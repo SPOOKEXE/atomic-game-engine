@@ -3,8 +3,8 @@
 // Dear ImGui, and the only place in the repository that knows it exists.
 //
 // **This module is here so that the engine is not.** An editor needs a real
-// widget toolkit — a dockable tree, a property grid, a text field that handles
-// selection and an IME — and writing one is a year nobody has. Dear ImGui is
+// widget toolkit - a dockable tree, a property grid, a text field that handles
+// selection and an IME - and writing one is a year nobody has. Dear ImGui is
 // vendored, has an SDL3 platform backend and an SDL_GPU renderer backend, and
 // both were built by `mono.build/MonoVendor.cmake` from v0.0 onward with
 // nothing linking them. This is the version that links them.
@@ -14,7 +14,7 @@
 // pipelines and its shaders into every client binary to be initialised and
 // never used, and would make "the renderer owns the device and not the
 // decisions" false the moment a widget wanted a font. So `render` declares
-// `render::FrameOverlayHook` — two virtual calls and an opaque handle — and
+// `render::FrameOverlayHook` - two virtual calls and an opaque handle - and
 // this module is the only implementation of it.
 //
 // **The hand-rolled overlay is not replaced and must not be.**
@@ -23,11 +23,11 @@
 // renderer is the thing being debugged. An imgui panel reporting a frame is
 // a panel drawn *by* the pipeline it is reporting on, which is exactly the
 // arrangement in which a broken pipeline shows you nothing and you conclude
-// the engine hung. Two overlays is the right number here — one for the
+// the engine hung. Two overlays is the right number here - one for the
 // program that is being written, one for the program that is being blamed.
 //
 // **The interface is not simulation state and never touches a store.** Which
-// node is expanded, where a splitter sits, what is selected — none of it is
+// node is expanded, where a splitter sits, what is selected - none of it is
 // world state, none of it is replicated, none of it survives a snapshot. Rule
 // 2 says the ECS owns the storage for data another module also reads; nobody
 // else reads a scroll position.
@@ -51,7 +51,7 @@ namespace engine::ui {
 		//
 		// One knob rather than a font size and a spacing multiplier, because a
 		// UI scaled in one dimension and not the other is worse than one that
-		// is small — text that outgrows the row it sits in overlaps the row
+		// is small - text that outgrows the row it sits in overlaps the row
 		// below and reads as a corrupt font.
 		float Scale = 1.0f;
 
@@ -69,7 +69,7 @@ namespace engine::ui {
 		//
 		// **Only read headless.** With a window the platform backend reports the
 		// real size every frame; without one imgui has nothing to go on, and a
-		// zero-sized display clips every panel to nothing — which looks exactly
+		// zero-sized display clips every panel to nothing - which looks exactly
 		// like the panels not running at all.
 		int DisplayWidth = 1600;
 
@@ -109,7 +109,7 @@ namespace engine::ui {
 		// what makes the panels runnable without a display: every widget's code
 		// executes, every layout is computed, and every action a script or an
 		// agent triggers goes through the path a person's click would. What is
-		// missing is the drawing — `Prepare` reports nothing to draw and the
+		// missing is the drawing - `Prepare` reports nothing to draw and the
 		// renderer skips its interface pass.
 		//
 		// With a window the renderer must already be initialised: the SDL_GPU
@@ -154,7 +154,7 @@ namespace engine::ui {
 
 		// Closes the frame and builds this frame's draw lists.
 		//
-		// Nothing is submitted here — the renderer does that, from inside its
+		// Nothing is submitted here - the renderer does that, from inside its
 		// own command buffer, through the two hook calls below.
 		void End();
 

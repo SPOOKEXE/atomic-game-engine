@@ -3,7 +3,7 @@
 //
 // `v02v03.md` §2.12 reserves exactly this and builds nothing else. A client
 // holding a replica receives state every tick and reconciles against what it
-// already has — same entity, new values, no destroy-and-recreate, because
+// already has - same entity, new values, no destroy-and-recreate, because
 // recreating would reset everything the client predicted and turn every
 // correction into a visible pop.
 
@@ -80,8 +80,8 @@ TEST_CASE("applying to an empty world brings everything across", "[ecs]") {
 
 TEST_CASE("applying updates entities in place rather than recreating them", "[ecs]") {
 	// The property the whole seam exists for. A destroy-and-recreate would give
-	// the entity a new generation, and every handle the client held — including
-	// ones inside its own components — would go stale on every correction.
+	// the entity a new generation, and every handle the client held - including
+	// ones inside its own components - would go stale on every correction.
 	Store authority("authority");
 	const Entity tracked = authority.Create();
 	authority.Set<Spot>(tracked, Spot{1.0f});
@@ -215,7 +215,7 @@ TEST_CASE("two stores allocate the same indices, and apply cannot tell them apar
 	//
 	// Entity identity is an index plus a generation, and two independently
 	// built stores both start at index 0 generation 1. So an entity a replica
-	// created for itself — a predicted projectile, say — can collide exactly
+	// created for itself - a predicted projectile, say - can collide exactly
 	// with one the authority created, and `Apply` is right to treat them as the
 	// same entity: it has nothing to distinguish them by.
 	//
@@ -226,7 +226,7 @@ TEST_CASE("two stores allocate the same indices, and apply cannot tell them apar
 	//
 	// **What has changed is that a replica no longer has to walk into this.**
 	// `SetAdoptOnly` refuses an authoritative mint, and `CreatePredicted` gives
-	// a replica a range of its own — the case below is the same scenario taken
+	// a replica a range of its own - the case below is the same scenario taken
 	// that way. This one reaches the collision by minting authoritatively in
 	// both stores, which is what makes it still the pinned behaviour of the
 	// storage rather than of a replica.
@@ -252,7 +252,7 @@ TEST_CASE("two stores allocate the same indices, and apply cannot tell them apar
 TEST_CASE("the same scenario through the predicted range keeps both entities", "[ecs]") {
 	// The case above, changed in exactly one place: the replica mints with
 	// `CreatePredicted` instead of `Create`. Kept beside it so the difference is
-	// one line rather than one file — `engine.ecs.prediction` covers the range
+	// one line rather than one file - `engine.ecs.prediction` covers the range
 	// itself, and this is the before-and-after.
 	Store authority("authority");
 	const Entity theirs = authority.Create();
@@ -365,7 +365,7 @@ TEST_CASE("applying the same snapshot twice changes nothing the second time", "[
 
 TEST_CASE("a replica converges however far it has drifted", "[ecs][fuzz]") {
 	// The reconciliation loop in miniature: the authority ticks, the replica
-	// predicts something else, and one correction has to bring them level —
+	// predicts something else, and one correction has to bring them level -
 	// whatever the replica did in between.
 	Store authority("authority");
 	std::vector<Entity> entities;
@@ -408,7 +408,7 @@ TEST_CASE("a replica converges however far it has drifted", "[ecs][fuzz]") {
 TEST_CASE("an adopt-only store refuses to mint and still adopts", "[ecs]") {
 	// A replica may not mint an *authoritative* entity, because that index is
 	// the authority's to hand out. `engine.ecs.prediction` covers the other half
-	// — that minting a predicted one stays legal here.
+	// - that minting a predicted one stays legal here.
 	Store replica("replica");
 	replica.SetAdoptOnly(true);
 	REQUIRE(replica.AdoptOnly());
@@ -429,8 +429,8 @@ TEST_CASE("an adopt-only store refuses to mint and still adopts", "[ecs]") {
 }
 
 TEST_CASE("adopt-only is a switch, not a one-way door", "[ecs]") {
-	// A world promoted out of being a replica — single-player taking over a
-	// session, a test building a fixture — has to be able to mint again.
+	// A world promoted out of being a replica - single-player taking over a
+	// session, a test building a fixture - has to be able to mint again.
 	Store store("world");
 	store.SetAdoptOnly(true);
 	REQUIRE(store.Create() == engine::ecs::NULL_ENTITY);

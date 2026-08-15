@@ -2,8 +2,8 @@
 
 // Every command the editor offers, as data rather than as call sites.
 //
-// **`MCP.md` §3's argument, taken at face value.** A studio operator — a name, a
-// description, a poll saying whether it can run, and something that runs it — is
+// **`MCP.md` §3's argument, taken at face value.** A studio operator - a name, a
+// description, a poll saying whether it can run, and something that runs it - is
 // an MCP tool descriptor field for field. Written once as a table, it has three
 // consumers rather than three implementations:
 //
@@ -14,15 +14,15 @@
 //     `control/Tools.cpp` still writes by hand.
 //
 // The poll is the part worth having. Availability was previously a condition
-// written inline at each menu item — `!Selection.empty()` appears three times in
-// `Interface.cpp` alone, with nothing comparing them — so an action reachable
+// written inline at each menu item - `!Selection.empty()` appears three times in
+// `Interface.cpp` alone, with nothing comparing them - so an action reachable
 // from a menu and a shortcut had two answers to "may this run now" and no
 // mechanism that would notice them disagreeing.
 //
 // ## Why it does not replace `Keybinds`
 //
-// It could, and doing so would touch a tested subsystem — the binding table, its
-// file persistence and its scopes — for no gain the palette can see. So the
+// It could, and doing so would touch a tested subsystem - the binding table, its
+// file persistence and its scopes - for no gain the palette can see. So the
 // division is: **`Keybinds` owns what key runs a command, this owns what the
 // commands are**, joined by `Action`.
 //
@@ -33,7 +33,7 @@
 //
 // ## Why a reason and not just a bool
 //
-// An agent — and a person reading a greyed-out menu item — discovers that an
+// An agent - and a person reading a greyed-out menu item - discovers that an
 // action was unavailable by attempting it and reading a failure. A poll that
 // carries *why* turns that into something readable before acting, which removes
 // a whole class of wasted turns. It costs one string.
@@ -56,7 +56,7 @@ namespace studio {
 		// Whether `Operator::Run` would do anything.
 		bool Ready = false;
 
-		// Why not, in the words a person would use — "nothing is selected", not
+		// Why not, in the words a person would use - "nothing is selected", not
 		// "precondition failed". Empty when `Ready`.
 		std::string Reason;
 
@@ -80,7 +80,7 @@ namespace studio {
 	//
 	// @since v0.7
 	struct Operator {
-		// Which command this is. Also how a binding is found — see
+		// Which command this is. Also how a binding is found - see
 		// `Keybinds::Of`.
 		Action Id = Action::Count;
 
@@ -125,7 +125,7 @@ namespace studio {
 		// Asks whether a command can run, without needing its operator.
 		//
 		// **The one call a menu item makes.** An unregistered command is not
-		// ready and says so, rather than defaulting to enabled — a menu item
+		// ready and says so, rather than defaulting to enabled - a menu item
 		// that is clickable and does nothing is worse than one that is greyed.
 		//
 		// @param id Which command.

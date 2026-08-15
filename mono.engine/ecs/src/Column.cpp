@@ -74,7 +74,7 @@ namespace engine::ecs {
 		}
 
 		// Reserved up front so that a throwing directory growth cannot leave a
-		// chunk acquired and unrecorded — the pool would never see it again.
+		// chunk acquired and unrecorded - the pool would never see it again.
 		Chunks.reserve(chunks);
 		while (Chunks.size() < chunks) {
 			Chunks.push_back(ChunkPool::Acquire(ChunkBytes(Chunks.size()), Alignment));
@@ -120,7 +120,7 @@ namespace engine::ecs {
 		}
 
 		// One chunk, never a doubling. Geometric growth existed to amortise a
-		// copy of everything already there, and there is no copy any more — a
+		// copy of everything already there, and there is no copy any more - a
 		// chunk is acquired and linked, and the rows before it never move.
 		GrowToChunks(Chunks.size() + 1);
 	}
@@ -246,7 +246,7 @@ namespace engine::ecs {
 
 		// The trailing chunk goes back the moment the rows stop reaching into
 		// it. This is the release the whole item is about, and it is affordable
-		// only because the pool is between here and the allocator — a population
+		// only because the pool is between here and the allocator - a population
 		// oscillating across a boundary would otherwise allocate and free on
 		// every oscillation.
 		//

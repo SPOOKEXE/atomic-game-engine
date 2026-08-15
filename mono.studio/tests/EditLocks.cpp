@@ -169,7 +169,7 @@ TEST_CASE("a guard hands the turn on when an editor dies", "[studio][editlocks]"
 	REQUIRE(locks.Request(MODEL, ANA, 0.0) == Turn::Granted);
 	REQUIRE(locks.Request(MODEL, BEN, 0.1) == Turn::Queued);
 
-	// **Not a lease on editing — a bound on one protocol step.** An editor
+	// **Not a lease on editing - a bound on one protocol step.** An editor
 	// granted a subtree that then dies would hold it for ever, and there is
 	// nobody to notice; the guard costs the next person a pause rather than the
 	// session.
@@ -231,7 +231,7 @@ TEST_CASE("the queue is bounded and a flood cannot take somebody's place", "[stu
 	REQUIRE(locks.Request(MODEL, BEN, 0.1) == Turn::Queued);
 	REQUIRE(locks.Request(MODEL, 3, 0.2) == Turn::Queued);
 
-	// Past the cap a new request is refused and the queue stands — a bound that
+	// Past the cap a new request is refused and the queue stands - a bound that
 	// lets a flood push out somebody's place is not a bound. **Refused rather
 	// than dropped silently**, because a request that is neither granted nor
 	// queued is an editor waiting for a message that will never come.

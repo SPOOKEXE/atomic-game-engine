@@ -12,7 +12,7 @@ namespace engine::world {
 		case WorldState::Remote:
 			return false;
 		}
-		// No default label, for `Describe`'s reason — and here the cost of
+		// No default label, for `Describe`'s reason - and here the cost of
 		// guessing is higher: a new state silently answering "ticks" would put
 		// interpolation onto a world nothing advances.
 		return false;

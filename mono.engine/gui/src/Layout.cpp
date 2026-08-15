@@ -60,7 +60,7 @@ namespace engine::gui {
 		// **Names rather than class ids, and that is this module's existing
 		// arrangement rather than a shortcut.** `Workspace`, `StarterGui` and a
 		// player's `PlayerGui` are `scene`'s services, and `gui/AGENTS.md`
-		// refuses an edge to `scene` — the same refusal that made
+		// refuses an edge to `scene` - the same refusal that made
 		// `SurfaceGui::Face` re-declare `NormalId`'s six members here, "pinned
 		// by a test at each end, which is the arrangement `DefaultMaterial`'s
 		// duplicated 'Plastic' already uses".
@@ -83,9 +83,9 @@ namespace engine::gui {
 		// Whether a collector sits somewhere it is allowed to draw from.
 		//
 		// **Roblox's rule, and it is a containment rule rather than a style
-		// one.** A `ScreenGui` parented to a `Part` draws nothing — not because
+		// one.** A `ScreenGui` parented to a `Part` draws nothing - not because
 		// it is invisible but because nothing is looking at that part of the
-		// tree — and an engine that drew it anyway would let an author ship a
+		// tree - and an engine that drew it anyway would let an author ship a
 		// game whose interface appears in the studio and not in the client.
 		//
 		//   - a `ScreenGui` draws from **`StarterGui`** or from a player's
@@ -127,7 +127,7 @@ namespace engine::gui {
 		// The parent extents a `UDim2` resolves against, per `SizeConstraint`.
 		//
 		// `RelativeXX` feeding the parent's *width* to both axes is what keeps
-		// a square element square as its parent changes shape — which is the
+		// a square element square as its parent changes shape - which is the
 		// whole reason the property exists, and is easy to write backwards.
 		Vector2 Basis(SizeConstraint constraint, const Vector2 &parent) {
 			switch (constraint) {
@@ -157,7 +157,7 @@ namespace engine::gui {
 		// **The walk is the expensive thing in this file, so there is exactly
 		// one of them per element.** `Store::EachChild` follows an intrusive
 		// `FirstChild`/`NextSibling` chain through a `std::function`, which is a
-		// type-erased call and a pointer chase into another table per child —
+		// type-erased call and a pointer chase into another table per child -
 		// and both halves of laying a node out want that list. Measuring it
 		// needs its scale, aspect and limits; placing it needs its padding, its
 		// layout, and the children themselves.
@@ -175,7 +175,7 @@ namespace engine::gui {
 			// index and a count rather than pointers or a span.
 			//
 			// **Indices, because the arena grows while this is held.** Measuring
-			// a sibling appends that sibling's children, which may reallocate —
+			// a sibling appends that sibling's children, which may reallocate -
 			// so anything holding a pointer into it would dangle halfway through
 			// the measure loop, on trees large enough to force a reallocation
 			// and not on the small ones a test builds.
@@ -192,7 +192,7 @@ namespace engine::gui {
 			// Only filled in when the container sorts by name.
 			//
 			// **`InstanceNameOf` reaches the process-wide name registry**, which
-			// is a shared lock and a hash lookup — and `SortOrder::Name` is the
+			// is a shared lock and a hash lookup - and `SortOrder::Name` is the
 			// rarest of the three. Fetching it for every child of every
 			// container on every frame paid that cost for a field two sort
 			// orders never read.
@@ -205,8 +205,8 @@ namespace engine::gui {
 		// The `GuiObject` children of every node currently being laid out.
 		//
 		// **A stack, and the discipline is exact.** `Place` on a node marks the
-		// arena, measures each of its children — which appends each child's own
-		// children — places them in turn, and then releases back to the mark.
+		// arena, measures each of its children - which appends each child's own
+		// children - places them in turn, and then releases back to the mark.
 		// A child's run therefore outlives the whole measure loop, which is what
 		// it has to do: the run is read when that child is *placed*, long after
 		// its siblings were measured on top of it.
@@ -225,7 +225,7 @@ namespace engine::gui {
 		// returns and will grow more; one of them added below the mark and above
 		// the release would leak a child run per element per frame, for the life
 		// of the process. Nothing would crash, no test would fail, and the only
-		// symptom would be a session that slowly ate memory — which is the worst
+		// symptom would be a session that slowly ate memory - which is the worst
 		// way to find out, and the same reasoning `MAXIMUM_DEPTH` gives a few
 		// lines above about hangs.
 		//
@@ -257,7 +257,7 @@ namespace engine::gui {
 		// that stacked it would leave a blank row where the modifier was. "Does
 		// it have an `Element`" is exactly what makes something a `GuiObject`,
 		// so the same test that finds the children rules out all seven modifier
-		// lookups for each of them — which matters because the common container
+		// lookups for each of them - which matters because the common container
 		// is a frame full of frames and seven misses against one hit is the
 		// ratio in every real interface.
 		Scan ScanChildren(const Store &store, Entity instance, std::vector<Entity> &arena) {
@@ -300,7 +300,7 @@ namespace engine::gui {
 		// What a container's padding takes out of each edge.
 		//
 		// Split out of `ContentArea` because the measure phase needs the same
-		// four numbers and has no `Rect` yet — an automatically sized container
+		// four numbers and has no `Rect` yet - an automatically sized container
 		// is being asked how big to be, so its rectangle is the answer rather
 		// than the input. One function, so the two phases cannot disagree about
 		// what a scale padding resolves against.
@@ -391,7 +391,7 @@ namespace engine::gui {
 		//
 		// See `Layout.hpp`: the advance is an estimate and this is the one
 		// answer everything downstream uses. Returning the authored size
-		// unchanged when `Scaled` is off is not a shortcut — a scaled size on an
+		// unchanged when `Scaled` is off is not a shortcut - a scaled size on an
 		// unscaled label would silently override what the author typed.
 		int32_t FittedTextSize(const Label &label, const Vector2 &box, const TextSizeLimits *limits) {
 			int32_t size = label.Size;
@@ -439,7 +439,7 @@ namespace engine::gui {
 		//
 		// Shared by the placement and by the measure, because a grid that
 		// wrapped at one count while being sized and another while being placed
-		// would produce a container the wrong number of rows tall — which reads
+		// would produce a container the wrong number of rows tall - which reads
 		// as the last row falling off the bottom rather than as an arithmetic
 		// disagreement between two functions.
 		int32_t CellsPerLine(const GridLayout &layout, float track, float cell, float gap) {
@@ -462,11 +462,11 @@ namespace engine::gui {
 		// its children's sizes and theirs are a function of its.
 		//
 		// Accumulated rather than collected: the extent of a stack is a sum and a
-		// maximum, and of a grid a count — all of them single-pass. So this
+		// maximum, and of a grid a count - all of them single-pass. So this
 		// measures each child, folds the answer in, and keeps no list, which is
 		// what stops an automatically sized container allocating per frame.
 		//
-		// @param basis  What the children resolve their `UDim2` against — the
+		// @param basis  What the children resolve their `UDim2` against - the
 		//        container's own size with the automatic axes already zeroed and
 		//        the padding already taken out.
 		// @return The extent inside the padding. The caller adds it back.
@@ -475,7 +475,7 @@ namespace engine::gui {
 		) {
 			// **Marked here, after this node's own child run was appended.**
 			// Measuring a child appends that child's children, and none of those
-			// runs outlive this function — the placement pass measures again with
+			// runs outlive this function - the placement pass measures again with
 			// the final rectangle and produces its own. Without the release the
 			// arena would carry a whole discarded generation per automatic
 			// container per frame.
@@ -485,7 +485,7 @@ namespace engine::gui {
 
 			if (modifiers.Grid != nullptr) {
 				// **The cell decides both axes, so no child is measured at all**
-				// — the same reason `RunGrid` does not consult `Measure`. What is
+				// - the same reason `RunGrid` does not consult `Measure`. What is
 				// needed is the count, and how the count wraps.
 				const Vector2 cell = modifiers.Grid->CellSize.Resolve(basis);
 				const Vector2 gap = modifiers.Grid->CellPadding.Resolve(basis);
@@ -550,7 +550,7 @@ namespace engine::gui {
 				}
 
 				// **The far edge, not the size**, because a child placed at an
-				// offset needs room for the offset as well — and the near edge is
+				// offset needs room for the offset as well - and the near edge is
 				// deliberately ignored: a child at a negative position hangs out
 				// of its parent rather than pushing the parent's origin, which is
 				// what keeps this a growth rule and not a reflow.
@@ -582,11 +582,11 @@ namespace engine::gui {
 		//
 		// Split from `Place` because a container running a list or a grid layout
 		// has to know how big its children are *before* it can decide where they
-		// go — which is the one thing that cannot be done in a single top-down
+		// go - which is the one thing that cannot be done in a single top-down
 		// sweep and is why this function exists at all.
 		//
-		// @param scan Filled in with the whole of what the walk found — the
-		//        modifiers this uses, and the child run `Place` will — so that
+		// @param scan Filled in with the whole of what the walk found - the
+		//        modifiers this uses, and the child run `Place` will - so that
 		//        placing the node afterwards costs no second walk.
 		Vector2 Measure(
 			const Store &store,
@@ -614,7 +614,7 @@ namespace engine::gui {
 			// It does not, and the reason is the invariant `Layout.hpp` already
 			// states: the backend draws at `Resolved::TextSize` and does not
 			// second-guess it. Nothing downstream re-measures with real metrics,
-			// so `AVERAGE_ADVANCE` is not an approximation of the truth — within
+			// so `AVERAGE_ADVANCE` is not an approximation of the truth - within
 			// this engine it *is* the truth, the one answer a hit test, a
 			// headless assertion and a renderer all agree on. A box grown to it
 			// fits by the same definition of fitting the module uses everywhere
@@ -628,7 +628,7 @@ namespace engine::gui {
 			// pair means anything.
 			//
 			// The residual risk is that the estimate is wrong about real glyphs.
-			// That risk is not introduced here — it is the same risk `TextScaled`
+			// That risk is not introduced here - it is the same risk `TextScaled`
 			// has carried since v0.8, and closing it means metrics shared below
 			// L7 rather than a second opinion in this branch.
 			const Label *label = store.Get<Label>(instance);
@@ -643,7 +643,7 @@ namespace engine::gui {
 				// string and a size and no wrap mode, so the height of a label
 				// is one line's height whatever the width is. The day wrapping
 				// arrives this is where the line count comes from, and it will
-				// need the width *before* the height — which is why the two are
+				// need the width *before* the height - which is why the two are
 				// computed apart rather than as one extent.
 				const auto characters = static_cast<float>(label->Text.size());
 				const float advance = characters * AVERAGE_ADVANCE * static_cast<float>(label->Size);
@@ -664,7 +664,7 @@ namespace engine::gui {
 				// to it: a child sized `{1, 0}` inside a parent sized by its
 				// content is asking to be as wide as the thing it is deciding the
 				// width of. Resolving that scale against zero makes the child
-				// contribute nothing rather than diverging — so a scale-sized
+				// contribute nothing rather than diverging - so a scale-sized
 				// child in an automatic parent measures as empty here, and then
 				// fills the grown parent when it is placed.
 				const Vector2 own{growX ? 0.0f : size.X, growY ? 0.0f : size.Y};
@@ -690,7 +690,7 @@ namespace engine::gui {
 			}
 
 			// After the growth rather than before it, so a `UISizeConstraint` on
-			// an automatic container is a bound on what it grows to — which is
+			// an automatic container is a bound on what it grows to - which is
 			// the only reading under which putting both on one element means
 			// anything.
 			return Constrain(size, scan.Mods, parent);
@@ -708,7 +708,7 @@ namespace engine::gui {
 		//
 		// Sized to `MAXIMUM_DEPTH` once rather than grown on demand, because
 		// growing it would reallocate the outer vector and dangle the reference
-		// an outer level of the recursion is still holding — a bug that would
+		// an outer level of the recursion is still holding - a bug that would
 		// appear only on trees deeper than whatever the pool happened to have
 		// reached.
 		//
@@ -731,7 +731,7 @@ namespace engine::gui {
 		//        child appends to the same arena and may reallocate it.
 		// @param named Whether the container's sort order reads `Item::Label`.
 		//        Only `SortOrder::Name` does, and the lookup is a trip through
-		//        the process-wide name registry — so it is asked for rather than
+		//        the process-wide name registry - so it is asked for rather than
 		//        taken.
 		// @param items Cleared and filled. Owned by the caller so that the
 		//        per-level scratch above can be handed in.
@@ -774,14 +774,14 @@ namespace engine::gui {
 			if (modifiers.Grid != nullptr) {
 				return modifiers.Grid->Order == SortOrder::Name;
 			}
-			// A container with neither runs no sort at all — its children are
-			// placed by their own `UDim2` — so no name is read.
+			// A container with neither runs no sort at all - its children are
+			// placed by their own `UDim2` - so no name is read.
 			return false;
 		}
 
 		void Sort(std::vector<Item> &items, SortOrder order) {
 			// `std::stable_sort`, so children that compare equal keep their
-			// insertion order — which is what `Custom` means and is also the
+			// insertion order - which is what `Custom` means and is also the
 			// only sensible tiebreak for the other two.
 			switch (order) {
 			case SortOrder::Name:
@@ -955,11 +955,11 @@ namespace engine::gui {
 
 		// Writes one node's `Resolved` and descends.
 		//
-		// `rect` is where this node goes and is already final — a list layout
+		// `rect` is where this node goes and is already final - a list layout
 		// decided it, or the caller resolved the node's own `UDim2`. Splitting
 		// the decision out is what lets one function serve both.
 		// @param known The node's modifiers when the caller already walked for
-		//        them — which every recursive caller has, because measuring a
+		//        them - which every recursive caller has, because measuring a
 		//        child is what produced its size. Null at the roots, where
 		//        nothing has measured anything yet.
 		size_t Place(
@@ -980,7 +980,7 @@ namespace engine::gui {
 				return 0;
 			}
 
-			// Not marked unrendered here — every `Resolved` was cleared before
+			// Not marked unrendered here - every `Resolved` was cleared before
 			// the walk began, so a subtree the walk does not enter is already
 			// saying it is not on screen. That is one pass over a packed column
 			// instead of a recursion per hidden node, and it cannot miss a
@@ -1023,7 +1023,7 @@ namespace engine::gui {
 			// **Marked before the children are measured and released after they
 			// are placed.** Measuring each child appends that child's own
 			// children, and every one of those runs has to survive until its
-			// owner is placed — which is after all of its siblings were measured
+			// owner is placed - which is after all of its siblings were measured
 			// on top of it. Releasing to the mark at the end drops the whole
 			// generation at once, so the arena's high-water mark is the widest
 			// path through the tree rather than the tree.
@@ -1055,8 +1055,8 @@ namespace engine::gui {
 
 		// The rectangle one collector's roots lay out inside.
 		//
-		// @return `false` for a collector that has no canvas — a `PluginGui`
-		//         today — so nothing under it is laid out rather than being laid
+		// @return `false` for a collector that has no canvas - a `PluginGui`
+		//         today - so nothing under it is laid out rather than being laid
 		//         out against a rectangle nobody chose.
 		bool CanvasFor(const Store &store, Entity collector, const Screen &screen, Rect &out) {
 			const Ids &ids = Classes();
@@ -1070,8 +1070,8 @@ namespace engine::gui {
 
 			// **What a host resolved wins, and its absence is not a failure.**
 			// `SpatialCanvas` is written by whoever holds the camera and the
-			// world — the multiplication `D00022` said belongs to whoever has
-			// both operands — and a world nobody is drawing simply has none. The
+			// world - the multiplication `D00022` said belongs to whoever has
+			// both operands - and a world nobody is drawing simply has none. The
 			// authored fallbacks below are then the answer rather than a
 			// degraded one: a `SurfaceGui` in `FixedSize` mode wanted its pixel
 			// size all along, and a headless test asserting a layout wants a
@@ -1086,7 +1086,7 @@ namespace engine::gui {
 
 			if (const Billboard *billboard = store.Get<Billboard>(collector);
 				billboard != nullptr && store.IsA(collector, ids.BillboardGui)) {
-				// Offset only when nothing resolved one — a billboard's scale is
+				// Offset only when nothing resolved one - a billboard's scale is
 				// in studs against the screen it is projected onto, so without a
 				// camera there is no number to multiply it by.
 				out = Rect{
@@ -1109,9 +1109,9 @@ namespace engine::gui {
 		Classes();
 
 		// **Cleared first, then set by the walk.** Anything the walk does not
-		// reach is an orphan — an element a script created and has not
+		// reach is an orphan - an element a script created and has not
 		// parented, one under a `Part`, one beneath a disabled collector or an
-		// invisible ancestor — and Roblox draws none of those.
+		// invisible ancestor - and Roblox draws none of those.
 		//
 		// A sweep rather than a hook on every parenting path, which is
 		// `scene::Visibility`'s argument in as many words: ancestry is not
@@ -1120,13 +1120,13 @@ namespace engine::gui {
 		// recursion per hidden subtree.
 		//
 		// **Only the flag is cleared.** The rectangles stay, so an element
-		// scrolled out of view is distinguishable from one never laid out —
+		// scrolled out of view is distinguishable from one never laid out -
 		// `Resolved`'s own comment gives the reason.
 		store.Each<Resolved>([](Entity, Resolved &resolved) { resolved.Rendered = false; });
 
 		// **Collected before anything is written.** `Place` writes `Resolved`,
 		// which can move a row between archetypes the first time a node gets
-		// one — and moving a row out from under the query walking it is exactly
+		// one - and moving a row out from under the query walking it is exactly
 		// what `Store::Each`'s deferral exists to prevent. A vector of handles
 		// costs one allocation per frame against a class of bug that only
 		// appears once a UI is big enough to span two archetypes.
@@ -1185,7 +1185,7 @@ namespace engine::gui {
 
 				// **The top of the arena's stack discipline.** Every `Place`
 				// below releases what it added, but a root's own child run is
-				// added *here* — so without this mark it would survive the call
+				// added *here* - so without this mark it would survive the call
 				// and the arena would grow by one run per root per frame, for as
 				// long as the process lived. A leak that is invisible in a test
 				// and unbounded in a session is exactly the shape worth spelling
@@ -1203,7 +1203,7 @@ namespace engine::gui {
 
 				// Handed on, like every other call: measuring a node is what
 				// finds its scan, and there is no path to `Place` that has not
-				// measured first — which is what lets `Place` take a `const
+				// measured first - which is what lets `Place` take a `const
 				// Scan &` rather than a pointer it has to test.
 				placed += Place(store, root, FromCorner(corner, size), canvas, 1, 0.0f, scan);
 			}

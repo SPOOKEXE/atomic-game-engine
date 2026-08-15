@@ -2,7 +2,7 @@
 
 // A fixed simulation rate under a variable frame rate.
 //
-// Without this, simulation advances by however long the frame took — so the
+// Without this, simulation advances by however long the frame took - so the
 // same game behaves differently at 30 fps and 300, a recorded run does not
 // replay, and every frame-time measurement conflates two rates that have no
 // reason to match.

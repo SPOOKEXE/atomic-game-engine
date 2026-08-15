@@ -3,7 +3,7 @@
 // `Channel.cpp` covers the queue semantics against the local implementation.
 // What is worth checking here is only what changes when the bytes go through
 // the kernel: partial writes, partial reads, a frame larger than a socket
-// buffer, and both ends noticing the other going away — which is the property
+// buffer, and both ends noticing the other going away - which is the property
 // a supervisor's heartbeat is ultimately built on.
 //
 // The child is this test binary run again with a hidden case. Spawning a system
@@ -54,7 +54,7 @@ namespace process_channel_test {
 
 	// Receives one frame, polling until it arrives or the deadline passes.
 	//
-	// A poll rather than a wait, because the interface never blocks — which is
+	// A poll rather than a wait, because the interface never blocks - which is
 	// the whole reason a world tick can hold a channel without stalling its
 	// neighbours.
 	ChannelStatus Await(

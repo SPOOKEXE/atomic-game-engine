@@ -64,7 +64,7 @@ namespace cdn {
 		}
 
 		// The manifest is signed, so what it records a bundle weighs is a fact
-		// about content the publisher committed to — not a hint from whoever
+		// about content the publisher committed to - not a hint from whoever
 		// just answered the fetch.
 		for (const auto &entry : against.Contents().Bundles()) {
 			if (entry.Root == bundle) {
@@ -235,7 +235,7 @@ namespace cdn {
 		ENGINE_PROFILE_CAT("Origin::Pump", engine::core::ProfileCategory::Assets);
 
 		// What to prepare this pump. Gathered first so that the parallel step
-		// below has a fixed set — a fan-out over a container something else may
+		// below has a fixed set - a fan-out over a container something else may
 		// append to is a data race with a plausible-looking body.
 		std::vector<size_t> work;
 		for (size_t index = 0; index < Requests.size() && work.size() < Configured.PreparePerPump; ++index) {
@@ -285,7 +285,7 @@ namespace cdn {
 		//
 		// Resolving a payload reads a filesystem or talks to an upstream. A
 		// construct that occupies a worker while it waits turns an IO-bound
-		// origin into a thread-starved one — CDN.md §3 — so this stage is its
+		// origin into a thread-starved one - CDN.md §3 - so this stage is its
 		// own, and only the compression that follows is fanned out.
 		std::vector<std::optional<std::vector<std::byte>>> payloads(toCompress.size());
 		std::vector<bool> forwarded(toCompress.size(), false);
@@ -297,7 +297,7 @@ namespace cdn {
 		}
 
 		// One entry per group being compressed, so the parallel step writes only
-		// what its own index names — the property `Jobs::For` requires and the
+		// what its own index names - the property `Jobs::For` requires and the
 		// reason inline and pooled execution are observationally identical.
 		std::vector<std::optional<std::vector<std::byte>>> frames(toCompress.size());
 
@@ -340,7 +340,7 @@ namespace cdn {
 			Pending &pending = Requests[toCompress[slot]].second;
 
 			// Cancelled while this pump was compressing. The result is discarded
-			// rather than delivered to nobody — and deliberately not cached
+			// rather than delivered to nobody - and deliberately not cached
 			// either, because a group nobody asked for evicts one somebody did.
 			if (pending.State != RequestState::Pending) {
 				continue;
@@ -355,7 +355,7 @@ namespace cdn {
 
 			// A forwarded group is kept only when this origin is configured as a
 			// cache. Without that, it fetches the same bundle from the same
-			// upstream for every client that asks — a proxy rather than a cache
+			// upstream for every client that asks - a proxy rather than a cache
 			// server, which is a legitimate deployment and a different one.
 			const bool keep = !forwarded[slot] || Configured.CacheUpstream;
 
@@ -365,7 +365,7 @@ namespace cdn {
 				stored = Prepared.Insert(key, std::move(*frames[slot]));
 			}
 			if (!stored) {
-				// Not kept, or too large for the cache to hold. Still served —
+				// Not kept, or too large for the cache to hold. Still served -
 				// the request asked for it and the bytes exist.
 				stored = std::make_shared<const std::vector<std::byte>>(std::move(*frames[slot]));
 			}

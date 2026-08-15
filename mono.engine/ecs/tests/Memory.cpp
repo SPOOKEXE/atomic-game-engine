@@ -3,7 +3,7 @@
 // **The figure that justifies chunked storage had no test behind it anywhere in
 // the repository.** `ROADMAP.md` records a thousand worlds that each grew to ten
 // thousand entities and settled back at a hundred holding **703 MB against
-// 2.7 MB of live rows**, and nothing measured it again afterwards — so the day
+// 2.7 MB of live rows**, and nothing measured it again afterwards - so the day
 // somebody put the high-water mark back, the number in the roadmap would still
 // have said it was fixed.
 //
@@ -40,7 +40,7 @@ using engine::ecs::Store;
 namespace memory_test {
 	// Three components of the widths a real scene has: a twelve-byte vector, a
 	// sixteen-byte one and a four-byte scalar. Their own types rather than
-	// `scene`'s, because `ecs` is at L3 and cannot see L7 — and because a
+	// `scene`'s, because `ecs` is at L3 and cannot see L7 - and because a
 	// storage measurement should not move when a component gains a field.
 	struct Place {
 		float X = 0.0f;

@@ -11,6 +11,15 @@ namespace engine::replication {
 	net::ChannelKind ChannelFor(MessageKind kind) {
 		switch (kind) {
 		case MessageKind::Delta:
+
+		// **Unreliable, and that is the cadence argument on the wire.** An
+		// audit that is lost costs one rotation of a sweep whose whole premise
+		// is that what it finds is not urgent, and an answer that is lost costs
+		// the same. Putting either on the reliable channel would spend the
+		// window that structural changes depend on, for a message whose
+		// resend is never worth more than the next one.
+		case MessageKind::GroupSignatures:
+		case MessageKind::Disputed:
 			return net::ChannelKind::Unreliable;
 
 		case MessageKind::SnapshotChunk:
@@ -148,8 +157,8 @@ namespace engine::replication {
 		}
 
 		// **A packet carrying only an acknowledgement, when nothing else is
-		// going.** `net::Link` has described this since v0.3 — "a connection
-		// with no traffic is indistinguishable from a dead one" — and until
+		// going.** `net::Link` has described this since v0.3 - "a connection
+		// with no traffic is indistinguishable from a dead one" - and until
 		// v0.13 nothing in this repository called `NeedsKeepAlive`, because
 		// every caller published a world every tick and so never went quiet.
 		//
@@ -166,8 +175,8 @@ namespace engine::replication {
 		// side is waiting for one or the link has gone quiet enough to look
 		// dead.
 		//
-		// `net::Link` has described the second half since v0.3 — "a connection
-		// with no traffic is indistinguishable from a dead one" — and until
+		// `net::Link` has described the second half since v0.3 - "a connection
+		// with no traffic is indistinguishable from a dead one" - and until
 		// v0.13 nothing in this repository called `NeedsKeepAlive`, because
 		// every caller published a world every tick and so never went quiet.
 		//
@@ -175,7 +184,7 @@ namespace engine::replication {
 		// alone does not cover it.** An acknowledgement rides on an outgoing
 		// packet, so a receiver with nothing to say never acknowledges. The
 		// sender resends on its own timer and gives up at
-		// `MaximumResends` — which it reaches *before* a one-second keep-alive
+		// `MaximumResends` - which it reaches *before* a one-second keep-alive
 		// comes round. The far side then has a `ReliableSender` that refuses
 		// everything, on a link that is up and healthy, and the only symptom is
 		// that sends start returning false.
@@ -232,13 +241,20 @@ namespace engine::replication {
 
 		Sender.OnAcknowledge(packet->Header, nowSeconds);
 
-		Link_.RecordRoundTrip(Sender.SmoothedRoundTripSeconds());
+		// **The variance goes with the estimate, and leaving it out is not a
+		// smaller version of passing it.** The congestion controller reads this
+		// as its delay signal and sizes its noise threshold from RTTVAR; with
+		// nothing to size it from the threshold falls back to a one-millisecond
+		// floor, and a jittery wireless path then reads as a standing queue.
+		// The link narrows for a queue that is not there, on exactly the
+		// connections least able to spare it.
+		Link_.RecordRoundTrip(Sender.SmoothedRoundTripSeconds(), Sender.RoundTripVarianceSeconds());
 
 		if (packet->Header.Channel == net::ChannelKind::Unreliable) {
 			// **An empty payload is an acknowledgement and not a message.**
 			// That is what `Flush` sends on a quiet link, and surfacing it as
 			// inbound would hand every reader a zero-length message it cannot
-			// parse — which each of them would then count as a refusal, on a
+			// parse - which each of them would then count as a refusal, on a
 			// link that is working exactly as designed.
 			//
 			// No legitimate message is empty: `WriteMessage` always writes a

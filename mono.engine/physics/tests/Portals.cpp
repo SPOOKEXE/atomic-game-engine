@@ -1,15 +1,15 @@
 // What a body standing in a hole is standing on.
 //
 // **The half of a portal `scene` cannot test**, because `scene` may not link
-// this module and the answer is an overlap query. The picture half — a body cut
-// at the plane with its far half drawn in the room beyond — is
+// this module and the answer is an overlap query. The picture half - a body cut
+// at the plane with its far half drawn in the room beyond - is
 // `scene::CutAndCloneSeams` and has its own suite; this is the contact half, and
 // the two are deliberately different mechanisms.
 //
 // The arrangement under test is the one that is not obvious: the far room's
 // colliders are copied *into* the near room through the inverse seam, rather
 // than a twin of the body being placed on the far side. `physics/Portals.hpp`
-// carries the argument — mapping this way needs no impulse mapped back, because
+// carries the argument - mapping this way needs no impulse mapped back, because
 // nothing crossed.
 
 #include <engine/core/Name.hpp>
@@ -100,7 +100,7 @@ namespace {
 			// **The far room's floor, behind B's face, which is the side the hole
 			// opens onto.** The map carries a pane's front hemisphere to the far
 			// pane's *back* one, so what a body's far half meets is what stands
-			// behind B — `physics/tests/Query.cpp` puts its slab there for the
+			// behind B - `physics/tests/Query.cpp` puts its slab there for the
 			// same reason and measures a ray landing on it.
 			//
 			// Close enough that the body's own reach touches it: a proxy is only
@@ -132,7 +132,7 @@ namespace {
 
 TEST_CASE("the far room's floor is put under a body standing in a seam", "[physics][portals]") {
 	// **A pane is a hole and a body may be halfway through one**, so the floor
-	// under its far half is in the other room — and the solver only ever knew
+	// under its far half is in the other room - and the solver only ever knew
 	// about this one. What that looks like is a crate resting in a doorway whose
 	// far room's floor is a stud higher: it clips, or it hangs, and both read as
 	// physics rather than as a missing feature.
@@ -155,7 +155,7 @@ TEST_CASE("the far room's floor is put under a body standing in a seam", "[physi
 			}
 
 			// **In the near room, which is the whole claim.** The slab is a
-			// hundred units away and its copy is beside the body — anything at
+			// hundred units away and its copy is beside the body - anything at
 			// `x = 100` would be a floor in a room nobody is in, and is what the
 			// obvious arrangement (a twin of the body on the far side) produces.
 			CHECK(placement.Frame.Position.X == Approx(0.0f).margin(1.0f));
@@ -168,8 +168,8 @@ TEST_CASE("the far room's floor is put under a body standing in a seam", "[physi
 	);
 	CHECK(found);
 
-	// **And a proxy never outlives its tick.** A body may walk out of the seam —
-	// or through it — in the tick that just ran, and a proxy left behind is a
+	// **And a proxy never outlives its tick.** A body may walk out of the seam -
+	// or through it - in the tick that just ran, and a proxy left behind is a
 	// piece of another room standing invisibly in this one.
 	CHECK(RetirePortalProxies(world.World) == placed);
 	CHECK(world.Proxies() == 0);

@@ -77,7 +77,7 @@ TEST_CASE("the thirty-third tag is refused rather than aliased", "[scene][taggin
 
 	// **The failure this ceiling exists to prevent is not "too many tags".** It
 	// is one tag quietly sharing another's bit, which puts one group's objects
-	// in another group's pass — invisible until somebody notices the wrong
+	// in another group's pass - invisible until somebody notices the wrong
 	// thing reflected.
 	CHECK(table.Register(Name("tagging_test.OneTooMany")) == 0);
 	CHECK(table.Names.size() == TagTable::MAXIMUM);
@@ -230,7 +230,7 @@ TEST_CASE("a filtered surface draws its group and an unfiltered one the world", 
 	constexpr uint32_t REFLECTIVE = 0b01;
 	constexpr uint32_t HIDDEN = 0b10;
 
-	// An unfiltered camera — every mirror — draws everything.
+	// An unfiltered camera - every mirror - draws everything.
 	CHECK(MatchesTags(0, 0));
 	CHECK(MatchesTags(REFLECTIVE, 0));
 	CHECK(MatchesTags(HIDDEN, 0));

@@ -29,7 +29,7 @@ using engine::core::Metrics;
 
 namespace {
 	// A fixed seed, so a failure is reproducible. Emphatically not how a real
-	// key is made — Ed25519's private key *is* this seed, and a predictable one
+	// key is made - Ed25519's private key *is* this seed, and a predictable one
 	// is a published one.
 	std::array<std::byte, SigningKey::SEED_BYTES> Seed(uint8_t fill) {
 		std::array<std::byte, SigningKey::SEED_BYTES> seed{};
@@ -111,7 +111,7 @@ TEST_CASE("signing is deterministic", "[assets][signature]") {
 
 	// Ed25519 derives its nonce from the key and the message rather than from a
 	// generator, so the same input signs to the same bytes. That is what lets a
-	// published manifest be byte-stable all the way to its signature — two
+	// published manifest be byte-stable all the way to its signature - two
 	// builds of one set of content produce one artefact, diffable and cacheable.
 	CHECK(key.SignManifestRoot(root) == key.SignManifestRoot(root));
 }
@@ -142,7 +142,7 @@ TEST_CASE("a moved-from key leaves no seed behind", "[assets][signature]") {
 	CHECK(moved.Public() == expected);
 
 	// The signature still works from the destination, which is the half that is
-	// easy to check. The half that matters — the source's storage being wiped —
+	// easy to check. The half that matters - the source's storage being wiped -
 	// is not observable through the public surface, and a test that reached for
 	// it would be testing the layout rather than the behaviour.
 	const ContentHash root = Root("after the move");
@@ -186,7 +186,7 @@ TEST_CASE("the signed message is domain-separated from the bare root", "[assets]
 	const SignatureBytes signature = key.SignManifestRoot(root);
 
 	// Constructed so that if SignManifestRoot signed the root directly, this
-	// root — whose digest is the tagged message — would verify with the same
+	// root - whose digest is the tagged message - would verify with the same
 	// signature and a manifest could be swapped for whatever else the key signs.
 	// It must not.
 	const ContentHash impostor = Root("manifest one but different");

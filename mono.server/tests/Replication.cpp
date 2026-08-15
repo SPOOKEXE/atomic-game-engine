@@ -4,7 +4,7 @@
 // over a loopback transport. That is the right shape for a suite and it is not
 // a running game: the two stores share an allocator, a component registry and a
 // clock, and none of the things that only cross a process boundary are crossed.
-// **This is the case the roadmap said did not exist yet** — a real server
+// **This is the case the roadmap said did not exist yet** - a real server
 // binary, started with `--listen`, streaming a world over a real UDP socket to
 // something that has only ever seen its bytes.
 //
@@ -23,28 +23,36 @@
 #include <engine/core/Name.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/examples/Shooting.hpp>
 #include <engine/game/Play.hpp>
+#include <engine/gui/Registration.hpp>
 #include <engine/net/Transport.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/replication/Connector.hpp>
+#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/Input.hpp>
-#include <engine/scene/Services.hpp>
 #include <engine/scene/Controls.hpp>
+#include <engine/scene/Input.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/Services.hpp>
+#include <engine/scene/Tools.hpp>
+#include <engine/script/Instances.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
-#include <numbers>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <numbers>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <thread>
 #include <vector>
@@ -62,12 +70,13 @@ using engine::parallel::Process;
 using engine::replication::Connector;
 using engine::scene::Bounds;
 using engine::scene::Character;
+using engine::scene::Humanoid;
 using engine::scene::Motion;
 using engine::scene::Transform;
 using engine::scene::Visual;
 
 namespace server_replication_test {
-	// The components the server sends — `scene`'s, and the same call the server
+	// The components the server sends - `scene`'s, and the same call the server
 	// itself makes.
 	//
 	// **This file used to declare its own `Position` and `Velocity` under the
@@ -81,6 +90,17 @@ namespace server_replication_test {
 	// declaration rather than renaming around the collision.
 	void RegisterTypes() {
 		engine::scene::RegisterSceneComponents();
+
+		// **And the two sets that started crossing at v0.15**, because this
+		// replica is a client and a client is what receives them. A snapshot
+		// naming a component the receiving build never registered is refused
+		// whole rather than half-merged - the join simply never completes and
+		// the log says which name - so a harness registering less than
+		// `client::BuildReplicatedWorld` does is a harness testing a client that
+		// does not exist. `gui.Element` on a `ScreenGui` and `script.Program` on
+		// a `LocalScript` are what made that reachable.
+		(void)engine::gui::RegisterGuiClasses();
+		(void)engine::script::ScriptClass();
 	}
 
 	std::filesystem::path ServerProgram() {
@@ -150,8 +170,8 @@ namespace server_replication_test {
 					continue;
 				}
 
-				// The child may still exit immediately — the port went to
-				// somebody else between the probe and the bind — so give it a
+				// The child may still exit immediately - the port went to
+				// somebody else between the probe and the bind - so give it a
 				// moment and check before committing to it.
 				std::this_thread::sleep_for(std::chrono::milliseconds(200));
 				if (!Child.Poll().Alive()) {
@@ -191,7 +211,7 @@ namespace server_replication_test {
 		//
 		// **The resource is written here and not by the caller**, because
 		// `Client::SubmitMove` refuses to send anything until the replica knows
-		// which player is its own — so a harness that recorded `Mine` and left
+		// which player is its own - so a harness that recorded `Mine` and left
 		// the store ignorant of it could not exercise the keyboard path at all.
 		void ListenForJoinNotice() {
 			Link->OnUserMessage([this](std::span<const std::byte> message) {
@@ -215,7 +235,7 @@ namespace server_replication_test {
 		//
 		// **`Previous` is kept, because a jump is an edge.** `ReadMoveIntent`
 		// asks for the space bar's edge, which is the difference between the two
-		// masks — so a harness that cleared both would make every frame look
+		// masks - so a harness that cleared both would make every frame look
 		// like the first and every held key look like a fresh press.
 		//
 		// **And `LatchPresses` is called, because that is what a writer does.**
@@ -239,6 +259,80 @@ namespace server_replication_test {
 			input->LatchPresses();
 		}
 
+		// Puts a camera in the replica at `from`, looking along `direction`.
+		//
+		// **A predicted entity, exactly as `client::AimReplicaViewer` mints
+		// one.** A replica may not allocate an authoritative index - the
+		// authority allocates from the same range and `Apply` would be right to
+		// merge the two - and a camera nobody else can see is precisely what the
+		// reserved high range is for. Building it by hand here rather than
+		// calling that function keeps this suite out of `mono.client`.
+		void AimFrom(const engine::core::Vector3 &from, const engine::core::Vector3 &direction) {
+			auto *active = World.ResourceMutable<engine::scene::ActiveCamera>();
+			if (active == nullptr || !World.Alive(active->Entity)) {
+				engine::scene::ActiveCamera live;
+				live.Entity = World.CreatePredicted("ReplicaViewer");
+				World.SetResource(live);
+				active = World.ResourceMutable<engine::scene::ActiveCamera>();
+			}
+
+			World.Set(
+				active->Entity, engine::scene::Transform{engine::core::CFrame::LookAt(from, from + direction)}
+			);
+		}
+
+		// Presses and releases the left mouse button, latching the edge.
+		//
+		// **The edge and not the hold**, which is the whole reason
+		// `InputState::PressedButtons` exists: frames outnumber ticks, so a
+		// click that began and ended between two of them lands on a frame no
+		// tick ever looks at. `LatchPresses` is what a writer owes, exactly as
+		// it does for a key.
+		void Click() {
+			auto *input = World.ResourceMutable<engine::scene::InputState>();
+			if (input == nullptr) {
+				World.SetResource(engine::scene::InputState{});
+				input = World.ResourceMutable<engine::scene::InputState>();
+			}
+
+			input->Focused = true;
+			input->PreviousButtons = input->Buttons;
+			input->Buttons =
+				static_cast<uint8_t>(1u << static_cast<uint8_t>(engine::scene::MouseButton::Left));
+			input->LatchPresses();
+			input->PreviousButtons = input->Buttons;
+			input->Buttons = 0;
+		}
+
+		// `Client::SubmitMove`'s shot half, and deliberately not a paraphrase.
+		//
+		// The same guard, the same `ReadAimIntent`, the same codec, the same
+		// channel - because the point of the assertion is that a *client* can
+		// fire, and a hand-built `examples::Shot` would step straight over the
+		// arithmetic that turns a camera into a ray.
+		bool SubmitAim() {
+			if (Mine == engine::ecs::NULL_ENTITY ||
+				engine::scene::CharacterOf(World, Mine) == engine::ecs::NULL_ENTITY) {
+				return false;
+			}
+
+			const engine::scene::AimIntent aim = engine::scene::ReadAimIntent(World);
+			if (!aim.Aimed || !aim.Fired) {
+				return false;
+			}
+
+			engine::examples::Shot shot;
+			shot.Aim = aim.Ray;
+			shot.Range = engine::examples::MAXIMUM_SHOT_RANGE;
+			if (!Link->Submit(Link->Applied(), engine::examples::EncodeShot(shot), Now)) {
+				return false;
+			}
+			if (auto *input = World.ResourceMutable<engine::scene::InputState>(); input != nullptr) {
+				input->ConsumeButtonTaps();
+			}
+			return true;
+		}
+
 		// Where the camera is pointing, which is what W is measured against.
 		void LookAlong(float yawRadians) {
 			auto *camera = World.ResourceMutable<engine::scene::CameraController>();
@@ -251,8 +345,8 @@ namespace server_replication_test {
 
 		// **`Client::SubmitMove`'s body, and deliberately not a paraphrase of
 		// it.** `Walk` above takes a direction already decided, which leaves the
-		// interesting arithmetic — which world direction a key means, and what
-		// the camera has to do with it — on the far side of the assertion. This
+		// interesting arithmetic - which world direction a key means, and what
+		// the camera has to do with it - on the far side of the assertion. This
 		// is the client half of "press W and the character walks": the same
 		// guard, the same `ReadMoveIntent`, the same codec, the same channel.
 		void SubmitMove() {
@@ -267,7 +361,7 @@ namespace server_replication_test {
 			move.Direction = intent.Direction;
 			move.Jump = intent.Jump;
 			if (Link->Submit(Link->Applied(), engine::game::EncodeMoveInput(move), Now)) {
-				// Once it is on the wire, and not before — the same rule
+				// Once it is on the wire, and not before - the same rule
 				// `Client::SubmitMove` follows, for the same reason: a tap
 				// forgotten after a failed send is a jump the server never
 				// heard about.
@@ -289,7 +383,7 @@ namespace server_replication_test {
 
 		// Holds `keys` for `ticks` client frames and reports where the body ended
 		// up. The keyboard is re-pressed every frame because that is what a held
-		// key *is* to `Client::WriteInput` — it rewrites the whole state each
+		// key *is* to `Client::WriteInput` - it rewrites the whole state each
 		// frame from the window.
 		engine::core::Vector3
 		Hold(std::initializer_list<engine::scene::KeyCode> keys, int ticks, Remote *other = nullptr) {
@@ -312,7 +406,7 @@ namespace server_replication_test {
 
 			// **Deliberately nothing but `Poll`.** A server on a datagram socket
 			// cannot stream to an address it has never heard from, so the client
-			// has to speak first — and making the *test* speak first, with an
+			// has to speak first - and making the *test* speak first, with an
 			// input the real client never sends, is how this suite passed while
 			// the actual client sat silent and never joined. `Poll` announces
 			// itself, and this is the case that says so.
@@ -320,15 +414,45 @@ namespace server_replication_test {
 			Link->Advance(Now);
 		}
 
-		bool Join(int ticks) {
-			for (int attempt = 0; attempt < ticks && !Link->Joined(); attempt++) {
+		// Ticks until `ready`, giving up after what `ticks` is worth in real
+		// time on a machine that is not busy.
+		//
+		// **The bound is a deadline and not a count of iterations, and that is
+		// not a detail.** The far side is a process competing for the same
+		// cores, so N iterations buys a different amount of *its* progress on a
+		// loaded machine than on an idle one - the join `D00122`'s case waits
+		// for finished inside 1200 iterations on a quiet box and needed about
+		// 1400 under a saturating build, so the case passed or failed on what
+		// else happened to be running. A count cannot express "long enough for
+		// the server to have got there"; a clock can.
+		//
+		// The multiplier is the room a busy machine needs, and it costs nothing
+		// on a quiet one because the loop stops the moment `ready` is true.
+		//
+		// @param ready What is being waited for.
+		// @param ticks The wait's length in ticks, as an idle machine would run
+		//        them.
+		// @return Whatever `ready` says at the end.
+		bool Wait(const std::function<bool()> &ready, int ticks) {
+			constexpr int STEP_MILLISECONDS = 4;
+			constexpr int SLACK = 4;
+
+			const auto deadline = std::chrono::steady_clock::now() +
+								  std::chrono::milliseconds(ticks * STEP_MILLISECONDS * SLACK);
+
+			while (!ready() && std::chrono::steady_clock::now() < deadline) {
 				Tick();
 
 				// Real time, because the far side is a real process running at
 				// its own rate rather than a function this loop calls.
-				std::this_thread::sleep_for(std::chrono::milliseconds(4));
+				std::this_thread::sleep_for(std::chrono::milliseconds(STEP_MILLISECONDS));
 			}
-			return Link->Joined();
+
+			return ready();
+		}
+
+		bool Join(int ticks) {
+			return Wait([this] { return Link->Joined(); }, ticks);
 		}
 
 		size_t Entities() {
@@ -442,7 +566,7 @@ TEST_CASE("a client announces itself without being told to", "[server][replicati
 
 	// The regression this exists for: the connector only ever replied. On a
 	// datagram socket a server cannot send to an address nobody has written
-	// from, so a client that waited to be spoken to waited forever — and the
+	// from, so a client that waited to be spoken to waited forever - and the
 	// suite missed it by having the *test* send an input first, which the real
 	// client never does. Nothing here calls `Submit`.
 	Remote remote;
@@ -466,7 +590,7 @@ TEST_CASE("a world too big for one datagram still streams", "[server][replicatio
 	// **The other regression, and the reason 32 entities was not enough to
 	// catch it by accident.** A tick's delta for this many entities is many
 	// times a datagram, and it used to be built as one message that
-	// `Link::Reserve` refused every tick — silently, because a refusal is
+	// `Link::Reserve` refused every tick - silently, because a refusal is
 	// ordinary backpressure. The join worked and the world then never moved.
 	Remote remote;
 	REQUIRE(remote.Start(2000));
@@ -487,6 +611,114 @@ TEST_CASE("a world too big for one datagram still streams", "[server][replicatio
 	REQUIRE(remote.World.CountMatching<Transform>() == 2000);
 }
 
+TEST_CASE("what ReplicatedFirst holds arrives before the world it covers", "[server][replication]") {
+	// **`D00122`, and it is only observable over a wire.** `ReplicatedFirst`
+	// outranking every distance score orders the *stream*, and a client's first
+	// view of a world is the join - one `ecs::Store::Save` chunked across ticks
+	// in whatever order the store wrote its archetypes, which no score reaches
+	// inside. So a loading screen was ranked first for every tick after the one
+	// it was for.
+	//
+	// **What is asserted is *before* and not *eventually*.** At the moment the
+	// preface lands this replica holds the screen and holds almost nothing else;
+	// a case that only waited for the screen to turn up would pass against the
+	// single-blob join this exists to replace.
+	//
+	// Identified by its size rather than by its name, because a name does not
+	// cross: `ecs.InstanceName` and the class are not in
+	// `DefaultReplicatedComponents`, so what a replica holds of the screen is
+	// its `scene::Bounds` and its frame. Nine studs is nothing else in the
+	// scene.
+	if (!ServerAvailable()) {
+		SKIP("the server program is not built into this preset");
+	}
+
+	const std::filesystem::path scene =
+		std::filesystem::temp_directory_path() / "server_replication_replicatedfirst.luau";
+	{
+		std::ofstream file(scene, std::ios::trunc);
+		REQUIRE(file);
+		file << "local screen = Instance.new(\"Part\")\n"
+			 << "screen.Name = \"LoadingScreen\"\n"
+			 << "screen.Anchored = true\n"
+			 << "screen.Size = Vector3.new(9, 9, 9)\n"
+			 << "screen.Parent = game:GetService(\"ReplicatedFirst\")\n"
+			 // A world whose own snapshot takes tens of ticks. Without that
+			 // there is no window for anything to be first in, and the case
+			 // would be measuring the packet rate.
+			 << "for index = 1, 1500 do\n"
+			 << "\tlocal block = Instance.new(\"Part\")\n"
+			 << "\tblock.Anchored = true\n"
+			 << "\tblock.Position = Vector3.new(index % 40, 1, index // 40)\n"
+			 << "\tblock.Parent = workspace\n"
+			 << "end\n";
+	}
+
+	const auto holdsScreen = [](Store &world) {
+		bool found = false;
+		world.EachEntity([&](Entity entity) {
+			const Bounds *bounds = world.Get<Bounds>(entity);
+			found = found || (bounds != nullptr && bounds->HalfExtent.X == 4.5f);
+		});
+		return found;
+	};
+
+	Remote remote;
+	REQUIRE(remote.Start(0, scene.string()));
+
+	int prefaces = 0;
+	bool joinedThen = true;
+	bool screenThen = false;
+	size_t entitiesThen = 0;
+
+	// **Sampled from inside the apply rather than between polls, and that is
+	// the difference between a check and a coin toss.** One `Connector::Poll`
+	// drains the socket and applies every message that was in it, so a machine
+	// with no spare core hands the preface and the world behind it to the same
+	// call - and this case used to read its four facts *after* that call, by
+	// which time the window it is about had closed. It failed six times in six
+	// under a saturating build and passed on an idle one, which is a case
+	// measuring the scheduler rather than the stream.
+	//
+	// `Replica::OnPreface` runs before anything of the world has been applied,
+	// so what the closure sees is the preface and nothing else by construction.
+	remote.Link->OnPreface([&](Store &world) {
+		prefaces++;
+		joinedThen = remote.Link->Joined();
+		screenThen = holdsScreen(world);
+
+		entitiesThen = 0;
+		world.EachEntity([&](Entity) { entitiesThen++; });
+	});
+
+	REQUIRE(remote.Join(1200));
+
+	// Once. A second would mean the server re-declared a preface mid-join,
+	// which would put a loading screen back over a world already being drawn.
+	REQUIRE(prefaces == 1);
+
+	INFO("the preface landed with " << entitiesThen << " entities in the replica");
+	CHECK(screenThen);
+
+	// The ordering the stage enum is for, read where it is decided. `Joined`
+	// is set by the world blob and this runs on the preface, so a build where
+	// this is true is one where the two blobs have been merged back into one.
+	CHECK_FALSE(joinedThen);
+
+	// The container and what is under it, and none of the fifteen hundred parts
+	// it was meant to be in front of.
+	CHECK(entitiesThen >= 2);
+	CHECK(entitiesThen < 32);
+
+	// And the world blob behind it is still the complete picture, whose
+	// authoritative sweep must leave what the preface put there alone.
+	CHECK(remote.World.CountMatching<Transform>() > 1500);
+	CHECK(holdsScreen(remote.World));
+
+	std::error_code ignored;
+	std::filesystem::remove(scene, ignored);
+}
+
 TEST_CASE("a connecting client becomes a player in the hosted world", "[server][replication]") {
 	// **The thing that had to exist before ownership could be assigned to
 	// anybody.** `scene::AddPlayer` had no production caller: every world this
@@ -495,7 +727,7 @@ TEST_CASE("a connecting client becomes a player in the hosted world", "[server][
 	//
 	// Observed from a *second* client's replica rather than from the server's
 	// log, because a log line is not a fact a test can hold: client one joins, is
-	// counted, and then client two joins — and what client one's world gains is
+	// counted, and then client two joins - and what client one's world gains is
 	// exactly the one entity that is client two's player.
 	//
 	// The leaving half is `engine.scene.ownership`'s and is asserted there
@@ -510,7 +742,7 @@ TEST_CASE("a connecting client becomes a player in the hosted world", "[server][
 	// replicates only services, whose archetypes are small enough that the two
 	// processes happen to agree about column order. A `Part` is nine components
 	// wide and is what caught `Archetype::Read` reading columns in the reader's
-	// id order rather than the writer's — the client could not join at all, and
+	// id order rather than the writer's - the client could not join at all, and
 	// the same mismatch on a narrower row loads silently wrong.
 	//
 	// Anchored, so it stays where it was put and the entity count below is not
@@ -534,8 +766,8 @@ TEST_CASE("a connecting client becomes a player in the hosted world", "[server][
 	REQUIRE(alone > 0);
 
 	// **Measured twice, so what is asserted is the rule and not the number.** A
-	// `Player` is not one entity — `AddPlayer` furnishes it with a `PlayerGui`
-	// — and pinning the count here would be pinning that arrangement from the
+	// `Player` is not one entity - `AddPlayer` furnishes it with a `PlayerGui`
+	// - and pinning the count here would be pinning that arrangement from the
 	// far side of a wire. Two more clients say the useful thing instead: each
 	// arrival costs the same, and it is not nothing.
 	Remote second;
@@ -615,7 +847,7 @@ TEST_CASE("a client is told which player is theirs, and can walk it", "[server][
 	REQUIRE(first.World.Alive(rig->Root));
 	REQUIRE(first.World.Get<Transform>(rig->Root) != nullptr);
 
-	// Both characters are in both replicas — this is what makes it a game with
+	// Both characters are in both replicas - this is what makes it a game with
 	// two players in it rather than two games.
 	CHECK(engine::scene::CharacterOf(first.World, second.Mine) != engine::ecs::NULL_ENTITY);
 	CHECK(engine::scene::CharacterOf(second.World, first.Mine) != engine::ecs::NULL_ENTITY);
@@ -624,13 +856,13 @@ TEST_CASE("a client is told which player is theirs, and can walk it", "[server][
 
 	// **Walk, and keep walking.** An input channel is unreliable by design and
 	// the server clears what it has applied every tick, so a single submission
-	// is a single tick of movement — which is under a tenth of a metre and inside
+	// is a single tick of movement - which is under a tenth of a metre and inside
 	// the wire's own quantisation. A client that stops sending stops moving, and
 	// that is the behaviour, not a limitation of the test.
 	//
 	// **Both clients tick throughout.** A client that stops polling stops
 	// acknowledging, and an authority with nothing acknowledged has no baseline
-	// to build the next delta against — so a second client parked for a second
+	// to build the next delta against - so a second client parked for a second
 	// is a second client whose world is a second stale, which is a fact about
 	// this test's pacing rather than about the feature.
 	for (int tick = 0; tick < 200; tick++) {
@@ -664,7 +896,7 @@ TEST_CASE("WASD on a client walks its character on the server", "[server][replic
 	// whole client half untested: which world direction W means, that the camera
 	// is what it is measured against, that an unfocused window walks nobody, and
 	// that the space bar leaves the ground. Every one of those is arithmetic in
-	// `scene::ReadMoveIntent` that a hand-built vector steps straight over —
+	// `scene::ReadMoveIntent` that a hand-built vector steps straight over -
 	// `Remote::SubmitMove` runs `Client::SubmitMove`'s body instead.
 	//
 	// **One case and not five, because the five share a server.** Standing a
@@ -705,7 +937,7 @@ TEST_CASE("WASD on a client walks its character on the server", "[server][replic
 	using engine::scene::KeyCode;
 
 	// How far counts as walking. **A metre**, which is a fifteenth of a second
-	// at `WalkSpeed` and hundreds of times the wire's own quantisation — so it
+	// at `WalkSpeed` and hundreds of times the wire's own quantisation - so it
 	// separates "walked" from both "stood still" and "drifted".
 	constexpr float WALKED = 1.0f;
 
@@ -724,7 +956,7 @@ TEST_CASE("WASD on a client walks its character on the server", "[server][replic
 	CHECK(std::abs(north.X - start.X) < WALKED);
 
 	// S is back the other way, and past where it started rather than merely
-	// slower — a character that only ever walked forwards would pass a test that
+	// slower - a character that only ever walked forwards would pass a test that
 	// asked for "moved".
 	const engine::core::Vector3 south = client.Hold({KeyCode::S}, HELD * 2);
 	CHECK(south.Z > north.Z + WALKED);
@@ -738,8 +970,8 @@ TEST_CASE("WASD on a client walks its character on the server", "[server][replic
 
 	// **Nothing held is nothing moved**, and this is not a tautology about the
 	// keyboard: `Humanoid::MoveDirection` is a field the server keeps, so a
-	// client that stopped sending — or one whose released keys still read as
-	// held — leaves a character walking for ever. `ReadMoveIntent` returning a
+	// client that stopped sending - or one whose released keys still read as
+	// held - leaves a character walking for ever. `ReadMoveIntent` returning a
 	// zero every tick is what stops it.
 	const engine::core::Vector3 released = client.Hold({}, HELD);
 	const engine::core::Vector3 stillThere = client.Hold({}, HELD);
@@ -747,7 +979,7 @@ TEST_CASE("WASD on a client walks its character on the server", "[server][replic
 	CHECK(std::abs(stillThere.Z - released.Z) < WALKED);
 
 	// **A quarter turn, and W now means what the camera means.** This is the
-	// whole reason `ReadMoveIntent` reads the `CameraController` at all — a game
+	// whole reason `ReadMoveIntent` reads the `CameraController` at all - a game
 	// whose forward key stopped meaning forward when the camera turned is the
 	// one thing every player notices immediately. Yaw is measured about +Y, so a
 	// positive quarter turn puts "away from the camera" along -X.
@@ -757,7 +989,7 @@ TEST_CASE("WASD on a client walks its character on the server", "[server][replic
 
 	// **And the space bar leaves the floor.** Jumping is the half that fails on
 	// its own: walking writes a horizontal velocity whatever the ground says,
-	// while a jump reads `Humanoid::Grounded` and does nothing without it — so a
+	// while a jump reads `Humanoid::Grounded` and does nothing without it - so a
 	// broken ground query is invisible to every check above and is the entire
 	// bug to somebody holding space. Sampled at every tick because the apex is
 	// between two of them.
@@ -768,7 +1000,7 @@ TEST_CASE("WASD on a client walks its character on the server", "[server][replic
 	const float ground = client.MyPosition().Y;
 
 	// **Tapped rather than held, and the alternation is the whole of it.** A
-	// jump is an edge — `ReadMoveIntent` asks `WasKeyPressed` — so space held
+	// jump is an edge - `ReadMoveIntent` asks `WasKeyPressed` - so space held
 	// down is one edge and therefore one submission, and the input channel is
 	// unreliable by design: a single datagram that does not arrive is a jump
 	// that silently did not happen. Releasing between presses is what a player
@@ -776,8 +1008,9 @@ TEST_CASE("WASD on a client walks its character on the server", "[server][replic
 	// instead of the loss rate.
 	float apex = ground;
 	for (int tick = 0; tick < HELD; tick++) {
-		client.Press(tick % 2 == 0 ? std::initializer_list<KeyCode>{KeyCode::Space}
-								   : std::initializer_list<KeyCode>{});
+		client.Press(
+			tick % 2 == 0 ? std::initializer_list<KeyCode>{KeyCode::Space} : std::initializer_list<KeyCode>{}
+		);
 		client.SubmitMove();
 		client.Tick();
 		apex = std::max(apex, client.MyPosition().Y);
@@ -785,6 +1018,336 @@ TEST_CASE("WASD on a client walks its character on the server", "[server][replic
 	}
 
 	CHECK(apex > ground + WALKED);
+
+	std::error_code ignored;
+	std::filesystem::remove(scene, ignored);
+}
+
+TEST_CASE("a client holds its own containers and none of anybody else's", "[server][replication]") {
+	// **The interest predicate, asserted in both directions over a real wire.**
+	// A check that only proved a client can see its own `PlayerGui` would pass
+	// against a server that sent everybody everything, which is exactly the
+	// state this repository was in until v0.15 and exactly what the four
+	// containers made worse: a `Backpack` is what a game keys "what am I
+	// holding" off, and one client reading another's would be reading their
+	// inventory.
+	//
+	// **From the replica rather than from the server's log**, for the reason the
+	// case above gives: what a client holds is the only fact about this that a
+	// test can hold.
+	if (!ServerAvailable()) {
+		SKIP("the server program is not built into this preset");
+	}
+
+	const std::filesystem::path scene =
+		std::filesystem::temp_directory_path() / "server_replication_private.luau";
+	{
+		std::ofstream file(scene, std::ios::trunc);
+		REQUIRE(file);
+		file << "local block = Instance.new(\"Part\")\n"
+			 << "block.Anchored = true\n"
+			 << "block.Parent = workspace\n"
+
+			 // **A `Tool` in `StarterPack`, because a container is only private
+			 // if what is *in* it is.** The four containers arriving empty proved
+			 // the predicate hides a row under a player; a game keys "what am I
+			 // holding" off the contents, and a client reading another's
+			 // `Backpack` reads their inventory. `AddPlayer` clones this into
+			 // each occupant's `StarterGear` and the spawn refills `Backpack`
+			 // from that, so each client ends up with a copy of its own.
+			 << "local tool = Instance.new(\"Tool\")\n"
+			 << "tool.Name = \"Sword\"\n"
+			 << "local handle = Instance.new(\"Part\")\n"
+			 << "handle.Name = \"Handle\"\n"
+			 << "handle.Parent = tool\n"
+			 << "tool.Parent = game:GetService(\"StarterPack\")\n";
+	}
+
+	Remote first;
+	REQUIRE(first.Start(0, scene.string()));
+	REQUIRE(first.Join(400));
+
+	Remote second;
+	REQUIRE(second.Connect(first.Port));
+	REQUIRE(second.Join(400));
+
+	Settle(first);
+	Settle(second);
+
+	REQUIRE(first.Mine != engine::ecs::NULL_ENTITY);
+	REQUIRE(second.Mine != engine::ecs::NULL_ENTITY);
+	REQUIRE(first.Mine != second.Mine);
+
+	const auto children = [](const Store &world, Entity parent) {
+		size_t found = 0;
+		world.EachChild(parent, [&](Entity) { found++; });
+		return found;
+	};
+
+	// **Both `Player` rows are public**, which is the half a stricter predicate
+	// would get wrong: `GetPlayers` is how a game knows who is in it, and a
+	// client shown only its own row would think it was alone.
+	CHECK(first.World.Alive(first.Mine));
+	CHECK(first.World.Alive(second.Mine));
+
+	// **And what is under one is not.** Four containers of its own, none of
+	// theirs - and they are asked for **by name**, which is the assertion this
+	// case could not make until v0.15.
+	//
+	// The containers are built by `AddPlayer` when a client joins, so they are
+	// exactly the case `replication::DefaultReplicatedComponents` used to get
+	// wrong: it admitted `ecs.Hierarchy` and the `scene.` prefix and nothing else
+	// from `ecs.`, so `ecs.InstanceName` crossed in a join snapshot and never in
+	// a delta and every one of these arrived called nothing at all. Counting
+	// anonymous handles was the workaround; a name is what a game actually holds
+	// them by.
+	for (const std::string_view container : {"PlayerGui", "PlayerScripts", "Backpack", "StarterGear"}) {
+		INFO("container: " << container);
+		CHECK(first.World.FindFirstChild(first.Mine, container) != engine::ecs::NULL_ENTITY);
+		CHECK(second.World.FindFirstChild(second.Mine, container) != engine::ecs::NULL_ENTITY);
+	}
+
+	CHECK(children(first.World, first.Mine) == 4);
+	CHECK(children(first.World, second.Mine) == 0);
+
+	// The same from the other side, so the answer is per client rather than
+	// "the first one to ask wins".
+	CHECK(children(second.World, second.Mine) == 4);
+	CHECK(children(second.World, first.Mine) == 0);
+
+	// **And the gear inside them, which is what a `Tool` made worth asserting.**
+	// Four empty containers prove the predicate hides a *row* under a player; a
+	// game keys "what am I holding" off the contents, so what has to be proved is
+	// that one client cannot count the other's. Each occupant has two copies of
+	// the template - one in `StarterGear` and the one the spawn refilled
+	// `Backpack` with - and none of anybody else's.
+	//
+	// **Named at every step, container and tool alike.** `Sword` is what the
+	// scene called it, so a client holding a `Tool` under an unnamed parent, or
+	// a named container holding an unnamed tool, is a failure here rather than a
+	// count that still comes to two.
+	const auto swordIn = [](Store &world, Entity player, std::string_view container) {
+		const Entity holder = world.FindFirstChild(player, container);
+		return holder != engine::ecs::NULL_ENTITY &&
+			   world.FindFirstChild(holder, "Sword") != engine::ecs::NULL_ENTITY;
+	};
+
+	CHECK(swordIn(first.World, first.Mine, "Backpack"));
+	CHECK(swordIn(first.World, first.Mine, "StarterGear"));
+
+	// The same from the other side, so the answer is per client here too.
+	CHECK(swordIn(second.World, second.Mine, "Backpack"));
+	CHECK(swordIn(second.World, second.Mine, "StarterGear"));
+
+	// And neither can reach into the other's, which is the half the naming does
+	// not change: the interest predicate is what keeps one client's inventory out
+	// of another's world, and asking by name would find it if it were there.
+	CHECK_FALSE(swordIn(first.World, second.Mine, "Backpack"));
+	CHECK_FALSE(swordIn(second.World, first.Mine, "Backpack"));
+
+	// The count stays, because "two, and not one or three" is a different claim
+	// from "the named one is there" - a spawn that refilled `Backpack` twice
+	// would pass every assertion above.
+	const auto toolsUnder = [](Store &world, Entity player) {
+		size_t found = 0;
+		world.Each<const engine::scene::Tool>([&](Entity tool, const engine::scene::Tool &) {
+			for (Entity at = tool; at != engine::ecs::NULL_ENTITY; at = world.ParentOf(at)) {
+				if (at == player) {
+					found++;
+					return;
+				}
+			}
+		});
+		return found;
+	};
+
+	CHECK(toolsUnder(first.World, first.Mine) == 2);
+	CHECK(toolsUnder(first.World, second.Mine) == 0);
+	CHECK(toolsUnder(second.World, second.Mine) == 2);
+	CHECK(toolsUnder(second.World, first.Mine) == 0);
+
+	std::error_code ignored;
+	std::filesystem::remove(scene, ignored);
+}
+
+TEST_CASE("a client's click is a shot the server resolves and everybody sees", "[server][replication]") {
+	// **The other half of `D00109`, and the half that had never had a caller.**
+	// `Server::ApplyInputs` decodes an `examples::Shot`, rewinds the client's
+	// view with `Rewind::TickSeenBy`, hit-tests against the recorded history and
+	// recolours what was struck - a complete server-authoritative feature whose
+	// `examples::EncodeShot` was reachable from nothing in the tree. That entry
+	// calls it two finished halves connected to nothing; this is the wire
+	// between them.
+	//
+	// **Two clients, because one would prove less than it looks.** A client
+	// shooting a prop would exercise the same code and would leave the
+	// interesting property untested: the verdict is the *server's*, and what
+	// makes that visible is a second client learning about a hit it did not
+	// witness and did not decide. The shooter never says what it struck.
+	//
+	// **The target is a character and not a prop, and that is not a preference.**
+	// `Server::ServeClients` records the rewind history over `Transform` *and*
+	// `Motion`, deliberately, so that static geometry does not fill the ring
+	// with rows whose answer is the same at every tick - a scripted anchored
+	// part is therefore invisible to the hit test, and an unanchored one that
+	// has come to rest is too. What moves in this engine is a character.
+	if (!ServerAvailable()) {
+		SKIP("the server program is not built into this preset");
+	}
+
+	const std::filesystem::path scene =
+		std::filesystem::temp_directory_path() / "server_replication_shot.luau";
+	{
+		std::ofstream file(scene, std::ios::trunc);
+		REQUIRE(file);
+		file << "local floor = Instance.new(\"Part\")\n"
+			 << "floor.Name = \"SpawnLocation\"\n"
+			 << "floor.Size = Vector3.new(400, 4, 400)\n"
+			 << "floor.Position = Vector3.new(0, -2, 0)\n"
+			 << "floor.Anchored = true\n"
+			 << "floor.Parent = workspace\n";
+	}
+
+	Remote shooter;
+	REQUIRE(shooter.Start(0, scene.string()));
+	REQUIRE(shooter.Join(400));
+
+	Remote victim;
+	REQUIRE(victim.Connect(shooter.Port));
+	REQUIRE(victim.Join(400));
+
+	for (int tick = 0; tick < 200; tick++) {
+		shooter.Tick();
+		victim.Tick();
+		std::this_thread::sleep_for(std::chrono::milliseconds(4));
+	}
+
+	REQUIRE(shooter.Mine != engine::ecs::NULL_ENTITY);
+	REQUIRE(victim.Mine != engine::ecs::NULL_ENTITY);
+
+	// **The shooter walks away first**, so that its own body is nowhere near the
+	// ray. Both characters spawn at the same `SpawnLocation`, and the shooter's
+	// root is in the rewind history exactly as the victim's is - a shot fired
+	// from where they are standing could strike the shooter and the assertion
+	// below would never know the difference.
+	shooter.LookAlong(0.0f);
+	shooter.Hold({engine::scene::KeyCode::W}, 120, &victim);
+
+	// The victim's body, as the shooter's replica holds it. Found through the
+	// join notice rather than by position, because a `Player` is what a client
+	// is told about and the character hangs off it.
+	const Entity victimCharacter = engine::scene::CharacterOf(shooter.World, victim.Mine);
+	REQUIRE(victimCharacter != engine::ecs::NULL_ENTITY);
+
+	const Character *rig = shooter.World.Get<Character>(victimCharacter);
+	REQUIRE(rig != nullptr);
+	const Entity victimRoot = rig->Root;
+	REQUIRE(shooter.World.Get<Visual>(victimRoot) != nullptr);
+
+	const engine::core::Color3 before = shooter.World.Get<Visual>(victimRoot)->Tint;
+
+	bool recoloured = false;
+	for (int attempt = 0; attempt < 200 && !recoloured; attempt++) {
+		// Re-read every attempt: the victim is a body on a floor and drifts a
+		// little, and a ray aimed once at where it used to be is a test that
+		// depends on it not having settled.
+		const Transform *placement = shooter.World.Get<Transform>(victimRoot);
+		if (placement == nullptr) {
+			break;
+		}
+
+		const engine::core::Vector3 at = placement->Frame.Position;
+		const engine::core::Vector3 eye = at + engine::core::Vector3{20.0f, 0.0f, 0.0f};
+		shooter.AimFrom(eye, (at - eye).Unit());
+
+		// Fired repeatedly, because the input channel is unreliable by design:
+		// `net/AGENTS.md` makes structure reliable and values not, so one lost
+		// datagram is one click that never happened. A player clicking again is
+		// what this models.
+		shooter.Click();
+		shooter.SubmitAim();
+		shooter.Tick();
+		victim.Tick();
+		std::this_thread::sleep_for(std::chrono::milliseconds(4));
+
+		if (const Visual *visual = shooter.World.Get<Visual>(victimRoot); visual != nullptr) {
+			// **The green channel, not the red.** A character's root is
+			// already white, so "the red went up" cannot distinguish the
+			// server's `{1, 0.2, 0.1}` from where it started - the first
+			// version of this case asserted exactly that and passed nothing
+			// while the server was striking every shot.
+			recoloured = visual->Tint.G < before.G - 0.3f && visual->Tint.R > 0.9f;
+		}
+	}
+
+	CHECK(recoloured);
+
+	// **A hit takes health off, and this is the consequence
+	// `docs/retired/DEFERRED.md` D00121 was waiting for.** Its reopen trigger was "anything in the engine
+	// that damages a character", on the reading that a hit test with no
+	// consequence does not need "dead" to mean anything - so the shot landing is
+	// what makes the health model load-bearing rather than decorative, and this
+	// is the assertion that says the two are wired together.
+	const Entity victimHumanoid = [&] {
+		const Character *now = shooter.World.Get<Character>(victimCharacter);
+		return now == nullptr ? engine::ecs::NULL_ENTITY : now->Humanoid;
+	}();
+	REQUIRE(victimHumanoid != engine::ecs::NULL_ENTITY);
+
+	const Humanoid *wounded = shooter.World.Get<Humanoid>(victimHumanoid);
+	REQUIRE(wounded != nullptr);
+	CHECK(wounded->Health < 100.0f);
+
+	// **And the shooter cannot put it back**, which is the authority half and
+	// the one only a real replica can prove: this store was made adopt-only by
+	// `replication::Connector`, so `Store::SetProperty` refuses by name rather
+	// than letting the write stand until the next delta overwrites it. A suite
+	// that only called `SetAdoptOnly` by hand would be asserting its own setup.
+	const engine::ecs::PropertyDescriptor *health = nullptr;
+	for (const auto &property : engine::ecs::Classes::Describe(engine::scene::HumanoidClass()).Properties) {
+		if (property.Name == Name("Health")) {
+			health = &property;
+		}
+	}
+	REQUIRE(health != nullptr);
+
+	const float full = 100.0f;
+	CHECK_FALSE(shooter.World.SetProperty(victimHumanoid, *health, &full, sizeof(full)));
+	CHECK(shooter.World.Get<Humanoid>(victimHumanoid)->Health < 100.0f);
+
+	// **And the victim sees the same verdict**, which is the half a single
+	// client cannot assert. It did not fire, it was not asked, and the colour
+	// reaches it as ordinary replicated `scene.Visual` - so a client that had
+	// decided its own hits would be a client nothing downstream could
+	// second-guess.
+	const Entity ownRoot = [&] {
+		const Entity character = engine::scene::CharacterOf(victim.World, victim.Mine);
+		const Character *own = victim.World.Get<Character>(character);
+		return own == nullptr ? engine::ecs::NULL_ENTITY : own->Root;
+	}();
+	REQUIRE(ownRoot != engine::ecs::NULL_ENTITY);
+
+	bool seenByVictim = false;
+	for (int tick = 0; tick < 200 && !seenByVictim; tick++) {
+		victim.Tick();
+		std::this_thread::sleep_for(std::chrono::milliseconds(4));
+		if (const Visual *visual = victim.World.Get<Visual>(ownRoot); visual != nullptr) {
+			seenByVictim = visual->Tint.G < before.G - 0.3f && visual->Tint.R > 0.9f;
+		}
+	}
+	CHECK(seenByVictim);
+
+	// The same for the health, and on the machine that lost it. A client draws
+	// its own bar off this row, so a `scene.Humanoid` that stopped crossing
+	// would leave every client watching a number that never moves.
+	const Entity ownHumanoid = [&] {
+		const Entity character = engine::scene::CharacterOf(victim.World, victim.Mine);
+		const Character *own = victim.World.Get<Character>(character);
+		return own == nullptr ? engine::ecs::NULL_ENTITY : own->Humanoid;
+	}();
+	REQUIRE(ownHumanoid != engine::ecs::NULL_ENTITY);
+	REQUIRE(victim.World.Get<Humanoid>(ownHumanoid) != nullptr);
+	CHECK(victim.World.Get<Humanoid>(ownHumanoid)->Health < 100.0f);
 
 	std::error_code ignored;
 	std::filesystem::remove(scene, ignored);

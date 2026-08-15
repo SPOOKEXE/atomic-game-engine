@@ -12,6 +12,7 @@
 TEST_SUITE_ID("engine.scene.input")
 
 using engine::scene::Describe;
+using engine::scene::InputSource;
 using engine::scene::InputState;
 using engine::scene::KeyBits;
 using engine::scene::KeyCode;
@@ -20,8 +21,8 @@ using engine::scene::MouseBehavior;
 using engine::scene::MouseButton;
 
 // **The invariant `scene/AGENTS.md` states and nothing checked.** A component is
-// serialised as its object representation — `Column::Write` sends `sizeof(T)`
-// bytes and does not know which of them a member claimed — so a byte the
+// serialised as its object representation - `Column::Write` sends `sizeof(T)`
+// bytes and does not know which of them a member claimed - so a byte the
 // compiler inserted and nobody declared reaches a save file uninitialised. Every
 // other component in the module names its padding; this one stopped six bytes
 // short, which is what this case exists to keep from happening again.
@@ -83,7 +84,7 @@ TEST_CASE("a key edge is the difference between the two frames", "[scene][input]
 	CHECK(state.WasKeyPressed(KeyCode::Space));
 	CHECK_FALSE(state.WasKeyReleased(KeyCode::Space));
 
-	// Frame two: still held. **Held is not pressed** — a bound action fires on
+	// Frame two: still held. **Held is not pressed** - a bound action fires on
 	// the edge, and a held key reporting a press every frame is what turns one
 	// jump into a flight.
 	state.Previous = state.Down;
@@ -149,10 +150,34 @@ TEST_CASE("a fresh state reports nothing down", "[scene][input]") {
 	CHECK(state.Focused);
 	CHECK(state.Behaviour == MouseBehavior::Default);
 	CHECK(state.WheelDelta == 0.0f);
+
+	// **The two that travel towards the window default to what a window does
+	// without being asked**, so a world nobody has scripted draws its pointer and
+	// leaves it free.
+	CHECK(state.MouseIconEnabled);
+	CHECK(state.LastSource == InputSource::Keyboard);
+	CHECK_FALSE(state.WasLastSourceChanged());
+}
+
+TEST_CASE("the device change is an edge and not a value", "[scene][input]") {
+	// **`LastInputTypeChanged` is the difference between two frames**, exactly as
+	// the focus pair is - a place swaps "press E" for "click here" on the moment
+	// the answer changed, not on the answer. A state that reported a change while
+	// the two agreed would fire it every frame.
+	InputState state;
+	state.LastSource = InputSource::MouseMovement;
+	CHECK(state.WasLastSourceChanged());
+
+	state.PreviousLastSource = state.LastSource;
+	CHECK_FALSE(state.WasLastSourceChanged());
+
+	// And it changes back, which is the case a one-way flag would miss.
+	state.LastSource = InputSource::Keyboard;
+	CHECK(state.WasLastSourceChanged());
 }
 
 TEST_CASE("every key name round-trips", "[scene][input]") {
-	// `Describe` and `KeyFromName` are inverses, and the table is one list — a
+	// `Describe` and `KeyFromName` are inverses, and the table is one list - a
 	// key inserted in the middle of the enum without a name beside it shifts
 	// every name after it by one, so `Enum.KeyCode.W` resolves to V.
 	for (size_t ordinal = 0; ordinal < static_cast<size_t>(KeyCode::Count); ordinal++) {
@@ -190,4 +215,61 @@ TEST_CASE("every mouse button has a name", "[scene][input]") {
 		REQUIRE(name != nullptr);
 		CHECK(std::string_view(name) != "?");
 	}
+}
+
+TEST_CASE("an input source names every button and the three that are not", "[scene][input]") {
+	// **The overlap is what `IsMouseButtonPressed` casts through.** It resolves
+	// an `Enum.UserInputType` member to an ordinal and hands it to
+	// `IsButtonDown`, so a source inserted ahead of the buttons would make "is
+	// the left button down" answer about the right one - with nothing failing,
+	// because the arithmetic still lands on a valid bit.
+	CHECK(std::string_view(Describe(InputSource::MouseButton1)) == Describe(MouseButton::Left));
+	CHECK(std::string_view(Describe(InputSource::MouseButton2)) == Describe(MouseButton::Right));
+	CHECK(std::string_view(Describe(InputSource::MouseButton3)) == Describe(MouseButton::Middle));
+
+	CHECK(std::string_view(Describe(InputSource::Keyboard)) == "Keyboard");
+	CHECK(std::string_view(Describe(InputSource::MouseMovement)) == "MouseMovement");
+	CHECK(std::string_view(Describe(InputSource::MouseWheel)) == "MouseWheel");
+
+	// Distinct, for the reason the key names are: two sources sharing a name
+	// makes an `InputObject` report one of them and which depends on the table.
+	std::unordered_set<std::string> seen;
+	for (size_t ordinal = 0; ordinal < static_cast<size_t>(InputSource::Count); ordinal++) {
+		CHECK(seen.insert(std::string(Describe(static_cast<InputSource>(ordinal)))).second);
+	}
+}
+
+TEST_CASE("focus is an edge and not a level", "[scene][input]") {
+	// **`WindowFocused` and `WindowFocusReleased` are edges**, so the state has
+	// to remember last frame's focus the way it remembers last frame's keys. A
+	// fresh state has focus and had it, which reports neither edge - otherwise
+	// the first pump of every world would fire a focus event nobody caused.
+	InputState state;
+	CHECK_FALSE(state.WasFocusGained());
+	CHECK_FALSE(state.WasFocusLost());
+
+	// Losing it. The frame this happens on is also the frame every held key
+	// reports released, because the translator clears `Down` and leaves
+	// `Previous` alone - so both are observable from one state.
+	state.Previous = state.Down;
+	state.Down.Set(KeyCode::W, true);
+	state.PreviousFocused = state.Focused;
+	state.Focused = false;
+	state.Previous = state.Down;
+	state.Down = KeyBits{};
+
+	CHECK(state.WasFocusLost());
+	CHECK_FALSE(state.WasFocusGained());
+	CHECK(state.WasKeyReleased(KeyCode::W));
+
+	// Regaining it, one frame later.
+	state.PreviousFocused = state.Focused;
+	state.Focused = true;
+	CHECK(state.WasFocusGained());
+	CHECK_FALSE(state.WasFocusLost());
+
+	// And the frame after, which is a level rather than an edge.
+	state.PreviousFocused = state.Focused;
+	CHECK_FALSE(state.WasFocusGained());
+	CHECK_FALSE(state.WasFocusLost());
 }

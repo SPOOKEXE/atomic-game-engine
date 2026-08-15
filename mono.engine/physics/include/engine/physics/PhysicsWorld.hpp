@@ -5,7 +5,7 @@
 //
 // **A resource, because rule 2 of the root `AGENTS.md` leaves no alternative.**
 // A module does not keep private vectors for data another module also reads, and
-// every one of these buffers is read outside the function that filled it — the
+// every one of these buffers is read outside the function that filled it - the
 // pair list by the narrow phase, the events by game code. Held in the store, it
 // is covered by the affinity check, visible to a snapshot, and there is exactly
 // one of it per world.
@@ -15,7 +15,7 @@
 // stops allocating after its first tick.
 //
 // **Two indexes, not one.** `spatial::HashGrid` is rebuild-only by design, so
-// "only re-insert what moved" is not a call this module can make — it is a
+// "only re-insert what moved" is not a call this module can make - it is a
 // decision about *what to hand to `Rebuild`*. Static geometry gets its own grid
 // and its own rebuild, which happens when the static set changes and not once
 // per tick. `spatial/AGENTS.md` names the second grid as the answer to
@@ -42,7 +42,7 @@ namespace engine::physics {
 	//
 	// **The masks are here rather than looked up per candidate.** A pair needs
 	// both colliders' `Layer` and `Mask`, and `spatial::HashGrid` filters with
-	// one mask only — so the reverse half of the rule needs the other side's
+	// one mask only - so the reverse half of the rule needs the other side's
 	// mask in hand. Resolving it through the store per candidate would be one
 	// random access per candidate, which is the cost an index exists to remove.
 	//
@@ -89,7 +89,7 @@ namespace engine::physics {
 		// **This ordering is a determinism requirement and not tidiness.** The
 		// solver visits contacts in pair order, sequential impulse is
 		// order-dependent, and a list assembled in whatever sequence a grid walk
-		// produced would put two runs of one scene on different trajectories —
+		// produced would put two runs of one scene on different trajectories -
 		// which `just determinism` reports a long way from here.
 		//
 		// @param other The pair to compare.
@@ -110,7 +110,7 @@ namespace engine::physics {
 	// to the same row. Through `Store::Get` every one of them is a sparse-set
 	// lookup into a column that is not the one visited before it. Gathered, the
 	// whole iteration runs over one array, and `Publish` is the single pass
-	// that puts the answers back — which is exactly what the pipeline table
+	// that puts the answers back - which is exactly what the pipeline table
 	// means by a `Publish` step that writes back velocities.
 	//
 	// **The first four fields are the ones a sweep touches, and they are first
@@ -119,7 +119,7 @@ namespace engine::physics {
 	// cache is how many lines a body's *hot* half spans. Velocities, correction
 	// and inverse mass are forty bytes; the sixty-four-byte alignment below puts
 	// all of them in one line and everything the sweeps never look at in the
-	// next. Scattered — inverse mass sat ninety-six bytes after the velocities —
+	// next. Scattered - inverse mass sat ninety-six bytes after the velocities -
 	// it was two lines per body per access.
 	//
 	// @since v0.4
@@ -134,7 +134,7 @@ namespace engine::physics {
 		//
 		// **Split from the real velocity on purpose.** Pushing two overlapping
 		// bodies apart through their actual velocity is indistinguishable, one
-		// tick later, from them having been thrown apart — the stack bounces,
+		// tick later, from them having been thrown apart - the stack bounces,
 		// and a box at rest carries a permanent upward velocity that no
 		// sleeping threshold can tell from creeping. This is added to the
 		// transform by `Publish` and then thrown away.
@@ -145,13 +145,13 @@ namespace engine::physics {
 		// and a stack acquires a permanent lean that grows every tick until it
 		// slides apart. Measured on a six-box tower over four seconds, the
 		// angular half costs 326 millimetres of drift against 40 without it.
-		// The price is that an overlap which really is rotational — a box
-		// resting on one corner, sunk in — is pushed straight out rather than
+		// The price is that an overlap which really is rotational - a box
+		// resting on one corner, sunk in - is pushed straight out rather than
 		// tipped out, which is slower and never wrong.
 		core::Vector3 CorrectionLinear;
 
 		// One over the mass, in reciprocal kilograms. **Zero means immovable**
-		// — static geometry, a kinematic body, or a sleeping one.
+		// - static geometry, a kinematic body, or a sleeping one.
 		//
 		// Here rather than beside the other scalars because `ApplyImpulse` reads
 		// it, so it belongs in the hot line with the velocities it scales.
@@ -162,14 +162,14 @@ namespace engine::physics {
 		// Which entity this is.
 		ecs::Entity Owner;
 
-		// Where the body turns about — its transform's position, because
+		// Where the body turns about - its transform's position, because
 		// nothing in this engine offsets a centre of mass from its origin.
 		core::Vector3 Centre;
 
 		// The body's principal axes, in world space.
 		//
 		// Held as axes and a diagonal rather than as a three-by-three matrix
-		// because that is the form the inertia is *derived* in — every shape
+		// because that is the form the inertia is *derived* in - every shape
 		// here is symmetric about its own axes, so the local tensor is
 		// diagonal and the world one is `R diag Rt`. Multiplying a vector
 		// through the axes costs three dots and three scales and never builds
@@ -197,7 +197,7 @@ namespace engine::physics {
 	// One contact point's accumulated impulse, kept for the next tick.
 	//
 	// **The warm start, and it is a reuse structure rather than an
-	// optimisation bolted on** — `v02v03v04.md`'s allocation table names it as
+	// optimisation bolted on** - `v02v03v04.md`'s allocation table names it as
 	// one. A resting stack converges to the same impulses every tick, so
 	// starting from last tick's answer instead of from zero costs a lookup and
 	// saves most of the iterations it would otherwise take to find them again.
@@ -240,7 +240,7 @@ namespace engine::physics {
 
 	// One direction an impulse may act along at a contact, fully resolved.
 	//
-	// The three of them — the normal and the two friction directions — differ
+	// The three of them - the normal and the two friction directions - differ
 	// only in which way they point, so they are one type used three times
 	// rather than three sets of parallel fields. Keeping the direction, the
 	// response it produces and the impulse accumulated along it in one place is
@@ -257,23 +257,27 @@ namespace engine::physics {
 		//
 		// **Resolved here because no sweep changes it.** A body's inertia and
 		// its lever arms are fixed for the tick, so this is three vectors per
-		// row — but derived inside the iteration it was two inertia products
+		// row - but derived inside the iteration it was two inertia products
 		// per body per direction per sweep, which at sixteen sweeps is
 		// ninety-six evaluations of three constants and was the largest single
 		// cost in the solve.
+		//@{
 		core::Vector3 FirstAngular;
 		core::Vector3 SecondAngular;
+		//@}
 
 		// Each body's lever arm crossed into `Direction`.
 		//
-		// The torque a unit impulse applies, and — by the scalar triple product
-		// — also the vector that turns a body's angular velocity into its share
+		// The torque a unit impulse applies, and - by the scalar triple product
+		// - also the vector that turns a body's angular velocity into its share
 		// of the closing speed along `Direction`. That second reading is what a
 		// sweep uses: `(w x lever) . Direction` becomes `w . Torque`, so probing
 		// the contact is two dot products instead of two cross products, three
 		// times per row per sweep.
+		//@{
 		core::Vector3 FirstTorque;
 		core::Vector3 SecondTorque;
+		//@}
 
 		// The mass the pair presents along `Direction` at this point. It is the
 		// reciprocal of what the two responses above already add up to, so all
@@ -287,7 +291,7 @@ namespace engine::physics {
 	// One contact point turned into the numbers an impulse iteration needs.
 	//
 	// **Set up once and read every iteration.** Everything here is constant for
-	// the tick apart from the accumulated impulses — the directions, the
+	// the tick apart from the accumulated impulses - the directions, the
 	// responses each body gives them, the effective masses, the friction the
 	// two `scene::Surface` rows combine to, the target speed the penetration
 	// asks for. Recomputing any of it inside the iteration loop would multiply
@@ -318,7 +322,7 @@ namespace engine::physics {
 		// contact plane, and one direction leaves the perpendicular one free.
 		ContactAxis Along[3];
 
-		// The mass for the correction, which is translation only — so it is
+		// The mass for the correction, which is translation only - so it is
 		// the two inverse masses and no lever arm at all.
 		float CorrectionMass = 0.0f;
 
@@ -344,14 +348,16 @@ namespace engine::physics {
 
 		// Slots in `Along`. The normal first, so the friction pair is the two
 		// after it and both can be walked with one loop.
+		//@{
 		static constexpr size_t NORMAL = 0;
 		static constexpr size_t TANGENT = 1;
+		//@}
 	};
 
 	// How long one body has been still, and whether it has been put to sleep.
 	//
 	// Kept per world rather than per row, because the alternative is the field
-	// `scene::RigidBody` used to carry — the same state in two places, and only
+	// `scene::RigidBody` used to carry - the same state in two places, and only
 	// readable by visiting the row it was meant to let the query skip. See
 	// `AGENTS.md` in this directory for the whole of that decision.
 	//
@@ -451,7 +457,7 @@ namespace engine::physics {
 
 		// The contact transitions for this tick.
 		//
-		// Written by `Publish` — one entry per pair that started touching,
+		// Written by `Publish` - one entry per pair that started touching,
 		// kept touching, or stopped. In the same `(min id, max id)` order the
 		// pairs are in, so two runs of a scene deliver them identically.
 		//
@@ -492,7 +498,7 @@ namespace engine::physics {
 		// Takes a body out of the resting set, so the next tick simulates it.
 		//
 		// **The verb that was missing, and a character controller is what
-		// noticed.** Everything that woke a body until now was a *contact* — the
+		// noticed.** Everything that woke a body until now was a *contact* - the
 		// solver's wake pass gives a sleeping body back to the dynamic set when
 		// an awake neighbour touches it. That is the whole of the mechanism, and
 		// it cannot express "this body has been told to move": a character
@@ -504,7 +510,7 @@ namespace engine::physics {
 		// **It clears the whole resting record rather than only the flag**, so
 		// the body starts accumulating rest again from zero. Clearing the flag
 		// alone would leave the timer at its threshold, and the body would sleep
-		// again on the very next tick it was not being pushed — which is a
+		// again on the very next tick it was not being pushed - which is a
 		// character that walks in single frames.
 		//
 		// Costs a binary search and is a no-op for a body that was already
@@ -516,7 +522,7 @@ namespace engine::physics {
 
 		// Records that the static geometry changed and its index must be rebuilt.
 		//
-		// `SyncBroadphase` detects the ordinary cases itself — a static collider
+		// `SyncBroadphase` detects the ordinary cases itself - a static collider
 		// created, destroyed, or written through `Store::Set`. This is for the
 		// case it cannot see: a transform written through a raw column pointer
 		// in the batch path, which advances no per-row stamp. Calling it when
@@ -562,7 +568,7 @@ namespace engine::physics {
 		// **The number the second-grid design exists to keep small.** A world
 		// whose static rebuild count climbs with its tick count has static
 		// geometry being re-measured every tick, which is the cost
-		// `spatial/AGENTS.md` says the second grid removes — and it is what the
+		// `spatial/AGENTS.md` says the second grid removes - and it is what the
 		// suite for this module asserts against.
 		//
 		// @return A counter that only increases.
@@ -619,8 +625,8 @@ namespace engine::physics {
 		//
 		// **The one thing here that outlives a tick's contacts.** A body that
 		// fell asleep on top of static geometry produces no candidate pair at
-		// all — both sides are anchored as far as the broad phase is concerned
-		// — so it is not gathered, and an entry rebuilt from this tick's bodies
+		// all - both sides are anchored as far as the broad phase is concerned
+		// - so it is not gathered, and an entry rebuilt from this tick's bodies
 		// would lose it and wake it for no reason. Entries for sleepers are
 		// carried; entries for awake bodies that stopped touching anything are
 		// not, because a body in mid-air is not resting.
@@ -648,7 +654,7 @@ namespace engine::physics {
 		// `Store::ChangeVersion()` as of the last time the static set was
 		// examined. The counter only moves for a write through `Set` to an
 		// observed component, so an unchanged one means nothing authored has
-		// happened and the changed-row walk can be skipped entirely — which is
+		// happened and the changed-row walk can be skipped entirely - which is
 		// what keeps the static index from being rebuilt every tick in a store
 		// whose dirty bits nobody clears.
 		uint64_t StaticChangeVersion = 0;

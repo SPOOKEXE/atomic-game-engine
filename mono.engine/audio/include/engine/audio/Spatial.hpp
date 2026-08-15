@@ -4,7 +4,7 @@
 //
 // **Two numbers, because the mixer is stereo.** Everything spatialisation does
 // here comes out as a left gain and a right gain, and that is the whole of the
-// interface — no filters, no head model, no occlusion. A binaural renderer and
+// interface - no filters, no head model, no occlusion. A binaural renderer and
 // a distance-dependent low-pass are both real things this will eventually want,
 // and neither is pretended to exist.
 //
@@ -32,7 +32,7 @@ namespace engine::audio {
 	// Equal-power panning from a position between hard left and hard right.
 	//
 	// **Equal power rather than linear**, and the difference is audible. A
-	// linear pan — left = 1-p, right = p — drops about 3 dB in the middle,
+	// linear pan - left = 1-p, right = p - drops about 3 dB in the middle,
 	// so a sound swept across the front sags as it passes the centre. Taking
 	// the cosine and sine of a quarter turn keeps `L² + R²` constant, which is
 	// what the ear tracks.
@@ -47,7 +47,7 @@ namespace engine::audio {
 	// are what somebody placing a sound can reason about: it is full volume
 	// within `FalloffStart` and silent past `FalloffEnd`.
 	//
-	// Between them the curve is inverse-square-ish rather than linear — sound
+	// Between them the curve is inverse-square-ish rather than linear - sound
 	// intensity falls with the square of distance in the real world, and a
 	// linear ramp is why a sound can seem to switch off as you walk away from
 	// it. It is normalised to reach exactly zero at `FalloffEnd`, so nothing

@@ -34,7 +34,7 @@ namespace studio {
 		// panel gets a home.**
 		//
 		// imgui writes the layout to an ini and owns it from then on, which is
-		// right — an editor that threw away wherever somebody dragged a panel to
+		// right - an editor that threw away wherever somebody dragged a panel to
 		// would be unusable. But it also means a panel added in a later build is
 		// a window the saved layout has never heard of, so it opens floating in
 		// the corner. That is exactly what `Viewport` and `Worlds` did.
@@ -42,7 +42,7 @@ namespace studio {
 		// A version in the id makes the old node unfindable, so the default
 		// layout is rebuilt once and then owned by the ini again. **Bump this
 		// when a panel is added or the arrangement changes**, and not otherwise
-		// — every bump costs everybody their layout.
+		// - every bump costs everybody their layout.
 		// **v3 because Settings is a panel the saved layout has never heard
 		// of**, and a panel a layout does not know about opens floating in a
 		// corner. Bumping costs everybody the arrangement they dragged into
@@ -50,7 +50,7 @@ namespace studio {
 		// panel is added and not otherwise.
 		// **v8 because Live Instances is a panel the saved layout has never
 		// heard of**, and a panel a layout does not know about opens floating in
-		// a corner — which is exactly the failure it exists to fix.
+		// a corner - which is exactly the failure it exists to fix.
 		constexpr const char *DOCKSPACE = "StudioDockSpace.v8";
 
 		constexpr const char *VIEWPORT = "Viewport";
@@ -63,7 +63,7 @@ namespace studio {
 		constexpr const char *OUTPUT = "Output";
 		// **The title reads "Preferences" and the id stays "Studio Settings".**
 		// imgui derives a window's id from its label, and the saved layout keys
-		// on that id — so renaming the panel outright would leave the ini's
+		// on that id - so renaming the panel outright would leave the ini's
 		// entry orphaned and the panel would come back floating in a corner for
 		// everybody who had docked it. `###` pins the id to the old name while
 		// the visible title changes, which is the same trick the script tabs use
@@ -91,7 +91,7 @@ namespace studio {
 		// @param dockspace   The dockspace node to fill.
 		// @param extraTitles The extra viewport panels, in index order. Passed in
 		//                    rather than spelled here because the editor owns
-		//                    both how many there are and what they are called —
+		//                    both how many there are and what they are called -
 		//                    see `Editor::ResizeViewports`.
 		void BuildDefaultLayout(ImGuiID dockspace, std::span<const char *const> extraTitles) {
 			ImGui::DockBuilderRemoveNode(dockspace);
@@ -99,8 +99,8 @@ namespace studio {
 			ImGui::DockBuilderSetNodeSize(dockspace, ImGui::GetMainViewport()->Size);
 
 			// Studio's arrangement, and it is Studio's for a reason worth
-			// stating: the tree and the properties are one conversation — you
-			// click a thing on the left and edit it below — so they share an
+			// stating: the tree and the properties are one conversation - you
+			// click a thing on the left and edit it below - so they share an
 			// edge. Splitting them across the window makes every edit a
 			// diagonal mouse journey.
 			ImGuiID centre = dockspace;
@@ -115,7 +115,7 @@ namespace studio {
 
 			// **A split, not the same node.** Docking both viewports into
 			// `centre` makes them *tabs*, so the second is a background window
-			// — `ImGui::Begin` returns false for it, the panel drops its target
+			// - `ImGui::Begin` returns false for it, the panel drops its target
 			// and the renderer never draws it. That is not a subtle failure
 			// either: the second view is simply never there, and the first
 			// looks exactly as it always did.
@@ -147,7 +147,7 @@ namespace studio {
 			ImGui::DockBuilderDockWindow(OUTPUT, bottom);
 
 			// Beside the properties rather than in the centre: they are panels
-			// somebody opens, reads or changes one thing in, and leaves — and
+			// somebody opens, reads or changes one thing in, and leaves - and
 			// the centre belongs to the world.
 			ImGui::DockBuilderDockWindow(SETTINGS, rightLower);
 			ImGui::DockBuilderDockWindow(STATISTICS, rightLower);
@@ -163,7 +163,7 @@ namespace studio {
 
 	const engine::ui::ThemeColours &Editor::PanelColoursFor(const char *panel) const {
 		// **One empty set, handed out to every panel that has none.** The common
-		// case by a mile — most panels are never recoloured — and it has to cost
+		// case by a mile - most panels are never recoloured - and it has to cost
 		// a pointer rather than a construction, because this runs once per panel
 		// per frame.
 		static const engine::ui::ThemeColours NONE;
@@ -181,7 +181,7 @@ namespace studio {
 
 		// **No `PassthruCentralNode`, and that flag is why the viewport used to
 		// be a hole.** It punches a transparent rectangle through the dockspace
-		// so the swapchain shows through — but `imgui.cpp`'s `central_node_hole`
+		// so the swapchain shows through - but `imgui.cpp`'s `central_node_hole`
 		// requires the central node to be *empty*, so docking a panel into it
 		// fills the whole dockspace with `ImGuiCol_WindowBg` instead. The world
 		// vanished the moment the viewport was docked, which is exactly what it
@@ -194,7 +194,7 @@ namespace studio {
 		// `DockSpaceOverViewport` fills the viewport's *work area*, and
 		// `BeginMainMenuBar` and `BeginViewportSideBar` are what shrink that
 		// area. Drawing the toolbar afterwards put it underneath a dockspace
-		// covering the same rectangle — the strip was submitted every frame,
+		// covering the same rectangle - the strip was submitted every frame,
 		// with working buttons, and could not be seen or clicked.
 		//
 		// **The status bar had the same bug and kept it a version longer**,
@@ -254,12 +254,12 @@ namespace studio {
 
 		// **One span per panel, so the interface bar has something under it.**
 		// Without these the whole build is a single wide block and the only
-		// question it can answer is "is the interface slow" — which is the one
+		// question it can answer is "is the interface slow" - which is the one
 		// question you already know the answer to by the time you have opened
 		// the graph. A closed panel returns immediately and costs a span of
 		// almost nothing, which is the correct reading rather than an absence.
 		// The `+` on a tab strip is added by whichever panel draws first in each
-		// node — see `DrawViewport` — so the record of which nodes have one is a
+		// node - see `DrawViewport` - so the record of which nodes have one is a
 		// within-frame fact, like `ViewportClaimed` above it.
 		TabbedNodes.clear();
 
@@ -269,7 +269,7 @@ namespace studio {
 			// **Every extra panel skins as `VIEWPORT2`, whatever it is called.**
 			// The settings page offers a colour per entry in `SkinnablePanels`,
 			// and one entry per viewport would be a list that grows as panels
-			// are added — so "the main viewport" and "an extra viewport" are the
+			// are added - so "the main viewport" and "an extra viewport" are the
 			// two things somebody can colour, which is the distinction that was
 			// there when there were exactly two.
 			for (size_t index = 0; index < 1 + Extras.size(); index++) {
@@ -327,7 +327,7 @@ namespace studio {
 		}
 		// **The panel that reports the frame, inside the frame it reports.** It
 		// draws a row per span and a bar per span, so it scales with exactly the
-		// thing it is used to measure — and it was the largest of the panels with
+		// thing it is used to measure - and it was the largest of the panels with
 		// no span of its own, which made it the one thing the graph could not
 		// account for while being read.
 		{
@@ -370,7 +370,7 @@ namespace studio {
 
 		// **After every panel, because any of them may be the one under the
 		// cursor.** `EndHoverPreview` settles the delay for the whole frame and
-		// `DrawHoverPreview` puts the panel on top of everything — which is why
+		// `DrawHoverPreview` puts the panel on top of everything - which is why
 		// neither belongs inside a list's own loop.
 		EndHoverPreview(static_cast<double>(ImGui::GetIO().DeltaTime));
 
@@ -423,7 +423,7 @@ namespace studio {
 
 		// The selection's centre and how far it reaches, from the transforms
 		// themselves. Bounds would be better and `scene::Bounds` is on
-		// `BasePart` rather than on `Instance` — so a folder of parts would
+		// `BasePart` rather than on `Instance` - so a folder of parts would
 		// frame from nothing, and a position is the fact every instance has.
 		Vector3 centre;
 		size_t counted = 0;
@@ -442,7 +442,7 @@ namespace studio {
 		});
 
 		if (counted == 0) {
-			// Selected, but nothing in it has a place in the world — a script,
+			// Selected, but nothing in it has a place in the world - a script,
 			// a service. Silent rather than a message: F over a folder is a
 			// keypress somebody makes by accident.
 			return;
@@ -461,8 +461,8 @@ namespace studio {
 	void Editor::DriveCamera() {
 		// **The pointer decides first, and focus decides when the pointer is
 		// nowhere.** One camera driver for every panel rather than a copy each:
-		// the rules — right-drag to look, middle-drag to pan, wheel to dolly, F
-		// to frame, WASD to fly — are the same in all of them.
+		// the rules - right-drag to look, middle-drag to pan, wheel to dolly, F
+		// to frame, WASD to fly - are the same in all of them.
 		//
 		// The order is the whole of it. A viewport under the pointer is the one a
 		// mouse gesture means, whichever panel was last clicked; a viewport with
@@ -471,7 +471,7 @@ namespace studio {
 		// gives both without either overriding the other.
 		//
 		// **Which panel, resolved once, then driven once.** This was four call
-		// sites of an eight-argument function spread over four early returns —
+		// sites of an eight-argument function spread over four early returns -
 		// and two of them were provably the same call, one passing a computed
 		// expression and the other a hard-coded `true` for the same value. A
 		// ninth parameter would have meant four more edits, and the signature
@@ -491,7 +491,7 @@ namespace studio {
 			target = 0;
 		}
 
-		// Nothing under the pointer, so the keyboard's panel gets the frame —
+		// Nothing under the pointer, so the keyboard's panel gets the frame -
 		// but only if the keyboard is genuinely in a viewport. `FocusedViewport`
 		// alone still names one after a click into the properties panel, which is
 		// right for the transport readout and wrong here. See
@@ -506,7 +506,7 @@ namespace studio {
 		// **A viewport showing a client with a body in it is played, not
 		// flown.** Both readings of WASD are legitimate and only one can have
 		// the frame; the presence of a character settles it, which is
-		// discoverable without a menu — you press Play, you walk. A client view
+		// discoverable without a menu - you press Play, you walk. A client view
 		// that has not received its character yet still flies, so the panel is
 		// usable in the gap.
 		//
@@ -527,7 +527,7 @@ namespace studio {
 		// The second is what it did to the target: the search above accepts a
 		// panel that is `Panning`, and the call passed only `hovered` and
 		// `active` on. So a panel selected *because* it was panning arrived here
-		// looking like a panel nobody was touching — it took the frame, decided
+		// looking like a panel nobody was touching - it took the frame, decided
 		// it was not being driven, and cleared the keys it had just been given.
 		// `Panning` stays set when a middle-drag is released off the picture, so
 		// from then on that client viewport erased its own keyboard every frame:
@@ -549,9 +549,9 @@ namespace studio {
 			}
 
 			// **Two panels showing one world is one world, and the one being
-			// driven wins.** A second view of the same client — which the `+` on
+			// driven wins.** A second view of the same client - which the `+` on
 			// a tab strip makes in one click, and which the main panel becomes
-			// for free whenever the active scene *is* a client — would otherwise
+			// for free whenever the active scene *is* a client - would otherwise
 			// arrive here as "not the target" and clear the very keys the target
 			// had just been given. `scene::InputState` is per world and not per
 			// panel; releasing it has to be a statement about the world.
@@ -577,7 +577,7 @@ namespace studio {
 		}
 
 		// `ExtraAt` returns null for index 0, which is the main viewport's own
-		// fields — the one place the extras array does not hold the state.
+		// fields - the one place the extras array does not hold the state.
 		ViewportState *view = ExtraAt(target);
 		const bool focused = FocusedIsViewport && FocusedViewport == target;
 
@@ -633,7 +633,7 @@ namespace studio {
 		// drag, and a camera that stopped at the edge of the rectangle would be
 		// unusable at exactly the moment somebody is turning quickly.
 		// **`hovered` alone, not `hovered && !io.WantCaptureMouse`.** The
-		// viewport is an imgui window, so hovering it sets `WantCaptureMouse` —
+		// viewport is an imgui window, so hovering it sets `WantCaptureMouse` -
 		// the second half was therefore false exactly when the first was true,
 		// and the two together could never be satisfied. `IsItemHovered`
 		// already refuses when a popup or another window is over the panel,
@@ -641,7 +641,7 @@ namespace studio {
 		const bool looking = (active || hovered) && ImGui::IsMouseDown(ImGuiMouseButton_Right);
 
 		// **Flying detaches from a followed camera.** Otherwise a right-drag
-		// would turn a camera nobody asked it to turn — or worse, appear to do
+		// would turn a camera nobody asked it to turn - or worse, appear to do
 		// nothing because the scene's camera keeps overriding the eye every
 		// frame. Discoverable without a menu: you fly, you are flying.
 		if (looking && FollowCamera != engine::ecs::NULL_ENTITY) {
@@ -675,14 +675,14 @@ namespace studio {
 		Vector3 move;
 
 		// **WASD without holding a mouse button, which is what an author
-		// expects.** Flying used to require the right button down — the
-		// aim-while-you-move arrangement Unreal and Roblox use — so tapping W
+		// expects.** Flying used to require the right button down - the
+		// aim-while-you-move arrangement Unreal and Roblox use - so tapping W
 		// over the picture did nothing at all and read as a broken camera.
 		// Turning still needs the right button, because a viewport that swung
 		// whenever the pointer crossed it would be unusable; only the
 		// translation is freed here.
 		//
-		// **`WantTextInput`, not `WantCaptureKeyboard` — and that swap is the
+		// **`WantTextInput`, not `WantCaptureKeyboard` - and that swap is the
 		// bug, not a tidy-up.** The claim above it was that imgui raises
 		// `WantCaptureKeyboard` "while any text field has focus". It does not.
 		// `imgui.cpp` raises it while *navigation* is active:
@@ -699,7 +699,7 @@ namespace studio {
 		// **This is the keyboard twin of the bug fixed twelve lines above**, and
 		// it survived that fix: `hovered && !io.WantCaptureMouse` could never be
 		// satisfied because hovering an imgui window is what raises
-		// `WantCaptureMouse`. Same mistake, same file, other device — a
+		// `WantCaptureMouse`. Same mistake, same file, other device - a
 		// "does imgui want this" flag used to answer "is a widget eating this".
 		//
 		// `WantTextInput` is the question that was meant: it is raised only by an
@@ -757,14 +757,14 @@ namespace studio {
 
 		// **The wheel dollies when not looking and changes speed when it is.**
 		// Both are what somebody means by the wheel at those two moments, and
-		// the `looking` branch above already claimed the second — so this is
+		// the `looking` branch above already claimed the second - so this is
 		// the other half rather than a conflict.
 		if (overViewport && !looking && io.MouseWheel != 0.0f) {
 			position = position + forward * (io.MouseWheel * speed * 0.12f);
 		}
 
 		// F frames the selection, which is the one navigation command that
-		// needs no aim at all — so it follows the keyboard rather than the
+		// needs no aim at all - so it follows the keyboard rather than the
 		// pointer, and carries the same `WantTextInput` correction as `driving`.
 		// It had the identical `WantCaptureKeyboard` guard and was dead in
 		// exactly the same circumstances.
@@ -791,7 +791,7 @@ namespace studio {
 		const bool second = extra != nullptr;
 
 		// imgui remembers a window by its title, so a panel's title is minted
-		// once when the panel is and then never changes — a name that moved
+		// once when the panel is and then never changes - a name that moved
 		// would be a panel the saved layout has never heard of. See
 		// `ViewportState::Title`.
 		const char *title = ViewportTitle(index);
@@ -824,7 +824,7 @@ namespace studio {
 		// it for twenty years.
 		//
 		// `DockNodeBeginAmendTabBar` is imgui's own supported way to put an item
-		// on a dock node's tab bar — the alternative is a strip of our own above
+		// on a dock node's tab bar - the alternative is a strip of our own above
 		// the image, which would sit *under* the tabs and read as belonging to
 		// the wrong thing.
 		//
@@ -858,7 +858,7 @@ namespace studio {
 
 		if (!shown) {
 			// Collapsed or behind another tab. The target is dropped rather than
-			// left at its last size — rendering a texture nobody shows is a
+			// left at its last size - rendering a texture nobody shows is a
 			// frame's work thrown away every frame.
 			target = engine::render::SceneTarget{};
 			ImGui::End();
@@ -868,13 +868,13 @@ namespace studio {
 		// **What the toolbar reports on, claimed here rather than from a click
 		// on the image.** Focus is true for the panel a person is working in
 		// whether they got there by clicking the picture, the tab or the title
-		// bar — a click on the image alone would leave the transport describing
+		// bar - a click on the image alone would leave the transport describing
 		// a panel nobody is in, which is the whole failure this is fixing. See
 		// `FocusedViewport`.
 		//
 		// **`ChildWindows` and emphatically not `RootAndChildWindows`.** A
 		// docked window's *root* is the dockspace host, which every docked
-		// panel shares — so the root-walking flag is true for all four
+		// panel shares - so the root-walking flag is true for all four
 		// viewports at once and the last one drawn wins. It was written that
 		// way first and the toolbar reported "Viewport 2" no matter which panel
 		// was clicked. This flag stays inside the panel and its own children.
@@ -887,12 +887,12 @@ namespace studio {
 		//
 		// `ResolveFocusedViewport` settles it once, after every panel has
 		// drawn, from the single window imgui actually considers focused. The
-		// only thing claimed here is the click, below — because a click has to
+		// only thing claimed here is the click, below - because a click has to
 		// take effect on the frame it happened rather than the frame after.
 
 		// **The size in pixels, which is not the size in imgui's points.** The
 		// texture is real pixels and a high-DPI display makes those different
-		// numbers — a target sized in points on a 2x display is a quarter-scale
+		// numbers - a target sized in points on a 2x display is a quarter-scale
 		// image stretched back up, which reads as a blurry renderer.
 		const ImVec2 origin = ImGui::GetCursorScreenPos();
 		const ImVec2 size = ImGui::GetContentRegionAvail();
@@ -906,7 +906,7 @@ namespace studio {
 		// **The texture the renderer holds now, and it is usually this frame's
 		// picture rather than the last one's.** imgui records its draw lists
 		// before the renderer runs, so what is bound here is whatever texture
-		// exists at this moment — but the world pass and the interface pass go
+		// exists at this moment - but the world pass and the interface pass go
 		// into the same command buffer with the world first, so a texture that
 		// keeps its identity across the frame is written before it is sampled.
 		// Targets are allocated in blocks precisely so that identity survives a
@@ -931,8 +931,8 @@ namespace studio {
 		// why the camera could not be driven at all.** `ImGui::Image` is not an
 		// interactive item: it has no id, it is never hovered *as an item* in a
 		// way that survives, and `IsItemActive` is false for it forever. So the
-		// look condition — "the viewport is active, or hovered and imgui does
-		// not want the mouse" — could only ever be satisfied by the fallback
+		// look condition - "the viewport is active, or hovered and imgui does
+		// not want the mouse" - could only ever be satisfied by the fallback
 		// path that ran on the first frame after a resize.
 		//
 		// A button laid over the image gives the panel an id, so a right-drag
@@ -940,7 +940,7 @@ namespace studio {
 		// when the pointer leaves the panel, which is what makes a fast turn
 		// keep turning instead of stopping at the edge.
 		//
-		// Right and middle only. Left is deliberately not claimed — it belongs
+		// Right and middle only. Left is deliberately not claimed - it belongs
 		// to selecting things in the world, and a button that swallowed it
 		// would be in the way of the first feature added here.
 		// What the overlay pass needs, kept rather than drawn now. See
@@ -961,7 +961,7 @@ namespace studio {
 		// **Left is claimed now, and the comment below used to say it was
 		// deliberately not.** It was reserved for "selecting things in the
 		// world", which is this. Right and middle still drive the camera; a
-		// left click picks, and ctrl-click adds — the modifier the explorer
+		// left click picks, and ctrl-click adds - the modifier the explorer
 		// already uses, because two ways to extend one selection is two things
 		// to learn.
 		ImGui::InvisibleButton(
@@ -972,7 +972,7 @@ namespace studio {
 		);
 
 		// Recorded rather than acted on: picking enters the store, and a panel
-		// acts from outside `Universe::Enter` — the rule at the top of
+		// acts from outside `Universe::Enter` - the rule at the top of
 		// `Editor.hpp`. `DrawViewportOverlays` runs it after the camera moves,
 		// which is also when the projection it needs is correct.
 		if (ImGui::IsItemDeactivated() && ImGui::IsMouseReleased(ImGuiMouseButton_Left) &&
@@ -1004,7 +1004,7 @@ namespace studio {
 		// claimed, because a right-drag is how the camera is aimed. Left is
 		// claimed for one more reason: clicking a picture is how a person says
 		// "this is the viewport I am working in", and imgui does not focus a
-		// window from a click on a non-interactive item — so without this the
+		// window from a click on a non-interactive item - so without this the
 		// toolbar went on describing whichever panel imgui happened to focus
 		// last, which is exactly what it did. See `FocusedViewport`.
 		if (hovered &&
@@ -1019,7 +1019,7 @@ namespace studio {
 
 		// **An extra viewport used to stop here, behind a scene dropdown drawn
 		// over its own picture, and both halves of that were wrong.** The
-		// dropdown duplicated the toolbar's scene selector — which now retargets
+		// dropdown duplicated the toolbar's scene selector - which now retargets
 		// whichever viewport you are in, so one control does the job from a
 		// place that is not covering the image. And returning early meant an
 		// extra panel never reached the readout below: no scene name, no draw
@@ -1034,7 +1034,7 @@ namespace studio {
 
 		// **Scoped to the readout and not to the function.** A pushed font that
 		// is still pushed when `ImGui::End` runs is imgui's "Missing PopFont()"
-		// assertion — which fires at the *end of the frame*, naming neither the
+		// assertion - which fires at the *end of the frame*, naming neither the
 		// window nor the font, and was exactly what this cost once.
 		ImGui::BeginGroup();
 		{
@@ -1056,7 +1056,7 @@ namespace studio {
 
 			// **This panel's world, not "the" mode.** With scenes running
 			// independently, a viewport showing an edited world must not warn that
-			// Stop will throw the edits away — and one showing a running world must,
+			// Stop will throw the edits away - and one showing a running world must,
 			// whatever the other panels are doing. An author who has forgotten which
 			// of two scenes is live is exactly who this line is for.
 			if (const RunMode panelMode = ModeOf(ViewportWorld(index)); panelMode != RunMode::Edit) {
@@ -1080,7 +1080,7 @@ namespace studio {
 		// **One entry for every viewport there is or could be.** A row per panel
 		// was right while there were four of them and is not now they are minted
 		// on demand: the list grew as somebody worked, most of it was off, and
-		// the one thing anybody came to this menu for — another view — was at
+		// the one thing anybody came to this menu for - another view - was at
 		// the bottom of it.
 		//
 		// **It is still the way back**, which is this menu's whole job.
@@ -1089,7 +1089,7 @@ namespace studio {
 		// its title bar comes back from here rather than being lost.
 		//
 		// N open viewports each refresh at a Nth of the frame rate, which is why
-		// there is no ceiling and no default beyond the first — see
+		// there is no ceiling and no default beyond the first - see
 		// `DrawingViewport`.
 		if (ImGui::MenuItem("New Viewport")) {
 			AddViewport();
@@ -1113,7 +1113,7 @@ namespace studio {
 		// **In the View menu like every other panel**, because that is this
 		// program's rule: a thing that can be toggled and has no menu entry is
 		// a thing somebody turns on by accident and cannot turn off. No
-		// shortcuts of their own — the Keybinds page is where keys are decided
+		// shortcuts of their own - the Keybinds page is where keys are decided
 		// now, and two places to bind a key is one too many.
 		ImGui::MenuItem("Statistics", nullptr, &ShowStatistics);
 		ImGui::MenuItem("Frame Graph", nullptr, &ShowFrameGraph);
@@ -1140,7 +1140,7 @@ namespace studio {
 		ImGui::Separator();
 
 		// Not a panel, so it is below the separator rather than in the list of
-		// them — but it is a thing somebody turns off and has to be able to
+		// them - but it is a thing somebody turns off and has to be able to
 		// turn back on, which is the rule this menu exists for.
 		ImGui::MenuItem("Ground Grid", nullptr, &ShowGrid);
 
@@ -1178,7 +1178,7 @@ namespace studio {
 			// **The last five, most recent first**, which is the shape a menu
 			// wants: a list somebody scans rather than searches. Kept in
 			// `~/Documents/atomic-game-engine/studio/recent.json` with the rest
-			// of the configuration — see `studio/Config.hpp`.
+			// of the configuration - see `studio/Config.hpp`.
 			if (ImGui::BeginMenu("Open Recent", !Recent.Paths.empty())) {
 				// A copy, because opening a game calls `Recent.Remember` and
 				// reorders the very list this loop is walking.
@@ -1220,7 +1220,7 @@ namespace studio {
 				ImGui::EndMenu();
 
 				// **After `EndMenu`, because opening a game tears down every
-				// world** — and doing that while ImGui is inside the menu it is
+				// world** - and doing that while ImGui is inside the menu it is
 				// drawing is rearranging the tree being walked.
 				if (!forget.empty()) {
 					Recent.Forget(forget);
@@ -1233,7 +1233,7 @@ namespace studio {
 			// **Rojo's layout, because it is the one the ecosystem already
 			// writes.** A game laid out for Rojo has its scripts in folders that
 			// mean something, its tooling assumes it, and every author who has
-			// used Roblox knows it — asking them to convert a working project in
+			// used Roblox knows it - asking them to convert a working project in
 			// order to try this engine is the wrong side of the trade for a
 			// format that costs a parser to read.
 			if (ImGui::MenuItem("Sync Rojo Project...")) {
@@ -1294,7 +1294,7 @@ namespace studio {
 
 			// **Beside the world export rather than beside Save As**, because
 			// the pair an author is choosing between is "this scene" and "all
-			// of them" — not "write it" and "write it somewhere else". The
+			// of them" - not "write it" and "write it somewhere else". The
 			// extension is what tells them apart afterwards.
 			if (ImGui::MenuItem("Export Universe...", nullptr, false, Universe->Count() > 0)) {
 				AskingExportUniverse = true;
@@ -1324,8 +1324,8 @@ namespace studio {
 				canRedo ? "Redo " + std::string(Commands->NextRedo()) : std::string("Redo");
 
 			// **Every item below asks the operator table whether it may run.**
-			// The conditions used to be written here — `!Selection.empty()`
-			// three times in this menu alone, and again in `DrawShortcuts` —
+			// The conditions used to be written here - `!Selection.empty()`
+			// three times in this menu alone, and again in `DrawShortcuts` -
 			// which is four copies of one rule with nothing comparing them. See
 			// `Operators.hpp`.
 			const auto item = [this](Action id, const char *label) {
@@ -1356,7 +1356,7 @@ namespace studio {
 
 			// **Where every other editor puts it.** Preferences is the last
 			// item in Edit on Windows and Linux, and somebody looking for the
-			// theme or the frame cap looks there before they look in View —
+			// theme or the frame cap looks there before they look in View -
 			// which is where the panel was, filed with the panels because it is
 			// one. It is still in View as well, because it is still a panel and
 			// `DrawViewMenu` is the guaranteed way back to any of them.
@@ -1433,7 +1433,7 @@ namespace studio {
 			// **How many clients the next Play admits.** Disabled while
 			// something is running, because the links are made at `BeginRun` and
 			// a number that changed underneath a live run would describe
-			// something that is not there. Stop, change it, Play again — which
+			// something that is not there. Stop, change it, Play again - which
 			// is also how Roblox's own player count works.
 			ImGui::Separator();
 			ImGui::BeginDisabled(mode != RunMode::Edit);
@@ -1479,7 +1479,7 @@ namespace studio {
 	void Editor::DrawShortcuts() {
 		// **At the end of the frame, and that is the whole reason this is its own
 		// function.** `io.WantTextInput` is cleared by `NewFrame` and set by
-		// whatever field turns out to be active *during* the frame — so reading
+		// whatever field turns out to be active *during* the frame - so reading
 		// from the menu bar, which draws first, always saw false. The symptom was
 		// Ctrl+S inside the script editor saving the script *and* opening the Save
 		// Game As dialog at the same time.
@@ -1489,7 +1489,7 @@ namespace studio {
 
 		// **Every key comes from `Keybinds`, and none is spelled out here.**
 		// That table is what the Keybinds page edits, so a binding changed
-		// there changes what this does on the next frame — and the menus print
+		// there changes what this does on the next frame - and the menus print
 		// their shortcut labels from the same rows. Three copies of "F5" was
 		// what this looked like before, and two of them were comments.
 
@@ -1524,7 +1524,7 @@ namespace studio {
 		}
 
 		// **Through the table, not through the method.** A shortcut that called
-		// `UndoEdit` directly would be a second answer to "may this run now" —
+		// `UndoEdit` directly would be a second answer to "may this run now" -
 		// the menu asks the poll and the key would not, and the two would agree
 		// only for as long as nobody changed one of them.
 		if (Keybinds::Fired(Action::Undo)) {
@@ -1544,7 +1544,7 @@ namespace studio {
 		}
 
 		// The primary selection, which is the one the tree highlights first. A
-		// rename is a single-instance edit however many rows are selected —
+		// rename is a single-instance edit however many rows are selected -
 		// there is one field and one name being typed into it.
 		if (Keybinds::Fired(Action::Rename) && !Selection.empty()) {
 			BeginRename(Selection.front());
@@ -1568,7 +1568,7 @@ namespace studio {
 
 		// **Stop is tested before Play**, because their defaults share a key:
 		// F5 plays and Shift+F5 stops, which is Studio's arrangement. `Fired`
-		// matches modifiers exactly, so the two cannot both fire — but the
+		// matches modifiers exactly, so the two cannot both fire - but the
 		// order says which is meant to win if somebody binds them to the same
 		// chord anyway.
 		// Same scene the toolbar and the Run menu act on, so a keyboard and a
@@ -1612,7 +1612,7 @@ namespace studio {
 		}
 
 		// The panel that owns the focused window, which is the window itself
-		// unless focus landed on a child of it — a combo or a popup inside the
+		// unless focus landed on a child of it - a combo or a popup inside the
 		// viewport is still the viewport for this purpose.
 		const ImGuiWindow *focused =
 			context->NavWindow->RootWindow != nullptr ? context->NavWindow->RootWindow : context->NavWindow;
@@ -1666,7 +1666,7 @@ namespace studio {
 		// **A side bar, not a window placed where a side bar would go.**
 		// `BeginViewportSideBar` reserves the strip out of the viewport's work
 		// area, which is the only thing that stops the dockspace from being
-		// laid over the top of it — the previous version positioned an
+		// laid over the top of it - the previous version positioned an
 		// ordinary window at `WorkPos` and was invisible for exactly that
 		// reason.
 		//
@@ -1674,7 +1674,7 @@ namespace studio {
 		// drag into a corner is a toolbar somebody loses.
 		//
 		// **Two rows since v0.13, which is what makes it a ribbon.** The first
-		// is the transport and which scene it is about — facts that are true
+		// is the transport and which scene it is about - facts that are true
 		// whatever somebody is doing, so they never move. The second is the
 		// selected tab's controls, because what is wanted while placing geometry
 		// and what is wanted while writing a script are different sets and
@@ -1683,7 +1683,7 @@ namespace studio {
 		//
 		// **Two item spacings rather than the one between the rows.** The tab
 		// bar draws a border under itself and reserves a little of its own, and
-		// the window is `NoScrollbar` — so a height that is a few pixels short
+		// the window is `NoScrollbar` - so a height that is a few pixels short
 		// clips the bottom of the second row silently rather than growing a
 		// scrollbar. One spacing of slack is cheaper than that.
 		const ImGuiStyle &style = ImGui::GetStyle();
@@ -1703,12 +1703,12 @@ namespace studio {
 		// in.** Every button below reads and writes that world's run record, so
 		// switching viewports genuinely swaps the transport rather than
 		// relabelling it. A universe is a collection of scenes and each of them
-		// runs, pauses and stops on its own — see `Editor::WorldRun`.
+		// runs, pauses and stops on its own - see `Editor::WorldRun`.
 		const WorldId focused = ViewportWorld(FocusedViewport);
 
 		// **A client view belongs to a run and is not one, so the transport asks
-		// the run it is part of.** A replica carries no run record — `ModeOf`
-		// answers `Edit` for it — so every button here read "nothing is running"
+		// the run it is part of.** A replica carries no run record - `ModeOf`
+		// answers `Edit` for it - so every button here read "nothing is running"
 		// while looking at a live client, and Play would have started a *second*
 		// run inside the replica world: a snapshot of somebody else's view, with
 		// its scripts started, ticking beside the server it is a copy of.
@@ -1731,14 +1731,14 @@ namespace studio {
 
 		// **Pause between Run and Stop, and only while this scene runs.** It is
 		// the transport a person reaches for mid-run, so it sits where a
-		// transport does; disabled in Edit because there is no clock to stop —
+		// transport does; disabled in Edit because there is no clock to stop -
 		// a button that could be pressed and did nothing would read as a
 		// pause that failed.
 		ImGui::BeginDisabled(!running);
 		if (RunButton(paused ? "Resume" : "Pause", paused, engine::ui::WarningColour())) {
 			if (WorldRun *record = RunOf(scope); record != nullptr) {
 				record->Paused = !record->Paused;
-				Say(record->Paused ? "paused — the clock is stopped, the run is not" : "resumed");
+				Say(record->Paused ? "paused - the clock is stopped, the run is not" : "resumed");
 			}
 		}
 		ImGui::SameLine();
@@ -1746,7 +1746,7 @@ namespace studio {
 		// **Stop means "this client leaves" while a client view is focused.**
 		// Stopping the whole run from a panel showing one player's screen is the
 		// larger of the two things somebody could mean and the one they cannot
-		// undo — the server's own view is a click away and still stops
+		// undo - the server's own view is a click away and still stops
 		// everything. The label says which of the two this press is.
 		if (ImGui::Button(client ? "Stop Client" : "Stop")) {
 			if (client) {
@@ -1773,7 +1773,7 @@ namespace studio {
 		//
 		// **Scoped to the viewport you are in, like every other button here.**
 		// `RunOwning` is what makes that work from a *client* panel as well as
-		// from the server's — pressing Remove Player while looking at a client
+		// from the server's - pressing Remove Player while looking at a client
 		// removes that one, which is the only reading somebody would expect.
 		ImGui::BeginDisabled(!running);
 		if (ImGui::Button("Spawn Player")) {
@@ -1802,7 +1802,7 @@ namespace studio {
 		// **Everything from here reports on the viewport you are in, not on
 		// "the" world.** With two panels showing two worlds ticking in
 		// parallel, a transport that always described the active world was
-		// describing the wrong one half the time — you would be looking at the
+		// describing the wrong one half the time - you would be looking at the
 		// mirror and reading the skygrid's state. See `FocusedViewport`.
 		const size_t reporting = FocusedViewport;
 		const WorldId shown = ViewportWorld(reporting);
@@ -1820,7 +1820,7 @@ namespace studio {
 		//
 		// **It retargets the focused panel rather than always the active
 		// world.** Picking a scene while looking at Viewport 2 moves *that*
-		// panel — the alternative is a selector that appears to be about the
+		// panel - the alternative is a selector that appears to be about the
 		// picture in front of you and silently changes a different one.
 		ImGui::SetNextItemWidth(180.0f * Settings.Scale);
 		const Name shownName = Universe->NameOf(shown);
@@ -1843,7 +1843,7 @@ namespace studio {
 		ImGui::SameLine();
 
 		// **The world's own state, which is not the same claim as the mode.**
-		// The mode is the universe's — Play runs every world — while this is
+		// The mode is the universe's - Play runs every world - while this is
 		// whether *this* world is ticking, and the two disagree exactly when
 		// something interesting has happened: a world suspended for being empty
 		// during a run, or faulted because its tick threw. That is the reading
@@ -1880,13 +1880,13 @@ namespace studio {
 		}
 
 		// **Grouped by what somebody is doing, not by what the code is.** "Home"
-		// is the loop somebody is in most of the day — pick a tool, set a step,
+		// is the loop somebody is in most of the day - pick a tool, set a step,
 		// anchor the thing. "Model" is the operations on what is already
 		// selected. "Script" is the programs. "View" is the furniture.
 		//
 		// Each strip is drawn *after* `EndTabBar` rather than inside its tab
 		// item, because a tab item's contents go under the bar at the bar's own
-		// width — and this row is the whole toolbar's width. So the tab item is
+		// width - and this row is the whole toolbar's width. So the tab item is
 		// a label that answers "was I clicked", and `tab` carries the answer
 		// down to the row below.
 		int tab = -1;
@@ -1904,7 +1904,7 @@ namespace studio {
 
 		// **Always there, whether or not anything is installed.** A tab that
 		// appeared once a plugin loaded would be the answer to "where do
-		// plugins go" only for people who already had one — and the row says
+		// plugins go" only for people who already had one - and the row says
 		// which of the two empty states it is.
 		item("Plugins", 4);
 
@@ -1966,7 +1966,7 @@ namespace studio {
 
 	void Editor::ApplyZoomWheel(float &zoom) {
 		// **Anywhere in the panel, not only over the text.** This asked
-		// `IsItemHovered` — the rectangle of the widget submitted last — which
+		// `IsItemHovered` - the rectangle of the widget submitted last - which
 		// in the output panel is the whole list and in the script editor is the
 		// code field *only*. So Ctrl+wheel did nothing over the breakpoint
 		// gutter beside the code, over the scrollbar, over the tab bar or over
@@ -1983,7 +1983,7 @@ namespace studio {
 
 		// **Nothing has to suppress the scroll that would otherwise go with
 		// it.** imgui's `UpdateMouseWheel` returns early while Ctrl is held, so
-		// the wheel reaches this and moves no scrollbar — which is why the text
+		// the wheel reaches this and moves no scrollbar - which is why the text
 		// zooms in place rather than zooming and running away up the file.
 		if (const float wheel = ImGui::GetIO().MouseWheel; wheel != 0.0f) {
 			zoom = std::clamp(zoom + wheel * ZOOM_STEP, ZOOM_MINIMUM, ZOOM_MAXIMUM);
@@ -2024,7 +2024,7 @@ namespace studio {
 
 		// **Three chords for "zoom in", and the shifted one is the one that was
 		// missing.** On most layouts `+` *is* Shift and the equals key, so
-		// pressing what everybody calls Ctrl-plus reports `Ctrl+Shift+Equal` —
+		// pressing what everybody calls Ctrl-plus reports `Ctrl+Shift+Equal` -
 		// and `IsKeyChordPressed` matches modifiers exactly, so a rule listing
 		// only `Ctrl+Equal` answers no to the very press it was written for. The
 		// keypad has a `+` of its own that needs no shift, which is why it is
@@ -2236,7 +2236,7 @@ namespace studio {
 			// the line somebody is hunting for.
 			if (shown != Output.size()) {
 				ImGui::TextDisabled(
-					"— %zu of %zu lines, %zu hidden by the filter",
+					"- %zu of %zu lines, %zu hidden by the filter",
 					shown,
 					Output.size(),
 					Output.size() - shown
@@ -2250,7 +2250,7 @@ namespace studio {
 			//
 			// **Read before the wheel is consumed below.** Ctrl+wheel must not
 			// also scroll the log, and imgui has already applied it to this
-			// child by the time the panel sees it — so a zoom that left the
+			// child by the time the panel sees it - so a zoom that left the
 			// view where it was is one the person has to scroll back from.
 			const bool pinned = ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 1.0f;
 			if (pinned) {
@@ -2322,7 +2322,7 @@ namespace studio {
 
 		// **What is selected, which the explorer cannot say while you are
 		// looking at the viewport.** It is the one fact about the current state
-		// that has no other home once the eye is in the centre panel — the
+		// that has no other home once the eye is in the centre panel - the
 		// explorer has it, and the explorer is the panel you are not reading.
 		//
 		// Drawn from the store every frame rather than from a cached name,
@@ -2449,7 +2449,7 @@ namespace studio {
 		// **The universe, which is a different document from a world and not a
 		// bigger one.** `<Game>` and `<World>` are separate roots and the
 		// reader refuses each in the other's place, so the two exports write
-		// different extensions and say which they are — see
+		// different extensions and say which they are - see
 		// `game::WORLD_EXTENSION`, where the same distinction is spelled out.
 		if (FilePrompt("Export Universe", PathBuffer, "Export", GAME_FILES, false)) {
 			ExportUniverse(std::filesystem::path(PathBuffer));

@@ -2,7 +2,7 @@
 //
 // **`Modified` is a bool, and a bool is not an answer.** It says something has
 // changed and nothing about what, so the only way to find out before saving is
-// to save and then read a version-control diff — which is the wrong end of the
+// to save and then read a version-control diff - which is the wrong end of the
 // operation to discover you moved something you did not mean to.
 //
 // The whole feature rests on a property this engine already has: **a game is
@@ -13,8 +13,8 @@
 //
 // ## Why the algorithm is here and not in the panel
 //
-// The diff is the half that can be silently wrong — a comparator that reports
-// no changes looks exactly like a clean tree — and it is pure text in, text out.
+// The diff is the half that can be silently wrong - a comparator that reports
+// no changes looks exactly like a clean tree - and it is pure text in, text out.
 // So it is a free function with its own suite, and the panel is a reader over
 // what it returns.
 
@@ -66,7 +66,7 @@ namespace studio {
 
 		// **Common prefix and suffix first.** Two saves of one game are almost
 		// entirely identical, so trimming the ends turns a whole-document
-		// comparison into one over the handful of lines somebody touched — which
+		// comparison into one over the handful of lines somebody touched - which
 		// is what keeps the table below affordable.
 		size_t head = 0;
 		while (head < left.size() && head < right.size() && left[head] == right[head]) {
@@ -89,7 +89,7 @@ namespace studio {
 		// **Bounded, and it says so when it gives up.** The table below is
 		// O(n·m); on a scene where somebody rewrote everything that is a
 		// multi-second stall in a frame. Past the cap the answer degrades to
-		// "this block changed", which is still true and still useful — and the
+		// "this block changed", which is still true and still useful - and the
 		// panel reports that it degraded rather than presenting a coarse diff as
 		// a fine one.
 		if (leftCount * rightCount > DIFF_CELL_LIMIT) {
@@ -160,7 +160,7 @@ namespace studio {
 			// **Not "no changes".** A game that has never been saved has
 			// everything to save, and reporting that as a clean tree is the one
 			// wrong answer this panel could give.
-			ImGui::TextDisabled("this game has never been saved — there is nothing to compare against");
+			ImGui::TextDisabled("this game has never been saved - there is nothing to compare against");
 			ImGui::End();
 			return;
 		}
@@ -187,7 +187,7 @@ namespace studio {
 		}
 
 		if (added == 0 && removed == 0) {
-			ImGui::TextDisabled("no changes — the file matches what is open");
+			ImGui::TextDisabled("no changes - the file matches what is open");
 			ImGui::End();
 			return;
 		}

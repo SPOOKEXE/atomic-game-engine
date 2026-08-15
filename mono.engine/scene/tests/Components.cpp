@@ -45,8 +45,8 @@ using engine::scene::Visual;
 using engine::scene::WorldBounds;
 using engine::spatial::LayerMask;
 
-// The storage takes the memcpy path for a trivially copyable component — a
-// whole column in one call instead of a call per row — and `replication` copies
+// The storage takes the memcpy path for a trivially copyable component - a
+// whole column in one call instead of a call per row - and `replication` copies
 // runs of adjacent changed rows the same way. A component that quietly stopped
 // being trivially copyable would still work and would cost a function call per
 // row on the engine's hottest path.
@@ -67,7 +67,7 @@ TEST_CASE("every component is trivially copyable", "[scene][components]") {
 
 // **The one that catches a real bug rather than a design opinion.** A
 // trivially copyable component is serialised as its object representation,
-// padding included, and padding is never initialised — so a hole here makes two
+// padding included, and padding is never initialised - so a hole here makes two
 // runs of one scene produce different snapshot bytes, and `just determinism`
 // reports it from `mono.server` with no clue which type is at fault.
 //
@@ -84,14 +84,14 @@ TEST_CASE("no component carries unnamed padding", "[scene][components]") {
 	// **`ImageTransparency` widened this one and the two bytes it needed came
 	// out of the named padding**, which is the same trade `Visual` records
 	// above: a float needs four-byte alignment, so it could not sit in the three
-	// bytes after `Surface` — the struct grew — while `Face` is a byte-wide enum
+	// bytes after `Surface` - the struct grew - while `Face` is a byte-wide enum
 	// and took one of them for nothing. Two are left.
 	//
 	// **`TagFilter` widened it again, by four**, and it could not have been
 	// paid for out of those two: a `uint32_t` needs four-byte alignment and the
 	// remaining padding is a tail after a pair of bytes. That is a real cost on
 	// a component every mirror in a world carries, and it is worth it because
-	// the alternative — a name resolved per instance per pass — is a lookup in
+	// the alternative - a name resolved per instance per pass - is a lookup in
 	// the draw loop rather than four bytes in a row that is already sixteen.
 	//
 	// **`Effect` widened nothing**, and that is the point of a named reserve: a
@@ -114,7 +114,7 @@ TEST_CASE("no component carries unnamed padding", "[scene][components]") {
 
 	// **Fourteen floats and a `CFrame`, and not one byte more.** A fitted
 	// frustum is four extents, two distances and a plane, and the map the pane
-	// was taken through rides with it — a portal's frustum is fitted to the
+	// was taken through rides with it - a portal's frustum is fitted to the
 	// *mapped* source pane, so the transform that mapped it is part of the
 	// answer rather than something to look up again. That map is a similarity
 	// rather than a rigid motion, so it is a `CFrame`, the centre its scale is
@@ -140,19 +140,19 @@ TEST_CASE("no component carries unnamed padding", "[scene][components]") {
 	// struct.** `Transparency` is a float and needed four-byte alignment, so it
 	// could not live in the three named bytes after `Visible` and the row got
 	// wider. `Surface` is an `int8_t` and `CastShadow` is a `bool`, so each took
-	// one of those bytes and cost nothing — which is what named padding is
+	// one of those bytes and cost nothing - which is what named padding is
 	// *for*, and what this check is here to keep honest. One byte is left.
 	//
 	// **Two `Name`s, and both of the changes that got it there are v0.10's.**
-	// `Material` came off — a material is content named by a `Material`
-	// instance, not a word on every drawable, `scene/Materials.hpp` — and
+	// `Material` came off - a material is content named by a `Material`
+	// instance, not a word on every drawable, `scene/Materials.hpp` - and
 	// `Fitted` went on, which records the mesh `Bounds` was last shaped to fit.
 	//
 	// **The second one is paid for on every part in the world**, including every
 	// plain `Part` that will never name a mesh, and that is the honest cost of
 	// keeping `client::CollectInstances` a batched walk over fixed columns: the
 	// same trade `SurfaceAppearance` makes one component over. Four bytes an
-	// entity buys a fit rule with nothing to keep in step — see `Visual::Fitted`
+	// entity buys a fit rule with nothing to keep in step - see `Visual::Fitted`
 	// for why a bool would have been cheaper and wrong.
 	//
 	// **Four bytes of room again, as of v0.12.** `Surface`, `CastShadow` and
@@ -199,7 +199,7 @@ TEST_CASE("a default body is dynamic and unit mass", "[scene][components]") {
 
 	// **There is no `Sleeping` here and there must not be one.** Whether a
 	// body is at rest is the solver's, held in `physics::PhysicsWorld` and
-	// expressed to the ECS by the row losing its `Motion` — the archetype move
+	// expressed to the ECS by the row losing its `Motion` - the archetype move
 	// `v02v03v04.md`'s allocation table asks for. A flag on this row would be
 	// that same state a second time, and readable only by making the visit the
 	// move exists to avoid.
@@ -238,7 +238,7 @@ TEST_CASE("a default visual is a visible untinted default mesh", "[scene][compon
 	// **A `Visual` no longer carries a material at all**, which is the change
 	// v0.10 made and this is where it is pinned. It used to default to
 	// `Plastic` so a properties panel had something to show and a script had
-	// something to compare against — both real problems with a seventeen-name
+	// something to compare against - both real problems with a seventeen-name
 	// enum nothing sampled. A material is content now: a `Material` instance
 	// under the part names one, and a part with none draws
 	// `render::DefaultTexture`. See `scene/Materials.hpp`.
@@ -246,15 +246,15 @@ TEST_CASE("a default visual is a visible untinted default mesh", "[scene][compon
 	// **Nothing asserts the absence, and there is no way to.** A `requires`
 	// expression naming a member of a concrete type is a hard error rather than
 	// a substitution failure, so the check that "`Visual` has no `Material`" is
-	// the compiler refusing every call site — which it does, loudly, and which is
+	// the compiler refusing every call site - which it does, loudly, and which is
 	// what the rest of this change is. The test below is the positive half.
 }
 
 TEST_CASE("a material reference starts at none", "[scene][components]") {
 	// **`None` and not `Plastic`, which is the whole shape of the change.** The
 	// enum defaulted to a value the renderer could not act on; this defaults to
-	// "nothing chosen yet", which is a state the renderer draws — the engine's
-	// own white plastic — and a state an author can read as unfinished.
+	// "nothing chosen yet", which is a state the renderer draws - the engine's
+	// own white plastic - and a state an author can read as unfinished.
 	const MaterialRef material;
 	CHECK_FALSE(material.Asset.IsValid());
 }

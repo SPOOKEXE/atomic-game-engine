@@ -10,7 +10,7 @@
 // **The protocol is small on purpose.** Four kinds of frame, none of them a
 // request that expects an answer, because a driver that blocked waiting for a
 // host would have handed that host the power to stop the universe. Everything
-// here is fire-and-forget in exactly the way `Postbox` already is — a world
+// here is fire-and-forget in exactly the way `Postbox` already is - a world
 // posting to a bus does not wait either, and for the same reason.
 //
 //     driver                                   host
@@ -50,7 +50,7 @@ namespace engine::world {
 		// Host to driver: the worlds are built and the first tick is due.
 		//
 		// Sent once. A driver that never sees it has a host that started and
-		// could not do the one thing it was started for — which is a different
+		// could not do the one thing it was started for - which is a different
 		// problem from one that died, and worth telling apart.
 		Ready,
 
@@ -63,7 +63,7 @@ namespace engine::world {
 		// Driver to host: what the buses answered, for its worlds' inboxes.
 		//
 		// The other half of `Traffic`, and a separate signal rather than a
-		// direction-dependent reading of one — a frame whose meaning depends on
+		// direction-dependent reading of one - a frame whose meaning depends on
 		// who is holding it is a frame somebody eventually reads from the wrong
 		// side.
 		Deliveries,
@@ -78,7 +78,7 @@ namespace engine::world {
 		// Host to driver: one of my worlds faulted and is held down.
 		//
 		// Soft faults are quarantined by the host and the driver never needs to
-		// know — except that a world held down by the crash-loop cutoff has
+		// know - except that a world held down by the crash-loop cutoff has
 		// stopped simulating, and something outside the host has to be able to
 		// say so.
 		Faulted,
@@ -107,7 +107,7 @@ namespace engine::world {
 	//
 	// The attribution has to survive the trip from the link to the router,
 	// because the router's check is *this host holds that world*. Resolving the
-	// host from the envelope's own sender field instead would be circular — it
+	// host from the envelope's own sender field instead would be circular - it
 	// would verify the claim against itself.
 	//
 	// @since v0.2
@@ -135,7 +135,7 @@ namespace engine::world {
 		// The sender's tick count, for `Heartbeat` and `Ready`.
 		//
 		// A number that stops moving is a host that is stuck rather than dead,
-		// which a heartbeat alone cannot distinguish — the heartbeat says the
+		// which a heartbeat alone cannot distinguish - the heartbeat says the
 		// link is being serviced, and this says the simulation is.
 		uint64_t Tick = 0;
 
@@ -143,7 +143,7 @@ namespace engine::world {
 		//
 		// **A driver cannot time a host.** The work happened in another address
 		// space, and the only honest number is the one the host measured and
-		// sent — which is what `FrameGraph::Report` exists to plot. A driver
+		// sent - which is what `FrameGraph::Report` exists to plot. A driver
 		// that timed the link instead would be graphing its own poll interval.
 		float Milliseconds = 0.0f;
 
@@ -173,7 +173,7 @@ namespace engine::world {
 	//
 	// Owns the channel and the encoding, so that neither side writes framing of
 	// its own. Both sides use this class; which one you are is decided by which
-	// signals you send, not by a different type — a second type would be a
+	// signals you send, not by a different type - a second type would be a
 	// second encoder, and two encoders agree until they do not.
 	//
 	// @since v0.2

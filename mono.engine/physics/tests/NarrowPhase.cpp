@@ -127,7 +127,7 @@ namespace {
 // Stated as a depth and a normal rather than as a point count, because those
 // two are what the solver acts on and what a sign mistake changes. Every case
 // puts the second shape on the positive side of the first, so the expected
-// normal is a positive axis in every one of the six — which makes a flipped
+// normal is a positive axis in every one of the six - which makes a flipped
 // pair unmissable in the diff.
 
 TEST_CASE("box against box has a known depth and normal", "[physics][narrowphase]") {
@@ -168,7 +168,7 @@ TEST_CASE("box against cylinder has a known depth and normal", "[physics][narrow
 	CHECK(DeepestOf(solution) == Approx(0.1f).margin(1e-4));
 
 	// A cap against a face is a whole disc of contact, so it must not come back
-	// as one point — that is the manifold a resting cylinder cannot stand on.
+	// as one point - that is the manifold a resting cylinder cannot stand on.
 	CHECK(solution.PointCount > 1);
 }
 
@@ -211,7 +211,7 @@ TEST_CASE("cylinder against cylinder has a known depth and normal", "[physics][n
 TEST_CASE("a pair that does not overlap reports not touching", "[physics][narrowphase]") {
 	// **Not touching is a result and not a failure to decide.** Each of the six
 	// has to be able to say no, and the separated case is the one a solution
-	// left default-constructed would pass by accident — so every one of them is
+	// left default-constructed would pass by accident - so every one of them is
 	// also checked for a zero point count.
 	const ContactSolution pairs[] = {
 		BoxBox(
@@ -241,7 +241,7 @@ TEST_CASE("the dispatcher flips exactly once", "[physics][narrowphase]") {
 	// `ContactBetween` takes its shapes in entity order and the pair functions
 	// take theirs in shape order, so half of all pairs are called reversed.
 	// Asking the same geometry both ways round has to give exactly opposite
-	// normals and the same depth — a flip that also moved the points to the
+	// normals and the same depth - a flip that also moved the points to the
 	// wrong surface, or one applied twice, fails here.
 	const ShapeInstance box = Box(Vector3::Zero, Vector3{0.5f, 0.5f, 0.5f});
 	const ShapeInstance sphere = Sphere(Vector3{0.8f, 0.0f, 0.0f}, 0.5f);
@@ -311,7 +311,7 @@ TEST_CASE("a box resting flat on a box gives four points", "[physics][narrowphas
 TEST_CASE("a box corner into a face gives one point", "[physics][narrowphase]") {
 	// The other end of the same machinery. A box tipped onto a corner really
 	// does touch at one place, and reporting four there would invent three
-	// constraints — which reads as a box that refuses to topple.
+	// constraints - which reads as a box that refuses to topple.
 	const ContactSolution solution = BoxBox(
 		Box(Vector3::Zero, Vector3{4.0f, 0.5f, 4.0f}),
 		Box(Vector3{0.0f, 1.32f, 0.0f}, Vector3{0.5f, 0.5f, 0.5f}, CFrame::Angles(0.6f, 0.7f, 0.5f))
@@ -325,7 +325,7 @@ TEST_CASE("a box corner into a face gives one point", "[physics][narrowphase]") 
 
 TEST_CASE("the cylinder disc-edge case is one rim point", "[physics][narrowphase]") {
 	// **Budgeted for, not discovered.** A tilted cylinder meets a floor on the
-	// edge of its disc — not on the cap, not on the barrel — and the contact is
+	// edge of its disc - not on the cap, not on the barrel - and the contact is
 	// a single point of the rim. A cap-shaped answer here would plant four
 	// points in the air, and the cylinder would stand up on nothing.
 	//
@@ -371,7 +371,7 @@ TEST_CASE("the cylinder parallel-axis case gives two points", "[physics][narrowp
 	CHECK(solution.PointCount == 2);
 	CHECK(DeepestOf(solution) == Approx(0.1f).margin(1e-4));
 
-	// Two points at the two ends of the shared stretch, four metres apart —
+	// Two points at the two ends of the shared stretch, four metres apart -
 	// the whole length of both barrels, because they are lying exactly on top
 	// of each other.
 	const float spread = (solution.Positions[1] - solution.Positions[0]).Magnitude();
@@ -414,7 +414,7 @@ TEST_CASE("the narrow phase names its bodies the way the pair did", "[physics][n
 	// The end-to-end version of the convention case above. The sphere is
 	// created first so it holds the smaller id and is therefore `A`, while the
 	// pair function takes the box first because `ShapeKind::Box` sorts before
-	// `Sphere` — so this only passes if the dispatcher flipped.
+	// `Sphere` - so this only passes if the dispatcher flipped.
 	Store store("narrowphase.convention");
 	PreparePhysicsWorld(store, 1.0f);
 

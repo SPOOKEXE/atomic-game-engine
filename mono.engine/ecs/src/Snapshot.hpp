@@ -4,20 +4,20 @@
 //
 // Three operations over one format: write a world out, replace a world with
 // one, and merge one into a world that is already running. They are together
-// because they are one format — a reader that drifts from its writer is the
+// because they are one format - a reader that drifts from its writer is the
 // failure this codec exists to make impossible, and the two halves are only
 // obviously in step while they are next to each other.
 //
 // **Component types are recorded by name, never by id.** Ids are assigned in
 // interning order and that order is a property of a process rather than of a
 // world, so a snapshot keyed by them would restore into the wrong columns in
-// the next process to read it — which is every consumer there is: a restart
+// the next process to read it - which is every consumer there is: a restart
 // after a crash, a world moving between hosts, a recording replayed by a later
 // build. Names cost a table at the front and nothing per row.
 //
 // **The entity directory is reproduced exactly**, index and generation alike,
-// rather than re-allocated in order. A component may hold an `Entity` — a
-// parent, a target, an owner — and those handles only survive if the directory
+// rather than re-allocated in order. A component may hold an `Entity` - a
+// parent, a target, an owner - and those handles only survive if the directory
 // that issued them comes back unchanged.
 //
 // **The bytes are stable.** Two saves of the same world produce the same
@@ -71,7 +71,7 @@ namespace engine::ecs {
 	// sender destroyed and recreated is a different entity here too rather than
 	// the old one wearing new values.
 	//
-	// On failure the world is **left as it was** — not cleared, and not
+	// On failure the world is **left as it was** - not cleared, and not
 	// half-merged. A replica that lost its world to a corrupt packet would be
 	// worse off than one that ignored it.
 	//

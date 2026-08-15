@@ -11,7 +11,7 @@ one of them produces something that builds today and is wrong later. Do all six.
 ## Before writing anything
 
 Answer these, out loud, in your response. If any answer is unclear, ask rather
-than guess — a module at the wrong height is expensive to move once things
+than guess - a module at the wrong height is expensive to move once things
 depend on it.
 
 1. **What layer does it sit at?** A layer may see every layer below it and none
@@ -32,7 +32,7 @@ depend on it.
 ```
 mono.engine/$1/
 ├─ CMakeLists.txt              mono_add_library with TIER and DEPS
-├─ AGENTS.md                   the invariants — see below
+├─ AGENTS.md                   the invariants - see below
 ├─ include/engine/$1/          public headers, and only public headers
 ├─ src/                        sources and private headers
 ├─ tests/                      one file per public header
@@ -53,12 +53,12 @@ Tests are picked up automatically when `tests/` exists. Do not write an
 
 ## Then wire it in
 
-**`mono.engine/CMakeLists.txt`** — add the `add_subdirectory` in layer order,
+**`mono.engine/CMakeLists.txt`** - add the `add_subdirectory` in layer order,
 with the layer and tier in the trailing comment like its neighbours. If it is
 `client` tier it goes inside the `MONO_BUILD_CLIENT` guard; if `server`, it
 needs the mirror-image guard.
 
-**`mono.tools/architecture/expected_graph.json`** — add the entry. A new module
+**`mono.tools/architecture/expected_graph.json`** - add the entry. A new module
 is an architectural change and should show up in review as a diff to that file.
 If it is behind a build option, give it `"requires": "<OPTION>"`, or the
 architecture test will fail under the preset that turns the option off.
@@ -69,7 +69,7 @@ Configure once and read the real answer out of
 
 ## The AGENTS.md
 
-The root `AGENTS.md` carries policy. This one carries invariants — the things
+The root `AGENTS.md` carries policy. This one carries invariants - the things
 that are true about this module and would be broken by a reasonable-looking
 change. Write it as what a reviewer should refuse, not as a description.
 

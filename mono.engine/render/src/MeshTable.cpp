@@ -76,8 +76,8 @@ namespace engine::render {
 		MeshEntry entry;
 
 		// **The mesh's own box, which is what turns `Size` into a size.**
-		// `Mesh::Read` derives these from the vertices — nothing on disk states
-		// them — so they are the true bounds and a file that lied about its own
+		// `Mesh::Read` derives these from the vertices - nothing on disk states
+		// them - so they are the true bounds and a file that lied about its own
 		// could not make a part cull wrong. See `MeshEntry::Extent`.
 		entry.Centre = (mesh.Minimum + mesh.Maximum) * 0.5f;
 		entry.Extent = (mesh.Maximum - mesh.Minimum) * 0.5f;

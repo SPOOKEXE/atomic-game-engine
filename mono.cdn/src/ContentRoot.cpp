@@ -28,7 +28,7 @@ namespace cdn {
 
 			// Component by component, before the filesystem is touched at all.
 			// `..` is the obvious one. `.` is refused with it so that a name has
-			// exactly one spelling — `a/./b` and `a/b` naming one file is two
+			// exactly one spelling - `a/./b` and `a/b` naming one file is two
 			// keys for one piece of content, and the manifest keys on the name.
 			for (const auto &component : requested) {
 				if (component == ".." || component == ".") {

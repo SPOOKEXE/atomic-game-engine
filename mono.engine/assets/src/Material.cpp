@@ -16,7 +16,7 @@ namespace engine::assets {
 		// **Always written, even when every one is empty.** A writer that
 		// omitted absent maps would make the record's length depend on its
 		// contents, so a reader could not tell four empty names from a file that
-		// stopped early — which is the distinction `reader.Failed()` below
+		// stopped early - which is the distinction `reader.Failed()` below
 		// exists to preserve.
 		writer.WriteString(data.NormalMap);
 		writer.WriteString(data.RoughnessMap);
@@ -38,8 +38,8 @@ namespace engine::assets {
 		const std::string_view colour = reader.ReadString();
 
 		// **`Failed()` and not the emptiness of the view**, because an empty
-		// colour map is a material somebody authored and has not textured yet —
-		// `MaterialData::ColourMap` says so — and a truncated file reads back as
+		// colour map is a material somebody authored and has not textured yet -
+		// `MaterialData::ColourMap` says so - and a truncated file reads back as
 		// exactly the same empty view. Without this the two are one answer, and
 		// the wrong half of it draws the default and reports nothing.
 		if (reader.Failed() || colour.size() > MAXIMUM_NAME) {
@@ -48,10 +48,10 @@ namespace engine::assets {
 
 		// **Assigned last, so a refusal leaves `out` alone.** A caller reusing
 		// one across a run of files would otherwise act on a mixture of the last
-		// good material and a bad one — `Read`'s contract, and `Texture::Read`
+		// good material and a bad one - `Read`'s contract, and `Texture::Read`
 		// keeps the same promise the same way.
 		// **Version 1 is a colour map and nothing else**, which is this material
-		// with four empty names — so it is read by not reading them rather than
+		// with four empty names - so it is read by not reading them rather than
 		// by a second parser. See `VERSION`.
 		std::string_view normal;
 		std::string_view roughness;

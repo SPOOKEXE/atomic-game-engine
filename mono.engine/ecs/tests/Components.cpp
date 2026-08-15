@@ -37,7 +37,7 @@ namespace components_test {
 	// A tag: no data, matched by a query and nothing else.
 	struct Frozen {};
 
-	// Non-trivial on purpose — the lifetime hooks have to be real for this one,
+	// Non-trivial on purpose - the lifetime hooks have to be real for this one,
 	// and it must not be offered raw serialisation.
 	struct Label {
 		std::string Text;
@@ -87,7 +87,7 @@ TEST_CASE("a type registers once and keeps its id", "[ecs]") {
 
 TEST_CASE("one type has one id, whatever it is asked for by", "[ecs]") {
 	// The defect this catches: the name table maps *names* to ids, so a type
-	// registered under a second name would take a second id — and an archetype
+	// registered under a second name would take a second id - and an archetype
 	// built from one would silently not match a query built from the other.
 	// Nothing about that failure looks like a registration problem later.
 	struct Twice {
@@ -164,7 +164,7 @@ TEST_CASE("a descriptor carries size, alignment and triviality", "[ecs]") {
 	REQUIRE(label.Size == sizeof(Label));
 	REQUIRE_FALSE(label.Trivial);
 
-	// A std::string cannot be written as its object representation — the bytes
+	// A std::string cannot be written as its object representation - the bytes
 	// are a pointer into this process. Refusing is the only correct answer.
 	REQUIRE_FALSE(label.Serialisable);
 	REQUIRE(label.Write == nullptr);
@@ -242,7 +242,7 @@ TEST_CASE("a truncated column read fails rather than tearing", "[ecs]") {
 
 TEST_CASE("a custom serialiser replaces the raw one", "[ecs]") {
 	// The case the automatic path gets wrong. A Material holds a Name, whose
-	// id is a process-local counter — writing those four bytes would produce a
+	// id is a process-local counter - writing those four bytes would produce a
 	// file that means something different in every process that reads it.
 	const ComponentId id = Components::Register<Material>(
 		"test.material",
@@ -306,7 +306,7 @@ TEST_CASE("sealing refuses a type nobody registered at startup", "[ecs]") {
 	Components::Seal();
 	REQUIRE(Components::Sealed());
 
-	// Already-registered types keep working while sealed — sealing closes the
+	// Already-registered types keep working while sealed - sealing closes the
 	// table to new types, it does not close the engine.
 	REQUIRE(Components::Of<Position>() == early);
 

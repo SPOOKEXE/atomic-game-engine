@@ -18,7 +18,7 @@ namespace studio {
 		// What a field's callback is given.
 		//
 		// **A carrier rather than the string itself**, because the code field
-		// needs a second thing out of the same callback — where the caret is —
+		// needs a second thing out of the same callback - where the caret is -
 		// and imgui offers exactly one `UserData` pointer. `Edit` is null for
 		// every field that only wants to grow.
 		struct FieldCallback {
@@ -27,12 +27,12 @@ namespace studio {
 		};
 
 		// imgui's callback, which is how a text field grows a `std::string`
-		// instead of truncating into a fixed buffer — and, for the code field,
+		// instead of truncating into a fixed buffer - and, for the code field,
 		// how the caret gets out and an insertion gets in.
 		//
 		// **`resize` and then `data()` and not the other way round.** The
 		// callback hands back a pointer imgui goes on writing into, so it has
-		// to be the pointer the string owns *after* the reallocation — reading
+		// to be the pointer the string owns *after* the reallocation - reading
 		// it first hands imgui memory that has just been freed, and the
 		// corruption shows up in whatever allocated next.
 		int Grow(ImGuiInputTextCallbackData *data) {
@@ -46,7 +46,7 @@ namespace studio {
 
 			// **`CallbackAlways` is the whole of the completion seam, and it is
 			// public API.** `ScriptEditor.cpp` refuses `ImGuiInputTextState` to
-			// move the caret, and that refusal stands — that struct is a private
+			// move the caret, and that refusal stands - that struct is a private
 			// *layout* whose fields shift between releases. This is the
 			// supported way to the same fact: `CursorPos`, `InsertChars` and
 			// `DeleteChars` are documented members of
@@ -112,7 +112,7 @@ namespace studio {
 		//
 		// **`AllowTabInput` is also why Tab cannot accept a completion.**
 		// `imgui_widgets.cpp` asserts that it and `CallbackCompletion` are never
-		// both set, because both want the key — so the popup takes Enter, and
+		// both set, because both want the key - so the popup takes Enter, and
 		// claims it with `SetKeyOwner` while it is open.
 		auto flags = ImGuiInputTextFlags_CallbackResize | ImGuiInputTextFlags_AllowTabInput;
 		if (edit != nullptr) {
@@ -155,7 +155,7 @@ namespace studio {
 		// **`Appearing` alone was not enough, and the failure needs a resize to
 		// see.** A position set once is in absolute coordinates, so shrinking
 		// the window afterwards leaves the modal where the old centre used to
-		// be — which is off the edge, and a modal is the one window somebody
+		// be - which is off the edge, and a modal is the one window somebody
 		// cannot scroll to or drag back because it has taken the input. So the
 		// frame the viewport changes size re-centres every prompt, and every
 		// other frame leaves it where it is. Re-centring unconditionally would
@@ -164,7 +164,7 @@ namespace studio {
 		// **Latched per frame, not per call.** `DrawDialogs` submits every
 		// prompt every frame and only one of them can be open, so comparing and
 		// then storing the size would let the first call consume the change and
-		// the other seven — including the open one — see nothing. The frame
+		// the other seven - including the open one - see nothing. The frame
 		// number is what makes "did the viewport resize" a fact about the frame
 		// rather than about the call order within it.
 		static int measuredFrame = -1;
@@ -199,7 +199,7 @@ namespace studio {
 		// `AlwaysAutoResize` window comes from the width it measured last
 		// frame. So the field asked for one pixel less than the window, the
 		// window resized to fit the field, and the field asked for one less
-		// again — a few pixels a frame until the modal had deflated to the
+		// again - a few pixels a frame until the modal had deflated to the
 		// widest thing that was not elastic, which is the two buttons at the
 		// bottom. It looked like an animation and was a feedback loop.
 		//
@@ -267,7 +267,7 @@ namespace studio {
 		// shared directory would make each of them jump to whichever was used
 		// last.
 		//
-		// `PerCallSite` is that pattern, written once — this was the third
+		// `PerCallSite` is that pattern, written once - this was the third
 		// transcription of it and the comment here used to say so.
 		struct Browsing {
 			std::filesystem::path Where;
@@ -287,7 +287,7 @@ namespace studio {
 		const Listing listing = BrowseDirectory(state->Where, extensions);
 		state->Where = listing.Directory;
 
-		// The path bar. Not editable — the field at the bottom is where a path
+		// The path bar. Not editable - the field at the bottom is where a path
 		// is typed, and two places to type one would be two places for them to
 		// disagree.
 		ImGui::TextDisabled("%s", listing.Directory.string().c_str());
@@ -407,7 +407,7 @@ namespace studio {
 			return false;
 		}
 
-		// Where this dialog is looking, kept per title — `FilePrompt`'s reason
+		// Where this dialog is looking, kept per title - `FilePrompt`'s reason
 		// and its pattern.
 		std::filesystem::path *const where = &PerCallSite<std::filesystem::path>(title);
 

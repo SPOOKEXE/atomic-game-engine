@@ -39,7 +39,7 @@ namespace engine::spatial {
 		// walk uses.
 		//
 		// Both build passes go through here, so the counting pass and the
-		// filling pass cannot disagree about which cells a proxy occupies —
+		// filling pass cannot disagree about which cells a proxy occupies -
 		// which would corrupt the bucket offsets rather than merely misplace
 		// something. A range whose maximum is below its minimum yields nothing,
 		// and that is how an oversized proxy is kept out of the cells.
@@ -113,7 +113,7 @@ namespace engine::spatial {
 
 			// A box built the wrong way round covers no cells and can still
 			// satisfy AABB::Overlaps against a large enough box, so it joins
-			// the oversized list where the exact test answers it — rather than
+			// the oversized list where the exact test answers it - rather than
 			// being dropped here, which would make the index disagree with the
 			// type.
 			const bool inverted = spanX <= 0 || spanY <= 0 || spanZ <= 0;
@@ -208,7 +208,7 @@ namespace engine::spatial {
 		//
 		// In `double`, because the sum is over every collider in the world and a
 		// float accumulator loses the small ones once the running total is large
-		// — which is the case a world of debris around one baseplate produces.
+		// - which is the case a world of debris around one baseplate produces.
 		double total = 0.0;
 		for (const Proxy &proxy : proxies) {
 			const core::Vector3 size = proxy.Bounds.Size();
@@ -224,7 +224,7 @@ namespace engine::spatial {
 		}
 
 		// Twice the mean is the rule of thumb `DEFAULT_CELL_SIZE` records, then
-		// rounded to a power of two — see the header for why the rounding is the
+		// rounded to a power of two - see the header for why the rounding is the
 		// hysteresis rather than a tidiness measure.
 		const float wanted =
 			std::clamp(mean * 2.0f, HashGrid::MINIMUM_CELL_SIZE, HashGrid::MAXIMUM_CELL_SIZE);

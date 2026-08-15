@@ -2,7 +2,7 @@
 //
 // **The number was already being counted.** `RuntimeLimits::StepBudget` bounds
 // an interrupt counter, so Luau's `Interrupt` hook runs at every loop back-edge,
-// call and return whether or not anybody is looking — this panel reads the
+// call and return whether or not anybody is looking - this panel reads the
 // figure that hook maintains and adds nothing to the hot path to do it.
 //
 // **Steps and not milliseconds**, which is `script/AGENTS.md`'s rule rather than
@@ -13,7 +13,7 @@
 //
 // ## What this measures, said plainly
 //
-// A script's **top level** — the run that `RunWorldScripts` performs when the
+// A script's **top level** - the run that `RunWorldScripts` performs when the
 // world starts. Not its heartbeat work. `SignalTable` holds connections as
 // opaque callables and nothing records which script made one, so attributing
 // beat time to a script would be a guess with a number's confidence. The panel
@@ -49,7 +49,7 @@ namespace studio {
 			// **Not an empty table.** "No scripts are running" and "the scripts
 			// that are running cost nothing" are different answers and a blank
 			// grid gives the second when it means the first.
-			ImGui::TextDisabled("nothing is running — press Play or Run");
+			ImGui::TextDisabled("nothing is running - press Play or Run");
 			ImGui::End();
 			return;
 		}
@@ -82,7 +82,7 @@ namespace studio {
 			std::snprintf(
 				header,
 				sizeof(header),
-				"%s — %zu script%s, %llu steps###%u",
+				"%s - %zu script%s, %llu steps###%u",
 				world.c_str(),
 				costs.size(),
 				costs.size() == 1 ? "" : "s",
@@ -127,12 +127,12 @@ namespace studio {
 						ImGui::TextUnformatted(names[index].c_str());
 					} else {
 						// **A script that raised has a step count and it is not
-						// comparable to one that finished** — it stopped where
+						// comparable to one that finished** - it stopped where
 						// it stopped. Marked rather than silently ranked beside
 						// the others.
 						ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.35f, 1.0f), "%s", names[index].c_str());
 						if (ImGui::IsItemHovered()) {
-							ImGui::SetTooltip("raised part way through — its count is where it stopped");
+							ImGui::SetTooltip("raised part way through - its count is where it stopped");
 						}
 					}
 
@@ -144,7 +144,7 @@ namespace studio {
 						// Every division in this panel is guarded, and this is
 						// the one that fires: a world whose scripts are all
 						// trivial legitimately totals zero steps.
-						ImGui::TextDisabled("—");
+						ImGui::TextDisabled("-");
 					} else {
 						const float share =
 							static_cast<float>(cost.Steps) / static_cast<float>(total);

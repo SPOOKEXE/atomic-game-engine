@@ -13,7 +13,7 @@ namespace engine::render {
 
 		// **Negative time holds frame zero rather than counting backwards.** A
 		// caller's clock starts at zero and only grows, so this is the case a
-		// mistake produces — and a modulo of a negative in C++ is
+		// mistake produces - and a modulo of a negative in C++ is
 		// implementation-defined in sign, which would show as an animation
 		// running backwards on one platform and not another.
 		if (!(seconds > 0.0)) {
@@ -25,7 +25,7 @@ namespace engine::render {
 		// **In `double` before the cast, because a long-running session
 		// overflows a 32-bit count.** At ten frames a second an `int` wraps after
 		// about seven years and a `float` loses whole-number precision after
-		// about nineteen days — at which point the animation would visibly
+		// about nineteen days - at which point the animation would visibly
 		// stutter and then stop. The modulo brings it back into range first.
 		return static_cast<uint32_t>(std::fmod(elapsed, static_cast<double>(frames)));
 	}

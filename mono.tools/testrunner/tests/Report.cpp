@@ -37,7 +37,7 @@ namespace {
 	}
 
 	// A suite with `passed` green cases and `failed` red ones, each costing a
-	// millisecond, and the suite as a whole costing ten more than its cases —
+	// millisecond, and the suite as a whole costing ten more than its cases -
 	// which is the shape a real one has, process startup being nobody's case.
 	SuiteReport Make(std::string id, unsigned passed, unsigned failed = 0, bool ran = true) {
 		SuiteReport report;
@@ -144,7 +144,7 @@ TEST_CASE("a run that never finished is not a result", "[report]") {
 
 	// A binary that died halfway leaves a file whose every line parses. The
 	// totals line is what says the run got to the end, so its absence is the
-	// signal — the alternative is a crash reported as a suite of three cases
+	// signal - the alternative is a crash reported as a suite of three cases
 	// that all passed.
 	REQUIRE_FALSE(
 		testrunner::ParseSuiteReport(
@@ -298,7 +298,7 @@ TEST_CASE("a cached suite claims no slowest case", "[report]") {
 	const std::string page = testrunner::RenderMarkdown({Make("engine.core.arguments", 4, 0, false)});
 
 	// It has a total and no breakdown. Zero would be a claim, and a false one.
-	REQUIRE(page.find("| — |") != std::string::npos);
+	REQUIRE(page.find("| - |") != std::string::npos);
 }
 
 TEST_CASE("the summary says how long the whole run took", "[report]") {
@@ -351,7 +351,7 @@ TEST_CASE("the widest frame comes first", "[report]") {
 TEST_CASE("a cached suite is a leaf of the flamegraph", "[report]") {
 	const std::string html = testrunner::RenderHtml({Make("engine.core.arguments", 4, 0, false)});
 
-	// Root, first, second, suite — and no cases, because smart-tests.txt keeps
+	// Root, first, second, suite - and no cases, because smart-tests.txt keeps
 	// a suite's total and not its breakdown.
 	size_t boxes = 0;
 	for (size_t at = html.find("class=\"box\""); at != std::string::npos;
@@ -479,7 +479,7 @@ TEST_CASE("a readout says more than the box had room for", "[report]") {
 
 	const std::string html = testrunner::RenderHtml({suite});
 
-	// The counts, the worst case, and the time no case accounts for — which is
+	// The counts, the worst case, and the time no case accounts for - which is
 	// the number a box cannot show and the reason to hover one.
 	REQUIRE(html.find("3 case(s)") != std::string::npos);
 	REQUIRE(html.find("6 assertion(s)") != std::string::npos);
@@ -492,11 +492,11 @@ TEST_CASE("a readout says what share of its parent a frame is", "[report]") {
 		testrunner::RenderHtml({Make("engine.core.arguments", 2), Make("engine.core.paths", 1)});
 
 	// The width is the fact a flamegraph is made of, so it is also stated in
-	// words — 12 ms of the section's 23 ms.
+	// words - 12 ms of the section's 23 ms.
 	REQUIRE(html.find("52.2% of engine.core") != std::string::npos);
 
 	// The root is a share of nothing, so its own readout does not claim to be
-	// one — even though its children all say "of all suites".
+	// one - even though its children all say "of all suites".
 	const std::string opening = "class=\"tip\"><b>all suites</b><span>";
 	const size_t at = html.find(opening);
 	REQUIRE(at != std::string::npos);

@@ -1,7 +1,7 @@
 // The bake pipeline: input nodes, processing nodes, export nodes.
 //
 // Every case here runs without opening a file, which is the property the graph
-// is shaped around — `audio::NullDevice` is the same idea for the mixer. The
+// is shaped around - `audio::NullDevice` is the same idea for the mixer. The
 // bytes a source node holds are a built-in mesh serialised in the test itself,
 // so the suite exercises the real import path over a real file format with no
 // fixture on disk to go stale.
@@ -128,7 +128,7 @@ TEST_CASE("a mesh round-trips through import and export", "[bake][graph]") {
 	const NodeId source = graph.AddSource("props/ramp.amesh", bytes);
 	const NodeId write = graph.AddWrite("props/ramp");
 
-	// A source node's bytes are already an asset, so no import is needed —
+	// A source node's bytes are already an asset, so no import is needed -
 	// except that the payload is `Bytes` and `Write` wants a mesh, which is the
 	// mismatch this checks.
 	REQUIRE(graph.Connect(source, write));
@@ -157,7 +157,7 @@ TEST_CASE("a scale node rebuilds normals only when it has to", "[bake][graph]") 
 		REQUIRE(Ran(graph).empty());
 
 		// A cube's faces are flat, and rebuilding normals over a cube whose
-		// vertices are shared per face changes nothing — but rebuilding them
+		// vertices are shared per face changes nothing - but rebuilding them
 		// after a *uniform* scale would be work with no reason, and the visible
 		// consequence on a model with split normals is that it turns smooth.
 		const MeshData &mesh = graph.Output(scale).Mesh;
@@ -176,7 +176,7 @@ TEST_CASE("a scale node rebuilds normals only when it has to", "[bake][graph]") 
 		CHECK(mesh.Maximum.Y == Approx(2.0f));
 
 		// Every normal still unit length, which a stretched-but-unrebuilt
-		// sphere's would also be — what changes is where they point, and the
+		// sphere's would also be - what changes is where they point, and the
 		// cheap standing check is that nothing became degenerate.
 		for (const engine::assets::MeshVertex &vertex : mesh.Vertices) {
 			const float length = std::sqrt(
@@ -215,6 +215,29 @@ TEST_CASE("an opaque node fills the alpha channel", "[bake][graph]") {
 	for (size_t pixel = 3; pixel < graph.Output(opaque).Texture.Pixels.size(); pixel += 4) {
 		REQUIRE(graph.Output(opaque).Texture.Pixels[pixel] == std::byte{255});
 	}
+}
+
+TEST_CASE("a mipmap node builds the chain and a mesh cannot have one", "[bake][graph]") {
+	Graph graph;
+	const NodeId source = graph.AddSource("textures/floor.bmp", Bytes(BMP));
+	const NodeId import = graph.Add(NodeKind::Import);
+	const NodeId mipmap = graph.Add(NodeKind::Mipmap);
+
+	REQUIRE(graph.Connect(source, import));
+	REQUIRE(graph.Connect(import, mipmap));
+	REQUIRE(Ran(graph).empty());
+	CHECK(graph.Output(mipmap).Texture.LevelCount() == 2);
+
+	// **A rerun rebuilds rather than appends**, which is what makes a graph a
+	// description: the same nodes over the same source bake the same bytes.
+	REQUIRE(Ran(graph).empty());
+	CHECK(graph.Output(mipmap).Texture.LevelCount() == 2);
+
+	Graph mesh;
+	const NodeId cube = mesh.AddBuiltin("engine.Cube");
+	const NodeId wrong = mesh.Add(NodeKind::Mipmap);
+	REQUIRE(mesh.Connect(cube, wrong));
+	CHECK_FALSE(Ran(mesh).empty());
 }
 
 TEST_CASE("one input fans out to several chains", "[bake][graph]") {
@@ -347,4 +370,56 @@ TEST_CASE("a source name travels down the chain", "[bake][graph]") {
 	REQUIRE(Ran(graph).empty());
 
 	CHECK(graph.Output(resize).Source == "textures/floor.bmp");
+}
+
+TEST_CASE("a drawing enters through rasterize and never through import", "[bake][graph]") {
+	constexpr std::string_view DRAWING =
+		R"(<svg width="4" height="4"><rect width="4" height="4" fill="#00ff00"/></svg>)";
+	const std::span<const std::byte> markup(
+		reinterpret_cast<const std::byte *>(DRAWING.data()), DRAWING.size()
+	);
+
+	// **The size is the node's, because the file has none.** A `Resize` after an
+	// `Import` cannot stand in for this: there would be nothing to resize until
+	// something had already chosen a rasterisation, and that choice is the one
+	// being made here.
+	Graph graph;
+	const NodeId source = graph.AddSource("icons/leaf.svg", markup);
+	const NodeId rasterize = graph.AddRasterize(16, 16);
+	const NodeId write = graph.AddWrite("icons/leaf");
+
+	REQUIRE(graph.Connect(source, rasterize));
+	REQUIRE(graph.Connect(rasterize, write));
+	REQUIRE(Ran(graph).empty());
+
+	CHECK(graph.Output(rasterize).Kind == PayloadKind::Texture);
+	CHECK(graph.Output(rasterize).Texture.Width == 16);
+	CHECK(graph.Output(rasterize).Texture.Height == 16);
+	REQUIRE(graph.Baked().size() == 1);
+	CHECK(graph.Baked()[0].Kind == AssetKind::Texture);
+
+	// A zero target asks for the size the document declares, which is the only
+	// size an SVG can be said to have.
+	Graph declared;
+	const NodeId bytes = declared.AddSource("icons/leaf.svg", markup);
+	const NodeId intrinsic = declared.AddRasterize(0, 0);
+	REQUIRE(declared.Connect(bytes, intrinsic));
+	REQUIRE(Ran(declared).empty());
+	CHECK(declared.Output(intrinsic).Texture.Width == 4);
+
+	// An `Import` handed the same bytes names the node that would have worked
+	// rather than guessing a size or failing inside an XML parser.
+	Graph imported;
+	const NodeId same = imported.AddSource("icons/leaf.svg", markup);
+	const NodeId import = imported.Add(NodeKind::Import);
+	REQUIRE(imported.Connect(same, import));
+	CHECK(Ran(imported).find("rasterize node") != std::string::npos);
+
+	// And a `Rasterize` handed something that already has pixels says so, rather
+	// than reporting a PNG's compressed data as bad markup.
+	Graph mistaken;
+	const NodeId picture = mistaken.AddSource("textures/floor.bmp", Bytes(BMP));
+	const NodeId wrong = mistaken.AddRasterize(16, 16);
+	REQUIRE(mistaken.Connect(picture, wrong));
+	CHECK(Ran(mistaken).find("already has a size") != std::string::npos);
 }

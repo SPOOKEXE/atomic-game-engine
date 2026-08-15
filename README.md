@@ -28,10 +28,9 @@
 |---|---|
 | **[RUNNING.md](RUNNING.md)** | **every way to build and run the client, the server, a single test and the tools** |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | building from a fresh clone, and what is expected of a pull request |
-| [docs/CODE_QUALITY.md](docs/CODE_QUALITY.md) | the completion checklist — run it before opening one |
+| [docs/CODE_QUALITY.md](docs/CODE_QUALITY.md) | the completion checklist - run it before opening one |
 | [docs/CODE_FORMAT.md](docs/CODE_FORMAT.md) | naming, includes, and what a comment is for |
 | [docs/CODE_DOCUMENTING.md](docs/CODE_DOCUMENTING.md) | where a comment ends up in the generated reference, and the tags |
-| [docs/retired/CPP_LINKER.md](docs/retired/CPP_LINKER.md) | what a vendor actually costs a binary, measured — and why `VENDOR` is not a size argument |
 | [AGENTS.md](AGENTS.md) | the four rules, and how AI is used here |
 | [ROADMAP.md](ROADMAP.md) | what is built, what is next |
 | [docs/DEFERRED.md](docs/DEFERRED.md) | deferred items from ROADMAP.md that need to be revisited |
@@ -49,7 +48,7 @@ For now, all media relating to development builds will be in the discord server 
 
 ## Version
 
-Current Version: **v0.14**
+Current Version: **v0.15**
 
 See more in [`ROADMAP.md`](ROADMAP.md).
 

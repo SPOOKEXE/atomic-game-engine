@@ -4,7 +4,7 @@
 //
 // An advert and a rendezvous message both carry endpoints and session ids, and
 // both are read from datagrams a stranger wrote. Writing the layout twice is
-// how a format acquires a dialect — one side gains a field, the other keeps
+// how a format acquires a dialect - one side gains a field, the other keeps
 // reading the old shape, and the mismatch shows up as "discovery works on the
 // LAN and not through the point".
 //

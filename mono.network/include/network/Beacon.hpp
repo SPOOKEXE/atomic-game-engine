@@ -25,8 +25,8 @@
 // ## What it refuses to do
 //
 // **A `Private` advert with no key is never sent.** An untagged private advert
-// is a public one wearing a label — anybody could forge it and no browser could
-// tell — so the beacon announces nothing and says so through
+// is a public one wearing a label - anybody could forge it and no browser could
+// tell - so the beacon announces nothing and says so through
 // `BeaconCounters::Refused`. A host that has misconfigured its key finds out by
 // being invisible, which is the loud failure; the quiet one would be a private
 // session anybody can impersonate.
@@ -76,8 +76,8 @@ namespace network {
 		// Announcements this beacon declined to make.
 		//
 		// **Counted apart from a failed send**, because they are different
-		// problems: this one is a misconfiguration here — a private session
-		// with no key, or an advert that is not well formed — and the other is
+		// problems: this one is a misconfiguration here - a private session
+		// with no key, or an advert that is not well formed - and the other is
 		// the network.
 		uint64_t Refused = 0;
 

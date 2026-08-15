@@ -8,7 +8,7 @@
 // The one that is worth a case of its own is `Locked` leaving a part out of the
 // pick grid rather than filtering it out of the hit. The difference only shows
 // up when something is *behind* the locked thing, which is exactly the case
-// locking a wall is for — and the version that filters the hit passes every
+// locking a wall is for - and the version that filters the hit passes every
 // simpler test.
 
 #include <engine/core/types/AABB.hpp>
@@ -61,7 +61,7 @@ namespace {
 	// **A copy of the rule rather than a call into the editor**, because the
 	// editor's own function needs a window, a projection and a universe. What is
 	// under test is the rule, and a copy that drifted from the original would
-	// fail this case the moment it did — the exclusion is one `if`.
+	// fail this case the moment it did - the exclusion is one `if`.
 	Entity PickThrough(Store &store, const Ray &ray) {
 		std::vector<engine::spatial::Proxy> proxies;
 
@@ -133,7 +133,7 @@ TEST_CASE("a locked part lets the ray through to what is behind it", "[studio][t
 	REQUIRE(store.SetProperty(front, Name("Locked"), &locked, sizeof(locked)));
 
 	// **This is the assertion the whole design turns on.** Filtering the *hit*
-	// would answer `NULL_ENTITY` here — the locked wall would still swallow the
+	// would answer `NULL_ENTITY` here - the locked wall would still swallow the
 	// ray and make the thing behind it unclickable, which is the opposite of
 	// what locking a wall is for.
 	CHECK(PickThrough(store, ray) == behind);
@@ -158,7 +158,7 @@ TEST_CASE("a pivot offset is written and reset through its property", "[studio][
 	REQUIRE(store.SetProperty(part, Name("PivotOffset"), &offset, sizeof(offset)));
 
 	// **`GetPivot` composes the placement with the offset**, which is what makes
-	// a pivot edit visible without the part moving — and is the arithmetic the
+	// a pivot edit visible without the part moving - and is the arithmetic the
 	// gizmo has to undo to turn a world drag into a local offset.
 	CHECK(engine::scene::PivotOf(store, part).Position.X == -0.5f);
 
@@ -179,14 +179,14 @@ TEST_CASE("anchoring is a structural change and locking is not", "[studio][tools
 	const Entity part = Place(store, "Crate", 0.0f);
 
 	// The two toolbar toggles look alike and are not: anchored decides whether
-	// the physics moves it — which is a component coming off the row — and
+	// the physics moves it - which is a component coming off the row - and
 	// locked decides whether a person can grab it, which is a byte.
 	bool anchored = false;
 	REQUIRE(store.GetProperty(part, Name("Anchored"), &anchored, sizeof(anchored)));
 
 	anchored = true;
 	REQUIRE(store.SetProperty(part, Name("Anchored"), &anchored, sizeof(anchored)));
-	CHECK(store.Get<engine::scene::RigidBody>(part) == nullptr);
+	CHECK(store.Has<engine::scene::Anchored>(part));
 
 	bool locked = true;
 	REQUIRE(store.SetProperty(part, Name("Locked"), &locked, sizeof(locked)));

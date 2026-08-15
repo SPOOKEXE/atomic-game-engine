@@ -21,7 +21,7 @@
 //
 // **Names cross, indices do not.** Rule 4 exactly: a group is identified by its
 // string in a save file and on a wire, and the index it happens to hold depends
-// on registration order — which is the order a game's files linked in. A
+// on registration order - which is the order a game's files linked in. A
 // `CollisionGroup` property therefore reads and writes a name.
 //
 // **Registration is process-wide**, like `Components` and `Classes`, because a
@@ -65,8 +65,8 @@ namespace engine::spatial {
 		//
 		// A new group starts colliding with **every** existing group, matching
 		// Roblox: a group nobody has configured behaves like ordinary geometry,
-		// and the alternative — a group that collides with nothing until told
-		// otherwise — makes a new group look broken.
+		// and the alternative - a group that collides with nothing until told
+		// otherwise - makes a new group look broken.
 		//
 		// @param name The group's name.
 		// @return Its layer index, or `NO_GROUP` when all thirty-two are taken.
@@ -88,7 +88,7 @@ namespace engine::spatial {
 		//
 		// **Symmetric, and that is not a convenience.** `LayerMask::Overlaps`
 		// asks whether two sets share a bit, and a pair is considered only when
-		// each side's layer is in the other's mask — so a one-sided setting
+		// each side's layer is in the other's mask - so a one-sided setting
 		// would produce a pair that one collider believes in and the other does
 		// not, which the broad phase resolves differently depending on which it
 		// visited first.
@@ -126,7 +126,7 @@ namespace engine::spatial {
 
 		// How many groups are registered.
 		//
-		// @return The count, at least one — `Default` always exists.
+		// @return The count, at least one - `Default` always exists.
 		static uint32_t Count();
 
 		// Forgets every group but `Default` and restores the full matrix.

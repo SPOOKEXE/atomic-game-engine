@@ -13,8 +13,8 @@
 // The sequence, and there is nothing else in it:
 //
 // 1. A host **registers** with the point. The point sees the address the
-//    registration arrived from — the *reflexive* address, the one the host's
-//    router put on it — and tells the host what that is.
+//    registration arrived from - the *reflexive* address, the one the host's
+//    router put on it - and tells the host what that is.
 // 2. A guest asks the point to **reach** that session by id.
 // 3. The point sends a **punch** to each side naming the other's reflexive
 //    address, and a nonce it drew for this meeting.
@@ -23,13 +23,13 @@
 //    *arrives* is the one that found a mapping already open. One of them is
 //    dropped and the other gets through, and which is which does not matter.
 // 5. The side that received a poke answers it. Both sides now hold an address
-//    that works, and this module is finished — what happens over that address
+//    that works, and this module is finished - what happens over that address
 //    is `replication`'s, or `delivery`'s, or nobody's.
 //
 // ## What this deliberately does not do
 //
-// **No relay.** When both routers refuse — symmetric NAT on both ends, which is
-// a minority of a minority — the attempt fails and says so, rather than falling
+// **No relay.** When both routers refuse - symmetric NAT on both ends, which is
+// a minority of a minority - the attempt fails and says so, rather than falling
 // back to carrying the session's traffic through the point. A relay is a
 // different product: it is bandwidth somebody pays for, it is a bottleneck with
 // a latency floor, and it is the piece that turns a small coordination service
@@ -54,7 +54,7 @@
 // What the key *does* do here is the poke. Both sides tag `SessionId || Nonce`
 // under it, and a private host drops a poke whose tag does not verify. That is
 // possession of the key plus return routability, and it is not a session
-// establishment — the connection made over the resulting address authenticates
+// establishment - the connection made over the resulting address authenticates
 // on its own terms, one layer up.
 //
 // @tier shared
@@ -141,7 +141,7 @@ namespace network {
 	//
 	// @since v0.13
 	struct RendezvousSettings {
-		// How often to say the same thing again while something is unfinished —
+		// How often to say the same thing again while something is unfinished -
 		// a registration unanswered, a punch unacknowledged.
 		//
 		// The poke interval as well as the retry interval, and the two are one
@@ -210,8 +210,8 @@ namespace network {
 	// A process's side of a rendezvous: registering, browsing and punching.
 	//
 	// One object does all three because one socket has to. A punch only works
-	// from the port the registration came from — that is the mapping the
-	// router opened — so a client that browsed on one socket and punched on
+	// from the port the registration came from - that is the mapping the
+	// router opened - so a client that browsed on one socket and punched on
 	// another would punch a hole nobody was told about.
 	//
 	// Borrows its transport, like everything else here.
@@ -232,7 +232,7 @@ namespace network {
 		// Starts registering this session, and keeps doing it.
 		//
 		// @param advert What to register. A `Private` one is registered and not
-		//        listed — see the file header.
+		//        listed - see the file header.
 		// @param key    The session key, for a private session's pokes. Moved
 		//        in.
 		void Register(const Advert &advert, std::optional<SessionKey> key = std::nullopt);
@@ -264,7 +264,7 @@ namespace network {
 
 		// Starts an attempt to reach one session.
 		//
-		// Replaces any attempt in flight — one socket punches one hole at a
+		// Replaces any attempt in flight - one socket punches one hole at a
 		// time, and two attempts sharing it would each answer the other's
 		// pokes.
 		//
@@ -285,7 +285,7 @@ namespace network {
 		// Answers one datagram the caller already took off the wire, and
 		// repeats what is due.
 		//
-		// For a client sharing its transport with something else — see
+		// For a client sharing its transport with something else - see
 		// `IsRendezvousMessage`. A caller using this must still call it every
 		// tick with an empty datagram, because the repeats are what a punch is
 		// made of.
@@ -421,7 +421,7 @@ namespace network {
 		// Bounded by the datagram, not by taste: a reply has to fit in one
 		// `engine::net::Transport::MAXIMUM_DATAGRAM_BYTES`, and an advert with
 		// two full-length strings is not small. A browser that wants more than
-		// this asks again — which nothing implements yet, and saying so is
+		// this asks again - which nothing implements yet, and saying so is
 		// better than implying a paging protocol exists.
 		uint8_t ListingsPerReply = 8;
 	};
@@ -463,7 +463,7 @@ namespace network {
 
 	// The third party that introduces two peers, and holds nothing else.
 	//
-	// Run by whoever is already running something reachable — `mono.cdn` hosts
+	// Run by whoever is already running something reachable - `mono.cdn` hosts
 	// one with `--rendezvous-listen`. It is not a program of its own, because a
 	// second executable doing this would be a second deployment to configure
 	// and a second place for the message set to drift.

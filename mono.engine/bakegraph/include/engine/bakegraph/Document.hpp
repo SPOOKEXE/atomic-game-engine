@@ -2,15 +2,15 @@
 
 // A bake graph as a list of edits, so it can be saved, scripted and undone.
 //
-// **The operations are the document.** `bake::Graph` is a runtime — you build
+// **The operations are the document.** `bake::Graph` is a runtime - you build
 // it, wire it, run it, and what it holds afterwards is payloads. This is the
 // other half: an ordered record of the *edits* that produce such a graph.
 // Replaying the record builds the graph; writing the record saves it; dropping
 // the last entry is undo. One representation, four features, and none of them
 // is a second description of the other.
 //
-// The alternative — a panel that calls `Graph::AddFit` directly and separately
-// remembers what it did for the save file — is two descriptions of one pipeline
+// The alternative - a panel that calls `Graph::AddFit` directly and separately
+// remembers what it did for the save file - is two descriptions of one pipeline
 // kept in step by whoever remembers, which is the failure `DEFERRED.md` D00016
 // is about in another module.
 //
@@ -18,8 +18,8 @@
 //
 // v0.11 §4.4 settles the order: *"the API comes first and the UI is a consumer
 // of it, which also means a graph can be edited from a script with no UI at
-// all."* Everything an Assets Pipeline widget does — add a node, wire two,
-// change a number — is `Record` with a different `Operation`, so a script and a
+// all."* Everything an Assets Pipeline widget does - add a node, wire two,
+// change a number - is `Record` with a different `Operation`, so a script and a
 // panel reach the same surface and a graph built either way saves identically.
 //
 // ## A recipe, not a payload
@@ -35,22 +35,30 @@
 // enters, and a test supplies one backed by a map.
 //
 //
+// ## What a world carries is the set, not the document
+//
+// `PipelineSet` at the bottom of this file is the named collection, and it is
+// what `game`'s `<AssetPipelines>` block holds - one text block in the world
+// document, in this format, embedded rather than restated as XML. One grammar
+// for a pipeline; the save format names it and does not redescribe it.
+//
 // ## Why this is not in `bake`
 //
 // **So that `Engine::game` can read a pipeline out of a save file without
 // linking a JPEG decoder.** `bake` carries the PNG, JPEG, GIF, BMP, OBJ, glTF
 // and PMX readers, and its own build file states that nothing a shipped game
-// links may link it — a save format that named `bake` to parse *text* would put
+// links may link it - a save format that named `bake` to parse *text* would put
 // every one of those decoders into `server`, which has no reason to decode a
 // JPEG. `D00102` weighed three ways out and settled on the split.
 //
 // So the document lives here and the runtime stays there. `Build` is the one
-// function that needs both, and it is in `bake` for that reason —
+// function that needs both, and it is in `bake` for that reason -
 // `bake/GraphDocument.hpp`.
 //
 // @tier L9 · shared
 
 #include <engine/bakegraph/Nodes.hpp>
+#include <engine/core/Name.hpp>
 #include <engine/core/types/Vector3.hpp>
 
 #include <cstddef>
@@ -66,8 +74,8 @@ namespace engine::bake {
 	// Which edit an `Operation` is.
 	//
 	// **One per way of adding a node, rather than one `AddNode` carrying every
-	// parameter.** `Graph` already draws these lines — `AddFit` takes a size and
-	// `AddResize` takes two integers — and collapsing them here would mean a
+	// parameter.** `Graph` already draws these lines - `AddFit` takes a size and
+	// `AddResize` takes two integers - and collapsing them here would mean a
 	// reader could not tell which fields of an operation are meaningful.
 	//
 	// @since v0.11
@@ -78,7 +86,7 @@ namespace engine::bake {
 		// An input node naming a built-in mesh.
 		AddBuiltin,
 
-		// A node whose kind carries no parameters — `Import`, `Smooth`,
+		// A node whose kind carries no parameters - `Import`, `Smooth`,
 		// `Opaque`.
 		AddNode,
 
@@ -90,6 +98,17 @@ namespace engine::bake {
 
 		// A `Resize` node.
 		AddResize,
+
+		// A `Rasterize` node.
+		//
+		// **Its own operation rather than `AddResize` reused**, though both
+		// carry two integers: they mean different things - one is the size a
+		// picture is resampled to and the other is the size a drawing is first
+		// given - and a document that spelled them the same would bake
+		// differently depending on what was upstream.
+		//
+		// @since v0.14
+		AddRasterize,
 
 		// A `Retime` node.
 		AddRetime,
@@ -125,7 +144,7 @@ namespace engine::bake {
 		// For `AddNode`, which node. Ignored otherwise.
 		//
 		// `Source`, `Builtin`, `Fit`, `Scale`, `Resize`, `Retime` and `Write`
-		// are refused here — each has its own operation kind, because each
+		// are refused here - each has its own operation kind, because each
 		// carries a parameter this field cannot.
 		NodeKind Node = NodeKind::Import;
 
@@ -173,7 +192,7 @@ namespace engine::bake {
 		// `Builtin`, which have their own operations.
 		WrongNodeKind,
 
-		// The graph refused the edit — a full graph, an unknown built-in, a
+		// The graph refused the edit - a full graph, an unknown built-in, a
 		// second input on one node, or a wire that would close a cycle.
 		//
 		// **Not split further on purpose.** `Graph::Connect` documents four
@@ -262,8 +281,8 @@ namespace engine::bake {
 	// operation per line, in order, so a saved pipeline reviews as a list of
 	// what somebody did.
 	//
-	// Names are quoted and the five characters that would break a line —
-	// backslash, quote, newline, carriage return and tab — are escaped, so a
+	// Names are quoted and the five characters that would break a line -
+	// backslash, quote, newline, carriage return and tab - are escaped, so a
 	// name is never able to forge an operation.
 	//
 	// @param document The edits.
@@ -281,4 +300,96 @@ namespace engine::bake {
 	// @param offender Set to the offending line's text. Untouched on success.
 	// @return `Ok`, or why not.
 	DocumentStatus Read(std::string_view text, Document &document, std::string &offender);
+
+	// Several named pipelines, which is what one world carries.
+	//
+	// **A world does not have *a* bake pipeline any more than it has *a*
+	// script.** v0.11 asks for many node trees in one editor, so the thing a
+	// save file holds is the collection rather than one document - and a format
+	// that carried one would need a second format the day somebody added a
+	// second chain.
+	//
+	// **Names are sorted by text on the way out.** A set written twice with the
+	// same contents produces byte-identical text whatever order it was built in,
+	// which is what makes a save file diffable and a round-trip test meaningful.
+	// By text and not by `core::Name::operator<`, which orders by the interning
+	// counter - first-seen order is a property of the process rather than of the
+	// document, and rule 4 is about exactly that difference.
+	//
+	// Two parallel vectors searched linearly, for `script::SourceCache`'s
+	// reason: a world holds a handful of pipelines and a `core::Name` compare is
+	// an integer compare, so a map would cost an allocation per world to improve
+	// a lookup nobody has measured.
+	//
+	// @since v0.15
+	class PipelineSet {
+	  public:
+		// Adds a pipeline, or replaces the one of that name.
+		//
+		// **Replaces rather than refuses.** Saving over a pipeline is what
+		// "save" means; a duplicate is only a mistake inside one graph.
+		//
+		// @param name     What it is called. An invalid or empty name is
+		//                 refused, because a pipeline this cannot name is one it
+		//                 cannot write back.
+		// @param document The pipeline. Taken by value; move it in.
+		// @return `false` for an unnamed pipeline.
+		bool Set(core::Name name, Document document);
+
+		// One pipeline.
+		//
+		// @param name Which.
+		// @return The document, or null when there is no such name.
+		const Document *Find(core::Name name) const;
+
+		// Drops one.
+		//
+		// @param name Which.
+		// @return `false` when there was no such name.
+		bool Remove(core::Name name);
+
+		// Every name it holds, sorted by text.
+		//
+		// @return The names. Valid until the next `Set`, `Remove` or `Clear`.
+		std::span<const core::Name> Names() const {
+			return Order;
+		}
+
+		// How many pipelines it holds.
+		size_t Count() const {
+			return Order.size();
+		}
+
+		// Forgets everything.
+		void Clear();
+
+	  private:
+		// Parallel to `Order` and kept in step by every mutator, so `Names` can
+		// hand back a span rather than building one per call.
+		std::vector<core::Name> Order;
+		std::vector<Document> Documents;
+	};
+
+	// Writes a set as text.
+	//
+	// **One `pipeline` line then that pipeline's operations**, repeated under a
+	// single header, so the one-document format is a strict substring of this
+	// one and a reader of either can be understood from the other.
+	//
+	// @param set The pipelines.
+	// @return The text, ending in a newline.
+	std::string Write(const PipelineSet &set);
+
+	// Reads a set back.
+	//
+	// **Operations before the first `pipeline` line are refused**, because a set
+	// is not a document with extra parts - an operation belonging to no named
+	// pipeline is a file somebody hand-edited into a shape this cannot
+	// represent.
+	//
+	// @param text     What `Write` produced.
+	// @param set      Filled in. Cleared first.
+	// @param offender Set to the offending line's text. Untouched on success.
+	// @return `Ok`, or why not.
+	DocumentStatus Read(std::string_view text, PipelineSet &set, std::string &offender);
 }

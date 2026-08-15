@@ -1,8 +1,8 @@
 // What smoothing the world costs a client, per frame and per received tick.
 //
 // **Two loops, running at different rates, and confusing them is easy.**
-// `Record` runs once per entity per *received tick* — thirty a second from a
-// listen server. `Sample` runs once per entity per *rendered frame* — a hundred
+// `Record` runs once per entity per *received tick* - thirty a second from a
+// listen server. `Sample` runs once per entity per *rendered frame* - a hundred
 // and forty-four a second on a machine that can manage it. So a cost in
 // `Sample` is worth nearly five times a cost in `Record` on the same hardware,
 // and a suite that reported one number for "interpolation" would hide which of
@@ -197,8 +197,8 @@ BENCH("Sample · 20k entities", 20'000) {
 
 BENCH("Sample · 20k entities the buffer has never seen", 20'000) {
 	// **The miss path, and it is not hypothetical.** A client draws entities the
-	// buffer has no business placing — one it has never recorded, one gone
-	// quiet longer than the history, the predicted local player — and takes its
+	// buffer has no business placing - one it has never recorded, one gone
+	// quiet longer than the history, the predicted local player - and takes its
 	// own live value instead. Whatever a miss costs is paid on every such entity
 	// on every frame, so a miss that is dearer than a hit would make the
 	// unhandled case the expensive one.
@@ -216,8 +216,8 @@ BENCH("Sample · 20k entities the buffer has never seen", 20'000) {
 BENCH("Sample · 20k entities while stalled", 20'000) {
 	// The clock has run past the newest sample, so there is nothing to
 	// interpolate toward and the world holds its last received pose. This is
-	// what every frame costs during a network hiccup — the moment when the
-	// client is least able to afford anything extra — and the shape to want is
+	// what every frame costs during a network hiccup - the moment when the
+	// client is least able to afford anything extra - and the shape to want is
 	// that it is *cheaper* than a hit, because there is no lerp to do.
 	SnapshotBuffer &buffer = Warm(20'000);
 	const std::vector<Entity> &entities = Entities(20'000);
@@ -234,7 +234,7 @@ BENCH("Sample · 20k entities while stalled", 20'000) {
 // --- the clock ----------------------------------------------------------------
 
 BENCH("Advance · 100k frames", 100'000) {
-	// Once per frame, not once per entity — but it is where pruning happens, so
+	// Once per frame, not once per entity - but it is where pruning happens, so
 	// its cost is not independent of the population. Read it against the 20k
 	// version below: if they differ, `Advance` is doing per-entity work and the
 	// per-frame cost of the module is larger than `Sample` alone suggests.

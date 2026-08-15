@@ -4,14 +4,14 @@
 # The editor, the server, the client, the unified harness and the content origin
 # all answer the same handshake; what differs is which tools each registers.
 # Before this was a module the protocol lived in `mono.studio`, and adding it to
-# a second program would have meant a second copy of a JSON-RPC implementation —
+# a second program would have meant a second copy of a JSON-RPC implementation -
 # which is the duplication the root `AGENTS.md` calls the most expensive kind.
 #
 # `shared`, and it has to be: a headless server exposes its worlds through this
 # and links no client code at all.
 #
 # Above `world` because a tool's whole vocabulary is worlds and instances, and
-# below anything that presents — this module builds an answer and never draws
+# below anything that presents - this module builds an answer and never draws
 # one.
 #
 # **Nothing links it by default.** Each program opts in by constructing a
@@ -31,7 +31,7 @@ mono_add_library(control
 		# **Public, and it is the narrowest widening available.** `Surface.hpp`
 		# declares a tool as a function returning `nlohmann::json`, so the name
 		# has to be visible to every program that registers one. What it costs is
-		# `json_fwd.hpp` — a forward declaration and no parser; only this
+		# `json_fwd.hpp` - a forward declaration and no parser; only this
 		# module's own sources include the real header.
 		Vendor::json
 )

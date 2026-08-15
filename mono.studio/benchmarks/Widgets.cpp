@@ -11,8 +11,8 @@
 // ## What this measures, and what it deliberately does not
 //
 // **Its own imgui context, with no backends and no device.** `ui::Interface`
-// refuses to start without an initialised renderer — reasonably, since it owns
-// the SDL and GPU backends — and a benchmark that needed a GPU would measure the
+// refuses to start without an initialised renderer - reasonably, since it owns
+// the SDL and GPU backends - and a benchmark that needed a GPU would measure the
 // driver on whichever machine ran it, and would not run at all on a build box.
 // So this creates a bare context, sets a display size and a default font, and
 // submits widgets into it. That is precisely the cost `build interface` is: the
@@ -22,8 +22,8 @@
 //
 // **The panels' own functions are `Editor` members and are not called here.**
 // An `Editor` needs a window, a device and a universe. What is submitted below
-// is the same *shape* — the same widgets in the same order per row, taken from
-// `Explorer.cpp` and `Properties.cpp` — so a change to how many widgets a row
+// is the same *shape* - the same widgets in the same order per row, taken from
+// `Explorer.cpp` and `Properties.cpp` - so a change to how many widgets a row
 // costs shows up here. A change to which rows are submitted at all does not, and
 // that is the one thing to keep in mind when reading these numbers.
 //
@@ -59,7 +59,7 @@ namespace widget_bench {
 	// A bare imgui context, built once and reused.
 	//
 	// **No backends, so `NewFrame` has to be given what a platform backend would
-	// have supplied** — a display size and a built font atlas — which is the same
+	// have supplied** - a display size and a built font atlas - which is the same
 	// arrangement `ui::Interface` uses for a headless run and for the same
 	// reason: a zero-sized display clips every panel to nothing, and `NewFrame`
 	// asserts on an atlas nothing built.
@@ -292,7 +292,7 @@ BENCH("properties grid · 24 rows", 2000) {
 BENCH("scrolling table · 200 rows", 500) {
 	// The Worlds panel, the frame graph's span list and the output panel are all
 	// this: a scrolling table with a frozen header. **imgui clips a table's rows
-	// for you** — rows outside the scroll region are skipped — which is exactly
+	// for you** - rows outside the scroll region are skipped - which is exactly
 	// the property the explorer's tree does not have, and the reason this case
 	// sits beside the tree one.
 	Live();
@@ -340,11 +340,11 @@ BENCH("empty frame", 5000) {
 BENCH("explorer tree · 200 rows, 20 on screen", 500) {
 	// **The case the panel is actually in.** An explorer is a few hundred rows
 	// in a pane that shows twenty, so most of what a naive tree submits is work
-	// for rows nobody can see — and unlike a table, a tree cannot be clipped by
+	// for rows nobody can see - and unlike a table, a tree cannot be clipped by
 	// row index because the visible set depends on what is expanded.
 	//
 	// This is the same tree as above inside a scroll region, with the per-row
-	// extras skipped when `IsItemVisible` says the row is outside it — which is
+	// extras skipped when `IsItemVisible` says the row is outside it - which is
 	// what `DrawTreeNode` does. The difference between this and the case above
 	// is what that guard is worth.
 	Live();
@@ -395,14 +395,14 @@ BENCH("explorer tree · 200 rows, 20 on screen", 500) {
 BENCH("worlds panel · 4 rows", 2000) {
 	// **The shape that turned out to be the editor's most expensive panel per
 	// row.** The frame graph put `worlds` at 0.025 ms against the explorer's
-	// 0.009 for a quarter of the rows — so the cost is per row rather than per
+	// 0.009 for a quarter of the rows - so the cost is per row rather than per
 	// scene, and this is the row: a span-all-columns selectable, a context-menu
 	// probe, the name, the state, the count, and a button that opens the same
 	// menu the probe would have.
 	//
 	// **Two popup calls per row is the part worth watching.**
 	// `BeginPopupContextItem` and `BeginPopup` both hash an id and test the
-	// popup stack, and both are made whether or not any menu is open — which,
+	// popup stack, and both are made whether or not any menu is open - which,
 	// for a panel nobody is right-clicking, is every frame of every run.
 	Live();
 
@@ -462,7 +462,7 @@ BENCH("worlds panel · engine calls for 4 rows", 5000) {
 	// **The other half of the Worlds panel, and the half the numbers pointed
 	// at.** The widget shape above is 3.9 us; the panel measured 24 us in a real
 	// frame. The difference is not imgui, it is what the row asks the universe
-	// for — a name, a state, whether it is remote, and the list of worlds
+	// for - a name, a state, whether it is remote, and the list of worlds
 	// itself.
 	//
 	// `Universe::Worlds()` is the one to watch: it builds and returns a

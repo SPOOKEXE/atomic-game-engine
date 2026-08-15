@@ -173,7 +173,7 @@ TEST_CASE("unmarked time counts root spans once, not every span", "[framegraph]"
 
 	// Root durations are inclusive. Summing every span instead would count the
 	// nested 4 ms twice, drive the total past the frame, and clamp the gap to
-	// zero — which is the same wrong answer the panel had before, arrived at
+	// zero - which is the same wrong answer the panel had before, arrived at
 	// from the other direction.
 	REQUIRE(FrameGraph::Spans().size() == 2);
 	REQUIRE(FrameGraph::UnmarkedMilliseconds() < 1.0f);
@@ -271,7 +271,7 @@ TEST_CASE("a span records which span it opened inside", "[framegraph]") {
 	REQUIRE(spans.size() == 4);
 
 	// The depth column alone cannot tell "second" apart from a second child of
-	// "first" — both are depth 1 following a depth-2 row. Which is why the
+	// "first" - both are depth 1 following a depth-2 row. Which is why the
 	// parent is stored rather than re-derived.
 	REQUIRE(spans[0].Parent == FrameGraph::NO_PARENT);
 	REQUIRE(spans[1].Name == "first");
@@ -431,14 +431,29 @@ TEST_CASE("the recent maximum is a single reading, not a total", "[framegraph]")
 
 	// **The loop is timed as well as profiled**, and the assertion below is
 	// against that rather than against a number of milliseconds. A ceiling like
-	// "under 3 ms" is a claim about the machine: four one-millisecond burns take
-	// four milliseconds on an idle box and can take three times that on a loaded
+	// "under 3 ms" is a claim about the machine: burns of a millisecond each
+	// take that long on an idle box and can take three times as long on a loaded
 	// one, so the test failed about one run in six while the code was correct.
-	// The wall clock and the profiler stretch together, so a ratio does not.
+	//
+	// **A ratio was the first fix and it was not enough, for a reason worth
+	// keeping.** The comment here used to say the wall clock and the profiler
+	// stretch together - true only if the stretch is *uniform*, and a scheduler
+	// does not work that way. It preempts one span. With four repeats a single
+	// stall of three milliseconds puts the maximum past sixty percent of a loop
+	// that should have been four, and the case failed under this repository's
+	// own parallel test sweep while the code was right.
+	//
+	// **Sixteen repeats rather than four**, which widens the gap the assertion
+	// is measuring instead of loosening the assertion. A total now reads about
+	// sixteen times a single reading, so one preempted burn among sixteen is
+	// still far below the ceiling - the discrimination gets stronger and the
+	// flake goes, which is the opposite trade from raising the bound.
+	constexpr int REPEATS = 16;
+
 	const auto started = std::chrono::steady_clock::now();
 
 	FrameGraph::BeginFrame();
-	for (int repeat = 0; repeat < 4; repeat++) {
+	for (int repeat = 0; repeat < REPEATS; repeat++) {
 		ENGINE_PROFILE("four-times");
 		BurnMilliseconds(1.0);
 	}
@@ -447,17 +462,18 @@ TEST_CASE("the recent maximum is a single reading, not a total", "[framegraph]")
 	const float spent =
 		std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
 
-	// Four opens of about a millisecond each. **A total would read near the
-	// whole loop; a single reading reads near a quarter of it** — and that is
+	// Sixteen opens of about a millisecond each. **A total would read near the
+	// whole loop; a single reading reads near a sixteenth of it** - and that is
 	// the difference the column has to show, so that it compares with the
 	// per-frame figure printed beside it.
 	//
-	// Six tenths, which is nowhere near either answer: a quarter is well under
-	// it and a total is well over, however slow the machine got.
+	// A third, which is nowhere near either answer: a sixteenth is far under it
+	// and a total is far over, and one stalled burn among sixteen cannot cross
+	// it however slow the machine got.
 	const float worst = FrameGraph::RecentMaximum("four-times");
-	INFO("worst " << worst << " ms of " << spent << " ms spent in the loop");
+	INFO("worst " << worst << " ms of " << spent << " ms spent over " << REPEATS << " opens");
 	REQUIRE(worst >= 0.5f);
-	REQUIRE(worst < spent * 0.6f);
+	REQUIRE(worst < spent * 0.33f);
 }
 
 TEST_CASE("a span that stops running decays out of the window", "[framegraph]") {
@@ -566,8 +582,8 @@ TEST_CASE(
 
 // --- timings measured somewhere else ------------------------------------------
 //
-// A worker's span cannot be recorded live — `Push` refuses anything off the
-// owning thread — so the producer measures itself and hands the number back.
+// A worker's span cannot be recorded live - `Push` refuses anything off the
+// owning thread - so the producer measures itself and hands the number back.
 // What these check is that the handed-over number lands in the tree without
 // corrupting the arithmetic of the spans that were measured here.
 
@@ -589,7 +605,7 @@ TEST_CASE("a reported span carries the duration it was given", "[framegraph]") {
 TEST_CASE("a reported child does not make its parent's self time negative", "[framegraph]") {
 	// The case the whole `Reported` flag exists for. Eight workers each
 	// reporting five milliseconds under a batch that took almost none is
-	// forty milliseconds of work inside a scope that waited for one — and
+	// forty milliseconds of work inside a scope that waited for one - and
 	// subtracting that from the parent would produce a number that is not
 	// merely wrong, it is a different quantity.
 	Collecting collecting;
@@ -659,7 +675,7 @@ TEST_CASE("a reported span is a leaf and never becomes a parent", "[framegraph]"
 }
 
 TEST_CASE("a negative duration is refused rather than clamped", "[framegraph]") {
-	// It means the producer measured wrongly — two clocks, or a start it never
+	// It means the producer measured wrongly - two clocks, or a start it never
 	// set. Folding it to zero would put a plausible bar on the graph where the
 	// honest outcome is a missing one and a bump in the drop count.
 	Collecting collecting;
@@ -715,7 +731,7 @@ TEST_CASE("a reported span can be named at runtime", "[framegraph]") {
 
 TEST_CASE("every category has a name of its own", "[framegraph]") {
 	// `GetCategoryName` is a switch, and a switch over an enum class with no
-	// default is a warning at worst — a category added without a case falls
+	// default is a warning at worst - a category added without a case falls
 	// through to "?" and the panel draws two bars with the same label. There
 	// is nothing in a build that catches that, so this does.
 	std::vector<std::string_view> names;
@@ -762,7 +778,7 @@ TEST_CASE("the subsystem categories carved out of ECS total separately", "[frame
 	REQUIRE(FrameGraph::CategoryMilliseconds(ProfileCategory::Assets) >= 1.0f);
 
 	// The physics span is nested inside the ECS one, and self time is what the
-	// totals are made of — so the scheduler keeps only what it spent itself.
+	// totals are made of - so the scheduler keeps only what it spent itself.
 	// This is the assertion that says the carve-out actually moved the time
 	// rather than counting it twice.
 	REQUIRE(
@@ -798,7 +814,7 @@ TEST_CASE("the tracked-name budget is released when collection stops", "[framegr
 		FrameGraph::EndFrame();
 
 		// Zero is what a name the history turned away reads as, and it is also
-		// what a span costing nothing reads as — so this span sleeps, and the
+		// what a span costing nothing reads as - so this span sleeps, and the
 		// assertion is about a duration rather than about presence.
 		REQUIRE(FrameGraph::RecentMaximum("the.next.scene") >= 1.0f);
 	}
@@ -829,7 +845,7 @@ TEST_CASE("a stopped session leaves no readings behind", "[framegraph]") {
 TEST_CASE("two profiling scopes may share one C++ scope", "[framegraph]") {
 	// **This case earns its keep at compile time.** `ENGINE_PROFILE_CAT`
 	// expanded to Tracy's `ZoneScopedN`, which declares a variable with one
-	// fixed name — so a second macro beside the first failed to build, in
+	// fixed name - so a second macro beside the first failed to build, in
 	// `ENGINE_TRACY` configurations only, with an error naming a Tracy
 	// internal from a header the caller never wrote. Nothing said so and
 	// nothing would have caught it; the code below simply does not compile if
@@ -847,7 +863,7 @@ TEST_CASE("two profiling scopes may share one C++ scope", "[framegraph]") {
 	FrameGraph::EndFrame();
 
 	// All three live in one C++ scope, so each opens inside the one before it
-	// and they close in reverse. Nesting, not siblings — which is what the
+	// and they close in reverse. Nesting, not siblings - which is what the
 	// stack the scopes are pushed onto means.
 	const auto &spans = FrameGraph::Spans();
 	REQUIRE(spans.size() == 3);

@@ -1,6 +1,6 @@
 #pragma once
 
-// What a 2D thing in a game *is* — the component set both halves share.
+// What a 2D thing in a game *is* - the component set both halves share.
 //
 // `scene` answers the same question for a part and this is that file's argument
 // applied one dimension down. A server authors a `ScreenGui` and replicates it,
@@ -25,7 +25,7 @@
 // ## Text is owned; an image name is interned
 //
 // **The split is what a value *is*, not what it is made of.** `Picture::Image`
-// is an asset id — one of the bounded set of things a game shipped — so it is a
+// is an asset id - one of the bounded set of things a game shipped - so it is a
 // `core::Name`, interned once and compared as an integer, exactly as
 // `Material` and a class name are.
 //
@@ -37,7 +37,7 @@
 // loop to do it. A score counter is the first thing anybody writes.
 //
 // What it costs instead: `Label` and `Entry` are no longer trivially copyable,
-// so both carry a written serialiser — which both already did, because a
+// so both carry a written serialiser - which both already did, because a
 // `core::Name`'s id is process-local and could never have been memcpy'd to a
 // file either. The storage change is therefore paid entirely in `ecs::Column`'s
 // non-trivial path, which has existed since v0.2 and had no user until now.
@@ -121,6 +121,9 @@ namespace engine::gui {
 
 		// Which axes grow to fit the content.
 		AutomaticSize Automatic = AutomaticSize::None;
+
+		// Explicit padding, for the reason every other `Reserved` gives.
+		uint8_t Reserved[2] = {};
 	};
 
 	// The box an element draws for itself.
@@ -146,13 +149,16 @@ namespace engine::gui {
 
 		// Whether the outline grows outwards, inwards, or straddles the edge.
 		BorderMode Border = BorderMode::Outline;
+
+		// Explicit padding, for the reason every other `Reserved` gives.
+		uint8_t Reserved[3] = {};
 	};
 
 	// The text an element shows.
 	//
 	// @since v0.8
 	struct Label {
-		// The string. Owned rather than interned — see the note at the top of
+		// The string. Owned rather than interned - see the note at the top of
 		// this file, and `ecs::PropertyType::String`.
 		std::string Text;
 
@@ -202,7 +208,7 @@ namespace engine::gui {
 	//
 	// @since v0.8
 	struct Picture {
-		// The content name. Interned — see the note at the top of this file.
+		// The content name. Interned - see the note at the top of this file.
 		core::Name Image;
 
 		// Multiplied into the sampled colour. White leaves it alone.
@@ -282,13 +288,16 @@ namespace engine::gui {
 
 		// Which axes grow the canvas to fit the content.
 		AutomaticSize AutomaticCanvas = AutomaticSize::None;
+
+		// Explicit padding, for the reason every other `Reserved` gives.
+		uint8_t Reserved[1] = {};
 	};
 
 	// What makes a text box editable.
 	//
 	// @since v0.8
 	struct Entry {
-		// Shown when the text is empty. Owned, like `Label::Text` — a
+		// Shown when the text is empty. Owned, like `Label::Text` - a
 		// placeholder is authored rather than chosen from a set, and having
 		// the two strings a text box holds be two different types would be a
 		// distinction with nothing behind it.
@@ -306,7 +315,14 @@ namespace engine::gui {
 		// Whether a person may type into it at all.
 		bool TextEditable = true;
 
-		// The caret's index into the text, or -1 when unfocused.
+		// The caret's position in the text, or -1 when unfocused.
+		//
+		// **Roblox's number: one-based, and counted in characters rather than
+		// in bytes.** `1` is before the first character and `n + 1` is after the
+		// last, so an empty box that has just taken focus reads `1`. The
+		// distinction is not academic - `Label::Text` is UTF-8, and a caret set
+		// from `Text.size()` sits past the end of anything typed in a language
+		// with accents in it. `gui::Focus` counts the characters.
 		int32_t CursorPosition = -1;
 
 		// Where a selection started, or -1 when there is none.
@@ -317,16 +333,20 @@ namespace engine::gui {
 	//
 	// On every `LayerCollector`. What differs between a `ScreenGui`, a
 	// `SurfaceGui` and a `BillboardGui` is *where* the canvas is, which is what
-	// `Canvas`, `Surface` and `Billboard` add — the fields here are the ones all
+	// `Canvas`, `Surface` and `Billboard` add - the fields here are the ones all
 	// three share.
 	//
 	// @since v0.8
+	// Widest first, which is the ordering `TypeDescriptor`'s warning asks for
+	// rather than the reading order the fields were written in. A `bool` ahead
+	// of the `int32_t` cost three bytes nothing wrote, and they went into every
+	// save.
 	struct Layer {
-		// Whether this collector and its subtree are drawn at all.
-		bool Enabled = true;
-
 		// Which collector draws on top. Higher draws later.
 		int32_t DisplayOrder = 0;
+
+		// Whether this collector and its subtree are drawn at all.
+		bool Enabled = true;
 
 		// Whether `ZIndex` is compared across the collector or among siblings.
 		ZIndexBehavior Behavior = ZIndexBehavior::Sibling;
@@ -341,7 +361,7 @@ namespace engine::gui {
 	// The screen-sized canvas a `ScreenGui` collects onto.
 	//
 	// Holds the resolved rectangle rather than any authored field, because a
-	// screen gui has none — its canvas is the viewport. It exists so the draw
+	// screen gui has none - its canvas is the viewport. It exists so the draw
 	// pass and the hit test can read the canvas a node belongs to without
 	// learning which of the three kinds of collector it was.
 	//
@@ -358,7 +378,7 @@ namespace engine::gui {
 	// is on, which is `scene::Bounds`; a `BillboardGui`'s scale is against the
 	// screen it is projected onto, which is a fact about a camera and a
 	// viewport. This module is L7 `shared` and links neither, so it declares
-	// where the answer goes and whoever holds both operands writes it —
+	// where the answer goes and whoever holds both operands writes it -
 	// `render::ResolveSpatialCanvases` is that writer today.
 	//
 	// **Derived, like `Canvas` and `Resolved`.** Nothing authors it, nothing
@@ -367,7 +387,7 @@ namespace engine::gui {
 	// hosts with different viewports are *supposed* to disagree.
 	//
 	// Absent means "nobody resolved one", and `CanvasFor` then falls back to the
-	// authored pixel size — which is the right answer for a headless world, a
+	// authored pixel size - which is the right answer for a headless world, a
 	// test, and a `SurfaceGui` whose sizing mode is `FixedSize` anyway.
 	//
 	// @since v0.8
@@ -379,9 +399,22 @@ namespace engine::gui {
 	// A collector projected onto a face of a part.
 	//
 	// @since v0.8
+	// Widest first, for `Layer`'s reason.
 	struct Surface {
 		// The part this is drawn on, or the parent when unset.
 		ecs::Entity Adornee;
+
+		// The canvas size in pixels, when `Sizing` says `FixedSize`.
+		core::Vector2 CanvasSize{800.0f, 600.0f};
+
+		// Pixels per stud, when `Sizing` says so.
+		float PixelsPerStud = 50.0f;
+
+		// How much scene lighting tints it. 0 is fullbright.
+		float LightInfluence = 0.0f;
+
+		// A multiplier on the fullbright part of the result.
+		float Brightness = 1.0f;
 
 		// Which face of that part.
 		Face On = Face::Front;
@@ -389,20 +422,11 @@ namespace engine::gui {
 		// How the canvas's pixel size is decided.
 		SurfaceSizingMode Sizing = SurfaceSizingMode::FixedSize;
 
-		// Pixels per stud, when `Sizing` says so.
-		float PixelsPerStud = 50.0f;
-
-		// The canvas size in pixels, when `Sizing` says `FixedSize`.
-		core::Vector2 CanvasSize{800.0f, 600.0f};
-
 		// Whether it draws over geometry in front of it.
 		bool AlwaysOnTop = false;
 
-		// How much scene lighting tints it. 0 is fullbright.
-		float LightInfluence = 0.0f;
-
-		// A multiplier on the fullbright part of the result.
-		float Brightness = 1.0f;
+		// Explicit padding, for the reason every other `Reserved` gives.
+		uint8_t Reserved[1] = {};
 	};
 
 	// A collector that faces the camera at a point in the world.
@@ -424,14 +448,17 @@ namespace engine::gui {
 		// An offset in multiples of the adornee's size.
 		core::Vector3 ExtentsOffset;
 
-		// Whether it draws over geometry in front of it.
-		bool AlwaysOnTop = false;
-
 		// How much scene lighting tints it. 0 is fullbright.
 		float LightInfluence = 0.0f;
 
 		// Beyond this many studs it is not drawn. Zero means no limit.
 		float MaxDistance = 0.0f;
+
+		// Whether it draws over geometry in front of it.
+		bool AlwaysOnTop = false;
+
+		// Explicit padding, for the reason every other `Reserved` gives.
+		uint8_t Reserved[3] = {};
 	};
 
 	// What a `CanvasGroup` composites its subtree with.
@@ -468,6 +495,10 @@ namespace engine::gui {
 
 		// 0 is opaque and 1 is invisible.
 		float Transparency = 0.0f;
+
+		// Explicit padding, for the reason every other `Reserved` gives.
+		// `CurrentCamera` aligns the whole component to eight.
+		uint8_t Reserved[4] = {};
 	};
 
 	// --- the modifiers ------------------------------------------------------
@@ -484,7 +515,7 @@ namespace engine::gui {
 		// One edge each, resolved against the parent's own size.
 		//
 		// **A `UDim` rather than a number**, so padding can be a fraction of the
-		// parent — which is what lets one element look right at two sizes
+		// parent - which is what lets one element look right at two sizes
 		// without a script recomputing it.
 		//@{
 		core::UDim Top;
@@ -497,12 +528,13 @@ namespace engine::gui {
 	// Stacks the parent's children along one axis.
 	//
 	// @since v0.8
+	// Widest first, for `Layer`'s reason.
 	struct ListLayout {
-		// Which way the children stack.
-		FillDirection Direction = FillDirection::Vertical;
-
 		// Space between one child and the next.
 		core::UDim Padding;
+
+		// Which way the children stack.
+		FillDirection Direction = FillDirection::Vertical;
 
 		// Where the stack sits along the horizontal axis.
 		HorizontalAlignment Horizontal = HorizontalAlignment::Left;
@@ -524,12 +556,12 @@ namespace engine::gui {
 		// Space between cells, on both axes.
 		core::UDim2 CellPadding{0.0f, 5.0f, 0.0f, 5.0f};
 
-		// Which way a row or column is filled.
-		FillDirection Direction = FillDirection::Horizontal;
-
 		// How many cells before wrapping. Zero fits as many as the parent
 		// holds, which is Roblox's meaning of its own default.
 		int32_t MaxCells = 0;
+
+		// Which way a row or column is filled.
+		FillDirection Direction = FillDirection::Horizontal;
 
 		// Which corner the fill starts from.
 		StartCorner Corner = StartCorner::TopLeft;
@@ -542,6 +574,9 @@ namespace engine::gui {
 
 		// What order the children are visited in.
 		SortOrder Order = SortOrder::LayoutOrder;
+
+		// Explicit padding, for the reason every other `Reserved` gives.
+		uint8_t Reserved[3] = {};
 	};
 
 	// Forces the parent's resolved size to a ratio.
@@ -557,6 +592,9 @@ namespace engine::gui {
 
 		// Which axis the other is derived from.
 		DominantAxis Dominant = DominantAxis::Width;
+
+		// Explicit padding, for the reason every other `Reserved` gives.
+		uint8_t Reserved[2] = {};
 	};
 
 	// Clamps the parent's resolved size, in pixels.
@@ -603,7 +641,7 @@ namespace engine::gui {
 		// What the outline looks like.
 		//
 		// **Its own transparency rather than the parent's**, so an outline can
-		// stay solid on a fading element — which is what a focus ring wants and
+		// stay solid on a fading element - which is what a focus ring wants and
 		// what inheriting would make impossible.
 		//@{
 		core::Color3 Color{0.0f, 0.0f, 0.0f};
@@ -629,7 +667,7 @@ namespace engine::gui {
 	//
 	// **Derived, and the only component here that is.** One pass writes it,
 	// parent before child; the draw pass and the hit test read it with a query.
-	// Nothing else in the engine may keep a second copy — `scene::Bounds` gives
+	// Nothing else in the engine may keep a second copy - `scene::Bounds` gives
 	// the argument, and it is the same argument.
 	//
 	// A node that is not reached by the pass keeps whatever it last held and is
@@ -663,9 +701,14 @@ namespace engine::gui {
 		// makes paint order total.
 		int32_t Depth = 0;
 
-		// The position in the compile's paint order. Assigned by the compile
-		// and read by nothing else, but stored rather than local so that a
-		// panel or a test can ask why one element covered another.
+		// The position in the compile's paint order.
+		//
+		// Assigned by `Compiled::Rebuild` and stored rather than left local so
+		// that a panel or a test can ask why one element covered another.
+		// `ElementsAt` is the reader that turned that from a convenience into a
+		// contract: `PlayerGui:GetGuiObjectsAtPosition` answers front to back,
+		// and this is how it does so without a second traversal deciding what is
+		// on top.
 		int32_t Order = 0;
 
 		// Whether this element descends from an enabled collector and every
@@ -676,19 +719,22 @@ namespace engine::gui {
 		// every parenting path is where one gets missed and an element draws
 		// after being detached.
 		bool Rendered = false;
+
+		// Explicit padding, for the reason every other `Reserved` gives.
+		uint8_t Reserved[3] = {};
 	};
 
 	// What every 3D adornment carries.
 	//
 	// **An adornment is a `GuiBase3d`, which is a description and not a
-	// drawing.** It says what to outline, in what colour, and how solid — and
+	// drawing.** It says what to outline, in what colour, and how solid - and
 	// nothing here resolves that into geometry, because resolving it needs the
 	// adornee's `CFrame` and stud extent and those are `scene::Transform` and
 	// `scene::Bounds`. `gui` links neither and `gui/AGENTS.md` refuses the edge.
 	//
 	// That split is `D00022`'s, arrived at for a `SurfaceGui`'s canvas and the
 	// same one word for word here: **whoever draws an adornment has both
-	// operands, and this module has one.** What `gui` owns is the tree half —
+	// operands, and this module has one.** What `gui` owns is the tree half -
 	// which instance an adornment is about, and whether it is anywhere it may
 	// be drawn from at all.
 	//
@@ -711,6 +757,9 @@ namespace engine::gui {
 		// every other transparency here keeps it.
 		float Transparency = 0.0f;
 
+		// Draw order among adornments. Higher draws later, so on top.
+		int32_t ZIndex = 0;
+
 		// Whether it is drawn at all.
 		bool Visible = true;
 
@@ -722,8 +771,9 @@ namespace engine::gui {
 		// selected, which is the one thing it is for.
 		bool AlwaysOnTop = true;
 
-		// Draw order among adornments. Higher draws later, so on top.
-		int32_t ZIndex = 0;
+		// Explicit padding, for the reason every other `Reserved` gives.
+		// `Adornee` aligns the whole component to eight.
+		uint8_t Reserved[2] = {};
 	};
 
 	// The box a `SelectionBox` draws.
@@ -740,7 +790,7 @@ namespace engine::gui {
 		// The fill drawn over the adornee's faces.
 		core::Color3 SurfaceColor{0.0f, 0.65f, 1.0f};
 
-		// 1 by default, which means no fill — an outline alone. A filled
+		// 1 by default, which means no fill - an outline alone. A filled
 		// selection hides what it selected, and an author who wants one asks.
 		float SurfaceTransparency = 1.0f;
 	};
@@ -761,7 +811,7 @@ namespace engine::gui {
 	//
 	// **A component on the service instance rather than a resource**, which is
 	// the opposite of what `ecs/AGENTS.md`'s one-of-a-kind rule usually asks
-	// for — and the reason is that a service *is* an instance here. `scene`'s
+	// for - and the reason is that a service *is* an instance here. `scene`'s
 	// services are rows in the tree that `GetService` finds by name, so their
 	// state has to be reachable the same way a `Part`'s is: through a property
 	// on the thing a script is holding. A resource would make
@@ -773,9 +823,26 @@ namespace engine::gui {
 		//
 		// **This is what makes `GuiObject::Selectable` mean something.** The
 		// property has existed since the tree was registered and nothing read
-		// it, which is the state the roadmap refuses to leave a property in —
+		// it, which is the state the roadmap refuses to leave a property in -
 		// `Select` and `SelectNext` are the readers.
 		ecs::Entity SelectedObject;
+
+		// The `TextBox` the keyboard is going to, or null.
+		//
+		// **The focus lives here rather than on `gui::Router`, because two
+		// modules read it and only one decides it.** The router decides - a
+		// press lands on a text box or somewhere else - and
+		// `UserInputService:GetFocusedTextBox` at L9 reads, with no route to a
+		// router at all. A copy held beside the decision would be rule 2's
+		// second statement of one fact, and the two would part company the first
+		// frame a box was destroyed.
+		//
+		// **A handle and never a pointer**, which is what makes a focused box
+		// that has since been destroyed a question rather than a crash: the
+		// generation in the id goes stale and `FocusedTextBox` answers null.
+		//
+		// @since v0.15
+		ecs::Entity FocusedTextBox;
 
 		// Whether a platform menu is covering the game.
 		//
@@ -790,5 +857,9 @@ namespace engine::gui {
 		// Roblox's `AutoSelectGuiEnabled`. False means a game drives selection
 		// itself and `SelectNext` refuses to seed one from nothing.
 		bool AutoSelectGuiEnabled = true;
+
+		// Explicit padding, for the reason every other `Reserved` gives. Both
+		// handles align the whole component to eight.
+		uint8_t Reserved[6] = {};
 	};
 }

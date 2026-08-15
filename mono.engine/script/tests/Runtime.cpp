@@ -42,7 +42,7 @@ namespace {
 	}
 
 	// The one part a script made, found by walking rather than by being handed
-	// a handle — so these tests assert on the world and not on the binding's
+	// a handle - so these tests assert on the world and not on the binding's
 	// own bookkeeping.
 	Entity OnlyPart(Store &store) {
 		Entity found = engine::ecs::NULL_ENTITY;
@@ -205,7 +205,7 @@ TEST_CASE("a property nobody declared is an error, not a silent nil", "[script]"
 	// engine has no field for. Writing it must say so rather than accept it
 	// silently, which is what a plain table would do.
 	//
-	// It used to be `Transparency`, and that is the point — the gap closed at
+	// It used to be `Transparency`, and that is the point - the gap closed at
 	// v0.6, so the test moved to a name that is still a gap rather than
 	// asserting something no longer true.
 	CHECK_FALSE(runtime->Run("Instance.new('Part').Reflectance = 0.5"));
@@ -327,7 +327,7 @@ TEST_CASE("javascript creates the same entities luau does", "[script][js]") {
 	const Entity part = OnlyPart(store);
 	REQUIRE(part != engine::ecs::NULL_ENTITY);
 
-	// Same class, same archetype, same components — not a JavaScript-flavoured
+	// Same class, same archetype, same components - not a JavaScript-flavoured
 	// entity.
 	CHECK(store.IsA(part, PartClass()));
 	CHECK(store.Get<Transform>(part)->Frame.Position.X == Approx(1.0f));
@@ -368,8 +368,8 @@ TEST_CASE("javascript refuses an undeclared property", "[script][js]") {
 	const auto runtime = MakeRuntime(store, Language::JavaScript);
 
 	// The prototype carries exactly the declared properties, so `Reflectance`
-	// is not there to assign to. Silently accepting it — which a plain object
-	// would — is what this asserts against.
+	// is not there to assign to. Silently accepting it - which a plain object
+	// would - is what this asserts against.
 	CHECK_FALSE(runtime->Run(R"(
 		const part = Instance.new('Part');
 		part.Reflectance = 0.5;
@@ -520,7 +520,7 @@ TEST_CASE("one raising connection does not stop the others", "[script]") {
 	)"));
 
 	// The beat reports the failure and still runs what came after it. A script
-	// that threw once must not silently stop everything registered later — the
+	// that threw once must not silently stop everything registered later - the
 	// symptom, half a scene animating, points nowhere near the cause.
 	CHECK_FALSE(runtime->Heartbeat(0.016f));
 	CHECK_FALSE(runtime->LastError().empty());
@@ -542,7 +542,7 @@ TEST_CASE("a script-created Part is drawable", "[script]") {
 
 	// `CollectInstances` matches on <Transform, PreviousTransform, Bounds,
 	// Visual>. A part missing the previous transform is a complete, correct
-	// part that the renderer silently skips — which is what happened before
+	// part that the renderer silently skips - which is what happened before
 	// `BasePart` carried it.
 	CHECK(store.Get<engine::scene::PreviousTransform>(part) != nullptr);
 	CHECK(store.Get<Transform>(part) != nullptr);
@@ -560,7 +560,7 @@ TEST_CASE("CFrame composes, in both languages", "[script]") {
 	Store store("script_test");
 
 	// `a * b` in Luau. Turning a quarter circle about Y and then stepping five
-	// units along local X puts the part on the Z axis, not the X axis — which
+	// units along local X puts the part on the Z axis, not the X axis - which
 	// is the whole reason an orbit needs no sine and no cosine.
 	const auto luau = MakeRuntime(store, Language::Luau);
 	REQUIRE(luau->Run(R"(
@@ -581,7 +581,7 @@ TEST_CASE("CFrame.Angles is radians, and Orientation is degrees", "[script]") {
 
 	// Roblox's own split, reproduced deliberately. A binding that took degrees
 	// in `CFrame.Angles` would make every `math.rad(90)` a rotation 57 times
-	// too small — and the scene would look wrong rather than fail.
+	// too small - and the scene would look wrong rather than fail.
 	REQUIRE(runtime->Run(R"(
 		local part = Instance.new('Part')
 		part.CFrame = CFrame.Angles(0, math.rad(90), 0)
@@ -594,7 +594,7 @@ TEST_CASE("game:GetService reaches RunService", "[script]") {
 	Store store("script_test");
 
 	// The line every Roblox script opens with, and the same object either way
-	// round — two objects for one service would be two things to keep in step.
+	// round - two objects for one service would be two things to keep in step.
 	REQUIRE(MakeRuntime(store, Language::Luau)->Run("assert(game:GetService('RunService') == RunService)"));
 
 	REQUIRE(MakeRuntime(store, Language::JavaScript)
@@ -624,8 +624,8 @@ TEST_CASE("workspace is an instance in the world", "[script]") {
 	// **The inverse of what this asserted before v0.7, deliberately.**
 	// `workspace` used to stand for the world itself, so it had the world's
 	// name and `part.Parent = workspace` meant "a root of this world". A world
-	// now holds a real `Workspace` service and the two were collapsed into it —
-	// see `script/Bindings.hpp` on `OpenWorkspace`. It is an ordinary instance:
+	// now holds a real `Workspace` service and the two were collapsed into it -
+	// see `script/LuauBindings.hpp` on `OpenWorkspace`. It is an ordinary instance:
 	// it has a class, a name of its own, and a place in the tree.
 	REQUIRE(runtime->Run(R"(
 		assert(typeof(workspace) == 'Instance', typeof(workspace))
@@ -645,10 +645,10 @@ TEST_CASE("workspace is an instance in the world", "[script]") {
 	REQUIRE(runtime->Run("assert(game.Workspace == workspace)"));
 	REQUIRE(runtime->Run("assert(game:GetService('Workspace') == workspace)"));
 
-	// The part, the Workspace, and the nine other services `InstallServices`
-	// puts in every world. A phantom row standing for the world is exactly what
-	// there is still none of — `workspace` names something that was already
-	// there.
+	// The part, the Workspace, and the twelve other services `InstallServices`
+	// puts in every world - `Teams` is the one v0.15 added. A phantom row
+	// standing for the world is exactly what there is still none of -
+	// `workspace` names something that was already there.
 	//
 	// The count moves whenever a service is added, and it is written out rather
 	// than derived on purpose: a service arriving without somebody noticing is
@@ -657,12 +657,12 @@ TEST_CASE("workspace is an instance in the world", "[script]") {
 	store.Each<const engine::ecs::InstanceClass>([&](Entity, const engine::ecs::InstanceClass &) {
 		instances++;
 	});
-	CHECK(instances == 11);
+	CHECK(instances == 14);
 }
 
 // **The rule the render gate rests on**, stated from the script side: an
 // instance with no parent is not in the scene, and until v0.7 there was no way
-// to say that at all — a null parent meant "a root of this world", which was
+// to say that at all - a null parent meant "a root of this world", which was
 // drawn.
 TEST_CASE("an instance with no parent is an orphan, not a root of the world", "[script]") {
 	RegisterClasses();
@@ -710,7 +710,7 @@ TEST_CASE("parenting to an instance still nests", "[script]") {
 	Store store("test.world");
 	const auto runtime = MakeRuntime(store, Language::Luau);
 
-	// A part under a part is a real edge in the hierarchy — the tree is
+	// A part under a part is a real edge in the hierarchy - the tree is
 	// organisational, so this decides nothing about drawing, but it is not a
 	// courtesy either.
 	REQUIRE(runtime->Run(R"(
@@ -762,7 +762,7 @@ TEST_CASE("Color3.fromRGB takes 0-255", "[script]") {
 //
 // `game` is the universe and `workspace` is the world a script runs on. A
 // script holds one `Store` and no binding hands it another, so the only way out
-// of a world is a service that sits in the universe — which is rule 3 expressed
+// of a world is a service that sits in the universe - which is rule 3 expressed
 // as an API: nothing crossing a world boundary is a pointer.
 
 TEST_CASE("MessagingService is reachable as a universe service", "[script]") {
@@ -788,7 +788,7 @@ TEST_CASE("a script has no route to another world", "[script]") {
 	// another one. If one ever appears, rule 3 is what it has to answer to.
 	//
 	// Asked of the store rather than of the name, because the name is
-	// `Workspace` in every world now — it is the *instance* that is this
+	// `Workspace` in every world now - it is the *instance* that is this
 	// world's, and a name could no longer tell the two apart.
 	REQUIRE(runtime->Run("assert(workspace:IsA('Workspace'))"));
 	CHECK(engine::scene::WorkspaceOf(store) != engine::ecs::NULL_ENTITY);
@@ -865,8 +865,8 @@ TEST_CASE("a publish crosses from one world to another", "[script]") {
 	universe.Enter(listener, [&](Store &store) {
 		hearer = MakeRuntime(store, Language::Luau);
 		// The subscriber writes into the *world* rather than into a global.
-		// Each chunk runs on its own sandboxed thread — one script cannot see
-		// another's globals, which is deliberate — so the world is the only
+		// Each chunk runs on its own sandboxed thread - one script cannot see
+		// another's globals, which is deliberate - so the world is the only
 		// place an assertion from C++ could read either way. It is also the
 		// stronger claim: the message did not merely arrive, it changed
 		// something.
@@ -879,7 +879,7 @@ TEST_CASE("a publish crosses from one world to another", "[script]") {
 	});
 
 	// A subscription takes effect at the next barrier, so a message sent in the
-	// same tick is not received — the honest answer, since the subscription did
+	// same tick is not received - the honest answer, since the subscription did
 	// not exist when it was sent.
 	universe.Tick(1.0f / 60.0f);
 
@@ -916,7 +916,7 @@ TEST_CASE("a publish crosses from one world to another", "[script]") {
 TEST_CASE("TeleportService moves a player between two worlds", "[script]") {
 	// **The bus operation that names a world, end to end.** `BusKind::Teleport`,
 	// `Postbox::Teleport` and the router's delivery have all existed since v0.2
-	// — and no script could reach any of it, and `PumpDeliveries` dropped every
+	// - and no script could reach any of it, and `PumpDeliveries` dropped every
 	// arrival on the floor because it only ever looked for `Messaging`. So the
 	// crossing worked and nothing could ask for one or notice one.
 	//
@@ -952,7 +952,7 @@ TEST_CASE("TeleportService moves a player between two worlds", "[script]") {
 	std::unique_ptr<engine::script::Runtime> arenaScripts;
 
 	// Both worlds furnished, because a `Player` is a child of the `Players`
-	// service — an unfurnished destination takes nobody, quietly, which is the
+	// service - an unfurnished destination takes nobody, quietly, which is the
 	// placeholder case and not this one.
 	universe.Enter(lobby, [&](Store &store) {
 		engine::scene::RegisterSceneClasses();
@@ -977,7 +977,7 @@ TEST_CASE("TeleportService moves a player between two worlds", "[script]") {
 
 		// **Gone from here on the call, not at the barrier.** The two worlds
 		// cannot reach each other, so only this one can stop the player being
-		// in both — and the router already holds a copy of the bytes.
+		// in both - and the router already holds a copy of the bytes.
 		CHECK_FALSE(store.Alive(traveller));
 
 		// **And their body with them, which is the half a screenshot notices.**
@@ -1001,7 +1001,7 @@ TEST_CASE("TeleportService moves a player between two worlds", "[script]") {
 		REQUIRE(engine::world::Postbox(store).Deliveries().size() == 1);
 
 		// **The arrival is admitted by the engine rather than by a script**, and
-		// no longer by a *runtime* either — who is in a game is the host's
+		// no longer by a *runtime* either - who is in a game is the host's
 		// business, and a teleport that only worked in games whose author had
 		// written a handler would be a feature with a footnote.
 		//
@@ -1027,7 +1027,7 @@ TEST_CASE("TeleportService moves a player between two worlds", "[script]") {
 	});
 
 	// And the data came with them. Read through the same call a game would use,
-	// which needs a `LocalPlayer` — the whole point of the name is that it is
+	// which needs a `LocalPlayer` - the whole point of the name is that it is
 	// nil on a server.
 	universe.Enter(arena, [&](Store &store) {
 		store.SetResource(engine::scene::LocalPlayer{arrived});
@@ -1056,7 +1056,7 @@ TEST_CASE("a world with no scripts still takes somebody in", "[script][teleport]
 	// scripts are JavaScript; a room built entirely by C++.
 	//
 	// Admitting an arrival used to happen inside the Luau runtime's own delivery
-	// pump. So all three took the payload into their inbox and left it there —
+	// pump. So all three took the payload into their inbox and left it there -
 	// and the source world had already destroyed the player, because only the
 	// source world can. The traveller existed nowhere, the host that follows
 	// them searched every world and found nobody, and the client was dropped as
@@ -1102,7 +1102,7 @@ TEST_CASE("a world with no scripts still takes somebody in", "[script][teleport]
 	//
 	// **Registered twice, deliberately.** `ecs::Scheduler` does not dedupe by
 	// name, and a host that installs this once through a shared per-world call
-	// and once beside its own systems is not hypothetical — the studio did
+	// and once beside its own systems is not hypothetical - the studio did
 	// exactly that, and every arrival was admitted twice: two `Player` rows and
 	// two characters per crossing, one adopted by the play link and one orphan
 	// nobody drives, one more of them on every teleport. What stops it is that
@@ -1129,7 +1129,7 @@ TEST_CASE("a world with no scripts still takes somebody in", "[script][teleport]
 
 	// One tick carries it across the barrier and the next runs the destination's
 	// systems over what arrived. **Two, because the delivery lands in the inbox
-	// at the barrier and `PreSimulation` has already run by then** — which is
+	// at the barrier and `PreSimulation` has already run by then** - which is
 	// the same one-tick gap `studio::PlayLink::Missing` exists to wait out.
 	universe.Tick(1.0f / 60.0f);
 	universe.Tick(1.0f / 60.0f);
@@ -1138,7 +1138,7 @@ TEST_CASE("a world with no scripts still takes somebody in", "[script][teleport]
 		const Entity arrived = store.FindFirstChild(engine::scene::PlayersOf(store), "Wanderer");
 		REQUIRE(arrived != engine::ecs::NULL_ENTITY);
 
-		// With a body, built from this world's own class table — the same
+		// With a body, built from this world's own class table - the same
 		// guarantee a scripted destination gives, from a world that cannot run
 		// a script to give it.
 		CHECK(engine::scene::CharacterOf(store, arrived) != engine::ecs::NULL_ENTITY);

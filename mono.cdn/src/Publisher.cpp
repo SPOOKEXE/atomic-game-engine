@@ -1,5 +1,6 @@
 #include <engine/assets/AssetKind.hpp>
 #include <engine/assets/ChunkStore.hpp>
+#include <engine/assets/ContentForm.hpp>
 #include <engine/assets/Manifest.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
@@ -62,7 +63,7 @@ namespace cdn {
 		// **Always forward slashes**, whatever the platform separator is. A
 		// manifest is content addressed by name as well as by hash, so the same
 		// files published on Windows and on Linux have to produce one manifest
-		// — otherwise the two builds share no cache entries and nothing says
+		// - otherwise the two builds share no cache entries and nothing says
 		// why.
 		std::string ContentName(const fs::path &root, const fs::path &file) {
 			const fs::path relative = fs::relative(file, root);
@@ -113,7 +114,7 @@ namespace cdn {
 
 		std::error_code failure;
 		if (!fs::is_directory(contentDirectory, failure)) {
-			ENGINE_ERROR("cdn: nothing to publish — {} is not a directory", contentDirectory.string());
+			ENGINE_ERROR("cdn: nothing to publish - {} is not a directory", contentDirectory.string());
 			return std::nullopt;
 		}
 
@@ -130,7 +131,7 @@ namespace cdn {
 		// Gathered and sorted before anything is written, so two publishes of
 		// one directory do the same work in the same order. The manifest is
 		// byte-stable by construction, but the *store* writes and the
-		// dictionary sample are not unless the walk order is fixed — and a
+		// dictionary sample are not unless the walk order is fixed - and a
 		// dictionary that differs run to run makes every prepared group a
 		// different artefact.
 		std::vector<fs::path> files;
@@ -147,19 +148,32 @@ namespace cdn {
 		for (const fs::path &file : files) {
 			std::optional<std::vector<std::byte>> bytes = ReadWholeFile(file);
 			if (!bytes) {
-				ENGINE_WARN("cdn: skipped {} — could not be read", file.string());
+				ENGINE_WARN("cdn: skipped {} - could not be read", file.string());
 				continue;
 			}
 			if (bytes->empty()) {
 				// An empty file has no chunks, so it would be an asset with an
-				// empty root — a row in the manifest that fetches nothing.
+				// empty root - a row in the manifest that fetches nothing.
 				// Skipped, and said so, rather than published as a thing that
 				// cannot be delivered.
-				ENGINE_WARN("cdn: skipped {} — empty", file.string());
+				ENGINE_WARN("cdn: skipped {} - empty", file.string());
 				continue;
 			}
 
 			const std::string name = ContentName(contentDirectory, file);
+
+			// **Before the chunker, which is what makes this the gate rather
+			// than a filter.** A refused form is not cut, not hashed, not
+			// written into the store and not named in the manifest - so nothing
+			// downstream has to know the decision was taken.
+			const engine::assets::ContentForm form = engine::assets::FormOfName(name);
+			if (!settings.Content.Allows(form)) {
+				ENGINE_INFO(
+					"cdn: refused {} - {} content is turned off", name, engine::assets::Describe(form)
+				);
+				++report.Refused;
+				continue;
+			}
 
 			std::vector<ChunkEntry> chunks;
 			for (const ChunkSpan &span : chunker.Split(*bytes)) {
@@ -222,7 +236,7 @@ namespace cdn {
 			} else {
 				// Ordinary on small content, and worth saying rather than
 				// leaving somebody to wonder why the ratio is poor.
-				ENGINE_INFO("cdn: no dictionary — too little content to train one on");
+				ENGINE_INFO("cdn: no dictionary - too little content to train one on");
 			}
 		}
 

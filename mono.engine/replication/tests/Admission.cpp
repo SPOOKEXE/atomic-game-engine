@@ -1012,8 +1012,8 @@ TEST_CASE("a claim rides the reliable channel", "[replication][admission]") {
 }
 
 // **The gate is on what a peer is given, not on whether it is let in.** A claim
-// arrives after the handshake — `SetIdentityCheck` fills `Peer::Identity` from a
-// message the client sends once the session exists — so there is nothing to
+// arrives after the handshake - `SetIdentityCheck` fills `Peer::Identity` from a
+// message the client sends once the session exists - so there is nothing to
 // check at the door, and a version that refused in `Accept` would refuse
 // everybody. These two cases are the pair that says so: the same peer, admitted
 // the same way, and the only difference is whether the listener was told to
@@ -1045,7 +1045,7 @@ TEST_CASE("an unidentified client is admitted and sent nothing", "[replication][
 	admission_test::Stranger peer = port.Peer(0, 7);
 	Admit(port, peer);
 
-	// Admitted, and holding a session — the gate is not a refusal.
+	// Admitted, and holding a session - the gate is not a refusal.
 	CHECK(port.Server->Count() == 1);
 	CHECK_FALSE(port.Server->IdentityOf(engine::replication::ClientId{0, 0}).has_value());
 

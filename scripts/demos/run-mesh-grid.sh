@@ -24,7 +24,7 @@
 #
 # That carries meshes and *image* textures. A material built out of Blender's
 # shader nodes is a procedure rather than an image and glTF has nowhere to put
-# it, so those models arrive with base colours only — which is not a fault in
+# it, so those models arrive with base colours only - which is not a fault in
 # the pipeline, and `MeshGrid.luau` puts one next to a textured model so the
 # difference is visible rather than mysterious.
 #

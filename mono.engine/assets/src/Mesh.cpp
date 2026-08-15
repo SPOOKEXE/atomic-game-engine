@@ -18,8 +18,8 @@ namespace engine::assets {
 
 		// Whether every coordinate of a vertex is a real number.
 		//
-		// A NaN in a position poisons the bounds fold — every comparison
-		// against it is false, so the box silently stops covering the mesh —
+		// A NaN in a position poisons the bounds fold - every comparison
+		// against it is false, so the box silently stops covering the mesh -
 		// and a NaN in a normal produces a black fragment that reads as a
 		// lighting bug. Both are much cheaper to refuse at the boundary than to
 		// find on a screen.
@@ -244,7 +244,7 @@ namespace engine::assets {
 		}
 
 		// `IsValid` is what checks that every index names a vertex and every
-		// run names indices — the two things a consumer would otherwise read
+		// run names indices - the two things a consumer would otherwise read
 		// past the end of. Run after parsing rather than during it because the
 		// vertex count is only known to be *correct* once the vertices are
 		// actually there.

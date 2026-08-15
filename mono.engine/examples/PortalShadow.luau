@@ -4,7 +4,7 @@
 -- **Written for one report and shaped so that report is unmistakable.** A
 -- character straddling a portal has two halves: the near one drawn directly and
 -- the far one drawn as a clone in the destination room. Both are lit by the
--- world's one directional light, and the map between two panes is a rotation —
+-- world's one directional light, and the map between two panes is a rotation -
 -- so the far half's shadow comes out turned by that rotation relative to the
 -- near half's. Standing in the hole you see one body with two shadows pointing
 -- different ways, and no shadow crossing the seam at all.
@@ -25,7 +25,7 @@
 --      which is what makes it point the wrong way. `scene::AppendPortalClones`
 --      is where the clone is made.
 --   3. **A shadow crossing the seam.** A caster on one side of a hole should
---      shadow the floor on the other, and does not — there is one shadow map,
+--      shadow the floor on the other, and does not - there is one shadow map,
 --      fitted once to the whole scene from one direction, so light through a
 --      hole is not modelled at all.
 --
@@ -33,7 +33,7 @@
 --
 -- Only a body that can move is cloned. `scene::CloneThroughSeams` walks bodies
 -- with motion and character limbs, which is what keeps a floor from being copied
--- into the room next door — so an anchored crate in a seam draws on one side
+-- into the room next door - so an anchored crate in a seam draws on one side
 -- only and is not the case this scene is about. The crate here rests on the
 -- floor under gravity, which is also what a character does.
 
@@ -141,8 +141,8 @@ block("Control", Vector3.new(3, 6, 3), CFrame.new(Vector3.new(-14, 3, 12)), CRAT
 -- --- light -----------------------------------------------------------------
 --
 -- A lamp over each room. The shadow this scene is about is cast by the world's
--- directional light rather than by these — `render` fits one shadow map to the
--- whole scene from `SUN_DIRECTION` — so these are here to make the floors
+-- directional light rather than by these - `render` fits one shadow map to the
+-- whole scene from `SUN_DIRECTION` - so these are here to make the floors
 -- readable and not to cast anything.
 local function lamp(name: string, at: Vector3)
 	local fitting = block(name, Vector3.new(2, 0.5, 2), CFrame.new(at), Color3.new(1, 0.98, 0.92))
@@ -165,7 +165,7 @@ block("SpawnLocation", Vector3.new(6, 1, 6), CFrame.new(Vector3.new(0, 0.5, 16))
 
 -- `VIEW` names a still for a headless capture; empty, walk it.
 -- **A line this file rewrites rather than a global.** `_G` is readonly in the
--- script sandbox, so nothing outside a scene can set one — the capture scripts
+-- script sandbox, so nothing outside a scene can set one - the capture scripts
 -- copy the file and substitute the line below, which is the only mechanism that
 -- actually works from a shell.
 local VIEW = ""

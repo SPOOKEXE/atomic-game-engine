@@ -29,7 +29,7 @@ namespace engine::gui {
 		// the measurement this follows: constructing a `core::Name` from a
 		// literal takes the process-wide registry's mutex and hashes a string,
 		// and a property getter is read every frame by an immediate-mode
-		// properties panel — which is that loop.
+		// properties panel - which is that loop.
 		//
 		// **A function template keyed on the C++ enum, not a parameter.** The
 		// generated conversions below are captureless function pointers, so
@@ -69,7 +69,7 @@ namespace engine::gui {
 		// The stored value of the *first* member of a set.
 		//
 		// Zero for every set but one. `ScrollingDirection` is `X = 1`, `Y = 2`,
-		// `XY = 3` in Roblox — a bit pair rather than a counter — and the
+		// `XY = 3` in Roblox - a bit pair rather than a counter - and the
 		// ordinal is the format, so it is kept rather than tidied to start at
 		// zero. `EnumTable` numbers members from zero whatever they mean, so
 		// the offset is applied here, once, in both directions.
@@ -83,7 +83,7 @@ namespace engine::gui {
 
 		// How many members a set has. Only needed to walk the range when
 		// registering, so it lives beside the registration rather than in the
-		// header — a count in `Enums.hpp` would be a third place the list lives.
+		// header - a count in `Enums.hpp` would be a third place the list lives.
 		template <class E> constexpr size_t EnumCount();
 
 #define GUI_ENUM_COUNT(Type, Number)                                                                         \
@@ -140,7 +140,7 @@ namespace engine::gui {
 		//
 		// `Classes::Property` cannot express this: its generated conversion is
 		// typed by `TypeOf<T>`, which answers `Opaque` for anything it does not
-		// know — so every one of these would have been a property nothing could
+		// know - so every one of these would have been a property nothing could
 		// read. This is the same generated-field idea with the name lookup
 		// folded in, and it is a template for the reason `Property` is one: the
 		// member pointer as a template argument is what keeps the conversion a
@@ -252,7 +252,7 @@ namespace engine::gui {
 
 		// Every class this module registers, in registration order.
 		//
-		// **One list, read by three callers** — the registration below, the
+		// **One list, read by three callers** - the registration below, the
 		// `GuiClassNames` accessor a palette and the manifest use, and
 		// `gui/tests/Registration.cpp`. A class added to the tree and not to
 		// this array fails that test, which is what makes the list a contract
@@ -337,7 +337,7 @@ namespace engine::gui {
 
 			// **The one set this module shares with `scene`.** Both register
 			// `NormalId` and `EnumTable` takes the second declaration as
-			// agreement — which is legal exactly as long as the orders match,
+			// agreement - which is legal exactly as long as the orders match,
 			// since the ordinal is what a game file carries. `Enums.hpp` says
 			// so at the declaration and `gui/tests/Enums.cpp` pins it.
 			RegisterEnum<Face>();
@@ -354,7 +354,7 @@ namespace engine::gui {
 			const ClassId guiBase = Classes::Register("GuiBase", instance, {});
 
 			// **A service, so it hangs off `Instance` rather than off
-			// `GuiBase`.** It is not a thing that draws — it is the thing that
+			// `GuiBase`.** It is not a thing that draws - it is the thing that
 			// *owns the selection*, which is what finally gives
 			// `GuiObject::Selectable` a reader. `scene`'s services sit at the
 			// root the same way, and `GetService` finds either by name.
@@ -369,8 +369,8 @@ namespace engine::gui {
 			// collapsed the two "would have to grow the split back at exactly
 			// the point somebody is adding a feature". This is that point.
 			//
-			// An adornment is a description rather than a drawing — see
-			// `Adornment` — so what is registered here is what to outline and
+			// An adornment is a description rather than a drawing - see
+			// `Adornment` - so what is registered here is what to outline and
 			// how, and nothing that resolves it into geometry.
 			const ClassId guiBase3d = Classes::Register("GuiBase3d", guiBase, {});
 
@@ -386,7 +386,7 @@ namespace engine::gui {
 
 			// A handle is an adornment with a shape and an offset. The four
 			// leaves below differ only in what a drawer makes of `HandleShape`,
-			// which is why they add no components of their own — the same shape
+			// which is why they add no components of their own - the same shape
 			// `Frame` and `CanvasGroup` have on the 2D side.
 			const std::array handle{Components::Of<HandleShape>()};
 			const ClassId handleAdornment = Classes::Register("HandleAdornment", pvAdornment, handle);
@@ -396,7 +396,7 @@ namespace engine::gui {
 			const ClassId cylinderHandle = Classes::Register("CylinderHandleAdornment", handleAdornment, {});
 			const ClassId lineHandle = Classes::Register("LineHandleAdornment", handleAdornment, {});
 
-			// `Handles` and `ArcHandles` are the draggable ones — the editor's
+			// `Handles` and `ArcHandles` are the draggable ones - the editor's
 			// move and rotate gizmos. They carry the same `Adornment` their
 			// siblings do and differ in what a drawer offers to grab, which is
 			// the drawer's business rather than the tree's.
@@ -456,7 +456,7 @@ namespace engine::gui {
 			// **Registered and drawn by nothing, and that is not the same as a
 			// shim.** A `PluginGui` is a collector whose canvas is a *host
 			// window*, and this engine's editor is Dear ImGui until the tree
-			// can draw a property grid — so there is no window to be its
+			// can draw a property grid - so there is no window to be its
 			// canvas yet. It is here because `DockWidgetPluginGui` is the
 			// class the studio's own panels will be authored as, and its place
 			// in the tree is what the last step of the v0.8 plan builds on.
@@ -508,7 +508,7 @@ namespace engine::gui {
 			// Each declared on the class that first holds what it projects, so
 			// a derived class inherits it and `Classes` merges base-first.
 			// Declaring them all on the leaves would work today and would be
-			// wrong the moment a second subclass exists — which, in this tree,
+			// wrong the moment a second subclass exists - which, in this tree,
 			// is almost every class.
 
 			// The three every 2D thing reports and nothing may assign.

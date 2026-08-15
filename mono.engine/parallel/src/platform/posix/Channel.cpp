@@ -33,7 +33,7 @@ namespace engine::parallel {
 
 		// Close-on-exec on both. Without it a spawned child inherits *every*
 		// handle this process holds, including the driver's own end of this
-		// very channel — and while the child holds a copy of that end, the
+		// very channel - and while the child holds a copy of that end, the
 		// kernel counts the socket as still having a peer. Neither side would
 		// ever see the other go away, which is the one thing the channel is
 		// relied on to notice.
@@ -44,8 +44,8 @@ namespace engine::parallel {
 		::fcntl(handles[1], F_SETFD, FD_CLOEXEC);
 
 #if defined(SO_NOSIGPIPE)
-		// macOS and iOS have no MSG_NOSIGNAL, so the same promise — that a
-		// write to a dead peer fails rather than killing this process — is a
+		// macOS and iOS have no MSG_NOSIGNAL, so the same promise - that a
+		// write to a dead peer fails rather than killing this process - is a
 		// socket option there instead of a per-call flag. Set on both ends,
 		// because the option travels with the socket and the child's end has
 		// nowhere else to acquire it.
@@ -56,7 +56,7 @@ namespace engine::parallel {
 
 		// Only this end. The remote one is made non-blocking by whoever adopts
 		// it, because `O_NONBLOCK` is a property of the open file description
-		// and setting it here would set it for the child too — which is
+		// and setting it here would set it for the child too - which is
 		// correct, but relying on that to cross an exec is the kind of thing
 		// that works until somebody re-opens the handle.
 		if (!platform::SocketMakeNonBlocking(handles[0])) {
@@ -74,7 +74,7 @@ namespace engine::parallel {
 	bool HasInheritedChannel() {
 		// A stream socket, specifically. The slot is an ordinary handle number
 		// and a program run from a shell that happened to leave one open there
-		// would otherwise be told it is a supervised host — and would then try
+		// would otherwise be told it is a supervised host - and would then try
 		// to speak a protocol down somebody's log file.
 		int kind = 0;
 		socklen_t size = sizeof(kind);

@@ -57,6 +57,7 @@ using engine::physics::Publish;
 using engine::physics::SLEEP_SETTLE_SECONDS;
 using engine::physics::Solve;
 using engine::physics::SyncBroadphase;
+using engine::scene::Anchored;
 using engine::scene::BodyKind;
 using engine::scene::Collider;
 using engine::scene::Motion;
@@ -102,13 +103,18 @@ namespace {
 		}
 
 		// `Anchored` decides presence rather than setting a flag, exactly as
-		// `MakePart` does: an anchored body has neither `RigidBody` nor
-		// `Motion` and lands in a different archetype.
-		if (!description.Anchored) {
+		// `MakePart` does: an anchored body carries the tag and no `Motion`, and
+		// lands in a different archetype. The `RigidBody` is on both, because
+		// what a part weighs is not the world's decision about whether it may
+		// move it.
+		RigidBody body;
+		body.Mass = description.Mass;
+		store.Set<RigidBody>(entity, body);
+
+		if (description.Anchored) {
+			store.Set<Anchored>(entity, Anchored{});
+		} else {
 			store.Set<Motion>(entity, Motion{description.Velocity, Vector3::Zero});
-			RigidBody body;
-			body.Mass = description.Mass;
-			store.Set<RigidBody>(entity, body);
 		}
 		return entity;
 	}
@@ -117,8 +123,8 @@ namespace {
 	//
 	// Written out rather than driven through a `Scheduler` so that a case can
 	// step gravity, or leave it out, without a system to hang it on. Gravity is
-	// deliberately not part of this module — `v02v03v04.md` §3.5 has no gravity
-	// row and `RigidBody` has no gravity scale — so a scene that wants weight
+	// deliberately not part of this module - `v02v03v04.md` §3.5 has no gravity
+	// row and `RigidBody` has no gravity scale - so a scene that wants weight
 	// applies it, which is what this does.
 	void StepWorld(Store &store, float delta, bool gravity) {
 		store.AdvanceTick(delta);
@@ -154,7 +160,7 @@ namespace {
 TEST_CASE("a contact removes the closing velocity", "[physics][solver]") {
 	// The smallest thing a solver has to do. Two boxes overlapping and closing
 	// at a metre a second come out separating, or not closing, but never still
-	// closing — the sign of the impulse is what decides which, and getting it
+	// closing - the sign of the impulse is what decides which, and getting it
 	// backwards accelerates them into each other.
 	Store store("solver.closing");
 	PreparePhysicsWorld(store, 1.0f);
@@ -175,8 +181,8 @@ TEST_CASE("a contact removes the closing velocity", "[physics][solver]") {
 }
 
 TEST_CASE("an anchored body is not moved by a contact", "[physics][solver]") {
-	// A body with no `RigidBody` is not a static body — it is not a body at all
-	// — and an infinite mass is how that is expressed. A solver that gave it a
+	// A body with no `RigidBody` is not a static body - it is not a body at all
+	// - and an infinite mass is how that is expressed. A solver that gave it a
 	// finite one would push the floor out from under everything.
 	Store store("solver.anchored");
 	PreparePhysicsWorld(store, 1.0f);
@@ -268,7 +274,7 @@ TEST_CASE("contact events say began, persisted and ended", "[physics][solver]") 
 }
 
 TEST_CASE("the surface table decides friction and restitution", "[physics][solver]") {
-	// `Surface` names a row and the row holds the floats — the resource case
+	// `Surface` names a row and the row holds the floats - the resource case
 	// out of `ecs/AGENTS.md`. A body whose material nobody registered takes the
 	// defaults rather than a silent zero, and a bouncy one bounces.
 	const auto drop = [](const char *name, float restitution) {
@@ -397,7 +403,7 @@ TEST_CASE("a tower stands up because of the warm start", "[physics][solver]") {
 	// **The case that fails when the warm start is deleted**, which the weaker
 	// version of it did not: a single box on a floor settles at sixteen
 	// iterations with or without last tick's impulses, so watching one box sink
-	// measured nothing. A tower is where it bites — the bottom contact carries
+	// measured nothing. A tower is where it bites - the bottom contact carries
 	// five boxes, and finding that impulse from zero every tick takes more
 	// sweeps than there are.
 	//
@@ -489,7 +495,7 @@ TEST_CASE("a settled body falls asleep and leaves the dynamic archetype", "[phys
 TEST_CASE("a moving neighbour wakes a sleeping body", "[physics][solver]") {
 	// A body that could never wake would be a body that fell out of the
 	// simulation. The waking pass is one sweep of the manifolds in pair order,
-	// so a stack wakes one layer per tick — bounded and the same every run.
+	// so a stack wakes one layer per tick - bounded and the same every run.
 	Store store("solver.wake");
 	PreparePhysicsWorld(store, 2.0f);
 
@@ -522,7 +528,7 @@ TEST_CASE("a moving neighbour wakes a sleeping body", "[physics][solver]") {
 
 TEST_CASE("a sleeping contact is not reported as ended", "[physics][solver]") {
 	// Falling asleep takes a body out of the dynamic index, and two anchored
-	// colliders are never a pair — so the contact holding a resting box up
+	// colliders are never a pair - so the contact holding a resting box up
 	// disappears from the broad phase the tick it sleeps. Reporting that as
 	// `Ended` would tell a listener the box left the floor, which is the one
 	// thing it definitely did not do.

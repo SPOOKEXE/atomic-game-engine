@@ -2,7 +2,7 @@
 //
 // **Everything a host offers arrives through one closure.** `OpenHost` builds a
 // table with one entry per `HostSurface::Names`, each a C function carrying the
-// name it was made for — so a call is a marshal, one virtual call, and a marshal
+// name it was made for - so a call is a marshal, one virtual call, and a marshal
 // back. There is no per-name C++ anywhere in this module, which is the whole
 // point: the editor adds `CreateDockWidget` and nothing here changes.
 //
@@ -15,15 +15,15 @@
 //
 // **A Luau function passed as an argument becomes a `HostCallback`.** It is put
 // in the registry and the ref is remembered on the context, keyed by a counter
-// that starts at one — so zero is "no callback" and no id is ever an address,
+// that starts at one - so zero is "no callback" and no id is ever an address,
 // which `physics/AGENTS.md` and this module's own determinism rules both refuse.
 //
 // **An `Instance` crosses in both directions.** A host call is inside one
-// process against one store, so a handle means something — which is exactly why
+// process against one store, so a handle means something - which is exactly why
 // `ScriptValue` refuses one and `HostValue` does not. `Host.hpp` carries that
 // argument.
 
-#include "Bindings.hpp"
+#include "LuauBindings.hpp"
 
 #include <engine/core/Log.hpp>
 
@@ -69,7 +69,7 @@ namespace engine::script {
 		// One argument, read off the stack.
 		//
 		// Returns false for a value with no host representation, which the
-		// caller turns into a script error naming the position — a thread or a
+		// caller turns into a script error naming the position - a thread or a
 		// userdata the host has no way to hold.
 		bool ReadHostValue(lua_State *state, int index, HostValue &out, int depth) {
 			if (depth > HOST_MAX_DEPTH) {
@@ -80,7 +80,7 @@ namespace engine::script {
 			// be asked for rather than assumed: a C function is guaranteed
 			// `LUA_MINSTACK` free slots and nothing more, and a map traversal
 			// holds a key and a value per level while it recurses. Sixteen
-			// levels is thirty-two slots, which is past the guarantee — and
+			// levels is thirty-two slots, which is past the guarantee - and
 			// overrunning it is a `LUAU_ASSERT` rather than a wrong answer, so
 			// the symptom was an illegal instruction from a script that merely
 			// nested a table.
@@ -113,7 +113,7 @@ namespace engine::script {
 			case LUA_TFUNCTION: {
 				// **The registry, and a counter for the id.** An address would
 				// be stable and would also be an address, which this module's
-				// determinism rules refuse — and a counter reads better in a log.
+				// determinism rules refuse - and a counter reads better in a log.
 				LuauContext &context = ContextOf(state);
 
 				lua_pushvalue(state, index);
@@ -152,15 +152,15 @@ namespace engine::script {
 				}
 
 				// **An `EnumItem` crosses as its member's name.** That is the
-				// same latitude `ReadEnumValue` already gives everywhere else —
+				// same latitude `ReadEnumValue` already gives everywhere else -
 				// `part.AlphaMode = "Clip"` is accepted, so a host that takes
 				// `Enum.FinishRecordingOperation.Commit` and a host that takes
 				// `"Commit"` should not be two hosts.
 				//
 				// The set it belongs to is dropped, which is a real loss and the
 				// honest trade: carrying it would make every host that takes an
-				// enum read a two-field map, to catch a mistake — passing a
-				// member of the wrong set whose name happens to match — that
+				// enum read a two-field map, to catch a mistake - passing a
+				// member of the wrong set whose name happens to match - that
 				// costs one clear refusal when it happens.
 				core::Name enumName;
 				core::Name member;
@@ -182,7 +182,7 @@ namespace engine::script {
 				// reader has to pick one; a host expecting a map finds no entries
 				// under either tag, where a host expecting a *list* gets a tag it
 				// refuses. So the ambiguity is harmless in one direction and not
-				// in the other — and `Selection:Set({})`, which is how a plugin
+				// in the other - and `Selection:Set({})`, which is how a plugin
 				// deselects everything, is exactly the call that would have been
 				// refused.
 				const int absolute = lua_absindex(state, index);
@@ -313,7 +313,7 @@ namespace engine::script {
 			//
 			// Compared against the table this closure was built for rather than
 			// against "is argument one a table", because a method whose first
-			// real argument *is* a table — `Selection:Set({part})` — must not
+			// real argument *is* a table - `Selection:Set({part})` - must not
 			// lose it.
 			int first = 1;
 			if (count >= 1 && lua_type(state, lua_upvalueindex(3)) == LUA_TTABLE &&
@@ -351,15 +351,15 @@ namespace engine::script {
 		LuauContext &context = ContextOf(state);
 
 		if (context.Host == nullptr) {
-			// No host is the ordinary case — a game script has none — and a
+			// No host is the ordinary case - a game script has none - and a
 			// world with no host global is what says so.
 			return;
 		}
 
 		// **The globals may already be frozen, and that is the ordinary case.**
 		// `luaL_sandbox` runs at construction so one script cannot rewrite the
-		// language the next one runs in, and a host installed afterwards —
-		// which `Runtime::SetHost` is — would otherwise be "attempt to modify a
+		// language the next one runs in, and a host installed afterwards -
+		// which `Runtime::SetHost` is - would otherwise be "attempt to modify a
 		// readonly table" thrown out of a setter.
 		//
 		// Unfrozen for exactly this set of assignments and frozen again, rather
@@ -374,7 +374,7 @@ namespace engine::script {
 
 		// **A dotted name is a service and a bare one is a plain call.**
 		// `Selection.Get` becomes `Selection:Get()`, and `game:GetService`
-		// then finds it for free — that function resolves a service by looking
+		// then finds it for free - that function resolves a service by looking
 		// up a global of the same name, so a service installed here is reachable
 		// both ways without `GetService` learning anything. `RunService` is
 		// already exactly this shape, and the comment there gives the reason:
@@ -419,7 +419,7 @@ namespace engine::script {
 		}
 
 		// **The table itself is frozen too**, so a plugin cannot replace one of
-		// its own host functions with something that looks like it — which
+		// its own host functions with something that looks like it - which
 		// matters because a *second* chunk in the same VM would then be calling
 		// the first one's replacement.
 		lua_setreadonly(state, -1, 1);
@@ -437,7 +437,7 @@ namespace engine::script {
 				lua_pushstring(state, name.c_str());
 
 				// The service table, so a colon call can be told from a dot
-				// call — see `HostCall`. Three deep, because the two upvalues
+				// call - see `HostCall`. Three deep, because the two upvalues
 				// above are already on the stack.
 				lua_pushvalue(state, -3);
 

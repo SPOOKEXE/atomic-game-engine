@@ -20,7 +20,7 @@ TEST_SUITE_ID("engine.spatial.query")
 // Every query is a walk of the grid, and the walk decides what a query can
 // possibly see.
 TEST_DEPENDS("engine.spatial.hashgrid")
-// Rays and hits come from here, and RayHit has no suite of its own — this is
+// Rays and hits come from here, and RayHit has no suite of its own - this is
 // where it is covered.
 TEST_DEPENDS("engine.core.types.ray")
 // Candidates are boxes and the exact tests are box arithmetic.
@@ -107,7 +107,7 @@ TEST_CASE("the nearest box wins, not the first cell walked", "[query]") {
 TEST_CASE("the normal is the face the ray entered through", "[query]") {
 	// One case per axis and per sign. A sign error on one axis is invisible in
 	// every other case, and a normal pointing into the surface reflects a
-	// bounce the wrong way — which looks like a solver bug.
+	// bounce the wrong way - which looks like a solver bug.
 	HashGrid grid{UNIT_CELL};
 	const Proxy proxies[] = {Cube(1, Vector3{0.0f, 0.0f, 0.0f}, 1.0f)};
 	grid.Rebuild(proxies);
@@ -141,7 +141,7 @@ TEST_CASE("a ray lying exactly in the plane of a face does not become a NaN", "[
 	// `-Vector3::YAxis` is `(-0, -1, -0)`: negating zero gives negative zero, so
 	// the X and Z reciprocals are *minus* infinity. On the axis where the origin
 	// sits exactly on the maximum plane the numerator is zero, zero times
-	// infinity is a NaN, and a NaN compares false in both directions — so the
+	// infinity is a NaN, and a NaN compares false in both directions - so the
 	// slab is read as (+inf, NaN), the entry distance becomes infinite, and the
 	// floor under the character's feet is reported as a miss.
 	//
@@ -322,7 +322,7 @@ TEST_CASE("a zero-length span writes nothing and reports overflow", "[query]") {
 	REQUIRE(cast.Written == 0);
 	REQUIRE(cast.Overflowed);
 
-	// And with nothing to find, an empty span has not overflowed — it held
+	// And with nothing to find, an empty span has not overflowed - it held
 	// everything there was.
 	const QueryResult empty = OverlapBox(
 		grid, AABB{Vector3{40.0f, 40.0f, 40.0f}, Vector3{41.0f, 41.0f, 41.0f}}, LayerMask::All(), nowhere

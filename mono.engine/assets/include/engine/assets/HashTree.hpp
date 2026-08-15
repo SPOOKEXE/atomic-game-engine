@@ -1,6 +1,6 @@
 #pragma once
 
-// The hierarchical hash — one root standing for many chunks.
+// The hierarchical hash - one root standing for many chunks.
 //
 // A flat list of chunk hashes would be enough to *store* an asset. It is not
 // enough to deliver one, and CDN.md §2 turns on four properties a tree has and
@@ -12,7 +12,7 @@
 //   transport. A 400 MB mesh is the case that settles it.
 // - **Patch for free.** Two versions are diffed by walking both trees top-down
 //   and stopping wherever a subtree hash matches. What falls out is exactly the
-//   set of chunks that changed — no patch format, and no second code path that
+//   set of chunks that changed - no patch format, and no second code path that
 //   can disagree with the first.
 // - **Invalidation is the changed path.** One edited chunk changes its asset
 //   root, its bundle root and the manifest root. That chain *is* the set an edge
@@ -36,8 +36,8 @@ namespace engine::assets {
 	// A binary Merkle tree over content hashes.
 	//
 	// Build it from the leaves, keep the root, hand out proofs. Verification
-	// needs no tree at all — only the leaf, its index, the leaf count, the
-	// sibling path and the root — which is what lets a client verify against a
+	// needs no tree at all - only the leaf, its index, the leaf count, the
+	// sibling path and the root - which is what lets a client verify against a
 	// root it was given without ever holding the whole structure.
 	class HashTree {
 	  public:
@@ -66,7 +66,7 @@ namespace engine::assets {
 		//
 		// Bottom-up: the first entry is the leaf's sibling, the last is the
 		// sibling nearest the root. A level where this leaf's subtree has no
-		// sibling contributes nothing — Verify knows to expect that from the
+		// sibling contributes nothing - Verify knows to expect that from the
 		// leaf count, so the path carries no padding and no marker.
 		//
 		// @param index Zero-based leaf index.
@@ -78,7 +78,7 @@ namespace engine::assets {
 		// whose root is `root`.
 		//
 		// Takes no HashTree, on purpose. A verifier holds a root it trusts and a
-		// chunk that just arrived, and nothing else — requiring the tree would
+		// chunk that just arrived, and nothing else - requiring the tree would
 		// mean shipping the structure it is meant to make unnecessary.
 		//
 		// @param leaf The hash being checked.
@@ -99,8 +99,8 @@ namespace engine::assets {
 
 		// The root of a tree over `leaves`, without keeping the tree.
 		//
-		// For the levels that only ever need a root — a bundle over its assets,
-		// the manifest over its bundles — where building the interior levels to
+		// For the levels that only ever need a root - a bundle over its assets,
+		// the manifest over its bundles - where building the interior levels to
 		// throw them away is the only other option.
 		//
 		// @param leaves The leaf hashes, in canonical order.

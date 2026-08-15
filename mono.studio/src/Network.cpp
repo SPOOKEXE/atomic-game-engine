@@ -2,13 +2,13 @@
 //
 // **The editor had the configuration and never used it.** `ContentSources` was
 // saved, loaded and edited since v0.9, and nothing in the studio ever built a
-// `delivery::AssetClient` from it — so a publisher key could be wrong, an origin
+// `delivery::AssetClient` from it - so a publisher key could be wrong, an origin
 // could be down and an address could be a host name that never resolves, and the
 // preferences page would look exactly the same either way. This file is the half
 // that makes the settings do something and then says what happened.
 //
 // **A model over counters, and no clock of its own.** `cdn::Dashboard` is the
-// same shape on the origin's side and for the same reasons — everything here is
+// same shape on the origin's side and for the same reasons - everything here is
 // arithmetic over `DeliveryCounters`, `UploadCounters` and a ring of one-second
 // samples, and every sample is stamped with a time passed in. What it does *not*
 // share with the dashboard is a text model: an origin's operator is looking at a
@@ -19,10 +19,12 @@
 // long the editor has been open" is a number that only falls, and is useless the
 // moment somebody wants to know whether a download is moving *now*. So the
 // samples are a ring of the last few seconds and the rate is what crossed inside
-// it — which is the same decision `Dashboard`'s minute buckets make, at the
+// it - which is the same decision `Dashboard`'s minute buckets make, at the
 // resolution an interactive panel is read at.
 
 #include <engine/assets/Builtin.hpp>
+#include <engine/assets/ContentForm.hpp>
+#include <engine/assets/ContentPolicy.hpp>
 #include <engine/assets/Manifest.hpp>
 #include <engine/assets/Material.hpp>
 #include <engine/assets/Mesh.hpp>
@@ -53,7 +55,7 @@ namespace studio {
 		//
 		// **Four, because a request pulls a bundle and a bundle is decompressed
 		// on this thread.** `delivery/Client.hpp` forbids a background thread, so
-		// the only lever is how much is asked for at once — and a place naming
+		// the only lever is how much is asked for at once - and a place naming
 		// five hundred assets has to become five hundred assets arriving over a
 		// second, not one frame that never returns.
 		constexpr size_t REQUESTS_PER_PUMP = 4;
@@ -162,18 +164,24 @@ namespace studio {
 			// pages: no key is a trust problem and no source is an address one.
 			ContentStatus =
 				Content.PublisherKey.empty()
-					? "no publisher key — nothing can be fetched, because nothing could be verified"
-					: "no usable read source — check the addresses and that a row is enabled";
+					? "no publisher key - nothing can be fetched, because nothing could be verified"
+					: "no usable read source - check the addresses and that a row is enabled";
 		}
 
 		// **The assets panel's tabs are the same list read a different way**, so
 		// they are rebuilt with the clients rather than waiting for somebody to
 		// reopen the panel. An origin added on the Content page and no tab for
 		// it reads as the row not having been saved.
+		//
+		// **Rebuilt without asking the origins**, unlike `RefreshStoreContents`.
+		// This runs at start-up and on every save of the Content page, and
+		// `MakeOriginLister` waits for an answer with a ceiling on the wait - a
+		// mistyped address with a key beside it would then be a stall on a path
+		// nobody chose. The tab says it has not been asked, and Refresh asks.
 		AssetTabs = BuildCatalogue(Content);
 
 		// **Built even when delivery is not.** An uploader verifies nothing, so
-		// it does not need a publisher key — and an editor being used to *seed*
+		// it does not need a publisher key - and an editor being used to *seed*
 		// an origin is exactly the case where no manifest has been signed yet
 		// and `DeliverySettings::IsValid` is false.
 		ContentUploads = engine::delivery::MakeUploader(settings);
@@ -188,8 +196,8 @@ namespace studio {
 		}
 
 		// **Outside the `ContentClient` guard on purpose.** A part can meet an
-		// already-loaded mesh in a process with no delivery client at all — a
-		// built-in, a duplicate, an undo — and those are exactly the cases the
+		// already-loaded mesh in a process with no delivery client at all - a
+		// built-in, a duplicate, an undo - and those are exactly the cases the
 		// arrival-driven fit never saw.
 		FitPendingParts();
 
@@ -231,7 +239,7 @@ namespace studio {
 
 	void Editor::EachOpenWorld(const std::function<void(engine::ecs::Store &)> &body) {
 		// **Every world, not only the one on screen.** An editor has several
-		// open — a server's beside a client's during Play — and a mesh
+		// open - a server's beside a client's during Play - and a mesh
 		// registered into the renderer is registered for all of them, so a
 		// catalogue filled for one would leave `TrianglesCount` answering zero
 		// in the others for no reason anybody could see.
@@ -244,14 +252,14 @@ namespace studio {
 		// **The editor fetches content, which it did not before at all.** Its
 		// delivery client existed and nothing ever asked it for anything, so a
 		// `MeshPart` in a viewport drew the fallback cube however good its
-		// `MeshId` was — the renderer had never been handed a mesh. This is
+		// `MeshId` was - the renderer had never been handed a mesh. This is
 		// `Client::PumpContent`'s policy, one program over.
 		if (!ContentRequested && ContentClient->Ready()) {
 			ContentRequested = true;
-			ENGINE_INFO("assets: catalogue ready — content is fetched as the worlds name it");
+			ENGINE_INFO("assets: catalogue ready - content is fetched as the worlds name it");
 
 			// **The list of what there is, handed to the worlds once.** Not the
-			// content — the *names*. A scene has no other way to find out what a
+			// content - the *names*. A scene has no other way to find out what a
 			// store published: since v0.10 nothing is fetched by kind, so
 			// `ContentService:GetMeshes()` reports only what something already
 			// asked for, and a scene reading it can never be the thing that asks.
@@ -268,9 +276,9 @@ namespace studio {
 		}
 
 		// **How much decoding and uploading one frame will do**, and the same
-		// allowance the client's own intake uses. Content arrives in bursts — a
+		// allowance the client's own intake uses. Content arrives in bursts - a
 		// scene names forty meshes at once and the origin answers them together
-		// — and this loop used to drain every completed request in the frame
+		// - and this loop used to drain every completed request in the frame
 		// that noticed them, which is a third of a second in one frame and an
 		// editor that stops responding while somebody's model set lands.
 		//
@@ -297,7 +305,7 @@ namespace studio {
 
 			// **Read before the take, because a take is what destroys it.** A
 			// failed request answers no asset and therefore no name, and the
-			// name is what has to be unmarked — the half `D00107` warned about,
+			// name is what has to be unmarked - the half `D00107` warned about,
 			// where unmarking only on arrival leaves a misspelled sheet expected
 			// for ever and the marker never appears for the one case it exists
 			// for.
@@ -307,7 +315,7 @@ namespace studio {
 
 			// **On the request finishing, not on it succeeding**, and above
 			// every `continue` below so no branch can forget. An arrival needs
-			// no call — `AddTexture` clears it — but doing it here as well costs
+			// no call - `AddTexture` clears it - but doing it here as well costs
 			// a hash and removes the question.
 			Renderer.StopExpectingTexture(asked);
 
@@ -327,7 +335,7 @@ namespace studio {
 				}
 
 				// A mesh's own sheets, at the one point their names are
-				// readable — they live inside the mesh file, so the demand pass
+				// readable - they live inside the mesh file, so the demand pass
 				// cannot see them.
 				for (const engine::assets::Submesh &submesh : mesh.Submeshes) {
 					if (!submesh.Texture.empty()) {
@@ -339,14 +347,14 @@ namespace studio {
 					ContentMeshes++;
 
 					// **Every part naming it, now that its shape is known.** A
-					// `MeshId` can be set long before the geometry arrives — that
-					// is the ordinary case, since naming it is what fetches it —
+					// `MeshId` can be set long before the geometry arrives - that
+					// is the ordinary case, since naming it is what fetches it -
 					// so the fit cannot happen at assignment alone.
 					FitPartsToMesh(name, engine::core::Vector3{(mesh.Maximum - mesh.Minimum) * 0.5f});
 
 					// **The sheets its submeshes name, recorded where they are
 					// readable.** They live inside the mesh file, so this is the
-					// one point anything can learn them — and without them a
+					// one point anything can learn them - and without them a
 					// script that wants to swap a model's texture has no way to
 					// find out what it is wearing or what to put back. Duplicates
 					// and order are kept: which run wears which is a fact, and
@@ -358,7 +366,7 @@ namespace studio {
 					}
 
 					// **Triangle counts are world data**, so
-					// `MeshPart.TrianglesCount` answers in an edited world too —
+					// `MeshPart.TrianglesCount` answers in an edited world too -
 					// which is how somebody checks a mesh actually arrived.
 					const auto triangles = static_cast<uint32_t>(mesh.Indices.size() / 3);
 					EachOpenWorld([&name, triangles, &sheets](engine::ecs::Store &store) {
@@ -385,12 +393,12 @@ namespace studio {
 				// `raster` or `dispatch` node names them.
 				//
 				// **Only what a runtime can read.** GLSL routes to this kind too
-				// — what somebody publishes is what they wrote — and
+				// - what somebody publishes is what they wrote - and
 				// `IsRuntimeReadable` is what says it has not been baked yet.
 				// TODO(render-pipeline): `Renderer.AddShader(name, asset->Bytes)`
 				// went here, inside this condition. The delivery is kept and
 				// still counted, because `AssetKind::Shader` is part of the asset
-				// pipeline rather than the render one — shaders publish, fetch
+				// pipeline rather than the render one - shaders publish, fetch
 				// and arrive exactly as before. What is missing is the renderer
 				// end: something has to take the bytes and let a node name them.
 				if (engine::assets::IsRuntimeReadable(asset->Name)) {
@@ -421,7 +429,7 @@ namespace studio {
 		}
 		ContentPending.resize(kept);
 
-		// Appended after the walk, never during it — a mesh names its own
+		// Appended after the walk, never during it - a mesh names its own
 		// sheets while this vector is being drained, and pushing to a container
 		// being iterated is what cost the client a whole debugging round.
 		ContentPending.insert(ContentPending.end(), ContentIssued.begin(), ContentIssued.end());
@@ -431,7 +439,7 @@ namespace studio {
 		// where it used to be said exactly once.** An editor is not a client: a
 		// client names its content at load and then stops, so one line at the end
 		// of the first drain described the whole session. An editor's whole job is
-		// to name content *later* — somebody picks a mesh, and that is the moment
+		// to name content *later* - somebody picks a mesh, and that is the moment
 		// they want to know whether it arrived.
 		//
 		// The once-only version reported `0 mesh(es)` on the frame the catalogue
@@ -441,7 +449,7 @@ namespace studio {
 		// changed on screen and nothing was written down.
 		//
 		// **Gated on the counts rather than on the queue**, so a pump that drains
-		// nothing new says nothing — otherwise this would be a line per frame for
+		// nothing new says nothing - otherwise this would be a line per frame for
 		// the life of the editor.
 		const size_t total = ContentMeshes + ContentTextures + ContentMaterials;
 		if (ContentPending.empty() && total != ContentReportedTotal) {
@@ -467,8 +475,8 @@ namespace studio {
 																		 engine::scene::Visual &visual,
 																		 engine::scene::Bounds &bounds) {
 				// **Only when the mesh changed, which is what `Visual::Fitted`
-				// records.** This runs whenever geometry arrives — a republish,
-				// a reopened place, another part pulling the same mesh in — and
+				// records.** This runs whenever geometry arrives - a republish,
+				// a reopened place, another part pulling the same mesh in - and
 				// without the guard every one of those would reshape a box
 				// somebody had deliberately squashed. A scene that rearranges
 				// itself on load is the worst kind of surprise, because nothing
@@ -482,7 +490,7 @@ namespace studio {
 				// rule, and both halves are load-bearing:
 				//
 				//   * the shape has to come from the mesh, because `Size` is a
-				//     box the mesh is *stretched* into — a character in a cubic
+				//     box the mesh is *stretched* into - a character in a cubic
 				//     box is a character squashed into a cube;
 				//   * the scale has to come from the part, because somebody
 				//     swapping a bad mesh for a fixed one wants the thing to
@@ -518,40 +526,40 @@ namespace studio {
 
 		// **Gathered first, applied second.** `MeshExtentOf` is the renderer's
 		// and `Each` is inside `Universe::Enter`, so asking the renderer from
-		// within the walk would be reaching out of a scoped store — the rule at
+		// within the walk would be reaching out of a scoped store - the rule at
 		// the top of `Editor.hpp`. It is also a walk that writes, and the names
 		// are what decide whether anything is written at all.
 		std::vector<engine::core::Name> waiting;
 
 		EachOpenWorld([&waiting](engine::ecs::Store &store) {
-			store.Each<const engine::scene::Visual>([&waiting, &store](
-														engine::ecs::Entity, const engine::scene::Visual &visual
-													) {
-				if (!visual.Mesh.IsValid()) {
-					return;
-				}
+			store.Each<const engine::scene::Visual>(
+				[&waiting, &store](engine::ecs::Entity, const engine::scene::Visual &visual) {
+					if (!visual.Mesh.IsValid()) {
+						return;
+					}
 
-				// **Two reasons a mesh is pending, and the second is not the
-				// first.** A part that has never been fitted needs the shape; a
-				// world whose catalogue has never heard of the mesh needs the
-				// facts. They come apart when a world is loaded from a file —
-				// `Visual::Fitted` is saved with the part, so a reopened place
-				// is fully fitted and knows no triangle counts at all.
-				const bool unfitted = visual.Fitted != visual.Mesh;
-				const bool unknown = engine::scene::TrianglesOf(store, visual.Mesh) == 0;
-				if (!unfitted && !unknown) {
-					return;
-				}
+					// **Two reasons a mesh is pending, and the second is not the
+					// first.** A part that has never been fitted needs the shape; a
+					// world whose catalogue has never heard of the mesh needs the
+					// facts. They come apart when a world is loaded from a file -
+					// `Visual::Fitted` is saved with the part, so a reopened place
+					// is fully fitted and knows no triangle counts at all.
+					const bool unfitted = visual.Fitted != visual.Mesh;
+					const bool unknown = engine::scene::TrianglesOf(store, visual.Mesh) == 0;
+					if (!unfitted && !unknown) {
+						return;
+					}
 
-				if (std::find(waiting.begin(), waiting.end(), visual.Mesh) == waiting.end()) {
-					waiting.push_back(visual.Mesh);
+					if (std::find(waiting.begin(), waiting.end(), visual.Mesh) == waiting.end()) {
+						waiting.push_back(visual.Mesh);
+					}
 				}
-			});
+			);
 		});
 
 		for (const engine::core::Name &mesh : waiting) {
 			// **Only a mesh the renderer holds.** A part naming one that has not
-			// arrived — or never will — is left alone rather than fitted to
+			// arrived - or never will - is left alone rather than fitted to
 			// nothing, which is what keeps a misspelled `MeshId` a fallback cube
 			// instead of a part collapsed to zero.
 			engine::core::Vector3 extent;
@@ -569,7 +577,7 @@ namespace studio {
 			// never to update.
 			//
 			// Guarded on the count rather than written unconditionally, so this
-			// is a lookup per pending mesh rather than a write per frame — and
+			// is a lookup per pending mesh rather than a write per frame - and
 			// so a republish, which *does* go through the intake path, is not
 			// overwritten here with what this cached.
 			const auto known = ContentMeshFacts.find(mesh.Id());
@@ -595,7 +603,7 @@ namespace studio {
 		// **Runtime-readable only.** A `.pmx` and a `.amesh` are both
 		// `AssetKind::Mesh` and only the second is something the runtime decodes,
 		// so offering both would put names in a scene's list that can be named,
-		// fetched and then refused — a cell drawing the fallback cube with a
+		// fetched and then refused - a cell drawing the fallback cube with a
 		// perfectly good string behind it. `assets::IsRuntimeReadable` is the same
 		// filter the asset picker applies, and a second opinion here would be a
 		// script disagreeing with the editor about what works.
@@ -619,7 +627,7 @@ namespace studio {
 		// that moment and routinely: pressing Play mints a server world and a
 		// client replica, and both run scripts. Offering once left those two with
 		// an empty list, so the mesh grid placed its six built-ins during editing
-		// and stayed at six through the whole play session — which reads exactly
+		// and stayed at six through the whole play session - which reads exactly
 		// like a store with nothing in it.
 		//
 		// **Guarded on the count, so the common case is a comparison.** The list
@@ -637,8 +645,8 @@ namespace studio {
 
 	void Editor::RequestShownContent() {
 		// **Bounded per pump, which is the whole of what "asynchronously" can
-		// mean here.** `delivery/Client.hpp` forbids a background thread — a
-		// completion arriving at a moment scheduling chose would be a desync —
+		// mean here.** `delivery/Client.hpp` forbids a background thread - a
+		// completion arriving at a moment scheduling chose would be a desync -
 		// so `Pump` does its work on this thread, and the unit it fetches is a
 		// *bundle*. Issuing five hundred requests at once therefore asks for
 		// five hundred bundles' worth of decompression before the next frame.
@@ -646,7 +654,7 @@ namespace studio {
 		// Issuing a few per pump turns the same load into content appearing over
 		// a second or two, which is what an editor opening a large place should
 		// look like. The collection is idempotent, so what is not issued this
-		// pump is simply issued on the next — there is no queue to keep in step.
+		// pump is simply issued on the next - there is no queue to keep in step.
 		std::vector<engine::core::Name> wanted;
 		EachOpenWorld([&wanted](engine::ecs::Store &store) { client::CollectWantedContent(store, wanted); });
 
@@ -667,22 +675,34 @@ namespace studio {
 		// `assets::MakeBuiltin` and registered by `MeshTable::Initialise` before
 		// any delivery client exists, so they resolve in every process with no
 		// store at all. No manifest names one, so a request for it can only come
-		// back as a miss — a warning per built-in in the log of anybody using
+		// back as a miss - a warning per built-in in the log of anybody using
 		// the picker's default rows, describing content that is already there.
 		if (engine::assets::BuiltinMesh ignored; engine::assets::BuiltinFromName(asset.Text(), ignored)) {
 			return false;
 		}
 
-		// Asked once, whatever happened to it — a misspelled name must not
+		// Asked once, whatever happened to it - a misspelled name must not
 		// issue a request per frame for the life of the session.
 		if (!ContentClient || !asset.IsValid() || !ContentAsked.insert(asset.Id()).second) {
 			return false;
 		}
+
+		// **The same door the shipped client has**, and it is here rather than
+		// only there because a rule that holds in a game binary and not in the
+		// editor is one an author meets for the first time after shipping.
+		if (const engine::assets::ContentForm form = engine::assets::FormOfName(asset.Text());
+			!engine::assets::ContentPolicy::Process(engine::assets::ContentVerb::Handle).Allows(form)) {
+			ContentStatus = "not asking for " + std::string(asset.Text()) + " - " +
+							engine::assets::Describe(form) + " content is turned off";
+			ENGINE_INFO("content: {}", ContentStatus);
+			return false;
+		}
+
 		ContentIssued.push_back(ContentClient->Request(asset.Text()));
 
 		// **Marked before the answer, which is the whole point.** Until this
 		// request finishes, a part naming this sheet draws as the default
-		// material rather than as the purple marker — so a scene load looks like
+		// material rather than as the purple marker - so a scene load looks like
 		// untextured parts becoming textured instead of a purple shimmer. See
 		// `render::ChooseTexture`; the unmark is in `DrainContent`, on the
 		// request finishing rather than on it succeeding.
@@ -692,12 +712,12 @@ namespace studio {
 
 	void Editor::UploadStore() {
 		if (!ContentUploads) {
-			ContentStatus = "no write source — give a row the write role and an ingest key";
+			ContentStatus = "no write source - give a row the write role and an ingest key";
 			return;
 		}
 
 		// **`raw/` and not `processed/`.** What an origin's inbox wants is
-		// content, and `processed/` is a *published* store — chunks under hash
+		// content, and `processed/` is a *published* store - chunks under hash
 		// names plus a signed manifest, which would arrive as several thousand
 		// unrecognisable files. The far end publishes what it receives; sending
 		// it something already published would be publishing twice.
@@ -705,7 +725,7 @@ namespace studio {
 
 		std::error_code failure;
 		if (!std::filesystem::is_directory(paths.Raw, failure)) {
-			ContentStatus = "nothing to upload — the content store is empty";
+			ContentStatus = "nothing to upload - the content store is empty";
 			return;
 		}
 
@@ -732,7 +752,7 @@ namespace studio {
 
 	void Editor::DownloadAsset(const std::string &name) {
 		if (!ContentClient) {
-			ContentStatus = "delivery is not configured — see the Content page in Preferences";
+			ContentStatus = "delivery is not configured - see the Content page in Preferences";
 			return;
 		}
 		if (name.empty()) {
@@ -781,13 +801,13 @@ namespace studio {
 							reinterpret_cast<const char *>(asset->Bytes.data()),
 							static_cast<std::streamsize>(asset->Bytes.size())
 						);
-						ContentStatus = out.good() ? pending.Name + " — " + Readable(asset->Bytes.size()) +
+						ContentStatus = out.good() ? pending.Name + " - " + Readable(asset->Bytes.size()) +
 														 " into the store"
-												   : pending.Name + " — could not be written";
+												   : pending.Name + " - could not be written";
 					}
 				}
 			} else {
-				ContentStatus = pending.Name + " — every source was tried and none answered";
+				ContentStatus = pending.Name + " - every source was tried and none answered";
 			}
 
 			Downloads.erase(Downloads.begin() + static_cast<ptrdiff_t>(index));
@@ -834,7 +854,7 @@ namespace studio {
 		}
 
 		if (rates.WindowSeconds <= 0.0) {
-			ImGui::TextDisabled("no window yet — rates appear after a second of samples");
+			ImGui::TextDisabled("no window yet - rates appear after a second of samples");
 		}
 
 		// --- downloading ------------------------------------------------------
@@ -844,7 +864,7 @@ namespace studio {
 		if (!ContentClient) {
 			ImGui::TextColored(
 				ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled),
-				"not configured — Preferences > Content needs a publisher key and a readable source"
+				"not configured - Preferences > Content needs a publisher key and a readable source"
 			);
 		} else {
 			const engine::delivery::DeliveryCounters &counters = ContentClient->Counters();
@@ -859,11 +879,11 @@ namespace studio {
 					"assets served without touching a source");
 				Row("Cache misses", std::to_string(counters.CacheMisses));
 				Row("Bundles", std::to_string(counters.Bundles));
-				Row("Transferred", Readable(counters.TransferredBytes), "as it travelled — compressed");
+				Row("Transferred", Readable(counters.TransferredBytes), "as it travelled - compressed");
 				Row("Expanded", Readable(counters.ExpandedBytes), "what those became");
 
 				// **The pair is what answers 'did this travel compressed'**, and
-				// it is a question about the wire — so it is measured at it
+				// it is a question about the wire - so it is measured at it
 				// rather than inferred from a setting. See `DeliveryCounters`.
 				if (counters.TransferredBytes > 0) {
 					char ratio[32];
@@ -909,7 +929,7 @@ namespace studio {
 			ImGui::EndDisabled();
 
 			for (const PendingDownload &pending : Downloads) {
-				ImGui::BulletText("%s — waiting", pending.Name.c_str());
+				ImGui::BulletText("%s - waiting", pending.Name.c_str());
 			}
 		}
 
@@ -920,7 +940,7 @@ namespace studio {
 		if (!ContentUploads) {
 			ImGui::TextColored(
 				ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled),
-				"no write source — give a row the write role and an ingest key in Preferences > Content"
+				"no write source - give a row the write role and an ingest key in Preferences > Content"
 			);
 		} else {
 			const engine::delivery::UploadCounters &counters = ContentUploads->Counters();
@@ -943,7 +963,7 @@ namespace studio {
 			}
 
 			for (const engine::delivery::Source &target : ContentUploads->Destinations()) {
-				ImGui::BulletText("%s — %s", target.Name.c_str(), target.Location.c_str());
+				ImGui::BulletText("%s - %s", target.Name.c_str(), target.Location.c_str());
 			}
 
 			ImGui::BeginDisabled(ContentUploads->Remaining() > 0);

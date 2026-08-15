@@ -19,7 +19,7 @@ namespace studio {
 		// happens is the editor's release rather than a component encoding.
 		constexpr uint32_t STUDIO_PROTOCOL = 1;
 
-		// Hex when it is exactly that, words otherwise — `cdn::Stream` makes
+		// Hex when it is exactly that, words otherwise - `cdn::Stream` makes
 		// the same choice for the same reason.
 		std::optional<network::SessionKey> ReadSecret(const std::string &secret) {
 			if (secret.empty()) {
@@ -40,7 +40,7 @@ namespace studio {
 
 	bool TeamCreate::Host(const TeamCreateSettings &settings, std::string &error) {
 		// The stream first, because the port it binds is the port the
-		// announcement has to carry — `settings.Port` of zero binds an
+		// announcement has to carry - `settings.Port` of zero binds an
 		// ephemeral one, and an advert naming zero sends every guest nowhere.
 		engine::net::TransportSettings socket;
 		Socket = engine::net::MakeUdpTransport(settings.Port, socket);
@@ -163,7 +163,7 @@ namespace studio {
 		}
 
 		if (announce && !Announcing) {
-			error = "nothing could be announced — see the fault";
+			error = "nothing could be announced - see the fault";
 			// Not a failure to open. The rendezvous half may still be running,
 			// and an editor that refused to watch because it could not
 			// broadcast would be refusing over the wrong half.
@@ -252,7 +252,7 @@ namespace studio {
 				if (!Team->Invitation().empty()) {
 					ImGui::SameLine();
 					// The key is the invitation. It has to be copyable or a
-					// private session is a session of one — `SessionKey::Text`
+					// private session is a session of one - `SessionKey::Text`
 					// carries that argument in full.
 					if (ImGui::SmallButton("Copy key")) {
 						ImGui::SetClipboardText(Team->Invitation().c_str());
@@ -295,7 +295,7 @@ namespace studio {
 				// The port a peer would connect to is the editor's hosted
 				// server, which only exists while Play is running. Zero when it
 				// is not, and an announcement carrying zero is one nothing can
-				// act on — so it is reported rather than hidden.
+				// act on - so it is reported rather than hidden.
 				offering.Port = 0;
 
 				std::string trouble;
@@ -413,7 +413,7 @@ namespace studio {
 
 		ImGui::TextDisabled(
 			"Edits replicate; undo does not. Ctrl+Z reverses what you did,\n"
-			"never what somebody else did. Two people on one model take turns —\n"
+			"never what somebody else did. Two people on one model take turns -\n"
 			"whoever asked first goes first, and nobody's work is lost."
 		);
 

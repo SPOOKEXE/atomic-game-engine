@@ -1,3 +1,5 @@
+#include "ShaderBinary.hpp"
+
 #include <engine/core/Log.hpp>
 #include <engine/render/InterfacePass.hpp>
 #include <engine/resources/Shaders.hpp>
@@ -12,8 +14,8 @@
 namespace engine::render {
 
 	namespace {
-		std::vector<uint8_t> ReadShader(std::string_view name) {
-			const auto path = resources::Shader(name);
+		std::vector<uint8_t> ReadShader(std::string_view name, resources::ShaderForm form) {
+			const auto path = resources::Shader(name, form);
 			std::ifstream file(path, std::ios::binary | std::ios::ate);
 			if (!file) {
 				ENGINE_ERROR("interface pass: shader not found: {}", path.string());
@@ -36,7 +38,14 @@ namespace engine::render {
 			uint32_t samplers,
 			uint32_t uniforms
 		) {
-			const std::vector<uint8_t> code = ReadShader(name);
+			// Asked of the device rather than assumed, the same way
+			// `Renderer::LoadShader` asks. This pass creates its shaders from a
+			// device somebody else made, so it has nowhere to carry the answer
+			// and asks each time - twice per initialisation, against a string
+			// compare inside SDL.
+			const ShaderBinary binary = ShaderBinaryFor(device);
+
+			const std::vector<uint8_t> code = ReadShader(name, binary.Form);
 			if (code.empty()) {
 				return nullptr;
 			}
@@ -44,8 +53,8 @@ namespace engine::render {
 			SDL_GPUShaderCreateInfo info{};
 			info.code = code.data();
 			info.code_size = code.size();
-			info.entrypoint = "main";
-			info.format = SDL_GPU_SHADERFORMAT_SPIRV;
+			info.entrypoint = binary.EntryPoint;
+			info.format = binary.Format;
 			info.stage = stage;
 			info.num_samplers = samplers;
 			info.num_uniform_buffers = uniforms;
@@ -74,7 +83,7 @@ namespace engine::render {
 		// **The atlas first, because a pipeline with nothing to sample is a
 		// pipeline that draws nothing.** A failure here is not fatal: the
 		// interface still draws its rectangles and images, and the missing text
-		// is visible as missing — `GlyphAtlas::Build` says why.
+		// is visible as missing - `GlyphAtlas::Build` says why.
 		Glyphs.Build(pixelSize);
 
 		SDL_GPUShader *vertex = Load(gpu, "interface.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
@@ -147,7 +156,7 @@ namespace engine::render {
 
 		// **No depth and no culling.** The interface is drawn back to front in
 		// the order the compile produced, so a depth test would hide a panel
-		// behind a wall — and a quad wound the other way is invisible under
+		// behind a wall - and a quad wound the other way is invisible under
 		// culling, which looks exactly like an element that failed to lay out.
 		info.target_info.has_depth_stencil_target = false;
 		info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
@@ -171,7 +180,7 @@ namespace engine::render {
 		sampler.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
 
 		// Clamped, so a UV a rounding error pushed past the edge samples the
-		// border rather than wrapping to the far side of the sheet — which
+		// border rather than wrapping to the far side of the sheet - which
 		// would draw an unrelated glyph.
 		sampler.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
 		sampler.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
@@ -323,7 +332,7 @@ namespace engine::render {
 
 		// **Grown and never shrunk.** An interface that opened a large panel
 		// once and closed it would otherwise reallocate on the frame it opened
-		// again — and a buffer reallocation mid-frame is a stall the panel gets
+		// again - and a buffer reallocation mid-frame is a stall the panel gets
 		// blamed for.
 		if (VertexBuffer == nullptr || VertexCapacity < vertexBytes) {
 			if (VertexBuffer != nullptr) {
@@ -372,7 +381,7 @@ namespace engine::render {
 		// **Cycled, because this buffer was written last frame and may still be
 		// in flight.** Without it the copy would overwrite bytes a queued frame
 		// has not read yet, which draws last frame's interface at this frame's
-		// positions — a tearing that only appears under load.
+		// positions - a tearing that only appears under load.
 		if (auto *mapped = static_cast<uint8_t *>(SDL_MapGPUTransferBuffer(gpu, staging, true))) {
 			std::memcpy(mapped, Mesh.Vertices().data(), vertexBytes);
 			std::memcpy(mapped + vertexBytes, Mesh.Indices().data(), indexBytes);
@@ -438,8 +447,8 @@ namespace engine::render {
 		for (const InterfaceBatch &batch : Mesh.Batches()) {
 			SDL_GPUTexture *texture = atlas;
 
-			// The identity, so a rectangle and a glyph — which sample the atlas
-			// and are most of a frame — pay one uniform push and no arithmetic.
+			// The identity, so a rectangle and a glyph - which sample the atlas
+			// and are most of a frame - pay one uniform push and no arithmetic.
 			FlipbookCell cell;
 
 			if (batch.Image.IsValid() && Images) {
@@ -479,7 +488,7 @@ namespace engine::render {
 				static_cast<SDL_GPUCommandBuffer *>(commandBuffer), 0, flipbook, sizeof(flipbook)
 			);
 
-			// The scissor, in pixels, clamped to the target — a negative origin
+			// The scissor, in pixels, clamped to the target - a negative origin
 			// or a width past the edge is a validation error on some backends
 			// and silently ignored on others, which is the worst pair.
 			SDL_Rect scissor{};

@@ -5,7 +5,7 @@
 // **The list is shared and the callables are not.** A Luau connection holds a
 // registry ref and a JavaScript one holds a `JSValue`; neither type can appear
 // here, because `script/AGENTS.md` keeps every VM type inside its own source
-// file. What *can* be shared — and has to be — is everything about ordering:
+// file. What *can* be shared - and has to be - is everything about ordering:
 // which connection fires first, what a `:Disconnect` during a fire does, and
 // what a connection id is. Those are the rules a recording depends on, and two
 // hand-written copies of them would agree until the first time one was fixed.
@@ -26,6 +26,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -66,7 +67,7 @@ namespace engine::script {
 		//
 		// **The one signal here that is not queued, and the only one that
 		// cannot be.** Everything else on this list is recorded and delivered
-		// at the next barrier — `Changes.hpp` sets out why a signal must not
+		// at the next barrier - `Changes.hpp` sets out why a signal must not
 		// fire from inside a write. This one's whole contract is that the
 		// handler is called *while the thing is still there*, which a queue
 		// drained a tick later cannot offer, because by then it has gone.
@@ -87,7 +88,7 @@ namespace engine::script {
 		//
 		// **These are the tree's signals wearing the name a game expects.** A
 		// `Player` is an instance parented under `Players`, so arriving and
-		// leaving are already a `ChildAdded` and a removal — what these add is
+		// leaving are already a `ChildAdded` and a removal - what these add is
 		// the filter, which is not cosmetic: `Players` may hold something that
 		// is not a player, and a handler that had to test the class itself is a
 		// handler every game writes and one of them forgets.
@@ -97,16 +98,44 @@ namespace engine::script {
 		// other tree change. `PlayerRemoving` is dispatched synchronously from
 		// `Store::OnDescendantRemoving`, before anything is unlinked, for the
 		// reason `DescendantRemoving` is: the whole point of the signal is that
-		// the player is still there when the handler runs — a game saving
+		// the player is still there when the handler runs - a game saving
 		// somebody's progress on the way out has nothing to save otherwise.
 		PlayerAdded,
 		PlayerRemoving,
+
+		// `player.CharacterAdded` and `player.CharacterRemoving`. The subject is
+		// the `Player`, and the handler is called with the character model.
+		//
+		// **Not the tree's, unlike the pair above them.** A player arriving *is*
+		// a reparent, so `PlayerAdded` is `ChildAdded` with a filter; a character
+		// is a `Model` under `Workspace` and the link to its player is a
+		// component, so nothing in the tree changes shape when somebody
+		// respawns. What records it is `scene::SetPlayerCharacter` - the one
+		// door every assignment goes through - and `scene::TakeCharacterChanges`
+		// is what both pumps drain.
+		//
+		// **Two different mechanisms, matching the pair above them.**
+		// `CharacterAdded` is recorded by `scene::SetPlayerCharacter` and
+		// delivered at the barrier like every other arrival. `CharacterRemoving`
+		// rides `Store::OnDescendantRemoving` instead, for the reason
+		// `PlayerRemoving` does: dying in this engine *is* the model being
+		// destroyed, so a queue drained a tick later would hand a handler an
+		// instance it cannot read a single property off.
+		//
+		// The queue still records removals, and the pump fires only the ones
+		// whose model is **still alive** - which is exactly the case the hook did
+		// not cover: `player.Character = nil` releases a body without destroying
+		// it. The two are disjoint, so nothing fires twice.
+		//
+		// @since v0.17
+		CharacterAdded,
+		CharacterRemoving,
 
 		// --- the 2D tree's input, from `gui::Router` ------------------------
 		//
 		// **The six below are one mechanism and it is not the tree's.** Every
 		// signal above is recorded by the store and fanned out at the barrier;
-		// these arrive from outside the world entirely — a host polls a pointer,
+		// these arrive from outside the world entirely - a host polls a pointer,
 		// `gui::Router` decides what that means, and the events are handed to
 		// `Runtime::DeliverGuiEvents`. Nothing in `ecs` knows they happened.
 		//
@@ -120,28 +149,101 @@ namespace engine::script {
 		//
 		// The subject is the element, for all six.
 
-		// `guiObject.Activated` — pressed and released on the same element.
+		// `guiObject.Activated` - pressed and released on the same element.
 		// The one nearly every script connects to.
 		GuiActivated,
 
-		// `guiObject.InputBegan` — the button went down over it.
+		// `guiObject.InputBegan` - the button went down over it.
 		GuiInputBegan,
 
-		// `guiObject.InputEnded` — the button came up. Fired on the element the
+		// `guiObject.InputEnded` - the button came up. Fired on the element the
 		// press *began* on, which is `gui::Router`'s rule and is what makes a
 		// drag off a button and back one interaction rather than two.
 		GuiInputEnded,
 
-		// `guiObject.MouseEnter` — the pointer entered its rectangle.
+		// `guiObject.MouseEnter` - the pointer entered its rectangle.
 		GuiMouseEnter,
 
-		// `guiObject.MouseLeave` — it left. Fired before the matching
+		// `guiObject.MouseLeave` - it left. Fired before the matching
 		// `MouseEnter` on whatever it moved onto, so a handler that puts
 		// something back on leave runs before the one reacting to the arrival.
 		GuiMouseLeave,
 
-		// `guiObject.MouseMoved` — it moved while over the element.
+		// `guiObject.MouseMoved` - it moved while over the element.
 		GuiMouseMoved,
+
+		// `textBox.Focused` - a press landed on it and the keyboard is now its.
+		//
+		// **The only pair here that is about the keyboard rather than the
+		// pointer, and it still arrives from the router**, because a press is
+		// what decides where typing goes. `gui::EventKind::Focused` is the
+		// event; `GuiServiceState::FocusedTextBox` is where the fact rests, and
+		// `UserInputService:GetFocusedTextBox` reads it there rather than
+		// counting these.
+		//
+		// @since v0.15
+		GuiFocused,
+
+		// `textBox.FocusLost` - a press landed somewhere else.
+		//
+		// **The handler is called with `enterPressed` and nothing after it.**
+		// Roblox passes a second argument, the `InputObject` that took the focus
+		// away, and this engine has no such object to pass: the router deals in
+		// `gui::GuiEvent` and `script::InputReport` is built by the *input* pump
+		// from a different frame's state, so anything handed over here would be
+		// a value made up at the call site.
+		//
+		// **`enterPressed` is `GuiEvent::Entered`, and the two producers are what
+		// make it worth an argument.** A press landing elsewhere releases a box
+		// through `gui::Router` and answers false; Return releases one through
+		// `gui::Type` and answers true, which is how a script tells a submitted
+		// field from an abandoned one.
+		//
+		// @since v0.15
+		GuiFocusLost,
+
+		// `CrossWorldService:OpenChannel(name)` - a payload another world in this
+		// universe addressed to that channel on this one.
+		//
+		// **No subject, like `Heartbeat` and unlike everything between them.** A
+		// channel message arrives at the world rather than at any instance in it,
+		// so the subject is `NULL_ENTITY`.
+		//
+		// **The channel is the connection's `Property`**, which is what makes one
+		// kind serve every channel a world opens. It is
+		// `GetPropertyChangedSignal`'s mechanism used for a name the engine never
+		// declared, exactly as `GetAttributeChangedSignal` uses it - and it is why
+		// there is no signal *field* on the service: a field is one list, and two
+		// subsystems in one world listening on two channels need two.
+		//
+		// **Fired at the deliveries barrier**, which is the first of the four
+		// stages `LuauRuntime::Heartbeat` runs - a message the barrier applied
+		// belongs to the tick that is starting, so a handler sees it before
+		// anything that beat moves.
+		//
+		// @since v0.15
+		CrossWorldMessage,
+
+		// `tween.Completed` - a tween reached the end of its last pass.
+		//
+		// **The subject is the tween's own entity, which is what a tween is.**
+		// `Tweens.hpp` argues that at length; what this list needs from it is
+		// that the subject is not the instance being animated - two tweens
+		// driving one part are two signals, and a subject shared between them
+		// would be one.
+		//
+		// **Fired at the tween barrier rather than inside the step.** A handler
+		// may cancel the tween it was called about or start another, and
+		// `TweenTable::Advance` is mid-walk of the list that names it - the same
+		// argument `Changes.hpp` makes for not firing from inside a write.
+		//
+		// **The handler is called with nothing.** Roblox passes a
+		// `PlaybackState`, this engine has no such enum, and an argument
+		// invented here would have to change the day one arrives - the same
+		// trade `GuiActivated` is on a few lines up.
+		//
+		// @since v0.16
+		TweenCompleted,
 	};
 
 	// Whether a tree change is a player arriving in or leaving the `Players`
@@ -155,7 +257,7 @@ namespace engine::script {
 	// and one of them forgets.
 	//
 	// By class rather than by `scene::PlayersOf`, which is a scan of every root
-	// in the world — this runs once per tree change.
+	// in the world - this runs once per tree change.
 	//
 	// @param store    The world.
 	// @param container The parent gaining or losing the instance.
@@ -163,6 +265,44 @@ namespace engine::script {
 	// @return `true` when a player joined or left.
 	// @since v0.13
 	bool IsPlayerOfService(const ecs::Store &store, ecs::Entity container, ecs::Entity instance);
+
+	// The signals `LuauInstances.cpp`'s `InstanceIndex` answers from its branch
+	// chain.
+	//
+	// **Declared here rather than in `LuauBindings.hpp` because nothing in the
+	// signature is Luau's.** `Vocabulary.cpp` is the caller, it describes both
+	// languages, and reaching this through the Luau umbrella header meant a file
+	// that opens no VM was compiled against `<lua.h>` for one `vector` of names.
+	//
+	// **Here because a branch cannot be walked.** Everything else the editor
+	// offers is read back out of a live VM - the globals from its global table,
+	// the instance methods from the registry table `OpenInstances` fills - and a
+	// signal is the one member that exists only as a string comparison. See
+	// `script::InstanceSignals`, which is the public face of this.
+	//
+	// @return The signal names, in the order the chain tests them.
+	std::vector<std::string_view> LuauInstanceSignalNames();
+
+	// Which player is about to lose the body being removed, or a null entity.
+	//
+	// **`IsPlayerOfService`'s shape for the other synchronous signal**, and the
+	// gate on `container` is what makes it fire once. `OnDescendantRemoving`
+	// announces a leaving instance to *every* ancestor above it, so a test that
+	// only asked "is this somebody's character" would fire `CharacterRemoving`
+	// once per level of the tree above `Workspace`.
+	//
+	// **Null for an NPC and for a body already released**, both through
+	// `scene::PlayerOf`, which reads `Character::Owner` and checks it is alive.
+	// The second is what keeps this disjoint from the queued half: a release
+	// clears the owner, so a model destroyed after being released is nobody's
+	// here and its removal was already reported at the barrier.
+	//
+	// @param store     The world.
+	// @param container The ancestor being told.
+	// @param instance  The instance leaving.
+	// @return The `Player`, or `ecs::NULL_ENTITY`.
+	// @since v0.17
+	ecs::Entity PlayerLosingCharacter(const ecs::Store &store, ecs::Entity container, ecs::Entity instance);
 
 	// A callable, as the VM that owns it names one.
 	//
@@ -174,8 +314,8 @@ namespace engine::script {
 	//
 	// Monotonic and never reused, so a stale handle disconnects nothing rather
 	// than disconnecting whatever took its slot. Reuse would make a
-	// double-`:Disconnect` — which is ordinary in real code, because a cleanup
-	// path runs whether or not something else already ran — silently kill an
+	// double-`:Disconnect` - which is ordinary in real code, because a cleanup
+	// path runs whether or not something else already ran - silently kill an
 	// unrelated connection.
 	using ConnectionId = uint64_t;
 
@@ -203,7 +343,7 @@ namespace engine::script {
 		// dead entries are compacted once the fire finishes.
 		bool Live = true;
 
-		// Whether it retires after one call — `:Once`.
+		// Whether it retires after one call - `:Once`.
 		//
 		// A flag here rather than a wrapper closure in each VM. A wrapper would
 		// have to disconnect itself from inside its own call, which is the one
@@ -274,7 +414,7 @@ namespace engine::script {
 		// **Insertion order, not hash order**, and that is the whole reason this
 		// is not a bare walk of the map. `.Changed` fires per instance, so the
 		// order instances are visited in is the order a script sees its world
-		// change — and a hash walk would make that depend on pointer values.
+		// change - and a hash walk would make that depend on pointer values.
 		//
 		// @param kind Which signal.
 		// @param body Called with each subject.

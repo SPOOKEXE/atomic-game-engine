@@ -28,7 +28,7 @@ namespace studio {
 
 	// No panel. Also what `ChooseViewportFor` says when one has to be made.
 	//
-	// **Not zero, because zero is the main viewport** — the one index in this
+	// **Not zero, because zero is the main viewport** - the one index in this
 	// program that is a real panel and reads as "none" to anybody who has met a
 	// null handle first.
 	//
@@ -59,7 +59,7 @@ namespace studio {
 	// clicks a scene.
 	//
 	// @param world     The world wanted. An invalid id has no panel.
-	// @param mainWorld What the main panel draws — the active scene.
+	// @param mainWorld What the main panel draws - the active scene.
 	// @param mainOpen  Whether the main panel is on screen.
 	// @param panels    The extras, in index order. Index `i` here is panel
 	//                  `i + 1`, which is the numbering `Editor::ExtraAt` uses.

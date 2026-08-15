@@ -15,7 +15,7 @@ namespace client {
 		// `ViewChannel`'s payload is opaque bytes precisely so that the two
 		// ends can agree on a layout the layer between them never learns. The
 		// instances are `scene::DrawInstance` now, which is the `shared` type a
-		// host of any tier can write — but a view crossing a *process* boundary
+		// host of any tier can write - but a view crossing a *process* boundary
 		// still needs a real encoding rather than this memcpy, because the
 		// `core::Name`s inside a draw instance are process-local ids.
 		struct Prefix {
@@ -33,7 +33,7 @@ namespace client {
 		//
 		// **A step rather than the exact size**, because reserving precisely
 		// what this frame needed would allocate again on the next frame that
-		// added one instance — which is the per-frame allocation the channel
+		// added one instance - which is the per-frame allocation the channel
 		// was reserved up front to avoid. 512 is chosen rather than measured:
 		// large enough that a world settling at some size stops growing within
 		// a handful of frames, small enough that overshooting costs a fraction
@@ -84,7 +84,7 @@ namespace client {
 		const size_t bytes = PayloadFor(list.size());
 		if (bytes > slot->Channel->MaximumPayload()) {
 			// **Grown rather than refused.** The size passed to `Track` is a
-			// starting guess — on the client it is `--entities`, which is the
+			// starting guess - on the client it is `--entities`, which is the
 			// demo scene's cube count and says nothing about what a script
 			// builds. A world that outgrew it used to stop being drawn
 			// entirely, which reads as a rendering bug and is not one: the
@@ -187,7 +187,7 @@ namespace client {
 			}
 
 			// Placed, because two worlds' coordinates do not mean the same
-			// thing — nothing says they should, and overlaying them would draw
+			// thing - nothing says they should, and overlaying them would draw
 			// two scenes inside each other and call it one.
 			if (index > 0 && spacing != 0.0f) {
 				const float offset = spacing * static_cast<float>(index);

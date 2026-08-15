@@ -61,7 +61,7 @@ namespace {
 	//
 	// A real loopback socket rather than an in-memory pair on purpose: the
 	// message layer is already tested without one, and what is left to check
-	// here is precisely the part a pair cannot express — partial writes, a
+	// here is precisely the part a pair cannot express - partial writes, a
 	// kernel send buffer smaller than the body, and a connection that has to
 	// survive being read across several polls.
 	struct Wire {

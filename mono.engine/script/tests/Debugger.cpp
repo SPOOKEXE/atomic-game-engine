@@ -4,7 +4,7 @@
 // named and nowhere else.** A debugger that reports the wrong line is worse
 // than none, because it sends the reader to a place that is working.
 //
-// The other half — that an unarmed runtime pays nothing — is structural rather
+// The other half - that an unarmed runtime pays nothing - is structural rather
 // than observable: `Run` switches single-step on only when `Armed()`, and the
 // case below pins that a runtime with no breakpoints catches nothing.
 
@@ -107,7 +107,7 @@ TEST_CASE("a stopping breakpoint ends the script as an ordinary error", "[debugg
 	CHECK_FALSE(runtime->Run(PROGRAM, "probe.luau"));
 	CHECK(runtime->LastError().find("breakpoint") != std::string::npos);
 
-	// And it still captured before it raised — a stop that reported nothing
+	// And it still captured before it raised - a stop that reported nothing
 	// would be a crash with extra steps.
 	CHECK_FALSE(runtime->Debug().Hits().empty());
 }
@@ -195,7 +195,7 @@ TEST_CASE("adopting takes the breakpoints and none of the hits", "[debugger]") {
 	REQUIRE(fresh.Breakpoints().size() == 2);
 	CHECK(fresh.Hits().empty());
 
-	// The action and the enabled flag both came across — a copy that dropped
+	// The action and the enabled flag both came across - a copy that dropped
 	// either would be a breakpoint that behaves differently after a Stop than
 	// before it, which is worse than losing it outright.
 	CHECK(fresh.Breakpoints()[0].Action == BreakAction::Stop);
@@ -209,7 +209,7 @@ TEST_CASE("adopting takes the breakpoints and none of the hits", "[debugger]") {
 }
 
 TEST_CASE("adopting twice does not duplicate", "[debugger]") {
-	// `BeginRun` may hand the list to a runtime that already has some — a
+	// `BeginRun` may hand the list to a runtime that already has some - a
 	// second Play without a Stop, or a world started while another runs.
 	Debugger master;
 	master.Add("a.luau", 10);
@@ -227,7 +227,7 @@ namespace {
 	// A closure over a local, which is what makes an upvalue exist at all.
 	//
 	// `counter` is a local of the *chunk* and an upvalue of `bump`, so the two
-	// lists have to disagree about it — which is the whole property under test.
+	// lists have to disagree about it - which is the whole property under test.
 	constexpr const char *CLOSURE = R"(
 local counter = 0
 local label = "tally"
@@ -244,7 +244,7 @@ TEST_CASE("a capture names the upvalues a function closed over", "[debugger]") {
 	Store store("debug_test");
 	const auto runtime = MakeRuntime(store, Language::Luau);
 
-	// Line 6 is `return counter`, inside `bump` — where `step` is a local and
+	// Line 6 is `return counter`, inside `bump` - where `step` is a local and
 	// `counter` is an upvalue.
 	runtime->Debug().Add("closure.luau", 6);
 	REQUIRE(runtime->Run(CLOSURE, "closure.luau"));
@@ -280,7 +280,7 @@ TEST_CASE("a capture names the upvalues a function closed over", "[debugger]") {
 	CHECK(find(frame.Locals, "counter") == nullptr);
 
 	// A variable the function never mentions is neither. `bump` does not read
-	// `label`, so Luau does not capture it — which is worth pinning, because a
+	// `label`, so Luau does not capture it - which is worth pinning, because a
 	// capture that listed every enclosing local would be listing the wrong
 	// thing and would look right.
 	CHECK(find(frame.Upvalues, "label") == nullptr);
@@ -290,7 +290,7 @@ TEST_CASE("a chunk's own frame has locals and no upvalues", "[debugger]") {
 	Store store("debug_test");
 	const auto runtime = MakeRuntime(store, Language::Luau);
 
-	// Line 8 is `return counter`, at the chunk's top level — one frame out from
+	// Line 8 is `return counter`, at the chunk's top level - one frame out from
 	// the case above.
 	runtime->Debug().Add("closure.luau", 8);
 	REQUIRE(runtime->Run(CLOSURE, "closure.luau"));
@@ -300,7 +300,7 @@ TEST_CASE("a chunk's own frame has locals and no upvalues", "[debugger]") {
 
 	const engine::script::DebugFrame &frame = hits.front().Frames.front();
 
-	// At the top level `counter` is a local, not an upvalue — the opposite of
+	// At the top level `counter` is a local, not an upvalue - the opposite of
 	// what the inner frame reported for the same name, which is what makes the
 	// distinction observable rather than a claim.
 	bool localCounter = false;
@@ -339,7 +339,7 @@ TEST_CASE("BreakpointService is a studio's and nobody else's", "[debugger]") {
 
 	// **Absent rather than refusing.** A service that existed and answered "not
 	// in a game" to everything is a surface somebody writes against and then
-	// finds does nothing where it matters — and arming a breakpoint costs the
+	// finds does nothing where it matters - and arming a breakpoint costs the
 	// whole runtime its speed, which a shipped server must not let a game script
 	// decide.
 	const auto game = MakeRuntime(store, Language::Luau);
@@ -444,15 +444,15 @@ TEST_CASE("a chunk this engine cannot break inside is refused", "[debugger]") {
 	using engine::script::BreakpointsRefused;
 
 	// **Only Luau has breakpoints.** A `.js` chunk runs on QuickJS, which
-	// exposes no line hook at all — see `D00106` — so a breakpoint on one would
+	// exposes no line hook at all - see `D00106` - so a breakpoint on one would
 	// sit in the list looking armed and never fire.
 	CHECK_FALSE(BreakpointsRefused("plugin.js").empty());
 	CHECK_FALSE(BreakpointsRefused("plugin.mjs").empty());
 	CHECK_FALSE(BreakpointsRefused("plugin.cjs").empty());
 
 	// **`.ts` is refused too, and it is the likelier thing somebody types.**
-	// TypeScript never reaches a runtime — `tsc` turns it into JavaScript first
-	// — so a breakpoint on one is two steps from anything that could fire, and
+	// TypeScript never reaches a runtime - `tsc` turns it into JavaScript first
+	// - so a breakpoint on one is two steps from anything that could fire, and
 	// the message says so rather than only naming JavaScript.
 	CHECK_FALSE(BreakpointsRefused("panel.ts").empty());
 	CHECK_FALSE(BreakpointsRefused("panel.tsx").empty());
@@ -477,7 +477,7 @@ TEST_CASE("a refused chunk never reaches the breakpoint list", "[debugger]") {
 	Debugger debug;
 
 	// **Refused in `Add` rather than at each caller**, so a dead breakpoint
-	// cannot arrive through any path — the service, the editor's gutter, the
+	// cannot arrive through any path - the service, the editor's gutter, the
 	// panel and `Adopt` all end up here.
 	CHECK_FALSE(debug.Add("panel.ts", 4));
 	CHECK_FALSE(debug.Add("plugin.js", 4));
@@ -487,7 +487,7 @@ TEST_CASE("a refused chunk never reaches the breakpoint list", "[debugger]") {
 	CHECK(debug.Add("enemy.luau", 4));
 	CHECK(debug.Breakpoints().size() == 1);
 
-	// **Including through `Adopt`**, which copies a list somebody else built —
+	// **Including through `Adopt`**, which copies a list somebody else built -
 	// a list from an older build, or one hand-edited into a save file.
 	Debugger stale;
 	stale.Add("enemy.luau", 9);

@@ -9,7 +9,7 @@
 //
 // **It names no vendor type, and that is the whole reason it exists.** asio is
 // `VENDOR` in this module rather than `VENDOR_PUBLIC`, so a public header here
-// may not name a socket, an `io_context`, an `error_code` or an asio endpoint —
+// may not name a socket, an `io_context`, an `error_code` or an asio endpoint -
 // `net/AGENTS.md` states it and the build cannot check it. Passing an
 // `asio::ip::udp::endpoint` across this boundary would put asio's headers in
 // every module that links `net` and would pin the transport to one library
@@ -17,15 +17,15 @@
 //
 // **Sixteen bytes and a family, so IPv6 is not a later migration.** A four-byte
 // address would fit today's tests and would have to be widened by every caller
-// the day a v6 socket appears. The address is stored big-endian — the order the
+// the day a v6 socket appears. The address is stored big-endian - the order the
 // numbering in `127.0.0.1` reads in, and the order every wire format and every
-// socket API already uses — so a conversion is a copy rather than a byte swap
+// socket API already uses - so a conversion is a copy rather than a byte swap
 // somebody forgets on one side.
 //
 // **A `Connection` is not an `Endpoint`.** An address is where bytes go; a
 // `ConnectionId` is who is on the other end and whether they are still there.
 // Two peers behind one NAT share an address, and one peer that reconnects from a
-// new port keeps its identity — so the transport routes by this and the
+// new port keeps its identity - so the transport routes by this and the
 // lifecycle above it keys by that.
 //
 // @tier L11 · shared
@@ -87,7 +87,7 @@ namespace engine::net {
 
 		// Whether this names somewhere.
 		//
-		// Says the value was filled in, not that anything is listening there —
+		// Says the value was filled in, not that anything is listening there -
 		// on an unreliable transport nothing can answer the second question
 		// without sending something and waiting.
 		//
@@ -135,7 +135,7 @@ namespace engine::net {
 		// The limited broadcast address, 255.255.255.255, on `port`.
 		//
 		// **The limited one rather than a subnet-directed one, deliberately.**
-		// A subnet broadcast — 192.168.1.255 — has to be computed from an
+		// A subnet broadcast - 192.168.1.255 - has to be computed from an
 		// interface's address and netmask, which means enumerating interfaces
 		// and picking one, and a machine with a VPN or a container bridge has
 		// several that all look plausible. The limited address needs none of

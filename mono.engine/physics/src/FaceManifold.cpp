@@ -38,7 +38,7 @@ namespace engine::physics {
 		// **A stack of identical boxes is the case this exists for**, and it is
 		// not a rounding allowance. Two boxes of the same width resting on each
 		// other present two faces whose outlines coincide *exactly*, so every
-		// vertex of the incident face sits precisely on a clipping edge — and a
+		// vertex of the incident face sits precisely on a clipping edge - and a
 		// strict test puts all four of them outside, throws the whole polygon
 		// away, and leaves the fallback single point holding a stack that then
 		// slides apart over a couple of seconds. A tenth of a millimetre is far
@@ -381,7 +381,7 @@ namespace engine::physics {
 		}
 
 		// Nothing survived the clip, which happens when the two faces overlap
-		// only outside each other's outlines — a corner resting on a face, for
+		// only outside each other's outlines - a corner resting on a face, for
 		// instance. The axis still found a real overlap, so the answer is one
 		// point rather than none.
 		if (count == 0) {

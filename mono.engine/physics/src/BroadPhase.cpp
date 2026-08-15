@@ -118,7 +118,7 @@ namespace engine::physics {
 		// **The sort is the determinism requirement.** Sequential impulse is
 		// order-dependent, so a solver visiting contacts in grid-walk order
 		// gives one answer on a scene built one way and another on the same
-		// scene built another way — and `just determinism` reports it a long
+		// scene built another way - and `just determinism` reports it a long
 		// way from here.
 		std::sort(pairs.begin(), pairs.end());
 

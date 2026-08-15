@@ -7,8 +7,8 @@
 // are a position nobody can see to the last micrometre and sixteen are a unit
 // quaternion, which carries one redundant number: its own length. So a position
 // crosses as three fixed-point values on a stated grid and a rotation crosses as
-// *smallest-three* — the largest component dropped, the other three sent, the
-// dropped one recovered from unit length — and twenty-eight bytes become ten.
+// *smallest-three* - the largest component dropped, the other three sent, the
+// dropped one recovered from unit length - and twenty-eight bytes become ten.
 // `Motion` is two `Vector3`s and becomes twelve.
 //
 // **This is what goes on the wire and never what goes in the store.** The
@@ -31,7 +31,7 @@
 // clamped entity is visibly stuck against the boundary of the world it was
 // declared to be inside, which is a wrong answer somebody can see and locate. A
 // wrapped one is at the far side of the world, indistinguishable from a
-// teleport the server meant — the silent aliasing this file refuses. Every
+// teleport the server meant - the silent aliasing this file refuses. Every
 // decode clamps as well as every encode, because the sixteen bits arriving from
 // a peer are not the sixteen bits an encoder wrote.
 //
@@ -49,8 +49,8 @@ namespace engine::scene {
 	// **32767 of the 32768 a signed sixteen-bit code offers, and the one that
 	// is dropped buys symmetry.** With all 32768 the negative edge would reach
 	// one step further than the positive one, so `+HalfExtent` would not be
-	// representable, an entity pinned against the far wall — which is exactly
-	// where `Bounce` puts one — would decode a whole step short, and the error
+	// representable, an entity pinned against the far wall - which is exactly
+	// where `Bounce` puts one - would decode a whole step short, and the error
 	// bound below would need two halves. One code is a cheaper price than a
 	// bound with an exception in it.
 	inline constexpr int32_t WIRE_STEPS = 32767;
@@ -59,7 +59,7 @@ namespace engine::scene {
 	//
 	// The same 64 m `WorldBounds::HalfExtent` defaults to, and that is not a
 	// coincidence: this is the world's extent expressed on the wire. A world
-	// authored larger does not silently lose entities — it has them clamped to
+	// authored larger does not silently lose entities - it has them clamped to
 	// this, which `WireCoversWorld` is for saying at the place the size is
 	// chosen rather than discovering per entity.
 	inline constexpr float WIRE_POSITION_HALF_EXTENT_METRES = 64.0f;
@@ -70,7 +70,7 @@ namespace engine::scene {
 
 	// The most a decoded coordinate differs from the one encoded, in metres.
 	//
-	// **Half a step, everywhere in the world including both edges** — 0.977 mm
+	// **Half a step, everywhere in the world including both edges** - 0.977 mm
 	// at the extent above. Per axis, so the worst case on a 3D distance is
 	// sqrt(3) of it, 1.69 mm. Stated rather than hoped for, and
 	// `engine.scene.wire` measures it across the whole extent rather than
@@ -81,7 +81,7 @@ namespace engine::scene {
 	//
 	// One over root two. Whichever component of a unit quaternion is largest is
 	// at least a half, and the other three are therefore each no larger than
-	// this — which is the whole reason smallest-three costs less than sending
+	// this - which is the whole reason smallest-three costs less than sending
 	// four components of the same precision.
 	inline constexpr float WIRE_ROTATION_LIMIT = 0.70710678118654752440f;
 
@@ -98,7 +98,7 @@ namespace engine::scene {
 	//
 	// **0.24 degrees, and it is derived rather than measured.** Each sent
 	// component lands within half a step, so the three of them are within
-	// sqrt(3)/2 of a step — 0.0012. The dropped component is recovered as
+	// sqrt(3)/2 of a step - 0.0012. The dropped component is recovered as
 	// sqrt(1 - s), whose error is the error in `s` over twice the component
 	// itself; that component is at least a half, so the division at most
 	// doubles nothing and the term is at most 0.0017. Together the quaternion
@@ -122,7 +122,7 @@ namespace engine::scene {
 	//
 	// **3.9 mm/s, and the number to compare it against is the position grid
 	// rather than zero.** Over one tick of a 60 Hz world that is 65 micrometres
-	// of travel — fifteen times below `WIRE_POSITION_ERROR_METRES` — so a
+	// of travel - fifteen times below `WIRE_POSITION_ERROR_METRES` - so a
 	// velocity quantised this coarsely cannot be seen in any position derived
 	// from it within a tick. That is the whole justification for velocity
 	// having a grid of its own rather than the position one.
@@ -137,6 +137,32 @@ namespace engine::scene {
 	// radians per second. Just under a milliradian.
 	inline constexpr float WIRE_ANGULAR_ERROR_RADIANS_PER_SECOND =
 		WIRE_ANGULAR_HALF_EXTENT_RADIANS_PER_SECOND / static_cast<float>(WIRE_STEPS) * 0.5f;
+
+	// How long a position integrated from a decoded velocity stays better than
+	// the decoded position it started from, in seconds.
+	//
+	// **A quarter of a second, and it is the ratio of the two extents above
+	// rather than a number somebody picked.** Interpolating between two decoded
+	// poses keeps the error inside `WIRE_POSITION_ERROR_METRES` whatever the
+	// elapsed time. *Integrating* does not: the position error is the one it
+	// started with plus `WIRE_LINEAR_ERROR_METRES_PER_SECOND` times the seconds
+	// since, so it grows linearly and the bound is a function of time rather
+	// than of the grid. The two are equal when
+	//
+	//     t = WIRE_POSITION_ERROR_METRES / WIRE_LINEAR_ERROR_METRES_PER_SECOND
+	//
+	// and both errors are half a step of their own grid, so the step counts
+	// cancel and what is left is 64 m over 256 m/s. Per axis and on a 3D
+	// distance alike, for the same reason.
+	//
+	// Past it the guess is worse-conditioned than the last thing the authority
+	// actually said, which is where `replication::InterpolationSettings::
+	// ExtrapolateSeconds` stops guessing and lets the world hold.
+	// `engine.scene.wire` measures the growth rather than trusting this
+	// paragraph, and `client.replicated` pins the two constants against each
+	// other because `replication` may not see this header.
+	inline constexpr float WIRE_DEAD_RECKON_SECONDS =
+		WIRE_POSITION_HALF_EXTENT_METRES / WIRE_LINEAR_HALF_EXTENT_METRES_PER_SECOND;
 
 	// Bytes one `Transform` occupies on the wire, against twenty-eight in the
 	// store: three sixteen-bit axes and one packed rotation.

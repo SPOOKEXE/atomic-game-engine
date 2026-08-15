@@ -123,7 +123,7 @@ TEST_CASE("a frame is refused when the size does not match the manifest", "[cdn]
 	CHECK(GroupCodec::Decompress(*frame, payload.size()).has_value());
 
 	// Exactly, not at most. Content that does not match what the manifest
-	// describes is refused rather than truncated or padded to fit — padding it
+	// describes is refused rather than truncated or padded to fit - padding it
 	// would hand the hash check bytes the origin never sent.
 	CHECK_FALSE(GroupCodec::Decompress(*frame, payload.size() - 1).has_value());
 	CHECK_FALSE(GroupCodec::Decompress(*frame, payload.size() + 1).has_value());
@@ -141,7 +141,7 @@ TEST_CASE("a corrupt or empty frame is refused", "[cdn][groupcodec]") {
 	CHECK_FALSE(GroupCodec::Decompress(truncated, payload.size()).has_value());
 
 	// A flipped byte in the middle of the frame. Caught by the content checksum
-	// the codec turns on — Zstd leaves it off, and with it off this decompresses
+	// the codec turns on - Zstd leaves it off, and with it off this decompresses
 	// cleanly to the right length and the wrong content. The chunk hashes would
 	// still catch that downstream, but only after a whole group had been
 	// transferred and expanded.
@@ -159,8 +159,8 @@ TEST_CASE("an absurd expected size is refused before it is allocated", "[cdn][gr
 	REQUIRE(frame.has_value());
 
 	// The backstop above the manifest's own bound. Sizing a buffer from what a
-	// frame *claims* is the classic decompression bomb — a few kilobytes on the
-	// wire declaring a multi-gigabyte payload — which is why the size comes from
+	// frame *claims* is the classic decompression bomb - a few kilobytes on the
+	// wire declaring a multi-gigabyte payload - which is why the size comes from
 	// the signed manifest and why even that is bounded.
 	CHECK_FALSE(GroupCodec::Decompress(*frame, GroupCodec::MAXIMUM_PAYLOAD_BYTES + 1).has_value());
 }
@@ -168,7 +168,7 @@ TEST_CASE("an absurd expected size is refused before it is allocated", "[cdn][gr
 TEST_CASE("a dictionary improves the ratio on small similar payloads", "[cdn][groupcodec]") {
 	const Dictionary dictionary = Trained();
 
-	// One small record — the case a dictionary exists for. Without one there is
+	// One small record - the case a dictionary exists for. Without one there is
 	// no history to compress against and a few hundred bytes stay a few hundred
 	// bytes; the dictionary supplies the history.
 	const auto payload = Bytes(Record(424'242));

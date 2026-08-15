@@ -32,7 +32,7 @@ TEST_DEPENDS("engine.physics.shapes")
 // what these cases read.
 TEST_DEPENDS("engine.physics.physicsworld")
 // The index itself, and the guarantee that two rebuilds of one input iterate
-// identically — which is half of why the pair list is reproducible.
+// identically - which is half of why the pair list is reproducible.
 TEST_DEPENDS("engine.spatial.hashgrid")
 // The overlap query the pair walk is built on.
 TEST_DEPENDS("engine.spatial.query")
@@ -75,7 +75,7 @@ namespace {
 	// An empty label creates an unnamed entity. `Store::Create` hands back the
 	// entity already holding a name rather than minting a second, so a case
 	// wanting several interchangeable colliders must not name them all the
-	// same thing — it would get one entity and a passing test that measured
+	// same thing - it would get one entity and a passing test that measured
 	// nothing.
 	struct Placed {
 		std::string_view Label;
@@ -115,8 +115,8 @@ namespace {
 		return *store.Resource<PhysicsWorld>();
 	}
 
-	// The pairs as label strings, so two scenes built in different orders — and
-	// therefore holding different entity ids — can be compared at all.
+	// The pairs as label strings, so two scenes built in different orders - and
+	// therefore holding different entity ids - can be compared at all.
 	std::vector<std::pair<std::string, std::string>> Labelled(const Store &store) {
 		std::vector<std::pair<std::string, std::string>> named;
 		for (const CandidatePair &pair : WorldOf(store).Pairs()) {
@@ -167,7 +167,7 @@ TEST_CASE("a body is never paired with itself", "[physics][broadphase]") {
 TEST_CASE("a pair is reported once however many cells it spans", "[physics][broadphase]") {
 	// A collider wider than a cell appears in several buckets. `spatial`
 	// reports it from the first shared cell of the walk, and this is the case
-	// that fails if that de-duplication is ever traded for a visited stamp — or
+	// that fails if that de-duplication is ever traded for a visited stamp - or
 	// if the pair walk stops keeping each unordered pair exactly once.
 	Store store("broadphase.spanning");
 	PreparePhysicsWorld(store, UNIT_CELL);
@@ -196,7 +196,7 @@ TEST_CASE("pairs come out sorted by the smaller id then the larger", "[physics][
 
 	// **The rows are laid out against the ids on purpose.** A cluster built in
 	// id order comes out of the pair walk already ascending, so the sort would
-	// be free to be missing and this case would still pass — it did, the first
+	// be free to be missing and this case would still pass - it did, the first
 	// time it was written. Adding the colliders in reverse makes the walk emit
 	// descending ids, which nothing but the sort can put right.
 	std::vector<Entity> entities;
@@ -275,7 +275,7 @@ TEST_CASE("the pair list does not depend on the order colliders entered", "[phys
 
 TEST_CASE("the same scene built in a different creation order pairs the same", "[physics][broadphase]") {
 	// Creating in a different order gives every entity a different id, so the
-	// two lists cannot be compared as ids — they are compared as the names the
+	// two lists cannot be compared as ids - they are compared as the names the
 	// scene gave them, which is what "the same scene" means to anybody but the
 	// entity directory.
 	const auto run = [](const char *name, bool reversed) {
@@ -308,7 +308,7 @@ TEST_CASE("the same scene built in a different creation order pairs the same", "
 
 TEST_CASE("filtering needs both masks and not either", "[physics][broadphase]") {
 	// The rule is `a.Mask ∩ b.Layer` **and** `b.Mask ∩ a.Layer`, which is what
-	// `scene::Collider::Mask` already claims in its own comment — so the other
+	// `scene::Collider::Mask` already claims in its own comment - so the other
 	// reading would make that documentation false rather than merely make a
 	// different choice.
 	const ColliderRecord seer{Entity{1}, LayerMask::Only(0), LayerMask::Only(1)};
@@ -383,7 +383,7 @@ TEST_CASE("two static colliders are never a pair", "[physics][broadphase]") {
 TEST_CASE("static geometry that has not moved is not rebuilt", "[physics][broadphase]") {
 	// The whole reason there are two indexes. `spatial::HashGrid` is
 	// rebuild-only by design, so "only re-insert what moved" is a decision
-	// about which set to hand to `Rebuild` — and static geometry, which is most
+	// about which set to hand to `Rebuild` - and static geometry, which is most
 	// of a world, must not be re-measured every tick.
 	Store store("broadphase.staticstable");
 	PreparePhysicsWorld(store, UNIT_CELL);
@@ -401,7 +401,7 @@ TEST_CASE("static geometry that has not moved is not rebuilt", "[physics][broadp
 
 	CHECK(WorldOf(store).StaticRebuilds() == afterFirst);
 
-	// The dynamic index, by contrast, is rebuilt every tick — which is what
+	// The dynamic index, by contrast, is rebuilt every tick - which is what
 	// makes the number above worth reading rather than an artefact of nothing
 	// running.
 	CHECK(WorldOf(store).DynamicRebuilds() == 21);
@@ -419,7 +419,7 @@ TEST_CASE("moving static geometry rebuilds its index", "[physics][broadphase]") 
 	const uint64_t settled = WorldOf(store).StaticRebuilds();
 
 	// Written through `Set`, which is how a loader, an editor or a script moves
-	// an anchored part — and what advances the change stamp the sync reads.
+	// an anchored part - and what advances the change stamp the sync reads.
 	store.Set<Transform>(floor, Transform{CFrame{Vector3{0.0f, -20.0f, 0.0f}}});
 	Step(store);
 

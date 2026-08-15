@@ -3,7 +3,7 @@
 //
 // **A connected pair has to be built by hand here, and the build has a hole in
 // it.** Winsock offers no `socketpair`, so the only way to two connected stream
-// sockets is to listen on loopback, connect to that, and accept — and between
+// sockets is to listen on loopback, connect to that, and accept - and between
 // the listen and the accept, any process on the machine can reach that port.
 // Accepting the wrong connection would hand a stranger one end of a channel the
 // engine trusts.
@@ -29,7 +29,7 @@
 // WIN32_LEAN_AND_MEAN before anything, and it is load-bearing rather than a
 // compile-time saving: without it <windows.h> drags in the original <winsock.h>,
 // which redefines everything <winsock2.h> declares. With it, the two can be
-// included in either order — which they have to be, because `.clang-format`
+// included in either order - which they have to be, because `.clang-format`
 // regroups and sorts system includes and sorts "windows.h" ahead of
 // "winsock2.h". An ordering kept by a comment is one the formatter eventually
 // undoes.
@@ -57,7 +57,7 @@ namespace engine::parallel {
 		// give a child *every* inheritable handle this process holds, including
 		// the driver's own end of the very channel being handed over. While the
 		// child holds a copy of that end the socket still has a peer, so
-		// neither side would ever see the other go away — which is the one
+		// neither side would ever see the other go away - which is the one
 		// thing the channel is relied on to notice.
 		//
 		// Both ends, and permanently: even the end a child is meant to have
@@ -71,7 +71,7 @@ namespace engine::parallel {
 		// waiting for a larger one to join it.
 		//
 		// A local socket pair carries a supervisor's heartbeats and a host's
-		// answers — small frames whose whole value is arriving now. On POSIX
+		// answers - small frames whose whole value is arriving now. On POSIX
 		// the pair is an AF_UNIX socket and there is no Nagle to turn off;
 		// loopback TCP is the price of Winsock having no `socketpair`, and this
 		// is the rest of that price.
@@ -168,7 +168,7 @@ namespace engine::parallel {
 
 		// The handover pipe this process was started with, or null.
 		//
-		// A value rather than a fixed slot — see `INHERITED_VARIABLE` for why
+		// A value rather than a fixed slot - see `INHERITED_VARIABLE` for why
 		// Windows cannot have the slot.
 		HANDLE HandoverPipe() {
 			wchar_t text[32] = {};
@@ -254,7 +254,7 @@ namespace engine::parallel {
 		SendImmediately(handles[1]);
 
 		// Only this end. The remote one is made non-blocking by whoever adopts
-		// it, because a handle handed to a child is configured by the child —
+		// it, because a handle handed to a child is configured by the child -
 		// relying on the mode surviving the spawn is the kind of thing that
 		// works until somebody re-opens the handle.
 		if (!platform::SocketMakeNonBlocking(static_cast<int64_t>(handles[0]))) {
@@ -277,7 +277,7 @@ namespace engine::parallel {
 
 		// A pipe, specifically, and asked without reading anything. The
 		// variable is an ordinary name, and a program run with it set to some
-		// other number would otherwise be told it is a supervised host — and
+		// other number would otherwise be told it is a supervised host - and
 		// would then try to speak a protocol down whatever that handle turned
 		// out to be.
 		//

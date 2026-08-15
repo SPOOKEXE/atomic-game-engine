@@ -3,7 +3,7 @@
 // The flat list of things to draw, in the order to draw them.
 //
 // **This is the whole seam between the tree and a renderer.** A backend takes
-// this and nothing else — no store, no class table, no `UDim2`, no tree walk.
+// this and nothing else - no store, no class table, no `UDim2`, no tree walk.
 // That is what lets the same compiled list be drawn through Dear ImGui's draw
 // list today and through a batched quad pipeline later without either half
 // learning about the other, and it is what lets a headless test assert exactly
@@ -12,7 +12,7 @@
 // **One struct with every field rather than a variant**, which is
 // `game::PropertyValue`'s trade for the same reason: the consumers are a
 // backend switching on `Kind` and a test reading fields, and a variant costs a
-// visitor at both. A UI is hundreds of commands, not millions — the list is
+// visitor at both. A UI is hundreds of commands, not millions - the list is
 // rebuilt only when the tree moves, so the memory is a rounding error against
 // what it replaces.
 //
@@ -42,7 +42,7 @@ namespace engine::gui {
 		// A filled rectangle, optionally with rounded corners.
 		Rectangle,
 
-		// An unfilled rectangle of `Thickness` pixels — a border or a stroke.
+		// An unfilled rectangle of `Thickness` pixels - a border or a stroke.
 		Outline,
 
 		// A sampled image, stretched, sliced, tiled, fitted or cropped.
@@ -119,13 +119,13 @@ namespace engine::gui {
 		//
 		// **Owned, which follows from `Label::Text` being owned** and is worth a
 		// word because it makes a `DrawCommand` non-trivial. The list is rebuilt
-		// only when the tree's hash changes — the cache is the whole of
-		// `Compiled` — so this allocates on a rebuild rather than per frame, and
+		// only when the tree's hash changes - the cache is the whole of
+		// `Compiled` - so this allocates on a rebuild rather than per frame, and
 		// a run short enough for the small-string buffer never allocates at all.
 		std::string Text;
 
 		// The em size to draw at, already fitted and clamped. **A backend uses
-		// this rather than measuring again** — see `Layout.hpp` on why there is
+		// this rather than measuring again** - see `Layout.hpp` on why there is
 		// exactly one answer.
 		int32_t TextSize = 0;
 
@@ -157,7 +157,7 @@ namespace engine::gui {
 		// The canvas this was compiled against, in pixels.
 		core::Vector2 CanvasSize;
 
-		// How many elements were reached and drawn. Not the command count —
+		// How many elements were reached and drawn. Not the command count -
 		// one element emits between zero and four commands.
 		size_t Elements = 0;
 	};

@@ -74,7 +74,7 @@ namespace engine::core {
 
 		// Every value given for an option, in the order they appeared.
 		//
-		// For an option that names one of several things — the worlds a
+		// For an option that names one of several things - the worlds a
 		// supervised host was granted, say. Order is kept because a caller may
 		// depend on it and sorting here would hide that.
 		//

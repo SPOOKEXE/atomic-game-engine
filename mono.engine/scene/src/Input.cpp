@@ -15,7 +15,7 @@ namespace engine::scene {
 		// `NormalId` member list from `Describe` rather than typing it out.
 		//
 		// The order **is** the enum's, and a `static_assert` below is what makes
-		// that a checked claim rather than a hopeful one — inserting a key in the
+		// that a checked claim rather than a hopeful one - inserting a key in the
 		// middle of `KeyCode` without inserting a name here would silently shift
 		// every name after it by one, so `Enum.KeyCode.W` would resolve to V.
 		constexpr std::array<std::string_view, static_cast<size_t>(KeyCode::Count)> KEY_NAMES{{
@@ -57,11 +57,56 @@ namespace engine::scene {
 			"every KeyCode needs exactly one name, in ordinal order"
 		);
 
-		constexpr std::array<std::string_view, static_cast<size_t>(MouseButton::Count)> BUTTON_NAMES{{
+		// Every `Enum.UserInputType` member, in ordinal order.
+		//
+		// **One table for the buttons and the three that are not buttons**, which
+		// is what keeps `Describe(MouseButton)` and `Describe(InputSource)` from
+		// being two spellings of one list. The `static_assert`s below are what
+		// pin the overlap that `IsMouseButtonPressed` relies on.
+		constexpr std::array<std::string_view, static_cast<size_t>(InputSource::Count)> SOURCE_NAMES{{
 			"MouseButton1",
 			"MouseButton2",
 			"MouseButton3",
+			"Keyboard",
+			"MouseMovement",
+			"MouseWheel",
 		}};
+
+		static_assert(
+			SOURCE_NAMES.size() == static_cast<size_t>(InputSource::Count),
+			"every InputSource needs exactly one name, in ordinal order"
+		);
+
+		// **The buttons come first and keep their numbers.**
+		// `UserInputService:IsMouseButtonPressed` resolves an
+		// `Enum.UserInputType` member to an ordinal and casts it to a
+		// `MouseButton`, so a member inserted ahead of these would silently make
+		// "is the left button down" answer about the right one.
+		static_assert(
+			static_cast<size_t>(InputSource::MouseButton1) == static_cast<size_t>(MouseButton::Left)
+		);
+		static_assert(
+			static_cast<size_t>(InputSource::MouseButton2) == static_cast<size_t>(MouseButton::Right)
+		);
+		static_assert(
+			static_cast<size_t>(InputSource::MouseButton3) == static_cast<size_t>(MouseButton::Middle)
+		);
+		static_assert(static_cast<size_t>(MouseButton::Count) <= static_cast<size_t>(InputSource::Count));
+
+		// **The layout is pinned, because `Column::Write` sends `sizeof(T)` bytes
+		// and does not know which of them a member claimed.** Every field added
+		// since v0.10 has come out of `Reserved` for that reason, and this is what
+		// turns "came out of `Reserved`" from a habit into a checked claim: a
+		// member appended to the end instead grows the object, moves the save
+		// format, and does it silently.
+		//
+		// The number is what the members happen to add up to rather than a target
+		// - the point is that changing it is a decision somebody has to make here.
+		constexpr size_t SIZE_IS_PINNED = 56;
+		static_assert(
+			sizeof(InputState) == SIZE_IS_PINNED,
+			"InputState changed size: take a new field out of Reserved, or move the save format on purpose"
+		);
 	}
 
 	const char *Describe(KeyCode key) {
@@ -71,8 +116,8 @@ namespace engine::scene {
 
 	KeyCode KeyFromName(std::string_view name) {
 		// **A linear scan and not a map.** Ninety-odd string compares sounds like
-		// a lot and is not: this is called when a script *names* a key — binding
-		// an action, testing one by name — which is an authoring-time frequency,
+		// a lot and is not: this is called when a script *names* a key - binding
+		// an action, testing one by name - which is an authoring-time frequency,
 		// and the hot path is `IsKeyDown(KeyCode)` which takes the enum and never
 		// comes here. A static map would be an allocation and a hash to save a
 		// scan nothing runs in a loop.
@@ -85,7 +130,15 @@ namespace engine::scene {
 	}
 
 	const char *Describe(MouseButton button) {
+		// The buttons are the first three sources, so this is that lookup with a
+		// narrower argument rather than a second table.
 		const auto index = static_cast<size_t>(button);
-		return index < BUTTON_NAMES.size() ? BUTTON_NAMES[index].data() : "MouseButton1";
+		return index < static_cast<size_t>(MouseButton::Count) ? Describe(static_cast<InputSource>(button))
+															   : SOURCE_NAMES[0].data();
+	}
+
+	const char *Describe(InputSource source) {
+		const auto index = static_cast<size_t>(source);
+		return index < SOURCE_NAMES.size() ? SOURCE_NAMES[index].data() : SOURCE_NAMES[0].data();
 	}
 }

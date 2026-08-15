@@ -5,8 +5,8 @@
 // producer that stalled keeping its last frame, and the placement that stops
 // two worlds being drawn inside each other.
 //
-// The channel's own behaviour — triple buffering, drop counting, the atomic
-// publish index — is `world`'s and is tested there.
+// The channel's own behaviour - triple buffering, drop counting, the atomic
+// publish index - is `world`'s and is tested there.
 
 #include <engine/core/Name.hpp>
 #include <engine/scene/Components.hpp>
@@ -117,7 +117,7 @@ TEST_CASE("zero spacing overlays them, which is what one view wants", "[client]"
 TEST_CASE("a stalled producer keeps its last frame and is counted", "[client]") {
 	// A world flickering out of existence for one frame is worse than a world
 	// one frame behind. A compositor running faster than its producers is the
-	// normal case, not a fault — but a producer that has *stopped* looks
+	// normal case, not a fault - but a producer that has *stopped* looks
 	// identical to a still scene unless somebody counts it.
 	Compositor views;
 	views.Track(WorldId{0}, Name("a"), 8);
@@ -176,7 +176,7 @@ TEST_CASE("an empty draw list is a legal frame", "[client]") {
 TEST_CASE("a draw list past the channel's size grows it rather than being refused", "[client]") {
 	// **The size passed to `Track` is a guess, not a ceiling.** On the client
 	// it is `--entities`, which is the demo scene's cube count and says nothing
-	// about what a script builds — so a world that outgrew it used to stop
+	// about what a script builds - so a world that outgrew it used to stop
 	// being drawn entirely. That reads as a rendering bug and is not one: the
 	// draw list was fine and there was nowhere to put it.
 	//
@@ -199,7 +199,7 @@ TEST_CASE("a draw list past the channel's size grows it rather than being refuse
 
 TEST_CASE("growth is in steps, so a world that settles stops growing", "[client]") {
 	// A channel reserved at exactly what this frame needed would allocate
-	// again on the next frame that added one instance — which is the
+	// again on the next frame that added one instance - which is the
 	// per-frame allocation the reservation exists to avoid.
 	Compositor views;
 	views.Track(WorldId{0}, Name("a"), 4);
@@ -268,7 +268,7 @@ TEST_CASE("the camera comes from the first view", "[client]") {
 TEST_CASE("composing many times over many views stays consistent", "[client][fuzz]") {
 	// Publishers and a consumer at different rates, which is the case the whole
 	// channel exists for. Every compose has to produce exactly the instances of
-	// whatever each view last published — never a mixture, never a partial one.
+	// whatever each view last published - never a mixture, never a partial one.
 	Compositor views;
 	constexpr size_t COUNT = 5;
 	for (uint32_t index = 0; index < COUNT; index++) {

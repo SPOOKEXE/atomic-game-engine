@@ -1,4 +1,4 @@
-// How big a pane's texture is, and — the part that has a bug's name on it —
+// How big a pane's texture is, and - the part that has a bug's name on it -
 // how often that answer is allowed to change.
 //
 // **No device, which is why this is a suite at all.** The decision is arithmetic
@@ -39,7 +39,7 @@ TEST_CASE("a pane's texture grows with the screen it covers and stops at both en
 	// texels, they are just spread over less screen.
 	CHECK(SurfaceScale(4096, 1.0f, SCREEN, 1) == 1);
 
-	// No coverage is no information — a pane nothing can see keeps the size it
+	// No coverage is no information - a pane nothing can see keeps the size it
 	// has rather than being shrunk to the floor and regrown on the frame the
 	// viewer turns back round.
 	CHECK(SurfaceScale(AUTHORED, 0.0f, SCREEN, 4) == 4);
@@ -49,11 +49,11 @@ TEST_CASE("a viewer breathing on a pane does not resize it every frame", "[rende
 	// **The bug this file was written for, and it was a hysteresis one texel
 	// wide.** A step *up* happens when the pane wants more than the held size
 	// provides; the step down used to be tested against half of that same
-	// number — and a step is a factor of two, so half of what is held is exactly
+	// number - and a step is a factor of two, so half of what is held is exactly
 	// what the step below provides. Both thresholds sat on one point.
 	//
 	// What crosses that point is a viewer standing still. A character bobs, a
-	// camera arm settles, a hand moves a mouse — the pane's screen coverage
+	// camera arm settles, a hand moves a mouse - the pane's screen coverage
 	// wobbles by a fraction of a percent, and every crossing released three
 	// render targets and created three more. The slot's `Ready` is cleared by
 	// that, so the pane spent those frames re-rendering from nothing and drew
@@ -77,7 +77,7 @@ TEST_CASE("a viewer breathing on a pane does not resize it every frame", "[rende
 }
 
 TEST_CASE("a pane that really is walked away from does come back down", "[render][surface]") {
-	// **The other half, because refusing to shrink is also a bug** — it holds
+	// **The other half, because refusing to shrink is also a bug** - it holds
 	// four times the texels for a pane the size of a coin, per viewport, for as
 	// long as the scene is open. The band is a whole doubling wide and no wider:
 	// step up when the pane wants more than it holds, step down when it wants

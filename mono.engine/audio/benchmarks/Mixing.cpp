@@ -2,7 +2,7 @@
 //
 // **Every other benchmark in this repository measures something that can be
 // late.** A slow frame is a stutter; a slow tick is a rubber band. A slow audio
-// block is a *click*, because the device does not wait — it plays whatever is
+// block is a *click*, because the device does not wait - it plays whatever is
 // in the ring buffer, and if the mixer has not filled it, what it plays is the
 // last block again or silence. There is no graceful degradation available.
 //
@@ -14,7 +14,7 @@
 // one scheduling hiccup from an audible fault.
 //
 // **The voice ladder is the whole suite.** A game does not decide how many
-// sounds are playing — the player does, by walking into a firefight — so the
+// sounds are playing - the player does, by walking into a firefight - so the
 // question is not "what does the mixer cost" but "how many voices before the
 // budget is gone". The ladder answers that directly, and the number it produces
 // is the one a voice cap should be set from rather than guessed at.
@@ -108,7 +108,7 @@ namespace mixing_bench {
 				node->Playing = true;
 				node->Looping = true;
 				// Distinct cursors, so the voices are not reading the same
-				// cache line of the same sound in lockstep — which is what a
+				// cache line of the same sound in lockstep - which is what a
 				// real mix looks like and what makes the memory traffic honest.
 				node->Cursor = static_cast<double>(voice * 37u % 40'000u);
 				node->Gain = 0.5f;
@@ -209,7 +209,7 @@ BENCH("Render · 512 voices", 50) {
 //
 // An `Emitter` does distance attenuation and equal-power panning against the
 // listener; a `Fader` multiplies. Same voice count, so the gap is exactly what
-// placing a sound in the world costs — and it is the number that decides
+// placing a sound in the world costs - and it is the number that decides
 // whether ambience should be spatial or simply mixed.
 
 BENCH("Render · 64 spatial voices", 100) {
@@ -233,8 +233,8 @@ BENCH("Render · 256 spatial voices", 100) {
 // --- commands inside the block --------------------------------------------------
 //
 // **A command with a deadline inside the block splits it.** That is the whole
-// point of the sample-accurate scheduling — a sound starts on the sample it was
-// meant to, not on the block boundary — and it is not free: each split is
+// point of the sample-accurate scheduling - a sound starts on the sample it was
+// meant to, not on the block boundary - and it is not free: each split is
 // another pass over the graph for a shorter run of frames. `MixReport::Segments`
 // counts the pieces, and one means nothing was scheduled inside, which the
 // header calls the common case. These rows are what the uncommon case costs.
@@ -275,7 +275,7 @@ BENCH("Render · 64 voices, 8 commands split across the block", 100) {
 BENCH("Render · 64 voices, 64 commands split across the block", 100) {
 	// **The pathological case: a split every eight frames.** A tick that
 	// scheduled a great many things inside one block gets this, and the shape to
-	// look for is whether the cost grows with the *splits* or with the frames —
+	// look for is whether the cost grows with the *splits* or with the frames -
 	// if a 64-way split costs eight times a 8-way one, the per-segment overhead
 	// dominates and there is a fixed cost per segment worth amortising.
 	AudioMixer &mixer = GraphOf(64, false);
@@ -302,7 +302,7 @@ BENCH("Render · 64 voices, 64 commands split across the block", 100) {
 
 BENCH("CommandQueue::Post · 100k", 100'000) {
 	// **Paid on the tick thread, not the device thread**, so it is not against
-	// the audio deadline — but a world posting a command per sound per tick does
+	// the audio deadline - but a world posting a command per sound per tick does
 	// it a great many times, and a full queue drops rather than blocks. This is
 	// what posting costs and, by extension, how long the producer holds the ring.
 	static engine::audio::CommandQueue queue;
@@ -373,7 +373,7 @@ BENCH("DistanceGain · 100k", 100'000) {
 BENCH("SampleBuffer::MixFrom · 100 blocks", 100) {
 	// The primitive a `Bus` is made of: sum one buffer into another with a gain.
 	// A 64-voice mix is 64 of these per block, so this row times the voice count
-	// should account for most of the ladder above — and whatever it does not
+	// should account for most of the ladder above - and whatever it does not
 	// account for is the graph walk.
 	static const SampleBuffer source(AudioFormat{}, BLOCK);
 	SampleBuffer &out = Out();

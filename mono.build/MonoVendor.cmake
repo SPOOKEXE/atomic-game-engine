@@ -1,4 +1,4 @@
-# MonoVendor.cmake — third-party configuration, in one place.
+# MonoVendor.cmake - third-party configuration, in one place.
 #
 # Vendor options are set here rather than in the root CMakeLists so that the
 # root file stays what §3 says it is: options, tiers and add_subdirectory.
@@ -16,8 +16,8 @@ set(MONO_VENDOR "${CMAKE_SOURCE_DIR}/mono.vendor")
 # is about SDL.
 #
 # What it cost, measured on the editor: `SDL_SubmitGPUCommandBuffer` is where the
-# Vulkan backend turns a recorded command buffer into queue submissions —
-# barrier tracking, descriptor and pipeline hashing, the pending-destroy sweep —
+# Vulkan backend turns a recorded command buffer into queue submissions -
+# barrier tracking, descriptor and pipeline hashing, the pending-destroy sweep -
 # and at -O0 that is the single most expensive thing in a frame. The `submit`
 # span read **17 ms in `dev` against a p50 of 0.2 ms in `release`** on the same
 # scene and the same machine. An editor nobody can drag a splitter in is one
@@ -28,7 +28,7 @@ set(MONO_VENDOR "${CMAKE_SOURCE_DIR}/mono.vendor")
 # vendor tree below is added from this file: the variables are inherited by each
 # subdirectory scope and first-party targets get their flags from
 # `MONO_COMPILE_OPTIONS`, which is applied per target and wins by coming later
-# on the command line. Debug information is deliberately kept — a stack through
+# on the command line. Debug information is deliberately kept - a stack through
 # SDL should still name its frames.
 #
 # Off with `-DMONO_OPTIMISE_VENDOR=OFF`, which is what to pass when the thing
@@ -106,7 +106,7 @@ add_subdirectory("${MONO_VENDOR}/tracy" EXCLUDE_FROM_ALL)
 # Upstream keeps the headers at its repository root, in `include/`. The `asio/`
 # directory sitting beside them is a compatibility shim for the older layout,
 # and the `include` and `src` entries inside it are symlinks back up at the real
-# ones — `git ls-files -s` reports them as mode 120000.
+# ones - `git ls-files -s` reports them as mode 120000.
 #
 # Git on Windows does not create symlinks. `core.symlinks` defaults to off
 # there, because creating one needs Developer Mode or an elevated shell, and
@@ -146,7 +146,7 @@ target_link_libraries(vendor_asio INTERFACE Threads::Threads)
 # control server answers Model Context Protocol, which is JSON-RPC 2.0.
 #
 # Header-only and declared here rather than added as a subdirectory, for asio's
-# reason — upstream's CMakeLists builds tests and a package config nobody here
+# reason - upstream's CMakeLists builds tests and a package config nobody here
 # wants, and the single header is the whole library.
 #
 # **The single_include copy, not include/.** Upstream ships both; the amalgamated
@@ -164,7 +164,7 @@ target_include_directories(vendor_json SYSTEM INTERFACE "${MONO_VENDOR}/json/sin
 # TOML, for the one thing in this repository that reads it: `mono.studio`'s Rojo
 # sync maps a `*.toml` to a `ModuleScript`, which `rojo.space/docs/v7/sync-details`
 # lists beside the `*.json` case. `D00104` carried it as deferred for exactly one
-# reason — the mapping was free and the parser was not vendored.
+# reason - the mapping was free and the parser was not vendored.
 #
 # Header-only, MIT, and declared here rather than added as a subdirectory for
 # json's reason: upstream's CMakeLists builds tests, examples and an install
@@ -195,7 +195,7 @@ target_compile_definitions(vendor_tomlplusplus INTERFACE TOML_EXCEPTIONS=0)
 # **The licence is why this one exists at all.** `audio/AGENTS.md` said MP3 was
 # "a vendored codec and a licence decision" and left the gap honest rather than
 # listing an extension it could not decode; CC0 is what makes the decision cheap
-# — no attribution obligation, no patent grant to read, nothing that reaches a
+# - no attribution obligation, no patent grant to read, nothing that reaches a
 # shipped game. A codec is usually where that question ends the conversation.
 #
 # Header-only and declared here for asio's reason: upstream ships a test
@@ -206,7 +206,7 @@ target_compile_definitions(vendor_tomlplusplus INTERFACE TOML_EXCEPTIONS=0)
 # nothing to keep and is what a file with a `.mp3` extension sometimes actually
 # is; the second would turn off the SSE and NEON paths that make a five-minute
 # track decode in well under a second. `MINIMP3_IMPLEMENTATION` is defined in
-# exactly one translation unit — `audio/src/Mp3.cpp` — because these headers are
+# exactly one translation unit - `audio/src/Mp3.cpp` - because these headers are
 # a single-header library and defining it twice is a duplicate-symbol link
 # error.
 #
@@ -221,13 +221,13 @@ target_include_directories(vendor_minimp3 SYSTEM INTERFACE "${MONO_VENDOR}/minim
 # and inspectors are made of, and what a debug window would use.
 #
 # Not the F3/F5 panels. Those draw pixels into a CPU buffer on purpose, so they
-# keep working when the renderer is the thing being debugged — see
+# keep working when the renderer is the thing being debugged - see
 # mono.engine/render/AGENTS.md.
 #
 # Client tier: it needs SDL3 and a GPU backend.
 if(MONO_BUILD_CLIENT)
 	# imgui ships no CMakeLists either, and the backends are deliberately not
-	# a library — you compile the two that match your platform. SDL3 for the
+	# a library - you compile the two that match your platform. SDL3 for the
 	# window and events, SDL3 GPU for drawing, which is the same pair the
 	# renderer already uses.
 	add_library(vendor_imgui STATIC EXCLUDE_FROM_ALL
@@ -252,6 +252,53 @@ if(MONO_BUILD_CLIENT)
 	# imgui_demo.cpp is deliberately absent. It is a third of the library by
 	# size, it is a showcase rather than a dependency, and adding it later is
 	# one line if somebody wants the demo window while building an inspector.
+
+	# --- nodegraph ------------------------------------------------------------
+	# A typed node graph and an ImGui canvas over it. Ours, developed in this
+	# repository as `studio/NodeGraph.hpp` and moved out by D00113 so that the
+	# render pipeline editor and `Engine::bakegraph`'s pipeline documents extend
+	# one library instead of starting a third.
+	#
+	# **Declared here although upstream ships a CMakeLists, which is the unusual
+	# call.** That file builds its own `nodegraph_imgui` out of whatever ImGui it
+	# finds, because the common case for a template is a checkout with no build
+	# system in it. Adding it here would put a second copy of every ImGui symbol
+	# on the link line of anything that linked both - a duplicate-symbol error
+	# rather than a slow build - and there is no option that makes it consume an
+	# existing one. It also configures a test binary and an SDL3 demo, neither of
+	# which this repository wants built.
+	#
+	# Two targets, because upstream keeps the same seam: the library knows no
+	# node types, and the set it ships is a demo a host opts into.
+	add_library(vendor_nodegraph STATIC EXCLUDE_FROM_ALL
+		"${MONO_VENDOR}/nodegraph/cpp/src/Types.cpp"
+		"${MONO_VENDOR}/nodegraph/cpp/src/Registry.cpp"
+		"${MONO_VENDOR}/nodegraph/cpp/src/Graph.cpp"
+		"${MONO_VENDOR}/nodegraph/cpp/src/Layout.cpp"
+		"${MONO_VENDOR}/nodegraph/cpp/src/Evaluate.cpp"
+		"${MONO_VENDOR}/nodegraph/cpp/src/Serialize.cpp"
+		"${MONO_VENDOR}/nodegraph/cpp/src/Preview.cpp"
+		"${MONO_VENDOR}/nodegraph/cpp/src/Inspect.cpp"
+		"${MONO_VENDOR}/nodegraph/cpp/src/Editor.cpp"
+		"${MONO_VENDOR}/nodegraph/cpp/src/Inspectors.cpp"
+	)
+	add_library(Vendor::nodegraph ALIAS vendor_nodegraph)
+
+	# SYSTEM for imgui's reason above: the `ci` preset builds first-party code
+	# with -Werror and a vendored header must never be able to fail it.
+	target_include_directories(vendor_nodegraph SYSTEM PUBLIC
+		"${MONO_VENDOR}/nodegraph/cpp/include")
+	target_link_libraries(vendor_nodegraph PUBLIC vendor_imgui)
+	target_compile_features(vendor_nodegraph PUBLIC cxx_std_20)
+
+	# The demo node set - terrain fields, a colouriser and two slow async nodes.
+	# Separate because it is content rather than library: what links it is
+	# `mono.studio`'s Demo Nodes panel, and a node editor with its own vocabulary
+	# links `Vendor::nodegraph` and none of this.
+	add_library(vendor_nodegraph_nodes STATIC EXCLUDE_FROM_ALL
+		"${MONO_VENDOR}/nodegraph/cpp/demo/Nodes.cpp")
+	add_library(Vendor::nodegraph_nodes ALIAS vendor_nodegraph_nodes)
+	target_link_libraries(vendor_nodegraph_nodes PUBLIC vendor_nodegraph)
 endif()
 
 # --- Catch2 -----------------------------------------------------------------
@@ -273,7 +320,7 @@ endif()
 #   libshaderc the library, linked into the client by `render`. This is the
 #              one that matters for the graph renderer: a `ShaderScript` whose
 #              revision changed, a swapped antialias pass, a shader permutation
-#              — none of them exist at build time, so none can be compiled
+#              - none of them exist at build time, so none can be compiled
 #              ahead of it.
 #
 # Keeping both is deliberate rather than redundant. Build-time compilation
@@ -283,7 +330,7 @@ endif()
 #
 # Client-tier, and gated on nothing else. libshaderc is linked into the client
 # for the runtime half above, so MONO_VENDORED_GLSLC only decides which glslc
-# compiles the built-in shaders — not whether shaderc is configured at all.
+# compiles the built-in shaders - not whether shaderc is configured at all.
 #
 # A server configure still gets none of it: no server-tier target owns GLSL or
 # compiles one.
@@ -303,7 +350,7 @@ if(MONO_BUILD_CLIENT)
 
 	set(SHADERC_SKIP_TESTS            ON  CACHE BOOL "" FORCE)
 	set(SHADERC_SKIP_EXAMPLES         ON  CACHE BOOL "" FORCE)
-	# glslc, the command-line driver, is the point of vendoring this today —
+	# glslc, the command-line driver, is the point of vendoring this today -
 	# it is what compiles the engine's own GLSL, and building it here means a
 	# fresh clone needs no shader compiler installed. libshaderc comes along
 	# with it and is what the cooker will link when there is one.
@@ -363,11 +410,74 @@ if(MONO_BUILD_CLIENT)
 	add_subdirectory("${MONO_VENDOR}/shaderc" EXCLUDE_FROM_ALL)
 endif()
 
+# --- SPIRV-Cross -------------------------------------------------------------
+# SPIR-V to MSL. The other end of shaderc: glslc produces SPIR-V and SDL's Metal
+# backend takes MSL or a metallib and never SPIR-V, so this is what stands
+# between the two on that platform. `docs/DEFERRED.md` D00001 is the item.
+#
+# Client-gated, beside shaderc and for its reason rather than by analogy: the
+# only two consumers are `mono.tools/shadercross`, which translates the built-in
+# shaders during the build, and `render::ShaderCompiler`, which translates
+# runtime-authored ones. `render` is client-tier and a server preset configures
+# neither, so a headless build pays nothing.
+#
+# **Three of its eight libraries, and the omissions are the point.** `core` is
+# the parser, `glsl` is the emitter every other backend derives from, `msl` is
+# the one thing here that is wanted. HLSL, the deprecated C++ backend, the JSON
+# reflection backend, the C API and the CLI are all off - this engine authors
+# GLSL and reads SPIR-V, and a target nothing links is build time spent on a
+# claim we do not make.
+if(MONO_BUILD_CLIENT)
+	if(NOT EXISTS "${MONO_VENDOR}/spirv-cross/CMakeLists.txt")
+		message(FATAL_ERROR "mono.vendor/spirv-cross is missing. Run `just setup`.")
+	endif()
+
+	set(SPIRV_CROSS_STATIC        ON  CACHE BOOL "" FORCE)
+	set(SPIRV_CROSS_SHARED        OFF CACHE BOOL "" FORCE)
+	set(SPIRV_CROSS_CLI           OFF CACHE BOOL "" FORCE)
+	set(SPIRV_CROSS_ENABLE_TESTS  OFF CACHE BOOL "" FORCE)
+	set(SPIRV_CROSS_ENABLE_GLSL   ON  CACHE BOOL "" FORCE)
+	set(SPIRV_CROSS_ENABLE_MSL    ON  CACHE BOOL "" FORCE)
+	set(SPIRV_CROSS_ENABLE_HLSL   OFF CACHE BOOL "" FORCE)
+	set(SPIRV_CROSS_ENABLE_CPP    OFF CACHE BOOL "" FORCE)
+	set(SPIRV_CROSS_ENABLE_REFLECT OFF CACHE BOOL "" FORCE)
+	set(SPIRV_CROSS_ENABLE_UTIL   OFF CACHE BOOL "" FORCE)
+	set(SPIRV_CROSS_ENABLE_C_API  OFF CACHE BOOL "" FORCE)
+	# Unconditional install rules, so they are skipped as well as excluded from
+	# `all`. Upstream's macro also calls `export(TARGETS ...)`, which writes a
+	# stray config file into the build tree when it is left on.
+	set(SPIRV_CROSS_SKIP_INSTALL  ON  CACHE BOOL "" FORCE)
+	# Their code, our compiler. Same rule as shaderc above: a new warning in a
+	# future GCC must not turn into a failed engine build.
+	set(SPIRV_CROSS_WERROR        OFF CACHE BOOL "" FORCE)
+	set(SPIRV_CROSS_MISC_WARNINGS OFF CACHE BOOL "" FORCE)
+
+	add_subdirectory("${MONO_VENDOR}/spirv-cross" EXCLUDE_FROM_ALL)
+
+	# One name for the three, so a consumer links what the job needs rather than
+	# knowing which of upstream's libraries the emitter lives in.
+	add_library(vendor_spirv_cross INTERFACE)
+	add_library(Vendor::spirv-cross ALIAS vendor_spirv_cross)
+	target_link_libraries(vendor_spirv_cross INTERFACE spirv-cross-msl spirv-cross-glsl spirv-cross-core)
+
+	# SYSTEM, for the reason `mono.vendor/AGENTS.md` gives: the `ci` preset builds
+	# first-party code with -Werror and a warning in a vendored header must never
+	# be able to fail our build. Upstream declares its include directory PUBLIC
+	# and not SYSTEM, so it is re-declared here rather than wrapped -
+	# `INTERFACE_SYSTEM_INCLUDE_DIRECTORIES` is what CMake 3.24 has; the `SYSTEM`
+	# target property is 3.25 and the root file asks for 3.24.
+	foreach(spirv_cross_target IN ITEMS spirv-cross-core spirv-cross-glsl spirv-cross-msl)
+		get_target_property(spirv_cross_includes ${spirv_cross_target} INTERFACE_INCLUDE_DIRECTORIES)
+		set_property(TARGET ${spirv_cross_target}
+			APPEND PROPERTY INTERFACE_SYSTEM_INCLUDE_DIRECTORIES ${spirv_cross_includes})
+	endforeach()
+endif()
+
 # --- Crypto++ ---------------------------------------------------------------
 # Two submodules, and the second one is the build system. `.gitmodules` has the
 # long form of why; the short form is that weidai11/cryptopp ships a GNUmakefile
-# and no CMakeLists, and that declaring the target here — the asio and imgui
-# answer — does not survive contact with 202 translation units, a per-file ISA
+# and no CMakeLists, and that declaring the target here - the asio and imgui
+# answer - does not survive contact with 202 translation units, a per-file ISA
 # flag matrix across x86, ARM and POWER, and a link order that is load-bearing
 # for static initialisation. abdes/cryptopp-cmake is the wrapper the Crypto++
 # wiki points at. Vendoring it costs one more submodule and one more notice, and
@@ -375,7 +485,7 @@ endif()
 #
 # Not gated on a tier, and deliberately so. Crypto++ is portable C++ with no
 # platform dependency, so it is available to client-tier and server-tier targets
-# alike — asio's situation, and for the same reason. Being configured here says
+# alike - asio's situation, and for the same reason. Being configured here says
 # nothing about who may link it; that stays a tier question, decided by whatever
 # module first lists it.
 #
@@ -403,7 +513,7 @@ set(USE_CCACHE             OFF CACHE BOOL "" FORCE)
 add_subdirectory("${MONO_VENDOR}/cryptopp-cmake" EXCLUDE_FROM_ALL)
 
 # cryptopp-cmake marks its include directories PUBLIC but not SYSTEM, and the
-# `ci` preset builds first-party code with -Werror — a warning in a vendored
+# `ci` preset builds first-party code with -Werror - a warning in a vendored
 # header must never be able to fail our build. add_subdirectory(... SYSTEM)
 # would say this in one word, but it is CMake 3.25 and the root file targets
 # 3.24, so the property is set directly instead.
@@ -433,11 +543,11 @@ add_library(Vendor::cryptopp ALIAS cryptopp)
 # Crypto++ is already here and ships BLAKE2b, which would serve as a leaf hash.
 # Taking it would not have been the same decision. Content addressing is the one
 # place a hash is compared against an attacker's rather than against accident,
-# and changing the algorithm afterwards rehashes every byte anyone has stored —
+# and changing the algorithm afterwards rehashes every byte anyone has stored -
 # so it is picked once, on purpose, and DATATYPES_LIBRARIES.md §1.1 picks this.
 #
 # Only the upstream `c/` directory is built. The Rust crate above it is the
-# reference implementation and is not vendored — one implementation of a format
+# reference implementation and is not vendored - one implementation of a format
 # is the rule, and the C one is what a game binary can link.
 #
 # Its CMakeLists enables ASM itself and dispatches SIMD at run time, so a single
@@ -450,7 +560,7 @@ if(NOT EXISTS "${MONO_VENDOR}/blake3/c/CMakeLists.txt")
 endif()
 
 # Upstream defaults this on and would otherwise fetch oneTBB from GitHub at
-# configure time — the same offline-and-reproducible line CRYPTOPP_SOURCES is.
+# configure time - the same offline-and-reproducible line CRYPTOPP_SOURCES is.
 # The parallel hashing it buys is not wanted here anyway: chunking is already
 # fanned out a chunk at a time by Jobs::For, and two layers of parallelism over
 # one file is how a job system gets oversubscribed.
@@ -480,13 +590,13 @@ add_library(Vendor::blake3 ALIAS blake3)
 #
 # The dictionary support is the reason this is Zstd rather than anything else
 # already here. A game's content is thousands of small files that share a great
-# deal — the same vertex layouts, the same material fields, the same strings —
+# deal - the same vertex layouts, the same material fields, the same strings -
 # and a trained dictionary is what turns that into a ratio rather than into
 # thousands of independently incompressible blobs.
 #
 # **BSD-3-Clause, not GPLv2.** Upstream is dual-licensed and ships both texts:
 # LICENSE is the BSD one and COPYING is GPLv2. We take BSD. That is not a
-# preference — GPLv2 would be incompatible with shipping this in a game binary
+# preference - GPLv2 would be incompatible with shipping this in a game binary
 # under MPL-2.0, and the choice is recorded in THIRD_PARTY_NOTICES.md rather
 # than left for somebody to infer from two files in a submodule.
 if(NOT EXISTS "${MONO_VENDOR}/zstd/build/cmake/CMakeLists.txt")
@@ -504,7 +614,7 @@ set(ZSTD_BUILD_CONTRIB   OFF CACHE BOOL "" FORCE)
 
 # Off, and this one is a decision rather than a default.
 #
-# Legacy support decodes frames from Zstd 0.x — formats that predate the
+# Legacy support decodes frames from Zstd 0.x - formats that predate the
 # stabilised one and that nothing here could ever have written. It costs a large
 # amount of extra decoder surface, and that surface parses bytes an origin
 # supplied. `repo_layout.md` §1 says anyone can run a server, so a decoder we
@@ -515,7 +625,7 @@ set(ZSTD_LEGACY_SUPPORT  OFF CACHE BOOL "" FORCE)
 #
 # Zstd's multithreading spawns its own worker threads per compression context.
 # The origin already fans out over *groups* with its own pool, and two layers of
-# parallelism over one workload is how a job system gets oversubscribed — the
+# parallelism over one workload is how a job system gets oversubscribed - the
 # reasoning BLAKE3_USE_TBB is off for, one library up.
 set(ZSTD_MULTITHREAD_SUPPORT OFF CACHE BOOL "" FORCE)
 
@@ -539,8 +649,8 @@ add_library(Vendor::zstd ALIAS libzstd_static)
 # `v05.md` open question 3 asked which VM and said the answer should be taken
 # before the bindings manifest generates declaration files, because a `.d.ts`
 # and a Luau type file are written against a value model rather than in the
-# abstract. This is that answer. **Nothing links it yet** — v0.6 is where a
-# script runs — and EXCLUDE_FROM_ALL is what makes vendoring it early cost
+# abstract. This is that answer. **Nothing links it yet** - v0.6 is where a
+# script runs - and EXCLUDE_FROM_ALL is what makes vendoring it early cost
 # nothing until then.
 #
 # MIT, twice over: Roblox's own text in LICENSE.txt and Lua.org's in
@@ -587,7 +697,7 @@ unset(_luau_target)
 #
 # - **`Luau.CodeGen` is the native-code backend, and it is off the table until
 #   determinism is measured rather than assumed.** This repository diffs two runs
-#   byte for byte — `just determinism` and `just replay-check` — and a JIT is a
+#   byte for byte - `just determinism` and `just replay-check` - and a JIT is a
 #   second execution path for the same script. That is exactly the test v0.4
 #   stated before changing to `-O3`, and it has to be stated again before a
 #   second backend, not after.
@@ -603,7 +713,7 @@ add_library(Vendor::luau_compiler ALIAS Luau.Compiler)
 # and `just typecheck` is what runs it.
 #
 # **Not linked by `Engine::script`, and that separation is the point.** Nothing a
-# game binary contains type-checks anything — a shipped runtime compiles bytecode
+# game binary contains type-checks anything - a shipped runtime compiles bytecode
 # and runs it. This is a build-time consumer only, which is why the alias sits
 # beside the two the runtime uses rather than among them.
 #
@@ -619,8 +729,8 @@ add_library(Vendor::luau_analysis ALIAS Luau.Analysis)
 # choice `v05.md` §5.7 records.
 #
 # Vendored alongside Luau rather than instead of it. `v05.md` argued for one
-# runtime and the decision went the other way deliberately — two languages, two
-# VMs, one binding surface — so what matters here is that the *engine* keeps one
+# runtime and the decision went the other way deliberately - two languages, two
+# VMs, one binding surface - so what matters here is that the *engine* keeps one
 # tick and one determinism story across both. Three properties of this engine
 # are what make that possible, and each is an API rather than a hope:
 #
@@ -641,7 +751,7 @@ add_library(Vendor::luau_analysis ALIAS Luau.Analysis)
 # is left unaliased one block up. MIT, Bellard and Gordon, continued by the ng
 # fork after the two projects merged efforts. No external dependencies.
 #
-# **Nothing links it yet** — v0.6 is where a script runs — and EXCLUDE_FROM_ALL
+# **Nothing links it yet** - v0.6 is where a script runs - and EXCLUDE_FROM_ALL
 # is what keeps that free.
 if(NOT EXISTS "${MONO_VENDOR}/quickjs/CMakeLists.txt")
 	message(FATAL_ERROR "mono.vendor/quickjs is missing. Run `just setup`.")
@@ -652,7 +762,7 @@ endif()
 # `quickjs-libc` is upstream's `std` and `os` modules: file I/O, process spawn,
 # `setTimeout` against a wall clock. Every part of that is either a capability a
 # game script must not have or a source of non-determinism a recording cannot
-# replay — a script that sleeps on real time is precisely the desync rule 5
+# replay - a script that sleeps on real time is precisely the desync rule 5
 # names. The engine supplies what a script may reach through its own bindings,
 # and this is the line where the alternative is refused rather than sandboxed
 # later.

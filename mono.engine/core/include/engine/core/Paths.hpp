@@ -2,7 +2,7 @@
 
 // Where the program's own files are.
 //
-// A program stages into a directory that is runnable as it stands — binary,
+// A program stages into a directory that is runnable as it stands - binary,
 // shared libraries, shaders. Everything here resolves relative to that
 // directory rather than to the working directory, because the working directory
 // is whatever the person who launched the game happened to be in.
@@ -18,7 +18,7 @@ namespace engine::core {
 	class Paths {
 	  public:
 		// The directory the running binary sits in. Resolved once, on first
-		// call, and cached — the answer cannot change while the process lives.
+		// call, and cached - the answer cannot change while the process lives.
 		// Falls back to the working directory when the platform cannot report the
 		// executable path.
 		static const std::filesystem::path &Base();
@@ -56,7 +56,7 @@ namespace engine::core {
 		// Where the vendored typefaces are staged.
 		//
 		// Under the assets root rather than beside the binary, so
-		// `--override-assets-directory` moves the fonts with everything else —
+		// `--override-assets-directory` moves the fonts with everything else -
 		// a tree that had the shaders relocated and the fonts not would be half
 		// an override.
 		//

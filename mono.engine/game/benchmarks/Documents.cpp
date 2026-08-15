@@ -2,7 +2,7 @@
 //
 // **Loading is a player waiting.** Opening a place in the studio, or a server
 // bringing a world up on start, is one pass of this code over a whole document
-// — and unlike a frame, there is no next one to make up for it. A parser that
+// - and unlike a frame, there is no next one to make up for it. A parser that
 // costs a microsecond per element turns a hundred-thousand-instance place into
 // a tenth of a second before anything is constructed, which is the difference
 // between a tool that feels instant and one that does not.
@@ -11,7 +11,7 @@
 // world is instances inside instances, each carrying a handful of properties,
 // and every property is an element. So the interesting figure is per element
 // rather than per byte, and the ladder exists to say whether parsing is linear
-// in the document — a parser that resolves entities by rescanning, or that
+// in the document - a parser that resolves entities by rescanning, or that
 // looks an attribute up by walking a list, is quadratic in a way no small test
 // document reveals.
 //
@@ -19,7 +19,7 @@
 // document is not usually hostile; it is usually *old*, or truncated by a disk
 // that filled, or written by a build that has since changed. But `XmlLimits`
 // bounds depth, size and element count precisely because a document can be
-// hostile — a place file is content, and content arrives from other people. A
+// hostile - a place file is content, and content arrives from other people. A
 // parser that costs more to refuse a 300-deep document than to accept a
 // 200-deep one is one that can be made to spend a long time saying no.
 //
@@ -138,7 +138,7 @@ using namespace documents_bench;
 
 // --- parsing --------------------------------------------------------------------
 //
-// One iteration is one *instance*, and each instance is five elements — so
+// One iteration is one *instance*, and each instance is five elements - so
 // divide by five for a per-element figure. Instances rather than elements
 // because that is the unit somebody counts when they say how big their place
 // is.
@@ -159,8 +159,8 @@ BENCH("ParseXml · 200k instances", 200'000) {
 	// **A large place file, and the row the ladder exists for.** A flat
 	// per-instance figure from 1k up to here means parsing is linear and a big
 	// world merely takes proportionally longer. A climbing one means something
-	// is being searched per element — an attribute lookup that walks, an entity
-	// resolver that rescans — and the load time of a big place is quadratic in
+	// is being searched per element - an attribute lookup that walks, an entity
+	// resolver that rescans - and the load time of a big place is quadratic in
 	// a way no small document could have shown.
 	const std::string &text = DocumentOf(200'000);
 	Consume(ParseXml(text, Parsed()) == XmlStatus::Ok);
@@ -182,7 +182,7 @@ BENCH("ParseXml · 20k instances into a fresh document", 20'000) {
 
 BENCH("XmlElement::Attribute · 100k lookups", 100'000) {
 	// **Called once per attribute per element by every loader**, and it is a
-	// linear walk of two parallel vectors by design — which is right for the two
+	// linear walk of two parallel vectors by design - which is right for the two
 	// or three attributes an element actually has, and would be badly wrong if
 	// something started writing dozens. This row is what makes that assumption
 	// checkable rather than implicit.
@@ -208,7 +208,7 @@ BENCH("XmlElement::Attribute · 100k lookups", 100'000) {
 BENCH("ParseXml · 10k documents nested past the depth limit", 10'000) {
 	// 300 deep against a limit of 256. The parser should stop at the limit
 	// rather than at the end of the document, so this must cost about what 256
-	// levels cost and not what 300 do — and it must not cost what a *stack*
+	// levels cost and not what 300 do - and it must not cost what a *stack*
 	// 300 deep costs, which is the recursive implementation this bounds against.
 	static const std::string tooDeep = NestedTo(300);
 	XmlDocument &document = Parsed();
@@ -248,7 +248,7 @@ BENCH("ParseXml · 10k truncated documents", 10'000) {
 BENCH("ParseXml · 10k documents over the element limit", 10'000) {
 	// A tiny limit against an ordinary document, so the parser hits the bound
 	// early. **It must stop there rather than parsing the rest and checking
-	// afterwards** — the whole purpose of a bound is that the work is not done.
+	// afterwards** - the whole purpose of a bound is that the work is not done.
 	// If this row costs anything like `ParseXml · 1k instances`, it is being
 	// checked at the end.
 	static const std::string text = DocumentOf(1000);
@@ -273,7 +273,7 @@ BENCH("ParseXml · 10k documents over the element limit", 10'000) {
 BENCH("FormatNumber · 100k", 100'000) {
 	// **Not `std::to_string`**, which is `%f` and writes 60 as "60.000000". The
 	// shortest round-tripping form costs more than a fixed one, and this row is
-	// how much — multiplied by every number in a place file, twice, if a tool
+	// how much - multiplied by every number in a place file, twice, if a tool
 	// both writes and reloads.
 	double value = 0.5;
 	size_t bytes = 0;
@@ -309,8 +309,8 @@ BENCH("ParseValue · 100k Vector3", 100'000) {
 
 BENCH("ParseValue · 100k rejected Vector3", 100'000) {
 	// The path somebody typing into a field takes on every keystroke that is not
-	// yet a valid vector. It fills `reason` with a message — "expected x, y, z"
-	// — and building a string per rejection is the thing to watch: an editor
+	// yet a valid vector. It fills `reason` with a message - "expected x, y, z"
+	// - and building a string per rejection is the thing to watch: an editor
 	// calling this per character is allocating per character.
 	PropertyValue out;
 	std::string reason;

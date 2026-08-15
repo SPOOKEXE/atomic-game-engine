@@ -3,7 +3,7 @@
 // **The registrations are here rather than beside the things they call**, which
 // is the one arrangement that makes the table readable as a list of what the
 // editor does. Scattered across `Interface.cpp`, `Explorer.cpp` and `Editor.cpp`
-// it would be a registry nobody could read in one go — and the reason for having
+// it would be a registry nobody could read in one go - and the reason for having
 // it at all is that there is one place to look.
 
 #include <engine/core/Log.hpp>
@@ -166,7 +166,7 @@ namespace studio {
 		//
 		// Always available. A tool with nothing selected draws no handles and
 		// costs nothing, and greying the buttons would make picking a tool
-		// something you can only do *after* choosing what to point it at —
+		// something you can only do *after* choosing what to point it at -
 		// which is the wrong way round for a person who selects with the tool
 		// already in hand.
 		const auto tool = [this, always](Action id, const char *name, const char *what, ToolMode mode) {
@@ -197,7 +197,7 @@ namespace studio {
 		// **The join, checked where it is made.** `tests/Operators.cpp` proves
 		// the property is satisfiable; this proves these registrations satisfy
 		// it. Without it, an `Action` added to `Keybinds.cpp` and forgotten here
-		// is a command with a binding and no behaviour — the key does nothing,
+		// is a command with a binding and no behaviour - the key does nothing,
 		// the palette does not list it, and neither says why.
 		//
 		// A warning rather than an abort: a missing operator makes one command
@@ -268,7 +268,7 @@ namespace studio {
 
 		// **Chosen outside the loop and run after `EndPopup`.** Running an
 		// operator from inside the row that drew it would let an operator that
-		// closes the palette — or opens a modal — do so while imgui is still
+		// closes the palette - or opens a modal - do so while imgui is still
 		// inside the popup it belongs to.
 		const Operator *chosen = nullptr;
 

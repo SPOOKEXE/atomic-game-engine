@@ -6,11 +6,11 @@
 // fact about the command line.** `--script PATH` runs one file against a world;
 // a game has many, each parented somewhere, each knowing which one it is. Until
 // a script is a row in the world it builds, a world cannot be written out whole
-// — so this is the prerequisite for a save file rather than a convenience.
+// - so this is the prerequisite for a save file rather than a convenience.
 //
 // **The source is a path, not the text**, and that is a v0.6 decision worth
 // stating. Roblox's `Script.Source` is the program itself, and a save format
-// that carried it would need a component holding an unbounded string — which is
+// that carried it would need a component holding an unbounded string - which is
 // not trivially copyable, so it could not be a column, could not go into a
 // snapshot as its object representation, and could not cross a bus as bytes. A
 // `core::Name` naming an asset-relative path is what `Visual::Mesh` already is
@@ -20,7 +20,7 @@
 //
 // **Which scripts run is the host's role, not the world's.** A `Script` runs
 // where `RunService:IsServer()` is true and a `LocalScript` where `IsClient()`
-// is — Roblox's rule, and the one an author already expects. A single-player
+// is - Roblox's rule, and the one an author already expects. A single-player
 // host is both, so it runs both, which is exactly right.
 //
 // @tier L9 · shared
@@ -43,7 +43,7 @@ namespace engine::script {
 	// **One container per language, and an instance may hold both.** A script
 	// being ported does not stop being one script: the Luau it has and the
 	// JavaScript it is becoming are two programs of one instance, and a single
-	// `Source` field made switching between them a destructive edit — the old
+	// `Source` field made switching between them a destructive edit - the old
 	// text was overwritten by the new one, and going back meant having kept a
 	// copy somewhere the engine knew nothing about.
 	//
@@ -54,7 +54,7 @@ namespace engine::script {
 	// **Not scriptable, and that is the security boundary rather than a
 	// preference.** A script that could write another script's source is a
 	// sandbox escape that makes every other boundary in this engine decorative
-	// — the step budget, the memory ceiling and the host role all assume the
+	// - the step budget, the memory ceiling and the host role all assume the
 	// program is the one an author wrote. The properties panel, a game file and
 	// the Rojo sync all write it, because they are the author.
 	// `ecs::PropertyDescriptor::Scriptable` carries the mechanism.
@@ -62,7 +62,7 @@ namespace engine::script {
 	// @since v0.14
 	struct LuaSourceContainer {
 		// The path, relative to the assets root. An invalid name is a container
-		// with nothing in it, which is a legal state — an author makes the
+		// with nothing in it, which is a legal state - an author makes the
 		// instance before choosing the file.
 		core::Name Path;
 	};
@@ -83,9 +83,9 @@ namespace engine::script {
 	// Which of an instance's containers is the program it runs.
 	//
 	// **The one part of this a script may set.** Choosing which language a
-	// script runs is a decision a game can legitimately make at run time — a
+	// script runs is a decision a game can legitimately make at run time - a
 	// mod switching an implementation, a test running the same behaviour twice
-	// — and none of it requires reading or writing a line of anybody's source.
+	// - and none of it requires reading or writing a line of anybody's source.
 	// So this is scriptable and the two containers are not, which is the whole
 	// point of splitting the selection out of them.
 	//
@@ -124,7 +124,7 @@ namespace engine::script {
 	//
 	// **The extension decides which container, and the selector follows it.**
 	// That is what makes `--script thing.js` and a Rojo `.luau` file both do the
-	// obvious thing with one call, and it is where `LanguageOf` is applied — a
+	// obvious thing with one call, and it is where `LanguageOf` is applied - a
 	// caller choosing the container itself would be a second place that decides
 	// what a `.ts` file is.
 	//
@@ -149,7 +149,7 @@ namespace engine::script {
 	// Process-wide and idempotent, like every other class registration.
 	//
 	// `ModuleScript` is registered here too, and it is a **sibling** of `Script`
-	// rather than a kind of one — which is what makes it inert. `ScriptsIn`
+	// rather than a kind of one - which is what makes it inert. `ScriptsIn`
 	// collects `IsA(Script)` and `IsA(LocalScript)`; a module is neither, so the
 	// run loop never visits one and nothing had to learn to skip it.
 	//
@@ -166,7 +166,7 @@ namespace engine::script {
 	// **Nothing runs a module.** It is reached with `require`, which evaluates it
 	// once per runtime and hands every later caller the same value back. A module
 	// with a side effect at its top level therefore has that side effect once, on
-	// whichever script required it first — Roblox's rule, and the reason module
+	// whichever script required it first - Roblox's rule, and the reason module
 	// order is not something an author has to think about.
 	//
 	// @return The class id.
@@ -182,7 +182,7 @@ namespace engine::script {
 	//
 	// **Takes the store mutably, because asking it a question is a mutation.**
 	// A query is built and cached on first use, so `Store::Each` is non-const by
-	// design — and a `const Store &` here bought nothing except a `const_cast`
+	// design - and a `const Store &` here bought nothing except a `const_cast`
 	// at the one line that had to do the work. Naming the requirement in the
 	// signature is the honest version: this reads no rows the caller wrote, but
 	// it is not a call you may make from a thread that does not own the world.
@@ -192,6 +192,36 @@ namespace engine::script {
 	// @param client Whether this host presents.
 	// @return The instances to run, in order.
 	std::vector<ecs::Entity> ScriptsIn(ecs::Store &store, bool server, bool client);
+
+	// Every script instance a client should run in a world it does not own.
+	//
+	// **A class rule and a container rule, because a replica needs both.**
+	// `ScriptsIn` answers the class half - a `Script` is the server's and a
+	// `LocalScript` is a client's - and that is the whole answer for a host that
+	// owns the world it is running. It is not the answer for a replica: the rows
+	// there are somebody else's, and a client that ran every `LocalScript` it
+	// could see would run the ones in *other people's* players and the ones in
+	// `StarterPlayerScripts`, which is a template rather than a program.
+	//
+	// **Roblox's containers, and no new vocabulary was needed for them.** A
+	// `LocalScript` runs when it is under the local player's own subtree -
+	// `scene::PlayerOwning` against `scene::LocalPlayer` - or under
+	// `ReplicatedFirst`, which is `scene::InReplicatedFirst`. `scene::AddPlayer`
+	// is what copies `StarterPlayerScripts` into a player's `PlayerScripts`, so
+	// the template's own children are excluded by being where they are rather
+	// than by being named here.
+	//
+	// **This is not `ScriptsIn` with an extra argument, and that is deliberate.**
+	// A single-player host is a server *and* a client and owns the world it is
+	// in; the containment rule there would stop a `LocalScript` an author parked
+	// in `Workspace` from ever running, which is a change to how every existing
+	// scene loads for the sake of a rule about a replica.
+	//
+	// @param store The replicated world.
+	// @return The instances to run, in creation order. Empty until the host has
+	//         said which player is this client's.
+	// @since v0.15
+	std::vector<ecs::Entity> ClientScriptsIn(ecs::Store &store);
 
 	// Creates a script instance naming a file.
 	//
@@ -214,7 +244,7 @@ namespace engine::script {
 	// Mirrors a directory of `.luau` files into a tree of `ModuleScript`s.
 	//
 	// **This is what makes a library of many files reachable from a script.**
-	// `require` takes an instance and never a path, deliberately — so a
+	// `require` takes an instance and never a path, deliberately - so a
 	// thousand-file library has to *be* a thousand instances before anything can
 	// require the first one, and until this existed the only way to get one was
 	// to hand-build the tree in C++ or to write the whole library into one file.
@@ -229,7 +259,7 @@ namespace engine::script {
 	//
 	// **Absolute paths, and that is not incidental.** `ReadSource` resolves a
 	// relative `Source` against `core::Paths::Assets()`, which defaults to the
-	// running program's own directory — while a staged library sits in a
+	// running program's own directory - while a staged library sits in a
 	// *sibling* of it. `examples::ExamplePath` documents that mismatch and works
 	// around it by looking in both places; a `Source` cannot, because it is one
 	// name. Resolving here, once, where the directory is already known, keeps

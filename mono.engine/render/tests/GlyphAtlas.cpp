@@ -4,7 +4,7 @@
 // decision inside it, unchanged: whichever module ends up owning the four
 // faces, only one does". `ui` owned them through imgui, which was right while
 // the editor was the only thing drawing text and stops being right the moment a
-// shipped client has to draw a `ScreenGui` — `mono.client` does not link
+// shipped client has to draw a `ScreenGui` - `mono.client` does not link
 // `Engine::ui` and must not.
 //
 // These cases run headless. Rasterising needs no device, which is what makes
@@ -30,7 +30,7 @@ using engine::render::Typeface;
 namespace {
 	// The staged assets, which is where the fonts are.
 	// The fonts are staged beside the test binary, the same way a program's are
-	// staged beside it — `mono_add_tests` copies them for a test that links
+	// staged beside it - `mono_add_tests` copies them for a test that links
 	// something which reads them.
 	struct StagedAssets {
 		std::filesystem::path Previous = engine::core::Paths::Assets();
@@ -80,8 +80,8 @@ TEST_CASE("the atlas bakes every vendored face", "[render][glyphatlas]") {
 
 	// **At least the em size, and these faces report exactly it.**
 	//
-	// `LineHeight` is the font's own metric — ascent less descent plus the line
-	// gap — and all four vendored faces declare a zero gap, so it comes out at
+	// `LineHeight` is the font's own metric - ascent less descent plus the line
+	// gap - and all four vendored faces declare a zero gap, so it comes out at
 	// precisely the size asked for. That reads as "consecutive lines touch",
 	// and it is the honest number rather than a wrong one: the *spacing* a
 	// layout leaves between lines is `gui::LINE_SPACING`, which is 1.2 and is
@@ -113,7 +113,7 @@ TEST_CASE("a space has an advance and no pixels", "[render][glyphatlas]") {
 
 TEST_CASE("a codepoint outside the baked range resolves to nothing", "[render][glyphatlas]") {
 	// **Null rather than a zero-size box**, so a caller draws its missing-glyph
-	// marker — visible on purpose, for `ui::ImageSource`'s reason: text that
+	// marker - visible on purpose, for `ui::ImageSource`'s reason: text that
 	// silently vanished would look like the label was broken rather than like
 	// the character was unavailable.
 	const StagedAssets assets;
@@ -131,7 +131,7 @@ TEST_CASE("a codepoint outside the baked range resolves to nothing", "[render][g
 }
 
 TEST_CASE("glyphs are padded so a sampler cannot read a neighbour", "[render][glyphatlas]") {
-	// **The classic atlas bleed, and it only shows at non-integer scales** —
+	// **The classic atlas bleed, and it only shows at non-integer scales** -
 	// which is to say on somebody else's machine. A sampler filtering at the
 	// edge of a packed glyph reads the neighbour's coverage and draws a faint
 	// smear of an unrelated letter down one side.
@@ -175,7 +175,7 @@ TEST_CASE("measuring text is the sum of its advances", "[render][glyphatlas]") {
 	// **The real number, against `gui::AVERAGE_ADVANCE`'s estimate.** That
 	// constant exists because `gui` is `shared` and cannot rasterise anything;
 	// this is what a backend that *has* an atlas should use, and the estimate is
-	// there so the two do not disagree about where an element is — not so the
+	// there so the two do not disagree about where an element is - not so the
 	// text stays wrong.
 	const StagedAssets assets;
 	if (!FontsPresent()) {
@@ -195,7 +195,7 @@ TEST_CASE("measuring text is the sum of its advances", "[render][glyphatlas]") {
 
 	// **Monospace is the face where a wrong sum is provable rather than
 	// plausible.** Every advance is identical, so ten characters must be
-	// exactly ten times one — a measurement that dropped or double-counted a
+	// exactly ten times one - a measurement that dropped or double-counted a
 	// glyph fails here and would be invisible in a proportional face.
 	const float single = atlas.Measure(Typeface::Monospace, "x");
 	const float ten = atlas.Measure(Typeface::Monospace, "xxxxxxxxxx");
@@ -211,13 +211,13 @@ TEST_CASE("a bad size is refused rather than baked", "[render][glyphatlas]") {
 
 TEST_CASE("the white texel is packed rather than assumed", "[render][glyphatlas]") {
 	// **A filled rectangle and a glyph go through one pipeline**, which needs
-	// one solid texel to sample. Two pipelines — one textured, one not — is two
+	// one solid texel to sample. Two pipelines - one textured, one not - is two
 	// places for the blend state to be set differently, and that shows as
 	// interface panels being subtly the wrong opacity and nowhere else.
 	//
 	// **The texel takes a rect from the packer rather than a corner somebody
 	// picked.** `stbrp` fills the whole sheet, so a hand-picked texel is one a
-	// large glyph can land on — putting a letter's coverage under every filled
+	// large glyph can land on - putting a letter's coverage under every filled
 	// rectangle in the interface. That bug appears only once the atlas is full
 	// enough for that glyph to go there, which is to say on the machine with the
 	// wider font, which is to say not this one.
@@ -255,7 +255,7 @@ TEST_CASE("the white texel is packed rather than assumed", "[render][glyphatlas]
 	CHECK(pixels[static_cast<size_t>(y + 1) * atlas.Width() + x] == 0);
 
 	// And it is not mistaken for a glyph, which the slot offset is what
-	// prevents — a reader that forgot it would return the white texel for the
+	// prevents - a reader that forgot it would return the white texel for the
 	// first baked codepoint.
 	const Glyph *space = atlas.Find(Typeface::Interface, GlyphAtlas::FIRST_CODEPOINT);
 	REQUIRE(space != nullptr);

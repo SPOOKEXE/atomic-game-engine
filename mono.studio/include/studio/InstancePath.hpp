@@ -52,7 +52,7 @@ namespace studio {
 	// The instance a path names.
 	//
 	// **The first match wins and duplicates are the caller's problem.** Two
-	// siblings may share a name — Roblox allows it and so does this store — so a
+	// siblings may share a name - Roblox allows it and so does this store - so a
 	// path is not a key. It is the best identity available without the document
 	// format carrying one, and where it is ambiguous the ambiguity was already
 	// there in what a person sees.
@@ -66,7 +66,7 @@ namespace studio {
 	// Whether one path is the other, or an ancestor of it.
 	//
 	// **The comparison a lock is made of.** A lock over a model has to cover
-	// the parts inside it — moving a model moves its children — so "does this
+	// the parts inside it - moving a model moves its children - so "does this
 	// edit touch that lock" is not equality, it is whether either path
 	// contains the other.
 	//
@@ -86,7 +86,7 @@ namespace studio {
 	// @since v0.13
 	bool Overlaps(const InstancePath &left, const InstancePath &right);
 
-	// A path as something a person can read — `Workspace.Model.Part`.
+	// A path as something a person can read - `Workspace.Model.Part`.
 	//
 	// **For a message and never for the wire.** Joining is lossy the moment a
 	// name holds the separator, which is exactly why the wire carries the list.

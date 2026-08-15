@@ -146,7 +146,7 @@ TEST_CASE("signals are per subject", "[signals]") {
 
 TEST_CASE("subjects are visited in first-connection order", "[signals]") {
 	// Not hash order. `.Changed` fires per instance, so this is the order a
-	// script sees its world change in — and a hash walk would make that depend
+	// script sees its world change in - and a hash walk would make that depend
 	// on pointer values.
 	SignalTable table;
 	for (uint64_t id = 5; id > 0; id--) {
@@ -252,7 +252,7 @@ TEST_CASE("waits resume on the tick they are due and not before", "[signals][tas
 }
 
 TEST_CASE("a tick that is overdue resumes everything up to it", "[signals][task]") {
-	// A world that ticked several times without pumping — a host catching up —
+	// A world that ticked several times without pumping - a host catching up -
 	// must not leave a script waiting forever on a tick it stepped over.
 	TaskQueue queue;
 	queue.Delay(1, 5);
@@ -306,7 +306,7 @@ TEST_CASE("deferred work drains in order and only once", "[signals][task]") {
 	queue.DrainDeferred([&](CallbackRef thread) {
 		resumed.push_back(thread);
 		if (thread == 1) {
-			// Belongs to the next pass, not this one — otherwise a script could
+			// Belongs to the next pass, not this one - otherwise a script could
 			// spin the host without ever yielding a tick.
 			queue.Defer(3);
 		}

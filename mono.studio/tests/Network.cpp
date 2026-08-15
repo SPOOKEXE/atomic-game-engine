@@ -35,7 +35,7 @@ TEST_CASE("there is no rate until there is a window", "[studio][network]") {
 TEST_CASE("the first observation seeds rather than measuring", "[studio][network]") {
 	// **A client that has been running for a while has a large total**, and a
 	// ring whose first sample counted all of it would show one enormous spike
-	// on the frame the panel is first opened — which is exactly the moment
+	// on the frame the panel is first opened - which is exactly the moment
 	// somebody is deciding whether to believe the number.
 	NetworkSamples samples;
 	samples.Observe(120.0, 500'000'000, 0);
@@ -59,7 +59,7 @@ TEST_CASE("a rate is what crossed inside the window", "[studio][network]") {
 
 TEST_CASE("samples closer together than the interval are dropped", "[studio][network]") {
 	// A panel is drawn sixty times a second and the ring holds seconds, so most
-	// calls have to do nothing at all — otherwise the window would be a sixth
+	// calls have to do nothing at all - otherwise the window would be a sixth
 	// of a second and the rate would be one frame's noise.
 	NetworkSamples samples;
 	samples.Observe(0.0, 0, 0);
@@ -95,7 +95,7 @@ TEST_CASE("the window stops growing once the ring is full", "[studio][network]")
 TEST_CASE("a transfer that stops reads as zero rather than as its total", "[studio][network]") {
 	// **The failure that makes a total useless.** Bytes-since-start divided by
 	// uptime never returns to zero, so a panel built on one says a finished
-	// download is still moving — for as long as the editor stays open.
+	// download is still moving - for as long as the editor stays open.
 	NetworkSamples samples;
 	for (int second = 0; second < 4; second++) {
 		samples.Observe(static_cast<double>(second), static_cast<uint64_t>(second) * 5000, 0);

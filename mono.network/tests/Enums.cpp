@@ -2,7 +2,7 @@
 // wire: an ordinal means one thing for ever.
 //
 // This suite exists to fail when somebody reorders one. That is not a
-// hypothetical — an announcement from an older build decoding as a different
+// hypothetical - an announcement from an older build decoding as a different
 // kind of session in a newer one is the quietest way this module could break,
 // and nothing else in the build would notice.
 
@@ -69,7 +69,7 @@ TEST_CASE("every value names itself and no two share a name", "[network][enums]"
 	CHECK(std::string_view(network::Describe(Purpose::Studio)) == "studio");
 	CHECK(std::string_view(network::Describe(Purpose::Content)) == "content");
 
-	// A value from outside the list — what a hostile datagram would carry if
+	// A value from outside the list - what a hostile datagram would carry if
 	// anything cast one without checking. It names itself as unknown rather
 	// than reading past the end of a table.
 	CHECK(std::string_view(network::Describe(static_cast<Reach>(200))) == "?");

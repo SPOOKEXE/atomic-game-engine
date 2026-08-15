@@ -33,7 +33,35 @@
 #include <functional>
 #include <vector>
 
+namespace engine {
+	namespace ecs {
+		class Store;
+	}
+}
+
 namespace engine::script {
+
+	// How many ticks a duration in seconds rounds to.
+	//
+	// **Up, and never to zero.** `task.wait(0)` in Roblox resumes on the next
+	// frame rather than immediately, and a wait that resumed inside the same beat
+	// would make `while true do task.wait() end` an infinite loop inside one tick
+	// rather than a loop across them. Rounding up also means a wait is never
+	// *shorter* than asked, which is the direction an author can reason about.
+	//
+	// **One function, where there were three.** `task.wait` had a copy per VM and
+	// `Debris:AddItem` had a third, each with the same `ceil(seconds / delta)` in
+	// it and each taking a different handle to the same world - which is three
+	// places for the answer to "how long is half a second" to be edited
+	// separately. `script/AGENTS.md` states that a debris deadline is computed by
+	// the same arithmetic `task.wait` uses; this is what makes that true rather
+	// than repeated.
+	//
+	// @param store   The world, for its tick delta.
+	// @param seconds What the script asked for.
+	// @return At least one tick.
+	// @since v0.18
+	uint64_t TicksFor(const ecs::Store &store, double seconds);
 
 	// Resumes waiting for a deterministic moment.
 	//

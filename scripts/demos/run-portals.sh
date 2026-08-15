@@ -4,7 +4,7 @@
 #
 # A square building with four quarters and three rooms in it. Hall, library and
 # garden clockwise round the middle, one door in the west wall, and a pair of
-# holes where the fourth room would have been — so the lap closes after three
+# holes where the fourth room would have been - so the lap closes after three
 # right turns instead of four.
 #
 #   scripts/demos/run-portals.sh                  # uncapped, held at 165 fps

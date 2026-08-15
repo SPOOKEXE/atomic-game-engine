@@ -128,7 +128,7 @@ TEST_CASE("inserting the same key twice keeps the first", "[cdn][preparedcache]"
 	REQUIRE(first != nullptr);
 
 	// Two threads prepared the same group and raced. Preparation is
-	// deterministic so both results are byte-identical — the first wins, and the
+	// deterministic so both results are byte-identical - the first wins, and the
 	// entry is not churned out from under whatever is streaming it.
 	const PreparedFrame second = cache.Insert(Key("terrain"), Frame(100, std::byte{0x02}));
 	REQUIRE(second != nullptr);

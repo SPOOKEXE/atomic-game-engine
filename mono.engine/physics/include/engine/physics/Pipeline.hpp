@@ -9,7 +9,7 @@
 // **The steps are registered as one system per phase, not one per step.**
 // `ecs::Scheduler` is explicit that two systems in the same phase have no
 // ordering guarantee, and `SyncBroadphase` reading the transforms
-// `IntegrateMotion` just wrote is not a preference — it is a hard dependency. So
+// `IntegrateMotion` just wrote is not a preference - it is a hard dependency. So
 // the order is expressed by composition, which the scheduler's contract
 // supports, rather than by registration order, which it does not.
 // `v02v03v04.md` §3.5 lists them as separate rows in the same phase; that table
@@ -31,7 +31,7 @@ namespace engine::physics {
 	// Called once during single-threaded startup, before any world is built and
 	// before `ecs::Components::Seal`. A resource is keyed by a component id too,
 	// so one that is never registered here would be minted by the first
-	// `Store::SetResource` — under the compiler's spelling of the type, and
+	// `Store::SetResource` - under the compiler's spelling of the type, and
 	// aborting outright once the table is sealed.
 	//
 	// Idempotent.

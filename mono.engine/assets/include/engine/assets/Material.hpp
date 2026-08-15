@@ -6,7 +6,7 @@
 // `ROADMAP.md` v0.10 lists in as many words: `Submesh::Material` was what a
 // source file called a run, `Submesh::Texture` was an asset that existed, and
 // there was nothing in between binding the two. So a part's material was an
-// *enum* — `Plastic`, `Wood`, `Metal` — seventeen names a renderer could
+// *enum* - `Plastic`, `Wood`, `Metal` - seventeen names a renderer could
 // plausibly be asked to draw and did not draw differently, because a name is not
 // a texture. This is the format that closes that gap: a material is an asset
 // like a mesh or a texture, it is published and fetched like one, and what it
@@ -14,7 +14,7 @@
 //
 // **One map, and the rest are absent rather than declared.** `ColourMap` is what
 // the opaque pass samples today; a `MetalnessMap` field nothing read would be
-// half a feature somebody would reasonably assume worked — the same rule
+// half a feature somebody would reasonably assume worked - the same rule
 // `scene::SurfaceAppearance` already states about exactly these fields.
 // `ROADMAP.md` v0.11 is where the G-buffer arrives and where the other maps get
 // a reader. The fetched content already carries them as ordinary textures beside
@@ -24,7 +24,7 @@
 // texture across a save file, a manifest and a wire, so the reference is the
 // string a publisher wrote. `assetc` is what turns `Bricks075A_Color.png` into
 // `materials/ambientcg/Bricks075A_Color.atex`, and it does it through the same
-// `BakedName` a model's texture reference goes through — one spelling of the
+// `BakedName` a model's texture reference goes through - one spelling of the
 // rule, because two would be a material resolving to nothing.
 //
 // **A runtime does not author one.** Turning a `.mat` into this is a publishing
@@ -48,7 +48,7 @@ namespace engine::assets {
 		//
 		// **May be empty, and an empty one is a real state rather than a
 		// malformed file.** A material that names no texture is drawn with the
-		// engine's own default — `render::DefaultTexture` — which is what makes
+		// engine's own default - `render::DefaultTexture` - which is what makes
 		// "no texture to render" a thing an author can say. A file refused for
 		// having no colour map would make the null case unrepresentable and push
 		// it back onto the absence of the material itself, which is a different
@@ -60,7 +60,7 @@ namespace engine::assets {
 		//
 		// **Published since v0.10 and read by nothing until now.** `ROADMAP.md`
 		// said these arrive "when there is a pass that samples them, which is
-		// v0.11's G-buffer" — that pass exists, so they arrive. All 291 seeded
+		// v0.11's G-buffer" - that pass exists, so they arrive. All 291 seeded
 		// materials already ship the full set at 1K; what was missing was
 		// anywhere to put the names.
 		//
@@ -87,7 +87,7 @@ namespace engine::assets {
 		//
 		// **The one map with no CC0 source behind it.** ambientCG, Poly Haven
 		// and cgbookcase publish the other four for nearly every material and an
-		// emissive map for almost none — it is authored per-asset, because what
+		// emissive map for almost none - it is authored per-asset, because what
 		// glows is a decision about the object rather than a property of the
 		// substance. So this is carried and sampled with a hand-authored test
 		// material rather than with the seeded set.
@@ -98,7 +98,7 @@ namespace engine::assets {
 		//
 		// @return `true` always, today. **A function rather than nothing**, so
 		//         the shape matches `MeshData` and `TextureData` and a caller
-		//         checking one checks all three the same way — the field that
+		//         checking one checks all three the same way - the field that
 		//         makes this answer `false` arrives with the second map.
 		bool IsValid() const {
 			return true;
@@ -107,7 +107,7 @@ namespace engine::assets {
 
 	// Reading and writing the material format.
 	//
-	// Static, because a material has no state — `Texture`'s shape and its
+	// Static, because a material has no state - `Texture`'s shape and its
 	// reason.
 	//
 	// @since v0.10
@@ -121,7 +121,7 @@ namespace engine::assets {
 		//
 		// **3 adds emissive, 2 added the other four, and 1 still reads.** A version 1 file is a
 		// colour map and nothing else, which is exactly a material whose other
-		// four names are empty — so the older format is not a special case to
+		// four names are empty - so the older format is not a special case to
 		// translate, it is the newer one with four absent fields. That is what
 		// makes reading it a branch on how many strings to expect rather than a
 		// second parser.
@@ -149,7 +149,7 @@ namespace engine::assets {
 		// `MAXIMUM_NAME`.
 		//
 		// @param reader The bytes to parse.
-		// @param out    Filled in on success, left alone otherwise — so a caller
+		// @param out    Filled in on success, left alone otherwise - so a caller
 		//               reusing one cannot act on a mixture of the last good
 		//               material and a bad one.
 		// @return `false` on anything malformed. Drop it and count it.

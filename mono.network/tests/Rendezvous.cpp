@@ -4,7 +4,7 @@
 // The loopback has no NAT in it, which is exactly why it is the right harness:
 // every message of the protocol still crosses, in the order it crosses on the
 // internet, and the only thing missing is the router that would have dropped
-// the first datagram. What that leaves testable is the whole state machine —
+// the first datagram. What that leaves testable is the whole state machine -
 // who says what, in what order, and what each end refuses.
 //
 // What it cannot test is whether a real router cooperates. Nothing can, from a
@@ -99,7 +99,7 @@ TEST_CASE("a registration is acknowledged with the address the point saw", "[net
 	CHECK(host.Enrolled());
 
 	// The reflexive address. On a loopback there is no NAT, so it equals the
-	// host's own — which is the case a guest can dial without punching at all,
+	// host's own - which is the case a guest can dial without punching at all,
 	// and the reason the field is worth reporting.
 	CHECK(host.Reflexive() == ends[HOST]->Local());
 
@@ -238,7 +238,7 @@ TEST_CASE("a private punch needs the key at both ends", "[network][rendezvous]")
 	point.Serve(*ends[POINT], 0.0);
 	host.Pump(nullptr, 0.0);
 
-	// The id is enough to be introduced — the point holds no key and cannot
+	// The id is enough to be introduced - the point holds no key and cannot
 	// decide otherwise. The key is what the poke has to carry.
 	REQUIRE(wrong.Reach(advert.Session, Key("not the passphrase"), 0.0));
 

@@ -3,7 +3,7 @@
 .cache/
 
 # Personal Claude settings. .claude/skills/ and .claude/commands/ are checked
-# in on purpose — everyone gets the same ones. Anything ending .local is yours.
+# in on purpose - everyone gets the same ones. Anything ending .local is yours.
 .claude/settings.local.json
 .claude/*.local.json
 .claude/worktrees/
@@ -18,7 +18,7 @@ compile_commands.json
 
 # The pinned TypeScript compiler `just typecheck` installs. Not committed: the
 # version in package.json is exact and TypeScript pins its own platform binaries
-# to the same version, so the tree is already reproducible without a lockfile —
+# to the same version, so the tree is already reproducible without a lockfile -
 # and committing one would mean choosing between bun's and npm's, when the
 # recipe accepts either.
 node_modules/

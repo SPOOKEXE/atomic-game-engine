@@ -4,14 +4,14 @@
 // before the first call, and a way to get a socket into a child at all.
 //
 // **A socket does not survive being inherited.** The handle arrives in the
-// child — `GetHandleInformation` finds it — but Winsock does not know it, and
+// child - `GetHandleInformation` finds it - but Winsock does not know it, and
 // every call on it fails with `WSAENOTSOCK`. That is not a bug to work around;
 // it is what `WSADuplicateSocket` exists for. The parent asks Winsock to mint a
 // description of the socket *for a named child process*, and the child turns
 // that description back into a socket of its own.
 //
 // So the handover is in two halves, in two processes, and neither can see the
-// other's code — the same problem `posix/InheritedSlot.hpp` has and the reason
+// other's code - the same problem `posix/InheritedSlot.hpp` has and the reason
 // both halves are declared here rather than each in the file that runs it:
 //
 //   1. The parent makes a pipe, gives the child its end, and starts it.
@@ -33,7 +33,7 @@ namespace engine::parallel::platform {
 	//
 	// **No matching cleanup, deliberately.** `WSACleanup` is refcounted against
 	// `WSAStartup`, and the only correct moment to call it is after the last
-	// socket in the process is closed — which is a fact no single translation
+	// socket in the process is closed - which is a fact no single translation
 	// unit knows. Process teardown releases it, so the alternative to leaking
 	// it is a shutdown ordering problem in exchange for nothing.
 	void EnsureWinsock();
@@ -71,7 +71,7 @@ namespace engine::parallel::platform {
 	// process and there is no process id until then.
 	//
 	// @param socket    The end the child is to have. Still owned by the caller,
-	//                  which closes it afterwards — the child's copy is a
+	//                  which closes it afterwards - the child's copy is a
 	//                  reference of its own and keeps the socket alive.
 	// @param processId The child's process id.
 	// @param parentEnd The writing end from `MakeChannelHandover`.

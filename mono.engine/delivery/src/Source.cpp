@@ -9,7 +9,7 @@ namespace engine::delivery {
 		// Splits `host:port`, refusing anything that is not exactly that.
 		//
 		// A bracketed IPv6 literal is handled because `Endpoint::Text` writes
-		// one and this has to read back what that wrote — otherwise a v6
+		// one and this has to read back what that wrote - otherwise a v6
 		// deployment could be configured and never reached.
 		bool SplitLocation(std::string_view location, std::string_view &host, uint16_t &port) {
 			if (location.empty()) {
@@ -90,7 +90,7 @@ namespace engine::delivery {
 	bool HostPermitted(std::string_view location, const std::vector<std::string> &allowed) {
 		if (allowed.empty()) {
 			// No restriction. Right for a list a person typed into their own
-			// preferences, and wrong for one a server sent — which is why the
+			// preferences, and wrong for one a server sent - which is why the
 			// caller assembling the second kind fills this in.
 			return true;
 		}
@@ -135,7 +135,7 @@ namespace engine::delivery {
 		// host the allow-list admits, in list order.
 		//
 		// One walk with a predicate rather than two walks, because the *order*
-		// is the policy — see `SourceRole` — and two loops that drifted would
+		// is the policy - see `SourceRole` - and two loops that drifted would
 		// silently make uploads prefer a different origin than downloads for a
 		// reason nobody wrote down.
 		template <typename Predicate>

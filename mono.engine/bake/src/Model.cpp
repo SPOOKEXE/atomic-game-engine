@@ -1,3 +1,4 @@
+#include "Extension.hpp"
 #include "Importers.hpp"
 
 #include <engine/bake/Model.hpp>
@@ -7,27 +8,6 @@
 #include <string>
 
 namespace engine::bake {
-
-	namespace {
-		// A lowercase copy of a name's extension, or an empty view when it has
-		// none. The same rule `assets::KindOfName` applies, including that a dot
-		// inside a directory component is not an extension.
-		std::string ExtensionOf(std::string_view name) {
-			const size_t dot = name.find_last_of('.');
-			if (dot == std::string_view::npos || dot + 1 >= name.size()) {
-				return {};
-			}
-			if (name.find('/', dot) != std::string_view::npos) {
-				return {};
-			}
-
-			std::string extension(name.substr(dot + 1));
-			std::transform(extension.begin(), extension.end(), extension.begin(), [](char value) {
-				return (value >= 'A' && value <= 'Z') ? static_cast<char>(value - 'A' + 'a') : value;
-			});
-			return extension;
-		}
-	}
 
 	ModelFormat ModelFormatOfBytes(std::span<const std::byte> bytes) {
 		if (bytes.size() >= 4) {
@@ -42,7 +22,7 @@ namespace engine::bake {
 
 		// A `.gltf` is JSON, and JSON starting with `{` is the only thing that
 		// distinguishes it from any other text file. Accepted here because the
-		// parse itself is the real check — a text file that is not glTF fails on
+		// parse itself is the real check - a text file that is not glTF fails on
 		// "no nodes" with a message that says so.
 		for (const std::byte byte : bytes) {
 			const char character = static_cast<char>(byte);
@@ -113,7 +93,7 @@ namespace engine::bake {
 		const float longest = std::max({extent[0], extent[1], extent[2]});
 		if (longest <= 0.0f) {
 			// Every vertex at one point. Scaled by `size / 0` it would become
-			// infinities, which `MeshData::IsValid` would then refuse — with
+			// infinities, which `MeshData::IsValid` would then refuse - with
 			// nothing to say that the *input* was the degenerate thing.
 			return false;
 		}

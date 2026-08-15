@@ -60,7 +60,7 @@ namespace assetc {
 
 		// **`.mat` is a source and `.amat` is what it bakes to**, the same split
 		// `.png` and `.atex` have. What is inside a `.mat` is three lines of text
-		// somebody or something wrote — see `ReadMaterialSource` — and a runtime
+		// somebody or something wrote - see `ReadMaterialSource` - and a runtime
 		// parses no text.
 		bool IsMaterial(std::string_view extension) {
 			return extension == ".mat";
@@ -70,11 +70,24 @@ namespace assetc {
 			// **`.gif` is here and its output is a flipbook sheet**, which is the
 			// one entry whose baked result is not a picture of its input.
 			// `bake::ReadGif` lays the frames out as a square power-of-two grid,
-			// so a GIF becomes an ordinary texture and every path downstream —
-			// the chunker, the manifest, the renderer's table — handles it with no
+			// so a GIF becomes an ordinary texture and every path downstream -
+			// the chunker, the manifest, the renderer's table - handles it with no
 			// knowledge that it animates. `bake/src/Gif.cpp` carries the argument.
+			//
+			// **`.svg` is here and it is the one that has no size of its own**,
+			// which is why it enters the graph through a different node - see
+			// `IsVector` and the pipeline below.
 			return extension == ".png" || extension == ".jpg" || extension == ".jpeg" ||
-				   extension == ".bmp" || extension == ".gif";
+				   extension == ".bmp" || extension == ".gif" || extension == ".svg";
+		}
+
+		// The images that are drawings rather than pixels.
+		//
+		// One entry today, and a predicate rather than a comparison because the
+		// pipeline asks the question in two places - which node opens the chain,
+		// and how the texture cap is applied.
+		bool IsVector(std::string_view extension) {
+			return extension == ".svg";
 		}
 
 		std::vector<std::byte> ReadFile(const fs::path &path) {
@@ -113,8 +126,8 @@ namespace assetc {
 		// what that cost.
 		//
 		// **One branch, at the only point where a bake touches its output.**
-		// Everything above this — the decode, the fit, the resize, the texture
-		// rewriting — is the same work whether the result becomes a file or
+		// Everything above this - the decode, the fit, the resize, the texture
+		// rewriting - is the same work whether the result becomes a file or
 		// stays in the caller's hands, and a second baker for the second case
 		// would be a second copy of all of it. `Settings::Output` carries the
 		// argument in full.
@@ -186,13 +199,13 @@ namespace assetc {
 		//
 		// **Unknown keys are ignored rather than refused.** The fetcher writes
 		// `color` and nothing else today, and `ROADMAP.md` v0.11 adds four more
-		// when there is a pass that reads them — a baker that refused an unknown
+		// when there is a pass that reads them - a baker that refused an unknown
 		// key would make every material written for the newer engine unbakeable by
 		// the older one, which is the wrong direction for a content tree that
 		// outlives a build.
 		// **The five keys, read in one pass rather than five.** A `.mat` is a
 		// handful of lines and re-scanning it per key would be five parses of the
-		// same text — but the real reason is that the keys are read *together*,
+		// same text - but the real reason is that the keys are read *together*,
 		// so a file naming `normal` twice resolves the same way as one naming
 		// `colour` twice and there is one rule about which wins.
 		struct MaterialKeys {
@@ -281,7 +294,7 @@ namespace assetc {
 			return report;
 		}
 		// **No output directory is a run that writes nothing**, not a run
-		// rooted at the working directory — `Settings::Output` says so, and
+		// rooted at the working directory - `Settings::Output` says so, and
 		// creating "" here would have made that an empty path joined onto every
 		// name instead.
 		if (!settings.Output.empty()) {
@@ -324,6 +337,20 @@ namespace assetc {
 			if (bytes.empty()) {
 				baked.Failure = "unreadable or empty";
 				report.Failures++;
+				report.Assets.push_back(std::move(baked));
+				continue;
+			}
+
+			// **Before the extension is dispatched on, so nothing decodes.** The
+			// point of a content flag is that the parser is never reached: an
+			// SVG refused here does not go through the rasteriser, and the
+			// hostile-file cost charge in `bake/src/Svg.cpp` is a second line of
+			// defence rather than the only one.
+			const engine::assets::ContentForm form = engine::assets::FormOfName(relative);
+			if (!settings.Content.Allows(form)) {
+				baked.Failure =
+					std::string("refused: ") + engine::assets::Describe(form) + " content is turned off";
+				report.Refused++;
 				report.Assets.push_back(std::move(baked));
 				continue;
 			}
@@ -377,7 +404,7 @@ namespace assetc {
 					} else {
 						// Refuse references outside the input tree, exactly as a
 						// model's are refused. An untextured material is a real
-						// state — `assets/Material.hpp` — so this is a material
+						// state - `assets/Material.hpp` - so this is a material
 						// that draws the default rather than a failed row.
 						baked.Failure = "a map is outside the input tree";
 						report.Failures++;
@@ -412,9 +439,19 @@ namespace assetc {
 				continue;
 			}
 
+			const bool vector = image && IsVector(extension);
+
 			engine::bake::Graph graph;
-			const engine::bake::NodeId source = graph.AddSource(relative, bytes);
-			const engine::bake::NodeId import = graph.Add(engine::bake::NodeKind::Import);
+			engine::bake::NodeId source = graph.AddSource(relative, bytes);
+
+			// **A drawing enters through `Rasterize` and everything else through
+			// `Import`.** A zero target asks for the size the document itself
+			// declares, which is the only size an SVG can be said to have -
+			// `assetc` bakes a tree and has no per-file switches, so a caller who
+			// wants a particular one builds the graph rather than walking a
+			// directory.
+			engine::bake::NodeId import =
+				vector ? graph.AddRasterize(0, 0) : graph.Add(engine::bake::NodeKind::Import);
 			graph.Connect(source, import);
 
 			engine::bake::NodeId tail = import;
@@ -444,9 +481,34 @@ namespace assetc {
 					const uint32_t height =
 						std::max<uint32_t>(1, static_cast<uint32_t>(decoded.Height * scale));
 
-					const engine::bake::NodeId resize = graph.AddResize(width, height);
-					graph.Connect(tail, resize);
-					tail = resize;
+					if (vector) {
+						// **Drawn again at the cap rather than box-filtered down
+						// to it**, which is the whole reason the raster size is a
+						// node parameter. Resampling would give edges belonging
+						// to the filter instead of to the shapes, and a drawing
+						// is the one input where the sharp answer is still
+						// available.
+						//
+						// A second graph rather than a mutated one: a node's
+						// parameters are fixed when it is added, and that is what
+						// makes a graph a description of what a bake did.
+						graph = engine::bake::Graph{};
+						source = graph.AddSource(relative, bytes);
+						import = graph.AddRasterize(width, height);
+						graph.Connect(source, import);
+						tail = import;
+
+						if (!graph.Run(graphFailure)) {
+							baked.Failure = graphFailure;
+							report.Failures++;
+							report.Assets.push_back(std::move(baked));
+							continue;
+						}
+					} else {
+						const engine::bake::NodeId resize = graph.AddResize(width, height);
+						graph.Connect(tail, resize);
+						tail = resize;
+					}
 				}
 			}
 
@@ -467,7 +529,7 @@ namespace assetc {
 
 					// **The resolver first, because it knows things the tree
 					// cannot.** A flattened store has no `tex/` folder beside the
-					// model — see `Settings::ResolveTexture` for what that broke
+					// model - see `Settings::ResolveTexture` for what that broke
 					// and for how the import log puts it back.
 					const bool named = settings.ResolveTexture &&
 									   settings.ResolveTexture(relative, submesh.Texture, resolved);
@@ -479,8 +541,8 @@ namespace assetc {
 					}
 
 					// **Checked against the tree, and not checking is what let
-					// this ship.** `Resolve` is purely lexical — it joins and
-					// normalises and never asks whether the file is there — so a
+					// this ship.** `Resolve` is purely lexical - it joins and
+					// normalises and never asks whether the file is there - so a
 					// reference to something that is not being baked became a
 					// perfectly well-formed name for an asset that would never
 					// exist. Nothing downstream can catch it: the publisher
@@ -489,7 +551,7 @@ namespace assetc {
 					std::error_code missing;
 					if (!std::filesystem::is_regular_file(settings.Input / resolved, missing)) {
 						ENGINE_WARN(
-							"bake: {}: texture '{}' resolves to '{}', which is not in the input tree — "
+							"bake: {}: texture '{}' resolves to '{}', which is not in the input tree - "
 							"the submesh will draw untextured",
 							relative,
 							submesh.Texture,
@@ -524,12 +586,22 @@ namespace assetc {
 			// **After the resize, because the resize carries the fields across
 			// and this one overwrites one of them.** The other order would work
 			// today and would break the first time a resize stopped preserving
-			// the rate — which is exactly the failure `ResizeImage`'s note is
+			// the rate - which is exactly the failure `ResizeImage`'s note is
 			// about.
 			if (image && settings.FlipbookFps > 0.0f) {
 				const engine::bake::NodeId retime = graph.AddRetime(settings.FlipbookFps);
 				graph.Connect(tail, retime);
 				tail = retime;
+			}
+
+			// **Last of the texture nodes, and the order is load-bearing.** Every
+			// node above changes the pixels the levels are filtered from, and a
+			// resize drops the chain outright - built before one, a texture would
+			// reach disk with no levels and nothing saying why.
+			if (image && settings.Mipmaps) {
+				const engine::bake::NodeId mipmap = graph.Add(engine::bake::NodeKind::Mipmap);
+				graph.Connect(tail, mipmap);
+				tail = mipmap;
 			}
 
 			const engine::bake::NodeId write = graph.AddWrite(baked.Output);

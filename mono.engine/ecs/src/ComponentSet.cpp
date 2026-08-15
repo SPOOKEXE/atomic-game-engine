@@ -28,7 +28,7 @@ namespace engine::ecs {
 			size_t operator()(const Key &key) const {
 				// FNV-1a over the ids. Specified rather than borrowed from a
 				// standard hash so that the table behaves the same on every
-				// standard library — not for determinism of results, which does
+				// standard library - not for determinism of results, which does
 				// not depend on it, but so a pathological bucket distribution
 				// is reproducible when somebody profiles one.
 				size_t hash = 1469598103934665603ull;

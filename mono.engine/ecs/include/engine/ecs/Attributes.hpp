@@ -6,7 +6,7 @@
 // **A resource, not a component, and that is the whole decision.** Every other
 // per-entity fact in this engine is a column: fixed layout, dense, iterated. An
 // attribute is a name an author invents at run time mapped to a value whose type
-// they also pick, and there is no column shape for that — a component holding a
+// they also pick, and there is no column shape for that - a component holding a
 // map would be a heap allocation per row on `Instance`, which is every row in
 // the world, and `AGENTS.md` rule 3 forbids it outright for anything that has to
 // survive being memcpy'd across a process boundary.
@@ -16,7 +16,7 @@
 // no attributes costs nothing at all**, not even a byte on its row. That is the
 // case that matters, because it is almost every entity.
 //
-// **The key is `(Entity, Name)` and the lookup is a hash.** Not a column read —
+// **The key is `(Entity, Name)` and the lookup is a hash.** Not a column read -
 // so this is deliberately *not* something to read per frame per entity. It is a
 // script surface: `part:GetAttribute("Health")` on the frame something is hit,
 // not `for every part, read its health` in a system. Anything iterated wants a
@@ -24,7 +24,7 @@
 // become one.
 //
 // **The value types are `ecs::PropertyType`'s and not a new list.** An attribute
-// and a property are the same question — "what can userland hold" — asked at run
+// and a property are the same question - "what can userland hold" - asked at run
 // time and at declaration time, and two answers would mean two marshallers in
 // each binding and two widgets in the properties panel. What an attribute cannot
 // be is `Reference`: a handle is meaningless outside the world holding it, and an
@@ -60,8 +60,8 @@ namespace engine::ecs {
 	// between a store, a script and a document with its type carried alongside,
 	// and a variant would cost a visitor at each of the three.
 	//
-	// It is the widest type in this header by far — the two sequences are 656
-	// bytes between them — and that is affordable only because attributes are
+	// It is the widest type in this header by far - the two sequences are 656
+	// bytes between them - and that is affordable only because attributes are
 	// stored in a hash map rather than in a column. A `PropertyValue`-shaped
 	// thing in an archetype would be the mistake this whole file exists to avoid.
 	//
@@ -95,7 +95,7 @@ namespace engine::ecs {
 		// *computes* must be able to go away, where a `core::Name` never does.
 		std::string String;
 
-		// The datatype cases — every `core/types` value a script can author.
+		// The datatype cases - every `core/types` value a script can author.
 		//
 		// **The two sequences are 656 bytes between them and are carried
 		// anyway**, which is the trade this struct's header opens with: an
@@ -103,7 +103,7 @@ namespace engine::ecs {
 		// the entities that have one instead of every entity in the world.
 		//
 		// Each is named for its type so a reader never has to look up which
-		// field a `PropertyType` selects — the enum member and the field spell
+		// field a `PropertyType` selects - the enum member and the field spell
 		// the same word.
 		//@{
 		core::Vector3 Vector3;
@@ -124,7 +124,7 @@ namespace engine::ecs {
 	// **`Reference` is the only refusal, and it is not an oversight.** An
 	// `ecs::Entity` is a handle within one world and an attribute survives a save
 	// file, so storing one would write a number that means a different row when it
-	// is read back — rule 4's hazard with no name to fall back on. A game that
+	// is read back - rule 4's hazard with no name to fall back on. A game that
 	// wants to point at something stores its instance's name.
 	//
 	// `Opaque` is refused too, because it is the absence of a value rather than
@@ -178,7 +178,7 @@ namespace engine::ecs {
 	//
 	// **Sorted by name rather than in hash order**, because the callers are a
 	// script iterating and a document being written, and both want the same
-	// answer twice — `mono.tools/bindings`' argument for sorting a component set,
+	// answer twice - `mono.tools/bindings`' argument for sorting a component set,
 	// applied to a value somebody saves.
 	//
 	// @param store    The world.
@@ -190,7 +190,7 @@ namespace engine::ecs {
 	//
 	// **Not the destroy path.** An instance being destroyed is cleaned up by
 	// `StoreState`'s `DropAttributes`, which reaches the table by component id
-	// because it sits below this header — one hook rather than two, for the
+	// because it sits below this header - one hook rather than two, for the
 	// reason written there. This is the deliberate call: a scripting surface
 	// clearing an instance's attributes in one step rather than naming each.
 	//

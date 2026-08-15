@@ -16,12 +16,22 @@
 namespace engine::ecs {
 
 	namespace {
-		// The key a query plan is cached under: the sorted term ids as raw
-		// bytes, so two systems asking for the same components in different
-		// orders share one plan.
+		// The key a query plan is cached under: the term ids as raw bytes, in
+		// the caller's order and with the required and excluded sets after
+		// them.
+		//
+		// **In the caller's order, and that is a correction rather than a
+		// choice.** It used to sort them, so that `Each<A, B>` and `Each<B, A>`
+		// shared one plan - and `Match::Positions` is built in the *caller's*
+		// term order, so the second of those two got the first's column
+		// bindings and read an `A` where it had asked for a `B`. Silent, and
+		// wrong in the way that is hardest to see: the types line up, the loop
+		// runs, and the numbers are somebody else's. Sharing a plan between two
+		// orders was never worth anything - a plan is a handful of indices -
+		// and it cost correctness.
 		//
 		// **Built on the caller's stack, not on the heap.** This runs once per
-		// query per system per tick — the hottest non-row path in the engine —
+		// query per system per tick - the hottest non-row path in the engine -
 		// and the previous shape allocated a vector *and* a string on every
 		// call, to look up a cache entry that was almost always already there.
 		// A stack buffer plus a transparent hash makes the hit path allocate
@@ -34,21 +44,45 @@ namespace engine::ecs {
 			std::vector<uint32_t> Overflow;
 			std::string_view Bytes;
 
-			explicit PlanKey(std::span<const ComponentId> terms) {
-				uint32_t *sorted = Inline;
-				if (terms.size() > INLINE_QUERY_TERMS) {
+			explicit PlanKey(const QueryTerms &terms) {
+				// **The two filter sets are sorted and the bound terms are
+				// not.** Order is meaningful for the bound terms, because it is
+				// what the body's parameters are matched against; `With` and
+				// `Without` are sets and nothing downstream reads their order,
+				// so normalising them keeps two spellings of one filter on one
+				// plan.
+				//
+				// `ComponentId::INVALID` separates the three runs. No
+				// registration produces it, so it cannot be mistaken for a term
+				// - which is what stops a bound `{A, B}` keying the same bytes
+				// as a bound `{A}` that excludes `B`.
+				const size_t total = terms.Bound.size() + terms.Required.size() + terms.Excluded.size() + 2;
+
+				uint32_t *keyed = Inline;
+				if (total > INLINE_QUERY_TERMS) {
 					// Absurd, but it must work rather than corrupt the stack.
-					Overflow.resize(terms.size());
-					sorted = Overflow.data();
+					Overflow.resize(total);
+					keyed = Overflow.data();
 				}
 
-				for (size_t index = 0; index < terms.size(); index++) {
-					sorted[index] = terms[index].Index;
+				size_t at = 0;
+				for (const ComponentId term : terms.Bound) {
+					keyed[at++] = term.Index;
 				}
-				std::sort(sorted, sorted + terms.size());
 
-				Bytes =
-					std::string_view(reinterpret_cast<const char *>(sorted), terms.size() * sizeof(uint32_t));
+				const auto appendSorted = [&](std::span<const ComponentId> ids) {
+					keyed[at++] = ComponentId::INVALID;
+					const size_t from = at;
+					for (const ComponentId id : ids) {
+						keyed[at++] = id.Index;
+					}
+					std::sort(keyed + from, keyed + at);
+				};
+
+				appendSorted(terms.Required);
+				appendSorted(terms.Excluded);
+
+				Bytes = std::string_view(reinterpret_cast<const char *>(keyed), at * sizeof(uint32_t));
 			}
 		};
 	}
@@ -72,6 +106,20 @@ namespace engine::ecs {
 
 	void Store::BindToCallingThread() {
 		Owner.store(std::this_thread::get_id(), std::memory_order_relaxed);
+	}
+
+	void Store::TooManyFilterTerms(const char *what) const {
+		// Abort rather than drop the term. A `Without` that quietly did nothing
+		// would be a query silently matching rows it was written to skip, which
+		// is worse than not running at all.
+		ENGINE_ERROR(
+			"store '{}': a query named more than {} `{}` terms. A filter is a handful of components; "
+			"past that it has stopped describing a set.",
+			StoreName,
+			Store::MAX_FILTER_TERMS,
+			what
+		);
+		std::abort();
 	}
 
 	void Store::RequireOwningThread(const char *what) const {
@@ -171,6 +219,44 @@ namespace engine::ecs {
 		return State->AdoptOnly;
 	}
 
+	void Store::Protect(Entity instance) {
+		RequireOwningThread("Protect");
+
+		if (instance != NULL_ENTITY) {
+			State->Protected.insert(instance.Id);
+		}
+	}
+
+	bool Store::Protected(Entity instance) const {
+		return State->Protected.find(instance.Id) != State->Protected.end();
+	}
+
+	bool Store::DestroyAuthored(Entity instance) {
+		if (Protected(instance)) {
+			// **Named rather than silent**, because a `Destroy()` that does
+			// nothing and says nothing is a script that carries on believing it
+			// worked. The instance's own name is what the author wrote.
+			ENGINE_WARN(
+				"'{}' is a fixture of this world and may not be destroyed", InstanceNameOf(instance).Text()
+			);
+			return false;
+		}
+
+		DestroyInstance(instance);
+		return true;
+	}
+
+	bool Store::SetParentAuthored(Entity instance, Entity parent) {
+		if (Protected(instance)) {
+			ENGINE_WARN(
+				"'{}' is a fixture of this world and may not be reparented", InstanceNameOf(instance).Text()
+			);
+			return false;
+		}
+
+		return SetParent(instance, parent);
+	}
+
 	Entity Store::MintNamed(std::string_view name, bool predicted) {
 		if (name.empty()) {
 			return predicted ? CreatePredicted() : Create();
@@ -215,7 +301,7 @@ namespace engine::ecs {
 		// **Out of the tree before out of the directory.** See `DetachFromTree`:
 		// freeing a row leaves every link that points at it naming something
 		// that is gone, and the sibling walk stops at the first of those rather
-		// than stepping over it — so destroying the middle child of three used
+		// than stepping over it - so destroying the middle child of three used
 		// to truncate the list and lose the rest.
 		//
 		// Before rather than after, because there is no "after": once the row
@@ -257,8 +343,8 @@ namespace engine::ecs {
 		// components at all is in no table and is still an entity.
 		//
 		// Both regions, authoritative first. Walking to `Capacity()` alone would
-		// miss every predicted entity — silently, since a directory with none
-		// behaves identically — which is exactly the shape of bug a second
+		// miss every predicted entity - silently, since a directory with none
+		// behaves identically - which is exactly the shape of bug a second
 		// region introduces.
 		const size_t capacity = State->Directory.Capacity();
 		for (uint32_t index = 0; index < capacity; index++) {
@@ -309,8 +395,8 @@ namespace engine::ecs {
 	// --- components --------------------------------------------------------
 
 	// Qualified, every one of them. The public runtime-keyed methods below
-	// share these names deliberately — they are the same operation, one taking
-	// a state and one taking a `Store` — and unqualified lookup inside a member
+	// share these names deliberately - they are the same operation, one taking
+	// a state and one taking a `Store` - and unqualified lookup inside a member
 	// finds the member first and recurses.
 	void Store::SetRaw(Entity entity, ComponentId id, const void *value) {
 		engine::ecs::SetComponent(*State, entity, id, value);
@@ -379,6 +465,10 @@ namespace engine::ecs {
 	void Store::VisitTables(
 		std::span<const ComponentId> terms, const std::function<void(const TableSlice &)> &body
 	) {
+		VisitTables(QueryTerms{terms, {}, {}}, body);
+	}
+
+	void Store::VisitTables(const QueryTerms &terms, const std::function<void(const TableSlice &)> &body) {
 		const PlanKey key(terms);
 
 		// Found without allocating; inserted only the first time, when the key
@@ -391,23 +481,40 @@ namespace engine::ecs {
 
 		// Topped up rather than rebuilt. Tables are only ever added, so
 		// everything matched before still matches and only the new ones need
-		// testing — which is what makes calling this every tick cost nothing
+		// testing - which is what makes calling this every tick cost nothing
 		// after the first frame, and what closes `D00003`.
 		if (plan.SeenTables < State->Tables.size()) {
 			for (size_t index = plan.SeenTables; index < State->Tables.size(); index++) {
 				const ComponentSet &set = State->Tables[index].Set();
-				if (!set.ContainsAll(terms)) {
+
+				// **All three tests are per table, never per row.** Whether a
+				// component is present is a property of the archetype, so an
+				// exclusion costs one binary search per table per plan rebuild
+				// and nothing at all afterwards - the same price an inclusion
+				// pays. That is what makes `Without` worth having rather than a
+				// branch in the body.
+				if (!set.ContainsAll(terms.Bound) || !set.ContainsAll(terms.Required)) {
+					continue;
+				}
+
+				bool excluded = false;
+				for (const ComponentId term : terms.Excluded) {
+					excluded = excluded || set.Contains(term);
+				}
+				if (excluded) {
 					continue;
 				}
 
 				QueryPlan::Match match;
 				match.Table = static_cast<uint32_t>(index);
-				match.Positions.reserve(terms.size());
+				match.Positions.reserve(terms.Bound.size());
 
 				// Resolved in the caller's term order, so the iteration code
 				// indexes by parameter position rather than searching per row.
+				// The key carries that order for the same reason - see
+				// `PlanKey`.
 				const std::span<const ComponentId> ids = set.Ids();
-				for (const ComponentId term : terms) {
+				for (const ComponentId term : terms.Bound) {
 					const auto at = std::lower_bound(ids.begin(), ids.end(), term);
 					match.Positions.push_back(static_cast<size_t>(at - ids.begin()));
 				}
@@ -423,8 +530,8 @@ namespace engine::ecs {
 		std::vector<void *const *> overflowColumns;
 
 		void *const **columns = inlineColumns;
-		if (terms.size() > INLINE_QUERY_TERMS) {
-			overflowColumns.resize(terms.size());
+		if (terms.Bound.size() > INLINE_QUERY_TERMS) {
+			overflowColumns.resize(terms.Bound.size());
 			columns = overflowColumns.data();
 		}
 
@@ -435,9 +542,9 @@ namespace engine::ecs {
 			}
 
 			// The chunk directory rather than a base address. One slice still
-			// covers the whole table — see `TableSlice` on why that is not a
-			// detail — and the visitors index it by `Column::ChunkOf(row)`.
-			for (size_t term = 0; term < terms.size(); term++) {
+			// covers the whole table - see `TableSlice` on why that is not a
+			// detail - and the visitors index it by `Column::ChunkOf(row)`.
+			for (size_t term = 0; term < terms.Bound.size(); term++) {
 				columns[term] = table.ColumnAt(match.Positions[term]).ChunkData();
 			}
 
@@ -451,6 +558,10 @@ namespace engine::ecs {
 	}
 
 	size_t Store::CountRows(std::span<const ComponentId> terms) {
+		return CountRows(QueryTerms{terms, {}, {}});
+	}
+
+	size_t Store::CountRows(const QueryTerms &terms) {
 		size_t total = 0;
 		VisitTables(terms, [&total](const TableSlice &slice) { total += slice.Rows; });
 		return total;
@@ -462,7 +573,7 @@ namespace engine::ecs {
 		// **Sorted and deduplicated so that two spellings of one query share a
 		// plan.** `VisitTables` keys its cache on the term bytes, so `{A, B}`
 		// and `{B, A}` would otherwise build and top up two plans that match
-		// exactly the same tables — and a script writing its query arguments in
+		// exactly the same tables - and a script writing its query arguments in
 		// a different order in two files would pay for it twice.
 		//
 		// A duplicate term is dropped rather than refused: naming a component
@@ -480,7 +591,7 @@ namespace engine::ecs {
 		RequireOwningThread("EachMatching");
 
 		// **An empty query matches nothing.** A query is defined by what it
-		// names, and `VisitTables` with no terms would match every table — which
+		// names, and `VisitTables` with no terms would match every table - which
 		// is a different question, and `EachEntity` is the one that answers it
 		// honestly by walking the directory rather than the tables.
 		if (components.empty()) {
@@ -495,7 +606,7 @@ namespace engine::ecs {
 
 		VisitTables(terms, [&body](const TableSlice &slice) {
 			// `Archetype::Ids` is one contiguous array whatever the columns do,
-			// so the entities need no chunk walk — see `ecs/AGENTS.md` on why
+			// so the entities need no chunk walk - see `ecs/AGENTS.md` on why
 			// the columns underneath do.
 			for (size_t row = 0; row < slice.Rows; row++) {
 				body(slice.Entities[row]);
@@ -519,7 +630,7 @@ namespace engine::ecs {
 
 		// The same check `Create` makes, because this mints from the same
 		// authoritative range. It was missing, and `scene::MakePart` grew a copy
-		// of it to work around the gap — one minting path honouring the rule and
+		// of it to work around the gap - one minting path honouring the rule and
 		// one walking past it is worse than neither, because the one that
 		// honours it makes the other look covered.
 		if (!MayMintAuthoritative("CreateInstance")) {
@@ -544,7 +655,7 @@ namespace engine::ecs {
 		//
 		// Linear over the merged list rather than a map. A class has a handful
 		// of properties, the list is contiguous, and a binding that cares about
-		// the cost resolves the descriptor once and keeps it — which is what
+		// the cost resolves the descriptor once and keeps it - which is what
 		// `PropertiesOf` is for.
 		const PropertyDescriptor *FindProperty(const Store &store, Entity instance, core::Name name) {
 			const ClassId id = store.ClassOf(instance);
@@ -607,7 +718,7 @@ namespace engine::ecs {
 		}
 
 		// A replica's rows belong to the authority. v0.3 made minting here
-		// impossible; a property write is the same hazard one step along — a
+		// impossible; a property write is the same hazard one step along - a
 		// client-side script setting a value the next delta overwrites, which
 		// presents as "my script works sometimes" rather than as an error.
 		//
@@ -729,7 +840,7 @@ namespace engine::ecs {
 	void Store::EachRoot(const std::function<void(Entity)> &body) const {
 		// Collected and sorted rather than visited in place. The walk is over
 		// archetypes, and a row's position in one moves whenever anything
-		// changes its component set — so visiting in place would report the
+		// changes its component set - so visiting in place would report the
 		// world's roots in an order that depends on what happened to the scene
 		// rather than on the scene. A recording made in one order and replayed
 		// in another diverges the first time a script reads `GetChildren()`.
@@ -907,12 +1018,19 @@ namespace engine::ecs {
 				const size_t start = Column::ChunkStart(chunk);
 				const size_t end = ChunkEnd(row, slice.Rows);
 				const auto *bits = static_cast<const DirtyBits *>(bitChunks[chunk]);
-				auto *values = static_cast<std::byte *>(valueChunks[chunk]);
+
+				// **A tag has no column, so there is no directory to index.**
+				// `TableSlice::Columns` is null for a component with no data,
+				// and this walked it anyway - so observing a tag and writing it
+				// crashed here rather than reporting a change with no value.
+				// Nothing observed one until a property named a tag among the
+				// components it reads, which is what `scene::Anchored` does.
+				auto *values = stride == 0 ? nullptr : static_cast<std::byte *>(valueChunks[chunk]);
 
 				for (; row < end; row++) {
 					const size_t offset = row - start;
 					if (bits[offset].Test(position)) {
-						body(slice.Entities[row], values + offset * stride);
+						body(slice.Entities[row], values == nullptr ? nullptr : values + offset * stride);
 					}
 				}
 			}
@@ -952,7 +1070,7 @@ namespace engine::ecs {
 		}
 
 		// An entity with no components is in no table, which is the ordinary
-		// state of one that has just been created — a row is what a component
+		// state of one that has just been created - a row is what a component
 		// buys.
 		const EntityLocation *location = State->Directory.Locate(key.Index);
 		if (location == nullptr || location->Archetype == EntityLocation::NO_ARCHETYPE) {
@@ -991,13 +1109,13 @@ namespace engine::ecs {
 
 			// Runs of adjacent set bits. A system walks a table in order and
 			// writes as it goes, so the changed rows are usually one run or a
-			// few — which is what makes a delta a memcpy per run rather than a
+			// few - which is what makes a delta a memcpy per run rather than a
 			// copy per entity.
 			//
 			// **A run stops at a chunk boundary even when the bits do not.** The
 			// contract this hands the callback is that `data + row * size` is
 			// the value for `entities[row]` over the whole run, and past a
-			// boundary that address is in the previous chunk's tail — so a
+			// boundary that address is in the previous chunk's tail - so a
 			// delta would send entity A's id with entity B's bytes, which every
 			// test here would pass and a client would show as teleporting.
 			// `Archetype::Ids` stays one contiguous array, so only the value
@@ -1084,7 +1202,7 @@ namespace engine::ecs {
 
 		for (const ComponentId subject : subjects) {
 			// Collected before anything fires. A listener may add or remove a
-			// component, which moves rows between tables — and an iteration
+			// component, which moves rows between tables - and an iteration
 			// that was still walking one of them would be walking a table that
 			// no longer holds what it thought.
 			State->Firing.clear();
@@ -1147,7 +1265,7 @@ namespace engine::ecs {
 			}
 
 			// The bit index is the component's position in the table's sorted
-			// set, which is also where its column sits — the same resolution
+			// set, which is also where its column sits - the same resolution
 			// `MarkWritten` does per write, done once per table here.
 			const std::span<const ComponentId> ids = table.Set().Ids();
 			const auto at = std::lower_bound(ids.begin(), ids.end(), component);
@@ -1157,7 +1275,7 @@ namespace engine::ecs {
 
 			// Per chunk. A column is only contiguous inside one, so marking
 			// `table.Rows()` bits from chunk zero's base would write past its
-			// end — and it is a write, so it corrupts whatever the pool handed
+			// end - and it is a write, so it corrupts whatever the pool handed
 			// to somebody else rather than merely reading rubbish.
 			const auto position = static_cast<size_t>(at - ids.begin());
 			void *const *chunks = bits->ChunkData();
@@ -1242,7 +1360,7 @@ namespace engine::ecs {
 		}
 
 		// Taken by move before replaying, because applying a command may itself
-		// defer — a nested Each, or a Destroy that cascades. Replaying out of
+		// defer - a nested Each, or a Destroy that cascades. Replaying out of
 		// the live vector would walk a container being appended to.
 		std::vector<Command> commands;
 		commands.swap(State->Commands);

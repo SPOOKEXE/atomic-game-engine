@@ -119,7 +119,7 @@ TEST_CASE("an acknowledgement retires nothing it does not name", "[net][reliabil
 	// Older than anything sent, and with an empty window.
 	CHECK(sender.OnAcknowledge(Ack(4), 0.0) == 0);
 
-	// Newer, but the bit for 5 is not set — 5 is what was lost.
+	// Newer, but the bit for 5 is not set - 5 is what was lost.
 	CHECK(sender.OnAcknowledge(Ack(9, BitFor(9, 8)), 0.0) == 0);
 	CHECK(sender.Waiting() == 1);
 }
@@ -129,8 +129,8 @@ TEST_CASE("a receiver that has heard nothing acknowledges nothing", "[net][relia
 	ReliableSender sender(Quick());
 	REQUIRE(sender.Track(0, Body(1), 0.0));
 
-	// The trap: a window starting at zero acknowledges sequence zero — the
-	// first reliable payload a Link ever sends — before it has arrived, and
+	// The trap: a window starting at zero acknowledges sequence zero - the
+	// first reliable payload a Link ever sends - before it has arrived, and
 	// that payload is then never resent. It starts one behind instead.
 	const PacketHeader header = receiver.Acknowledging(PacketHeader{});
 	CHECK(header.Acknowledge == 0xFFFF);
@@ -193,7 +193,7 @@ TEST_CASE("a resend the budget refuses is held and offered again", "[net][reliab
 	CHECK(sent == 1);
 	CHECK(link.Stats().SendsOverBudget == 1);
 
-	// Its clock never restarted, so it is still due — and still held.
+	// Its clock never restarted, so it is still due - and still held.
 	const auto again = sender.Due(0.1);
 	REQUIRE(again.size() == 1);
 	CHECK(again[0].Sequence == 1);
@@ -676,7 +676,7 @@ TEST_CASE("many independent streams all arrive intact", "[net][reliability][fuzz
 // **This is what `ConnectionStats::RoundTripMilliseconds` was declared for and
 // never filled in.** The field sat at zero from v0.3 to v0.9 while
 // `replication::Rewind::TickSeenBy` read it, so lag compensation corrected for
-// the interpolation delay and not for travel — a conservative rewind, and one
+// the interpolation delay and not for travel - a conservative rewind, and one
 // nothing said was conservative.
 
 TEST_CASE("an acknowledgement measures the round trip", "[net][reliability]") {
@@ -724,7 +724,7 @@ TEST_CASE("a resent payload is never measured, which is Karn's rule", "[net][rel
 	// **The detail that decides whether this is right or merely present.** An
 	// acknowledgement of a resent packet does not say *which* transmission it
 	// answers, so a sample from one is either the true trip or the trip plus a
-	// retransmit timeout — and there is no way to tell. Measuring them makes
+	// retransmit timeout - and there is no way to tell. Measuring them makes
 	// the estimate worst on exactly the links that need it most.
 	ReliableSender sender(Quick());
 
@@ -746,8 +746,8 @@ TEST_CASE("a resent payload is never measured, which is Karn's rule", "[net][rel
 }
 
 TEST_CASE("a window acknowledgement measures too", "[net][reliability]") {
-	// Retiring through the bitfield is the common case on a busy link — one
-	// packet retires up to thirty-three — so measuring only the direct
+	// Retiring through the bitfield is the common case on a busy link - one
+	// packet retires up to thirty-three - so measuring only the direct
 	// acknowledgement would sample a small and unrepresentative slice.
 	ReliableSender sender(Quick());
 
@@ -769,4 +769,113 @@ TEST_CASE("a clock that went backwards is not folded in", "[net][reliability]") 
 	REQUIRE(sender.Track(1, Body(1), 10.0));
 	REQUIRE(sender.OnAcknowledge(Ack(1), 10.03) == 1);
 	CHECK(sender.SmoothedRoundTripSeconds() == Approx(0.03));
+}
+
+// --- how much the round trip moves ------------------------------------------
+//
+// **The mean alone is half an estimator.** A congestion controller reads
+// queueing delay as the round trip rising above its own floor, and on a wireless
+// link the round trip rises and falls by tens of milliseconds with nothing
+// queued anywhere. Told only the mean, a controller cannot tell those apart and
+// backs off for ever on a path that was never congested.
+
+TEST_CASE("the variance seeds at half the first sample", "[net][reliability]") {
+	ReliableSender sender(Quick());
+
+	CHECK(sender.RoundTripVarianceSeconds() == 0.0);
+
+	REQUIRE(sender.Track(0, Body(1), 0.0));
+	REQUIRE(sender.OnAcknowledge(Ack(0), 0.08) == 1);
+
+	// RFC 6298 seeds it at half the first sample rather than at zero, for the
+	// reason the mean is taken whole: zero would claim a certainty one sample
+	// cannot support, and the retransmit timeout derived from it would be too
+	// tight on exactly the first packets of a connection.
+	CHECK(sender.RoundTripVarianceSeconds() == Approx(0.04));
+}
+
+TEST_CASE("a link with a stated delay is measured to that delay", "[net][reliability]") {
+	// A round trip is something this module states rather than waits for, so a
+	// link with a known induced delay is a caller handing over the same gap
+	// every time. Forty milliseconds, forty times.
+	ReliableSender sender(Quick());
+
+	constexpr double DELAY = 0.04;
+	double now = 0.0;
+	for (uint16_t sequence = 0; sequence < 40; sequence++) {
+		REQUIRE(sender.Track(sequence, Body(1), now));
+		now += DELAY;
+		REQUIRE(sender.OnAcknowledge(Ack(sequence), now) == 1);
+		now += 0.01;
+	}
+
+	CHECK(sender.SmoothedRoundTripSeconds() == Approx(DELAY));
+
+	// **A path that does not move reports no jitter**, which is the reading the
+	// whole variance exists to make possible: the first sample's seed decays
+	// away because every deviation after it is zero.
+	CHECK(sender.RoundTripVarianceSeconds() < DELAY / 100.0);
+}
+
+TEST_CASE("a link that swings between two delays reports the swing", "[net][reliability]") {
+	ReliableSender sender(Quick());
+
+	// The same mean as above and none of the steadiness: forty and eighty
+	// milliseconds, alternating.
+	double now = 0.0;
+	for (uint16_t sequence = 0; sequence < 60; sequence++) {
+		REQUIRE(sender.Track(sequence, Body(1), now));
+		now += sequence % 2 == 0 ? 0.04 : 0.08;
+		REQUIRE(sender.OnAcknowledge(Ack(sequence), now) == 1);
+		now += 0.01;
+	}
+
+	// The mean lands between the two and says nothing about either.
+	CHECK(sender.SmoothedRoundTripSeconds() > 0.04);
+	CHECK(sender.SmoothedRoundTripSeconds() < 0.08);
+
+	// The variance is what says the next sample could be twenty milliseconds
+	// from the estimate - and `CongestionSettings::VarianceFactor` is what
+	// consumes it, so that this path is not read as one with a queue on it.
+	CHECK(sender.RoundTripVarianceSeconds() > 0.01);
+}
+
+TEST_CASE("a resent payload moves neither half of the estimate", "[net][reliability]") {
+	// Karn's rule covers the variance for the same reason it covers the mean: a
+	// sample that might be the trip or might be the trip plus a retransmit
+	// timeout would widen the variance on exactly the links that need it
+	// tightest.
+	ReliableSender sender(Quick());
+
+	REQUIRE(sender.Track(0, Body(1), 0.0));
+	REQUIRE(sender.OnAcknowledge(Ack(0), 0.04) == 1);
+	const double variance = sender.RoundTripVarianceSeconds();
+
+	REQUIRE(sender.Track(1, Body(1), 1.0));
+	REQUIRE(sender.Due(11.0).size() == 1);
+	REQUIRE(sender.OnResent(1, 11.0));
+	REQUIRE(sender.OnAcknowledge(Ack(1), 11.01) == 1);
+
+	CHECK(sender.RoundTripVarianceSeconds() == Approx(variance));
+}
+
+TEST_CASE("the variance is measured against the estimate before it moves", "[net][reliability]") {
+	// **RFC 6298 states the order and the two are not interchangeable.**
+	// Updating the mean first measures the deviation against a value that has
+	// already absorbed part of the sample, so the variance reads low on exactly
+	// the samples that should widen it. Pinned as arithmetic rather than as a
+	// direction, because the wrong order is still in the right direction.
+	ReliableSender sender(Quick());
+
+	REQUIRE(sender.Track(0, Body(1), 0.0));
+	REQUIRE(sender.OnAcknowledge(Ack(0), 0.1) == 1);
+	REQUIRE(sender.SmoothedRoundTripSeconds() == Approx(0.1));
+	REQUIRE(sender.RoundTripVarianceSeconds() == Approx(0.05));
+
+	REQUIRE(sender.Track(1, Body(1), 1.0));
+	REQUIRE(sender.OnAcknowledge(Ack(1), 1.5) == 1);
+
+	// 0.05 * 0.75 + |0.1 - 0.5| * 0.25. Against 0.125 the other way round.
+	CHECK(sender.RoundTripVarianceSeconds() == Approx(0.05 * 0.75 + 0.4 * 0.25));
+	CHECK(sender.SmoothedRoundTripSeconds() == Approx(0.1 * 0.875 + 0.5 * 0.125));
 }

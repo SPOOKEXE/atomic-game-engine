@@ -15,8 +15,8 @@
 // so it is built once and streamed many times.
 //
 // A dictionary is what makes this worth doing. A game's content is thousands of
-// small files sharing a great deal — the same vertex layouts, the same material
-// fields, the same strings — and without one they compress as thousands of
+// small files sharing a great deal - the same vertex layouts, the same material
+// fields, the same strings - and without one they compress as thousands of
 // independently mediocre blobs. The dictionary is itself content-addressed and
 // shipped as a group, so it versions like everything else instead of becoming an
 // out-of-band file that can drift.
@@ -24,7 +24,7 @@
 // **Decompression treats its input as hostile.** A frame arrives from an origin,
 // and `repo_layout.md` §1 says anyone can run one. A frame header can claim any
 // decompressed size it likes, so nothing here allocates against what the frame
-// says — only against what the *manifest* already said the group weighs.
+// says - only against what the *manifest* already said the group weighs.
 //
 // @tier L11 · shared
 
@@ -49,12 +49,12 @@ namespace engine::delivery {
 		//
 		// 110 KiB is Zstd's own suggested size and is chosen rather than
 		// derived. It ships to every client once and then improves the ratio of
-		// every group forever, so it is the cheapest large thing in the format —
+		// every group forever, so it is the cheapest large thing in the format -
 		// but the *size* is still a number CDN.md §9 has no measurement behind.
 		//
 		// **What has been measured is that the dictionary works, and on which
 		// groups.** `engine.delivery.bench.compression` reports it as worthless
-		// on a 4 MiB group — 5.06x either way — and worth a fifth of the bytes
+		// on a 4 MiB group - 5.06x either way - and worth a fifth of the bytes
 		// on small ones: two hundred 4 KiB groups compress 3.90x plain and 4.86x
 		// against a dictionary.
 		//
@@ -62,7 +62,7 @@ namespace engine::delivery {
 		// builds its own history as it goes, so by a few kilobytes into a large
 		// payload it has learned the content's vocabulary and a supplied one
 		// adds nothing. A dictionary earns its keep only on payloads too short
-		// to build that history — which is exactly what a group of small assets
+		// to build that history - which is exactly what a group of small assets
 		// is, and the case the format ships them in.
 		//
 		// So the row to watch when tuning this constant is the *small*-group
@@ -73,7 +73,7 @@ namespace engine::delivery {
 
 		// Trains a dictionary over a sample of a game's content.
 		//
-		// Run once per published build, not per request — training is
+		// Run once per published build, not per request - training is
 		// substantial CPU over the whole sample, and putting it on a serving
 		// path would make an origin's first response wait for it. Its output is
 		// content-addressed and shipped as a group like anything else.
@@ -97,7 +97,7 @@ namespace engine::delivery {
 		//
 		// Refuses anything without a trained dictionary's magic. Zstd would
 		// happily accept arbitrary bytes as a "raw content" dictionary, which is
-		// legal and nearly useless — and a manifest shipped where a dictionary
+		// legal and nearly useless - and a manifest shipped where a dictionary
 		// was expected would then cost ratio on every group for the life of the
 		// deployment, silently.
 		//
@@ -159,7 +159,7 @@ namespace engine::delivery {
 		// And the trade is not "once against many", because `cdn::Origin::Pump`
 		// compresses **on a cache miss, with a client waiting**. For one 4 MiB
 		// group that is the difference between a 6.7 ms first request and a 36 ms
-		// one — and level 19 would make it 1.05 seconds, which is why the levels
+		// one - and level 19 would make it 1.05 seconds, which is why the levels
 		// where the ratio genuinely improves are unreachable from here rather
 		// than merely expensive. Only once the prepared-group cache is warm does
 		// the origin's CPU stop being a latency the player sees, and a default
@@ -167,11 +167,11 @@ namespace engine::delivery {
 		//
 		// So: 3, which is within 1.2% of what 9 achieved at a fifth of the miss
 		// latency. Raise it per deployment through `Origin::CompressionLevel` if
-		// that origin prepares ahead of demand rather than on it — that is the
+		// that origin prepares ahead of demand rather than on it - that is the
 		// arrangement the old reasoning described, and it is a deployment's to
 		// choose rather than this constant's to assume.
 		//
-		// The corpus is synthetic — a repeating markup vocabulary with scattered
+		// The corpus is synthetic - a repeating markup vocabulary with scattered
 		// numeric noise. It stands in for scene and manifest text, and it does
 		// **not** stand in for already-compressed textures or audio, where every
 		// level converges on no gain. Re-measure against a real build before

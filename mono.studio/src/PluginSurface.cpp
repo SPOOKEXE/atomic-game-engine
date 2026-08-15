@@ -3,8 +3,8 @@
 // **The names are Roblox's where Roblox has one**, because a person who has
 // written a Studio plugin should be able to write one of these without learning
 // a second vocabulary for the same idea. Where the shape differs it is because
-// the seam carries values rather than objects — `plugin.CreateButton(toolbar,
-// ...)` takes the toolbar's id where Roblox's takes the toolbar — and that is
+// the seam carries values rather than objects - `plugin.CreateButton(toolbar,
+// ...)` takes the toolbar's id where Roblox's takes the toolbar - and that is
 // stated rather than smoothed over.
 //
 //     local toolbar = plugin.CreateToolbar("My Tools")
@@ -38,7 +38,7 @@
 //
 // `GetScriptSource` hands back the text of a `LuaSourceContainer` in the world
 // being edited. That is the same text the script editor shows and the same text
-// a save file carries — a plugin is a tool running in an editor on a project
+// a save file carries - a plugin is a tool running in an editor on a project
 // somebody opened, so it is reading what its user is already looking at.
 //
 // It is *not* a way out of the sandbox: it reads through `script::ReadSource`
@@ -95,7 +95,7 @@ namespace studio {
 	// **Per plugin rather than one shared**, because every call has to know
 	// which plugin made it: a toolbar belongs to the plugin that created it, and
 	// a surface shared between them would need the caller's identity passed in
-	// on every call — which the seam has no way to supply and a plugin could
+	// on every call - which the seam has no way to supply and a plugin could
 	// forge.
 	class PluginSurface final : public engine::script::HostSurface {
 	  public:
@@ -112,8 +112,8 @@ namespace studio {
 				"GetActiveWorld",
 
 				// **`Selection` is a service, which is Roblox's own shape.**
-				// A dotted name becomes a global table of methods — see
-				// `OpenHost` — so `game:GetService("Selection")` finds it for
+				// A dotted name becomes a global table of methods - see
+				// `OpenHost` - so `game:GetService("Selection")` finds it for
 				// free, and `Selection:Get()` is what a Roblox plugin author
 				// already types.
 				"Selection.Get",
@@ -124,7 +124,7 @@ namespace studio {
 				// **`ChangeHistoryService` is how a plugin tells the editor what
 				// one undo should reverse**, and since v0.13 it is also how a
 				// plugin's edits reach the other people in a team-create
-				// session — a committed recording is the unit that travels.
+				// session - a committed recording is the unit that travels.
 				// Roblox's shape, method for method.
 				"ChangeHistoryService.TryBeginRecording",
 				"ChangeHistoryService.FinishRecording",
@@ -271,7 +271,7 @@ namespace studio {
 		//
 		// **An empty array is a whole answer**, not a degenerate one:
 		// `Selection:Set({})` is how a plugin deselects everything, and it is
-		// the reason the binding reads an empty Luau table as an array — see
+		// the reason the binding reads an empty Luau table as an array - see
 		// `HostValue::Items`.
 		// --- ChangeHistoryService ---------------------------------------------
 		//
@@ -296,7 +296,7 @@ namespace studio {
 		History(std::string_view method, HostArguments arguments, HostValue &result, std::string &failure) {
 			CommandLog *log = Owner.Commands.get();
 			if (log == nullptr) {
-				failure = "ChangeHistoryService is not available — this editor has no command log";
+				failure = "ChangeHistoryService is not available - this editor has no command log";
 				return false;
 			}
 
@@ -455,9 +455,9 @@ namespace studio {
 				// is the second; telling them what to write costs a sentence and
 				// saves them the guess.
 				if (value.Tag == HostTag::Instance) {
-					failure += " — write Selection:" + method + "({ instance })";
+					failure += " - write Selection:" + method + "({ instance })";
 				} else if (value.Tag == HostTag::Nil) {
-					failure += " — write Selection:" + method + "({}) to select nothing";
+					failure += " - write Selection:" + method + "({}) to select nothing";
 				}
 				return false;
 			}
@@ -518,7 +518,7 @@ namespace studio {
 
 			// **The list is edited directly rather than through
 			// `Editor::Select`, and that is not a shortcut.** That function
-			// *toggles* — it is what a ctrl-click calls, so adding something
+			// *toggles* - it is what a ctrl-click calls, so adding something
 			// already selected removes it. `Selection:Add` must not, and a
 			// plugin adding a part twice must not end up with it deselected.
 			std::vector<Entity> &selected = Owner.Selection;
@@ -630,7 +630,7 @@ namespace studio {
 				return false;
 			}
 
-			// The file on disk is not this editor's to write from here — a
+			// The file on disk is not this editor's to write from here - a
 			// plugin edits the world, and saving the world is what writes it.
 			Owner.MarkModified();
 			return true;
@@ -668,7 +668,7 @@ namespace studio {
 		bool CreateButton(HostArguments arguments, HostValue &result, std::string &failure) {
 			size_t toolbar = 0;
 			if (!IndexOf(At(arguments, 0), Plugin.Toolbars.size(), toolbar)) {
-				failure = "no such toolbar — CreateToolbar answers the id to pass here";
+				failure = "no such toolbar - CreateToolbar answers the id to pass here";
 				return false;
 			}
 
@@ -710,7 +710,7 @@ namespace studio {
 		bool Widget(std::string_view name, HostArguments arguments, HostValue &result, std::string &failure) {
 			size_t widget = 0;
 			if (!IndexOf(At(arguments, 0), Plugin.Widgets.size(), widget)) {
-				failure = "no such widget — CreateWidget answers the id to pass here";
+				failure = "no such widget - CreateWidget answers the id to pass here";
 				return false;
 			}
 
@@ -762,7 +762,7 @@ namespace studio {
 					names += index > 0 ? ", " : "";
 					names += engine::ui::Describe(static_cast<engine::ui::ThemeColour>(index));
 				}
-				failure = "no colour called '" + name + "' — one of: " + names;
+				failure = "no colour called '" + name + "' - one of: " + names;
 				return false;
 			}
 
@@ -809,7 +809,7 @@ namespace studio {
 			if (name == "InputText") {
 				// **A fixed buffer, and the length is stated rather than
 				// implied.** A plugin's text field is not where somebody edits a
-				// script — that is the script editor — so a growing buffer per
+				// script - that is the script editor - so a growing buffer per
 				// field per frame would be an allocation nobody needed.
 				char buffer[512] = {};
 				const std::string initial(At(arguments, 1).AsText());
@@ -835,7 +835,7 @@ namespace studio {
 
 	void SetPluginDrawing(engine::script::HostSurface &surface, bool drawing) {
 		// A `static_cast` rather than a virtual, because `Drawing` is this
-		// editor's own gate and not part of what a host surface *is* — a second
+		// editor's own gate and not part of what a host surface *is* - a second
 		// host would have no use for it.
 		static_cast<PluginSurface &>(surface).Drawing = drawing;
 	}

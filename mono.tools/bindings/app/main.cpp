@@ -1,8 +1,8 @@
 // The bindings manifest, and the type declarations generated from it.
 //
 // **One source of truth for what a class is and what a property costs.** The
-// class table already holds all of it — `ecs::Classes` knows the tree,
-// `PropertyDescriptor` knows the types and the components each side touches —
+// class table already holds all of it - `ecs::Classes` knows the tree,
+// `PropertyDescriptor` knows the types and the components each side touches -
 // so this writes that out rather than restating it. A second hand-maintained
 // list of what a script can touch is the thing this exists to prevent.
 //
@@ -26,13 +26,16 @@
 #include <engine/scene/Services.hpp>
 #include <engine/script/Datatypes.hpp>
 #include <engine/script/Instances.hpp>
+#include <engine/script/Vocabulary.hpp>
 
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <span>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -105,6 +108,8 @@ namespace {
 			return "computed";
 		case PropertyKind::Structural:
 			return "structural";
+		case PropertyKind::Resource:
+			return "resource";
 		}
 		return "field";
 	}
@@ -114,7 +119,7 @@ namespace {
 	// **Takes the descriptor rather than the type**, because an `Enum` property
 	// has no single answer: its script type is the enum it names, and that is
 	// carried on the descriptor. A function of the type alone could only have
-	// said `EnumItem`, which is the shape and not the type — and would have
+	// said `EnumItem`, which is the shape and not the type - and would have
 	// given an author completion for every enum in the engine at once.
 	std::string LuauType(const PropertyDescriptor &property) {
 		if (property.Type == PropertyType::Enum) {
@@ -128,7 +133,7 @@ namespace {
 			// there is no `declare` syntax for anything else.
 			//
 			// What resolves `Enum.Material` is `Scope::lookupImportedType("Enum",
-			// "Material")` — the `importedTypeBindings` map, which `require`
+			// "Material")` - the `importedTypeBindings` map, which `require`
 			// populates and which a **host** may populate directly. That is
 			// precisely what Roblox does, and it is what
 			// `mono.tools/scriptcheck` now does: it walks the `Enum_*` types this
@@ -136,8 +141,8 @@ namespace {
 			//
 			// **The declaration file keeps the flat name and scripts get both**,
 			// which is forced by the order things happen in rather than chosen.
-			// The aliases are registered *after* `loadDefinitionFile` returns —
-			// they are built by walking the `Enum_*` types it created — so this
+			// The aliases are registered *after* `loadDefinitionFile` returns -
+			// they are built by walking the `Enum_*` types it created - so this
 			// file cannot use the dotted form in its own declarations. Emitting it
 			// here made the file fail to load with "Unknown type
 			// 'Enum.AspectType'" before a single script was checked.
@@ -160,7 +165,7 @@ namespace {
 		case PropertyType::String:
 			// **The same word in both languages, and it should be.** Whether
 			// the engine interns text or owns it is a storage decision an
-			// author has no way to observe from a script — `label.Text` is a
+			// author has no way to observe from a script - `label.Text` is a
 			// string either way. A declaration file that spelled them
 			// differently would be leaking a C++ concern into a type position.
 			return "string";
@@ -199,7 +204,7 @@ namespace {
 			// is the half of `ROADMAP.md` v0.10's rename that a type system can
 			// actually express. TypeScript merges an `interface Material` and a
 			// `const Material` inside `namespace Enum`, so one name is both the
-			// type and the table of members — see the namespace this emits below.
+			// type and the table of members - see the namespace this emits below.
 			//
 			// The Luau half cannot do this and `LuauType` says why.
 			return std::string("Enum.") + property.EnumName.Text().data();
@@ -217,7 +222,7 @@ namespace {
 		case PropertyType::String:
 			// **The same word in both languages, and it should be.** Whether
 			// the engine interns text or owns it is a storage decision an
-			// author has no way to observe from a script — `label.Text` is a
+			// author has no way to observe from a script - `label.Text` is a
 			// string either way. A declaration file that spelled them
 			// differently would be leaking a C++ concern into a type position.
 			return "string";
@@ -293,15 +298,15 @@ namespace {
 	//
 	// **A service is not constructible, and the table can now say so.** This
 	// field shipped hard-coded `true` with a note that nothing in the class
-	// table could express a service — one instance per world, reached by name,
+	// table could express a service - one instance per world, reached by name,
 	// never minted by a script. `scene::ServiceClass()` is that expression:
 	// `Workspace` and `Lighting` derive from `Service`, so the question is an
 	// `IsA` rather than a list of names, and a tenth service never touches this
 	// function.
 	//
-	// The abstract bases — `Instance`, `BasePart`, `LuaSourceContainer` — stay
+	// The abstract bases - `Instance`, `BasePart`, `LuaSourceContainer` - stay
 	// constructible here, because the *run time* still accepts them:
-	// `Instances.cpp` looks the name up in the class table and mints whatever it
+	// `LuauInstances.cpp` looks the name up in the class table and mints whatever it
 	// finds. `Explorer.cpp` filters them out of the class picker by name, which
 	// is a decision about a palette rather than about the binding, and copying
 	// that list into a second place is how the two would disagree later.
@@ -314,7 +319,7 @@ namespace {
 	//
 	// **Derived from the class table rather than listed by hand, and that is
 	// the fix rather than the tidy-up.** `GetService` resolves a name against
-	// the world's roots — `RunService.cpp` says so — so *every* service
+	// the world's roots - `RunService.cpp` says so - so *every* service
 	// `scene::InstallServices` furnishes is reachable, and the hand-written
 	// list of five said otherwise. `Interface.luau` asking for `StarterGui`
 	// typechecked as an error against an engine that answers it perfectly well.
@@ -324,8 +329,8 @@ namespace {
 	// types disagree. That is the drift this file exists to prevent everywhere
 	// else, arriving through the one list that was still manual.
 	//
-	// The bus services are *not* here — they are globals installed by the
-	// bindings rather than instances in the tree — so they are appended by the
+	// The bus services are *not* here - they are globals installed by the
+	// bindings rather than instances in the tree - so they are appended by the
 	// caller. Everything derived from `Service` is.
 	std::vector<ClassId> ServiceClasses() {
 		const ClassId service = Classes::Find(engine::core::Name("Service"));
@@ -356,9 +361,9 @@ namespace {
 
 	// The properties a class declares itself, sorted by name.
 	//
-	// **Own, not inherited.** Both declaration files now express inheritance —
+	// **Own, not inherited.** Both declaration files now express inheritance -
 	// TypeScript through `extends` on an interface and Luau through `extends` on
-	// a `declare extern type` — so repeating an inherited property would be a
+	// a `declare extern type` - so repeating an inherited property would be a
 	// second declaration of one fact. TypeScript accepts a narrowing of one
 	// silently, and Luau's would simply be noise growing with the depth of the
 	// tree.
@@ -389,7 +394,7 @@ namespace {
 	// the whole class table.
 	//
 	// **The manifest publishes `reads` and `writes`, so a descriptor that
-	// declares the wrong thing is not a private slip — it is a wrong sentence in
+	// declares the wrong thing is not a private slip - it is a wrong sentence in
 	// a checked-in contract that script authors and both declaration files are
 	// generated from.** Four read-only properties declared a write set:
 	// `Attachment.WorldCFrame` and `WorldPosition`, `Humanoid.Grounded` and
@@ -404,9 +409,9 @@ namespace {
 	//
 	// **What is deliberately not checked is an empty `reads` set.**
 	// `Players.LocalPlayer` has one and is right to: it projects a world
-	// *resource*, not a component on the row. The consequence — a property that
+	// *resource*, not a component on the row. The consequence - a property that
 	// reads no component can never fire `.Changed`, because `script::ChangeQueue`
-	// subscribes through `reads` — is a real limitation and not a contradiction,
+	// subscribes through `reads` - is a real limitation and not a contradiction,
 	// and that descriptor says so in its own comment.
 	//
 	// @return How many contradictions were reported.
@@ -432,7 +437,7 @@ namespace {
 
 				// **And the converse, which is what the studio's scale gizmo
 				// went round.** `scene::SizeProperty` writes `Bounds` *and*
-				// `Collider` — a caller that moved only the first left a part
+				// `Collider` - a caller that moved only the first left a part
 				// drawn at one size and collided at another. A writable property
 				// that declares nothing is a setter whose blast radius is
 				// undocumented, and the manifest is where a caller would look.
@@ -542,7 +547,7 @@ namespace {
 		//
 		// Members in registration order rather than sorted: the order an author
 		// reads them in should be the order they were declared, which is usually
-		// meaningful — `Static`, `Kinematic`, `Dynamic` is a progression and
+		// meaningful - `Static`, `Kinematic`, `Dynamic` is a progression and
 		// alphabetical is not. The enum *names* are sorted, because those come
 		// from whichever translation unit ran first.
 		out << "\t\"enums\": [\n";
@@ -589,18 +594,18 @@ namespace {
 	// **`declare extern type X with ... end`, not `declare class X ... end`, and
 	// the difference is not cosmetic.** Both spellings parse in the Luau this
 	// repository vendors, but the class form is gated behind
-	// `FFlag::LuauAllowGlobalDeclarationToBeCalledClass` — whose own comment says
+	// `FFlag::LuauAllowGlobalDeclarationToBeCalledClass` - whose own comment says
 	// the plan is to remove `declare class X [extends Y]`. Anything that enables
 	// Luau's flags therefore rejects the class form outright, and `luau-lsp` does
 	// exactly that: pointed at a file using it, the language server fails to load
 	// the definitions at all and an author gets *no* completion rather than
 	// slightly wrong completion. `mono.tools/scriptcheck` runs with default flags
-	// and accepts both, so this generator would not have caught it — `just
+	// and accepts both, so this generator would not have caught it - `just
 	// luau-lsp` did, which is the argument for that recipe existing.
 	//
 	// **The signals are three classes because a definition file cannot declare a
 	// generic one.** Roblox spells this `RBXScriptSignal<T...>` and that syntax
-	// does not parse here — so each signal is named for what it hands its
+	// does not parse here - so each signal is named for what it hands its
 	// handler, which is the thing an author actually wants completed. Same
 	// `Connect`, same `Once`, same `RBXScriptConnection` back.
 	constexpr const char *LUAU_PRELUDE =
@@ -652,7 +657,7 @@ end
 
 declare CFrame: {
 	new: ((x: number?, y: number?, z: number?) -> CFrame) & ((position: Vector3) -> CFrame),
-	-- Radians, because Roblox's is radians — while `Orientation` is degrees.
+	-- Radians, because Roblox's is radians - while `Orientation` is degrees.
 	Angles: (pitch: number, yaw: number, roll: number) -> CFrame,
 	lookAt: (from: Vector3, to: Vector3, up: Vector3?) -> CFrame,
 }
@@ -681,33 +686,185 @@ end
 -- reason: nothing about them is in the class table, so the generator has no way
 -- to derive them and writing them out is the honest form.
 
+-- What an input signal hands its listener.
+--
+-- **Roblox's `InputObject`, added at v0.16 because the three signals were
+-- passing something no declaration described.** `InputBegan` fired with a bare
+-- `Enum.KeyCode`, the bound-action handler took one as its third argument, and
+-- these declarations said the signals passed *nothing at all* - three answers to
+-- one question, none of them Roblox's. A script copied from a Roblox place
+-- indexed `input.KeyCode` and got nil.
+--
+-- No constructor: a script cannot make one, because an input report is a fact
+-- about a frame rather than a value anybody authors. Roblox offers none either.
+declare extern type InputObject with
+	-- The key, or `Enum.KeyCode.Unknown` for anything that is not one.
+	read KeyCode: Enum_KeyCode
+
+	-- Where it came from - a mouse button, the keyboard, pointer motion or the
+	-- wheel. `Enum.UserInputType` is shorter here than in Roblox; every member
+	-- absent is one nothing in this engine can produce.
+	read UserInputType: Enum_UserInputType
+
+	-- `Begin`, `Change` or `End`.
+	read UserInputState: Enum_UserInputState
+
+	-- Where the pointer was, in pixels from the top-left of the window, with the
+	-- wheel's notches in `Z`. Zero for a keyboard event.
+	read Position: Vector3
+
+	-- How far it moved since the previous frame, in the same space. Zero for a
+	-- keyboard event and for a button edge - motion is reported by its own
+	-- `InputChanged`, so counting it on the click as well would double it.
+	read Delta: Vector3
+end
+
+-- What `InputBegan`, `InputEnded` and `InputChanged` call a handler with.
+--
+-- Its own type rather than `PropertyChangedSignal`, which these three were
+-- declared as and which passes nothing.
+--
+-- **`gameProcessedEvent` is Roblox's second argument and it is real here**: it
+-- is true when the 2D interface took the pointer this beat, which is what a
+-- click on a `TextButton` is. It is always false for a keyboard event, because
+-- `gui` has no keyboard focus to take one with - `InterfaceHasPointer` in
+-- `script/src/Actions.cpp` carries what would close that.
+declare extern type InputSignal with
+	function Connect(
+		self, handler: (input: InputObject, gameProcessedEvent: boolean) -> ()
+	): RBXScriptConnection
+	function Once(
+		self, handler: (input: InputObject, gameProcessedEvent: boolean) -> ()
+	): RBXScriptConnection
+end
+
+-- What `LastInputTypeChanged` calls a handler with.
+declare extern type LastInputTypeSignal with
+	function Connect(self, handler: (lastInputType: Enum_UserInputType) -> ()): RBXScriptConnection
+	function Once(self, handler: (lastInputType: Enum_UserInputType) -> ()): RBXScriptConnection
+end
+
 declare extern type UserInputServiceType with
 	MouseBehavior: Enum_MouseBehavior
+
+	-- Whether the pointer is drawn. **Separate from `MouseBehavior` because
+	-- Roblox's two are**: an inventory screen wants the pointer visible while the
+	-- camera stays locked. `LockCenter` and `LockCurrentPosition` hide it
+	-- whatever this says, which is the client's rule and not a script's.
+	MouseIconEnabled: boolean
+
 	MouseDeltaSensitivity: number
 	read KeyboardEnabled: boolean
 	read MouseEnabled: boolean
 
-	read InputBegan: PropertyChangedSignal
-	read InputEnded: PropertyChangedSignal
-	read InputChanged: PropertyChangedSignal
+	-- **Present and always false.** There is no gamepad, touch surface, headset
+	-- or motion sensor anywhere in `engine::input`, and a Roblox place branches
+	-- on these to pick a control scheme - a missing property raises where a
+	-- false one takes the other branch.
+	read GamepadEnabled: boolean
+	read TouchEnabled: boolean
+	read VREnabled: boolean
+	read AccelerometerEnabled: boolean
+	read GyroscopeEnabled: boolean
+
+	read InputBegan: InputSignal
+	read InputEnded: InputSignal
+
+	-- Fires for pointer motion and for the wheel, which are the two things this
+	-- engine can report changing. **It fired for nothing at all before v0.16**,
+	-- having been connectable and silent since v0.10.
+	read InputChanged: InputSignal
+
+	-- The window's focus edges. Everything reads as released on the frame focus
+	-- is lost, and `WindowFocusReleased` is delivered before those releases so a
+	-- listener can tell which explains which.
+	read WindowFocused: PropertyChangedSignal
+	read WindowFocusReleased: PropertyChangedSignal
+
+	-- Which device the player switched to. **The edge beside
+	-- `GetLastInputType`'s poll**, which is the pair a place needs to swap
+	-- "press E" for "click here" and to know which to draw when a menu opens.
+	read LastInputTypeChanged: LastInputTypeSignal
 
 	function IsKeyDown(self, key: Enum_KeyCode): boolean
+
+	-- False for the three `Enum.UserInputType` members that are not buttons.
 	function IsMouseButtonPressed(self, button: Enum_UserInputType): boolean
+
 	function GetMouseLocation(self): Vector2
 	function GetMouseDelta(self): Vector2
 	function GetKeysPressed(self): { Enum_KeyCode }
+
+	-- `InputObject`s and not `EnumItem`s, which is Roblox's shape: the object
+	-- carries where the pointer was as well as which button it is.
+	function GetMouseButtonsPressed(self): { InputObject }
+
+	-- **`Enum.UserInputType.Keyboard` on a world nobody has touched**, where
+	-- Roblox answers `None`. There is no such member here for `InputSource`'s
+	-- reason: every member is one something in this engine can produce.
+	function GetLastInputType(self): Enum_UserInputType
+
+	-- The `TextBox` a person is typing into, or nil.
+	--
+	-- **A lookup rather than a tally of the focus signals**, because
+	-- `gui::Focus` is the one door a focus change goes through and
+	-- `GuiServiceState::FocusedTextBox` is where the answer rests. Nil for a
+	-- world with no `GuiService`, and nil for a box destroyed while focused.
+	function GetFocusedTextBox(self): Instance?
 end
 
+-- **What `UserInputService` deliberately does not have**, which is the half a
+-- migrating author needs most. `script/src/UserInputService.cpp` names each and
+-- what closing it would take; the short version is that there is no gamepad, no
+-- touch surface, no cursor image in `render` and no keyboard-layout query below
+-- L12 - so `GetConnectedGamepads`, `GetGamepadState`, the six touch signals,
+-- `MouseIcon` and `GetStringForKeyCode` are absent rather than present and
+-- useless. `TextBoxFocused` and its twin are absent for a different reason: the
+-- fact exists and reaches a script as `textBox.Focused`, and a world-subject row
+-- firing about an instance would put the two input pumps in each other's work.
+
 declare UserInputService: UserInputServiceType
+
+-- What `GetBoundActionInfo` reports about one bound action.
+--
+-- **Four of Roblox's six fields.** `title` and `description` come from
+-- `SetTitle` and `SetDescription`, which decorate a touch button - there is no
+-- touch surface, so the pair is not bound and reporting them as empty strings
+-- would claim they had been set to nothing.
+declare extern type BoundActionInfo with
+	-- The keys this action claims. **Keys only**: `BindAction` takes
+	-- `Enum.KeyCode` here where Roblox also takes `Enum.UserInputType`.
+	read inputTypes: { Enum_KeyCode }
+
+	read priorityLevel: number
+
+	-- **Higher wins, which is Roblox's direction.** The engine's own list is
+	-- sorted highest-priority-first, so this is that index inverted rather than
+	-- the same word meaning the opposite thing.
+	read stackOrder: number
+
+	-- Always false: the argument is accepted at bind time and ignored.
+	read createTouchButton: boolean
+end
 
 declare extern type ContextActionServiceType with
 	-- The touch-button argument is accepted and ignored: there is no touch
 	-- surface, and refusing it would make a Roblox script fail on a line that
 	-- describes something this engine simply does not have.
+	--
+	-- **The handler's third argument is an `InputObject` since v0.16**, which is
+	-- what Roblox has always passed. It was an `Enum.KeyCode`, so a handler
+	-- reading `input.KeyCode` - the form every Roblox place is written in - got
+	-- nil.
+	--
+	-- **What it returns decides who else hears the key.**
+	-- `Enum.ContextActionResult.Pass` hands the press to the next claim down;
+	-- `Sink`, `nil`, or a handler that raised, stop it here. Returning nothing is
+	-- the ordinary case and sinks, which is Roblox's default.
 	function BindAction(
 		self,
 		name: string,
-		handler: (string, Enum_UserInputState, Enum_KeyCode) -> (),
+		handler: (string, Enum_UserInputState, InputObject) -> Enum_ContextActionResult?,
 		createTouchButton: boolean,
 		...: Enum_KeyCode
 	): ()
@@ -715,7 +872,7 @@ declare extern type ContextActionServiceType with
 	function BindActionAtPriority(
 		self,
 		name: string,
-		handler: (string, Enum_UserInputState, Enum_KeyCode) -> (),
+		handler: (string, Enum_UserInputState, InputObject) -> Enum_ContextActionResult?,
 		createTouchButton: boolean,
 		priority: number,
 		...: Enum_KeyCode
@@ -723,6 +880,11 @@ declare extern type ContextActionServiceType with
 
 	function UnbindAction(self, name: string): ()
 	function UnbindAllActions(self): ()
+
+	-- `nil` for a name nothing has bound, which is what `if info then` reads.
+	function GetBoundActionInfo(self, name: string): BoundActionInfo?
+
+	function GetAllBoundActionInfo(self): { [string]: BoundActionInfo }
 end
 
 declare ContextActionService: ContextActionServiceType
@@ -755,10 +917,27 @@ end
 --
 -- **`GuiSignal` takes no arguments and that is deliberate rather than
 -- unfinished.** Roblox hands `Activated`, `InputBegan` and `InputEnded` an
--- `InputObject`; this engine has no such datatype, and inventing a different
--- one now would have to change the day one arrives. A handler that cannot rely
--- on an argument is better than one relying on an argument that will move.
+-- `InputObject`, and a handler that cannot rely on an argument is better than
+-- one relying on an argument that will move.
+--
+-- **The datatype exists since v0.16 and this still takes none**, which is a
+-- narrower gap than it was. `gui::GuiEvent` carries a kind, an entity and two
+-- points - no key, no button, no `Enum.UserInputType` - so an `InputObject`
+-- built for these would have to *invent* the field a handler reads it for. What
+-- closing it needs is `gui::Router` recording which button produced an event.
 declare extern type GuiSignal with
+	function Connect(self, handler: () -> ()): RBXScriptConnection
+	function Once(self, handler: () -> ()): RBXScriptConnection
+end
+
+-- `tween.Completed`, which takes no arguments.
+--
+-- **Its own type rather than `GuiSignal`**, which is structurally identical: a
+-- name is what a reader gets from a declaration file, and a tween's completion
+-- typed as a gui signal is a name that is simply false. Roblox passes a
+-- `PlaybackState` here; this engine has no such enum, and one invented now
+-- would have to change the day it arrives.
+declare extern type TweenCompletedSignal with
 	function Connect(self, handler: () -> ()): RBXScriptConnection
 	function Once(self, handler: () -> ()): RBXScriptConnection
 end
@@ -768,6 +947,32 @@ end
 declare extern type PointerSignal with
 	function Connect(self, handler: (x: number, y: number) -> ()): RBXScriptConnection
 	function Once(self, handler: (x: number, y: number) -> ()): RBXScriptConnection
+end
+
+-- `textBox.Focused`, which takes no arguments.
+--
+-- **Its own name rather than `GuiSignal`**, for `TweenCompletedSignal`'s
+-- reason: the two are structurally identical and a name is what a reader gets
+-- out of a declaration file. This one is about the keyboard and the other three
+-- are about the pointer.
+declare extern type FocusSignal with
+	function Connect(self, handler: () -> ()): RBXScriptConnection
+	function Once(self, handler: () -> ()): RBXScriptConnection
+end
+
+-- `textBox.FocusLost`, which takes `enterPressed` and nothing after it.
+--
+-- **One of Roblox's two arguments.** The second is the `InputObject` that took
+-- the focus away, and the router deals in `gui::GuiEvent` - there is no report
+-- to hand over that would not be invented at the call site, which is the trade
+-- `GuiSignal` above is on.
+--
+-- `enterPressed` is true when Return released the box and false when a press
+-- somewhere else did, which is how a handler tells a submitted field from an
+-- abandoned one.
+declare extern type FocusLostSignal with
+	function Connect(self, handler: (enterPressed: boolean) -> ()): RBXScriptConnection
+	function Once(self, handler: (enterPressed: boolean) -> ()): RBXScriptConnection
 end
 
 -- --- queries ---------------------------------------------------------------
@@ -789,8 +994,8 @@ declare RaycastParams: {
 	// neither carries a rotation: Roblox's `Region3` is an axis-aligned box and
 	// the engine already had that box under the name every spatial query uses.
 	//
-	// A sequence keypoint is a table rather than a type of its own —
-	// `{time, value, envelope}` for a number and `{time, Color3}` for a colour —
+	// A sequence keypoint is a table rather than a type of its own -
+	// `{time, value, envelope}` for a number and `{time, Color3}` for a colour -
 	// because two more userdata types for something written inline once is
 	// surface nobody asked for.
 	constexpr const char *LUAU_DATATYPES =
@@ -871,7 +1076,7 @@ declare NumberRange: {
 -- The stops, added at v0.10 because a sequence became a *property* and a value
 -- read back has to come back in a shape its own constructor accepts. Until then
 -- `Keypoints` handed out `{time, value, envelope}` tables, and those are still
--- accepted by both constructors — the table form is how a gradient is written
+-- accepted by both constructors - the table form is how a gradient is written
 -- inline and is not deprecated.
 -- What an attribute may hold, which is `ecs::AttributeTypeAllowed`'s closed set.
 --
@@ -997,6 +1202,52 @@ declare DateTime: {
 
 )LUAU";
 
+	// The `BusStatus` string union, in each language's spelling.
+	//
+	// **Generated from `script::BusStatusWords` rather than written out, which is
+	// what turns it from a comment into a check.** Both unions were hand-kept
+	// text with a note asking whoever appended a status to remember, and nothing
+	// in the build compared them against `script::DescribeStatus` - the third
+	// category `AGENTS.md` rule 6 refuses. A status appended to
+	// `world::BusStatus` now changes what this emits, so `just bindings-check`
+	// fails by name until the checked-in declarations are regenerated.
+	//
+	// **Two layouts rather than one, because the two files are read by different
+	// tools.** Luau's alias is one line, which is how the rest of that file
+	// spells a union; TypeScript's is one member per line, which is what
+	// `prettier` and every hand-written `.d.ts` in the ecosystem produce. A
+	// shared layout would be wrong in one of the two.
+	//
+	// @param out  Where the declaration goes.
+	// @param luau Luau's spelling when true, TypeScript's when false.
+	void WriteBusStatus(std::ostream &out, bool luau) {
+		const char *comment = luau ? "--" : "//";
+
+		out << comment << " --- the bus services "
+			<< "------------------------------------------------------\n\n";
+		out << comment << " Every word `script::DescribeStatus` can hand back, generated from that\n"
+			<< comment << " switch. A status a script branches on cannot be missing here, and a\n"
+			<< comment << " status appended to `world::BusStatus` fails `just bindings-check` until\n"
+			<< comment << " these files are regenerated.\n";
+
+		const std::span<const std::string_view> words = engine::script::BusStatusWords();
+
+		if (luau) {
+			out << "export type BusStatus =";
+			for (size_t index = 0; index < words.size(); index++) {
+				out << (index == 0 ? " " : " | ") << '"' << words[index] << '"';
+			}
+			out << "\n\n";
+			return;
+		}
+
+		out << "declare type BusStatus =\n";
+		for (size_t index = 0; index < words.size(); index++) {
+			out << "\t| \"" << words[index] << (index + 1 == words.size() ? "\";\n" : "\"\n");
+		}
+		out << "\n";
+	}
+
 	// The globals that reach the class tree, so they are emitted after it.
 	//
 	// **`RunService` is a class and a value of the same name**, which is legal
@@ -1004,15 +1255,11 @@ declare DateTime: {
 	// Roblox's own declarations spell a service.
 	//
 	// The bus services carry `(value, status, version)` back, which is the shape
-	// `Services.cpp` resumes a suspended thread with. Roblox's `GetAsync` returns
+	// `LuauBus.cpp` resumes a suspended thread with. Roblox's `GetAsync` returns
 	// the value alone and swallows the rest; the status rides beside it here
 	// because a refusal a script cannot see is a refusal it cannot handle.
 	constexpr const char *LUAU_SERVICES =
-		R"LUAU(-- --- the bus services ------------------------------------------------------
-
-export type BusStatus = "Ok" | "NotFound" | "Conflict" | "OverBudget" | "NoSuchWorld" | "Unsupported" | "Unknown"
-
-declare extern type MessagingService with
+		R"LUAU(declare extern type MessagingService with
 	function PublishAsync(self, topic: string, message: any): (any, BusStatus, number)
 	function SubscribeAsync(self, topic: string, handler: (message: any) -> ()): ()
 end
@@ -1033,6 +1280,46 @@ declare extern type TeleportService with
 	function GetTeleportData(self, player: Instance): any
 end
 
+-- One channel's arrivals. `OpenChannel` hands one back per channel, so two
+-- subsystems in one world listen to two of these rather than filtering one.
+declare extern type CrossWorldSignal with
+	function Connect(self, handler: (message: any, fromWorld: string) -> ()): RBXScriptConnection
+	function Once(self, handler: (message: any, fromWorld: string) -> ()): RBXScriptConnection
+end
+
+-- The addressed route out of a world, which `MessagingService` is not.
+--
+-- A topic is a fan-out: the publisher does not know or care who is listening,
+-- which is right for "the boss died" and wrong for "world B, here is the score
+-- you asked me for". This names one channel on one world and delivers there
+-- alone, so two subsystems talking between the same pair of worlds do not read
+-- each other's traffic.
+--
+-- There is deliberately no `GetWorlds`. A world's storage cannot see its
+-- siblings - the directory belongs to the barrier's router - so answering it
+-- would mean the barrier stamping a list into every world every tick, which is
+-- machinery nobody has asked for. `SendAsync` answering `NoSuchWorld` is the
+-- honest half of the same question.
+declare extern type CrossWorldService with
+	-- Listens on a named channel and hands back that channel's signal. The
+	-- handler is called `(message, fromWorldName)` - the sender's name is second
+	-- because answering is the point, and the receiver already named the channel.
+	--
+	-- Takes effect at the next barrier, so a message sent in the same tick is
+	-- refused. Raises when this world is over its bus budget for the tick.
+	function OpenChannel(self, channel: string): CrossWorldSignal
+
+	-- Stops delivery on a channel. Handlers already connected are left alone, so
+	-- reopening it later finds them still there.
+	function CloseChannel(self, channel: string): ()
+
+	-- Sends a value to a named channel on a named world, and suspends until the
+	-- barrier answers. `Ok`, or `NoSuchWorld`, `NoSuchChannel`, `WorldNotReady`
+	-- or `Overflow` - a channel send carries no value back, so the status is the
+	-- answer. Raises when this world is over its bus budget for the tick.
+	function SendAsync(self, world: string, channel: string, message: any): (any, BusStatus, number)
+end
+
 declare extern type MemoryStoreService with
 	function GetAsync(self, key: string): (any, BusStatus, number)
 	function SetAsync(self, key: string, value: any): (any, BusStatus, number)
@@ -1048,7 +1335,7 @@ end
 
 -- What content this world holds, which is the other half of naming an asset.
 --
--- A `MeshId` is a name a publisher wrote — an id does not cross — and until
+-- A `MeshId` is a name a publisher wrote - an id does not cross - and until
 -- this there was no way for a script to ask what those names were. Every list
 -- is sorted, so a scene that lays content out arranges itself the same way on
 -- every run.
@@ -1057,7 +1344,7 @@ declare extern type ContentService with
 	-- and before content has arrived, which are the same honest answer.
 	function GetMeshes(self): { string }
 
-	-- Every mesh the *store* published, sorted — the signed manifest, which a
+	-- Every mesh the *store* published, sorted - the signed manifest, which a
 	-- client verifies before it can fetch anything.
 	--
 	-- **This is what there is to name; `GetMeshes` is what has been named.** The
@@ -1075,14 +1362,14 @@ declare extern type ContentService with
 	--
 	-- **What a model is wearing, which nothing else can answer.** A `MeshPart`
 	-- naming no `TextureID` shows whatever each submesh recorded at bake time,
-	-- and those names live inside the mesh file — so swapping a character's
+	-- and those names live inside the mesh file - so swapping a character's
 	-- outfit meant guessing, with no way to learn the current sheet and no name
 	-- to put back.
 	--
 	-- **Not sorted and not deduplicated**, unlike every other list here: which
 	-- run wears which is a fact, and a character with twenty submeshes sharing
 	-- four sheets is four names repeated. Empty for a built-in, which names
-	-- none, and for a mesh this world has not been told about — the same two
+	-- none, and for a mesh this world has not been told about - the same two
 	-- answers `GetTriangleCount` folds into zero, for the same reason.
 	--
 	-- `TextureID` overrides *every* run at once, so naming one of several is a
@@ -1097,8 +1384,189 @@ declare extern type ContentService with
 	function GetFlipbook(self, texture: string): { Side: number, Frames: number, FrameRate: number }?
 
 	-- The same number `MeshPart.TrianglesCount` gives, asked about a mesh
-	-- rather than a part — so a layout can be sized before anything is built.
+	-- rather than a part - so a layout can be sized before anything is built.
 	function GetTriangleCount(self, mesh: string): number
+end
+
+-- What carries a tag, which is the half `Instance:AddTag` cannot answer.
+--
+-- The same three methods the instance has, plus the one nothing else can do:
+-- finding an instance you are not already holding. A scene that wanted every
+-- door used to keep its own list beside the tags, and that list goes stale the
+-- first time one is destroyed.
+--
+-- **`Tags` is a `BasePart` component**, so `AddTag` on a `Folder` answers
+-- `false` rather than raising - the same answer `Instance:AddTag` gives.
+--
+-- No `GetInstanceAddedSignal`: nothing records that a tag changed, so a signal
+-- here would never fire, and one that never fires reads as a broken engine.
+-- `CollectionService.cpp` says what closing that would take.
+declare extern type CollectionService with
+	-- The same call `Instance:AddTag` makes, so which side a script spells it
+	-- from cannot change what happens. `false` when the instance carries no
+	-- tags and when this world's thirty-two tags are all spoken for.
+	function AddTag(self, instance: Instance, tag: string): boolean
+
+	-- The tag's *name* stays registered in this world afterwards, so
+	-- `GetAllTags` still lists one nothing carries.
+	function RemoveTag(self, instance: Instance, tag: string): boolean
+	function HasTag(self, instance: Instance, tag: string): boolean
+
+	-- Every instance in this world carrying the tag, and empty for a tag
+	-- nothing has ever added - a script polling before another has run is the
+	-- ordinary case, not a mistake.
+	--
+	-- **Sorted by the order the world was built in**, so a scene laying its
+	-- tagged instances out arranges itself the same way on every run.
+	function GetTagged(self, tag: string): { Instance }
+
+	-- What one instance carries, sorted.
+	function GetTags(self, instance: Instance): { string }
+
+	-- Every tag this world has registered, sorted, carried or not.
+	function GetAllTags(self): { string }
+end
+
+-- JSON, a GUID and a URL escape - and **no `RequestAsync`, `GetAsync` or
+-- `PostAsync`**, which are absent on purpose rather than missing.
+--
+-- Arbitrary outbound HTTP from a game script is a security decision nobody has
+-- taken. This engine's one route to the network is a signed manifest a client
+-- verifies against a publisher key, which is a different thing and not a
+-- smaller one. Declaring the three here would promise a surface that does not
+-- exist; `script/src/HttpService.cpp` says what taking the decision would need.
+--
+-- The four that are here observe nothing, which is what lets them exist in a VM
+-- whose runs have to replay. `GenerateGUID` is *deterministic* for that reason -
+-- read its note before using one as a name anything outside this world has to
+-- agree is unique.
+declare extern type HttpService with
+	-- **The same rules `MessagingService` encodes by**, because it is the same
+	-- table walk: an array is a table keyed exactly 1 to `#t` and writes as a
+	-- JSON array, anything else is an object, a mixed table's numeric keys
+	-- become their decimal text, and an empty table is `{}` rather than `[]`.
+	--
+	-- Keys are written in sorted order, so one table is one document on every
+	-- run. Raises for a cycle, for nesting past sixteen deep, for a NaN or an
+	-- infinity, and for anything with no JSON form - an `Instance`, a function,
+	-- a `Vector3`, a `Color3` or a `CFrame`.
+	function JSONEncode(self, value: any): string
+
+	-- Arrays come back **one-based**, which is what `#` and `ipairs` mean.
+	-- `null` becomes `nil`. Raises on malformed text, on text after the value,
+	-- and on a number a double cannot hold.
+	function JSONDecode(self, text: string): any
+
+	-- `{XXXXXXXX-XXXX-4XXX-YXXX-XXXXXXXXXXXX}`, upper case, braces by default.
+	--
+	-- **Deterministic**, and that is a decision rather than an oversight: a
+	-- value drawn from a clock or from system entropy makes a run that does not
+	-- replay, which is why this VM has no `os` either. Two runs of one world
+	-- hand out the same sequence, so this is an identifier for things inside a
+	-- world and never a token, a secret, or a name a second machine has to
+	-- agree is distinct.
+	function GenerateGUID(self, wrapInCurlyBraces: boolean?): string
+
+	-- RFC 3986: the unreserved set through unchanged, every other byte as
+	-- `%XX`. A space is `%20` and never `+`.
+	function UrlEncode(self, text: string): string
+end
+
+-- A master volume and where the ear is - **and eleven Roblox members that are
+-- absent on purpose rather than missing.**
+--
+-- `engine::audio` is L12 `client` and the script layer is L9 `shared`, so
+-- nothing in the binding can name a mixer: what a script decides lands on
+-- `scene::AudioState` and the client walks it, which is the seam
+-- `scene::InputState` established. Everything that would need a *node* the
+-- graph does not have is therefore not here - reverb needs a filter node,
+-- `DopplerScale` and `DistanceFactor` need a Doppler one, `VolumetricAudio`
+-- needs a shape in the emitter, and `RolloffScale` needs a rolloff curve where
+-- the engine has two distances. `script/src/SoundService.cpp` lists all eleven
+-- with what each would take.
+--
+-- `PlayLocalSound` is absent for a different reason: `sound.Playing = true`
+-- already is it.
+declare extern type SoundService with
+	-- **Not a Roblox property.** Roblox turns a group of sounds down with a
+	-- `SoundGroup`, this engine has no such class - every `Sound` gets one fader
+	-- straight into the output - and a whole-world level is the honest one-line
+	-- version of what a group is for. Linear, 1 being every sound as authored,
+	-- and above 1 is legal for the reason `Sound.Volume` is.
+	Volume: number
+
+	-- The mode, then whatever it points at. `Camera` points at nothing and hands
+	-- back nil, which is also what `SetListener` takes for it.
+	function GetListener(self): (Enum_ListenerType, Instance?)
+
+	-- **`Enum.ListenerType` has two members here and four in Roblox.** The two
+	-- missing ones place the ear *and turn it*, and the mixer is posted a
+	-- position with no facing, so they are absent from the enum rather than
+	-- refused by this method - a script naming one fails where it names it.
+	function SetListener(self, listenerType: Enum_ListenerType, listener: Instance?): ()
+end
+
+-- Interpolating a property from wherever it is to wherever it should end up.
+--
+-- **A tween is not an instance and is not parented.** `TweenService:Create`
+-- hands back the only handle there is, and dropping it does not stop a tween
+-- that is playing - the service holds it until it finishes, exactly as Roblox
+-- does.
+--
+-- **Only a value with a midpoint may be tweened**: the numbers, `Vector2`,
+-- `Vector3`, `Color3`, `CFrame`, `UDim`, `UDim2` and `Rect`. A `Bool`, a string
+-- or an enum is refused *by name* when the tween is created, rather than
+-- running for its whole duration and moving nothing.
+declare extern type Tween with
+	-- Starts it, or resumes a paused one. A tween that has already finished
+	-- starts again from wherever its target is now.
+	--
+	-- False when the target instance has been destroyed, which is the one
+	-- ordinary way this fails.
+	function Play(self): boolean
+
+	-- Holds it where it is. False when it was not playing.
+	function Pause(self): boolean
+
+	-- Stops it and rewinds. **The properties are left where they are** - a
+	-- cancel is a stop and not an undo - and `Completed` does not fire.
+	function Cancel(self): boolean
+
+	Completed: TweenCompletedSignal
+end
+
+declare extern type TweenService with
+	-- The easing curve on its own, with no target and nothing to build.
+	--
+	-- Alpha is clamped: past the end a tween is finished, and an elastic curve
+	-- extrapolated past one grows without bound.
+	function GetValue(self, alpha: number, easingStyle: Enum_EasingStyle, easingDirection: Enum_EasingDirection): number
+
+	-- A tween over one instance, from where it is now to the values named.
+	--
+	-- The start is captured when the tween is **played**, not here, so one built
+	-- ahead of time interpolates from wherever the instance has got to.
+	--
+	-- Raises for a property this instance does not have, for one a script may
+	-- not assign, and for one whose type has no midpoint - each named.
+	function Create(self, instance: Instance, info: TweenInfo, goals: { [string]: any }): Tween
+end
+
+-- Destroying something later, without a script left waiting to do it.
+--
+-- **The lifetime is seconds in and ticks underneath**, exactly as `task.wait`
+-- is: a deadline measured against a wall clock arrives after a different amount
+-- of simulation on a busy machine, and a recording would stop replaying. Half a
+-- second is thirty ticks at sixty hertz on every machine that runs it.
+--
+-- **A thousand items at once, and the thousand-and-first destroys the oldest
+-- early.** A cleanup call that refused would leave a script's rubbish in the
+-- world forever, which is the worse of the two ways to be wrong. There is no
+-- `MaxItems`: a cap a script can raise is not a cap.
+declare extern type Debris with
+	-- Ten seconds by default, which is Roblox's. A lifetime of zero destroys on
+	-- the next beat rather than inside this call.
+	function AddItem(self, instance: Instance, lifetime: number?): ()
 end
 
 declare extern type RunService with
@@ -1116,10 +1584,16 @@ end
 
 declare MessagingService: MessagingService
 declare TeleportService: TeleportService
+declare CrossWorldService: CrossWorldService
 declare MemoryStoreService: MemoryStoreService
 declare DataStoreService: DataStoreService
 declare RunService: RunService
 declare ContentService: ContentService
+declare CollectionService: CollectionService
+declare HttpService: HttpService
+declare SoundService: SoundService
+declare TweenService: TweenService
+declare Debris: Debris
 
 -- The world this script runs on. `game` is the universe above it.
 declare workspace: Workspace
@@ -1131,7 +1605,7 @@ declare workspace: Workspace
 -- entity in the archetype the `Part` class names, and `World:Query` is that
 -- archetype asked about directly.
 --
--- A component a script declares is a real component — the same dense id, the
+-- A component a script declares is a real component - the same dense id, the
 -- same column, iterated by a C++ system that never heard of the script. What it
 -- is not is *typed*: the field list is a run-time fact, so every value table
 -- here is `{ [string]: any }` and a definition file cannot do better. See
@@ -1140,9 +1614,9 @@ declare extern type EngineWorld with
 	-- Declares a component, or agrees with one already declared with exactly
 	-- these fields. Returns whether this call created it.
 	--
-	-- The field types are the engine's own spellings — `number`, `boolean`,
+	-- The field types are the engine's own spellings - `number`, `boolean`,
 	-- `string`, `float`, `int32`, `Vector3`, `CFrame`, `Color3`, `Instance` and
-	-- the rest — or `Enum.<set>` for a value that must be a registered member.
+	-- the rest - or `Enum.<set>` for a value that must be a registered member.
 	function DefineComponent(self, component: string, fields: { [string]: string }): boolean
 
 	function HasComponentType(self, component: string): boolean
@@ -1174,7 +1648,7 @@ declare script: LuaSourceContainer
 -- checker**: seeing a call to the global, it hands the argument to a module
 -- resolver expecting a path, and reports `Unknown require: unsupported path` for
 -- anything else. Every argument in this engine is an instance, so every module
--- a script loaded was an error — which made `require` unusable under
+-- a script loaded was an error - which made `require` unusable under
 -- `scriptcheck` even where it worked perfectly at run time.
 --
 -- Declaring it overrides the global and the resolver leaves it alone. The return
@@ -1211,7 +1685,7 @@ declare task: {
 		out << "-- What a Luau script can name, typed. The class tree and the enums come out\n";
 		out << "-- of the class table; the globals come out of what the VM installs. Both\n";
 		out << "-- halves are written by one program alongside the TypeScript declarations, so\n";
-		out << "-- the two surfaces cannot drift into two APIs by accident — where they do\n";
+		out << "-- the two surfaces cannot drift into two APIs by accident - where they do\n";
 		out << "-- differ, they differ because the two VMs do, and the difference is written\n";
 		out << "-- down rather than smoothed over.\n";
 		out << "--\n";
@@ -1265,6 +1739,33 @@ declare task: {
 			const ClassInfo &info = Classes::Describe(id);
 			const std::string name(info.Name.Text());
 
+			// **Which inherited members are the ones about this class**, for the
+			// two where that is genuinely hard to guess.
+			//
+			// **A note and not a redeclaration.** Every instance method lives on
+			// one shared table, so they are declared on `Instance` and inherited
+			// - see the block above. Spelling `GetPlayers` again here would be a
+			// second declaration of one member, and Luau would be right to
+			// complain; what an author is missing is not the type, it is knowing
+			// that the member exists and which instance to call it on. That is a
+			// sentence, so this emits a sentence.
+			if (name == "Players") {
+				out << "-- The service every game asks who is in it. `LocalPlayer` and the\n"
+					   "-- rest are below; `GetPlayers`, `GetPlayerByUserId`,\n"
+					   "-- `GetPlayerFromCharacter`, `PlayerAdded` and `PlayerRemoving` are\n"
+					   "-- inherited from `Instance` and are about this one - nothing fires a\n"
+					   "-- player signal at any other subject.\n";
+			}
+			if (name == "Player") {
+				out << "-- One occupant. `LoadCharacter`, `CharacterAdded` and\n"
+					   "-- `CharacterRemoving` are inherited from `Instance` and are about\n"
+					   "-- this one: the first destroys the old body and spawns a new one at\n"
+					   "-- `SpawnLocation`, and the other two fire when it arrives and goes.\n"
+					   "-- `PlayerGui`, `PlayerScripts`, `Backpack` and `StarterGear` are the\n"
+					   "-- four containers a join makes, and every one of them is private to\n"
+					   "-- this player on the wire.\n";
+			}
+
 			out << "declare extern type " << name;
 			if (info.Parent.IsValid()) {
 				out << " extends " << Classes::Describe(info.Parent).Name.Text();
@@ -1283,7 +1784,7 @@ declare task: {
 				// scripts.** `PropertyDescriptor::Scriptable` is enforced in
 				// both bindings by answering "no such member"; a declaration
 				// here would tell an author about a member that then does not
-				// exist, which is worse than not mentioning it — a typecheck
+				// exist, which is worse than not mentioning it - a typecheck
 				// that passes and a run that fails is the pairing this file
 				// exists to prevent.
 				if (!property.Scriptable) {
@@ -1297,7 +1798,7 @@ declare task: {
 				// TypeScript half below has emitted `readonly` since it was
 				// written; this half emitted nothing, so a Luau script
 				// assigning `MeshPart.TrianglesCount` typechecked clean and was
-				// then refused at run time by `Store::SetProperty` — a
+				// then refused at run time by `Store::SetProperty` - a
 				// diagnostic arriving one layer later than the one that exists
 				// to prevent it.
 				if (!property.Writable) {
@@ -1309,7 +1810,7 @@ declare task: {
 
 			// **The host members, which project onto no component and never
 			// will.** `.Changed` and the methods below it are the binding's
-			// rather than the class table's — declaring components for them so
+			// rather than the class table's - declaring components for them so
 			// this loop could find them is the change `script/AGENTS.md` says to
 			// refuse. They are written here, against the one class that has
 			// them, so they are declared once and inherited by the rest.
@@ -1320,7 +1821,7 @@ declare task: {
 				// **The tags, which sit beside `IsA` in `OpenInstances`' method
 				// table and were missing here.** v0.9 added them to the run time
 				// and not to this generator, so every script calling `AddTag`
-				// typechecked as an error against a method the engine answers —
+				// typechecked as an error against a method the engine answers -
 				// `examples/Meshes.luau` among them. A host member is only
 				// declared where it is written down, and there is no test that
 				// would notice one of these tables growing without the other.
@@ -1328,12 +1829,51 @@ declare task: {
 				out << "\tfunction RemoveTag(self, tag: string): boolean\n";
 				out << "\tfunction HasTag(self, tag: string): boolean\n";
 
+				// **`GetTags`, which Roblox puts on `Instance` and this engine
+				// only had on `CollectionService`.** The other three had been on
+				// both surfaces since v0.9, so the instance side was three
+				// quarters of a pair - the shape a script copied from a Roblox
+				// place trips over. Sorted, matching the service's.
+				out << "\tfunction GetTags(self): { string }\n";
+
 				out << "\tfunction Destroy(self): ()\n";
 				out << "\tfunction Clone(self): Instance\n";
 				out << "\tfunction GetChildren(self): { Instance }\n";
 				out << "\tfunction GetDescendants(self): { Instance }\n";
-				out << "\tfunction FindFirstChild(self, name: string): Instance?\n";
+
+				// **The lookups, and six of the seven had never been declared at
+				// all.** Every one of them has been bound in both languages
+				// since the neutral layer took the instance table, and an author
+				// writing `model:FindFirstChildOfClass("Humanoid")` got a
+				// typecheck error against a method the engine answers - the exact
+				// failure the tag calls had before v0.9 and the reason this block
+				// is written where the run-time table is.
+				//
+				// **`FindFirstChild`'s second argument was the seventh**, and
+				// leaving it out was worse than an absent member: the call
+				// typechecked, ran, and silently answered the non-recursive
+				// question.
+				out << "\tfunction FindFirstChild(self, name: string, recursive: boolean?): Instance?\n";
+
+				// **`WaitForChild`'s timeout is not optional, and that is the one
+				// place this surface is deliberately stricter than Roblox's.**
+				// Roblox's `WaitForChild(name)` waits for ever; this engine refuses
+				// that form at run time because a script that never finishes its
+				// tick is work crossing a tick boundary, and `ScriptMethods.cpp`
+				// carries the whole argument. Declaring the argument `number?` would
+				// typecheck the exact call the run time then raises on - which is
+				// the failure the lookups above were fixed for, the other way round.
+				out << "\tfunction WaitForChild(self, name: string, timeout: number): Instance?\n";
+				out << "\tfunction FindFirstChildOfClass(self, className: string): Instance?\n";
+				out << "\tfunction FindFirstChildWhichIsA(self, className: string, recursive: boolean?): "
+					   "Instance?\n";
+				out << "\tfunction FindFirstAncestor(self, name: string): Instance?\n";
+				out << "\tfunction FindFirstAncestorOfClass(self, className: string): Instance?\n";
+				out << "\tfunction FindFirstAncestorWhichIsA(self, className: string): Instance?\n";
+				out << "\tfunction GetFullName(self): string\n";
+
 				out << "\tfunction IsDescendantOf(self, ancestor: Instance): boolean\n";
+				out << "\tfunction IsAncestorOf(self, descendant: Instance): boolean\n";
 				out << "\tfunction ClearAllChildren(self): ()\n";
 
 				// **The pivot pair, declared on `Instance` rather than on
@@ -1350,8 +1890,8 @@ declare task: {
 					   "PropertyChangedSignal\n";
 
 				// **Attributes, and the value type is a union rather than
-				// `any`.** An attribute holds one of a closed set —
-				// `ecs::AttributeTypeAllowed` refuses everything else — so a
+				// `any`.** An attribute holds one of a closed set -
+				// `ecs::AttributeTypeAllowed` refuses everything else - so a
 				// union is what the run time actually accepts, and `any` would
 				// typecheck `part:SetAttribute("k", part)` which the binding
 				// refuses at run time.
@@ -1361,14 +1901,14 @@ declare task: {
 				// an unset one reads as.
 				//
 				// **The alias is at file scope, not here.** A `declare extern
-				// type ... with` block takes members and not type aliases —
+				// type ... with` block takes members and not type aliases -
 				// putting one inside is a syntax error four lines later that
 				// reads as an unclosed function, which is exactly how it was
 				// found. `EngineAttribute` is declared beside the datatypes.
 				// **Ownership, declared on `Instance` like everything above it,
 				// and the argument is an `Instance` rather than a `Player`.**
-				// There is no `Player` type in this file — a class is a run-time
-				// registration and the declared vocabulary stops at `Instance` —
+				// There is no `Player` type in this file - a class is a run-time
+				// registration and the declared vocabulary stops at `Instance` -
 				// so pinning the argument tighter than the file can spell would
 				// mean inventing a type the run time does not check. What it is
 				// checked against is `scene::PlayerClass`, at the call.
@@ -1379,7 +1919,7 @@ declare task: {
 				// **The `Players` pair, declared on `Instance` like every signal
 				// above it.** Nothing fires one at a subject that is not the
 				// service, so a connection on anything else is inert by
-				// construction — the same answer a class gate would give, at
+				// construction - the same answer a class gate would give, at
 				// none of the cost. `GetPlayers` is the same shape: the
 				// `Player` children of the receiver, which is the answer on
 				// `Players` and an empty table anywhere else.
@@ -1390,7 +1930,33 @@ declare task: {
 				out << "\tAncestryChanged: AncestrySignal\n";
 				out << "\tPlayerAdded: InstanceSignal\n";
 				out << "\tPlayerRemoving: InstanceSignal\n";
+
+				// **A player's own pair, on `Instance` like every signal above
+				// it and for the same reason.** Nothing fires one at a subject
+				// that is not a `Player`, so a connection anywhere else is inert
+				// by construction - which is the answer a class gate would give
+				// at none of the cost.
+				out << "\tCharacterAdded: InstanceSignal\n";
+				out << "\tCharacterRemoving: InstanceSignal\n";
 				out << "\tfunction GetPlayers(self): { Instance }\n";
+				out << "\tfunction GetPlayerByUserId(self, userId: number): Instance?\n";
+
+				// **The two the neutral method layer added first**, and they are
+				// here for the same reason every method above is: the method
+				// table is one table shared by every instance userdata, so a
+				// declaration on `Players` alone would type-check something the
+				// run time does not enforce. Which instance each is *for* is the
+				// note above the generated `Players` and `Player` blocks.
+				// **`Equals`, which Roblox does not have and this engine needs.**
+				// JavaScript has no operator overloading and every instance
+				// handle is a fresh object, so `===` on two handles to one part
+				// is always false - see `ScriptMethods.cpp`. Declared for Luau
+				// too, where it is a longer spelling of `==`, because a method
+				// that exists in one language is the drift the neutral layer
+				// ended.
+				out << "\tfunction Equals(self, other: Instance): boolean\n";
+				out << "\tfunction GetPlayerFromCharacter(self, character: Instance): Instance?\n";
+				out << "\tfunction LoadCharacter(self): Instance?\n";
 
 				out << "\tfunction KeepWorldAwake(self, reason: string): ()\n";
 				out << "\tfunction LetWorldSleep(self): ()\n";
@@ -1407,7 +1973,7 @@ declare task: {
 				// **The storage underneath, declared on `Instance` for the
 				// reason every method above it is: the method table is one
 				// table.** An instance is an entity, so the thing a component
-				// attaches to is already in hand — see `script/src/LuauEcs.cpp`.
+				// attaches to is already in hand - see `script/src/LuauEcs.cpp`.
 				//
 				// The value tables are `{ [string]: any }` and that is honest
 				// rather than lazy: a component's fields are declared at run
@@ -1421,7 +1987,7 @@ declare task: {
 				out << "\tfunction GetComponents(self): { string }\n";
 
 				// **The 2D tree's input, declared on `Instance` rather than on
-				// `GuiObject`.** That is what the run time does — `InstanceIndex`
+				// `GuiObject`.** That is what the run time does - `InstanceIndex`
 				// answers these for any instance, because gating them by class
 				// would put a class test on a lookup that runs for every field
 				// access on every instance, to produce a connection that never
@@ -1433,27 +1999,81 @@ declare task: {
 				// offered them only on `GuiObject` would refuse code the engine
 				// accepts, which is worse than the reverse.
 				out << "\tActivated: GuiSignal\n";
+
+				// **Roblox's second name for the one event, and it is one
+				// `SignalKind` under both.** A `GuiButton` carries
+				// `MouseButton1Click` there and most scripts connect to that
+				// rather than to `Activated`; this engine's router produces
+				// exactly one primary button, so the two questions have one
+				// answer. `LuauInstances.cpp` says the same from the run time's side.
+				//
+				// **`InputChanged` is deliberately not here.** Roblox's fires for
+				// pointer motion and for the wheel over an element, `gui::Router`
+				// produces motion only, and `MouseMoved` already carries it with
+				// the position an argument-less signal could not.
+				out << "\tMouseButton1Click: GuiSignal\n";
+
 				out << "\tInputBegan: GuiSignal\n";
 				out << "\tInputEnded: GuiSignal\n";
 				out << "\tMouseEnter: PointerSignal\n";
 				out << "\tMouseLeave: PointerSignal\n";
 				out << "\tMouseMoved: PointerSignal\n";
+
+				// **A `TextBox`'s pair, on `Instance` for the reason the six
+				// above it are.** Only a box can take the keyboard -
+				// `gui::Focus` refuses anything with no `Entry` - so a
+				// connection made anywhere else is inert by construction, and
+				// declaring them on `TextBox` alone would refuse code the engine
+				// accepts.
+				out << "\tFocused: FocusSignal\n";
+				out << "\tFocusLost: FocusLostSignal\n";
+
+				// **The interface surface, declared on `Instance` for the reason
+				// every method above it is.** Which instance each is *for* is
+				// Roblox's answer and not the run time's: `GetGuiObjectsAtPosition`
+				// is a `PlayerGui`'s and answers an empty list anywhere else,
+				// because a container with no laid-out elements under it has
+				// nothing at any position.
+				out << "\tfunction GetGuiObjectsAtPosition(self, x: number, y: number): { Instance }\n";
+
+				// **The goal is a `UDim2` or a `Vector3` and the union is the
+				// honest type**, which is the one place these three depart from
+				// Roblox's declaration. The run time reads the argument as the
+				// *target's own* `Position` or `Size` - see
+				// `ScriptCall::ReadProperty` - so on a `GuiObject` it is a
+				// `UDim2` and on a `BasePart` it is a `Vector3`, and both calls
+				// work. Narrowing to Roblox's `UDim2` would refuse a call the
+				// engine serves, which every comment above says is the worse
+				// direction to be wrong in.
+				//
+				// **Easing *direction* before *style***, which is Roblox's order
+				// and the opposite of `TweenInfo.new`'s. Correcting it here would
+				// silently swap two arguments of the same kind.
+				const char *const tweenTail =
+					"easingDirection: Enum_EasingDirection?, easingStyle: Enum_EasingStyle?, "
+					"time: number?, override: boolean?, callback: (() -> ())?): boolean\n";
+
+				out << "\tfunction TweenPosition(self, endPosition: UDim2 | Vector3, " << tweenTail;
+				out << "\tfunction TweenSize(self, endSize: UDim2 | Vector3, " << tweenTail;
+				out << "\tfunction TweenSizeAndPosition(self, endSize: UDim2 | Vector3, "
+					   "endPosition: UDim2 | Vector3, "
+					<< tweenTail;
 			}
 
 			// The member only the Workspace answers, for the reason
-			// `Instances.cpp` keeps it in a table of its own: a `Raycast` on a
+			// `LuauInstances.cpp` keeps it in a table of its own: a `Raycast` on a
 			// `Folder` would be an answer that means nothing.
 			//
-			// A raycast result is a plain table at run time — read once and
-			// discarded — so it is written inline rather than given a name.
+			// A raycast result is a plain table at run time - read once and
+			// discarded - so it is written inline rather than given a name.
 			//
 			// **`CurrentCamera` used to be written here too, and removing it was
-			// a fix rather than a tidy-up** — the same correction the `Name` line
+			// a fix rather than a tidy-up** - the same correction the `Name` line
 			// on `Instance` went through at v0.5, and it failed the same way. It
 			// was hand-written because it *was* a special case: `PushCurrentCamera`
 			// served it from the `ActiveCamera` resource and no property projected
 			// it. v0.10 declared one, so the loop below started emitting it as
-			// well — and an extern type with the member twice is not a warning,
+			// well - and an extern type with the member twice is not a warning,
 			// it is an assertion failure inside Luau's constraint generator, which
 			// `just typecheck` reports as `SIGILL` on every script in the tree.
 			//
@@ -1461,7 +2081,7 @@ declare task: {
 			// `Instance` and this said `Camera?`, so a script assigning a `Part`
 			// to `workspace.CurrentCamera` now typechecks and is refused at run
 			// time instead. That is the same trade every other reference property
-			// makes — `Parent: Instance` — and narrowing it needs
+			// makes - `Parent: Instance` - and narrowing it needs
 			// `PropertyDescriptor` to carry which class a reference points at,
 			// which is a change to `ecs` rather than to this generator.
 			if (name == "Workspace") {
@@ -1473,8 +2093,8 @@ declare task: {
 				out << "\t\tDistance: number,\n";
 
 				// **A string, where this said `Enum_Material` until v0.10.** The
-				// enum is gone and the field is `Surface::Material` now — the row
-				// a contact reads friction out of — which is a plain name.
+				// enum is gone and the field is `Surface::Material` now - the row
+				// a contact reads friction out of - which is a plain name.
 				// `script/LuauQuery.cpp` carries why a hit result reports that
 				// one rather than resolving the part's `Material` instance.
 				out << "\t\tMaterial: string,\n";
@@ -1484,12 +2104,13 @@ declare task: {
 			out << "end\n\n";
 		}
 
+		WriteBusStatus(out, true);
 		out << LUAU_SERVICES;
 
 		// **A table of names to types, read with `index`, rather than one
 		// overload per class.** Both of these started as an intersection of
-		// function types — which is how a reader would first write "one
-		// signature per class name" — and the type checker refused the file
+		// function types - which is how a reader would first write "one
+		// signature per class name" - and the type checker refused the file
 		// outright with *"Code is too complex to typecheck"* at nine of them.
 		// An intersection is solved by trying every branch; a lookup is one
 		// step, and it stays one step when the tree doubles.
@@ -1500,7 +2121,7 @@ declare task: {
 
 		out << "type Services = {\n";
 
-		// Everything in the tree, from the class table — see `ServiceClasses`
+		// Everything in the tree, from the class table - see `ServiceClasses`
 		// for why this is derived rather than listed.
 		for (const ClassId id : ServiceClasses()) {
 			const std::string_view name = Classes::Describe(id).Name.Text();
@@ -1513,8 +2134,32 @@ declare task: {
 		out << "\tMessagingService: MessagingService,\n";
 		out << "\tTeleportService: TeleportService,\n";
 		out << "\tContentService: ContentService,\n";
+		out << "\tCollectionService: CollectionService,\n";
+		out << "\tHttpService: HttpService,\n";
+		out << "\tCrossWorldService: CrossWorldService,\n";
+		out << "\tContextActionService: ContextActionServiceType,\n";
+
+		// **The two that carry a live property, and the TypeScript map has them
+		// too since v0.16.** They were this paragraph's exception for as long as
+		// `ServiceSurface` could describe a method and not an accessor; the type
+		// is still the hand-written one above rather than a class, because both
+		// are globals and not instances in the tree.
+		//
+		// `UserInputService` is also the row that was reachable at run time and
+		// absent from this map, which made `game:GetService("UserInputService")`
+		// - the form the docs and every test use, and the only form a live
+		// property survives, since a bare global read is a `GETIMPORT` - a
+		// typecheck error.
+		out << "\tSoundService: SoundService,\n";
+		out << "\tUserInputService: UserInputServiceType,\n";
 		out << "\tMemoryStoreService: MemoryStoreService,\n";
 		out << "\tDataStoreService: DataStoreService,\n";
+
+		// The two that step on the tick. Both languages bind them, so they are
+		// here *and* in the TypeScript map - which is the ordinary case and the
+		// one the four above are the exception to.
+		out << "\tTweenService: TweenService,\n";
+		out << "\tDebris: Debris,\n";
 		out << "}\n\n";
 
 		out << "type CreatableInstances = {\n";
@@ -1525,13 +2170,13 @@ declare task: {
 		out << "}\n\n";
 
 		// **`game` is the universe, and `GetService` is a global lookup at run
-		// time** — so `Services` above is exactly the globals that exist, plus
+		// time** - so `Services` above is exactly the globals that exist, plus
 		// `Workspace`, which `RunService.cpp` special-cases because its global
 		// is spelled lower case.
 		//
 		// **Named `DataModel`, and `self` is that name rather than `any`.** The
-		// name is the run time's — `OpenGame` sets `__metatable` to the same
-		// string — and it has to be written down because a generic method whose
+		// name is the run time's - `OpenGame` sets `__metatable` to the same
+		// string - and it has to be written down because a generic method whose
 		// `self` is `any` does not infer: `game:GetService("RunService")`
 		// resolved `T` to `any` and handed back a service with no members. A
 		// concrete `self` is what makes the singleton argument reach `T`.
@@ -1540,7 +2185,7 @@ declare task: {
 
 		// **Which world this script is standing on**, by name. Roblox's
 		// `JobId` identifies the server instance, and a world here *is* that
-		// instance — see `RunService.cpp`. `Mirrors-4-worlds` is the caller:
+		// instance - see `RunService.cpp`. `Mirrors-4-worlds` is the caller:
 		// `--worlds N` runs one file in every world, so without this every view
 		// would be identical and a compositor that placed them in the wrong
 		// order would look correct.
@@ -1562,7 +2207,7 @@ declare task: {
 	// The hand-written half of the TypeScript file.
 	//
 	// **`Vector3.new(...)`, not `new Vector3(...)`, and the difference was a
-	// bug.** This declared `{ new(x?: number, ...): Vector3 }` — which inside an
+	// bug.** This declared `{ new(x?: number, ...): Vector3 }` - which inside an
 	// object type is a *construct signature*, so the declaration said
 	// `new Vector3(1, 2, 3)` while `JsBindings.cpp` provides a `new` **method**
 	// and `Mirrors-1-world.ts` calls it. The file disagreed with its own
@@ -1642,7 +2287,7 @@ declare interface ChangedSignal {
 	Equals(other: ChangedSignal): boolean;
 }
 
-// The instance tree's signals, matching the Luau half — undeclared until v0.13
+// The instance tree's signals, matching the Luau half - undeclared until v0.13
 // for the reason given there.
 declare interface InstanceSignal {
 	Connect(handler: (instance: Instance) => void): RBXScriptConnection;
@@ -1657,52 +2302,160 @@ declare interface AncestrySignal {
 // What an attribute may hold, which is `ecs::AttributeTypeAllowed`'s closed set.
 //
 // **Named at file scope rather than nested**, because TypeScript has no
-// interface-scoped type alias the way the Luau half does — so the name is
+// interface-scoped type alias the way the Luau half does - so the name is
 // prefixed to say where it belongs rather than risking a collision with a game's
 // own `Attribute`.
 // --- input ------------------------------------------------------------------
 //
-// Hand-written for the Luau half's reason: these are globals, not classes.
-declare interface UserInputServiceType {
+// **`UserInputService` is declared here at last, and the history is the reason
+// to say so.** `engine.d.ts` once declared it and `ContextActionService` because
+// its prelude was written by mirroring Luau's, and neither global existed in
+// that VM - a TypeScript file naming one typechecked and then failed. That is
+// the failure `ServiceCatalogue.hpp` opens by naming, and the rule that came out
+// of it is that a declaration here is a claim the catalogue has to back.
+//
+// It does now. `ServiceProperty` gave a live property a neutral shape, so both
+// VMs install `UserInputService` and `SoundService` from one description -
+// `MouseBehavior` and `Volume` are accessors here where they are a userdata's
+// `__index` there - and `engine.script.servicecatalogue` asks a running VM
+// whether every row it claims is reachable.
+//
+// **The two that were absent here are declared now**, which is what
+// `ScriptCall::ReturnBoundAction` bought: `GetBoundActionInfo` and
+// `GetAllBoundActionInfo` answer a record holding `Enum.KeyCode` members, and a
+// record with an `EnumItem` in it still has no `ScriptValue` form - so the *fact*
+// became a `BoundActionReport` and each adapter builds its own record, exactly as
+// each builds its own `InputObject`.
+
+// What a bound action's handler is handed. Roblox's `InputObject`, and the same
+// five fields the Luau half offers over the same report.
+declare interface InputObject {
+	readonly KeyCode: Enum.KeyCode;
+	readonly UserInputType: Enum.UserInputType;
+	readonly UserInputState: Enum.UserInputState;
+
+	// Pixels from the top-left of the window, with the wheel's notches in Z.
+	readonly Position: Vector3;
+	readonly Delta: Vector3;
+}
+
+// What `InputBegan`, `InputEnded` and `InputChanged` call a handler with.
+//
+// Its own type rather than `PropertyChangedSignal`, which passes nothing.
+//
+// `gameProcessedEvent` is true when the 2D interface took the pointer this beat,
+// which is what a click on a `TextButton` is. Always false for a keyboard event:
+// `gui` has no keyboard focus to take one with.
+declare interface InputSignal {
+	Connect(handler: (input: InputObject, gameProcessedEvent: boolean) => void): RBXScriptConnection;
+	Once(handler: (input: InputObject, gameProcessedEvent: boolean) => void): RBXScriptConnection;
+}
+
+// The window's focus edges, which Roblox calls with nothing.
+declare interface WindowFocusSignal {
+	Connect(handler: () => void): RBXScriptConnection;
+	Once(handler: () => void): RBXScriptConnection;
+}
+
+// What `LastInputTypeChanged` calls a handler with.
+declare interface LastInputTypeSignal {
+	Connect(handler: (lastInputType: Enum.UserInputType) => void): RBXScriptConnection;
+	Once(handler: (lastInputType: Enum.UserInputType) => void): RBXScriptConnection;
+}
+
+declare interface UserInputService {
 	MouseBehavior: Enum.MouseBehavior;
+
+	// Whether the pointer is drawn. Separate from `MouseBehavior` because
+	// Roblox's two are; the two locking modes hide it whatever this says.
+	MouseIconEnabled: boolean;
+
 	MouseDeltaSensitivity: number;
 	readonly KeyboardEnabled: boolean;
 	readonly MouseEnabled: boolean;
 
-	readonly InputBegan: PropertyChangedSignal;
-	readonly InputEnded: PropertyChangedSignal;
-	readonly InputChanged: PropertyChangedSignal;
+	// **Present and always false.** There is no gamepad, touch surface, headset
+	// or motion sensor anywhere in `engine::input`, and a Roblox place branches
+	// on these to pick a control scheme - a missing property is `undefined` here
+	// where a false one takes the other branch.
+	readonly GamepadEnabled: boolean;
+	readonly TouchEnabled: boolean;
+	readonly VREnabled: boolean;
+	readonly AccelerometerEnabled: boolean;
+	readonly GyroscopeEnabled: boolean;
+
+	readonly InputBegan: InputSignal;
+	readonly InputEnded: InputSignal;
+
+	// Fires for pointer motion and for the wheel, which are the two things this
+	// engine can report changing.
+	readonly InputChanged: InputSignal;
+
+	// Everything reads as released on the frame focus is lost, and
+	// `WindowFocusReleased` is delivered before those releases so a listener can
+	// tell which explains which.
+	readonly WindowFocused: WindowFocusSignal;
+	readonly WindowFocusReleased: WindowFocusSignal;
+
+	// Which device the player switched to, beside `GetLastInputType`'s poll.
+	readonly LastInputTypeChanged: LastInputTypeSignal;
 
 	IsKeyDown(key: Enum.KeyCode): boolean;
+
+	// False for the three `Enum.UserInputType` members that are not buttons.
 	IsMouseButtonPressed(button: Enum.UserInputType): boolean;
+
 	GetMouseLocation(): Vector2;
 	GetMouseDelta(): Vector2;
 	GetKeysPressed(): Enum.KeyCode[];
+
+	// `InputObject`s and not `EnumItem`s, which is Roblox's shape: the object
+	// carries where the pointer was as well as which button it is.
+	GetMouseButtonsPressed(): InputObject[];
+
+	// `Enum.UserInputType.Keyboard` on a world nobody has touched, where Roblox
+	// answers `None` - there is no such member here.
+	GetLastInputType(): Enum.UserInputType;
+
+	// The `TextBox` a person is typing into, or null. A lookup rather than a
+	// tally of the focus signals: `gui::Focus` is the one door a focus change
+	// goes through and `GuiServiceState::FocusedTextBox` is where it rests.
+	GetFocusedTextBox(): Instance | null;
 }
 
-declare const UserInputService: UserInputServiceType;
+// What `UserInputService` deliberately does not have, and it is the half a
+// migrating author needs most: no gamepad, no touch surface, no cursor image in
+// `render`, no keyboard-layout query below L12. So `GetConnectedGamepads`,
+// `GetGamepadState`, the six touch signals, `MouseIcon` and
+// `GetStringForKeyCode` are absent rather than present and useless.
+// `TextBoxFocused` and its twin are absent for a different reason: the fact
+// exists and reaches a script as `textBox.Focused`, and a world-subject row
+// firing about an instance would put the two input pumps in each other's work.
+// `script/src/UserInputService.cpp` names each one and what closing it would
+// take.
 
-declare interface ContextActionServiceType {
-	BindAction(
-		name: string,
-		handler: (name: string, state: Enum.UserInputState, key: Enum.KeyCode) => void,
-		createTouchButton: boolean,
-		...keys: Enum.KeyCode[]
-	): void;
+// What a world decides about how it is heard. See the Luau half for the eleven
+// Roblox members that are absent and what each would need first.
+declare interface SoundService {
+	// **Not a Roblox property**, which has a `SoundGroup` instead and this
+	// engine has no such class. Linear, 1 being every sound as authored, and
+	// above 1 is legal for the reason `Sound.Volume` is.
+	Volume: number;
 
-	BindActionAtPriority(
-		name: string,
-		handler: (name: string, state: Enum.UserInputState, key: Enum.KeyCode) => void,
-		createTouchButton: boolean,
-		priority: number,
-		...keys: Enum.KeyCode[]
-	): void;
+	// **A pair and not two values, which is the one place this surface reads
+	// differently from Luau's.** A method with more than one answer is a Luau
+	// shape; JavaScript has no multiple return, so `ScriptCall` packs the two
+	// into an array and an author destructures it:
+	//
+	//     const [mode, ear] = SoundService.GetListener();
+	GetListener(): [Enum.ListenerType, Instance | null];
 
-	UnbindAction(name: string): void;
-	UnbindAllActions(): void;
+	// **`Enum.ListenerType` has two members here and four in Roblox.** The two
+	// missing ones place the ear *and turn it*, and the mixer is posted a
+	// position with no facing, so they are absent from the enum rather than
+	// refused by this method.
+	SetListener(listenerType: Enum.ListenerType, listener?: Instance | null): void;
 }
-
-declare const ContextActionService: ContextActionServiceType;
 
 declare type EngineAttribute =
 	| boolean
@@ -1727,8 +2480,8 @@ declare interface PropertyChangedSignal {
 
 // The 2D tree's input, in two shapes because the arguments differ. See the Luau
 // half for why the three input signals take none: Roblox hands them an
-// `InputObject`, this engine has no such datatype, and a different one invented
-// now would have to change the day one arrives.
+// `InputObject`, and `gui::GuiEvent` carries nothing one could be built from
+// without inventing the field a handler reads it for.
 declare interface GuiSignal {
 	Connect(handler: () => void): RBXScriptConnection;
 	Once(handler: () => void): RBXScriptConnection;
@@ -1740,6 +2493,24 @@ declare interface PointerSignal {
 	Connect(handler: (x: number, y: number) => void): RBXScriptConnection;
 	Once(handler: (x: number, y: number) => void): RBXScriptConnection;
 	Equals(other: PointerSignal): boolean;
+}
+
+// `textBox.Focused`. Its own name rather than `GuiSignal` for the reason the
+// Luau half gives: the two are structurally identical and this one is about the
+// keyboard.
+declare interface FocusSignal {
+	Connect(handler: () => void): RBXScriptConnection;
+	Once(handler: () => void): RBXScriptConnection;
+	Equals(other: FocusSignal): boolean;
+}
+
+// `textBox.FocusLost`, with one of Roblox's two arguments. See the Luau half for
+// why the `InputObject` is not the second, and for what `enterPressed`
+// distinguishes.
+declare interface FocusLostSignal {
+	Connect(handler: (enterPressed: boolean) => void): RBXScriptConnection;
+	Once(handler: (enterPressed: boolean) => void): RBXScriptConnection;
+	Equals(other: FocusLostSignal): boolean;
 }
 
 // --- queries ---------------------------------------------------------------
@@ -1758,7 +2529,7 @@ declare interface RaycastResult {
 	readonly Normal: Vector3;
 	readonly Distance: number;
 
-	// The `Surface` name — what the part is like to touch, not what it looks
+	// The `Surface` name - what the part is like to touch, not what it looks
 	// like. See the Luau declaration above for why it is a string.
 	readonly Material: string;
 }
@@ -1973,18 +2744,7 @@ declare const DateTime: {
 	// reply arrives as one object because a promise resolves with a single
 	// value. That is the same `(value, status, version)` the Luau side returns.
 	constexpr const char *TYPESCRIPT_SERVICES =
-		R"TS(// --- the bus services ------------------------------------------------------
-
-declare type BusStatus =
-	| "Ok"
-	| "NotFound"
-	| "Conflict"
-	| "OverBudget"
-	| "NoSuchWorld"
-	| "Unsupported"
-	| "Unknown";
-
-declare interface StoreReply {
+		R"TS(declare interface StoreReply {
 	readonly Value: unknown;
 	readonly Status: BusStatus;
 	readonly Version: number;
@@ -2020,6 +2780,217 @@ declare interface RunService {
 	readonly Heartbeat: HeartbeatSignal;
 }
 
+// One channel's arrivals, handed back by `OpenChannel`. `(message,
+// fromWorldName)`: the sender's name is second because answering is the point,
+// and the receiver already named the channel.
+declare interface CrossWorldSignal {
+	Connect(handler: (message: unknown, fromWorld: string) => void): RBXScriptConnection;
+	Once(handler: (message: unknown, fromWorld: string) => void): RBXScriptConnection;
+}
+
+// The addressed route out of a world, where `MessagingService` is the fan-out.
+// One channel on one world, so two subsystems talking between the same pair of
+// worlds do not read each other's traffic. There is deliberately no
+// `GetWorlds`: a world's storage cannot see its siblings, and `SendAsync`
+// answering `NoSuchWorld` is the honest half of the same question.
+declare interface CrossWorldService {
+	// Listens on a named channel and hands back that channel's signal. Takes
+	// effect at the next barrier, so a message sent in the same tick is refused.
+	// Throws when this world is over its bus budget for the tick.
+	OpenChannel(channel: string): CrossWorldSignal;
+
+	// Stops delivery. Handlers already connected are left alone, so reopening
+	// the channel later finds them still there.
+	CloseChannel(channel: string): void;
+
+	// `Ok`, or `NoSuchWorld`, `NoSuchChannel`, `WorldNotReady` or `Overflow` - a
+	// channel send carries no value back, so the status is the answer.
+	SendAsync(world: string, channel: string, message: unknown): Promise<StoreReply>;
+}
+
+// What content this world holds, which is the other half of naming an asset.
+// Every list is sorted, so a scene that lays content out arranges itself the
+// same way on every run. See the Luau half for what each answer means.
+declare interface ContentService {
+	GetMeshes(): string[];
+
+	// What there is to name, where `GetMeshes` is what has been named. Setting a
+	// `MeshId` from this list is what fetches that one asset.
+	GetPublishedMeshes(): string[];
+
+	// The sheets a mesh's own submeshes name, in submesh order - not sorted and
+	// not deduplicated, unlike every other list here. An untextured run keeps
+	// its slot as an empty string.
+	GetMeshTextures(mesh: string): string[];
+
+	GetTextures(): string[];
+
+	// Null for a still image and for a texture this world has not been told
+	// about, which are the same answer.
+	GetFlipbook(texture: string): { Side: number; Frames: number; FrameRate: number } | null;
+
+	GetTriangleCount(mesh: string): number;
+}
+
+// What carries a tag, which is the half `Instance.AddTag` cannot answer.
+//
+// No `GetInstanceAddedSignal`: nothing records that a tag changed, so a signal
+// here would never fire, and one that never fires reads as a broken engine.
+declare interface CollectionService {
+	// False when the instance carries no tags and when this world's thirty-two
+	// tags are all spoken for.
+	AddTag(instance: Instance, tag: string): boolean;
+
+	// The tag's name stays registered afterwards, so `GetAllTags` still lists
+	// one nothing carries.
+	RemoveTag(instance: Instance, tag: string): boolean;
+	HasTag(instance: Instance, tag: string): boolean;
+
+	// Sorted by the order the world was built in, and empty for a tag nothing
+	// has ever added.
+	GetTagged(tag: string): Instance[];
+
+	GetTags(instance: Instance): string[];
+	GetAllTags(): string[];
+}
+
+// JSON, a GUID and a URL escape - and **no `RequestAsync`, `GetAsync` or
+// `PostAsync`**, which are absent on purpose rather than missing. See the Luau
+// half, which carries the whole argument.
+declare interface HttpService {
+	// The same rules `MessagingService` encodes by, because it is the same table
+	// walk. Keys are written in sorted order. Throws for a cycle, for nesting
+	// past sixteen deep, for a NaN or an infinity, and for anything with no JSON
+	// form.
+	JSONEncode(value: unknown): string;
+
+	// `null` becomes `null`. Throws on malformed text, on text after the value,
+	// and on a number a double cannot hold.
+	JSONDecode(text: string): unknown;
+
+	// **Deterministic**, and that is a decision rather than an oversight - two
+	// runs of one world hand out the same sequence, so this is an identifier for
+	// things inside a world and never a token or a secret.
+	//
+	// Braces by default. **`GenerateGUID(0)` differs from Luau's**, because the
+	// argument is read with this language's own truthiness and zero is falsy
+	// here and truthy there.
+	GenerateGUID(wrapInCurlyBraces?: boolean): string;
+
+	// RFC 3986: the unreserved set through unchanged, every other byte as `%XX`.
+	// A space is `%20` and never `+`.
+	UrlEncode(text: string): string;
+}
+
+// What `GetBoundActionInfo` reports about one bound action.
+//
+// **Four of Roblox's six fields.** `title` and `description` come from
+// `SetTitle` and `SetDescription`, which decorate a touch button - there is no
+// touch surface, so the pair is not bound and reporting them as empty strings
+// would claim they had been set to nothing.
+declare interface BoundActionInfo {
+	// The keys this action claims. **Keys only**: `BindAction` takes
+	// `Enum.KeyCode` here where Roblox also takes `Enum.UserInputType`.
+	readonly inputTypes: Enum.KeyCode[];
+
+	readonly priorityLevel: number;
+
+	// **Higher wins, which is Roblox's direction.** The engine's own list is
+	// sorted highest-priority-first, so this is that index inverted rather than
+	// the same word meaning the opposite thing.
+	readonly stackOrder: number;
+
+	// Always false: the argument is accepted at bind time and ignored.
+	readonly createTouchButton: boolean;
+}
+
+// A priority stack over the keyboard, which is what this adds over polling: the
+// highest claim on a key decides, and what its handler returns decides whether
+// anything below it hears the press.
+declare interface ContextActionService {
+	// The touch-button argument is accepted and ignored: there is no touch
+	// surface, and refusing it would make a script fail on a line describing
+	// something this engine does not have.
+	//
+	// **What the handler returns decides who else hears the key.**
+	// `Enum.ContextActionResult.Pass` hands the press to the next claim down;
+	// `Sink`, `undefined`, or a handler that threw, stop it here.
+	BindAction(
+		name: string,
+		handler: (
+			name: string,
+			state: Enum.UserInputState,
+			input: InputObject
+		) => Enum.ContextActionResult | void,
+		createTouchButton: boolean,
+		...keys: Enum.KeyCode[]
+	): void;
+
+	BindActionAtPriority(
+		name: string,
+		handler: (
+			name: string,
+			state: Enum.UserInputState,
+			input: InputObject
+		) => Enum.ContextActionResult | void,
+		createTouchButton: boolean,
+		priority: number,
+		...keys: Enum.KeyCode[]
+	): void;
+
+	UnbindAction(name: string): void;
+	UnbindAllActions(): void;
+
+	// `null` for a name nothing has bound, which is what `if (info)` reads.
+	GetBoundActionInfo(name: string): BoundActionInfo | null;
+
+	GetAllBoundActionInfo(): Record<string, BoundActionInfo>;
+}
+
+// `tween.Completed`, which takes no arguments. Its own type rather than
+// `GuiSignal` for the reason the Luau half gives: they are structurally
+// identical and one of the two names would be false.
+declare interface TweenCompletedSignal {
+	Connect(handler: () => void): RBXScriptConnection;
+	Once(handler: () => void): RBXScriptConnection;
+	Equals(other: TweenCompletedSignal): boolean;
+}
+
+// Interpolating a property from wherever it is to wherever it should end up.
+// See the Luau half for what a tween is, what it may drive, and why dropping
+// the handle does not stop one that is playing.
+declare interface Tween {
+	// False when the target instance has been destroyed.
+	Play(): boolean;
+	Pause(): boolean;
+
+	// A stop and not an undo: the properties stay where they are, and
+	// `Completed` does not fire.
+	Cancel(): boolean;
+
+	readonly Completed: TweenCompletedSignal;
+
+	// **Two handles to one tween are not `===`**, because `Create` and every
+	// return build a fresh object - the same reason `Instance.Equals` exists.
+	Equals(other: Tween): boolean;
+}
+
+declare interface TweenService {
+	GetValue(alpha: number, easingStyle: Enum.EasingStyle, easingDirection: Enum.EasingDirection): number;
+
+	// Raises for a property this instance does not have, for one a script may
+	// not assign, and for one whose type has no midpoint - each named.
+	Create(instance: Instance, info: TweenInfo, goals: { [property: string]: unknown }): Tween;
+}
+
+// Destroying something later, without a script left waiting to do it. The
+// lifetime is seconds in and ticks underneath, exactly as `task.wait` is.
+declare interface Debris {
+	// Ten seconds by default. A lifetime of zero destroys on the next beat
+	// rather than inside this call.
+	AddItem(instance: Instance, lifetime?: number): void;
+}
+
 // --- the globals -----------------------------------------------------------
 
 declare const MessagingService: MessagingService;
@@ -2027,6 +2998,22 @@ declare const TeleportService: TeleportService;
 declare const MemoryStoreService: MemoryStoreService;
 declare const DataStoreService: DataStoreService;
 declare const RunService: RunService;
+declare const TweenService: TweenService;
+declare const Debris: Debris;
+
+// The seven that stopped being Luau's at v0.16 - five when `ServiceSurface`
+// stopped naming a VM, and the last two when `ServiceProperty` gave a live
+// property a neutral shape. **Every surface service this engine has is now in
+// both languages**, and `BreakpointService` is not one: it is absent outside a
+// studio and refuses a JavaScript chunk outright, which is a debugger feature
+// and not a binding.
+declare const CrossWorldService: CrossWorldService;
+declare const ContentService: ContentService;
+declare const CollectionService: CollectionService;
+declare const HttpService: HttpService;
+declare const ContextActionService: ContextActionService;
+declare const UserInputService: UserInputService;
+declare const SoundService: SoundService;
 
 // The world this script runs on. `game` is the universe above it.
 declare const workspace: Workspace;
@@ -2115,7 +3102,7 @@ declare const task: {
 		// `Enum.Material` a type here where the Luau half could only have the
 		// alias. TypeScript keeps types and values in separate namespaces, so an
 		// `interface Material` and a `const Material` under `namespace Enum` are
-		// one name meaning two things rather than a redeclaration — the type in a
+		// one name meaning two things rather than a redeclaration - the type in a
 		// type position, the table of members in an expression.
 		//
 		// **The brand stays.** `__enum` is what stops `Enum.Material.Plastic` and
@@ -2157,14 +3144,14 @@ declare const task: {
 
 			// **The root's `Name` is not written by hand either, and this one was
 			// actively wrong rather than merely redundant.** It emitted
-			// `readonly Name: string;` on `Instance` — which then declared
+			// `readonly Name: string;` on `Instance` - which then declared
 			// `Name: string;` again from the property loop, because `Name` has
 			// been a real property since v0.5. Two declarations of one member
 			// that *disagree about whether it can be assigned*, in the file whose
 			// whole job is to tell an author what they may write.
 			//
-			// A Roblox script sets `.Name`, so the property's own answer —
-			// writable — is the right one, and it is the one that survives now
+			// A Roblox script sets `.Name`, so the property's own answer -
+			// writable - is the right one, and it is the one that survives now
 			// that nothing competes with it.
 			for (const PropertyDescriptor &property : OwnProperties(info)) {
 				// Left out for the reason the Luau half above gives.
@@ -2187,17 +3174,42 @@ declare const task: {
 				out << "\treadonly Changed: ChangedSignal;\n";
 				out << "\tIsA(className: string): boolean;\n";
 
-				// The tags, for the reason the Luau half states.
+				// The tags, for the reason the Luau half states - including
+				// `GetTags`, which was the missing quarter of the set.
 				out << "\tAddTag(tag: string): boolean;\n";
 				out << "\tRemoveTag(tag: string): boolean;\n";
 				out << "\tHasTag(tag: string): boolean;\n";
+				out << "\tGetTags(): string[];\n";
 
 				out << "\tDestroy(): void;\n";
 				out << "\tClone(): Instance;\n";
 				out << "\tGetChildren(): Instance[];\n";
 				out << "\tGetDescendants(): Instance[];\n";
-				out << "\tFindFirstChild(name: string): Instance | null;\n";
+
+				// The lookups, matching the Luau half - six of the seven had
+				// never been declared and the seventh was declared without its
+				// second argument. `null` rather than `undefined` because that is
+				// what a JavaScript lookup answers for nothing found.
+				out << "\tFindFirstChild(name: string, recursive?: boolean): Instance | null;\n";
+
+				// **The required timeout of the Luau half, plus the one thing a
+				// JavaScript author has to know: this may or may not be a promise.**
+				// A child that is already there is answered directly and a wait is a
+				// `Promise` the barrier resolves, so `await` is what reads either -
+				// and the union is what says so. A bare `Promise<Instance | null>`
+				// would have typechecked a `.then` that fails on the direct answer,
+				// which is the same class of lie as an optional timeout.
+				out << "\tWaitForChild(name: string, timeout: number): Instance | Promise<Instance | null> | "
+					   "null;\n";
+				out << "\tFindFirstChildOfClass(className: string): Instance | null;\n";
+				out << "\tFindFirstChildWhichIsA(className: string, recursive?: boolean): Instance | null;\n";
+				out << "\tFindFirstAncestor(name: string): Instance | null;\n";
+				out << "\tFindFirstAncestorOfClass(className: string): Instance | null;\n";
+				out << "\tFindFirstAncestorWhichIsA(className: string): Instance | null;\n";
+				out << "\tGetFullName(): string;\n";
+
 				out << "\tIsDescendantOf(ancestor: Instance): boolean;\n";
+				out << "\tIsAncestorOf(descendant: Instance): boolean;\n";
 				out << "\tClearAllChildren(): void;\n";
 
 				// The pivot pair, matching the Luau half and declared in the
@@ -2218,7 +3230,22 @@ declare const task: {
 				out << "\treadonly AncestryChanged: AncestrySignal;\n";
 				out << "\treadonly PlayerAdded: InstanceSignal;\n";
 				out << "\treadonly PlayerRemoving: InstanceSignal;\n";
+
+				// A player's own pair, matching the Luau half and declared on
+				// `Instance` for the reason given there.
+				out << "\treadonly CharacterAdded: InstanceSignal;\n";
+				out << "\treadonly CharacterRemoving: InstanceSignal;\n";
 				out << "\tGetPlayers(): Instance[];\n";
+				out << "\tGetPlayerByUserId(userId: number): Instance | undefined;\n";
+
+				// The two the neutral method layer added first. Declared here as
+				// well as on the Luau side because they are genuinely bound in
+				// both languages now - which is what that layer is for, and is
+				// the opposite of the nine it started by closing, where this file
+				// declared methods JavaScript did not have.
+				out << "\tEquals(other: Instance): boolean;\n";
+				out << "\tGetPlayerFromCharacter(character: Instance): Instance | undefined;\n";
+				out << "\tLoadCharacter(): Instance | undefined;\n";
 
 				out << "\tKeepWorldAwake(reason: string): void;\n";
 				out << "\tLetWorldSleep(): void;\n";
@@ -2248,11 +3275,39 @@ declare const task: {
 				// instance, and a type narrower than the run time refuses code
 				// the engine accepts.
 				out << "\treadonly Activated: GuiSignal;\n";
+
+				// Roblox's second name for the one event, matching the Luau half
+				// - and `InputChanged` is absent here for the reason given there.
+				out << "\treadonly MouseButton1Click: GuiSignal;\n";
+
 				out << "\treadonly InputBegan: GuiSignal;\n";
 				out << "\treadonly InputEnded: GuiSignal;\n";
 				out << "\treadonly MouseEnter: PointerSignal;\n";
 				out << "\treadonly MouseLeave: PointerSignal;\n";
 				out << "\treadonly MouseMoved: PointerSignal;\n";
+
+				// A `TextBox`'s pair, on `Instance` and inert anywhere else -
+				// the Luau half says why.
+				out << "\treadonly Focused: FocusSignal;\n";
+				out << "\treadonly FocusLost: FocusLostSignal;\n";
+
+				// The interface surface, matching the Luau half - including the
+				// `UDim2 | Vector3` goal, which is the target's own property type
+				// rather than Roblox's narrower one.
+				out << "\tGetGuiObjectsAtPosition(x: number, y: number): Instance[];\n";
+
+				// `Enum.EasingStyle` rather than `Enum_EasingStyle`, which is the
+				// one spelling difference between the two declaration files: the
+				// TypeScript half puts the enums in a namespace where the Luau
+				// half prefixes them.
+				const char *const tweenTail =
+					"easingDirection?: Enum.EasingDirection, easingStyle?: Enum.EasingStyle, "
+					"time?: number, override?: boolean, callback?: () => void): boolean;\n";
+
+				out << "\tTweenPosition(endPosition: UDim2 | Vector3, " << tweenTail;
+				out << "\tTweenSize(endSize: UDim2 | Vector3, " << tweenTail;
+				out << "\tTweenSizeAndPosition(endSize: UDim2 | Vector3, endPosition: UDim2 | Vector3, "
+					<< tweenTail;
 			}
 
 			// The member only the Workspace answers, matching the Luau half.
@@ -2260,7 +3315,7 @@ declare const task: {
 			// `CurrentCamera` is gone from here for the reason the Luau half
 			// gives: it is a declared property now and the loop above emits it.
 			// TypeScript would have merged the duplicate rather than crashing,
-			// which is worse — the hand-written `Camera | null` and the generated
+			// which is worse - the hand-written `Camera | null` and the generated
 			// `Instance` would have intersected to something no assignment
 			// satisfies.
 			if (name == "Workspace") {
@@ -2271,6 +3326,7 @@ declare const task: {
 			out << "}\n\n";
 		}
 
+		WriteBusStatus(out, false);
 		out << TYPESCRIPT_SERVICES;
 
 		// `game` carries `GetService` alone. The Luau half also answers
@@ -2279,7 +3335,7 @@ declare const task: {
 		// does not.
 		out << "declare const game: {\n";
 
-		// Which world this script is standing on, by name — the same value the
+		// Which world this script is standing on, by name - the same value the
 		// Luau half answers and for the same reason. `JsBindings.cpp` sets it
 		// as a plain string property rather than a getter, because a world's
 		// name is fixed for its life and a getter would imply otherwise.
@@ -2291,7 +3347,7 @@ declare const task: {
 		// perfectly well, and the overloads collapsed to an intersection that
 		// was not an `Instance` at all.
 		//
-		// A list edited by hand is a list nothing fails to update — the run time
+		// A list edited by hand is a list nothing fails to update - the run time
 		// keeps working and only the types disagree, which is the drift this
 		// whole file exists to prevent.
 		out << "\tGetService: {\n";
@@ -2303,6 +3359,22 @@ declare const task: {
 		out << "\t\t(service: \"MessagingService\"): MessagingService;\n";
 		out << "\t\t(service: \"MemoryStoreService\"): MemoryStoreService;\n";
 		out << "\t\t(service: \"DataStoreService\"): DataStoreService;\n";
+
+		// The two that step on the tick, which this language binds as well.
+		out << "\t\t(service: \"TweenService\"): TweenService;\n";
+		out << "\t\t(service: \"Debris\"): Debris;\n";
+
+		// The seven that stopped being Luau's at v0.16. **The last asymmetry
+		// between this list and the Luau map is gone**: `UserInputService` and
+		// `SoundService` are in both, because `ServiceProperty` gave a live
+		// property a shape both VMs can install.
+		out << "\t\t(service: \"CrossWorldService\"): CrossWorldService;\n";
+		out << "\t\t(service: \"ContentService\"): ContentService;\n";
+		out << "\t\t(service: \"CollectionService\"): CollectionService;\n";
+		out << "\t\t(service: \"HttpService\"): HttpService;\n";
+		out << "\t\t(service: \"ContextActionService\"): ContextActionService;\n";
+		out << "\t\t(service: \"UserInputService\"): UserInputService;\n";
+		out << "\t\t(service: \"SoundService\"): SoundService;\n";
 		out << "\t};\n";
 		out << "};\n\n";
 
@@ -2311,7 +3383,7 @@ declare const task: {
 		// Instance("Part")` is what a construct signature would have described,
 		// and this file described that for three versions.
 		//
-		// Services are absent because a script does not mint one — the same
+		// Services are absent because a script does not mint one - the same
 		// `constructible` answer the manifest now carries.
 		out << "declare const Instance: {\n";
 		out << "\tnew: {\n";
@@ -2356,7 +3428,7 @@ int main(int argc, char **argv) {
 	engine::core::Log::Initialise("bindings");
 
 	engine::core::Arguments arguments(
-		"bindings", "atomic — generates the scripting manifest and declarations."
+		"bindings", "atomic - generates the scripting manifest and declarations."
 	);
 	arguments.Flag("check", "Compare against the checked-in files instead of writing them");
 	arguments.Value("out", "DIR", "Where the generated files live");
@@ -2382,14 +3454,14 @@ int main(int argc, char **argv) {
 
 	// **And the 2D tree, which a game file can carry and a script can build.**
 	// A manifest that stopped at `Part` and `Script` would leave every
-	// `TextLabel` property untyped in both declaration files — so an author
+	// `TextLabel` property untyped in both declaration files - so an author
 	// gets no completion for the half of v0.8 that is meant to be authored from
 	// TypeScript, which is the point of generating this at all.
 	(void)engine::gui::RegisterGuiClasses();
 
 	// **And the services, because `workspace` is one.** Every script opens by
 	// reaching into the world through the `Workspace` global, and a manifest
-	// that stopped at `Part` had no type to give it — so the declaration files
+	// that stopped at `Part` had no type to give it - so the declaration files
 	// either left the most-used global in the engine untyped or hand-wrote a
 	// class the table already knew. This is also what makes `constructible`
 	// answerable: `Service` is the ancestor that says a class is reached by
@@ -2398,7 +3470,7 @@ int main(int argc, char **argv) {
 
 	// **The datatype enums, which no class registration reaches.** `EasingStyle`
 	// and `EasingDirection` belong to `TweenInfo` rather than to any class, so
-	// they arrive through the enum table alone — and both VMs used to register
+	// they arrive through the enum table alone - and both VMs used to register
 	// them while opening, which is a moment this tool never has. The result was
 	// a manifest that described `Material` and not `EasingStyle`, and a script
 	// that got no completion for a value the run time accepts.
@@ -2448,12 +3520,12 @@ int main(int argc, char **argv) {
 
 	if (drifted) {
 		ENGINE_ERROR(
-			"The scripting surface changed. Run `just bindings` and review the diff — a change "
+			"The scripting surface changed. Run `just bindings` and review the diff - a change "
 			"here is a change to what every script can name."
 		);
 		return 1;
 	}
 
-	ENGINE_INFO("bindings ok — {} artefact(s) match the class table", artefacts.size());
+	ENGINE_INFO("bindings ok - {} artefact(s) match the class table", artefacts.size());
 	return 0;
 }

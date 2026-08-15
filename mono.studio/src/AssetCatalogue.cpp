@@ -39,7 +39,7 @@ namespace studio {
 				.Name = std::string(engine::assets::BuiltinName(builtin)),
 				.Kind = engine::assets::AssetKind::Mesh,
 				// **Left zero deliberately.** A built-in has no content address
-				// because it has no content — nothing fetches one — and
+				// because it has no content - nothing fetches one - and
 				// inventing a digest for it would be a value that looks like it
 				// could be looked up. `RefreshPickerContents` says the same.
 				.Root = {},
@@ -66,7 +66,7 @@ namespace studio {
 		// **The manifest reader the store already has, given only the folder it
 		// reads.** `cdn::PublishedContents` touches `Processed` and nothing
 		// else, so a source pointing at somebody else's published tree is
-		// listed by exactly the code that lists this machine's own — a second
+		// listed by exactly the code that lists this machine's own - a second
 		// reader would be a second thing to keep in step with the format.
 		cdn::LocalPaths paths;
 		paths.Processed = processed;
@@ -129,7 +129,31 @@ namespace studio {
 		return entries;
 	}
 
-	std::vector<CatalogueTab> BuildCatalogue(const ContentSources &sources) {
+	const char *Describe(ListingOutcome outcome) {
+		// **One sentence each, and each of them names what to do about it.** A
+		// tab that cannot list is the ordinary case for an origin - enumeration
+		// is off by default there - so this text is what somebody reads far more
+		// often than they read a list of names.
+		switch (outcome) {
+		case ListingOutcome::Listed:
+			return "";
+		case ListingOutcome::NotAsked:
+			return "not asked yet - Refresh asks this origin what it holds";
+		case ListingOutcome::NoKey:
+			return "no key for this origin here - listing needs the same key an upload uses, on the Content page";
+		case ListingOutcome::Unreachable:
+			return "no answer from this origin - it may be down, or the address may be wrong";
+		case ListingOutcome::NotOffered:
+			return "this origin does not list its contents - enumeration is switched off there, or it is an older build";
+		case ListingOutcome::Refused:
+			return "this origin refused the key - listing uses the same key an upload does";
+		case ListingOutcome::Unreadable:
+			return "this origin answered something this editor could not read";
+		}
+		return "";
+	}
+
+	std::vector<CatalogueTab> BuildCatalogue(const ContentSources &sources, OriginLister *origins) {
 		std::vector<CatalogueTab> tabs;
 
 		// `All` is first and filled last: it is the merge of everything below
@@ -141,7 +165,7 @@ namespace studio {
 			.Title = ENGINE_SOURCE,
 			.Origin = CatalogueOrigin::Engine,
 			.Entries = EngineAssets(),
-			.Note = "generated in every process — no store, no publish, no fetch",
+			.Note = "generated in every process - no store, no publish, no fetch",
 		});
 
 		for (const Source &source : sources.Sources) {
@@ -162,25 +186,33 @@ namespace studio {
 				tab.Origin = CatalogueOrigin::Directory;
 				tab.Entries = DirectoryAssets(std::filesystem::path(source.Location), source.Name);
 				if (tab.Entries.empty()) {
-					tab.Note = "no manifest here yet — publish into it, or check the path";
+					tab.Note = "no manifest here yet - publish into it, or check the path";
 				}
 			} else {
-				// **An origin answers by name and does not enumerate**, which is
-				// a property of the protocol rather than a gap in this panel:
-				// `delivery::AssetClient` fetches a manifest through the whole
-				// priority list and reports which names verified, and no route
-				// asks one origin what it holds. Said here rather than drawn as
-				// an empty table, which would read as an origin holding nothing.
+				// **Asked, and whatever it says is what the tab shows.** Until
+				// v0.15 no route could answer this at all, so the tab said so;
+				// now `cdn::Service` has one and the honest failure cases moved
+				// from "the protocol cannot" to "this origin will not", each of
+				// which is its own sentence. What has not changed is the rule
+				// that produced both: the panel never draws the delivery
+				// client's catalogue here, because those names came from
+				// whichever source answered first and this tab is a claim about
+				// one origin.
 				tab.Origin = CatalogueOrigin::Http;
-				tab.Note = "an HTTP origin serves by name and does not list — the Network panel says what has arrived";
+
+				OriginListing listing = origins ? origins->List(source) : OriginListing{};
+				tab.Entries = std::move(listing.Entries);
+				tab.Note = listing.Outcome == ListingOutcome::Listed && tab.Entries.empty()
+							   ? "this origin answered, and has published nothing"
+							   : Describe(listing.Outcome);
 			}
 
 			tabs.push_back(std::move(tab));
 		}
 
 		// **After the origins, because that is the order things resolve in.** A
-		// raw folder is not fetched from at all — nothing outside this process
-		// can see it — so it belongs at the end of a strip that reads as "what
+		// raw folder is not fetched from at all - nothing outside this process
+		// can see it - so it belongs at the end of a strip that reads as "what
 		// answers first", and its note says what is missing before anything else
 		// could.
 		for (const std::filesystem::path &folder : sources.RawFolders) {
@@ -196,7 +228,7 @@ namespace studio {
 			tab.Entries = RawFolderAssets(folder, tab.Title);
 			tab.Note = tab.Entries.empty()
 						   ? "nothing here, or the folder is not there"
-						   : "unprocessed — baked on demand into this editor, and not published to anything";
+						   : "unprocessed - baked on demand into this editor, and not published to anything";
 
 			tabs.push_back(std::move(tab));
 		}

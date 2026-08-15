@@ -1,7 +1,7 @@
 # L9. The words a bake pipeline is described in, and nothing that runs one.
 #
 # **This module exists to keep a decoder out of a save format.** `bake` carries
-# every importer the engine has — PNG, JPEG, GIF, BMP, OBJ, glTF, PMX — and its
+# every importer the engine has - PNG, JPEG, GIF, BMP, OBJ, glTF, PMX - and its
 # own build file states that nothing a shipped game links may link it. A world
 # that carried its asset pipelines would have made `Engine::game` name `bake` to
 # parse a *text document*, which puts all of those decoders into `server`, which
@@ -15,7 +15,7 @@
 # has answered.
 #
 # **`Engine::core` and nothing else.** That is the whole point of the module and
-# is the line to defend: the day this needs `assets`, ask what for — a document
+# is the line to defend: the day this needs `assets`, ask what for - a document
 # is names and numbers, and a payload is `bake`'s.
 mono_add_library(bakegraph
 	TIER shared

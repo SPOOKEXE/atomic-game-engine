@@ -9,9 +9,30 @@
 // rules out std::hash, which may differ between runs of the same binary.
 //
 // This was a copy-pasted integer mixer in mono.client/src/Demo.cpp and again in
-// mono.server/src/Simulation.cpp — the same function twice, with a comment in
-// the second admitting it. It is SHA-256 from Crypto++ now, in one place, which
-// is a specified algorithm rather than a constant nobody can check.
+// mono.server/src/Simulation.cpp - the same function twice, with a comment in
+// the second admitting it. It is one function now, and a *specified* one rather
+// than a constant nobody can check, which was always the real objection to the
+// copies.
+//
+// **The specified function is SplitMix64's finaliser, and it was SHA-256 until
+// v0.15.** Both are specified, so the property this file exists for is
+// unchanged; what changed is that the bottom layer of the engine no longer
+// depends on a cryptography library to produce a number. `Engine::core` linked
+// Crypto++ for this one call and nothing else, and everything links `core`.
+//
+// **That is dependency hygiene, and it is not a size win - say so out loud.**
+// `net` and `assets` are what put Crypto++ into the client, the server and the
+// origin, and they still do; all three carry exactly what they carried before.
+// What the swap buys is that a program linking `core` and neither `net` nor
+// `assets` no longer drags a hash library in behind `Random::Float`, and that
+// `THIRD_PARTY_NOTICES.md` no longer owes an entry to the module every other
+// module depends on. `docs/retired/DEFERRED.md` D00004 has the measurements.
+//
+// **Every seeded stream moved when this changed.** `Random.new(seed)` in both
+// script VMs draws through here, so a world that placed a tree at a particular
+// spot places it somewhere else now. That was the accepted cost, not an
+// oversight: the numbers are a specified function of their arguments, and which
+// specified function was never a promise.
 //
 // **Indexed, not sequential.** Every function here is pure: Float(index, salt)
 // depends on nothing but its arguments. Spawning entity 500 on its own gives the
@@ -19,31 +40,26 @@
 // call from EachParallel or from a spawn path that skips entities. A stateful
 // generator would look equivalent and quietly not be.
 //
-// Salts are how one index gives several independent values — position wants
+// Salts are how one index gives several independent values - position wants
 // three and a colour wants three more. Any two distinct salts give independent
 // sequences; the call sites use small primes only because they read well.
 //
-// Not for anything security-sensitive, despite what is underneath. It is a
-// stable, portable, well-distributed number and no attempt is made to keep the
-// seed secret.
+// **Two nanoseconds a call, and the warning that used to stand here is gone
+// with the reason for it.** SHA-256 cost about 47 ns, so this header spent five
+// paragraphs saying it was a load-time budget and must not be called per entity
+// per frame. On the `bench` preset `engine.core.bench.values` now measures
+// `Float` at 2 ns and a three-salt position at 7 ns, against 1 ns for a bare
+// xorshift32 in the same run. There is no longer a call site this is too dear
+// for.
 //
-// **It costs about 47 nanoseconds a call, and that is a load-time budget rather
-// than a per-frame one.** Every function here is a full SHA-256 compression, so
-// `engine.core.bench.values` measures it at roughly fifty times the integer
-// mixer it replaced — a position built from three salts is around 146 ns, which
-// makes spawning a hundred thousand entities about fifteen milliseconds of
-// hashing on its own.
-//
-// That is the right price for determinism at a spawn point, a world seed or a
-// content generator, all of which run once. It is the wrong price inside a
-// system that runs every tick: calling this per entity per frame costs more
-// than iterating the entire world does — compare the figure against
-// `engine.ecs.bench.iteration`, where `Each` over a hundred thousand entities
-// is a couple of nanoseconds a row.
-//
-// If a per-frame call site ever genuinely needs this, the answer is to compute
-// the values once at spawn and store them on the entity, not to make this
-// function cheaper: the specified algorithm is exactly what the type is for.
+// **Not for anything security-sensitive, and that is a property of the type
+// rather than of what is under it.** It is a stable, portable, well-distributed
+// number, and no attempt is made to keep anything about it secret - a stream is
+// a pure function of two arguments an attacker can guess. Anything that needs
+// to be unpredictable takes `net`'s handshake or `assets`' grant key, both of
+// which draw from the operating system and both of which say so in their own
+// headers. Nothing in the tree reaches here for a key, a nonce or a token, and
+// nothing should start.
 //
 // @tier L0 · shared
 
@@ -56,10 +72,16 @@ namespace engine::core {
 	// @threadsafe
 	class Random {
 	  public:
-		// The first 32 bits of SHA-256 over the big-endian `(index, salt)` pair.
+		// The top 32 bits of SplitMix64's finaliser over the `(salt, index)` pair.
+		//
+		// The finaliser is Steele, Lea and Flood's `mix64variant13`, published in
+		// *Fast Splittable Pseudorandom Number Generators* (OOPSLA 2014) and
+		// spelled here as Vigna's public-domain `splitmix64.c` spells it.
+		// `tests/Random.cpp` pins the sequence it produces, against the constant
+		// every reference implementation of it prints.
 		static uint32_t Bits(uint32_t index, uint32_t salt);
 
-		// A uniform float in [0, 1) — half-open, so it never returns 1.0f.
+		// A uniform float in [0, 1) - half-open, so it never returns 1.0f.
 		//
 		// Exact across platforms rather than merely deterministic: the result is
 		// a 24-bit integer scaled by a power of two, which IEEE-754 represents

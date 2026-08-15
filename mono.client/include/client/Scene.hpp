@@ -14,7 +14,7 @@
 //
 // **There is no scene object.** Building the world is a function, and
 // everything the tick touches is in the store: per-entity data as components,
-// world-scoped data as resources. That is not tidiness — a scene class with the
+// world-scoped data as resources. That is not tidiness - a scene class with the
 // draw list and the clock as members puts the state the renderer reads outside
 // the world, where the affinity check does not cover it, the profiler does not
 // see it, and a second world cannot have its own.
@@ -71,7 +71,7 @@ namespace client {
 	// **All of them since v0.8, and it used to be the first by entity id.** The
 	// pipeline rendered one offscreen view, so a world with four mirrored walls
 	// got one working mirror and three panes projecting that one camera's image
-	// across themselves — which looked like a bug in the mirror rather than the
+	// across themselves - which looked like a bug in the mirror rather than the
 	// limit of the pipeline it was. `render::SurfaceView::Index` and
 	// `scene::MAX_SURFACES` are what replaced it.
 	//
@@ -81,7 +81,7 @@ namespace client {
 	// component set.
 	//
 	// **Reads what a camera *is*, never where it should be.** Aiming is
-	// `scene::AimSurfaceCameras` in `PreRender`, and this runs after it — so a
+	// `scene::AimSurfaceCameras` in `PreRender`, and this runs after it - so a
 	// view carries the frame that system computed. Two things deriving a
 	// reflection would be two answers to one question, and the one on screen
 	// would be whichever ran last.
@@ -107,7 +107,7 @@ namespace client {
 	// a `DestinationWorld` is a window onto a second simulation and keeps its
 	// surface camera, and one without is a hole in this space and is drawn by
 	// recursion instead. `scene::PortalSeam::Crosses` is the test, so the two
-	// halves cannot disagree about which a pane is — it is the same field
+	// halves cannot disagree about which a pane is - it is the same field
 	// `AppendPortalClones` and `CrossPortals` already branch on.
 	//
 	// **Built from `GatherPortalSeams` and `SeamMapping`, not from a second
@@ -116,7 +116,7 @@ namespace client {
 	// its own way would be a picture that disagrees with where a body comes out.
 	//
 	// **Both maps, front and back.** Which one applies is a question about the
-	// camera, and the camera moves with the recursion — see
+	// camera, and the camera moves with the recursion - see
 	// `render::PortalView::Front`.
 	//
 	// @param store   The world to search.
@@ -132,12 +132,12 @@ namespace client {
 	// places the camera and fits its frustum, and both are arithmetic inside one
 	// world; what is *drawn* through that frustum is a draw list, and the draw
 	// list of another world is on the far side of a boundary rule 3 keeps shut.
-	// So the host — which holds the universe and is already outside every store
-	// when it calls the renderer — is the only thing that can join the two.
+	// So the host - which holds the universe and is already outside every store
+	// when it calls the renderer - is the only thing that can join the two.
 	//
 	// **Fills a list of its own, and that separation is the whole contract.**
 	// The renderer uploads one instance buffer per frame, so the far world's
-	// rows do end up on the end of this world's — but the *appending* is the
+	// rows do end up on the end of this world's - but the *appending* is the
 	// renderer's to do, after it has culled, ordered and partitioned this
 	// world's list. Handing the two joined would put the far world into this
 	// world's frustum cull, its scene plan and its main pass: the two rooms
@@ -149,7 +149,7 @@ namespace client {
 	//
 	// **Reads the far world's published `DrawList` and does not build one.** A
 	// world that is not ticking has whatever its last tick published, which is
-	// right — a suspended destination should look like the moment it stopped
+	// right - a suspended destination should look like the moment it stopped
 	// rather than like nothing. `ImmersivePortals.luau` holds both ends awake so
 	// that case does not arise, and says why.
 	//
@@ -160,22 +160,22 @@ namespace client {
 	// ## A hole has two mouths, and both of them are this pass's
 	//
 	// A body standing in a cross-world pane is in two rooms, exactly as it is
-	// for a same-world one — and neither store can say so, because each holds
+	// for a same-world one - and neither store can say so, because each holds
 	// one of the two. So both halves are assembled here, and they go to
 	// different places:
 	//
 	// - a body in **this** world, standing in this world's pane, is cloned onto
-	//   the end of `foreign` — into the picture the glass shows;
+	//   the end of `foreign` - into the picture the glass shows;
 	// - a body in the **far** world, standing in the far world's pane back to
-	//   here, is cloned onto the end of `drawn` — into this room, in front of
+	//   here, is cloned onto the end of `drawn` - into this room, in front of
 	//   this world's pane, where its near half actually stands.
 	//
 	// **Only the first of those existed until v0.15, and one direction is what
 	// that looks like.** Walk into the hole from world A and your far half
 	// appears in B's picture; stand in B while somebody walks in from A and
 	// nothing comes out of the block. The second half is not the first one
-	// repeated from the other side — nobody draws world B's frame while world A
-	// is on screen — so it has to be gathered while the far store is open and
+	// repeated from the other side - nobody draws world B's frame while world A
+	// is on screen - so it has to be gathered while the far store is open and
 	// appended here.
 	//
 	// **The far pane is found by name, not by surface slot.** A slot numbers a
@@ -190,12 +190,12 @@ namespace client {
 	//
 	// @param universe The worlds, entered one at a time and never nested.
 	// @param world    The world being drawn.
-	// @param drawn    This world's own rows, appended to — never cleared. The
+	// @param drawn    This world's own rows, appended to - never cleared. The
 	//                 far side of anybody standing in a far pane that leads
 	//                 here ends up on the end of it.
 	// @param foreign  Cleared, then filled with every other world's rows this
 	//                 frame needs. Hand it to `render::Renderer::Render` as its
-	//                 `foreign` argument, beside — never joined to — this
+	//                 `foreign` argument, beside - never joined to - this
 	//                 world's own draw list.
 	// @param views    The views `CollectSurfaceViews` filled, updated in place.
 	// @return How many surfaces were pointed at another world. The clones
@@ -214,7 +214,7 @@ namespace client {
 	//
 	// **One batch per emitter that has live particles, and a span rather than a
 	// copy.** The pool's blocks are contiguous per emitter with the live ones a
-	// prefix — `effects::ParticleSystem` — so a batch is that prefix pointed at,
+	// prefix - `effects::ParticleSystem` - so a batch is that prefix pointed at,
 	// and half a million particles reach the renderer without being moved.
 	//
 	// **Here rather than in `effects`, for `CollectSurfaceViews`'s reason.**
@@ -222,7 +222,7 @@ namespace client {
 	// a module that named it would be a shared module naming a presentation type.
 	// So the pool knows nothing about batches and this is where the two meet.
 	//
-	// The emitter's shared half — texture, blend mode, flipbook layout, Z offset —
+	// The emitter's shared half - texture, blend mode, flipbook layout, Z offset -
 	// is read off `ParticleEmitter` here, once per emitter rather than once per
 	// particle, which is the whole reason `ParticleInstance` is twenty-eight
 	// bytes.
@@ -237,8 +237,8 @@ namespace client {
 	// Turns a world's `scene::Light` rows into the lights the renderer takes.
 	//
 	// **Resolves where each one shines from, which is its parent's business.**
-	// A `Light` carries no position — `scene/Components.hpp` refuses it one, for
-	// `Sound`'s reason — so this walks one step to the parent and takes its
+	// A `Light` carries no position - `scene/Components.hpp` refuses it one, for
+	// `Sound`'s reason - so this walks one step to the parent and takes its
 	// `Attachment`'s world frame or its `Transform`. A light parented to neither
 	// is skipped rather than placed at the origin, which would put a lamp in the
 	// middle of every world that had one lying loose in `ReplicatedStorage`.
@@ -246,8 +246,8 @@ namespace client {
 	// **Capped at `render::MAX_SCENE_LIGHTS`, nearest to the eye first.** The
 	// renderer drops anything past the cap and has no idea which lamp matters;
 	// choosing is the caller's, and distance is the only ordering that is right
-	// more often than it is wrong. A scene that needs a better rule — a boss's
-	// aura outranking a corridor sconce — wants an authored priority, which is
+	// more often than it is wrong. A scene that needs a better rule - a boss's
+	// aura outranking a corridor sconce - wants an authored priority, which is
 	// the same shape `replication::DistancePriority` already has and is not in
 	// v0.10.
 	//
@@ -268,16 +268,26 @@ namespace client {
 	// is the client's half and only that: a camera to look through and a draw
 	// list to fill. A server calls the same loader and adds neither.
 	//
+	// **The runtime comes back**, because the client has to be able to reach the
+	// VM of the world it is drawing: `Runtime::DeliverGuiEvents` is how a
+	// `TextButton`'s `Activated` gets from `gui::Router` to a script, and until
+	// v0.15 this loader kept the only reference. A shipped client running a
+	// `--script` scene therefore routed its interface input, produced the
+	// events, and had nowhere to deliver them - every button in every scripted
+	// scene was silent in the one program a game ships.
+	//
 	// @param store     The world to build into.
 	// @param scheduler The systems to install.
 	// @param path      The `.luau` file to run.
 	// @param reserve   How much draw-list capacity to reserve up front.
+	// @param runtime   Set to the VM that ran the scene, when not null.
 	// @return `false` when the script could not be read, compiled or run.
 	bool BuildScriptedWorld(
 		engine::ecs::Store &store,
 		engine::ecs::Scheduler &scheduler,
 		const std::string &path,
-		uint32_t reserve
+		uint32_t reserve,
+		std::shared_ptr<engine::script::Runtime> *runtime = nullptr
 	);
 
 	// The client's half of a world, installed onto one somebody else built.
@@ -285,7 +295,7 @@ namespace client {
 	// **`BuildScriptedWorld` is the demo's entry point and this is the general
 	// one.** A studio opens a world out of a game file rather than out of a
 	// `.luau`, and a world with no draw list is a world that renders as an
-	// empty frame — which reads as a broken renderer rather than as a missing
+	// empty frame - which reads as a broken renderer rather than as a missing
 	// system, and cost an afternoon to find once.
 	//
 	// Installs a `DrawList`, the previous-transform capture that rendering
@@ -306,7 +316,7 @@ namespace client {
 	// `BuildScriptedWorld` already holds and the reason it is a rule: running
 	// the placeholder orbit beside a script that aimed a camera is two things
 	// writing one `Transform`, the second winning silently every tick. That is
-	// not hypothetical — it made `Mirrors-1-world.luau` compute its reflection
+	// not hypothetical - it made `Mirrors-1-world.luau` compute its reflection
 	// for a position the viewer was no longer at, and the mirror looked broken.
 	//
 	// A game file's world usually has no camera, because a camera is something
@@ -331,7 +341,7 @@ namespace client {
 	// **One type, and it had no registration at all until v0.7.** `DrawList` is
 	// a resource, a resource is keyed by a component id, and
 	// `Store::SetResource` was minting one under the compiler's spelling of the
-	// type — which is rule 4's exact failure and sat unnoticed because nothing
+	// type - which is rule 4's exact failure and sat unnoticed because nothing
 	// had ever snapshotted a world that had one. The studio's Stop does.
 	//
 	// Idempotent, and called by both entry points above. Call it before

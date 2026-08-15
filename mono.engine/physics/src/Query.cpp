@@ -72,7 +72,7 @@ namespace engine::physics {
 		//
 		// Dynamic first and static second, always. A query's answer is a set,
 		// but the *order* it is written into the caller's span is part of what
-		// a recorded run reproduces — and a caller whose span overflows keeps a
+		// a recorded run reproduces - and a caller whose span overflows keeps a
 		// prefix, so the order decides which colliders that prefix holds.
 		struct Indexes {
 			Index Entry[2];
@@ -105,7 +105,7 @@ namespace engine::physics {
 		//
 		// The volume is a `ShapeInstance` rather than an `AABB` so that
 		// `OverlapSphere` is a sphere against the real shapes rather than a box
-		// against them — the difference this module exists for.
+		// against them - the difference this module exists for.
 		spatial::QueryResult OverlapExact(
 			const ecs::Store &store,
 			const ShapeInstance &volume,
@@ -217,7 +217,7 @@ namespace engine::physics {
 		}
 
 		// Where the whole ray would end, which is the segment `PortalCrossing`
-		// tests — the same one a body's tick is tested as.
+		// tests - the same one a body's tick is tested as.
 		const core::Vector3 finish = ray.PointAt(maxDistance);
 
 		scene::PortalHop hop;
@@ -232,8 +232,8 @@ namespace engine::physics {
 		// continuation below never runs once.
 		//
 		// **Only once a crossing is known**, so a ray that meets the pane
-		// outside its rectangle — the frame, the edge, the wall the hole is cut
-		// in — still stops on it, which is what a hole with a border means.
+		// outside its rectangle - the frame, the edge, the wall the hole is cut
+		// in - still stops on it, which is what a hole with a border means.
 		if (blocking && blocking->Owner == hop.Pane) {
 			blocking.reset();
 		}
@@ -242,7 +242,7 @@ namespace engine::physics {
 
 		// **Anything else solid before the glass settles it.** A wall between the
 		// caster and the pane is a wall, and continuing past it would let a ray
-		// see through geometry — which is the one thing a hole must not make
+		// see through geometry - which is the one thing a hole must not make
 		// true of everything else in the room.
 		if (blocking && blocking->Distance <= reached) {
 			return blocking;
@@ -257,7 +257,7 @@ namespace engine::physics {
 		// like the hole being crooked.** A pane pair that turns a corner sends
 		// the remainder off along the axis it came in on, so the ray leaves the
 		// far side aimed the way it entered the near one rather than the way the
-		// far pane faces — see `CrossPortals`, which is the same two lines about
+		// far pane faces - see `CrossPortals`, which is the same two lines about
 		// a body's placement and its velocity.
 		//
 		// **`Rotate` and not `Carry` for the direction**, because `core::Ray`
@@ -270,13 +270,13 @@ namespace engine::physics {
 
 		// **And the reach it has left is a length, so it scales.** A ray with a
 		// metre to run that enters the large end of a hole has that metre
-		// stretched with everything else about it — anything else would give a
+		// stretched with everything else about it - anything else would give a
 		// character walking into the big room a ground query that stops short of
 		// a floor it is standing on.
 		const float beyondDistance = hop.Through.Length(remaining);
 
 		// **The far pane is ignored and the caster is not.** `ignore` is the
-		// caster, and the caster is on this side of the glass by construction —
+		// caster, and the caster is on this side of the glass by construction -
 		// carrying it across would name whatever entity happens to share that
 		// index over there, which is nothing in particular. What does have to go
 		// is the pane the ray comes *out* of: the map takes the near pane's plane
@@ -289,7 +289,7 @@ namespace engine::physics {
 		}
 
 		// Measured from the original origin, so a caller comparing against its
-		// own reach never has to know a hole was involved — which means the far
+		// own reach never has to know a hole was involved - which means the far
 		// side's distance comes back through the scale it went out by.
 		far->Distance = reached + far->Distance / hop.Through.Scale;
 		return far;
@@ -342,7 +342,7 @@ namespace engine::physics {
 
 		// The path's envelope: the shape's own bound at both ends, unioned. The
 		// exact test then runs the candidates against *that box* rather than
-		// against the moving shape — which is why the header calls this
+		// against the moving shape - which is why the header calls this
 		// conservative and says what it is not.
 		const core::AABB swept = start.Union(core::AABB{start.Minimum + motion, start.Maximum + motion});
 		const ShapeInstance volume{core::CFrame{swept.Centre()}, swept.Size() * 0.5f, scene::ShapeKind::Box};

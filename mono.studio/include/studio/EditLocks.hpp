@@ -11,7 +11,7 @@
 //
 // **Nobody's work is thrown away, and that is the whole point of the queue.**
 // The version this replaced refused the second editor and rolled their change
-// back at their own machine — which is correct, survivable, and still means
+// back at their own machine - which is correct, survivable, and still means
 // somebody watched their edit disappear. Here the second edit lands *on top of*
 // the first, in the order the host granted, and both people keep what they did.
 //
@@ -19,14 +19,14 @@
 //
 // The guest waits for a grant before its edit *replicates*. It does not wait to
 // *see* it: the edit is applied locally the moment it is made, so the person
-// feels no latency at all. What waits is the message, by one round trip — a
-// millisecond on a subnet, tens across the internet — and what it buys is that
+// feels no latency at all. What waits is the message, by one round trip - a
+// millisecond on a subnet, tens across the internet - and what it buys is that
 // the host, and only the host, decides who was first.
 //
 // ## Why there is still a timeout
 //
 // A guest that is granted a subtree and then dies would hold it for ever, and
-// there is nobody to notice. So a grant has a guard — not a lease on editing,
+// there is nobody to notice. So a grant has a guard - not a lease on editing,
 // which is what the previous design got wrong, but a bound on one protocol
 // step: the time between "you may" and "here it is". It is short, because
 // nothing legitimate takes long, and it exists so a crash costs the next person
@@ -47,7 +47,7 @@
 // key that let them in.
 //
 // **Not visible as waiting.** A queued editor is not blocked at their own
-// machine — they carry on editing, and their messages queue behind each other
+// machine - they carry on editing, and their messages queue behind each other
 // in the order the host grants them.
 //
 // @tier L12 · client
@@ -66,7 +66,7 @@ namespace studio {
 	//
 	// **The host is zero and a guest is one past its client slot.** A
 	// `ClientId` is the host's own numbering and means nothing to a guest, so
-	// what crosses is this — the same number every editor in the session sees
+	// what crosses is this - the same number every editor in the session sees
 	// for the same person, because the host is the one that issues it.
 	//
 	// The offset is load-bearing rather than cosmetic: client slots are dense
@@ -154,7 +154,7 @@ namespace studio {
 		// a loop would otherwise be a guest spending the host's memory. Past
 		// the cap a new request is refused and the queue stands, which is the
 		// way round `network::Directory` bounds its table and for the same
-		// reason — a bound that lets a flood push out somebody's place in the
+		// reason - a bound that lets a flood push out somebody's place in the
 		// queue is not a bound.
 		size_t MaximumWaiting = 256;
 	};
@@ -191,7 +191,7 @@ namespace studio {
 		//
 		// @param path       The subtree.
 		// @param holder     Who is giving it up. Somebody else's turn is left
-		//        alone — a release that could end another editor's turn would
+		//        alone - a release that could end another editor's turn would
 		//        be a queue anybody can jump.
 		// @param nowSeconds The current time.
 		// @return Everybody who was waiting and may now go, in the order they
@@ -201,7 +201,7 @@ namespace studio {
 
 		// Gives up everything one editor holds or is waiting for.
 		//
-		// What a departure calls, and what makes a clean exit immediate — the
+		// What a departure calls, and what makes a clean exit immediate - the
 		// guard is what makes a crash survivable.
 		//
 		// @param holder     Who left.

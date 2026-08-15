@@ -21,7 +21,7 @@ namespace engine::render {
 		// spelled again rather than shared because that function takes a
 		// `gui::Adornment` and these are two other components. What matters is
 		// that the rule agrees: set wins, an unset one means the parent, and a
-		// set-but-dead one is nothing rather than silently falling back — an
+		// set-but-dead one is nothing rather than silently falling back - an
 		// `Adornee` pointing at a destroyed part is a collector about nothing,
 		// and re-aiming it at whatever it is parented to would project it onto
 		// the wrong object.
@@ -35,7 +35,7 @@ namespace engine::render {
 		// The two stud extents of one face of a box.
 		//
 		// A face is named by the axis it points along, so its extent is the
-		// *other* two — and which of those is the canvas's width is what decides
+		// *other* two - and which of those is the canvas's width is what decides
 		// whether a sign reads upright or sideways. Front and back look down Z,
 		// so they span X across and Y up; left and right look down X and span Z
 		// and Y; top and bottom look down Y and span X and Z.
@@ -88,8 +88,8 @@ namespace engine::render {
 
 		std::vector<Pending> pending;
 
-		// The camera, once. A world with no live camera resolves no billboard —
-		// there is nothing to measure a stud against — but its surface guis are
+		// The camera, once. A world with no live camera resolves no billboard -
+		// there is nothing to measure a stud against - but its surface guis are
 		// unaffected, because a face's stud extent is a fact about the part.
 		float fieldOfView = 0.0f;
 		Vector3 eye;
@@ -185,7 +185,7 @@ namespace engine::render {
 			// **Removed rather than left**, which is the half that is easy to
 			// skip and expensive to skip. A `SurfaceGui` switched back to
 			// `FixedSize`, or one whose adornee was deleted, would otherwise keep
-			// the canvas the last frame that could resolve it wrote — and it
+			// the canvas the last frame that could resolve it wrote - and it
 			// would keep it forever, looking correct until somebody moved the
 			// part it is no longer attached to.
 			if (store.Get<gui::SpatialCanvas>(entry.Collector) != nullptr) {

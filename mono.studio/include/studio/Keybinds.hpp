@@ -4,7 +4,7 @@
 //
 // **The same shape `input::Actions` gives the client, and for the same
 // reason.** That header's first line is "the one table in the engine that names
-// a key; everything else asks for an action" — and the editor had drifted from
+// a key; everything else asks for an action" - and the editor had drifted from
 // it: F5 was spelled out in `DrawShortcuts`, again in the Run menu's label, and
 // a third time in a comment. Three copies of a binding are three places to
 // change it and two places to forget.
@@ -14,7 +14,7 @@
 // loop drives; the editor's keys are read through imgui, which owns the
 // keyboard while a text field has focus and must go on owning it. So this is
 // the same idea over `ImGuiKey`, and the two tables are deliberately separate
-// — see `Action` for the one binding they disagree about.
+// - see `Action` for the one binding they disagree about.
 //
 // **Rebinding is why this exists rather than a `switch`.** A key nobody can
 // change is a key that is wrong for somebody, and an editor is a program people
@@ -54,14 +54,14 @@ namespace studio {
 		// **They are unbound here rather than bound to a different pair.** F5 is
 		// Play in an editor and always will be, and inventing a second set of
 		// function keys for the editor is a decision better made by whoever
-		// wants them — which is what the Keybinds page is for.
+		// wants them - which is what the Keybinds page is for.
 		ShowStatistics,
 		ShowFrameGraph,
 
 		// The four manipulators.
 		//
 		// **Scoped to the viewport**, because that is the only place a handle
-		// exists — and because a plain digit is a digit everywhere else. Studio
+		// exists - and because a plain digit is a digit everywhere else. Studio
 		// puts these on 1 to 4 and this ships them unbound for the reason the
 		// table in `Keybinds.cpp` gives at length; the Keybinds page is one
 		// visit away and `tests/Keybinds.cpp` is what stops the shortcut here.
@@ -72,7 +72,7 @@ namespace studio {
 		ToolRotate,
 		ToolScale,
 
-		// The palette itself, which is a command like any other — it appears in
+		// The palette itself, which is a command like any other - it appears in
 		// its own list, and that is correct rather than a curiosity: somebody
 		// who has found the palette once should be able to find out what opens
 		// it without leaving it.
@@ -88,7 +88,7 @@ namespace studio {
 	// script editor where it is a character; F5 belongs to the transport
 	// wherever you are. Without a scope the only guard available is
 	// `io.WantCaptureKeyboard`, which answers "is a text field focused" and not
-	// "does this key mean anything here" — so a binding on a plain letter could
+	// "does this key mean anything here" - so a binding on a plain letter could
 	// never be added safely at all.
 	//
 	// @since v0.7
@@ -149,7 +149,7 @@ namespace studio {
 		// The name in the file, which is not the display name.
 		//
 		// **A saved binding has to survive an action being renamed for the
-		// page, and it has to survive `Action`'s members being reordered** —
+		// page, and it has to survive `Action`'s members being reordered** -
 		// which an enum value cannot, because the number would then name a
 		// different command. This is the only thing written to disk.
 		const char *Id = "";
@@ -170,7 +170,7 @@ namespace studio {
 	// The editor's bindings.
 	//
 	// **Process-wide, like `input::Actions`.** Two editors in one process would
-	// share them, which is a thing a test does and not a thing a person does —
+	// share them, which is a thing a test does and not a thing a person does -
 	// and the alternative is threading a binding table through every panel that
 	// wants to draw a shortcut in a menu.
 	//
@@ -194,11 +194,11 @@ namespace studio {
 		//
 		// **A chord belongs to one action.** Two actions on one key is a key
 		// that does two things at once, and the one somebody notices is
-		// whichever happens to be checked first — a bug that reads as the
+		// whichever happens to be checked first - a bug that reads as the
 		// editor being haunted.
 		//
 		// This writes nothing on its own. `Save` is the write, and the editor
-		// calls it once on the way out rather than on every rebind — a file
+		// calls it once on the way out rather than on every rebind - a file
 		// rewritten per keystroke of a capture dialog is a file that can be
 		// caught half-written.
 		//
@@ -248,8 +248,8 @@ namespace studio {
 		// Writes every bound action to a file.
 		//
 		// One `id = chord` line each, in table order, so a person can read it
-		// and a diff means something. Unbound actions are written too — as an
-		// empty chord — because "I cleared this on purpose" has to survive a
+		// and a diff means something. Unbound actions are written too - as an
+		// empty chord - because "I cleared this on purpose" has to survive a
 		// restart just as a binding does.
 		//
 		// @param path Where to write.

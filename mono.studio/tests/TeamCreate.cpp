@@ -2,7 +2,7 @@
 // what it refuses.
 //
 // The wire is `network`'s and is covered there over a loopback. What belongs
-// here is the editor's own shape — that watching announces nothing, that
+// here is the editor's own shape - that watching announces nothing, that
 // hosting produces an invitation somebody can pass on, and that leaving takes
 // it all back down.
 
@@ -33,7 +33,7 @@ using studio::TeamCreateSettings;
 
 namespace {
 	// A whole editor's worth of state, because `TeamCreate` borrows the command
-	// log and the universe that arriving edits are applied through — hosting is
+	// log and the universe that arriving edits are applied through - hosting is
 	// not a thing an editor does beside its document, it is a thing it does
 	// *to* its document.
 	struct Editor {
@@ -166,7 +166,7 @@ TEST_CASE("leaving takes the session back down", "[studio][teamcreate]") {
 	CHECK(team.Invitation().empty());
 	CHECK_FALSE(team.Session().Session.IsValid());
 
-	// Hosting again is a new session, not a revived one — `ConnectionId`'s rule
+	// Hosting again is a new session, not a revived one - `ConnectionId`'s rule
 	// and `SessionId`'s.
 	std::string second;
 	REQUIRE(team.Host(offering, second));

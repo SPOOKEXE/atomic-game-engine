@@ -5,7 +5,7 @@
 // **Corners rather than a position and a size**, which is the opposite of what
 // `AABB` does one dimension up and is worth explaining. `AABB` is the shape a
 // containment test wants and it is derived per entity per tick; this is what a
-// caller *authors* — a sprite's slice of an atlas, a region of a screen — and an
+// caller *authors* - a sprite's slice of an atlas, a region of a screen - and an
 // author reads two corners off an image far more easily than a corner and an
 // extent. `Width` and `Height` are one subtraction away.
 //
@@ -77,7 +77,7 @@ namespace engine::core {
 		// Reports whether the rectangle encloses nothing.
 		//
 		// True when either axis's maximum is below its minimum. A zero-area
-		// rectangle is *not* empty — it is a point or a line, and a caller
+		// rectangle is *not* empty - it is a point or a line, and a caller
 		// clipping against one wants that distinction.
 		constexpr bool Empty() const {
 			return Max.X < Min.X || Max.Y < Min.Y;

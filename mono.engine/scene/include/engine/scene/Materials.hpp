@@ -3,7 +3,7 @@
 // What a part is made of, as an asset rather than as a word.
 //
 // **This replaces `Enum.Material`, and the enum is gone rather than deprecated.**
-// It held seventeen names — `Plastic`, `Wood`, `Metal` — checked against a
+// It held seventeen names - `Plastic`, `Wood`, `Metal` - checked against a
 // registered set, and the check was the only thing it did: nothing in the
 // renderer sampled a different texture because a part said `Wood`, because a
 // name is not a texture. `AGENTS.md` calls two ways to do one job the most
@@ -22,14 +22,14 @@
 // **`Attachment`'s shape exactly**, down to the reason: an instance whose only
 // job is to say something about its parent, resolved by one flat pass over one
 // component type. It is an `Instance` and not a `PVInstance` for the same reason
-// an attachment is — it has no place in the world of its own.
+// an attachment is - it has no place in the world of its own.
 //
 // ## The resolve pass, and what it writes
 //
 // `ResolveMaterials` walks every `MaterialRef` row, looks its asset up in the
 // world's `MaterialCatalogue`, and writes the resulting texture name into the
 // **parent's** `SurfaceAppearance::ColourMap`. That is the field the draw-list
-// pass already reads — `client::CollectInstances` is a batched parallel loop
+// pass already reads - `client::CollectInstances` is a batched parallel loop
 // over a fixed signature, and a child lookup is precisely what that shape cannot
 // express, which is the same wall `SurfaceAppearance`'s own comment hits.
 //
@@ -41,7 +41,7 @@
 // **A part that stops having a material is cleared, and the pass costs nothing
 // extra to do it.** Deleting a `Material` child used to leave the colour map it
 // last resolved sitting on the parent for ever, because nothing visits a part
-// that no longer has one — `docs/DEFERRED.md` D00032. The fix is not the pass
+// that no longer has one - `docs/DEFERRED.md` D00032. The fix is not the pass
 // over every part that entry rejected, which would be a child scan per drawable
 // per tick to correct an editor-time action. It is a **difference between two
 // passes**: the resolve records which parents it wrote, and the next one clears
@@ -52,14 +52,14 @@
 // destruction hook.** A hook on the row leaving would miss a `Material`
 // *reparented* to another part, a `MaterialRef` removed from a still-living
 // instance, and a part whose material was moved under something with no
-// `SurfaceAppearance` — all of which leave the same stale texture and none of
+// `SurfaceAppearance` - all of which leave the same stale texture and none of
 // which is a destruction.
 //
 // ## Nothing here reads a material file
 //
 // `scene` is `shared` and does not link `assets`. The catalogue takes a texture
-// name from whoever *did* read the `.amat` — the client's content pump, the same
-// caller as `RecordMesh` and `RecordTexture` — which is `TextureCatalogue`'s
+// name from whoever *did* read the `.amat` - the client's content pump, the same
+// caller as `RecordMesh` and `RecordTexture` - which is `TextureCatalogue`'s
 // rule and its reason.
 //
 // @tier L7 · shared
@@ -80,7 +80,7 @@ namespace engine::scene {
 
 	// What a world knows about the materials its parts name.
 	//
-	// **Derived rather than authored, so it is not saved** — `TextureCatalogue`'s
+	// **Derived rather than authored, so it is not saved** - `TextureCatalogue`'s
 	// rule. Its contents come from whatever registered the materials this run,
 	// and a save file carrying last run's texture names would be names that agree
 	// with nothing on disk.
@@ -88,31 +88,43 @@ namespace engine::scene {
 	// Every texture one material names.
 	//
 	// **A struct rather than five parallel maps**, because they are written and
-	// read together on every path — recorded from one `.amat`, resolved onto one
+	// read together on every path - recorded from one `.amat`, resolved onto one
 	// part, demanded as one set. Five maps keyed the same way would be five
 	// places for a material to be half-present.
 	//
 	// @since v0.11
 	// **Every map is initialised where it is declared**, which is what lets a
-	// caller name the one it has — `MaterialMaps{.Colour = texture}` is the
+	// caller name the one it has - `MaterialMaps{.Colour = texture}` is the
 	// ordinary case, because a material with a colour and nothing else is the
 	// ordinary material. Without these `= {}` the omitted five are still
 	// value-initialised and still invalid, and GCC still refuses the designated
 	// initialiser under `-Wmissing-field-initializers`, which the `ci` preset
 	// makes fatal. `core::Name` already defaults to invalid, so this changes no
-	// value — it says so where the compiler can see it.
+	// value - it says so where the compiler can see it.
 	struct MaterialMaps {
+		// The albedo, and the one a material usually has on its own.
 		core::Name Colour = {};
+
+		// Tangent-space normals, as the baker writes them.
 		core::Name Normal = {};
+
+		// Per-texel roughness. Absent leaves the material's own scalar.
 		core::Name Roughness = {};
+
+		// Baked ambient occlusion, multiplied into the ambient term.
 		core::Name Occlusion = {};
+
+		// Height, for whatever the pipeline does with it. Written by the baker
+		// and carried here because a material names it; nothing samples it yet.
 		core::Name Height = {};
+
+		// What the surface emits on its own, independent of any light.
 		core::Name Emissive = {};
 
 		// Whether this names anything at all.
 		//
 		// @return `true` when any map is set. A material naming none is a real
-		//         state — see `assets::MaterialData` — so this says "the
+		//         state - see `assets::MaterialData` - so this says "the
 		//         catalogue knows this material" rather than "it is usable".
 		bool IsValid() const {
 			return Colour.IsValid() || Normal.IsValid() || Roughness.IsValid() || Occlusion.IsValid() ||
@@ -155,7 +167,7 @@ namespace engine::scene {
 		// states on purpose**: a material this world has not been told about, and
 		// a material that names no texture. Neither is something to draw, and a
 		// consumer that had to tell them apart would be asking a question with no
-		// use — the renderer draws `render::DefaultTexture` either way.
+		// use - the renderer draws `render::DefaultTexture` either way.
 		//
 		// @param material The material's asset name.
 		// @return The texture's name, or an invalid one.
@@ -165,7 +177,7 @@ namespace engine::scene {
 	// The world's material catalogue, creating an empty one if it has none.
 	//
 	// **`RegisterSceneComponents` must have run first**, as it must before any
-	// resource here is set — `MeshesOf` carries why in full.
+	// resource here is set - `MeshesOf` carries why in full.
 	//
 	// @param store The world.
 	// @return The catalogue.

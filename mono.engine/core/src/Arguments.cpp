@@ -36,7 +36,7 @@ namespace engine::core {
 		// `-Wmissing-field-initializers` into an error, and GCC counts a
 		// designator left out the same as a positional one left off the end. So
 		// "say every field" is the rule here rather than "say the interesting
-		// ones" — and a field added to `Option` later then fails the build
+		// ones" - and a field added to `Option` later then fails the build
 		// instead of silently defaulting at two call sites.
 		Options.push_back(
 			Option{
@@ -100,7 +100,7 @@ namespace engine::core {
 				continue;
 			}
 
-			// `--name=value` — split before the lookup, so that the option name
+			// `--name=value` - split before the lookup, so that the option name
 			// is what gets matched.
 			std::optional<std::string_view> inlineValue;
 			const auto equals = name->find('=');

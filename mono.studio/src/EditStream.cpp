@@ -19,7 +19,7 @@ namespace studio {
 		//
 		// **A short keep-alive, and it is load-bearing rather than tidy.** An
 		// acknowledgement rides on an outgoing packet, and an edit stream sends
-		// nothing between edits — no world, no delta, no input. At the default
+		// nothing between edits - no world, no delta, no input. At the default
 		// one-second keep-alive the reliable window therefore goes
 		// unacknowledged for up to a second, and a burst of edits inside that
 		// second is refused by a link that is working perfectly.
@@ -138,8 +138,8 @@ namespace studio {
 		// The smallest subtree covering everything a waypoint touches.
 		//
 		// **One request per waypoint, not one per record.** A waypoint is
-		// granted and applied whole — half of one is a state the author never
-		// saw — so it takes one turn, and a waypoint spanning two models asks
+		// granted and applied whole - half of one is a state the author never
+		// saw - so it takes one turn, and a waypoint spanning two models asks
 		// for the smallest subtree that covers both. That is coarser than
 		// asking per record and it is the only shape in which "applied whole"
 		// and "took a turn" are the same statement.
@@ -355,7 +355,7 @@ namespace studio {
 				const Entity newParent = log.Resolve(command.NewParent);
 
 				// A destroy is recorded *before* the destroy, so its subject is
-				// still alive here — and a create's is alive because it was
+				// still alive here - and a create's is alive because it was
 				// just made.
 				record.Subject = PathOf(store, subject);
 				record.OldParent = PathOf(store, oldParent);
@@ -411,7 +411,7 @@ namespace studio {
 			}
 
 			// **Every id here is this log's own.** The sender's are one process's
-			// names for its own instances — see `EditStream.hpp`.
+			// names for its own instances - see `EditStream.hpp`.
 			bool usable = true;
 			universe.Enter(world, [&](Store &store) {
 				const auto track = [&](const InstancePath &path, EditId &out, bool required) {
@@ -432,7 +432,7 @@ namespace studio {
 				if (record.Kind == CommandKind::Create) {
 					// Nothing to resolve: the subject does not exist here yet.
 					// A fresh id, which `ApplyForeign` binds to whatever the
-					// rebuild produces — so a later record naming the same
+					// rebuild produces - so a later record naming the same
 					// instance resolves it by path and tracks the same entity.
 					command.Subject = log.Mint();
 				} else if (!track(record.Subject, command.Subject, true)) {
@@ -442,7 +442,7 @@ namespace studio {
 
 				// A create and a destroy hang their rebuild under this, so a
 				// parent that does not resolve is a subtree rebuilt as a root
-				// rather than a refusal — `CommandLog::Apply` already makes
+				// rather than a refusal - `CommandLog::Apply` already makes
 				// that choice and this must not make a different one.
 				track(record.OldParent, command.OldParent, false);
 				track(record.NewParent, command.NewParent, false);
@@ -522,7 +522,7 @@ namespace studio {
 			return false;
 		}
 
-		// Described now, while the instances the commands name still exist — a
+		// Described now, while the instances the commands name still exist - a
 		// delete's subject is gone by the time a queued turn comes round.
 		const std::vector<EditRecord> records = DescribeEdits(*Log, *Worlds, commands);
 		if (records.empty()) {
@@ -536,7 +536,7 @@ namespace studio {
 		held.AskedAtSeconds = nowSeconds;
 
 		if (Server != nullptr) {
-			// The host asks its own table, which answers immediately — there is
+			// The host asks its own table, which answers immediately - there is
 			// nobody to ask. It is not exempt from the queue, though: a host
 			// that could edit through somebody else's turn would make the whole
 			// thing advisory.
@@ -565,7 +565,7 @@ namespace studio {
 			return false;
 		}
 
-		// A guest asks and waits for the grant. **The person does not wait** —
+		// A guest asks and waits for the grant. **The person does not wait** -
 		// the edit is already applied at this machine; what waits is the
 		// message.
 		//
@@ -687,7 +687,7 @@ namespace studio {
 		switch (message->Kind) {
 		case EditFrame::Locks:
 			// A guest taking the host's picture of whose turn it is. Never
-			// consulted to decide anything — a decision two processes could
+			// consulted to decide anything - a decision two processes could
 			// reach differently is a decision that will be.
 			Holds.Adopt(message->Locks);
 			return;
@@ -801,7 +801,7 @@ namespace studio {
 
 		if (Server != nullptr) {
 			// A grant whose guard has fired holds nobody up whether or not
-			// anybody sweeps it — but sweeping is what hands the turn to
+			// anybody sweeps it - but sweeping is what hands the turn to
 			// whoever was waiting behind an editor that died.
 			const std::vector<Waiting> woken = Holds.Expire(nowSeconds);
 			for (const Waiting &next : woken) {

@@ -3,8 +3,8 @@
 --
 -- **The same illusion as `Hallway.luau`, folded into single buildings.** The
 -- hallway is two corridors that are each other's insides: you walk into one and
--- come out of the other. A *tunnel* is the stricter case — you walk in one end
--- of a building and out of the *same* building's far end — so the length has to
+-- come out of the other. A *tunnel* is the stricter case - you walk in one end
+-- of a building and out of the *same* building's far end - so the length has to
 -- be added or taken away somewhere in the middle of the walk rather than at the
 -- mouths. That is the shape of a doorway in a wall, which is what a portal is
 -- usually drawn as, and it is the one shape the hallway does not cover.
@@ -22,7 +22,7 @@
 -- ## The trick is that there is only one corridor's worth of space
 --
 -- **The west tunnel's middle is the east tunnel's inside.** Nobody ever walks
--- the west tunnel's middle — its own pair of panes skips over it — so those
+-- the west tunnel's middle - its own pair of panes skips over it - so those
 -- twenty-six studs are furnished, lit, and standing empty. The east tunnel
 -- splices them in. One building lends the space it does not use to the one that
 -- cannot hold it, and no hidden third corridor is buried under the map.
@@ -78,7 +78,7 @@ local SHORT = 4
 -- walked part of that tunnel is therefore `LONG / 2 - SKIP` studs at each end.
 local SKIP = 14
 
--- And where the middle's own ends are — the two panes the east tunnel arrives
+-- And where the middle's own ends are - the two panes the east tunnel arrives
 -- through. One stud inside the skip pair, so neither pane's back is ever the
 -- nearest thing to an eye.
 local SPLICE = 13
@@ -120,7 +120,7 @@ block("Ground", Vector3.new(200, 1, 200), Vector3.new(0, -0.5, 0), DARK)
 -- **Built as a shell rather than as a box with the ends removed**, for
 -- `Hallway.luau`'s reason: the mouths are where a pane could go and a mouth with
 -- a lip on it is a mouth whose pane does not fill it. Here the mouths are left
--- open — both tunnels are walked *into*, not through a hole in a wall — but the
+-- open - both tunnels are walked *into*, not through a hole in a wall - but the
 -- shell is still the right build, because the panes inside have to fill the
 -- cross-section exactly and a lipped section would leave a crack round each.
 local function tunnel(name: string, x: number, half: number)
@@ -156,8 +156,8 @@ tunnel("Short", SHORT_X, SHORT / 2)
 --
 -- **`CanCollide = false` authored here rather than left to `OpenPortals`.** A
 -- pane is an ordinary part and an ordinary part is a wall, so anything that
--- loads this scene without running the portal systems — the studio's edit view,
--- a tool reading the world — would otherwise park a walker on the glass, and
+-- loads this scene without running the portal systems - the studio's edit view,
+-- a tool reading the world - would otherwise park a walker on the glass, and
 -- here that means bricking both tunnels rather than leaving a doorway shut.
 --
 -- `turned` is the whole aim: `Front` is local -Z, so an unrotated pane faces -Z
@@ -247,7 +247,7 @@ block("ShortPost", Vector3.new(1, 6, 1), Vector3.new(SHORT_X - 6, 3, SHORT / 2 +
 -- --- light ----------------------------------------------------------------
 --
 -- **A lamp is the only light a scene can add.** A world's `Lighting` service
--- round-trips and nothing reads it — `scene::LightingServiceComponent` says so —
+-- round-trips and nothing reads it - `scene::LightingServiceComponent` says so -
 -- so every lit thing here hangs under a `PointLight`, and `opaque.frag`'s
 -- falloff is a windowed inverse square. `Brightness = 1` against `1 / (1 + d²)`
 -- is invisible at any distance a tunnel has; two orders up is what reads as a
@@ -294,7 +294,7 @@ lamp("PlainLampSouth", Vector3.new(0, 14, -22), 90)
 -- **Script-driven rather than thrown, and the reason is a gap rather than a
 -- preference.** `CrossPortals` carries "anything with a velocity, not only a
 -- character" through a hole, so the engine would do this itself given a moving
--- body — but a script cannot author one. `Motion` is engine-declared and
+-- body - but a script cannot author one. `Motion` is engine-declared and
 -- therefore has no script-readable schema (`SetComponent` refuses it by design),
 -- and `BasePart` exposes no velocity property, so the only body a scene can make
 -- is an unanchored one, which falls. These blocks are anchored, `CanCollide`
@@ -304,7 +304,7 @@ lamp("PlainLampSouth", Vector3.new(0, 14, -22), 90)
 -- here is one pane facing +Z and its partner facing -Z with no rotation between
 -- them, so each hop is a pure translation and a leg boundary sits on the pane
 -- plane. The cost of doing it by hand is the one frame of pop as the block
--- changes ends — a real crosser is drawn straddling the seam and this is not.
+-- changes ends - a real crosser is drawn straddling the seam and this is not.
 
 type Leg = {
 	From: Vector3,
@@ -389,7 +389,7 @@ drifter("ShortDrifter", SHORT_MARK, {
 --
 -- North of both, facing them. The name is the contract: `scene::FindSpawn` looks
 -- for exactly this under `Workspace`, and a world without one spawns everybody
--- at the origin — which here is between the two tunnels and level with neither
+-- at the origin - which here is between the two tunnels and level with neither
 -- mouth.
 block("SpawnLocation", Vector3.new(8, 1, 8), Vector3.new(0, 0.5, 30), FLOOR)
 
@@ -398,7 +398,7 @@ block("SpawnLocation", Vector3.new(8, 1, 8), Vector3.new(0, 0.5, 30), FLOOR)
 -- **Off by default, because this scene is meant to be walked.** A
 -- `workspace.CurrentCamera` overrides the character's, so setting one
 -- unconditionally would make the demo a video. `VIEW` below names a
--- viewpoint for a headless capture — which is how a change to the portal pass
+-- viewpoint for a headless capture - which is how a change to the portal pass
 -- gets looked at without a display.
 -- **Unset means no camera at all**, which is the difference between this and
 -- `Hallway.luau`: that file names a default still because it is mostly read as a
@@ -407,7 +407,7 @@ block("SpawnLocation", Vector3.new(8, 1, 8), Vector3.new(0, 0.5, 30), FLOOR)
 local viewpoint: CFrame? = nil
 
 -- **A line this file rewrites rather than a global.** `_G` is readonly in the
--- script sandbox, so nothing outside a scene can set one — the capture scripts
+-- script sandbox, so nothing outside a scene can set one - the capture scripts
 -- copy the file and substitute the line below, which is the only mechanism that
 -- actually works from a shell.
 local VIEW = ""

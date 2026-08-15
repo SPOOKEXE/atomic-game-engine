@@ -179,7 +179,7 @@ TEST_CASE("every plugin gets its own globals", "[studio][plugins]") {
 
 	// **The assertion is inside the second plugin.** Two plugins sharing a
 	// runtime would share a global table, and the one that ran second would see
-	// what the first left — so this fails by the second plugin refusing to
+	// what the first left - so this fails by the second plugin refusing to
 	// start rather than by anything here.
 	for (const LoadedPlugin &plugin : plugins) {
 		INFO(plugin.Manifest.Name << ": " << plugin.Error);
@@ -214,7 +214,7 @@ TEST_CASE("a plugin that will not start does not stop the others", "[studio][plu
 	CHECK_FALSE(delta->Running);
 	CHECK(delta->Error.find("missing.luau") != std::string::npos);
 
-	// Switched off is a state, not a failure — it stays on disk and stays listed.
+	// Switched off is a state, not a failure - it stays on disk and stays listed.
 	const LoadedPlugin *echo = Named(plugins, "Echo");
 	CHECK_FALSE(echo->Running);
 	CHECK(echo->Error == "switched off");
@@ -317,7 +317,7 @@ TEST_CASE("a plugin reads the selection as a component", "[studio][plugins]") {
 //
 // **A stand-in host rather than a live `Editor`.** Starting one needs a window,
 // a renderer and a universe; what these cases are about is the *shape* a plugin
-// sees — that a toolbar answers an id, that a button's handler is held and can
+// sees - that a toolbar answers an id, that a button's handler is held and can
 // be called, that the widget calls are refused outside a render. The editor's
 // own implementation is `PluginSurface.cpp` and is exercised by running it.
 
@@ -346,7 +346,7 @@ namespace {
 				"Label",
 
 				// A dotted name is a service, which is how the editor offers
-				// `Selection` — see `PluginSurface.cpp`.
+				// `Selection` - see `PluginSurface.cpp`.
 				"Selection.Get",
 				"Selection.Set",
 			};

@@ -75,7 +75,12 @@ namespace engine::replication {
 	ApplyStatus Replica::Apply(ecs::Store &store, const SnapshotChunk &chunk) {
 		ENGINE_PROFILE_CAT("replica.snapshot", core::ProfileCategory::Network);
 
-		if (!Assembling || chunk.Tick != SnapshotTick || Snapshot.size() != chunk.TotalBytes) {
+		// **The stage is part of the buffer's identity, beside the tick.** A join
+		// is two blobs taken at one tick, so two of the same length would
+		// otherwise be assembled into one another - half a preface spliced under
+		// half a world, restored without a complaint from anything.
+		if (!Assembling || chunk.Tick != SnapshotTick || chunk.Stage != Stage ||
+			Snapshot.size() != chunk.TotalBytes) {
 			if (Assembling && chunk.Tick < SnapshotTick) {
 				return ApplyStatus::Stale;
 			}
@@ -84,6 +89,7 @@ namespace engine::replication {
 			Received.assign(chunk.TotalBytes, false);
 			Outstanding = chunk.TotalBytes;
 			SnapshotTick = chunk.Tick;
+			Stage = chunk.Stage;
 			Assembling = true;
 		}
 
@@ -105,8 +111,15 @@ namespace engine::replication {
 			return ApplyStatus::Ok;
 		}
 
+		// **The preface merges and the world sweeps, and swapping them is the
+		// bug.** A preface is a slice of a world, so applying it authoritatively
+		// would destroy everything it does not mention - which on a re-snapshot
+		// is the entire world the client already holds, wiped a moment before
+		// being sent it again.
+		const bool preface = Stage == SnapshotStage::Preface;
+
 		core::ByteReader reader(Snapshot);
-		if (!store.Apply(reader, ecs::ApplyMode::Authoritative)) {
+		if (!store.Apply(reader, preface ? ecs::ApplyMode::Overlay : ecs::ApplyMode::Authoritative)) {
 			// Apply through the store's scratch path to avoid partial state.
 			ENGINE_ERROR("replication: the joining snapshot could not be restored.");
 			Assembling = false;
@@ -120,12 +133,32 @@ namespace engine::replication {
 		Snapshot.shrink_to_fit();
 		Received.clear();
 
+		if (preface) {
+			// **The join is not over and `Applied` does not move.** What has
+			// arrived is the part a loading screen is made of; acknowledging the
+			// tick it was taken at would tell the server this client holds a
+			// world it has been sent a corner of.
+			Prefaced_ = true;
+			Stats_.Prefaces++;
+
+			// **Here rather than left to the caller's next poll**, because the
+			// caller's next poll is not a moment - `Connector::Poll` applies the
+			// preface and whatever of the world arrived with it in one call, so
+			// by the time anything outside looks, the window this preface exists
+			// to open has already closed. See `OnPreface`.
+			if (Preface_) {
+				Preface_(store);
+			}
+
+			return ApplyStatus::Ok;
+		}
+
 		Counting = Parts{};
 
 		// **A snapshot is the whole world, so nothing in it is half-built.**
 		// Anything that was being held is either in these bytes with its parent
 		// or is not in them at all, and either way the hold has nothing left to
-		// say — keeping it would re-parent an entity the snapshot may have put
+		// say - keeping it would re-parent an entity the snapshot may have put
 		// somewhere else.
 		Arriving_.clear();
 
@@ -151,7 +184,7 @@ namespace engine::replication {
 		// **The write itself is shared with the inbound direction**, which is
 		// what `Submission.hpp` is for: a delta going up the wire is the same
 		// bytes as one coming down, and the only difference is whether the
-		// sender was allowed to say it. No filter here — the sender is the
+		// sender was allowed to say it. No filter here - the sender is the
 		// authority.
 		const WriteOutcome outcome = WriteComponents(store, delta);
 		if (outcome.Status != ApplyStatus::Ok) {
@@ -171,7 +204,7 @@ namespace engine::replication {
 
 			// The bound. An entity held past `HOLD_DELTAS` is shown wherever it
 			// has got to, because content that is simply missing is worse than
-			// content that arrived in two steps — `HOLD_DELTAS` carries why.
+			// content that arrived in two steps - `HOLD_DELTAS` carries why.
 			const uint64_t seen = Stats_.Deltas;
 			std::vector<Arrival> overdue;
 			std::erase_if(Arriving_, [&](const Arrival &arriving) {
@@ -227,8 +260,8 @@ namespace engine::replication {
 	void Replica::ReleaseArrivals(ecs::Store &store) {
 		for (const Arrival &arriving : Arriving_) {
 			if (arriving.Parent == ecs::NULL_ENTITY) {
-				// It never had one. A replicated root is an ordinary thing —
-				// `Instance.new` with no parent is exactly this — and putting it
+				// It never had one. A replicated root is an ordinary thing -
+				// `Instance.new` with no parent is exactly this - and putting it
 				// somewhere would be inventing a tree the server did not send.
 				continue;
 			}
@@ -254,8 +287,8 @@ namespace engine::replication {
 			store.CreateAt(entity);
 
 			// **Recorded before a single component of it has arrived.** The
-			// hold is what stops a half-built entity being drawn — see
-			// `HoldArrivals` — and the moment to start holding is the moment the
+			// hold is what stops a half-built entity being drawn - see
+			// `HoldArrivals` - and the moment to start holding is the moment the
 			// entity exists, because the delta that parents it may be the very
 			// next message.
 			Arriving_.push_back(Arrival{entity, ecs::NULL_ENTITY, Stats_.Deltas});
@@ -266,13 +299,54 @@ namespace engine::replication {
 
 			// Nothing to give a parent back to. Left in the list it would be a
 			// `SetParent` on a dead handle every time a tick completed.
-			std::erase_if(Arriving_, [entity](const Arrival &arriving) {
-				return arriving.Entity == entity;
-			});
+			std::erase_if(Arriving_, [entity](const Arrival &arriving) { return arriving.Entity == entity; });
 		}
 		Forgotten_.insert(Forgotten_.end(), structure.Forgotten.begin(), structure.Forgotten.end());
 
 		Stats_.Structures++;
+		return ApplyStatus::Ok;
+	}
+
+	ApplyStatus Replica::Check(const ecs::Store &store, const replication::GroupSignatures &signatures) {
+		ENGINE_PROFILE_CAT("replica.audit", core::ProfileCategory::Network);
+
+		if (!Joined_) {
+			Stats_.Stale++;
+			return ApplyStatus::Stale;
+		}
+
+		// **Every name resolved before anything is hashed**, exactly as
+		// `WriteComponents` does and for the same reason: a build that cannot
+		// name one of these would hash a different set of leaves and report a
+		// disagreement about a component rather than about a value. That is a
+		// build mismatch and it says so, rather than becoming an audit that
+		// disputes everything for ever.
+		std::vector<ecs::ComponentId> components;
+		components.reserve(signatures.Components.size());
+		for (const core::Name named : signatures.Components) {
+			const ecs::ComponentId component = ecs::Components::Find(named);
+			if (!component.IsValid()) {
+				ENGINE_ERROR(
+					"replication: an audit names component '{}', which this build has not registered.",
+					named.Text()
+				);
+				return ApplyStatus::UnknownComponent;
+			}
+			components.push_back(component);
+		}
+
+		Disputing_ = replication::Disputed{};
+		Disputing_.Tick = signatures.Tick;
+
+		for (const AuditGroup &group : signatures.Groups) {
+			if (AuditDigest(store, components, group.Entities, AuditSide::Replica) == group.Digest) {
+				continue;
+			}
+			Disputing_.Groups.push_back(group.Group);
+		}
+
+		Stats_.Audits++;
+		Stats_.Mismatched += Disputing_.Groups.size();
 		return ApplyStatus::Ok;
 	}
 
@@ -295,9 +369,19 @@ namespace engine::replication {
 		case MessageKind::Structure:
 			return Apply(store, read.Structure);
 
+		case MessageKind::GroupSignatures:
+			return Check(store, read.Signatures);
+
 		case MessageKind::Input:
 		case MessageKind::Applied:
 		case MessageKind::Identify:
+		case MessageKind::Disputed:
+		// **`User` is refused here rather than ignored.** Its payload is opaque
+		// to this module by design - see `MessageKind::User` - so whoever owns
+		// the link peels one off before this point. One arriving here means the
+		// caller did not, which is a routing mistake worth counting rather than
+		// a message to drop quietly.
+		case MessageKind::User:
 			Stats_.Malformed++;
 			return ApplyStatus::Malformed;
 		}
@@ -313,6 +397,17 @@ namespace engine::replication {
 
 		core::ByteWriter writer;
 		WriteMessage(writer, replication::Applied{Applied_});
+		return {writer.Bytes().begin(), writer.Bytes().end()};
+	}
+
+	std::vector<std::byte> Replica::Dispute() {
+		if (Disputing_.Groups.empty()) {
+			return {};
+		}
+
+		core::ByteWriter writer;
+		WriteMessage(writer, Disputing_);
+		Disputing_ = replication::Disputed{};
 		return {writer.Bytes().begin(), writer.Bytes().end()};
 	}
 }

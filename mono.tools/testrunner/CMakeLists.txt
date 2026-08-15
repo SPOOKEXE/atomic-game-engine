@@ -2,7 +2,7 @@
 #
 # A library plus a thin executable, the same shape as a program, so that its
 # guts are testable. The tests it grows are ordinary Catch2 suites with
-# TEST_SUITE_ID — which means the runner discovers and re-runs its own tests
+# TEST_SUITE_ID - which means the runner discovers and re-runs its own tests
 # like any other. A test runner that cannot see its own tests is one whose bugs
 # hide other bugs.
 #

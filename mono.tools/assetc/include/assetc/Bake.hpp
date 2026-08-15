@@ -4,6 +4,7 @@
 // copied by default, and baked names replace source extensions deterministically.
 
 #include <engine/assets/AssetKind.hpp>
+#include <engine/assets/ContentPolicy.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -24,7 +25,7 @@ namespace assetc {
 		// Where the baked tree goes. Created if it is not there.
 		//
 		// **Empty means nothing is written and every row carries its bytes
-		// instead** — see `Baked::Payload`. That is one branch at the point of
+		// instead** - see `Baked::Payload`. That is one branch at the point of
 		// emission rather than a second entry point, because everything that
 		// makes a bake *correct* is in the walk above it: a model's texture
 		// references are rewritten through `BakedName`, a texture is resized
@@ -53,8 +54,8 @@ namespace assetc {
 		// alone" rather than "use twelve": a GIF states a delay per frame and
 		// the decoder averages those into a rate, so the common case needs
 		// nothing said here. This exists for the case where the source is wrong
-		// — an exporter that wrote 100ms on every frame of something drawn at
-		// 24fps, which is a thing exporters do — and for re-timing an animation
+		// - an exporter that wrote 100ms on every frame of something drawn at
+		// 24fps, which is a thing exporters do - and for re-timing an animation
 		// without re-exporting it.
 		//
 		// It applies to every flipbook in the run, because `assetc` bakes a
@@ -68,15 +69,15 @@ namespace assetc {
 		// alone cannot say.
 		//
 		// **Because a flattened store destroys the relationship a model file
-		// relies on.** A `.pmx` names its sheets the way it was authored —
-		// `tex/体.png`, relative to the folder the model sat in — and that works
+		// relies on.** A `.pmx` names its sheets the way it was authored -
+		// `tex/体.png`, relative to the folder the model sat in - and that works
 		// perfectly while the bake walks an art tree with the `tex/` folder still
 		// beside the model. `cdn::ImportFile` renames every file to
 		// `<hash><extension>` in one flat directory, so after an import the
 		// model is `<hash>.pmx`, the sheet is a different `<hash>.png`, and
 		// nothing in the folder records that the two belong together.
 		//
-		// The lexical join then produced `tex/体.atex` — a name no manifest
+		// The lexical join then produced `tex/体.atex` - a name no manifest
 		// carries, written into the mesh without a word. Every PMX character in
 		// this repository's own store baked and published with dangling sheet
 		// references, and the symptom was models that arrive, draw, and are
@@ -84,7 +85,7 @@ namespace assetc {
 		// string joining it to its pixels points at nothing.
 		//
 		// **The import log is the only surviving link**, so the resolver lives
-		// with whoever owns the log rather than here — `cdn::StoreTextureResolver`
+		// with whoever owns the log rather than here - `cdn::StoreTextureResolver`
 		// builds one. This module stays ignorant of `mono.cdn`, which the tier
 		// check would refuse anyway.
 		//
@@ -93,13 +94,27 @@ namespace assetc {
 		//
 		// @param model     The model being baked, relative to `Input`.
 		// @param reference The texture as the model spelled it.
-		// @param out       Set to the *source* name, relative to `Input` — not
+		// @param out       Set to the *source* name, relative to `Input` - not
 		//        the baked one. `BakedName` is applied by the caller so the
 		//        naming rule stays in one place.
 		// @return `false` to fall back to resolving against the tree.
 		// @since v0.10
 		std::function<bool(std::string_view model, std::string_view reference, std::string &out)>
 			ResolveTexture;
+
+		// Whether to build every baked texture's mip chain.
+		//
+		// **On by default, because the cost is a third of a texture's bytes and
+		// the alternative is visible from the first frame.** A 2048 sheet drawn
+		// across forty pixels without levels samples one texel in fifty and
+		// shimmers as the camera moves - which reads as a renderer bug rather
+		// than as missing content.
+		//
+		// Off is for a bake whose output is going somewhere that builds its own
+		// levels, and for measuring what the chain costs.
+		//
+		// @since v0.14
+		bool Mipmaps = true;
 
 		// Whether to copy files the baker does not understand.
 		//
@@ -110,7 +125,7 @@ namespace assetc {
 		//
 		// **For the editor, which bakes what somebody just picked.** A studio
 		// showing the raw folder has to turn one file into something a runtime
-		// reads *now* — re-walking a store of six thousand assets to do it would
+		// reads *now* - re-walking a store of six thousand assets to do it would
 		// take minutes, and a picker that hung for minutes is one nobody uses.
 		//
 		// **A filter on the existing walk rather than a second entry point**,
@@ -124,6 +139,26 @@ namespace assetc {
 		//
 		// @since v0.10
 		std::string Only;
+
+		// Which content forms this run will touch at all.
+		//
+		// **The decoder door, and it is the earliest one there is.** A refused
+		// source is not decoded, not copied and not written, so a deployment
+		// that has turned SVG off never runs the rasteriser - which is what
+		// makes the flag a statement about a parser rather than about a
+		// picture.
+		//
+		// **Defaulted from the process's own settings rather than to "allow
+		// everything"**, so the callers who bake - `assetc`, `contentimport`
+		// and the studio's two raw-asset paths - are gated by one line here
+		// rather than by three they each have to remember. A caller wanting a
+		// different one assigns it; a program that never declared the flags
+		// gets everything, which is what `ContentPolicy::FromFlags` guarantees
+		// and what this engine did before they existed.
+		//
+		// @since v0.15
+		engine::assets::ContentPolicy Content =
+			engine::assets::ContentPolicy::Process(engine::assets::ContentVerb::Handle);
 	};
 
 	// What one source file became.
@@ -152,7 +187,7 @@ namespace assetc {
 		// **For a caller that wants the asset and not a file.** The editor's
 		// raw folders are the case: a person points at their art directory and
 		// expects to see it in the viewport, and writing a baked copy beside it
-		// — or into somebody's content store — is a side effect they did not
+		// - or into somebody's content store - is a side effect they did not
 		// ask for and would have to clean up. Kept here rather than returned
 		// separately so a row still says what it is, what it weighs and why it
 		// failed, in one place.
@@ -169,7 +204,7 @@ namespace assetc {
 	//
 	// @since v0.9
 	struct Report {
-		// One row per asset the run produced, failures included — a row carries
+		// One row per asset the run produced, failures included - a row carries
 		// its own failure so a caller can name what did not bake rather than
 		// subtract two counts.
 		std::vector<Baked> Assets;
@@ -187,7 +222,7 @@ namespace assetc {
 		// input tree.
 		//
 		// **Counted rather than left to the log**, because this is the failure
-		// that produces a model which loads, draws, and is silently untextured —
+		// that produces a model which loads, draws, and is silently untextured -
 		// and a warning per submesh in a run of two thousand assets is a line
 		// nobody scrolls back to. A non-zero number here is the one thing that
 		// says "this bake produced references that cannot resolve", and
@@ -195,6 +230,18 @@ namespace assetc {
 		//
 		// @since v0.10
 		size_t DanglingTextures = 0;
+
+		// How many sources `Settings::Content` refused.
+		//
+		// **Counted apart from `Failures`, because a refusal is not one.** A
+		// caller that treats any failure as a broken bake must not be broken by
+		// a deployment deciding it does not want GIFs - but a run that silently
+		// produced fewer assets than its input holds is exactly the mystery the
+		// whole settings layer exists to end, so the number is reported and each
+		// refused source keeps a row saying why.
+		//
+		// @since v0.15
+		size_t Refused = 0;
 	};
 
 	// The baked name for a source path.
@@ -212,7 +259,7 @@ namespace assetc {
 	// Bakes one tree into another.
 	//
 	// @param settings What to bake and how.
-	// @param failure  Set when the run could not start at all — a missing input
+	// @param failure  Set when the run could not start at all - a missing input
 	//                 directory, an output that cannot be created. A file that
 	//                 failed on its own is a row in the report instead.
 	// @return What happened, one row per source file.

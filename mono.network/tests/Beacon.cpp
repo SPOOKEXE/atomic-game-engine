@@ -3,7 +3,7 @@
 //
 // **No socket and no sleeping.** The loopback honours a broadcast, so what runs
 // here is the same `Encode`, the same datagram and the same `Decode` a real
-// subnet carries — §16.6's argument, applied to discovery. Every interval is
+// subnet carries - §16.6's argument, applied to discovery. Every interval is
 // stated rather than waited for, which is what the module's "time is passed in"
 // rule buys.
 

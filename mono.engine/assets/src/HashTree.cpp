@@ -90,7 +90,7 @@ namespace engine::assets {
 			}
 			if (index < below.size()) {
 				// Odd node out. Promoted unchanged rather than paired with a
-				// copy of itself — duplicating it makes two different leaf sets
+				// copy of itself - duplicating it makes two different leaf sets
 				// produce one root, which is the flaw the leaf count in
 				// SealRoot also guards, and there is no reason to rely on only
 				// one of the two.
@@ -147,7 +147,7 @@ namespace engine::assets {
 
 		// A verification failure is a security signal and not a miss. A rate
 		// that climbs means somebody is serving bytes that do not match a root
-		// the client trusts — which, per CDN.md §1, is the one thing a
+		// the client trusts - which, per CDN.md §1, is the one thing a
 		// compromised origin cannot do without being seen. It is seen here.
 		core::Metrics::Count(passed ? "assets.verify.passed" : "assets.verify.failed", 1.0);
 		return passed;
@@ -174,7 +174,7 @@ namespace engine::assets {
 			if (sibling < width) {
 				if (consumed >= proof.size()) {
 					// The path is shorter than the shape requires. Refuse rather
-					// than treat a missing sibling as a promotion — that would
+					// than treat a missing sibling as a promotion - that would
 					// let a truncated proof verify.
 					return false;
 				}

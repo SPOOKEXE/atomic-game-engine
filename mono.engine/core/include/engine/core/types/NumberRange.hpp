@@ -2,8 +2,8 @@
 
 // A closed interval of numbers.
 //
-// Roblox's `NumberRange`, and it is two floats with one useful question — is a
-// value inside — plus the sampling a particle emitter does with it. Kept as its
+// Roblox's `NumberRange`, and it is two floats with one useful question - is a
+// value inside - plus the sampling a particle emitter does with it. Kept as its
 // own type rather than a `Vector2` because the two mean different things: a
 // `Vector2` has an X and a Y that are independent, and this has a low and a high
 // that are ordered. Passing one where the other is expected compiles either way,
@@ -17,7 +17,7 @@ namespace engine::core {
 	//
 	// Nothing here reorders a range built backwards. `Contains` on one is false
 	// for every value, which is the answer that makes the mistake visible at the
-	// first test rather than at the tenth — the same choice `AABB` makes.
+	// first test rather than at the tenth - the same choice `AABB` makes.
 	//
 	// @since v0.6
 	struct NumberRange {

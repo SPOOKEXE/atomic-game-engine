@@ -3,8 +3,8 @@
 // Groups that have already been compressed, so they are built once and streamed
 // many times.
 //
-// Preparing a group is the origin's only real compute — hashing, chunking and
-// compressing a set of assets — and it produces the same bytes every time.
+// Preparing a group is the origin's only real compute - hashing, chunking and
+// compressing a set of assets - and it produces the same bytes every time.
 // Doing it per request would make an origin's cost scale with its *popularity*
 // rather than with its content, which is exactly backwards: the group everybody
 // wants is the one that would be rebuilt most.
@@ -18,7 +18,7 @@
 // **A prepared frame is handed out as a shared pointer, not a view.** Eviction
 // happens on whichever thread inserts, and a reader streaming a frame must not
 // have it freed underneath. Ownership shared with the reader is the cheap answer;
-// the alternative — a lock held for the length of a transfer — makes one slow
+// the alternative - a lock held for the length of a transfer - makes one slow
 // client block every eviction in the origin.
 //
 // @tier shared
@@ -56,7 +56,7 @@ namespace cdn {
 	  public:
 		// What the cache is allowed to hold.
 		//
-		// Chosen rather than derived — CDN.md §9 carries "memory, disk or both"
+		// Chosen rather than derived - CDN.md §9 carries "memory, disk or both"
 		// as an open question, and this is the memory half with no measurement
 		// behind its size yet.
 		static constexpr uint64_t DEFAULT_CAPACITY_BYTES = 256ull * 1024 * 1024;
@@ -76,7 +76,7 @@ namespace cdn {
 		// Stores a prepared group, evicting to make room.
 		//
 		// A frame larger than the whole capacity is refused rather than stored
-		// by emptying the cache for it — one group that evicts everything else
+		// by emptying the cache for it - one group that evicts everything else
 		// on every insert is worse than not caching that group at all.
 		//
 		// Inserting a key that is already present replaces nothing and returns
@@ -92,7 +92,7 @@ namespace cdn {
 		// Whether a key is present, without marking it used.
 		//
 		// For a diagnostic or a test. Using this to decide whether to prepare
-		// would be a check-then-act race — call Find.
+		// would be a check-then-act race - call Find.
 		//
 		// @param key The bundle and dictionary.
 		// @return Whether it is cached.

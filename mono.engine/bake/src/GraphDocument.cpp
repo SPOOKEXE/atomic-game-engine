@@ -76,6 +76,9 @@ namespace engine::bake {
 			case OperationKind::AddResize:
 				added = graph.AddResize(operation.Width, operation.Height);
 				break;
+			case OperationKind::AddRasterize:
+				added = graph.AddRasterize(operation.Width, operation.Height);
+				break;
 			case OperationKind::AddRetime:
 				added = graph.AddRetime(operation.Number);
 				break;

@@ -1,7 +1,7 @@
 // The 3D branch: which instance an adornment is about, and whether it draws.
 //
 // **What is tested here is the half `gui` owns**, which is the tree half. An
-// adornment is a description — what to outline, in what colour, how solid — and
+// adornment is a description - what to outline, in what colour, how solid - and
 // turning that into geometry needs the adornee's `CFrame` and stud extent,
 // which are `scene`'s and which this module may not link. That split is
 // `D00022`'s, arrived at again: whoever draws an adornment has both operands
@@ -118,7 +118,7 @@ TEST_CASE("an adornee that is gone is not silently replaced by the parent", "[gu
 	// **The one place the fallback must not fire.** An `Adornee` pointing at
 	// something destroyed is an adornment about nothing; quietly re-aiming it at
 	// whatever it happens to be parented to would draw a box around the wrong
-	// object, which is worse than drawing none — a wrong selection box is a
+	// object, which is worse than drawing none - a wrong selection box is a
 	// wrong answer to "what am I about to delete".
 	World world("adornments.dangling");
 
@@ -140,7 +140,7 @@ TEST_CASE("an adornee that is gone is not silently replaced by the parent", "[gu
 TEST_CASE("an adornment draws from the world and the gui containers", "[gui][adornments]") {
 	// The same containment `Layout` applies to a `SurfaceGui`, and for the same
 	// reason: an adornment hangs off something in the world, so the world is a
-	// legal home for it — and so are the two interface containers, because an
+	// legal home for it - and so are the two interface containers, because an
 	// editor keeps its gizmos somewhere a game's tree does not.
 	World world("adornments.contained");
 
@@ -161,14 +161,14 @@ TEST_CASE("an adornment outside a container does not draw", "[gui][adornments]")
 	// **Under a `Part` is not contained, and the distinction is the one that
 	// would otherwise be discovered by somebody wondering why their handle
 	// vanished when they tidied the tree.** The part is what an adornment
-	// *adorns*, not where it lives — and a part that is itself outside the
+	// *adorns*, not where it lives - and a part that is itself outside the
 	// world is nowhere at all.
 	World world("adornments.uncontained");
 
 	const Entity loose = world.Bare("Loose");
 	const Entity box = world.Adorn("SelectionBox", loose);
 
-	// The adornee resolves — its parent is right there — and it still must not
+	// The adornee resolves - its parent is right there - and it still must not
 	// draw, which is what separates the two questions.
 	CHECK(AdorneeOf(world.Data, box) == loose);
 	CHECK_FALSE(AdornmentDrawn(world.Data, box));
@@ -189,7 +189,7 @@ TEST_CASE("an invisible adornment does not draw", "[gui][adornments]") {
 
 TEST_CASE("adornments are visited in ZIndex order", "[gui][adornments]") {
 	// **Ordered here rather than by each drawer**, because two drawers sorting
-	// independently is two answers to what covers what — and an editor drawing
+	// independently is two answers to what covers what - and an editor drawing
 	// a move gizmo under the selection box it belongs to reads as the gizmo
 	// being broken.
 	World world("adornments.order");

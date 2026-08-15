@@ -7,7 +7,7 @@
 // and is only allowed because the difference is invisible. So the direction of
 // the error matters more than the speed: a test that wrongly says "visible"
 // costs a draw, and one that wrongly says "hidden" is a hole in the world.
-// Everything below is biased that way — the box test is conservative, and it
+// Everything below is biased that way - the box test is conservative, and it
 // says "visible" whenever it is not certain.
 //
 // **Planes come out of the view-projection matrix rather than out of the
@@ -15,7 +15,7 @@
 // `-w ≤ x ≤ w` is a row combination of the matrix, and the six of them are the
 // six planes. Deriving from the matrix rather than from a field of view and an
 // aspect ratio means the frustum cannot disagree with what was actually
-// projected — which is the bug that produces geometry popping at the screen
+// projected - which is the bug that produces geometry popping at the screen
 // edge on one machine and not another.
 //
 // `scene::ResolveCamera` is where that matrix comes from, and it is the one
@@ -87,7 +87,7 @@ namespace engine::graph {
 		// distance, and a caller comparing one against a radius would otherwise
 		// be comparing against an arbitrary scale.
 		//
-		// Assumes the Vulkan convention this engine pins everywhere —
+		// Assumes the Vulkan convention this engine pins everywhere -
 		// `GLM_FORCE_DEPTH_ZERO_TO_ONE`, so the near plane is `z ≥ 0` rather
 		// than `z ≥ -w`. A frustum built for the OpenGL convention would clip
 		// everything in front of the camera, which reads as a renderer that
@@ -101,8 +101,8 @@ namespace engine::graph {
 		// Reports whether a box is at least partly inside.
 		//
 		// **Conservative: a `true` may be wrong and a `false` may not.** The
-		// test is the standard positive-vertex one — for each plane, the corner
-		// furthest along the inward normal — which never rejects a box that is
+		// test is the standard positive-vertex one - for each plane, the corner
+		// furthest along the inward normal - which never rejects a box that is
 		// actually visible. It can accept a box that is outside all six planes
 		// but outside no single one, which happens for large boxes near a
 		// corner; that costs a draw call and nothing else.

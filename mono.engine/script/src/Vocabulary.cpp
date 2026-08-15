@@ -1,4 +1,4 @@
-#include "Bindings.hpp"
+#include "Signals.hpp"
 
 #include <engine/script/Vocabulary.hpp>
 
@@ -13,7 +13,7 @@ namespace engine::script {
 		// Luau's reserved words, from the lexer rather than from memory.
 		//
 		// Sorted, because the completion list is ranked by match quality and
-		// ties break by name — an unsorted source would put two runs in a
+		// ties break by name - an unsorted source would put two runs in a
 		// different order for no reason anybody could see.
 		constexpr std::string_view LUAU_KEYWORDS[] = {
 			"and",	 "break",  "continue", "do",   "else", "elseif", "end",	  "export",
@@ -55,7 +55,7 @@ namespace engine::script {
 		};
 
 		// `__instanceMethods` is a global only because that is where the shared
-		// method object had to live for `PrototypeFor` to reach it — see
+		// method object had to live for `PrototypeFor` to reach it - see
 		// `JsSurface.cpp`. It is not part of the surface anybody writes against.
 		//
 		// `globalThis`, `undefined` and `nil` are real and reachable; the first
@@ -71,15 +71,19 @@ namespace engine::script {
 	}
 
 	std::span<const std::string_view> InstanceSignals(const Language language) {
-		// **Luau's alone.** JavaScript installs the same fourteen as accessors
-		// on `__instanceMethods`, so a walk of that object already reports
-		// them; answering here as well would offer every one of them twice.
+		// **Luau's alone.** JavaScript installs the same list as accessors on
+		// `__instanceMethods`, so a walk of that object already reports them;
+		// answering here as well would offer every one of them twice.
+		//
+		// Deliberately not a count, for `ServiceCatalogue.cpp`'s reason: the
+		// number in this sentence has been wrong once already, and a stale one
+		// reads as a fact somebody checked.
 		if (language != Language::Luau) {
 			return {};
 		}
 
 		// Built once from the array that sits beside the branch chain in
-		// `Instances.cpp`, so this file names no signal of its own.
+		// `LuauInstances.cpp`, so this file names no signal of its own.
 		static const std::vector<std::string_view> signals = LuauInstanceSignalNames();
 		return signals;
 	}

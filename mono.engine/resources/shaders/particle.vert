@@ -3,7 +3,7 @@
 // A billboard, expanded from the vertex index rather than from a vertex buffer.
 //
 // **No quad geometry is bound at all.** Four corners of a unit square are two bit
-// tests, and a vertex fetch is a memory access — at half a million particles the
+// tests, and a vertex fetch is a memory access - at half a million particles the
 // difference is half a million cache lines that are never read. `gl_VertexIndex`
 // runs 0..3 and the draw is a triangle strip, so one instance is four vertices
 // and no index buffer either.
@@ -47,7 +47,7 @@ layout(location = 1) out vec4 outColour;
 void main() {
 	// **The corner comes out of the index, not out of a buffer.** Bit 0 is the
 	// right edge and bit 1 is the top, which walks 0,1,2,3 as bottom-left,
-	// bottom-right, top-left, top-right — the winding a triangle strip wants.
+	// bottom-right, top-left, top-right - the winding a triangle strip wants.
 	vec2 corner = vec2(
 		(gl_VertexIndex & 1) == 0 ? -0.5 : 0.5,
 		(gl_VertexIndex & 2) == 0 ? -0.5 : 0.5
@@ -55,7 +55,7 @@ void main() {
 
 	// 64 metres over 65535, matching `PackParticleSize`. Spelled as the constant
 	// rather than passed in, because a mismatch between the two would be a scene
-	// where every particle is the wrong size by a fixed factor — which reads as
+	// where every particle is the wrong size by a fixed factor - which reads as
 	// an authoring mistake rather than as a shader one.
 	const float SIZE_SCALE = 64.0 / 65535.0;
 	vec2 size = vec2(float(inSize & 0xFFFFu), float(inSize >> 16)) * SIZE_SCALE;
@@ -83,8 +83,8 @@ void main() {
 		+ quadUp * spun.y
 		- frame.CameraForward.xyz * frame.Options.y;
 
-	// The flipbook cell picks a rectangle of the texture. A side of 1 — no
-	// flipbook — makes this the whole of it, with no branch.
+	// The flipbook cell picks a rectangle of the texture. A side of 1 - no
+	// flipbook - makes this the whole of it, with no branch.
 	float side = frame.Options.x;
 	uint cell = inRotationAndCell >> 16;
 	vec2 cellOrigin = vec2(float(cell % uint(side)), float(cell / uint(side))) / side;

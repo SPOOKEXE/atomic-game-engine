@@ -47,7 +47,7 @@ return third
 	// keeps them.
 	//
 	// **A stand-in rather than a live `Editor`**, which needs a window and a
-	// renderer. What is copied is the rule, and it is four lines — a copy that
+	// renderer. What is copied is the rule, and it is four lines - a copy that
 	// drifted would fail the case that pins the two halves agreeing.
 	struct Editorish {
 		Debugger Master;
@@ -147,7 +147,7 @@ TEST_CASE("a run started later is handed the editor's breakpoints", "[studio][de
 	engine::scene::EnsureClassTree();
 
 	// Somebody sets a breakpoint before pressing Play, which is the ordinary
-	// order — and the whole reason the editor keeps a list of its own.
+	// order - and the whole reason the editor keeps a list of its own.
 	Editorish editor;
 	editor.Toggle("probe.luau", 4, BreakAction::Stop);
 

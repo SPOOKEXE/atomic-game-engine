@@ -29,7 +29,7 @@ namespace network {
 		// The one flag: whether a tag follows the body.
 		constexpr uint8_t FLAG_TAGGED = 0x01;
 
-		// The smallest a well-formed frame can be — every fixed field, plus the
+		// The smallest a well-formed frame can be - every fixed field, plus the
 		// two length prefixes of two empty strings. Checked before anything is
 		// read so a truncated datagram is refused rather than half-parsed.
 		constexpr size_t MINIMUM_BYTES =
@@ -131,7 +131,7 @@ namespace network {
 			);
 		} catch (const CryptoPP::Exception &) {
 			// The null id, which fails IsValid. A session that could not be
-			// named is one that cannot be announced — the alternative would be
+			// named is one that cannot be announced - the alternative would be
 			// a predictable id, and every host that could not draw one would
 			// announce as the same session.
 			return {};
@@ -213,7 +213,7 @@ namespace network {
 		if (!tagged) {
 			// Trailing rubbish is a refusal. A frame whose fields ended before
 			// its bytes did is one somebody appended to, and accepting it would
-			// let two datagrams that decode identically carry different bytes —
+			// let two datagrams that decode identically carry different bytes -
 			// which is the last thing a format a tag commits to should allow.
 			return body == datagram.size() ? std::optional<DecodedAdvert>(std::move(decoded)) : std::nullopt;
 		}

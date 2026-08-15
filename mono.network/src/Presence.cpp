@@ -84,7 +84,7 @@ namespace network {
 			presence->Listening = engine::net::MakeUdpTransport(settings.DiscoveryPort, ListenerSettings());
 			if (!presence->Listening) {
 				// Almost always another program holding the port without
-				// `ReuseAddress`. The announcement half still runs — a partial
+				// `ReuseAddress`. The announcement half still runs - a partial
 				// success is a success, and a program that refused to start
 				// over this would be refusing over a feature nobody asked to be
 				// essential.
@@ -105,9 +105,9 @@ namespace network {
 				// **Registering is decided by having something to register, not
 				// by whether the subnet is being broadcast to.** Those are
 				// different questions and tying them together made the case the
-				// point exists for — a host reachable through a rendezvous and
+				// point exists for - a host reachable through a rendezvous and
 				// announcing to nobody, which is every dedicated server on the
-				// internet — the one case that silently registered nothing while
+				// internet - the one case that silently registered nothing while
 				// still logging that it had.
 				//
 				// The same advert either way, and with no key: the beacon took
@@ -134,7 +134,7 @@ namespace network {
 		if (Meeting) {
 			if (Sharing) {
 				// The session's owner drains that transport. All that is left
-				// here is the repeating — a registration due, a poke due — and
+				// here is the repeating - a registration due, a poke due - and
 				// the repeats are what a punch is made of.
 				Meeting->Deliver({}, {}, &Table, nowSeconds);
 			} else {

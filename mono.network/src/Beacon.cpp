@@ -58,7 +58,7 @@ namespace network {
 			// Counted rather than retried. The next announcement is a quarter
 			// of a second away and carries newer numbers than this one, so a
 			// retry would put a stale advert on a wire that is already
-			// congested — which is why `net` keeps no outbox either.
+			// congested - which is why `net` keeps no outbox either.
 			Tally.Undelivered++;
 			return false;
 		}

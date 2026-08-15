@@ -2,7 +2,7 @@
 //
 // The target from `v02v03v04.md` is mixed: one or two worlds at 50k–500k
 // entities, plus tens to hundreds at 1k–10k. Both shapes are here, because they
-// stress different things — the large one measures the inner loop and the small
+// stress different things - the large one measures the inner loop and the small
 // one measures the *per-world* overhead, which is the cost that a hundred
 // worlds multiply.
 
@@ -230,7 +230,7 @@ BENCH("Tick · 50 quiet worlds, serial", 200) {
 	// dominates fifty empty worlds, and a measurement whose noise is larger
 	// than its subject measures the scheduler. This one runs the identical
 	// bookkeeping on the calling thread, so what it reports is the per-world
-	// cost of a barrier and nothing else — which is the number the storage and
+	// cost of a barrier and nothing else - which is the number the storage and
 	// resource paths are actually judged on.
 	Universe &universe = UniverseOf(50, 0, ExecutionMode::WorldSerial);
 	for (int pass = 0; pass < 200; pass++) {
@@ -243,7 +243,7 @@ BENCH("Tick · 200 suspended worlds, serial", 50) {
 	// and still given an inbox and a budget; what it does not do is tick.
 	//
 	// Against the case below, the difference is `World::Tick` and the
-	// difference alone — which is the only way to tell "the barrier costs too
+	// difference alone - which is the only way to tell "the barrier costs too
 	// much per world" from "an empty tick costs too much", and those want
 	// opposite fixes.
 	static Universe *suspended = nullptr;

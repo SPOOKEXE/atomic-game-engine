@@ -196,7 +196,7 @@ namespace engine::script {
 
 			case ValueTag::CFrame:
 				// Position then quaternion, which is the field order of the
-				// struct — but written component by component rather than as a
+				// struct - but written component by component rather than as a
 				// memcpy of it, so a padding byte or a reordered field cannot
 				// change what an old recording means.
 				PutTag(out, ValueTag::CFrame);
@@ -418,7 +418,7 @@ namespace engine::script {
 
 		// Trailing bytes mean the payload was not what it claimed. Accepting
 		// them would let a sender append anything it liked to a well-formed
-		// message and have it ignored — which is a channel, and a channel
+		// message and have it ignored - which is a channel, and a channel
 		// nobody audits.
 		if (cursor.Remaining()) {
 			out = ScriptValue{};

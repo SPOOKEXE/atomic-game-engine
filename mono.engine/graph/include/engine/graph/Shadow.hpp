@@ -4,7 +4,7 @@
 //
 // **A directional light has no position, and that is the whole problem.** The
 // sun is a direction; a shadow map is a rendered image, and an image needs a
-// camera. So one has to be invented — placed far enough back to see everything
+// camera. So one has to be invented - placed far enough back to see everything
 // that casts, and framed tightly enough that the texels are not wasted on empty
 // space.
 //
@@ -12,7 +12,7 @@
 // resolution and gives soft, blocky shadows; one fitted tightly clips casters
 // that are outside the view but still shadow into it. This fits to the **whole
 // scene** rather than to the camera's frustum, which is the conservative half
-// of that trade — nothing is ever clipped, and the cost is resolution on a
+// of that trade - nothing is ever clipped, and the cost is resolution on a
 // large world. Fitting to the frustum is the next thing to do here and it needs
 // a stability pass with it, because a frame-to-frame refit makes shadow edges
 // crawl.
@@ -39,7 +39,7 @@ namespace engine::graph {
 	//
 	// **Orthographic, because the light's rays are parallel.** A perspective
 	// projection here would make shadows converge toward a point the sun does
-	// not have, and the error grows with distance from the middle of the map —
+	// not have, and the error grows with distance from the middle of the map -
 	// which reads as shadows that are right in the centre of a scene and wrong
 	// at its edges.
 	//
@@ -57,8 +57,8 @@ namespace engine::graph {
 	// The same, for the beam of light that gets through one hole.
 	//
 	// **The frustum is the aperture, and that is the whole trick.** Light does
-	// not cross a portal everywhere — it crosses through the rectangle and
-	// nowhere else — so a shadow map for a hole has to answer only for the
+	// not cross a portal everywhere - it crosses through the rectangle and
+	// nowhere else - so a shadow map for a hole has to answer only for the
 	// fragments that rectangle's beam reaches. Fitting the sides of the box to
 	// the pane's own rectangle makes the map *be* the mask: anything outside the
 	// beam projects outside `0..1` and the lookup already reads that as lit.
@@ -80,7 +80,7 @@ namespace engine::graph {
 	// @param first     One half-axis of it, as a vector.
 	// @param second    The other.
 	// @param direction Which way the light travels. A zero direction, or a
-	//                  degenerate rectangle, yields the identity — which
+	//                  degenerate rectangle, yields the identity - which
 	//                  shadows nothing rather than shadowing everything.
 	// @return `Projection * View` for the beam.
 	// @since v0.15
@@ -95,7 +95,7 @@ namespace engine::graph {
 	// The box every instance in a draw list occupies.
 	//
 	// What `FitDirectionalLight` is fitted to. Separate because a caller may
-	// have a better answer — a world's authored `WorldBounds`, say — and
+	// have a better answer - a world's authored `WorldBounds`, say - and
 	// deriving one per frame from the draw list is the fallback rather than the
 	// intent.
 	//
@@ -113,8 +113,8 @@ namespace engine::graph {
 	//
 	// **The two used to be two passes over the same span, and the bound is the
 	// expensive half of both.** `BoundsOf` is three quaternion rotations and
-	// nine abs-mul-adds — `benchmarks/Cull.cpp` measured nine of the seventeen
-	// nanoseconds an instance at it, against eight for the six planes — so
+	// nine abs-mul-adds - `benchmarks/Cull.cpp` measured nine of the seventeen
+	// nanoseconds an instance at it, against eight for the six planes - so
 	// deriving it twice cost more than the frustum test it was paid for. Fused,
 	// the union is six float comparisons on a box the culler had already built.
 	//
@@ -124,8 +124,8 @@ namespace engine::graph {
 	// `ecs::ChangeChannel` is what a real cache would hang on, and it does not
 	// exist yet.
 	//
-	// **`visible` comes out exactly as `Cull` fills it** — ascending, one entry
-	// per survivor — and that is not an implementation detail. It is the order
+	// **`visible` comes out exactly as `Cull` fills it** - ascending, one entry
+	// per survivor - and that is not an implementation detail. It is the order
 	// the world produced, which `scene::OrderForDrawing` then keeps for the
 	// opaque head so that a recording of a frame replays as that frame. A pass
 	// that filled this list in any other order would be right on screen and
@@ -136,8 +136,8 @@ namespace engine::graph {
 	// @param instances The draw list.
 	// @param frustum   The view.
 	// @param visible   Filled in with indices into `instances`. Cleared first.
-	// @param bounds    Set to the union of every instance's world box — the
-	//                  whole list, not the survivors — or to a unit box at the
+	// @param bounds    Set to the union of every instance's world box - the
+	//                  whole list, not the survivors - or to a unit box at the
 	//                  origin for an empty list.
 	// @return How many are visible.
 	size_t CullAndBound(

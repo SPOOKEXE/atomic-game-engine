@@ -152,7 +152,7 @@ TEST_CASE("changes are per component, not per entity", "[ecs]") {
 
 TEST_CASE("clearing quiets everything at once", "[ecs]") {
 	// Cleared at a phase boundary rather than per read, so every consumer in a
-	// tick sees the same set — and a property written three times signals once.
+	// tick sees the same set - and a property written three times signals once.
 	Store store("test");
 	store.Observe<Spot>();
 
@@ -277,7 +277,7 @@ TEST_CASE("a table gains the bits only when one of its components is observed", 
 TEST_CASE("observing after the fact migrates what already exists", "[ecs]") {
 	// Declaring observation when a world is built avoids this entirely. Doing
 	// it late has to move every entity already carrying the component into a
-	// table with somewhere to put the bits — correct, and not free.
+	// table with somewhere to put the bits - correct, and not free.
 	Store store("test");
 
 	std::vector<Entity> entities;
@@ -327,7 +327,7 @@ TEST_CASE("the coarse counter moves on every recorded write", "[ecs]") {
 	store.Set<Spot>(entity, Spot{1.0f});
 	REQUIRE(store.ChangeVersion() > afterFirst);
 
-	// Clearing the bits does not rewind the counter — it is a monotonic "has
+	// Clearing the bits does not rewind the counter - it is a monotonic "has
 	// anything happened", which is what a consumer comparing against a stored
 	// value needs.
 	const uint64_t held = store.ChangeVersion();
@@ -337,7 +337,7 @@ TEST_CASE("the coarse counter moves on every recorded write", "[ecs]") {
 
 TEST_CASE("a batch write moves the counter but sets no bit", "[ecs]") {
 	// The documented gap. EachBatch hands out raw column pointers precisely to
-	// avoid a per-row check, so a write through one cannot set a bit — and
+	// avoid a per-row check, so a write through one cannot set a bit - and
 	// v0.4's QuickHash is what closes it for consumers that need row
 	// granularity over batch-written data.
 	Store store("test");
@@ -363,7 +363,7 @@ TEST_CASE("a batch write moves the counter but sets no bit", "[ecs]") {
 //
 // `EachChanged` hands over one row at a time, which is right for a signal and
 // wrong for a delta. Rows that changed together are usually adjacent, so a
-// replication pass wants the runs — a memcpy each rather than a copy per entity.
+// replication pass wants the runs - a memcpy each rather than a copy per entity.
 
 TEST_CASE("changed runs arrive as contiguous blocks", "[ecs]") {
 	Store store("runs");
@@ -436,7 +436,7 @@ TEST_CASE("a run stops at a chunk boundary and never straddles one", "[ecs]") {
 	// pointer and a row count, and `data + row * size` has to be the value for
 	// `entities[row]` over the whole run. A column is only contiguous inside one
 	// chunk, so a run allowed to grow past a boundary walks into the previous
-	// chunk's tail — and the entity array does *not*, because `Archetype::Ids`
+	// chunk's tail - and the entity array does *not*, because `Archetype::Ids`
 	// is one allocation. The result is entity A's id sent with entity B's bytes:
 	// every count still adds up, nothing crashes, and a client shows objects
 	// teleporting.
@@ -484,7 +484,7 @@ TEST_CASE("a run stops at a chunk boundary and never straddles one", "[ecs]") {
 	REQUIRE(straddling == 0);
 
 	// And clearing reaches every chunk. Both `MarkAllChanged` and
-	// `ClearChanges` used to take the whole row count from chunk zero's base —
+	// `ClearChanges` used to take the whole row count from chunk zero's base -
 	// a write past the end of the first chunk, so the bits past it were left
 	// alone and somebody else's chunk was overwritten.
 	store.ClearChanges();

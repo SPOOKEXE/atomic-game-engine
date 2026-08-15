@@ -8,7 +8,7 @@ namespace engine::world {
 	namespace {
 		// Recognises a frame before anything else is read.
 		//
-		// Both ends are the same binary, so this is not a compatibility check —
+		// Both ends are the same binary, so this is not a compatibility check -
 		// it is a check that the handle really is a link, because the cost of
 		// finding out otherwise is a driver interpreting somebody's log file as
 		// bus traffic.

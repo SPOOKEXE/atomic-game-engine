@@ -2,6 +2,7 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Instance.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Audio.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
@@ -12,9 +13,13 @@
 #include <engine/scene/PublishedCatalogue.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/Shaders.hpp>
+#include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/SurfaceTable.hpp>
 #include <engine/scene/Tagging.hpp>
+#include <engine/scene/Teams.hpp>
 #include <engine/scene/TextureCatalogue.hpp>
+#include <engine/scene/Tools.hpp>
 #include <engine/scene/Visibility.hpp>
 #include <engine/scene/Wire.hpp>
 
@@ -28,7 +33,7 @@ namespace engine::scene {
 		// name's id is a counter this process assigned in first-seen order. The
 		// raw object representation would write that counter, and a reading
 		// process would resolve it to whatever string happened to take the same
-		// number — which is not a corrupt file, it is a file that loads and is
+		// number - which is not a corrupt file, it is a file that loads and is
 		// wrong. So each of them is written as text.
 
 		void WriteSurfaces(core::ByteWriter &writer, const void *source, size_t count) {
@@ -59,6 +64,43 @@ namespace engine::scene {
 			}
 		}
 
+		// `PlayerIdentity::DisplayName` is a `core::Name`, so this pair exists
+		// for the reason the paragraph at the top of this file gives: the raw
+		// object representation would write the id this process happened to
+		// assign, and a reading process would resolve it to whatever string took
+		// the same number. A player called somebody else is a file that loads
+		// and is wrong.
+		// A tick's worth of arrivals and departures, drained by whoever fires
+		// signals - so a saved world holding last session's list would deliver a
+		// `CharacterAdded` for a body that no longer exists. Written as nothing
+		// and read back empty, which is `RenderedSignature`'s pair.
+		void WriteCharacterChanges(core::ByteWriter &, const void *, size_t) {}
+
+		void ReadCharacterChanges(core::ByteReader &, void *destination, size_t count) {
+			auto *changes = static_cast<CharacterChanges *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				changes[index] = CharacterChanges{};
+			}
+		}
+
+		void WritePlayerIdentities(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *identities = static_cast<const PlayerIdentity *>(source);
+			for (size_t index = 0; index < count; index++) {
+				writer.WriteInt64(identities[index].UserId);
+				writer.WriteName(identities[index].DisplayName);
+				writer.WriteFloat(identities[index].RespawnTime);
+			}
+		}
+
+		void ReadPlayerIdentities(core::ByteReader &reader, void *destination, size_t count) {
+			auto *identities = static_cast<PlayerIdentity *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				identities[index].UserId = reader.ReadInt64();
+				identities[index].DisplayName = reader.ReadName();
+				identities[index].RespawnTime = reader.ReadFloat();
+			}
+		}
+
 		void WriteVisuals(core::ByteWriter &writer, const void *source, size_t count) {
 			const auto *visuals = static_cast<const Visual *>(source);
 			for (size_t index = 0; index < count; index++) {
@@ -82,7 +124,7 @@ namespace engine::scene {
 				// one with a hand-written pair crosses only if somebody
 				// remembers, and nothing in the build checks. `Transparency` and
 				// `Surface` both landed after this function was written and
-				// both silently reset to their defaults on every load —
+				// both silently reset to their defaults on every load -
 				// invisible for a part that was opaque anyway, and a glass pane
 				// that turned solid the first time a world was saved and
 				// reopened. `mono.client/tests/Presentation.cpp` is the check
@@ -91,7 +133,7 @@ namespace engine::scene {
 				writer.WriteInt8(visual.Surface);
 
 				// Added at v0.7 beside the shadow pass that reads it, and
-				// written here in the same breath rather than a release later —
+				// written here in the same breath rather than a release later -
 				// which is the whole lesson of the paragraph above.
 				writer.WriteBool(visual.CastShadow);
 
@@ -122,7 +164,7 @@ namespace engine::scene {
 		// **A `RenderedSignature` is derived state, and its serialisation says
 		// so by writing nothing.**
 		//
-		// It is not merely redundant to save — it is dangerous. The stamp says
+		// It is not merely redundant to save - it is dangerous. The stamp says
 		// "the walk has already been run against a tree that folds to this",
 		// and a world restored from a snapshot has had no walk run against it
 		// at all. Carrying a live value across a load would let the very first
@@ -192,7 +234,7 @@ namespace engine::scene {
 
 				// **The resolved set has to go with it, and this one is not
 				// merely tidy.** It holds entity handles, and a load replaces
-				// the whole directory — so a handle kept across it names
+				// the whole directory - so a handle kept across it names
 				// whatever now sits at that index, and the next pass would
 				// clear the colour map of an unrelated part exactly once,
 				// immediately after loading.
@@ -205,6 +247,12 @@ namespace engine::scene {
 			const auto *refs = static_cast<const MaterialRef *>(source);
 			for (size_t index = 0; index < count; index++) {
 				writer.WriteName(refs[index].Asset);
+
+				// Written the day it was added, which is `WriteVisuals`' lesson:
+				// a material whose shader reset on every load would be a part
+				// that came back drawn by the engine's default and nothing in
+				// the file saying why.
+				writer.WriteName(refs[index].Shader);
 			}
 		}
 
@@ -212,6 +260,31 @@ namespace engine::scene {
 			auto *refs = static_cast<MaterialRef *>(destination);
 			for (size_t index = 0; index < count; index++) {
 				refs[index].Asset = reader.ReadName();
+				refs[index].Shader = reader.ReadName();
+			}
+		}
+
+		// **A written pair rather than the generated one**, for `WriteTexts`'
+		// reason: `ShaderSource` holds a `std::string` and is therefore not
+		// trivially copyable, so there is no object representation to write.
+		void WriteShaderSources(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *sources = static_cast<const ShaderSource *>(source);
+			for (size_t index = 0; index < count; index++) {
+				writer.WriteString(sources[index].Code);
+
+				// **The revision travels with the code.** A library that
+				// restored the text and reset the counter would believe a
+				// reloaded world's shaders were the ones it had already
+				// compiled, and would draw last session's.
+				writer.WriteUInt32(sources[index].Revision);
+			}
+		}
+
+		void ReadShaderSources(core::ByteReader &reader, void *destination, size_t count) {
+			auto *sources = static_cast<ShaderSource *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				sources[index].Code = std::string(reader.ReadString());
+				sources[index].Revision = reader.ReadUInt32();
 			}
 		}
 
@@ -229,6 +302,7 @@ namespace engine::scene {
 				writer.WriteName(appearances[index].OcclusionMap);
 				writer.WriteName(appearances[index].HeightMap);
 				writer.WriteName(appearances[index].EmissiveMap);
+				writer.WriteName(appearances[index].Shader);
 
 				writer.WriteFloat(appearances[index].AlphaCutoff);
 				writer.WriteUInt8(static_cast<uint8_t>(appearances[index].Mode));
@@ -236,7 +310,7 @@ namespace engine::scene {
 		}
 
 		// **A hand-written pair, because it holds a name**, and every field is
-		// written the day it is added rather than a release later — the lesson
+		// written the day it is added rather than a release later - the lesson
 		// `WriteVisuals` records above, applied from this function's first line.
 		void WriteSounds(core::ByteWriter &writer, const void *source, size_t count) {
 			const auto *sounds = static_cast<const Sound *>(source);
@@ -249,7 +323,7 @@ namespace engine::scene {
 				writer.WriteBool(sound.Looped);
 
 				// **Written, so a save file remembers what was playing.** The
-				// alternative reads as tidier — a loaded world starts silent —
+				// alternative reads as tidier - a loaded world starts silent -
 				// and is the wrong default: a level whose ambience is a looping
 				// `Sound` under `Workspace` would come back mute, and nothing
 				// in the file would say why.
@@ -279,6 +353,7 @@ namespace engine::scene {
 				appearances[index].OcclusionMap = reader.ReadName();
 				appearances[index].HeightMap = reader.ReadName();
 				appearances[index].EmissiveMap = reader.ReadName();
+				appearances[index].Shader = reader.ReadName();
 				appearances[index].AlphaCutoff = reader.ReadFloat();
 
 				const uint8_t mode = reader.ReadUInt8();
@@ -296,7 +371,7 @@ namespace engine::scene {
 		// **The tag names, and they have to travel with the masks.** A `Tags`
 		// component is a bare integer whose bits mean whatever this table says
 		// they mean, so a world restored with the masks and without the table
-		// would have every tagged object in a group with no name — and a surface
+		// would have every tagged object in a group with no name - and a surface
 		// camera filtering by name would match nothing, silently.
 		void WriteTagTables(core::ByteWriter &writer, const void *source, size_t count) {
 			const auto *tables = static_cast<const TagTable *>(source);
@@ -304,7 +379,7 @@ namespace engine::scene {
 				writer.WriteUInt32(static_cast<uint32_t>(tables[index].Names.size()));
 
 				// In registration order, because the index *is* the bit. Sorting
-				// here would renumber every mask already stored on a row —
+				// here would renumber every mask already stored on a row -
 				// `WriteSurfaceTables` says the same about its own.
 				for (const core::Name &name : tables[index].Names) {
 					writer.WriteName(name);
@@ -337,7 +412,7 @@ namespace engine::scene {
 				writer.WriteUInt32(static_cast<uint32_t>(table.Rows.size()));
 
 				// In stored order rather than sorted. The order is program
-				// order — the sequence the scene registered materials in — so
+				// order - the sequence the scene registered materials in - so
 				// two runs of one scene write identical bytes, and sorting here
 				// would only hide a table that had been built differently.
 				for (const SurfaceRow &row : table.Rows) {
@@ -374,7 +449,7 @@ namespace engine::scene {
 		// floating-point sum over them can come out differently. Add at the
 		// end.
 		// **The two that carry a wire form are the two that dominate a delta**,
-		// and this is the only place either half of the engine says so — a
+		// and this is the only place either half of the engine says so - a
 		// server and a client cannot disagree about how a `Transform` crosses
 		// without disagreeing about what a `Transform` is. The file
 		// serialisation is untouched and stays lossless; `Wire.hpp` says what
@@ -387,7 +462,7 @@ namespace engine::scene {
 		// **The tree, and it is registered here for want of an earlier place
 		// that every host already calls.** `ecs::Hierarchy` is the ECS's own
 		// type and had only the automatic name `Components::Of<T>` mints from
-		// the compiler's spelling — which is unusable on a wire, because the two
+		// the compiler's spelling - which is unusable on a wire, because the two
 		// processes have to agree on it and nothing makes them.
 		//
 		// It has to happen before anything creates an instance:
@@ -399,7 +474,7 @@ namespace engine::scene {
 		//
 		// **The default POD wire form, and that is safe because a `Hierarchy` is
 		// five entity handles and nothing else.** A replica adopts the
-		// authority's indices — `Store::SetAdoptOnly` exists to guarantee it —
+		// authority's indices - `Store::SetAdoptOnly` exists to guarantee it -
 		// so the handles mean the same thing on both ends without remapping.
 		//
 		// A child whose parent has not arrived yet holds a handle to a row that
@@ -410,7 +485,7 @@ namespace engine::scene {
 		// `ecs.Hierarchy` used to be registered here, and it was the wrong
 		// place: an `ecs::` type named by `scene` is a name that depends on this
 		// function having run first, and nothing made it. `ecs` names all three
-		// instance components itself now — see `RegisterInstanceComponents`.
+		// instance components itself now - see `RegisterInstanceComponents`.
 
 		// Added at the end of this list rather than beside `ServiceComponent`,
 		// per the ordering note above: a component id decides column order, and
@@ -420,6 +495,11 @@ namespace engine::scene {
 		ecs::Components::Register<Bounds>("scene.Bounds");
 		ecs::Components::Register<Motion>("scene.Motion", MotionWire());
 		ecs::Components::Register<RigidBody>("scene.RigidBody");
+
+		// A tag, so it costs a column of nothing and crosses as presence. The
+		// authority decides whether a part is anchored, so it crosses like every
+		// other `scene.` row.
+		ecs::Components::Register<Anchored>("scene.Anchored");
 		ecs::Components::Register<Collider>("scene.Collider");
 		ecs::Components::Register<Surface>("scene.Surface", WriteSurfaces, ReadSurfaces);
 
@@ -440,14 +520,14 @@ namespace engine::scene {
 		);
 
 		// **The default POD form, and that is right here.** A `Tags` is one
-		// integer and no name — the *names* are in the `TagTable` resource,
+		// integer and no name - the *names* are in the `TagTable` resource,
 		// which is serialised beside it, so the mask and the meanings of its
 		// bits travel together or not at all.
 		ecs::Components::Register<Tags>("scene.Tags");
 		ecs::Components::Register<SurfaceCamera>("scene.SurfaceCamera");
 
 		// **A written pair rather than the generated one**, because the type
-		// holds a `std::string` and is therefore not trivially copyable —
+		// holds a `std::string` and is therefore not trivially copyable -
 		// `DescribeType` offers raw serialisation only for a type that is.
 		ecs::Components::Register<TextContent>("scene.TextContent", WriteTexts, ReadTexts);
 		ecs::Components::Register<Camera>("scene.Camera");
@@ -459,7 +539,7 @@ namespace engine::scene {
 		// file opens with is about names and only about names: a name's id is a
 		// counter this process assigned, so it is written as text. An
 		// `Attachment` is two `CFrame`s and a `Light` is a colour, four floats and
-		// three bytes of enum and flags — all of which mean the same thing in
+		// three bytes of enum and flags - all of which mean the same thing in
 		// every process, so the object representation is the format and the
 		// generated pair is correct.
 		//
@@ -467,11 +547,11 @@ namespace engine::scene {
 		// sentence rather than a shrug: `WorldFrame` is a cache with one writer,
 		// and writing a cache into a snapshot is normally the thing rule 2
 		// refuses. It goes in because the alternative is a restored world whose
-		// beams draw at the origin for one frame — `ResolveAttachments` runs in
+		// beams draw at the origin for one frame - `ResolveAttachments` runs in
 		// `PreRender`, so a load that cleared it would present before it was
 		// filled. One frame of a beam in the wrong place is more visible than
 		// thirty-two bytes an entity.
-		// **Generated, because a `Pivot` is one `CFrame`** — no name, so the
+		// **Generated, because a `Pivot` is one `CFrame`** - no name, so the
 		// object representation is the format. Registered beside `Attachment`
 		// for the same reason it is: both are placements relative to something
 		// else.
@@ -482,7 +562,7 @@ namespace engine::scene {
 
 		// **Generated, because a `Humanoid` is nine floats and four flags.** No
 		// name, so the object representation is the format and there is nothing
-		// to hand-write — which is the desirable case and the one most components
+		// to hand-write - which is the desirable case and the one most components
 		// here are in.
 		ecs::Components::Register<Humanoid>("scene.Humanoid");
 
@@ -492,7 +572,7 @@ namespace engine::scene {
 		// list opens with: registration order decides component ids, ids decide
 		// the order archetypes iterate their columns, and inserting one of
 		// these above `Transform` would change the order every row in the
-		// engine is visited in. Neither carries a wire form — a service is
+		// engine is visited in. Neither carries a wire form - a service is
 		// authored content that a snapshot moves, not per-tick state a delta
 		// does.
 		ecs::Components::Register<TransientComponent>("scene.Transient");
@@ -501,7 +581,7 @@ namespace engine::scene {
 
 		// **Who this host is looking through, and only a client has one.** A
 		// resource, so it is carried by a snapshot and covered by the affinity
-		// check like everything else a world holds — and named explicitly
+		// check like everything else a world holds - and named explicitly
 		// because an automatic name minted from the compiler's spelling is
 		// unusable the moment a world crosses a process.
 		ecs::Components::Register<LocalPlayer>("scene.LocalPlayer");
@@ -511,6 +591,11 @@ namespace engine::scene {
 		// decide the order archetypes iterate their columns. A hand-written pair
 		// because it is a name.
 		ecs::Components::Register<MaterialRef>("scene.MaterialRef", WriteMaterialRefs, ReadMaterialRefs);
+
+		// **What a `ShaderScript` instance holds**, registered beside the
+		// material that names one and at the end for the same reason. A written
+		// pair because it holds a `std::string`, not because it holds a name.
+		ecs::Components::Register<ShaderSource>("scene.ShaderSource", WriteShaderSources, ReadShaderSources);
 
 		// The render gate, at the end for the reason this list opens with.
 		//
@@ -525,7 +610,7 @@ namespace engine::scene {
 
 		// The resources. A resource is keyed by a component id too, so one that
 		// is never registered here would be minted by the first
-		// `Store::SetResource` — under the compiler's spelling of the type, and
+		// `Store::SetResource` - under the compiler's spelling of the type, and
 		// aborting outright once the table is sealed.
 		ecs::Components::Register<SurfaceTable>("scene.SurfaceTable", WriteSurfaceTables, ReadSurfaceTables);
 		ecs::Components::Register<TagTable>("scene.TagTable", WriteTagTables, ReadTagTables);
@@ -534,14 +619,23 @@ namespace engine::scene {
 		// **`InputState` crosses and `CameraController` crosses**, which is worth
 		// a sentence because one of them looks like it should not. Input is
 		// per-frame state and writing it into a save file sounds like storing an
-		// answer that is recomputed — and it is, except that a *recording* is the
+		// answer that is recomputed - and it is, except that a *recording* is the
 		// case that matters: `just replay-check` replays a world from a snapshot
 		// and its input stream, and a snapshot whose input state was cleared would
 		// replay a character that never moved.
 		//
-		// The camera controller is authored state — a mode, a zoom, a sensitivity
-		// — and crosses for the ordinary reason.
+		// The camera controller is authored state - a mode, a zoom, a sensitivity
+		// - and crosses for the ordinary reason.
 		ecs::Components::Register<InputState>("scene.InputState");
+
+		// **`AudioState` crosses for `CameraController`'s reason and not
+		// `InputState`'s.** It is authored state - a master gain and where the ear
+		// is - rather than a per-frame report, so a world reopened from a file is
+		// as loud as it was left. The plain object representation is enough: an
+		// `ecs::Entity` is an index and a generation, which is exactly what
+		// `LocalPlayer` writes, and a snapshot that carries the row carries the
+		// instance it names.
+		ecs::Components::Register<AudioState>("scene.AudioState");
 		ecs::Components::Register<CameraController>("scene.CameraController");
 		ecs::Components::Register<WorldBounds>("scene.WorldBounds");
 		ecs::Components::Register<MeshCatalogue>(
@@ -563,7 +657,7 @@ namespace engine::scene {
 		// by whichever worker claimed it.
 		//
 		// Registered rather than left to be minted from the compiler's
-		// spelling, which is the failure `client::DrawList` was found in — and
+		// spelling, which is the failure `client::DrawList` was found in - and
 		// with a writer that stores nothing, which is the other half. See the
 		// pair above.
 		ecs::Components::Register<RenderedSignature>(
@@ -572,7 +666,7 @@ namespace engine::scene {
 
 		// **At the end, which is where a new component goes**, per the ordering
 		// note above: an id decides column order and inserting one beside
-		// `RigidBody` — where it belongs by subject — would reorder iteration
+		// `RigidBody` - where it belongs by subject - would reorder iteration
 		// across the engine to no purpose.
 		//
 		// The generated form, for the reason `ecs.Hierarchy` uses it: the field
@@ -584,7 +678,7 @@ namespace engine::scene {
 		ecs::Components::Register<AwakeWorld>("scene.AwakeWorld");
 
 		// **Authored data, so it crosses.** Which part a portal leads to is a
-		// fact about the scene rather than about whoever is looking at it —
+		// fact about the scene rather than about whoever is looking at it -
 		// the same side of the line `scene.SurfaceCamera` is already on, and
 		// `replication::LocalToTheClient` names both.
 		//
@@ -594,7 +688,7 @@ namespace engine::scene {
 
 		// **Derived data, so it does not.** A surface camera's frustum is fitted
 		// to its pane *as seen from the local eye*, so the authority's answer is
-		// wrong for every client watching — `client/Replicated.hpp` gives that
+		// wrong for every client watching - `client/Replicated.hpp` gives that
 		// argument for the placement and this is the same fact one step on.
 		// `LocalToTheClient` keeps it off the wire and `AimSurfaceCameras`
 		// recomputes it on both ends.
@@ -603,17 +697,22 @@ namespace engine::scene {
 		// **The three rows a character is held together by**, appended for the
 		// ordering reason this list keeps repeating. All three are the generated
 		// form: an `Entity` is a directory index a snapshot and a replica both
-		// restore exactly, and a `CFrame` is its own object representation —
+		// restore exactly, and a `CFrame` is its own object representation -
 		// `scene.Pivot` is already registered on that argument.
 		//
 		// **All three cross the wire, and `CharacterLimb` is the one worth
 		// stating.** A client poses its own limbs from the root it interpolated,
-		// so the *offsets* have to arrive once — but the limb transforms that
-		// come with them are overwritten by `PoseCharacters` on the frame they
-		// land. That is wire spent on nothing, and it is the cost of
-		// `replication` filtering by component rather than by entity;
-		// `docs/DEFERRED.md` carries it as an item rather than as a comment
-		// nobody will find.
+		// so the *offsets* have to arrive - and this row is what carries them.
+		//
+		// **It is also the tag that stops the limb transforms following them.**
+		// Those were sent every tick and overwritten by `PoseCharacters` on the
+		// frame they landed, which is what `D00115` filed: `replication` filtered
+		// by component and a limb needed filtering by row. It does now -
+		// `replication::DefaultReplicatedComponents` names this component as the
+		// suppressor for `scene.Transform`, so an entity carrying one stops
+		// paying for a frame the receiver computes. Nothing new had to be
+		// declared, because an entity with a limb row already *means* an entity
+		// whose transform is derived.
 		ecs::Components::Register<Character>("scene.Character");
 		ecs::Components::Register<CharacterLimb>("scene.CharacterLimb");
 		ecs::Components::Register<PlayerCharacter>("scene.PlayerCharacter");
@@ -621,14 +720,79 @@ namespace engine::scene {
 		// **It crosses, and it exists in order to cross.** A body goes through a
 		// portal on the authority and the eye that follows it belongs to a
 		// client, so this is the one fact about a crossing that has to reach the
-		// other machine — see `scene::PortalTransit`. Appended for the ordering
+		// other machine - see `scene::PortalTransit`. Appended for the ordering
 		// reason this list keeps repeating, and the generated form: two scalars
 		// with no name and no handle in them.
 		ecs::Components::Register<PortalTransit>("scene.PortalTransit");
+
+		// **The three the player pipeline added, appended for this list's
+		// standing reason.** Component ids are a dense counter and an archetype
+		// is a sorted list of them, so inserting one anywhere but the end
+		// changes the order every row in the engine is visited in.
+		//
+		// **`PlayersServiceComponent` and `PlayerIdentity` cross and
+		// `PlayerRespawn` does not need to.** A client reads `Player.UserId` and
+		// `DisplayName` off its own store, and `Players.MaxPlayers` is what a
+		// game's own interface shows - where a respawn deadline is the
+		// authority's bookkeeping and is recomputed there. All three are
+		// registered because a component a snapshot meets and nothing registered
+		// aborts the process; what differs is only what a game does with them.
+		ecs::Components::Register<PlayersServiceComponent>("scene.PlayersService");
+		ecs::Components::Register<PlayerIdentity>(
+			"scene.PlayerIdentity", WritePlayerIdentities, ReadPlayerIdentities
+		);
+		ecs::Components::Register<PlayerRespawn>("scene.PlayerRespawn");
+		ecs::Components::Register<CharacterChanges>(
+			"scene.CharacterChanges", WriteCharacterChanges, ReadCharacterChanges
+		);
+
+		// **Registered rather than left to be minted, unlike `Gravity` and
+		// `Sun` beside it.** `workspace.SurfaceBounces` is a declared property,
+		// so the class table names this resource's component id while the tree
+		// is being registered - and a type that reaches `Components::Of` before
+		// an explicit name arrives keeps the compiler's spelling and aborts when
+		// the real one turns up. Appended, for this list's standing reason.
+		ecs::Components::Register<SurfaceBounces>("scene.SurfaceBounces");
+
+		// **The three the team pipeline added, appended for this list's
+		// standing reason**: a component id is registration order, an archetype
+		// is a sorted list of ids, and inserting one anywhere but the end
+		// reorders how every row in the engine is visited.
+		//
+		// All three are the generated form. A `Team` is three floats, a
+		// `SpawnLocation` is three floats and two flags, and a `PlayerTeam` is
+		// an `Entity` - a directory index a snapshot and a replica both restore
+		// exactly, which is the argument `scene.PlayerCharacter` already makes.
+		// No `core::Name` anywhere in them, so there is nothing to hand-write.
+		//
+		// **`scene.SpawnLocation` has to cross, and that is not obvious.** A
+		// spawn pad is authored geometry, so the *part* would replicate anyway;
+		// what this row carries is which side may use it, and a client that ran
+		// `FindSpawn` - the studio does, through `PlayLink` - would put
+		// everybody on the first neutral pad without it.
+		ecs::Components::Register<Team>("scene.Team");
+		ecs::Components::Register<PlayerTeam>("scene.PlayerTeam");
+		ecs::Components::Register<SpawnLocation>("scene.SpawnLocation");
+
+		// **What a `Tool` instance is, appended for this list's standing
+		// reason**: a component id is registration order, an archetype is a
+		// sorted list of ids, and inserting one anywhere but the end reorders how
+		// every row in the engine is visited.
+		//
+		// The generated form - one `CFrame` and no name, which is the argument
+		// `scene.Pivot` already makes.
+		//
+		// **It crosses, and what it decides is where a handle is drawn.** A
+		// stowed tool reaches only its owner because it is under a `Player` and
+		// `scene::PlayerOwning` says so; an equipped one is under a character in
+		// `Workspace` and reaches everybody, and the `Grip` is what every one of
+		// those clients poses the handle by. Nothing about that needed a rule of
+		// its own - see `scene/Tools.hpp`.
+		ecs::Components::Register<Tool>("scene.Tool");
 	}
 
 	void RegisterSceneClasses() {
-		// The components first and then the whole tree, on the first call —
+		// The components first and then the whole tree, on the first call -
 		// the same registration under the name a caller looks for rather than
 		// a second one.
 		EnsureClassTree();
@@ -636,8 +800,17 @@ namespace engine::scene {
 		// The services, through the same door. A game file naming `Lighting`
 		// has to resolve it, and a reader that depended on the studio having
 		// registered these first would fail with "no class named 'Lighting'" on
-		// a perfectly good file — which is exactly the failure
+		// a perfectly good file - which is exactly the failure
 		// `game::RegisterGameClasses` exists to prevent for `Part`.
 		(void)ServiceClass();
+
+		// **`ShaderScript` through the same door, for the same reason.** It is
+		// this module's class and it lives in its own file only because the
+		// property that moves its revision does; a caller that had to know to
+		// register it separately would be one that opened a game file naming
+		// one and could not resolve it - and the studio's own insert menu is
+		// built by walking everything registered under `Instance`, so a class
+		// nothing registered is a class nobody can create.
+		(void)ShaderScriptClass();
 	}
 }

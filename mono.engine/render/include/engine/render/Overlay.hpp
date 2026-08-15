@@ -75,7 +75,7 @@ namespace engine::render {
 		// with zero was, measured, over a third of a frame.
 		//
 		// **Only correct on a region known to be transparent.** Anywhere else it
-		// erases rather than composites — which is why it is a separate name and
+		// erases rather than composites - which is why it is a separate name and
 		// not a flag on Blend. Clipped and marks the image dirty exactly as Blend
 		// does.
 		//
@@ -101,7 +101,7 @@ namespace engine::render {
 		//
 		// It exists for the text rasteriser, and the reason is arithmetic rather
 		// than taste. A glyph is three bits wide, so a line of text is thousands
-		// of runs two or three pixels long — and at that size Blend's clip,
+		// of runs two or three pixels long - and at that size Blend's clip,
 		// dispatch and setup cost several times the handful of bytes it goes on
 		// to write. Drawing a panel of text was measured at half a millisecond,
 		// almost all of it spent deciding to write eight pixels.
@@ -181,12 +181,12 @@ namespace engine::render {
 		// Declares that the GPU now matches this image.
 		//
 		// Called by the renderer once it has recorded the upload. Until it is,
-		// UploadRegion keeps reporting the pending area — including the part a
+		// UploadRegion keeps reporting the pending area - including the part a
 		// shrinking panel vacated, which nothing else would remember.
 		void MarkUploaded() {
 			// What was pending is now what the texture is showing. The upload
-			// covered the old showing region too — that is how UploadRegion is
-			// built — so everything outside this rectangle is transparent on the
+			// covered the old showing region too - that is how UploadRegion is
+			// built - so everything outside this rectangle is transparent on the
 			// GPU as well as here.
 			PreviousLeft = DirtyLeft;
 			PreviousRight = DirtyRight;
@@ -223,7 +223,7 @@ namespace engine::render {
 		//
 		// This matters because the image is the size of the *window* and the
 		// panels are a corner of it. Uploading all of it was, measured, the
-		// largest single cost in the frame — most of it transparent pixels that
+		// largest single cost in the frame - most of it transparent pixels that
 		// had not changed since the program started.
 		Region UploadRegion() const;
 
@@ -231,7 +231,7 @@ namespace engine::render {
 		//
 		// Blend and Fill do this for themselves. It is public for the text
 		// rasteriser, which marks a whole string once and then writes its runs
-		// through WriteOpaqueRun — several thousand calls that would otherwise
+		// through WriteOpaqueRun - several thousand calls that would otherwise
 		// each pay for the bookkeeping.
 		//
 		// Clipped to the image, so a caller may name a region that hangs over

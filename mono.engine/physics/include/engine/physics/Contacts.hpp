@@ -6,13 +6,13 @@
 // one reason: the shape of a manifold decides whether the solver can hold a box
 // still, and getting it wrong is a rewrite of the narrow phase, the solver, the
 // contact cache and the event surface together rather than an edit to one. They
-// have a producer now — `NarrowPhase` and `Publish` — and the decisions below
+// have a producer now - `NarrowPhase` and `Publish` - and the decisions below
 // are what that producer had to be built against.
 //
 // **A manifold holds several points, and that is the load-bearing decision.**
 // `v02v03v04.md` §3.5 is explicit: a single-point manifold cannot hold a resting
 // box still. One point gives the solver one constraint, so a box on a floor
-// pivots about that point and rocks — every frame the contact moves, and the
+// pivots about that point and rocks - every frame the contact moves, and the
 // rocking never damps out because each frame is a fresh single constraint.
 // Designing for one point now and adding the rest later means rewriting the
 // solver, the cache key and the event surface together.
@@ -20,7 +20,7 @@
 // **The normal's direction is a convention and it is stated once.** From `A`
 // toward `B`, with `A` the smaller entity id and the points on `B`'s surface.
 // Six pair functions obey it and exactly one function in the module reverses
-// one — `src/ContactPairs.hpp` is where that is written down. Two of six
+// one - `src/ContactPairs.hpp` is where that is written down. Two of six
 // disagreeing reads as objects occasionally flying apart rather than as a sign
 // error, which is why it is a convention rather than a per-pair choice.
 //
@@ -47,7 +47,7 @@ namespace engine::physics {
 		// together.
 		float Penetration = 0.0f;
 
-		// Which features of the two shapes met — a face, an edge, a vertex,
+		// Which features of the two shapes met - a face, an edge, a vertex,
 		// combined into one number by whatever produces the manifold.
 		//
 		// **A key, not a description.** Its only job is to be the same number
@@ -61,7 +61,7 @@ namespace engine::physics {
 	// they share.
 	//
 	// One normal for the whole manifold rather than one per point, because a
-	// solver iterating a face contact has to push along a single direction —
+	// solver iterating a face contact has to push along a single direction -
 	// per-point normals turn a resting box into four independent constraints
 	// pulling four ways, which is the jitter the multi-point manifold exists to
 	// remove.
@@ -72,13 +72,13 @@ namespace engine::physics {
 		//
 		// Four. A face-on-face contact between two boxes clips to a polygon with
 		// up to eight vertices, and every solver worth copying reduces that to
-		// the four that best preserve the contact area — four points hold a box
+		// the four that best preserve the contact area - four points hold a box
 		// against translation and both rotations, and the fifth adds cost
 		// without adding a constraint the first four did not already imply.
 		// Reduction is the narrow phase's job; this is the budget it reduces to.
 		static constexpr size_t MAXIMUM_POINTS = 4;
 
-		// The first collider, always the one with the smaller entity id — the
+		// The first collider, always the one with the smaller entity id - the
 		// same ordering `CandidatePair` uses, so a contact and the pair it came
 		// from name their two bodies the same way round.
 		ecs::Entity A;
@@ -118,7 +118,7 @@ namespace engine::physics {
 	//
 	// Deliberately not a manifold. A script asking "did these two touch" wants
 	// two entities and an edge, and handing it four points and a normal makes
-	// every listener depend on the narrow phase's output format — so an event is
+	// every listener depend on the narrow phase's output format - so an event is
 	// the pair and the transition, and a listener that needs the geometry reads
 	// the manifold list for the same pair.
 	//

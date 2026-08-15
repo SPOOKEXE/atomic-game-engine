@@ -11,14 +11,14 @@
 -- ## Why a cube that collapses rather than a cube that stands
 --
 -- The blocks start on a lattice with a gap between them, so on the first tick
--- nothing touches anything — the broad phase reports almost no pairs and the
+-- nothing touches anything - the broad phase reports almost no pairs and the
 -- solver has no rows. Then they fall, meet each other and the floor, and settle
 -- into a pile. One run therefore walks the whole cost curve: an empty narrow
 -- phase, a burst as the lattice closes up, and a steady state where a deep
 -- static pile is being held apart every tick.
 --
 -- That last state is the one worth measuring. A pile at rest is the worst case
--- for the solver — every block is in contact with several neighbours, none of
+-- for the solver - every block is in contact with several neighbours, none of
 -- the contacts go away, and the impulses have to be found again every tick
 -- until sleeping takes them. It is also the case a game actually ships.
 --
@@ -34,7 +34,7 @@
 --
 -- It is not a rendering test. Ten thousand cubes is a lot of draw calls and the
 -- renderer will show up in the frame graph beside physics, but `SkyGrid.luau`
--- is the scene built to ask that question properly — this one puts its geometry
+-- is the scene built to ask that question properly - this one puts its geometry
 -- where the collisions are, not where the overdraw is.
 
 -- **The count, and the lattice that holds it.** Twenty-two cubed is 10648, so
@@ -119,7 +119,7 @@ for index = 0, COUNT - 1 do
 
 	-- **Unanchored, which is the whole point.** An anchored part carries no
 	-- rigid body, so a cube of anchored blocks integrates nothing and solves
-	-- nothing — it would be `SkyGrid.luau` with more of them.
+	-- nothing - it would be `SkyGrid.luau` with more of them.
 	part.Anchored = false
 	part.Size = Vector3.new(BLOCK, BLOCK, BLOCK)
 	part.Position = ORIGIN + Vector3.new(x * SPACING, y * SPACING, z * SPACING)

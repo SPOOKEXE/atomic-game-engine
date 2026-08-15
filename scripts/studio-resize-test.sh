@@ -4,7 +4,7 @@
 # is still alive afterwards.
 #
 # **What this catches, and why it cannot be a unit test.** The viewport panel
-# shows *last frame's* scene texture — imgui records its draw lists before the
+# shows *last frame's* scene texture - imgui records its draw lists before the
 # renderer runs, so there is no other texture to show. On the frame the panel
 # changes size, the order is: the interface records a bind of the old texture,
 # `EnsureScene` notices the new size, and then those draw lists are replayed.
@@ -15,7 +15,7 @@
 # Reproducing it needs a real window, a real swapchain and a window manager
 # delivering a size change per motion event. That is not something a headless
 # test binary can do, which is why this is a script rather than a `TEST_CASE`
-# — the same reason `just studio-smoke` is a recipe and not part of `just
+# - the same reason `just studio-smoke` is a recipe and not part of `just
 # check`.
 #
 #   scripts/studio-resize-test.sh                    the dev build
@@ -29,7 +29,7 @@ root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 binary=${1:-$root/.cache/build/dev/studio/studio}
 
 if [ ! -x "$binary" ]; then
-    echo "no studio at $binary — build it first (just studio)" >&2
+    echo "no studio at $binary - build it first (just studio)" >&2
     exit 2
 fi
 
@@ -39,7 +39,7 @@ if ! command -v xdotool > /dev/null; then
 fi
 
 if [ -z "${DISPLAY:-}" ]; then
-    echo "no DISPLAY — this needs a real window and a real swapchain" >&2
+    echo "no DISPLAY - this needs a real window and a real swapchain" >&2
     exit 2
 fi
 
@@ -48,7 +48,7 @@ log=$(mktemp)
 pid=$!
 
 # **Found by pid, then verified by name.** `xdotool search` defaults to
-# `--any`, so `search --pid X --name Y` matches anything matching *either* —
+# `--any`, so `search --pid X --name Y` matches anything matching *either* -
 # an earlier version of this script matched a terminal whose title happened to
 # contain the repository path, resized that instead, and reported a pass.
 window=""
@@ -72,7 +72,7 @@ if [ -z "$window" ]; then
 fi
 
 if [ "$(xdotool getwindowpid "$window" 2>/dev/null)" != "$pid" ]; then
-    echo "FAIL: that window belongs to another process — refusing to resize it" >&2
+    echo "FAIL: that window belongs to another process - refusing to resize it" >&2
     kill "$pid" 2>/dev/null
     rm -f "$log"
     exit 2
@@ -102,7 +102,7 @@ if kill -0 "$pid" 2>/dev/null; then
     kill "$pid" 2>/dev/null
     wait "$pid" 2>/dev/null
     rm -f "$log"
-    echo "studio ok — survived ~250 resizes with the viewport docked"
+    echo "studio ok - survived ~250 resizes with the viewport docked"
     exit 0
 fi
 

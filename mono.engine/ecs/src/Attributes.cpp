@@ -16,7 +16,7 @@ namespace engine::ecs {
 	}
 
 	namespace {
-		// The table, or null. Const path — never creates one.
+		// The table, or null. Const path - never creates one.
 		const AttributeTable *TableOf(const Store &store) {
 			return store.Resource<AttributeTable>();
 		}
@@ -48,7 +48,7 @@ namespace engine::ecs {
 		}
 
 		// **Removal first, before the table is created.** Clearing an attribute on
-		// a world that has never had one should not leave an empty table behind —
+		// a world that has never had one should not leave an empty table behind -
 		// and more usefully, it means `SetAttribute(name, nil)` is safe on any
 		// instance rather than only on ones that have been written to.
 		if (value.Type == PropertyType::Opaque) {
@@ -79,7 +79,7 @@ namespace engine::ecs {
 
 		if (!store.HasResource<AttributeTable>()) {
 			// Created on first write rather than by whatever furnishes a world,
-			// so a world with no attributes carries no table — which is what makes
+			// so a world with no attributes carries no table - which is what makes
 			// the "costs nothing at all" claim in the header true.
 			store.SetResource(AttributeTable{});
 		}
@@ -144,7 +144,7 @@ namespace engine::ecs {
 		// The wire form.
 		//
 		// **Both keys cross carefully and for different reasons.** A `core::Name`
-		// id is a first-seen counter, so the name is written as *text* — rule 4,
+		// id is a first-seen counter, so the name is written as *text* - rule 4,
 		// exactly as every other name in the engine crosses. An entity id is a
 		// slot this world allocated, and it is written raw, which is legal here
 		// and only here: a snapshot restores a *whole world* including its entity
@@ -248,7 +248,7 @@ namespace engine::ecs {
 				break;
 			case PropertyType::Reference:
 			case PropertyType::Opaque:
-				// Never stored — `AttributeTypeAllowed` refuses both — so nothing
+				// Never stored - `AttributeTypeAllowed` refuses both - so nothing
 				// is written and the reader writes nothing back.
 				break;
 			}
@@ -397,7 +397,7 @@ namespace engine::ecs {
 						// **Interned on the way in, which is what makes the id a
 						// valid key.** The name crossed as text and
 						// `ReadName` interned it in *this* process, so the id it
-						// has now is this process's — which is the whole point of
+						// has now is this process's - which is the whole point of
 						// writing the text.
 						if (name.IsValid()) {
 							table.Entities[id][name.Id()] = std::move(value);

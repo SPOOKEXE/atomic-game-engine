@@ -6,8 +6,8 @@
 // the cylinder pairs add a longer axis list on top of the same clip. A single
 // average over a mixed scene would hide the one that matters.
 //
-// Each row measures **one call to the pair function** — no store, no index, no
-// broad phase — so the number is the geometry and nothing else. The scene rows
+// Each row measures **one call to the pair function** - no store, no index, no
+// broad phase - so the number is the geometry and nothing else. The scene rows
 // at the end put it back in context.
 //
 // What it measured, in the `bench` preset, on a 24-thread machine. Minimum
@@ -26,7 +26,7 @@
 // which is the shape to expect: a sphere against anything is a closest point
 // and a subtraction, and everything else is an axis search followed by a
 // polygon clip. Box-cylinder is the most expensive of the six because its axis
-// list is twenty-three long against box-box's fifteen — the price of a shape
+// list is twenty-three long against box-box's fifteen - the price of a shape
 // with no faces to enumerate.
 //
 // Saying no is three to four times cheaper than saying yes, because a
@@ -36,14 +36,14 @@
 //
 // **`ShapeInstance` resolving its frame axes once is what these numbers are
 // standing on.** The axis search asks for a projection radius twice per
-// candidate, and a `CFrame` holds a quaternion — so deriving the three world
+// candidate, and a `CFrame` holds a quaternion - so deriving the three world
 // axes inside that question made box-box rotate the same six vectors ninety
 // times per pair. It was a third of the cost of every row that clips.
 //
 // In a world, over colliders every third one of which is a different shape:
 // 187 us ± 57 for 2000 and 3140 us ± 516 for 8000. That climbs faster than the
 // count because the scene volume is fixed, so density rises with it and the
-// pair count is quadratic in density — the same reason the broad-phase suite
+// pair count is quadratic in density - the same reason the broad-phase suite
 // beside this one climbs.
 
 #include <engine/core/Random.hpp>

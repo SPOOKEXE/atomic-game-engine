@@ -21,12 +21,13 @@ using engine::ecs::PropertyType;
 using engine::ecs::Schema;
 using engine::ecs::Schemas;
 using engine::ecs::Store;
+using engine::ecs::TypeDescriptor;
 
 namespace {
 	// The component table is process-wide and nothing unregisters, so every
 	// case here has to name something no other case and no engine module will.
-	// A counter is not enough on its own — the suites in one binary share the
-	// table — so the prefix is this file's.
+	// A counter is not enough on its own - the suites in one binary share the
+	// table - so the prefix is this file's.
 	std::string Unique(const char *what) {
 		static int counter = 0;
 		return std::string("engine.ecs.schema.test.") + what + "." + std::to_string(counter++);
@@ -105,7 +106,7 @@ TEST_CASE("a different field set under one name is refused", "[schema]") {
 
 TEST_CASE("a name a C++ type already holds is a conflict, not an abort", "[schema]") {
 	// `Entity` is registered by the storage itself long before this runs, under
-	// whatever `TypeNameOf` spells — so instead this registers a type here and
+	// whatever `TypeNameOf` spells - so instead this registers a type here and
 	// then tries to describe over it. Aborting would be right for two C++ types
 	// and wrong for a script that mistyped a name.
 	struct Occupied {
@@ -303,7 +304,7 @@ TEST_CASE("a described component's padding is zeroed rather than left alone", "[
 	// The layout below pads: a bool followed by nothing wide enough to fill the
 	// tail. `TypeDescriptor` warns that uninitialised padding makes two runs of
 	// one scene produce different bytes, and a derived layout cannot promise
-	// there is no padding — so it promises the padding is defined.
+	// there is no padding - so it promises the padding is defined.
 	const std::string name = Unique("padding");
 	const FieldSpec fields[] = {
 		{"Wide", PropertyType::Double},
@@ -363,11 +364,11 @@ TEST_CASE("a slot past the last one is refused rather than overrunning", "[schem
 	// **The table is bounded and the boundary has to be a refusal.** A
 	// registration past the end would index an array of generated hook sets out
 	// of range, which is the one failure in this file that would not look like a
-	// failure — the schema would register and its first row would call whatever
+	// failure - the schema would register and its first row would call whatever
 	// the bytes after the table happened to be.
 	//
-	// Filling the table to prove it is not affordable — it is two thousand
-	// process-wide registrations that nothing can undo — so what is checked is
+	// Filling the table to prove it is not affordable - it is two thousand
+	// process-wide registrations that nothing can undo - so what is checked is
 	// that the guard is a comparison against the same constant the table is
 	// sized from, by asking for a schema when the table is already full. The
 	// registry has no way to fake that from outside, which leaves this as the
@@ -387,4 +388,32 @@ TEST_CASE("a slot past the last one is refused rather than overrunning", "[schem
 	// And the process has room left, which is the property the cap exists to
 	// have: a game describing tens of components is nowhere near it.
 	CHECK(Schemas::All().size() < 2048);
+}
+
+TEST_CASE("a described component with fields is data and a fieldless one is a tag", "[schema]") {
+	// **The regression for a use-after-move.** `Kind` was decided from
+	// `layout.empty()` *after* `layout` had been moved into the schema, so the
+	// answer was always "empty" and every component a script declared was
+	// registered as a tag while holding bytes. Nothing read `Kind` at the time,
+	// which is why it survived: a field with no consumer is a field with no
+	// test, until the first consumer trusts it and is wrong about every
+	// script-declared component at once.
+	const std::string named = Unique("kind.data");
+	const FieldSpec fields[] = {{"Value", PropertyType::Double}};
+
+	const Schemas::Result data = Schemas::Register(named, fields);
+	REQUIRE(data.Why == Schemas::Status::Ok);
+
+	const TypeDescriptor &described = Components::Describe(data.Id);
+	CHECK(described.Kind == engine::ecs::ComponentKind::Data);
+	CHECK(described.Size > 0);
+
+	// And the other way, which is the branch that was accidentally always
+	// taken and so was never really exercised either.
+	const Schemas::Result tag = Schemas::Register(Unique("kind.tag"), {});
+	REQUIRE(tag.Why == Schemas::Status::Ok);
+
+	const TypeDescriptor &empty = Components::Describe(tag.Id);
+	CHECK(empty.Kind == engine::ecs::ComponentKind::Tag);
+	CHECK(empty.Size == 0);
 }

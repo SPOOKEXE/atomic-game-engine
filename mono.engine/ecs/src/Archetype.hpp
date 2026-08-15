@@ -3,7 +3,7 @@
 // One table: every entity carrying exactly one set of components.
 //
 // Private to this module on purpose. An archetype is the storage layout, and
-// the layout is the thing most likely to change — `ecs/AGENTS.md` says
+// the layout is the thing most likely to change - `ecs/AGENTS.md` says
 // everything public here is a migration cost, and a table is not something
 // userland or another module should be able to name. `Store` exposes what an
 // archetype can do, never the archetype.
@@ -149,7 +149,7 @@ namespace engine::ecs {
 		// that the source did not are default-constructed. That covers both
 		// directions of a structural change with one operation.
 		//
-		// The source row is **not** removed — the caller does that, because it
+		// The source row is **not** removed - the caller does that, because it
 		// also has to fix up whichever entity the removal moves.
 		//
 		// @param source    The table to move from.
@@ -162,7 +162,7 @@ namespace engine::ecs {
 		// column in set order.
 		//
 		// The component set is *not* written here. Only the store knows how to
-		// record it — as names, so a restore in another process resolves them
+		// record it - as names, so a restore in another process resolves them
 		// to whatever ids it assigned.
 		//
 		// @param writer The writer to append to.
@@ -174,7 +174,7 @@ namespace engine::ecs {
 		//
 		// **`order` is the writer's column order and is not optional across
 		// processes.** `Write` emits columns in *its* set order, which is
-		// ascending by *its* component ids — and `ComponentSet::Intern` sorts
+		// ascending by *its* component ids - and `ComponentSet::Intern` sorts
 		// by the reading process's ids, which are assignment order and differ
 		// whenever the two programs registered their components in a different
 		// sequence. A server whose `ecs.Hierarchy` is registered last and a
@@ -189,8 +189,8 @@ namespace engine::ecs {
 		// from.
 		//
 		// An empty `order` means "this reader's own order", which is correct
-		// only when the same process wrote them — a scratch copy inside one
-		// program — and is the default for that reason.
+		// only when the same process wrote them - a scratch copy inside one
+		// program - and is the default for that reason.
 		//
 		// @param reader The reader to consume.
 		// @param rows   The row count the caller read from the header.
@@ -205,7 +205,7 @@ namespace engine::ecs {
 		// The interned set, which lives for the process.
 		const ComponentSet *Members;
 
-		// One per component in Members, in the set's sorted order — so a term
+		// One per component in Members, in the set's sorted order - so a term
 		// resolved to a position stays valid for every table sharing the set.
 		std::vector<Column> Columns;
 

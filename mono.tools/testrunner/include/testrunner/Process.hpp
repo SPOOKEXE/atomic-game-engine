@@ -20,7 +20,7 @@ namespace testrunner {
 	// Read Started first. The other two describe a program that ran, and say
 	// nothing at all about one that never did.
 	struct ProcessResult {
-		// False when the program could not be started at all — missing,
+		// False when the program could not be started at all - missing,
 		// not executable, fork failed. Distinct from a non-zero exit, which is
 		// the program running and disagreeing with you.
 		bool Started = false;

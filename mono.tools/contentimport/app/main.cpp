@@ -2,7 +2,7 @@
 //
 // **The repeatable form of "put this in the cdn".** `ROADMAP.md` v0.10 asks for
 // a named list of files to be added to the store, and a shell loop that did it
-// once would leave nothing anybody could run again — on another machine, or after
+// once would leave nothing anybody could run again - on another machine, or after
 // the store was cleared. This is that loop with a name.
 //
 //     contentimport ~/Music/album ~/art/fox.png
@@ -14,8 +14,11 @@
 //
 // @tier shared
 
+#include <engine/assets/ContentPolicy.hpp>
 #include <engine/assets/Signature.hpp>
 #include <engine/core/Arguments.hpp>
+#include <engine/core/Config.hpp>
+#include <engine/core/Flags.hpp>
 #include <engine/core/Log.hpp>
 
 #include <array>
@@ -34,7 +37,7 @@ namespace {
 	// Seconds since the Unix epoch.
 	//
 	// **Read here and passed down**, because `cdn::LocalStore` holds no notion of
-	// "now" — `assets::Grant`'s standing rule, and what lets a suite pin a
+	// "now" - `assets::Grant`'s standing rule, and what lets a suite pin a
 	// timestamp.
 	uint64_t NowSeconds() {
 		return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(
@@ -146,7 +149,7 @@ namespace {
 	// @param raw   Where the sources are.
 	// @param baked Where the modules go.
 	// @return How many compiled. Failures are logged and skipped rather than
-	//         stopping the import — one bad shader should not hold back a
+	//         stopping the import - one bad shader should not hold back a
 	//         publish of forty assets.
 	size_t BakeShaders(const std::filesystem::path &raw, const std::filesystem::path &baked) {
 		namespace fs = std::filesystem;
@@ -210,9 +213,17 @@ namespace {
 }
 
 int main(int argc, char **argv) {
+	// **Both verbs, because this tool bakes and publishes.** It is the one
+	// place `assetc`'s decoder door and `cdn`'s publish door are crossed in one
+	// program, so a deployment turning a form off here turns it off for both.
+	engine::core::Config::DeclareEngineFlags();
+	engine::assets::DeclareContentFlags(engine::assets::ContentVerb::Handle);
+	engine::assets::DeclareContentFlags(engine::assets::ContentVerb::Publish);
+
 	engine::core::Arguments arguments(
 		"contentimport", "Brings files and folders into the local content store."
 	);
+	engine::core::Config::DeclareOptions(arguments);
 
 	arguments.Value("root", "PATH", "The store. Defaults to ~/Documents/atomic-game-engine/cdn");
 	arguments.Flag("publish", "Publish raw/ into processed/ once the imports are done");
@@ -225,6 +236,16 @@ int main(int argc, char **argv) {
 	}
 	if (parsed.HelpRequested) {
 		std::printf("%s", arguments.Help().c_str());
+		return 0;
+	}
+
+	const engine::core::ConfigReport configured = engine::core::Config::Apply(arguments);
+	if (!configured.Ok) {
+		std::fprintf(stderr, "%s\n", configured.Error.c_str());
+		return 2;
+	}
+	if (engine::core::Config::ListingWanted(arguments)) {
+		std::fputs(engine::core::Flags::Listing().c_str(), stdout);
 		return 0;
 	}
 
@@ -272,7 +293,7 @@ int main(int argc, char **argv) {
 	}
 
 	// **Baked before published, which is the step that was missing.** `raw/`
-	// holds what somebody dragged in and a runtime decodes none of it —
+	// holds what somebody dragged in and a runtime decodes none of it -
 	// `cdn/LocalStore.hpp` carries how long that went unnoticed and what it
 	// looked like. `assetc::Bake` is the one baker; this supplies it the two
 	// paths and nothing else, so a tree baked here and a tree baked by
@@ -285,8 +306,8 @@ int main(int argc, char **argv) {
 	// authored scale was wrong in a way that took two versions to see.**
 	//
 	// A `MeshPart`'s `Size` *multiplies* the mesh's own coordinates rather than
-	// fitting the mesh into a box — `examples/MeshGrid.luau` opens by calling
-	// that load-bearing — so a mesh only behaves like the built-ins if its own
+	// fitting the mesh into a box - `examples/MeshGrid.luau` opens by calling
+	// that load-bearing - so a mesh only behaves like the built-ins if its own
 	// coordinates fit inside ±0.5. Then `Size` means metres for every part in
 	// the scene rather than metres for some and a multiplier for others.
 	//
@@ -296,7 +317,7 @@ int main(int argc, char **argv) {
 	//   * the model drew about twenty times too big and overlapped every
 	//     neighbour on the plate;
 	//   * **the culling deleted it.** `scene::Bounds::HalfExtent` is `Size / 2`
-	//     — two metres for a part sized four — and that is the box
+	//     - two metres for a part sized four - and that is the box
 	//     `graph::CullAndBound` tests against the frustum. The geometry extended
 	//     ten times further than the box describing it, so the instance was
 	//     culled while most of it was still on screen. Nothing is wrong with the
@@ -311,7 +332,7 @@ int main(int argc, char **argv) {
 	// **Not `assetc`'s default of four**, which fits a model to four metres and
 	// is aimed at somebody pointing the baker at an art folder and wanting a
 	// scene to be usable immediately. A store is a library, and a library entry
-	// should carry no opinion about how big it is — one is the only scale that
+	// should carry no opinion about how big it is - one is the only scale that
 	// means "whatever `Size` says".
 	baking.ModelSize = 1.0f;
 
@@ -327,7 +348,7 @@ int main(int argc, char **argv) {
 	// `Tool::assetc` is `TIER shared` and so is `Engine::bake`; `libshaderc` is
 	// gated on `MONO_BUILD_CLIENT`, so neither can link it. This program is a
 	// bare `add_executable` with no tier, which is the same reason the mesh
-	// baking lives here rather than in `Mono::cdn` — see this directory's
+	// baking lives here rather than in `Mono::cdn` - see this directory's
 	// CMakeLists.
 	//
 	// **The server keeps carrying shaders regardless.** `AssetKind::Shader` is
@@ -343,7 +364,7 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 	ENGINE_INFO(
-		"baked {} asset(s), {} failed — {} bytes out", baked.Assets.size(), baked.Failures, baked.OutputBytes
+		"baked {} asset(s), {} failed - {} bytes out", baked.Assets.size(), baked.Failures, baked.OutputBytes
 	);
 	if (shaders > 0) {
 		ENGINE_INFO("compiled {} shader(s) to SPIR-V", shaders);
@@ -356,7 +377,7 @@ int main(int argc, char **argv) {
 	// will ever fetch.
 	if (baked.DanglingTextures > 0) {
 		ENGINE_WARN(
-			"{} model texture reference(s) named a file not in the store — those submeshes will draw "
+			"{} model texture reference(s) named a file not in the store - those submeshes will draw "
 			"untextured",
 			baked.DanglingTextures
 		);
@@ -364,7 +385,7 @@ int main(int argc, char **argv) {
 
 	// **The development identity when nobody says otherwise.** A store on this
 	// machine, serving this machine's editor, had a key only so that the same
-	// sixty-four characters could be mistyped in three places —
+	// sixty-four characters could be mistyped in three places -
 	// `cdn::DevelopmentSigningKey` carries what that costs and where it stops.
 	// `--key` still overrides it, and `cdn --publish` still requires one.
 	std::optional<engine::assets::SigningKey> signing;
@@ -376,7 +397,7 @@ int main(int argc, char **argv) {
 		}
 	} else {
 		signing = cdn::DevelopmentSigningKey();
-		ENGINE_INFO("publishing with the development key — pass --key for an identity of your own");
+		ENGINE_INFO("publishing with the development key - pass --key for an identity of your own");
 	}
 
 	const auto published = cdn::PublishLocal(paths, *signing, now);

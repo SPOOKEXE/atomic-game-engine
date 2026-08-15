@@ -22,7 +22,7 @@ mono_add_library(ui
 		# L12, `client`. `render::FrameOverlayHook` is the base class this
 		# module implements and `render::Renderer::Backend` is where the device
 		# and the swapchain format come from. Sideways within a layer rather
-		# than upward — repo_layout.md §6 allows it and the tier check agrees,
+		# than upward - repo_layout.md §6 allows it and the tier check agrees,
 		# because both are `client`.
 		Engine::render
 
@@ -30,7 +30,7 @@ mono_add_library(ui
 		# direction is the whole of why it is allowed**: `gui` is the engine's
 		# own widget tree and knows nothing about this module, exactly as
 		# `render` knows nothing about it. What arrives here is a flat
-		# `gui::DrawList` — no store, no tree, no class table — which is what
+		# `gui::DrawList` - no store, no tree, no class table - which is what
 		# lets a second backend draw the same list without either learning
 		# about the other.
 		#

@@ -3,7 +3,7 @@
 // This is a client test rather than an engine one because what it covers is
 // client code: the demo scene's components, resources and systems, and the
 // shape of the data they hand to the renderer. It links several engine modules
-// because the client does, not because it is testing them — each of those has
+// because the client does, not because it is testing them - each of those has
 // its own suite under mono.engine/<module>/tests/.
 //
 // Headless on purpose. Everything up to the point where a GPU is required is
@@ -55,7 +55,7 @@ namespace {
 	constexpr uint32_t ENTITIES = 512;
 	constexpr float STEP = 1.0f / 60.0f;
 
-	// A world and the scheduler that ticks it. Nothing else — which is the
+	// A world and the scheduler that ticks it. Nothing else - which is the
 	// point: after the scene loads, everything the tick reads and writes is
 	// inside the store.
 	//
@@ -106,7 +106,7 @@ TEST_CASE("a built scene produces one instance per entity", "[demo]") {
 	REQUIRE(session.Drawn().size() == ENTITIES);
 
 	// The camera is a row too and carries a Transform, so the query that counts
-	// drawable things names Visual as well — a count of Transform alone would be
+	// drawable things names Visual as well - a count of Transform alone would be
 	// one too many and would read as an off-by-one in the build loop.
 	REQUIRE(session.World.CountMatching<Transform, Visual>() == ENTITIES);
 }
@@ -223,7 +223,7 @@ TEST_CASE("the scene is a function of elapsed time, not of tick count", "[demo]"
 
 	// Compared on the Transform rather than on the emitted instance, because
 	// the instance is *interpolated* and at alpha 0 it shows the previous
-	// tick — 59/60 of a second against 119/120, which are legitimately
+	// tick - 59/60 of a second against 119/120, which are legitimately
 	// different places. What has to match is the simulation.
 	const auto a = PositionOf(coarse.World, 7);
 	const auto b = PositionOf(fine.World, 7);
@@ -251,8 +251,8 @@ TEST_CASE("rendering interpolates between the last two ticks", "[demo]") {
 	const auto currentTick = session.Drawn()[3].Frame.Position;
 
 	// At alpha 1 the render is at the tick it just simulated; at 0 it is a
-	// whole tick behind. That lag is inherent to interpolating — you can only
-	// draw between two states you already have — and it is what buys smooth
+	// whole tick behind. That lag is inherent to interpolating - you can only
+	// draw between two states you already have - and it is what buys smooth
 	// motion at any frame rate.
 	REQUIRE(currentTick.X != Approx(previousTick.X));
 
@@ -368,7 +368,7 @@ TEST_CASE("a tick reports itself to the frame graph and the metrics sink", "[dem
 	REQUIRE(named("collect-instances"));
 
 	// A span per phase between the scheduler and its systems, so "which part of
-	// the tick" is answerable before "which system" — and every one of them is
+	// the tick" is answerable before "which system" - and every one of them is
 	// ECS time, because every engine and game system runs through the ECS.
 	REQUIRE(named("simulation"));
 	REQUIRE(named("pre-render"));
@@ -408,7 +408,7 @@ TEST_CASE("the panels render a real tick's data", "[demo]") {
 	// aim-surface-cameras, collect-instances. `sync-rendered` arrived at v0.7
 	// with the render gate: it is what keeps `scene::Rendered` in step with the
 	// `Workspace` subtree, and it is structural. `aim-surface-cameras` arrived
-	// beside it and places every surface camera parented to a part — see
+	// beside it and places every surface camera parented to a part - see
 	// `scene/SurfaceCameras.hpp`.
 	//
 	// **Nine more at v0.10**, from two installers. `InstallEffects` adds
@@ -416,7 +416,7 @@ TEST_CASE("the panels render a real tick's data", "[demo]") {
 	// and record-trails in `Simulation`, and build-ribbons in `PreRender`.
 	// `InstallControls` adds character-control in `PreSimulation` and
 	// camera-control in `PreRender`, and `physics::RegisterCharacterSystems`
-	// adds character.control in `PreSimulation` — that moved out of this file's
+	// adds character.control in `PreSimulation` - that moved out of this file's
 	// installer at v0.14, so that a dedicated server grounds its characters too.
 	//
 	// Only two of the nine are presentation; the rest are simulation and are here
@@ -425,31 +425,31 @@ TEST_CASE("the panels render a real tick's data", "[demo]") {
 	// The question this assertion exists to force was asked and answered:
 	// **a world that only presents still does the right thing.** The studio's
 	// suspended scene runs `PreRender` and not `Simulation`, so it builds ribbons
-	// from whatever the trails last recorded and steps no particles — a frozen
+	// from whatever the trails last recorded and steps no particles - a frozen
 	// effect rather than a missing one, which is what a suspended world should
 	// look like.
 	//
 	// **A count rather than a list, and it is worth keeping as one.** It fails
 	// whenever a system is added to the presentation phase, which is exactly
-	// when somebody should be asked whether a world that only presents — the
-	// studio's suspended scene — still does the right thing.
+	// when somebody should be asked whether a world that only presents - the
+	// studio's suspended scene - still does the right thing.
 	//
 	// **Sixteen since v0.10's `resolve-materials`, and the question it forces was
 	// answered.** It runs in `PreSimulation`, so a suspended scene does not run
-	// it — which is right: a `Material` instance's texture is already on the part
+	// it - which is right: a `Material` instance's texture is already on the part
 	// from the last tick that did, so a frozen world keeps the material it was
 	// frozen with rather than losing it.
 	//
 	// **Seventeen since v0.14's `character.pose`, and its question has the
 	// friendliest answer of the three.** It is presentation, so a suspended
-	// scene *does* run it — and that is exactly right: a character's limbs are a
+	// scene *does* run it - and that is exactly right: a character's limbs are a
 	// product of where its root is, so a frozen world shows a character standing
 	// still rather than one whose arms are wherever they were when the world
 	// stopped.
 	//
 	// **Eighteen since `character.link`, and its answer is the same as
 	// `resolve-materials`'.** It runs in `PreSimulation`, so a suspended scene
-	// does not run it — which is right: the link between a player and the model
+	// does not run it - which is right: the link between a player and the model
 	// they drive is state, not presentation, and a frozen world showing the
 	// character it was frozen with is exactly what it should show.
 	//
@@ -462,12 +462,12 @@ TEST_CASE("the panels render a real tick's data", "[demo]") {
 	//
 	// **Nineteen since `character.link`**, which rebuilds a rig a client
 	// received over the wire. `PreSimulation`, so a suspended scene does not run
-	// it — and a scene nobody is playing has no client to have received one.
+	// it - and a scene nobody is playing has no client to have received one.
 	//
 	// **And eighteen again once the wake, the ground query and the step became
 	// one `character.control`.** They were two systems in two phases and the
 	// second shared `Simulation` with `physics.simulation`, which the scheduler
-	// leaves unordered — so the velocity a key press produced was written after
+	// leaves unordered - so the velocity a key press produced was written after
 	// the integrator that would have moved it, and thrown away with the
 	// `scene::Motion` when the resting body lost it. Composed, the way
 	// `physics.contacts` composes its four steps and for the same reason.

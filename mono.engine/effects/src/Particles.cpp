@@ -15,7 +15,7 @@ namespace engine::effects {
 			// **Clamped rather than wrapped**, and the low end matters as much as
 			// the high: a negative size comes out of a `Squash` past -1, and
 			// wrapping it would make an over-squashed particle sixty-four metres
-			// across for one frame — a full-screen white flash in the middle of an
+			// across for one frame - a full-screen white flash in the middle of an
 			// effect, which reads as a shader fault rather than as a curve.
 			const float clamped = std::clamp(metres, 0.0f, MAX_PARTICLE_SIZE);
 			return static_cast<uint32_t>(clamped * SIZE_SCALE + 0.5f);

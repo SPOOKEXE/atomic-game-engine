@@ -8,7 +8,7 @@
 // compare, which cannot work: what is staged is SPIR-V and the constant is folded
 // away by then.
 //
-// Closed at v0.10 by removing the second spelling rather than by checking it —
+// Closed at v0.10 by removing the second spelling rather than by checking it -
 // `mono.engine/render/CMakeLists.txt` reads the value out of `Renderer.hpp` and
 // passes `-DMAX_LIGHTS` to glslc, so the shader has no literal to disagree with.
 // **A constraint made impossible beats one that is tested**, which is the shape
@@ -31,7 +31,7 @@ TEST_CASE("a scene light's defaults are the ones a point light wants", "[render]
 	// **-1 is the value that means "no cone", and it is a default rather than a
 	// sentinel a caller has to know.** The shader tests `cosine > -1.0` to decide
 	// whether to clip, so a light left alone is a point light and needs no branch
-	// on its kind — which is what lets `scene::Light` be one component behind
+	// on its kind - which is what lets `scene::Light` be one component behind
 	// three classes.
 	REQUIRE(light.ConeCosine == -1.0f);
 
@@ -48,7 +48,7 @@ TEST_CASE("a scene light's defaults are the ones a point light wants", "[render]
 TEST_CASE("the light cap is a number the renderer can act on", "[render]") {
 	// Not a tautology: this is the constant a caller sizes its own list against,
 	// and a zero or a wildly large value would each be a different kind of broken
-	// — one drops every light, the other overflows a uniform buffer at the
+	// - one drops every light, the other overflows a uniform buffer at the
 	// driver rather than here.
 	REQUIRE(engine::render::MAX_SCENE_LIGHTS > 0);
 	REQUIRE(engine::render::MAX_SCENE_LIGHTS <= 64);

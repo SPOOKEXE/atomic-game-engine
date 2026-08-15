@@ -31,8 +31,8 @@ namespace engine::scene {
 
 		// An untextured material is stored rather than rejected, for
 		// `RecordTexture`'s reason: it reads back identically to "not known",
-		// both mean the same thing to a caller — there is nothing here to sample
-		// — and a separate "known to have no texture" state would be a
+		// both mean the same thing to a caller - there is nothing here to sample
+		// - and a separate "known to have no texture" state would be a
 		// distinction nothing can act on.
 		MaterialsOf(store).ColourMaps[material.Id()] = maps;
 		return true;
@@ -51,11 +51,11 @@ namespace engine::scene {
 
 		// The parents written this pass, so the next one can tell what stopped
 		// having a material. Gathered while writing rather than in a second
-		// walk — the entity is already in hand.
+		// walk - the entity is already in hand.
 		std::vector<ecs::Entity> written;
 
 		// **`Each` and not `EachBatchParallel`, and the difference is the parent
-		// lookup** — `ResolveAttachments` states the argument and this pass has
+		// lookup** - `ResolveAttachments` states the argument and this pass has
 		// exactly the same shape. A batched walk is handed columns and no entity,
 		// so there is no handle to ask `ParentOf` about, and the parent's
 		// `SurfaceAppearance` lives in a different archetype from the material's
@@ -95,6 +95,14 @@ namespace engine::scene {
 			appearance->OcclusionMap = maps.Occlusion;
 			appearance->HeightMap = maps.Height;
 			appearance->EmissiveMap = maps.Emissive;
+
+			// **From the material instance and not from the catalogue**, which
+			// is the one field here that does not come out of a published
+			// `.amat`. A shader is selected on the `Material` in the world -
+			// `MaterialRef::Shader` - because it may name a `ShaderScript` that
+			// only that world contains, and a catalogue keyed by asset name has
+			// nowhere to put an answer that differs per world.
+			appearance->Shader = material.Shader;
 			written.push_back(parent);
 			resolved++;
 		});
@@ -145,6 +153,12 @@ namespace engine::scene {
 				appearance->OcclusionMap = core::Name{};
 				appearance->HeightMap = core::Name{};
 				appearance->EmissiveMap = core::Name{};
+
+				// **And the shader with them**, for the same reason: a part
+				// whose material was deleted would otherwise go on being drawn
+				// by that material's shader, which is the one thing about it
+				// still visible after the textures had gone.
+				appearance->Shader = core::Name{};
 			}
 		}
 

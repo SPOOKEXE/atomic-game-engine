@@ -5,14 +5,14 @@
 // **This decodes one container and there is exactly one other.** RIFF/WAV,
 // because it is what every authoring tool writes, it is uncompressed so there
 // is no codec to vendor, and `AssetKind::Audio` already classifies `.wav` at
-// publish time. `Mp3.hpp` is the second, added at v0.9 because minimp3 is CC0 —
+// publish time. `Mp3.hpp` is the second, added at v0.9 because minimp3 is CC0 -
 // a licence answer rather than a change of principle. Ogg and FLAC are still
 // classified by the manifest and **not decoded anywhere**, and pretending to
 // support them by listing an extension would be worse than the honest gap.
 //
 // **Every field is hostile.** A `.wav` arrives over the delivery path from an
 // origin that `repo_layout.md` §1 says anyone can run, and the format is a
-// chain of length-prefixed chunks — which is to say it is a list of numbers
+// chain of length-prefixed chunks - which is to say it is a list of numbers
 // that tell a parser how far to jump. So nothing here allocates from a length
 // it has not bounded against the actual buffer, no chunk header is read without
 // checking there is a header's worth of bytes left, and a chunk claiming to
@@ -36,7 +36,7 @@ namespace engine::audio {
 	//
 	// A cheap check on the first twelve bytes, for a caller deciding what a
 	// blob is before spending a decode on it. **Not a substitute for decoding**
-	// — it says the container is plausible and nothing about whether the rest
+	// - it says the container is plausible and nothing about whether the rest
 	// parses.
 	//
 	// @param bytes The file.
@@ -46,8 +46,8 @@ namespace engine::audio {
 	// Decodes a RIFF/WAV file into samples.
 	//
 	// Accepts the four encodings authoring tools actually write: unsigned
-	// 8-bit, signed 16-bit, signed 24-bit and 32-bit float. Everything else —
-	// A-law, µ-law, ADPCM, anything with a codec behind it — is refused rather
+	// 8-bit, signed 16-bit, signed 24-bit and 32-bit float. Everything else -
+	// A-law, µ-law, ADPCM, anything with a codec behind it - is refused rather
 	// than half-read, because a decoder that guessed would produce noise at
 	// full volume, which is the single worst failure mode this subsystem has.
 	//
@@ -65,7 +65,7 @@ namespace engine::audio {
 
 	// The largest file this will decode.
 	//
-	// A backstop rather than the real check — the real one is that every chunk
+	// A backstop rather than the real check - the real one is that every chunk
 	// is bounded against the buffer it came in. This catches a `.wav` that is
 	// absurd before the allocator does, and it is generous: ten minutes of
 	// 48 kHz stereo float is about 230 MB.

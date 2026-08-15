@@ -58,7 +58,7 @@ namespace {
 		//
 		// **Made by the fixture rather than by each case.** Containment is a
 		// rule every case is now subject to, and parenting by hand in thirty of
-		// them would be thirty chances to forget — and a forgotten one lays out
+		// them would be thirty chances to forget - and a forgotten one lays out
 		// to nothing, which reads as the case being wrong rather than the
 		// fixture being incomplete.
 		//
@@ -92,7 +92,7 @@ namespace {
 	// **The point of this is that it is generic.** `Compile.hpp` promises the
 	// signature covers every field that reaches a rectangle, and the only way
 	// to check a promise about *every* field is to walk the class table rather
-	// than to list them again — a list would go stale in exactly the same way
+	// than to list them again - a list would go stale in exactly the same way
 	// the fold would.
 	//
 	// @return `false` for a property this cannot meaningfully perturb, which
@@ -132,7 +132,7 @@ namespace {
 		// bytes makes it read a length and a pointer out of nothing. Every
 		// production caller takes the same exception for the same reason, and
 		// this one exists because the walk above reaches *every* declared
-		// property — which is the whole point of the case.
+		// property - which is the whole point of the case.
 		if (property.Type == PropertyType::String) {
 			const std::string next = "a value nothing else here uses";
 			return store.SetProperty(instance, property.Name, &next, sizeof(next));
@@ -145,7 +145,7 @@ namespace {
 			return store.SetProperty(instance, property.Name, &current, sizeof(current));
 		}
 
-		// Everything left is one or more numbers laid end to end — an `int32`,
+		// Everything left is one or more numbers laid end to end - an `int32`,
 		// a `float`, a `Vector2`, a `UDim2`, a `Rect`, a `Color3`. Nudging the
 		// first component is enough to say the field is folded in, and reading
 		// the current value first means the nudge lands somewhere legal for a
@@ -199,7 +199,7 @@ TEST_CASE("a still world compiles once and is then kept", "[gui][compile]") {
 TEST_CASE("every declared property moves the signature", "[gui][compile]") {
 	// **This is the check that makes `Compile.hpp`'s table a contract.** A
 	// field added to a component and not to the fold is a UI one edit stale,
-	// and the symptom — a panel that updates on the *next* unrelated change —
+	// and the symptom - a panel that updates on the *next* unrelated change -
 	// is close to undebuggable from the outside.
 	//
 	// Every concrete class, every property it declares, one at a time.
@@ -291,7 +291,7 @@ TEST_CASE("the tree, the name and the screen all move the signature", "[gui][com
 	REQUIRE(world.Rebuild());
 
 	// Reparenting. `ecs::Hierarchy` is not an observed component, so
-	// `Store::ChangeVersion` does not move for this — which is the entire
+	// `Store::ChangeVersion` does not move for this - which is the entire
 	// reason a signature exists rather than a version compare.
 	uint64_t before = world.List.Signature();
 	world.Data.SetParent(second, first);
@@ -324,7 +324,7 @@ TEST_CASE("the hovered element is an input to the compile", "[gui][compile]") {
 	const Entity button = world.Make("TextButton", screen);
 
 	// **The default fill, deliberately.** `Background::Color` is white, so a
-	// button created in the explorer is white — and a shift that only ever
+	// button created in the explorer is white - and a shift that only ever
 	// lightened clamped straight back to white and did nothing under the
 	// pointer, which is every button anybody makes. This case used to be run
 	// against a mid-grey, which is exactly the fill that hid it.
@@ -395,7 +395,7 @@ TEST_CASE("paint order is parent first, then siblings by ZIndex", "[gui][compile
 
 	// **Deliberately lower than its own parent's sibling.** Under
 	// `ZIndexBehavior::Sibling` a child is drawn over its parent whatever its
-	// number, and `ZIndex` only orders siblings — so this child sits above
+	// number, and `ZIndex` only orders siblings - so this child sits above
 	// `back` and below `front`, and a compile that sorted globally would put it
 	// at the bottom.
 	beneath.ZIndex = -50;
@@ -466,7 +466,7 @@ TEST_CASE("a fully transparent element emits nothing", "[gui][compile]") {
 
 	REQUIRE(world.Rebuild());
 
-	// Not emitted at all, so a backend never has to test for it — and the
+	// Not emitted at all, so a backend never has to test for it - and the
 	// command count means "what is on screen" rather than "what exists".
 	CHECK(world.List.Commands().Commands.empty());
 

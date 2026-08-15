@@ -6,6 +6,7 @@
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -29,7 +30,7 @@ namespace engine::script {
 	void Runtime::DeliverGuiEvents(std::span<const gui::GuiEvent> events) {
 		// **Appended rather than assigned**, because a host may poll more than
 		// one canvas between beats. The studio compiles and routes one
-		// `gui::Router` per viewport panel — a panel *is* a canvas — so two
+		// `gui::Router` per viewport panel - a panel *is* a canvas - so two
 		// panels open is two calls here before a single heartbeat, and an
 		// assignment would deliver whichever ran last and silently drop the
 		// other.
@@ -63,12 +64,17 @@ namespace engine::script {
 		ScriptCosts.reserve(scripts.size());
 
 		for (const ecs::Entity instance : scripts) {
+			// Recorded whether or not it is new: this call starts everything it
+			// finds, and what the record is for is stopping `RunNewScripts` from
+			// starting the same instance a second time.
+			(void)RememberStarted(instance);
+
 			const uint64_t before = StepsTaken();
 			const bool ok = RunInstance(instance);
 			const uint64_t after = StepsTaken();
 
 			// Saturating, because the counter resets when a script blows its
-			// budget — and a reset read as a delta would be an enormous figure
+			// budget - and a reset read as a delta would be an enormous figure
 			// attributed to whichever script ran next.
 			ScriptCosts.push_back(ScriptCost{instance, after >= before ? after - before : 0, ok});
 
@@ -91,25 +97,54 @@ namespace engine::script {
 		return ran;
 	}
 
+	bool Runtime::RememberStarted(ecs::Entity instance) {
+		const auto at = std::lower_bound(
+			StartedScripts.begin(), StartedScripts.end(), instance, [](ecs::Entity left, ecs::Entity right) {
+				return left.Id < right.Id;
+			}
+		);
+
+		if (at != StartedScripts.end() && at->Id == instance.Id) {
+			return false;
+		}
+
+		StartedScripts.insert(at, instance);
+		return true;
+	}
+
+	size_t Runtime::RunNewScripts(std::span<const ecs::Entity> wanted) {
+		Error.clear();
+
+		size_t started = 0;
+		std::string firstError;
+
+		for (const ecs::Entity instance : wanted) {
+			if (!RememberStarted(instance)) {
+				continue;
+			}
+
+			if (RunInstance(instance)) {
+				started++;
+				continue;
+			}
+
+			// Logged per failure and reported once, for the reason
+			// `RunWorldScripts` gives: a world where half the scripts silently
+			// did not start is a bug report with nothing in it.
+			ENGINE_ERROR("script '{}': {}", Store.InstanceNameOf(instance).Text(), Error);
+			if (firstError.empty()) {
+				firstError = Error;
+			}
+		}
+
+		Error = firstError;
+		return started;
+	}
+
 	std::unique_ptr<Runtime> MakeRuntime(ecs::Store &store, Language language, const RuntimeLimits &limits) {
 		if (language == Language::JavaScript) {
 			return std::make_unique<JavaScriptRuntime>(store, limits);
 		}
 		return std::make_unique<LuauRuntime>(store, limits);
-	}
-
-	bool RunScriptFile(
-		ecs::Store &store, const std::string &path, std::string &error, const RuntimeLimits &limits
-	) {
-		// The extension picks the VM, which is what makes "two languages, one
-		// binding surface" a fact a caller never has to think about: a loader
-		// hands over a path and the same world comes back either way.
-		const std::unique_ptr<Runtime> runtime = MakeRuntime(store, LanguageOf(path), limits);
-		if (runtime->RunFile(path)) {
-			return true;
-		}
-
-		error = runtime->LastError();
-		return false;
 	}
 }

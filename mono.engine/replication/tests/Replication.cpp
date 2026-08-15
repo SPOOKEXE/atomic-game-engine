@@ -2,11 +2,12 @@
 //
 // No transport here on purpose. `Authority` produces messages and `Replica`
 // consumes them, so the whole of replication can be driven by handing byte
-// vectors from one to the other — which is what lets these cases run in
+// vectors from one to the other - which is what lets these cases run in
 // microseconds and what makes a lost or reordered message something a test
 // *states* rather than something it waits for.
 
 #include <engine/core/Random.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
@@ -34,6 +35,7 @@ using engine::ecs::Store;
 using engine::replication::ApplyStatus;
 using engine::replication::Authority;
 using engine::replication::AuthoritySettings;
+using engine::replication::ChangeDetection;
 using engine::replication::ClientId;
 using engine::replication::Prediction;
 using engine::replication::Replica;
@@ -58,10 +60,36 @@ namespace replication_test {
 			engine::ecs::Components::Register<Spot>("replication_test.Spot");
 			engine::ecs::Components::Register<Secret>("replication_test.Secret");
 			engine::ecs::Components::Register<Marked>("replication_test.Marked");
-			engine::ecs::Components::Register<engine::ecs::Hierarchy>("ecs.Hierarchy");
+
+			// `ecs.Hierarchy`, `ecs.InstanceName` and `ecs.InstanceClass` in one
+			// call, and idempotent - which is why it replaces the hand-written
+			// `Register<Hierarchy>` that used to stand here. Registering one of
+			// the three by hand is how the other two get forgotten, which is the
+			// same shape as the bug the cases below cover.
+			engine::ecs::Classes::RegisterInstanceRoot();
 			return true;
 		}();
 		(void)once;
+	}
+
+	// Two classes of this suite's own, so that "the class arrived" is a
+	// statement about *which* class rather than about the only one there is.
+	//
+	// Their names are this suite's, because a class table is process-wide and a
+	// stand-in under a real name is the collision `Defaults.cpp` already records
+	// having made once.
+	engine::ecs::ClassId HolderClass() {
+		static const engine::ecs::ClassId id = engine::ecs::Classes::Register(
+			"ReplicationTestHolder", engine::ecs::Classes::RegisterInstanceRoot(), {}
+		);
+		return id;
+	}
+
+	engine::ecs::ClassId CarriedClass() {
+		static const engine::ecs::ClassId id = engine::ecs::Classes::Register(
+			"ReplicationTestCarried", engine::ecs::Classes::RegisterInstanceRoot(), {}
+		);
+		return id;
 	}
 
 	std::vector<std::byte> Bytes(std::string_view text) {
@@ -82,7 +110,7 @@ namespace replication_test {
 
 		// One tick: publish, deliver everything, acknowledge.
 		//
-		// `drop` decides which messages are lost, by index within the tick —
+		// `drop` decides which messages are lost, by index within the tick -
 		// an unreliable transport is the normal case, not the exception.
 		void Tick(const std::function<bool(size_t)> &drop = {}) {
 			Now++;
@@ -97,7 +125,7 @@ namespace replication_test {
 			}
 
 			// The world's change bits are the delta source, so they are cleared
-			// after publishing and not before — clearing first is how a tick's
+			// after publishing and not before - clearing first is how a tick's
 			// worth of movement goes missing.
 			Server.ClearChanges();
 
@@ -141,7 +169,7 @@ TEST_CASE("a client joins by full snapshot and sees the world", "[replication]")
 	REQUIRE(pair.Join());
 	REQUIRE(pair.Replica_.Stats().Snapshots == 1);
 
-	// The same entities, by the same handles — which only holds because the
+	// The same entities, by the same handles - which only holds because the
 	// snapshot reproduces the directory exactly, index and generation alike.
 	for (int index = 0; index < 24; index++) {
 		const Entity entity = entities[static_cast<size_t>(index)];
@@ -176,11 +204,314 @@ TEST_CASE("a big world joins over several ticks rather than one", "[replication]
 	REQUIRE(pair.Replica_.SnapshotOutstanding() == 0);
 }
 
+TEST_CASE("what a host puts in front of the world arrives in front of it", "[replication]") {
+	// **`D00122`: a score orders a stream and a join is a byte cursor.** The
+	// entities a host wants seen first were ranked ahead of everything for the
+	// life of the connection and it changed nothing about the one moment that
+	// matters - a client's first view of a world is one `ecs::Store::Save`
+	// chunked across ticks in whatever order the store wrote its archetypes.
+	//
+	// What is asserted is *before* and not *eventually*: at the tick the
+	// preface landed, the client holds it and holds nothing else. A case that
+	// only proved it arrives passes against the code this exists to change.
+	//
+	// Spelled with this suite's own components rather than `scene`'s, because
+	// `replication` does not link `scene` and must not - `Marked` stands in for
+	// "under `ReplicatedFirst`", and the predicate reaching across that boundary
+	// is exactly how the real one does it.
+	AuthoritySettings settings;
+	settings.ChunkBytes = 256;
+	settings.ChunksPerTick = 1;
+
+	Pair pair;
+	pair.Authority_ = Authority(settings);
+	pair.Handle = pair.Authority_.Admit();
+	pair.Authority_.Replicate(Name("replication_test.Spot"));
+	pair.Authority_.Replicate(Name("replication_test.Marked"));
+	pair.Authority_.SetPreface([](Entity entity, const Store &store) {
+		return store.Get<Marked>(entity) != nullptr;
+	});
+
+	const Entity screen = pair.Server.Create();
+	pair.Server.Set<Spot>(screen, Spot{-1.0f, -1.0f});
+	pair.Server.Set<Marked>(screen, Marked{1});
+
+	// A world large enough that its own snapshot takes many ticks at a chunk a
+	// tick. Without that there is no window to be first in.
+	for (int index = 0; index < 400; index++) {
+		pair.Server.Set<Spot>(pair.Server.Create(), Spot{static_cast<float>(index), 0.0f});
+	}
+
+	int prefacedAt = -1;
+	bool joinedThen = true;
+	bool screenThen = false;
+	size_t rowsThen = 0;
+
+	for (int tick = 0; tick < 1024 && !pair.Replica_.Joined(); tick++) {
+		pair.Tick();
+		if (prefacedAt >= 0 || !pair.Replica_.Prefaced()) {
+			continue;
+		}
+
+		prefacedAt = tick;
+		joinedThen = pair.Replica_.Joined();
+		screenThen = pair.Client.Get<Spot>(screen) != nullptr;
+		rowsThen = pair.Client.CountMatching<Spot>();
+	}
+
+	REQUIRE(prefacedAt >= 0);
+	INFO("the preface landed on tick " << prefacedAt << " with " << rowsThen << " rows in the replica");
+
+	CHECK(screenThen);
+	CHECK_FALSE(joinedThen);
+
+	// The whole of the claim: one row, and it is the one that was put in front.
+	CHECK(rowsThen == 1);
+
+	// And the world blob that follows is still the complete picture, so its
+	// authoritative sweep must not take the preface's rows back out.
+	REQUIRE(pair.Replica_.Joined());
+	CHECK(pair.Client.CountMatching<Spot>() == 401);
+	CHECK(pair.Client.Get<Marked>(screen) != nullptr);
+	CHECK(pair.Replica_.Stats().Prefaces == 1);
+	CHECK(pair.Replica_.Stats().Snapshots == 1);
+}
+
+TEST_CASE("the preface is observable when a poll drains both blobs at once", "[replication]") {
+	// **The defect that made `server.replication`'s version of the case above a
+	// coin toss.** A poll is not a moment. `Connector::Poll` drains the socket
+	// and applies every message that was waiting in it, so on a machine with no
+	// spare core a client that sleeps 4 ms between polls wakes to several ticks'
+	// worth of datagrams and applies the preface and the world behind it in one
+	// call. Everything outside that call then sees a replica that has already
+	// joined, and the window a loading screen lives in never existed as far as
+	// any caller could tell. Measured at six failures in six under a saturating
+	// build and none on an idle one.
+	//
+	// Reproduced here by holding the stream back and applying half a second of
+	// it in one go, which is what a socket buffer does for free.
+	// `Replica::OnPreface` runs inside the apply, so it sees the same window
+	// whether the caller polls every tick or once a second.
+	AuthoritySettings settings;
+	settings.ChunkBytes = 512;
+	settings.ChunksPerTick = 1;
+
+	Pair pair;
+	pair.Authority_ = Authority(settings);
+	pair.Handle = pair.Authority_.Admit();
+	pair.Authority_.Replicate(Name("replication_test.Spot"));
+	pair.Authority_.Replicate(Name("replication_test.Marked"));
+	pair.Authority_.SetPreface([](Entity entity, const Store &store) {
+		return store.Get<Marked>(entity) != nullptr;
+	});
+
+	const Entity screen = pair.Server.Create();
+	pair.Server.Set<Spot>(screen, Spot{-1.0f, -1.0f});
+	pair.Server.Set<Marked>(screen, Marked{1});
+
+	for (int index = 0; index < 400; index++) {
+		pair.Server.Set<Spot>(pair.Server.Create(), Spot{static_cast<float>(index), 0.0f});
+	}
+
+	int prefaces = 0;
+	bool joinedInside = true;
+	bool screenInside = false;
+	size_t rowsInside = 0;
+	pair.Replica_.OnPreface([&](Store &world) {
+		prefaces++;
+		joinedInside = pair.Replica_.Joined();
+		screenInside = world.Get<Spot>(screen) != nullptr;
+		rowsInside = world.CountMatching<Spot>();
+	});
+
+	// What a caller polling between drains would have seen, kept running beside
+	// the hook so the difference between them is measured here rather than
+	// asserted in a comment.
+	bool seenBetweenPolls = false;
+
+	std::vector<std::vector<std::byte>> waiting;
+	for (int tick = 0; tick < 1024 && !pair.Replica_.Joined(); tick++) {
+		pair.Now++;
+		pair.Authority_.Publish(pair.Server, pair.Now);
+		for (const std::vector<std::byte> &message : pair.Authority_.Outgoing(pair.Handle)) {
+			waiting.push_back(message);
+		}
+		pair.Server.ClearChanges();
+
+		// **One drain per thirty-two ticks, which is half a second at 60 Hz.**
+		// The number has to be larger than the join is long or the drain lands
+		// mid-world and the window is visible again for an uninteresting
+		// reason - the point being reproduced is a client that was away for
+		// the whole of it, which is what a 4 ms poll on a saturated machine
+		// amounts to.
+		if (tick % 32 != 31) {
+			continue;
+		}
+
+		for (const std::vector<std::byte> &message : waiting) {
+			pair.Replica_.Receive(pair.Client, message);
+		}
+		waiting.clear();
+
+		const std::vector<std::byte> ack = pair.Replica_.Acknowledge();
+		if (!ack.empty()) {
+			pair.Authority_.Receive(pair.Handle, ack);
+		}
+
+		seenBetweenPolls = seenBetweenPolls || (pair.Replica_.Prefaced() && !pair.Replica_.Joined());
+	}
+
+	REQUIRE(pair.Replica_.Joined());
+
+	// **The hook saw it**, once, with the screen present and the world absent.
+	REQUIRE(prefaces == 1);
+	CHECK_FALSE(joinedInside);
+	CHECK(screenInside);
+	CHECK(rowsInside == 1);
+
+	// **And nothing outside the apply did**, which is the whole reason the hook
+	// exists rather than a flag somebody checks after polling. If this ever
+	// starts passing, the batching above has stopped reproducing what a loaded
+	// machine does and the case is no longer about anything.
+	CHECK_FALSE(seenBetweenPolls);
+
+	// The world behind the preface still arrived whole and did not sweep the
+	// preface's row back out.
+	CHECK(pair.Client.CountMatching<Spot>() == 401);
+	CHECK(pair.Client.Get<Marked>(screen) != nullptr);
+	CHECK(pair.Replica_.Stats().Prefaces == 1);
+	CHECK(pair.Replica_.Stats().Snapshots == 1);
+}
+
+TEST_CASE("a host that declares no preface joins in one blob", "[replication]") {
+	// The default has to stay exactly what it was: one snapshot, one cursor, no
+	// window. A preface nobody asked for would be a second blob's worth of
+	// latency on every join in the engine.
+	Pair pair;
+	for (int index = 0; index < 24; index++) {
+		pair.Server.Set<Spot>(pair.Server.Create(), Spot{static_cast<float>(index), 0.0f});
+	}
+
+	REQUIRE(pair.Join());
+	CHECK_FALSE(pair.Replica_.Prefaced());
+	CHECK(pair.Replica_.Stats().Prefaces == 0);
+	CHECK(pair.Replica_.Stats().Snapshots == 1);
+}
+
+TEST_CASE("a re-snapshotted client is not emptied by the preface", "[replication]") {
+	// **The failure that swapping the two apply modes would produce, and it is
+	// invisible from the preface alone.** A preface is a slice of a world, so a
+	// receiver applying it authoritatively sweeps everything it does not
+	// mention - which on a join is nothing and on a *re-snapshot* is the entire
+	// world this client already holds.
+	AuthoritySettings settings;
+	settings.ResnapshotAfterTicks = 4;
+
+	Pair pair;
+	pair.Authority_ = Authority(settings);
+	pair.Handle = pair.Authority_.Admit();
+	pair.Authority_.Replicate(Name("replication_test.Spot"));
+	pair.Authority_.Replicate(Name("replication_test.Marked"));
+	pair.Authority_.SetPreface([](Entity entity, const Store &store) {
+		return store.Get<Marked>(entity) != nullptr;
+	});
+
+	const Entity screen = pair.Server.Create();
+	pair.Server.Set<Spot>(screen, Spot{-1.0f, -1.0f});
+	pair.Server.Set<Marked>(screen, Marked{1});
+
+	std::vector<Entity> world;
+	for (int index = 0; index < 12; index++) {
+		const Entity entity = pair.Server.Create();
+		pair.Server.Set<Spot>(entity, Spot{static_cast<float>(index), 0.0f});
+		world.push_back(entity);
+	}
+
+	REQUIRE(pair.Join());
+	REQUIRE(pair.Client.CountMatching<Spot>() == 13);
+
+	// Every acknowledgement dropped, which is what "this client cannot be
+	// caught up by deltas" looks like from the server's side.
+	for (int tick = 0; tick < 40 && pair.Replica_.Stats().Snapshots < 2; tick++) {
+		for (const Entity entity : world) {
+			pair.Server.GetMutable<Spot>(entity)->Y += 1.0f;
+		}
+
+		pair.Now++;
+		pair.Authority_.Publish(pair.Server, pair.Now);
+		for (const std::vector<std::byte> &message : pair.Authority_.Outgoing(pair.Handle)) {
+			pair.Replica_.Receive(pair.Client, message);
+		}
+		pair.Server.ClearChanges();
+
+		// Nothing goes back, so the server sees a client that has stopped
+		// applying and re-snapshots it.
+		CHECK(pair.Client.CountMatching<Spot>() == 13);
+	}
+
+	REQUIRE(pair.Replica_.Stats().Snapshots == 2);
+	REQUIRE(pair.Replica_.Stats().Prefaces == 2);
+	CHECK(pair.Client.CountMatching<Spot>() == 13);
+	CHECK(pair.Client.Get<Marked>(screen) != nullptr);
+}
+
+TEST_CASE("a tagged entity stops paying for a row the receiver derives", "[replication]") {
+	// **`D00115`: the filter was per component and a character needed it per
+	// row.** Five of a character's six parts have their frame derived from the
+	// root by `scene::PoseCharacters` on whichever machine draws, so the frames
+	// that crossed for them were overwritten the moment they landed - five
+	// ten-byte quantised `CFrame`s per character per tick against roughly ten
+	// for the root alone.
+	//
+	// Spelled here with the suite's own components rather than with `scene`'s,
+	// because `replication` does not link `scene` and must not: the tag reaches
+	// the authority as a *string*, which is the whole reason this works across
+	// the tier boundary. `Marked` stands in for `scene.CharacterLimb`.
+	Pair pair;
+	pair.Authority_.Replicate(Name("replication_test.Marked"));
+	pair.Authority_.SuppressWhenTagged(Name("replication_test.Spot"), Name("replication_test.Marked"));
+
+	const Entity root = pair.Server.Create();
+	pair.Server.Set<Spot>(root, Spot{1.0f, 0.0f});
+
+	const Entity limb = pair.Server.Create();
+	pair.Server.Set<Spot>(limb, Spot{2.0f, 0.0f});
+	pair.Server.Set<Marked>(limb, Marked{1});
+
+	REQUIRE(pair.Join());
+
+	// **The baseline carries one copy, and that is deliberate.** A client just
+	// admitted holds the limb where the server last put it, so its first frame
+	// is right before any derivation has run. Only the per-tick repeat stops.
+	REQUIRE(pair.Client.Get<Spot>(limb) != nullptr);
+	CHECK(pair.Client.Get<Spot>(limb)->X == 2.0f);
+
+	// And the tag itself still crosses - it is what carries a limb's rest
+	// offset, and filtering it would be the mistake `D00115` warned against.
+	CHECK(pair.Client.Get<Marked>(limb) != nullptr);
+
+	// Now move both. The untagged row is the control: without it a test that
+	// asserted only the skip would also pass if replication had stopped
+	// entirely.
+	pair.Server.GetMutable<Spot>(root)->X = 11.0f;
+	pair.Server.GetMutable<Spot>(limb)->X = 22.0f;
+
+	for (int beat = 0; beat < 4; beat++) {
+		pair.Tick();
+	}
+
+	INFO("the unsuppressed row is the control and must still arrive");
+	CHECK(pair.Client.Get<Spot>(root)->X == 11.0f);
+
+	INFO("the suppressed row must still hold what the baseline gave it");
+	CHECK(pair.Client.Get<Spot>(limb)->X == 2.0f);
+}
+
 TEST_CASE("an entity with no replicated component is not in the snapshot", "[replication]") {
 	// **A row with nothing in it still says how many entities the world holds.**
 	// Interest filters entities and `Replicate` filters components, and the
 	// entity that passed the first and had nothing left after the second used to
-	// cross as a bare row — no data, and a count of a world the client was never
+	// cross as a bare row - no data, and a count of a world the client was never
 	// told it could see.
 	//
 	// Counted rather than inspected: what is being asserted is the *number* of
@@ -323,6 +654,101 @@ TEST_CASE("a component nobody replicated never crosses", "[replication]") {
 	REQUIRE(pair.Client.Get<Secret>(entity) == nullptr);
 }
 
+// --- what an instance is -------------------------------------------------------
+
+TEST_CASE("an instance created after a join arrives with its name and its class", "[replication]") {
+	// **The bug this case exists for was invisible from the server.**
+	// `DefaultReplicatedComponents` admitted `ecs.Hierarchy` and the `scene.`
+	// prefix and nothing else from `ecs.`, so `ecs.InstanceName` and
+	// `ecs.InstanceClass` crossed in the join snapshot - `Store::Save` carries
+	// every component - and never in a delta. An entity the world already held
+	// was named on a client and an entity created while that client was
+	// connected was not, which is why `server.replication` had to count a
+	// player's tools by walking `ecs::Entity` handles instead of asking for a
+	// child called `Backpack`.
+	//
+	// The join is deliberately taken *before* the instance is made, because a
+	// snapshot would have carried both and the case would pass with the bug in.
+	Pair pair;
+	pair.Authority_.Replicate(Name("ecs.Hierarchy"));
+	pair.Authority_.Replicate(Name("ecs.InstanceName"), ChangeDetection::Signature);
+	pair.Authority_.Replicate(Name("ecs.InstanceClass"), ChangeDetection::Signature);
+
+	REQUIRE(pair.Join());
+
+	const Entity holder = pair.Server.CreateInstance(HolderClass(), "Holder");
+	const Entity carried = pair.Server.CreateInstance(CarriedClass(), "Backpack");
+	REQUIRE(pair.Server.SetParent(carried, holder));
+
+	// Two ticks: the first says the entities exist, the second offers their
+	// values through the recovery walk an entity coming into view already gets.
+	pair.Tick();
+	pair.Tick();
+
+	REQUIRE(pair.Client.Alive(carried));
+
+	// The name, and it is asked for the way a script would rather than read off
+	// the component - `FindFirstChild` is the assertion the bug was hiding from.
+	REQUIRE(pair.Client.InstanceNameOf(carried) == Name("Backpack"));
+	REQUIRE(pair.Client.FindFirstChild(holder, "Backpack") == carried);
+
+	// And the class, which is the half that could not simply be admitted: a
+	// `ClassId` is a registration index, so what crosses is the registered
+	// *name* and the receiver resolves it in its own table.
+	REQUIRE(pair.Client.ClassOf(carried) == CarriedClass());
+	REQUIRE(pair.Client.ClassOf(holder) == HolderClass());
+
+	// A rename after the fact crosses too, which is why these are signed rather
+	// than said once in the `Structure` message that created the entity. A fact
+	// that only crossed at birth is the v0.7 recolour bug in another component.
+	REQUIRE(pair.Server.SetInstanceName(carried, "Satchel"));
+	pair.Tick();
+	REQUIRE(pair.Client.InstanceNameOf(carried) == Name("Satchel"));
+	REQUIRE(pair.Client.FindFirstChild(holder, "Satchel") == carried);
+}
+
+TEST_CASE("rows of different lengths land on the right entities", "[replication]") {
+	// **A delta's rows are not one width, and the packer used to assume they
+	// were.** It recorded one stride per component - the entry's bytes divided
+	// by its rows - and sliced each row back out at `row * stride` after the
+	// priority sort had reordered them. That is right only while every row
+	// encodes to the same length, which is true of a `Transform` and false of
+	// anything that writes a name: `scene.Visual` writes two, `ecs.InstanceName`
+	// writes one, and a name is as long as its text.
+	//
+	// It was already reachable before instance names crossed - two parts whose
+	// meshes are spelt differently is enough - and it was invisible because the
+	// names in a demo world are almost always empty and therefore all four bytes
+	// long. So the lengths here are deliberately far apart.
+	Pair pair;
+	pair.Authority_.Replicate(Name("ecs.InstanceName"), ChangeDetection::Signature);
+	pair.Authority_.Replicate(Name("ecs.InstanceClass"), ChangeDetection::Signature);
+
+	REQUIRE(pair.Join());
+
+	const std::vector<std::string> names = {
+		"a",
+		"a name long enough that a stride taken from the average is wrong",
+		"bb",
+		"ccc",
+		"an altogether different length again",
+	};
+
+	std::vector<Entity> made;
+	for (const std::string &name : names) {
+		made.push_back(pair.Server.CreateInstance(CarriedClass(), name));
+	}
+
+	pair.Tick();
+	pair.Tick();
+
+	for (size_t index = 0; index < names.size(); index++) {
+		INFO("name: " << names[index]);
+		REQUIRE(pair.Client.Alive(made[index]));
+		REQUIRE(pair.Client.InstanceNameOf(made[index]) == Name(names[index]));
+	}
+}
+
 // --- interest ------------------------------------------------------------------
 
 TEST_CASE("a client is only sent what it may see", "[replication]") {
@@ -340,7 +766,7 @@ TEST_CASE("a client is only sent what it may see", "[replication]") {
 	for (int index = 0; index < 10; index++) {
 		allowed.push_back(entities[static_cast<size_t>(index)].Id);
 	}
-	pair.Authority_.SetInterest([allowed](ClientId, Entity entity) {
+	pair.Authority_.SetInterest([allowed](ClientId, Entity entity, const Store &) {
 		return std::find(allowed.begin(), allowed.end(), entity.Id) != allowed.end();
 	});
 
@@ -358,7 +784,7 @@ TEST_CASE("losing sight of an entity is a forget, never a destroy", "[replicatio
 	pair.Server.Set<Spot>(pair.Server.Create(), Spot{2.0f, 0.0f});
 
 	bool visible = true;
-	pair.Authority_.SetInterest([&visible, watched](ClientId, Entity entity) {
+	pair.Authority_.SetInterest([&visible, watched](ClientId, Entity entity, const Store &) {
 		return entity != watched || visible;
 	});
 
@@ -377,7 +803,7 @@ TEST_CASE("losing sight of an entity is a forget, never a destroy", "[replicatio
 TEST_CASE("a forget too big for one datagram is split", "[replication]") {
 	// **The same rule as a snapshot and a delta, and the path that missed it.**
 	// A world going out of view all at once names every entity in one message,
-	// and three hundred handles is well past a datagram — which `Link::Reserve`
+	// and three hundred handles is well past a datagram - which `Link::Reserve`
 	// refuses outright rather than fragmenting, so the one message that says
 	// "stop drawing these" would be the one that never arrives and the client
 	// would draw a world that is no longer there.
@@ -393,7 +819,7 @@ TEST_CASE("a forget too big for one datagram is split", "[replication]") {
 	}
 
 	bool visible = true;
-	pair.Authority_.SetInterest([&visible](ClientId, Entity) { return visible; });
+	pair.Authority_.SetInterest([&visible](ClientId, Entity, const Store &) { return visible; });
 
 	REQUIRE(pair.Join(256));
 	REQUIRE(pair.Authority_.StatusOf(pair.Handle).Known == 300);
@@ -447,7 +873,7 @@ TEST_CASE("no message fits a datagram only by luck", "[replication]") {
 	// because `Link::Reserve` refuses an oversized message with the same answer
 	// it gives ordinary backpressure. So the largest thing this can build is
 	// measured rather than reasoned about, against the number `Reserve` actually
-	// compares with — the plaintext limit, not the sealed one.
+	// compares with - the plaintext limit, not the sealed one.
 	//
 	// `ChunkBytes` is asked for above what can ever fit, so what is being
 	// measured is the cap rather than a value that happened to be small.
@@ -554,7 +980,7 @@ TEST_CASE("a re-snapshot is not counted as a tick short of a part", "[replicatio
 	REQUIRE(pair.Replica_.Applied() == pair.Now);
 
 	// One tick was short of a part and it was never superseded by a newer one,
-	// so nothing ever abandoned it — and a rejoin must not be recorded as
+	// so nothing ever abandoned it - and a rejoin must not be recorded as
 	// having done so.
 	REQUIRE(pair.Replica_.Stats().Incomplete == 0);
 	REQUIRE(pair.Client.Get<Spot>(all[0])->X == 11.0f);
@@ -589,7 +1015,7 @@ TEST_CASE("a part number past the bound is refused", "[replication]") {
 
 TEST_CASE("a message limit past what a part number can carry is capped", "[replication]") {
 	// **A part a receiver refuses is a part that never arrives**, and a tick
-	// missing a part is never acknowledged — so a limit above `MAXIMUM_PARTS`
+	// missing a part is never acknowledged - so a limit above `MAXIMUM_PARTS`
 	// would not merely waste the excess, it would stall the stream outright.
 	// Capped at construction for the same reason `ChunkBytes` is.
 	//
@@ -660,7 +1086,7 @@ TEST_CASE("a truncated message is refused at every length", "[replication]") {
 TEST_CASE("a tick's parts complete it in any order and however often", "[replication]") {
 	// **A part number is a position, not an arrival order**, and this is the
 	// case that says so. Parts ride the unreliable channel, which delivers out
-	// of order and twice as readily as once and in order — so a receiver that
+	// of order and twice as readily as once and in order - so a receiver that
 	// counted arrivals would read a duplicate as progress and acknowledge a tick
 	// it is a part short of, which is D00013 with an extra step.
 	//
@@ -735,7 +1161,7 @@ TEST_CASE("a tick missing one of its parts is not acknowledged", "[replication]"
 
 	// A middle part, not the first and not the last. The first is what a
 	// receiver stopping at the first hole would have, and the last is the one
-	// carrying the marker — so a hole in the middle is the case that needs the
+	// carrying the marker - so a hole in the middle is the case that needs the
 	// whole set rather than a high-water mark.
 	for (const Entity entity : all) {
 		pair.Server.GetMutable<Spot>(entity)->X = 3.0f;
@@ -750,7 +1176,7 @@ TEST_CASE("a tick missing one of its parts is not acknowledged", "[replication]"
 
 	// **Every survivor twice, which is what makes this case discriminating.**
 	// A receiver counting arrivals rather than positions would have as many
-	// deltas as the tick had parts and read the hole as filled — and the hole is
+	// deltas as the tick had parts and read the hole as filled - and the hole is
 	// filled by duplicates of the wrong parts, which is the D00013 bug with a
 	// receiver that looks like it is checking.
 	for (size_t index = 0; index < parts.size(); index++) {
@@ -815,7 +1241,7 @@ TEST_CASE("reconciliation retires what the server consumed and keeps the rest", 
 	REQUIRE(prediction.Ahead() == 4);
 
 	// What is left is exactly what has to be replayed to arrive back at the
-	// present — the inputs *after* the acknowledged tick, oldest first.
+	// present - the inputs *after* the acknowledged tick, oldest first.
 	REQUIRE(prediction.Pending()[0].Tick == 7);
 	REQUIRE(prediction.Pending().back().Tick == 10);
 }
@@ -843,7 +1269,7 @@ TEST_CASE("the prediction buffer is bounded and says when it overflowed", "[repl
 	REQUIRE(prediction.Ahead() == 4);
 	REQUIRE(prediction.Dropped() == 6);
 
-	// The oldest went, not the newest — the newest is the input the player just
+	// The oldest went, not the newest - the newest is the input the player just
 	// made, and it is the one they can see not happening.
 	REQUIRE(prediction.Pending().front().Tick == 7);
 	REQUIRE(prediction.Pending().back().Tick == 10);
@@ -945,7 +1371,7 @@ TEST_CASE("a value lost in transit is resent until it is confirmed", "[replicati
 	REQUIRE(pair.Replica_.Applied() > 0);
 
 	// One move, and then the entity is still for the rest of the test. This is
-	// the case that used to be unrecoverable — a change that happens once and
+	// the case that used to be unrecoverable - a change that happens once and
 	// whose only delta is dropped.
 	pair.Server.Set<Spot>(entity, Spot{9.0f, 9.0f});
 	pair.Tick([](size_t) { return true; });
@@ -973,7 +1399,7 @@ TEST_CASE("a confirmed value stops being resent", "[replication]") {
 	REQUIRE(pair.Client.Get<Spot>(entity)->X == 5.0f);
 
 	// Acknowledged, so the entry retires. A world where nothing is moving has
-	// to fall silent — a baseline that never retired would turn every delta
+	// to fall silent - a baseline that never retired would turn every delta
 	// into a full world update forever, which is the opposite of what carrying
 	// one is for.
 	pair.Tick();
@@ -1014,7 +1440,7 @@ TEST_CASE("a run of losses still converges", "[replication]") {
 TEST_CASE("a destroyed entity leaves the replica's tree walkable", "[replication]") {
 	// **The repair may not be left to the delta that follows.** A destroy rides
 	// the reliable channel and the corrected links ride the delta, and the two
-	// do not arrive together — `ApplyStructure` says so itself. A client renders
+	// do not arrive together - `ApplyStructure` says so itself. A client renders
 	// in between, and a parent still naming a freed child makes `EachChild` hand
 	// its body a dead handle and stop there, taking every sibling behind it off
 	// the tree.
@@ -1090,7 +1516,8 @@ namespace replication_test {
 	}
 
 	// One part of a tick's delta, carrying a parent for one entity.
-	std::vector<std::byte> ParentPart(uint64_t tick, uint16_t part, bool final_, Entity child, Entity parent) {
+	std::vector<std::byte>
+	ParentPart(uint64_t tick, uint16_t part, bool final_, Entity child, Entity parent) {
 		engine::replication::Delta delta;
 		delta.Tick = tick;
 		delta.Part = part;
@@ -1123,7 +1550,7 @@ namespace replication_test {
 
 // **The flash, at the far end of the wire.** A spawn crosses as a `Structure`
 // naming the entity and a delta carrying its rows, and the bandwidth budget
-// splits a delta — so the row that puts a part in `Workspace` can arrive a tick
+// splits a delta - so the row that puts a part in `Workspace` can arrive a tick
 // before the row that says where it is. In between, the client's own
 // `scene::SyncRendered` reaches it and it draws at the identity: a part at the
 // origin, then a jump. `examples/Slide.luau` shows it on every block it spawns.
@@ -1154,8 +1581,8 @@ TEST_CASE("a spawned entity is not put in the tree until its tick is whole", "[r
 	REQUIRE(pair.Client.Alive(child));
 
 	// Part zero of the tick: it says where the entity goes and the tick is not
-	// finished, so the rest of what it is — its transform, its size, its colour
-	// — has not arrived.
+	// finished, so the rest of what it is - its transform, its size, its colour
+	// - has not arrived.
 	REQUIRE(
 		pair.Replica_.Receive(pair.Client, replication_test::ParentPart(tick, 0, false, child, room)) ==
 		ApplyStatus::Ok
@@ -1167,9 +1594,8 @@ TEST_CASE("a spawned entity is not put in the tree until its tick is whole", "[r
 
 	// The last part completes the tick.
 	REQUIRE(
-		pair.Replica_.Receive(
-			pair.Client, replication_test::ParentPart(tick, 1, true, Entity{}, Entity{})
-		) == ApplyStatus::Ok
+		pair.Replica_.Receive(pair.Client, replication_test::ParentPart(tick, 1, true, Entity{}, Entity{})) ==
+		ApplyStatus::Ok
 	);
 
 	// And now it is where the server put it.

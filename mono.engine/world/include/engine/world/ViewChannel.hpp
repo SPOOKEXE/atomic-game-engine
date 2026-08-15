@@ -4,14 +4,14 @@
 //
 // Three consumers on the roadmap are the same object underneath: a surface
 // camera for mirrors, split-screen across two worlds, and any view whose
-// producer is not the compositor. All of them are a *view* — produced
+// producer is not the compositor. All of them are a *view* - produced
 // somewhere, buffered, and composited by the client at its own frame rate.
 //
 // **Three slots and one atomic publish index, not a lock.** A lock is correct
 // and couples the two rates: a compositor that stalled a producer would be a
 // client stalling a simulation, and the frame budget cannot absorb that. With a
 // triple buffer a slow consumer **drops frames instead of throttling the
-// world**, which is the behaviour you want — and it makes the remote case
+// world**, which is the behaviour you want - and it makes the remote case
 // behave exactly like the local one. The atomics are lock-free and sit inside
 // the region, so identical code works across a process boundary with no named
 // mutex.
@@ -23,7 +23,7 @@
 // **The payload is opaque here.** This layer moves bytes, exactly as
 // `Envelope` does; L7's `scene::DrawInstance` gives them meaning and the tier
 // check keeps L4 from learning what a draw instance is. Carrying a *draw list*
-// rather than pixels is what lets a `server`-tier host publish at all — a host
+// rather than pixels is what lets a `server`-tier host publish at all - a host
 // that published pixels would need a GPU and would stop being server tier.
 //
 // @tier L4 · shared
@@ -84,7 +84,7 @@ namespace engine::world {
 		// Creates a channel sized for one payload.
 		//
 		// Slots are reserved at this size, so publishing a frame that fits
-		// never allocates — which is what keeps a producer off the allocator
+		// never allocates - which is what keeps a producer off the allocator
 		// inside its own render phase. A frame that does not fit is `Reserve`'s
 		// business rather than a refusal; see there for what that costs.
 		//
@@ -132,7 +132,7 @@ namespace engine::world {
 		//
 		// The number worth putting on F5: a figure that climbs is a compositor
 		// that cannot keep up with a producer, which is a tuning problem rather
-		// than a bug — but only if somebody can see it.
+		// than a bug - but only if somebody can see it.
 		//
 		// @return The dropped count.
 		uint64_t Dropped() const {
@@ -149,7 +149,7 @@ namespace engine::world {
 		// race with a plausible-looking body.
 		//
 		// So the cost of a raise is at most three reallocations, one per slot,
-		// spread over the next three publishes — and then never again at that
+		// spread over the next three publishes - and then never again at that
 		// size. That is the trade this class was originally written to avoid,
 		// taken deliberately: a fixed ceiling means a world that outgrows it
 		// stops being drawn at all, and a frame nobody can see is worse than a

@@ -4,6 +4,7 @@
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/ecs/Invariants.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/ecs/TypeDescriptor.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -19,6 +20,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.scene.registration")
+TEST_DEPENDS("engine.ecs.invariants")
 
 using engine::core::ByteReader;
 using engine::core::ByteWriter;
@@ -53,7 +55,9 @@ namespace registration_test {
 		"scene.Transient",	 "scene.Service",			"scene.LightingService",
 		"scene.Rendered",	 "scene.SurfaceTable",		"scene.ActiveCamera",
 		"scene.WorldBounds", "scene.RenderedSignature", "scene.Portal",
-		"scene.SurfaceLens",
+		"scene.SurfaceLens", "scene.SurfaceBounces",	"scene.Team",
+		"scene.PlayerTeam",	 "scene.SpawnLocation",		"scene.Tool",
+		"scene.Anchored",
 	};
 }
 
@@ -104,6 +108,16 @@ TEST_CASE("everything registered here can be snapshotted", "[scene][registration
 	for (const std::string_view expected : registration_test::EXPECTED) {
 		const TypeDescriptor &descriptor = Components::Describe(Components::Find(Name(expected)));
 		INFO(expected);
+
+		// **A tag is exempt, and `Store::Save` agrees.** It refuses a component
+		// with bytes and no serialisation; a tag has no bytes, crosses as
+		// presence, and is restored by being in the archetype at all. Requiring
+		// a writer for one would be asking for a function that writes nothing.
+		if (descriptor.Kind == engine::ecs::ComponentKind::Tag) {
+			CHECK(descriptor.Size == 0);
+			continue;
+		}
+
 		CHECK(descriptor.Serialisable);
 	}
 }
@@ -179,7 +193,7 @@ TEST_CASE("the surface table crosses a snapshot in order", "[scene][registration
 }
 
 TEST_CASE("the active camera resource survives a snapshot", "[scene][registration]") {
-	// Registered because a resource is keyed by a component id too — one that
+	// Registered because a resource is keyed by a component id too - one that
 	// is never named here would be minted by the first `SetResource` under the
 	// compiler's spelling, and would abort once the table is sealed.
 	RegisterSceneComponents();
@@ -207,7 +221,7 @@ TEST_CASE("the active camera resource survives a snapshot", "[scene][registratio
 // `Visual` is registered with a hand-written writer and reader, because it
 // holds `core::Name`s that have to cross as text. The cost of that pair is that
 // a field added to the struct crosses only if a person remembers to add two
-// lines, and nothing in the build checks — so the field silently resets to its
+// lines, and nothing in the build checks - so the field silently resets to its
 // default on every load, which looks like a bug in whatever reads it.
 //
 // This has happened three times. `Transparency` and `Surface` were both added
@@ -220,7 +234,7 @@ TEST_CASE("the active camera resource survives a snapshot", "[scene][registratio
 // round-trip test passes for a field the writer skips whenever the reader
 // leaves the default in place, which is exactly the case that goes wrong.
 //
-// Adding a field to `Visual` and not adding a case here leaves it untested —
+// Adding a field to `Visual` and not adding a case here leaves it untested -
 // which is why `engine.scene.components` pins `sizeof(Visual)`. That assertion
 // fails first, and it fails in a file whose comment points back at this one.
 TEST_CASE("every field of Visual reaches the wire", "[scene][registration]") {
@@ -303,4 +317,20 @@ TEST_CASE("every field of Visual reaches the wire", "[scene][registration]") {
 	CHECK(restored.Visible == authored.Visible);
 	CHECK(restored.Surface == authored.Surface);
 	CHECK(restored.CastShadow == authored.CastShadow);
+}
+
+TEST_CASE("every scene component obeys the serialisation rules", "[scene][registration]") {
+	// **The sweep rather than a list**, because the components that have gone
+	// wrong here were the ones nobody thought to name: a limb carrying eight
+	// indeterminate bytes into every save, a controller with four. Both were
+	// registered years apart from the check that would have caught them, and
+	// both are in `EXPECTED` above without that having helped.
+	//
+	// `engine.ecs.invariants` is where the rules are and where each one is
+	// proved to fire. This is the same sweep pointed at this module's registry,
+	// so a scene component that breaks one is a red suite here rather than a
+	// determinism failure somebody bisects later.
+	RegisterSceneComponents();
+
+	CHECK(engine::ecs::Describe(engine::ecs::AuditComponents("scene.")) == "");
 }

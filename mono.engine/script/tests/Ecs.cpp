@@ -1,7 +1,7 @@
 // The storage surface, exercised through both VMs.
 //
-// `engine.ecs.schema` covers what a described component *is* — the layout, the
-// hooks, the serialisation — because that is pure C++ and testable without a
+// `engine.ecs.schema` covers what a described component *is* - the layout, the
+// hooks, the serialisation - because that is pure C++ and testable without a
 // VM. This file covers what a script can reach, which is the half a binding can
 // get wrong while every piece underneath it is correct.
 //
@@ -48,7 +48,7 @@ namespace {
 
 	// The component table is process-wide and nothing unregisters, so a case
 	// that declares `Health` twice in one binary is declaring it once and then
-	// agreeing with itself — which is a different test from the one intended.
+	// agreeing with itself - which is a different test from the one intended.
 	std::string Unique(const char *what) {
 		static int counter = 0;
 		return std::string("engine.script.ecs.test.") + what + "." + std::to_string(counter++);
@@ -462,7 +462,7 @@ TEST_CASE("the JavaScript surface reaches the same storage", "[script-ecs]") {
 	}
 
 	// A second VM over the same world. The component is already declared, so
-	// this one agrees with it rather than creating a second — which is the
+	// this one agrees with it rather than creating a second - which is the
 	// property that makes two languages in one game possible at all.
 	const auto js = MakeRuntime(store, Language::JavaScript);
 	MustRun(

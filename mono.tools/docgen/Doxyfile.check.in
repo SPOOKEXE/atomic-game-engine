@@ -1,6 +1,6 @@
 # The coverage pass. Configured by mono.tools/docgen/CMakeLists.txt.
 #
-# `EXTRACT_ALL = YES` disables WARN_IF_UNDOCUMENTED — Doxygen says so in its own
+# `EXTRACT_ALL = YES` disables WARN_IF_UNDOCUMENTED - Doxygen says so in its own
 # documentation, and it is easy to miss because nothing reports that the setting
 # was ignored. A build asked to both list everything and complain about the gaps
 # quietly stops complaining.

@@ -29,13 +29,14 @@
 // | `default.project.json` in `D/` | `D` **is** that project, and `D` is not also walked |
 // | `X.txt` | a `StringValue` holding the file |
 // | `X.csv` | a `LocalizationTable` holding the file |
+// | `X.rbxm` | the instance in that binary model, named `X` |
 //
 // `.lua` is accepted everywhere `.luau` is, because Rojo's own table is written
 // in terms of `.lua` and a project may predate the newer extension.
 //
 // **`default.project.json` replacing its folder is what makes an installed
 // package arrive once.** Every wally dependency is a directory holding a project
-// file whose whole tree is a `$path` — `{"tree": {"$path": "lib"}}` — beside the
+// file whose whole tree is a `$path` - `{"tree": {"$path": "lib"}}` - beside the
 // tests and examples it was published with. Following the project *and* walking
 // the folder built the package twice, once under the name it publishes and once
 // under the folder's own, and two copies of a `ModuleScript` are two modules
@@ -51,34 +52,62 @@
 // Without it a module with sub-modules would have to be a folder *beside* a
 // script, and every path in the project would gain a level. **Which class the
 // directory becomes is the init file's own suffix**, exactly as it is for any
-// other file — reading only `init.luau` made every `init.server.luau` project a
+// other file - reading only `init.luau` made every `init.server.luau` project a
 // folder plus a stray script called `init`.
+//
+// ## The binary model, and what it does not carry over
+//
+// **`.rbxm` is read by `bake::ReadRobloxModel` and only mapped here**, because a
+// parser for a foreign binary format is the largest attack surface a content
+// pipeline has and `bake` is the module that is allowed to hold one. What this
+// file adds is the three decisions Rojo's table implies and the reader has no
+// business taking:
+//
+// - **One instance, named after the file.** The container allows any number at
+//   its top level and Rojo's table maps a model file to one; a file with several
+//   is refused by name rather than wrapped in a folder nobody wrote. The name
+//   comes from the path, as it does for every other row above - the children
+//   keep their own.
+// - **A class this engine does not have becomes a `Folder` and says so**, which
+//   is the same answer a `$className` already gets. One question, one answer,
+//   whichever format asked it.
+// - **A script's `Source` is staged into the world's `SourceCache`** under a key
+//   naming where the instance sits in the file. Roblox keeps the text on the
+//   instance and this engine keeps a path, so an import that only made the
+//   instance would produce a `Script` that never runs - which looks exactly like
+//   a script with a bug in it.
+//
+// **What a `.rbxm` cannot bring is what the reader refuses**, and `bake`'s
+// `RobloxModel.hpp` carries the list and the argument. The two worth knowing
+// here are that an **enum** is a number naming a member of Roblox's table, which
+// this engine has no copy of, and that a **reference** is a number naming a row
+// of the file, which is not identity anything outside it can resolve. Both are
+// reported by class and property rather than dropped.
+//
+// A property this engine has no declaration for is **counted rather than
+// listed**: Studio writes every property of every class, so a note each would be
+// a hundred lines saying this engine is smaller than Roblox.
 //
 // ## What this does not do
 //
-// **Three rows of Rojo's table are still reported rather than built, and each
-// names a dependency this repository does not vendor:**
+// **One row of Rojo's table is still reported rather than built, and it names a
+// dependency this repository does not vendor:**
 //
-// - **`.rbxm`** is Roblox's binary model — LZ4-framed chunks, interned strings
-//   and a referent table. That is a format reader, and it belongs beside the
-//   other model decoders in `bake` rather than in an editor.
 // - **`.rbxmx`** is the same tree as XML, and **nothing here parses XML**.
 //   `mono.vendor` holds JSON and no XML library, so this is a vendor decision
 //   before it is a feature.
-// - **`.toml`** would be a `ModuleScript` like `.json` is — the emitter already
-//   exists and is shared — and **nothing here parses TOML** either.
 //
-// Each is named in the report by what Rojo says it is, so a gap reads as a gap
-// rather than as an unrecognised file, and `D00104` carries what closing each
-// would take.
+// It is named in the report by what Rojo says it is, so a gap reads as a gap
+// rather than as an unrecognised file, and `D00104` carries what closing it
+// would take. `.toml` closed at v0.13 and `.rbxm` at v0.15.
 //
 // **A `.meta.json` cannot change a class.** A class is the archetype an entity
 // was created in, and `Store` offers no way to move a live row between class
-// trees — so `init.meta.json`'s `className` is reported as a property the
+// trees - so `init.meta.json`'s `className` is reported as a property the
 // instance does not have. Everything else in a patch is applied.
 //
 // **It builds, it does not watch.** A file watcher is a thread, a debounce and a
-// decision about what happens when a sync lands mid-tick — and the last of those
+// decision about what happens when a sync lands mid-tick - and the last of those
 // is rule 5's question, not a detail. Syncing on demand answers the same need
 // for an author who is editing in an external editor and pressing one key to see
 // it, and leaves the live-sync design to be taken deliberately.
@@ -139,7 +168,7 @@ namespace studio {
 		//
 		// **Order is kept rather than sorted**, because a project file is
 		// authored and a tree that reordered itself would make two syncs of one
-		// file produce two different creation orders — which is a different
+		// file produce two different creation orders - which is a different
 		// entity id per instance and a recording that does not replay.
 		std::vector<RojoNode> Children;
 	};
@@ -173,7 +202,7 @@ namespace studio {
 		// on a fresh clone.
 		std::vector<std::string> Missing;
 
-		// Anything the sync had to decide rather than read — a class this engine
+		// Anything the sync had to decide rather than read - a class this engine
 		// does not have, a file it did not recognise. One line each, in the
 		// words somebody can act on.
 		std::vector<std::string> Notes;
@@ -215,7 +244,7 @@ namespace studio {
 	// @since v0.12
 	struct RojoUniverseWorld {
 		// The world's name. This is what `world::Universe::Find` is asked for,
-		// so it is the name everything crossing a world boundary already uses —
+		// so it is the name everything crossing a world boundary already uses -
 		// a teleport, a topic, a reply.
 		std::string Name;
 
@@ -268,7 +297,7 @@ namespace studio {
 	//
 	// @since v0.12
 	struct RojoUniverseReport {
-		// One entry per world named by the file, in that order — including the
+		// One entry per world named by the file, in that order - including the
 		// ones that failed, which is what makes this readable as a result rather
 		// than as a list of successes with gaps.
 		std::vector<RojoWorldSync> Worlds;
@@ -286,7 +315,7 @@ namespace studio {
 
 	// Parses a universe file.
 	//
-	// The shape is deliberately small — a name and a map of worlds to folders —
+	// The shape is deliberately small - a name and a map of worlds to folders -
 	// because everything else about a world is already `world::WorldSettings`,
 	// and a second place to say what a tick rate is would be two that disagree.
 	//
@@ -302,8 +331,8 @@ namespace studio {
 	// The project file one world's entry resolves to.
 	//
 	// A `path` naming a file is taken as it is. A `path` naming a directory is
-	// searched for **`default.project.json` first** — Rojo's own name, so a
-	// subfolder is a project every tool in that ecosystem already understands —
+	// searched for **`default.project.json` first** - Rojo's own name, so a
+	// subfolder is a project every tool in that ecosystem already understands -
 	// and then for `main.default.json`, which `ROADMAP.md` proposed for a folder
 	// that is only ever a world of this engine.
 	//
@@ -321,7 +350,7 @@ namespace studio {
 	// author's hand-built scene the first time they ran it.
 	//
 	// **One world's failure is that world's.** Every entry is attempted, and
-	// each carries its own error — a project file that does not parse, a folder
+	// each carries its own error - a project file that does not parse, a folder
 	// with no project in it, a world the driver refused to create.
 	//
 	// @param universe The parsed universe file.
@@ -342,8 +371,8 @@ namespace studio {
 	// The class every plain directory becomes.
 	//
 	// **Registered here rather than in `scene`, because it is this feature that
-	// needs it.** A folder is an instance with no components and no behaviour —
-	// it exists to hold children, which the hierarchy already provides — so it
+	// needs it.** A folder is an instance with no components and no behaviour -
+	// it exists to hold children, which the hierarchy already provides - so it
 	// costs one registration and buys the whole left column of the table above.
 	//
 	// @return The class id, registered on first use.

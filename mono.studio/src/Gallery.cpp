@@ -2,14 +2,14 @@
 //
 // **Taken from `explorer-plus`'s gallery, including the two decisions that make
 // it worth having.** The first is that a tile is one *asset* rather than one
-// instance — a texture used by forty parts is one tile with `x40` on it, not
+// instance - a texture used by forty parts is one tile with `x40` on it, not
 // forty identical tiles. The second is what the tile is labelled with:
 //
 // > Four tiles reading "SurfaceAppearance" tell you nothing; "ColorMap" and
 // > "NormalMap" tell you everything.
 //
 // So the caption is the *property* doing the using. In this engine that is
-// `Mesh`, `TextureID`, `Texture`, `ColorMap`, `SoundId` or `Image` — the same
+// `Mesh`, `TextureID`, `Texture`, `ColorMap`, `SoundId` or `Image` - the same
 // table the property picker reads, which is what keeps the two from disagreeing
 // about what counts as content.
 //
@@ -166,14 +166,14 @@ namespace studio {
 	void Editor::DrawGallery() {
 		// **Rebuilt when the tab opens and on demand, not per frame.** Walking
 		// every entity of every world reading every `Name` property is a real
-		// cost — it is the one thing in this panel that scales with the scene
+		// cost - it is the one thing in this panel that scales with the scene
 		// rather than with the store.
 		//
 		// **The gate is "have I scanned", not "is the result empty", and the
 		// difference was seconds of frozen editor.** An empty result is a
 		// *result*: a fresh place names no assets at all, so `Gallery.empty()`
 		// stayed true, so the full walk ran again on the next frame, and the
-		// next — for as long as the panel was open. Inserting anything made it
+		// next - for as long as the panel was open. Inserting anything made it
 		// worse by adding an entity to a scan that was already running every
 		// frame, which is why it showed up as "the studio greys out when I
 		// insert something".
@@ -229,7 +229,7 @@ namespace studio {
 
 			const ImVec2 start = ImGui::GetCursorPos();
 
-			// The whole tile is the target, drawn first and then written over —
+			// The whole tile is the target, drawn first and then written over -
 			// the picker's arrangement, for its reason: a click on the picture
 			// is what a person does.
 			if (ImGui::Selectable("##tile", false, ImGuiSelectableFlags_None, ImVec2(tileWidth, tileHeight))) {
@@ -247,7 +247,7 @@ namespace studio {
 			ImGui::TextUnformatted(entry.Property.c_str());
 			ImGui::PopStyleColor();
 
-			// The asset's own name under it, elided — a store's names are
+			// The asset's own name under it, elided - a store's names are
 			// hashes and a tile is a hundred pixels wide.
 			ImGui::SetCursorPos(ImVec2(start.x + 4.0f, start.y + image + 8.0f + ImGui::GetTextLineHeight()));
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());

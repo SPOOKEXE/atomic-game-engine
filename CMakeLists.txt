@@ -21,7 +21,7 @@ option(MONO_BUILD_SERVER "Build the server program"    ON)
 option(MONO_BUILD_CDN    "Build the content origin"    ON)
 option(MONO_BUILD_TESTS  "Build the test binaries"     ON)
 # Off by default. A benchmark is built to be *run*, and a build that produces
-# binaries nobody times is a longer build for nothing — `just bench` turns it on
+# binaries nobody times is a longer build for nothing - `just bench` turns it on
 # for the preset it uses.
 option(MONO_BUILD_BENCH  "Build the benchmark binaries" OFF)
 option(MONO_TRACY        "Compile in the Tracy client" ON)
@@ -42,8 +42,8 @@ option(MONO_OPTIMISE     "Optimise first-party targets" OFF)
 # On: compile shaders with the glslc built from mono.vendor/shaderc. Off: find
 # one on PATH.
 #
-# On by default because it removes glslc from the prerequisite list — a fresh
-# clone needs CMake, Ninja and a C++ compiler and nothing else — and because a
+# On by default because it removes glslc from the prerequisite list - a fresh
+# clone needs CMake, Ninja and a C++ compiler and nothing else - and because a
 # pinned compiler makes the SPIR-V reproducible. Two machines with different
 # Vulkan SDKs otherwise produce different bytes from the same source, which is
 # a difference nobody looks for.
@@ -84,12 +84,12 @@ else()
 		#
 		# **Measured, and it is not a small difference.** The ECS iteration
 		# control runs 100k rows in 38.74 us at -O2 and 16.61 at -O3, and 500k
-		# in 196.38 against 85.63 — 2.4x, on the loop this engine spends most of
+		# in 196.38 against 85.63 - 2.4x, on the loop this engine spends most of
 		# its time in. It was invisible for as long as every measurement was
 		# taken at the same level as every other, and it was found sideways,
 		# while disproving v0.4's vectorisable-layout item: a twelve-byte
 		# component has no padding, so -O3's vectoriser fills every lane, and
-		# padding it to sixteen — which that item proposed — puts a dead lane in
+		# padding it to sixteen - which that item proposed - puts a dead lane in
 		# every vector and made the same loop 2.4x *slower*. The layout was
 		# already right; the flag was the thing holding it back.
 		#
@@ -127,6 +127,38 @@ if(MONO_BUILD_CLIENT)
 		find_program(MONO_GLSLC glslc REQUIRED
 			DOC "GLSL to SPIR-V compiler, from shaderc")
 	endif()
+
+	# **A macOS client was stopped here and at v0.15 is warned instead.** The
+	# refusal was right while this build produced SPIR-V and nothing else: SDL's
+	# Metal backend takes MSL or a metallib and never SPIR-V, so a client
+	# configured, compiled, linked, staged, started and died inside
+	# `SDL_CreateGPUDevice`, having been knowable before the first object.
+	#
+	# What changed is that the translation runs. `mono.tools/shadercross` writes
+	# an `.msl` beside every `.spv` the build compiles, `Engine::msl` does the
+	# same for a `ShaderScript` inside the running client, `just shader-check`
+	# reads every emitted module back against the SPIR-V it came from, and the
+	# format handed to SDL is asked of the device rather than written down.
+	#
+	# **A warning that can fire is worth more than a refusal that cannot.**
+	# `docs/DEFERRED.md` D00001's reopen trigger is somebody configuring a client
+	# on Darwin, and a `FATAL_ERROR` there yields no information - the first
+	# person to try is now the only source of the answers that are left, so this
+	# asks them for the right ones instead of turning them away.
+	if(APPLE)
+		message(WARNING
+			"No client has ever been built or run on macOS. This configures, and "
+			"beyond that nothing is known.\n"
+			"  Every shader is translated to MSL during the build and checked by "
+			"`just shader-check` - but no Metal compiler and no Metal device has "
+			"seen one, because neither exists on the machines this was written on.\n"
+			"  If it fails, the three guesses in the order they were made: the "
+			"argument-buffer default against what SDL's Metal backend binds; the "
+			"depth range, which is the classic difference and is silent; and a "
+			"ShaderScript, which goes through the runtime translator nothing on "
+			"Linux can exercise end to end.\n"
+			"  docs/DEFERRED.md D00001 is the entry. Say what happened, either way.")
+	endif()
 endif()
 include(MonoLibrary)
 
@@ -146,13 +178,13 @@ if(MONO_BUILD_BENCH)
 endif()
 
 # The engine is libraries and never a product. Programs are thin mains over
-# them, and each mono.X folder carries its own tests/ — there is no central
+# them, and each mono.X folder carries its own tests/ - there is no central
 # test directory.
 add_subdirectory(mono.engine)
 
 # Finding a peer, and being findable. Above `Engine::net` and below every
 # program: the client, the server, the studio and the content origin all import
-# it, and none of them is a layer of the engine — which is why it is a member
+# it, and none of them is a layer of the engine - which is why it is a member
 # beside them rather than a module inside `mono.engine`.
 #
 # Unconditional, like `mono.engine`. It is `shared` tier and links `core`, `net`
@@ -176,18 +208,18 @@ if(MONO_BUILD_CLIENT AND MONO_BUILD_SERVER)
 	add_subdirectory(mono.unified_server_client)
 
 	# The editor. Needs the renderer to draw with and the server library to host
-	# with, so like the harness above it configures only where both exist —
+	# with, so like the harness above it configures only where both exist -
 	# under the `server` preset there is nothing here to build.
 	add_subdirectory(mono.studio)
 endif()
 
 # The content origin. `shared` tier rather than `server`, so the tier rule
-# itself — not a guard here — is what keeps a graphics stack off its link line.
+# itself - not a guard here - is what keeps a graphics stack off its link line.
 # repo_layout.md §11.
 #
 # **The library is built whenever the server is, and the program is what
 # MONO_BUILD_CDN gates.** Since v0.9 a server can attach an origin and serve its
-# own disk — CDN.md §6's local store — so `Mono::cdn` is on `mono.server`'s link
+# own disk - CDN.md §6's local store - so `Mono::cdn` is on `mono.server`'s link
 # line and has to exist under the `server` preset, which sets MONO_BUILD_CDN
 # OFF. The alternative was a conditional dependency and an `#ifdef` around the
 # attachment, which would make "does this server serve content" a build-time
@@ -207,6 +239,12 @@ add_subdirectory(mono.tools)
 # Every target now exists, so the tier rule can be checked across the whole
 # graph rather than only against what had been declared at each point.
 mono_check_all_tiers()
+
+# And so the shader stage can be compared with the modules that still own
+# shaders. Here rather than in `mono_add_library` because the case it catches is
+# a module that owns *none* - which is a module `_mono_add_shaders` returns early
+# for and therefore never revisits.
+mono_prune_shader_stage()
 
 # The checked-in expectation mono.tools/architecture/ compares against.
 mono_write_target_graph("${CMAKE_BINARY_DIR}/target-graph.json")

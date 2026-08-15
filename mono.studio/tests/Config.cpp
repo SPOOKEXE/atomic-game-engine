@@ -5,7 +5,7 @@
 // person's preferences the first time anybody ran it, which is why
 // `SetConfigRoot` exists at all.
 //
-// What is worth asserting is not that a round trip works — it is the behaviour
+// What is worth asserting is not that a round trip works - it is the behaviour
 // around the edges, because those are what a person meets: a fresh install with
 // no files, a file somebody edited by hand and broke, and a recent list that has
 // to stay in "most recent first" order across a save and a load.
@@ -179,7 +179,7 @@ TEST_CASE("a panel's colours round trip, and a broken one is skipped", "[studio]
 	Scratch scratch;
 
 	// **The one preference that is a document rather than a number**, and the
-	// only one somebody would plausibly hand-edit a colour into — so what is
+	// only one somebody would plausibly hand-edit a colour into - so what is
 	// worth asserting is that a name nobody knows, a colour that is not one,
 	// and a panel with nothing left in it each cost only themselves.
 	Preferences written;
@@ -227,7 +227,7 @@ TEST_CASE("a panel's colours round trip, and a broken one is skipped", "[studio]
 	);
 	CHECK_FALSE(salvaged.PanelColours["Explorer"][engine::ui::ThemeColour::Accent].has_value());
 
-	// A panel whose every line was unreadable is not a panel — an entry with
+	// A panel whose every line was unreadable is not a panel - an entry with
 	// nothing in it would be written straight back out on the next save.
 	CHECK(salvaged.PanelColours.count("Ghost") == 0);
 	CHECK(salvaged.PanelColours.count("Empty") == 0);
@@ -280,7 +280,7 @@ TEST_CASE("the recent list keeps the newest first and drops the oldest", "[studi
 	CHECK(recent.Paths.back() == "game3.agame");
 
 	// **Moved rather than added when it is already there**, which is what "most
-	// recent" means — otherwise opening one file five times would fill the menu
+	// recent" means - otherwise opening one file five times would fill the menu
 	// with five copies of it.
 	recent.Remember("game3.agame");
 	CHECK(recent.Paths.size() == RecentProjects::LIMIT);

@@ -12,17 +12,41 @@
     "runtime and `assetc` owns filesystem access. `render` consumes `assets`, not",
     "foreign-format parsers. The server remains headless.",
     "",
-    "v0.13 adds `network` — finding a peer, and being findable. It sits above",
+    "v0.13 adds `network` - finding a peer, and being findable. It sits above",
     "`net` and below every program, which is why four rows gained it at once and",
     "no row gained anything else. It is `shared` and links only `core` and",
     "`net`, so the server row is still headless and the cdn row still configures",
     "on a machine with no Vulkan SDK.",
     "",
-    "v0.14 adds `resources` — the engine's built-in GLSL, moved out of `render`.",
+    "v0.14 adds `resources` - the engine's built-in GLSL, moved out of `render`.",
     "It is linked for its files rather than its symbols: `mono_add_program` stages",
     "the shaders of every module a program links, so the rows that gained it are",
     "exactly the rows that draw. The server row gained nothing and still stages no",
-    "shaders/ directory."
+    "shaders/ directory.",
+    "",
+    "v0.15 adds `bakegraph` to `game` and therefore to every program that reads a",
+    "game file. A world carries its bake pipelines in its document, and the point",
+    "of the v0.13 split is that this edge is the document format and not the",
+    "importers - the server row gained `bakegraph` and still does not name `bake`,",
+    "which is the property `D00102` was about. That pair of facts is what this row",
+    "is here to keep true.",
+    "",
+    "v0.15 adds `shadercheck`, and its row links nothing. It reads compiled SPIR-V",
+    "against the contract `SDL_CreateGPUShader` documents, so its input is a byte",
+    "stream a specification defines and it needs neither the engine nor a shader",
+    "compiler - which is why it is `shared` and unconditional where `contentimport`",
+    "is client-gated. No other row changed: nothing links it, and the tool's own",
+    "executable links `core` for `Arguments` the way `linecount` does.",
+    "",
+    "v0.15 adds `msl` - SPIR-V to Metal Shading Language, and the only module here",
+    "that links nothing first-party at all. That is the row worth reading twice: it",
+    "is `client` because SPIRV-Cross is configured only for a client preset, and it",
+    "is a module rather than code inside `render` because there are two callers at",
+    "two times. `mono.tools/shadercross` translates the built-in shaders during the",
+    "build and `render` translates a `ShaderScript` while the engine runs, and one",
+    "implementation is what stops those two from putting a texture on different",
+    "Metal indices. The rows that gained it are exactly the rows that already had",
+    "`render`; the server row gained nothing and still links no shader tooling."
   ],
   "modules": {
     "assetc": {
@@ -77,6 +101,7 @@
       "links": [
         "assets",
         "audio",
+        "bakegraph",
         "core",
         "delivery",
         "ecs",
@@ -86,6 +111,7 @@
         "graph",
         "gui",
         "input",
+        "msl",
         "net",
         "network",
         "parallel",
@@ -161,6 +187,7 @@
     "game": {
       "tier": "shared",
       "links": [
+        "bakegraph",
         "core",
         "ecs",
         "graph",
@@ -208,6 +235,11 @@
         "core"
       ]
     },
+    "msl": {
+      "tier": "client",
+      "links": [],
+      "requires": "MONO_BUILD_CLIENT"
+    },
     "net": {
       "tier": "shared",
       "links": [
@@ -246,6 +278,7 @@
         "effects",
         "graph",
         "gui",
+        "msl",
         "parallel",
         "resources",
         "scene",
@@ -297,6 +330,7 @@
       "tier": "server",
       "links": [
         "assets",
+        "bakegraph",
         "cdn",
         "control",
         "core",
@@ -317,6 +351,10 @@
         "world"
       ],
       "requires": "MONO_BUILD_SERVER"
+    },
+    "shadercheck": {
+      "tier": "shared",
+      "links": []
     },
     "spatial": {
       "tier": "shared",
@@ -344,6 +382,7 @@
         "graph",
         "gui",
         "input",
+        "msl",
         "net",
         "network",
         "parallel",
@@ -375,6 +414,7 @@
         "effects",
         "graph",
         "gui",
+        "msl",
         "parallel",
         "render",
         "resources",
@@ -388,6 +428,7 @@
       "links": [
         "assets",
         "audio",
+        "bakegraph",
         "cdn",
         "client",
         "control",
@@ -400,6 +441,7 @@
         "graph",
         "gui",
         "input",
+        "msl",
         "net",
         "network",
         "parallel",
@@ -442,6 +484,7 @@
       "links": [
         "assets",
         "audio",
+        "bakegraph",
         "cdn",
         "core",
         "delivery",
@@ -452,6 +495,7 @@
         "graph",
         "gui",
         "input",
+        "msl",
         "net",
         "network",
         "parallel",
@@ -470,6 +514,7 @@
       "tier": "server",
       "links": [
         "assets",
+        "bakegraph",
         "cdn",
         "control",
         "core",
@@ -511,6 +556,7 @@
         "graph",
         "gui",
         "input",
+        "msl",
         "net",
         "network",
         "parallel",
@@ -532,6 +578,7 @@
       "links": [
         "assets",
         "audio",
+        "bakegraph",
         "cdn",
         "client",
         "control",
@@ -544,6 +591,7 @@
         "graph",
         "gui",
         "input",
+        "msl",
         "net",
         "network",
         "parallel",

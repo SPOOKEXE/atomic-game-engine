@@ -4,7 +4,7 @@
 //
 // `Link` stamps an acknowledgement onto every outgoing packet and records every
 // one that arrives. Nothing acts on it: a lost reliable packet is noticed and
-// then forgotten. This is what acts on it — the sender holds a payload until the
+// then forgotten. This is what acts on it - the sender holds a payload until the
 // far side says it arrived, and the receiver holds a payload that arrived early
 // until the gap in front of it is filled.
 //
@@ -17,8 +17,8 @@
 //
 // **The acknowledgement is about the reliable channel alone, and it has to ride
 // every packet whatever channel that packet is on.** `Link` keeps a window per
-// channel — it has to, or a reliable resend makes an unreliable packet look
-// stale — and `Link::NextHeader` can therefore only report the window of the
+// channel - it has to, or a reliable resend makes an unreliable packet look
+// stale - and `Link::NextHeader` can therefore only report the window of the
 // channel it is stamping. A game is mostly one-way and mostly unreliable, so a
 // reliable stream acknowledged only by reliable traffic coming back would hardly
 // be acknowledged at all, and the sender would resend payloads that arrived.
@@ -58,7 +58,7 @@ namespace engine::net {
 	// is not acknowledging is given up on.
 	//
 	// The defaults are conventional rather than measured, and saying so is
-	// better than implying otherwise — the same standing `LinkSettings` has. The
+	// better than implying otherwise - the same standing `LinkSettings` has. The
 	// one exception is `MaximumUnacknowledged`, which is derived rather than
 	// chosen and says so.
 	//
@@ -113,9 +113,9 @@ namespace engine::net {
 
 	// Holds reliable payloads until the far side acknowledges them.
 	//
-	// One per connection per direction. It does not assign sequences —
+	// One per connection per direction. It does not assign sequences -
 	// `Link::NextHeader` owns the per-channel counters, because a reliable
-	// resend must not make an unreliable packet look stale — so a caller stamps
+	// resend must not make an unreliable packet look stale - so a caller stamps
 	// a header, sends it, and hands the same sequence here.
 	//
 	// **Track every reliable packet, in the order the sequences were stamped.**
@@ -141,7 +141,7 @@ namespace engine::net {
 			// The payload, as a view **into the sender's own storage**.
 			//
 			// Not copied. Valid until the next call that adds or retires an
-			// entry — `Track` or `OnAcknowledge` — which outlasts the send loop
+			// entry - `Track` or `OnAcknowledge` - which outlasts the send loop
 			// `Due` exists to feed.
 			std::span<const std::byte> Payload;
 		};
@@ -190,8 +190,8 @@ namespace engine::net {
 		// tick rather than a reason to drop it.
 		//
 		// **The window is over sequences, not over entries.** Payloads retire
-		// out of order — a lost one is acknowledged long after everything
-		// behind it — so counting what is waiting would let the newest run
+		// out of order - a lost one is acknowledged long after everything
+		// behind it - so counting what is waiting would let the newest run
 		// arbitrarily far ahead of one straggler, and put that straggler
 		// outside the only window that can ever acknowledge it.
 		bool HasRoom() const;
@@ -200,7 +200,7 @@ namespace engine::net {
 		//
 		// @param sequence The sequence the packet went out with, from
 		//        `Link::NextHeader`.
-		// @param payload The payload, copied — it has to outlive the send.
+		// @param payload The payload, copied - it has to outlive the send.
 		// @param nowSeconds The current time, which starts its retransmit
 		//        clock.
 		// @return False when `HasRoom` was false, in which case nothing is
@@ -216,7 +216,7 @@ namespace engine::net {
 		//
 		// @param header The header that arrived, with the acknowledgement the
 		//        far side's `ReliableReceiver::Acknowledging` put on it. Its
-		//        channel does not matter — the acknowledgement rides every
+		//        channel does not matter - the acknowledgement rides every
 		//        packet, which is what keeps a mostly one-way conversation from
 		//        needing packets of its own.
 		// @param nowSeconds The current time, which every retired entry that
@@ -247,12 +247,33 @@ namespace engine::net {
 			return SmoothedRoundTrip;
 		}
 
+		// How much the round trip moves about, in seconds, or zero before the
+		// first sample.
+		//
+		// RFC 6298's `RTTVAR`: the smoothed mean deviation of a sample from the
+		// estimate, at a weight of one quarter. It is the half of the estimator
+		// that says how much to trust the other half.
+		//
+		// **A congestion controller needs both and a single last-sample is no
+		// substitute for either.** Queueing delay is read as the round trip
+		// rising above its own floor, and on a wireless link the trip rises and
+		// falls by tens of milliseconds with nothing queued anywhere - so a
+		// controller with no variance to compare against reads jitter as
+		// congestion and backs off for ever. `CongestionSettings::VarianceFactor`
+		// is what consumes this.
+		//
+		// @return The variance in seconds. Zero means nothing has been measured.
+		// @since v0.15
+		double RoundTripVarianceSeconds() const {
+			return RoundTripVariance;
+		}
+
 		// What is due to be sent again, oldest first.
 		//
 		// **Offer each one to `Link::Reserve` before sending it.** A resend is
 		// not exempt from the per-tick budget; when the budget refuses one, do
 		// not call `OnResent` for it. Its retransmit clock then does not
-		// restart, it is still held, and it comes back from the next `Due` —
+		// restart, it is still held, and it comes back from the next `Due` -
 		// while the refusal itself is already visible in
 		// `ConnectionStats::SendsOverBudget`.
 		//
@@ -282,6 +303,9 @@ namespace engine::net {
 
 		// The smoothed round trip in seconds, or zero before the first sample.
 		double SmoothedRoundTrip = 0.0;
+
+		// The smoothed mean deviation of a sample from that estimate.
+		double RoundTripVariance = 0.0;
 
 		ReliabilitySettings Paced;
 		DisconnectReason Overflowed = DisconnectReason::None;
@@ -366,8 +390,8 @@ namespace engine::net {
 		// Fills in the acknowledgement fields of an outgoing header.
 		//
 		// **Call this on every outgoing header, whatever its channel.** The
-		// acknowledgement is about the reliable stream — see the file comment
-		// for why `Link`'s shared window cannot be — and a game is mostly
+		// acknowledgement is about the reliable stream - see the file comment
+		// for why `Link`'s shared window cannot be - and a game is mostly
 		// one-way, so a reliable stream acknowledged only by reliable traffic
 		// going the other way would hardly be acknowledged at all.
 		//
@@ -382,7 +406,7 @@ namespace engine::net {
 		// has not heard that the original arrived.
 		//
 		// @param sequence The packet's sequence.
-		// @param payload The payload, copied — it may be held for some ticks.
+		// @param payload The payload, copied - it may be held for some ticks.
 		// @return False when it was a duplicate, or when the bound has been
 		//         reached and `Overflow` names the reason. Either way nothing
 		//         was held.
@@ -391,7 +415,7 @@ namespace engine::net {
 		// Everything now deliverable, oldest first.
 		//
 		// Empty while the gap ahead is unfilled, however much is queued behind
-		// it — which is the whole promise, and the reason the sender resends.
+		// it - which is the whole promise, and the reason the sender resends.
 		//
 		// @return A view into this receiver's own buffer, valid until the next
 		//         call to `Drain`.
@@ -413,8 +437,8 @@ namespace engine::net {
 		//
 		// Starts one *behind* the first sequence of the stream, so that a
 		// receiver which has heard nothing acknowledges nothing. Starting at
-		// zero would acknowledge sequence zero — the first reliable payload a
-		// `Link` ever sends — before it had arrived, and that payload would
+		// zero would acknowledge sequence zero - the first reliable payload a
+		// `Link` ever sends - before it had arrived, and that payload would
 		// then never be resent.
 		uint16_t Highest = 0;
 		uint32_t Bits = 0;

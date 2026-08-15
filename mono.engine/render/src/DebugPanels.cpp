@@ -57,7 +57,7 @@ namespace engine::render {
 
 			// Cyan, and deliberately the most legible colour here after the
 			// warnings. Every engine and game system runs through the ECS, so
-			// this is the bar a reader is looking for — and it has to be
+			// this is the bar a reader is looking for - and it has to be
 			// unmistakable against both the engine blue above it and the render
 			// green beside it.
 			//
@@ -68,7 +68,7 @@ namespace engine::render {
 
 			// Red, and the only warm colour above the middle of the list. The
 			// physics bar is the one a reader goes looking for when a frame
-			// went long, so it is findable without reading a label — and it
+			// went long, so it is findable without reading a label - and it
 			// sits between the cyan above it and the amber below it, which is
 			// the largest hue gap the palette had left.
 			Colour{236, 112, 108}, // physics
@@ -85,7 +85,7 @@ namespace engine::render {
 		// The positional rule above, made a build error rather than a comment.
 		//
 		// A `std::array` sized from the enum accepts too few initialisers in
-		// silence — the missing entries become black and every colour after an
+		// silence - the missing entries become black and every colour after an
 		// insertion point shifts by one, which reads as a palette somebody
 		// chose rather than as a mistake. Idle is last and its grey is
 		// distinctive, so checking that the last slot still holds it catches
@@ -119,7 +119,7 @@ namespace engine::render {
 		// duration is not a cost and the two are worth reading together. A
 		// vsynced `Renderer::Render` is 0.15 busy and 15.9 idle: the first says
 		// what the renderer did, the second says what it waited for, and the
-		// sum is the wall time that used to be the only number here — which
+		// sum is the wall time that used to be the only number here - which
 		// sent two separate investigations at the renderer for work it was not
 		// doing.
 		constexpr size_t IDLE_FIELD = 6;
@@ -180,7 +180,7 @@ namespace engine::render {
 		// A faint tint behind every other row.
 		//
 		// The rows are a pixel apart and a column of numbers with nothing
-		// between them is read wrong — the eye slides up a line between the name
+		// between them is read wrong - the eye slides up a line between the name
 		// and the figure beside it.
 		constexpr uint8_t STRIPE_ALPHA = 16;
 
@@ -244,7 +244,7 @@ namespace engine::render {
 		// The header used to name the open tab in brackets and list the keys
 		// beside it, which told you what you were looking at and nothing about
 		// what else there was. A strip says both: four names, one lit, and the
-		// keys that move between them — a panel with a hidden control has none.
+		// keys that move between them - a panel with a hidden control has none.
 		void DrawTabStrip(OverlayImage &image, const DebugPanelData &data, int x, int y, int width) {
 			const int scale = data.Scale;
 			const int glyphHeight = DebugText::GLYPH_HEIGHT * scale;
@@ -292,7 +292,7 @@ namespace engine::render {
 		void DrawPanelBackground(OverlayImage &image, int x, int y, int width, int height) {
 			// Fill, not Blend. DrawDebugPanels clears the overlay before either
 			// panel is drawn and this is the first thing either one puts down, so
-			// every pixel under it is transparent — which makes the read half of
+			// every pixel under it is transparent - which makes the read half of
 			// the read-modify-write a read of zero, several hundred thousand
 			// times, to combine with nothing.
 			//
@@ -305,7 +305,7 @@ namespace engine::render {
 			);
 			// A one-pixel top edge, so the panel reads as a surface rather than
 			// as a dark patch of the scene. Blended, because it lands on the fill
-			// above rather than on a cleared image — though at full alpha it
+			// above rather than on a cleared image - though at full alpha it
 			// takes Blend's opaque path and is a store either way.
 			image.Blend(x, y, width, 1, 90, 100, 120, 255);
 		}
@@ -330,7 +330,7 @@ namespace engine::render {
 			const int height = StatisticsHeight(data);
 
 			{
-				// The whole panel rectangle, at 208 alpha — so every pixel of it
+				// The whole panel rectangle, at 208 alpha - so every pixel of it
 				// is a read, four multiplies, four divides and a write. Seven
 				// lines of text sit on top of it, and until this span existed the
 				// two were one number.
@@ -352,7 +352,7 @@ namespace engine::render {
 			// lines of text, and it cost more than the scene being measured.
 			//
 			// Its own span, because it is the only part of this panel whose cost
-			// scales with the frame *rate* rather than with what is on screen —
+			// scales with the frame *rate* rather than with what is on screen -
 			// the faster the game runs, the more samples twenty seconds holds.
 			FrameSummary summary;
 			{
@@ -412,7 +412,7 @@ namespace engine::render {
 		}
 
 		// -----------------------------------------------------------------
-		// F4 — the network panel
+		// F4 - the network panel
 		// -----------------------------------------------------------------
 
 		// A byte rate, in whichever unit keeps it three digits wide.
@@ -435,7 +435,7 @@ namespace engine::render {
 		// F3's so they cannot overlap, and adding a third to that column would
 		// make every one of those numbers depend on two others. The right edge
 		// has nothing on it, so this panel's position depends on nothing but the
-		// image width — and its background blends rather than fills, so if a
+		// image width - and its background blends rather than fills, so if a
 		// wide flamegraph ever does reach this far the result is a translucent
 		// overlap rather than a hole punched in the panel underneath.
 		void DrawNetwork(OverlayImage &image, const DebugPanelData &data) {
@@ -548,7 +548,7 @@ namespace engine::render {
 		}
 
 		// -----------------------------------------------------------------
-		// F5 — the flamegraph
+		// F5 - the flamegraph
 		// -----------------------------------------------------------------
 
 		// A row per span, rather than a bar per span.
@@ -557,7 +557,7 @@ namespace engine::render {
 		// the label is the whole point: a wall of coloured rectangles says a
 		// frame was busy without saying what it was busy with. The "when in the
 		// frame" that the bars carried is kept, in the timeline strip on the
-		// right — which the numbers cannot say, because two systems costing 2 ms
+		// right - which the numbers cannot say, because two systems costing 2 ms
 		// each read identically whether they ran back to back or with the GPU
 		// wait between them.
 		void DrawFlameGraph(
@@ -583,7 +583,7 @@ namespace engine::render {
 			const int timelineWidth = std::max(0, x + width - timelineLeft);
 
 			// The timeline is laid out against the whole frame, because that is
-			// what a span's start offset is measured from — but the SHARE column
+			// what a span's start offset is measured from - but the SHARE column
 			// is a share of the *busy* part. On a vsynced frame the two differ by
 			// an order of magnitude, and a share of the whole frame would report
 			// everything that did work as one per cent of it.
@@ -612,8 +612,8 @@ namespace engine::render {
 			int cursor = y + rowHeight;
 
 			// Pinned under the header rather than sorted into the list, and it
-			// does not scroll away. It is not a span — it is the part of the
-			// frame no span covers — and it is the first thing worth knowing
+			// does not scroll away. It is not a span - it is the part of the
+			// frame no span covers - and it is the first thing worth knowing
 			// when the rows below do not add up to the heading above.
 			//
 			// No timeline bar: unmarked time is not one interval, it is every
@@ -647,12 +647,12 @@ namespace engine::render {
 			//
 			// The passes exist to be *measured*. Interleaved, the cost of a row
 			// is one number covering a history scan, a handful of string
-			// allocations, a few hundred glyph blends and two rectangle fills —
+			// allocations, a few hundred glyph blends and two rectangle fills -
 			// and "the panel costs 0.7 ms" is not something anybody can act on.
 			// Split, each one is a span of its own in the very graph being drawn.
 			//
 			// Nothing is done twice: the passes divide the work, they do not
-			// repeat it. Drawing order changes, and cannot matter — the chips,
+			// repeat it. Drawing order changes, and cannot matter - the chips,
 			// the text and the timeline occupy disjoint columns.
 			struct PlannedRow {
 				size_t Index = 0;
@@ -702,7 +702,7 @@ namespace engine::render {
 			{
 				// One lookup and one window scan per visible row. Separated
 				// because it is the only part of drawing a row that is not
-				// drawing — it reads several hundred frames of history per
+				// drawing - it reads several hundred frames of history per
 				// name, and it is the first thing to suspect when this panel
 				// costs more than what it is reporting on.
 				ENGINE_PROFILE_CAT("flame history", core::ProfileCategory::Render);
@@ -793,7 +793,7 @@ namespace engine::render {
 
 					// Every other row tinted. The rows are a pixel apart, and a
 					// column of numbers with nothing between them is read wrong
-					// — the eye slides up a line between a name and its figure.
+					// - the eye slides up a line between a name and its figure.
 					if ((index & 1) != 0) {
 						image.Blend(x, row.Y - scale, width, rowHeight, 255, 255, 255, STRIPE_ALPHA);
 					}
@@ -804,7 +804,7 @@ namespace engine::render {
 						Shade(CATEGORY_COLOURS[static_cast<size_t>(span.Category)], span.Depth);
 					image.Blend(x, row.Y, chipWidth, glyphHeight, colour.R, colour.G, colour.B, 235);
 
-					// Where in the frame it ran, in a track of its own — an empty
+					// Where in the frame it ran, in a track of its own - an empty
 					// track reads as "did not run", where empty space reads as a
 					// row nobody drew.
 					if (timelineWidth > 0) {
@@ -835,7 +835,7 @@ namespace engine::render {
 		//
 		// **Measured rather than written down.** This was sized against the
 		// literal `engine 00.00`, which held while every name was six
-		// characters or fewer and stopped holding the moment one was not — a
+		// characters or fewer and stopped holding the moment one was not - a
 		// `physics` bar starting one glyph early is not a compile error and
 		// not a test failure, it is a panel that looks very slightly wrong to
 		// somebody who is busy reading the numbers on it.
@@ -866,7 +866,7 @@ namespace engine::render {
 				shares = CategoryShares(data);
 			}
 
-			// The figures beside the bars, which the shares no longer carry —
+			// The figures beside the bars, which the shares no longer carry -
 			// a share is what the bar is drawn from and a millisecond count is
 			// what the reader is told, and they are not the same number.
 			std::array<float, static_cast<size_t>(core::ProfileCategory::Count)> totals{};
@@ -923,7 +923,7 @@ namespace engine::render {
 
 			// The category bars are self time, and self time only covers what a
 			// scope was opened around. Without this last bar they sum to less
-			// than the frame and nothing on the panel says why — the reader is
+			// than the frame and nothing on the panel says why - the reader is
 			// left comparing four bars against a total none of them reach.
 			DebugText::Draw(
 				image,
@@ -1026,7 +1026,7 @@ namespace engine::render {
 			{
 				// A system's name is the name of the span the scheduler opens
 				// around it, so the history already has it and the same RMAX
-				// column works here without anything extra being recorded — at
+				// column works here without anything extra being recorded - at
 				// the price of a window scan per row, which is why it is its own
 				// span rather than hidden inside the formatting.
 				ENGINE_PROFILE_CAT("row history", core::ProfileCategory::Render);
@@ -1140,7 +1140,7 @@ namespace engine::render {
 			//
 			// Measured because it is a pass over every span before a single
 			// pixel is drawn, and because it decides how large the background
-			// fill below is going to be — so it is upstream of the panel's
+			// fill below is going to be - so it is upstream of the panel's
 			// biggest cost as well as being a cost itself.
 			int bodyRows = 1;
 			{
@@ -1157,7 +1157,7 @@ namespace engine::render {
 					}
 					// Plus the column header, plus the pinned (unmarked) row. Both
 					// are drawn before the scrollable body and neither scrolls, so
-					// leaving them out of the budget does not move the panel — it
+					// leaving them out of the budget does not move the panel - it
 					// clips the last span off the bottom of it.
 					bodyRows = visible + 2 - std::max(data.Scroll, 0);
 					break;
@@ -1183,7 +1183,7 @@ namespace engine::render {
 			}
 
 			// Top-anchored, stacked under the statistics panel when that is
-			// open. Anchored to the bottom, the rows grew upwards — so the
+			// open. Anchored to the bottom, the rows grew upwards - so the
 			// first row moved every time the frame's shape changed, and reading
 			// down a tree meant re-finding where it started on every repaint.
 			const int top = data.ShowStatistics ? StatisticsHeight(data) + padding : 0;
@@ -1239,8 +1239,8 @@ namespace engine::render {
 
 			switch (data.Tab) {
 			// One span per tab body rather than one for all of them. The tabs
-			// cost different amounts — a flame graph is a row and a timeline bar
-			// per span, categories are four bars — and a single name covering
+			// cost different amounts - a flame graph is a row and a timeline bar
+			// per span, categories are four bars - and a single name covering
 			// all of them would report a number that changes when you press a
 			// key and never say which key.
 			case ProfilerTab::Frame: {
@@ -1284,7 +1284,7 @@ namespace engine::render {
 		}
 		// **`Connected` and not merely `ShowNetwork`.** A client with no
 		// `--connect` has no link, and a panel of zeroes says "the link is up
-		// and idle" — which is a different and far more alarming reading than
+		// and idle" - which is a different and far more alarming reading than
 		// "there is no link". Enforced here rather than left to the caller,
 		// because there is one place to get it wrong and this is it.
 		if (data.ShowNetwork && data.Network.Connected) {

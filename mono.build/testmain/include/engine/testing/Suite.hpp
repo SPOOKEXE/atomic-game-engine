@@ -8,7 +8,7 @@
 //     TEST_DEPENDS("engine.core.memory.arena")
 //
 // Identifiers are hand-declared because a person knows what a test is about.
-// The set of *files* a test touches is not declared here — a hand-written file
+// The set of *files* a test touches is not declared here - a hand-written file
 // list goes stale silently, and a stale list means a skipped test that should
 // have run. mono.tools/testrunner derives that from the compiler's .d files
 // instead. repo_layout.md §14.

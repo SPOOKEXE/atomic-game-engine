@@ -4,14 +4,14 @@
 //
 // **The gap was never a missing decoder.** `ImageLabel` drew the missing-texture
 // marker because `AssetKind::Texture` named a kind and nothing said what a
-// texture *is* — so there was nothing for a backend to sample even once the
+// texture *is* - so there was nothing for a backend to sample even once the
 // bytes had arrived. Vendoring a PNG decoder would have answered a different
 // question: how to read somebody else's format, when what was needed was to
 // have one.
 //
 // So this is the format, and it is deliberately the dullest possible: a header
 // and the pixels a GPU wants, in the order it wants them. **A runtime does not
-// decode.** Turning a PNG into this is a publishing step — the same division
+// decode.** Turning a PNG into this is a publishing step - the same division
 // `Chunker` and `Manifest` already draw, where the origin does the work once
 // and every client does none.
 //
@@ -22,7 +22,7 @@
 //
 // **Uncompressed here, compressed in transit.** `delivery::GroupCodec` runs
 // zstd over whatever a group holds, so a raw sheet costs its real size on disk
-// and its compressed size on the wire — and the client's decompression is the
+// and its compressed size on the wire - and the client's decompression is the
 // one it was already doing for every other asset rather than a second one for
 // this kind alone.
 //
@@ -40,7 +40,7 @@ namespace engine::assets {
 	// How the pixels are laid out.
 	//
 	// **A closed list that grows, and the ordinal is on the wire**, so an entry
-	// may be added at the end and never reordered — `ecs::PropertyType`'s rule
+	// may be added at the end and never reordered - `ecs::PropertyType`'s rule
 	// and for the same reason.
 	//
 	// @since v0.8
@@ -59,6 +59,41 @@ namespace engine::assets {
 	// @return The stride of a single pixel.
 	constexpr uint32_t BytesPerPixel(TextureFormat format) {
 		return format == TextureFormat::R8 ? 1u : 4u;
+	}
+
+	// One axis of a mip level, halving and stopping at one.
+	//
+	// **A level's shape is derived, not stored**, and that is the same argument
+	// `Mesh::Write` makes for the bounding box: a stored width and height per
+	// level is a second copy of a fact the base dimensions already carry, and it
+	// is the copy an attacker gets to choose. Deriving it means a level is either
+	// exactly the size the rule says or the file is refused.
+	//
+	// @param extent The width or height at level zero.
+	// @param level  Zero for the base image.
+	// @return The extent at that level, never zero.
+	constexpr uint32_t MipExtent(uint32_t extent, uint32_t level) {
+		const uint32_t shifted = level >= 32 ? 0u : extent >> level;
+		return shifted == 0 ? 1u : shifted;
+	}
+
+	// How many levels a full chain over these dimensions runs to.
+	//
+	// **It runs until both axes are one, not until the shorter one is.** A 64x1
+	// strip has seven levels; stopping at the first axis to reach one would give
+	// it a single level and leave it aliasing exactly as it did before.
+	//
+	// @param width  The image's width.
+	// @param height The image's height.
+	// @return The count, level zero included. Never zero.
+	constexpr uint32_t MipLevelCount(uint32_t width, uint32_t height) {
+		uint32_t levels = 1;
+		while (width > 1 || height > 1) {
+			width = MipExtent(width, 1);
+			height = MipExtent(height, 1);
+			levels++;
+		}
+		return levels;
 	}
 
 	// A decoded image, ready to upload.
@@ -86,12 +121,32 @@ namespace engine::assets {
 		// pads on upload, where it knows the number.
 		std::vector<std::byte> Pixels;
 
+		// The smaller copies, level one first, or empty for an image with no
+		// chain.
+		//
+		// **A vector of levels rather than one buffer holding the whole chain**,
+		// and the reason is what `Pixels` already means. A dozen call sites read
+		// `Pixels` as *the image* and check it against `Width * Height *
+		// BytesPerPixel` - `IsValid`, the GPU upload, `ResizeImage`, the opaque
+		// pass, the thumbnailer. Concatenating would make every one of them read
+		// a buffer a third too long while still compiling, and `IsValid` would
+		// have to stop meaning what it means. Levels beside the base cost a
+		// handful of allocations on a path that already decoded a PNG, and they
+		// cost nothing to a reader who does not know they are there.
+		//
+		// Each level's dimensions come from `MipExtent`, so a level holds exactly
+		// `MipExtent(Width, n) * MipExtent(Height, n) * BytesPerPixel` bytes and
+		// `IsValid` refuses anything else.
+		//
+		// @since v0.14
+		std::vector<std::vector<std::byte>> Mips;
+
 		// The flipbook grid's side, or zero for a still image.
 		//
 		// **A sheet of animation frames is still one texture, and that is the
 		// whole reason this is three fields rather than a new asset kind.** A
-		// GIF decodes to a square power-of-two grid of cells — `bake/Gif.cpp`
-		// carries that argument — so what a sampler needs is unchanged and what
+		// GIF decodes to a square power-of-two grid of cells - `bake/Gif.cpp`
+		// carries that argument - so what a sampler needs is unchanged and what
 		// is *lost* without these three is how to play it: a 4x4 sheet and a
 		// 4x4 tile atlas are the same pixels.
 		//
@@ -114,7 +169,7 @@ namespace engine::assets {
 		// **Read from the source rather than assumed.** A GIF states a delay
 		// per frame and this is what those delays average to; a sheet drawn by
 		// hand states nothing, which is what zero means. A consumer that gets
-		// zero picks its own rate — for a particle that is "one loop over the
+		// zero picks its own rate - for a particle that is "one loop over the
 		// lifetime", which is what the engine did before there was anything to
 		// ask.
 		//
@@ -129,9 +184,17 @@ namespace engine::assets {
 
 		// Whether this describes an image at all.
 		//
-		// @return `true` when the dimensions are non-zero and the pixel count
-		//         matches them exactly.
+		// @return `true` when the dimensions are non-zero, the pixel count
+		//         matches them exactly, and every level in `Mips` is exactly the
+		//         size its position implies.
 		bool IsValid() const;
+
+		// How many levels this image has, the base included.
+		//
+		// @return One for an image with no chain.
+		uint32_t LevelCount() const {
+			return 1u + static_cast<uint32_t>(Mips.size());
+		}
 
 		// Whether this image is a sheet of animation frames.
 		//
@@ -143,7 +206,7 @@ namespace engine::assets {
 
 	// Reading and writing the texture format.
 	//
-	// Static, because a texture has no state — the same shape `Packet` has for
+	// Static, because a texture has no state - the same shape `Packet` has for
 	// the same reason.
 	//
 	// @since v0.8
@@ -156,13 +219,21 @@ namespace engine::assets {
 
 		// The version. Bumped when the layout changes, never reused.
 		//
-		// **2 adds the three flipbook fields, and 1 is still read.** Not for
-		// compatibility's sake — this is pre-release and the standing rule is
-		// that a format break is acceptable — but because the absent case has
-		// an obviously right answer: a v1 file is a still image, which is what
-		// zeroes already mean. Refusing one would make every baked texture in
-		// every store on disk unreadable to buy nothing.
-		static constexpr uint16_t VERSION = 2;
+		// **3 adds the mip chain, 2 added the three flipbook fields, and 1 is
+		// still read.** Not compatibility for its own sake - this is pre-release
+		// and the standing rule is that a format break is acceptable - but
+		// because every absent case has an obviously right answer: a v1 file is a
+		// still image and a v2 file is a texture with one level, which is what
+		// zero and one already mean. Refusing them would make every baked texture
+		// in every store on disk unreadable to buy nothing.
+		//
+		// The level count is a byte after the flipbook rate and before the
+		// pixels, for the reason the flipbook triple sits there: the pixels run
+		// to the end of the payload, so anything written after them would be
+		// unreachable. **The count is bounded by `MipLevelCount` of the
+		// dimensions rather than by a constant of its own**, which is the tighter
+		// bound and the one that stays true if `MAXIMUM_DIMENSION` moves.
+		static constexpr uint16_t VERSION = 3;
 
 		// The largest image this will read.
 		//
@@ -184,13 +255,14 @@ namespace engine::assets {
 		// Reads an image, refusing anything that is not one.
 		//
 		// Refuses a wrong magic, an unknown version, a format outside the enum,
-		// a dimension of zero or past `MAXIMUM_DIMENSION`, and a pixel count
-		// that disagrees with the dimensions. **The size is checked against the
-		// bytes actually present before anything is allocated**, which is the
-		// difference between a refusal and a decompression bomb.
+		// a dimension of zero or past `MAXIMUM_DIMENSION`, a level count of zero
+		// or past what the dimensions allow, and a pixel count that disagrees
+		// with the dimensions. **The whole chain's size is summed and checked
+		// against the bytes actually present before anything is allocated**,
+		// which is the difference between a refusal and a decompression bomb.
 		//
 		// @param reader The bytes to parse.
-		// @param out    Filled in on success, left alone otherwise — so a caller
+		// @param out    Filled in on success, left alone otherwise - so a caller
 		//               reusing one cannot act on a mixture of the last good
 		//               image and a bad one.
 		// @return `false` on anything malformed. Drop it and count it.

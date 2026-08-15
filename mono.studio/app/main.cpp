@@ -5,20 +5,36 @@
 // test binary needs something to link, and a program that is one executable's
 // worth of globbed sources cannot be driven by one.
 
-#include <algorithm>
-#include <cstdlib>
-#include <engine/parallel/Jobs.hpp>
+#include <engine/assets/ContentPolicy.hpp>
 #include <engine/core/Arguments.hpp>
+#include <engine/core/Config.hpp>
+#include <engine/core/Flags.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/parallel/Jobs.hpp>
+#include <engine/parallel/Settings.hpp>
 
+#include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <studio/Config.hpp>
 #include <studio/Editor.hpp>
 
 int main(int argc, char **argv) {
 	engine::core::Log::Initialise("studio");
 
-	engine::core::Arguments arguments("studio", "atomic studio — builds a game.");
+	// **The engine's settings and the content policy, and no `studio.*` table.**
+	// An editor already persists its own preferences in a document it owns -
+	// `studio/Config.hpp` - and a second place to say the same things is the
+	// drift rule 2 is about. What a config file adds here is the settings that
+	// are *not* the editor's: the log level, the job pool, and which content
+	// forms this machine will decode, all three of which a studio shares with
+	// the client it is previewing for.
+	engine::core::Config::DeclareEngineFlags();
+	engine::parallel::DeclareFlags();
+	engine::assets::DeclareContentFlags(engine::assets::ContentVerb::Handle);
+
+	engine::core::Arguments arguments("studio", "atomic studio - builds a game.");
+	engine::core::Config::DeclareOptions(arguments);
 
 	arguments.Flag("verbose", "Log at trace level");
 	arguments.Flag(
@@ -45,13 +61,16 @@ int main(int argc, char **argv) {
 	arguments.Value("capture", "PATH", "Write the viewport's world to a BMP and carry on");
 	arguments.Value("capture-world", "NAME", "Point --capture at this scene rather than the active one");
 	arguments.Value("profile-snapshot", "PATH", "Write a frame-graph snapshot when the run ends");
-	arguments.Value(
-		"frames-in-flight", "N", "Frames the CPU may queue ahead of the GPU: 1 (default) to 3"
-	);
+	arguments.Value("frames-in-flight", "N", "Frames the CPU may queue ahead of the GPU: 1 (default) to 3");
 	arguments.Value("idle-close", "SECONDS", "Close an empty world after this long (default 300)");
 	arguments.Value("run", "MODE", "Start in edit, server or play (default edit)");
+	arguments.Value(
+		"surface-bounces",
+		"N",
+		"Levels of mirror-in-mirror per frame, overriding the world (default: measured)"
+	);
 
-	// The control surface. Off unless asked for — see `Options::ControlPort`.
+	// The control surface. Off unless asked for - see `Options::ControlPort`.
 	arguments.Value("mcp-port", "PORT", "Listen for Model Context Protocol on 127.0.0.1:PORT (default 8738)");
 	arguments.Value("override-assets-directory", "DIR", "Read shaders and data from here");
 
@@ -67,13 +86,14 @@ int main(int argc, char **argv) {
 
 	// **Before anything starts a world or a job.** The flag is read on every
 	// dispatch, so setting it late would leave the frames before it with the
-	// shape it exists to remove — and those are the frames somebody was
+	// shape it exists to remove - and those are the frames somebody was
 	// watching while the program came up.
 	//
 	// It makes the program slower on purpose. See `parallel::SetForceSerialCompute`:
 	// this is a measurement instrument, and the number it produces is a serial
 	// cost rather than a verdict on the parallel one.
 	if (arguments.Has("force-serial-compute")) {
+		engine::core::Flags::Set("engine.serial-compute", "true", engine::core::FlagSource::CommandLine);
 		engine::parallel::SetForceSerialCompute(true);
 		ENGINE_INFO("serial compute forced: every dispatch runs on its caller's thread");
 	}
@@ -82,10 +102,21 @@ int main(int argc, char **argv) {
 		engine::core::Log::SetLevel(engine::core::LogLevel::Trace);
 	}
 
+	const engine::core::ConfigReport settings = engine::core::Config::Apply(arguments);
+	if (!settings.Ok) {
+		std::fprintf(stderr, "%s\n", settings.Error.c_str());
+		return 2;
+	}
+	if (engine::core::Config::ListingWanted(arguments)) {
+		std::fputs(engine::core::Flags::Listing().c_str(), stdout);
+		return 0;
+	}
+	engine::parallel::ApplyFlags();
+
 	// **The configured values first, then the flags over the top.** Only this
 	// function can tell a flag that was given from one that was left at its
-	// default — `Arguments::GetNumber(name, fallback)` answers the fallback for
-	// an absent flag — so the reconciliation belongs here and nowhere else.
+	// default - `Arguments::GetNumber(name, fallback)` answers the fallback for
+	// an absent flag - so the reconciliation belongs here and nowhere else.
 	// `studio/Config.hpp` states the rule: a flag is for one run and a
 	// preference is a thing somebody set and expects to find again.
 	studio::Preferences preferences;
@@ -105,10 +136,10 @@ int main(int argc, char **argv) {
 	// The bare flag takes the configured port rather than a number written
 	// here, so somebody who set one in the panel gets it back from the
 	// command line too. No flag at all still leaves the socket shut.
-	options.ControlPort =
-		arguments.Has("mcp-port")
-			? static_cast<int>(arguments.GetInteger("mcp-port", preferences.ControlPort))
-			: -1;
+	options.ControlPort = arguments.Has("mcp-port")
+							  ? static_cast<int>(arguments.GetInteger("mcp-port", preferences.ControlPort))
+							  : -1;
+	options.SurfaceBounces = static_cast<int>(arguments.GetInteger("surface-bounces", 0));
 	options.Headless = arguments.Has("headless");
 	options.Uncapped = arguments.Has("uncapped");
 	// A flag turns a panel on for this run; the file remembers what was left
@@ -123,9 +154,9 @@ int main(int argc, char **argv) {
 	//
 	// The floor of one is not politeness about bad input: `StartViewports` is
 	// unsigned, so a negative would arrive as a request for four billion panels.
-	options.StartViewports = static_cast<size_t>(std::max<int64_t>(
-		{arguments.GetInteger("viewports", 1), arguments.Has("viewport2") ? 2 : 1, 1}
-	));
+	options.StartViewports = static_cast<size_t>(
+		std::max<int64_t>({arguments.GetInteger("viewports", 1), arguments.Has("viewport2") ? 2 : 1, 1})
+	);
 
 	// A headless run has no window to close, so without a budget it would never
 	// stop. Refused rather than given a default, because a default here is a
@@ -170,12 +201,27 @@ int main(int argc, char **argv) {
 	}
 	if (auto capture = arguments.Get("capture")) {
 		options.Capture = std::filesystem::path(*capture);
+
+		// **A headless capture pins the animation clock, and it is not a flag.**
+		// The only reason to take one is to compare it with another, and a clock
+		// accumulated from the measured frame delta lands frame N on a different
+		// phase every run - two captures of one unchanged world differ by about
+		// an eighth of their bytes, which swamps most changes worth checking.
+		//
+		// Headless only, because a capture taken while somebody is watching is a
+		// screenshot of what they are watching, and pinning the clock there would
+		// make the picture disagree with the window it came from.
+		if (options.Headless) {
+			options.FixedAnimationStep = 1.0 / 60.0;
+		}
 	}
 	if (auto snapshot = arguments.Get("profile-snapshot")) {
 		options.ProfileSnapshot = std::filesystem::path(*snapshot);
 	}
-	options.FramesInFlight = static_cast<int>(arguments.GetInteger("frames-in-flight", options.FramesInFlight));
-	options.IdleCloseSeconds = static_cast<float>(arguments.GetNumber("idle-close", options.IdleCloseSeconds));
+	options.FramesInFlight =
+		static_cast<int>(arguments.GetInteger("frames-in-flight", options.FramesInFlight));
+	options.IdleCloseSeconds =
+		static_cast<float>(arguments.GetNumber("idle-close", options.IdleCloseSeconds));
 	if (auto assets = arguments.Get("override-assets-directory")) {
 		options.Assets = std::filesystem::path(*assets);
 	}

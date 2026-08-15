@@ -1,7 +1,7 @@
 --!strict
 -- A room made of mirrors, and what it takes to make one.
 --
--- `Rings.luau` proves the *loading* path — a script builds a world through the
+-- `Rings.luau` proves the *loading* path - a script builds a world through the
 -- class table and animates it on `RunService.Heartbeat`. This proves the
 -- **rendering** one: shadows, cameras that draw into a texture, and surfaces
 -- that show them.
@@ -9,13 +9,13 @@
 -- ## How a mirror works here, in two lines of setup
 --
 -- Parent a `SurfaceCamera` to a part, pick a face, and the engine does the
--- reflection — see `scene/SurfaceCameras.hpp`. The camera renders the world
+-- reflection - see `scene/SurfaceCameras.hpp`. The camera renders the world
 -- into a texture from the eye's position mirrored through that face, and the
 -- part is told to sample it. There is no vector maths in this file.
 --
 -- **It is a frame stale, and that is the design rather than a limitation.** The
 -- surface is rendered before the main pass and shows the world as it was on the
--- previous frame — which is what breaks the dependency cycle between a mirror
+-- previous frame - which is what breaks the dependency cycle between a mirror
 -- and the scene it reflects, and exactly the latency `world::ViewChannel`
 -- assumed when it was built at v0.2.
 --
@@ -31,8 +31,8 @@
 --     its own. Every camera used to share slot 0, so all four walls wrote into
 --     one target and three of them projected the fourth's image across
 --     themselves. `scene::AimSurfaceCameras` hands the slots out in entity
---     order and writes both ends of the pairing — the camera that renders into
---     a slot and the pane that samples it — so nothing in this file names one;
+--     order and writes both ends of the pairing - the camera that renders into
+--     a slot and the pane that samples it - so nothing in this file names one;
 --   - a **per-view exclusion** in the surface pass. It used to skip every
 --     mirror, because a mirror sits between its own reflection camera and the
 --     world and would fill its texture with itself. It now skips only the
@@ -42,7 +42,7 @@
 -- design rather than a limitation.** Each surface is being rendered for the
 -- others, so there is no order in which any of them could have this frame's
 -- image ready first. Each pass therefore samples the half of the pair it is not
--- writing — the frame before. A reflection of a reflection is two frames behind,
+-- writing - the frame before. A reflection of a reflection is two frames behind,
 -- three is three, and the recursion fades out rather than terminating: at some
 -- depth the bounce is older than anything on screen and stops being legible.
 --
@@ -83,7 +83,7 @@ local WALL_OFFSET = PLATE_HALF + WALL_THICKNESS / 2
 -- viewer's chair.
 local CASTER_SPREAD = 12
 
--- Where the viewer stands. **A position only** — the reflection is worked out
+-- Where the viewer stands. **A position only** - the reflection is worked out
 -- from wherever this camera is, every frame, so moving it moves the image with
 -- it instead of leaving the mirror correct for one spot.
 --
@@ -121,12 +121,12 @@ floor.Parent = workspace
 --
 -- **One effect per wall, which is the point of putting four here.** A demo that
 -- showed one grade would show what the feature does; four facing each other show
--- what it *costs*, which is nothing — the surface pass is identical for all of
+-- what it *costs*, which is nothing - the surface pass is identical for all of
 -- them and the difference is a handful of instructions where the pane samples.
 --
 -- They also show each other. Stand between the thermal wall and the swirl and
 -- the corridor of reflections carries both grades, each applied once by the pane
--- it belongs to rather than compounding down the recursion — because the texture
+-- it belongs to rather than compounding down the recursion - because the texture
 -- holds an ungraded picture and only the pane that shows it grades.
 local WALLS = {
 	{
@@ -169,7 +169,7 @@ local WALLS = {
 -- wide as it is tall and a square target spends half its texels on sky above it;
 -- 2048x512 is the same megapixel as the 1024x1024 a single pane used and puts it
 -- where the wall is. All four declare the same size because all four walls are
--- the same shape, not because they share a target — since v0.8 each index owns
+-- the same shape, not because they share a target - since v0.8 each index owns
 -- its own pair.
 local SURFACE_SIZE = Vector3.new(2048, 512)
 
@@ -191,8 +191,8 @@ for _, wall in WALLS do
 	pane.CastShadow = false
 
 	-- **Nothing here says which texture this pane shows, and that is the
-	-- point.** A pane is a mirror because a `SurfaceCamera` is parented to it —
-	-- a plain `Camera` projects nothing — so `scene::AimSurfaceCameras` hands
+	-- point.** A pane is a mirror because a `SurfaceCamera` is parented to it -
+	-- a plain `Camera` projects nothing - so `scene::AimSurfaceCameras` hands
 	-- out the slots and writes both ends of the pairing itself.
 	pane.Parent = workspace
 
@@ -203,7 +203,7 @@ for _, wall in WALLS do
 
 	-- **A texture of its own, and nothing in this file asks for one.** Every
 	-- surface camera used to share slot 0, so all four wrote into one target and
-	-- the last to render won — three walls projected a fourth wall's image
+	-- the last to render won - three walls projected a fourth wall's image
 	-- across themselves. The fix was a slot per camera, and the slots are handed
 	-- out by `scene::AimSurfaceCameras` in entity order rather than typed here:
 	-- a render-target index is the engine's bookkeeping, and an authored one is
@@ -211,7 +211,7 @@ for _, wall in WALLS do
 
 	-- **Not authored any more, and the attempt is left here as the reason.**
 	-- This used to be 70 degrees, chosen to be "wide enough to still cover the
-	-- pane when the viewer walks up to it" — which is the one thing a constant
+	-- pane when the viewer walks up to it" - which is the one thing a constant
 	-- cannot be. The reflected camera stands as far behind the glass as the eye
 	-- is in front, so the pane subtends the same angle from the camera as from
 	-- the viewer: this wall needs 24 degrees from the middle of the room and 127
@@ -219,12 +219,12 @@ for _, wall in WALLS do
 	-- covering the wall and drew as a hard-edged rectangle floating on grey.
 	--
 	-- `scene::AimSurfaceCameras` fits it to the pane's corners every frame, so a
-	-- value set here would be overwritten — as `CFrame` and `NearPlaneZ` already
+	-- value set here would be overwritten - as `CFrame` and `NearPlaneZ` already
 	-- are, and for the same reason. A surface camera parented to a part is
 	-- placed by the engine, frustum included.
 
 	-- **The image's own opacity, which is not the pane's.** At 0 the reflection
-	-- is solid whatever the pane's `Transparency` is — so a sheet of glass you
+	-- is solid whatever the pane's `Transparency` is - so a sheet of glass you
 	-- can see through still carries a mirror image, which is what glass does and
 	-- what one shared number could never express.
 	reflection.ImageTransparency = 0
@@ -288,7 +288,7 @@ end
 -- several cameras and `workspace.CurrentCamera` names the live one, which is
 -- exactly the distinction `ActiveCamera` exists for.
 --
--- An identity rotation looks down -Z, so this faces the north wall — the one
+-- An identity rotation looks down -Z, so this faces the north wall - the one
 -- built first and therefore the one that reflects.
 local view = Instance.new("Camera")
 view.Name = "Viewer"
@@ -314,6 +314,6 @@ for _, wall in WALLS do
 end
 
 print(
-	`mirrors: {#casters} casters, {#WALLS} mirrored walls, each on a surface of its own — `
+	`mirrors: {#casters} casters, {#WALLS} mirrored walls, each on a surface of its own - `
 		.. table.concat(grades, ", ")
 )

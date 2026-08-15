@@ -3,21 +3,21 @@
 // Turning a predicted entity into a server one.
 //
 // A replica mints predicted entities from the high half of the index space so
-// that nothing it invents can collide with something the authority minted —
+// that nothing it invents can collide with something the authority minted -
 // see `EntityRange`. When the authority finally answers with the real entity,
 // the local row has to stop being a guess and start being the real thing.
 //
 // **This is the primitive and not the policy.** *When* a predicted entity is
 // promoted, which authoritative handle it is promoted to, and what happens to
 // one the authority never confirms are all decisions belonging to the layer
-// that predicts — and there is nothing predicting a spawn yet, because that
+// that predicts - and there is nothing predicting a spawn yet, because that
 // wants a projectile, which wants physics and `Part`. `ROADMAP.md` says the
 // design should not be guessed at before its consumer exists, so this file
 // builds the operation and refuses to build the rule.
 //
 // Split out of `StoreState.cpp` because it is a self-contained job that touches
-// four things at once — the directory, the row's own copy of its handle, the
-// name maps and the instance tree — and a reader looking for any one of them
+// four things at once - the directory, the row's own copy of its handle, the
+// name maps and the instance tree - and a reader looking for any one of them
 // should not have to read the rest of the storage to find it.
 //
 // @tier L3 · shared
@@ -34,14 +34,14 @@ namespace engine::ecs {
 	//
 	// The row does not move: every component value, the archetype and the row
 	// index are exactly what they were, and only the handle naming them changes.
-	// That is the point — a promotion that rebuilt the entity would throw away
+	// That is the point - a promotion that rebuilt the entity would throw away
 	// whatever the client had predicted, which is the state the prediction
 	// existed to have.
 	//
 	// **What it fixes up, and what it cannot.** The directory, the row's own id
 	// entry, the store's name maps and the instance hierarchy links around it
 	// all follow the new handle. An `ecs::Entity` stored inside some *other*
-	// component — a target, an owner, a field a game declared — does **not**,
+	// component - a target, an owner, a field a game declared - does **not**,
 	// because nothing in `TypeDescriptor` says which of a component's bytes are
 	// entity handles and a byte-pattern search would rewrite an unrelated
 	// integer that happened to match. Those handles keep the predicted value,

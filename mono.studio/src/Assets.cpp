@@ -1,14 +1,14 @@
 // The assets manager: what is in the local content store, and how to add to it.
 //
 // **A view over `cdn::LocalStore` and nothing of its own.** The folder is the
-// index — `LocalStore.hpp` says so — so this panel reads `raw/` to say what is
+// index - `LocalStore.hpp` says so - so this panel reads `raw/` to say what is
 // actually there, reads the published manifest to say what an author can name,
 // and calls `ImportFile` and `PublishLocal`. It keeps no list it cannot rebuild
 // and has no opinion the store does not already have.
 //
 // **Every row is a file in `~/Documents/atomic-game-engine/cdn` and nowhere
 // else.** That is a rule and not a default. This panel used to list the *log*,
-// whose subjects are the paths files came from — `~/Music/...`, `~/art/...` —
+// whose subjects are the paths files came from - `~/Music/...`, `~/art/...` -
 // so most of what it showed was somewhere else entirely, and half of it was
 // paths that no longer existed. The store is what the store contains. The log is
 // still read, but only to *label* a row: `raw/` is hash-named, so nothing else
@@ -25,7 +25,7 @@
 // - **Add folder…**, which browses and takes everything under a directory.
 //
 // The typed-path field is gone. It was there because there was no portable file
-// dialog — and there is one, `studio::FilePrompt`, which six other dialogs in
+// dialog - and there is one, `studio::FilePrompt`, which six other dialogs in
 // this editor already use. Keeping a text field beside a browser would be two
 // places to say the same thing.
 
@@ -58,7 +58,7 @@ namespace studio {
 		// Seconds since the Unix epoch, for the log.
 		//
 		// Read here and passed down, because `cdn::LocalStore` holds no notion of
-		// "now" of its own to drift — `assets::Grant`'s standing rule.
+		// "now" of its own to drift - `assets::Grant`'s standing rule.
 		uint64_t NowSeconds() {
 			return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(
 											 std::chrono::system_clock::now().time_since_epoch()
@@ -86,7 +86,7 @@ namespace studio {
 		// its own opinion.** There was a copy of that switch here, and it had
 		// fallen three kinds behind: `Video`, `Data` and `Shader` all reached
 		// the default and drew as "unknown", which is the exact reading the
-		// original comment said it existed to prevent — a row that looks like a
+		// original comment said it existed to prevent - a row that looks like a
 		// bug in this panel rather than a file nothing will claim.
 		//
 		// The names are identical for every kind both spellings knew, so this
@@ -148,7 +148,7 @@ namespace studio {
 		ImGui::TextUnformatted("or drop files and folders onto the window");
 		ImGui::PopStyleColor();
 
-		// **No extension filter.** A content store takes whatever somebody has —
+		// **No extension filter.** A content store takes whatever somebody has -
 		// `assetc` decides what it can bake and `Publish` decides what kind a
 		// name is, and a dialog that hid a format the pipeline would have handled
 		// would be a third opinion about what content is.
@@ -171,7 +171,7 @@ namespace studio {
 		// rule surfacing: a manifest signs what a client will trust, and a key kept
 		// in the editor's preferences file is a key that signs anything anybody
 		// drops in the folder. The *ingest* key on the Content page is saved and
-		// that is not an inconsistency — `ContentSources.hpp` carries why.
+		// that is not an inconsistency - `ContentSources.hpp` carries why.
 		ImGui::TextUnformatted("Publish raw/ into processed/");
 
 		ImGui::SetNextItemWidth(-engine::ui::Scaled(130.0f));
@@ -196,7 +196,7 @@ namespace studio {
 		//
 		// **Uploading and publishing are two acts and stay two.** What an
 		// origin's inbox receives is unsigned content, and no client will look
-		// at it until a publisher has signed a manifest naming it — CDN.md §1.
+		// at it until a publisher has signed a manifest naming it - CDN.md §1.
 		// A single button doing both would need the signing seed to be around
 		// for the upload, which is the one thing this panel refuses to keep.
 		ImGui::BeginDisabled(ContentUploads == nullptr || ContentUploads->Remaining() > 0);
@@ -207,12 +207,12 @@ namespace studio {
 
 		ImGui::SameLine();
 		if (ContentUploads == nullptr) {
-			ImGui::TextDisabled("no write source — Preferences > Content");
+			ImGui::TextDisabled("no write source - Preferences > Content");
 		} else if (ContentUploads->Remaining() > 0) {
 			ImGui::Text("%zu left", ContentUploads->Remaining());
 		} else {
 			ImGui::TextDisabled(
-				"%zu destination(s) — the Network panel says how it went",
+				"%zu destination(s) - the Network panel says how it went",
 				ContentUploads->Destinations().size()
 			);
 		}
@@ -227,7 +227,7 @@ namespace studio {
 		//
 		// **One tab per place, then the two questions that are about this
 		// machine.** A published list on its own could not say *where* a name
-		// lives, which is the question with two origins configured — so the
+		// lives, which is the question with two origins configured - so the
 		// catalogue tabs come first, in priority order, with the merged view in
 		// front of them and the engine's own beside it. `raw/` still answers
 		// "did my file get in" and the gallery answers "what is actually used",
@@ -237,8 +237,8 @@ namespace studio {
 				const CatalogueTab &tab = AssetTabs[index];
 
 				// **The id is pinned to the position and the label is not.**
-				// Two origins may be called the same thing — nothing stops
-				// somebody naming two rows "cdn" — and two tabs sharing an id
+				// Two origins may be called the same thing - nothing stops
+				// somebody naming two rows "cdn" - and two tabs sharing an id
 				// is one tab that flickers between two contents.
 				const std::string label = tab.Title + "###asset-place-" + std::to_string(index);
 				if (ImGui::BeginTabItem(label.c_str())) {
@@ -271,7 +271,7 @@ namespace studio {
 		// it**, which is the split `PaintPreview` exists for: a list row paints
 		// over a selectable it must not add a second hit target to, and a panel
 		// that draws a preview on its own still needs the layout to know it is
-		// there. One painter, two ways in — `studio/AssetRow.hpp` carries why
+		// there. One painter, two ways in - `studio/AssetRow.hpp` carries why
 		// the row cannot use this one.
 		const ImVec2 corner = ImGui::GetCursorScreenPos();
 		ImGui::Dummy(ImVec2(side, side));
@@ -286,8 +286,8 @@ namespace studio {
 		const ImVec2 far(cornerX + side, cornerY + side);
 
 		// **A mesh has no bitmap and gets the live slot instead.** A picture of a
-		// mesh is a render — `Thumbnails.cpp` opens with why there is no cached
-		// one — so a mesh row resolves to `Unavailable` and would draw an `M`
+		// mesh is a render - `Thumbnails.cpp` opens with why there is no cached
+		// one - so a mesh row resolves to `Unavailable` and would draw an `M`
 		// forever. The hovered row is the one the preview slot is already
 		// rendering for the panel beside the cursor, and drawing that same
 		// texture here costs nothing: it is one image, already made, this frame.
@@ -301,7 +301,7 @@ namespace studio {
 				// **Sampled to its extent rather than whole.** The target is
 				// rounded up to a block and the render fills the corner, so
 				// drawing all of it would show the unwritten border down two
-				// edges — the same correction the viewport panel and the hover
+				// edges - the same correction the viewport panel and the hover
 				// panel both make.
 				draw->AddImage(
 					reinterpret_cast<ImTextureID>(slot),
@@ -326,7 +326,7 @@ namespace studio {
 		// v0.12 only the cursor asked, so a store full of materials drew a grid
 		// of dashes until somebody swept the mouse across it. Recorded here
 		// rather than requested here because there is one slot and this runs
-		// per row — `PumpRenderedPreviews` takes one of these after the whole
+		// per row - `PumpRenderedPreviews` takes one of these after the whole
 		// list has been drawn.
 		if (PreviewIsRendered(kind) && !name.empty() &&
 			std::find(PreviewQueue.begin(), PreviewQueue.end(), name) == PreviewQueue.end()) {
@@ -334,12 +334,12 @@ namespace studio {
 		}
 
 		// **A box of the same size rather than nothing**, so a row does not
-		// change height when its picture arrives — a list that reflows while it
+		// change height when its picture arrives - a list that reflows while it
 		// loads is one nobody can click in.
 		draw->AddRect(corner, far, ImGui::GetColorU32(ImGuiCol_Border));
 
 		// **A mark rather than a sentence, at this size.** Thirty-two pixels
-		// holds no words; the hover preview is where the reason is spelled out —
+		// holds no words; the hover preview is where the reason is spelled out -
 		// which is the split `explorer-plus` makes too, its rows carrying icons
 		// and its hover panel carrying "Preview unavailable".
 		//
@@ -367,7 +367,7 @@ namespace studio {
 		// **One source, through the whole baker.** `assetc::Settings::Only`
 		// filters the walk rather than skipping it, so a material picked here
 		// gets its colour map rewritten through `BakedName` exactly as a
-		// whole-tree bake would — two spellings of that rule is a material that
+		// whole-tree bake would - two spellings of that rule is a material that
 		// resolves to nothing on a machine nobody tested.
 		assetc::Settings settings;
 		settings.Input = paths.Raw;
@@ -375,7 +375,7 @@ namespace studio {
 		settings.Only = relative;
 
 		// **A unit box, matching `contentimport` exactly.** The two bake into the
-		// same store and a mesh has to behave the same whichever produced it —
+		// same store and a mesh has to behave the same whichever produced it -
 		// one baked at authored scale would draw at a different size and, worse,
 		// be culled against a `Bounds` ten times too small. `contentimport`
 		// carries the whole argument.
@@ -407,12 +407,12 @@ namespace studio {
 		// **Registered into this editor's own renderer immediately.** The point
 		// of baking on demand is that the thing appears now; waiting for a
 		// publish would make the picker's whole reason for existing a four-minute
-		// round trip. What a publish is still needed for is a *client* — nothing
+		// round trip. What a publish is still needed for is a *client* - nothing
 		// outside this process can fetch an asset no manifest names, and the tab
 		// says so.
 		RegisterBakedAsset(paths.Baked / baked, baked);
 
-		AssetStatus = "baked " + baked + " — publish to share it";
+		AssetStatus = "baked " + baked + " - publish to share it";
 		ENGINE_INFO("assets: {}", AssetStatus);
 
 		// The picker lists the manifest, and this file is not in one yet. Its
@@ -422,7 +422,7 @@ namespace studio {
 
 	bool Editor::LoadRawAsset(const std::filesystem::path &folder, const std::string &relative) {
 		// **The tree is the truth here, so no resolver is passed.** A model in a
-		// raw folder still sits beside its `tex/` directory — the flattening
+		// raw folder still sits beside its `tex/` directory - the flattening
 		// that made `cdn::StoreTextureResolver` necessary is what `ImportFile`
 		// does, and nothing has imported this.
 		assetc::Settings settings;
@@ -431,7 +431,7 @@ namespace studio {
 
 		// **A unit box, matching `contentimport` and `BakeRawAsset` exactly.**
 		// The three feed one renderer and a mesh has to be the same size
-		// whichever produced it — one baked at authored scale would draw
+		// whichever produced it - one baked at authored scale would draw
 		// differently and be culled against the wrong bounds.
 		settings.ModelSize = 1.0f;
 
@@ -460,10 +460,10 @@ namespace studio {
 
 		if (Content.MemoryOnly) {
 			RegisterBakedAsset(one.Payload, one.Output);
-			AssetStatus = "loaded " + one.Output + " — in this editor only, nothing was written";
+			AssetStatus = "loaded " + one.Output + " - in this editor only, nothing was written";
 		} else {
 			RegisterBakedAsset(paths.Baked / one.Output, one.Output);
-			AssetStatus = "baked " + one.Output + " into the store — publish to share it";
+			AssetStatus = "baked " + one.Output + " into the store - publish to share it";
 		}
 
 		ENGINE_INFO("assets: {}", AssetStatus);
@@ -493,7 +493,7 @@ namespace studio {
 
 		// **Only the two kinds this editor can show.** A sound or a script baked
 		// on demand is a real thing to have done and there is nothing here to
-		// hand it to — the publish is what delivers those, and pretending
+		// hand it to - the publish is what delivers those, and pretending
 		// otherwise would be a status line that lied.
 		if (engine::assets::KindOfName(name) == engine::assets::AssetKind::Texture) {
 			engine::assets::TextureData image;
@@ -551,7 +551,7 @@ namespace studio {
 			ImGui::SameLine();
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
 			ImGui::TextUnformatted(
-				Content.MemoryOnly ? "memory-only — nothing is written" : "writing into the store's baked/"
+				Content.MemoryOnly ? "memory-only - nothing is written" : "writing into the store's baked/"
 			);
 			ImGui::PopStyleColor();
 		}
@@ -620,14 +620,14 @@ namespace studio {
 
 				// **Only the rows the clipper drew ask for a picture**, which is
 				// the bound that makes previews affordable over a store of
-				// hundreds — Thumbnails.cpp.
+				// hundreds - Thumbnails.cpp.
 				DrawPreview(entry.Name, engine::ui::Scaled(32.0f), entry.Kind);
 				HoverPreview(entry.Name, entry.Kind);
 
 				ImGui::TableNextColumn();
 
 				// **The name is what a scene writes**, so it is the thing worth
-				// copying — one click rather than reading it off and retyping.
+				// copying - one click rather than reading it off and retyping.
 				ImGui::AlignTextToFramePadding();
 				ImGui::TextUnformatted(entry.Name.c_str());
 				HoverPreview(entry.Name, entry.Kind);
@@ -646,8 +646,8 @@ namespace studio {
 				ImGui::TableNextColumn();
 
 				// **The address column is where an unbaked row is acted on.**
-				// It has no address to show — nothing has hashed it, because
-				// nothing has baked it — and a per-row button is what turns
+				// It has no address to show - nothing has hashed it, because
+				// nothing has baked it - and a per-row button is what turns
 				// "this folder holds a crate" into a crate in the viewport.
 				//
 				// **Only on the folder's own tab**, because the folder is the
@@ -672,8 +672,8 @@ namespace studio {
 				}
 
 				// **A generated asset says so rather than showing zeros.** Its
-				// address is all-zero because it has none — nothing fetches a
-				// built-in — and eight zeros in an address column reads as a
+				// address is all-zero because it has none - nothing fetches a
+				// built-in - and eight zeros in an address column reads as a
 				// publish that went wrong.
 				if (entry.Root.IsZero()) {
 					ImGui::TextDisabled("generated");
@@ -728,7 +728,7 @@ namespace studio {
 						// tab draws "Where" here and the address after it; every
 						// other tab has no "Where" at all, so the same index is
 						// its address column. imgui reports a position and not a
-						// name, so the caller's layout is what disambiguates —
+						// name, so the caller's layout is what disambiguates -
 						// sorting by the wrong field is the kind of thing that
 						// looks like an unstable sort rather than a bug.
 						less = showSource ? left->Source < right->Source
@@ -755,7 +755,7 @@ namespace studio {
 		ImGui::Text("%zu file(s), %s", PickerRaw.size(), Readable(total).c_str());
 
 		if (PickerRaw.empty()) {
-			ImGui::TextDisabled("nothing imported yet — drop files on the window, or use the buttons above");
+			ImGui::TextDisabled("nothing imported yet - drop files on the window, or use the buttons above");
 			return;
 		}
 
@@ -785,7 +785,7 @@ namespace studio {
 		// a scrolled table is the cost imgui's clipper exists to remove.
 		//
 		// The filter is applied first so the clipper counts what is actually
-		// drawn — a clipper over the unfiltered list would leave gaps.
+		// drawn - a clipper over the unfiltered list would leave gaps.
 		std::vector<const cdn::RawEntry *> shown;
 		shown.reserve(PickerRaw.size());
 		for (const cdn::RawEntry &entry : PickerRaw) {
@@ -815,7 +815,7 @@ namespace studio {
 				ImGui::TableNextColumn();
 
 				// **The file name and not the original**, because that is what
-				// this file is called under `raw/` — which is the path
+				// this file is called under `raw/` - which is the path
 				// `ThumbnailFor` resolves. The two differ: `Original` is what it
 				// was called before it came in.
 				const std::string stored = entry.Path.filename().string();
@@ -851,7 +851,7 @@ namespace studio {
 			return;
 		}
 
-		// Least significant column first, stably — `SortPublished` carries why.
+		// Least significant column first, stably - `SortPublished` carries why.
 		for (int index = specs->SpecsCount - 1; index >= 0; index--) {
 			const ImGuiTableColumnSortSpecs &spec = specs->Specs[index];
 			const bool ascending = spec.SortDirection == ImGuiSortDirection_Ascending;
@@ -889,11 +889,18 @@ namespace studio {
 		PickerContents = cdn::PublishedContents(paths);
 
 		// **Built from the configured sources rather than from this machine's
-		// store alone.** The store is one of those sources — the default list's
-		// first row points at exactly this folder — so it needs no special case
+		// store alone.** The store is one of those sources - the default list's
+		// first row points at exactly this folder - so it needs no special case
 		// here, and an editor pointed at somebody else's published tree lists
 		// that one the same way.
-		AssetTabs = BuildCatalogue(Content);
+		//
+		// **This is where an HTTP origin is asked what it holds, and the wait is
+		// why it is only here.** `MakeOriginLister` blocks with a ceiling, and
+		// every caller of this function is somebody having asked - opening the
+		// panel, pressing Refresh, importing, publishing. `RebuildContentClients`
+		// deliberately does not ask, because it runs at start-up.
+		const std::unique_ptr<OriginLister> origins = MakeOriginLister();
+		AssetTabs = BuildCatalogue(Content, origins.get());
 	}
 
 	void Editor::ImportAssetPath(const std::string &given) {
@@ -957,7 +964,7 @@ namespace studio {
 
 	void Editor::DropAssetPath(const std::string &path) {
 		// **Opened rather than only imported.** A person dropping a file on a
-		// closed panel gets no feedback at all otherwise — the import happens,
+		// closed panel gets no feedback at all otherwise - the import happens,
 		// the status line updates, and nothing they can see says so.
 		ShowAssets = true;
 		ImportAssetPath(path);
@@ -990,7 +997,7 @@ namespace studio {
 		const cdn::LocalPaths paths = cdn::DefaultLocalPaths();
 		const auto report = cdn::PublishLocal(paths, *signing, NowSeconds());
 		if (!report.has_value()) {
-			AssetStatus = "the publish failed — see the output panel";
+			AssetStatus = "the publish failed - see the output panel";
 			return;
 		}
 

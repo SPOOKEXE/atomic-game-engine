@@ -1,14 +1,14 @@
 // The control socket, and the editor's frame loop that drives it.
 //
 // **Asynchronous asio with no thread of its own, polled from `Pump`.** The
-// operations are all `async_`, but nothing here ever calls `io_context::run` —
+// operations are all `async_`, but nothing here ever calls `io_context::run` -
 // `Pump` calls `poll`, which runs whatever is ready and returns. So the socket
 // makes progress one frame at a time, on the editor's thread, and there is no
 // second thread and nothing that blocks.
 //
 // That is not a style preference, it is the bug class. A thread blocked in
 // `accept` does not come out because the acceptor was closed, and a thread
-// blocked in `read` does not come out because a flag was cleared — so an editor
+// blocked in `read` does not come out because a flag was cleared - so an editor
 // asked to quit joined threads that were waiting for a connection and a line
 // that were never going to arrive, and the program hung with its window already
 // gone. Quitting an editor started with `--mcp-port` did that every time, with
@@ -16,8 +16,8 @@
 // `Stop` has nothing to wake and nothing to join.
 //
 // It also makes the one rule this has to obey free rather than engineered. Only
-// the editor's thread may look at a world — `Universe::Enter` aborts on
-// re-entry rather than racing — and a completion handler runs on whichever
+// the editor's thread may look at a world - `Universe::Enter` aborts on
+// re-entry rather than racing - and a completion handler runs on whichever
 // thread called `poll`, which is that thread by construction. The queue, the
 // mutex and the condition variable that used to carry a request across the
 // boundary are gone because there is no longer a boundary.
@@ -107,7 +107,7 @@ namespace engine::control {
 		//
 		// **Strictly one request in flight, by chaining rather than by a lock.**
 		// The next read is started by the write's completion, so the responses
-		// leave in the order the requests arrived — two writes outstanding on one
+		// leave in the order the requests arrived - two writes outstanding on one
 		// socket have no defined order between them.
 		void Read() {
 			asio::async_read_until(*Client, Incoming, '\n', [this](const asio::error_code &failed, size_t) {
@@ -182,7 +182,7 @@ namespace engine::control {
 		}
 
 		// **Loopback, spelled out.** `tcp::v4()` with any address is the usual
-		// incantation and is exactly what must not happen here — see the
+		// incantation and is exactly what must not happen here - see the
 		// header.
 		const asio::ip::tcp::endpoint local(asio::ip::make_address("127.0.0.1"), port);
 
@@ -194,7 +194,7 @@ namespace engine::control {
 			State->Acceptor->listen();
 			State->Bound = State->Acceptor->local_endpoint().port();
 		} catch (const std::exception &failure) {
-			ENGINE_ERROR("control: could not listen on 127.0.0.1:{} — {}", port, failure.what());
+			ENGINE_ERROR("control: could not listen on 127.0.0.1:{} - {}", port, failure.what());
 			State->Acceptor.reset();
 			return false;
 		}

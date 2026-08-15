@@ -1,7 +1,7 @@
-# L8. Particles, beams and trails — what a world emits rather than what it is.
+# L8. Particles, beams and trails - what a world emits rather than what it is.
 #
 # **`shared`, and that is load-bearing rather than tidy.** A headless server
-# simulates particles for anything gameplay reads off them, and — more usefully —
+# simulates particles for anything gameplay reads off them, and - more usefully -
 # `shared` is the only tier a test suite can reach. `scene::OrderScene` makes the
 # same argument in the other direction: the *pipeline* is `render`'s, and the
 # arithmetic that decides what a pass is handed belongs where it can be wrong in
@@ -13,7 +13,7 @@
 #
 # `parallel` is here for one loop and it is the loop the module exists for.
 # `StepParticles` walks emitter blocks through `Jobs::For`, and the whole shape of
-# the pool — contiguous blocks, a swap-with-last retirement, no atomics — is what
+# the pool - contiguous blocks, a swap-with-last retirement, no atomics - is what
 # makes that dispatch safe.
 #
 # Deliberately does not depend on: render, assets, or physics. A particle names

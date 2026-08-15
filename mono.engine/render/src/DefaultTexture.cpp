@@ -1,3 +1,4 @@
+#include <engine/assets/Resample.hpp>
 #include <engine/render/DefaultTexture.hpp>
 
 #include <cstdint>
@@ -28,6 +29,14 @@ namespace engine::render {
 			for (size_t texel = 0; texel < sizeof(TILE); texel++) {
 				built.Pixels[texel] = static_cast<std::byte>(TILE[texel]);
 			}
+
+			// **Filtered here rather than shipped as a chain in the `.inl`.** The
+			// tile is compiled in because it has to exist before any content has
+			// streamed, and six more levels of it would be a third more source
+			// bytes for something derivable in microseconds once, at first use.
+			// `assets::BuildMipChain` is one tier below this module; it was
+			// `bake`'s until v0.15, and `bake` is what a shipped game may not link.
+			assets::BuildMipChain(built);
 			return built;
 		}();
 		return image;

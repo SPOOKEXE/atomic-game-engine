@@ -4,7 +4,7 @@
 //
 // **One pipeline for a filled rectangle, an image and a glyph.** The atlas
 // carries a solid white texel that an untextured quad samples, so a rectangle
-// and a letter differ only in where they sample — not in which pipeline drew
+// and a letter differ only in where they sample - not in which pipeline drew
 // them. Two pipelines would be two places for the blend state to be set
 // differently, which shows as panels at subtly the wrong opacity and nowhere
 // else.
@@ -21,7 +21,7 @@ layout(set = 3, binding = 0) uniform Flipbook {
 	// Where the current animation cell sits: x the scale, yz the offset.
 	//
 	// **The identity for everything that is not a sheet**, which is a rectangle,
-	// a glyph and every still image — so this is applied unconditionally rather
+	// a glyph and every still image - so this is applied unconditionally rather
 	// than behind a branch. `render::FlipbookCell` carries why a transform
 	// rather than a cell index.
 	vec4 Cell;
@@ -44,7 +44,7 @@ void main() {
 
 	// **Discard rather than blend a zero.** The interface is drawn back to
 	// front with no depth test, so a fully transparent fragment costs a blend
-	// for nothing — and text is mostly transparent by area.
+	// for nothing - and text is mostly transparent by area.
 	if (outColour.a <= 0.0) {
 		discard;
 	}

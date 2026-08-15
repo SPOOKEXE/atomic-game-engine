@@ -103,7 +103,7 @@ TEST_CASE("a header written on its own is the header of a whole packet", "[net][
 TEST_CASE("the message limit is the payload limit less the tag", "[net][packet]") {
 	// **The number every budget above this module is sized against.** A caller
 	// hands over a message and a tag is added to it, so the two limits differ by
-	// sixteen bytes — and a budget measured against the wrong one produces a
+	// sixteen bytes - and a budget measured against the wrong one produces a
 	// message that can never be sent and looks exactly like a busy link.
 	CHECK(
 		Packet::MAXIMUM_MESSAGE_BYTES + engine::net::Cipher::OVERHEAD_BYTES == Packet::MAXIMUM_PAYLOAD_BYTES
@@ -249,8 +249,8 @@ TEST_CASE("sequence comparison survives the wrap", "[net][packet]") {
 	CHECK_FALSE(Packet::IsNewer(5, 5));
 
 	// The case a plain `>` gets wrong. A 16-bit counter wraps every 65536
-	// packets — about eighteen minutes at sixty a second, well inside one match
-	// — and without this every packet after the first wrap is discarded as old.
+	// packets - about eighteen minutes at sixty a second, well inside one match
+	// - and without this every packet after the first wrap is discarded as old.
 	CHECK(Packet::IsNewer(0, 65535));
 	CHECK(Packet::IsNewer(3, 65533));
 	CHECK_FALSE(Packet::IsNewer(65535, 0));

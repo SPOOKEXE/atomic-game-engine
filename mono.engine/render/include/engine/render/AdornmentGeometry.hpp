@@ -6,7 +6,7 @@
 // adornment says what to outline, in what colour and how solid; turning that
 // into geometry needs the adornee's `CFrame` and stud extent, which are
 // `scene::Transform` and `scene::Bounds`. `gui` is L7 `shared` and links
-// neither — `gui/AGENTS.md` refuses the edge — so `gui::EachAdornment` answers
+// neither - `gui/AGENTS.md` refuses the edge - so `gui::EachAdornment` answers
 // *which* instance an adornment is about and stops there.
 //
 // This module links both, which is what `D00022` meant by "whoever draws one
@@ -18,7 +18,7 @@
 // exists to leave visible.
 //
 // **Headless.** Resolving an adornment is a transform and twelve corners, so it
-// is testable without a device — the same reason `InterfaceMesh` is a type
+// is testable without a device - the same reason `InterfaceMesh` is a type
 // rather than a loop inside a recording function.
 //
 // @tier L12 · client
@@ -48,7 +48,7 @@ namespace engine::render {
 		core::Color3 Colour;
 		//@}
 
-		// 0 is opaque, Roblox's sense — kept because every other transparency
+		// 0 is opaque, Roblox's sense - kept because every other transparency
 		// in this engine keeps it and one that flipped would be found by
 		// somebody wondering why their selection box was invisible.
 		float Transparency = 0.0f;
@@ -72,7 +72,7 @@ namespace engine::render {
 		// Resolves every drawable adornment against its adornee.
 		//
 		// Walks `gui::EachAdornment`, which has already answered which instances
-		// are adorned and which of them may be drawn at all — so nothing here
+		// are adorned and which of them may be drawn at all - so nothing here
 		// re-derives containment or the adornee fallback. What it adds is the
 		// transform.
 		//

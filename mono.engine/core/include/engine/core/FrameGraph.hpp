@@ -41,7 +41,7 @@ namespace engine::core {
 		//
 		// **This is the default home of a game's systems, not all of them.**
 		// Everything runs through the ECS, so this bar would be the whole
-		// frame if it took everything the scheduler dispatched — which is a
+		// frame if it took everything the scheduler dispatched - which is a
 		// bar that says "the game ran" and nothing else. The carve-outs below
 		// are the subsystems large enough that a reader wants them named
 		// before they want them grouped, and `Script` was the first of them
@@ -49,7 +49,7 @@ namespace engine::core {
 		//
 		// It is separate from `Simulation` because the two answer different
 		// questions: this one is "what did the systems cost", and that one is
-		// "what did the machinery around them cost" — a driver spending more
+		// "what did the machinery around them cost" - a driver spending more
 		// on its barrier than on its worlds is a real and findable problem,
 		// and one category could not show it.
 		ECS,
@@ -59,7 +59,7 @@ namespace engine::core {
 		//
 		// **Carved out of `ECS` because it is the system a slow frame is
 		// usually about.** Physics runs as scheduler systems like everything
-		// else, so it was ECS time and indistinguishable from it — and "ECS
+		// else, so it was ECS time and indistinguishable from it - and "ECS
 		// 9 ms" sends a reader to the scheduler when the answer is a
 		// broadphase rebuild. The per-system view could always tell them
 		// apart; the category view is the one read first, and it could not.
@@ -97,7 +97,7 @@ namespace engine::core {
 		// @since v0.7
 		Assets,
 
-		// Time the frame spent waiting rather than working — the wait for the
+		// Time the frame spent waiting rather than working - the wait for the
 		// display, above all.
 		//
 		// It is a category rather than something excluded from the graph because
@@ -122,7 +122,7 @@ namespace engine::core {
 	// One completed timing span published for the in-game frame overlay.
 	struct FrameSpan {
 		// Either a literal the caller owns for the life of the process, or a
-		// copy the frame owns — see `Scope` and `CopiedScope`. The overlay reads
+		// copy the frame owns - see `Scope` and `CopiedScope`. The overlay reads
 		// these after the frame that produced them has ended, so anything with a
 		// shorter life is a dangling read rather than a wrong label.
 		std::string_view Name;
@@ -145,20 +145,20 @@ namespace engine::core {
 		// the frame go" answer is made of, and what the category totals sum.
 		float SelfMilliseconds = 0.0f;
 
-		// Of `Milliseconds`, how much was spent waiting — this span's own idle
+		// Of `Milliseconds`, how much was spent waiting - this span's own idle
 		// time and every idle span beneath it.
 		//
 		// **Because an inclusive duration is not a cost.** `Renderer::Render`
 		// on a vsynced frame reads 16 ms, and 15.9 of that is one child
 		// blocking on the display. A reader looking at the biggest number goes
-		// and optimises the renderer, which is what happened — twice — before
+		// and optimises the renderer, which is what happened - twice - before
 		// this field existed. `Milliseconds - IdleMilliseconds` is the part
 		// anybody can do something about, and it is the number the overlay
 		// leads with.
 		//
 		// Idle *self* time is what accumulates, so a wait nested inside another
 		// wait is counted once, and it is added to every ancestor rather than
-		// to the immediate parent alone — every span that contains a wait
+		// to the immediate parent alone - every span that contains a wait
 		// contains it.
 		//
 		// @since v0.6
@@ -172,7 +172,7 @@ namespace engine::core {
 		// **A reported span is not wall time on this thread**, so it must not
 		// be subtracted from its parent's self time. Eight workers each
 		// reporting five milliseconds under a batch that took one would give
-		// that batch a self time of minus thirty-nine — a number that is not
+		// that batch a self time of minus thirty-nine - a number that is not
 		// wrong by a little, it is a different quantity. The tree maths skips
 		// these, and the parent keeps the wall time it actually spent waiting.
 		//
@@ -188,8 +188,8 @@ namespace engine::core {
 	// **Public because two callers need the same answer and one of them is a
 	// test.** `EndFrame` runs it before publishing so the overlay and the RMAX
 	// history agree; the panel suite runs it over hand-built spans so the
-	// invariants it checks — a share never above 100%, a wait inside a wait
-	// counted once — stay properties of this arithmetic rather than of a
+	// invariants it checks - a share never above 100%, a wait inside a wait
+	// counted once - stay properties of this arithmetic rather than of a
 	// number a test wrote down.
 	//
 	// Idle *self* time is what accumulates, added to the span itself and to
@@ -216,7 +216,7 @@ namespace engine::core {
 		static constexpr size_t MAXIMUM_SPANS = 4096;
 
 		// Deep enough to reach past the schedule. The first levels are spent
-		// before any real work starts — frame, phase, system — so a smaller
+		// before any real work starts - frame, phase, system - so a smaller
 		// budget records the schedule and throws away the frame.
 		//
 		// Past this the depth is still tracked, so Pop stays balanced, but
@@ -265,7 +265,7 @@ namespace engine::core {
 
 		// Returns how much of the last completed frame ran inside no span at all.
 		//
-		// The frame's own self time — FrameMilliseconds() less the inclusive
+		// The frame's own self time - FrameMilliseconds() less the inclusive
 		// duration of the root spans. Everything else this class reports is time
 		// somebody thought to name; this is the rest of it, and on a frame that
 		// is only partly instrumented it is usually most of it.
@@ -301,7 +301,7 @@ namespace engine::core {
 		// opened on any thread but the frame's owner, and it is right to: the
 		// depth is the owning thread's stack, and a worker moving it would
 		// corrupt that thread's nesting. Locking instead would put contention
-		// in the one path that runs on every span of every frame — so today
+		// in the one path that runs on every span of every frame - so today
 		// every worker's work is counted by `Dropped()` and shown nowhere.
 		//
 		// The answer is not to time it from here. It is for the producer to
@@ -320,14 +320,14 @@ namespace engine::core {
 		//                     literal, or text outliving the frame.
 		// @param category     Broad owner used for category totals.
 		// @param milliseconds What the producer said it took. A negative value
-		//                     is ignored rather than clamped — it means the
+		//                     is ignored rather than clamped - it means the
 		//                     producer measured wrongly, and turning it into
 		//                     zero would hide that.
 		static void Report(std::string_view name, ProfileCategory category, float milliseconds);
 
 		// Records a reported span whose name is only known at runtime.
 		//
-		// For a producer named at runtime — a worker index, a host name. The
+		// For a producer named at runtime - a worker index, a host name. The
 		// text is copied into frame-owned storage, exactly as `CopiedScope`
 		// does and for the same reason.
 		//
@@ -352,13 +352,13 @@ namespace engine::core {
 		static constexpr size_t MAXIMUM_HISTORY_FRAMES = 20000;
 
 		// Distinct span names the history tracks. Past this a name is not
-		// recorded and the snapshot says how many it turned away — a copied
+		// recorded and the snapshot says how many it turned away - a copied
 		// name is arbitrary text, so a script naming a zone per chunk could
 		// otherwise grow this without limit.
 		static constexpr size_t MAXIMUM_HISTORY_NAMES = 256;
 
 		// Returns the worst *single* reading for a named span in any of the last
-		// RECENT_FRAMES frames — not a total. A span that opens six times in a
+		// RECENT_FRAMES frames - not a total. A span that opens six times in a
 		// frame contributes its worst of the six, so the number is comparable
 		// with the per-frame figure beside it rather than being six times
 		// larger.
@@ -431,7 +431,7 @@ namespace engine::core {
 
 		// Opens a frame span after copying a runtime name into frame-owned storage.
 		//
-		// Use for a name that does not outlive the call — a script chunk, a node
+		// Use for a name that does not outlive the call - a script chunk, a node
 		// kind built on the stack. The text is copied into a pool the frame
 		// owns, so the view the overlay reads stays good until that frame is
 		// replaced.
@@ -461,7 +461,7 @@ namespace engine::core {
 		// opened on a thread that does not own the frame.
 		static constexpr size_t NOT_RECORDING = static_cast<size_t>(-1);
 		// A scope past MAXIMUM_DEPTH or past MAXIMUM_SPANS. No span was stored,
-		// but the depth moved — so the matching close has to move it back, or
+		// but the depth moved - so the matching close has to move it back, or
 		// every sibling after it is recorded one level too deep.
 		static constexpr size_t DEPTH_ONLY = static_cast<size_t>(-2);
 

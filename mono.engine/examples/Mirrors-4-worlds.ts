@@ -1,13 +1,13 @@
-// Four worlds, four view producers, one composited frame — the TypeScript twin
+// Four worlds, four view producers, one composited frame - the TypeScript twin
 // of `Mirrors-4-worlds.luau`.
 //
 // **The same scene, the same bindings, the same result.** The differences below
 // are the languages' rather than the engine's, and they are the same three the
 // single-world pair already carries:
 //
-//   - `game.GetService("RunService")` — a dot, because JavaScript has no
+//   - `game.GetService("RunService")` - a dot, because JavaScript has no
 //     colon-call.
-//   - `a.mul(b)` and `a.add(b)` — methods, because JavaScript has no operator
+//   - `a.mul(b)` and `a.add(b)` - methods, because JavaScript has no operator
 //     overloading.
 //   - `for (const caster of casters)` rather than a generic `for ... in`.
 //
@@ -45,7 +45,7 @@ const PALETTES = [
 ];
 
 // Wraps rather than clamps, so `--worlds 6` still builds six distinguishable
-// rooms. Zero-based on both sides here, unlike the Luau file — which is the one
+// rooms. Zero-based on both sides here, unlike the Luau file - which is the one
 // place the two genuinely differ rather than merely reading differently.
 const PALETTE = PALETTES[INDEX % PALETTES.length];
 
@@ -64,7 +64,7 @@ const WALL_OFFSET = PLATE_HALF + WALL_THICKNESS / 2;
 const CASTER_SPREAD = 9;
 
 // Every world uses the same eye, and the compositor is what moves the views
-// apart — which is the property under test: a world does not know where its
+// apart - which is the property under test: a world does not know where its
 // image will be drawn.
 const EYE = Vector3.new(0, 6, 16);
 const EYE_FOV = 60;
@@ -175,7 +175,7 @@ workspace.CurrentCamera = view;
 
 // --- what moves ---------------------------------------------------------------
 
-// Each world runs at its own rate, so the four views are visibly out of step —
+// Each world runs at its own rate, so the four views are visibly out of step -
 // which is what proves they are four simulations rather than one image drawn
 // four times.
 const RATE = 0.7 + INDEX * 0.25;

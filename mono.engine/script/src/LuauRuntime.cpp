@@ -1,6 +1,6 @@
 #include "LuauRuntime.hpp"
 
-#include "Bindings.hpp"
+#include "LuauBindings.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
@@ -25,7 +25,7 @@ namespace engine::script {
 		// can reach.
 		//
 		// Carried in the state's userdata rather than in a static, so two
-		// runtimes in one process have two of everything — which is what makes
+		// runtimes in one process have two of everything - which is what makes
 		// "one runtime, one world" a property of the arrangement rather than a
 		// rule somebody has to remember.
 		struct Bounds {
@@ -80,7 +80,7 @@ namespace engine::script {
 		// This is what bounds `while true do end`. It counts rather than reading
 		// a clock deliberately: a wall-clock deadline makes whether a script
 		// finished depend on how busy the machine was, and a recorded run would
-		// then replay differently on a slower one — the desync rule 5 names.
+		// then replay differently on a slower one - the desync rule 5 names.
 		void Interrupt(lua_State *state, int) {
 			Bounds &bounds = BoundsOf(state);
 			if (bounds.StepBudget == 0) {
@@ -144,7 +144,7 @@ namespace engine::script {
 
 				// **The upvalues, which need the function itself on the
 				// stack.** `lua_getlocal` takes a level and `lua_getupvalue`
-				// takes a closure, so the two walks cannot share a loop — which
+				// takes a closure, so the two walks cannot share a loop - which
 				// is why this is a second pass rather than a second column in
 				// the first.
 				//
@@ -226,7 +226,7 @@ namespace engine::script {
 
 			if (point->Action == BreakAction::Stop) {
 				// An ordinary script error, which the host already knows how to
-				// report — rather than a new state the runtime would have to
+				// report - rather than a new state the runtime would have to
 				// learn to be in.
 				luaL_errorL(state, "stopped at a breakpoint: %s:%d", source, here.currentline);
 			}
@@ -260,7 +260,7 @@ namespace engine::script {
 		//
 		// - `os` is `time`, `clock` and `date`. Every one of them reads a wall
 		//   clock, and a script branching on one produces a run that does not
-		//   replay — `just replay-check` would fail somewhere far from the
+		//   replay - `just replay-check` would fail somewhere far from the
 		//   script that caused it. A world's clock is `store.Time()`, which is
 		//   simulated, and `OpenClock` is what a script gets instead.
 		// - `debug` reaches into the interpreter: stack frames, locals,
@@ -340,7 +340,7 @@ namespace engine::script {
 
 		// **`nil` as a global, because this is a Roblox-shaped API.** Luau
 		// already has the keyword; what this adds is nothing, and that is the
-		// point — the JavaScript side needs an alias for `null` and this side
+		// point - the JavaScript side needs an alias for `null` and this side
 		// needs no such thing, so the two surfaces differ by a line rather than
 		// by a concept.
 
@@ -349,12 +349,30 @@ namespace engine::script {
 		OpenEnums(State);
 		OpenSignals(State);
 		OpenInstances(State);
-		OpenRunService(State);
-		OpenInputServices(State);
 		OpenGame(State);
 		OpenWorkspace(State, Store);
-		OpenServices(State);
-		OpenContentService(State);
+
+		// **Before the services, because two of them produce one.**
+		// `UserInputService`'s signals and a bound action's handler are both
+		// handed an `InputObject`, and a metatable registered after the service
+		// that hands one over would be looked up before it exists. The JavaScript
+		// runtime installs its class in the same position and for this reason.
+		OpenInputObject(State);
+
+		// **Before the services too, and for `OpenInputObject`'s reason.**
+		// `TweenService:Create` hands back a `Tween`, whose metatable is
+		// registered here - a service installed first would be one whose method
+		// looks up a metatable that does not exist yet. The JavaScript runtime
+		// installs its class in the same position.
+		OpenTweenHandle(State);
+
+		// **Every service this language binds, from the catalogue.** They used to
+		// be a hand-written call list here, which is how "which services exist"
+		// came to be two lists - this one and the JavaScript runtime's - that
+		// drifted by four services with nothing in the build to say so. See
+		// `ServiceCatalogue.hpp`.
+		InstallLuauServices(State, ServiceAvailability::Always);
+
 		OpenQueries(State);
 
 		// After `OpenInstances`, whose method table this adds the component
@@ -365,7 +383,7 @@ namespace engine::script {
 		OpenBaseExtras(State);
 
 		// **After every engine surface and before `OpenRequire`**, so a host
-		// cannot replace one of the engine's globals by naming it — the table is
+		// cannot replace one of the engine's globals by naming it - the table is
 		// its own and `host.Thing` is the only way in.
 		OpenHost(State);
 
@@ -378,17 +396,19 @@ namespace engine::script {
 
 		// **The step callback is installed, single-step mode is not.** Luau only
 		// calls this while stepping is enabled, and `Run` enables it for exactly
-		// as long as a breakpoint is armed — so a runtime nobody is debugging
+		// as long as a breakpoint is armed - so a runtime nobody is debugging
 		// pays nothing for this line.
 		lua_callbacks(State)->debugstep = DebugStep;
 
 		BoundsOf(State).Context.Breakpoints = &Breakpoints;
 
 		// **After that assignment and before the sandbox**, and the position is
-		// forced from both sides. The service reads the pointer to decide
-		// whether to install itself at all, so it cannot run earlier; and it
-		// writes a global, so it cannot run once the table is frozen.
-		OpenBreakpointService(State);
+		// forced from both sides. A studio service reads the pointer above to
+		// decide whether to install itself at all, so it cannot run earlier; and
+		// it writes a global, so it cannot run once the table is frozen. That is
+		// the whole reason `ServiceAvailability` has a second value and the
+		// catalogue is walked twice.
+		InstallLuauServices(State, ServiceAvailability::Studio);
 
 		// Freezes the global table and the library tables. After this a script
 		// can read `math.floor` and cannot replace it, so one script cannot
@@ -405,7 +425,7 @@ namespace engine::script {
 
 		// **The store's change listeners go before the VM does.** They capture
 		// `this` through the queue, and a store that outlives the runtime would
-		// otherwise call into freed memory at its next barrier — which is the
+		// otherwise call into freed memory at its next barrier - which is the
 		// ordinary case, because a world is destroyed after the scripts that
 		// built it.
 		if (bounds != nullptr) {
@@ -428,20 +448,20 @@ namespace engine::script {
 
 		// Compiled to bytecode first: Luau is a compiler and a VM, and they are
 		// separate libraries on purpose. Optimisation at 1 and debug info at 1
-		// — the default pairing, which keeps a usable traceback.
+		// - the default pairing, which keeps a usable traceback.
 		lua_CompileOptions options = {};
 		options.optimizationLevel = 1;
 		options.debugLevel = 1;
 
 		// **A breakpoint compiles the chunk differently, and it has to.** At
 		// optimisation level 1 the compiler folds constants and drops the
-		// instructions their lines would have produced — so `local x = 1` is not
+		// instructions their lines would have produced - so `local x = 1` is not
 		// a line execution ever arrives at, and a breakpoint on it would sit
 		// there never firing while the script plainly ran past it. That is the
 		// worst failure a debugger has: silently pointing at the wrong place.
 		//
 		// So stepping compiles at level 0 with full debug info, which is the
-		// same trade `dev` already makes for C++ — the code does what it says
+		// same trade `dev` already makes for C++ - the code does what it says
 		// rather than what it was rewritten into. It applies only while a
 		// breakpoint is armed, so nothing else in the world pays for it.
 		if (Breakpoints.Armed()) {
@@ -463,7 +483,7 @@ namespace engine::script {
 
 		// **`script` goes on the thread, after the sandbox.** The state's global
 		// table is frozen and shared; the thread's is this chunk's alone, which
-		// is exactly the scoping `script` needs — two scripts in one world each
+		// is exactly the scoping `script` needs - two scripts in one world each
 		// see themselves and never each other.
 		if (LuauContext &context = ContextOf(State); context.PendingScript != ecs::NULL_ENTITY) {
 			PushInstanceValue(thread, context.PendingScript);
@@ -489,7 +509,7 @@ namespace engine::script {
 		// **Single-step is switched on only while something is armed, and off
 		// again the moment the chunk ends.** Luau checks a flag per instruction
 		// when it is on, so leaving it on would tax every script in the world
-		// for a breakpoint nobody set — and a debugger that costs something when
+		// for a breakpoint nobody set - and a debugger that costs something when
 		// unused is one that gets switched off and then rots.
 		//
 		// On the thread rather than the state, because that is what runs.
@@ -513,7 +533,7 @@ namespace engine::script {
 		// thread that suspended through `task.wait` is registered for one of
 		// those and something will come back for it. A thread that suspended any
 		// other way found a route the sandbox did not intend, and finishing the
-		// tick with it would be work crossing a tick boundary — which is exactly
+		// tick with it would be work crossing a tick boundary - which is exactly
 		// what rule 5 forbids and what v0.5 refused outright.
 		//
 		// So the check is not "did it yield" but "will anything resume it", and
@@ -552,8 +572,8 @@ namespace engine::script {
 		// `require(moduleScript)`.
 		//
 		// **The argument is an instance, never a path.** A path would be a second
-		// namespace beside the tree — two ways to name one module, disagreeing the
-		// first time somebody moved a file — and it would reach code no manifest
+		// namespace beside the tree - two ways to name one module, disagreeing the
+		// first time somebody moved a file - and it would reach code no manifest
 		// describes, which is what the old refusal was written to prevent. An
 		// instance is already in the world, already saved, already replicated.
 		int Require(lua_State *state) {
@@ -574,7 +594,7 @@ namespace engine::script {
 				luaL_errorL(state, "require expects a ModuleScript");
 			}
 
-			// **Already evaluated: hand back the same value.** Not a fresh copy —
+			// **Already evaluated: hand back the same value.** Not a fresh copy -
 			// two scripts requiring one module must see one table, or a module
 			// used to share state silently shares nothing.
 			if (const auto found = context.Modules.find(module.Id); found != context.Modules.end()) {
@@ -594,16 +614,14 @@ namespace engine::script {
 				}
 			}
 
-			const core::Name modulePath = ActiveSourceOf(store, module);
-			if (!modulePath.IsValid()) {
-				luaL_errorL(
-					state, "'%s' has no source to require", store.InstanceNameOf(module).Text().data()
-				);
-			}
-
+			// **Through the instance rather than the path**, so a module
+			// required in a replica reads the `script::Program` row that
+			// arrived. `require` is how a client's `LocalScript` reaches a
+			// library, and the path alone finds nothing there.
+			core::Name modulePath;
 			std::string program;
 			std::string error;
-			if (!ReadSource(store, modulePath, program, error)) {
+			if (!ReadProgram(store, module, modulePath, program, error)) {
 				luaL_errorL(state, "%s", error.c_str());
 			}
 
@@ -657,7 +675,7 @@ namespace engine::script {
 			if (lua_gettop(thread) < 1) {
 				luaL_errorL(
 					state,
-					"'%s' returned nothing — a ModuleScript must return one value",
+					"'%s' returned nothing - a ModuleScript must return one value",
 					store.InstanceNameOf(module).Text().data()
 				);
 			}
@@ -692,28 +710,29 @@ namespace engine::script {
 	bool LuauRuntime::RunInstance(ecs::Entity instance) {
 		Error.clear();
 
-		// **The active container** — `script::CodeSourceContainerSelector` says
+		// **The active container** - `script::CodeSourceContainerSelector` says
 		// which of an instance's programs is the one to run.
-		const core::Name path = ActiveSourceOf(Store, instance);
-		if (!path.IsValid()) {
+		if (!ActiveSourceOf(Store, instance).IsValid()) {
 			// A script with no path is a no-op rather than an error: an author
 			// makes the instance before choosing the file, and that is a legal
 			// state.
 			return true;
 		}
 
-		// **The world's `SourceCache` before the filesystem**, through the one
-		// function that knows both. A studio's unsaved edit lives in that table
-		// and a game file's scripts arrive in it, so a second resolver here
-		// would be a second place to forget it — and the symptom would be
-		// edited code that runs from one entry point and not another.
+		// **The world's `SourceCache`, then the row the authority sent, then the
+		// filesystem**, through the one function that knows all three. A
+		// studio's unsaved edit lives in that table, a game file's scripts
+		// arrive in it, and a replica has neither - so a second resolver here
+		// would be a second place to forget one of them, and the symptom would
+		// be code that runs from one entry point and not another.
+		core::Name path;
 		std::string program;
-		if (!ReadSource(Store, path, program, Error)) {
+		if (!ReadProgram(Store, instance, path, program, Error)) {
 			return false;
 		}
 
 		// Which script a captured hit came from. Cleared after the run, because
-		// a heartbeat connection is not attributable to one — see
+		// a heartbeat connection is not attributable to one - see
 		// `LuauContext::RunningScript`.
 		ContextOf(State).RunningScript = instance;
 
@@ -723,7 +742,7 @@ namespace engine::script {
 		// of many scripts possible rather than one file that builds a world.
 		//
 		// A plain global rather than an upvalue, because `luaL_sandboxthread`
-		// gives each chunk its own global table — so one script's `script` is
+		// gives each chunk its own global table - so one script's `script` is
 		// invisible to the next, which is exactly the scoping an author expects.
 		ContextOf(State).PendingScript = instance;
 
@@ -735,14 +754,14 @@ namespace engine::script {
 	bool LuauRuntime::Heartbeat(float delta) {
 		// **The order is the tick's own, and every step of it is a rule.**
 		//
-		//   1. deliveries — a message the barrier applied belongs to the tick
+		//   1. deliveries - a message the barrier applied belongs to the tick
 		//      that is starting, so a subscriber sees it before anything that
 		//      beat moves. The alternative is a world reacting one tick late to
 		//      something it already has.
-		//   2. changes — what the *previous* barrier recorded, fanned out from
+		//   2. changes - what the *previous* barrier recorded, fanned out from
 		//      components to property names. Before the beat, so a `.Changed`
 		//      handler and a `Heartbeat` handler see the same world.
-		//   3. tasks — resumes due at this tick, then everything deferred from
+		//   3. tasks - resumes due at this tick, then everything deferred from
 		//      the last beat.
 		//   4. the beat itself.
 		//
@@ -750,13 +769,25 @@ namespace engine::script {
 		// the order the barrier produced them.
 		//
 		// **A span each, because one span over all four answers nothing.** The
-		// four do entirely different work — a bus drain, a signal fan-out, a
-		// coroutine resume and a script's own beat — and they fail differently:
+		// four do entirely different work - a bus drain, a signal fan-out, a
+		// coroutine resume and a script's own beat - and they fail differently:
 		// deliveries scale with traffic, changes with how much of the world
 		// moved, tasks with how many are due, and the beat with what the game
 		// wrote. A single `script heartbeat` bar that spikes says only that
 		// something did, which is where this was before a spike had to be found
 		// in `Mirrors-1-world` and nothing under it could be read.
+		{
+			// **Before everything, because what it produces is read after the
+			// barrier rather than inside it.** The `script::Program` rows are
+			// what a client is sent, and `replication::Authority::Publish` runs
+			// once the tick is over - so a program edited between two ticks has
+			// to be mirrored at the head of this one or a client waits a tick
+			// for every save. It is also the cheapest thing in the beat: a
+			// 64-bit compare unless somebody wrote to the cache.
+			ENGINE_PROFILE_CAT("script source", core::ProfileCategory::Script);
+			MirrorSourcePrograms(Store, Mirrored);
+		}
+
 		std::string firstError;
 		{
 			ENGINE_PROFILE_CAT("script deliveries", core::ProfileCategory::Script);
@@ -770,16 +801,53 @@ namespace engine::script {
 		};
 
 		{
+			// **The world's own timed work, before anything that reacts to it.**
+			// A tween and a debris deadline are not resumes: nothing asked to be
+			// called, and what they produce is a property write and a removal -
+			// the same things a `Heartbeat` handler produces, arriving from the
+			// clock instead of from a script.
+			//
+			// So they run at the head of the barrier, and everything after them
+			// - a bound action, a `.Changed`, a tree signal, a resumed task, the
+			// beat - sees one world in which this tick's motion has already
+			// happened. After the beat instead, every script would read a value
+			// one tick stale and an expired instance would outlive its deadline
+			// by a tick as far as anything could tell.
+			//
+			// It also settles what a tween made *during* this barrier does: it
+			// first advances on the next one, rather than part way through the
+			// tick it was created in, because every creator runs after this
+			// point.
+			//
+			// **Tweens before debris**, so an instance's last tick of motion
+			// happens before it is taken away. The reverse is defensible and the
+			// point is that it is stated: two queues drained in whichever order
+			// the code happened to be written in is exactly the sort of thing a
+			// recording depends on and nobody wrote down.
+			ENGINE_PROFILE_CAT("script tweens", core::ProfileCategory::Script);
+			note(PumpTweens(State, delta));
+			PumpDebris(Store, ContextOf(State).Debris);
+		}
+
+		{
 			// **Input first, and that ordering is the useful one.** A bound
 			// action's handler writes properties, and those writes should reach
-			// their listeners on *this* barrier rather than the next — so the pump
+			// their listeners on *this* barrier rather than the next - so the pump
 			// that produces writes runs before the pump that delivers them.
 			//
 			// The reverse order works and puts every scripted response a frame
 			// late, which is the kind of latency nobody can find by reading a
 			// handler.
+			//
+			// **It is handed this beat's interface events even though it
+			// dispatches none of them**, which is what `gameProcessedEvent` is: a
+			// click the 2D tree consumed has to arrive at `InputBegan` marked
+			// rather than swallowed or passed as though nobody handled it. They
+			// are still queued at this point and `PumpGuiEvents` below drains
+			// them - reading the queue twice is what lets the two pumps stay one
+			// each.
 			ENGINE_PROFILE_CAT("script input", core::ProfileCategory::Script);
-			note(PumpInput(State));
+			note(PumpInput(State, PendingGuiEvents));
 		}
 		{
 			ENGINE_PROFILE_CAT("script changes", core::ProfileCategory::Script);
@@ -793,9 +861,30 @@ namespace engine::script {
 			// world rather than two.
 			ENGINE_PROFILE_CAT("script tree", core::ProfileCategory::Script);
 			note(PumpTree(State));
+
+			// **The tree's other listener, and the only one that is a resume.**
+			// A `WaitForChild` wakes on the same arrival the signals above just
+			// delivered, so it belongs inside this step rather than beside it -
+			// and it goes second, because a signal every listener shares is a
+			// worse thing to be one tick late with than one script's own wait.
+			//
+			// Its own span would say almost nothing: the pump does nothing at
+			// all unless something is suspended, which is the ordinary state of
+			// a world.
+			note(PumpChildWaiters(State));
 		}
 		{
-			// **Still inside step 2 — "what the previous barrier recorded" —
+			// **After the tree, because a respawn is both.** A new character is
+			// a `Model` parented into `Workspace` - which is a `ChildAdded` the
+			// pump above delivers - and a link written onto the `Player`, which
+			// is this one. A `CharacterAdded` handler indexing
+			// `character.Humanoid` should find a world whose tree signals have
+			// already agreed the model is there.
+			ENGINE_PROFILE_CAT("script characters", core::ProfileCategory::Script);
+			note(PumpCharacters(State));
+		}
+		{
+			// **Still inside step 2 - "what the previous barrier recorded" -
 			// and last within it.** A pointer event is about an element whose
 			// rectangle came from the last frame's layout, so it belongs with
 			// the other things the world already settled rather than with the
@@ -812,7 +901,7 @@ namespace engine::script {
 			// would mean a `DeliverGuiEvents` arriving mid-pass could reallocate
 			// under the walk.
 			//
-			// No script can cause that today — only a host calls
+			// No script can cause that today - only a host calls
 			// `DeliverGuiEvents`, and a host is inside this call. So this is
 			// structural rather than load-bearing, and a test cannot reach it:
 			// removing the swap keeps the suite green. It stays because the
@@ -835,7 +924,7 @@ namespace engine::script {
 		// **The collector, on the host's clock rather than on an allocation's.**
 		//
 		// Luau collects incrementally when a script allocates, which puts the
-		// pause inside whichever `Vector3.new` happened to cross the threshold —
+		// pause inside whichever `Vector3.new` happened to cross the threshold -
 		// so it lands *inside* the beat's span and is invisible as itself. A
 		// scene animating parts allocates hard: `Mirrors-1-world` builds two
 		// vectors and two CFrames per caster per frame, which at 24 casters and
@@ -843,7 +932,7 @@ namespace engine::script {
 		// up as a beat that is occasionally slow for no reason the beat can
 		// explain.
 		//
-		// Stepping it here does not stop the automatic collector — it means part
+		// Stepping it here does not stop the automatic collector - it means part
 		// of the debt is paid where it can be seen and named. What it costs is
 		// one span a tick.
 		{
@@ -916,7 +1005,7 @@ namespace engine::script {
 		lua_pop(State, 1);
 
 		// **The same registry table `OpenInstances` filled**, so a method added
-		// there is offered here with nothing else changing — and the five
+		// there is offered here with nothing else changing - and the five
 		// `LuauEcs` appends to it arrive for free, which a list of method names
 		// kept anywhere else would have missed.
 		lua_getfield(State, LUA_REGISTRYINDEX, "engine.instance.methods");
@@ -924,7 +1013,7 @@ namespace engine::script {
 		lua_pop(State, 1);
 
 		// The signals, which are a branch chain rather than a table. This is the
-		// one member list in the module that is written down; `Instances.cpp`
+		// one member list in the module that is written down; `LuauInstances.cpp`
 		// keeps it beside the chain and `engine.script.vocabulary` checks it.
 		for (const std::string_view signal : LuauInstanceSignalNames()) {
 			surface.InstanceMembers.emplace_back(signal);

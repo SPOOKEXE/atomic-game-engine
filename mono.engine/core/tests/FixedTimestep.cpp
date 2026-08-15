@@ -16,7 +16,7 @@ TEST_CASE("the delta is the rate inverted and never varies", "[timestep]") {
 	REQUIRE(timestep.Delta() == Approx(1.0f / 60.0f));
 
 	// Whatever the frame did, the tick delta is the same. That is the whole
-	// point — a system integrating by it produces the same result at any
+	// point - a system integrating by it produces the same result at any
 	// frame rate.
 	timestep.Advance(0.100f);
 	REQUIRE(timestep.Delta() == Approx(1.0f / 60.0f));
@@ -81,7 +81,7 @@ TEST_CASE("a long stall is dropped, not carried", "[timestep]") {
 	FixedTimestep timestep(60.0);
 
 	// Two seconds of stall is 120 ticks owed. Running them would take longer
-	// than a frame, arriving at the next frame owing even more — the death
+	// than a frame, arriving at the next frame owing even more - the death
 	// spiral. Giving up is visible and recoverable; the spiral is neither.
 	const int ticks = timestep.Advance(2.0f);
 	REQUIRE(ticks == FixedTimestep::MAXIMUM_TICKS_PER_FRAME);

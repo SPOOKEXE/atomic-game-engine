@@ -2,8 +2,8 @@
 // `SOLVER_ITERATIONS`.
 //
 // `v02v03v04.md` §3.6 asks for exactly this figure. It is the cost side of the
-// decision; the accuracy side — how far a stack sinks and whether it settles at
-// all — is in `Solver.hpp` beside the constant, because that is where somebody
+// decision; the accuracy side - how far a stack sinks and whether it settles at
+// all - is in `Solver.hpp` beside the constant, because that is where somebody
 // changing the number will be looking.
 //
 // **The iteration count is compiled in**, so the per-iteration column of that
@@ -14,7 +14,7 @@
 //
 // Every row reports per call to `Solve`. The contact counts the per-contact
 // figure divides by are 3520 for 200 stacks of four, 18040 for 800 of four and
-// 10688 for 200 of twelve — four points per box-on-box face contact, and
+// 10688 for 200 of twelve - four points per box-on-box face contact, and
 // `tests/Solver.cpp` is where that is pinned rather than assumed.
 //
 // What it measured, in the `bench` preset, on a 24-thread machine, at the
@@ -36,8 +36,8 @@
 // one pass over the bodies and a merge over the pairs, with no iteration at
 // all.
 //
-// The warm start does not show up in the cost — the cache row is inside the
-// spread of the row above it — which is the point: a binary search over a
+// The warm start does not show up in the cost - the cache row is inside the
+// spread of the row above it - which is the point: a binary search over a
 // sorted array is free next to sixteen sweeps. What it buys is in `Solver.hpp`.
 
 #include <engine/core/Random.hpp>
@@ -102,7 +102,7 @@ namespace solver_bench {
 	// **A benchmark that let the solver sleep would measure the sleeping.** The
 	// rows below call `Solve` two hundred times without a tick of gravity
 	// between them, so after thirty calls every body has been still for half a
-	// simulated second and drops out of the solve entirely — and the figure
+	// simulated second and drops out of the solve entirely - and the figure
 	// stops moving when `SOLVER_ITERATIONS` changes, which is exactly the
 	// signal that says the measurement is measuring nothing.
 	void KeepAwake(Store &store) {
@@ -155,7 +155,7 @@ namespace solver_bench {
 
 		// Several ticks before anything is measured, so the warm start is warm
 		// and the rows below measure a steady scene rather than its first
-		// tick — which is the one tick a game never spends most of its time in.
+		// tick - which is the one tick a game never spends most of its time in.
 		for (int tick = 0; tick < 10; tick++) {
 			store->AdvanceTick(1.0f / 60.0f);
 			SyncBroadphase(*store);
@@ -225,7 +225,7 @@ BENCH("Solve · 200 stacks of 12", 100) {
 // alternatives by running them alternately rather than one after the other.
 //
 // Around 25 ms per call for roughly 40000 contact points, which is 0.6 us each
-// — a fifth above the small rows, and that gap is the cache rather than the
+// - a fifth above the small rows, and that gap is the cache rather than the
 // arithmetic.
 
 BENCH("Solve · 500 stacks of 20", 10) {
@@ -241,7 +241,7 @@ BENCH("Solve · 500 stacks of 20", 10) {
 //
 // The same solve with the cache emptied first, which is what every tick would
 // look like if the impulses were not carried. The gap is not the cost of the
-// lookup — that is a binary search over a sorted array — it is the iterations
+// lookup - that is a binary search over a sorted array - it is the iterations
 // the warm start saves by starting the search at the answer.
 
 BENCH("Solve · 200 stacks of 4, cache emptied each tick", 200) {

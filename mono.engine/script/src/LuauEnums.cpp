@@ -1,4 +1,4 @@
-#include "Bindings.hpp"
+#include "LuauBindings.hpp"
 
 #include <engine/ecs/EnumTable.hpp>
 
@@ -14,7 +14,7 @@ namespace engine::script {
 		// One member of one enum: which set, and which member.
 		//
 		// Two interned ids and nothing else. Roblox's `EnumItem` also carries a
-		// `Value` — the underlying number — and this deliberately does not:
+		// `Value` - the underlying number - and this deliberately does not:
 		// **the number is not the format**, and an author who reads one will
 		// eventually write it into a save file. `ecs/Enums.hpp` states that rule
 		// for the engine's own enums, and handing userland a number would be the
@@ -62,7 +62,7 @@ namespace engine::script {
 			return 1;
 		}
 
-		// `Enum.AlphaMode.Clip` — the second lookup.
+		// `Enum.AlphaMode.Clip` - the second lookup.
 		//
 		// A metatable rather than a prebuilt table of members, so an enum
 		// extended after the VM opened is still reachable. A game registering
@@ -99,7 +99,7 @@ namespace engine::script {
 			return 1;
 		}
 
-		// `Enum.AlphaMode` — the first lookup.
+		// `Enum.AlphaMode` - the first lookup.
 		int EnumIndex(lua_State *state) {
 			const char *name = luaL_checkstring(state, 2);
 			const Name enumName(name);
@@ -110,7 +110,7 @@ namespace engine::script {
 
 			// The set object. Built per access rather than cached, because
 			// caching it would need somewhere to put the cache and the only
-			// honest place is the registry — where it would then have to be
+			// honest place is the registry - where it would then have to be
 			// invalidated by a late registration. `__eq` on `EnumItem` is what
 			// makes comparison work, so two set objects for one enum cost
 			// nothing an author can observe.
@@ -156,7 +156,7 @@ namespace engine::script {
 	bool ReadEnumValue(lua_State *state, int index, core::Name enumName, core::Name &out) {
 		// An `EnumItem` of the *right* enum. A member of the wrong one is the
 		// error a bare string could never have caught, so it is refused here
-		// rather than left to `Store::SetProperty`'s registry check — which
+		// rather than left to `Store::SetProperty`'s registry check - which
 		// would accept `Enum.Shape.Box` for an `AlphaMode` if both happened to
 		// register a member of that name.
 		if (void *value = lua_touserdatatagged(state, index, TAG_ENUM_ITEM); value != nullptr) {

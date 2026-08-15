@@ -9,7 +9,7 @@
 // `test-output.md` and `test-output.html` are for.
 //
 // Sections are the suite identifiers themselves. `engine.core.arguments` sits
-// under `engine`, then under `engine.core` — no second taxonomy to keep in step
+// under `engine`, then under `engine.core` - no second taxonomy to keep in step
 // with the first, because a report that groups by anything other than
 // TEST_SUITE_ID would eventually disagree with the runner about what a module
 // is.
@@ -42,7 +42,7 @@ namespace testrunner {
 		bool Skipped = false;
 
 		// Wall-clock inside the test binary, from the case starting to the case
-		// ending — every SECTION of it, since a case holding sections is entered
+		// ending - every SECTION of it, since a case holding sections is entered
 		// once per leaf and the interesting number is what the case cost.
 		unsigned long long Microseconds = 0;
 	};
@@ -60,7 +60,7 @@ namespace testrunner {
 		bool Ran = false;
 
 		// Whether the suite is green. Taken from the binary's exit status, not
-		// derived from the counts — a suite can exit non-zero without any case
+		// derived from the counts - a suite can exit non-zero without any case
 		// reporting a failure, and that is still a failure.
 		bool Passed = false;
 
@@ -70,7 +70,7 @@ namespace testrunner {
 		// Test cases that failed.
 		unsigned CasesFailed = 0;
 
-		// Test cases Catch2 skipped — a SKIP() the suite reached and declined.
+		// Test cases Catch2 skipped - a SKIP() the suite reached and declined.
 		// Counted apart from a pass, because a case that did not run is not a
 		// case that worked.
 		unsigned CasesSkipped = 0;
@@ -89,7 +89,7 @@ namespace testrunner {
 		//
 		// It is therefore larger than the sum of the cases, by the cost of
 		// starting a process and running its static initialisers. That gap is
-		// not noise to be hidden — it is the fixed price of a suite existing,
+		// not noise to be hidden - it is the fixed price of a suite existing,
 		// and on a tree of thirty of them it is worth being able to see.
 		unsigned long long Microseconds = 0;
 
@@ -125,7 +125,7 @@ namespace testrunner {
 	// the four.
 	//
 	// @return False if the header is missing or unrecognised, or if the run
-	//         never reached its totals line — a binary that crashed halfway
+	//         never reached its totals line - a binary that crashed halfway
 	//         leaves a file that parses field by field and is still not a
 	//         result. The counts are then not to be trusted, and the caller
 	//         has the exit status to fall back on.
@@ -148,7 +148,7 @@ namespace testrunner {
 	// too many.
 	std::string FormatDuration(unsigned long long microseconds);
 
-	// test-output.md — what a diff and a pull request read.
+	// test-output.md - what a diff and a pull request read.
 	//
 	// Suites are grouped by identifier and ordered within a group, so two runs
 	// that learned the same thing produce the same bytes. There is deliberately
@@ -156,7 +156,7 @@ namespace testrunner {
 	// says nothing.
 	std::string RenderMarkdown(const std::vector<SuiteReport> &suites);
 
-	// test-output.html — the same numbers, for a person rather than a diff.
+	// test-output.html - the same numbers, for a person rather than a diff.
 	//
 	// One self-contained file. A report that needs a network to render is a
 	// report that does not render on the machine that produced it.

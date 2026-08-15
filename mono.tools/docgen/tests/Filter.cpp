@@ -23,7 +23,7 @@ namespace {
 
 // The invariant everything else rests on. Doxygen numbers its source listing
 // from the filtered text and links to it by line, so a filter that adds or
-// drops one line sends every link on the page off by one — a failure that looks
+// drops one line sends every link on the page off by one - a failure that looks
 // like working documentation.
 TEST_CASE("the line count never changes", "[docgen]") {
 	const std::string source = "#pragma once\n"
@@ -167,7 +167,7 @@ TEST_CASE("an inline block comment does not swallow the rest of the line", "[doc
 	REQUIRE(Promote(source) == "actions.HandleEvent(Key(F5, /*repeat=*/true));  ///< held\n");
 }
 
-// Unescaped, Doxygen reads these as HTML tags and renders `/shaders//` — the
+// Unescaped, Doxygen reads these as HTML tags and renders `/shaders//` - the
 // placeholder disappears and the page does not say it did.
 TEST_CASE("a path placeholder is not an HTML tag", "[docgen]") {
 	const std::string source = "// <assets>/shaders/<module>/. A module stages its own SPIR-V.\n"
@@ -213,7 +213,7 @@ TEST_CASE("an empty file filters to an empty file", "[docgen]") {
 TEST_CASE("a bold sentence's full stop moves outside the emphasis", "[docgen]") {
 	// **The whole bug, in one character.** `JAVADOC_AUTOBRIEF` ends the brief at
 	// the first sentence stop and does not care that the stop is inside
-	// emphasis — so `**Sentence.**` leaves the brief holding an unclosed `**`
+	// emphasis - so `**Sentence.**` leaves the brief holding an unclosed `**`
 	// and the detail holding its stranded partner.
 	const std::string filtered = Promote("// **A failure here is a decision.** And then some.\n");
 	CHECK(Contains(filtered, "**A failure here is a decision**."));

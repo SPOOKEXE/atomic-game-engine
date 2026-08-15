@@ -17,7 +17,7 @@ namespace engine::render {
 		// The twelve edges of a box, as pairs of corner indices.
 		//
 		// A corner is a sign per axis, so index `n` is `(n&1, n&2, n&4)` mapped
-		// to -1 or +1 — which is why the table below is indices rather than
+		// to -1 or +1 - which is why the table below is indices rather than
 		// vectors: the corners are derived and the *edges* are the fact.
 		constexpr std::array<std::pair<int, int>, 12> EDGES{{
 			{0, 1},
@@ -72,7 +72,7 @@ namespace engine::render {
 
 			// **No transform, no geometry.** A `Folder` can legally be an
 			// `Adornee`, and outlining it at the origin would draw a box around
-			// a place nothing is — which looks like a bug in the selection
+			// a place nothing is - which looks like a bug in the selection
 			// rather than an adornee that has no position.
 			const scene::Transform *transform = store.Get<scene::Transform>(adornee);
 			if (transform == nullptr) {
@@ -88,7 +88,7 @@ namespace engine::render {
 			// against the adornee's own extent.
 			if (const gui::HandleShape *handle = store.Get<gui::HandleShape>(adornment)) {
 				// **Composed rather than added**, so a handle offset from a
-				// rotated part follows the part's rotation — which is what makes
+				// rotated part follows the part's rotation - which is what makes
 				// a move gizmo's arms point along the object's axes rather than
 				// the world's.
 				const CFrame placed = transform->Frame * handle->Offset;

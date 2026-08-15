@@ -17,11 +17,11 @@ git diff
 ```
 
 Everything uncommitted, plus anything on this branch that is not on `main`. If
-the diff is large enough that you cannot hold it in your head, say so — the
+the diff is large enough that you cannot hold it in your head, say so - the
 checklist itself says a change too large to review in a few minutes is too
 large, and that is a finding worth reporting before any of the rest.
 
-## Section 1 — the mechanical gate
+## Section 1 - the mechanical gate
 
 Run every command in that section. **Run all of them even after one fails**, and
 report the failures together; stopping at the first turns one round trip into
@@ -37,7 +37,7 @@ Two things worth noticing that a green run will not tell you:
 - **`just format` changing files.** Say which. A formatting-only diff mixed
   into a behavioural change is what makes a review hard to read.
 
-## Sections 2 to 9 — the review
+## Sections 2 to 9 - the review
 
 These need judgement, so answer them against the actual diff rather than in
 general. For each section, either name the specific thing in this change that
@@ -64,26 +64,26 @@ rather than reasoned about:
 behind it, and it is therefore the one that gets waved through. Read the diff
 again specifically for it:
 
-- Every new name — is any of them `data`, `info`, `manager`, `handler`,
+- Every new name - is any of them `data`, `info`, `manager`, `handler`,
   `value`, `temp`, `result`? Does anything with a unit carry it in the name?
-- Every file you added or grew — can you say what it is for in one sentence?
-- Every branch you added — is any of it now unreachable, and is there anything
+- Every file you added or grew - can you say what it is for in one sentence?
+- Every branch you added - is any of it now unreachable, and is there anything
   left over from an approach you abandoned?
 - The two "negative practices" lists are specific and worth going through item
   by item on a diff of any size. Most of them compile and pass tests, which is
   exactly why they need a person.
 
-## Section 10 — reporting
+## Section 10 - reporting
 
 Then report, in this shape:
 
-1. **Gate** — what passed, with numbers. "9/9 on dev, 6/6 on server, ci clean."
-2. **Findings** — anything sections 2 to 9 turned up, most serious first. A
+1. **Gate** - what passed, with numbers. "9/9 on dev, 6/6 on server, ci clean."
+2. **Findings** - anything sections 2 to 9 turned up, most serious first. A
    finding is a specific thing in a specific file, not a category.
-3. **Not run** — every step you skipped or could not run, and why. No GPU, a
+3. **Not run** - every step you skipped or could not run, and why. No GPU, a
    missing tool, a preset that would not configure. This section being empty is
    a claim; make sure it is true.
-4. **Gaps** — what the change deliberately does not do. The checklist asks the
+4. **Gaps** - what the change deliberately does not do. The checklist asks the
    pull request to say this, so work it out now.
 
 ## The rule that outranks the rest

@@ -5,7 +5,7 @@
 // **One function, because a delta going up is the same bytes as a delta coming
 // down.** `Replica` has applied server→client deltas since v0.3; v0.13 added
 // the other direction, where a client sends state for an entity it owns. The
-// two differ in who is allowed to say it — which is a predicate — and in
+// two differ in who is allowed to say it - which is a predicate - and in
 // nothing else, so they share the write rather than having one each.
 //
 // @tier L12 · shared
@@ -36,7 +36,7 @@ namespace engine::replication {
 		// Whether every entity the delta named was alive to receive it.
 		//
 		// A delta naming a row that has since been destroyed is ordinary rather
-		// than wrong — the destroy and the value crossed — so this is reported
+		// than wrong - the destroy and the value crossed - so this is reported
 		// and not refused.
 		bool Whole = true;
 
@@ -52,7 +52,7 @@ namespace engine::replication {
 	// **A refused value is read and discarded rather than skipped**, which is
 	// the one thing to know before touching this. A component's values are one
 	// packed stream in the same order as its entity list, and only the type's
-	// descriptor knows how many bytes one value occupies — so a filter that
+	// descriptor knows how many bytes one value occupies - so a filter that
 	// dropped an entity without consuming its bytes would shift every value
 	// after it onto the wrong row, quietly, and the symptom would be one
 	// client's position arriving on another client's part.
@@ -78,8 +78,8 @@ namespace engine::replication {
 	// streams: it tracks what each client knows, signs values to notice changes,
 	// prioritises, budgets and splits across ticks, because it is answering for
 	// a whole world and many clients. A client submitting the handful of things
-	// it owns needs none of that — it knows exactly what it owns and it is
-	// talking to one machine — and building a second streamer to say so would be
+	// it owns needs none of that - it knows exactly what it owns and it is
+	// talking to one machine - and building a second streamer to say so would be
 	// most of `Authority` again for a list that fits in a cache line.
 	//
 	// Every value present is included. There is no change detection, because the
@@ -87,7 +87,7 @@ namespace engine::replication {
 	// left holding the last one it heard.
 	//
 	// An entity with none of the named components contributes nothing rather
-	// than an empty row, and a component no entity has is left out entirely — so
+	// than an empty row, and a component no entity has is left out entirely - so
 	// a submission with nothing to say is a delta with no components in it,
 	// which `Authority` refuses as empty rather than applies as a no-op.
 	//

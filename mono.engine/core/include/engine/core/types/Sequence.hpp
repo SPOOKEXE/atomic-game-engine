@@ -1,6 +1,6 @@
 #pragma once
 
-// A value that changes over a normalised zero-to-one span — a gradient, in the
+// A value that changes over a normalised zero-to-one span - a gradient, in the
 // general sense.
 //
 // **Fixed capacity, and that is a determinism decision rather than a
@@ -13,7 +13,7 @@
 // **The unused tail is zeroed, not left alone.** `Count` says how many
 // keypoints matter, but the bytes past it still reach a snapshot, and
 // uninitialised padding is the failure `ecs::WorldTime` learned the expensive
-// way — two runs of one scene producing different bytes. Default member
+// way - two runs of one scene producing different bytes. Default member
 // initialisers on the keypoint types are what make the whole array defined.
 //
 // **Evaluation clamps at both ends and interpolates between.** A sequence with
@@ -42,7 +42,7 @@ namespace engine::core {
 	// returned the value the gradient was stepping *away* from. Sampling exactly
 	// on the seam then read one colour while a hair past it read the other.
 	//
-	// Shared by both sequences because the rule has to be the same in each — a
+	// Shared by both sequences because the rule has to be the same in each - a
 	// number ramp and a colour ramp built from one authored table must agree
 	// about where their edges are.
 	//
@@ -74,8 +74,8 @@ namespace engine::core {
 		// How far either side of `Value` a sampler may stray.
 		//
 		// Roblox's spelling for the randomised band a particle emitter samples
-		// within. Nothing in this header consumes it — `Evaluate` returns the
-		// centre — because picking a number inside the band needs a generator,
+		// within. Nothing in this header consumes it - `Evaluate` returns the
+		// centre - because picking a number inside the band needs a generator,
 		// and which generator is the caller's decision. A sequence that reached
 		// for a global one would be the determinism hazard `core::Random` exists
 		// to avoid.
@@ -117,7 +117,7 @@ namespace engine::core {
 		// Explicit padding, so the object representation carries no
 		// uninitialised bytes into a snapshot. `Color3` is three floats and
 		// `Time` is a fourth, so this is the alignment tail rather than an
-		// interior hole — named anyway, because the day somebody adds a field
+		// interior hole - named anyway, because the day somebody adds a field
 		// is the day it stops being one.
 		uint32_t Reserved = 0;
 
@@ -213,7 +213,7 @@ namespace engine::core {
 			const NumberKeypoint &next = Keypoints[low + 1];
 			const float span = next.Time - previous.Time;
 
-			// Unreachable for a sorted sequence — `LowerKeypoint` picks the
+			// Unreachable for a sorted sequence - `LowerKeypoint` picks the
 			// *last* stop at or before `time`, so the next one is strictly
 			// later. Kept for the unsorted case the header refuses to fix
 			// silently: a NaN would surface wherever the value was consumed
@@ -290,7 +290,7 @@ namespace engine::core {
 
 		// The colour at a point on the span.
 		//
-		// **Interpolated in whatever space `Color3` holds**, which is linear —
+		// **Interpolated in whatever space `Color3` holds**, which is linear -
 		// see `Color3.hpp`. That is the correct space to blend light in, and it
 		// is why a red-to-green gradient here does not pass through the muddy
 		// midpoint an sRGB blend produces.

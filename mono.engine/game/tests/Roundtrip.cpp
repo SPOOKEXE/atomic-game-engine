@@ -1,7 +1,7 @@
 // A game written out and read back is the same game.
 //
 // **One property, checked from several directions.** A save format has exactly
-// one job and it is not "produces a plausible file" — it is that the thing you
+// one job and it is not "produces a plausible file" - it is that the thing you
 // load is the thing you saved. Every case here writes a universe, loads it into
 // a second one, and asks whether something specific survived: the tree, the
 // values, the references, the script text, the world settings.
@@ -212,7 +212,7 @@ TEST_CASE("a world's services are in the file like anything else", "[game][round
 	// That is the point of making them entities rather than a side table: they
 	// are written by the same walk that writes a part, they resolve by the same
 	// class lookup, and the only thing that had to be true was that
-	// `RegisterGameClasses` reaches them — which it does, through
+	// `RegisterGameClasses` reaches them - which it does, through
 	// `RegisterSceneClasses`.
 	RegisterEverything();
 
@@ -238,7 +238,7 @@ TEST_CASE("a world's services are in the file like anything else", "[game][round
 		const Entity workspace = store.FindFirstRoot("Workspace");
 		REQUIRE(workspace != NULL_ENTITY);
 		CHECK(ChildNamed(store, workspace, "Baseplate") != NULL_ENTITY);
-		// The viewer's camera is not in the file — see the transient case below.
+		// The viewer's camera is not in the file - see the transient case below.
 		CHECK(ChildNamed(store, workspace, "Camera") == NULL_ENTITY);
 
 		const Entity starter = store.FindFirstRoot("StarterPlayer");
@@ -247,7 +247,7 @@ TEST_CASE("a world's services are in the file like anything else", "[game][round
 
 		// **The scope survives, and it is the one that would not have.** It is
 		// a computed property over a `uint8_t`, so it is written as a word and
-		// read back through a setter — the path a plain field never takes. A
+		// read back through a setter - the path a plain field never takes. A
 		// `ServerStorage` that loaded as `Shared` is a container that stops
 		// being server-only, which is the kind of thing nobody checks.
 		const Entity storage = store.FindFirstRoot("ServerStorage");
@@ -262,7 +262,7 @@ TEST_CASE("a world's services are in the file like anything else", "[game][round
 
 TEST_CASE("an instance moves between two worlds", "[game][roundtrip]") {
 	// **What the explorer's cross-world drag is made of.** An `ecs::Entity` is
-	// an index into one store, so a subtree cannot be handed across — it is
+	// an index into one store, so a subtree cannot be handed across - it is
 	// described by the same writer a save file uses and rebuilt on the far
 	// side. The properties, the children and the script text all have to come
 	// with it, and the script text is the one that would not have: a `Script`
@@ -353,7 +353,7 @@ TEST_CASE("a viewer's own instances are not written into the file", "[game][roun
 	// **The camera belongs to whoever is looking, not to the game.** The editor
 	// makes one to show its viewport, a client makes one for its player, and
 	// several people editing one game make one each. Writing any of them out
-	// would hand one person's viewpoint to everybody who opened the file — and
+	// would hand one person's viewpoint to everybody who opened the file - and
 	// with several editors, would add one per person per save, forever.
 	RegisterEverything();
 
@@ -403,7 +403,7 @@ TEST_CASE("a format 1 file keeps its own settings", "[game][roundtrip]") {
 	// the settings became an element has them on `<World>`, and a reader that
 	// only looked in the child would load somebody's 30Hz scene at 60 without
 	// saying anything. Read from the child when it is there and from the
-	// element when it is not — no branch on the version number, because the
+	// element when it is not - no branch on the version number, because the
 	// shape is what is being read.
 	RegisterEverything();
 
@@ -503,7 +503,7 @@ TEST_CASE("a script's text is in the file, not a path to it", "[game][roundtrip]
 	RegisterEverything();
 
 	// The whole reason `script::SourceCache` exists. A game file that carried
-	// paths would be a game file that does not contain the game — send it to
+	// paths would be a game file that does not contain the game - send it to
 	// somebody and they get a universe of empty scripts.
 	const std::string program = "print('hello') -- <&> and a ]]> for good measure";
 
@@ -539,7 +539,7 @@ TEST_CASE("a script's text is in the file, not a path to it", "[game][roundtrip]
 		const Entity script = store.FindFirstRoot("Main");
 		REQUIRE(script != NULL_ENTITY);
 
-		// The active container's path — a `.luau` file lands in the Luau one and
+		// The active container's path - a `.luau` file lands in the Luau one and
 		// the selector follows it, which `script::SetSourcePath` decides once.
 		CHECK(engine::script::ActiveSourceOf(store, script) == Name("Scripts/Main.luau"));
 		CHECK(engine::script::ActiveLanguageOf(store, script) == engine::script::Language::Luau);
@@ -553,7 +553,7 @@ TEST_CASE("a reference pointing forward in the tree resolves", "[game][roundtrip
 
 	// **The case a one-pass loader silently drops.** A camera naming a part
 	// declared after it is ordinary content, and resolving references as they
-	// are read would leave every forward one at its default — which looks like
+	// are read would leave every forward one at its default - which looks like
 	// the property was never set rather than like a loader bug.
 	Universe source;
 	const WorldId world = AddWorld(source, "Start");
@@ -574,7 +574,7 @@ TEST_CASE("a reference pointing forward in the tree resolves", "[game][roundtrip
 
 	// The structural half is what this format guarantees today: a parent is the
 	// nesting and never a property. Asserted here so that a future change which
-	// starts writing `Parent` as a value fails loudly — two answers to one
+	// starts writing `Parent` as a value fails loudly - two answers to one
 	// question is the drift rule 2 is about.
 	CHECK(document.find("name=\"Parent\"") == std::string::npos);
 	CHECK(document.find("name=\"Target\"") != std::string::npos);
@@ -656,7 +656,7 @@ TEST_CASE("a game document is refused as a world and the reverse", "[game][round
 	REQUIRE(SaveGame(source, Name("Confusion"), gamePath, error));
 
 	// Opening a game as a world would otherwise produce a world with nothing in
-	// it — the root element is `<Game>`, its children are `<World>`, and a
+	// it - the root element is `<Game>`, its children are `<World>`, and a
 	// world reader looking for `<Item>` finds none. Silently succeeding at that
 	// is a lost afternoon.
 	Universe other;

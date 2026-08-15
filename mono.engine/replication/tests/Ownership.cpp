@@ -3,8 +3,8 @@
 // **The trust boundary, so these are adversarial rather than illustrative.**
 // Every case here is a client saying something it should not be able to say:
 // state for an entity it does not own, a component the server never sends it,
-// last tick's position arriving after this tick's, and — the one that motivated
-// the whole shape of `WriteComponents` — a delta whose owned entity is second in
+// last tick's position arriving after this tick's, and - the one that motivated
+// the whole shape of `WriteComponents` - a delta whose owned entity is second in
 // a packed value stream, where a filter that skipped bytes instead of reading
 // them would land the wrong client's position on it.
 //
@@ -106,7 +106,7 @@ using namespace ownership_test;
 TEST_CASE("an authority told nothing accepts nothing", "[replication][ownership]") {
 	// **The default is refusal, and that is the decision.** Accepting until
 	// somebody remembers to restrict it would make the insecure state the one a
-	// host gets by forgetting — which is how most of the bugs this module's
+	// host gets by forgetting - which is how most of the bugs this module's
 	// AGENTS.md is about begin.
 	Server server;
 
@@ -148,7 +148,7 @@ TEST_CASE("a client writes what it owns and nothing else", "[replication][owners
 TEST_CASE("a refused value does not shift the ones after it", "[replication][ownership]") {
 	// **The case the whole design is arranged around.** A component's values
 	// are one packed stream in entity order, so a filter that dropped an entity
-	// *before* the write — by stripping it from the entity list — would leave
+	// *before* the write - by stripping it from the entity list - would leave
 	// its bytes in the stream and put them on the next entity along. Here the
 	// owned entity is second, so that mistake lands the unowned client's value
 	// on the owned row and every check above still passes.
@@ -173,7 +173,7 @@ TEST_CASE("a refused value does not shift the ones after it", "[replication][own
 
 TEST_CASE("owning an entity does not grant a component", "[replication][ownership]") {
 	// A component the authority does not replicate is one the client was never
-	// sent and has no business setting — server-side AI state, a pending bus
+	// sent and has no business setting - server-side AI state, a pending bus
 	// request. Ownership answers *which entity*, not *which fields of it*.
 	Server server;
 

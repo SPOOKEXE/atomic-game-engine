@@ -4,14 +4,14 @@
 // A server sends every connected client a delta every tick; a client parses one
 // from every server it is talking to. So a figure here multiplies by population
 // and then by tick rate, and a delta that costs 50 microseconds to encode is
-// 300 milliseconds a second at a hundred clients — half a core, spent turning
+// 300 milliseconds a second at a hundred clients - half a core, spent turning
 // numbers the server already has into bytes.
 //
 // **The entity counts are the whole point of the ladder.** A delta carries
 // runs, not rows: `ecs::Store::EachChangedBatch` yields adjacent changed rows
 // as a block, which is what lets a value copy be a memcpy per run rather than
 // one call per entity. Whether that actually pays off is invisible from the
-// header and visible here — the `one run` and `fragmented` rows carry the same
+// header and visible here - the `one run` and `fragmented` rows carry the same
 // number of entities in a different number of runs, and if they cost the same
 // then the run structure is buying nothing and the complexity should go.
 //
@@ -54,7 +54,7 @@ namespace protocol_bench {
 
 	// Bytes per replicated value.
 	//
-	// A `CFrame` is a position and a rotation — twelve bytes and sixteen — so
+	// A `CFrame` is a position and a rotation - twelve bytes and sixteen - so
 	// twenty-eight is what the component every networked game replicates
 	// actually weighs. Round numbers here would make the memcpy rows agree with
 	// a cache line by accident.
@@ -64,7 +64,7 @@ namespace protocol_bench {
 	// `runs` contiguous blocks per component.
 	//
 	// `runs` is the parameter that matters. One run is a world where everything
-	// that moved is adjacent in the store — the case archetype storage is
+	// that moved is adjacent in the store - the case archetype storage is
 	// supposed to produce. `entities` runs is the pathological opposite: every
 	// changed row isolated between unchanged ones, which is what a world looks
 	// like after a few thousand ticks of creation and destruction with no
@@ -182,8 +182,8 @@ BENCH("WriteMessage delta · 10k entities, 4 components", 40'000) {
 	// number of *values*. Read against the single-component row: if the
 	// per-value cost is flat, the per-component overhead is negligible and a
 	// game may replicate as many components as it likes. If it climbs, each
-	// component is paying a fixed cost — a name written as text, a count, a
-	// header — and a game with forty small components is being taxed forty
+	// component is paying a fixed cost - a name written as text, a count, a
+	// header - and a game with forty small components is being taxed forty
 	// times a tick.
 	ByteWriter &writer = Reused();
 	writer.Clear();
@@ -227,7 +227,7 @@ BENCH("ReadMessage delta · 10k entities, 4 components", 40'000) {
 
 BENCH("ReadMessage delta · 10k entities, into a fresh Message", 10'000) {
 	// **What a caller pays for not reusing the message.** Every vector inside
-	// it — entities, values, one pair per component — is reallocated from
+	// it - entities, values, one pair per component - is reallocated from
 	// nothing. The gap against the reused row is the per-tick allocation bill a
 	// client avoids by keeping one `Message` across its poll loop, and it is the
 	// argument for the fill-in-place signature the function has.
@@ -276,7 +276,7 @@ BENCH("WriteMessage applied · 100k acknowledgements", 100'000) {
 BENCH("WriteMessage snapshot chunk · 1 MiB in 1 KiB pieces", 1024) {
 	// The join path: a whole world serialised and cut into datagram-sized
 	// pieces. One iteration is one chunk, so the figure multiplies by however
-	// many chunks a world is — and a world is megabytes, so this is the number
+	// many chunks a world is - and a world is megabytes, so this is the number
 	// that decides how long a player waits at a loading screen.
 	static const SnapshotChunk chunk = [] {
 		SnapshotChunk built;
@@ -347,7 +347,7 @@ BENCH("ReadMessage · 10k messages with an unknown kind byte", 10'000) {
 	// **A kind byte is range-checked before the cast.** Casting it anyway
 	// produces a value no switch handles, and every dispatch downstream then
 	// reads something the type says cannot exist. The check is one comparison
-	// and this row is what it costs — which should be the cheapest refusal in
+	// and this row is what it costs - which should be the cheapest refusal in
 	// the file, because it happens before anything else is looked at.
 	static const std::vector<std::byte> unknown = [] {
 		std::vector<std::byte> bytes = CachedBytes(1000, 1, 1);
@@ -371,7 +371,7 @@ BENCH("ReadMessage · 10k messages with an unknown kind byte", 10'000) {
 
 BENCH("tick · 100 clients each sent a 500-entity delta", 100) {
 	// **The shape of the real bill.** One iteration is one client, so the figure
-	// is what a server spends per client per tick on encoding alone — before
+	// is what a server spends per client per tick on encoding alone - before
 	// sealing, before framing, before the socket. Multiply by 60 for a second.
 	//
 	// 500 entities per client rather than the whole world, because interest

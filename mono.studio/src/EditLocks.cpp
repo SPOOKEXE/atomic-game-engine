@@ -34,7 +34,7 @@ namespace studio {
 		for (const Lease &lease : Leases) {
 			if (lease.Holder == holder || nowSeconds >= lease.ExpiresAtSeconds) {
 				// A grant whose guard has fired holds nobody up, and is left in
-				// the table until `Expire` sweeps it — checking here as well
+				// the table until `Expire` sweeps it - checking here as well
 				// means a dead editor's turn does not stay in force between the
 				// moment it lapses and the moment somebody notices.
 				continue;

@@ -6,7 +6,7 @@
 // The first version of the previews drew one empty box for everything that had
 // no picture, with a comment defending it: "whether this is 'not yet' or 'never'
 // is deliberately not distinguished". That reasoning was wrong, and
-// `explorer-plus` shows why — it separates *refused* from *unreadable* and says
+// `explorer-plus` shows why - it separates *refused* from *unreadable* and says
 // which:
 //
 // > "Preview disabled due to model size" / "Preview unavailable"
@@ -20,7 +20,7 @@
 // **A budget is checked before the work, not discovered during it.** Also from
 // the same reference: `objectIsTooLarge` walks the tree counting parts and stops
 // at the limit rather than cloning first and regretting it. Here that is the
-// source file's size for an image and the mesh's triangle count for geometry —
+// source file's size for an image and the mesh's triangle count for geometry -
 // both known before a byte is decoded or uploaded.
 //
 // @tier client
@@ -61,7 +61,7 @@ namespace studio {
 	// @param state What happened.
 	// @param kind  What the asset claims to be, so the wording can name it.
 	// @return A view valid for the lifetime of the process, or nullptr when
-	//         there is nothing worth saying — `Ready` has a picture instead and
+	//         there is nothing worth saying - `Ready` has a picture instead and
 	//         `Pending` must not flash text that is about to be replaced.
 	const char *DescribePreview(PreviewState state, engine::assets::AssetKind kind);
 
@@ -77,7 +77,7 @@ namespace studio {
 	//
 	// **Checked after decoding and before uploading**, which is the only place
 	// it can be: a `.amesh` states its own counts in a header the reader has
-	// already validated, so the number is free — and the thing being avoided is
+	// already validated, so the number is free - and the thing being avoided is
 	// a GPU upload and a draw, not the decode.
 	//
 	// A quarter of a million is well past any prop and short of the character
@@ -90,7 +90,7 @@ namespace studio {
 	// **A material preview is the one that would otherwise grow without a
 	// bound.** A mesh preview is capped by its triangle count and a thumbnail is
 	// resampled to `THUMBNAIL_SIDE`, but a material's sheet is whatever the
-	// publisher baked — this repository's own seed content is 1K and 2K — and
+	// publisher baked - this repository's own seed content is 1K and 2K - and
 	// nothing evicts a preview once it is uploaded. Hovering thirty 2K sheets at
 	// full size is half a gigabyte of device memory for pictures of spheres.
 	//
@@ -104,7 +104,7 @@ namespace studio {
 	//
 	// **One answer, because the question is asked in two places.** The hover
 	// panel decides whether to drive the preview slot, and a list row decides
-	// whether to paint what that slot holds — and the two have to agree exactly,
+	// whether to paint what that slot holds - and the two have to agree exactly,
 	// or a row draws a dash beside a hover panel showing the thing. That is the
 	// duplicate-policy failure this repository keeps recording, so the condition
 	// lives here rather than being spelled in `HoverPreview.cpp` and `Assets.cpp`.
@@ -112,8 +112,8 @@ namespace studio {
 	// **A mesh and a material, and nothing else.** Both are references with no
 	// picture of their own: a mesh is geometry that has to be drawn, and a
 	// material is a texture reference whose picture is the engine's sphere
-	// wearing it. Everything else in a store — a texture, a GIF, audio, a script
-	// — either has pixels already or has none to have.
+	// wearing it. Everything else in a store - a texture, a GIF, audio, a script
+	// - either has pixels already or has none to have.
 	constexpr bool PreviewIsRendered(engine::assets::AssetKind kind) {
 		return kind == engine::assets::AssetKind::Mesh ||
 			   kind == engine::assets::AssetKind::Material;

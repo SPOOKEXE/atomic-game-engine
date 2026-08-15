@@ -4,8 +4,8 @@
 //
 // Every transport in this module either delivers or refuses **here and now**:
 // the loopback routes into a queue it owns and the socket hands the bytes to a
-// kernel, and both answer `Ok` for anything they let go of. The third outcome —
-// a datagram that left, was accepted, and never arrived — is the one the whole
+// kernel, and both answer `Ok` for anything they let go of. The third outcome -
+// a datagram that left, was accepted, and never arrived - is the one the whole
 // design above this layer is built around, and nothing in the tree had ever
 // produced it. This produces it, under the caller's control.
 //
@@ -13,8 +13,8 @@
 // `Transport` and answers every call by delegating, so what it loses is real
 // datagrams carrying real framing over the loopback or a real socket. A third
 // implementation would be a third set of bugs, and the two paths only a routed
-// network produces — a sender this end has never heard of, and an address
-// nobody is listening on — would have to be built a second time to get them.
+// network produces - a sender this end has never heard of, and an address
+// nobody is listening on - would have to be built a second time to get them.
 //
 // **Loss is applied on the way in, not on the way out, and that is what keeps
 // `Send` honest.** `Transport::Send` promises `Ok` means the datagram left and
@@ -29,14 +29,14 @@
 // **Deterministic, and that is this module's whole discipline.** No clock, no
 // `std::random_device`, no unordered iteration. A datagram is numbered by the
 // order it arrived and whether it is lost is a pure function of that number and
-// a seed the caller states — `core::Random` is indexed rather than streamed for
+// a seed the caller states - `core::Random` is indexed rather than streamed for
 // exactly this reason. A failing case is reproducible from its seed alone, and
 // nothing here can reach a recorded run.
 //
 // **Nominating one datagram is worth more than a percentage.** "The third
 // datagram never arrived" is a test; "ten percent loss" is a flake with a
 // plausible story attached. Both are offered and the first is the one to reach
-// for — `LossSettings::Drop` when the number is known in advance, `DropNext`
+// for - `LossSettings::Drop` when the number is known in advance, `DropNext`
 // when the test knows what it just made the server send and not which arrival
 // that will be.
 //
@@ -122,7 +122,7 @@ namespace engine::net {
 	// A transport that discards some of what arrives at it.
 	//
 	// Owns the transport underneath, because a lossy link that borrowed one
-	// would let a caller keep a reference that bypasses the loss — and the
+	// would let a caller keep a reference that bypasses the loss - and the
 	// bypass would be invisible at the call site that mattered.
 	//
 	// @since v0.5
@@ -141,7 +141,7 @@ namespace engine::net {
 
 		// Sends one datagram, losing nothing.
 		//
-		// **Pure delegation, deliberately** — see the note at the top of this
+		// **Pure delegation, deliberately** - see the note at the top of this
 		// file on why loss belongs on the receiving end.
 		//
 		// @param to The destination.
@@ -211,7 +211,7 @@ namespace engine::net {
 
 		// The transport underneath.
 		//
-		// For the calls this does not forward — a concrete implementation's own
+		// For the calls this does not forward - a concrete implementation's own
 		// accessors. Sending through it bypasses nothing, since loss is applied
 		// on arrival.
 		//

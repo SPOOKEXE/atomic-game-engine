@@ -4,7 +4,7 @@
 //
 // **The mixer owns the graph**, and that is what makes the threading tractable.
 // A tick never touches a node; it posts a command. The mixer drains the queue,
-// applies each command at its exact sample, and mixes — all on one thread. So
+// applies each command at its exact sample, and mixes - all on one thread. So
 // there is no lock anywhere in here, and the reason is not that locks were
 // avoided but that there is nothing to lock: only one thread ever reads or
 // writes the graph.
@@ -12,7 +12,7 @@
 // **A block is split at every command deadline**, which is the whole of
 // sample-accurate scheduling. Rendering 512 frames with a `Play` due at sample
 // 200 means two sub-blocks: 0..200 without it, 200..512 with it. The alternative
-// — applying everything at the top of the block — is what
+// - applying everything at the top of the block - is what
 // `DATATYPES_LIBRARIES.md` §11.2 calls out as audible jitter, and it is the one
 // place where "close enough to the frame" is wrong.
 //
@@ -51,7 +51,7 @@ namespace engine::audio {
 		// The loudest sample in the output, before clipping.
 		//
 		// **Before**, so a meter shows what the graph produced rather than what
-		// survived — a mix that is clipping reads as exactly 1.0 for ever if
+		// survived - a mix that is clipping reads as exactly 1.0 for ever if
 		// measured after, which is the number that hides the problem.
 		float Peak = 0.0f;
 
@@ -65,7 +65,7 @@ namespace engine::audio {
 	// Runs the graph.
 	//
 	// Named `AudioMixer` rather than `Mixer` so `Device::Mixer()` can be an
-	// accessor — a member function and a type of one name compiles and reads
+	// accessor - a member function and a type of one name compiles and reads
 	// badly. `AudioGraph`/`Graph()` is the same pairing.
 	//
 	// **One owner, one thread.** The device thread calls `Render`; the tick
@@ -126,7 +126,7 @@ namespace engine::audio {
 		// Applies every waiting command immediately, ignoring deadlines.
 		//
 		// For building a routing before the clock is running, and for a test
-		// that wants a graph in a known state. **Not for the device thread** —
+		// that wants a graph in a known state. **Not for the device thread** -
 		// using it there is exactly the tick-boundary quantisation this module
 		// exists to avoid.
 		//
@@ -169,13 +169,13 @@ namespace engine::audio {
 		// **Because the alternative was a linear scan of `ScratchFor`, per
 		// input, per node, per segment.** Summing what is wired into a node
 		// means finding each input's scratch, and searching for it made the mix
-		// quadratic in the node count — an output with sixty-four inputs over a
+		// quadratic in the node count - an output with sixty-four inputs over a
 		// hundred-and-thirty-node graph is eight thousand comparisons to move
 		// sixty-four buffers, and a block split by commands paid all of it again
 		// per piece.
 		//
 		// Rebuilt only alongside `ScratchFor`, which is to say only when the
-		// node set changes — far less often than a block is rendered, and never
+		// node set changes - far less often than a block is rendered, and never
 		// on the device thread's critical path for an unchanged graph.
 		std::unordered_map<uint32_t, size_t> SlotOfNode;
 

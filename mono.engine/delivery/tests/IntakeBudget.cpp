@@ -13,7 +13,7 @@ using engine::delivery::IntakeBudget;
 namespace {
 
 	// One frame of intake, written the way the studio's and the client's loops
-	// write it: ask, take, spend — and put back whatever did not fit.
+	// write it: ask, take, spend - and put back whatever did not fit.
 	//
 	// Returns what was absorbed and leaves the rest in `pending`, which is the
 	// property the whole thing rests on: a refused arrival is still an arrival.
@@ -51,7 +51,7 @@ TEST_CASE("a frame absorbs up to its allowance and defers the rest", "[delivery]
 	CHECK(budget.Absorbed() == 4);
 
 	// **Deferred, not dropped**, which is the difference between a budget and a
-	// loss — the two left are still waiting to be taken.
+	// loss - the two left are still waiting to be taken.
 	CHECK(budget.Deferred() == 2);
 	CHECK(pending.size() == 2);
 }
@@ -90,7 +90,7 @@ TEST_CASE("an asset larger than the whole budget is still admitted", "[delivery]
 }
 
 TEST_CASE("a quiet frame spends nothing and defers nothing", "[delivery][intake]") {
-	// The ordinary case — most frames have no content waiting at all, and this
+	// The ordinary case - most frames have no content waiting at all, and this
 	// pins that the budget costs them nothing and reports nothing happening.
 	std::vector<size_t> pending;
 
@@ -102,7 +102,7 @@ TEST_CASE("a quiet frame spends nothing and defers nothing", "[delivery][intake]
 }
 
 TEST_CASE("a budget can be set smaller than a frame's default", "[delivery][intake]") {
-	// A caller that wants tighter pacing — a low-end device, or a test — says
+	// A caller that wants tighter pacing - a low-end device, or a test - says
 	// so at construction rather than editing a constant two modules away.
 	std::vector<size_t> pending(4, 4096u);
 

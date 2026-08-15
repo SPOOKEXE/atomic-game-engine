@@ -2,7 +2,7 @@
 
 // The one byte layout everything in this engine serialises through.
 //
-// A world snapshot, a bus envelope, a save file and — later — a network packet
+// A world snapshot, a bus envelope, a save file and - later - a network packet
 // are all the same problem: turn values into bytes that a *different build on a
 // different machine* will read back identically. So the layout is specified
 // here rather than discovered from whatever `memcpy` happened to produce:
@@ -18,8 +18,8 @@
 //   within one process. Making that the only way to write a Name turns the rule
 //   into something the API enforces instead of something a reviewer catches.
 //
-// Reading is the half that faces hostile input — a truncated snapshot, a
-// corrupt packet, a file from a newer build — so `ByteReader` never trusts what
+// Reading is the half that faces hostile input - a truncated snapshot, a
+// corrupt packet, a file from a newer build - so `ByteReader` never trusts what
 // it is given. It cannot read out of bounds, cannot be made to allocate from a
 // length field, and cannot throw. A read that will not fit sets a sticky
 // failure flag and returns a zero value, so a caller may run a whole sequence
@@ -53,7 +53,7 @@ namespace engine::core {
 	//
 	// Reusable on purpose: `Clear` keeps the capacity, so a writer held across
 	// ticks stops allocating after the first frame that reached its high-water
-	// mark. That is the intended usage for anything per-tick — one writer per
+	// mark. That is the intended usage for anything per-tick - one writer per
 	// world, cleared rather than constructed.
 	//
 	// @since v0.2
@@ -180,7 +180,7 @@ namespace engine::core {
 
 		// Appends a name as its interned text.
 		//
-		// The only way to serialize a Name, because the alternative — the id —
+		// The only way to serialize a Name, because the alternative - the id -
 		// is first-seen order within one process and means nothing anywhere
 		// else. An invalid Name writes an empty string and reads back invalid.
 		//
@@ -189,7 +189,7 @@ namespace engine::core {
 
 		// Appends `bytes` bytes verbatim, with no length and no framing.
 		//
-		// For a block whose size the caller already knows or has written — a
+		// For a block whose size the caller already knows or has written - a
 		// component column, a fixed-size record. Nothing about it is inspected,
 		// so endianness is the caller's problem here and this is the one path
 		// that can put host layout into a file.
@@ -213,7 +213,7 @@ namespace engine::core {
 	//
 	// Every read is bounds-checked against the buffer it was handed. A read
 	// that will not fit sets `Failed()`, consumes nothing, and returns a zero
-	// value — and once failed, a reader stays failed, so a later read cannot
+	// value - and once failed, a reader stays failed, so a later read cannot
 	// appear to succeed against bytes that were never meant for it.
 	//
 	// That shape is chosen over exceptions because deserialisation is a long
@@ -270,8 +270,8 @@ namespace engine::core {
 		// Marks the reader failed without reading anything.
 		//
 		// For a caller that has decided the contents are wrong for a reason
-		// this class cannot see — an unknown version, a count that contradicts
-		// a header — so that one flag carries the verdict for the whole buffer.
+		// this class cannot see - an unknown version, a count that contradicts
+		// a header - so that one flag carries the verdict for the whole buffer.
 		void Fail() {
 			Bad = true;
 		}

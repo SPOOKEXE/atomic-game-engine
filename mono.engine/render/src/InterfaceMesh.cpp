@@ -11,7 +11,7 @@ namespace engine::render {
 
 		// The colour a command draws in, packed.
 		//
-		// **Transparency, not alpha** — `gui` spells it Roblox's way round,
+		// **Transparency, not alpha** - `gui` spells it Roblox's way round,
 		// where 0 is opaque, and converting here rather than at each use is what
 		// stops one of them being written backwards.
 		uint32_t Packed(const gui::DrawCommand &command) {
@@ -60,7 +60,7 @@ namespace engine::render {
 	void InterfaceMesh::Push(const Rect &bounds, const Rect &uv, uint32_t colour, const Rotation &turn) {
 		// **Sixteen-bit indices, so a quad past 65 532 vertices is dropped
 		// rather than wrapped.** Wrapping would draw a triangle between three
-		// unrelated corners of the interface — a stripe across the screen that
+		// unrelated corners of the interface - a stripe across the screen that
 		// looks like a driver fault. An interface that large is an
 		// instrumentation bug, and `Batches` is where a caller sees it stopped.
 		if (VertexData.size() + 4 > 0xFFFFu) {
@@ -83,8 +83,8 @@ namespace engine::render {
 		};
 
 		// **Turned about the element's own centre, not the quad's.** A glyph
-		// inside a rotated label rotates *with the label* — around the label's
-		// middle — and a per-quad rotation would spin every letter on the spot
+		// inside a rotated label rotates *with the label* - around the label's
+		// middle - and a per-quad rotation would spin every letter on the spot
 		// while leaving the run in a straight line, which is a distinctive and
 		// completely wrong look. That is why the pivot is passed in rather than
 		// derived from `bounds` here.
@@ -136,7 +136,7 @@ namespace engine::render {
 			// **A new batch when the scissor or the texture changes, and not
 			// otherwise.** A clip is pipeline state rather than a vertex
 			// attribute, so two elements clipped differently cannot be one draw
-			// however alike their pixels are — and merging runs that *do* match
+			// however alike their pixels are - and merging runs that *do* match
 			// is the whole reason this is called a batched pipeline.
 			const bool fresh = BatchData.empty() || !SameClip(BatchData.back().Clip, command.Clip) ||
 							   BatchData.back().Image != image;
@@ -157,7 +157,7 @@ namespace engine::render {
 				// **Corner rounding is not done here and the field is not
 				// ignored.** A rounded corner is either more geometry or a
 				// shader that knows the radius, and the second is what this
-				// pipeline will do — the radius travels to the backend rather
+				// pipeline will do - the radius travels to the backend rather
 				// than being tessellated into a fan whose segment count nobody
 				// chose. Until that shader exists a corner draws square, which
 				// is visibly plain rather than wrong.
@@ -199,7 +199,7 @@ namespace engine::render {
 				// **The whole image, and the fit modes are the backend's.**
 				// Nine-slice and tiling change how many quads there are and
 				// against what source rectangle, and doing them here would mean
-				// this type knew the image's pixel size — which is exactly what
+				// this type knew the image's pixel size - which is exactly what
 				// `gui::DrawCommand::Image` being a content name says it must
 				// not. The batch carries the name; the backend that resolved it
 				// has the size.
@@ -275,7 +275,7 @@ namespace engine::render {
 
 		// **Empty batches dropped at the end rather than avoided at the
 		// start.** Whether a command produces geometry is not known until it has
-		// been tried — a text run of unbaked codepoints produces none — and a
+		// been tried - a text run of unbaked codepoints produces none - and a
 		// batch with no indices is a scissor change and a pipeline bind for
 		// nothing.
 		BatchData.erase(

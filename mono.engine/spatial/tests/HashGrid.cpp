@@ -5,7 +5,7 @@
 
 // Private, and deliberately so. The walk, the retained capacity and the bucket
 // a cell lands in are all things this suite has to see and no other module
-// should — `AGENTS.md` at the root: link the module's `src/` rather than
+// should - `AGENTS.md` at the root: link the module's `src/` rather than
 // widening its public header to make a test easier.
 #include "GridInternals.hpp"
 
@@ -60,7 +60,7 @@ namespace {
 TEST_CASE("a cell coordinate floors rather than truncating", "[hashgrid]") {
 	// A truncating cast rounds toward zero, so -0.5 and +0.5 land in the same
 	// cell and the cell at the origin is twice the width of every other one.
-	// Nothing misses, because the build and the query would agree — which is
+	// Nothing misses, because the build and the query would agree - which is
 	// exactly why it survives: it is a silent doubling of the busiest cell in
 	// every scene, since scenes are built around the origin.
 	REQUIRE(CellCoordinateOf(0.5f, 1.0f) == 0);
@@ -96,7 +96,7 @@ TEST_CASE("cells left of the origin are their own cells", "[hashgrid]") {
 
 TEST_CASE("a proxy spanning four cells is visited once", "[hashgrid]") {
 	// Without de-duplication this proxy is reported four times and every
-	// consumer downstream — a contact list, an overlap span — receives it four
+	// consumer downstream - a contact list, an overlap span - receives it four
 	// times too.
 	HashGrid grid{UNIT_CELL};
 	const Proxy proxies[] = {Box(7, Vector3{0.5f, 0.5f, 0.5f}, Vector3{1.5f, 1.5f, 0.5f})};
@@ -154,7 +154,7 @@ TEST_CASE("a proxy far larger than the query volume is still found", "[hashgrid]
 
 TEST_CASE("a proxy too large for cells is found through the oversized list", "[hashgrid]") {
 	// A baseplate. Past the cap it stops producing entries and every query
-	// tests it directly instead — the path that keeps one enormous object from
+	// tests it directly instead - the path that keeps one enormous object from
 	// costing tens of thousands of entries per rebuild.
 	HashGrid grid{UNIT_CELL};
 	const Proxy proxies[] = {
@@ -221,7 +221,7 @@ TEST_CASE("a bucket collision is a false positive and never a miss", "[hashgrid]
 
 TEST_CASE("sharing a cell is not overlapping, and the box test says so", "[hashgrid]") {
 	// A cell is coarse: two proxies in one cell need not touch. The cell match
-	// says "worth testing" and the box test says "yes" — deleting the second
+	// says "worth testing" and the box test says "yes" - deleting the second
 	// because the first already narrowed things down turns every cell into a
 	// hit, and a broad phase that reports its own cell size as a contact.
 	HashGrid grid{UNIT_CELL};
@@ -314,7 +314,7 @@ TEST_CASE("the second rebuild reuses the first's storage", "[hashgrid]") {
 
 	grid.Rebuild(proxies);
 
-	// Capacity survives, and so does the address — the second is the stronger
+	// Capacity survives, and so does the address - the second is the stronger
 	// claim, because a vector that reallocated to the same size would keep the
 	// first number and not the second.
 	REQUIRE(GridInternals::EntryCapacity(grid) == capacity);
@@ -353,7 +353,7 @@ TEST_CASE("a cell size at or below zero falls back rather than dividing by it", 
 
 TEST_CASE("a query volume far larger than the index still answers exactly", "[hashgrid]") {
 	// Past a point the walk would cost more than one pass over every proxy, so
-	// it takes the pass instead. The answer must not change — only the route.
+	// it takes the pass instead. The answer must not change - only the route.
 	HashGrid grid{UNIT_CELL};
 	const Proxy proxies[] = {
 		Box(1, Vector3{0.1f, 0.1f, 0.1f}, Vector3{0.9f, 0.9f, 0.9f}),
@@ -398,7 +398,7 @@ TEST_CASE("a visitor that stops is not called again", "[hashgrid]") {
 
 TEST_CASE("a suggested cell size is twice the mean extent, quantised", "[spatial][hashgrid]") {
 	// A scene of two-metre colliders wants four-metre cells, which is the rule
-	// of thumb `DEFAULT_CELL_SIZE` records — and is the answer a person would
+	// of thumb `DEFAULT_CELL_SIZE` records - and is the answer a person would
 	// have picked.
 	std::vector<Proxy> proxies;
 	for (int index = 0; index < 16; index++) {
@@ -461,7 +461,7 @@ TEST_CASE("changing the cell size empties the grid and answers the same", "[spat
 		);
 
 		// A default mask matches nothing, so a proxy with one is invisible to
-		// every query — which is the right default and the wrong fixture.
+		// every query - which is the right default and the wrong fixture.
 		proxy.Layers = LayerMask::All();
 		proxies.push_back(proxy);
 	}

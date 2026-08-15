@@ -18,7 +18,7 @@
 // This is a content origin's protocol, not a web framework:
 //
 // - **`GET` and `HEAD` only.** An origin serves. Upload is `control/`'s, in
-//   TypeScript, over its own API — CDN.md §6.
+//   TypeScript, over its own API - CDN.md §6.
 // - **`Content-Length` framing only. No `Transfer-Encoding`.** A body that can
 //   be framed two ways is request smuggling: two parsers in a chain disagree
 //   about where one message ends and the next begins, and the disagreement is
@@ -30,7 +30,7 @@
 // reach the port and a response arrives from an origin that `repo_layout.md` §1
 // says anyone can run. Nothing here allocates from a length field it has not
 // bounded, and a malformed message is refused whole rather than half-read into
-// a partly filled value — the shape a caller uses by accident.
+// a partly filled value - the shape a caller uses by accident.
 //
 // @tier L11 · shared
 
@@ -65,7 +65,7 @@ namespace engine::net::http {
 		//
 		// **The one verb here that carries a body, and the only one that ever
 		// will.** A `GET` or a `HEAD` with a `content-length` is refused rather
-		// than read — see `ParseRequest` — because a body on a verb whose
+		// than read - see `ParseRequest` - because a body on a verb whose
 		// framing nobody agrees about is precisely the request-smuggling shape:
 		// two hops that disagree about where the message ended see two
 		// different next requests. `PUT` is unambiguous, so `PUT` is where a
@@ -90,7 +90,7 @@ namespace engine::net::http {
 	//
 	// A closed list rather than a bare `uint16_t`, so an origin cannot invent a
 	// code no client was written against. Parsing accepts any three-digit code
-	// — a client must cope with whatever an origin answers — and maps the ones
+	// - a client must cope with whatever an origin answers - and maps the ones
 	// outside this list to `Unknown`.
 	//
 	// @since v0.9
@@ -109,7 +109,7 @@ namespace engine::net::http {
 		BadRequest = 400,
 
 		// The grant does not admit this content. **Never says which check
-		// failed** — a reason returned to a client is an oracle, which is the
+		// failed** - a reason returned to a client is an oracle, which is the
 		// rule `cdn::Gate` already holds.
 		Forbidden = 403,
 
@@ -170,11 +170,11 @@ namespace engine::net::http {
 		uint64_t First = 0;
 
 		// The last byte wanted, inclusive. HTTP ranges are inclusive at both
-		// ends, which is off by one from every other range in this codebase —
+		// ends, which is off by one from every other range in this codebase -
 		// hence saying so here rather than leaving it to be rediscovered.
 		uint64_t Last = 0;
 
-		// Whether this was written as a suffix range — `bytes=-500`, meaning
+		// Whether this was written as a suffix range - `bytes=-500`, meaning
 		// the last 500 bytes.
 		//
 		// Kept rather than resolved at parse time, because resolving it needs
@@ -186,7 +186,7 @@ namespace engine::net::http {
 		//
 		// @param entityBytes The whole entity's length.
 		// @return The resolved range, or nothing when it does not overlap the
-		//         entity at all — which is a `416` rather than an empty body.
+		//         entity at all - which is a `416` rather than an empty body.
 		std::optional<ByteRange> Resolve(uint64_t entityBytes) const;
 	};
 
@@ -199,7 +199,7 @@ namespace engine::net::http {
 	//
 	// @since v0.9
 	struct MessageLimits {
-		// The longest request line — verb, target and version.
+		// The longest request line - verb, target and version.
 		size_t RequestLineBytes = 8u * 1024u;
 
 		// The largest header block, all fields together.
@@ -212,8 +212,8 @@ namespace engine::net::http {
 		//
 		// Mostly this bounds a *response*, which is a compressed group and is
 		// genuinely large. The delivery client also checks the length against
-		// the signed manifest before it believes it — CDN.md §5's
-		// decompression-bomb rule — so this is the transport's backstop rather
+		// the signed manifest before it believes it - CDN.md §5's
+		// decompression-bomb rule - so this is the transport's backstop rather
 		// than the real check.
 		//
 		// Since v0.10 it also bounds a `Put` request's body. **That is not the
@@ -231,7 +231,7 @@ namespace engine::net::http {
 		// The verb.
 		Method Verb = Method::Unknown;
 
-		// The request target, as written — `/bundle/1a2b...`. Percent-decoding
+		// The request target, as written - `/bundle/1a2b...`. Percent-decoding
 		// is the caller's, and there is no path resolution here at all: a
 		// target never becomes a filesystem path in this module, because
 		// `cdn::ContentRoot` is the one place that turns a name into a path and
@@ -250,7 +250,7 @@ namespace engine::net::http {
 		// same as a response's, and by `ServerSettings::ConnectionBufferBytes`
 		// while it is still arriving. The second is the one that bites: a whole
 		// request is buffered before it parses, so an origin that accepts
-		// uploads has to be told it may hold one — `cdn::IngestSettings` sizes
+		// uploads has to be told it may hold one - `cdn::IngestSettings` sizes
 		// it, and a file past that is `413` rather than a connection that fills
 		// memory.
 		//
@@ -303,7 +303,7 @@ namespace engine::net::http {
 		Ok,
 
 		// What is here so far is valid and there is not enough of it. Read
-		// more and call again — the buffer is not consumed.
+		// more and call again - the buffer is not consumed.
 		Incomplete,
 
 		// Not a message this subset accepts. **The connection is finished**:
@@ -324,7 +324,7 @@ namespace engine::net::http {
 
 	// Parses one request from the front of a buffer.
 	//
-	// @param buffer The bytes received so far. Not consumed — `consumed` says
+	// @param buffer The bytes received so far. Not consumed - `consumed` says
 	//        how many belonged to this message.
 	// @param limits The bounds to hold the parse to.
 	// @param[out] request Filled only on `Ok`. Untouched otherwise, so a
@@ -380,7 +380,7 @@ namespace engine::net::http {
 	// verb means.
 	//
 	// @param response What to send.
-	// @param bodyOmitted Whether to write the headers and no body — the `Head`
+	// @param bodyOmitted Whether to write the headers and no body - the `Head`
 	//        case. The length still describes what a `Get` would have returned.
 	// @param[out] out Appended to.
 	void WriteResponse(const Response &response, bool bodyOmitted, std::vector<std::byte> &out);

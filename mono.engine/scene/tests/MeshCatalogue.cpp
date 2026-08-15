@@ -36,7 +36,7 @@ namespace {
 	// **Registered before the store exists, and every case here goes through
 	// this.** `MeshesOf` sets a resource, `SetResource` keys on a component id,
 	// and an id minted before the explicit registration lands takes the
-	// compiler's spelling of the type — which aborts the process the moment
+	// compiler's spelling of the type - which aborts the process the moment
 	// `RegisterSceneComponents` gets there.
 	//
 	// The abort is order-dependent, so a suite that gets this wrong passes most
@@ -199,7 +199,7 @@ TEST_CASE("a mesh reports the sheets its submeshes name", "[scene][meshcatalogue
 
 	// **In submesh order with duplicates kept**, unlike every other list this
 	// module hands out. A character with twenty runs sharing four sheets is four
-	// names repeated, and which run wears which is a fact — collapsing it here
+	// names repeated, and which run wears which is a fact - collapsing it here
 	// would lose it for good.
 	CHECK(read[0] == Name("skins/body.atex"));
 	CHECK(read[1] == Name("skins/eyes.atex"));
@@ -207,14 +207,14 @@ TEST_CASE("a mesh reports the sheets its submeshes name", "[scene][meshcatalogue
 
 	// **Replaced rather than merged**, for the same reason the count is: a
 	// republished mesh may name different sheets, and a leftover would be a name
-	// somebody puts back onto geometry that no longer wears it — worse than not
+	// somebody puts back onto geometry that no longer wears it - worse than not
 	// knowing, because it looks like an answer.
 	REQUIRE(RecordMesh(store, fox, 9, std::array<Name, 1>{Name("skins/plain.atex")}));
 	CHECK(engine::scene::SheetsOf(store, fox, read) == 1);
 	REQUIRE(read.size() == 1);
 	CHECK(read[0] == Name("skins/plain.atex"));
 
-	// A mesh recorded with none — every built-in is one — reads back empty
+	// A mesh recorded with none - every built-in is one - reads back empty
 	// rather than keeping what it had.
 	REQUIRE(RecordMesh(store, fox, 12));
 	CHECK(engine::scene::SheetsOf(store, fox, read) == 0);
@@ -224,7 +224,7 @@ TEST_CASE("a mesh reports the sheets its submeshes name", "[scene][meshcatalogue
 TEST_CASE("sheets for an unknown mesh are empty, and asking creates nothing", "[scene][meshcatalogue]") {
 	Store store = Fresh("mesh_catalogue_test.sheets_unknown");
 
-	// **The reader's path**, and it must not acquire the resource — the same
+	// **The reader's path**, and it must not acquire the resource - the same
 	// rule `TrianglesOf` keeps, for the same reason: it is what a script binding
 	// calls, and a read that mutated the world would be a structural write from
 	// inside one.

@@ -74,7 +74,7 @@ namespace engine::core {
 		// pitch reaches ±90° the yaw and roll axes coincide and the split
 		// between them is arbitrary, so roll is taken as zero and the whole turn
 		// is attributed to yaw. That is a choice, not a recovery of lost
-		// information — the rotation is reproduced exactly either way.
+		// information - the rotation is reproduced exactly either way.
 		//
 		// @return Rotation about X, Y and Z as `{pitch, yaw, roll}`, in radians.
 		Vector3 ToAngles() const;
@@ -125,8 +125,8 @@ namespace engine::core {
 		// both endpoint rotations must be unit quaternions.
 		//
 		// Costs an `acos` and three `sin` calls. When the two orientations are
-		// close together — which is what interpolating between consecutive ticks
-		// means — NLerp is the same answer for a fraction of the price. Reach for
+		// close together - which is what interpolating between consecutive ticks
+		// means - NLerp is the same answer for a fraction of the price. Reach for
 		// this one when the endpoints are far apart and the *rate* has to be
 		// uniform, such as an animation blend over a whole second.
 		CFrame Lerp(const CFrame &target, float alpha) const;
@@ -137,7 +137,7 @@ namespace engine::core {
 		// The same endpoints as Lerp and the same path through space, but not at
 		// the same speed: the angular rate eases toward the midpoint instead of
 		// holding constant. The error is bounded by the angle between the
-		// endpoints and vanishes with it — under about 30 degrees it is well
+		// endpoints and vanishes with it - under about 30 degrees it is well
 		// below what a pixel can show, and two consecutive simulation ticks are
 		// nowhere near that far apart.
 		//

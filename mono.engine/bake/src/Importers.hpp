@@ -18,7 +18,7 @@ namespace engine::bake {
 	// **One number rather than one per format**, because the question each of
 	// them is asking is the same: is this count plausible for a mesh, or is it
 	// four bytes an attacker chose. It matches `assets::Mesh::MAXIMUM_VERTICES`
-	// deliberately — an importer that accepted more than the format can store
+	// deliberately - an importer that accepted more than the format can store
 	// would do the whole parse and then fail at the write.
 	constexpr uint64_t MAXIMUM_IMPORTED_VERTICES = 4u * 1024u * 1024u;
 

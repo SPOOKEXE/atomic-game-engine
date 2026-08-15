@@ -191,7 +191,7 @@ TEST_CASE("a group mixes large assets with small ones", "[cdn][grouper]") {
 	const Grouper grouper(GroupPolicy{1000, 2000});
 
 	// One large asset and many small ones. Packing largest-first leaves the
-	// small ones to fill what the large one did not use — the mix rule 2 asks
+	// small ones to fill what the large one did not use - the mix rule 2 asks
 	// for. Packing smallest-first would fill whole groups with tiny assets and
 	// strand the large one alone.
 	std::vector<GroupCandidate> candidates{Candidate("big", 700)};
@@ -212,7 +212,7 @@ TEST_CASE("an affinity heavier than the ceiling becomes one oversized group", "[
 
 	// Rule 1 outranks the bound. Splitting this would produce two groups
 	// neither of which makes anything appear, which is the one outcome the
-	// class exists to avoid — so it is allowed and *counted*.
+	// class exists to avoid - so it is allowed and *counted*.
 	const std::vector<GroupCandidate> candidates{
 		Candidate("huge-a", 1500, 1),
 		Candidate("huge-b", 1500, 1),

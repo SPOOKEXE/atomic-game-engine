@@ -12,6 +12,8 @@ namespace engine::world {
 			return "DataStore";
 		case BusKind::Teleport:
 			return "Teleport";
+		case BusKind::Channel:
+			return "Channel";
 		}
 		return "?";
 	}
@@ -47,6 +49,7 @@ namespace engine::world {
 		writer.WriteUInt8(static_cast<uint8_t>(envelope.Operation));
 		writer.WriteName(envelope.Key);
 		writer.WriteName(envelope.From);
+		writer.WriteName(envelope.Target);
 		writer.WriteUInt64(envelope.Sequence);
 		writer.WriteUInt64(envelope.Reply.Value);
 		writer.WriteUInt64(envelope.Version);
@@ -60,6 +63,7 @@ namespace engine::world {
 		envelope.Operation = static_cast<BusOperation>(reader.ReadUInt8());
 		envelope.Key = reader.ReadName();
 		envelope.From = reader.ReadName();
+		envelope.Target = reader.ReadName();
 		envelope.Sequence = reader.ReadUInt64();
 		envelope.Reply.Value = reader.ReadUInt64();
 		envelope.Version = reader.ReadUInt64();
@@ -117,6 +121,14 @@ namespace engine::world {
 			return "no such world";
 		case BusStatus::Unsupported:
 			return "unsupported operation";
+		case BusStatus::NoSuchChannel:
+			return "no such channel";
+		case BusStatus::Overflow:
+			return "destination queue full";
+		case BusStatus::WorldNotReady:
+			return "world not ready";
+		case BusStatus::TooManyChannels:
+			return "too many channels";
 		}
 		return "?";
 	}

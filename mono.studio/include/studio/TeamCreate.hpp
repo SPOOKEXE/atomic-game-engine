@@ -3,7 +3,7 @@
 // Team create's networking half: an editor saying it is here, and seeing the
 // others.
 //
-// **What this is, exactly.** It is the session layer — an editor announces
+// **What this is, exactly.** It is the session layer - an editor announces
 // itself on the subnet or registers at a rendezvous point, other editors see
 // it, and a `SessionKey` decides who is invited. It is the same
 // `network::Presence` the client browses servers with and the origin offers a
@@ -13,7 +13,7 @@
 //
 // **What this is not, and saying so plainly matters more than usual here.**
 // There is no shared document. Two editors that can see each other cannot yet
-// edit one place together — that needs a change model with an ordering, and
+// edit one place together - that needs a change model with an ordering, and
 // this repository has one (`replication::Authority`) that is built for a
 // server's world rather than for two people's undo stacks. So what exists is
 // the part that has to exist first and the part that was actually asked for at
@@ -21,8 +21,8 @@
 // outcome, because "half-added is worse than not started" is exactly about a
 // feature nobody can tell the shape of.
 //
-// The address a peer is listed at is the editor's hosted server — the one
-// `RunMode::Play` already stands up — so when the shared document arrives it
+// The address a peer is listed at is the editor's hosted server - the one
+// `RunMode::Play` already stands up - so when the shared document arrives it
 // has somewhere to arrive.
 //
 // @tier client
@@ -60,7 +60,7 @@ namespace studio {
 		std::string RendezvousAddress;
 
 		// The UDP port the edit stream listens on. Zero binds an ephemeral one,
-		// which is what a person hosting from a laptop wants — the announcement
+		// which is what a person hosting from a laptop wants - the announcement
 		// carries the port that was bound, so nothing has to be agreed in
 		// advance.
 		uint16_t Port = 0;
@@ -95,7 +95,7 @@ namespace studio {
 		//
 		// @param settings What to offer.
 		// @param[out] error Filled when this returns false.
-		// @return `false` when a setting is not usable — a secret that is
+		// @return `false` when a setting is not usable - a secret that is
 		//         neither hex nor words. A subnet that will not carry a
 		//         broadcast is not one of those: it is reported through
 		//         `Fault` and the rest runs.
@@ -107,7 +107,7 @@ namespace studio {
 		// hands over an address; the edit stream is what makes joining mean
 		// something. A `Join` that only connected would be a browser.
 		//
-		// @param at         Where the host is — `network::Listing::Dial`.
+		// @param at         Where the host is - `network::Listing::Dial`.
 		// @param nowSeconds The current time.
 		// @param[out] error Filled when this returns false.
 		// @return `false` when the address is not one, or no socket could be

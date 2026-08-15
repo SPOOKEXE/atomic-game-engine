@@ -123,7 +123,7 @@ TEST_CASE("a closed tree is its roots, in entity-id order", "[studio][hierarchy]
 	REQUIRE(view.Rebuild(scene.World, Closed()));
 
 	// `Workspace` and `Lighting` are the two with no parent. The order is the
-	// one `Store::EachRoot` yields — creation order, not insertion order — and
+	// one `Store::EachRoot` yields - creation order, not insertion order - and
 	// a panel that sorted them its own way would be a second answer to it.
 	std::vector<Entity> roots;
 	scene.World.EachRoot([&](Entity root) { roots.push_back(root); });
@@ -134,7 +134,7 @@ TEST_CASE("a closed tree is its roots, in entity-id order", "[studio][hierarchy]
 		CHECK(view.Rows()[index].Depth == 0);
 	}
 
-	// Closed, so nothing below a root is a row — but the arrow is drawn.
+	// Closed, so nothing below a root is a row - but the arrow is drawn.
 	CHECK(RowNamed(view, "Workspace")->HasChildren);
 	CHECK_FALSE(RowNamed(view, "Workspace")->Open);
 	CHECK_FALSE(RowNamed(view, "Lighting")->HasChildren);
@@ -175,7 +175,7 @@ TEST_CASE("a filter matches at any depth and brings its parents with it", "[stud
 	HierarchyView view;
 
 	// Nothing is open, and the match is two levels down. Studio's search finds
-	// it anyway and unfolds the path to it — a match with no parents above it
+	// it anyway and unfolds the path to it - a match with no parents above it
 	// is a row with no way to tell where it lives.
 	REQUIRE(view.Rebuild(scene.World, Closed("Handle")));
 
@@ -260,7 +260,7 @@ TEST_CASE("the signature moves for every edit the rows depend on", "[studio][hie
 
 	SECTION("a rename") {
 		// The name is drawn on the row and is what the filter matches, so a
-		// stamp that missed it would be the panel showing the old name — wrong
+		// stamp that missed it would be the panel showing the old name - wrong
 		// for exactly as long as nothing else changed, which is the version of
 		// this bug nobody reports.
 		scene.World.Set<InstanceName>(scene.Grip, InstanceName{Name("Hilt")});
@@ -280,7 +280,7 @@ TEST_CASE("the signature moves for every edit the rows depend on", "[studio][hie
 	}
 
 	SECTION("a reorder among siblings") {
-		// Same parent, same names, same count — only the order changed, and
+		// Same parent, same names, same count - only the order changed, and
 		// the order is what the rows are.
 		scene.World.SetParent(scene.Handle, NULL_ENTITY);
 		REQUIRE(view.Rebuild(scene.World, Closed()));
@@ -351,7 +351,7 @@ TEST_CASE("a view pointed at another world re-compiles", "[studio][hierarchy]") 
 	CHECK_FALSE(view.Rebuild(first.World, Closed()));
 
 	// Two worlds built the same way allocate the same entity ids and hold the
-	// same names, so their *contents* hash identically — correct arithmetic and
+	// same names, so their *contents* hash identically - correct arithmetic and
 	// the wrong answer. Which world it is has to be part of the signature, or a
 	// view handed the other one keeps showing the first.
 	CHECK(view.Rebuild(second.World, Closed()));
@@ -408,7 +408,7 @@ TEST_CASE("the signature ignores everything the rows do not read", "[studio][hie
 }
 
 TEST_CASE("a skipped rebuild leaves the rows usable", "[studio][hierarchy]") {
-	// The rows are the answer, not a cache in front of one — so everything that
+	// The rows are the answer, not a cache in front of one - so everything that
 	// reads them has to keep working on a frame that did not re-compile. This
 	// is what makes `Rebuild`'s `false` safe to ignore at the call site.
 	Scene scene;
@@ -516,7 +516,7 @@ TEST_CASE("a filter matching nothing shows nothing", "[studio][hierarchy]") {
 
 TEST_CASE("handles that name nothing are ignored rather than fatal", "[studio][hierarchy]") {
 	// Both sets are handles the panel collected on an earlier frame, and an
-	// instance can be deleted between one frame and the next — by an undo, by a
+	// instance can be deleted between one frame and the next - by an undo, by a
 	// script, by Stop restoring a snapshot. A stale handle has to be nothing
 	// more than an entry nobody matches.
 	Scene scene;
@@ -573,7 +573,7 @@ TEST_CASE("opening a leaf changes nothing", "[studio][hierarchy]") {
 	HierarchyView view;
 
 	// `Terrain` has no children, so asking for it open is a request the tree
-	// has nothing to honour with — and must not draw an expander for.
+	// has nothing to honour with - and must not draw an expander for.
 	const engine::ecs::Entity open[] = {scene.Workspace, scene.Terrain};
 	HierarchyRequest request = Closed();
 	request.Open = open;
@@ -588,7 +588,7 @@ TEST_CASE("the compiled rows are what a plain walk of the tree would draw", "[st
 	// **A model, written from the store rather than from the compiled nodes.**
 	// Every other test here names a case somebody thought of. This one builds a
 	// random tree, opens a random part of it, and checks the flattened rows
-	// against a straightforward recursive walk — the obvious implementation the
+	// against a straightforward recursive walk - the obvious implementation the
 	// clever one has to agree with.
 	//
 	// It is the only test that can catch a wrong answer in the parts that do
@@ -705,7 +705,7 @@ TEST_CASE("the compiled rows are what a plain walk of the tree would draw", "[st
 		REQUIRE(view.Rebuild(world, request));
 		world.EachRoot([&](Entity root) { walk(root, 0, walk); });
 
-		// Narrowed, but not to nothing — see the note above.
+		// Narrowed, but not to nothing - see the note above.
 		REQUIRE(expected.size() > 5);
 		REQUIRE(expected.size() < view.Count());
 
@@ -758,7 +758,7 @@ TEST_CASE("an empty world compiles to nothing", "[studio][hierarchy]") {
 TEST_CASE("a shift-click range is what the eye sees between two rows", "[studio][hierarchy]") {
 	// **The drawn order, not the tree.** A range in a tree view is the rows
 	// between two rows on screen, which is the flattened order with the closed
-	// subtrees left out — so `Terrain` is in a range from `Handle` to
+	// subtrees left out - so `Terrain` is in a range from `Handle` to
 	// `Lighting` and `Grip` is too, because both are drawn between them.
 	Scene scene;
 	HierarchyView view;
@@ -809,7 +809,7 @@ TEST_CASE("a shift-click range is what the eye sees between two rows", "[studio]
 		REQUIRE(view.Rebuild(scene.World, Closed("a")));
 
 		// Whatever survived the filter, a range over it never includes a row
-		// the filter removed — because the rows are the range.
+		// the filter removed - because the rows are the range.
 		for (const HierarchyRow &row : studio::RowsBetween(view, view.Rows().front().Instance,
 														  view.Rows().back().Instance)) {
 			CHECK(view.RowOf(row.Instance) != HierarchyView::NO_ROW);
@@ -860,7 +860,7 @@ TEST_CASE("a multi-drag moves the outermost members only", "[studio][hierarchy]"
 
 	SECTION("rows a filter is hiding still count as ancestors") {
 		// The drag can only start on a drawn row, but the *ancestor test* has
-		// to see the whole world — a model hidden by the filter is still the
+		// to see the whole world - a model hidden by the filter is still the
 		// parent of the part being dragged.
 		HierarchyView filtered;
 		REQUIRE(filtered.Rebuild(scene.World, Closed("Grip")));

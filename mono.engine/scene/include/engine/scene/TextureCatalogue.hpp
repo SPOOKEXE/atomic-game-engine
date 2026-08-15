@@ -3,8 +3,8 @@
 // Which textures a world knows are flipbooks, and how they play.
 //
 // **`MeshCatalogue`'s shape for `MeshCatalogue`'s reason, one kind over.** A
-// particle emitter names a texture — rule 4, so the name survives a save file
-// and a wire — and the pixels behind that name live wherever the bytes were
+// particle emitter names a texture - rule 4, so the name survives a save file
+// and a wire - and the pixels behind that name live wherever the bytes were
 // read: the renderer's `TextureTable` on a client, and nowhere at all on a
 // headless server. "How many frames does that sheet have and how fast was it
 // drawn" is a question about the *texture*, and this is the one place in the
@@ -12,13 +12,13 @@
 //
 // **The alternative was making every scene state the numbers by hand.** A 4x4
 // flipbook and a 4x4 tile atlas are the same pixels, so an emitter pointed at a
-// GIF has to be told the grid, the frame count and the rate — and a script that
+// GIF has to be told the grid, the frame count and the rate - and a script that
 // hardcodes `FlipbookFrames = 24` is a script that is wrong the moment somebody
 // re-exports the GIF with a frame added. The numbers are in the baked texture
 // already; this is how they reach the thing that plays it.
 //
 // **Nothing here reads a texture.** `scene` depends on `core`, `ecs` and
-// `spatial` and that list is not growing — AGENTS.md — so this takes three
+// `spatial` and that list is not growing - AGENTS.md - so this takes three
 // numbers from whoever *did* read the texture rather than taking
 // `assets::TextureData` and pulling them out. The client's content pump is that
 // caller today, the same one that calls `RecordMesh` two lines above.
@@ -45,7 +45,7 @@ namespace engine::scene {
 	// @since v0.10
 	struct FlipbookFacts {
 		// The grid's side. Zero means the texture is a still image, or that
-		// this world has not been told about it — see `TextureCatalogue::Find`.
+		// this world has not been told about it - see `TextureCatalogue::Find`.
 		uint8_t Side = 0;
 
 		// How many of the grid's cells hold a frame.
@@ -94,7 +94,7 @@ namespace engine::scene {
 	// The world's texture catalogue, creating an empty one if it has none.
 	//
 	// **`RegisterSceneComponents` must have run first**, as it must before any
-	// resource here is set — `MeshesOf` carries why in full: a resource id
+	// resource here is set - `MeshesOf` carries why in full: a resource id
 	// minted before the explicit registration lands takes the compiler's
 	// spelling of the type, which aborts the process at a call site with nothing
 	// to do with this one.

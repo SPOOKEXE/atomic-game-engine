@@ -1,0 +1,176 @@
+// The `game` locator, which is how a script reaches a service by name.
+//
+// **Split out of `RunService.cpp` at v0.18, because the service is neutral and
+// this is not.** `RunService`'s four predicates are `ScriptMethod`s both
+// languages install from one description, and describing them in a translation
+// unit that also holds a `lua_State` metatable meant the description was
+// compiled against `<lua.h>` for no reason of its own.
+//
+// **They remain one subject and the seam is `GetService`.** A service installs
+// as a *global* of its own name, and this is the function that looks one up -
+// so the refusal at the bottom is where `ServiceCatalogue`'s language mask
+// becomes something an author can read. `RunService.cpp` is the description;
+// this is the apparatus, and the JavaScript half of the same apparatus is
+// `JsBindings.cpp`'s `game` object.
+//
+// **`PumpHeartbeat` is here for the same reason `PumpInput` is in
+// `LuauInput.cpp`**: calling a callable is the half no shared function can do.
+//
+// @tier L9 · shared
+// @since v0.18
+
+#include "LuauBindings.hpp"
+
+#include <lualib.h>
+#include <string>
+#include <string_view>
+
+namespace engine::script {
+
+	namespace {
+		// `game:GetService("RunService")`.
+		//
+		// The service locator every Roblox script opens with. Looked up as a
+		// global rather than from a table of its own, so
+		// `game:GetService("RunService")` and `RunService` are one object - two
+		// objects for one service is two things to keep in step, and a script
+		// comparing them would find them different.
+		int GetService(lua_State *state) {
+			const char *name = luaL_checkstring(state, 2);
+
+			// **`Workspace` before the globals, because its global is spelled
+			// differently.** Roblox's is `workspace`, lowercase, and a script
+			// asking for it by its class name is asking for the same object -
+			// which it did not get, because `lua_getglobal("Workspace")` finds
+			// nothing and this refused a service the engine plainly provides.
+			//
+			// From the registry, so this and `game.Workspace` and the global
+			// are one instance rather than three handles that compare equal.
+			if (std::string_view(name) == "Workspace") {
+				lua_getfield(state, LUA_REGISTRYINDEX, "engine.workspace");
+				return 1;
+			}
+
+			lua_getglobal(state, name);
+			if (!lua_isnil(state, -1)) {
+				return 1;
+			}
+			lua_pop(state, 1);
+
+			// **Then the tree, because that is where a scene service lives.**
+			// `Players`, `ReplicatedStorage` and the rest are ordinary instances
+			// `InstallServices` puts at the root - so looking them up by name is
+			// looking them up the way everything else in the world is looked up.
+			//
+			// A global would have been a second handle onto one instance, and a
+			// script comparing `game:GetService("Players")` with
+			// `workspace.Parent.Players` would have found them different.
+			const ecs::Entity service = UpvalueContext(state).World->FindFirstRoot(name);
+			if (service != ecs::NULL_ENTITY) {
+				PushInstanceValue(state, service);
+				return 1;
+			}
+
+			// **Which refusal, from the catalogue.** A name that is *here* but
+			// bound by the other language is a different failure from a name the
+			// engine has never heard of, and saying the same sentence for both
+			// sends an author looking in the wrong place - they check their
+			// spelling when the answer is that the service exists and this VM
+			// does not have it. `ServiceCatalogue.hpp` carries the argument.
+			if (const ServiceDefinition *known = FindService(name);
+				known != nullptr && !Binds(known->Languages, ServiceLanguages::Luau)) {
+				luaL_errorL(state, "'%s' is not bound for Luau in this engine", name);
+			}
+
+			luaL_errorL(state, "'%s' is not a service this engine provides", name);
+		}
+
+		// `game.Workspace` and `game:GetService("Workspace")`.
+		int GameIndex(lua_State *state) {
+			const std::string_view field = luaL_checkstring(state, 2);
+
+			// `game.Workspace` is the world this script runs on, which is the
+			// mapping `LuauBindings.hpp` states: game is the universe, workspace is
+			// the world.
+			if (field == "Workspace") {
+				lua_getfield(state, LUA_REGISTRYINDEX, "engine.workspace");
+				return 1;
+			}
+
+			if (field == "GetService") {
+				// **The context is forwarded, not re-derived.** `GetService`
+				// reaches the world to resolve a service instance from the
+				// tree, and a plain `lua_pushcfunction` would give it no
+				// upvalue to read one from - which is a garbage pointer rather
+				// than a compile error.
+				lua_pushvalue(state, lua_upvalueindex(1));
+				lua_pushcclosure(state, GetService, "GetService", 1);
+				return 1;
+			}
+
+			// **Which world this script is running on, by name.**
+			//
+			// Roblox's `JobId` identifies the server instance a script is
+			// standing on, and a world here *is* that instance - one clock, one
+			// store, one set of scripts. So the mapping is the same one `game`
+			// and `workspace` already use rather than a new idea:
+			//
+			//     game.JobId -> `ecs::Store::Name()`
+			//
+			// **This is what lets one script build four different worlds**, and
+			// `Mirrors-4-worlds.luau` is why it exists: `--worlds N` runs the
+			// same file in every world, so without an identity every view is
+			// identical and a compositor that placed them in the wrong order
+			// would look correct.
+			//
+			// A name rather than Roblox's GUID, because a name is what a bus
+			// envelope, a snapshot and a view header already carry - a second
+			// identifier for one world would be the two-sources-of-truth
+			// problem, and this one is already the key everything else uses.
+			if (field == "JobId") {
+				const auto &context =
+					*static_cast<LuauContext *>(lua_tolightuserdata(state, lua_upvalueindex(1)));
+				const std::string_view name = context.World->Name();
+				lua_pushlstring(state, name.data(), name.size());
+				return 1;
+			}
+
+			luaL_errorL(state, "game has no member '%s'", std::string(field).c_str());
+		}
+	}
+
+	void OpenGame(lua_State *state) {
+		// **`game` is the universe.**
+		//
+		// Roblox's `game` is a `DataModel`: the root holding every service and,
+		// through `Workspace`, everything with a position. This engine already
+		// has that thing and calls it `world::Universe` - one process, many
+		// worlds, buses between them. The mapping is direct rather than
+		// approximate:
+		//
+		//     game      -> the universe
+		//     workspace -> the world this script runs on
+		//
+		// What it carries is `GetService` and `Workspace`. Reaching *another*
+		// world is deliberately not here and never will be as a property:
+		// rule 3 says nothing crossing a world boundary is a pointer, so the
+		// route out is `MessagingService` and the other bus services, which
+		// carry copies.
+		lua_newtable(state);
+
+		lua_newtable(state);
+		lua_pushlightuserdata(state, &ContextOf(state));
+		lua_pushcclosure(state, GameIndex, "__index", 1);
+		lua_setfield(state, -2, "__index");
+		lua_pushstring(state, "DataModel");
+		lua_setfield(state, -2, "__metatable");
+		lua_setmetatable(state, -2);
+
+		lua_setglobal(state, "game");
+	}
+
+	std::string PumpHeartbeat(lua_State *state, float delta) {
+		lua_pushnumber(state, delta);
+		return FireSignal(state, SignalKind::Heartbeat, ecs::NULL_ENTITY, 1);
+	}
+}

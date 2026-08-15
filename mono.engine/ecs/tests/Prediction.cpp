@@ -1,6 +1,6 @@
 // Locally predicted entities: the reserved index range, and promotion.
 //
-// A replica may not mint an *authoritative* entity — the index is the
+// A replica may not mint an *authoritative* entity - the index is the
 // authority's to hand out, and two independently built stores both start at
 // index 0 generation 1, so one minted here would collide exactly with one the
 // server minted. What it may do is mint from the high half of the index space,
@@ -8,7 +8,7 @@
 // collision itself; this pins the way out of it.
 //
 // Promotion is the primitive and not the policy. Nothing here decides *when* a
-// prediction is promoted, because nothing predicts a spawn yet — see
+// prediction is promoted, because nothing predicts a spawn yet - see
 // `Store::Promote` and `ecs/AGENTS.md`.
 
 #include <engine/core/Bytes.hpp>
@@ -46,7 +46,7 @@ namespace prediction_test {
 		int Value = 0;
 	};
 
-	// A handle stored inside a component — the case promotion cannot fix up and
+	// A handle stored inside a component - the case promotion cannot fix up and
 	// says so.
 	struct Target {
 		Entity Other;
@@ -65,7 +65,7 @@ namespace prediction_test {
 
 	// The handle a server would hand over: minted in the authority's store, at
 	// an index this replica has not already filled. Promoting onto an index that
-	// is already live here is refused, and rightly — so a test that wants the
+	// is already live here is refused, and rightly - so a test that wants the
 	// promotion to happen has to name a free one, exactly as a real caller must.
 	Entity ServerHandleFor(Store &replica, Store &authority) {
 		for (int attempt = 0; attempt < 64; attempt++) {
@@ -121,7 +121,7 @@ TEST_CASE("an authority never allocates in the predicted range", "[ecs]") {
 TEST_CASE("a replica mints in the predicted range and cannot collide", "[ecs]") {
 	// **The exact scenario `tests/Replication.cpp` reaches, now taken the safe
 	// way.** There, a replica mints with `Create` and gets index 0 generation 1
-	// — the same handle the authority minted — so `Apply` merges two different
+	// - the same handle the authority minted - so `Apply` merges two different
 	// entities into one and the replica's own component is gone. Here it mints
 	// with `CreatePredicted`, and both survive.
 	Store authority("authority");
@@ -151,7 +151,7 @@ TEST_CASE("a replica mints in the predicted range and cannot collide", "[ecs]") 
 
 TEST_CASE("an authoritative correction does not delete a prediction", "[ecs]") {
 	// `Authoritative` mode destroys what the sender did not mention, and a
-	// snapshot from a server can never mention a predicted entity — the
+	// snapshot from a server can never mention a predicted entity - the
 	// authority allocates nothing from that range. Sweeping them would delete
 	// every prediction on the first correction, which is every tick.
 	Store authority("authority");
@@ -191,7 +191,7 @@ TEST_CASE("a freed predicted index is reused inside the predicted range only", "
 	REQUIRE(Store::IsPredicted(fourth));
 
 	// Recycled slots, so the handles differ from the retired ones only by
-	// generation — and the retired ones stay dead.
+	// generation - and the retired ones stay dead.
 	REQUIRE(third != second);
 	REQUIRE(fourth != first);
 	REQUIRE_FALSE(replica.Alive(first));
@@ -237,7 +237,7 @@ TEST_CASE("an adopt-only store refuses authoritative mints and allows predicted 
 TEST_CASE("CreateInstance honours adopt-only", "[ecs]") {
 	// **The hole this closes.** `Store::Create` checked the flag and
 	// `Store::CreateInstance` did not, so a replica could mint a colliding
-	// entity through the instance path — which is the path `scene::MakePart`
+	// entity through the instance path - which is the path `scene::MakePart`
 	// uses, and which grew a guard of its own to work around it.
 	Store replica("replica");
 	replica.SetAdoptOnly(true);
@@ -313,7 +313,7 @@ TEST_CASE("a promoted entity then takes authoritative state", "[ecs]") {
 
 TEST_CASE("promotion moves the name with the entity", "[ecs]") {
 	// The store's name map is keyed by index, so a promotion that left it alone
-	// would have `Find` answer with a handle the directory calls dead — the
+	// would have `Find` answer with a handle the directory calls dead - the
 	// quietest possible failure, since `NameOf` and `Find` both guard on
 	// liveness and would simply stop finding anything.
 	Store replica("replica");
@@ -357,8 +357,8 @@ TEST_CASE("promotion relinks the instance tree around it", "[ecs]") {
 	const Entity after = world.CreateInstance(NodeClass(), "after");
 	const Entity child = world.CreateInstance(NodeClass(), "child");
 
-	// A predicted instance is not a thing `Store` mints today — the class path
-	// is authoritative — so the node is built by hand out of the same
+	// A predicted instance is not a thing `Store` mints today - the class path
+	// is authoritative - so the node is built by hand out of the same
 	// components, which is what the tree is made of anyway.
 	const Entity guess = world.CreatePredicted();
 	world.Set<Hierarchy>(guess, Hierarchy{});
@@ -444,8 +444,8 @@ TEST_CASE("a handle stored in another component is left dead, never wrong", "[ec
 	// **The limit of what promotion covers, pinned rather than described.**
 	// Nothing in `TypeDescriptor` says which of a component's bytes are entity
 	// handles, so a handle a game stored in a field of its own keeps the
-	// predicted value. What matters is that it reads as *dead* — the predicted
-	// index's generation is bumped as it is freed — rather than naming whatever
+	// predicted value. What matters is that it reads as *dead* - the predicted
+	// index's generation is bumped as it is freed - rather than naming whatever
 	// the replica predicts next.
 	Store world("world");
 

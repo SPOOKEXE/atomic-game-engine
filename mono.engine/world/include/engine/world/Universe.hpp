@@ -2,8 +2,8 @@
 
 // The overarching simulation: every world, and when each one ticks.
 //
-// A universe owns worlds. It does not own game state — a world's storage is the
-// world's — and it never hands a world's store to anybody. `ecs/AGENTS.md` says
+// A universe owns worlds. It does not own game state - a world's storage is the
+// world's - and it never hands a world's store to anybody. `ecs/AGENTS.md` says
 // this layer "hands out identifiers, never stores"; that sentence is what this
 // class is.
 //
@@ -50,14 +50,14 @@ namespace engine::world {
 	//
 	// @since v0.2
 	struct UniverseSettings {
-		// How the worker pool is spent. See ExecutionMode — the switch changes
+		// How the worker pool is spent. See ExecutionMode - the switch changes
 		// no result, only where the parallelism is taken.
 		ExecutionMode Mode = ExecutionMode::WorldParallel;
 
 		// The largest number of ticks one world may catch up in a single driver
 		// tick. Beyond this the excess is dropped and counted, because a world
 		// that fell far behind will not recover by trying to run a hundred
-		// ticks in one frame — it will only fall further behind.
+		// ticks in one frame - it will only fall further behind.
 		int MaximumCatchUpTicks = 8;
 
 		// Whether the buses live in another process.
@@ -67,7 +67,7 @@ namespace engine::world {
 		// driver's, because two processes each holding a copy would be two
 		// answers to the same key. So a federated universe collects what its
 		// worlds posted, hands it up the link, and delivers back whatever the
-		// driver decided — it never applies an envelope itself.
+		// driver decided - it never applies an envelope itself.
 		//
 		// The default is a universe that owns its buses, which is a driver, a
 		// single-process server, and a client. A host says so explicitly.
@@ -80,13 +80,66 @@ namespace engine::world {
 		// request budgets because they turned out to be necessary; there is no
 		// reason to rediscover that.
 		uint32_t BusBudgetPerTick = 64;
+
+		// How many channel deliveries one world may have queued for it in one
+		// barrier, before the senders are told `BusStatus::Overflow`.
+		//
+		// **The bound on the queue between two worlds, and it needs one.**
+		// `BusBudgetPerTick` bounds what a *sender* emits; nothing bounded what a
+		// *destination* accumulates, so a thousand worlds each spending their
+		// allowance on one victim queued sixty-four thousand payloads into one
+		// inbox in one barrier. That is a memory leak with extra steps, and the
+		// version of it that silently discards the tail is worse - a game that
+		// works until the day it is busy.
+		//
+		// Four times the default budget, so four worlds may each spend their whole
+		// allowance on one destination before the fifth is refused. Past that the
+		// destination is the bottleneck and the sender is the only one that can do
+		// anything about it, which is why it is told rather than absorbed.
+		//
+		// Channel deliveries only. A reply is bounded by the sender's own budget -
+		// one per request - a publish needs the destination to have subscribed,
+		// and a teleport moves a player, which nothing can do in a loop.
+		//
+		// @since v0.17
+		uint32_t ChannelQueueLimit = 256;
+
+		// How many channels one world may hold open, before an open is answered
+		// `BusStatus::TooManyChannels`.
+		//
+		// **The bound on the channel *table*, where `ChannelQueueLimit` bounds
+		// the queue.** A channel costs one bus operation to open and one entry in
+		// the router's table for ever after, and `BusBudgetPerTick` bounds the
+		// rate rather than the total: a world opening a distinct channel every
+		// tick for an hour leaves two hundred thousand live entries that every
+		// snapshot then carries. Nothing in the engine does that today because a
+		// channel name is written in a script, and the first game that names
+		// channels from data - one per player, one per match - is the one that
+		// would.
+		//
+		// **256, and it is `ChannelQueueLimit`'s number on purpose rather than by
+		// coincidence.** The honest range is wide: a channel is either a
+		// subsystem, of which a world has a handful, or a conversation, of which
+		// it has one per player. The upper reading is what has to fit, so the cap
+		// is set where a world stops being able to *hear* from what it has
+		// opened - past 256 channels a world could not take one delivery on each
+		// in a single barrier, because 256 is exactly what its inbox accepts.
+		// Below that the two bounds agree; above it, opening another channel buys
+		// a name and no more traffic.
+		//
+		// A setting rather than a constant for `ChannelQueueLimit`'s reason: the
+		// number is defensible and not derivable, so the deployment that finds it
+		// wrong should be able to say so without a rebuild.
+		//
+		// @since v0.17
+		uint32_t ChannelsPerWorld = 256;
 	};
 
 	// One delivery for a world that lives in another process.
 	//
 	// Carries the host as well as the world, because the driver's directory is
 	// the only thing that knows which host holds which world and the link does
-	// not — a host is told about its own worlds and nothing else.
+	// not - a host is told about its own worlds and nothing else.
 	//
 	// @since v0.2
 	struct RemoteDelivery {
@@ -107,7 +160,7 @@ namespace engine::world {
 		// Worlds that ran at least one tick in the most recent driver tick.
 		size_t ActiveWorlds = 0;
 
-		// Worlds currently suspended — not ticking, and expected back.
+		// Worlds currently suspended - not ticking, and expected back.
 		size_t Suspended = 0;
 
 		// Worlds held by a supervised host rather than by this process.
@@ -157,7 +210,7 @@ namespace engine::world {
 		// Creates a world, or returns the one already holding that name.
 		//
 		// Applied immediately when called from the driver thread outside a
-		// tick, and queued to the next barrier when called from inside one —
+		// tick, and queued to the next barrier when called from inside one -
 		// because a world list that grew underneath a running batch would move
 		// the very worlds the batch is iterating.
 		//
@@ -168,8 +221,8 @@ namespace engine::world {
 
 		// Registers a world held by a supervised host.
 		//
-		// The driver keeps a record of it — a name, a state of `Remote`, and
-		// the host holding it — so that everything a world is addressed *by*
+		// The driver keeps a record of it - a name, a state of `Remote`, and
+		// the host holding it - so that everything a world is addressed *by*
 		// keeps working: a topic it subscribed to, a teleport sent to it, a
 		// reply owed to it. What the driver does not have is its storage, so
 		// the world is never ticked here and its store is never read.
@@ -223,8 +276,8 @@ namespace engine::world {
 		//
 		// **Exists because `Count` answers the wrong question for a lifecycle
 		// decision.** `world::DecideLifecycle` refuses to suspend the last
-		// world, and a host feeding that refusal a total — which includes the
-		// worlds already suspended — suspends a whole universe one world at a
+		// world, and a host feeding that refusal a total - which includes the
+		// worlds already suspended - suspends a whole universe one world at a
 		// time, each of them the last only after the rest had gone. Counting
 		// what is still `Active` is the fact that refusal is about, and it lives
 		// here so both hosts cannot answer it differently.
@@ -291,7 +344,7 @@ namespace engine::world {
 		//
 		// @param id The world to recover.
 		// @return `NoSuchWorld`, or `Ok` even when the world is being held down
-		//         for faulting too often — the caller reads `StateOf` to see.
+		//         for faulting too often - the caller reads `StateOf` to see.
 		WorldStatus Recover(WorldId id);
 
 		// Runs one driver tick: the barrier, then the worlds.
@@ -331,7 +384,7 @@ namespace engine::world {
 
 		// Runs `body` against a world's storage, without the scheduler.
 		//
-		// The same door as the overload above — there is deliberately no
+		// The same door as the overload above - there is deliberately no
 		// read-only variant. `Store::Each` is not const, because iterating
 		// caches a query plan, so a `const Store &` could not be iterated and a
 		// view that cannot be walked is not a view. A caller that only reads
@@ -377,7 +430,7 @@ namespace engine::world {
 		// Reads a bus value directly, on the driver thread.
 		//
 		// The escape hatch `v02v03.md` §2.8 describes: for persistence, an
-		// admin console, a stats scrape — consumers genuinely outside the
+		// admin console, a stats scrape - consumers genuinely outside the
 		// simulation. **A system may never call this.** Anything read through
 		// it is non-replayable by definition, so nothing the simulation depends
 		// on may live behind it.
@@ -422,7 +475,7 @@ namespace engine::world {
 
 		// Uses `traffic` for the next barrier instead of the worlds' outboxes.
 		//
-		// The replay path. A world's own outbox is discarded for that barrier —
+		// The replay path. A world's own outbox is discarded for that barrier -
 		// a replayed world re-derives the same requests, and applying both the
 		// recorded and the re-derived copy would double every operation.
 		//
@@ -462,7 +515,7 @@ namespace engine::world {
 		//
 		// The driver hands these to the hosts holding them. Accumulated rather
 		// than replaced, so a driver that services its links less often than it
-		// ticks does not lose deliveries — it is the caller's job to take them.
+		// ticks does not lose deliveries - it is the caller's job to take them.
 		//
 		// @return The pending deliveries, in barrier order.
 		std::span<const RemoteDelivery> Outbound() const;
@@ -514,7 +567,7 @@ namespace engine::world {
 		//
 		// Parallel rather than a field on `World`, because a `World` is storage
 		// plus a scheduler plus a clock and a remote one has none of the three
-		// — putting the host on it would be putting a driver's bookkeeping
+		// - putting the host on it would be putting a driver's bookkeeping
 		// inside the thing being booked.
 		std::vector<core::Name> Hosts;
 
@@ -526,7 +579,7 @@ namespace engine::world {
 		std::vector<int> OwedList;
 
 		// The bus backends and the barrier that applies traffic to them. Held
-		// by pointer so the header does not have to describe either — a
+		// by pointer so the header does not have to describe either - a
 		// DataStore's table is nobody else's business, and neither is the order
 		// the driver puts a tick's envelopes in.
 		std::unique_ptr<class BusRouter> Router;

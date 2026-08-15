@@ -1,12 +1,12 @@
-// A room made of mirrors — the TypeScript twin of `Mirrors-1-world.luau`.
+// A room made of mirrors - the TypeScript twin of `Mirrors-1-world.luau`.
 //
 // **The same scene, the same bindings, the same result.** Two VMs over one
 // binding surface, and the differences below are the languages' rather than the
 // engine's:
 //
-//   - `game.GetService("RunService")` — a dot, because JavaScript has no
+//   - `game.GetService("RunService")` - a dot, because JavaScript has no
 //     colon-call.
-//   - `a.mul(b)` and `a.add(b)` — methods, because JavaScript has no operator
+//   - `a.mul(b)` and `a.add(b)` - methods, because JavaScript has no operator
 //     overloading. The transform being composed is identical.
 //   - `for (const wall of WALLS)` rather than a generic `for ... in`.
 //
@@ -42,7 +42,7 @@ const WALL_THICKNESS = 0.4;
 const WALL_OFFSET = PLATE_HALF + WALL_THICKNESS / 2;
 
 // How far from the middle the cubes are allowed to wander. Well inside the
-// walls — a caster clipping through a mirror reads as a broken reflection
+// walls - a caster clipping through a mirror reads as a broken reflection
 // rather than as a cube in the wrong place.
 const CASTER_SPREAD = 12;
 
@@ -120,7 +120,7 @@ const WALLS: {
 // Wide rather than square, at the same texel count: a wall is four times as
 // wide as it is tall and a square target spends half its texels on sky above
 // it. All four declare the same size because all four walls are the same shape,
-// not because they share a target — each index owns its own pair.
+// not because they share a target - each index owns its own pair.
 const SURFACE_SIZE = Vector3.new(2048, 512);
 
 for (const wall of WALLS) {
@@ -221,7 +221,7 @@ for (let index = 0; index < 24; index++) {
 }
 
 // The camera the scene is watched through. An identity rotation looks down -Z,
-// so this faces the north wall — the one built first and therefore the one that
+// so this faces the north wall - the one built first and therefore the one that
 // reflects.
 const view = Instance.new("Camera");
 view.Name = "Viewer";
@@ -239,6 +239,6 @@ RunService.Heartbeat.Connect((deltaTime: number) => {
 });
 
 print(
-	`mirrors: ${casters.length} casters, ${WALLS.length} mirrored walls, each on a surface of its own — ` +
+	`mirrors: ${casters.length} casters, ${WALLS.length} mirrored walls, each on a surface of its own - ` +
 		WALLS.map((wall) => wall.effect.Name).join(", "),
 );

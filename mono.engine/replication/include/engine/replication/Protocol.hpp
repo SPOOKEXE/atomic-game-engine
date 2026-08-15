@@ -2,6 +2,7 @@
 
 // @tier L12 · shared
 
+#include <engine/assets/ContentHash.hpp>
 #include <engine/assets/Signature.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Name.hpp>
@@ -36,8 +37,8 @@ namespace engine::replication {
 		// **The seam that stops the next feature becoming a fourth session
 		// type.** A connected, admitted, encrypted, reliable link between two
 		// processes is expensive to build and this module already has one; a
-		// caller that needs to carry something else between the same two ends —
-		// a game's remote call, the studio's edit stream — should not have to
+		// caller that needs to carry something else between the same two ends -
+		// a game's remote call, the studio's edit stream - should not have to
 		// build a second one beside it.
 		//
 		// The payload is opaque here and must stay opaque. A `replication` that
@@ -46,6 +47,16 @@ namespace engine::replication {
 		//
 		// @since v0.13
 		User,
+
+		// The server's digests over state a client has already acknowledged.
+		//
+		// @since v0.15
+		GroupSignatures,
+
+		// A client answering one of those, naming the groups it disagrees with.
+		//
+		// @since v0.15
+		Disputed,
 	};
 
 	// Returns a stable, human-readable name for a message kind.
@@ -73,12 +84,72 @@ namespace engine::replication {
 	// The wire format version.
 	//
 	// Unknown versions are refused; wire changes require a version bump.
-	inline constexpr uint16_t PROTOCOL_VERSION = 5;
+	//
+	// **8 - no message changed shape, and it still had to move.** A peer of
+	// version 7 registers `ecs.InstanceClass` and would resolve the name in a
+	// delta perfectly well, then read a length-prefixed class name as a raw
+	// four-byte `ClassId` and lose the cursor for every value behind it. A
+	// version's job is to refuse that at the first field rather than at the
+	// twentieth; the two encodings are indistinguishable from the bytes alone,
+	// which is the same test `ecs::Store::SNAPSHOT_VERSION` 3 applies to the
+	// same change on the other side.
+	//
+	// **9 - the same shape of change, one type along, plus components a version
+	// 8 peer has never registered.** `script.LuaSourceContainer` now writes its
+	// path as text where it used to write the `core::Name`'s interning index, so
+	// a version 8 reader would consume a length prefix as a four-byte id and
+	// lose every value behind it - the version 8 story exactly, and the reason
+	// `ecs::Store::SNAPSHOT_VERSION` moved to 4 beside it. The interface and
+	// script sets crossing for the first time is the milder half: a peer that
+	// never registered `gui.Element` refuses the whole delta as naming an
+	// unknown component, which is loud, but there is no reason to make it find
+	// that out one message at a time.
+	inline constexpr uint16_t PROTOCOL_VERSION = 9;
+
+	// Which half of a join a snapshot chunk belongs to.
+	//
+	// **A join is two blobs because it is two cursors.** A snapshot is one
+	// `ecs::Store::Save` chunked across ticks in whatever order the store wrote
+	// its archetypes, and no ordering hook reaches inside a byte cursor - so
+	// "these entities first" is a second snapshot finished before the first byte
+	// of the world's goes out, and this is the field that says which one a chunk
+	// is part of. See `Authority::SetPreface`.
+	//
+	// @since v0.15
+	enum class SnapshotStage : uint8_t {
+		// A slice of a world rather than the whole of one.
+		//
+		// Applied as an overlay rather than authoritatively, because a receiver
+		// that swept everything this blob failed to mention would empty the
+		// world it is about to be sent again.
+		//
+		// **Two senders build one, and the shape is what they have in common.**
+		// `Authority::SetPreface` puts the entities a host wants a client to
+		// hold before the world in front of the join; `Authority::StageOversize`
+		// puts an entity whose row is larger than any delta message here
+		// mid-session, because a value that needs chunking needs the path that
+		// chunks. Neither can be in flight while the other is: both require the
+		// client to be owed nothing.
+		Preface,
+
+		// The whole of what a client may see, and the blob that ends the join.
+		World,
+	};
 
 	// One piece of a snapshot.
 	//
 	// @since v0.3
 	struct SnapshotChunk {
+		// Which of the join's two blobs this is part of.
+		//
+		// **Part of the buffer's identity at the far side, not a label.** Both
+		// blobs are stamped with the tick they were taken at, so two of the same
+		// length would otherwise assemble into one another - the same failure
+		// `Offset` exists to prevent, one level up.
+		//
+		// @since v0.15
+		SnapshotStage Stage = SnapshotStage::World;
+
 		// The tick the whole snapshot was taken at.
 		//
 		// Carried on every chunk rather than only the first, so a receiver can
@@ -92,7 +163,7 @@ namespace engine::replication {
 		// Where this chunk starts within that total.
 		//
 		// **Explicit rather than implied by arrival order**, because chunks
-		// travel on a channel that may reorder them — an appending receiver
+		// travel on a channel that may reorder them - an appending receiver
 		// would assemble a snapshot out of order and never know.
 		uint32_t Offset = 0;
 
@@ -117,7 +188,7 @@ namespace engine::replication {
 		// Those rows' values, back to back at the component's wire stride.
 		//
 		// **Parallel to `Entities` rather than interleaved with it**, so the
-		// values are one memcpy per run of adjacent rows — which is what
+		// values are one memcpy per run of adjacent rows - which is what
 		// `EachChangedBatch` yields and the reason it yields runs at all.
 		std::vector<std::byte> Values;
 	};
@@ -184,7 +255,7 @@ namespace engine::replication {
 		// The input itself, opaque here.
 		//
 		// **This module does not know what a game's input is**, and reading it
-		// would be `replication` knowing what a component means — the same line
+		// would be `replication` knowing what a component means - the same line
 		// `ComponentDelta::Values` is on.
 		std::vector<std::byte> Bytes;
 	};
@@ -200,6 +271,67 @@ namespace engine::replication {
 		// would be a feature every caller has to re-implement the recovery for,
 		// and this module already has a reliable channel.
 		std::vector<std::byte> Bytes;
+	};
+
+	// One group of replicated state, and the digest over it.
+	//
+	// @since v0.15
+	struct AuditGroup {
+		// Which group of *this audit* this is, counted from zero.
+		//
+		// A label for the answer to name rather than a place in anything the
+		// two ends keep: the entities are listed below, so a group needs no
+		// identity outside the message it arrived in.
+		uint32_t Group = 0;
+
+		// The entities the sender hashed, in the order it hashed them.
+		//
+		// **Listed rather than derived from the group number, and that is what
+		// makes the comparison exact.** The sender audits only the rows this
+		// client has already acknowledged, and a receiver working the
+		// membership out for itself would include a row that is merely in
+		// flight - reporting a disagreement about a value that is on its way.
+		std::vector<ecs::Entity> Entities;
+
+		// The digest of those entities' replicated values.
+		assets::ContentHash Digest;
+	};
+
+	// What the server believes a client is holding, and the proof of it.
+	//
+	// @since v0.15
+	struct GroupSignatures {
+		// The tick the digests were taken at, and the only thing an answer may
+		// name.
+		uint64_t Tick = 0;
+
+		// The components hashed, by name, in the order their ordinals count in.
+		//
+		// **Only the ones that produced a leaf**, which is what keeps this from
+		// dominating the message: a slice of a few dozen entities touches a
+		// fraction of what a host replicates, and naming the rest would spend
+		// most of a datagram saying nothing.
+		std::vector<core::Name> Components;
+
+		// One entry per group in this audit's slice.
+		std::vector<AuditGroup> Groups;
+	};
+
+	// A client saying which of an audit's groups it disagrees with.
+	//
+	// **Every field of this is hostile and the limit on it is the server's.**
+	// A client claiming everything mismatches is asking the server to resend
+	// the world, so nothing here is trusted: the tick has to be the audit the
+	// server actually issued, the groups have to be ones it actually asked
+	// about, and it may be answered once. See `Authority::Receive`.
+	//
+	// @since v0.15
+	struct Disputed {
+		// Which audit this answers.
+		uint64_t Tick = 0;
+
+		// The groups whose digests did not match, ascending.
+		std::vector<uint32_t> Groups;
 	};
 
 	// The last tick a client applied in full.
@@ -263,6 +395,20 @@ namespace engine::replication {
 	// @since v0.13
 	void WriteMessage(core::ByteWriter &writer, const User &user);
 
+	// Writes an audit.
+	//
+	// @param writer     Where the bytes go.
+	// @param signatures The groups and their digests.
+	// @since v0.15
+	void WriteMessage(core::ByteWriter &writer, const GroupSignatures &signatures);
+
+	// Writes an answer to an audit.
+	//
+	// @param writer   Where the bytes go.
+	// @param disputed The groups that did not match.
+	// @since v0.15
+	void WriteMessage(core::ByteWriter &writer, const Disputed &disputed);
+
 	// What a successful read produced.
 	//
 	// @since v0.3
@@ -274,7 +420,7 @@ namespace engine::replication {
 		//
 		// **Every field rather than a union, and it costs what it costs.** A
 		// message is parsed once per datagram and then acted on, so the saving a
-		// union would buy is a few hundred bytes on one stack frame — against a
+		// union would buy is a few hundred bytes on one stack frame - against a
 		// visitor at every site that handles a message, in a module where every
 		// inbound field is hostile and the parsing is the part that has to stay
 		// readable.
@@ -290,6 +436,8 @@ namespace engine::replication {
 		replication::Applied Applied;
 		replication::Identify Identify;
 		replication::User User;
+		replication::GroupSignatures Signatures;
+		replication::Disputed Disputed;
 		//@}
 	};
 
@@ -323,4 +471,14 @@ namespace engine::replication {
 	//
 	// @since v0.5
 	inline constexpr uint16_t MAXIMUM_PARTS = 1024;
+
+	// The most groups one audit, or one answer to one, may name.
+	//
+	// Far below `MAXIMUM_ENTRIES` on purpose: an audit is a slice and an answer
+	// is a subset of that slice, so a message naming hundreds of groups is a
+	// message no honest sender produces. Bounding the parse is the cheap half
+	// of `Authority::Receive`'s rate limit.
+	//
+	// @since v0.15
+	inline constexpr uint32_t MAXIMUM_AUDIT_GROUPS = 256;
 }

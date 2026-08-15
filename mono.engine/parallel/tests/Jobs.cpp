@@ -155,7 +155,7 @@ TEST_CASE("an exception in a range reaches the caller", "[jobs]") {
 //
 // A second dispatch finding the pool occupied runs its span inline rather than
 // waiting or corrupting the batch already in flight. These cover the two ways
-// that happens — nested, and from another thread — because both become the
+// that happens - nested, and from another thread - because both become the
 // ordinary case once a world tick is itself a range in a larger batch.
 
 namespace {
@@ -182,7 +182,7 @@ namespace {
 	bool PoolParticipates(size_t count) {
 		// **Retried, because a work-stealing pool is not obliged to steal.** If
 		// the calling thread drains the queue before any worker wakes, one
-		// thread saw the whole batch — and that is correct behaviour, not a
+		// thread saw the whole batch - and that is correct behaviour, not a
 		// broken pool. The property being checked is that the pool *can*
 		// participate, so the honest test is "does it, ever".
 		//
@@ -378,7 +378,7 @@ namespace {
 	// Turns the flag on and puts it back, whatever the case does.
 	//
 	// A process-wide switch left on by a failing assertion would make every
-	// later case in this binary run serially and pass for the wrong reason —
+	// later case in this binary run serially and pass for the wrong reason -
 	// which is the one failure mode a test of a global switch has to close.
 	struct ForcedSerial {
 		ForcedSerial() {
@@ -427,7 +427,7 @@ TEST_CASE("forcing serial compute runs every span on the caller", "[parallel][jo
 
 	// **Retried, for `PoolParticipates`' reason.** A single dispatch that
 	// happened to be drained by the caller is a pool working correctly, not a
-	// flag stuck on — and asserting on one dispatch made this fail about one run
+	// flag stuck on - and asserting on one dispatch made this fail about one run
 	// in four on a loaded machine. What the retry cannot hide is the thing being
 	// checked: a flag that stayed on keeps every attempt single-threaded.
 	CHECK(PoolParticipates(COUNT));
@@ -461,7 +461,7 @@ TEST_CASE("a forced dispatch still rethrows on the caller", "[parallel][jobs]") 
 		Jobs::For(1u << 20u, 64, [](size_t, size_t) { throw std::runtime_error("boom"); }), std::runtime_error
 	);
 
-	// The pool is released, so the next dispatch is not stranded — the same
+	// The pool is released, so the next dispatch is not stranded - the same
 	// property the pooled path promises, checked on this path too. It would
 	// hang rather than fail if it were wrong, which is why it is a bare call
 	// and not an assertion.

@@ -2,7 +2,7 @@
 
 // Where chunks actually live on a disk.
 //
-// CDN.md §7 listed "the chunk store — how chunks are laid out on disk" as *not
+// CDN.md §7 listed "the chunk store - how chunks are laid out on disk" as *not
 // started*, and `cdn::PayloadSource` was left as the seam so that an undecided
 // layout would not get baked into the request path. This decides it, and it
 // decides it here rather than in the origin for the reason the manifest is here:
@@ -22,7 +22,7 @@
 // **Chunks are stored uncompressed and that is not an oversight.** Dedup and
 // patching work on chunk boundaries, and a compressed chunk store would trade
 // the property content addressing exists for against a ratio the delivery group
-// already gets. Two levels, two jobs: chunks are storage, groups are delivery —
+// already gets. Two levels, two jobs: chunks are storage, groups are delivery -
 // `assets/AGENTS.md` and CDN.md §5.
 //
 // **Every read verifies.** A chunk's name *is* the hash of its bytes, so
@@ -48,7 +48,7 @@ namespace engine::assets {
 	// A directory of content-addressed chunks.
 	//
 	// **One owner, one thread** for writing. Reads take no lock and no shared
-	// state, so a mounted store may be read from several threads at once — the
+	// state, so a mounted store may be read from several threads at once - the
 	// filesystem is doing the work and the object holds only a path.
 	//
 	// @since v0.9
@@ -102,7 +102,7 @@ namespace engine::assets {
 		// Reassembles one asset from its chunks.
 		//
 		// The result is verified against the asset's root, so a caller gets
-		// either the asset or nothing — never a run of chunks that individually
+		// either the asset or nothing - never a run of chunks that individually
 		// verified and together are not the asset.
 		//
 		// @param asset The manifest's entry for it.
@@ -127,7 +127,7 @@ namespace engine::assets {
 
 		// Reads the manifest and the signature that was published with it.
 		//
-		// The file is the 64-byte signature followed by the manifest bytes —
+		// The file is the 64-byte signature followed by the manifest bytes -
 		// **the signature first**, so a reader knows what to verify before it
 		// has parsed anything. A reader that parsed first and checked after
 		// would be running a parser over unverified bytes, which is the

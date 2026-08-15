@@ -50,8 +50,8 @@ will eventually be added to one in a different unit.
 Grouped, and `.clang-format` regroups them:
 
 1. This file's own header, if it is a `.cpp`.
-2. `<engine/...>` — first-party.
-3. Vendor — `<SDL3/...>`, `<glm/...>`, `<spdlog/...>`.
+2. `<engine/...>` - first-party.
+3. Vendor - `<SDL3/...>`, `<glm/...>`, `<spdlog/...>`.
 4. The standard library.
 
 Angle brackets for anything reachable through an include directory, quotes only
@@ -66,7 +66,7 @@ include says which side of the module boundary the file is on.
 in `src/` is unreachable from another module, and CMake enforces it. Put a
 thing in `src/` unless another module needs it.
 
-`#pragma once`. Include what you use. Forward-declare where you can —
+`#pragma once`. Include what you use. Forward-declare where you can -
 `Renderer.hpp` declares `struct SDL_Window;` rather than including SDL, and
 that one line is why `Instance` and `Camera` are usable without a graphics API.
 
@@ -86,7 +86,7 @@ SDL_UploadToGPUBuffer(copy, &source, &destination, true);
 Good reasons to write one:
 
 - The obvious thing is wrong here, and this explains why.
-- There is a constraint from outside this file — an API's convention, a
+- There is a constraint from outside this file - an API's convention, a
   platform's behaviour, a format's layout.
 - A future reader will want to "simplify" this and break it.
 - A number was chosen rather than derived, and this is where it came from.
@@ -98,7 +98,7 @@ function that should have been two functions.
 The first twenty lines of `FrameGraph.hpp` explain why it exists next to Tracy;
 that is the question a reader arrives with.
 
-**British or American spelling — pick one per file and do not churn.** The
+**British or American spelling - pick one per file and do not churn.** The
 codebase leans British (`Colour` in local code, `Color3` where it mirrors the
 Roblox type). Matching the surrounding file matters more than either.
 

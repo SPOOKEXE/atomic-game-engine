@@ -6,7 +6,7 @@
 // reached and whether it will let you in; an announcement carries what the
 // session is *for*, so a client does not list the studio next door and the
 // studio does not list a content origin. So each is a type rather than a bool
-// that loses its meaning at the first hop — `engine::net::Enums.hpp`'s rule,
+// that loses its meaning at the first hop - `engine::net::Enums.hpp`'s rule,
 // applied one layer up.
 //
 // **All three are closed lists whose ordinals reach a wire.** A value may be
@@ -23,7 +23,7 @@ namespace network {
 	// The UDP port a LAN announcement is broadcast to.
 	//
 	// Fixed rather than configurable-by-default, because discovery only works
-	// when both ends already agree — a port somebody has to set on the host and
+	// when both ends already agree - a port somebody has to set on the host and
 	// on every client is a port that will be set on some of them. It is still a
 	// setting, for the one case that needs it: two unrelated sessions sharing a
 	// subnet, which is a LAN party running two games.
@@ -53,7 +53,7 @@ namespace network {
 		// Reached through a rendezvous point, by punching both NATs.
 		Peer = 2,
 
-		// An address somebody supplied — a command line, a config file, a
+		// An address somebody supplied - a command line, a config file, a
 		// server list.
 		Remote = 3,
 	};
@@ -62,7 +62,7 @@ namespace network {
 	//
 	// **A third value was deliberately not added.** "Invite only" and "friends
 	// of the host" are decisions about *who a person is*, and nothing at this
-	// layer knows what a person is — that belongs where accounts are, one
+	// layer knows what a person is - that belongs where accounts are, one
 	// authority up. What this can honestly express is whether joining needs a
 	// secret both ends already hold, and that is one bit.
 	//

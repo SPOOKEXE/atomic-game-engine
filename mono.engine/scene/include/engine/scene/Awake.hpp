@@ -4,7 +4,7 @@
 //
 // **The half of occupancy a host cannot work out for itself.**
 // `world::DecideLifecycle` suspends a world nobody is using, and what a host can
-// see is players and — in an editor — viewports. A world whose NPCs are walking
+// see is players and - in an editor - viewports. A world whose NPCs are walking
 // a route, whose shop is restocking, or which is counting down between rounds is
 // indistinguishable from an abandoned one from there. `scene::AwakeWorld` is the
 // game saying otherwise, and this is the pair of calls that read and write it.

@@ -32,6 +32,32 @@ namespace engine::world {
 		return Hosts[id.Index];
 	}
 
+	namespace {
+		// Which of two envelopes the barrier applies first.
+		//
+		// **`(From.Text(), Sequence)`, and the text half is rule 4 rather than a
+		// preference.** `Name::Id()` is handed out in interning order, so it
+		// depends on which world was named first *in this process* - a universe
+		// restored from a snapshot interns in file order where the run that wrote
+		// it interned in creation order, and the same two envelopes then apply in
+		// the opposite order. That is a replay diverging from its recording
+		// through the one mechanism meant to prevent it.
+		//
+		// `SortedKeys` below already argues exactly this for the snapshot codec.
+		// The barrier's sort is the same rule and had the same bug: it compared
+		// ids until v0.17.
+		//
+		// The comparison costs a string compare where it used to cost an integer
+		// one, over a range that is already nearly sorted - each world's outbox is
+		// ordered by construction, so this is a merge of sorted runs.
+		bool Earlier(const std::pair<World *, Envelope> &left, const std::pair<World *, Envelope> &right) {
+			if (left.second.From != right.second.From) {
+				return left.second.From.Text() < right.second.From.Text();
+			}
+			return left.second.Sequence < right.second.Sequence;
+		}
+	}
+
 	bool BusRouter::Deliver(WorldId id, Delivery delivery) {
 		if (!id.IsValid() || id.Index >= Fanout.size()) {
 			return false;
@@ -40,7 +66,12 @@ namespace engine::world {
 		return true;
 	}
 
-	void BusRouter::ApplyEnvelope(World &sender, const Envelope &envelope, const WorldDirectory &directory) {
+	void BusRouter::ApplyEnvelope(
+		World &sender,
+		const Envelope &envelope,
+		const WorldDirectory &directory,
+		const UniverseSettings &settings
+	) {
 		const uint32_t key = envelope.Key.Id();
 
 		// The reply this operation produces, if it asked for one. Built here
@@ -221,6 +252,110 @@ namespace engine::world {
 			Deliver(destination, std::move(arrival));
 			break;
 		}
+
+		case BusKind::Channel: {
+			auto &channels = Backends.Channels;
+			auto &open = channels.Open;
+
+			// **Opening a channel is `Subscribe` one bus along**, which is
+			// `BusOperation`'s argument: the act is the same one and the kind is
+			// what tells them apart. What differs from `Messaging` is who the
+			// list is for - a topic's subscribers are fanned out to, and a
+			// channel's are *checked* before one addressed delivery is made.
+			if (envelope.Operation == BusOperation::Subscribe) {
+				// **The one refusal on this bus a world earns for itself, and it
+				// is refused *here* because here is the only place that knows.** A
+				// world's own store cannot count its channels without holding a
+				// second copy of the router's table, and the copy would drift the
+				// first time an open was refused. So the authority rations it at
+				// the barrier and the world is told by reply, which is why
+				// `Postbox::OpenChannel` hands back a ticket where `CloseChannel`
+				// beside it hands back a boolean.
+				//
+				// Named in the log as well, because the one caller that cannot
+				// read the reply is a script: `CrossWorldService:OpenChannel`
+				// returns the channel's signal on the spot, so the verdict a
+				// barrier later has nowhere to be returned to.
+				if (!channels.OpenFor(key, sender.Id().Index, settings.ChannelsPerWorld)) {
+					ENGINE_WARN(
+						"world '{}' holds {} channels and asked for '{}'. See "
+						"UniverseSettings::ChannelsPerWorld.",
+						sender.Name().Text(),
+						settings.ChannelsPerWorld,
+						envelope.Key.Text()
+					);
+					reply.Status = BusStatus::TooManyChannels;
+				}
+				break;
+			}
+			if (envelope.Operation == BusOperation::Unsubscribe) {
+				channels.CloseFor(key, sender.Id().Index);
+				break;
+			}
+			if (envelope.Operation != BusOperation::Send) {
+				reply.Status = BusStatus::Unsupported;
+				break;
+			}
+
+			// **Four refusals, and each is a different thing to go and fix.**
+			// `Bus.hpp`'s table is the contract; this is where it is enforced,
+			// and the order matters - a closed channel on a world that is not
+			// there should name the world, because that is the first thing wrong.
+			const WorldId destination = directory.Find(envelope.Target);
+			if (!destination.IsValid()) {
+				// **Named rather than silent.** A publish with no subscribers is
+				// a quiet afternoon; a message addressed to a world that is not
+				// running is a sender holding a name nothing answers to, and it
+				// wants to know. `MessagingService` cannot tell the difference
+				// and this can, which is half the reason to have it.
+				reply.Status = BusStatus::NoSuchWorld;
+				break;
+			}
+
+			if (directory.Reach(destination)->State() == WorldState::Faulted) {
+				// The supervisor is about to restore it from its snapshot, which
+				// takes its inbox with it - so this would be accepted and then
+				// thrown away. A **suspended** world is deliberately not refused:
+				// its inbox is what wakes it, which is
+				// `LifecycleInputs::InboxWaiting`.
+				reply.Status = BusStatus::WorldNotReady;
+				break;
+			}
+
+			const auto listening = open.find(key);
+			if (listening == open.end() || !listening->second.contains(destination.Index)) {
+				// **The channel half of the address, refused by name.** Without
+				// this a send to a channel nobody opened would be delivered and
+				// then dropped by whatever was listening for something else,
+				// which is the v0.15 shape this replaces.
+				reply.Status = BusStatus::NoSuchChannel;
+				break;
+			}
+
+			if (ChannelQueued[destination.Index] >= settings.ChannelQueueLimit) {
+				// **The bound made visible.** `UniverseSettings::
+				// ChannelQueueLimit` carries the argument; what matters here is
+				// that the sender is told, because it is the only party that can
+				// slow down.
+				reply.Status = BusStatus::Overflow;
+				break;
+			}
+
+			Delivery arrival;
+			arrival.Bus = BusKind::Channel;
+
+			// **`Key` is the channel and `From` is the sender**, which is
+			// `Messaging`'s shape. v0.15 put the sender in both because there was
+			// no channel to name.
+			arrival.Key = envelope.Key;
+			arrival.From = sender.Name();
+			arrival.Payload = envelope.Payload;
+
+			if (Deliver(destination, std::move(arrival))) {
+				ChannelQueued[destination.Index]++;
+			}
+			break;
+		}
 		}
 
 		if (envelope.Reply.Expected()) {
@@ -231,7 +366,7 @@ namespace engine::world {
 	BarrierCounts BusRouter::Route(const WorldDirectory &directory, const UniverseSettings &settings) {
 		// Resized and cleared, never reassigned. `assign(N, {})` destroys every
 		// per-world vector and default-constructs a replacement, which throws
-		// away the capacity each world built up — once per world per tick,
+		// away the capacity each world built up - once per world per tick,
 		// forever. Clearing keeps the buffer, which is this version's standing
 		// discipline: preallocate and reuse by default.
 		Fanout.resize(directory.Registry.size());
@@ -240,14 +375,18 @@ namespace engine::world {
 			pending.clear();
 		}
 
+		// Reset with the fanout, which is what makes `ChannelQueueLimit` a
+		// per-barrier bound rather than a lifetime one.
+		ChannelQueued.assign(directory.Registry.size(), 0);
+
 		// Every pending envelope from every world, stamped with its sender and
-		// sorted by `(From, Sequence)`.
+		// sorted by `(From.Text(), Sequence)` - see `Earlier`.
 		//
 		// The sort is what makes this deterministic: two worlds publishing in
 		// the same tick would otherwise be applied in whatever order the world
 		// list happened to be walked in, and a replay would diverge. Each
 		// world's outbox is already ordered by construction, so this is a merge
-		// of sorted runs rather than a general sort — and `std::stable_sort`
+		// of sorted runs rather than a general sort - and `std::stable_sort`
 		// over a nearly-sorted range is close to linear.
 		std::vector<std::pair<World *, Envelope>> traffic;
 
@@ -255,7 +394,7 @@ namespace engine::world {
 
 		if (Replaying) {
 			// A replayed world re-derives the same requests it made the first
-			// time, so its outbox is discarded rather than merged — applying
+			// time, so its outbox is discarded rather than merged - applying
 			// both copies would double every operation.
 			for (const auto &world : directory.Registry) {
 				if (world == nullptr) {
@@ -280,7 +419,7 @@ namespace engine::world {
 			// actually happened.
 			Applied.clear();
 			for (const auto &[sender, envelope] : traffic) {
-				ApplyEnvelope(*sender, envelope, directory);
+				ApplyEnvelope(*sender, envelope, directory, settings);
 				Applied.push_back(envelope);
 			}
 			counts.BusOperations = traffic.size();
@@ -322,15 +461,10 @@ namespace engine::world {
 
 		if (settings.Federated) {
 			// The buses are somebody else's. Collected, stamped, ordered the
-			// same way — and then handed up the link instead of applied,
+			// same way - and then handed up the link instead of applied,
 			// because a host that answered its own DataStore read would be a
 			// second source of truth for the same key.
-			std::stable_sort(traffic.begin(), traffic.end(), [](const auto &left, const auto &right) {
-				if (left.second.From.Id() != right.second.From.Id()) {
-					return left.second.From.Id() < right.second.From.Id();
-				}
-				return left.second.Sequence < right.second.Sequence;
-			});
+			std::stable_sort(traffic.begin(), traffic.end(), Earlier);
 
 			Applied.clear();
 			for (auto &[sender, envelope] : traffic) {
@@ -344,7 +478,7 @@ namespace engine::world {
 
 		// What hosts handed over, merged in as though those worlds were local.
 		// Their `From` was checked against the host that sent it in `Ingest`, so
-		// by here a remote envelope is exactly as trusted as a local one — which
+		// by here a remote envelope is exactly as trusted as a local one - which
 		// is the point: one routing path, not two.
 		for (Envelope &envelope : Ingested) {
 			World *sender = directory.Reach(directory.Find(envelope.From));
@@ -354,16 +488,11 @@ namespace engine::world {
 		}
 		Ingested.clear();
 
-		std::stable_sort(traffic.begin(), traffic.end(), [](const auto &left, const auto &right) {
-			if (left.second.From.Id() != right.second.From.Id()) {
-				return left.second.From.Id() < right.second.From.Id();
-			}
-			return left.second.Sequence < right.second.Sequence;
-		});
+		std::stable_sort(traffic.begin(), traffic.end(), Earlier);
 
 		Applied.clear();
 		for (const auto &[sender, envelope] : traffic) {
-			ApplyEnvelope(*sender, envelope, directory);
+			ApplyEnvelope(*sender, envelope, directory, settings);
 
 			// Retained in applied order, which is what a recording records. A
 			// replay that re-sorted would be trusting this build's comparator
@@ -390,7 +519,7 @@ namespace engine::world {
 			if (index < directory.Hosts.size() && directory.Hosts[index].IsValid()) {
 				// A world that lives elsewhere has no inbox here. What the
 				// barrier decided for it goes out to its host instead, and the
-				// count is the same count — a delivery is a delivery whichever
+				// count is the same count - a delivery is a delivery whichever
 				// process ends up holding it.
 				delivered += Fanout[index].size();
 				for (Delivery &delivery : Fanout[index]) {
@@ -411,7 +540,7 @@ namespace engine::world {
 
 			// Swapped, not assigned. `SetResource` copies, and a resource
 			// column holding a non-trivial type *destroys and re-copies* on
-			// assignment — so handing over an inbox this way used to free the
+			// assignment - so handing over an inbox this way used to free the
 			// world's delivery buffer and allocate a new one every barrier, per
 			// world, whether or not anything had arrived.
 			//
@@ -425,7 +554,7 @@ namespace engine::world {
 				// **An empty barrier leaves a full inbox alone.** A barrier runs
 				// once per host frame and a world's systems run at the world's
 				// own tick rate, so a host drawing faster than it ticks holds
-				// two or three barriers per tick — this editor measured 200
+				// two or three barriers per tick - this editor measured 200
 				// against 91. Replacing unconditionally therefore handed the
 				// world an empty buffer and took an unread delivery away with
 				// it, and a teleport could be sent, routed, delivered and lost.
@@ -434,7 +563,7 @@ namespace engine::world {
 				// carry mail is the case this file's opening line is about: a
 				// world that forgets to drain misses messages rather than
 				// accumulating a backlog. What clears a read inbox is the tick
-				// that read it — `world::World::Tick` — which is the only place
+				// that read it - `world::World::Tick` - which is the only place
 				// that knows a tick happened at all.
 				if (!Fanout[index].empty()) {
 					inbox->Arrived.swap(Fanout[index]);
@@ -442,9 +571,9 @@ namespace engine::world {
 				} else if (!inbox->Arrived.empty() && store.Time().Tick != DeliveredAt[index]) {
 					// The world's clock has moved since this arrived, so its
 					// systems have had their look. Dropped here rather than
-					// replaced, which is the same promise this file opens with —
+					// replaced, which is the same promise this file opens with -
 					// a system that forgets to drain misses messages rather than
-					// accumulating a backlog — now kept without also taking mail
+					// accumulating a backlog - now kept without also taking mail
 					// from a world that never got a tick to read it in.
 					inbox->Arrived.clear();
 				}
@@ -583,32 +712,64 @@ namespace engine::world {
 			}
 			return bytes;
 		}
+
+		// A name-to-worlds table, written by world *name* and never by index.
+		//
+		// **One writer for the topics and the channels**, because they are the
+		// same shape and a second copy would agree with this one until the day
+		// somebody fixed only one of them. An index means something different in
+		// the process that reads this, which is why the names go out as text.
+		using Listeners = std::unordered_map<uint32_t, std::unordered_set<uint32_t>>;
+
+		void
+		WriteListeners(core::ByteWriter &writer, const Listeners &table, const WorldDirectory &directory) {
+			const std::vector<uint32_t> keys = SortedKeys(table);
+			writer.WriteUInt32(static_cast<uint32_t>(keys.size()));
+
+			for (const uint32_t key : keys) {
+				writer.WriteName(core::Name::FromId(key));
+
+				// Only the ones that still exist, so a restored universe does not
+				// carry subscriptions for worlds nobody will recreate. Sorted by
+				// name for the same reason the keys are.
+				std::vector<std::string_view> names;
+				for (const uint32_t index : table.at(key)) {
+					if (index < directory.Registry.size() && directory.Registry[index] != nullptr) {
+						names.push_back(directory.Registry[index]->Name().Text());
+					}
+				}
+				std::sort(names.begin(), names.end());
+
+				writer.WriteUInt32(static_cast<uint32_t>(names.size()));
+				for (const std::string_view name : names) {
+					writer.WriteString(name);
+				}
+			}
+		}
+
+		// Reads one back over whatever is there.
+		//
+		// A listener naming a world the reader does not hold is dropped rather
+		// than refused: the worlds block is read first, so by here the registry is
+		// everything this snapshot is going to have.
+		void ReadListeners(core::ByteReader &reader, Listeners &table, const WorldDirectory &directory) {
+			const uint32_t keys = reader.ReadUInt32();
+			for (uint32_t index = 0; index < keys && !reader.Failed(); index++) {
+				const core::Name key = reader.ReadName();
+				const uint32_t listeners = reader.ReadUInt32();
+
+				for (uint32_t listener = 0; listener < listeners && !reader.Failed(); listener++) {
+					const WorldId id = directory.Find(core::Name(reader.ReadString()));
+					if (id.IsValid()) {
+						table[key.Id()].insert(id.Index);
+					}
+				}
+			}
+		}
 	}
 
 	void BusRouter::WriteBuses(core::ByteWriter &writer, const WorldDirectory &directory) const {
-		// Subscribers by world *name*, never by index: an index means something
-		// different in the process that reads this.
-		const std::vector<uint32_t> topics = SortedKeys(Backends.Messaging.Subscribers);
-		writer.WriteUInt32(static_cast<uint32_t>(topics.size()));
-		for (const uint32_t topic : topics) {
-			writer.WriteName(core::Name::FromId(topic));
-
-			// Only the ones that still exist, so a restored universe does not
-			// carry subscriptions for worlds nobody will recreate. Sorted by
-			// name for the same reason the topics are.
-			std::vector<std::string_view> names;
-			for (const uint32_t index : Backends.Messaging.Subscribers.at(topic)) {
-				if (index < directory.Registry.size() && directory.Registry[index] != nullptr) {
-					names.push_back(directory.Registry[index]->Name().Text());
-				}
-			}
-			std::sort(names.begin(), names.end());
-
-			writer.WriteUInt32(static_cast<uint32_t>(names.size()));
-			for (const std::string_view name : names) {
-				writer.WriteString(name);
-			}
-		}
+		WriteListeners(writer, Backends.Messaging.Subscribers, directory);
 
 		const std::vector<uint32_t> values = SortedKeys(Backends.Memory.Values);
 		writer.WriteUInt32(static_cast<uint32_t>(values.size()));
@@ -635,21 +796,17 @@ namespace engine::world {
 			writer.WriteUInt64(Backends.Data.Records.at(key).Version);
 			WriteBytes(writer, Backends.Data.Records.at(key).Value);
 		}
+
+		// **An open channel is universe state, exactly as a topic subscription
+		// is.** A snapshot that dropped it would restore a universe where every
+		// addressed send answers `NoSuchChannel` until each world happened to open
+		// its channels again - which for a world whose open ran once at startup is
+		// never.
+		WriteListeners(writer, Backends.Channels.Open, directory);
 	}
 
 	void BusRouter::ReadBuses(core::ByteReader &reader, const WorldDirectory &directory) {
-		const uint32_t topics = reader.ReadUInt32();
-		for (uint32_t index = 0; index < topics && !reader.Failed(); index++) {
-			const core::Name topic = reader.ReadName();
-			const uint32_t listeners = reader.ReadUInt32();
-
-			for (uint32_t listener = 0; listener < listeners && !reader.Failed(); listener++) {
-				const WorldId id = directory.Find(core::Name(reader.ReadString()));
-				if (id.IsValid()) {
-					Backends.Messaging.Subscribers[topic.Id()].insert(id.Index);
-				}
-			}
-		}
+		ReadListeners(reader, Backends.Messaging.Subscribers, directory);
 
 		const uint32_t values = reader.ReadUInt32();
 		for (uint32_t index = 0; index < values && !reader.Failed(); index++) {
@@ -674,5 +831,13 @@ namespace engine::world {
 			record.Value = ReadBytes(reader);
 			Backends.Data.Records[key.Id()] = std::move(record);
 		}
+
+		ReadListeners(reader, Backends.Channels.Open, directory);
+
+		// The codec fills the table directly - the channels and the topics are one
+		// shape and one writer - so the per-world count is rebuilt from what
+		// landed. Without this a restored world could open the cap again on top of
+		// the channels it came back holding.
+		Backends.Channels.Recount();
 	}
 }

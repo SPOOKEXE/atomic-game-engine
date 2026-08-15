@@ -33,7 +33,7 @@ namespace engine::physics {
 		//
 		// **The order is the whole point.** A world can only hold the resource
 		// if something registered the type first, so an unregistered type is a
-		// complete answer to "is this world prepared" — and it is an answer
+		// complete answer to "is this world prepared" - and it is an answer
 		// reached by a name lookup rather than by the typed one, which would
 		// register the type to tell us it was missing.
 		bool Prepared(const ecs::Store &store) {

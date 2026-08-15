@@ -4,8 +4,8 @@
 //
 // **One internal representation, chosen rather than negotiated.** Every decoder
 // converts to this on the way in and the mixer works in nothing else. The
-// alternative — carrying each source's native format through the graph and
-// converting at the last moment — means every processor is written N times or
+// alternative - carrying each source's native format through the graph and
+// converting at the last moment - means every processor is written N times or
 // carries a switch, and the switch is in the inner loop of the one subsystem
 // with a hard deadline.
 //
@@ -20,7 +20,7 @@
 // interleaved is what every device wants; this engine's graph does far more
 // summing and copying than per-channel filtering, and the device conversion is
 // the one that would happen on the callback thread. Revisit when a filter
-// bank exists and the number says otherwise — `AGENTS.md` asks for a
+// bank exists and the number says otherwise - `AGENTS.md` asks for a
 // measurement beside an algorithm choice, and this one has none yet.
 //
 // @tier L12 · client
@@ -41,7 +41,7 @@ namespace engine::audio {
 
 	// How many channels the graph mixes in.
 	//
-	// Stereo, and the whole engine assumes it in the one place that matters —
+	// Stereo, and the whole engine assumes it in the one place that matters -
 	// `Pan` is a stereo operation. Surround is a change to the mixer's output
 	// stage rather than to the format, and it is not pretended to be supported
 	// by making this a variable nothing honours.
@@ -68,7 +68,7 @@ namespace engine::audio {
 		// Whether this describes audio at all.
 		//
 		// @return False for a zero rate or zero channels, and for more
-		//         channels than the mixer can place — a format nothing can
+		//         channels than the mixer can place - a format nothing can
 		//         play is refused where it is read rather than where it is
 		//         mixed.
 		bool IsValid() const;
@@ -94,7 +94,7 @@ namespace engine::audio {
 		//
 		// @param format The shape.
 		// @param samples Interleaved samples. Its length must be a whole
-		//        number of frames, or the buffer comes back empty — a partial
+		//        number of frames, or the buffer comes back empty - a partial
 		//        frame is a channel count that does not match the data, and
 		//        carrying it would put a stride bug in the mixer.
 		SampleBuffer(AudioFormat format, std::span<const float> samples);
@@ -104,7 +104,7 @@ namespace engine::audio {
 			return Shape;
 		}
 
-		// How many frames — one sample per channel each.
+		// How many frames - one sample per channel each.
 		size_t Frames() const {
 			return Shape.Channels == 0 ? 0 : Samples.size() / Shape.Channels;
 		}
@@ -151,7 +151,7 @@ namespace engine::audio {
 		//
 		// **The mixer's one operation**, and it is here rather than in the
 		// mixer so that the bounds rule lives with the data. Mixing stops at
-		// whichever buffer is shorter rather than reading past either — a bus
+		// whichever buffer is shorter rather than reading past either - a bus
 		// summing a voice that ended mid-block is the ordinary case, not an
 		// error.
 		//

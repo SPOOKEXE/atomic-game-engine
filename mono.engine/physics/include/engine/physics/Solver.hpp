@@ -9,7 +9,7 @@
 // **The solver is serial, and that is a determinism requirement rather than a
 // performance oversight.** Sequential impulse works by visiting contacts one
 // after another and letting each one see the velocities the previous ones left
-// behind — that is the whole method. Two threads visiting the same contact set
+// behind - that is the whole method. Two threads visiting the same contact set
 // in whatever order they got to it produce a different answer every run, and
 // the run that differs is the one somebody recorded. `v02v03v04.md` §3.5 and
 // decision 8 both say serial in as many words. **Do not "fix" this with a
@@ -20,7 +20,7 @@
 // **Sleeping lives here, and `scene::RigidBody` no longer carries a flag for
 // it.** A body that has been still long enough loses its `scene::Motion`, which
 // moves its row out of the dynamic archetype so `IntegrateMotion` and the
-// dynamic half of the broad phase stop visiting it at all — the archetype move
+// dynamic half of the broad phase stop visiting it at all - the archetype move
 // `v02v03v04.md`'s allocation table asks for, done with the components that
 // already exist rather than with a tag no query could exclude. `AGENTS.md` in
 // this directory carries the whole of that decision.
@@ -45,11 +45,11 @@ namespace engine::physics {
 	// 200 stacks of four, minimum sample with the spread beside it. Error is a
 	// six-box tower dropped a millimetre apart and left for four seconds in the
 	// `dev` preset, measured as the furthest any box ends up from the column it
-	// started in — the number that says whether a stack stands up.
+	// started in - the number that says whether a stack stands up.
 	//
 	// The cost column was re-measured after the row layout changed in v0.14; the
 	// error column is from the original run, because the change was arithmetic
-	// — the same sweeps in the same order — and not an algorithm the drift
+	// - the same sweeps in the same order - and not an algorithm the drift
 	// would answer differently.
 	//
 	// | Iterations | Solve, 3520 contacts | Per contact | Tower drift | Bottom sink |
@@ -61,19 +61,19 @@ namespace engine::physics {
 	// | 24 | 2385 us ± 129 | 0.68 us | 24 mm | 0.7 mm |
 	//
 	// Sixteen, because the drift curve flattens between twelve and sixteen and
-	// does not improve after — twenty-four is worse, which is a toppling tower
+	// does not improve after - twenty-four is worse, which is a toppling tower
 	// being chaotic rather than the solver getting worse, and either way it is
 	// not an argument for paying a third more. Below twelve the tower visibly
 	// slumps.
 	//
-	// Cost per contact is flat across scene size — 0.51 us at 3520 contacts,
-	// 0.56 at 18040, 0.55 at 10688 in taller stacks — so it really is a
+	// Cost per contact is flat across scene size - 0.51 us at 3520 contacts,
+	// 0.56 at 18040, 0.55 at 10688 in taller stacks - so it really is a
 	// per-contact figure and a scene's solver budget is a multiplication.
 	//
 	// **The warm start is what makes sixteen enough, and it costs nothing.**
 	// The same benchmark with the impulse cache emptied every tick runs in
 	// 1619 us ± 114, which is inside the spread: the lookup is a binary search
-	// over a sorted array. What it buys is accuracy — the same tower drifts
+	// over a sorted array. What it buys is accuracy - the same tower drifts
 	// 105 mm instead of 13 with the cache emptied, because every tick starts
 	// its search from zero instead of from the answer the previous tick found.
 	inline constexpr size_t SOLVER_ITERATIONS = 16;
@@ -82,7 +82,7 @@ namespace engine::physics {
 	//
 	// Half a millimetre. Under it the contact is reported and solved but the
 	// position correction leaves it alone, which is what stops a resting stack
-	// being pushed apart and falling back every tick — the shiver that has no
+	// being pushed apart and falling back every tick - the shiver that has no
 	// visible cause. Contacts are reported below it because a stack that only
 	// notices its neighbours once they have sunk half a millimetre falls half a
 	// millimetre first.
@@ -94,7 +94,7 @@ namespace engine::physics {
 	// that only ever move positions**, which is what lets this be eight tenths
 	// rather than the two tenths a correction folded into the real velocity has
 	// to settle for. Folded in, the correction is energy: the bodies leave the
-	// contact faster than they arrived, so a stack bounces and — worse — a box
+	// contact faster than they arrived, so a stack bounces and - worse - a box
 	// at rest reports a permanent upward velocity of one tick's gravity, which
 	// no sleeping threshold can tell apart from a box that is genuinely
 	// creeping.
@@ -149,7 +149,7 @@ namespace engine::physics {
 	// `PhysicsWorld::Bodies` and leaves the components alone; `Publish` is what
 	// touches the store.
 	//
-	// Trigger manifolds are gathered and never solved — a trigger reports and
+	// Trigger manifolds are gathered and never solved - a trigger reports and
 	// applies no impulse.
 	//
 	// @param store The world to solve.

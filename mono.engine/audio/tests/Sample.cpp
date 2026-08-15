@@ -95,7 +95,7 @@ TEST_CASE("mixing applies a gain as it adds", "[audio]") {
 
 TEST_CASE("mixing stops at the shorter buffer", "[audio]") {
 	// A bus summing a voice that ended mid-block is the ordinary case, not an
-	// error — so it stops rather than reading past either side.
+	// error - so it stops rather than reading past either side.
 	SampleBuffer into = Flat(STEREO, 8, 0.0f);
 	const SampleBuffer from = Flat(STEREO, 3, 1.0f);
 
@@ -157,7 +157,7 @@ TEST_CASE("halving the rate halves the frames", "[audio]") {
 
 	CHECK(down.Frames() == 50);
 	CHECK(down.Format().SampleRate == 24000);
-	// A flat signal stays flat whatever the ratio — an interpolator that got
+	// A flat signal stays flat whatever the ratio - an interpolator that got
 	// its indexing wrong would show up here as ringing at the ends.
 	CHECK(down.Peak() == 1.0f);
 }

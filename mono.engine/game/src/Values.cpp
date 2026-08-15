@@ -14,7 +14,7 @@ namespace engine::game {
 
 		// Shortest round-trip form, and the reason it is not `std::to_string`.
 		//
-		// `to_string` is `%f` — six decimal places, so 1e-8 writes as "0.000000"
+		// `to_string` is `%f` - six decimal places, so 1e-8 writes as "0.000000"
 		// and 1e20 writes as twenty-one digits of noise. `to_chars` without a
 		// precision produces the shortest text that reads back as the same
 		// float, which is the property a save file needs: loading and re-saving
@@ -203,7 +203,7 @@ namespace engine::game {
 			// text somebody could have edited, so `Material` reading
 			// "Plsatic" has to be refused where it was read rather than
 			// landing in the component and surfacing as a part drawn with
-			// the default for reasons nobody can see — which is exactly what
+			// the default for reasons nobody can see - which is exactly what
 			// `PropertyType::Enum` was added to prevent.
 			if (descriptor.EnumName.IsValid() && !ecs::EnumTable::Has(descriptor.EnumName, value.Name)) {
 				return false;
@@ -261,7 +261,7 @@ namespace engine::game {
 		case PropertyType::Color3:
 			return Number(value.Color3.R) + ", " + Number(value.Color3.G) + ", " + Number(value.Color3.B);
 		case PropertyType::CFrame:
-			// Position then quaternion — seven numbers, and the quaternion
+			// Position then quaternion - seven numbers, and the quaternion
 			// rather than Roblox's nine-float rotation matrix because that
 			// is what `core::CFrame` stores. Writing a matrix would mean
 			// converting on the way out and orthonormalising on the way
@@ -279,8 +279,8 @@ namespace engine::game {
 			// uses, so one parser reads all of them.
 			return Number(value.UDim.Scale) + ", " + Number(value.UDim.Offset);
 		case PropertyType::UDim2:
-			// Four numbers in `UDim2.new`'s order — xScale, xOffset, yScale,
-			// yOffset — and **not** two `UDim` texts joined, which would be a
+			// Four numbers in `UDim2.new`'s order - xScale, xOffset, yScale,
+			// yOffset - and **not** two `UDim` texts joined, which would be a
 			// second nesting the parser would have to learn.
 			return Number(value.UDim2.X.Scale) + ", " + Number(value.UDim2.X.Offset) + ", " +
 				   Number(value.UDim2.Y.Scale) + ", " + Number(value.UDim2.Y.Offset);
@@ -299,13 +299,13 @@ namespace engine::game {
 		// **Semicolons between stops, commas inside one**, which keeps the
 		// number separator the same one every other type in this file uses and
 		// adds exactly one level of nesting rather than a second syntax. A
-		// gradient reads as `0, 1, 0; 1, 0, 0` — three numbers, then three more —
+		// gradient reads as `0, 1, 0; 1, 0, 0` - three numbers, then three more -
 		// and `ParseValue` splits on the semicolon and hands each piece to the
 		// same `Numbers` every other case calls.
 		//
 		// **Only `Count` stops are written.** The array behind them is twenty
 		// long whatever a sequence holds, and writing the tail would put eighteen
-		// zeroed stops at time zero in every file — a gradient that steps to
+		// zeroed stops at time zero in every file - a gradient that steps to
 		// nothing, which is a different value from the one authored.
 		//
 		// An empty sequence writes as empty text and parses back as one, which is
@@ -393,7 +393,7 @@ namespace engine::game {
 		case PropertyType::Enum: {
 			// **Not trimmed, and not rejected when empty.** An instance
 			// name may legitimately have a leading space and an empty name
-			// is a legal state — `ecs::InstanceName` says so. Trimming here
+			// is a legal state - `ecs::InstanceName` says so. Trimming here
 			// would be this file quietly deciding what a name is.
 			out.Name = text.empty() ? core::Name{} : core::Name(text);
 			return true;
@@ -488,7 +488,7 @@ namespace engine::game {
 			}
 			// **Not reordered when the ends arrive backwards.** A range whose
 			// minimum exceeds its maximum is a mistake somebody made, and quietly
-			// swapping it puts a value in the file that nobody typed —
+			// swapping it puts a value in the file that nobody typed -
 			// `Numbers`'s own "exactly, not at least" argument, applied to order
 			// rather than to count. `Span()` goes negative and the consumer sees
 			// it.
@@ -584,7 +584,7 @@ namespace engine::game {
 		case PropertyType::CFrame:
 			return std::memcmp(&left.CFrame, &right.CFrame, sizeof(core::CFrame)) == 0;
 		// **Their own `operator==`, not a `memcmp`.** All four are packed floats
-		// today and a byte compare would agree — until one of them gains a
+		// today and a byte compare would agree - until one of them gains a
 		// padding byte, at which point a byte compare reports two equal values
 		// as different and the document writes a property that did not change.
 		// The `CFrame` case above is the exception and is a `memcmp` because

@@ -18,16 +18,24 @@ namespace engine::scene {
 			const core::Vector3 acceleration = gravity->Acceleration;
 			const float delta = store.Time().Delta;
 
-			store.Each<Motion, const RigidBody>([acceleration,
-												 delta](ecs::Entity, Motion &motion, const RigidBody &body) {
-				// Dynamic only. A static or kinematic body is moved by
-				// whatever owns it, and accelerating it here would fight
-				// that owner rather than adding weight to it.
-				if (body.Kind != BodyKind::Dynamic) {
-					return;
+			// **`Without<Anchored>` is said even though `Motion` already implies
+			// it**, because it no longer follows from `RigidBody`: every part
+			// carries one of those now, so the term that used to mean "the world
+			// may move this" has to be written down. An anchored part has no
+			// `Motion` either, so the set is the same one - and saying so keeps
+			// it the same one the day something hands a `Motion` to a row that
+			// should not have had it.
+			store.Query<Motion, const RigidBody>().Without<Anchored>().Each(
+				[acceleration, delta](ecs::Entity, Motion &motion, const RigidBody &body) {
+					// Dynamic only. A static or kinematic body is moved by
+					// whatever owns it, and accelerating it here would fight
+					// that owner rather than adding weight to it.
+					if (body.Kind != BodyKind::Dynamic) {
+						return;
+					}
+					motion.Linear = motion.Linear + acceleration * delta;
 				}
-				motion.Linear = motion.Linear + acceleration * delta;
-			});
+			);
 		});
 	}
 

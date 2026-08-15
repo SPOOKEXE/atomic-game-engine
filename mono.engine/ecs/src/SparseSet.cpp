@@ -118,7 +118,7 @@ namespace engine::ecs {
 			region.FreeList.pop_back();
 
 			// An entry naming an index whose page was released is not a free
-			// index any more — the high-water mark came back below it, so it is
+			// index any more - the high-water mark came back below it, so it is
 			// one that has never been issued and the fresh path owns it. Each
 			// stale entry is discarded exactly once, which is what keeps the
 			// release amortised rather than a purge.
@@ -134,7 +134,7 @@ namespace engine::ecs {
 				// **Refused, never wrapped.** Handing back an index from the
 				// other region would put a predicted entity on top of one the
 				// authority can mint, which is the failure this whole layout
-				// prevents — and it would happen at the one moment nobody is
+				// prevents - and it would happen at the one moment nobody is
 				// looking. The caller reports it; there is no log here because
 				// a directory does not know whose world it is.
 				return NO_INDEX;
@@ -261,7 +261,7 @@ namespace engine::ecs {
 
 		// Only as far as the pages actually reach. An index past them has never
 		// been touched, so it is neither live nor free-list material and the
-		// walk would only skip it — but a high-water mark restored well ahead of
+		// walk would only skip it - but a high-water mark restored well ahead of
 		// the pages (a snapshot saying "this range is full") would make that
 		// skip two billion iterations long.
 		const size_t reachable = std::min(issued, CoveredSlots(region));

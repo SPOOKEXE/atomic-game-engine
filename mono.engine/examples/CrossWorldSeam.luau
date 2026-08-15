@@ -3,7 +3,7 @@
 --
 -- **The smallest scene that can be captured to prove a cross-world pane shows
 -- the right half of the world it names.** `ImmersivePortals.luau` is the demo
--- and needs the studio — two runs, a play link, a client. This one needs
+-- and needs the studio - two runs, a play link, a client. This one needs
 -- `client --worlds 2 --script CrossWorldSeam.luau`, which builds both worlds in
 -- one process from one file and renders the first, so a still can be taken of
 -- exactly the thing the report is about.
@@ -13,7 +13,7 @@
 -- A hole's camera is placed by `scene::SeamMapping`: one map per pane, carrying
 -- its front hemisphere to the far pane's back one and its back to the far pane's
 -- front. `AimSurfaceCameras` used to compose its own instead, out of a source
--- frame that **flipped with the viewer's side** — which is the pre-v0.15 shape
+-- frame that **flipped with the viewer's side** - which is the pre-v0.15 shape
 -- and is two maps for one pane. A same-world hole stopped noticing when the
 -- recursive pass took its picture over. A cross-world pane still draws from
 -- there, so it kept the bug, and every scene like this one spawns you *behind*
@@ -29,7 +29,7 @@
 -- With the map wrong the camera lands on the other side of the far pane looking
 -- the other way, and the pane shows the far half of that world instead: no pad,
 -- no near marker, just the floor and the one marker behind the block. That is
--- exactly the report — "the other world does not replicate objects, only the
+-- exactly the report - "the other world does not replicate objects, only the
 -- floor".
 --
 -- ## What it turned out to catch as well, and it is one flag apart
@@ -40,20 +40,20 @@
 --     client --worlds 2 --view-spacing 0 --script CrossWorldSeam.luau --frames 40 --capture b.bmp
 --
 -- With **one** world the pane renders: its destination names a world that is not
--- there, so it falls back to showing its own — and the pad and the marker are
+-- there, so it falls back to showing its own - and the pad and the marker are
 -- plainly in the glass. With **two** the same pane draws its own material, flat,
 -- and so does the plain mirror beside it. Two panes, two slots, both blank, and
 -- the only thing that changed is how many worlds are being composited.
 --
 -- **And the difference is one branch, measured in pixels.** Sample the pane in
--- both stills: with one world it is `(11, 13, 21)` and `(59, 42, 28)` — the
+-- both stills: with one world it is `(11, 13, 21)` and `(59, 42, 28)` - the
 -- sub-render's own sky and this world's floor, so an image. With two it is a
 -- uniform `(141, 145, 167)`, which is the pane's material lit, so no image at
 -- all.
 --
 -- The renderer takes a different path for exactly that reason. With no
 -- destination present `SurfaceView::InstanceCount` is zero and the surface pass
--- draws `plan.Reflected` — this world's own rows — which works. With the
+-- draws `plan.Reflected` - this world's own rows - which works. With the
 -- destination present it is six, and the pass draws **only the foreign range**
 -- and skips the plan. That branch is what yields an empty texture, and it is the
 -- one line to instrument next.
@@ -61,7 +61,7 @@
 -- ## And what the sampling turned out not to be
 --
 -- Instrumented and removed: the pane's sampling matrix is **identical** in the
--- run that works and the run that does not — stored and fresh agree, and both
+-- run that works and the run that does not - stored and fresh agree, and both
 -- world counts agree. The far world's rows *are* uploaded at the right slots and
 -- *are* drawn into the surface texture, one call, seventy-two triangles.
 --
@@ -77,7 +77,7 @@
 -- layout and the same stand-in offset, which is why its pane reads as a flat slab
 -- rather than as a room.
 --
--- If that is it, the fix is the scene's and not the engine's — a destination
+-- If that is it, the fix is the scene's and not the engine's - a destination
 -- stand-in has to be placed where the far world's own pane is not, or the far
 -- pane has to be kept out of the picture by tag. Moving the stand-in aside here
 -- did not change the still, so it is not proven and should be measured before it
@@ -94,7 +94,7 @@
 -- ## Which world is which
 --
 -- `--worlds 2` names them `client.world` and `client.world.1`, and the same file
--- runs in both — the arrangement `Mirrors-4-worlds.luau` settled, because one
+-- runs in both - the arrangement `Mirrors-4-worlds.luau` settled, because one
 -- file cannot drift out of agreement with itself.
 
 local workspace = game:GetService("Workspace")
@@ -146,19 +146,19 @@ block("FarMarker", Vector3.new(3, 3, 3), CFrame.new(0, 2, -7), TONE)
 -- and is exactly the arrangement that used to blank the hole: the far world's
 -- slab stands where the surface camera looks, it is the same ten by eight the
 -- frustum is fitted to, and it filled the picture edge to edge. A pane is no
--- longer drawn into the image of a hole that leads back to it — the same rule a
+-- longer drawn into the image of a hole that leads back to it - the same rule a
 -- mirror has always had about itself.
 local pane = block("PortalBlock", BLOCK_SIZE, CFrame.new(BLOCK_AT), Color3.new(0.85, 0.85, 0.9))
 pane.CanCollide = false
 
 -- Where the camera stands, in this world's coordinates. Just behind the block,
--- so the map is nearly the identity and the hole reads as an opening — the same
+-- so the map is nearly the identity and the hole reads as an opening - the same
 -- arrangement `ImmersivePortals.luau` uses and the one the bug hid behind.
 local beyond = block("Beyond", BLOCK_SIZE, CFrame.new(BLOCK_AT + Vector3.new(0, 0, -0.6)), pane.Color)
 beyond.Transparency = 1
 beyond.CanCollide = false
 
--- **Both worlds get one, because a pair has two mouths** — and because the far
+-- **Both worlds get one, because a pair has two mouths** - and because the far
 -- one is the thing that used to fill this one's picture. A pane is no longer
 -- copied into the image of a hole that leads back to it, and this is the scene
 -- that says so: without the rule the glass is one flat colour, with it the far
@@ -176,7 +176,7 @@ end
 
 -- **A plain mirror beside it.** Slots are handed out by `AimSurfaceCameras` in
 -- entity order, so this takes the next one rather than naming it. Same pass, same camera code,
--- same sampling — the only difference is that a mirror draws *this* world's rows
+-- same sampling - the only difference is that a mirror draws *this* world's rows
 -- and the hole draws another world's appended range. So a frame where the mirror
 -- works and the hole does not says the difference is the foreign range, and one
 -- where neither works says it is the surface pass. A discriminator costs one part.

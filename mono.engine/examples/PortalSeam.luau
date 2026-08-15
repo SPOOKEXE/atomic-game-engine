@@ -14,17 +14,17 @@
 -- The straddler is a long bar pointing straight through the hole, five studs of
 -- it on each side of the plane. So:
 --
---   * `side` — the camera off to one side, pane edge-on. Correct is **half a
+--   * `side` - the camera off to one side, pane edge-on. Correct is **half a
 --     bar**: the near five studs and nothing past the plane. A whole bar here
 --     is the duplicate this scene exists to catch.
---   * `front` — square on to the hole. Correct is the near half in this room
+--   * `front` - square on to the hole. Correct is the near half in this room
 --     and the rest continuing inside the picture, meeting at the glass with no
 --     step and no gap.
---   * `far` — the same seam from the far room, where the copy is the near half
+--   * `far` - the same seam from the far room, where the copy is the near half
 --     and the original is what the hole shows.
 --
 -- The control bar is the same bar well clear of the pane. It is never cut, so
--- it is what a whole bar looks like at this distance, in this light — which is
+-- it is what a whole bar looks like at this distance, in this light - which is
 -- the comparison a still frame needs to be worth anything.
 --
 -- ## Why the bar is anchored
@@ -120,7 +120,7 @@ block("Control", Vector3.new(1, 1, BAR), CFrame.new(0, 3, -18), CONTROL)
 
 -- --- light -------------------------------------------------------------------
 --
--- **One lamp, in the near room, close to the hole — because the second thing
+-- **One lamp, in the near room, close to the hole - because the second thing
 -- this scene proves is that its light reaches the other side.** A local light
 -- is mapped through every seam it is within range of, so this one has a copy
 -- behind the far pane shining forward into the far room, exactly where the
@@ -148,7 +148,7 @@ lamp("NearLamp", Vector3.new(0, 8, -7), Color3.fromRGB(70, 220, 255), 320, 60)
 --
 -- **A particle is not a body and is not cut.** It is a point, wholly on one side
 -- of the plane or the other, so it is *moved* through the hole rather than
--- copied — drawing it in both places would be two sparks where one was authored.
+-- copied - drawing it in both places would be two sparks where one was authored.
 -- The visible failure without it is a torch whose flame dies at the seam while
 -- the torch holding it does not.
 --
@@ -185,7 +185,7 @@ block("SpawnLocation", Vector3.new(6, 1, 6), CFrame.new(0, 0.5, -14), NEAR_FLOOR
 -- --- where you stand ---------------------------------------------------------
 
 -- **A line this file rewrites rather than a global.** `_G` is readonly in the
--- script sandbox, so nothing outside a scene can set one — the capture scripts
+-- script sandbox, so nothing outside a scene can set one - the capture scripts
 -- copy the file and substitute the line below, which is the only mechanism that
 -- actually works from a shell.
 local VIEW = ""
@@ -205,7 +205,7 @@ elseif WHICH == "front" then
 	-- join this whole mechanism is about.
 	--
 	-- Off to the near-west so the control bar is behind the camera rather than
-	-- around it — at `z = -16` square on, the eye stands *inside* the control.
+	-- around it - at `z = -16` square on, the eye stands *inside* the control.
 	viewpoint = CFrame.lookAt(Vector3.new(-13, 8, -13), Vector3.new(0, 4, 0))
 elseif WHICH == "far" then
 	-- The far room, looking back at its own pane, where the copy is the half

@@ -12,7 +12,7 @@
 //
 // The trade being accepted, said out loud: it will not look like the host's file
 // dialog, and it will not have the host's places sidebar or its recent-files
-// list. What it does have is the thing that was actually missing — until v0.7
+// list. What it does have is the thing that was actually missing - until v0.7
 // every one of Open, Save As, Import World, Import Universe, Export World and
 // Export Universe asked for a full path to be typed, with no browsing, no
 // completion and no validation until the button was pressed.
@@ -32,7 +32,7 @@ namespace studio {
 	//
 	// @since v0.7
 	struct BrowseEntry {
-		// What to show. The file name only, never the whole path — the path bar
+		// What to show. The file name only, never the whole path - the path bar
 		// above the list already says where you are.
 		std::string Name;
 
@@ -72,7 +72,7 @@ namespace studio {
 	// would be a browser that fails in exactly the places somebody most needs to
 	// look around.
 	//
-	// Hidden entries — a leading dot — are omitted. The studio's own paths do
+	// Hidden entries - a leading dot - are omitted. The studio's own paths do
 	// not need them and a first listing full of `.git` and `.cache` is a listing
 	// nobody can find anything in.
 	//
@@ -80,7 +80,7 @@ namespace studio {
 	//                  parent, so a browser opened on a file's path shows the
 	//                  file's folder rather than an error.
 	// @param extensions Which file suffixes to show, lowercase and with the dot
-	//                   — `{".agame"}`. Empty shows every file. Directories are
+	//                   - `{".agame"}`. Empty shows every file. Directories are
 	//                   never filtered out, or there would be no way to reach a
 	//                   folder containing what you want.
 	// @return The listing. Check `Error` for why an empty one is empty.

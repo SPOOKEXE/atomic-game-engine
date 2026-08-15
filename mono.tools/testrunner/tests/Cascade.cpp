@@ -122,7 +122,7 @@ TEST_CASE("a change cascades through declared dependencies and no further", "[ca
 TEST_CASE("a signature changes when the module's implementation does", "[cascade]") {
 	// **The gap that made the cascade quiet on the most ordinary edit there
 	// is.** A suite is signed over its own translation unit's header closure,
-	// and a module's `src/*.cpp` is in no test's closure — a test includes the
+	// and a module's `src/*.cpp` is in no test's closure - a test includes the
 	// header and links the object. So editing an implementation and nothing
 	// else moved no signature, and `just test` re-ran nothing.
 	Scratch scratch;

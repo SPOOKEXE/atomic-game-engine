@@ -2,7 +2,7 @@
 //
 // **The thing an editor is missing until it has one.** "Anchor everything I
 // have selected", "rename these forty parts", "how many MeshParts are in this
-// model" — each is one line, and without a prompt each is a plugin somebody has
+// model" - each is one line, and without a prompt each is a plugin somebody has
 // to write, put in a folder and reload.
 //
 // ## Why it is one waypoint
@@ -12,8 +12,8 @@
 // commands and the person who typed it thinks of it as one action; forty
 // presses to take it back would make the prompt something nobody dares use.
 //
-// A run that changed nothing commits nothing. Somebody who typed a query — a
-// count, a print — should not find an empty step in their Edit menu afterwards.
+// A run that changed nothing commits nothing. Somebody who typed a query - a
+// count, a print - should not find an empty step in their Edit menu afterwards.
 //
 // ## Why the runtime is kept
 //
@@ -22,14 +22,14 @@
 // rebuilt when the active scene changes, since a runtime is bound to one store.
 //
 // **Its own runtime rather than a plugin's**, so a command cannot spend a
-// plugin's step budget or see its globals — the same reason plugins get one
+// plugin's step budget or see its globals - the same reason plugins get one
 // each.
 //
 // ## What a command cannot do
 //
 // A command runs once and is over: `BeatPlugins` never sees this runtime, so a
 // widget or a toolbar it creates is never drawn and a handler it binds never
-// fires again. That is the boundary rather than an omission — something that
+// fires again. That is the boundary rather than an omission - something that
 // wants to be there next frame is a plugin, and a prompt that could quietly
 // become one would be a plugin nobody can find the file for.
 //
@@ -89,7 +89,7 @@ namespace studio {
 		if (Commands != nullptr) {
 			recording = Commands->TryBeginRecording(COMMAND_WAYPOINT, "Command");
 			if (!recording) {
-				// Somebody else is mid-recording — a plugin that began one and
+				// Somebody else is mid-recording - a plugin that began one and
 				// never finished. Refused rather than run outside it, because a
 				// command whose changes landed in a plugin's undo step is a
 				// command Ctrl+Z takes back at a moment nobody can predict.
@@ -101,7 +101,7 @@ namespace studio {
 		bool ok = false;
 		Universe->Enter(world, [&](engine::ecs::Store &store) {
 			// Rebuilt when the scene changed, because a runtime is bound to one
-			// store — and holding one against a world that has gone is the
+			// store - and holding one against a world that has gone is the
 			// dangling reference this rebuild exists to avoid.
 			if (CommandHost.Vm == nullptr || !(CommandWorld == world)) {
 				engine::script::RuntimeLimits limits;
@@ -137,7 +137,7 @@ namespace studio {
 			ok = CommandHost.Vm->Run(source, "command");
 			if (!ok) {
 				// The whole error, because the person reading it is the person
-				// who typed the line — a truncated message costs them the
+				// who typed the line - a truncated message costs them the
 				// column, which is the only part that matters.
 				Say("command: " + CommandHost.Vm->LastError(), engine::core::LogLevel::Error);
 			}

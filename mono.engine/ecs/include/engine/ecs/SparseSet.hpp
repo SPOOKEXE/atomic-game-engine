@@ -18,7 +18,7 @@
 // **Paged, and a page is freed only once nothing in it is live.** A world of
 // half a million entities would otherwise reallocate one contiguous block and
 // copy it, at the moment it is least affordable. Pages also keep addresses
-// stable, so a caller may hold a location pointer across an unrelated spawn —
+// stable, so a caller may hold a location pointer across an unrelated spawn -
 // and a released page cannot take one with it, because `Locate` hands back
 // nothing for a dead slot in the first place.
 //
@@ -63,7 +63,7 @@ namespace engine::ecs {
 
 		// Minted by a replica for something it predicted locally, before the
 		// authority has said anything about it. Promoted to an authoritative
-		// identity — or dropped — once the authority answers.
+		// identity - or dropped - once the authority answers.
 		Predicted,
 	};
 
@@ -99,8 +99,8 @@ namespace engine::ecs {
 		// allocated whole, and the first one is allocated on the first entity,
 		// so every world pays this much whether it holds ten entities or the
 		// page's worth. That went unnoticed while there was one world: measured
-		// at the scale `ecs/docs/TODO.md` actually names — a thousand small
-		// worlds in one host — a thousand worlds of a hundred entities held
+		// at the scale `ecs/docs/TODO.md` actually names - a thousand small
+		// worlds in one host - a thousand worlds of a hundred entities held
 		// **72.7 MB resident against 2.7 MB of live rows, and 64 MB of it was
 		// directory pages**, because every world was paying a 64 KB entry fee
 		// for a hundred entities. Not the column capacity the TODO blamed.
@@ -111,7 +111,7 @@ namespace engine::ecs {
 
 		// Entities per page after the first.
 		//
-		// Still 4096 — 64 KB — and deliberately unchanged. **Shrinking every
+		// Still 4096 - 64 KB - and deliberately unchanged. **Shrinking every
 		// page rather than only the first was measured and rejected**: it costs
 		// a large world eight times as many allocations, which interleave with
 		// the columns and scatter them, and a multi-world tick over 100k
@@ -126,7 +126,7 @@ namespace engine::ecs {
 		// The generation a never-used index starts at.
 		//
 		// One rather than zero, so that an entity handle packing generation
-		// into its high bits is never all-zero — which is the null handle.
+		// into its high bits is never all-zero - which is the null handle.
 		// Index zero would otherwise produce a valid entity indistinguishable
 		// from NULL_ENTITY.
 		static constexpr uint32_t FIRST_GENERATION = 1;
@@ -174,7 +174,7 @@ namespace engine::ecs {
 		//
 		// Reuse is last-in-first-out, which keeps a spawn-despawn cycle inside
 		// one page instead of walking the directory. **A freed index only ever
-		// comes back in the range it was minted from** — each region keeps its
+		// comes back in the range it was minted from** - each region keeps its
 		// own free list, so a predicted index cannot be recycled as an
 		// authoritative one and the guarantee the split exists for holds across
 		// a spawn-despawn cycle as well as a fresh mint.
@@ -240,7 +240,7 @@ namespace engine::ecs {
 		// The directory's high-water mark, which is what a caller sizing a
 		// parallel array wants. **Counts the authoritative range only**, because
 		// the predicted range is 2³¹ indices further up and nothing sizes an
-		// array across the gap — a caller that wants both walks both.
+		// array across the gap - a caller that wants both walks both.
 		//
 		// @return The highest authoritative index issued, plus one.
 		size_t Capacity() const {
@@ -291,7 +291,7 @@ namespace engine::ecs {
 		//
 		// A snapshot has to reproduce the directory exactly rather than
 		// re-allocating indices in order, because a component may hold an
-		// `Entity` — a hierarchy's parent, a target, an owner — and those
+		// `Entity` - a hierarchy's parent, a target, an owner - and those
 		// handles are only still valid if index *and* generation come back
 		// unchanged.
 		//
@@ -317,8 +317,8 @@ namespace engine::ecs {
 
 		// Brings one index into being at an exact generation.
 		//
-		// What a caller adopting a *single* handle wants — `CreateAt`, and the
-		// per-entity path inside a merge — where `Restore` plus `FinishRestore`
+		// What a caller adopting a *single* handle wants - `CreateAt`, and the
+		// per-entity path inside a merge - where `Restore` plus `FinishRestore`
 		// is the bulk form. One call rather than two so that extending the right
 		// region's high-water mark is decided here instead of at every call
 		// site, which is where getting it wrong would put a predicted index in
@@ -352,7 +352,7 @@ namespace engine::ecs {
 		// space.** The predicted range starts at 2³¹, and a single linear list
 		// would have to allocate half a million pages just to reach its first
 		// index. Each region pages exactly the way the single one used to, so
-		// the small-first-page rule applies to both — and a store that never
+		// the small-first-page rule applies to both - and a store that never
 		// mints a predicted entity allocates no page at all for that region,
 		// because the first one is only made on the first index that needs it.
 		struct Region {
@@ -380,7 +380,7 @@ namespace engine::ecs {
 		//
 		// One place rather than four: `Reach` and both `Peek` overloads had the
 		// same two lines of arithmetic, and two page sizes turn two lines into
-		// four with a branch — which is three more chances for one copy to be
+		// four with a branch - which is three more chances for one copy to be
 		// subtly different from the others.
 		static Seat SeatOf(uint32_t local);
 
@@ -440,7 +440,7 @@ namespace engine::ecs {
 		// How far one region's pages actually reach.
 		//
 		// Summed rather than derived from the page count, so it stays the truth
-		// if the page sizes ever change — and so the test that pins the entry
+		// if the page sizes ever change - and so the test that pins the entry
 		// fee measures the allocation rather than restating the formula.
 		static size_t CoveredSlots(const Region &region);
 

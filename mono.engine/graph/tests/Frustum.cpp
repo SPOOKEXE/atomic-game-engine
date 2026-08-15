@@ -24,7 +24,7 @@ namespace {
 	// A camera at the origin looking down -Z, which is this engine's forward.
 	//
 	// Built through `scene::ResolveCamera` rather than by composing a
-	// projection here — that function is the one place the engine decides what
+	// projection here - that function is the one place the engine decides what
 	// a camera's matrices are, and a frustum derived from a second answer would
 	// be testing agreement with something nothing else uses.
 	//
@@ -94,7 +94,7 @@ TEST_CASE("every plane's normal points inward", "[graph][frustum]") {
 
 TEST_CASE("plane normals are unit length, so distances are metres", "[graph][frustum]") {
 	// A sign test would not need this. `SignedDistance` reports a real
-	// distance, and the sphere test compares it against a radius — so an
+	// distance, and the sphere test compares it against a radius - so an
 	// unnormalised plane would cull spheres at an arbitrary scale.
 	const Frustum frustum = Looking();
 
@@ -188,7 +188,7 @@ TEST_CASE("a surface whose pane nothing can see is not visible", "[graph][cull]"
 	// **The half of "should this mirror redraw" that used not to be asked.** A
 	// content signature says whether the image changed; it cannot say whether
 	// anybody is looking, so a room of eight mirrors redrew all eight on every
-	// frame anything in the world moved — including the ones behind the viewer.
+	// frame anything in the world moved - including the ones behind the viewer.
 	//
 	// Two panes, one in front of a camera at the origin and one well behind it.
 	DrawInstance ahead = At(Vector3{0.0f, 0.0f, -10.0f}, 2.0f);
@@ -199,8 +199,8 @@ TEST_CASE("a surface whose pane nothing can see is not visible", "[graph][cull]"
 
 	const std::vector<DrawInstance> instances{ahead, behind};
 
-	// Each pane's own camera. Neither matters for this case — what decides it
-	// is where the *pane* is — and giving them matrices that see nothing is
+	// Each pane's own camera. Neither matters for this case - what decides it
+	// is where the *pane* is - and giving them matrices that see nothing is
 	// what makes that claim rather than assumes it.
 	engine::graph::SurfaceEye eyes[2];
 	eyes[0].Index = 0;
@@ -222,7 +222,7 @@ TEST_CASE("a surface whose pane nothing can see is not visible", "[graph][cull]"
 TEST_CASE("a surface visible only inside another surface still counts", "[graph][cull]") {
 	// **Two facing mirrors, and a portal seen through a portal.** A pane off the
 	// screen but inside one that is on it has to keep refreshing, or the picture
-	// in the mirror freezes while the mirror itself moves — which is a much
+	// in the mirror freezes while the mirror itself moves - which is a much
 	// louder artefact than the redraw it saves.
 	//
 	// Pane A is in front of the viewer. Pane B is behind the viewer and so is
@@ -264,10 +264,131 @@ TEST_CASE("a surface visible only inside another surface still counts", "[graph]
 	CHECK(visible[1]);
 }
 
+TEST_CASE("a surface two bounces deep counts when the pass will draw it", "[graph][cull]") {
+	// **The bug a screenshot showed and no test did, and it was a mismatch
+	// between two numbers rather than a fault in either.** The grant sweep
+	// followed exactly one level of surface-seen-in-surface. `D00112` made the
+	// surface pass run `Renderer::SetSurfaceBounces` times and resolve a chain
+	// that deep *inside* the frame. So the pass drew level two and this marked it
+	// invisible, and a mirror's deeper reflections were culled rather than late.
+	//
+	// **It showed as a camera angle**, which is what made it hard to place: a
+	// pane directly on screen reveals what it sees for free, so the chain is only
+	// two deep once the first pane has *left* the frustum. Turning far enough to
+	// do that made reflections disappear with the geometry untouched.
+	//
+	// Three panes in a line. Only A is on screen. A's camera sees B, B's camera
+	// sees C. C is therefore two grants away and needs two rounds.
+	DrawInstance a = At(Vector3{0.0f, 0.0f, -10.0f}, 2.0f);
+	a.Surface = 0;
+
+	DrawInstance b = At(Vector3{0.0f, 0.0f, 40.0f}, 2.0f);
+	b.Surface = 1;
+
+	DrawInstance c = At(Vector3{0.0f, 0.0f, 90.0f}, 2.0f);
+	c.Surface = 2;
+
+	const std::vector<DrawInstance> instances{a, b, c};
+
+	Camera looking;
+	looking.NearPlane = 0.1f;
+	looking.FarPlane = 200.0f;
+
+	// **A's far plane stops short of C on purpose**, and the first version of
+	// this case did not do that: with everything on one axis and a two-hundred
+	// unit reach, A saw C directly and the chain was one deep rather than two.
+	// The test passed at one round for a reason that had nothing to do with what
+	// it was written to check.
+	Camera nearSighted;
+	nearSighted.NearPlane = 0.1f;
+	nearSighted.FarPlane = 60.0f;
+
+	engine::graph::SurfaceEye eyes[3];
+
+	// A stands at its own pane and looks down +Z, so B at 40 is in front of it
+	// and C at 90 is past where it can see.
+	eyes[0].Index = 0;
+	eyes[0].ViewProjection =
+		engine::scene::ResolveCamera(
+			CFrame::LookAt(Vector3{0.0f, 0.0f, -10.0f}, Vector3{0.0f, 0.0f, 40.0f}), nearSighted, 16.0f / 9.0f
+		)
+			.ViewProjection;
+
+	// B looks further down +Z, so C is in front of it - and C is in front of
+	// nothing else, which is what makes it exactly two grants away.
+	eyes[1].Index = 1;
+	eyes[1].ViewProjection =
+		engine::scene::ResolveCamera(
+			CFrame::LookAt(Vector3{0.0f, 0.0f, 40.0f}, Vector3{0.0f, 0.0f, 90.0f}), looking, 16.0f / 9.0f
+		)
+			.ViewProjection;
+
+	// C looks away from all of them, so it grants nothing and cannot rescue
+	// itself - without which this would pass for the wrong reason.
+	eyes[2].Index = 2;
+	eyes[2].ViewProjection =
+		engine::scene::ResolveCamera(
+			CFrame::LookAt(Vector3{0.0f, 0.0f, 90.0f}, Vector3{0.0f, 100.0f, 90.0f}), looking, 16.0f / 9.0f
+		)
+			.ViewProjection;
+
+	SECTION("one round reaches one level, which is what it always did") {
+		bool visible[3] = {};
+		const size_t seen = engine::graph::VisibleSurfaces(
+			instances,
+			LookingMatrix(),
+			std::span<const engine::graph::SurfaceEye>(eyes, 3),
+			std::span<bool>(visible, 3),
+			{},
+			1
+		);
+
+		CHECK(seen == 2);
+		CHECK(visible[0]);
+		CHECK(visible[1]);
+		INFO("one round cannot reach a pane two grants away, and must not pretend to");
+		CHECK_FALSE(visible[2]);
+	}
+
+	SECTION("two rounds reach the level a two-bounce pass will draw") {
+		bool visible[3] = {};
+		const size_t seen = engine::graph::VisibleSurfaces(
+			instances,
+			LookingMatrix(),
+			std::span<const engine::graph::SurfaceEye>(eyes, 3),
+			std::span<bool>(visible, 3),
+			{},
+			2
+		);
+
+		CHECK(seen == 3);
+		CHECK(visible[0]);
+		CHECK(visible[1]);
+		CHECK(visible[2]);
+	}
+
+	SECTION("asking for more rounds than the scene has depth changes nothing") {
+		// The early exit's guarantee, stated rather than assumed: a round that
+		// grants nothing stops the loop, so a caller may pass its bounce count
+		// without knowing how deep the scene actually goes.
+		bool visible[3] = {};
+		const size_t seen = engine::graph::VisibleSurfaces(
+			instances,
+			LookingMatrix(),
+			std::span<const engine::graph::SurfaceEye>(eyes, 3),
+			std::span<bool>(visible, 3),
+			{},
+			64
+		);
+
+		CHECK(seen == 3);
+	}
+}
+
 TEST_CASE("a surface with no pane in the draw list is not visible", "[graph][cull]") {
 	// A slot nothing samples is a texture nothing reads, and rendering into it
 	// is work with no consumer. `SurfaceSlotState::Ready` already knows how to
-	// show a pane that has never been drawn — it falls back to its own tint — so
+	// show a pane that has never been drawn - it falls back to its own tint - so
 	// the honest answer costs nothing downstream.
 	DrawInstance plain = At(Vector3{0.0f, 0.0f, -10.0f}, 2.0f);
 	plain.Surface = -1;
@@ -293,7 +414,7 @@ TEST_CASE("a surface's rate cap drops frames rather than queueing them", "[graph
 	// **A surface is a whole scene render and there is no reason it should keep
 	// the screen's rate.** A room of mirrors at 165 hertz is a room of full
 	// scene passes at 165 hertz, and a reflection is already a frame behind by
-	// construction — so `scene::SurfaceCamera::FPS` bounds the staleness instead
+	// construction - so `scene::SurfaceCamera::FPS` bounds the staleness instead
 	// of leaving it at whatever the display does.
 	//
 	// The rule lives in the renderer, where a device is needed to exercise it.

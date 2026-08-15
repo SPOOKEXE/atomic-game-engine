@@ -17,7 +17,7 @@
 // times a second and its cost is the binding's.
 //
 // The rows to watch are the fan-out ones. A `.Changed` connection on one part
-// costs a walk of that part's property list — eleven descriptors — against the
+// costs a walk of that part's property list - eleven descriptors - against the
 // changed component set, and the roadmap's whole objection to the naive design
 // was that filtering a whole-world signal per connection would walk every
 // change for every listener. These rows are what say whether the design avoided
@@ -42,26 +42,26 @@
 // | Luau, 10000 property reads | 1132 us ± 128 |
 //
 // **The heartbeat is 1.7 nanoseconds per connection and flat**, so the fan-out
-// is never the cost — whatever a handler does is.
+// is never the cost - whatever a handler does is.
 //
 // **The `.Changed` rows say the design worked.** The 40.7 us floor is the
 // thousand writes and the barrier, not the fan-out: the listener fires for
 // every changed entity and the watched-set lookup rejects 999 of them. What the
-// fan-out itself costs is the *difference* — about 97 us for a thousand watched
+// fan-out itself costs is the *difference* - about 97 us for a thousand watched
 // instances, or 97 ns each, which is a walk of that part's fourteen descriptors
 // against the changed component. It scales with what somebody watched and not
 // with what moved, which is exactly the property the roadmap objected to
 // `OnChanged<T>` for lacking. The quiet row is the one most ticks take.
 //
-// **`Task · 1000 waits` was 5.7 milliseconds** when this suite was first run —
-// 220 times slower — because `Delay` appended and then `std::sort`ed the whole
+// **`Task · 1000 waits` was 5.7 milliseconds** when this suite was first run -
+// 220 times slower - because `Delay` appended and then `std::sort`ed the whole
 // queue. It is a binary search and an insert now. Nothing else in the tree
 // would have noticed: a scene with a handful of waits pays either version
 // nothing, and the cost only appears once a game schedules them in bulk.
 //
 // A property write is 126 ns through the VM, and a read 113 ns. Most of that is
-// the descriptor scan — a linear walk comparing interned names over the
-// fourteen a `Part` has — and it is the obvious thing to index if a scene ever
+// the descriptor scan - a linear walk comparing interned names over the
+// fourteen a `Part` has - and it is the obvious thing to index if a scene ever
 // makes this the frame's cost. It is not today: 512 parts writing one property
 // each is 65 us against a 16 ms frame.
 //
@@ -196,7 +196,7 @@ using namespace surface_bench;
 // --- the heartbeat fan-out --------------------------------------------------
 //
 // The floor under every scripted tick. The body does nothing, so what is
-// measured is the walk, the snapshot of the count and the live check — not what
+// measured is the walk, the snapshot of the count and the live check - not what
 // a handler costs.
 
 BENCH("Heartbeat · fire 1 connection", 20000) {
@@ -241,7 +241,7 @@ BENCH("Connect and disconnect · 1000 pairs", 200) {
 // --- the change fan-out -----------------------------------------------------
 //
 // **The rows that decide whether the design worked.** The cost should scale
-// with what somebody *watched*, not with what moved — that is the whole reason
+// with what somebody *watched*, not with what moved - that is the whole reason
 // the queue filters on a set rather than walking every change per listener.
 
 BENCH("Changed · 1 watched of 1000 parts, 1000 moved", 500) {
@@ -334,8 +334,8 @@ BENCH("Task · 1000 waits scheduled and resumed", 200) {
 //
 // The one row where an interpreter's cost belongs in the number, because
 // `part.Position = v` is the call a scripted scene makes most and every part of
-// it — the metatable dispatch, the descriptor lookup, the conversion, the
-// change mark — is this engine's.
+// it - the metatable dispatch, the descriptor lookup, the conversion, the
+// change mark - is this engine's.
 
 BENCH("Luau · 10000 property writes", 20) {
 	engine::scene::EnsureClassTree();

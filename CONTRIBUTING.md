@@ -17,7 +17,7 @@ You need:
 | A C++20 compiler | GCC 13+, Clang 16+, MSVC 19.3+ | |
 | `clang-format` | 18+ | `just format`; optional, but a pull request without it says so |
 | `just` | optional | the entry point; raw CMake works too |
-| Python 3 | 3.8+ | **`just setup` only** — see below |
+| Python 3 | 3.8+ | **`just setup` only** - see below |
 
 Nothing in the build or the test suite needs a scripting runtime: the test
 runner is C++ and the architecture check is a CMake script.
@@ -31,10 +31,10 @@ once, on a fresh clone.
 You do **not** need `glslc` installed. It is built from `mono.vendor/shaderc`,
 which is what makes the SPIR-V reproducible between machines. Configure with
 `-DMONO_VENDORED_GLSLC=OFF` to use one from your PATH instead and skip building
-glslang — faster first build, at the cost of whatever version you happen to
+glslang - faster first build, at the cost of whatever version you happen to
 have.
 
-On Linux you will also want the usual X11/Wayland development packages — SDL
+On Linux you will also want the usual X11/Wayland development packages - SDL
 picks its backends at configure time and tells you what it found.
 
 ```sh
@@ -68,12 +68,12 @@ just test-all    # everything
 
 The first one is not a guess. Each suite's signature is a hash of its source,
 every header that source includes, and the signatures of the suites it declares
-a dependency on — so changing a header at the bottom of the stack re-runs
+a dependency on - so changing a header at the bottom of the stack re-runs
 everything above it and nothing else. It prints what it skipped.
 
 `ctest` from a build directory also works and always runs everything.
 
-Tests live with the thing they test — `mono.engine/<module>/tests/`,
+Tests live with the thing they test - `mono.engine/<module>/tests/`,
 `mono.client/tests/`, `mono.server/tests/`, `mono.tools/tests/`. There is no
 central test directory.
 
@@ -85,11 +85,11 @@ central test directory.
 just run --stats --graph
 ```
 
-- **F3** — frame rate, and the shape of the last twenty seconds. The minimum
+- **F3** - frame rate, and the shape of the last twenty seconds. The minimum
   is the interesting number.
-- **F5** — the frame graph. **F6**/**F7** move between views: the flamegraph,
+- **F5** - the frame graph. **F6**/**F7** move between views: the flamegraph,
   time by category, per-system cost, and the metrics counters.
-- **Esc** — quit.
+- **Esc** - quit.
 
 `--uncapped` unpins the frame from your display, which is the only way the
 numbers mean anything. `client --help` lists the rest.
@@ -113,7 +113,7 @@ when you care about the numbers.
 ## Before you open a pull request
 
 **Work through [`docs/CODE_QUALITY.md`](docs/CODE_QUALITY.md).** That is the
-completion checklist — the mechanical gate first, then the review questions,
+completion checklist - the mechanical gate first, then the review questions,
 then what the pull request itself has to say.
 
 It lives there rather than here on purpose. A checklist copied into two files
@@ -149,7 +149,7 @@ Practically, that means: read what it produced before you send it. If you do
 not understand a section, either understand it or take it out. A change nobody
 can explain is a change nobody can fix, and this is a codebase intended to last.
 
-Use AI freely for the parts where it is genuinely good — boilerplate,
+Use AI freely for the parts where it is genuinely good - boilerplate,
 mechanical refactors, working out an unfamiliar API, writing the test you know
 you should write. Be much more careful with it on architecture, on anything
 touching the untrusted parsing boundaries, and on anything where "looks right"
@@ -162,7 +162,7 @@ Always test your code, always benchmark and profile your code, always check if y
 ## Reporting a bug
 
 Say what you did, what happened, and what you expected. A frame from `--stats`
-or `--graph` is worth several paragraphs. Include your GPU backend — the F3
+or `--graph` is worth several paragraphs. Include your GPU backend - the F3
 panel prints it.
 
 For anything touching the sandbox, the game file reader or the network path,
@@ -174,7 +174,7 @@ see `SECURITY.md` before opening a public issue.
 
 **It lives in [`docs/CODE_QUALITY.md`](docs/CODE_QUALITY.md).** A checklist
 copied into two files is two checklists, and within a few months nobody knows
-which one is current — so this section is a pointer, not a copy.
+which one is current - so this section is a pointer, not a copy.
 
 The short version, and where each part is answered in full:
 
@@ -187,8 +187,8 @@ The short version, and where each part is answered in full:
 | Are variables and fields not named generic things? | [8 · Craft](docs/CODE_QUALITY.md#8--craft) |
 | Are there dead code paths you must remove? | [8 · Craft](docs/CODE_QUALITY.md#8--craft) |
 | Have you formatted your code correctly? | [1 · The mechanical gate](docs/CODE_QUALITY.md#1--the-mechanical-gate) |
-| Any 'negative' C++ practices? | [8 · Craft](docs/CODE_QUALITY.md#8--craft) — named, one by one |
-| Any 'negative' general practices? | [8 · Craft](docs/CODE_QUALITY.md#8--craft) — likewise |
+| Any 'negative' C++ practices? | [8 · Craft](docs/CODE_QUALITY.md#8--craft) - named, one by one |
+| Any 'negative' general practices? | [8 · Craft](docs/CODE_QUALITY.md#8--craft) - likewise |
 
 The full checklist also covers the layer stack, the untrusted parsing
 boundaries, thread affinity, and what the pull request itself has to say. Those

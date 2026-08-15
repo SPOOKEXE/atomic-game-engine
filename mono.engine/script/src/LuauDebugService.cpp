@@ -3,7 +3,7 @@
 // **A service rather than a host call, and that is what makes it worth
 // having.** The editor's own panel writes into `Runtime::Debug()` directly; this
 // is the same object reached from Luau, so a *tool* can arm a breakpoint the way
-// a person would — which is the whole shape of "put a breakpoint on every line
+// a person would - which is the whole shape of "put a breakpoint on every line
 // that writes this property" and the reason a debugger is worth scripting at
 // all.
 //
@@ -17,21 +17,21 @@
 // ## Two levels, and the split is real rather than decorative
 //
 // **The high level takes a script instance.** `SetBreakpoint(script, 12)` is
-// what a tool has in its hand — it just walked the tree and found a
-// `LuaSourceContainer` — and it resolves the instance's `Source` property to the
+// what a tool has in its hand - it just walked the tree and found a
+// `LuaSourceContainer` - and it resolves the instance's `Source` property to the
 // chunk name the VM will report. A caller doing that itself would be
 // reimplementing the one mapping that has to agree with the runtime.
 //
 // **The low level takes the chunk name.** `Arm("enemy.luau", 12)` is what the
 // editor's panel and a test have: a path typed by a person, or one read out of a
 // hit that has already happened. It is also the only form that can name a chunk
-// no instance carries — a module required from a file, or a chunk run by
+// no instance carries - a module required from a file, or a chunk run by
 // `Runtime::Run` with a name of its own.
 //
 // Neither is a wrapper over the other's storage. Both write the same
 // `Debugger`, which is the object the runtime consults.
 
-#include "Bindings.hpp"
+#include "LuauBindings.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
@@ -51,7 +51,7 @@ namespace engine::script {
 		// The debugger this VM writes into, or an error saying there is none.
 		//
 		// **Null is a real state rather than an impossible one.** A runtime
-		// built without one — every game runtime — reaches this only because
+		// built without one - every game runtime - reaches this only because
 		// the service was installed, and the service is only installed in a
 		// studio; so this is the belt to the role's braces and it says which of
 		// the two failed.
@@ -71,7 +71,7 @@ namespace engine::script {
 		// mapping in two places.
 		std::string SourceOf(lua_State *state, int index) {
 			// **`lua_type`, not `lua_isstring`.** The second answers true for a
-			// *number* too, because Lua coerces one — so `SetBreakpoint(7, 1)`
+			// *number* too, because Lua coerces one - so `SetBreakpoint(7, 1)`
 			// armed a breakpoint on a chunk called "7" and reported success. A
 			// caller who got the argument order wrong is the likeliest way to
 			// write that, and silently accepting it is a breakpoint that never
@@ -91,7 +91,7 @@ namespace engine::script {
 			const ecs::Store &store = *UpvalueContext(state).World;
 
 			// `Source` is the path a `LuaSourceContainer` was loaded from, which
-			// is exactly what the VM reports as the chunk name — so resolving it
+			// is exactly what the VM reports as the chunk name - so resolving it
 			// here is reading the one fact both ends already agree on.
 			Name path;
 			if (!store.GetProperty(instance, Name("Source"), &path, sizeof(path))) {
@@ -172,7 +172,7 @@ namespace engine::script {
 
 		// `BreakpointService:GetBreakpoints()`
 		//
-		// One table per breakpoint, in the order they were added — which is the
+		// One table per breakpoint, in the order they were added - which is the
 		// order the editor's list draws them in, so a tool and a person are
 		// looking at the same thing in the same sequence.
 		int GetBreakpoints(lua_State *state) {
@@ -285,7 +285,7 @@ namespace engine::script {
 		// `BreakpointService:IsArmed()`
 		//
 		// **What decides whether this runtime is paying for single-step mode**,
-		// which is the one cost of the whole feature — so a tool that arms
+		// which is the one cost of the whole feature - so a tool that arms
 		// breakpoints in a loop can check that it disarmed them again.
 		int IsArmed(lua_State *state) {
 			lua_pushboolean(state, CheckDebugger(state).Armed());
@@ -304,10 +304,7 @@ namespace engine::script {
 			return;
 		}
 
-		static const struct {
-			const char *Name;
-			lua_CFunction Function;
-		} METHODS[] = {
+		static constexpr LuauServiceMethod METHODS[] = {
 			// The high level: a script instance and a line.
 			{"SetBreakpoint", SetBreakpoint},
 			{"RemoveBreakpoint", RemoveBreakpoint},
@@ -321,16 +318,13 @@ namespace engine::script {
 			{"IsArmed", IsArmed},
 		};
 
-		lua_newtable(state);
-		for (const auto &method : METHODS) {
-			lua_pushlightuserdata(state, &context);
-			lua_pushcclosure(state, method.Function, method.Name, 1);
-			lua_setfield(state, -2, method.Name);
-		}
-
 		// A global, which is what makes `game:GetService("BreakpointService")`
-		// find it — that function resolves a service by looking one up, and
-		// `RunService` is the same shape for the same reason.
-		lua_setglobal(state, "BreakpointService");
+		// find it - that function resolves a service by looking one up, and
+		// every other surface service is the same shape for the same reason.
+		ServiceSurface surface;
+		surface.Name = "BreakpointService";
+		surface.LuauMethods = METHODS;
+
+		InstallService(state, surface);
 	}
 }

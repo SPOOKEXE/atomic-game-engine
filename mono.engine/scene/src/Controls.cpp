@@ -26,7 +26,7 @@ namespace engine::scene {
 		// **Just under a right angle, and the gap is the whole reason for the
 		// constant.** At exactly ninety degrees the look direction is parallel to
 		// world up, so the `LookAt` that builds the frame has no way to choose a
-		// roll and the camera spins about its own axis — a gimbal lock that reads
+		// roll and the camera spins about its own axis - a gimbal lock that reads
 		// as the view flipping over. A hundredth of a radian of clearance costs
 		// nothing anybody can see and removes the case entirely.
 		constexpr float PITCH_LIMIT = std::numbers::pi_v<float> * 0.5f - 0.01f;
@@ -61,7 +61,7 @@ namespace engine::scene {
 		// **Before the guards below, and that is deliberate.** A camera that is
 		// disabled or scriptable still belongs to a body that may have just gone
 		// through a hole, and its yaw is still what `ReadMoveIntent` steers by.
-		// Turning it is not "camera control" in the sense the guards are about —
+		// Turning it is not "camera control" in the sense the guards are about -
 		// it is keeping the eye pointing at the thing it was already pointing at.
 		const bool turned = FollowPortalTransit(store);
 
@@ -90,7 +90,7 @@ namespace engine::scene {
 
 		if (turning && (input->MouseDelta.X != 0.0f || input->MouseDelta.Y != 0.0f)) {
 			// **The delta and not the position**, which is what makes a locked
-			// pointer work at all — see `InputState::MouseDelta`.
+			// pointer work at all - see `InputState::MouseDelta`.
 			controller->Angles.Y -= input->MouseDelta.X * controller->Sensitivity;
 			controller->Angles.X -= input->MouseDelta.Y * controller->Sensitivity;
 			controller->Angles.X = std::clamp(controller->Angles.X, -PITCH_LIMIT, PITCH_LIMIT);
@@ -148,7 +148,7 @@ namespace engine::scene {
 		const Vector3 head = subject->Frame.Position + Vector3{0.0f, controller->HeadHeight, 0.0f};
 
 		// The look direction, from the two angles. **Built here rather than
-		// carried**, because the angles are the authority — `CameraController::
+		// carried**, because the angles are the authority - `CameraController::
 		// Angles` says why.
 		const float pitch = controller->Angles.X;
 		const float yaw = controller->Angles.Y;
@@ -176,7 +176,7 @@ namespace engine::scene {
 		// broken from the outside. The body crosses on the tick its own segment
 		// changes side; the eye is metres behind it and does not, so for as long
 		// as the arm straddles the pane the camera watches its subject from the
-		// room it just left — the character reads as teleporting away and
+		// room it just left - the character reads as teleporting away and
 		// turning as it goes, which is exactly the report this closes.
 		//
 		// Put through the same map as a body's placement and velocity, so the
@@ -205,7 +205,7 @@ namespace engine::scene {
 		// already gets from its landing clearance, applied to the eye.
 		//
 		// **After the crossing rather than before it**, because it is the eye's
-		// final resting place that has to be out of the seam — pushing it clear
+		// final resting place that has to be out of the seam - pushing it clear
 		// first and then mapping it through a hole would put it back in.
 		(void)engine::scene::ClearOfPanes(store, eye);
 
@@ -225,7 +225,7 @@ namespace engine::scene {
 		}
 
 		// **Relative to the camera's yaw**, which is why this reads the
-		// controller. W is "away from the camera", not "along -Z" — a game whose
+		// controller. W is "away from the camera", not "along -Z" - a game whose
 		// forward key stopped meaning forward when the camera turned is the one
 		// thing every player notices immediately.
 		const float yaw = controller == nullptr ? 0.0f : controller->Angles.Y;
@@ -257,17 +257,48 @@ namespace engine::scene {
 
 		// **Normalised, so diagonal movement is not faster.** Two keys held gives
 		// a vector of length √2, and a controller that used it directly would make
-		// running diagonally forty per cent quicker — which is the oldest movement
+		// running diagonally forty per cent quicker - which is the oldest movement
 		// bug there is and the one players find first.
 		intent.Direction = wanted.Magnitude() > 0.0f ? wanted.Unit() : Vector3{};
 
 		// **`WasKeyTapped` and not `WasKeyPressed`**, because this is read on a
 		// tick and the other question is about a frame. See `InputState::Pressed`
-		// — a space bar tapped between two ticks is pressed on a frame no tick
+		// - a space bar tapped between two ticks is pressed on a frame no tick
 		// inspects, and reading the frame-shaped edge here is what made both
 		// hosts grow a private `PendingJump` beside this function instead of
 		// through it.
 		intent.Jump = input->Focused && input->WasKeyTapped(KeyCode::Space);
+		return intent;
+	}
+
+	AimIntent ReadAimIntent(const ecs::Store &store) {
+		AimIntent intent;
+
+		const auto *input = store.Resource<InputState>();
+		const auto *active = store.Resource<ActiveCamera>();
+		if (input == nullptr || active == nullptr || active->Entity == ecs::NULL_ENTITY) {
+			return intent;
+		}
+
+		// **The camera's own `Transform` and not the controller's angles.** The
+		// two agree after `PlaceCamera` has run and disagree before it - and a
+		// `Scriptable` camera has no angles at all, so deriving the ray from
+		// yaw and pitch would aim a cutscene's shot wherever the player last
+		// left the mouse.
+		const auto *placement = store.Get<Transform>(active->Entity);
+		if (placement == nullptr) {
+			return intent;
+		}
+
+		intent.Ray = core::Ray(placement->Frame.Position, placement->Frame.LookVector());
+		intent.Aimed = true;
+
+		// **`WasButtonTapped` and not `WasButtonPressed`**, for the reason the
+		// jump above gives: this is read on a tick and the other question is
+		// about a frame, so a click between two ticks would be lost about two
+		// times in three. That latch did not exist until there was something to
+		// act on it.
+		intent.Fired = input->Focused && input->WasButtonTapped(MouseButton::Left);
 		return intent;
 	}
 
@@ -286,7 +317,7 @@ namespace engine::scene {
 		// fight over one body every tick.
 		//
 		// **A world with no `LocalPlayer` drives all of them**, which is not a
-		// second behaviour bolted on — it is the case where the question has no
+		// second behaviour bolted on - it is the case where the question has no
 		// answer. A test world, a single-part scripted character, an examples
 		// scene: none of them has a `Players` service, so "the local player's
 		// character" names nothing and driving what is there is the only useful
@@ -306,13 +337,13 @@ namespace engine::scene {
 		// **A character somebody owns is never the fallback's to drive**, and
 		// this is the correction that makes a hosted world work at all.
 		//
-		// The fallback above — no `LocalPlayer`, so drive every humanoid — is
+		// The fallback above - no `LocalPlayer`, so drive every humanoid - is
 		// right for the worlds it was written for and catastrophic for an
 		// authority. A studio playing both halves, or a dedicated server, has no
 		// `LocalPlayer` and no keyboard: `InputState` sits there unfocused, so
 		// `ReadMoveIntent` returns a zero direction, and the fallback wrote that
 		// zero over the direction a client had just sent through
-		// `game::ApplyMoveInput` — every tick, after the message arrived and
+		// `game::ApplyMoveInput` - every tick, after the message arrived and
 		// before `StepCharacters` read it. `MoveDirection` was therefore always
 		// zero by the time it mattered and no client could walk.
 		//
@@ -358,7 +389,14 @@ namespace engine::scene {
 
 		size_t moved = 0;
 		store.Each<Humanoid>([&](ecs::Entity entity, Humanoid &humanoid) {
-			if (!humanoid.Enabled) {
+			// **Dead is checked beside disabled, because they mean the same thing
+			// to this pass and nothing else.** A disabled humanoid is one a game
+			// took the controls off; a dead one is one the world took them off.
+			// Either way the `Motion` below is left alone, so the body keeps the
+			// momentum it had and gravity does the rest - which is what
+			// "the body stays where it fell" has to mean when nothing here
+			// ragdolls.
+			if (!humanoid.Enabled || IsDead(humanoid)) {
 				return;
 			}
 
@@ -392,7 +430,7 @@ namespace engine::scene {
 
 			// **Upright, and this is the line that stops a character lying
 			// down.** Nothing here runs a balance controller, so a body free to
-			// spin tips over the first time a corner catches it — and a
+			// spin tips over the first time a corner catches it - and a
 			// character face-down on the floor still walks, which reads as a
 			// physics bug rather than a missing feature. Zeroing the rate is
 			// enough: a box that is never given angular velocity never acquires
@@ -409,10 +447,22 @@ namespace engine::scene {
 		return moved;
 	}
 
+	bool IsDead(const Humanoid &humanoid) {
+		// **"Not alive" rather than "at or below zero", which is the same test
+		// for every number except one.** `TakeDamage` clamps at zero and the
+		// `Health` property clamps at zero, but a component written straight
+		// through `Store::Set` or read out of an older file has been through
+		// neither - so this has to answer for a negative, and it has to answer
+		// for a NaN. Written the other way round a NaN compares false against
+		// everything and the character is immortal, which is the one failure
+		// nothing downstream could explain.
+		return !(humanoid.Health > 0.0f);
+	}
+
 	ecs::ClassId HumanoidClass() {
 		// The shape every class accessor in this module shares; `Part.hpp`
 		// carries the argument for both halves. A humanoid derives from the
-		// instance root rather than from a part — what it shares with
+		// instance root rather than from a part - what it shares with
 		// `PartClass` is the registration, which is why that is what is called.
 		static const ecs::ClassId humanoid = (EnsureClassTree(), ecs::Classes::Find(core::Name("Humanoid")));
 		return humanoid;

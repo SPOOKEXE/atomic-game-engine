@@ -5,7 +5,7 @@
 //
 // X25519 (RFC 7748), one message each way, and out the other side come the two
 // directional ciphers ready to use. A caller sends Message(), feeds the peer's
-// to Consume(), and takes the keys — it never sees a key, a scalar or a shared
+// to Consume(), and takes the keys - it never sees a key, a scalar or a shared
 // secret, which is the point: the parts of this that are easy to get wrong are
 // the parts a caller is never handed.
 //
@@ -20,7 +20,7 @@
 // whoever carries the two messages can substitute their own key and hold a
 // session with each side.
 //
-// It is closed at v0.9, and **not here** — which was always the plan: the fix is
+// It is closed at v0.9, and **not here** - which was always the plan: the fix is
 // to bind the exchange to a *server identity*, and this module has no idea what
 // a server is. `replication::Admission` signs its transcript with the Ed25519
 // key `assets` verifies manifests with, and `ConnectorSettings::ServerIdentity`
@@ -33,7 +33,7 @@
 // the default, both ends log it, and it is a deployment choice rather than a
 // property of this code.
 //
-// Time is passed in, never read — the module rule, and here it costs nothing.
+// Time is passed in, never read - the module rule, and here it costs nothing.
 // No step of this has a deadline of its own; a handshake that never finishes is
 // a `Link` sitting in `Connecting` until the handshake timeout it was given.
 //
@@ -63,7 +63,7 @@ namespace engine::net {
 	// Where a handshake is in its one-way lifecycle.
 	//
 	// Forward only, like the connection lifecycle above it. Nothing here returns
-	// to an earlier state and a refused handshake stays refused — a peer that
+	// to an earlier state and a refused handshake stays refused - a peer that
 	// gets one message wrong does not get to try again on the same keys.
 	enum class HandshakeState : uint8_t {
 		AwaitingPeer, ///< Our message is ready to send; the peer's has not arrived.
@@ -116,7 +116,7 @@ namespace engine::net {
 		//
 		// @param role Which side this is.
 		// @return The handshake, or nothing if the operating system refused to
-		//         provide entropy — which is a refusal to connect, never a
+		//         provide entropy - which is a refusal to connect, never a
 		//         fallback to a weaker source.
 		static std::optional<Handshake> Begin(HandshakeRole role);
 
@@ -167,15 +167,15 @@ namespace engine::net {
 		// Consumes the peer's message and derives the keys.
 		//
 		// Every byte of it is hostile. Refuses a message that is not exactly
-		// MESSAGE_BYTES, a public key equal to our own — a reflection, which is
-		// either a loopback wired to itself or somebody echoing — and a key that
+		// MESSAGE_BYTES, a public key equal to our own - a reflection, which is
+		// either a loopback wired to itself or somebody echoing - and a key that
 		// agrees to the all-zero secret, which is what every low-order point on
 		// the curve produces and what RFC 7748 §6.1 asks implementations to
 		// check. Each refusal is terminal.
 		//
 		// Answers false to a second call as well. Consuming twice is either a
 		// replayed packet or two code paths both believing they own the
-		// transition, and accepting it quietly hides both —
+		// transition, and accepting it quietly hides both -
 		// `Link::CompleteHandshake` is not idempotent for the same reason. An
 		// already established handshake is left as it is rather than torn down,
 		// because losing a working session to a duplicate packet would be the

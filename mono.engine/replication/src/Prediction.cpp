@@ -11,7 +11,7 @@ namespace engine::replication {
 
 		// The oldest goes, not the newest. The oldest is the one the server is
 		// most likely to have already consumed, and dropping the newest would
-		// throw away the input the player just made — which is the one they can
+		// throw away the input the player just made - which is the one they can
 		// see not happening.
 		if (Settings_.MaximumPending > 0 && Inputs.size() >= Settings_.MaximumPending) {
 			Inputs.erase(Inputs.begin());

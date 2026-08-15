@@ -15,7 +15,7 @@
 // thing the first time two properties share a name.
 //
 // **Floating point round-trips exactly.** `std::to_chars` shortest form, not a
-// fixed number of decimal places — a save file that lost the low bits of a
+// fixed number of decimal places - a save file that lost the low bits of a
 // position would make loading and re-saving a scene move it, and the movement
 // would be invisible per part and obvious after a hundred loads.
 //
@@ -44,7 +44,7 @@ namespace engine::game {
 	//
 	// **A struct with every field rather than a variant**, because the whole
 	// point is a value crossing between a store, a text field and a document
-	// with its type carried alongside — and the alternative costs a visitor at
+	// with its type carried alongside - and the alternative costs a visitor at
 	// each of the three. At around a hundred bytes it is passed by reference
 	// and never stored in bulk; the property surface is a per-interaction path,
 	// not a per-row one. `Classes.hpp` makes the same argument from the other
@@ -71,7 +71,7 @@ namespace engine::game {
 		double Double = 0.0;
 
 		// Used for both `Name` and `Enum`. The storage is identical and the
-		// contract is not — see `PropertyType::Enum`, which is checked against
+		// contract is not - see `PropertyType::Enum`, which is checked against
 		// `ecs::EnumTable` on the way in.
 		core::Name Name;
 
@@ -116,7 +116,7 @@ namespace engine::game {
 		// **These two are what make the "around a hundred bytes" above wrong**,
 		// and the note is kept rather than corrected because the reasoning it
 		// carries still holds and the number no longer does. A sequence is 328
-		// bytes each, so a `PropertyValue` is now the better part of a kilobyte —
+		// bytes each, so a `PropertyValue` is now the better part of a kilobyte -
 		// which is fine for the same reason a hundred bytes was fine, and only for
 		// that reason: this crosses between a store, a text field and a document
 		// once per interaction, and is never stored in bulk. A `PropertyValue` in
@@ -158,8 +158,8 @@ namespace engine::game {
 
 	// A number as the shortest text that reads back as the same value.
 	//
-	// **Exposed because a document has numbers that are not property values** —
-	// a world's tick rate, a version — and `std::to_string` is `%f`: six decimal
+	// **Exposed because a document has numbers that are not property values** -
+	// a world's tick rate, a version - and `std::to_string` is `%f`: six decimal
 	// places, so it writes 60 as "60.000000" and 1e-8 as "0.000000". One
 	// formatting rule for everything a file holds is the point; two would drift
 	// the first time somebody rounded a tick rate.
@@ -172,7 +172,7 @@ namespace engine::game {
 	//
 	// **A `Reference` formats as empty**, because a handle has no text form
 	// that means anything outside the world holding it. A document that carries
-	// references resolves them itself — see `Game.hpp` — and a properties panel
+	// references resolves them itself - see `Game.hpp` - and a properties panel
 	// shows the target's name, which it has to look up anyway.
 	//
 	// @param value The value.
@@ -206,7 +206,7 @@ namespace engine::game {
 	//
 	// Not `ecs::Describe(PropertyType)`: that one is for a human reading a log
 	// and may be reworded, and this one is in a file format. Two callers, two
-	// stabilities — the same reason a wire format and a log message are never
+	// stabilities - the same reason a wire format and a log message are never
 	// the same string.
 	//
 	// @param type The type.
@@ -216,7 +216,7 @@ namespace engine::game {
 	// The `PropertyType` a document's tag names.
 	//
 	// **Not the inverse of `TypeTag`, on purpose.** `Name` and `String` are both
-	// written `string`, so this answers `Name` for both — whether the engine
+	// written `string`, so this answers `Name` for both - whether the engine
 	// interns a value is a storage decision and a file holds text either way. A
 	// caller checking a file's tag against a schema must therefore compare
 	// *tags* rather than the types they map back to, which is what `Game.cpp`

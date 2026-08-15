@@ -83,7 +83,7 @@ namespace iteration_bench {
 	// `Jobs::For` runs a span inline below `grain * MINIMUM_GRAINS`, so the
 	// default of 4096 refuses to dispatch anything under 32 768 rows and no
 	// count below that can be measured through the pool at all. 1024 puts the
-	// floor at 8192, which is where the ladder starts — so the smallest rung is
+	// floor at 8192, which is where the ladder starts - so the smallest rung is
 	// exactly the marginal case `MINIMUM_GRAINS` describes: eight grains, one
 	// per range, and the whole wake cost paid to hand out eight of them.
 	//
@@ -189,7 +189,7 @@ BENCH("Each · 500k entities", 2) {
 
 BENCH("EachBatch · 10k entities", 100) {
 	// The size where a change to the *layout* is most likely to show. 10k rows of
-	// two twelve-byte components is 240 KB — it fits in L2, so the loop is issue
+	// two twelve-byte components is 240 KB - it fits in L2, so the loop is issue
 	// bound rather than bandwidth bound, and that is the regime where a stride a
 	// compiler can vectorise is worth anything at all. At 500k the same loop is
 	// streaming from DRAM and a wider row is simply more bytes to move.

@@ -10,7 +10,7 @@ namespace testrunner {
 		// CreateProcessW takes one command line, not a list, so the quoting
 		// this header exists to avoid has to happen once, here, correctly.
 		//
-		// These are the rules CommandLineToArgvW parses back — a backslash is
+		// These are the rules CommandLineToArgvW parses back - a backslash is
 		// only special immediately before a quote, which is why the run is
 		// counted rather than every backslash escaped.
 		std::wstring Quote(const std::string &argument) {

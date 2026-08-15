@@ -3,7 +3,7 @@
 //
 // **The point of the seam is that it is the same link.** A connected, admitted,
 // encrypted, reliable session between two processes is expensive to build and
-// this module already has one — so what is checked here is that a caller with
+// this module already has one - so what is checked here is that a caller with
 // something else to say gets that link's guarantees without standing up a
 // fourth session type beside it.
 //
@@ -180,7 +180,7 @@ TEST_CASE("a message is reliable and ordered", "[replication][user]") {
 
 	// **The only promise worth making about a message nobody here
 	// understands.** An unreliable one would be a recovery every caller has to
-	// re-implement, and this module already has a reliable channel — so a
+	// re-implement, and this module already has a reliable channel - so a
 	// shared document does not need a sequence number of its own.
 	for (int index = 0; index < 16; index++) {
 		REQUIRE(pair.Client->SendUser(Bytes("edit " + std::to_string(index)), pair.Now));
@@ -352,7 +352,7 @@ TEST_CASE("a quiet link still acknowledges, so its window never stalls", "[repli
 	// something went quiet.** An acknowledgement rides on an outgoing packet.
 	// Every caller before v0.13 published a world every tick, so one always
 	// went. A session that carries occasional messages and nothing else sends
-	// nothing between them — and without a keep-alive the far side's reliable
+	// nothing between them - and without a keep-alive the far side's reliable
 	// window fills, its payloads are resent to the limit, and a link that is
 	// working perfectly gives up.
 	Pair pair;

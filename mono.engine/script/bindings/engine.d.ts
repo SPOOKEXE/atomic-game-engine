@@ -84,7 +84,7 @@ declare interface ChangedSignal {
 	Equals(other: ChangedSignal): boolean;
 }
 
-// The instance tree's signals, matching the Luau half — undeclared until v0.13
+// The instance tree's signals, matching the Luau half - undeclared until v0.13
 // for the reason given there.
 declare interface InstanceSignal {
 	Connect(handler: (instance: Instance) => void): RBXScriptConnection;
@@ -99,52 +99,160 @@ declare interface AncestrySignal {
 // What an attribute may hold, which is `ecs::AttributeTypeAllowed`'s closed set.
 //
 // **Named at file scope rather than nested**, because TypeScript has no
-// interface-scoped type alias the way the Luau half does — so the name is
+// interface-scoped type alias the way the Luau half does - so the name is
 // prefixed to say where it belongs rather than risking a collision with a game's
 // own `Attribute`.
 // --- input ------------------------------------------------------------------
 //
-// Hand-written for the Luau half's reason: these are globals, not classes.
-declare interface UserInputServiceType {
+// **`UserInputService` is declared here at last, and the history is the reason
+// to say so.** `engine.d.ts` once declared it and `ContextActionService` because
+// its prelude was written by mirroring Luau's, and neither global existed in
+// that VM - a TypeScript file naming one typechecked and then failed. That is
+// the failure `ServiceCatalogue.hpp` opens by naming, and the rule that came out
+// of it is that a declaration here is a claim the catalogue has to back.
+//
+// It does now. `ServiceProperty` gave a live property a neutral shape, so both
+// VMs install `UserInputService` and `SoundService` from one description -
+// `MouseBehavior` and `Volume` are accessors here where they are a userdata's
+// `__index` there - and `engine.script.servicecatalogue` asks a running VM
+// whether every row it claims is reachable.
+//
+// **The two that were absent here are declared now**, which is what
+// `ScriptCall::ReturnBoundAction` bought: `GetBoundActionInfo` and
+// `GetAllBoundActionInfo` answer a record holding `Enum.KeyCode` members, and a
+// record with an `EnumItem` in it still has no `ScriptValue` form - so the *fact*
+// became a `BoundActionReport` and each adapter builds its own record, exactly as
+// each builds its own `InputObject`.
+
+// What a bound action's handler is handed. Roblox's `InputObject`, and the same
+// five fields the Luau half offers over the same report.
+declare interface InputObject {
+	readonly KeyCode: Enum.KeyCode;
+	readonly UserInputType: Enum.UserInputType;
+	readonly UserInputState: Enum.UserInputState;
+
+	// Pixels from the top-left of the window, with the wheel's notches in Z.
+	readonly Position: Vector3;
+	readonly Delta: Vector3;
+}
+
+// What `InputBegan`, `InputEnded` and `InputChanged` call a handler with.
+//
+// Its own type rather than `PropertyChangedSignal`, which passes nothing.
+//
+// `gameProcessedEvent` is true when the 2D interface took the pointer this beat,
+// which is what a click on a `TextButton` is. Always false for a keyboard event:
+// `gui` has no keyboard focus to take one with.
+declare interface InputSignal {
+	Connect(handler: (input: InputObject, gameProcessedEvent: boolean) => void): RBXScriptConnection;
+	Once(handler: (input: InputObject, gameProcessedEvent: boolean) => void): RBXScriptConnection;
+}
+
+// The window's focus edges, which Roblox calls with nothing.
+declare interface WindowFocusSignal {
+	Connect(handler: () => void): RBXScriptConnection;
+	Once(handler: () => void): RBXScriptConnection;
+}
+
+// What `LastInputTypeChanged` calls a handler with.
+declare interface LastInputTypeSignal {
+	Connect(handler: (lastInputType: Enum.UserInputType) => void): RBXScriptConnection;
+	Once(handler: (lastInputType: Enum.UserInputType) => void): RBXScriptConnection;
+}
+
+declare interface UserInputService {
 	MouseBehavior: Enum.MouseBehavior;
+
+	// Whether the pointer is drawn. Separate from `MouseBehavior` because
+	// Roblox's two are; the two locking modes hide it whatever this says.
+	MouseIconEnabled: boolean;
+
 	MouseDeltaSensitivity: number;
 	readonly KeyboardEnabled: boolean;
 	readonly MouseEnabled: boolean;
 
-	readonly InputBegan: PropertyChangedSignal;
-	readonly InputEnded: PropertyChangedSignal;
-	readonly InputChanged: PropertyChangedSignal;
+	// **Present and always false.** There is no gamepad, touch surface, headset
+	// or motion sensor anywhere in `engine::input`, and a Roblox place branches
+	// on these to pick a control scheme - a missing property is `undefined` here
+	// where a false one takes the other branch.
+	readonly GamepadEnabled: boolean;
+	readonly TouchEnabled: boolean;
+	readonly VREnabled: boolean;
+	readonly AccelerometerEnabled: boolean;
+	readonly GyroscopeEnabled: boolean;
+
+	readonly InputBegan: InputSignal;
+	readonly InputEnded: InputSignal;
+
+	// Fires for pointer motion and for the wheel, which are the two things this
+	// engine can report changing.
+	readonly InputChanged: InputSignal;
+
+	// Everything reads as released on the frame focus is lost, and
+	// `WindowFocusReleased` is delivered before those releases so a listener can
+	// tell which explains which.
+	readonly WindowFocused: WindowFocusSignal;
+	readonly WindowFocusReleased: WindowFocusSignal;
+
+	// Which device the player switched to, beside `GetLastInputType`'s poll.
+	readonly LastInputTypeChanged: LastInputTypeSignal;
 
 	IsKeyDown(key: Enum.KeyCode): boolean;
+
+	// False for the three `Enum.UserInputType` members that are not buttons.
 	IsMouseButtonPressed(button: Enum.UserInputType): boolean;
+
 	GetMouseLocation(): Vector2;
 	GetMouseDelta(): Vector2;
 	GetKeysPressed(): Enum.KeyCode[];
+
+	// `InputObject`s and not `EnumItem`s, which is Roblox's shape: the object
+	// carries where the pointer was as well as which button it is.
+	GetMouseButtonsPressed(): InputObject[];
+
+	// `Enum.UserInputType.Keyboard` on a world nobody has touched, where Roblox
+	// answers `None` - there is no such member here.
+	GetLastInputType(): Enum.UserInputType;
+
+	// The `TextBox` a person is typing into, or null. A lookup rather than a
+	// tally of the focus signals: `gui::Focus` is the one door a focus change
+	// goes through and `GuiServiceState::FocusedTextBox` is where it rests.
+	GetFocusedTextBox(): Instance | null;
 }
 
-declare const UserInputService: UserInputServiceType;
+// What `UserInputService` deliberately does not have, and it is the half a
+// migrating author needs most: no gamepad, no touch surface, no cursor image in
+// `render`, no keyboard-layout query below L12. So `GetConnectedGamepads`,
+// `GetGamepadState`, the six touch signals, `MouseIcon` and
+// `GetStringForKeyCode` are absent rather than present and useless.
+// `TextBoxFocused` and its twin are absent for a different reason: the fact
+// exists and reaches a script as `textBox.Focused`, and a world-subject row
+// firing about an instance would put the two input pumps in each other's work.
+// `script/src/UserInputService.cpp` names each one and what closing it would
+// take.
 
-declare interface ContextActionServiceType {
-	BindAction(
-		name: string,
-		handler: (name: string, state: Enum.UserInputState, key: Enum.KeyCode) => void,
-		createTouchButton: boolean,
-		...keys: Enum.KeyCode[]
-	): void;
+// What a world decides about how it is heard. See the Luau half for the eleven
+// Roblox members that are absent and what each would need first.
+declare interface SoundService {
+	// **Not a Roblox property**, which has a `SoundGroup` instead and this
+	// engine has no such class. Linear, 1 being every sound as authored, and
+	// above 1 is legal for the reason `Sound.Volume` is.
+	Volume: number;
 
-	BindActionAtPriority(
-		name: string,
-		handler: (name: string, state: Enum.UserInputState, key: Enum.KeyCode) => void,
-		createTouchButton: boolean,
-		priority: number,
-		...keys: Enum.KeyCode[]
-	): void;
+	// **A pair and not two values, which is the one place this surface reads
+	// differently from Luau's.** A method with more than one answer is a Luau
+	// shape; JavaScript has no multiple return, so `ScriptCall` packs the two
+	// into an array and an author destructures it:
+	//
+	//     const [mode, ear] = SoundService.GetListener();
+	GetListener(): [Enum.ListenerType, Instance | null];
 
-	UnbindAction(name: string): void;
-	UnbindAllActions(): void;
+	// **`Enum.ListenerType` has two members here and four in Roblox.** The two
+	// missing ones place the ear *and turn it*, and the mixer is posted a
+	// position with no facing, so they are absent from the enum rather than
+	// refused by this method.
+	SetListener(listenerType: Enum.ListenerType, listener?: Instance | null): void;
 }
-
-declare const ContextActionService: ContextActionServiceType;
 
 declare type EngineAttribute =
 	| boolean
@@ -169,8 +277,8 @@ declare interface PropertyChangedSignal {
 
 // The 2D tree's input, in two shapes because the arguments differ. See the Luau
 // half for why the three input signals take none: Roblox hands them an
-// `InputObject`, this engine has no such datatype, and a different one invented
-// now would have to change the day one arrives.
+// `InputObject`, and `gui::GuiEvent` carries nothing one could be built from
+// without inventing the field a handler reads it for.
 declare interface GuiSignal {
 	Connect(handler: () => void): RBXScriptConnection;
 	Once(handler: () => void): RBXScriptConnection;
@@ -182,6 +290,24 @@ declare interface PointerSignal {
 	Connect(handler: (x: number, y: number) => void): RBXScriptConnection;
 	Once(handler: (x: number, y: number) => void): RBXScriptConnection;
 	Equals(other: PointerSignal): boolean;
+}
+
+// `textBox.Focused`. Its own name rather than `GuiSignal` for the reason the
+// Luau half gives: the two are structurally identical and this one is about the
+// keyboard.
+declare interface FocusSignal {
+	Connect(handler: () => void): RBXScriptConnection;
+	Once(handler: () => void): RBXScriptConnection;
+	Equals(other: FocusSignal): boolean;
+}
+
+// `textBox.FocusLost`, with one of Roblox's two arguments. See the Luau half for
+// why the `InputObject` is not the second, and for what `enterPressed`
+// distinguishes.
+declare interface FocusLostSignal {
+	Connect(handler: (enterPressed: boolean) => void): RBXScriptConnection;
+	Once(handler: (enterPressed: boolean) => void): RBXScriptConnection;
+	Equals(other: FocusLostSignal): boolean;
 }
 
 // --- queries ---------------------------------------------------------------
@@ -200,7 +326,7 @@ declare interface RaycastResult {
 	readonly Normal: Vector3;
 	readonly Distance: number;
 
-	// The `Surface` name — what the part is like to touch, not what it looks
+	// The `Surface` name - what the part is like to touch, not what it looks
 	// like. See the Luau declaration above for why it is a string.
 	readonly Material: string;
 }
@@ -213,6 +339,7 @@ declare namespace Enum {
 	interface AutomaticSize extends EnumItem { readonly __enum: "AutomaticSize"; }
 	interface BorderMode extends EnumItem { readonly __enum: "BorderMode"; }
 	interface CameraType extends EnumItem { readonly __enum: "CameraType"; }
+	interface ContextActionResult extends EnumItem { readonly __enum: "ContextActionResult"; }
 	interface DominantAxis extends EnumItem { readonly __enum: "DominantAxis"; }
 	interface EasingDirection extends EnumItem { readonly __enum: "EasingDirection"; }
 	interface EasingStyle extends EnumItem { readonly __enum: "EasingStyle"; }
@@ -220,6 +347,7 @@ declare namespace Enum {
 	interface Font extends EnumItem { readonly __enum: "Font"; }
 	interface HorizontalAlignment extends EnumItem { readonly __enum: "HorizontalAlignment"; }
 	interface KeyCode extends EnumItem { readonly __enum: "KeyCode"; }
+	interface ListenerType extends EnumItem { readonly __enum: "ListenerType"; }
 	interface MouseBehavior extends EnumItem { readonly __enum: "MouseBehavior"; }
 	interface NormalId extends EnumItem { readonly __enum: "NormalId"; }
 	interface ParticleEmitterShape extends EnumItem { readonly __enum: "ParticleEmitterShape"; }
@@ -270,6 +398,10 @@ declare namespace Enum {
 		readonly LockFirstPerson: CameraType;
 		readonly ShiftLock: CameraType;
 		readonly Scriptable: CameraType;
+	};
+	const ContextActionResult: {
+		readonly Sink: ContextActionResult;
+		readonly Pass: ContextActionResult;
 	};
 	const DominantAxis: {
 		readonly Width: DominantAxis;
@@ -373,6 +505,10 @@ declare namespace Enum {
 		readonly F10: KeyCode;
 		readonly F11: KeyCode;
 		readonly F12: KeyCode;
+	};
+	const ListenerType: {
+		readonly Camera: ListenerType;
+		readonly ObjectPosition: ListenerType;
 	};
 	const MouseBehavior: {
 		readonly Default: MouseBehavior;
@@ -491,6 +627,9 @@ declare namespace Enum {
 		readonly MouseButton1: UserInputType;
 		readonly MouseButton2: UserInputType;
 		readonly MouseButton3: UserInputType;
+		readonly Keyboard: UserInputType;
+		readonly MouseMovement: UserInputType;
+		readonly MouseWheel: UserInputType;
 	};
 	const VerticalAlignment: {
 		readonly Top: VerticalAlignment;
@@ -691,12 +830,21 @@ declare interface Instance {
 	AddTag(tag: string): boolean;
 	RemoveTag(tag: string): boolean;
 	HasTag(tag: string): boolean;
+	GetTags(): string[];
 	Destroy(): void;
 	Clone(): Instance;
 	GetChildren(): Instance[];
 	GetDescendants(): Instance[];
-	FindFirstChild(name: string): Instance | null;
+	FindFirstChild(name: string, recursive?: boolean): Instance | null;
+	WaitForChild(name: string, timeout: number): Instance | Promise<Instance | null> | null;
+	FindFirstChildOfClass(className: string): Instance | null;
+	FindFirstChildWhichIsA(className: string, recursive?: boolean): Instance | null;
+	FindFirstAncestor(name: string): Instance | null;
+	FindFirstAncestorOfClass(className: string): Instance | null;
+	FindFirstAncestorWhichIsA(className: string): Instance | null;
+	GetFullName(): string;
 	IsDescendantOf(ancestor: Instance): boolean;
+	IsAncestorOf(descendant: Instance): boolean;
 	ClearAllChildren(): void;
 	GetPivot(): CFrame;
 	PivotTo(target: CFrame): void;
@@ -708,7 +856,13 @@ declare interface Instance {
 	readonly AncestryChanged: AncestrySignal;
 	readonly PlayerAdded: InstanceSignal;
 	readonly PlayerRemoving: InstanceSignal;
+	readonly CharacterAdded: InstanceSignal;
+	readonly CharacterRemoving: InstanceSignal;
 	GetPlayers(): Instance[];
+	GetPlayerByUserId(userId: number): Instance | undefined;
+	Equals(other: Instance): boolean;
+	GetPlayerFromCharacter(character: Instance): Instance | undefined;
+	LoadCharacter(): Instance | undefined;
 	KeepWorldAwake(reason: string): void;
 	LetWorldSleep(): void;
 	IsKeepingWorldAwake(): boolean;
@@ -724,11 +878,18 @@ declare interface Instance {
 	RemoveComponent(component: string): void;
 	GetComponents(): string[];
 	readonly Activated: GuiSignal;
+	readonly MouseButton1Click: GuiSignal;
 	readonly InputBegan: GuiSignal;
 	readonly InputEnded: GuiSignal;
 	readonly MouseEnter: PointerSignal;
 	readonly MouseLeave: PointerSignal;
 	readonly MouseMoved: PointerSignal;
+	readonly Focused: FocusSignal;
+	readonly FocusLost: FocusLostSignal;
+	GetGuiObjectsAtPosition(x: number, y: number): Instance[];
+	TweenPosition(endPosition: UDim2 | Vector3, easingDirection?: Enum.EasingDirection, easingStyle?: Enum.EasingStyle, time?: number, override?: boolean, callback?: () => void): boolean;
+	TweenSize(endSize: UDim2 | Vector3, easingDirection?: Enum.EasingDirection, easingStyle?: Enum.EasingStyle, time?: number, override?: boolean, callback?: () => void): boolean;
+	TweenSizeAndPosition(endSize: UDim2 | Vector3, endPosition: UDim2 | Vector3, easingDirection?: Enum.EasingDirection, easingStyle?: Enum.EasingStyle, time?: number, override?: boolean, callback?: () => void): boolean;
 }
 
 declare interface PVInstance extends Instance {
@@ -762,7 +923,17 @@ declare interface BasePart extends PVInstance {
 declare interface Part extends BasePart {
 }
 
+declare interface SpawnLocation extends Part {
+	Enabled: boolean;
+	Neutral: boolean;
+	TeamColor: Color3;
+}
+
 declare interface Model extends PVInstance {
+}
+
+declare interface Tool extends Model {
+	Grip: CFrame;
 }
 
 declare interface MeshPart extends BasePart {
@@ -809,13 +980,16 @@ declare interface Attachment extends Instance {
 
 declare interface Material extends Instance {
 	MaterialId: string;
+	Shader: string;
 }
 
 declare interface Humanoid extends Instance {
 	Enabled: boolean;
 	readonly Grounded: boolean;
+	Health: number;
 	HipHeight: number;
 	JumpPower: number;
+	MaxHealth: number;
 	MoveDirection: Vector3;
 	WalkSpeed: number;
 }
@@ -1239,6 +1413,7 @@ declare interface Service extends Instance {
 
 declare interface Workspace extends Service {
 	CurrentCamera: Instance;
+	SurfaceBounces: number;
 	Raycast(origin: Vector3, direction: Vector3, params?: RaycastParams): RaycastResult | null;
 }
 
@@ -1268,22 +1443,51 @@ declare interface ServerStorage extends Service {
 declare interface StarterGui extends Service {
 }
 
+declare interface StarterPack extends Service {
+}
+
 declare interface StarterPlayer extends Service {
 }
 
 declare interface StarterPlayerScripts extends Service {
 }
 
+declare interface StarterCharacterScripts extends Service {
+}
+
 declare interface Players extends Service {
+	CharacterAutoLoads: boolean;
 	readonly LocalPlayer: Instance;
+	MaxPlayers: number;
+	readonly NumPlayers: number;
+	RespawnTime: number;
+}
+
+declare interface Teams extends Service {
 }
 
 declare interface Player extends Instance {
+	readonly Backpack: Instance;
 	Character: Instance;
+	DisplayName: string;
+	readonly PlayerGui: Instance;
+	readonly PlayerScripts: Instance;
+	RespawnTime: number;
+	readonly StarterGear: Instance;
+	Team: Instance;
+	readonly UserId: number;
+}
+
+declare interface Team extends Instance {
+	TeamColor: Color3;
 }
 
 // --- the bus services ------------------------------------------------------
 
+// Every word `script::DescribeStatus` can hand back, generated from that
+// switch. A status a script branches on cannot be missing here, and a
+// status appended to `world::BusStatus` fails `just bindings-check` until
+// these files are regenerated.
 declare type BusStatus =
 	| "Ok"
 	| "NotFound"
@@ -1291,6 +1495,10 @@ declare type BusStatus =
 	| "OverBudget"
 	| "NoSuchWorld"
 	| "Unsupported"
+	| "NoSuchChannel"
+	| "Overflow"
+	| "WorldNotReady"
+	| "TooManyChannels"
 	| "Unknown";
 
 declare interface StoreReply {
@@ -1329,6 +1537,217 @@ declare interface RunService {
 	readonly Heartbeat: HeartbeatSignal;
 }
 
+// One channel's arrivals, handed back by `OpenChannel`. `(message,
+// fromWorldName)`: the sender's name is second because answering is the point,
+// and the receiver already named the channel.
+declare interface CrossWorldSignal {
+	Connect(handler: (message: unknown, fromWorld: string) => void): RBXScriptConnection;
+	Once(handler: (message: unknown, fromWorld: string) => void): RBXScriptConnection;
+}
+
+// The addressed route out of a world, where `MessagingService` is the fan-out.
+// One channel on one world, so two subsystems talking between the same pair of
+// worlds do not read each other's traffic. There is deliberately no
+// `GetWorlds`: a world's storage cannot see its siblings, and `SendAsync`
+// answering `NoSuchWorld` is the honest half of the same question.
+declare interface CrossWorldService {
+	// Listens on a named channel and hands back that channel's signal. Takes
+	// effect at the next barrier, so a message sent in the same tick is refused.
+	// Throws when this world is over its bus budget for the tick.
+	OpenChannel(channel: string): CrossWorldSignal;
+
+	// Stops delivery. Handlers already connected are left alone, so reopening
+	// the channel later finds them still there.
+	CloseChannel(channel: string): void;
+
+	// `Ok`, or `NoSuchWorld`, `NoSuchChannel`, `WorldNotReady` or `Overflow` - a
+	// channel send carries no value back, so the status is the answer.
+	SendAsync(world: string, channel: string, message: unknown): Promise<StoreReply>;
+}
+
+// What content this world holds, which is the other half of naming an asset.
+// Every list is sorted, so a scene that lays content out arranges itself the
+// same way on every run. See the Luau half for what each answer means.
+declare interface ContentService {
+	GetMeshes(): string[];
+
+	// What there is to name, where `GetMeshes` is what has been named. Setting a
+	// `MeshId` from this list is what fetches that one asset.
+	GetPublishedMeshes(): string[];
+
+	// The sheets a mesh's own submeshes name, in submesh order - not sorted and
+	// not deduplicated, unlike every other list here. An untextured run keeps
+	// its slot as an empty string.
+	GetMeshTextures(mesh: string): string[];
+
+	GetTextures(): string[];
+
+	// Null for a still image and for a texture this world has not been told
+	// about, which are the same answer.
+	GetFlipbook(texture: string): { Side: number; Frames: number; FrameRate: number } | null;
+
+	GetTriangleCount(mesh: string): number;
+}
+
+// What carries a tag, which is the half `Instance.AddTag` cannot answer.
+//
+// No `GetInstanceAddedSignal`: nothing records that a tag changed, so a signal
+// here would never fire, and one that never fires reads as a broken engine.
+declare interface CollectionService {
+	// False when the instance carries no tags and when this world's thirty-two
+	// tags are all spoken for.
+	AddTag(instance: Instance, tag: string): boolean;
+
+	// The tag's name stays registered afterwards, so `GetAllTags` still lists
+	// one nothing carries.
+	RemoveTag(instance: Instance, tag: string): boolean;
+	HasTag(instance: Instance, tag: string): boolean;
+
+	// Sorted by the order the world was built in, and empty for a tag nothing
+	// has ever added.
+	GetTagged(tag: string): Instance[];
+
+	GetTags(instance: Instance): string[];
+	GetAllTags(): string[];
+}
+
+// JSON, a GUID and a URL escape - and **no `RequestAsync`, `GetAsync` or
+// `PostAsync`**, which are absent on purpose rather than missing. See the Luau
+// half, which carries the whole argument.
+declare interface HttpService {
+	// The same rules `MessagingService` encodes by, because it is the same table
+	// walk. Keys are written in sorted order. Throws for a cycle, for nesting
+	// past sixteen deep, for a NaN or an infinity, and for anything with no JSON
+	// form.
+	JSONEncode(value: unknown): string;
+
+	// `null` becomes `null`. Throws on malformed text, on text after the value,
+	// and on a number a double cannot hold.
+	JSONDecode(text: string): unknown;
+
+	// **Deterministic**, and that is a decision rather than an oversight - two
+	// runs of one world hand out the same sequence, so this is an identifier for
+	// things inside a world and never a token or a secret.
+	//
+	// Braces by default. **`GenerateGUID(0)` differs from Luau's**, because the
+	// argument is read with this language's own truthiness and zero is falsy
+	// here and truthy there.
+	GenerateGUID(wrapInCurlyBraces?: boolean): string;
+
+	// RFC 3986: the unreserved set through unchanged, every other byte as `%XX`.
+	// A space is `%20` and never `+`.
+	UrlEncode(text: string): string;
+}
+
+// What `GetBoundActionInfo` reports about one bound action.
+//
+// **Four of Roblox's six fields.** `title` and `description` come from
+// `SetTitle` and `SetDescription`, which decorate a touch button - there is no
+// touch surface, so the pair is not bound and reporting them as empty strings
+// would claim they had been set to nothing.
+declare interface BoundActionInfo {
+	// The keys this action claims. **Keys only**: `BindAction` takes
+	// `Enum.KeyCode` here where Roblox also takes `Enum.UserInputType`.
+	readonly inputTypes: Enum.KeyCode[];
+
+	readonly priorityLevel: number;
+
+	// **Higher wins, which is Roblox's direction.** The engine's own list is
+	// sorted highest-priority-first, so this is that index inverted rather than
+	// the same word meaning the opposite thing.
+	readonly stackOrder: number;
+
+	// Always false: the argument is accepted at bind time and ignored.
+	readonly createTouchButton: boolean;
+}
+
+// A priority stack over the keyboard, which is what this adds over polling: the
+// highest claim on a key decides, and what its handler returns decides whether
+// anything below it hears the press.
+declare interface ContextActionService {
+	// The touch-button argument is accepted and ignored: there is no touch
+	// surface, and refusing it would make a script fail on a line describing
+	// something this engine does not have.
+	//
+	// **What the handler returns decides who else hears the key.**
+	// `Enum.ContextActionResult.Pass` hands the press to the next claim down;
+	// `Sink`, `undefined`, or a handler that threw, stop it here.
+	BindAction(
+		name: string,
+		handler: (
+			name: string,
+			state: Enum.UserInputState,
+			input: InputObject
+		) => Enum.ContextActionResult | void,
+		createTouchButton: boolean,
+		...keys: Enum.KeyCode[]
+	): void;
+
+	BindActionAtPriority(
+		name: string,
+		handler: (
+			name: string,
+			state: Enum.UserInputState,
+			input: InputObject
+		) => Enum.ContextActionResult | void,
+		createTouchButton: boolean,
+		priority: number,
+		...keys: Enum.KeyCode[]
+	): void;
+
+	UnbindAction(name: string): void;
+	UnbindAllActions(): void;
+
+	// `null` for a name nothing has bound, which is what `if (info)` reads.
+	GetBoundActionInfo(name: string): BoundActionInfo | null;
+
+	GetAllBoundActionInfo(): Record<string, BoundActionInfo>;
+}
+
+// `tween.Completed`, which takes no arguments. Its own type rather than
+// `GuiSignal` for the reason the Luau half gives: they are structurally
+// identical and one of the two names would be false.
+declare interface TweenCompletedSignal {
+	Connect(handler: () => void): RBXScriptConnection;
+	Once(handler: () => void): RBXScriptConnection;
+	Equals(other: TweenCompletedSignal): boolean;
+}
+
+// Interpolating a property from wherever it is to wherever it should end up.
+// See the Luau half for what a tween is, what it may drive, and why dropping
+// the handle does not stop one that is playing.
+declare interface Tween {
+	// False when the target instance has been destroyed.
+	Play(): boolean;
+	Pause(): boolean;
+
+	// A stop and not an undo: the properties stay where they are, and
+	// `Completed` does not fire.
+	Cancel(): boolean;
+
+	readonly Completed: TweenCompletedSignal;
+
+	// **Two handles to one tween are not `===`**, because `Create` and every
+	// return build a fresh object - the same reason `Instance.Equals` exists.
+	Equals(other: Tween): boolean;
+}
+
+declare interface TweenService {
+	GetValue(alpha: number, easingStyle: Enum.EasingStyle, easingDirection: Enum.EasingDirection): number;
+
+	// Raises for a property this instance does not have, for one a script may
+	// not assign, and for one whose type has no midpoint - each named.
+	Create(instance: Instance, info: TweenInfo, goals: { [property: string]: unknown }): Tween;
+}
+
+// Destroying something later, without a script left waiting to do it. The
+// lifetime is seconds in and ticks underneath, exactly as `task.wait` is.
+declare interface Debris {
+	// Ten seconds by default. A lifetime of zero destroys on the next beat
+	// rather than inside this call.
+	AddItem(instance: Instance, lifetime?: number): void;
+}
+
 // --- the globals -----------------------------------------------------------
 
 declare const MessagingService: MessagingService;
@@ -1336,6 +1755,22 @@ declare const TeleportService: TeleportService;
 declare const MemoryStoreService: MemoryStoreService;
 declare const DataStoreService: DataStoreService;
 declare const RunService: RunService;
+declare const TweenService: TweenService;
+declare const Debris: Debris;
+
+// The seven that stopped being Luau's at v0.16 - five when `ServiceSurface`
+// stopped naming a VM, and the last two when `ServiceProperty` gave a live
+// property a neutral shape. **Every surface service this engine has is now in
+// both languages**, and `BreakpointService` is not one: it is absent outside a
+// studio and refuses a JavaScript chunk outright, which is a debugger feature
+// and not a binding.
+declare const CrossWorldService: CrossWorldService;
+declare const ContentService: ContentService;
+declare const CollectionService: CollectionService;
+declare const HttpService: HttpService;
+declare const ContextActionService: ContextActionService;
+declare const UserInputService: UserInputService;
+declare const SoundService: SoundService;
 
 // The world this script runs on. `game` is the universe above it.
 declare const workspace: Workspace;
@@ -1397,13 +1832,25 @@ declare const game: {
 		(service: "ServerScriptService"): ServerScriptService;
 		(service: "ServerStorage"): ServerStorage;
 		(service: "StarterGui"): StarterGui;
+		(service: "StarterPack"): StarterPack;
 		(service: "StarterPlayer"): StarterPlayer;
 		(service: "StarterPlayerScripts"): StarterPlayerScripts;
+		(service: "StarterCharacterScripts"): StarterCharacterScripts;
 		(service: "Players"): Players;
+		(service: "Teams"): Teams;
 		(service: "RunService"): RunService;
 		(service: "MessagingService"): MessagingService;
 		(service: "MemoryStoreService"): MemoryStoreService;
 		(service: "DataStoreService"): DataStoreService;
+		(service: "TweenService"): TweenService;
+		(service: "Debris"): Debris;
+		(service: "CrossWorldService"): CrossWorldService;
+		(service: "ContentService"): ContentService;
+		(service: "CollectionService"): CollectionService;
+		(service: "HttpService"): HttpService;
+		(service: "ContextActionService"): ContextActionService;
+		(service: "UserInputService"): UserInputService;
+		(service: "SoundService"): SoundService;
 	};
 };
 
@@ -1413,7 +1860,9 @@ declare const Instance: {
 		(className: "PVInstance", parent?: Instance): PVInstance;
 		(className: "BasePart", parent?: Instance): BasePart;
 		(className: "Part", parent?: Instance): Part;
+		(className: "SpawnLocation", parent?: Instance): SpawnLocation;
 		(className: "Model", parent?: Instance): Model;
+		(className: "Tool", parent?: Instance): Tool;
 		(className: "MeshPart", parent?: Instance): MeshPart;
 		(className: "Camera", parent?: Instance): Camera;
 		(className: "SurfaceCamera", parent?: Instance): SurfaceCamera;
@@ -1482,5 +1931,6 @@ declare const Instance: {
 		(className: "UIStroke", parent?: Instance): UIStroke;
 		(className: "UIScale", parent?: Instance): UIScale;
 		(className: "Player", parent?: Instance): Player;
+		(className: "Team", parent?: Instance): Team;
 	};
 };

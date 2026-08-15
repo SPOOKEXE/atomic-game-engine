@@ -2,8 +2,8 @@
 //
 // **Written because the pass had no test of its own and one half of it did not
 // work.** `ResolveAttachments` wrote `WorldFrame` straight through the
-// reference `Store::Each` hands out — a direct memory write, which the store
-// does not report — so `Attachment.WorldCFrame` and `WorldPosition` could never
+// reference `Store::Each` hands out - a direct memory write, which the store
+// does not report - so `Attachment.WorldCFrame` and `WorldPosition` could never
 // fire `.Changed`. The value read correctly the whole time, which is why
 // nothing noticed: a script polling saw the truth and a script waiting on the
 // signal waited for ever.
@@ -11,7 +11,7 @@
 // The other half is why the fix is a compare and not a `MarkAllChanged`.
 // Reporting every attachment every frame advances the world's change counter
 // for ever, and `physics`'s static broadphase and `gui`'s compile are both
-// gates on that counter standing still — `Store::GetUnobserved` carries the
+// gates on that counter standing still - `Store::GetUnobserved` carries the
 // argument.
 
 #include <engine/ecs/Classes.hpp>
@@ -93,7 +93,7 @@ TEST_CASE("an attachment on nothing keeps its local frame", "[scene][attachments
 
 	CHECK(ResolveAttachments(store) == 1);
 
-	// The useful state rather than an error — it is what makes an attachment
+	// The useful state rather than an error - it is what makes an attachment
 	// usable as a bare point in space, which is what a beam between two world
 	// positions needs.
 	CHECK(store.Get<Attachment>(point)->WorldFrame.Position.Y == Approx(2.0f));
@@ -155,7 +155,7 @@ TEST_CASE("resolving a world that did not move reports nothing", "[scene][attach
 
 	// **The half that makes the compare necessary rather than tidy.** This pass
 	// runs every frame in every phase it is registered in, and a version of it
-	// that reported unconditionally would advance the change counter for ever —
+	// that reported unconditionally would advance the change counter for ever -
 	// falsifying `physics`'s static broadphase gate and `gui`'s compile gate,
 	// both of which are built on that counter standing still when nothing was
 	// authored.

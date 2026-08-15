@@ -142,7 +142,7 @@ TEST_CASE("a material round-trips all five maps", "[assets]") {
 TEST_CASE("a version 1 material is one with four empty maps", "[assets]") {
 	// **The older format is not a special case to translate.** A version 1 file
 	// is a colour map and nothing else, which is exactly this material with four
-	// absent names — so it is read by not reading them. See `Material::VERSION`.
+	// absent names - so it is read by not reading them. See `Material::VERSION`.
 	//
 	// Hand-built rather than produced by an older writer, because there is no
 	// older writer to run: the point is that bytes already on disk still load.
@@ -181,7 +181,7 @@ TEST_CASE("a material truncated after its colour map is refused", "[assets]") {
 }
 
 TEST_CASE("a material round-trips its emissive map", "[assets]") {
-	// The sixth name, and the one with no CC0 source behind it — see
+	// The sixth name, and the one with no CC0 source behind it - see
 	// `MaterialData::EmissiveMap` for why it is authored rather than fetched.
 	MaterialData written;
 	written.ColourMap = "signs/neon_colour.atex";

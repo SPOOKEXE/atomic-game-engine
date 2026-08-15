@@ -7,7 +7,7 @@
 namespace engine::parallel {
 
 	namespace {
-		// The frame header. A length and nothing else — there is no version,
+		// The frame header. A length and nothing else - there is no version,
 		// because both ends of a channel are the same binary by construction:
 		// a host is `mono.server` started in host mode.
 		constexpr size_t HEADER = sizeof(uint32_t);

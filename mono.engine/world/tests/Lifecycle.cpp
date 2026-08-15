@@ -1,7 +1,7 @@
 // The world lifetime policy, which existed only inside a running editor before.
 //
 // **Every case here was previously reachable by opening the studio and waiting
-// five minutes.** That is the actual argument for hoisting it — `DEFERRED.md`
+// five minutes.** That is the actual argument for hoisting it - `DEFERRED.md`
 // D00017 makes the case about a second copy, and it is right, but the dividend
 // that arrived first is that the three refusals now have assertions instead of
 // comments.
@@ -64,7 +64,7 @@ TEST_CASE("a world inside its limit is left alone", "[world][lifecycle]") {
 	CHECK(DecideLifecycle(inputs) == LifecycleAction::Leave);
 
 	// The boundary is inclusive at the limit, so a limit of zero suspends
-	// immediately rather than never — which is what `--idle-close 0` has to
+	// immediately rather than never - which is what `--idle-close 0` has to
 	// mean for the flag to be usable as an off switch in the other direction.
 	inputs.IdleSeconds = 300.0;
 	CHECK(DecideLifecycle(inputs) == LifecycleAction::Suspend);
@@ -86,7 +86,7 @@ TEST_CASE("occupancy cannot wake a suspended world", "[world][lifecycle]") {
 	inputs.Occupied = true;
 
 	// **Nothing can occupy a world that is not running.** Somebody arriving in
-	// one is a teleport, and a teleport is a message — so the inbox is the only
+	// one is a teleport, and a teleport is a message - so the inbox is the only
 	// thing that can say a suspended world is wanted, and treating occupancy as
 	// a second answer would be a race with whatever wrote it.
 	CHECK(DecideLifecycle(inputs) == LifecycleAction::Leave);
@@ -116,8 +116,8 @@ TEST_CASE("an idle-rate world is not suspended out from under itself", "[world][
 // **`Ticks` exists because callers were spelling it `state == Active` and two
 // states tick.** The one that got caught was in the editor: an interpolation
 // alpha derived from a state test drew an `Idle` world at the tick rate while
-// it was simulating perfectly well, and — with the other half of the same
-// question missing — drew every part of an *edited* world at the origin. See
+// it was simulating perfectly well, and - with the other half of the same
+// question missing - drew every part of an *edited* world at the origin. See
 // `studio/Presentation.hpp`.
 //
 // Enumerated rather than tested in two groups, so adding a state to `WorldState`
@@ -131,7 +131,7 @@ TEST_CASE("two world states tick and three do not", "[world][lifecycle]") {
 	CHECK_FALSE(engine::world::Ticks(WorldState::Faulted));
 
 	// **`Remote` is a record of a world this process does not hold**, so it is
-	// not merely not ticking here — there is no storage to tick.
+	// not merely not ticking here - there is no storage to tick.
 	CHECK_FALSE(engine::world::Ticks(WorldState::Remote));
 }
 
@@ -139,14 +139,14 @@ TEST_CASE("two world states tick and three do not", "[world][lifecycle]") {
 //
 // **A world with nobody in it is not always a world with nothing happening**, so
 // the timeout is one of three answers rather than the only one. The cases below
-// are the two that are not it, plus the ceiling — which is enforced here so that
+// are the two that are not it, plus the ceiling - which is enforced here so that
 // no host can be the one that forgets it.
 
 TEST_CASE("a world set never to sleep does not, however long it is empty", "[world][lifecycle]") {
 	LifecycleInputs inputs = Stale();
 	inputs.Sleep = engine::world::IdleSleep::Never;
 
-	// The arrangement every other case suspends on — empty, an hour past a
+	// The arrangement every other case suspends on - empty, an hour past a
 	// five-minute limit, not the last world.
 	CHECK(DecideLifecycle(inputs) == LifecycleAction::Leave);
 

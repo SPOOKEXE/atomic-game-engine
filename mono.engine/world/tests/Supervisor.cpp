@@ -68,7 +68,7 @@ TEST_CASE("nothing to place makes no hosts", "[world]") {
 
 TEST_CASE("shared worlds are packed together", "[world]") {
 	// A process per subarea does not scale to hundreds of them, and soft faults
-	// are quarantined per world whatever the grouping — so sharing is the
+	// are quarantined per world whatever the grouping - so sharing is the
 	// default and the packing is the point.
 	const std::vector<WorldSettings> worlds{
 		Shared("zone.a"), Shared("zone.b"), Shared("zone.c"), Shared("zone.d"), Shared("zone.e")

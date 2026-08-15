@@ -1,4 +1,4 @@
-# mono.cdn — the content origin
+# mono.cdn - the content origin
 
 A `shared`-tier library and a thin main over it, serving a game's content out of
 a directory. `repo_layout.md` §11 is the design;
@@ -12,7 +12,7 @@ Two deployments, one program:
 | Remotely, on its own | a large content collection, at scale |
 
 Nothing in the program distinguishes them. The difference is which directory it
-mounts and who reaches it — which is what keeps the choice a deployment decision
+mounts and who reaches it - which is what keeps the choice a deployment decision
 rather than a build-time one.
 
 ## Three sources, one client path
@@ -39,7 +39,7 @@ No `ecs`, no `scene`, no `script`, no `render`.
 
 That row is the product, not a side effect of it: it is why the `cdn` preset
 configures on a container with no Vulkan SDK, no SDL and no shader compiler. The
-`shared` tier enforces it — a `shared` target may link only `shared`, so a
+`shared` tier enforces it - a `shared` target may link only `shared`, so a
 presentation module on this link line fails the configure with the edge named.
 
 ## Running it
@@ -57,7 +57,7 @@ serving needs a grant key and holds no signing key at all.
 
 ## Watching it serve
 
-`--gui` draws a scrolling terminal view of the origin — what is published, what
+`--gui` draws a scrolling terminal view of the origin - what is published, what
 it weighs per kind and per asset, the five largest, and traffic in and out as a
 live rate, an hour of one-minute buckets and a running total.
 
@@ -89,7 +89,7 @@ stack. It is the one worth running in CI on a container with nothing installed.
 | `cdn/ContentRoot.hpp` | the boundary between a content name and the filesystem |
 
 `ContentRoot::Resolve` is the only thing that turns a name into a path, and it
-refuses by default — every name it sees arrives from outside the process. Two
+refuses by default - every name it sees arrives from outside the process. Two
 checks, both load-bearing: components before touching the disk, and containment
 of the resolved path against the canonical root. The first cannot see a symlink;
 the second alone would accept a name that lands inside by accident.
@@ -102,6 +102,6 @@ one implementation. Writing the format twice is how a format acquires a dialect.
 
 HTTP range serving is `Engine::net`. The upload API, auth and the web dashboard
 are `control/`, in TypeScript, talking to this program's HTTP API rather than
-reimplementing any of it — **`--gui` is not that and does not grow into it.** It
+reimplementing any of it - **`--gui` is not that and does not grow into it.** It
 reads this process's own counters over a terminal it already has; a dashboard
 for a fleet is a different program with a different trust boundary.

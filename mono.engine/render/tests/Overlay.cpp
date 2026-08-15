@@ -60,7 +60,7 @@ TEST_CASE("an opaque blend writes the colour exactly", "[overlay]") {
 TEST_CASE("Fill matches Blend over a transparent destination", "[overlay]") {
 	// The entire justification for Fill existing. If these two ever disagree,
 	// every debug panel changes colour and the fast path is a bug rather than
-	// an optimisation — so it is checked across the alpha range rather than at
+	// an optimisation - so it is checked across the alpha range rather than at
 	// the one value the panels happen to use.
 	for (int alpha = 1; alpha <= 255; alpha++) {
 		OverlayImage blended;
@@ -140,7 +140,7 @@ TEST_CASE("an opaque blend replaces whatever was under it", "[overlay]") {
 
 	// Opaque takes a short path that stores the source instead of computing
 	// `(c * 255 + under * 0 + 127) / 255`. Those are the same byte for every c,
-	// but only over a *non-empty* destination does the test say so — over a
+	// but only over a *non-empty* destination does the test say so - over a
 	// fresh image every wrong answer that ignores the destination still passes.
 	REQUIRE(At(image, 1, 1, 0) == 10);
 	REQUIRE(At(image, 1, 1, 1) == 20);
@@ -175,7 +175,7 @@ TEST_CASE("the upload region is the union of everything drawn", "[overlay]") {
 	DebugText::Draw(image, 300, 5, "TEXT", 255, 255, 255, 2);
 
 	// Every entry point has to record what it touched, including the text
-	// rasteriser — which marks once per string rather than once per run.
+	// rasteriser - which marks once per string rather than once per run.
 	const auto region = image.UploadRegion();
 	REQUIRE(region.X == 10);
 	REQUIRE(region.Y == 5);
@@ -210,7 +210,7 @@ TEST_CASE("a region survives frames in which nothing is drawn", "[overlay]") {
 	image.MarkUploaded();
 
 	// The panels close. Nothing is uploaded on these frames, so the texture
-	// keeps the large panel — and a Clear that forgot it on the second frame
+	// keeps the large panel - and a Clear that forgot it on the second frame
 	// would leave those pixels on screen the moment a smaller panel reopened.
 	image.Clear();
 	image.Clear();
@@ -232,7 +232,7 @@ TEST_CASE("content outlives the upload that carried it", "[overlay]") {
 	REQUIRE(image.HasContent());
 
 	// The renderer takes the region and says so. The texture now holds the
-	// picture, so there is nothing to send — but there is still something to
+	// picture, so there is nothing to send - but there is still something to
 	// draw, which is what lets the panels be redrawn far less often than they
 	// are presented.
 	image.MarkUploaded();
@@ -268,8 +268,8 @@ TEST_CASE("clearing an uploaded image still asks for the erase", "[overlay]") {
 	image.Clear();
 
 	// Nothing is drawn any more, but the texture does not know that. Whether
-	// the erase is worth sending is the renderer's call — it skips the pass
-	// entirely — and the region has to be there for it either way.
+	// the erase is worth sending is the renderer's call - it skips the pass
+	// entirely - and the region has to be there for it either way.
 	REQUIRE_FALSE(image.HasContent());
 	REQUIRE(image.UploadRegion().Width == 100);
 }
@@ -343,7 +343,7 @@ TEST_CASE("a run of spaces draws nothing and still advances", "[overlay]") {
 	image.Resize(64, 16);
 
 	// Rows are padded to a fixed column width, so most of a line is spaces. They
-	// are skipped without walking their bits — but the cursor still has to move,
+	// are skipped without walking their bits - but the cursor still has to move,
 	// or every column after the first gap lands in the wrong place.
 	DebugText::Draw(image, 0, 0, "   A", 255, 255, 255, 1);
 
@@ -366,7 +366,7 @@ TEST_CASE("every lit pixel of a glyph row is drawn", "[overlay]") {
 
 	// '0' is 111 / 101 / 101 / 101 / 111, so its top row is three lit pixels
 	// side by side. They are emitted as one run rather than three calls, and a
-	// run built with the wrong end index loses the last pixel of it — which at
+	// run built with the wrong end index loses the last pixel of it - which at
 	// scale 1 is one dot nobody would notice until every glyph looked thin.
 	DebugText::Draw(image, 0, 0, "0", 255, 255, 255, 1);
 
@@ -435,7 +435,7 @@ TEST_CASE("no channel ever exceeds the alpha carrying it", "[overlay]") {
 	// **The invariant premultiplied storage is**, and the one case that broke it
 	// was a rounding mismatch rather than a formula mistake: the colours rounded
 	// and the alpha truncated, so the two could land a step apart. `(R=100,
-	// A=100)` under red at alpha 128 came out `R=178, A=177` — a pixel carrying
+	// A=100)` under red at alpha 128 came out `R=178, A=177` - a pixel carrying
 	// more red than its coverage allows, which the GPU's premultiplied blend
 	// shows as a faint over-brightness rather than as anything that looks like a
 	// bug in this file.
@@ -583,8 +583,8 @@ TEST_CASE("scale multiplies every glyph pixel", "[overlay]") {
 // The cases above check the *region* bookkeeping, which was right. What none of
 // them checked is the pixels after a clear that follows an upload, and that is
 // where the panels stopped clearing: `MarkUploaded` empties the dirty rectangle
-// without zeroing anything — correctly, because at that moment the image and the
-// texture agree — so a `Clear` that erased only the dirty rectangle erased
+// without zeroing anything - correctly, because at that moment the image and the
+// texture agree - so a `Clear` that erased only the dirty rectangle erased
 // nothing at all, and re-uploaded the old picture on top of itself.
 
 TEST_CASE("clearing after an upload actually zeroes the pixels", "[overlay]") {
@@ -609,7 +609,7 @@ TEST_CASE("a panel that shrinks leaves nothing of the larger one behind", "[over
 	image.MarkUploaded();
 
 	// Closed, and the statistics panel alone redrawn in its corner. What the
-	// big panel occupied outside the small one has to be gone — this is the
+	// big panel occupied outside the small one has to be gone - this is the
 	// "fps counter appears twice" report, where the old glyphs stayed put and
 	// the new ones drew beside them.
 	image.Clear();

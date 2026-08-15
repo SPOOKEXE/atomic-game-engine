@@ -13,8 +13,8 @@
 // A small routing table rather than a wired-up pair. Every end has an address,
 // a send looks the destination up, and a destination that is not in the table is
 // dropped exactly as the network drops one. That is what keeps single-player and
-// a real server the same code: the two cases a pair cannot express — a datagram
-// from a sender this end has never heard of, and one addressed nowhere — are the
+// a real server the same code: the two cases a pair cannot express - a datagram
+// from a sender this end has never heard of, and one addressed nowhere - are the
 // two the layer above has to handle, so the loopback must be able to produce
 // them.
 //
@@ -25,7 +25,7 @@
 //
 // The queue is bounded and a send into a full one is refused. On a socket that
 // refusal is the send buffer saying `EWOULDBLOCK`; here it is the receive queue
-// at its cap. Both mean the same thing to a caller — not sent, try later — and
+// at its cap. Both mean the same thing to a caller - not sent, try later - and
 // neither ever blocks.
 
 namespace engine::net {
@@ -103,7 +103,7 @@ namespace engine::net {
 
 				if (IsBroadcast(to)) {
 					// Refused rather than delivered when the end did not ask for
-					// it, because that is what a socket does — and a loopback
+					// it, because that is what a socket does - and a loopback
 					// that broadcast anyway would let a discovery beacon pass
 					// its suite and then fail to send a single datagram on the
 					// machine it shipped to.
@@ -117,7 +117,7 @@ namespace engine::net {
 					}
 					// One status for the whole send. A broadcast that filled one
 					// peer's queue and not another's has no useful answer to
-					// give — the sender cannot resend to just the one — and on a
+					// give - the sender cannot resend to just the one - and on a
 					// socket the kernel would report success either way.
 					return TransportStatus::Ok;
 				}
@@ -125,7 +125,7 @@ namespace engine::net {
 				const std::shared_ptr<Mailbox> target = Find(to);
 				if (!target) {
 					// Nobody is listening there. `Ok` and dropped, because that
-					// is what a socket does — a loopback that reported a
+					// is what a socket does - a loopback that reported a
 					// delivery failure would let single-player branch on
 					// something the real network never says.
 					return TransportStatus::Ok;

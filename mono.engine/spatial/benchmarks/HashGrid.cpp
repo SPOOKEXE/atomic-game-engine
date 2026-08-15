@@ -60,7 +60,7 @@ namespace hashgrid_bench {
 	// A scene of `count` colliders, built once and reused.
 	//
 	// Deterministic, through `core::Random`, which is indexed rather than
-	// streamed — so two runs measure the same scene and a difference between
+	// streamed - so two runs measure the same scene and a difference between
 	// them is the code.
 	const std::vector<Proxy> &SceneOf(size_t count) {
 		static std::vector<std::pair<size_t, std::vector<Proxy>>> built;
@@ -304,7 +304,7 @@ BENCH("OverlapBox · a 4m box, 4000 colliders, 32m cells", 2000) {
 // --- the raycast, at the same cell sizes -------------------------------------
 //
 // Two lengths, because the two answer different questions. A gameplay ray is a
-// few metres — a ground check, a melee reach — and a long one is a line of
+// few metres - a ground check, a melee reach - and a long one is a line of
 // sight across the world.
 //
 // **The long row is dominated by the walk and not by the candidates**, and that

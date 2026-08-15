@@ -5,13 +5,13 @@
 -- **Every scene this repository shipped before v0.14 was a scene to look at.**
 -- The slide runs itself, the mirrors reflect whatever orbits past them, the
 -- portals are walked through by a camera on rails. None of them has a floor a
--- person can stand on, and none has anywhere to put a player — so the first
+-- person can stand on, and none has anywhere to put a player - so the first
 -- character had nowhere to be.
 --
 -- This one is deliberately dull, and that is the point:
 --
 --   * a floor wide enough that walking off it takes a while;
---   * a `SpawnLocation`, which is the name `scene::FindSpawn` looks for;
+--   * a `SpawnLocation`, which is what `scene::FindSpawn` looks for;
 --   * steps, because a jump that clears nothing proves nothing;
 --   * a wall, because a character that walks through geometry looks exactly
 --     like one that does not until it meets some.
@@ -42,7 +42,7 @@ local function block(name: string, size: Vector3, at: Vector3, colour: Color3): 
 
 	-- **Anchored, all of it.** Scenery the solver may move is scenery that ends
 	-- up somewhere else after a character has leaned on it for a minute, and an
-	-- anchored part carries no rigid body at all — so this is a cheaper world as
+	-- anchored part carries no rigid body at all - so this is a cheaper world as
 	-- well as a stiller one.
 	part.Anchored = true
 	part.Parent = workspace
@@ -56,10 +56,13 @@ block(
 	GROUND
 )
 
--- **Named `SpawnLocation`, and the name is the contract.** `scene::FindSpawn`
--- looks for exactly this under `Workspace` and puts a character on its top
--- face; a world without one spawns everybody at the origin, which is inside the
--- floor.
+-- **A part still *named* `SpawnLocation`, which v0.15 kept working on purpose.**
+-- `SpawnLocation` is a class now - `Instance.new("SpawnLocation")` gives one
+-- with a `TeamColor`, a `Neutral` flag and an `Enabled` flag - and a plain block
+-- wearing the name is read as an enabled, neutral spawn so that every scene
+-- written before the class keeps spawning people. `scene::FindSpawn` puts a
+-- character on the top face; a world with no spawn at all starts everybody at
+-- the origin, which here is inside the floor.
 block("SpawnLocation", Vector3.new(12, 1, 12), Vector3.new(0, 0.5, 0), PAD)
 
 -- A staircase of four, each one a little under the jump height, so walking up it

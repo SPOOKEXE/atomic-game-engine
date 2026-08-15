@@ -1,6 +1,6 @@
 // The handshake, and the table read twice.
 //
-// **Four methods.** MCP is JSON-RPC 2.0 with a fixed opening — `initialize`,
+// **Four methods.** MCP is JSON-RPC 2.0 with a fixed opening - `initialize`,
 // then `notifications/initialized`, then `tools/list` and `tools/call` for as
 // long as the client cares to. Everything program-specific is a row in the
 // table; nothing here changes when one is added.
@@ -83,7 +83,7 @@ namespace engine::control {
 		try {
 			request = json::parse(line);
 		} catch (const std::exception &bad) {
-			// No id to answer against — the parse is what failed — so this uses
+			// No id to answer against - the parse is what failed - so this uses
 			// the null id JSON-RPC reserves for exactly this case.
 			return Error(nullptr, -32700, std::string("parse error: ") + bad.what()).dump();
 		}
@@ -108,7 +108,7 @@ namespace engine::control {
 						   {"protocolVersion", PROTOCOL_VERSION},
 						   {"capabilities", json{{"tools", json{{"listChanged", false}}}}},
 						   {"serverInfo",
-							json{{"name", Name}, {"title", "atomic — " + Name}, {"version", "0.8"}}},
+							json{{"name", Name}, {"title", "atomic - " + Name}, {"version", "0.8"}}},
 						   {"instructions", Purpose},
 					   }
 			)
@@ -145,7 +145,7 @@ namespace engine::control {
 				json payload;
 
 				// **A tool that throws is a failed tool, not a failed program.**
-				// A bad index into a world, a name that is not a class — these
+				// A bad index into a world, a name that is not a class - these
 				// arrive as exceptions from the json library or from a store, and
 				// letting one escape would take the frame loop with it.
 				try {

@@ -16,8 +16,8 @@ namespace engine::effects {
 	// Registers this module's components and the `ParticleSystem` resource.
 	//
 	// **`EmitterSlot` is registered with a writer that writes nothing and a
-	// reader that clears.** A block index is a position in one process's pool —
-	// rule 4's hazard exactly — so restoring it would point an emitter at whatever
+	// reader that clears.** A block index is a position in one process's pool -
+	// rule 4's hazard exactly - so restoring it would point an emitter at whatever
 	// block happened to take that number in the new process. `RefreshEmitters`
 	// hands out a fresh block on the first frame after a load, which is the same
 	// arrangement `client::DrawList` uses and for the same reason: derived state

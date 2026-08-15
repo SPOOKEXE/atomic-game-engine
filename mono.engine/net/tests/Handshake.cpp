@@ -200,7 +200,7 @@ TEST_CASE("the lifecycle goes one way", "[net][handshake]") {
 	REQUIRE(initiator.Consume(fromResponder));
 	CHECK(initiator.State() == HandshakeState::Established);
 
-	// Not idempotent, deliberately — the reason Link::CompleteHandshake is not
+	// Not idempotent, deliberately - the reason Link::CompleteHandshake is not
 	// either. A second message is a replay or two code paths both owning the
 	// transition, and the established session is left intact rather than torn
 	// down over a duplicate packet.
@@ -252,8 +252,8 @@ TEST_CASE("Begin draws a fresh key pair every time", "[net][handshake]") {
 }
 
 TEST_CASE("RFC 7748 section 6.1 derives the published public keys", "[net][handshake]") {
-	// Alice and Bob, verbatim. X25519 clamps the scalar, so these private keys —
-	// which the RFC prints unclamped — must still produce exactly these public
+	// Alice and Bob, verbatim. X25519 clamps the scalar, so these private keys -
+	// which the RFC prints unclamped - must still produce exactly these public
 	// keys; an implementation that forgot to clamp produces different ones and
 	// still interoperates with itself.
 	const auto alicePrivate = Hex("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a");
@@ -280,7 +280,7 @@ TEST_CASE("RFC 7748 section 6.1 derives the published public keys", "[net][hands
 }
 
 TEST_CASE("the derivation is pinned, because it is a wire format", "[net][handshake]") {
-	// Two builds that derive keys differently do not fail to connect — they
+	// Two builds that derive keys differently do not fail to connect - they
 	// connect and then refuse every frame, which is a much worse bug to be
 	// looking at. So the whole chain is nailed to a value produced outside this
 	// codebase: RFC 7748 §6.1's key pair, HKDF-SHA256 salted with

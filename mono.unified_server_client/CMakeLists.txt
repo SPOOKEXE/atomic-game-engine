@@ -1,4 +1,4 @@
-# mono.unified_server_client — both halves of replication in one process.
+# mono.unified_server_client - both halves of replication in one process.
 #
 # A diagnostic product, not a shipping one: it hosts the server's placeholder
 # world and the client's replicated world in one address space and hands the
@@ -10,11 +10,11 @@
 # user of it.** A `client`-tier target may not link `Mono::server`; this one
 # must, because a program that hosts a server and draws its world in one process
 # is precisely the arrangement the rule exists to make deliberate. D00008's
-# objection was that an escape with no user is an escape somebody repurposes —
+# objection was that an escape with no user is an escape somebody repurposes -
 # this one has a user, and it is this line. Single-player is still not it: that
 # edge belongs in `mono.client/CMakeLists.txt` and is still not declared there.
 #
-# The library exists for the same reason `mono.client`'s does — a test binary
+# The library exists for the same reason `mono.client`'s does - a test binary
 # needs something to link, and `tests/` here drives the harness directly.
 
 mono_add_library(unified_server_client

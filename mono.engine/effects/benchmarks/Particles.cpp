@@ -3,8 +3,8 @@
 // **The roadmap asks for 100,000 emitters with at least five particles each**,
 // which is half a million particles a frame, and this is the suite that says
 // whether that is true rather than plausible. Every architectural decision in
-// `ParticleSystem.hpp` — the pooled blocks, the sampled curves, the split
-// instance and state arrays, the block-local retirement — was taken against this
+// `ParticleSystem.hpp` - the pooled blocks, the sampled curves, the split
+// instance and state arrays, the block-local retirement - was taken against this
 // number, so a reading here that disagrees with one of those comments should win
 // and the comment should be corrected.
 //
@@ -40,8 +40,8 @@
 // **Two findings came out of this suite rather than out of reading the code.**
 //
 // - **The refresh pass was 70 per cent of the frame**, at 522 us against a whole
-//   frame of 738. It was re-sampling four curves per emitter per frame — 6.4
-//   million `Evaluate` calls — for tables that almost never change. Gating that
+//   frame of 738. It was re-sampling four curves per emitter per frame - 6.4
+//   million `Evaluate` calls - for tables that almost never change. Gating that
 //   on `Store::Changed<ParticleEmitter>` took the pass to 192 us and the frame to
 //   389. That gate is the single largest optimisation in the module and it was
 //   invisible until it was measured; the comment in `RefreshEmitters` had
@@ -49,8 +49,8 @@
 // - **The spawn half really is free.** "Step at zero delta" ages nothing and
 //   spawns nothing and costs 198 us, which is within noise of the full step's
 //   198 us. So the entire cost of the step is the walk and the per-particle
-//   arithmetic, and the serial spawn loop — the one deliberate serialisation in
-//   the module — does not appear in the measurement at all. That is the
+//   arithmetic, and the serial spawn loop - the one deliberate serialisation in
+//   the module - does not appear in the measurement at all. That is the
 //   justification `StepParticles` claims for it, confirmed rather than asserted.
 //
 // **A harness bug is recorded here rather than quietly fixed**, because it is the
@@ -94,14 +94,14 @@ namespace particle_bench {
 	//
 	// Five, which is the roadmap's floor. The block sizing is `Rate * Lifetime`,
 	// so a rate of five over a one-second life is five slots plus the accumulator's
-	// spare — and that is what makes the pool exactly as big as the target.
+	// spare - and that is what makes the pool exactly as big as the target.
 	constexpr float RATE = 5.0f;
 	constexpr float LIFETIME = 1.0f;
 
 	// A world of `count` emitters, built once and reused.
 	//
 	// Lazily rather than at static-initialisation time, because a store binds its
-	// owning thread on construction — `physics/benchmarks/Broadphase.cpp`'s
+	// owning thread on construction - `physics/benchmarks/Broadphase.cpp`'s
 	// reason, and it is the same store.
 	//
 	// **Every emitter is on its own part**, which is what the shape actually is:
@@ -130,7 +130,7 @@ namespace particle_bench {
 
 		for (size_t index = 0; index < count; index++) {
 			// Spread over a grid so the scene is a world rather than a point. The
-			// step does not read a position, so this changes nothing it measures —
+			// step does not read a position, so this changes nothing it measures -
 			// it is here so that a profile taken against this suite looks like a
 			// profile taken against a scene.
 			desc.Frame = CFrame{
@@ -181,7 +181,7 @@ using namespace particle_bench;
 //
 // Powers of ten, so the shape of the curve is readable rather than a single
 // point. The step is parallel over blocks with a dispatch floor of 256, so the
-// 1,000 row is above the floor and the 100 row would not be — which is why the
+// 1,000 row is above the floor and the 100 row would not be - which is why the
 // ladder starts where it does.
 
 BENCH("Frame · 1,000 emitters · 5,000 particles", 200) {
@@ -220,7 +220,7 @@ BENCH("Step only · 100,000 emitters · 500,000 particles", 20) {
 
 // **The serial spawn half, isolated.** `StepParticles` runs its ageing loop in
 // parallel and its spawn loop serially, and the argument for that is that a
-// steady scene spawns alive-over-lifetime particles a frame — a hundred thousand
+// steady scene spawns alive-over-lifetime particles a frame - a hundred thousand
 // a second here, which is under two thousand a frame. This row is the check on
 // that argument: a step at a delta of zero ages nothing and spawns nothing, so
 // the difference between it and the row above is the work rather than the walk.

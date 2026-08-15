@@ -2,8 +2,8 @@
 //
 // **The bug this exists for is the one you cannot see: a view with no way
 // back.** A viewport pinned to a client and then closed was recoverable only
-// because the replica had a row among the scenes, and the *server's* view — the
-// scene itself, drawn by the main panel — had no row anywhere. Live Instances is
+// because the replica had a row among the scenes, and the *server's* view - the
+// scene itself, drawn by the main panel - had no row anywhere. Live Instances is
 // the list, and this is the decision behind its buttons.
 //
 // Its three failure modes all look like something other than a fault: a second
@@ -41,7 +41,7 @@ TEST_CASE("a world already on screen is found rather than opened twice", "[studi
 	CHECK(ChooseViewportFor(CLIENT, SCENE, true, panels) == 1);
 	CHECK(ChooseViewportFor(OTHER, SCENE, true, panels) == 2);
 
-	// The main panel, which is not pinned to anything — it draws the active
+	// The main panel, which is not pinned to anything - it draws the active
 	// scene, so "showing SCENE" is a fact about `mainWorld` rather than about
 	// the panel.
 	CHECK(ChooseViewportFor(SCENE, SCENE, true, panels) == 0);
@@ -57,7 +57,7 @@ TEST_CASE("a world already on screen is found rather than opened twice", "[studi
 }
 
 TEST_CASE("a panel somebody pinned is never taken", "[studio][viewports]") {
-	// One free panel: closed. A closed panel is free whatever it is pinned to —
+	// One free panel: closed. A closed panel is free whatever it is pinned to -
 	// nobody is looking at it.
 	const std::array<PanelView, 3> panels{
 		PanelView{OTHER, true}, PanelView{CLIENT, false}, PanelView{SCENE, true}
@@ -73,7 +73,7 @@ TEST_CASE("a panel somebody pinned is never taken", "[studio][viewports]") {
 	CHECK(ChooseViewportFor(CLIENT, SCENE, true, loose) == 2);
 
 	// With every panel spoken for the honest answer is "make one" rather than
-	// evicting somebody — `Editor::ShowWorldInViewport` is what mints it.
+	// evicting somebody - `Editor::ShowWorldInViewport` is what mints it.
 	const std::array<PanelView, 2> full{PanelView{OTHER, true}, PanelView{CLIENT, true}};
 	CHECK(ChooseViewportFor(WorldId{7}, SCENE, true, full) == NO_VIEWPORT);
 

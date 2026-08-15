@@ -12,7 +12,7 @@ using engine::core::UDim2;
 using engine::core::Vector2;
 
 TEST_CASE("resolving mixes the proportion and the offset", "[udim]") {
-	// "Half the parent, minus eight" — the case the type exists for, and the
+	// "Half the parent, minus eight" - the case the type exists for, and the
 	// one neither number alone can express.
 	const UDim length{0.5f, -8.0f};
 
@@ -49,7 +49,7 @@ TEST_CASE("a UDim2 resolves each axis against its own parent extent", "[udim]") 
 }
 
 TEST_CASE("the four-number constructor uses Roblox's argument order", "[udim]") {
-	// xScale, xOffset, yScale, yOffset — not xScale, yScale, xOffset, yOffset.
+	// xScale, xOffset, yScale, yOffset - not xScale, yScale, xOffset, yOffset.
 	// Getting this wrong produces a layout that is plausible and mirrored.
 	const UDim2 size{0.5f, -8.0f, 0.25f, 4.0f};
 

@@ -97,7 +97,7 @@ TEST_CASE("a name resolves to exactly one asset", "[assets][manifest]") {
 	CHECK(manifest.Find("") == nullptr);
 
 	// The manifest is where a name becomes a hash, and the last place a name is
-	// used at all — CDN.md §1.
+	// used at all - CDN.md §1.
 	CHECK(manifest.Find("meshes/rock.mesh")->Name == "meshes/rock.mesh");
 }
 
@@ -167,7 +167,7 @@ TEST_CASE("the manifest root changes when anything below it changes", "[assets][
 	const ContentHash root = original.Root();
 
 	// One edited chunk changes its asset root, its bundle root and this. That
-	// chain is the invalidation set an edge cache is handed — CDN.md §2.
+	// chain is the invalidation set an edge cache is handed - CDN.md §2.
 	Manifest edited;
 	const ContentHash rock =
 		edited.AddAsset("meshes/rock.mesh", AssetKind::Mesh, {Chunk("rock-one"), Chunk("rock-CHANGED")});
@@ -195,7 +195,7 @@ TEST_CASE("the root binds a name to its content, not just the content", "[assets
 	const ContentHash b2 = swapped.AddAsset("meshes/tree.mesh", AssetKind::Mesh, {Chunk("rock")});
 	REQUIRE(swapped.AddBundle(std::vector<ContentHash>{a2, b2}).has_value());
 
-	// Identical content, identical bundles — and a different root, because the
+	// Identical content, identical bundles - and a different root, because the
 	// names now point at each other's bytes.
 	CHECK(straight.BundleRoot() == swapped.BundleRoot());
 	CHECK(straight.DescriptorRoot() != swapped.DescriptorRoot());
@@ -364,7 +364,7 @@ TEST_CASE("a truncated manifest is refused", "[assets][manifest]") {
 	const auto bytes = Serialise(Sample());
 
 	// Every length, because a reader answers zero past the end rather than
-	// throwing — so a truncation that is not checked parses as a manifest of
+	// throwing - so a truncation that is not checked parses as a manifest of
 	// empty things instead of failing.
 	for (size_t length = 0; length < bytes.size(); ++length) {
 		INFO("truncated to " << length);
@@ -383,7 +383,7 @@ TEST_CASE("a manifest whose root does not match its chunks is refused", "[assets
 
 	// Flip a byte inside the first chunk hash. The written asset root then
 	// describes content the chunk list does not, which is exactly the lie the
-	// hash tree exists to make impossible — so the reader recomputes rather
+	// hash tree exists to make impossible - so the reader recomputes rather
 	// than believing what it was handed.
 	const size_t firstChunkHash = bytes.size() - ContentHash::BYTES;
 	bytes[firstChunkHash] = static_cast<std::byte>(static_cast<uint8_t>(bytes[firstChunkHash]) ^ 0x01);

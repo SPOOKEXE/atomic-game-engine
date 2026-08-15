@@ -1,8 +1,8 @@
 {
 	"$comment": [
 		"luau-lsp's configuration, checked in so the editor and the command line",
-		"agree. `.vscode/settings.json` is gitignored — editor config is personal",
-		"here — so this is the copy that survives a fresh clone, and the VS Code",
+		"agree. `.vscode/settings.json` is gitignored - editor config is personal",
+		"here - so this is the copy that survives a fresh clone, and the VS Code",
 		"one should mirror it rather than diverge.",
 		"",
 		"Used by `luau-lsp analyze --settings=luau-lsp.json`. The keys are dotted",

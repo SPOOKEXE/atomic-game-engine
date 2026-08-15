@@ -10,13 +10,13 @@
 
 // **The two standalone headers `mono.vendor/imgui` carries, used without
 // imgui.** `stb_truetype` and `stb_rectpack` are public-domain single headers
-// that imgui bundles rather than parts of imgui — including them pulls in no
+// that imgui bundles rather than parts of imgui - including them pulls in no
 // imgui symbol and puts nothing of the editor's toolkit into a game binary,
 // which is the whole reason one atlas can serve both halves.
 //
 // The `imstb_` prefix is imgui's rename of the upstream files. Nothing else
 // about them is changed, and the `STB_*_IMPLEMENTATION` defines below are what
-// turn a header into a translation unit — done here, once, so there is one copy
+// turn a header into a translation unit - done here, once, so there is one copy
 // of the code in the binary.
 #define STB_RECT_PACK_IMPLEMENTATION
 #define STBRP_STATIC
@@ -45,7 +45,7 @@ namespace engine::render {
 		//
 		// **Not decoration.** A sampler filtering at the edge of a packed glyph
 		// reads the neighbour's coverage, which draws as a faint smear of an
-		// unrelated letter along one side — the classic atlas bleed, and it only
+		// unrelated letter along one side - the classic atlas bleed, and it only
 		// shows at non-integer scales, which is to say on somebody else's
 		// machine.
 		constexpr int PADDING = 1;
@@ -78,7 +78,7 @@ namespace engine::render {
 			1 + static_cast<size_t>(face) * PER_FACE + static_cast<size_t>(codepoint - FIRST_CODEPOINT);
 		const Glyph &glyph = Glyphs[index];
 
-		// A glyph with no advance was never baked — the face was missing, or
+		// A glyph with no advance was never baked - the face was missing, or
 		// the font has no such character. Null rather than a zero-size box, so
 		// a caller draws its missing marker instead of nothing.
 		return glyph.Advance > 0.0f || glyph.Width > 0 ? &glyph : nullptr;
@@ -111,7 +111,7 @@ namespace engine::render {
 		const std::filesystem::path root = core::Paths::Assets() / "fonts";
 
 		// Read every face first, because a face that failed to load must not
-		// take a slot in the packing — a hole in the sheet is wasted upload.
+		// take a slot in the packing - a hole in the sheet is wasted upload.
 		std::array<std::vector<unsigned char>, FACES> files;
 		std::array<stbtt_fontinfo, FACES> fonts{};
 		std::array<bool, FACES> loaded{};
@@ -158,7 +158,7 @@ namespace engine::render {
 		// **The white texel is packed, not placed in a corner the packer
 		// "cannot reach".** It can: `stbrp` fills the whole sheet, and a large
 		// glyph landing on a hand-picked texel would put a letter's coverage
-		// under every filled rectangle in the interface — a bug that appears
+		// under every filled rectangle in the interface - a bug that appears
 		// only once the atlas is full enough for that glyph to go there, which
 		// is to say on the machine with the wider font.
 		//
@@ -233,7 +233,7 @@ namespace engine::render {
 					rect.h = static_cast<stbrp_coord>(entry.Height + PADDING * 2);
 					rects.push_back(rect);
 				}
-				// A space has metrics and no pixels, which is not a failure —
+				// A space has metrics and no pixels, which is not a failure -
 				// it keeps its advance and takes no room in the sheet.
 
 				if (bitmap != nullptr) {
@@ -292,7 +292,7 @@ namespace engine::render {
 
 			if (rect.id == 0) {
 				// The reserved texel. Its centre, because a sampler filtering
-				// at a corner reads three neighbours — all empty here, which
+				// at a corner reads three neighbours - all empty here, which
 				// would draw a solid quad at a quarter alpha.
 				Pixels[static_cast<size_t>(y) * side + x] = 255;
 				White = core::Vector2{
@@ -320,7 +320,7 @@ namespace engine::render {
 			glyph.Advance = entry.Advance;
 		}
 
-		// The glyphs with metrics and no pixels — the space, and anything the
+		// The glyphs with metrics and no pixels - the space, and anything the
 		// face has an advance for and no outline. They were never packed, so
 		// their advance is written here.
 		for (const Baked &entry : baked) {

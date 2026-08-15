@@ -9,8 +9,8 @@
 //
 // **Every palette is generated from five colours, not from fifteen.** A theme
 // declares a surface, an accent, a hot accent and two text colours; the other
-// ten — the background behind panels, the raised face of a button, the sunken
-// well of a text field, the viewport, the border — are shades of that surface.
+// ten - the background behind panels, the raised face of a button, the sunken
+// well of a text field, the viewport, the border - are shades of that surface.
 // That is how seven themes exist without seven chances to get the contrast
 // between a button and the panel it sits on subtly wrong, and it is the
 // discipline `ui::Metrics` already applies to spacing: an interface built from
@@ -18,7 +18,7 @@
 // charge.
 //
 // The palettes are dark, low-chroma and low-contrast between neighbouring
-// surfaces, which is not a taste claim — the thing being looked at is a lit 3D
+// surfaces, which is not a taste claim - the thing being looked at is a lit 3D
 // scene, and chrome that competes with it for attention makes the render harder
 // to judge. That is the same reason a video editor is grey. `Terminal` is the
 // deliberate exception and says so.
@@ -41,7 +41,7 @@ namespace engine::ui {
 	//
 	// @since v0.7
 	enum class Palette : uint8_t {
-		// The default. Deep blue-grey chrome and a bright blue accent — the
+		// The default. Deep blue-grey chrome and a bright blue accent - the
 		// look this editor's reference has, and the one the greys were chosen
 		// against.
 		Dark,
@@ -78,7 +78,7 @@ namespace engine::ui {
 
 	// Enough of a palette to draw a preview of it.
 	//
-	// **Because imgui's style holds one palette at a time — the live one.** A
+	// **Because imgui's style holds one palette at a time - the live one.** A
 	// picker that showed seven themes by reading the style would show the
 	// current theme seven times, so the other six have to be readable without
 	// being applied. Three colours rather than the whole spec: a surface, a
@@ -113,7 +113,7 @@ namespace engine::ui {
 	//
 	// **Applies immediately rather than on the next frame.** imgui's style is
 	// read while widgets are submitted, so a palette that took effect later
-	// would draw one frame as a mixture of two — which is visible, and reads as
+	// would draw one frame as a mixture of two - which is visible, and reads as
 	// a flicker rather than as a setting.
 	//
 	// Safe to call before a context exists: the choice is remembered and
@@ -125,7 +125,7 @@ namespace engine::ui {
 	// Makes the chosen palette persist in the layout ini.
 	//
 	// **Call before the first frame**, because imgui loads its ini lazily on
-	// the first `NewFrame` — a handler registered after that has already had
+	// the first `NewFrame` - a handler registered after that has already had
 	// its lines skipped as unknown, and the setting silently never restores.
 	//
 	// Idempotent, and a no-op when there is no context.
@@ -134,7 +134,7 @@ namespace engine::ui {
 	// One of the colours a theme is built from.
 	//
 	// **Seven, and they are every colour this module has.** Five come from the
-	// palette and two are the semantic pair that never did — a warning and an
+	// palette and two are the semantic pair that never did - a warning and an
 	// error read the same in every theme, because what they mean does not change
 	// with the chrome. Overriding them is still allowed: somebody who cannot
 	// distinguish the default red from the default green needs to move it, and
@@ -142,7 +142,7 @@ namespace engine::ui {
 	// you" is not a customisable theme.
 	//
 	// **The list is short on purpose.** imgui has fifty-odd style slots and this
-	// exposes seven, because the other forty-odd are *derived* — see the header
+	// exposes seven, because the other forty-odd are *derived* - see the header
 	// note. Letting somebody set a button's face independently of the panel
 	// behind it is letting them put a control at the wrong distance from its
 	// surface, which is the mistake the shade ladder exists to make impossible.
@@ -172,7 +172,7 @@ namespace engine::ui {
 	// A colour's name, as a settings panel shows it and as a file spells it.
 	//
 	// **One spelling for both**, because the alternative is a label somebody
-	// reads and a key nobody can guess from it — and this is the name a plugin
+	// reads and a key nobody can guess from it - and this is the name a plugin
 	// passes to `SetWidgetColour` as well.
 	//
 	// @param colour The colour.
@@ -189,7 +189,7 @@ namespace engine::ui {
 	// Colours chosen over the ones the palette declares.
 	//
 	// **Sparse, and that is the whole design.** A person who wanted a purple
-	// accent chose one colour, not seven — so an override holds what was chosen
+	// accent chose one colour, not seven - so an override holds what was chosen
 	// and nothing else, and switching palette afterwards keeps their accent and
 	// moves everything else. An override that was a full copy of a palette would
 	// pin all seven the moment anybody touched one, and choosing a theme would
@@ -247,14 +247,14 @@ namespace engine::ui {
 	// The colour some `RRGGBBAA` text names.
 	//
 	// @param text Six or eight hex digits, with or without a leading `#`. Six is
-	//        opaque — `#2E3440` is what somebody copies out of a palette, and
+	//        opaque - `#2E3440` is what somebody copies out of a palette, and
 	//        making them append `FF` to it is making them get it wrong once.
 	// @return The colour in `IM_COL32` byte order, or nothing when the text is
 	//         not a colour.
 	// @since v0.13
 	std::optional<unsigned int> ParseColourText(std::string_view text);
 
-	// A colour of the live theme — the palette, with the global override on top.
+	// A colour of the live theme - the palette, with the global override on top.
 	//
 	// @param colour Which one.
 	// @return The colour, in imgui's `IM_COL32` byte order.
@@ -278,7 +278,7 @@ namespace engine::ui {
 	// Chooses colours over the palette, for the whole editor.
 	//
 	// Restyles the current context immediately and persists the choice in the
-	// layout ini, for the same reasons `SetPalette` does both — see its note.
+	// layout ini, for the same reasons `SetPalette` does both - see its note.
 	//
 	// @param colours What to choose. An unset field returns that colour to
 	//        whatever the palette says, so clearing one is the same call.
@@ -288,7 +288,7 @@ namespace engine::ui {
 	//
 	// **Constructed before `ImGui::Begin` and destroyed after `End`.** A window's
 	// background is read at `Begin`, so an override pushed inside the window
-	// colours everything in it except the window — which looks like a bug and is
+	// colours everything in it except the window - which looks like a bug and is
 	// the mistake this note exists to prevent.
 	//
 	// The colours are resolved the same way the global theme is: the seven are
@@ -327,8 +327,8 @@ namespace engine::ui {
 
 	// The accent colour, as packed RGBA a widget can pass straight to imgui.
 	//
-	// Exposed because a few things are drawn rather than styled — a selection
-	// rectangle in the explorer, the run-state pill on the toolbar — and those
+	// Exposed because a few things are drawn rather than styled - a selection
+	// rectangle in the explorer, the run-state pill on the toolbar - and those
 	// have to be the same colour as everything the style covers.
 	//
 	// @return The accent, in imgui's `IM_COL32` byte order.
@@ -344,7 +344,7 @@ namespace engine::ui {
 	// @return The colour, in imgui's `IM_COL32` byte order.
 	unsigned int ErrorColour();
 
-	// The colour secondary text uses — a class name beside an instance name, a
+	// The colour secondary text uses - a class name beside an instance name, a
 	// property's type beside its value.
 	//
 	// @return The colour, in imgui's `IM_COL32` byte order.

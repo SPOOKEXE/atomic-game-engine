@@ -6,13 +6,13 @@
 // **Two VMs and a generator need the same two enums, and each used to register
 // its own copy.** `EasingStyle` and `EasingDirection` are consumed by
 // `TweenInfo` in Luau and in JavaScript, so both surfaces registered the member
-// list at VM-open time — the same eleven strings written out twice. Registering
+// list at VM-open time - the same eleven strings written out twice. Registering
 // twice is agreement rather than conflict, which is exactly why the second copy
 // went unnoticed: nothing failed, and one list could quietly gain a member the
 // other did not.
 //
 // The third consumer is what made it worth fixing. `mono.tools/bindings`
-// generates the declaration files from `ecs::EnumTable`, and it opens no VM —
+// generates the declaration files from `ecs::EnumTable`, and it opens no VM -
 // so `Enum.EasingStyle` was absent from the manifest and from both declaration
 // files, and a script naming it had no completion for a value the run time
 // accepts.

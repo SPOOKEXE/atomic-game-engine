@@ -124,7 +124,7 @@ TEST_CASE("an outline is four quads and never a line primitive", "[render][inter
 TEST_CASE("batches split on a scissor change and merge otherwise", "[render][interfacemesh]") {
 	// **A clip is pipeline state rather than a vertex attribute**, so two
 	// elements clipped differently cannot be one draw however alike their pixels
-	// are — and merging the runs that *do* match is the whole reason this is
+	// are - and merging the runs that *do* match is the whole reason this is
 	// called batched.
 	GlyphAtlas atlas;
 	engine::gui::DrawList list;
@@ -159,7 +159,7 @@ TEST_CASE("batches split on a scissor change and merge otherwise", "[render][int
 
 TEST_CASE("an image starts its own batch and carries its name", "[render][interfacemesh]") {
 	// **A `core::Name` rather than a texture handle**, because resolving one is
-	// the caller's — `gui::DrawCommand::Image` is a content name for exactly
+	// the caller's - `gui::DrawCommand::Image` is a content name for exactly
 	// that reason and this type is no better placed to resolve it.
 	GlyphAtlas atlas;
 	engine::gui::DrawList list;
@@ -241,8 +241,8 @@ TEST_CASE("text with an atlas advances the pen per glyph", "[render][interfaceme
 }
 
 TEST_CASE("a solid quad samples the atlas's white texel", "[render][interfacemesh]") {
-	// **One pipeline for a filled rectangle and a glyph.** Two — one textured,
-	// one not — is two places for the blend state to be set differently, which
+	// **One pipeline for a filled rectangle and a glyph.** Two - one textured,
+	// one not - is two places for the blend state to be set differently, which
 	// shows as panels being subtly the wrong opacity and nowhere else.
 	const StagedAssets assets;
 	if (!std::filesystem::exists(engine::core::Paths::Assets() / "fonts" / "Inter.ttf")) {
@@ -274,14 +274,14 @@ TEST_CASE("a rotated command rotates its geometry", "[render][interfacemesh]") {
 	// axis-aligned quads with no transform, so a rotated label drew its box
 	// turned and its contents upright.
 	//
-	// The entry's own reopen trigger was "the quad pipeline — a pass that emits
+	// The entry's own reopen trigger was "the quad pipeline - a pass that emits
 	// its own vertices can apply the rotation to all four kinds in one place".
 	// This is that place, and this is that assertion.
 	GlyphAtlas atlas;
 	engine::gui::DrawList list;
 
 	// A wide, short rectangle centred at (50, 20), turned a quarter turn. After
-	// rotation it must be tall and narrow — a quad that ignored the angle stays
+	// rotation it must be tall and narrow - a quad that ignored the angle stays
 	// wide, and one that rotated about the wrong pivot moves off centre.
 	auto turned = Rectangle(0.0f, 10.0f, 100.0f, 20.0f);
 	turned.Rotation = 90.0f;
@@ -339,7 +339,7 @@ TEST_CASE("a rotated label turns as a run rather than per glyph", "[render][inte
 	REQUIRE(mesh.Vertices().size() == 8);
 
 	// Unrotated the second glyph is to the *right* of the first. Turned a
-	// quarter turn clockwise it must be *below* it instead — which only holds if
+	// quarter turn clockwise it must be *below* it instead - which only holds if
 	// both glyphs turned about one shared pivot.
 	const float firstY = mesh.Vertices()[0].Y;
 	const float secondY = mesh.Vertices()[4].Y;

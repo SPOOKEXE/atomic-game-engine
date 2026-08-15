@@ -3,8 +3,8 @@
 // Where a document meets a graph.
 //
 // **The one function that needs both halves, which is why it is the only thing
-// left here.** `bakegraph/Document.hpp` is the format — an ordered list of edits
-// that saves, scripts and undoes — and it names no decoder, so `Engine::game`
+// left here.** `bakegraph/Document.hpp` is the format - an ordered list of edits
+// that saves, scripts and undoes - and it names no decoder, so `Engine::game`
 // can read one out of a place file. Running a document needs `bake::Graph`,
 // which needs every importer, so replaying one lives on this side of the line.
 //

@@ -128,7 +128,7 @@ TEST_CASE("NLerp stays on the unit sphere", "[cframe]") {
 	const CFrame to = CFrame::Angles(0.4f, 0.9f, -0.3f);
 
 	// A component lerp without the renormalise leaves the unit sphere, and a
-	// non-unit quaternion is a rotation with a scale baked into it — every cube
+	// non-unit quaternion is a rotation with a scale baked into it - every cube
 	// drawn through one comes out the wrong size.
 	for (float alpha = 0.0f; alpha <= 1.0f; alpha += 0.125f) {
 		const CFrame middle = from.NLerp(to, alpha);
@@ -148,7 +148,7 @@ TEST_CASE("NLerp agrees with Lerp over a tick-sized arc", "[cframe]") {
 
 	// The claim the substitution rests on. Over an arc this short the two
 	// agree far inside what a pixel can show, so the cheap one is not an
-	// approximation anybody can see — it is the same picture.
+	// approximation anybody can see - it is the same picture.
 	for (float alpha = 0.0f; alpha <= 1.0f; alpha += 0.125f) {
 		const CFrame fast = from.NLerp(to, alpha);
 		const CFrame exact = from.Lerp(to, alpha);
@@ -164,7 +164,7 @@ TEST_CASE("NLerp takes the shortest arc", "[cframe]") {
 	const CFrame from;
 
 	// A quaternion and its negation are the same orientation. Interpolating
-	// toward the negated one without the sign flip goes the long way round —
+	// toward the negated one without the sign flip goes the long way round -
 	// which on a spinning object is a visible backwards snap once a revolution,
 	// and the reason Lerp's behaviour cannot simply be assumed here.
 	CFrame negated;
@@ -215,7 +215,7 @@ TEST_CASE("ToMatrix puts the position in the fourth column", "[cframe]") {
 
 namespace {
 	// Compares rotations rather than angle triples. Two different triples can
-	// name one rotation — that is what gimbal lock *is* — so asserting on the
+	// name one rotation - that is what gimbal lock *is* - so asserting on the
 	// angles would fail for a correct answer.
 	void RequireSameRotation(const CFrame &produced, const CFrame &expected, float margin = 1.0e-4f) {
 		for (const Vector3 &probe :
@@ -252,8 +252,8 @@ TEST_CASE("ToAngles round-trips at the gimbal poles", "[cframe]") {
 	constexpr float HALF_PI = std::numbers::pi_v<float> / 2.0f;
 
 	// Pitch at ±90° is where cos(pitch) reaches zero and the yaw and roll axes
-	// coincide. The triple that comes back is not the one that went in — it
-	// cannot be, the information is genuinely gone — but the rotation it
+	// coincide. The triple that comes back is not the one that went in - it
+	// cannot be, the information is genuinely gone - but the rotation it
 	// rebuilds has to be identical.
 	for (const float pitch : {HALF_PI, -HALF_PI}) {
 		for (const float yaw : {0.0f, 0.9f, -2.1f}) {
@@ -268,7 +268,7 @@ TEST_CASE("ToAngles round-trips at the gimbal poles", "[cframe]") {
 				// A looser margin than the sweep above, and it is float
 				// precision rather than slack. At the pole `sin(pitch)` comes
 				// back as 0.99999994, so the axis the extraction leans on has
-				// about 3.5e-4 of magnitude left to carry a ratio — that error
+				// about 3.5e-4 of magnitude left to carry a ratio - that error
 				// is the arithmetic's floor here, not the algorithm's.
 				RequireSameRotation(CFrame::Angles(recovered.X, recovered.Y, recovered.Z), original, 1.0e-3f);
 			}

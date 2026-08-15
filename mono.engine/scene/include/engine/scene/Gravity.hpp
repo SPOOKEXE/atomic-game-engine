@@ -9,7 +9,7 @@
 // world holds rather than a constant the solver assumes.
 //
 // **What was missing is that nothing applied it.** The physics module was
-// complete, tested and connected to nothing for four versions — `D00039` — and
+// complete, tested and connected to nothing for four versions - `D00039` - and
 // wiring `RegisterPhysicsSystems` alone would not have made a single thing fall,
 // because every body would have been integrated at zero acceleration for ever.
 // The two halves are separate features and this is the second one.
@@ -34,7 +34,7 @@ namespace engine::scene {
 	// @since v0.13
 	struct Gravity {
 		// **Metres per second squared, down.** Earth's, because this engine
-		// measures parts in metres — a part sized `2` is two metres — so the
+		// measures parts in metres - a part sized `2` is two metres - so the
 		// number that makes a two-metre crate fall the way a two-metre crate
 		// falls is the real one. Roblox's 196.2 is the same acceleration in
 		// studs, and copying it here would make everything fall twenty times
@@ -46,7 +46,7 @@ namespace engine::scene {
 	//
 	// **`PreSimulation`, and the phase is the whole of the ordering argument.**
 	// `physics.simulation` runs in `Simulation`, and a system sharing that phase
-	// has no ordering against it — so gravity applied there is gravity applied
+	// has no ordering against it - so gravity applied there is gravity applied
 	// after the integrate on some ticks, which is one tick of fall lost each
 	// time and reads as a body that is slightly too light.
 	//

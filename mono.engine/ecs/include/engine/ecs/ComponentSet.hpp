@@ -16,7 +16,7 @@
 //
 // **Sorted, so the set is canonical.** `{Motion, Transform}` and `{Transform,
 // Motion}` are one set with one id, whichever order the caller named them in.
-// Sorting is by component id, which is registration order — which is why
+// Sorting is by component id, which is registration order - which is why
 // `Components` insists registration happens once, at startup, in a fixed order.
 // Two runs that disagree about that would build differently-numbered sets, and
 // iteration order would follow.
@@ -129,7 +129,7 @@ namespace engine::ecs {
 		// The set with one more component, interned.
 		//
 		// Returns this set unchanged when it already contains `id`. This and
-		// `Without` are the archetype graph's edges — an entity gaining a
+		// `Without` are the archetype graph's edges - an entity gaining a
 		// component follows one to the table it belongs in.
 		//
 		// @param id The component to add.

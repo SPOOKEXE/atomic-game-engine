@@ -4,7 +4,7 @@
 #
 # Each client is admitted, given a blocky character on the spawn pad and told
 # which player it is; WASD walks it and Space jumps. Every client sees every
-# other character move, because the movement happens once — on the server — and
+# other character move, because the movement happens once - on the server - and
 # what crosses is the intent going up and the transform coming down.
 #
 #   scripts/demos/run-local-server.sh              # a server and two clients
@@ -16,7 +16,7 @@
 # **This is not `mono.unified_server_client`**, and the difference is the whole
 # reason to run it. That harness cuts `net` out of the middle to prove the
 # serialise/deserialise seam; this puts the socket, the handshake, the cipher and
-# the bandwidth budget back, and adds the thing neither of them had — more than
+# the bandwidth budget back, and adds the thing neither of them had - more than
 # one player.
 #
 # Ctrl-C stops everything: the clients are children of this shell and the trap
@@ -35,7 +35,7 @@ port=${PORT:-9099}
 scene=${SCENE:-Playground.luau}
 
 if [ "$preset" = "server" ]; then
-	echo "the 'server' preset builds no client — there would be nobody to connect." >&2
+	echo "the 'server' preset builds no client - there would be nobody to connect." >&2
 	echo "  try:  PRESET=dev $0" >&2
 	exit 1
 fi
@@ -52,7 +52,7 @@ for program in "$client" "$server"; do
 	fi
 done
 
-# The staged copy, not the source — a demo that ran the source tree would work
+# The staged copy, not the source - a demo that ran the source tree would work
 # here and nowhere a staged tree was copied to. `_common.sh` says the same.
 staged="$build/client/assets/examples/$scene"
 if [ ! -f "$staged" ]; then
@@ -88,13 +88,13 @@ for ((index = 1; index <= clients; index++)); do
 	echo "client $index: connecting"
 
 	# **`--net`, because the F4 panel is where this demo is read from.** Two
-	# characters that do not move have three explanations — never admitted, never
-	# told which player, never sent an input — and the panel separates them.
+	# characters that do not move have three explanations - never admitted, never
+	# told which player, never sent an input - and the panel separates them.
 	"$client" --connect "127.0.0.1:$port" --net --stats &
 	children+=($!)
 
 	# Staggered, so two clients do not hand the listener two admissions in one
-	# poll. Not required — the listener handles it — but it makes the log read in
+	# poll. Not required - the listener handles it - but it makes the log read in
 	# the order things happened.
 	sleep 0.3
 done

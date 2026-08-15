@@ -32,7 +32,7 @@ namespace engine::world {
 		// because a recording, a snapshot of pending traffic and the link to a
 		// supervised host all read it, and three encoders would agree until the
 		// day one of them did not. These four are the shape
-		// `Components::Register` wants — a count and a void pointer — wrapped
+		// `Components::Register` wants - a count and a void pointer - wrapped
 		// round that one encoder.
 		void WriteEnvelopes(core::ByteWriter &writer, const void *source, size_t count) {
 			const auto *boxes = static_cast<const Outbox *>(source);
@@ -125,12 +125,13 @@ namespace engine::world {
 		core::Name key,
 		std::span<const std::byte> payload,
 		uint64_t version,
-		bool wantsReply
+		bool wantsReply,
+		core::Name target
 	) {
 		if (IsReplica()) {
 			// A replica simulates its own copy and reconciles against
 			// authoritative state. Writing to a bus would be a client telling
-			// the universe something the server never said — so it is refused
+			// the universe something the server never said - so it is refused
 			// here, at the call, rather than left as a rule somebody
 			// eventually breaks.
 			return Ticket{};
@@ -151,6 +152,7 @@ namespace engine::world {
 		envelope.Bus = bus;
 		envelope.Operation = operation;
 		envelope.Key = key;
+		envelope.Target = target;
 		envelope.Sequence = outbox.NextSequence++;
 		envelope.Version = version;
 		envelope.Payload.assign(payload.begin(), payload.end());
@@ -163,15 +165,15 @@ namespace engine::world {
 		outbox.Pending.push_back(std::move(envelope));
 
 		// `From` is stamped by the driver at the barrier rather than here. A
-		// world does not get to say who it is — that is the one field a
+		// world does not get to say who it is - that is the one field a
 		// compromised or buggy world could otherwise lie about, and every
 		// ordering decision depends on it.
 		return issued;
 	}
 
-	// The three fire-and-forget operations check the budget themselves, because
+	// The four fire-and-forget operations check the budget themselves, because
 	// `Post` reports failure by returning no ticket and these never ask for one
-	// — so success and refusal would otherwise look identical.
+	// - so success and refusal would otherwise look identical.
 
 	bool Postbox::Publish(std::string_view topic, std::span<const std::byte> payload) {
 		if (IsReplica() || Remaining() == 0) {
@@ -194,6 +196,28 @@ namespace engine::world {
 			return false;
 		}
 		Post(BusKind::Messaging, BusOperation::Unsubscribe, core::Name(topic), {}, 0, false);
+		return true;
+	}
+
+	// **A channel is opened with `Subscribe` one bus along**, which is `Bus.hpp`'s
+	// argument: the act is the same one - a world declaring what it wants
+	// delivered - and the router tells the two apart by the `BusKind` it has to
+	// read anyway.
+	//
+	// **The open asks for a reply where the close does not**, because it is the
+	// one of the two the barrier may refuse: `UniverseSettings::ChannelsPerWorld`
+	// is a total the router holds and a world cannot count from its own store.
+	// Giving a channel up needs nobody's permission.
+
+	Ticket Postbox::OpenChannel(std::string_view channel) {
+		return Post(BusKind::Channel, BusOperation::Subscribe, core::Name(channel), {}, 0, true);
+	}
+
+	bool Postbox::CloseChannel(std::string_view channel) {
+		if (IsReplica() || Remaining() == 0) {
+			return false;
+		}
+		Post(BusKind::Channel, BusOperation::Unsubscribe, core::Name(channel), {}, 0, false);
 		return true;
 	}
 
@@ -223,5 +247,12 @@ namespace engine::world {
 
 	Ticket Postbox::Teleport(std::string_view world, std::span<const std::byte> payload) {
 		return Post(BusKind::Teleport, BusOperation::Send, core::Name(world), payload, 0, true);
+	}
+
+	Ticket
+	Postbox::SendTo(std::string_view world, std::string_view channel, std::span<const std::byte> payload) {
+		return Post(
+			BusKind::Channel, BusOperation::Send, core::Name(channel), payload, 0, true, core::Name(world)
+		);
 	}
 }

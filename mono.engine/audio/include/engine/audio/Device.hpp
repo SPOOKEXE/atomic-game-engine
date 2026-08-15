@@ -6,15 +6,15 @@
 // **The null device is the point of the abstraction**, not a convenience. Every
 // suite in this module runs against one: `Renderer::Initialise(nullptr)` made
 // the same choice for graphics, and `AGENTS.md` is explicit that a header
-// needing a GPU has no unit suite. Audio would have the same problem — CI has
-// no sound card and a developer's is in use — except that a mixer's output is
+// needing a GPU has no unit suite. Audio would have the same problem - CI has
+// no sound card and a developer's is in use - except that a mixer's output is
 // *data*, so the only part that genuinely needs hardware is the handover. That
 // part is small and is the only part left uncovered.
 //
 // **The real device owns a thread with a hard deadline.**
 // `DATATYPES_LIBRARIES.md` puts it plainly: *a device thread with a hard
 // deadline. A missed buffer is audible.* So the callback does exactly one
-// thing — render a block into the buffer SDL asked for — and everything that
+// thing - render a block into the buffer SDL asked for - and everything that
 // could allocate, block or take a lock happens elsewhere:
 //
 // - the graph is the mixer's and only the callback touches it
@@ -25,7 +25,7 @@
 //
 // **A machine with no audio output is not an error.** It is a laptop with its
 // output muted at the driver level, a CI container, a server that linked the
-// client library. `Open` answers null and the caller carries on — a game that
+// client library. `Open` answers null and the caller carries on - a game that
 // refused to start because it could not make a noise would be worse than one
 // that is quiet.
 //
@@ -67,7 +67,7 @@ namespace engine::audio {
 		//
 		// **A tick talks to `Mixer::Commands()` and to nothing else on it.**
 		// Reaching for `Graph()` from the tick thread while a real device is
-		// running is a data race with the callback — the one mistake this whole
+		// running is a data race with the callback - the one mistake this whole
 		// arrangement is shaped to prevent, and the one the type system cannot
 		// stop.
 		virtual AudioMixer &Mixer() = 0;
@@ -94,7 +94,7 @@ namespace engine::audio {
 	// **What every test in this module runs against**, and what a headless
 	// build gets. It has no thread and no hardware: `Advance` renders blocks
 	// synchronously, so a suite states how much time passed rather than waiting
-	// for it — the same discipline `net` applies to timeouts.
+	// for it - the same discipline `net` applies to timeouts.
 	//
 	// @since v0.9
 	class NullDevice : public Device {
@@ -117,7 +117,7 @@ namespace engine::audio {
 	// Opens the system's audio output.
 	//
 	// @param settings What to ask for.
-	// @return The device, or nothing when there is no audio output — which is
+	// @return The device, or nothing when there is no audio output - which is
 	//         an ordinary outcome on a CI container or a machine with its
 	//         output disabled, and **not an error**. A caller runs quietly.
 	// @since v0.9

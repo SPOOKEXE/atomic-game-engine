@@ -1,3 +1,4 @@
+#include <engine/assets/Resample.hpp>
 #include <engine/render/MissingTexture.hpp>
 
 #include <cstddef>
@@ -48,6 +49,14 @@ namespace engine::render {
 					}
 				}
 			}
+
+			// **A marker minifies to the mean of its two colours, and that is the
+			// right answer.** The point of the checkerboard is to be legible at
+			// the distance somebody notices the part; without a chain it was
+			// legible as speckle instead, which reads as a renderer fault rather
+			// than as a missing sheet. `DefaultTexture.cpp` carries where the
+			// filter lives and why it may be called from here.
+			assets::BuildMipChain(built);
 			return built;
 		}();
 		return image;

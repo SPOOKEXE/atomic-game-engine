@@ -147,7 +147,7 @@ TEST_CASE("With and Without are no-ops when they would change nothing", "[ecs]")
 	const ComponentSet &set = ComponentSet::Intern({A(), B()});
 
 	// Adding what is already there returns the same set rather than interning
-	// a second copy — which is what keeps `Set` on an existing component from
+	// a second copy - which is what keeps `Set` on an existing component from
 	// moving the entity to a new archetype.
 	REQUIRE(&set.With(A()) == &set);
 	REQUIRE(&set.With(ComponentId{}) == &set);

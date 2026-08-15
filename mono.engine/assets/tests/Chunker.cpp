@@ -111,7 +111,7 @@ TEST_CASE("an insertion moves only the chunks around it", "[assets][chunker]") {
 	const auto before = chunker.Split(original);
 
 	// One byte inserted near the front. With fixed-size chunking every later
-	// boundary shifts and every later chunk is new — which is the entire reason
+	// boundary shifts and every later chunk is new - which is the entire reason
 	// this class exists rather than a divide by 64 KiB.
 	std::vector<std::byte> edited;
 	edited.reserve(original.size() + 1);
@@ -232,7 +232,7 @@ TEST_CASE("the average chunk lands near the target", "[assets][chunker]") {
 	INFO("average " << average << " target " << limits.TargetBytes);
 
 	// A factor of two either way. This is what the normalised two-mask scheme
-	// buys — a single mask gives a geometric distribution whose average drifts
+	// buys - a single mask gives a geometric distribution whose average drifts
 	// much further than this once the floor and ceiling clamp it.
 	CHECK(average > static_cast<double>(limits.TargetBytes) / 2.0);
 	CHECK(average < static_cast<double>(limits.TargetBytes) * 2.0);
@@ -257,7 +257,7 @@ TEST_CASE(
 	}));
 
 	// One span per asset and the detail in counters, rather than a span per
-	// chunk — a large asset cuts into thousands and the graph holds 4096 spans
+	// chunk - a large asset cuts into thousands and the graph holds 4096 spans
 	// in total.
 	const auto counters = Metrics::Drain();
 	const auto total = [&counters](std::string_view name) {
@@ -284,7 +284,7 @@ TEST_CASE("the warm-up window does not move a boundary", "[assets][chunker]") {
 	// out of a 64-bit register entirely and cannot affect any tested position.
 	//
 	// If that arithmetic is wrong, nothing crashes and no other test fails. What
-	// happens instead is that every chunk boundary moves — so a client and an
+	// happens instead is that every chunk boundary moves - so a client and an
 	// origin on different builds share no chunks, every fetch is a full
 	// download, and the dedup the whole content system is built on silently
 	// stops working. That failure is invisible from inside one build, which is
@@ -380,7 +380,7 @@ TEST_CASE("the warm-up window does not move a boundary", "[assets][chunker]") {
 	CHECK(compared > 500);
 
 	// The degenerate stream too, where no boundary is ever found and every chunk
-	// is forced at the maximum — a different path through the same function, and
+	// is forced at the maximum - a different path through the same function, and
 	// the one where the warm-up is the largest share of the work.
 	const std::vector<std::byte> zeroes(64 * 1024);
 	offset = 0;

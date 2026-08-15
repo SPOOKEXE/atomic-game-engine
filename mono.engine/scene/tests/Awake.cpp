@@ -4,7 +4,7 @@
 // server sees players and an editor sees players and viewports; neither can see
 // that an NPC is halfway along a route or that a round timer has forty seconds
 // left. So what is asserted here is the shape of the claim rather than any
-// policy — the policy is `world::DecideLifecycle` and has its own suite.
+// policy - the policy is `world::DecideLifecycle` and has its own suite.
 //
 // The case worth having is the last one: a claim dies with the entity that made
 // it. That is the whole reason this is a component rather than a flag on the
@@ -102,7 +102,7 @@ TEST_CASE("withdrawing a claim nobody made is not an error", "[scene][awake]") {
 	const Entity part = MakePart(store, PartDesc{});
 
 	// A script tidying up should not have to remember whether it made the claim
-	// — the same argument `SetNetworkOwner` makes for handing a body back.
+	// - the same argument `SetNetworkOwner` makes for handing a body back.
 	LetWorldSleep(store, part);
 	CHECK_FALSE(WorldIsHeldAwake(store));
 }
@@ -142,7 +142,7 @@ TEST_CASE("a claim dies with the entity that made it", "[scene][awake]") {
 	// **The case this is a component for.** A flag on the world outlives
 	// whatever set it: somebody marks a world awake for an NPC, the NPC is
 	// destroyed, and the code that would have cleared the flag is exactly the
-	// code that no longer runs — leaving a world that never sleeps for a reason
+	// code that no longer runs - leaving a world that never sleeps for a reason
 	// nobody can find. Attaching the claim to the thing that needs it makes the
 	// release automatic and unforgettable.
 	awake_test::Ready();

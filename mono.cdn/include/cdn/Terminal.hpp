@@ -4,16 +4,16 @@
 // the escape sequences a frame is made of.
 //
 // **Everything that can be decided without a terminal is decided in
-// `Dashboard.hpp`.** What is left here is genuinely a file descriptor's — and
+// `Dashboard.hpp`.** What is left here is genuinely a file descriptor's - and
 // even of that, only `Terminal` itself is: key decoding, scroll arithmetic and
 // frame composition are free functions over values, so a suite exercises the
 // whole of what an operator sees and presses without opening a tty. The one
-// piece with no unit suite is `Terminal::Open`, for `Renderer.hpp`'s reason —
+// piece with no unit suite is `Terminal::Open`, for `Renderer.hpp`'s reason -
 // it needs the device, and a mock of one would close the gap on paper only.
 //
 // **Raw mode swallows Ctrl-C on purpose.** Leaving `ISIG` on would let the
 // signal end the process with the terminal still in raw mode, no cursor and the
-// alternate screen up — a shell nobody can type into, from a program that had a
+// alternate screen up - a shell nobody can type into, from a program that had a
 // perfectly good destructor. Ctrl-C is decoded as `Key::Quit` instead, and the
 // loop leaves the way `q` does.
 //
@@ -35,7 +35,7 @@ namespace cdn {
 	// A key the dashboard acts on.
 	//
 	// A closed list rather than a character, because the same action arrives
-	// spelled three ways — an arrow key is an escape sequence, `j` is a byte,
+	// spelled three ways - an arrow key is an escape sequence, `j` is a byte,
 	// and both mean "down".
 	//
 	// @since v0.9
@@ -72,7 +72,7 @@ namespace cdn {
 		// What was pressed.
 		Key Pressed = Key::None;
 
-		// How many bytes it consumed. **Zero means "not yet"** — the buffer
+		// How many bytes it consumed. **Zero means "not yet"** - the buffer
 		// holds the start of an escape sequence whose remaining bytes have not
 		// arrived, and a caller that dropped them would turn one arrow key into
 		// a stray `[` in the input. Keep the remainder and decode again after
@@ -127,7 +127,7 @@ namespace cdn {
 	// eating the next character.
 	//
 	// **A column is counted as a codepoint**, which is right for the content
-	// here and wrong in general — a combining mark or a wide CJK glyph is not
+	// here and wrong in general - a combining mark or a wide CJK glyph is not
 	// one column. Say so rather than implying this is a width calculation.
 	//
 	// @param text The line.
@@ -140,7 +140,7 @@ namespace cdn {
 	//
 	// **One string, written in one call.** Drawing a screen with a write per
 	// line lets a terminal display half of it, which reads as flicker on every
-	// redraw — and at four redraws a second it is the difference between a
+	// redraw - and at four redraws a second it is the difference between a
 	// dashboard somebody leaves open and one they close.
 	//
 	// @param dashboard What to draw.
@@ -186,7 +186,7 @@ namespace cdn {
 
 		// Takes over this process's terminal.
 		//
-		// @return The terminal, or nothing when there is not one — output
+		// @return The terminal, or nothing when there is not one - output
 		//         redirected to a file or a pipe, a service manager's log, a
 		//         CI job. **A refusal rather than a guess**: escape sequences
 		//         written into a log file are a log nobody can read, and the

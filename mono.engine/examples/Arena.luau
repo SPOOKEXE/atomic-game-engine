@@ -3,12 +3,12 @@
 --
 -- **A second world exists so that `TeleportService` has somewhere to go.** The
 -- Teleport bus has been able to move a payload between two worlds since v0.2 and
--- the studio has run several worlds in parallel since then — and there were no
+-- the studio has run several worlds in parallel since then - and there were no
 -- two worlds a player could be in, because there were no players. A teleport
 -- with one world is a delete.
 --
 -- Paired with `Playground.luau`. `ArenaPad.luau` is the pad back; it is a
--- separate file for the reason `PlaygroundPad.luau` gives — a scene that names a
+-- separate file for the reason `PlaygroundPad.luau` gives - a scene that names a
 -- destination is a scene that only works where that destination exists, and the
 -- playground is also what `scripts/demos/run-local-server.sh` hosts on its own.
 

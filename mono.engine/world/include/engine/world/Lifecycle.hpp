@@ -3,7 +3,7 @@
 // When a world should stop ticking, and when it should start again.
 //
 // **This is a policy, and it existed in exactly one program.** `mono.studio`
-// worked it out — a world idle for long enough suspends, a suspended world with
+// worked it out - a world idle for long enough suspends, a suspended world with
 // something in its inbox resumes, and three exceptions that were each arrived at
 // by being wrong first. `mono.server` has none of it: `--game FILE.agame` loads
 // every world in the file and ticks all of them forever, and there is no
@@ -11,7 +11,7 @@
 //
 // `docs/DEFERRED.md` D00017 is the entry, and its useful half is not that an
 // orchestration module is missing. It is that **the risk here is a second copy**.
-// This repository's most expensive recurring bug is one policy written twice —
+// This repository's most expensive recurring bug is one policy written twice -
 // `CapturePreviousTransforms` was five lines in `examples` that the studio needed
 // too, `ReadSource` exists so a source cache cannot be consulted from one entry
 // point and not another, and there is deliberately one bus router so a world's
@@ -23,13 +23,13 @@
 //
 // **The decision, not the gathering.** Whether somebody is *looking* at a world
 // is a question only an editor can answer, and whether a world is inside a scoped
-// run is a `WorldRun` concept that means nothing to a server — so those arrive as
+// run is a `WorldRun` concept that means nothing to a server - so those arrive as
 // facts in `LifecycleInputs` rather than being asked for here. What this owns is
 // the part that must not differ between hosts: the thresholds, the ordering of
 // the tests, and the three refusals.
 //
 // **Not placement.** Which host a world runs on, and what happens when that host
-// dies, is the other half of D00017 and genuinely has no caller — building it now
+// dies, is the other half of D00017 and genuinely has no caller - building it now
 // would be the guess that entry warns about. This is lifetime only.
 //
 // @tier L4 · server
@@ -43,7 +43,7 @@ namespace engine::world {
 	// @since v0.10
 	enum class LifecycleAction : uint8_t {
 		// Leave it as it is. The ordinary answer, and the one every refusal
-		// below produces — a refusal here means "not this", never "do the
+		// below produces - a refusal here means "not this", never "do the
 		// opposite".
 		Leave,
 
@@ -59,7 +59,7 @@ namespace engine::world {
 	// **A world with nobody in it is not necessarily a world with nothing
 	// happening**, which is the reason this is a choice rather than a constant.
 	// A shop that restocks, a patrol that walks its route, a match that is
-	// counting down between rounds — all of them are worlds whose only occupant
+	// counting down between rounds - all of them are worlds whose only occupant
 	// left and whose simulation still means something. Suspending those is a
 	// game that quietly stops keeping its promises while nobody is looking.
 	//
@@ -74,8 +74,8 @@ namespace engine::world {
 
 		// Suspend as soon as nobody is in it.
 		//
-		// For worlds that are purely a stage — a lobby, an instanced dungeon
-		// that resets anyway — where a tick with nobody watching is waste.
+		// For worlds that are purely a stage - a lobby, an instanced dungeon
+		// that resets anyway - where a tick with nobody watching is waste.
 		Immediate,
 
 		// Never suspend it.
@@ -116,7 +116,7 @@ namespace engine::world {
 		//
 		// **A host's own question, and the reason this is an input.** For a
 		// server that is a player standing in it; for the studio it is the
-		// active scene, the player's world, *or a viewport panel showing it* —
+		// active scene, the player's world, *or a viewport panel showing it* -
 		// and that last one was a real bug: with two panels open on two worlds,
 		// the one that was not the active scene got closed under the panel
 		// showing it, which looks exactly like the second viewport being broken.
@@ -152,8 +152,8 @@ namespace engine::world {
 		// **Worlds that are still ticking, not worlds that exist.** `Universe::
 		// Count()` includes suspended ones by its own documentation, so a host
 		// deriving this from it would suspend an entire universe one world at a
-		// time — each of them the "last" only after the others had already gone
-		// — which is precisely the outcome this refusal is named for.
+		// time - each of them the "last" only after the others had already gone
+		// - which is precisely the outcome this refusal is named for.
 		// `Universe::CountInState` is the count that answers it.
 		bool LastWorld = false;
 	};

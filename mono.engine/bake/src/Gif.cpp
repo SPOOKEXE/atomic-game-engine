@@ -4,14 +4,14 @@
 // decision.** `ROADMAP.md` v0.10 asks for GIF support and for flipbook particle
 // animation in the same version, and they are the same feature seen from two
 // ends: a GIF is a short looping animation, and the thing this engine can already
-// *draw* animated is a flipbook — `effects::FlipbookLayout`, a square
+// *draw* animated is a flipbook - `effects::FlipbookLayout`, a square
 // power-of-two grid sampled by cell. So a decoded GIF is laid out as that grid
 // and becomes an ordinary texture, which every path in the engine already
 // handles.
 //
 // The alternative was an animated texture type: a `TextureData` per frame, a
 // player, a clock, and a second thing for the renderer to bind per draw. That is
-// a real feature and it is not this one — and it would leave a GIF unable to be a
+// a real feature and it is not this one - and it would leave a GIF unable to be a
 // particle, which is the case that actually asked for it.
 //
 // **What that costs is stated rather than hidden.** A grid is square and a power
@@ -49,7 +49,7 @@ namespace engine::bake {
 		// **The de-facto rule and not the specification's.** GIF says zero is
 		// "no delay"; every browser since Netscape has read 0 and 1 as 100ms,
 		// so an encoder emitting zero expected 10fps rather than an infinite
-		// frame rate — and reading it literally would divide by zero.
+		// frame rate - and reading it literally would divide by zero.
 		constexpr uint16_t DEFAULT_HUNDREDTHS = 10;
 
 		// A cursor over the file that cannot run off the end.
@@ -491,7 +491,7 @@ namespace engine::bake {
 
 		// **The grid is the next power of two that fits, and square.** That is
 		// `effects::FlipbookLayout`'s shape and not a choice this decoder gets to
-		// make — a sheet the particle path cannot describe is a sheet it cannot
+		// make - a sheet the particle path cannot describe is a sheet it cannot
 		// draw.
 		uint32_t side = 1;
 		while (side * side < frames.size() && side < MAX_SIDE) {
@@ -523,7 +523,7 @@ namespace engine::bake {
 
 		// Total duration over frame count, which is a mean and is stated as one.
 		// A GIF whose frames each name a different delay cannot be a flipbook
-		// without this approximation, and the alternative — refusing it — would
+		// without this approximation, and the alternative - refusing it - would
 		// turn a usable asset into a failed import for a property nothing in the
 		// engine could have used anyway.
 		const double seconds = static_cast<double>(totalHundredths) / 100.0;
