@@ -188,12 +188,15 @@
 ; carries an older Luau still: matching the engine matters more here than
 ; matching a release number.
 ;
-; **It is also the one vendor that is patched, and `update = none` is half of
-; why that is safe.** `mono.vendor/patches/luau-lsp-*.patch` is applied to this
-; working tree by `just luau-lsp`; nothing else in the repository runs
-; `git submodule update` against it, so nothing silently reverts the patch out
-; from under a built binary. `mono.vendor/AGENTS.md` argues the shape and says
-; why it does not generalise to a vendor the engine links.
+; **It is also the one vendor that is patched, and the patch never touches this
+; working tree.** `scripts/vendor-tree.sh` archives the commit pinned here into
+; `.cache/vendor/luau-lsp` and applies `mono.vendor/patches/luau-lsp/*.patch`
+; there; the submodule stays exactly as cloned, so a superproject `git status` is
+; clean and a `git submodule update` has nothing to revert. It was applied here
+; once, and a permanently modified submodule in every status - one `git commit
+; -a` away from a pointer nobody meant to move - is why it is not any more.
+; `mono.vendor/AGENTS.md` argues the shape and says why it does not generalise
+; to a vendor the engine links.
 [submodule "mono.vendor/luau-lsp"]
 	path = mono.vendor/luau-lsp
 	url = https://github.com/JohnnyMorganz/luau-lsp.git

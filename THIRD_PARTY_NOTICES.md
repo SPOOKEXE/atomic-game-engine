@@ -15,8 +15,8 @@ it and no target links it. It brings a second copy of Luau with it, which is why
 it is built in a tree of its own - `.gitmodules` carries the reasoning.
 
 **It is also the one dependency this repository modifies**, under MIT's grant to
-do so: `just luau-lsp` applies `mono.vendor/patches/luau-lsp-*.patch` to the
-cloned tree before building. Nothing modified is redistributed - the patch is a
+do so: `just luau-lsp` applies `mono.vendor/patches/luau-lsp/*.patch` to a copy
+of the cloned tree before building. Nothing modified is redistributed - the patch is a
 diff against upstream, the build is local, and no shipped game contains a byte of
 it. `mono.vendor/AGENTS.md` argues the shape.
 

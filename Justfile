@@ -417,13 +417,23 @@ mcp port="8738" +args="--width 1600": (build "studio") (build "mcpbridge")
 # one luau-lsp brought with it.
 #
 # Flags rather than patches wherever a flag will do. Where one will not, the
-# patch is a file under `mono.vendor/patches/` applied here - the third shape
+# patch is a file under `mono.vendor/patches/luau-lsp/` - the third shape
 # `mono.vendor/AGENTS.md` argues for, taken over a fork so that nothing has to be
 # pushed to a remote we do not own.
+#
+# **The patch is applied to a copy, never to the submodule.** Applying it in
+# place left `mono.vendor/luau-lsp` modified in every `git status` from then on,
+# which is noise at best and a submodule pointer committed by accident at worst.
+# `scripts/vendor-tree.sh` archives the pinned commit into `.cache/vendor/` and
+# patches it there; the contract is that a directory under
+# `mono.vendor/patches/<name>/` means "this vendor builds from a copy", and the
+# script asserts the submodule is pristine on the way through.
+#
+# The editor's language server, built from a patched copy of `mono.vendor/luau-lsp`.
 luau-lsp:
     #!/usr/bin/env bash
     set -euo pipefail
-    git submodule update --init --recursive --checkout --depth 1 mono.vendor/luau-lsp
+    src=$(scripts/vendor-tree.sh luau-lsp)
 
     # **The two Luaus must be one Luau.** The editor type-checks with the copy
     # luau-lsp brings and `just typecheck` with `mono.vendor/luau`; if they drift
@@ -443,40 +453,18 @@ luau-lsp:
         exit 1
     fi
 
-    # **The patches, and a failure here is meant to stop the build rather than
-    # degrade it.** A language server that silently lost one is a language server
-    # that underlines a line which compiles, which is the whole problem
-    # `mono.vendor/patches/luau-lsp-dotted-enum-types.patch` exists to remove.
-    # Each patch carries its own preamble saying what it does and where to
-    # re-point it; `git apply` is checked in reverse first so a re-run is a no-op
-    # rather than an error.
-    shopt -s nullglob
-    patches=(mono.vendor/patches/luau-lsp-*.patch)
-    if [ ${#patches[@]} -eq 0 ]; then
-        echo "no patch found under mono.vendor/patches/ - one is checked in and this tree has none." >&2
-        exit 1
+    # **A build tree remembers where its source was**, and CMake stops rather
+    # than adapting when that moves - so the first run after the patched tree
+    # became a copy has to start over. It costs the eleven minutes of CPU once
+    # and then never again; without it the run fails on a CMakeCache mismatch
+    # that reads like a broken checkout.
+    if [ -f .cache/build/luau-lsp/CMakeCache.txt ] &&
+       ! grep -qxF "CMAKE_HOME_DIRECTORY:INTERNAL=$(pwd)/$src" .cache/build/luau-lsp/CMakeCache.txt; then
+        echo "luau-lsp: source is now $src, reconfiguring from scratch"
+        rm -rf .cache/build/luau-lsp
     fi
 
-    for patch in "${patches[@]}"; do
-        if git -C mono.vendor/luau-lsp apply --reverse --check "$(pwd)/$patch" 2> /dev/null; then
-            echo "patch already applied: $patch"
-            continue
-        fi
-        if ! git -C mono.vendor/luau-lsp apply "$(pwd)/$patch"; then
-            echo "" >&2
-            echo "$patch does not apply to mono.vendor/luau-lsp at $(git -C mono.vendor/luau-lsp rev-parse --short HEAD)." >&2
-            echo "" >&2
-            echo "Upstream moved the code it edits. Read the preamble at the top of the" >&2
-            echo "patch - it says what the hunk is for and where to re-point it - then" >&2
-            echo "regenerate it with 'git -C mono.vendor/luau-lsp diff'. Do not skip it:" >&2
-            echo "without it the editor underlines every 'Enum.<Name>' annotation that" >&2
-            echo "'just typecheck' accepts." >&2
-            exit 1
-        fi
-        echo "patch applied: $patch"
-    done
-
-    cmake -S mono.vendor/luau-lsp -B .cache/build/luau-lsp -G Ninja \
+    cmake -S "$src" -B .cache/build/luau-lsp -G Ninja \
           -DCMAKE_BUILD_TYPE=Release \
           -DCMAKE_CXX_FLAGS="-Wno-error=maybe-uninitialized -include cstdint" > /dev/null
     cmake --build .cache/build/luau-lsp --target luau-lsp

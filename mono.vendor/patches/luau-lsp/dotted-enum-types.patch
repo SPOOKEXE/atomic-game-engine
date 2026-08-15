@@ -1,4 +1,4 @@
-mono.vendor/patches/luau-lsp-dotted-enum-types.patch
+mono.vendor/patches/luau-lsp/dotted-enum-types.patch
 
 Make `local face: Enum.NormalId` resolve in the editor.
 
@@ -32,9 +32,19 @@ WHEN IT STOPS APPLYING
     `loadDefinitionFile` looks like then; if the hook has been removed outright,
     the entry to reopen is `docs/retired/DEFERRED.md` D00031.
 
-    A submodule pointer bump re-checks-out the tree and drops the patch. That is
-    fine and is the reason the recipe applies it every run rather than once:
-    the next `just luau-lsp` puts it back, or stops because it no longer fits.
+    To regenerate it, edit the submodule and then put the submodule back:
+
+        git -C mono.vendor/luau-lsp apply $(pwd)/mono.vendor/patches/luau-lsp/dotted-enum-types.patch
+        # fix the hunk in src/Workspace.cpp until it compiles, then
+        git -C mono.vendor/luau-lsp diff        # the new body of this file
+        git -C mono.vendor/luau-lsp checkout -- .
+
+    That last line is not optional and is checked: `scripts/vendor-tree.sh`
+    refuses to build from a submodule with local edits, because the build works
+    from `.cache/vendor/luau-lsp` - archived from the pinned commit and patched
+    there - so an edit left in the submodule would compile into nothing while
+    looking like it had. The preimage this file applies to is therefore always
+    upstream's, never a tree with the patch already half in it.
 
 diff --git a/src/Workspace.cpp b/src/Workspace.cpp
 index b756435..864218d 100644

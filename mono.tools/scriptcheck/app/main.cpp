@@ -180,7 +180,7 @@ int main(int argc, char **argv) {
 	// every one of them under the `Enum` prefix, so a script may write either.
 	//
 	// **This loop is duplicated on purpose, and the copy is a patch**:
-	// `mono.vendor/patches/luau-lsp-dotted-enum-types.patch` performs it inside
+	// `mono.vendor/patches/luau-lsp/dotted-enum-types.patch` performs it inside
 	// luau-lsp, because a host-side registration is the only way to spell it and an
 	// editor is a different host. `just typecheck-editor` is what keeps the two
 	// agreeing.

@@ -697,8 +697,11 @@ editor knows what a script may name without anything being restated by hand:
 just luau-lsp              # clones the submodule if needed, prints the binary's path
 ```
 
-That recipe also applies `mono.vendor/patches/luau-lsp-*.patch` to the cloned
-tree, and **stops rather than building without one**. There is one today: it
+That recipe also applies `mono.vendor/patches/luau-lsp/*.patch`, and **stops
+rather than building without one**. The patch lands on a copy of the submodule
+under `.cache/vendor/luau-lsp`, never on `mono.vendor/luau-lsp` itself - which is
+why building a language server does not leave a modified submodule in every
+`git status` afterwards. There is one today: it
 registers the `Enum` prefix so `local face: Enum.NormalId` resolves the way it
 already does in `just typecheck`, and the file's own preamble says why it is a
 patch here rather than a fork. If it ever fails to apply, upstream moved the code

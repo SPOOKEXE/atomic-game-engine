@@ -13,13 +13,34 @@ If a dependency needs a patch, the patch goes upstream or into a fork whose
 remote is recorded in `.gitmodules`. It does not go into a file in this tree.
 
 **Or, once, into `mono.vendor/patches/`.** That is a third shape and it is
-narrow: a `.patch` applied to a submodule's working tree by the recipe that
-builds it, never a source file sitting in this tree pretending to be upstream's.
-The rule above is about *drift* — a copy that silently stops matching what it was
+narrow: a `.patch` applied to a *copy* of a submodule by the recipe that builds
+it, never a source file sitting in this tree pretending to be upstream's. The
+rule above is about *drift* — a copy that silently stops matching what it was
 copied from — and a patch has the opposite property, because `git apply` fails
 loudly the moment upstream moves the code underneath it.
 
-- **`luau-lsp-dotted-enum-types.patch` is the one.** It teaches the language
+**The contract is a directory name, and the submodule is never written to.**
+`mono.vendor/patches/<name>/` holding at least one `.patch` is what makes
+`mono.vendor/<name>` a patched vendor. `scripts/vendor-tree.sh <name>` is what
+acts on that: it archives the pinned commit into `.cache/vendor/<name>`, applies
+the patches there, and prints the path to build from. There is no list to keep
+in sync — the patches say which submodule they belong to by where they live.
+
+- **The submodule stays pristine, and the script checks it.** Patching in place
+  worked and left `mono.vendor/luau-lsp` modified in every `git status` from
+  then on, which is noise a reviewer learns to skip past and a submodule pointer
+  one `git commit -a` away from moving by accident. Local edits there now stop
+  the build with the two commands that turn them into a patch, because the build
+  reads the commit rather than the files and would otherwise ignore them
+  silently.
+- **The copy is `git archive`, not `cp`.** The tree is the pinned commit by
+  construction, so a patch always applies against upstream's preimage and a
+  half-patched tree cannot exist. It also means no reverse-apply check: re-runs
+  are decided by a stamp of the pinned commits and the patch contents, and a
+  match skips the extraction entirely so mtimes hold still and the build is a
+  no-op.
+
+- **`luau-lsp/dotted-enum-types.patch` is the one.** It teaches the language
   server to register `importedTypeBindings["Enum"]`, so `local face:
   Enum.NormalId` resolves in an editor the way it already does in
   `just typecheck`. `docs/retired/DEFERRED.md` D00031 is the whole argument;
@@ -36,12 +57,17 @@ loudly the moment upstream moves the code underneath it.
   without it; and `just check` runs `just typecheck-editor`, which fails if the
   spelling the patch exists for stops resolving.
 
-**It does not generalise to a library the engine links.** luau-lsp is a
-developer tool built in a tree of its own by one recipe, so exactly one command
-can be made to apply the patch. A vendor compiled by `mono.build` is configured
-by CMake, cloned by `just setup` and re-checked-out by anything that touches
-submodules; a patch there would be applied by something and reverted by
-something else. For those, the rule above is unchanged.
+**It still does not generalise to a library the engine links, and the reason
+changed.** It used to be that a patch on a vendor `just setup` clones and
+anything else re-checks-out would be applied by one thing and reverted by
+another; building from a copy removes that hazard, and the script is not
+luau-lsp-specific. What remains is the consumer: luau-lsp is a developer tool
+built in a tree of its own by one recipe, which is one place to take a source
+path from. A vendor compiled by `mono.build` gets its path from
+`MonoVendor.cmake`, which names `mono.vendor/<name>` directly and is read by
+every preset — so patching one means teaching CMake to ask the script where the
+tree is, before configure, for every consumer. That is a real change rather than
+an impossible one. Until somebody makes it, the rule above is unchanged.
 
 ## One vendor, many consumers
 
