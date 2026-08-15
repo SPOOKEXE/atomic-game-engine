@@ -346,10 +346,12 @@ executor that no longer exists.
 
 **Everything it established is still true and worth reusing.**
 
-- SDL 3.2.31 - what `mono.vendor/sdl` is pinned to - has no timestamp query, no
-  query pool and no `SDL_GPUQuery`, exposes no native handle, and its Vulkan
-  backend has zero references to `vkCmdWriteTimestamp` or `VkQueryPool`. There is
-  no supported call to make.
+- SDL has no timestamp query, no query pool and no `SDL_GPUQuery`, exposes no
+  native handle, and its Vulkan backend has zero references to
+  `vkCmdWriteTimestamp` or `VkQueryPool`. There is no supported call to make.
+  **Established against 3.2.31 and re-checked against 3.4.14 at v0.15**, when
+  `mono.vendor/sdl` was bumped: two minor releases later, `SDL_gpu.h` still has
+  none of it. The bump was taken for other reasons and this entry did not move.
 - `SDL_Vulkan_GetVkGetInstanceProcAddr` **is** public SDL, so the entry points can
   be loaded rather than linked - no Vulkan SDK and no linked Vulkan library. The
   Khronos headers come from SDL's own copy.
@@ -416,7 +418,8 @@ rather than as free.
   D00002 landed and `graph::Execute` submits the frame, so there is now a node to
   put a timestamp around. There is still no way to write one.
 - **`SDL_GPU` has no timestamp query API.** Checked by reading
-  `SDL_gpu.h` at the vendored 3.2.31 rather than by remembering: there are fences
+  `SDL_gpu.h` at the vendored version rather than by remembering - 3.2.31 when
+  this was written and 3.4.14 since the v0.15 bump: there are fences
   - `SDL_SubmitGPUCommandBufferAndAcquireFence`, `SDL_QueryGPUFence` - and those
   are whole-command-buffer granularity, which is one number for the frame. No
   query pool, no timestamp write, nothing per pass.

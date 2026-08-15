@@ -4,10 +4,31 @@
 ; shallow = true keeps `just setup` to a single commit per vendor. The exact
 ; commit is still pinned by the superproject, so a clone is reproducible.
 
+; The window, the input and the GPU abstraction. Pinned to the `release-3.4.14`
+; tag rather than to the head of its branch, because the version is a number
+; documents quote and a branch head is not one.
+;
+; **Moved 3.2.31 to 3.4.14 at v0.15, and nothing in this repository changed with
+; it.** All 219 SDL symbols the engine names still exist - checked against the
+; 3.4 headers rather than by building and hoping - so the bump is additive. What
+; it buys is `SDL_GetGPUDeviceProperties` (device and driver name, version and
+; info, for a probe that currently has none) and the GPU device-creation feature
+; toggles that let a device be made on hardware missing clip distance, depth
+; clamping or anisotropy.
+;
+; **It does not buy a GPU timestamp query, and that was checked rather than
+; hoped for**: 3.4.14's `SDL_gpu.h` still has no timestamp, no query pool and no
+; `SDL_GPUQuery`. `docs/DEFERRED.md` D00046 is blocked on exactly that and is
+; unmoved by this.
+;
+; One new configure warning comes with it and it is honest: 3.4 warns when
+; `libdecor-0` is absent, which 3.2 checked for silently. Wayland window
+; decorations on GNOME and Weston want it; an X11 session does not care. Install
+; `libdecor-0-dev` to silence it rather than turning the feature off.
 [submodule "mono.vendor/sdl"]
 	path = mono.vendor/sdl
 	url = https://github.com/libsdl-org/SDL.git
-	branch = release-3.2.x
+	branch = release-3.4.x
 	shallow = true
 [submodule "mono.vendor/glm"]
 	path = mono.vendor/glm
