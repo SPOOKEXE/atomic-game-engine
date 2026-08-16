@@ -90,6 +90,11 @@ namespace engine::core {
 			size_t HistoryStart = 0;
 			size_t HistoryCount = 0;
 			size_t HistoryNamesDropped = 0;
+
+			// --- folded stacks ------------------------------------------------
+			bool Folding = false;
+			FoldedStacks Folded;
+			size_t FoldedFrameCount = 0;
 		};
 
 		State &Get() {
@@ -368,6 +373,85 @@ namespace engine::core {
 		}
 	}
 
+	void AccumulateFoldedStacks(std::span<const FrameSpan> spans, FoldedStacks &totals) {
+		// The stack of every span, built as the walk goes. Spans are in open
+		// order, so a parent is always an earlier entry and its path is already
+		// here - which is what makes this one pass rather than a climb per span.
+		std::vector<std::string> paths;
+		paths.reserve(spans.size());
+
+		for (size_t index = 0; index < spans.size(); index++) {
+			const FrameSpan &span = spans[index];
+
+			std::string path;
+			if (span.Parent < index) {
+				path.reserve(paths[span.Parent].size() + span.Name.size() + 1);
+				path.assign(paths[span.Parent]);
+				path.push_back(';');
+			}
+			// A semicolon inside a name would read as a second frame, so it is
+			// replaced rather than left to split the stack. Runtime names come
+			// from scripts and asset paths, which is where one would come from.
+			for (const char letter : span.Name) {
+				path.push_back(letter == ';' ? ':' : letter);
+			}
+
+			// Negative self time is possible on a malformed tree and would
+			// subtract width from a stack that really ran.
+			if (span.SelfMilliseconds > 0.0f) {
+				totals[path] += static_cast<double>(span.SelfMilliseconds) * 1000.0;
+			} else {
+				// Still recorded, at zero, so a stack that only ever costs
+				// rounding is visible as a name rather than absent.
+				totals.try_emplace(path, 0.0);
+			}
+
+			paths.push_back(std::move(path));
+		}
+	}
+
+	bool WriteFoldedStacks(const std::filesystem::path &path, const FoldedStacks &totals) {
+		std::ofstream out(path, std::ios::trunc);
+		if (!out) {
+			return false;
+		}
+
+		for (const auto &[stack, microseconds] : totals) {
+			const auto whole = static_cast<uint64_t>(microseconds + 0.5);
+			if (whole == 0) {
+				continue;
+			}
+			out << stack << ' ' << whole << '\n';
+		}
+
+		return out.good();
+	}
+
+	void FrameGraph::SetFoldingEnabled(bool enabled) {
+		auto &state = Get();
+		if (enabled) {
+			state.Folded.clear();
+			state.FoldedFrameCount = 0;
+		}
+		state.Folding = enabled;
+	}
+
+	bool FrameGraph::IsFolding() {
+		return Get().Folding;
+	}
+
+	size_t FrameGraph::FoldedFrames() {
+		return Get().FoldedFrameCount;
+	}
+
+	bool FrameGraph::WriteFolded(const std::filesystem::path &path) {
+		auto &state = Get();
+		if (state.Folded.empty()) {
+			return false;
+		}
+		return WriteFoldedStacks(path, state.Folded);
+	}
+
 	void FrameGraph::EndFrame() {
 		auto &state = Get();
 		if (!state.Recording) {
@@ -448,8 +532,15 @@ namespace engine::core {
 		// a profiler bug rather than as the rounding it is.
 		state.PublishedUnmarked = total > marked ? total - marked : 0.0f;
 
-		// Before the swap, on the frame that was just recorded.
+		// Before the swap, on the frame that was just recorded. The folding
+		// needs the same thing the history does - the tree, after the self time
+		// and the idle accounting are in it.
 		RecordHistory(state, total, now);
+
+		if (state.Folding) {
+			AccumulateFoldedStacks(state.Building, state.Folded);
+			state.FoldedFrameCount++;
+		}
 
 		state.Published.swap(state.Building);
 		state.PublishedMilliseconds = total;

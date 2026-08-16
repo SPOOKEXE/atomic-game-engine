@@ -311,35 +311,55 @@ namespace client {
 	bool Client::BeginContentDelivery() {
 		if (Settings.ContentSources.empty() && Settings.ContentPublisherKey.empty()) {
 			// Nothing was asked for. Not a failure - a game with its content
-			// beside it in a game file needs no origin at all.
+			// beside it in a game file needs no origin at all, and a server may
+			// still say where content is once this client has connected, which is
+			// what `AdoptContentDirectory` builds one for.
 			return true;
 		}
 
-		engine::delivery::DeliverySettings settings =
-			engine::delivery::DeliverySettings::Default(Settings.ContentCache);
-		settings.CachePath = Settings.ContentCache;
-
-		if (!Settings.ContentSources.empty()) {
-			settings.Sources.clear();
-			for (const std::string &source : Settings.ContentSources) {
-				// `dir:` names a published store on this machine; anything else
-				// is an address. One flag rather than two, because the priority
-				// order is a single list and splitting it across two flags
-				// would make "local first, then remote" unexpressible.
-				const bool directory = source.starts_with("dir:");
-				settings.Sources.push_back(
-					engine::delivery::Source{
-						.Name = source,
-						.Kind = directory ? engine::delivery::SourceKind::Directory
-										  : engine::delivery::SourceKind::Http,
-						.Location = directory ? source.substr(4) : source,
-						.Enabled = true,
-					}
-				);
-			}
+		// **A client about to connect may be told its root of trust**, so a
+		// missing key here is "not yet" rather than "never". Refusing to start
+		// would make redirect mode unreachable for exactly the deployment it is
+		// for: a player who was given an address and nothing else. Nothing is
+		// fetched in the meantime - `Content` stays null until a key exists -
+		// so the trust boundary is unchanged.
+		if (Settings.ContentPublisherKey.empty() && ExpectsServerContent()) {
+			ENGINE_INFO("content: waiting for the server to name a publisher key");
+			return true;
 		}
 
-		if (const auto key = engine::assets::PublicKey::FromHex(Settings.ContentPublisherKey)) {
+		return BuildContentClient();
+	}
+
+	bool Client::ExpectsServerContent() const {
+		return !Settings.ConnectAddress.empty() || Settings.Browse || !Settings.RendezvousAddress.empty();
+	}
+
+	bool Client::BuildContentClient() {
+		engine::delivery::DeliverySettings settings;
+		settings.CachePath = Settings.ContentCache;
+		settings.AllowedHosts = Settings.ContentAllowedHosts;
+		settings.Sources = MergeContentSources(
+			Settings.ContentSources,
+			OfferedContentSources,
+			ContentRelay != nullptr
+				? (Settings.ConnectAddress.empty() ? std::string_view("server")
+												   : std::string_view(Settings.ConnectAddress))
+				: std::string_view()
+		);
+
+		if (settings.Sources.empty()) {
+			// Nobody named anything and there is no link. The origin on this
+			// machine is the historical default and stays it.
+			settings.Sources = engine::delivery::DeliverySettings::Default(Settings.ContentCache).Sources;
+		}
+
+		// **A key pinned here is kept and a server's is only ever a fallback.** A
+		// pinned client refuses rather than downgrades, which is the same position
+		// `ConnectorSettings::ServerIdentity` takes one module along.
+		const std::string &publisher =
+			Settings.ContentPublisherKey.empty() ? OfferedPublisherKey : Settings.ContentPublisherKey;
+		if (const auto key = engine::assets::PublicKey::FromHex(publisher)) {
 			settings.Publisher = *key;
 		} else {
 			ENGINE_ERROR("content delivery needs --publisher-key, 64 hex characters");
@@ -347,15 +367,61 @@ namespace client {
 			return false;
 		}
 
-		Content = engine::delivery::MakeAssetClient(settings);
-		if (!Content) {
+		std::unique_ptr<engine::delivery::AssetClient> built =
+			engine::delivery::MakeAssetClient(settings, ContentRelay.get());
+		if (!built) {
 			return false;
 		}
+		if (!OfferedContentGrant.empty()) {
+			built->UseGrant(OfferedContentGrant);
+		}
+
+		Content = std::move(built);
+
+		// **Everything asked for is asked for again.** A rebuilt client holds none
+		// of the previous one's requests, and the demand walk only asks for what
+		// it has not asked for - so a set left behind would leave every texture
+		// this client already wanted permanently unrequested.
+		ContentRequested = false;
+		ContentReported = false;
+		ContentPending.clear();
+		ContentIssued.clear();
+		ContentAsked.clear();
 
 		ENGINE_INFO(
 			"content: {} source(s), first is '{}'", settings.Usable().size(), settings.Usable().front().Name
 		);
 		return true;
+	}
+
+	void Client::AdoptContentDirectory(const engine::game::ContentDirectory &directory) {
+		const OfferedContent accepted = AcceptOfferedContent(directory, Settings.ContentAllowedHosts);
+		if (accepted.RefusedByAllowList != 0) {
+			ENGINE_WARN(
+				"content: this client's allow-list refused {} origin(s) the server named",
+				accepted.RefusedByAllowList
+			);
+		}
+		if (accepted.UnresolvedNames != 0) {
+			// **One warning rather than a stream of failures.** `Endpoint::Parse`
+			// refuses a host *name* on purpose - resolving one blocks on a network
+			// service and nothing on the fetch path may block - so a server that
+			// named one has a configuration problem, and saying it once at the
+			// door is where it is useful.
+			ENGINE_WARN(
+				"content: the server named {} origin(s) by host name rather than address - a name has to be "
+				"resolved before it gets here, so they were skipped",
+				accepted.UnresolvedNames
+			);
+		}
+
+		OfferedContentSources = accepted.Permitted;
+		OfferedPublisherKey = directory.PublisherKey;
+		OfferedContentGrant = directory.Grant;
+
+		if (!BuildContentClient()) {
+			ENGINE_WARN("content: what the server named could not be used");
+		}
 	}
 
 	void Client::PumpContent() {
@@ -1239,19 +1305,41 @@ namespace client {
 		// `scene::LocalPlayer` cannot be replicated - a resource is one row and
 		// the answer differs per client - so the host says it once over the user
 		// channel. `game/Play.hpp` carries the whole argument.
+		// **The relay is built with the connection and outlives every delivery
+		// client made over it.** A rebuild replaces the fetcher; the routes
+		// already in flight belong to the link, and replacing the thing they are
+		// being assembled in would lose them mid-transfer.
+		ContentRelay = std::make_unique<ContentLink>([this](std::span<const std::byte> payload) {
+			return Connection != nullptr && Connection->SendUser(payload, engine::core::Clock::Seconds());
+		});
+
 		Connection->OnUserMessage([this](std::span<const std::byte> message) {
 			engine::game::JoinNotice notice;
-			if (!engine::game::DecodeJoinNotice(message, notice)) {
-				// Somebody else's message on a shared channel. Ignored rather
-				// than counted: the tag exists so that this is a non-event.
+			if (engine::game::DecodeJoinNotice(message, notice)) {
+				Universe_->Enter(Replicated, [notice](engine::ecs::Store &store) {
+					store.SetResource(engine::scene::LocalPlayer{notice.Player});
+				});
+
+				ENGINE_INFO("client: this is player {}", notice.Player.Id);
 				return;
 			}
 
-			Universe_->Enter(Replicated, [notice](engine::ecs::Store &store) {
-				store.SetResource(engine::scene::LocalPlayer{notice.Player});
-			});
+			// **Where content is, said once at admission.** It cannot be
+			// replicated for `LocalPlayer`'s reason and one more: the grant in it
+			// names this session, so it is per client by construction.
+			engine::game::ContentDirectory directory;
+			if (engine::game::DecodeContentDirectory(message, directory)) {
+				AdoptContentDirectory(directory);
+				return;
+			}
 
-			ENGINE_INFO("client: this is player {}", notice.Player.Id);
+			// A relayed route, or somebody else's message on a shared channel.
+			// Either way this is the last reader, so an unrecognised payload is
+			// ignored rather than counted: the tag exists so that it is a
+			// non-event.
+			if (ContentRelay != nullptr) {
+				(void)ContentRelay->Receive(message);
+			}
 		});
 
 		if (Discovery != nullptr) {

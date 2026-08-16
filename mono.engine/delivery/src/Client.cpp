@@ -7,6 +7,7 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/delivery/Client.hpp>
 #include <engine/delivery/GroupCodec.hpp>
+#include <engine/delivery/Relay.hpp>
 #include <engine/net/Endpoint.hpp>
 #include <engine/net/http/Client.hpp>
 
@@ -59,11 +60,22 @@ namespace engine::delivery {
 			// For an Http source: where to reach it.
 			net::Endpoint Address;
 			std::string Host;
+
+			// Who fetches for this source, and the reason it is per source
+			// rather than one client for the whole list: an `Http` source is
+			// fetched over a socket this module owns and a `Relay` source over
+			// a link somebody else owns. Both wear `net::http::Client`, so the
+			// manifest walk, the dictionary, the bundle jobs and the three
+			// verification checks stay one path rather than two that agree
+			// until they do not.
+			//
+			// Null for a `Directory`, which has no transport at all.
+			net::http::Client *Fetcher = nullptr;
 		};
 
 		class Client final : public AssetClient {
 		  public:
-			explicit Client(DeliverySettings settings) : Config(std::move(settings)) {
+			Client(DeliverySettings settings, RelayChannel *relay) : Config(std::move(settings)) {
 				if (!Config.CachePath.empty()) {
 					Cached = ContentCache::Open(Config.CachePath, Config.CacheCapacityBytes);
 				}
@@ -72,6 +84,9 @@ namespace engine::delivery {
 				transfer.MaximumOutstanding = MAXIMUM_BUNDLES_IN_FLIGHT + 2;
 				transfer.IdlePolls = Config.IdlePolls;
 				Transfer = net::http::MakeClient(transfer);
+				if (relay != nullptr) {
+					Relayed = MakeRelayClient(*relay, Config.IdlePolls);
+				}
 
 				for (const Source &source : Config.Usable()) {
 					Resolved resolved;
@@ -89,6 +104,19 @@ namespace engine::delivery {
 							);
 							continue;
 						}
+					} else if (source.Kind == SourceKind::Relay) {
+						if (!Relayed) {
+							// One line rather than a refusal: the rest of the list is
+							// still perfectly good, and a caller that configured a
+							// relay while owning no link has a configuration problem
+							// rather than a broken client.
+							ENGINE_WARN(
+								"delivery: source '{}' is a relay and this client carries no link",
+								source.Name
+							);
+							continue;
+						}
+						resolved.Fetcher = Relayed.get();
 					} else {
 						const std::optional<net::Endpoint> address = net::Endpoint::Parse(source.Location);
 						if (!address) {
@@ -107,6 +135,7 @@ namespace engine::delivery {
 						}
 						resolved.Address = *address;
 						resolved.Host = source.Location;
+						resolved.Fetcher = Transfer.get();
 					}
 					Sources.push_back(std::move(resolved));
 				}
@@ -306,7 +335,7 @@ namespace engine::delivery {
 					net::http::Request request;
 					request.Verb = net::http::Method::Get;
 					request.Target = "/manifest";
-					CatalogueFetch = Transfer->Submit(source.Address, request, source.Host);
+					CatalogueFetch = source.Fetcher->Submit(source.Address, request, source.Host);
 					if (!CatalogueFetch.IsValid()) {
 						Passed(source, false);
 						++CatalogueCursor;
@@ -324,15 +353,15 @@ namespace engine::delivery {
 					return;
 				}
 
-				Transfer->Pump();
-				const net::http::FetchState state = Transfer->StateOf(CatalogueFetch);
+				Resolved &source = Sources[CatalogueCursor];
+				source.Fetcher->Pump();
+				const net::http::FetchState state = source.Fetcher->StateOf(CatalogueFetch);
 				if (state == net::http::FetchState::Pending) {
 					return;
 				}
 
-				Resolved &source = Sources[CatalogueCursor];
 				if (state == net::http::FetchState::Ready) {
-					const std::optional<net::http::Response> answer = Transfer->Take(CatalogueFetch);
+					const std::optional<net::http::Response> answer = source.Fetcher->Take(CatalogueFetch);
 					CatalogueFetch = {};
 					if (answer && answer->Code == net::http::Status::Ok) {
 						assets::SignatureBytes signature;
@@ -347,7 +376,7 @@ namespace engine::delivery {
 						Passed(source, false);
 					}
 				} else {
-					Transfer->Take(CatalogueFetch);
+					source.Fetcher->Take(CatalogueFetch);
 					CatalogueFetch = {};
 					Passed(source, false);
 				}
@@ -381,19 +410,19 @@ namespace engine::delivery {
 					net::http::Request request;
 					request.Verb = net::http::Method::Get;
 					request.Target = "/dictionary";
-					CodebookFetch = Transfer->Submit(source.Address, request, source.Host);
+					CodebookFetch = source.Fetcher->Submit(source.Address, request, source.Host);
 					if (!CodebookFetch.IsValid()) {
 						return;
 					}
 				}
 
-				Transfer->Pump();
-				const net::http::FetchState state = Transfer->StateOf(CodebookFetch);
+				source.Fetcher->Pump();
+				const net::http::FetchState state = source.Fetcher->StateOf(CodebookFetch);
 				if (state == net::http::FetchState::Pending) {
 					return;
 				}
 
-				const std::optional<net::http::Response> answer = Transfer->Take(CodebookFetch);
+				const std::optional<net::http::Response> answer = source.Fetcher->Take(CodebookFetch);
 				CodebookFetch = {};
 				if (answer && answer->Code == net::http::Status::Ok && !answer->Body.empty()) {
 					Tally.TransferredBytes += answer->Body.size();
@@ -543,6 +572,9 @@ namespace engine::delivery {
 					}
 				}
 				Transfer->Pump();
+				if (Relayed) {
+					Relayed->Pump();
+				}
 
 				for (auto job = Jobs.begin(); job != Jobs.end();) {
 					if (Advance(*job)) {
@@ -591,7 +623,7 @@ namespace engine::delivery {
 						);
 					}
 
-					job.Fetch = Transfer->Submit(source.Address, request, source.Host);
+					job.Fetch = source.Fetcher->Submit(source.Address, request, source.Host);
 					if (job.Fetch.IsValid()) {
 						job.Active = true;
 						return true;
@@ -613,12 +645,13 @@ namespace engine::delivery {
 					return job.SourceIndex >= Sources.size() || !AnyWaiting(job.Bundle);
 				}
 
-				const net::http::FetchState state = Transfer->StateOf(job.Fetch);
+				Resolved &source = Sources[job.SourceIndex];
+				const net::http::FetchState state = source.Fetcher->StateOf(job.Fetch);
 				if (state == net::http::FetchState::Pending) {
 					return false;
 				}
 
-				const std::optional<net::http::Response> answer = Transfer->Take(job.Fetch);
+				const std::optional<net::http::Response> answer = source.Fetcher->Take(job.Fetch);
 				job.Active = false;
 				job.Fetch = {};
 
@@ -760,6 +793,11 @@ namespace engine::delivery {
 			std::vector<Resolved> Sources;
 			std::optional<ContentCache> Cached;
 			std::unique_ptr<net::http::Client> Transfer;
+
+			// The fetcher for `SourceKind::Relay` sources, when this caller owns a
+			// link to relay over. Null otherwise, which is what makes a relay source
+			// skipped rather than broken.
+			std::unique_ptr<net::http::Client> Relayed;
 			std::vector<std::byte> Grant;
 
 			std::optional<assets::Manifest> Known;
@@ -800,7 +838,7 @@ namespace engine::delivery {
 		return "unknown";
 	}
 
-	std::unique_ptr<AssetClient> MakeAssetClient(const DeliverySettings &settings) {
+	std::unique_ptr<AssetClient> MakeAssetClient(const DeliverySettings &settings, RelayChannel *relay) {
 		if (!settings.IsValid()) {
 			// Refused rather than half-applied. A client with no publisher key
 			// verifies nothing and one with no source fetches nothing, and
@@ -808,6 +846,6 @@ namespace engine::delivery {
 			ENGINE_ERROR("delivery: settings name no usable source, or no publisher key to trust");
 			return nullptr;
 		}
-		return std::make_unique<Client>(settings);
+		return std::make_unique<Client>(settings, relay);
 	}
 }

@@ -695,6 +695,31 @@ replay-check entities="256" ticks="120": (build "server")
     @echo "replay ok - {{ticks}} barriers reproduced, byte-identical"
     @rm -f .cache/replay-source.rec .cache/replay-again.rec
 
+# Two hundred real clients against one server, and a flamegraph of what it cost.
+#
+# **Not part of `just check`.** It is a measurement rather than a gate: it takes
+# a minute, its numbers depend on what else the machine is doing, and a gate that
+# fails because somebody started a build is a gate people learn to ignore.
+#
+# The clients are genuine - a socket, a handshake, a cipher, an admission and a
+# real `ecs::Store` each - and they all live in one process, because
+# `client --headless` still builds a GPU device and two hundred of those measure
+# the driver. `mono.tools/loadtest` is the harness and its `CMakeLists.txt` says
+# why it is shaped that way.
+#
+# **Run it against `release` or `bench`.** First-party code is `-O0` under the
+# default preset, so a tick cost from `just stress` is a number about the
+# compiler. The recipe does not force the preset, for the reason every other
+# recipe here does not: one override, applied before anything is derived.
+#
+#   just preset=release stress
+#   just preset=release stress iter1 200 45
+#
+# Artefacts land in .cache/stress/ - the graph, the folded capture it came from,
+# a greppable top-N, both logs, and the commit each was taken at.
+stress label="baseline" clients="200" seconds="45" port="45100": (build "server") (build "loadtest")
+    ./scripts/stress-test.sh {{build}} {{label}} {{clients}} {{seconds}} {{port}}
+
 # Configure and build with no client at all, which is how the tier split is
 # proved rather than asserted: the staged server/ gets no shaders/ directory.
 check-server-is-headless:

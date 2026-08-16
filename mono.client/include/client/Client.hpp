@@ -9,6 +9,7 @@
 #include <engine/delivery/IntakeBudget.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/game/Content.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Input.hpp>
 #include <engine/input/Actions.hpp>
@@ -28,6 +29,7 @@
 
 #include <chrono>
 #include <client/Compositor.hpp>
+#include <client/ContentLink.hpp>
 #include <client/Scene.hpp>
 #include <client/Sounds.hpp>
 #include <cstdint>
@@ -228,8 +230,23 @@ namespace client {
 
 		// The publisher key this client trusts, as 64 hex characters.
 		//
-		// An unset key disables delivery; manifests must be authenticated.
+		// An unset key disables delivery; manifests must be authenticated. A
+		// server may name one for a client that pinned none - see
+		// `Client::AdoptContentDirectory` - and it never replaces one that was
+		// pinned here.
 		std::string ContentPublisherKey;
+
+		// The hosts a server-named content origin may live on. Empty allows all.
+		//
+		// **Empty is right for a list a person typed and wrong for one that
+		// arrived over a wire**, which is `delivery/AGENTS.md`'s sentence and the
+		// reason this setting exists at all: *a client that is told to fetch from
+		// an arbitrary host is a request-forgery primitive.* Filling it in is how
+		// a deployment says which machines a server is allowed to point its
+		// players at.
+		//
+		// @since v0.16
+		std::vector<std::string> ContentAllowedHosts;
 
 		// A `.wav` to play on a loop once the world is up.
 		//
@@ -428,6 +445,47 @@ namespace client {
 		// @return `false` only when sources were configured and are unusable.
 		//         No configuration at all is not a failure.
 		bool BeginContentDelivery();
+
+		// Builds the delivery client out of everything currently known.
+		//
+		// **One place rather than two**, because the source list is assembled
+		// twice - once at start-up from this client's own configuration, and again
+		// when a server says where content is - and two assemblers would drift the
+		// day one of them learned about a new kind of source.
+		//
+		// @return `false` when sources were configured and are unusable.
+		bool BuildContentClient();
+
+		// Whether a server may still say where content is.
+		//
+		// **What makes a missing publisher key "not yet" rather than "never".**
+		// A client that was given an address and nothing else is exactly who
+		// redirect mode is for, and refusing to start would put it out of reach.
+		bool ExpectsServerContent() const;
+
+		// Takes what a server said about content.
+		//
+		// **This client's own configuration wins and is tried first.** RUNNING.md
+		// decides precedence by where a value came from: a source in a config file
+		// or on a command line was stated by the person running this program, and
+		// one that arrived over a wire was stated by a server they connected to.
+		// So the server's list is *appended* rather than substituted - the order is
+		// the policy, `delivery/AGENTS.md`, and appending is how "mine first, then
+		// whatever the host knows about" is expressed without a policy flag.
+		//
+		// The same rule one field along: a publisher key pinned here is kept, and
+		// a server's is adopted only when none was pinned. A pinned client refuses
+		// rather than downgrades.
+		//
+		// **Every endpoint is untrusted.** One on a host `ContentAllowedHosts`
+		// does not admit is dropped, and one naming a host *name* rather than an
+		// address is dropped with one warning - `net::Endpoint::Parse` refuses a
+		// name on purpose, and a stream of failures at fetch time would say the
+		// same thing far less usefully.
+		//
+		// @param directory What the server said.
+		// @since v0.16
+		void AdoptContentDirectory(const engine::game::ContentDirectory &directory);
 
 		// Advances content delivery and registers whatever arrived.
 		//
@@ -723,6 +781,26 @@ namespace client {
 
 		// The delivery client, when content sources were configured.
 		std::unique_ptr<engine::delivery::AssetClient> Content;
+
+		// How a relayed route travels, when this client is connected to a server.
+		//
+		// Built with the connection and outliving every delivery client made over
+		// it, because a rebuild replaces the fetcher and must not replace the
+		// routes already in flight underneath one.
+		std::unique_ptr<ContentLink> ContentRelay;
+
+		// The origins a server named, in the order it named them.
+		//
+		// Kept apart from `Settings::ContentSources` rather than merged into it,
+		// because the two have different provenance and the precedence between
+		// them is decided by exactly that - see `AdoptContentDirectory`.
+		std::vector<engine::delivery::Source> OfferedContentSources;
+
+		// The publisher a server named, as 64 hex characters, or empty.
+		std::string OfferedPublisherKey;
+
+		// The grant a server issued this client, or empty.
+		std::vector<std::byte> OfferedContentGrant;
 
 		// Requests issued for meshes and textures and not yet taken.
 		//

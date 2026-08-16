@@ -1,4 +1,5 @@
 #include <engine/core/Log.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/net/Packet.hpp>
 #include <engine/replication/Authority.hpp>
@@ -6,11 +7,25 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <utility>
 
 namespace engine::replication {
 
 	namespace {
+		// Multiplies and stops at the maximum rather than wrapping.
+		//
+		// The refinement window is a tick's reach times a configured factor, and
+		// both are settings a host writes. A wrap would turn "look at more rows"
+		// into "look at almost none", which reads as the second hook silently
+		// not running.
+		size_t SaturatingProduct(size_t value, size_t factor) {
+			if (factor == 0 || value == 0) {
+				return 0;
+			}
+			return value > SIZE_MAX / factor ? SIZE_MAX : value * factor;
+		}
+
 		template <class T> std::vector<std::byte> Encode(const T &message) {
 			core::ByteWriter writer;
 			WriteMessage(writer, message);
@@ -47,6 +62,117 @@ namespace engine::replication {
 		}
 
 		constexpr size_t LARGEST_CHUNK = net::Packet::MAXIMUM_MESSAGE_BYTES - MESSAGE_OVERHEAD;
+	}
+
+	namespace {
+		// Where an entity sits, or would sit, in a sorted row list.
+		template <class Rows> auto SeatFor(Rows &rows, uint64_t entity) {
+			return std::lower_bound(rows.begin(), rows.end(), entity, [](const auto &row, uint64_t id) {
+				return row.Entity < id;
+			});
+		}
+	}
+
+	Authority::Outstanding &Authority::OutstandingSet::operator[](uint64_t entity) {
+		const auto seat = SeatFor(Rows, entity);
+		if (seat != Rows.end() && seat->Entity == entity) {
+			return seat->Value;
+		}
+		return Rows.insert(seat, Row{entity, Outstanding{}})->Value;
+	}
+
+	void Authority::OutstandingSet::Emplace(uint64_t entity) {
+		const auto seat = SeatFor(Rows, entity);
+		if (seat != Rows.end() && seat->Entity == entity) {
+			return;
+		}
+		Rows.insert(seat, Row{entity, Outstanding{}});
+	}
+
+	void Authority::OutstandingSet::EmplaceAll(std::span<const uint64_t> entities) {
+		if (entities.empty()) {
+			return;
+		}
+
+		for (const uint64_t entity : entities) {
+			Rows.push_back(Row{entity, Outstanding{}});
+		}
+
+		// **Stable, and that is what keeps an existing row.** Everything already
+		// here was in front of everything appended, so a stable sort leaves a
+		// duplicate's existing copy first and `unique` keeps the first of a run.
+		// An assigning insert would restart the clock on a value genuinely in
+		// flight, which is `Emplace`'s rule and has to survive the bulk form.
+		std::stable_sort(Rows.begin(), Rows.end(), [](const Row &left, const Row &right) {
+			return left.Entity < right.Entity;
+		});
+		Rows.erase(
+			std::unique(
+				Rows.begin(),
+				Rows.end(),
+				[](const Row &left, const Row &right) { return left.Entity == right.Entity; }
+			),
+			Rows.end()
+		);
+	}
+
+	void Authority::OutstandingSet::Erase(uint64_t entity) {
+		const auto seat = SeatFor(Rows, entity);
+		if (seat != Rows.end() && seat->Entity == entity) {
+			Rows.erase(seat);
+		}
+	}
+
+	void Authority::OutstandingSet::EraseSorted(std::span<const uint64_t> entities) {
+		if (entities.empty()) {
+			return;
+		}
+
+		size_t cursor = 0;
+		size_t kept = 0;
+		for (size_t index = 0; index < Rows.size(); index++) {
+			while (cursor < entities.size() && entities[cursor] < Rows[index].Entity) {
+				cursor++;
+			}
+			if (cursor < entities.size() && entities[cursor] == Rows[index].Entity) {
+				continue;
+			}
+			Rows[kept++] = Rows[index];
+		}
+		Rows.resize(kept);
+	}
+
+	void
+	Authority::OutstandingSet::SelectRecovering(uint64_t tick, size_t limit, std::vector<uint64_t> &into) {
+		into.clear();
+		if (Rows.empty()) {
+			return;
+		}
+
+		const size_t take = limit == 0 ? Rows.size() : limit;
+
+		size_t index = static_cast<size_t>(SeatFor(Rows, Cursor) - Rows.begin());
+		if (index >= Rows.size()) {
+			index = 0;
+		}
+
+		// Every row is examined even when only `take` are kept, so the walk
+		// stops on the first tick where fewer than `take` are outstanding rather
+		// than spinning to find them. Examining is a compare; keeping is a
+		// serialisation, and it is the second one this bounds.
+		for (size_t step = 0; step < Rows.size() && into.size() < take; step++) {
+			if (Rows[index].Value.ConsideredAt != tick) {
+				into.push_back(Rows[index].Entity);
+			}
+			index = index + 1 < Rows.size() ? index + 1 : 0;
+		}
+
+		Cursor = Rows[index].Entity;
+	}
+
+	bool Authority::OutstandingSet::Contains(uint64_t entity) const {
+		const auto seat = SeatFor(Rows, entity);
+		return seat != Rows.end() && seat->Entity == entity;
 	}
 
 	Authority::Authority(const AuthoritySettings &settings) : Settings_(settings) {
@@ -136,6 +262,10 @@ namespace engine::replication {
 		Ownership = std::move(predicate);
 	}
 
+	void Authority::SetPriorityRefinement(std::function<float(ClientId, ecs::Entity, float)> refine) {
+		Refinement = std::move(refine);
+	}
+
 	void Authority::SetPriority(std::function<float(ClientId, ecs::Entity)> score) {
 		Priority = std::move(score);
 	}
@@ -204,6 +334,8 @@ namespace engine::replication {
 	}
 
 	void Authority::Survey(ecs::Store &store) {
+		ENGINE_PROFILE_CAT("Authority::Survey", core::ProfileCategory::Network);
+
 		// **`Resolved` and `ResolvedNames` are one list in two spellings, filled
 		// in one pass.** The audit puts an *ordinal* in every leaf and the names
 		// on the wire, so the two ends agree only while both spellings skip the
@@ -433,8 +565,8 @@ namespace engine::replication {
 			client.Known.insert(entity.Id);
 		}
 
-		for (std::unordered_map<uint64_t, Outstanding> &unconfirmed : client.Unconfirmed) {
-			unconfirmed.clear();
+		for (OutstandingSet &unconfirmed : client.Unconfirmed) {
+			unconfirmed.Clear();
 		}
 
 		// Cleared here rather than where it is read: a world blob carries every
@@ -529,18 +661,53 @@ namespace engine::replication {
 	}
 
 	void Authority::Prioritise(ClientId client, uint64_t tick) {
-		if (Priority) {
-			for (Candidate &candidate : Candidates) {
-				const float hint = Priority(client, candidate.Entity);
+		ENGINE_PROFILE_CAT("Authority::Prioritise", core::ProfileCategory::Network);
 
+		if (Priority) {
+			ENGINE_PROFILE_CAT("Authority::Score", core::ProfileCategory::Network);
+
+			// **Once per entity rather than once per row.** `SetPriority`'s
+			// hook is `(client, entity)` and nothing else, so the four rows an
+			// entity with a transform, a motion, a name and a class produces are
+			// four questions with one answer. What the repeats cost is whatever
+			// the host's lookup costs, and `mono.server`'s includes an occlusion
+			// raycast - measured at 69% of a two-hundred-client tick before this
+			// existed.
+			//
+			// `Bearing` is the sorted set of entities carrying a replicated
+			// component, so it indexes the table with a binary search and no
+			// allocation. A candidate whose entity is not in it - a row for
+			// something destroyed since the survey - is scored directly rather
+			// than being given somebody else's number.
+			//
+			// A quiet NaN is the "not yet asked" mark, which is exact because
+			// every score stored below has been through `std::isfinite`.
+			Scores.assign(Bearing.size(), std::numeric_limits<float>::quiet_NaN());
+
+			for (Candidate &candidate : Candidates) {
+				const auto found = std::lower_bound(Bearing.begin(), Bearing.end(), candidate.Entity.Id);
+				const bool known = found != Bearing.end() && *found == candidate.Entity.Id;
+				const size_t slot = known ? static_cast<size_t>(found - Bearing.begin()) : 0;
+
+				if (known && !std::isnan(Scores[slot])) {
+					candidate.Hint = Scores[slot];
+					continue;
+				}
+
+				const float hint = Priority(client, candidate.Entity);
 				candidate.Hint = std::isfinite(hint) ? hint : 0.0f;
+				if (known) {
+					Scores[slot] = candidate.Hint;
+				}
 			}
 		}
+
+		ENGINE_PROFILE_CAT("Authority::Sort", core::ProfileCategory::Network);
 
 		const uint64_t deadline = Settings_.StarvationTicks;
 		const std::vector<Candidate> &candidates = Candidates;
 
-		std::sort(Order.begin(), Order.end(), [&candidates, tick, deadline](uint32_t left, uint32_t right) {
+		const auto before = [&candidates, tick, deadline](uint32_t left, uint32_t right) {
 			const Candidate &first = candidates[left];
 			const Candidate &second = candidates[right];
 			const uint64_t waitedFirst = tick - first.WaitingSince;
@@ -563,10 +730,148 @@ namespace engine::replication {
 				return first.Entity.Id < second.Entity.Id;
 			}
 			return first.Entry < second.Entry;
-		});
+		};
+
+		// **Only the rows that could reach the wire have to be in order.**
+		// `Pack` walks `Order` from the front and stops the moment the budget is
+		// spent, so ordering what is past that point is work whose result
+		// nothing ever reads - and on a server over its budget the tail is most
+		// of the world.
+		//
+		// The bound is what this tick could carry at its most generous: the
+		// smaller of the byte allowance and the message budget, over the least a
+		// row can cost. A row past that cannot be reached even if every row in
+		// front of it is empty.
+		//
+		// **The least a row can cost is measured, not assumed.** Eight bytes for
+		// an entity handle plus a component that serialises to nothing is a
+		// legitimate lower bound and a useless one: at the default budget it
+		// makes every candidate in a two-thousand-entity world "reachable", so
+		// the partial sort degrades to a full sort on the tick it matters. The
+		// shortest row actually built this tick is a lower bound too, it is one
+		// pass over lengths `BuildComponents` has already measured, and on a
+		// world of transforms it is several times larger.
+		//
+		// **The first `reachable` are exactly what a full sort would have put
+		// there**, because the comparator is a total order - which is the same
+		// property `AGENTS.md` requires of it so that two runs of one server
+		// produce the same bytes.
+		const Client *held = Reach(client);
+		const size_t allowance = held != nullptr ? held->AllowanceBytes : SIZE_MAX;
+		const size_t spend = std::min(
+			std::min(Settings_.BytesPerTick, allowance), Settings_.MessagesPerTick * Settings_.ChunkBytes
+		);
+
+		// Straight down `Candidates` rather than through `Order`, which holds
+		// exactly one index per candidate. Both answer the same question; only
+		// one of them reads memory in the order it is laid out, and this runs
+		// per client per tick over every row in the world.
+		size_t shortest = SIZE_MAX;
+		for (const Candidate &candidate : Candidates) {
+			shortest = std::min(shortest, static_cast<size_t>(candidate.Bytes));
+		}
+
+		const size_t leastRow = sizeof(uint64_t) + (shortest == SIZE_MAX ? 0 : shortest);
+		const size_t reachable = spend / leastRow + 1;
+
+		if (reachable < Order.size()) {
+			std::partial_sort(
+				Order.begin(), Order.begin() + static_cast<ptrdiff_t>(reachable), Order.end(), before
+			);
+		} else {
+			std::sort(Order.begin(), Order.end(), before);
+		}
+
+		Refine(client, reachable, spend, before);
+	}
+
+	template <class Before>
+	void Authority::Refine(ClientId client, size_t reachable, size_t spend, const Before &before) {
+		if (!Refinement || Settings_.PriorityRefinementFactor == 0 || Order.empty()) {
+			return;
+		}
+
+		ENGINE_PROFILE_CAT("Authority::Refine", core::ProfileCategory::Network);
+
+		// **What the budget really reaches, not the bound the sort used.**
+		// `reachable` assumes every row ahead of a row is the shortest row in
+		// the tick, which is what a bound has to assume and is nowhere near what
+		// a tick sends. The first version of this window used it directly, came
+		// out wider than the whole world, and moved the occlusion cost from one
+		// profile frame to another without removing any of it.
+		//
+		// Adding up what the ordered rows actually encode to answers it in one
+		// walk of a prefix, out of lengths `BuildComponents` already measured.
+		// Per-message overhead is left out, so the count errs wide - which is
+		// the safe direction for a window.
+		const size_t ordered = std::min(reachable, Order.size());
+
+		size_t carried = 0;
+		size_t spent = 0;
+		while (carried < ordered && spent < spend) {
+			spent += sizeof(uint64_t) + Candidates[Order[carried]].Bytes;
+			carried++;
+		}
+
+		// **The rows in contention, which is what the second hook is for.**
+		// Widening what the tick carries leaves a properly-looked-at row behind
+		// every row a refinement demotes. Past the window nothing is asked, and
+		// the unrefined score standing in for it is an upper bound - see
+		// `SetPriorityRefinement` for why that is the safe direction and what it
+		// approximates.
+		//
+		// **The window is sorted before this runs and re-sorted after**, because
+		// a refinement changes the key the first sort used. Only the window is
+		// re-sorted: the tail was never in order past `reachable` anyway, and a
+		// row in it carries a score nothing refined.
+		const size_t window = std::min(
+			Order.size(), SaturatingProduct(std::max<size_t>(carried, 1), Settings_.PriorityRefinementFactor)
+		);
+
+		if (window > reachable) {
+			// The window reaches past what the first sort put in order, so the
+			// rows between have to be brought in before they can be refined.
+			std::partial_sort(
+				Order.begin(), Order.begin() + static_cast<ptrdiff_t>(window), Order.end(), before
+			);
+		}
+
+		// Per *entity*, exactly as the cheap half is memoised, and for the same
+		// reason: the hook is `(client, entity)` and the four rows an entity
+		// produces are four questions with one answer.
+		Refined.assign(Bearing.size(), std::numeric_limits<float>::quiet_NaN());
+
+		for (size_t position = 0; position < window; position++) {
+			Candidate &candidate = Candidates[Order[position]];
+
+			const auto found = std::lower_bound(Bearing.begin(), Bearing.end(), candidate.Entity.Id);
+			const bool known = found != Bearing.end() && *found == candidate.Entity.Id;
+			const size_t slot = known ? static_cast<size_t>(found - Bearing.begin()) : 0;
+
+			if (known && !std::isnan(Refined[slot])) {
+				candidate.Hint = Refined[slot];
+				continue;
+			}
+
+			const float refined = Refinement(client, candidate.Entity, candidate.Hint);
+
+			// **Clamped to the score it started from.** A refinement that raised
+			// one would outrank rows this pass never looked at, which is the one
+			// way the window stops being an ordering and starts being a filter.
+			// A host that returns a NaN or a larger number gets its own input
+			// back rather than a silently reordered stream.
+			candidate.Hint = std::isfinite(refined) && refined < candidate.Hint ? refined : candidate.Hint;
+			if (known) {
+				Refined[slot] = candidate.Hint;
+			}
+		}
+
+		std::sort(Order.begin(), Order.begin() + static_cast<ptrdiff_t>(window), before);
 	}
 
 	Authority::Placement Authority::Pack(Client &client, const Delta &delta, size_t messageLimit) {
+		ENGINE_PROFILE_CAT("Authority::Pack", core::ProfileCategory::Network);
+
 		const size_t budget = Settings_.ChunkBytes;
 
 		// **The lower of what the path will carry and what this module is
@@ -745,8 +1050,8 @@ namespace engine::replication {
 		// under v0.13 ownership the client's copy is the newer one between
 		// submissions, so the server is the side that is behind.
 		const auto settled = [&client](ecs::Entity entity) {
-			for (const std::unordered_map<uint64_t, Outstanding> &unconfirmed : client.Unconfirmed) {
-				if (unconfirmed.find(entity.Id) != unconfirmed.end()) {
+			for (const OutstandingSet &unconfirmed : client.Unconfirmed) {
+				if (unconfirmed.Contains(entity.Id)) {
 					return false;
 				}
 			}
@@ -940,22 +1245,23 @@ namespace engine::replication {
 
 		for (size_t slot = 0; slot < Components.size(); slot++) {
 			const core::Name name = Components[slot];
-			std::unordered_map<uint64_t, Outstanding> &unconfirmed = client.Unconfirmed[slot];
+			OutstandingSet &unconfirmed = client.Unconfirmed[slot];
 
-			for (const uint64_t appearing : Appearing) {
-				unconfirmed.emplace(appearing, Outstanding{});
-			}
+			// In bulk, because a joining client's `Appearing` is the whole world
+			// and inserting that into a sorted list one entity at a time moves
+			// the tail once per entity.
+			unconfirmed.EmplaceAll(Appearing);
 
 			// **The repair is the recovery walk, not a second way to resend.**
 			// An audit that disagreed says nothing about *which* value is
 			// wrong, only that something in the group is - so what it does is
 			// put every value of that group back into the unconfirmed set the
-			// walk below already reads. `emplace` leaves an entry that is
+			// walk below already reads. `Emplace` leaves an entry that is
 			// already there alone, so a repair cannot restart the clock on
 			// something genuinely in flight.
 			for (const uint64_t repairing : client.Repairing) {
 				if (client.Known.find(repairing) != client.Known.end()) {
-					unconfirmed.emplace(repairing, Outstanding{});
+					unconfirmed.Emplace(repairing);
 				}
 			}
 
@@ -1045,7 +1351,7 @@ namespace engine::replication {
 				// through a `Candidate`, and this one produces none.
 				const size_t wrote = values.Bytes().size() - at;
 				if (MESSAGE_OVERHEAD + ENTRY_OVERHEAD + sizeof(uint64_t) + wrote > Settings_.ChunkBytes) {
-					unconfirmed.erase(entity.Id);
+					unconfirmed.Erase(entity.Id);
 					client.Oversize.push_back(entity.Id);
 					Stats_.Oversized++;
 					return;
@@ -1111,30 +1417,48 @@ namespace engine::replication {
 				});
 			}
 
-			Recovering.clear();
-			for (const std::pair<const uint64_t, Outstanding> &waiting : unconfirmed) {
-				if (waiting.second.ConsideredAt != tick) {
-					Recovering.push_back(waiting.first);
-				}
-			}
-			std::sort(Recovering.begin(), Recovering.end());
+			// **Already in order, so there is no sort here any more.**
+			// `OutstandingSet` holds its rows ascending precisely so this walk
+			// does not have to copy every unconfirmed key of every component of
+			// every client into a scratch vector and sort it once a tick. On a
+			// saturated server the unconfirmed set is the whole world, and that
+			// copy was the largest single thing this function did.
+			//
+			// **And bounded, resuming where it stopped.** See
+			// `AuthoritySettings::RecoveryRowsPerTick`: the second largest thing
+			// it did was serialise every one of those rows so the priority sort
+			// could pick the forty a link would take.
+			//
+			// Ids rather than an iterator, because `offer` inserts into
+			// `unconfirmed` and would invalidate one.
+			unconfirmed.SelectRecovering(tick, Settings_.RecoveryRowsPerTick, Recovering);
 
+			// **Dropped in one pass at the end rather than one at a time.** A
+			// row leaves the set when the entity has gone, and erasing from a
+			// sorted list moves its tail - so a world losing a thousand entities
+			// would move that tail a thousand times. `EraseSorted` needs its
+			// input ascending and `Recovering` wraps, so this is sorted rather
+			// than assumed - it holds only rows with nothing behind them, which
+			// is a handful next to the walk that produced them.
+			Dropping.clear();
 			for (const uint64_t known : Recovering) {
 				const ecs::Entity entity{known};
 
 				if (client.Known.find(known) == client.Known.end() || !store.Alive(entity)) {
-					unconfirmed.erase(known);
+					Dropping.push_back(known);
 					continue;
 				}
 
 				const void *value = store.GetComponent(entity, id);
 				if (value == nullptr) {
-					unconfirmed.erase(known);
+					Dropping.push_back(known);
 					continue;
 				}
 
 				offer(entity, value);
 			}
+			std::sort(Dropping.begin(), Dropping.end());
+			unconfirmed.EraseSorted(Dropping);
 
 			if (component.Entities.empty()) {
 				Candidates.resize(before);
@@ -1171,6 +1495,14 @@ namespace engine::replication {
 	}
 
 	void Authority::Publish(ecs::Store &store, uint64_t tick) {
+		// **Instrumented per phase and not per client**, which is the shape a
+		// two-hundred-client host forces: `FrameGraph::MAXIMUM_SPANS` is 4096 and
+		// a span per client per phase would spend the frame's whole budget on
+		// the instrumentation. Every client's visibility walk shares one stack in
+		// the folded output, which is the number a reader wants anyway - what one
+		// client costs is this over the client count.
+		ENGINE_PROFILE_CAT("Authority::Publish", core::ProfileCategory::Network);
+
 		Stats_.Messages = 0;
 		Stats_.Bytes = 0;
 		Stats_.Visible = 0;
@@ -1206,15 +1538,28 @@ namespace engine::replication {
 				}
 			}
 
-			Visible.clear();
-			store.EachEntity([this, handle, &store](ecs::Entity entity) {
-				if (!std::binary_search(Bearing.begin(), Bearing.end(), entity.Id)) {
-					return;
+			{
+				ENGINE_PROFILE_CAT("Authority::Interest", core::ProfileCategory::Network);
+
+				// **`Bearing` rather than the whole store, which is the same set
+				// by a shorter road.** `Survey` has just built the sorted ids of
+				// everything carrying a replicated component, so walking the
+				// store and asking whether each entity is in that list is an
+				// archetype walk plus a binary search per entity to arrive at a
+				// list already in hand - once per client, so on a full server it
+				// is that walk two hundred times.
+				//
+				// It also leaves `Visible` ascending by handle, which the
+				// structural pass below takes rather than re-deriving.
+				Visible.clear();
+				Visible.reserve(Bearing.size());
+				for (const uint64_t id : Bearing) {
+					const ecs::Entity entity{id};
+					if (!Interest || Interest(handle, entity, store)) {
+						Visible.push_back(entity);
+					}
 				}
-				if (!Interest || Interest(handle, entity, store)) {
-					Visible.push_back(entity);
-				}
-			});
+			}
 			Stats_.Visible += Visible.size();
 
 			const bool adrift = Owed(client) == 0 && client.Applied > 0 && client.Streamed > client.Applied &&
@@ -1249,49 +1594,56 @@ namespace engine::replication {
 			Structure structure;
 			structure.Tick = tick;
 
-			for (const ecs::Entity entity : Visible) {
-				if (client.Known.find(entity.Id) == client.Known.end()) {
-					structure.Created.push_back(entity);
-				}
-			}
-
 			{
-				std::vector<uint64_t> visible;
-				visible.reserve(Visible.size());
+				ENGINE_PROFILE_CAT("Authority::Structure", core::ProfileCategory::Network);
+
 				for (const ecs::Entity entity : Visible) {
-					visible.push_back(entity.Id);
-				}
-				std::sort(visible.begin(), visible.end());
-
-				for (const uint64_t known : client.Known) {
-					if (std::binary_search(visible.begin(), visible.end(), known)) {
-						continue;
-					}
-					if (store.Alive(ecs::Entity{known})) {
-						structure.Forgotten.push_back(ecs::Entity{known});
-					} else {
-						structure.Destroyed.push_back(ecs::Entity{known});
+					if (client.Known.find(entity.Id) == client.Known.end()) {
+						structure.Created.push_back(entity);
 					}
 				}
-			}
 
-			const auto byHandle = [](ecs::Entity left, ecs::Entity right) { return left.Id < right.Id; };
-			std::sort(structure.Created.begin(), structure.Created.end(), byHandle);
-			std::sort(structure.Destroyed.begin(), structure.Destroyed.end(), byHandle);
-			std::sort(structure.Forgotten.begin(), structure.Forgotten.end(), byHandle);
+				{
+					// **`Visible` is already ascending by handle**, because the walk
+					// above takes `Bearing` in order - so this searches it directly
+					// rather than copying every id out and sorting the copy, which
+					// was a pass over the client's whole world per client per tick.
+					const auto byHandleId = [](const ecs::Entity entity, uint64_t id) {
+						return entity.Id < id;
+					};
 
-			for (const ecs::Entity entity : structure.Created) {
-				client.Known.insert(entity.Id);
-			}
-			for (const ecs::Entity entity : structure.Destroyed) {
-				client.Known.erase(entity.Id);
-			}
-			for (const ecs::Entity entity : structure.Forgotten) {
-				client.Known.erase(entity.Id);
-			}
+					for (const uint64_t known : client.Known) {
+						const auto at = std::lower_bound(Visible.begin(), Visible.end(), known, byHandleId);
+						if (at != Visible.end() && at->Id == known) {
+							continue;
+						}
+						if (store.Alive(ecs::Entity{known})) {
+							structure.Forgotten.push_back(ecs::Entity{known});
+						} else {
+							structure.Destroyed.push_back(ecs::Entity{known});
+						}
+					}
+				}
 
-			if (!structure.Created.empty() || !structure.Destroyed.empty() || !structure.Forgotten.empty()) {
-				EmitStructure(client, structure);
+				const auto byHandle = [](ecs::Entity left, ecs::Entity right) { return left.Id < right.Id; };
+				std::sort(structure.Created.begin(), structure.Created.end(), byHandle);
+				std::sort(structure.Destroyed.begin(), structure.Destroyed.end(), byHandle);
+				std::sort(structure.Forgotten.begin(), structure.Forgotten.end(), byHandle);
+
+				for (const ecs::Entity entity : structure.Created) {
+					client.Known.insert(entity.Id);
+				}
+				for (const ecs::Entity entity : structure.Destroyed) {
+					client.Known.erase(entity.Id);
+				}
+				for (const ecs::Entity entity : structure.Forgotten) {
+					client.Known.erase(entity.Id);
+				}
+
+				if (!structure.Created.empty() || !structure.Destroyed.empty() ||
+					!structure.Forgotten.empty()) {
+					EmitStructure(client, structure);
+				}
 			}
 
 			Appearing.clear();
@@ -1306,7 +1658,10 @@ namespace engine::replication {
 			delta.Tick = tick;
 			delta.Baseline = client.Applied;
 
-			BuildComponents(store, client, delta, tick);
+			{
+				ENGINE_PROFILE_CAT("Authority::BuildComponents", core::ProfileCategory::Network);
+				BuildComponents(store, client, delta, tick);
+			}
 			client.Repairing.clear();
 
 			if (!delta.Components.empty()) {
@@ -1410,12 +1765,14 @@ namespace engine::replication {
 			if (read.Applied.Tick > found->Applied) {
 				found->Applied = read.Applied.Tick;
 
-				for (std::unordered_map<uint64_t, Outstanding> &unconfirmed : found->Unconfirmed) {
-					for (auto entry = unconfirmed.begin(); entry != unconfirmed.end();) {
-						const uint64_t sentAt = entry->second.SentAt;
-						const bool confirmed = sentAt != 0 && sentAt <= found->Applied;
-						entry = confirmed ? unconfirmed.erase(entry) : std::next(entry);
-					}
+				// One pass over each set rather than an erase per acknowledged
+				// row. An acknowledgement retires everything sent up to a tick,
+				// so this is the bulk case by construction.
+				for (OutstandingSet &unconfirmed : found->Unconfirmed) {
+					const uint64_t applied = found->Applied;
+					unconfirmed.EraseIf([applied](const OutstandingSet::Row &row) {
+						return row.Value.SentAt != 0 && row.Value.SentAt <= applied;
+					});
 				}
 			}
 			return true;

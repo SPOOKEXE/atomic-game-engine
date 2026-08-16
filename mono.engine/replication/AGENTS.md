@@ -553,6 +553,45 @@ dirty bits handed it over, and only re-packed by score when that did not fit.
 A scheme that ranked every entity every tick would be a tax on every server that
 was never over budget.
 
+**A score has two halves and the expensive one is asked about the rows in
+contention.** `SetPriority` is asked about every entity for every client;
+`SetPriorityRefinement` is asked about a window derived from what the tick's
+byte budget really reaches, widened by `PriorityRefinementFactor`. The split
+exists because the two cost different amounts by orders of magnitude - a
+distance is a subtraction and `mono.server`'s occlusion test is a raycast, and
+asking the second about everything was measured at 51% of a two-hundred-client
+tick, every answer of it thrown away.
+
+**A refinement may only lower a score, and `Authority` clamps it so.** That is
+what makes an unrefined score an upper bound, and an upper bound is what lets
+rows outside the window keep theirs and still be correctly ranked below the
+window. A refinement that raised one would let a row nothing looked at be
+overtaken invisibly.
+
+**It is an ordering within a tick and never a filter.** A row just outside the
+window that would have overtaken a heavily demoted row inside it waits a tick.
+The rotation below is what bounds that, and it is the same argument: nothing
+here can starve anything, because a value that has waited its deadline outranks
+every score, refined or not.
+
+**Do not derive the window from the sort's own bound.** `Prioritise` bounds the
+sort by assuming every row is as short as the shortest row in the tick, which is
+what a bound has to assume and is nowhere near what a tick sends - at the
+default budget it covers every candidate in a two-thousand-entity world. The
+first version of the window used it and moved the whole occlusion cost from one
+profile frame to another without removing any of it. The window adds up what the
+ordered rows actually encode to, which is a walk of a prefix over lengths
+`BuildComponents` has already measured.
+
+**The recovery walk is bounded and rotates.** `RecoveryRowsPerTick` caps how
+many unacknowledged rows one component re-offers to one client in a tick, and
+the walk resumes where it stopped rather than restarting at the front. A client
+far enough behind has every entity it knows about unconfirmed, so an unbounded
+walk serialises the whole world to fill a link measured at forty rows. Cutting
+the walk *without* the cursor would rebuild the same rows for ever and never
+reach the rest, which is why the two arrived together. A bound of zero is the
+unbounded walk, and a healthy connection never reaches a non-zero one.
+
 **Three counters, and they mean three different things.**
 `Authority::Statistics::Deferred` is the authority holding traffic over, which
 is the ordinary answer to a world larger than a link.
@@ -586,10 +625,18 @@ that knows what a socket is.
 **Nothing in the ordering may read a clock, a pointer or an unordered
 container.** The comparator is a total order - score, then wait, then entity
 handle, then component - because `std::sort` is not stable and two runs of one
-server must produce the same bytes. The recovery walk sorts the unconfirmed
-entities for the same reason, and that one is not hypothetical: the map was
+server must produce the same bytes. The recovery walk needs the same property
+and that one is not hypothetical: the unconfirmed set was an `unordered_map`
 walked in place, and the only way to see it is to build the same set of entries
 through two different sequences of insertions.
+
+**The unconfirmed set is a sorted vector and the order is the reason, not the
+speed.** It used to be a hash map whose keys were copied into a scratch vector
+and sorted once per component per client per tick to get that order back. Held
+sorted, the walk is a pass over contiguous memory and the sort does not exist -
+which is why `OutstandingSet` has no `find` returning an iterator anybody may
+keep: offering a row inserts into the set, and an insert moves everything after
+it. Take ids, then offer.
 
 ## What an instance *is* crosses whole, and it is three components
 

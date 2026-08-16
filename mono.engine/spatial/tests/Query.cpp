@@ -85,9 +85,12 @@ TEST_CASE("a raycast finds nothing when there is nothing in the way", "[query]")
 }
 
 TEST_CASE("the nearest box wins, not the first cell walked", "[query]") {
-	// The walk visits cells in ascending order and knows nothing about the
-	// ray's direction, so firing backwards puts the *near* box in a cell the
-	// walk reaches last. An implementation that returns the first candidate it
+	// Written when the walk was ascending on every axis and knew nothing about
+	// the ray's direction, which put the *near* box in the cell reached last.
+	// The ray walk reaches it first now, so what this pins today is the other
+	// half of the same rule: firing backwards along an axis has to step the
+	// negative way, and a walk that only ever counted up would find the far box
+	// and stop at it. An implementation that returns the first candidate it
 	// finds passes every single-box case in this file and fails here.
 	HashGrid grid{UNIT_CELL};
 	const Proxy proxies[] = {
@@ -541,6 +544,104 @@ TEST_CASE("a proxy too large for cells is found by every query", "[query]") {
 		)
 			.Written == 1
 	);
+}
+
+TEST_CASE("a proxy spanning cells the ray crosses is reported once", "[query]") {
+	// The ray walk's de-duplication rule: report a proxy from the first cell of
+	// the unbroken run the ray makes through its cell range, which is the cell
+	// whose predecessor in the walk was outside that range.
+	//
+	// The box below is five cells wide on X and the ray goes straight down the
+	// middle of it, so a walk with no rule at all reports it five times. The
+	// box walk's rule cannot answer this: its designated cell is a corner of a
+	// *volume*, and a line has none.
+	HashGrid grid{UNIT_CELL};
+	const Proxy proxies[] = {Cube(1, Vector3{5.5f, 0.5f, 0.5f}, 2.5f)};
+	grid.Rebuild(proxies);
+
+	std::array<RayHit, 8> hits{};
+	const QueryResult all =
+		RaycastAll(grid, Ray{Vector3{0.5f, 0.5f, 0.5f}, Vector3::XAxis}, 20.0f, LayerMask::All(), hits);
+
+	REQUIRE(all.Written == 1);
+	REQUIRE_FALSE(all.Overflowed);
+	REQUIRE(hits[0].Id == 1u);
+	REQUIRE(hits[0].Distance == Approx(2.5f));
+}
+
+TEST_CASE("a ray starting inside a multi-cell proxy reports it once", "[query]") {
+	// The run starts at the walk's very first cell, where there is no previous
+	// cell to compare against. "No previous" has to count as outside the range,
+	// or the one case where the ray begins inside something reports nothing.
+	HashGrid grid{UNIT_CELL};
+	const Proxy proxies[] = {Cube(1, Vector3{4.5f, 0.5f, 0.5f}, 3.5f)};
+	grid.Rebuild(proxies);
+
+	std::array<RayHit, 8> hits{};
+	const QueryResult all =
+		RaycastAll(grid, Ray{Vector3{2.5f, 0.5f, 0.5f}, Vector3::XAxis}, 20.0f, LayerMask::All(), hits);
+
+	REQUIRE(all.Written == 1);
+	REQUIRE(hits[0].Id == 1u);
+	REQUIRE(hits[0].Distance == Approx(0.0f));
+}
+
+TEST_CASE("a diagonal ray finds what is on the line and not what is beside it", "[query]") {
+	// The reason the walk exists. Both boxes sit inside the bounding box of the
+	// segment, so the volume walk handed both to the exact test; only one is on
+	// the line, and only that one is now visited at all. The answer was already
+	// right - what changed is how many cells were opened to reach it.
+	HashGrid grid{UNIT_CELL};
+	const Proxy proxies[] = {
+		Cube(1, Vector3{10.5f, 10.5f, 0.5f}, 0.4f), // on the diagonal
+		Cube(2, Vector3{18.0f, 2.0f, 0.5f}, 0.4f),	// in the corner of the segment's box
+	};
+	grid.Rebuild(proxies);
+
+	const Vector3 diagonal = Vector3{1.0f, 1.0f, 0.0f}.Unit();
+	std::array<RayHit, 8> hits{};
+	const QueryResult all =
+		RaycastAll(grid, Ray{Vector3{0.5f, 0.5f, 0.5f}, diagonal}, 40.0f, LayerMask::All(), hits);
+
+	REQUIRE(all.Written == 1);
+	REQUIRE(hits[0].Id == 1u);
+}
+
+TEST_CASE("the nearest-hit stop does not skip a proxy too large for cells", "[query]") {
+	// `Raycast` stops walking once it holds a hit no later cell can beat, and
+	// an oversized proxy is in no cell at all - so the stop must not take the
+	// pass that finds one with it. The floor here is nearer than the cube, and
+	// the cube is what the walk finds first.
+	HashGrid grid{UNIT_CELL};
+	const Proxy proxies[] = {
+		Cube(1, Vector3{0.5f, -8.0f, 0.5f}, 0.4f),
+		Proxy{2, AABB{Vector3{-60.0f, -3.0f, -60.0f}, Vector3{60.0f, -2.0f, 60.0f}}, LayerMask::All()},
+	};
+	grid.Rebuild(proxies);
+	REQUIRE(GridInternals::OversizedCount(grid) == 1);
+
+	const std::optional<RayHit> hit = Raycast(grid, Ray{Vector3{0.5f, 0.5f, 0.5f}, -Vector3::YAxis}, 20.0f);
+
+	REQUIRE(hit.has_value());
+	REQUIRE(hit->Id == 2u);
+	REQUIRE(hit->Distance == Approx(2.5f));
+}
+
+TEST_CASE("a ray longer than the walk is worth takes the scan", "[query]") {
+	// Past `WALK_CELL_ALLOWANCE` cells the walk costs more than one pass over
+	// every proxy, and the fallback has to give the same answer rather than a
+	// cheaper one. A hundred thousand metres at one metre a cell is well past
+	// it on a grid holding a single box.
+	HashGrid grid{UNIT_CELL};
+	const Proxy proxies[] = {Cube(1, Vector3{3.5f, 0.5f, 0.5f}, 0.5f)};
+	grid.Rebuild(proxies);
+
+	const std::optional<RayHit> hit =
+		Raycast(grid, Ray{Vector3{0.5f, 0.5f, 0.5f}, Vector3::XAxis}, 100000.0f);
+
+	REQUIRE(hit.has_value());
+	REQUIRE(hit->Id == 1u);
+	REQUIRE(hit->Distance == Approx(2.5f));
 }
 
 TEST_CASE("the overlap queries honour the layer mask", "[query]") {

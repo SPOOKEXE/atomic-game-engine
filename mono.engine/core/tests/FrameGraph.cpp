@@ -876,3 +876,126 @@ TEST_CASE("two profiling scopes may share one C++ scope", "[framegraph]") {
 	REQUIRE(spans[2].Depth == 2);
 	REQUIRE(spans[2].Category == ProfileCategory::Physics);
 }
+
+// --- folded stacks ------------------------------------------------------------
+//
+// The flamegraph half. The arithmetic is a free function over hand-built spans,
+// so these are about the fold and not about whether a collector was running.
+
+TEST_CASE("a folded line is a stack and its self time", "[framegraph]") {
+	const std::vector<engine::core::FrameSpan> spans{
+		{.Name = "tick", .Depth = 0, .Parent = FrameGraph::NO_PARENT, .SelfMilliseconds = 1.0f},
+		{.Name = "publish", .Depth = 1, .Parent = 0, .SelfMilliseconds = 2.0f},
+		{.Name = "pack", .Depth = 2, .Parent = 1, .SelfMilliseconds = 4.0f},
+	};
+
+	engine::core::FoldedStacks totals;
+	engine::core::AccumulateFoldedStacks(spans, totals);
+
+	REQUIRE(totals.size() == 3);
+	REQUIRE(totals.at("tick") == 1000.0);
+	REQUIRE(totals.at("tick;publish") == 2000.0);
+	REQUIRE(totals.at("tick;publish;pack") == 4000.0);
+}
+
+TEST_CASE("folding accumulates across frames rather than replacing them", "[framegraph]") {
+	const std::vector<engine::core::FrameSpan> spans{
+		{.Name = "tick", .Depth = 0, .Parent = FrameGraph::NO_PARENT, .SelfMilliseconds = 0.5f},
+	};
+
+	// The whole reason this is a running total: a flamegraph of a stress run is
+	// the run, not the last frame of it.
+	engine::core::FoldedStacks totals;
+	for (int frame = 0; frame < 4; frame++) {
+		engine::core::AccumulateFoldedStacks(spans, totals);
+	}
+
+	REQUIRE(totals.at("tick") == 2000.0);
+}
+
+TEST_CASE("two spans of one name under two parents stay apart", "[framegraph]") {
+	// A flamegraph's whole value over a flat table: `seal` under the delta path
+	// and `seal` under the snapshot path are two different costs.
+	const std::vector<engine::core::FrameSpan> spans{
+		{.Name = "tick", .Depth = 0, .Parent = FrameGraph::NO_PARENT, .SelfMilliseconds = 0.0f},
+		{.Name = "delta", .Depth = 1, .Parent = 0, .SelfMilliseconds = 0.0f},
+		{.Name = "seal", .Depth = 2, .Parent = 1, .SelfMilliseconds = 3.0f},
+		{.Name = "snapshot", .Depth = 1, .Parent = 0, .SelfMilliseconds = 0.0f},
+		{.Name = "seal", .Depth = 2, .Parent = 3, .SelfMilliseconds = 5.0f},
+	};
+
+	engine::core::FoldedStacks totals;
+	engine::core::AccumulateFoldedStacks(spans, totals);
+
+	REQUIRE(totals.at("tick;delta;seal") == 3000.0);
+	REQUIRE(totals.at("tick;snapshot;seal") == 5000.0);
+}
+
+TEST_CASE("a semicolon in a name does not become a stack frame", "[framegraph]") {
+	// Runtime names are copied from scripts and asset paths, so the separator is
+	// text somebody can write. Splitting on it would invent a frame.
+	const std::vector<engine::core::FrameSpan> spans{
+		{.Name = "a;b", .Depth = 0, .Parent = FrameGraph::NO_PARENT, .SelfMilliseconds = 1.0f},
+	};
+
+	engine::core::FoldedStacks totals;
+	engine::core::AccumulateFoldedStacks(spans, totals);
+
+	REQUIRE(totals.count("a;b") == 0);
+	REQUIRE(totals.at("a:b") == 1000.0);
+}
+
+TEST_CASE("a folded capture covers every frame the collector saw", "[framegraph]") {
+	const auto path = std::filesystem::temp_directory_path() / "atomic-framegraph-test.folded";
+	std::filesystem::remove(path);
+
+	{
+		Collecting collecting;
+		FrameGraph::SetFoldingEnabled(true);
+
+		for (int frame = 0; frame < 5; frame++) {
+			FrameGraph::BeginFrame();
+			{
+				ENGINE_PROFILE("outer");
+				ENGINE_PROFILE("inner");
+				BurnMilliseconds(0.2);
+			}
+			FrameGraph::EndFrame();
+		}
+
+		REQUIRE(FrameGraph::FoldedFrames() == 5);
+		REQUIRE(FrameGraph::WriteFolded(path));
+		FrameGraph::SetFoldingEnabled(false);
+	}
+
+	std::ifstream in(path);
+	REQUIRE(in);
+	const std::string text{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+	in.close();
+	std::filesystem::remove(path);
+
+	// The nested span carries the time, so it is the line with a number on it.
+	REQUIRE(text.find("outer;inner ") != std::string::npos);
+}
+
+TEST_CASE("turning folding on clears what the last capture accumulated", "[framegraph]") {
+	Collecting collecting;
+
+	FrameGraph::SetFoldingEnabled(true);
+	FrameGraph::BeginFrame();
+	{ ENGINE_PROFILE("first.capture"); }
+	FrameGraph::EndFrame();
+	REQUIRE(FrameGraph::FoldedFrames() == 1);
+
+	// A second capture is a second run. Carrying the first one's stacks into it
+	// would compare a change against a graph containing the code before it.
+	FrameGraph::SetFoldingEnabled(true);
+	REQUIRE(FrameGraph::FoldedFrames() == 0);
+
+	const auto path = std::filesystem::temp_directory_path() / "atomic-framegraph-second.folded";
+	std::filesystem::remove(path);
+	REQUIRE_FALSE(FrameGraph::WriteFolded(path));
+	REQUIRE_FALSE(std::filesystem::exists(path));
+
+	FrameGraph::SetFoldingEnabled(false);
+}

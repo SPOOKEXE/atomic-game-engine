@@ -1,6 +1,13 @@
 #pragma once
 
-// The grid's cell arithmetic and its candidate walk. Private to this module.
+// The grid's cell arithmetic and its two candidate walks. Private to this
+// module.
+//
+// There are two walks because there are two shapes of question. A volume query
+// is given a box and visits the cells in it; a ray query is given a line and
+// walks the cells the line pierces. They de-duplicate a proxy spanning several
+// cells by different rules, and each rule is the one its own walk can support -
+// see the comment on each.
 //
 // Everything here needs the storage `HashGrid` keeps to itself, which is why it
 // is a friend rather than a set of public methods: the queries in `Query.cpp`,
@@ -13,11 +20,14 @@
 // stored in one cell and looked for in another, and it produces a broad phase
 // that misses about one contact in a thousand.
 
+#include "RayBox.hpp"
+
 #include <engine/spatial/HashGrid.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 
 namespace engine::spatial {
 
@@ -216,7 +226,215 @@ namespace engine::spatial {
 			return true;
 		}
 
+		// Calls `visit` once for each proxy in a cell the ray actually pierces,
+		// in increasing distance along the ray.
+		//
+		// **A digital differential walk - Amanatides and Woo, 1987.** The box
+		// walk above is given the bounding box of the whole segment, so a ray
+		// crossing a room diagonally asks for the cube that contains it: 25
+		// cells on a side is 15,625 cells to reach the 75 the line goes through.
+		// This steps cell to cell along the line instead, so the count is the
+		// ray's length in cells rather than its bounding volume in cells.
+		//
+		// **The measurement `AGENTS.md` requires of an algorithmic change**,
+		// from `benchmarks/HashGrid.cpp` on the `bench` preset, 64 rays of 64 m
+		// against 4000 colliders, before and after:
+		//
+		//     cells    box walk    ray walk
+		//      1 m     10.67 ms    12.90 us
+		//      2 m      1.78 ms     7.50 us
+		//      4 m    422.76 us     5.25 us
+		//      8 m    114.80 us     5.18 us
+		//     16 m     26.40 us     7.09 us
+		//     32 m     32.25 us    15.70 us
+		//
+		// The shape is the argument, not the ratio. The box walk's cost is
+		// cubic in the reciprocal of the cell size and this one's is linear, so
+		// the two agree at coarse cells and diverge without limit at fine ones -
+		// which is why the old default could not be chosen from the raycast rows
+		// and this one can. A short cast is barely changed: 64 rays of 8 m at
+		// 4 m cells go 3.13 us to 2.50 us, because a short ray's bounding box
+		// was never the problem.
+		//
+		// **De-duplication is "the cell before this one was not in the proxy's
+		// range", and that is the rule change the walk came with.** The box
+		// walk's rule - report from the corner formed by the larger minimum on
+		// each axis - needs a walk that covers a whole box, and a line does not.
+		// This one works because a straight ray is monotone on every axis, so
+		// the cells it visits inside any box in cell space form one unbroken
+		// run: the test fires on the first cell of that run and nowhere else.
+		// One comparison, no scratch memory, no write, and still the same answer
+		// whatever order anything runs in - which is what `AGENTS.md` requires
+		// of it and what a visited stamp would have cost.
+		//
+		// **No volume test on a candidate.** The box walk rejects a proxy whose
+		// cell overlaps the query while its box does not; here the caller's own
+		// exact ray-box test answers that question better, so repeating a
+		// coarser version of it first is work with no result.
+		//
+		// @param reciprocal  `RayReciprocal` for the same ray, which the caller
+		//                    already holds for its exact test.
+		// @param visit       Called with each candidate. Returning false stops
+		//                    the walk.
+		// @param keepWalking Called with the distance at which the ray leaves
+		//                    the cell just visited, before stepping to the next.
+		//                    Returning false stops the cell walk, which is how a
+		//                    nearest-hit query stops once nothing further along
+		//                    can beat what it holds. The oversized pass still
+		//                    runs, because a proxy too large for cells is in no
+		//                    cell and the walk never reached it.
+		// @return False if the visitor stopped the walk.
+		template <class Visit, class KeepWalking>
+		static bool ForEachCandidateAlongRay(
+			const HashGrid &grid,
+			const core::Ray &ray,
+			const RayReciprocal &reciprocal,
+			float maxDistance,
+			LayerMask mask,
+			Visit &&visit,
+			KeepWalking &&keepWalking
+		) {
+			const float origin[3] = {ray.Origin.X, ray.Origin.Y, ray.Origin.Z};
+			const float direction[3] = {ray.Direction.X, ray.Direction.Y, ray.Direction.Z};
+
+			int32_t cell[3] = {
+				CellCoordinateOf(origin[0], grid.InverseSpacing),
+				CellCoordinateOf(origin[1], grid.InverseSpacing),
+				CellCoordinateOf(origin[2], grid.InverseSpacing),
+			};
+
+			// How many cells the line crosses, which is its extent on each axis
+			// in cells plus the cell it starts in. In `double` so that a long ray
+			// on a fine grid cannot overflow the count that decides whether to
+			// walk at all, and written as `!(<=)` so a NaN takes the scan.
+			double crossings = 3.0;
+			for (int axis = 0; axis < 3; axis++) {
+				crossings += static_cast<double>(std::abs(direction[axis])) *
+								 static_cast<double>(maxDistance) * static_cast<double>(grid.InverseSpacing) +
+							 1.0;
+			}
+
+			// An origin clamped at the coordinate limit is an origin whose cell
+			// is not the cell it is in, and stepping from it would walk a line
+			// that is not the ray's. The scan answers it exactly instead.
+			const bool clamped = std::abs(cell[0]) >= CELL_LIMIT || std::abs(cell[1]) >= CELL_LIMIT ||
+								 std::abs(cell[2]) >= CELL_LIMIT;
+
+			if (grid.Entries.empty() || clamped ||
+				!(crossings <= static_cast<double>(grid.Entries.size()) + WALK_CELL_ALLOWANCE)) {
+				return ScanEveryProxy(grid, SegmentBounds(ray, maxDistance), mask, visit);
+			}
+
+			int32_t step[3] = {0, 0, 0};
+			float leaving[3] = {0.0f, 0.0f, 0.0f};
+			float crossing[3] = {0.0f, 0.0f, 0.0f};
+
+			for (int axis = 0; axis < 3; axis++) {
+				if (reciprocal.Parallel[axis]) {
+					// No direction on this axis, so the ray never leaves its
+					// starting cell along it and never steps on it.
+					step[axis] = 0;
+					leaving[axis] = std::numeric_limits<float>::infinity();
+					crossing[axis] = std::numeric_limits<float>::infinity();
+					continue;
+				}
+
+				step[axis] = direction[axis] > 0.0f ? 1 : -1;
+
+				const float plane =
+					static_cast<float>(step[axis] > 0 ? cell[axis] + 1 : cell[axis]) * grid.Spacing;
+
+				// Never behind the origin. An origin sitting exactly on a cell
+				// boundary produces zero here, and a small negative from rounding
+				// would put the first step before the ray starts.
+				leaving[axis] = std::max((plane - origin[axis]) * reciprocal.Inverse[axis], 0.0f);
+				crossing[axis] = grid.Spacing * std::abs(reciprocal.Inverse[axis]);
+			}
+
+			bool stepped = false;
+			int32_t previous[3] = {0, 0, 0};
+
+			for (;;) {
+				const size_t bucket = HashCell(cell[0], cell[1], cell[2]) & (BucketCount(grid) - 1);
+				const uint32_t last = grid.BucketStart[bucket + 1];
+
+				for (uint32_t slot = grid.BucketStart[bucket]; slot < last; slot++) {
+					const HashGrid::Entry &entry = grid.Entries[slot];
+					if (entry.CellX != cell[0] || entry.CellY != cell[1] || entry.CellZ != cell[2]) {
+						continue;
+					}
+
+					if (stepped && WithinCellRange(grid.Ranges[entry.ProxyIndex], previous)) {
+						continue;
+					}
+
+					const Proxy &proxy = grid.Proxies[entry.ProxyIndex];
+					if (!proxy.Layers.Overlaps(mask)) {
+						continue;
+					}
+					if (!visit(proxy)) {
+						return false;
+					}
+				}
+
+				const float exit = std::min(leaving[0], std::min(leaving[1], leaving[2]));
+				if (!keepWalking(exit) || !(exit < maxDistance)) {
+					break;
+				}
+
+				int axis = 0;
+				if (leaving[1] < leaving[axis]) {
+					axis = 1;
+				}
+				if (leaving[2] < leaving[axis]) {
+					axis = 2;
+				}
+
+				previous[0] = cell[0];
+				previous[1] = cell[1];
+				previous[2] = cell[2];
+				stepped = true;
+
+				cell[axis] += step[axis];
+				if (cell[axis] < -CELL_LIMIT || cell[axis] > CELL_LIMIT) {
+					break;
+				}
+				leaving[axis] += crossing[axis];
+			}
+
+			// After the cells and in proxy order, matching the box walk. A proxy
+			// too large for cells is in none of them, so no early stop above may
+			// skip this.
+			for (uint32_t index : grid.Oversized) {
+				const Proxy &proxy = grid.Proxies[index];
+				if (!proxy.Layers.Overlaps(mask)) {
+					continue;
+				}
+				if (!visit(proxy)) {
+					return false;
+				}
+			}
+			return true;
+		}
+
+		// The box that encloses a ray segment. What the scan fallback is given,
+		// and the volume the box walk used to be given for every raycast.
+		static core::AABB SegmentBounds(const core::Ray &ray, float maxDistance) {
+			const core::Vector3 end = ray.PointAt(maxDistance);
+			return core::AABB{ray.Origin, ray.Origin}.Union(core::AABB{end, end});
+		}
+
 	  private:
+		// Whether a cell coordinate lies inside a proxy's cell range.
+		//
+		// False for an oversized proxy, whose range is emptied at build time,
+		// which is right: it is in no cell and the ray walk never reaches it
+		// through one.
+		static bool WithinCellRange(const HashGrid::CellRange &range, const int32_t (&cell)[3]) {
+			return cell[0] >= range.MinimumX && cell[0] <= range.MaximumX && cell[1] >= range.MinimumY &&
+				   cell[1] <= range.MaximumY && cell[2] >= range.MinimumZ && cell[2] <= range.MaximumZ;
+		}
+
 		// Every proxy, in order, with no cells involved. The answer for a query
 		// so large that the walk would cost more than the scan.
 		template <class Visit>
