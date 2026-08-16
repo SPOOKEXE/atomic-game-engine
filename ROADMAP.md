@@ -39,7 +39,7 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### v0.16
 
-- [_] do a stress test with 200 (headless) clients connecting to the single server and optimise everything where possible.
+- [_] do a stress test with 200 (headless) clients connecting to the single server and optimise everything where possible. Always produce a baseline\_flamegraph.ext, then every iteration make a iter\(N\)\_flamegraph.ext so you can compare as you develop.
 - [_] setup a CDN mode that is:  1. server distributes from cdn (default) - when clients connect, the server itself connects to the cdn and streams assets as needed to the client (client has no authority for it except rate-limited retries only to the server). 2. server reroutes client - when client connects to server, it tells the clients where all the cdns are that are configured on the server
 - [_] thoroughly implement all user interface elements + surfacegui + billboardgui
 - [_] tutorial for setting up CDN in folder and as a server
