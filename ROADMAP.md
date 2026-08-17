@@ -50,12 +50,8 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] universe properties in explorer: selecting the universe root exposes its name, execution mode, catch-up cap, bus budget and world count in Properties, with authored tuning saved in the game file
 - [x] all user interface elements render in the client and Studio, including interactive ScreenGui, lit and depth-tested SurfaceGui and BillboardGui collectors, and nested ViewportFrame scenes
 - [x] portals use recursive off-axis projections, seam-clipped and cloned geometry, through-seam lighting and effects, and paired physics proxies and crossings so bodies and objects remain continuous at the opening
-- [_] for the portal seam stuff, could we render each side without the portals connecting (but the lighting enters like
-    a void room), then we record that, then overlay that on the inside of the portal matching the correct geometry of
-    the entrance? We can also do the inside-out the same way (make the inside room exit to a void, but we record the
-    lighting, then overaly them on the outside)? This way we can add a "Enabled" button on Portal components that
-    skip this step.
-- [_] go through all objects that have properties like services, objects, instances, etc, and ensure they all are hooked up and actually mutate states. I noticed lighting properties don't work and they're attached to nothing. Same for other things.
+- [x] portal mouths use per-view void-side captures: each destination renders without its portal panes, keeps scene and through-portal lighting, then composites nested captures back onto the exact opening. `Portal.Enabled` disables capture, lighting, seam geometry, crossing and pane opening while retaining the authored link.
+- [x] audited the declared property surface against runtime consumers: Lighting now drives per-world sun, ambient, outdoor light, fog, recursive portal views and particles; service fixture identity is read-only; light controls are class-specific; and unsupported GUI, local-shadow and selection-fill controls are no longer advertised as working properties
 
 ### v0.17
 
@@ -87,4 +83,3 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] constraints system
 - [_] deferred `D00106` - JavaScript and TypeScript breakpoints. The vendored QuickJS exposes no line hook and no debugger API at all, so this is a submodule decision rather than a feature. Asking for one on a .js/.ts chunk is refused with the reason, at the service, the gutter and the panel alike. **The TypeScript half of the entry shipped at v0.15 and is not part of this** - source maps are emitted and read, so the lines a debugger would land on are already the right ones.
 - [_] full audio DAW (digital audio workbench) system
-

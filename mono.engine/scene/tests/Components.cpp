@@ -104,13 +104,14 @@ TEST_CASE("no component carries unnamed padding", "[scene][components]") {
 	);
 	CHECK(offsetof(SurfaceCamera, Reserved) + sizeof(SurfaceCamera::Reserved) == sizeof(SurfaceCamera));
 
-	// **A portal is a handle, a world and a reserve**, and the second of those
-	// is what makes the third necessary. Which part the hole leads to decides
-	// where the camera stands; which *world* decides what it draws, and the two
-	// are separate because only the first is arithmetic a store can do for
-	// itself. An `Entity` is eight bytes and a `Name` is four, so four are left
-	// over and are named rather than left to the compiler.
+	// **A portal is a handle, a world, an activation byte and a reserve.** Which
+	// part the hole leads to decides where the camera stands; which world decides
+	// what it draws; and the activation byte decides whether either path runs.
+	// An `Entity` is eight bytes, a `Name` is four and the flag is one, so three
+	// bytes are left over and named rather than left to the compiler.
+	CHECK(sizeof(Portal) == sizeof(engine::ecs::Entity) + sizeof(Name) + sizeof(bool) + 3);
 	CHECK(offsetof(Portal, Reserved) + sizeof(Portal::Reserved) == sizeof(Portal));
+	CHECK(Portal{}.Enabled);
 
 	// **Fourteen floats and a `CFrame`, and not one byte more.** A fitted
 	// frustum is four extents, two distances and a plane, and the map the pane

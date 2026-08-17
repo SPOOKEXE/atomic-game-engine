@@ -2516,16 +2516,15 @@ namespace client {
 			drawn = Drawn;
 		}
 
-		// **The world's sun, pushed before the frame that shades with it.** It is
-		// a knob rather than an argument for `SetPortalDepth`'s reason, so this is
-		// where a world's `scene::Sun` reaches the renderer - every frame, because
-		// a resource a script may write is one a script may write at any time and
-		// two floats compared per frame is cheaper than anything that would notice
-		// when it changed.
+		// **The world's lighting, pushed before the frame that shades with it.** It
+		// is a knob rather than an argument for `SetPortalDepth`'s reason, so this
+		// is where the Lighting service reaches the renderer every frame. A
+		// property a script may write is one it may write at any time, and resolving
+		// this small value is cheaper than maintaining a second dirty-state system.
 		//
-		// **`SunOf` rather than the resource**, so a world that has never set one
-		// draws with the numbers this engine has always drawn with rather than
-		// with black.
+		// **`LightingOf` rather than the component**, so the legacy `Sun` resource
+		// remains an explicit override and a world without either still receives
+		// the renderer's established defaults.
 		// **And how deep its mirrors go, for the sun's reason exactly.** It is a
 		// property of the world being drawn rather than of the process, so it
 		// arrives here rather than at startup: two worlds in one session are two
@@ -2536,8 +2535,7 @@ namespace client {
 		// number is somebody measuring or comparing, and a world quietly taking
 		// it back on the next frame is the shape of an afternoon lost.
 		Universe_->Enter(Rendered, [this](engine::ecs::Store &lit, engine::ecs::Scheduler &) {
-			const engine::scene::Sun sun = engine::scene::SunOf(lit);
-			Renderer.SetSun(sun.Direction, sun.Ambient);
+			Renderer.SetLighting(engine::scene::LightingOf(lit));
 
 			const int32_t bounces = Settings.SurfaceBounces > 0
 										? static_cast<int32_t>(Settings.SurfaceBounces)

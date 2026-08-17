@@ -50,7 +50,16 @@ layout(set = 3, binding = 0) uniform Lighting {
 	vec4 Mirror;
 	vec4 PaneNormal;
 	vec4 SeamPlane;
+	vec4 OutdoorAmbient;
+	vec4 FogColour;
+	vec4 Fog;
+	vec4 Eye;
 } lighting;
+
+float FogFactor() {
+	float interval = max(lighting.Fog.y - lighting.Fog.x, 0.0001);
+	return clamp((distance(inWorldPosition, lighting.Eye.xyz) - lighting.Fog.x) / interval, 0.0, 1.0);
+}
 
 // How many steps the diffuse term is cut into.
 //
@@ -94,9 +103,9 @@ void main() {
 	// outline. Cheap - it is the same normal against the same eye direction the
 	// rasteriser already interpolated.
 	//
-	// **Derived from the world position rather than from a camera uniform**,
-	// because this block carries no eye position and adding one would change a
-	// struct every pass pushes. `dFdx`/`dFdy` of the world position give the
+	// **Derived from the world position rather than from the eye uniform**,
+	// because the derivatives give the surface's screen-space frame directly.
+	// `dFdx`/`dFdy` of the world position give the
 	// surface's own screen-space frame, whose cross product is the facing
 	// direction - one that is right whichever camera is looking, including the
 	// several a mirror renders through.
@@ -104,6 +113,9 @@ void main() {
 	float rim = 1.0 - abs(dot(normal, facing));
 	float edge = smoothstep(0.62, 0.92, rim);
 
-	vec3 lit = albedo * (lighting.Ambient.rgb + lighting.Direct.rgb * banded);
-	outColour = vec4(mix(lit, albedo, edge), alpha);
+	float sky = max(normal.y, 0.0);
+	vec3 lit = albedo *
+		(lighting.Ambient.rgb + lighting.OutdoorAmbient.rgb * sky + lighting.Direct.rgb * banded);
+	vec3 colour = mix(lit, albedo, edge);
+	outColour = vec4(mix(colour, lighting.FogColour.rgb, FogFactor()), alpha);
 }

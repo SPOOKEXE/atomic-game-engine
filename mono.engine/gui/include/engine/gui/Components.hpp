@@ -254,10 +254,13 @@ namespace engine::gui {
 		// depend on where the mouse is, which is a script bug nobody could see.
 		bool AutoButtonColor = true;
 
-		// Whether this button swallows input to everything behind it.
+		// Reserved for mouse-capture policy. It is not exposed as a property until
+		// the input router has a modal route to apply it to.
 		bool Modal = false;
 
-		// Whether gamepad selection is currently on this button.
+		// Reserved for a per-button selection cache. `GuiService.SelectedObject`
+		// owns selection today, so exposing a second writable answer would let the
+		// two disagree.
 		bool Selected = false;
 	};
 
@@ -280,13 +283,14 @@ namespace engine::gui {
 		// 0 is opaque and 1 is invisible.
 		float BarTransparency = 0.0f;
 
-		// Whether input may scroll it. Independent of whether bars are drawn.
+		// Reserved for wheel and drag input. CanvasPosition remains the supported
+		// authored route until the input router handles scrolling.
 		bool Enabled = true;
 
 		// Which axes may be scrolled.
 		ScrollingDirection Direction = ScrollingDirection::Y;
 
-		// Which axes grow the canvas to fit the content.
+		// Reserved until layout computes content bounds back into the canvas.
 		AutomaticSize AutomaticCanvas = AutomaticSize::None;
 
 		// Explicit padding, for the reason every other `Reserved` gives.
@@ -808,14 +812,13 @@ namespace engine::gui {
 	//
 	// @since v0.8
 	struct SelectionOutline {
-		// How thick the edges are, in studs.
+		// Reserved until the renderer consumes variable-width world lines.
 		float LineThickness = 0.05f;
 
-		// The fill drawn over the adornee's faces.
+		// Reserved until adornment geometry emits filled faces.
 		core::Color3 SurfaceColor{0.0f, 0.65f, 1.0f};
 
-		// 1 by default, which means no fill - an outline alone. A filled
-		// selection hides what it selected, and an author who wants one asks.
+		// Kept at the invisible default while filled faces are unsupported.
 		float SurfaceTransparency = 1.0f;
 	};
 

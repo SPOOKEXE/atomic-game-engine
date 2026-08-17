@@ -1145,13 +1145,22 @@ namespace engine::scene {
 		// @since v0.14
 		core::Name DestinationWorld = {};
 
+		// Whether this mouth participates in the portal system.
+		//
+		// False removes the mouth from the per-view void capture, seam cuts,
+		// crossings and portal lighting. The destination stays authored, so
+		// switching this back on restores the same link without rebuilding it.
+		//
+		// @since v0.16
+		bool Enabled = true;
+
 		// Explicit padding, for the reason every other `Reserved` gives.
 		//
-		// An `Entity` is eight bytes and a `Name` is four, so the type's own
-		// alignment leaves four the compiler inserted and nobody declared -
-		// written to a save file by `Column::Write`, which sends `sizeof(T)`
-		// bytes and does not know which of them a member claimed.
-		uint8_t Reserved[4] = {};
+		// An `Entity` is eight bytes, a `Name` is four and `Enabled` is one, so
+		// the type's own alignment leaves three the compiler inserted and nobody
+		// declared. `Column::Write` sends `sizeof(T)` bytes and does not know which
+		// of them a member claimed.
+		uint8_t Reserved[3] = {};
 	};
 
 	// The frustum a surface camera renders through, fitted to its pane.
@@ -1384,16 +1393,8 @@ namespace engine::scene {
 		// Which of the three this is.
 		LightKind Kind = LightKind::Point;
 
-		// Whether it casts a shadow.
-		//
-		// **Authored and not yet read**, which is stated rather than hidden: the
-		// renderer has one shadow-casting directional light and no shadow map per
-		// point light. Declared anyway because it is the field that decides
-		// whether a light is cheap, and a game authored without it would have to
-		// be re-authored the day the pass exists. `SurfaceAppearance`'s rule
-		// about `MetalnessMap` cuts the other way here and deliberately: that was
-		// a field a physically based pipeline would *interpret*, and this is one
-		// an author *decides*.
+		// Reserved for a local-shadow pass. It is deliberately not exposed as a
+		// property until a renderer consumes it.
 		bool Shadows = false;
 
 		// Whether it is on.

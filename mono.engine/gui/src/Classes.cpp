@@ -577,17 +577,13 @@ namespace engine::gui {
 			}
 
 			Classes::Property<&Button::AutoButtonColor>(guiButton, "AutoButtonColor");
-			Classes::Property<&Button::Modal>(guiButton, "Modal");
-			Classes::Property<&Button::Selected>(guiButton, "Selected");
 
 			Classes::Property<&Scrolling::CanvasSize>(scrollingFrame, "CanvasSize");
 			Classes::Property<&Scrolling::CanvasPosition>(scrollingFrame, "CanvasPosition");
 			Classes::Property<&Scrolling::BarThickness>(scrollingFrame, "ScrollBarThickness");
 			Classes::Property<&Scrolling::BarColor>(scrollingFrame, "ScrollBarImageColor3");
 			Classes::Property<&Scrolling::BarTransparency>(scrollingFrame, "ScrollBarImageTransparency");
-			Classes::Property<&Scrolling::Enabled>(scrollingFrame, "ScrollingEnabled");
 			Classes::Computed(scrollingFrame, EnumField<&Scrolling::Direction>("ScrollingDirection"));
-			Classes::Computed(scrollingFrame, EnumField<&Scrolling::AutomaticCanvas>("AutomaticCanvasSize"));
 
 			Classes::Property<&Entry::PlaceholderText>(textBox, "PlaceholderText");
 			Classes::Property<&Entry::PlaceholderColor>(textBox, "PlaceholderColor3");
@@ -679,10 +675,6 @@ namespace engine::gui {
 			Classes::Property<&Adornment::AlwaysOnTop>(pvAdornment, "AlwaysOnTop");
 			Classes::Property<&Adornment::ZIndex>(pvAdornment, "ZIndex");
 
-			Classes::Property<&SelectionOutline::LineThickness>(selectionBox, "LineThickness");
-			Classes::Property<&SelectionOutline::SurfaceColor>(selectionBox, "SurfaceColor3");
-			Classes::Property<&SelectionOutline::SurfaceTransparency>(selectionBox, "SurfaceTransparency");
-
 			Classes::Property<&HandleShape::Offset>(handleAdornment, "CFrame");
 			Classes::Property<&HandleShape::Size>(handleAdornment, "Size");
 
@@ -696,6 +688,7 @@ namespace engine::gui {
 			(void)canvasGroup;
 			(void)dockWidget;
 			(void)uiScale;
+			(void)selectionBox;
 			(void)selectionSphere;
 			(void)boxHandle;
 			(void)sphereHandle;

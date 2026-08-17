@@ -181,8 +181,8 @@ namespace engine::render {
 			glm::vec4 Direct;
 
 			// x: whether a shadow map was rendered. y: one shadow texel.
-			// z: whether this draw samples the surface texture. w: unused, and
-			// named so the struct's size is stated rather than implied.
+			// z: whether this draw samples the surface texture. w: projected-image
+			// opacity.
 			glm::vec4 Flags;
 
 			// The submesh's own colour, white for a draw with no material.
@@ -238,6 +238,14 @@ namespace engine::render {
 			// to is chosen by that plane - a caller passing one here would be
 			// overwritten by the slot's.
 			glm::vec4 SeamPlane{0.0f, 0.0f, 0.0f, 0.0f};
+
+			// The sky term, fog colour and eye-relative fog interval. Appended so
+			// built-in and user shaders that copy the established prefix keep every
+			// earlier field at the same offset.
+			glm::vec4 OutdoorAmbient{0.0f, 0.0f, 0.0f, 0.0f};
+			glm::vec4 FogColour{0.0f, 0.0f, 0.0f, 0.0f};
+			glm::vec4 Fog{100000.0f, 100001.0f, 0.0f, 0.0f};
+			glm::vec4 Eye{0.0f, 0.0f, 0.0f, 0.0f};
 		};
 
 		// How many holes may transport a shadow in one frame.
@@ -586,11 +594,15 @@ namespace engine::render {
 		// **Held rather than taken per frame, for `SetSurfaceBounces`' reason**:
 		// it is a property of what is being drawn rather than of this frame, and
 		// threading it through `Render` would put it in a signature every host
-		// calls to say the same thing on every frame. `client::PushSunlight` is
-		// what writes it from `scene::SunOf`.
+		// calls to say the same thing on every frame. `client::Client::Frame`
+		// writes it from `scene::LightingOf` before each world's render.
 		glm::vec3 Sun{SUN_DIRECTION};
 		glm::vec4 Ambient{SUN_AMBIENT};
+		glm::vec4 OutdoorAmbient{0.0f, 0.0f, 0.0f, 1.0f};
 		glm::vec4 Direct{1.0f, 1.0f, 1.0f, 1.0f};
+		glm::vec4 FogColour{0.05f, 0.06f, 0.09f, 1.0f};
+		float FogStart = 100000.0f;
+		float FogEnd = 100001.0f;
 
 		// What is in each slot of the instance buffer, filled in the same loop
 		// that fills the buffer itself.
@@ -1741,7 +1753,7 @@ namespace engine::render {
 			particleTarget.blend_state.enable_blend = true;
 			particleTarget.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
 			particleTarget.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
-			particleTarget.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+			particleTarget.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
 			particleTarget.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
 			particleTarget.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
 			particleTarget.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
@@ -2488,8 +2500,21 @@ namespace engine::render {
 		};
 
 		struct ParticleMaterial {
-			// x: whether the sampler holds this group's texture. The rest is
-			// named for `ParticleUniforms::Options`'s reason.
+			// x: whether the sampler holds this group's texture. y: the blend from
+			// alpha to additive. z: environmental-light influence.
+			glm::vec4 Flags;
+
+			// The orientation-free light approximation, followed by fog state.
+			glm::vec4 Illumination;
+			glm::vec4 FogColour;
+			glm::vec4 Fog;
+			glm::vec4 Eye;
+		};
+
+		// The ribbon fragment shader deliberately keeps the older one-vector
+		// block. Reusing the larger particle block would push bytes past what that
+		// shader declares on backends that validate uniform ranges.
+		struct RibbonMaterial {
 			glm::vec4 Flags;
 		};
 
@@ -2507,7 +2532,8 @@ namespace engine::render {
 		bool SameParticleState(const render::ParticleBatch &left, const render::ParticleBatch &right) {
 			return left.Additive == right.Additive && left.WorldUp == right.WorldUp &&
 				   left.Texture == right.Texture && left.FlipbookSide == right.FlipbookSide &&
-				   left.ZOffset == right.ZOffset;
+				   left.ZOffset == right.ZOffset && left.LightEmission == right.LightEmission &&
+				   left.LightInfluence == right.LightInfluence;
 		}
 	}
 
@@ -2551,6 +2577,12 @@ namespace engine::render {
 				}
 				if (a.ZOffset != b.ZOffset) {
 					return a.ZOffset < b.ZOffset;
+				}
+				if (a.LightEmission != b.LightEmission) {
+					return a.LightEmission < b.LightEmission;
+				}
+				if (a.LightInfluence != b.LightInfluence) {
+					return a.LightInfluence < b.LightInfluence;
 				}
 				return static_cast<int>(a.WorldUp) < static_cast<int>(b.WorldUp);
 			}
@@ -2665,7 +2697,16 @@ namespace engine::render {
 			SDL_GPUTexture *const texture = Textures.Find(state.Texture);
 
 			ParticleMaterial material{};
-			material.Flags = glm::vec4{texture != nullptr ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f};
+			material.Flags = glm::vec4{
+				texture != nullptr ? 1.0f : 0.0f,
+				state.Additive ? 1.0f : std::clamp(state.LightEmission, 0.0f, 1.0f),
+				std::clamp(state.LightInfluence, 0.0f, 1.0f),
+				0.0f,
+			};
+			material.Illumination = Ambient + OutdoorAmbient * 0.5f + Direct * 0.5f;
+			material.FogColour = FogColour;
+			material.Fog = glm::vec4{FogStart, FogEnd, 0.0f, 0.0f};
+			material.Eye = glm::vec4{eye.Position.X, eye.Position.Y, eye.Position.Z, 0.0f};
 			SDL_PushGPUFragmentUniformData(command, 0, &material, sizeof(material));
 
 			// **The fallback is bound rather than the sampler left unbound**,
@@ -2818,7 +2859,7 @@ namespace engine::render {
 
 				SDL_GPUTexture *const texture = Textures.Find(run.Texture);
 
-				ParticleMaterial material{};
+				RibbonMaterial material{};
 				material.Flags = glm::vec4{texture != nullptr ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f};
 				SDL_PushGPUFragmentUniformData(command, 0, &material, sizeof(material));
 
@@ -3848,6 +3889,23 @@ namespace engine::render {
 
 		State->Ambient = glm::vec4{ambient.R, ambient.G, ambient.B, 1.0f};
 		State->Direct = glm::vec4{direct.R, direct.G, direct.B, 1.0f};
+	}
+
+	void Renderer::SetLighting(const scene::WorldLighting &lighting) {
+		if (State == nullptr) {
+			return;
+		}
+
+		SetSun(lighting.Direction, lighting.Ambient, lighting.Direct);
+		State->OutdoorAmbient = glm::vec4{
+			lighting.OutdoorAmbient.R,
+			lighting.OutdoorAmbient.G,
+			lighting.OutdoorAmbient.B,
+			1.0f,
+		};
+		State->FogColour = glm::vec4{lighting.FogColor.R, lighting.FogColor.G, lighting.FogColor.B, 1.0f};
+		State->FogStart = std::max(lighting.FogStart, 0.0f);
+		State->FogEnd = std::max(lighting.FogEnd, State->FogStart);
 	}
 
 	core::Vector3 Renderer::SunDirection() const {
@@ -5215,6 +5273,27 @@ namespace engine::render {
 		const bool haveShadow = haveInstances && sceneCount > 0 &&
 								(reflectedCasters > 0 || surfaceCasters > 0) && State->EnsureShadow();
 
+		// Builds the per-draw block from world lighting and the camera used by
+		// this pass. Fog is eye-relative, so a reflected or portal sub-view must
+		// not reuse the screen eye even though every other authored term is shared.
+		const auto lightingAt = [&](const core::Vector3 &eye, float surfaceMode, float imageOpacity) {
+			LightingUniforms lighting;
+			lighting.Direction = glm::vec4{State->Sun, 0.0f};
+			lighting.Ambient = State->Ambient;
+			lighting.Direct = State->Direct;
+			lighting.Flags = glm::vec4{
+				haveShadow ? 1.0f : 0.0f,
+				1.0f / static_cast<float>(SHADOW_RESOLUTION),
+				surfaceMode,
+				imageOpacity,
+			};
+			lighting.OutdoorAmbient = State->OutdoorAmbient;
+			lighting.FogColour = State->FogColour;
+			lighting.Fog = glm::vec4{State->FogStart, State->FogEnd, 0.0f, 0.0f};
+			lighting.Eye = glm::vec4{eye.X, eye.Y, eye.Z, 0.0f};
+			return lighting;
+		};
+
 		if (haveShadow) {
 			ENGINE_PROFILE_CAT("shadow pass", core::ProfileCategory::Render);
 			passes.Enter(Pass::Shadow);
@@ -5538,7 +5617,12 @@ namespace engine::render {
 									   const SDL_GPUViewport *viewport) -> SDL_GPURenderPass * {
 			SDL_GPUColorTargetInfo colourInfo{};
 			colourInfo.texture = colour;
-			colourInfo.clear_color = SDL_FColor{0.05f, 0.06f, 0.09f, 1.0f};
+			colourInfo.clear_color = SDL_FColor{
+				State->FogColour.r,
+				State->FogColour.g,
+				State->FogColour.b,
+				1.0f,
+			};
 			colourInfo.load_op = SDL_GPU_LOADOP_CLEAR;
 			colourInfo.store_op = SDL_GPU_STOREOP_STORE;
 			colourInfo.cycle = cycle;
@@ -5841,14 +5925,7 @@ namespace engine::render {
 				// more often rather than less.
 				SDL_GPURenderPass *const pass = openScenePass(target->Colour, target->Depth, false, nullptr);
 
-				const LightingUniforms levelLighting{
-					glm::vec4{State->Sun, 0.0f},
-					State->Ambient,
-					State->Direct,
-					glm::vec4{
-						haveShadow ? 1.0f : 0.0f, 1.0f / static_cast<float>(SHADOW_RESOLUTION), 0.0f, 1.0f
-					},
-				};
+				const LightingUniforms levelLighting = lightingAt(eye.Frame.Position, 0.0f, 1.0f);
 
 				const FrameUniforms levelFrame{
 					matrices.ViewProjection,
@@ -6129,14 +6206,8 @@ namespace engine::render {
 					// the mirror that survived deleting every caster, the frame and
 					// the near-plane hack, and moved when the camera was re-aimed but
 					// not when the floor was.
-					const LightingUniforms surfaceLighting{
-						glm::vec4{State->Sun, 0.0f},
-						State->Ambient,
-						State->Direct,
-						glm::vec4{
-							haveShadow ? 1.0f : 0.0f, 1.0f / static_cast<float>(SHADOW_RESOLUTION), 0.0f, 1.0f
-						},
-					};
+					const core::Vector3 surfaceEye = accepted[index].View->Frame.Position;
+					const LightingUniforms surfaceLighting = lightingAt(surfaceEye, 0.0f, 1.0f);
 
 					const ShadowBinding shadow = shadowBinding();
 
@@ -6254,17 +6325,8 @@ namespace engine::render {
 									lightViewProjection,
 									level->Sampling,
 								};
-								LightingUniforms levelLighting{
-									glm::vec4{State->Sun, 0.0f},
-									State->Ambient,
-									State->Direct,
-									glm::vec4{
-										haveShadow ? 1.0f : 0.0f,
-										1.0f / static_cast<float>(SHADOW_RESOLUTION),
-										1.0f,
-										shown.ImageOpacity
-									},
-								};
+								LightingUniforms levelLighting =
+									lightingAt(surfaceEye, 1.0f, shown.ImageOpacity);
 								levelLighting.Mirror.x = static_cast<float>(shown.Effect);
 
 								SDL_PushGPUVertexUniformData(command, 0, &levelFrame, sizeof(levelFrame));
@@ -6310,17 +6372,8 @@ namespace engine::render {
 								lightViewProjection,
 								shown.PreviousSampling,
 							};
-							LightingUniforms mirrorLighting{
-								glm::vec4{State->Sun, 0.0f},
-								State->Ambient,
-								State->Direct,
-								glm::vec4{
-									haveShadow ? 1.0f : 0.0f,
-									1.0f / static_cast<float>(SHADOW_RESOLUTION),
-									1.0f,
-									shown.ImageOpacity
-								},
-							};
+							LightingUniforms mirrorLighting =
+								lightingAt(surfaceEye, 1.0f, shown.ImageOpacity);
 
 							// Which grade this surface's image goes through. On the
 							// composite rather than on the render, so switching one
@@ -6637,14 +6690,7 @@ namespace engine::render {
 					};
 					SDL_PushGPUVertexUniformData(command, 0, &subFrameUniforms, sizeof(subFrameUniforms));
 
-					const LightingUniforms subLighting{
-						glm::vec4{State->Sun, 0.0f},
-						State->Ambient,
-						State->Direct,
-						glm::vec4{
-							haveShadow ? 1.0f : 0.0f, 1.0f / static_cast<float>(SHADOW_RESOLUTION), 0.0f, 1.0f
-						},
-					};
+					const LightingUniforms subLighting = lightingAt(sub.Frame.Position, 0.0f, 1.0f);
 
 					drawWorldInto(pass, subLighting, portal.TagFilter);
 
@@ -6767,7 +6813,12 @@ namespace engine::render {
 		// window - so this is the one target that moves.
 		SDL_GPUColorTargetInfo colourTarget{};
 		colourTarget.texture = offscreen ? State->SlotAt(targetSlot).Texture : swapchain;
-		colourTarget.clear_color = SDL_FColor{0.05f, 0.06f, 0.09f, 1.0f};
+		colourTarget.clear_color = SDL_FColor{
+			State->FogColour.r,
+			State->FogColour.g,
+			State->FogColour.b,
+			1.0f,
+		};
 		colourTarget.load_op = SDL_GPU_LOADOP_CLEAR;
 		colourTarget.store_op = SDL_GPU_STOREOP_STORE;
 
@@ -6777,7 +6828,7 @@ namespace engine::render {
 		// back, which is last frame's image or uninitialised memory.
 		SDL_GPUColorTargetInfo windowTarget{};
 		windowTarget.texture = swapchain;
-		windowTarget.clear_color = SDL_FColor{0.05f, 0.06f, 0.09f, 1.0f};
+		windowTarget.clear_color = colourTarget.clear_color;
 		windowTarget.load_op = offscreen ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
 		windowTarget.store_op = SDL_GPU_STOREOP_STORE;
 
@@ -6891,14 +6942,7 @@ namespace engine::render {
 				// instance samples the surface is per instance and the uniform
 				// is per draw, so the split is a third draw rather than a
 				// per-fragment branch on data the shader does not have.
-				const LightingUniforms lighting{
-					glm::vec4{State->Sun, 0.0f},
-					State->Ambient,
-					State->Direct,
-					glm::vec4{
-						haveShadow ? 1.0f : 0.0f, 1.0f / static_cast<float>(SHADOW_RESOLUTION), 0.0f, 0.0f
-					},
-				};
+				const LightingUniforms lighting = lightingAt(cameraFrame.Position, 0.0f, 0.0f);
 				SDL_PushGPUFragmentUniformData(command, 0, &lighting, sizeof(lighting));
 
 				// The same, for the runs that sample the surface texture.
@@ -7055,17 +7099,8 @@ namespace engine::render {
 								lightViewProjection,
 								shown.Sampling,
 							};
-							LightingUniforms mirrored{
-								glm::vec4{State->Sun, 0.0f},
-								State->Ambient,
-								State->Direct,
-								glm::vec4{
-									haveShadow ? 1.0f : 0.0f,
-									1.0f / static_cast<float>(SHADOW_RESOLUTION),
-									1.0f,
-									shown.ImageOpacity
-								},
-							};
+							LightingUniforms mirrored =
+								lightingAt(cameraFrame.Position, 1.0f, shown.ImageOpacity);
 
 							// Which grade this surface's image goes through. On the
 							// composite rather than on the render, so switching one

@@ -207,9 +207,7 @@ namespace engine::gui {
 		}
 
 		uint64_t Fold(uint64_t running, const Button &value) {
-			running = Fold(running, value.AutoButtonColor);
-			running = Fold(running, value.Modal);
-			return Fold(running, value.Selected);
+			return Fold(running, value.AutoButtonColor);
 		}
 
 		uint64_t Fold(uint64_t running, const Scrolling &value) {
@@ -218,9 +216,8 @@ namespace engine::gui {
 			running = Fold(running, value.BarThickness);
 			running = Fold(running, value.BarColor);
 			running = Fold(running, value.BarTransparency);
-			running = Fold(running, value.Enabled);
 			running = Fold(running, value.Direction);
-			return Fold(running, value.AutomaticCanvas);
+			return running;
 		}
 
 		uint64_t Fold(uint64_t running, const Entry &value) {

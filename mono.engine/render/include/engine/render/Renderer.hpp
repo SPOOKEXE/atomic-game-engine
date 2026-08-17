@@ -14,6 +14,7 @@
 #include <engine/render/Overlay.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/DrawInstance.hpp>
+#include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 
 // `SurfaceView::Projection` is a matrix. glm has always arrived here through
@@ -489,6 +490,13 @@ namespace engine::render {
 
 		// How far towards the eye the quads are nudged, in metres.
 		float ZOffset = 0.0f;
+
+		// How blending moves from ordinary alpha to additive, and how much the
+		// world's lighting modulates the particle colour.
+		//@{
+		float LightEmission = 0.0f;
+		float LightInfluence = 0.0f;
+		//@}
 
 		// Whether the colour is added to the target rather than blended into it.
 		//
@@ -993,6 +1001,16 @@ namespace engine::render {
 		//
 		// @since v0.15
 		uint32_t PortalDepth() const;
+
+		// Sets every built-in lighting term for the world drawn next.
+		//
+		// The value is copied. A renderer holds no pointer into a world, and a
+		// caller presenting several worlds sets each one's value immediately
+		// before its frame.
+		//
+		// @param lighting The resolved `Lighting` service.
+		// @since v0.16
+		void SetLighting(const scene::WorldLighting &lighting);
 
 		// Which way the world's one directional light shines, and what reaches
 		// what it does not.
