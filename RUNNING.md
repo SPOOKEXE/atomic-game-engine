@@ -1816,9 +1816,86 @@ Publishing and serving are **two invocations, and the split is deliberate**: the
 signing key belongs to whoever publishes the game and the origin holds none,
 which is what makes it safe to deploy on hardware nobody here owns.
 
-[`SETUP-CDN.md`](SETUP-CDN.md) is the walkthrough - a folder on your own machine,
-a store served from a directory, an origin on localhost, and what it takes to
-reach one from somewhere else. What follows here is the reference.
+## Quick CDN setup
+
+Build with `just cdn`. Put baked assets in `content/`, choose different
+64-character hex signing and grant secrets, then publish:
+
+```sh
+SIGNING_KEY=YOUR_64_HEX_SIGNING_SECRET
+./.cache/build/dev/cdn/cdn \
+    --publish ./content --store ./store --signing-key "$SIGNING_KEY"
+```
+
+Save the `publisher key` printed by the command. To use the folder directly:
+
+```sh
+PUBLISHER_KEY=THE_KEY_PRINTED_BY_PUBLISH
+just run --cdn dir:./store --publisher-key "$PUBLISHER_KEY"
+```
+
+To serve the same store over HTTP:
+
+```sh
+GRANT_KEY=YOUR_DIFFERENT_64_HEX_GRANT_SECRET
+./.cache/build/dev/cdn/cdn \
+    --store ./store --grant-key "$GRANT_KEY" --port 9080
+```
+
+`curl http://127.0.0.1:9080/health` should answer `ok`.
+
+### Use a custom CDN from a game server
+
+In another terminal, point the game server at an IP address its clients can
+reach:
+
+```sh
+GRANT_KEY=THE_SAME_64_HEX_GRANT_SECRET
+PUBLISHER_KEY=THE_KEY_PRINTED_BY_PUBLISH
+CDN_HOST=192.168.1.20
+just host --game My.agame --listen 9000 \
+    --content-grant-key "$GRANT_KEY" \
+    --flag server.content-mode=redirect \
+    --flag server.content-sources="$CDN_HOST:9080" \
+    --flag server.content-publisher-key="$PUBLISHER_KEY"
+```
+
+The CDN and game server must use the same grant key.
+
+### Add the store to Studio
+
+Open **Edit > Preferences > Content**:
+
+1. Choose **Add local store**.
+2. Set **Use** to `read` and **Location** to the published `store/` directory.
+3. Paste the publisher key under **Trust**.
+
+Changes save immediately. For a remote origin, choose **Add origin** and enter
+its `HOST:PORT`. Protected remote downloads still need a grant from a game
+server, so use the local store in Studio for direct authoring and preview.
+
+### Connect a client
+
+Normally the server supplies the CDN address, session grant and publisher key:
+
+```sh
+just run --connect GAME_SERVER:9000
+```
+
+To pin your own CDN and key, pass them explicitly. The client tries this source
+before any source announced by the server and refuses a different publisher:
+
+```sh
+PUBLISHER_KEY=THE_KEY_PRINTED_BY_PUBLISH
+CDN_HOST=192.168.1.20
+just run --connect GAME_SERVER:9000 \
+    --cdn "$CDN_HOST:9080" --publisher-key "$PUBLISHER_KEY"
+```
+
+That HTTP CDN must accept the grant issued by the game server. A `dir:` source
+needs no grant.
+
+The detailed publishing, serving and troubleshooting reference follows.
 
 ### Publish a directory of files
 

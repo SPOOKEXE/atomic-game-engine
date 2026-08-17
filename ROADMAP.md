@@ -43,10 +43,10 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] the two hot frames `.cache/stress/RESULTS.md` leaves: the occlusion raycast in the priority score, and `Authority::BuildComponents`. Five iterations in `.cache/stress/RESULTS.md` - a walk along the ray in `spatial` (Amanatides and Woo, 10.67 ms to 12.90 us on the benchmark's fine-cell row), `Authority::SetPriorityRefinement` so occlusion is asked only about the rows in contention, `Client::Unconfirmed` as a sorted vector, and a bounded rotating recovery walk. p95 tick 416 ms to 280 ms, throughput to clients 6.6 MB/s to 12.3 MB/s, 200 of 200 clients joined.
 - [x] `ShapeCast` walks the thick line of a long sweep and de-duplicates from the first centre-cell neighbourhood shared with each proxy. A measured crossover keeps the volume walk when its small envelope opens fewer cells.
 - [x] setup a CDN mode that is:  1. server distributes from cdn (default) - when clients connect, the server itself connects to the cdn and streams assets as needed to the client (client has no authority for it except rate-limited retries only to the server). 2. server reroutes client - when client connects to server, it tells the clients where all the cdns are that are configured on the server
-- [_] tutorial for setting up CDN in folder and as a server
-- [_] tutorial for setting up a server with custom cdn
-- [_] tutorial adding cdn to studio
-- [_] tutorial for launching client to connect to a server (note: the server tells the client where the CDN is and the key needed, add a alternative mode in which the)
+- [x] concise `RUNNING.md` tutorial for publishing a CDN store and serving it from a folder or HTTP origin
+- [x] concise `RUNNING.md` tutorial for pointing a game server at a custom CDN
+- [x] concise `RUNNING.md` tutorial for adding a local store or remote origin to Studio
+- [x] concise `RUNNING.md` tutorial for connecting a client using the server-provided CDN, grant and publisher key, with an alternative mode that pins the client's own CDN and key
 - [x] universe properties in explorer: selecting the universe root exposes its name, execution mode, catch-up cap, bus budget and world count in Properties, with authored tuning saved in the game file
 - [x] all user interface elements render in the client and Studio, including interactive ScreenGui, lit and depth-tested SurfaceGui and BillboardGui collectors, and nested ViewportFrame scenes
 - [x] portals use recursive off-axis projections, seam-clipped and cloned geometry, through-seam lighting and effects, and paired physics proxies and crossings so bodies and objects remain continuous at the opening
