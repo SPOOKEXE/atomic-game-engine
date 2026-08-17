@@ -1,6 +1,7 @@
 #include "ShaderBinary.hpp"
 
 #include <engine/core/Log.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/render/InterfacePass.hpp>
 #include <engine/resources/Shaders.hpp>
 
@@ -87,13 +88,17 @@ namespace engine::render {
 		Glyphs.Build(pixelSize);
 
 		SDL_GPUShader *vertex = Load(gpu, "interface.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
+		SDL_GPUShader *spatialVertex = Load(gpu, "interface_spatial.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
 		SDL_GPUShader *fragment = Load(gpu, "interface.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
-		if (vertex == nullptr || fragment == nullptr) {
+		if (vertex == nullptr || spatialVertex == nullptr || fragment == nullptr) {
 			if (vertex != nullptr) {
 				SDL_ReleaseGPUShader(gpu, vertex);
 			}
 			if (fragment != nullptr) {
 				SDL_ReleaseGPUShader(gpu, fragment);
+			}
+			if (spatialVertex != nullptr) {
+				SDL_ReleaseGPUShader(gpu, spatialVertex);
 			}
 			return false;
 		}
@@ -163,10 +168,29 @@ namespace engine::render {
 
 		Pipeline = SDL_CreateGPUGraphicsPipeline(gpu, &info);
 
+		SDL_GPUGraphicsPipelineCreateInfo spatialInfo = info;
+		spatialInfo.vertex_shader = spatialVertex;
+		spatialInfo.vertex_input_state.vertex_buffer_descriptions = &buffer;
+		spatialInfo.vertex_input_state.num_vertex_buffers = 1;
+		spatialInfo.vertex_input_state.vertex_attributes = attributes;
+		spatialInfo.vertex_input_state.num_vertex_attributes = 3;
+		spatialInfo.target_info.color_target_descriptions = &target;
+		spatialInfo.target_info.num_color_targets = 1;
+		spatialInfo.target_info.has_depth_stencil_target = true;
+		spatialInfo.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+		spatialInfo.depth_stencil_state.enable_depth_test = true;
+		spatialInfo.depth_stencil_state.enable_depth_write = false;
+		spatialInfo.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
+		SpatialPipeline = SDL_CreateGPUGraphicsPipeline(gpu, &spatialInfo);
+
+		spatialInfo.depth_stencil_state.enable_depth_test = false;
+		SpatialTopPipeline = SDL_CreateGPUGraphicsPipeline(gpu, &spatialInfo);
+
 		SDL_ReleaseGPUShader(gpu, vertex);
+		SDL_ReleaseGPUShader(gpu, spatialVertex);
 		SDL_ReleaseGPUShader(gpu, fragment);
 
-		if (Pipeline == nullptr) {
+		if (Pipeline == nullptr || SpatialPipeline == nullptr || SpatialTopPipeline == nullptr) {
 			ENGINE_ERROR("interface pass: pipeline: {}", SDL_GetError());
 			return false;
 		}
@@ -196,10 +220,12 @@ namespace engine::render {
 			SDL_GPUTextureCreateInfo texture{};
 			texture.type = SDL_GPU_TEXTURETYPE_2D;
 
-			// **One channel, because the atlas is coverage and not colour.**
-			// Four would be three bytes of 255 per texel for a sheet that is
-			// megabytes.
-			texture.format = SDL_GPU_TEXTUREFORMAT_R8_UNORM;
+			// **RGBA even though the source is coverage.** SDL backends do not
+			// expose one portable swizzle for an R8 sample: Vulkan and Metal may
+			// place the missing channels differently. Expanding once at startup
+			// makes every sampled texel white with coverage in alpha, which lets
+			// glyphs, flat rectangles and images share the exact same shader.
+			texture.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
 			texture.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
 			texture.width = Glyphs.Width();
 			texture.height = Glyphs.Height();
@@ -210,6 +236,24 @@ namespace engine::render {
 			if (AtlasTexture == nullptr) {
 				ENGINE_ERROR("interface pass: atlas texture: {}", SDL_GetError());
 			}
+		}
+
+		// Upload before the first frame owns a command buffer. Keeping this copy
+		// out of the frame command also makes the atlas available to every
+		// recursive surface pass without relying on copy-to-render visibility
+		// within one submission.
+		if (AtlasTexture != nullptr) {
+			SDL_GPUCommandBuffer *upload = SDL_AcquireGPUCommandBuffer(gpu);
+			if (upload == nullptr || !UploadAtlas(upload)) {
+				if (upload != nullptr) {
+					SDL_CancelGPUCommandBuffer(upload);
+				}
+				ENGINE_ERROR("interface pass: atlas upload: {}", SDL_GetError());
+				return false;
+			}
+			SDL_SubmitGPUCommandBuffer(upload);
+			SDL_ReleaseGPUTransferBuffer(gpu, static_cast<SDL_GPUTransferBuffer *>(AtlasTransferBuffer));
+			AtlasTransferBuffer = nullptr;
 		}
 
 		return Pipeline != nullptr;
@@ -227,6 +271,9 @@ namespace engine::render {
 		if (TransferBuffer != nullptr) {
 			SDL_ReleaseGPUTransferBuffer(gpu, static_cast<SDL_GPUTransferBuffer *>(TransferBuffer));
 		}
+		if (AtlasTransferBuffer != nullptr) {
+			SDL_ReleaseGPUTransferBuffer(gpu, static_cast<SDL_GPUTransferBuffer *>(AtlasTransferBuffer));
+		}
 		if (IndexBuffer != nullptr) {
 			SDL_ReleaseGPUBuffer(gpu, static_cast<SDL_GPUBuffer *>(IndexBuffer));
 		}
@@ -242,13 +289,22 @@ namespace engine::render {
 		if (Pipeline != nullptr) {
 			SDL_ReleaseGPUGraphicsPipeline(gpu, static_cast<SDL_GPUGraphicsPipeline *>(Pipeline));
 		}
+		if (SpatialPipeline != nullptr) {
+			SDL_ReleaseGPUGraphicsPipeline(gpu, static_cast<SDL_GPUGraphicsPipeline *>(SpatialPipeline));
+		}
+		if (SpatialTopPipeline != nullptr) {
+			SDL_ReleaseGPUGraphicsPipeline(gpu, static_cast<SDL_GPUGraphicsPipeline *>(SpatialTopPipeline));
+		}
 
 		TransferBuffer = nullptr;
 		IndexBuffer = nullptr;
 		VertexBuffer = nullptr;
 		AtlasTexture = nullptr;
+		AtlasTransferBuffer = nullptr;
 		Sampler = nullptr;
 		Pipeline = nullptr;
+		SpatialPipeline = nullptr;
+		SpatialTopPipeline = nullptr;
 		Device = nullptr;
 
 		VertexCapacity = 0;
@@ -257,9 +313,13 @@ namespace engine::render {
 		AtlasUploaded = false;
 	}
 
-	void InterfacePass::Submit(const gui::DrawList &list, const core::Vector2 &canvas) {
+	void InterfacePass::Submit(const gui::DrawList &list, const core::Vector2 &canvas, ecs::Store &store) {
 		Pending = list;
 		Canvas = canvas;
+		SpatialCollectors.clear();
+		store.Each<const gui::SpatialCanvas>([&](ecs::Entity collector, const gui::SpatialCanvas &spatial) {
+			SpatialCollectors.push_back(SpatialCollector{collector, spatial});
+		});
 	}
 
 	bool InterfacePass::UploadAtlas(void *commandBuffer) {
@@ -269,26 +329,40 @@ namespace engine::render {
 
 		auto *gpu = static_cast<SDL_GPUDevice *>(Device);
 		const std::vector<uint8_t> &coverage = Glyphs.Coverage();
+		std::vector<uint8_t> pixels(coverage.size() * 4);
+		for (size_t index = 0; index < coverage.size(); index++) {
+			pixels[index * 4 + 0] = 255;
+			pixels[index * 4 + 1] = 255;
+			pixels[index * 4 + 2] = 255;
+			pixels[index * 4 + 3] = coverage[index];
+		}
 
 		SDL_GPUTransferBufferCreateInfo info{};
 		info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-		info.size = static_cast<uint32_t>(coverage.size());
+		info.size = static_cast<uint32_t>(pixels.size());
 
 		SDL_GPUTransferBuffer *staging = SDL_CreateGPUTransferBuffer(gpu, &info);
 		if (staging == nullptr) {
 			return false;
 		}
+		AtlasTransferBuffer = staging;
 
-		if (void *mapped = SDL_MapGPUTransferBuffer(gpu, staging, false)) {
-			std::memcpy(mapped, coverage.data(), coverage.size());
-			SDL_UnmapGPUTransferBuffer(gpu, staging);
+		void *mapped = SDL_MapGPUTransferBuffer(gpu, staging, false);
+		if (mapped == nullptr) {
+			SDL_ReleaseGPUTransferBuffer(gpu, staging);
+			AtlasTransferBuffer = nullptr;
+			return false;
 		}
+		std::memcpy(mapped, pixels.data(), pixels.size());
+		SDL_UnmapGPUTransferBuffer(gpu, staging);
 
 		SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(static_cast<SDL_GPUCommandBuffer *>(commandBuffer));
 
 		SDL_GPUTextureTransferInfo source{};
 		source.transfer_buffer = staging;
 		source.offset = 0;
+		source.pixels_per_row = Glyphs.Width();
+		source.rows_per_layer = Glyphs.Height();
 
 		SDL_GPUTextureRegion region{};
 		region.texture = static_cast<SDL_GPUTexture *>(AtlasTexture);
@@ -298,12 +372,6 @@ namespace engine::render {
 
 		SDL_UploadToGPUTexture(copy, &source, &region, false);
 		SDL_EndGPUCopyPass(copy);
-
-		// **Released immediately rather than kept.** The atlas is uploaded once
-		// for the life of the pass, so a staging buffer held for a second upload
-		// that never comes is a megabyte of nothing. SDL defers the free until
-		// the copy has retired.
-		SDL_ReleaseGPUTransferBuffer(gpu, staging);
 
 		AtlasUploaded = true;
 		return true;
@@ -318,7 +386,62 @@ namespace engine::render {
 
 		UploadAtlas(commandBuffer);
 
-		Mesh.Build(Pending, Glyphs);
+		ResolvedImages.clear();
+		for (const gui::DrawCommand &draw : Pending.Commands) {
+			const bool image = draw.Kind == gui::DrawKind::Image && draw.Image.IsValid();
+			const bool viewport = draw.Kind == gui::DrawKind::Viewport;
+			if (!image && !viewport) {
+				continue;
+			}
+
+			const auto found =
+				std::find_if(ResolvedImages.begin(), ResolvedImages.end(), [&](const ResolvedImage &entry) {
+					return viewport ? entry.Viewport == draw.Source
+									: entry.Viewport == ecs::NULL_ENTITY && entry.Name == draw.Image;
+				});
+			if (found == ResolvedImages.end()) {
+				ResolvedImage resolved;
+				resolved.Name = draw.Image;
+				resolved.Viewport = viewport ? draw.Source : ecs::NULL_ENTITY;
+				resolved.Value = viewport ? (Viewports ? Viewports(draw.Source) : InterfaceImage{})
+										  : (Images ? Images(draw.Image) : InterfaceImage{});
+				ResolvedImages.push_back(resolved);
+			}
+		}
+
+		const auto information = [](const InterfaceImage &image) {
+			return InterfaceImageInfo{
+				core::Vector2{
+					static_cast<float>(image.Width) * image.Cell.Scale,
+					static_cast<float>(image.Height) * image.Cell.Scale,
+				},
+				image.Cell,
+				image.UVMax,
+			};
+		};
+		Mesh.Build(
+			Pending,
+			Glyphs,
+			[&](const core::Name &name) {
+				const auto found = std::find_if(
+					ResolvedImages.begin(), ResolvedImages.end(), [&](const ResolvedImage &entry) {
+						return entry.Viewport == ecs::NULL_ENTITY && entry.Name == name;
+					}
+				);
+				if (found == ResolvedImages.end()) {
+					return InterfaceImageInfo{};
+				}
+				return information(found->Value);
+			},
+			[&](ecs::Entity viewport) {
+				const auto found = std::find_if(
+					ResolvedImages.begin(), ResolvedImages.end(), [&](const ResolvedImage &entry) {
+						return entry.Viewport == viewport;
+					}
+				);
+				return found != ResolvedImages.end() ? information(found->Value) : InterfaceImageInfo{};
+			}
+		);
 		Recorded = Mesh.Batches().size();
 
 		const auto vertices = static_cast<uint32_t>(Mesh.Vertices().size());
@@ -445,22 +568,28 @@ namespace engine::render {
 		SDL_GPUTexture *bound = nullptr;
 
 		for (const InterfaceBatch &batch : Mesh.Batches()) {
+			const bool spatial = std::any_of(
+				SpatialCollectors.begin(), SpatialCollectors.end(), [&](const SpatialCollector &entry) {
+					return entry.Collector == batch.Collector;
+				}
+			);
+			if (spatial) {
+				continue;
+			}
+
 			SDL_GPUTexture *texture = atlas;
 
-			// The identity, so a rectangle and a glyph - which sample the atlas
-			// and are most of a frame - pay one uniform push and no arithmetic.
-			FlipbookCell cell;
-
-			if (batch.Image.IsValid() && Images) {
-				if (auto *resolved = static_cast<SDL_GPUTexture *>(Images(batch.Image, cell))) {
-					texture = resolved;
+			if (batch.Image.IsValid() || batch.Viewport != ecs::NULL_ENTITY) {
+				const auto found = std::find_if(
+					ResolvedImages.begin(), ResolvedImages.end(), [&](const ResolvedImage &entry) {
+						return batch.Viewport != ecs::NULL_ENTITY
+								   ? entry.Viewport == batch.Viewport
+								   : entry.Viewport == ecs::NULL_ENTITY && entry.Name == batch.Image;
+					}
+				);
+				if (found != ResolvedImages.end() && found->Value.Texture != nullptr) {
+					texture = static_cast<SDL_GPUTexture *>(found->Value.Texture);
 				} else {
-					// **The cell goes back to the identity with the handle.** A
-					// resolver may have filled it before deciding it had no
-					// texture, and sampling the atlas's white texel through a
-					// quarter-scale transform is a rectangle drawn at the wrong
-					// size for a reason nothing on screen explains.
-					cell = FlipbookCell{};
 				}
 				// **An unresolved name falls back to the atlas**, which draws
 				// the image's bounds as a flat tinted rectangle. Visible on
@@ -480,12 +609,14 @@ namespace engine::render {
 				bound = texture;
 			}
 
-			// **Pushed per batch rather than per pass**, because the sheet is a
-			// property of the texture and a frame holds several. It is sixteen
-			// bytes against a bind that already happened.
-			const float flipbook[4] = {cell.Scale, cell.OffsetU, cell.OffsetV, 0.0f};
+			const float clip[4] = {
+				batch.Clip.Min.X,
+				batch.Clip.Min.Y,
+				batch.Clip.Max.X,
+				batch.Clip.Max.Y,
+			};
 			SDL_PushGPUFragmentUniformData(
-				static_cast<SDL_GPUCommandBuffer *>(commandBuffer), 0, flipbook, sizeof(flipbook)
+				static_cast<SDL_GPUCommandBuffer *>(commandBuffer), 0, clip, sizeof(clip)
 			);
 
 			// The scissor, in pixels, clamped to the target - a negative origin
@@ -503,5 +634,169 @@ namespace engine::render {
 
 			SDL_DrawGPUIndexedPrimitives(pass, batch.IndexCount, 1, batch.FirstIndex, 0, 0);
 		}
+	}
+
+	uint32_t InterfacePass::RecordWorld(
+		void *commandBuffer,
+		void *renderPass,
+		const glm::mat4 &viewProjection,
+		const core::CFrame &camera,
+		const core::Color3 &ambient,
+		const core::Vector3 &sun,
+		uint32_t width,
+		uint32_t height,
+		bool alwaysOnTop
+	) {
+		auto *command = static_cast<SDL_GPUCommandBuffer *>(commandBuffer);
+		auto *pass = static_cast<SDL_GPURenderPass *>(renderPass);
+		if (command == nullptr || pass == nullptr || SpatialPipeline == nullptr ||
+			SpatialTopPipeline == nullptr || SpatialCollectors.empty()) {
+			return 0;
+		}
+
+		SDL_GPUBufferBinding vertex{};
+		vertex.buffer = static_cast<SDL_GPUBuffer *>(VertexBuffer);
+		SDL_BindGPUVertexBuffers(pass, 0, &vertex, 1);
+
+		SDL_GPUBufferBinding index{};
+		index.buffer = static_cast<SDL_GPUBuffer *>(IndexBuffer);
+		SDL_BindGPUIndexBuffer(pass, &index, SDL_GPU_INDEXELEMENTSIZE_16BIT);
+
+		const SDL_Rect whole{0, 0, static_cast<int>(width), static_cast<int>(height)};
+		SDL_SetGPUScissor(pass, &whole);
+
+		auto *atlas = static_cast<SDL_GPUTexture *>(AtlasTexture);
+		auto *sampler = static_cast<SDL_GPUSampler *>(Sampler);
+		SDL_GPUTexture *bound = nullptr;
+		void *boundPipeline = nullptr;
+		uint32_t drawn = 0;
+
+		for (const InterfaceBatch &batch : Mesh.Batches()) {
+			const auto placed = std::find_if(
+				SpatialCollectors.begin(), SpatialCollectors.end(), [&](const SpatialCollector &entry) {
+					return entry.Collector == batch.Collector;
+				}
+			);
+			if (placed == SpatialCollectors.end() || !placed->Canvas.Visible ||
+				placed->Canvas.AlwaysOnTop != alwaysOnTop || placed->Canvas.Size.X <= 0.0f ||
+				placed->Canvas.Size.Y <= 0.0f) {
+				continue;
+			}
+
+			const gui::SpatialCanvas &spatial = placed->Canvas;
+			core::Vector3 origin = spatial.Origin;
+			core::Vector3 axisX = spatial.AxisX;
+			core::Vector3 axisY = spatial.AxisY;
+			core::Vector3 normal = spatial.Normal;
+			const core::Vector3 toCamera = camera.Position - spatial.Origin;
+			const float distance = toCamera.Magnitude();
+
+			if (spatial.MaxDistance > 0.0f && distance > spatial.MaxDistance) {
+				continue;
+			}
+
+			if (spatial.Kind == gui::SpatialCanvasKind::Surface) {
+				if (normal.Dot(toCamera) <= 0.0f) {
+					continue;
+				}
+			} else {
+				const core::Vector3 right = camera.RightVector();
+				const core::Vector3 up = camera.UpVector();
+				const glm::vec4 projectedAnchor =
+					viewProjection * glm::vec4{spatial.Origin.X, spatial.Origin.Y, spatial.Origin.Z, 1.0f};
+				const core::Vector3 oneUp = spatial.Origin + up;
+				const glm::vec4 projectedUp = viewProjection * glm::vec4{oneUp.X, oneUp.Y, oneUp.Z, 1.0f};
+				const float pixelsPerStud =
+					std::abs(
+						projectedUp.y / std::max(std::abs(projectedUp.w), 1.0e-5f) -
+						projectedAnchor.y / std::max(std::abs(projectedAnchor.w), 1.0e-5f)
+					) *
+					static_cast<float>(height) * 0.5f;
+				const float usablePixelsPerStud = std::max(pixelsPerStud, 1.0e-5f);
+				const core::Vector2 worldSize{
+					spatial.BillboardStuds.X + spatial.BillboardPixels.X / usablePixelsPerStud,
+					spatial.BillboardStuds.Y + spatial.BillboardPixels.Y / usablePixelsPerStud,
+				};
+				axisX = right * worldSize.X;
+				axisY = up * -worldSize.Y;
+				origin = spatial.Origin - axisX * 0.5f - axisY * 0.5f;
+				normal = distance > 0.0f ? toCamera / distance : camera.LookVector() * -1.0f;
+			}
+
+			const void *wantedPipeline = spatial.AlwaysOnTop ? SpatialTopPipeline : SpatialPipeline;
+			if (boundPipeline != wantedPipeline) {
+				SDL_BindGPUGraphicsPipeline(
+					pass, static_cast<SDL_GPUGraphicsPipeline *>(const_cast<void *>(wantedPipeline))
+				);
+				boundPipeline = const_cast<void *>(wantedPipeline);
+			}
+
+			const core::Vector3 light =
+				sun.MagnitudeSquared() > 0.0f ? sun.Unit() * -1.0f : core::Vector3::YAxis;
+			const float direct = std::max(normal.Dot(light), 0.0f);
+			const float bounce = std::max(normal.Y, 0.0f) * 0.15f;
+			const float influence = std::clamp(spatial.LightInfluence, 0.0f, 1.0f);
+			const float fullbright = spatial.Brightness * (1.0f - influence);
+			const float scene = influence * (direct + bounce);
+
+			struct SpatialUniforms {
+				glm::mat4 ViewProjection;
+				glm::vec4 Origin;
+				glm::vec4 AxisX;
+				glm::vec4 AxisY;
+				glm::vec4 Tint;
+				glm::vec4 Canvas;
+			};
+
+			const SpatialUniforms uniforms{
+				viewProjection,
+				glm::vec4{origin.X, origin.Y, origin.Z, 1.0f},
+				glm::vec4{axisX.X, axisX.Y, axisX.Z, 0.0f},
+				glm::vec4{axisY.X, axisY.Y, axisY.Z, 0.0f},
+				glm::vec4{
+					fullbright + influence * ambient.R + scene,
+					fullbright + influence * ambient.G + scene,
+					fullbright + influence * ambient.B + scene,
+					1.0f,
+				},
+				glm::vec4{spatial.Size.X, spatial.Size.Y, 0.0f, 0.0f},
+			};
+			SDL_PushGPUVertexUniformData(command, 0, &uniforms, sizeof(uniforms));
+
+			SDL_GPUTexture *texture = atlas;
+			if (batch.Image.IsValid() || batch.Viewport != ecs::NULL_ENTITY) {
+				const auto found = std::find_if(
+					ResolvedImages.begin(), ResolvedImages.end(), [&](const ResolvedImage &entry) {
+						return batch.Viewport != ecs::NULL_ENTITY
+								   ? entry.Viewport == batch.Viewport
+								   : entry.Viewport == ecs::NULL_ENTITY && entry.Name == batch.Image;
+					}
+				);
+				if (found != ResolvedImages.end() && found->Value.Texture != nullptr) {
+					texture = static_cast<SDL_GPUTexture *>(found->Value.Texture);
+				}
+			}
+
+			if (texture == nullptr) {
+				continue;
+			}
+			if (texture != bound) {
+				const SDL_GPUTextureSamplerBinding binding{texture, sampler};
+				SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
+				bound = texture;
+			}
+
+			const float clip[4]{
+				batch.Clip.Min.X,
+				batch.Clip.Min.Y,
+				batch.Clip.Max.X,
+				batch.Clip.Max.Y,
+			};
+			SDL_PushGPUFragmentUniformData(command, 0, clip, sizeof(clip));
+			SDL_DrawGPUIndexedPrimitives(pass, batch.IndexCount, 1, batch.FirstIndex, 0, 0);
+			drawn++;
+		}
+
+		return drawn;
 	}
 }

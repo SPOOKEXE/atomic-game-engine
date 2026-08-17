@@ -960,6 +960,7 @@ declare interface SurfaceCamera extends Camera {
 declare interface Portal extends SurfaceCamera {
 	Destination: Instance;
 	DestinationWorld: string;
+	Enabled: boolean;
 }
 
 declare interface Sound extends Instance {
@@ -995,22 +996,23 @@ declare interface Humanoid extends Instance {
 }
 
 declare interface Light extends Instance {
-	Angle: number;
 	Brightness: number;
 	Color: Color3;
 	Enabled: boolean;
-	Face: Enum.NormalId;
 	Range: number;
-	Shadows: boolean;
 }
 
 declare interface PointLight extends Light {
 }
 
 declare interface SpotLight extends Light {
+	Angle: number;
+	Face: Enum.NormalId;
 }
 
 declare interface SurfaceLight extends Light {
+	Angle: number;
+	Face: Enum.NormalId;
 }
 
 declare interface ValueBase extends Instance {
@@ -1126,9 +1128,6 @@ declare interface PVAdornment extends GuiBase3d {
 }
 
 declare interface SelectionBox extends PVAdornment {
-	LineThickness: number;
-	SurfaceColor3: Color3;
-	SurfaceTransparency: number;
 }
 
 declare interface SelectionSphere extends PVAdornment {
@@ -1192,20 +1191,16 @@ declare interface CanvasGroup extends Frame {
 }
 
 declare interface ScrollingFrame extends Frame {
-	AutomaticCanvasSize: Enum.AutomaticSize;
 	CanvasPosition: Vector2;
 	CanvasSize: UDim2;
 	ScrollBarImageColor3: Color3;
 	ScrollBarImageTransparency: number;
 	ScrollBarThickness: number;
 	ScrollingDirection: Enum.ScrollingDirection;
-	ScrollingEnabled: boolean;
 }
 
 declare interface GuiButton extends GuiObject {
 	AutoButtonColor: boolean;
-	Modal: boolean;
-	Selected: boolean;
 }
 
 declare interface TextButton extends GuiButton {
@@ -1407,7 +1402,7 @@ declare interface UIScale extends UIComponent {
 }
 
 declare interface Service extends Instance {
-	Fixture: boolean;
+	readonly Fixture: boolean;
 	Scope: Enum.ServiceScope;
 }
 

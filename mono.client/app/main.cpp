@@ -101,6 +101,11 @@ int main(int argc, char **argv) {
 	arguments.Value(
 		"cdn", "HOST:PORT", "A content origin, in priority order. 'dir:PATH' for a local store. Repeatable"
 	);
+	arguments.Value(
+		"cdn-allow-host",
+		"HOST",
+		"Permit a server-named content origin on this host. Repeatable; empty allows any"
+	);
 	arguments.Value("content-cache", "DIR", "Keep verified content here between runs");
 	arguments.Value("publisher-key", "HEX", "64 hex characters - the key whose manifests this client trusts");
 	arguments.Value("sound", "PATH", "Play this .wav or .mp3 on a loop - proves audio runs in-game");
@@ -260,6 +265,13 @@ int main(int argc, char **argv) {
 		if (cdn::EnsureLocalStore(local)) {
 			options.ContentSources.push_back("dir:" + local.Processed.string());
 		}
+	}
+	if (const std::vector<std::string_view> permitted = arguments.GetAll("cdn-allow-host");
+		!permitted.empty()) {
+		// **Replaces rather than appends**, which is the command line outranking a
+		// config file: an allow-list somebody typed is the whole of what they meant
+		// to permit, and adding it to a list they cannot see would widen it.
+		options.ContentAllowedHosts.assign(permitted.begin(), permitted.end());
 	}
 	if (auto cache = arguments.Get("content-cache")) {
 		options.ContentCache = std::filesystem::path(*cache);

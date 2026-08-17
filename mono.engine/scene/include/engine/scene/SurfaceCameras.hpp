@@ -1193,6 +1193,10 @@ namespace engine::scene {
 	// casts through the world - a portal that stopped answering queries is a
 	// portal you fall through the floor beside.
 	//
+	// A disabled portal closes its pane again when no other enabled portal camera
+	// shares that pane. This keeps the solid wall, the picture, seam cloning and
+	// traversal under the same `Portal::Enabled` decision.
+	//
 	// **A rule and not an authoring note.** It would be one line in each scene
 	// that builds a portal, and every scene would have to know it; a hole that
 	// collides is never what anybody meant. Idempotent, so a settled world pays

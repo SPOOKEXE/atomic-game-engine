@@ -6,6 +6,7 @@
 #include <engine/control/Surface.hpp>
 #include <engine/core/Clock.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/delivery/Source.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/examples/Shooting.hpp>
@@ -42,6 +43,48 @@ namespace engine::assets {
 }
 
 namespace server {
+	class ContentRelay;
+	struct ContentRelayStatistics;
+}
+
+namespace server {
+
+	// Which way this server gives its clients content.
+	//
+	// **A field rather than two server classes**, which is `cdn::CDNSettings`'
+	// rule one layer up: the moment the mode is a *type*, moving between them is a
+	// rebuild rather than a configuration change, and `repo_layout.md` §11 says
+	// that has to stay a deployment decision.
+	//
+	// @since v0.16
+	enum class ContentMode : uint8_t {
+		// This server holds the origin connection and streams content to its
+		// clients over the game link they already have.
+		//
+		// **The default**, because it is the deployment that asks least of a
+		// player's network: one port, already reached, already admitted. The
+		// client has no authority in it - it may ask and it may ask again, and
+		// `ContentRelay` decides how often.
+		Relay,
+
+		// This server tells clients where the origins are and they fetch for
+		// themselves, presenting the grant it issued them.
+		Redirect,
+	};
+
+	// Returns a stable, human-readable name for a content mode.
+	//
+	// @param mode The mode to name.
+	// @return A view valid for the lifetime of the process.
+	// @since v0.16
+	const char *Describe(ContentMode mode);
+
+	// Parses what `server.content-mode` was set to.
+	//
+	// @param text The setting's value.
+	// @return The mode, or nothing when the text names neither.
+	// @since v0.16
+	std::optional<ContentMode> ContentModeOf(std::string_view text);
 
 	// Command-line configuration copied into Server during Initialise.
 	struct Options {
@@ -130,6 +173,22 @@ namespace server {
 		// copies would double every operation.
 		std::filesystem::path ReplayPath;
 
+		// Write a folded-stack profile of the whole run here. Empty writes none.
+		//
+		// **A whole run rather than a window, which is what distinguishes it
+		// from `--graph`.** `FrameGraph`'s retained history is five seconds deep
+		// and keeps one worst reading per span name; a folded capture keeps the
+		// call tree and accumulates it for as long as the server runs, which is
+		// what a flamegraph of a load test needs. `scripts/flamegraph.py` turns
+		// the file into an SVG.
+		//
+		// Turning it on turns frame collection on with it - a profile of a run
+		// nobody collected is an empty file - so a run that names one is a run
+		// paying the collector's cost. That is a measurement, not a deployment.
+		//
+		// @since v0.16
+		std::filesystem::path ProfilePath;
+
 		// Host the world in a universe that permits several. Named worlds are
 		// the unit a supervisor grants and revokes; one is simply the common
 		// case rather than the only one.
@@ -192,6 +251,21 @@ namespace server {
 		// there is a flag beside it rather than zero meaning off.
 		uint16_t ListenPort = 0;
 
+		// The hard cap on connected clients, once `Listening`.
+		//
+		// **A deployment number rather than a library one.**
+		// `replication::ListenerSettings::MaximumClients` defaults to 64 and is
+		// the bound an unadmitted flood can fill, which `replication/AGENTS.md`
+		// is explicit about; what a host can actually carry is a property of the
+		// machine and of the world, and until v0.16 no flag said so. A load test
+		// with two hundred clients on it had nothing to raise.
+		//
+		// Raising it costs what the module says it costs: the per-client link
+		// budget times this, out of one uplink.
+		//
+		// @since v0.16
+		uint32_t MaximumClients = 64;
+
 		// Make every world this process builds talk on a bus.
 		//
 		// There is no game yet, so there is no traffic. This is the only thing
@@ -215,6 +289,37 @@ namespace server {
 		//
 		// Empty generates an in-process-only grant key at startup.
 		std::string ContentGrantKey;
+
+		// Which way clients are given content.
+		//
+		// @since v0.16
+		ContentMode ContentDelivery = ContentMode::Relay;
+
+		// The origins this server fetches content from, in priority order.
+		//
+		// **Spelled exactly as the client's `--cdn` is** - `dir:PATH` for a
+		// published tree and `HOST:PORT` for an origin, optionally `NAME=` in
+		// front - because they mean the same thing and a second spelling is a
+		// second thing to get wrong. The order *is* the policy, which is
+		// `delivery/AGENTS.md`'s rule: there is no strategy flag beside the list.
+		//
+		// In `Relay` these are where relayed routes come from. In `Redirect` they
+		// are what a client is told about. Empty falls back to `ContentStore`,
+		// so a self-hosted server needs one flag rather than two saying the same
+		// thing.
+		//
+		// @since v0.16
+		std::vector<std::string> ContentSources;
+
+		// The publisher whose signature content must carry, as 64 hex characters.
+		//
+		// Handed to clients in `Redirect` so they have a root of trust, and used
+		// in `Relay` to check a relayed manifest before it is passed on - which is
+		// defence in depth rather than a boundary, because the client checks it
+		// again regardless.
+		//
+		// @since v0.16
+		std::string ContentPublisherKey;
 
 		// Whether to announce this server on the local subnet.
 		//
@@ -287,6 +392,21 @@ namespace server {
 		// Ticks that overran their budget. The number that says whether the
 		// tick rate was actually held.
 		uint64_t Overruns = 0;
+
+		// The tick cost distribution, in milliseconds.
+		//
+		// **A mean and a maximum are two numbers and the shape is a third
+		// thing.** A load test's whole question is whether a server holds its
+		// rate with N clients on it, and a mean says yes while a fiftieth of the
+		// ticks miss the budget - which is what a player feels. Nearest-rank
+		// over every tick of the run, so p99 is a tick that actually happened.
+		//
+		// @since v0.16
+		//@{
+		float TickP50Milliseconds = 0.0f;
+		float TickP95Milliseconds = 0.0f;
+		float TickP99Milliseconds = 0.0f;
+		//@}
 	};
 
 	// One hosted world and the fixed-tick loop that drives it.
@@ -314,11 +434,27 @@ namespace server {
 		void ApplyMove(engine::replication::ClientId client, const engine::game::MoveInput &move);
 
 		// Where an entity is, for the priority score and its occlusion query.
-		// Not `const`: it enters a world, which takes it.
-		bool PositionOf(engine::ecs::Entity entity, engine::core::Vector3 &out);
+		//
+		// **Only answers during a publish**, because that is the only thing that
+		// asks and because the answer comes out of `Publishing` - see that
+		// member. Outside one it reports `false`, which the scorer already
+		// handles: an entity with no position falls back on the rotation.
+		bool PositionOf(engine::ecs::Entity entity, engine::core::Vector3 &out) const;
 
 		// Where a client is looking from, or `false` when nothing placed it.
 		bool ViewpointOf(engine::replication::ClientId client, engine::core::Vector3 &out) const;
+
+		// Works out what every client can see, before any of them is served.
+		//
+		// Fills `HiddenFromClients` and `OwnedByPlayer` - see those members for
+		// why the client-independent half of the interest predicate is hoisted
+		// out of the per-client loop.
+		//
+		// **Not `const`, because `EachEntity` is not**: walking a store binds it
+		// to the calling thread, which is a write however read-only the body is.
+		//
+		// @param store The world about to be published.
+		void SurveyVisibility(engine::ecs::Store &store);
 
 		// Where moving things were, for judging a client's action against what
 		// that client actually saw.
@@ -402,6 +538,14 @@ namespace server {
 		//
 		// @return The port, or nothing when no content is being served.
 		std::optional<uint16_t> ContentPort() const;
+
+		// What the content relay has done, or nothing when there is none.
+		//
+		// @return The counters. A caller reads them to tell a client asking too
+		//         fast from an upstream that is down, which are two incidents with
+		//         two different fixes.
+		// @since v0.16
+		const ContentRelayStatistics *ContentRelayStats() const;
 
 		// Issues a grant admitting every bundle this server serves.
 		//
@@ -576,6 +720,26 @@ namespace server {
 		// @return `false` when a store was asked for and cannot be served.
 		bool BeginServingContent();
 
+		// Builds the relay that answers clients' content routes.
+		//
+		// @return `false` when relay mode was asked for and could not be set up,
+		//         which is a configuration failure rather than a missing feature:
+		//         a server told to relay and quietly relaying nothing is a client
+		//         staring at a world with no textures and nothing saying why.
+		bool BeginRelayingContent();
+
+		// The content sources this server was configured with.
+		//
+		// Parsed from `Options::ContentSources`, falling back to `ContentStore`.
+		//
+		// @return The sources, in priority order.
+		std::vector<engine::delivery::Source> ConfiguredContentSources() const;
+
+		// Tells one client where content is, in `ContentMode::Redirect`.
+		//
+		// @param client Who to tell.
+		void OfferContentDirectory(engine::replication::ClientId client);
+
 		// Binds the replication socket and declares what is replicated.
 		//
 		// @return `false` when a port was asked for and could not be bound.
@@ -699,6 +863,13 @@ namespace server {
 		std::unique_ptr<cdn::Origin> ContentOrigin;
 		std::unique_ptr<cdn::Service> ContentService;
 
+		// The relay that answers clients' route requests, in `ContentMode::Relay`.
+		//
+		// Null in `Redirect`, and null in `Relay` when no content source was
+		// configured - a server hosting a game whose content ships inside its game
+		// file relays nothing and should build nothing.
+		std::unique_ptr<ContentRelay> ContentLink;
+
 		// The issuing half of the shared secret.
 		//
 		// **Two holders of one key, and that is the design rather than a
@@ -794,6 +965,51 @@ namespace server {
 		// for the life of the process. A client absent from here has no
 		// viewpoint, which the score reads as "order these by rotation alone".
 		std::unordered_map<uint32_t, Viewpoint> Viewpoints;
+
+		// What `SetInterest` needs that does not depend on who is asking, worked
+		// out once per publish.
+		//
+		// **Because two of the predicate's three questions are about the world
+		// and only the third is about the client.** Whether an entity is inside
+		// a server-scoped service, and which `Player` it sits under, are facts
+		// about the tree - and the predicate is asked once per entity *per
+		// client*, so on a two-hundred-client host each of those tree walks ran
+		// two hundred times for one answer. A capture put 41% of the tick in the
+		// interest walk.
+		//
+		// **Derived and thrown away inside one publish, which is what keeps it
+		// out of rule 2's way.** Nothing here is a second copy of a fact the ECS
+		// owns for longer than the call that reads it: `SurveyVisibility` fills
+		// it from the store immediately before `Publish` walks the same store,
+		// and nothing between the two mutates the world. It cannot drift,
+		// because it does not survive long enough to.
+		//
+		// Both are sorted by entity id, and both are usually tiny - the entities
+		// under a player, and the entities inside `ServerScriptService` and
+		// `ServerStorage`. Everything else answers "visible and unowned" after
+		// two failed binary searches.
+		//@{
+		std::vector<uint64_t> HiddenFromClients;
+		std::vector<std::pair<uint64_t, engine::ecs::Entity>> OwnedByPlayer;
+		//@}
+
+		// The store `Listener::Publish` is walking, for as long as it is walking
+		// it. Null at every other moment.
+		//
+		// **A borrow rather than a copy, which is the distinction rule 2
+		// draws.** Nothing is duplicated and nothing outlives the call: this is
+		// the same `ecs::Store` the surrounding `Worlds().Enter` already handed
+		// out, kept where the priority callbacks can reach it.
+		//
+		// **It is here because `Universe::Enter` per candidate is what a
+		// two-hundred-client server was spending itself on.** The scorer runs
+		// once per candidate per client - which at 200 clients over a two
+		// thousand entity world is around a million calls a tick - and each of
+		// `PositionOf` and the `ReplicatedFirst` test opened the world again to
+		// read one component out of the store the publish was already inside.
+		// A capture of that arrangement put 61% of the whole tick in the scorer;
+		// `.cache/stress/RESULTS.md` carries the numbers either side.
+		engine::ecs::Store *Publishing = nullptr;
 
 		// Present only in host mode. A driver holds one of these per host; a
 		// host holds exactly one, to whoever started it.

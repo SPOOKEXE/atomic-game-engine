@@ -1895,9 +1895,10 @@ namespace engine::scene {
 			ecs::Classes::Computed(surfaceCameraClass, SurfaceEffectProperty());
 			ecs::Classes::Computed(surfaceCameraClass, TagFilterProperty());
 
-			// The portal's one, and the whole of the feature is in it.
+			// The portal's authored link and activation state.
 			ecs::Classes::Computed(portalClass, DestinationProperty());
 			ecs::Classes::Computed(portalClass, DestinationWorldProperty());
+			ecs::Classes::Property<&Portal::Enabled>(portalClass, "Enabled");
 
 			// The sound's six. All plain fields, which is unusual enough here
 			// to be worth saying: nothing about a sound is a doubled
@@ -1948,20 +1949,11 @@ namespace engine::scene {
 			// resolution order and why it is that way round.
 			ecs::Classes::Property<&MaterialRef::Shader>(materialClass, "Shader");
 
-			// The light's, declared on the base so all three inherit them.
-			//
-			// **`Angle` and `Face` are on `Light` rather than on the two classes
-			// that read them**, which is the shape the single component forces and
-			// is honest about it: a `PointLight` has an `Angle` property that does
-			// nothing. The alternative is declaring the same two descriptors on
-			// two classes, which is two declarations of one projection - and the
-			// component is shared either way, so the storage does not change. A
-			// point light's angle reads back what it was set to and is ignored,
-			// which is the same contract `SurfaceCamera::Face` has on a camera
-			// parented to the world.
+			// The light's shared properties. Type-specific controls are declared on
+			// the two classes that consume them, so a point light never offers an
+			// angle or face that it cannot use.
 			ecs::Classes::Property<&Light::Colour>(lightClass, "Color");
 			ecs::Classes::Property<&Light::Enabled>(lightClass, "Enabled");
-			ecs::Classes::Property<&Light::Shadows>(lightClass, "Shadows");
 
 			// Clamped, because all three are quantities with an obvious nearest
 			// meaning outside their range - `ClampedProperty`'s own argument. The
@@ -1969,8 +1961,10 @@ namespace engine::scene {
 			// which a forward renderer's light culling stops rejecting anything.
 			ecs::Classes::ClampedProperty<&Light::Brightness, 0.0f, 10000.0f>(lightClass, "Brightness");
 			ecs::Classes::ClampedProperty<&Light::Range, 0.0f, 60.0f>(lightClass, "Range");
-			ecs::Classes::ClampedProperty<&Light::Angle, 0.0f, 180.0f>(lightClass, "Angle");
-			ecs::Classes::Computed(lightClass, LightFaceProperty());
+			for (const ecs::ClassId shaped : {spotLightClass, surfaceLightClass}) {
+				ecs::Classes::ClampedProperty<&Light::Angle, 0.0f, 180.0f>(shaped, "Angle");
+				ecs::Classes::Computed(shaped, LightFaceProperty());
+			}
 
 			// The humanoid's. All plain fields - nothing here is a doubled
 			// half-extent or an angle in the wrong unit, so there is no conversion

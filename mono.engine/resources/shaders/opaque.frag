@@ -26,6 +26,7 @@ layout(set = 2, binding = 3) uniform sampler2D beamMap;
 layout(set = 3, binding = 0) uniform Lighting {
 	vec4 Direction;
 	vec4 Ambient;
+	vec4 Direct;
 
 	// x: 1 when a shadow map was rendered this frame, 0 otherwise.
 	// y: one texel of the shadow map, for the sample offsets.
@@ -76,7 +77,20 @@ layout(set = 3, binding = 0) uniform Lighting {
 	// are drawn whole - the original hanging out of the back of the pane and the
 	// copy out of the far one. See `scene::DrawInstance::SeamNormal`.
 	vec4 SeamPlane;
+
+	// The sky term and eye-relative fog. Kept in this per-draw block because a
+	// mirror or portal pass has its own eye even when it shares the world.
+	vec4 OutdoorAmbient;
+	vec4 FogColour;
+	// x: start distance. y: complete distance.
+	vec4 Fog;
+	vec4 Eye;
 } lighting;
+
+float FogFactor() {
+	float interval = max(lighting.Fog.y - lighting.Fog.x, 0.0001);
+	return clamp((distance(inWorldPosition, lighting.Eye.xyz) - lighting.Fog.x) / interval, 0.0, 1.0);
+}
 
 // The effect ordinals, which are `scene::SurfaceEffect`'s and are the format.
 //
@@ -423,9 +437,9 @@ void main() {
 	vec3 toLight = -normalize(lighting.Direction.xyz);
 	float lambert = max(dot(normal, toLight), 0.0);
 
-	// A weak upward bounce, so faces pointing away from the light are shaded
-	// rather than flat. Cheaper than a second light and enough to read shape.
-	float bounce = max(normal.y, 0.0) * 0.15;
+	// The outdoor term is directional enough to distinguish sky-facing surfaces
+	// without pretending the engine has indoor volumes it does not yet model.
+	float sky = max(normal.y, 0.0);
 
 	// **The three colour sources multiply rather than one winning.** The
 	// texture is what the artist painted, the base colour is what the *material*
@@ -473,7 +487,10 @@ void main() {
 	// room's own geometry blocks and a beam says what the room through a hole
 	// blocks; light that fails either test does not arrive.
 	float shadow = min(ShadowFactor(normal, toLight), BeamFactor());
-	vec3 lit = albedo * (lighting.Ambient.rgb + vec3(lambert * shadow + bounce) + LocalLight(normal));
+	vec3 lit = albedo *
+		(lighting.Ambient.rgb + lighting.OutdoorAmbient.rgb * sky +
+		 lighting.Direct.rgb * lambert * shadow + LocalLight(normal));
+	lit = mix(lit, lighting.FogColour.rgb, FogFactor());
 
 	// **A portal pane reads the sub-render by screen position**, which is the
 	// whole of CodeParade's `portal.frag` and the reason the recursive pass can

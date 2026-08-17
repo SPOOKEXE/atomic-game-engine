@@ -22,6 +22,7 @@
 #include <engine/core/types/Rect.hpp>
 #include <engine/core/types/Vector2.hpp>
 #include <engine/gui/DrawList.hpp>
+#include <engine/render/Flipbook.hpp>
 #include <engine/render/GlyphAtlas.hpp>
 
 #include <cstddef>
@@ -89,6 +90,25 @@ namespace engine::render {
 		// than the list it came from. A backend maps the name to whatever it can
 		// sample and draws the batch.
 		core::Name Image;
+
+		// The element providing a dynamic viewport texture, or null for every
+		// other batch.
+		ecs::Entity Viewport;
+
+		// The canvas this batch belongs to. A backend uses this to keep screen
+		// pixels out of a world-space collector and vice versa.
+		ecs::Entity Collector;
+	};
+
+	// The source-pixel extent of an image after selecting its animation cell.
+	//
+	// A stretch needs no dimensions, but fit, crop, tile and nine-slice all do.
+	// The texture handle stays in `InterfacePass`; this arithmetic layer needs
+	// only the size and remains device-free.
+	struct InterfaceImageInfo {
+		core::Vector2 Size;
+		FlipbookCell Cell;
+		core::Vector2 UVMax{1.0f, 1.0f};
 	};
 
 	// Vertices, indices and the batches between them.
@@ -110,7 +130,12 @@ namespace engine::render {
 		//
 		// @param list  The compiled list, in paint order.
 		// @param atlas The glyphs, or an unbuilt atlas for no text.
-		void Build(const gui::DrawList &list, const GlyphAtlas &atlas);
+		void Build(
+			const gui::DrawList &list,
+			const GlyphAtlas &atlas,
+			const std::function<InterfaceImageInfo(const core::Name &)> &images = {},
+			const std::function<InterfaceImageInfo(ecs::Entity)> &viewports = {}
+		);
 
 		// The vertices, valid until the next `Build`.
 		const std::vector<InterfaceVertex> &Vertices() const {
@@ -153,6 +178,21 @@ namespace engine::render {
 		static Rotation TurnOf(const gui::DrawCommand &command);
 
 		void Push(const core::Rect &bounds, const core::Rect &uv, uint32_t colour, const Rotation &turn);
+		void PushRounded(
+			const core::Rect &bounds,
+			const core::Rect &uv,
+			float radius,
+			uint32_t colour,
+			const Rotation &turn
+		);
+		void PushRoundedOutline(
+			const core::Rect &bounds,
+			float radius,
+			float thickness,
+			const core::Vector2 &uv,
+			uint32_t colour,
+			const Rotation &turn
+		);
 
 		std::vector<InterfaceVertex> VertexData;
 		std::vector<uint16_t> IndexData;

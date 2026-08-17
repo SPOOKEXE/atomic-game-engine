@@ -106,6 +106,38 @@ TEST_CASE("the 2D tree descends the way a script expects", "[gui][registration]"
 	CHECK_FALSE(Classes::IsA(GuiClass("UIPadding"), GuiClass("GuiBase")));
 }
 
+TEST_CASE("the property surface exposes no controls without consumers", "[gui][registration]") {
+	RegisterGuiClasses();
+	Store store("gui_registration.supported_surface");
+
+	const auto has = [&](std::string_view className, std::string_view propertyName) {
+		const Entity instance = store.CreateInstance(GuiClass(className), className);
+		for (const auto &property : store.PropertiesOf(instance)) {
+			if (property.Name == Name(propertyName)) {
+				return true;
+			}
+		}
+		return false;
+	};
+
+	// These fields remain reserved in the raw components for format stability,
+	// but none has an input, layout, or render consumer yet. Advertising them
+	// would turn a successful write into a visible no-op.
+	CHECK_FALSE(has("TextButton", "Modal"));
+	CHECK_FALSE(has("TextButton", "Selected"));
+	CHECK_FALSE(has("ScrollingFrame", "ScrollingEnabled"));
+	CHECK_FALSE(has("ScrollingFrame", "AutomaticCanvasSize"));
+	CHECK_FALSE(has("SelectionBox", "LineThickness"));
+	CHECK_FALSE(has("SelectionBox", "SurfaceColor3"));
+	CHECK_FALSE(has("SelectionBox", "SurfaceTransparency"));
+
+	// Neighbouring implemented controls stay present, so this cannot pass by
+	// accidentally dropping the component or the whole class.
+	CHECK(has("TextButton", "AutoButtonColor"));
+	CHECK(has("ScrollingFrame", "CanvasPosition"));
+	CHECK(has("SelectionBox", "Color3"));
+}
+
 TEST_CASE("a fully populated Label round-trips through its serialiser", "[gui][registration]") {
 	RegisterGuiComponents();
 

@@ -254,6 +254,7 @@
 				{"name": "Destination", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["scene.Portal"], "writes": ["scene.Portal"]},
 				{"name": "DestinationWorld", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Portal"], "writes": ["scene.Portal"]},
 				{"name": "Effect", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "SurfaceEffect", "reads": ["scene.SurfaceCamera"], "writes": ["scene.SurfaceCamera"]},
+				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Portal"], "writes": ["scene.Portal"]},
 				{"name": "FPS", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.SurfaceCamera"], "writes": ["scene.SurfaceCamera"]},
 				{"name": "Face", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "NormalId", "reads": ["scene.SurfaceCamera"], "writes": ["scene.SurfaceCamera"]},
 				{"name": "FarPlaneZ", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Camera"], "writes": ["scene.Camera"]},
@@ -335,15 +336,12 @@
 			"constructible": true,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Light"],
 			"properties": [
-				{"name": "Angle", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Light"], "writes": ["scene.Light"]},
 				{"name": "Brightness", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Light"], "writes": ["scene.Light"]},
 				{"name": "Color", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.Light"], "writes": ["scene.Light"]},
 				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Light"], "writes": ["scene.Light"]},
-				{"name": "Face", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "NormalId", "reads": ["scene.Light"], "writes": ["scene.Light"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
-				{"name": "Range", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Light"], "writes": ["scene.Light"]},
-				{"name": "Shadows", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Light"], "writes": ["scene.Light"]}
+				{"name": "Range", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Light"], "writes": ["scene.Light"]}
 			]
 		},
 		{
@@ -352,15 +350,12 @@
 			"constructible": true,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Light"],
 			"properties": [
-				{"name": "Angle", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Light"], "writes": ["scene.Light"]},
 				{"name": "Brightness", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Light"], "writes": ["scene.Light"]},
 				{"name": "Color", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.Light"], "writes": ["scene.Light"]},
 				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Light"], "writes": ["scene.Light"]},
-				{"name": "Face", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "NormalId", "reads": ["scene.Light"], "writes": ["scene.Light"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
-				{"name": "Range", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Light"], "writes": ["scene.Light"]},
-				{"name": "Shadows", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Light"], "writes": ["scene.Light"]}
+				{"name": "Range", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Light"], "writes": ["scene.Light"]}
 			]
 		},
 		{
@@ -376,8 +371,7 @@
 				{"name": "Face", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "NormalId", "reads": ["scene.Light"], "writes": ["scene.Light"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
-				{"name": "Range", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Light"], "writes": ["scene.Light"]},
-				{"name": "Shadows", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Light"], "writes": ["scene.Light"]}
+				{"name": "Range", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Light"], "writes": ["scene.Light"]}
 			]
 		},
 		{
@@ -393,8 +387,7 @@
 				{"name": "Face", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "NormalId", "reads": ["scene.Light"], "writes": ["scene.Light"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
-				{"name": "Range", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Light"], "writes": ["scene.Light"]},
-				{"name": "Shadows", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Light"], "writes": ["scene.Light"]}
+				{"name": "Range", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Light"], "writes": ["scene.Light"]}
 			]
 		},
 		{
@@ -636,11 +629,8 @@
 				{"name": "Adornee", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "AlwaysOnTop", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "Color3", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
-				{"name": "LineThickness", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.SelectionOutline"], "writes": ["gui.SelectionOutline"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
-				{"name": "SurfaceColor3", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["gui.SelectionOutline"], "writes": ["gui.SelectionOutline"]},
-				{"name": "SurfaceTransparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.SelectionOutline"], "writes": ["gui.SelectionOutline"]},
 				{"name": "Transparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "Visible", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "ZIndex", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]}
@@ -900,7 +890,6 @@
 				{"name": "AbsoluteSize", "type": "Vector2", "kind": "computed", "bytes": 8, "writable": false, "reads": ["gui.Resolved"], "writes": []},
 				{"name": "Active", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "AnchorPoint", "type": "Vector2", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
-				{"name": "AutomaticCanvasSize", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "AutomaticSize", "reads": ["gui.Scrolling"], "writes": ["gui.Scrolling"]},
 				{"name": "AutomaticSize", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "AutomaticSize", "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "BackgroundColor3", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["gui.Background"], "writes": ["gui.Background"]},
 				{"name": "BackgroundTransparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Background"], "writes": ["gui.Background"]},
@@ -919,7 +908,6 @@
 				{"name": "ScrollBarImageTransparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Scrolling"], "writes": ["gui.Scrolling"]},
 				{"name": "ScrollBarThickness", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Scrolling"], "writes": ["gui.Scrolling"]},
 				{"name": "ScrollingDirection", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "ScrollingDirection", "reads": ["gui.Scrolling"], "writes": ["gui.Scrolling"]},
-				{"name": "ScrollingEnabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Scrolling"], "writes": ["gui.Scrolling"]},
 				{"name": "Selectable", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "Size", "type": "UDim2", "kind": "field", "bytes": 16, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "SizeConstraint", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "SizeConstraint", "reads": ["gui.Element"], "writes": ["gui.Element"]},
@@ -947,13 +935,11 @@
 				{"name": "BorderSizePixel", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Background"], "writes": ["gui.Background"]},
 				{"name": "ClipsDescendants", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "LayoutOrder", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
-				{"name": "Modal", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Button"], "writes": ["gui.Button"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Position", "type": "UDim2", "kind": "field", "bytes": 16, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "Rotation", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "Selectable", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
-				{"name": "Selected", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Button"], "writes": ["gui.Button"]},
 				{"name": "Size", "type": "UDim2", "kind": "field", "bytes": 16, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "SizeConstraint", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "SizeConstraint", "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "Visible", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
@@ -982,13 +968,11 @@
 				{"name": "Font", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "Font", "reads": ["gui.Label"], "writes": ["gui.Label"]},
 				{"name": "LayoutOrder", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "LineHeight", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Label"], "writes": ["gui.Label"]},
-				{"name": "Modal", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Button"], "writes": ["gui.Button"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Position", "type": "UDim2", "kind": "field", "bytes": 16, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "Rotation", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "Selectable", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
-				{"name": "Selected", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Button"], "writes": ["gui.Button"]},
 				{"name": "Size", "type": "UDim2", "kind": "field", "bytes": 16, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "SizeConstraint", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "SizeConstraint", "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "Text", "type": "String", "kind": "field", "bytes": 32, "writable": true, "reads": ["gui.Label"], "writes": ["gui.Label"]},
@@ -1031,14 +1015,12 @@
 				{"name": "ImageRectSize", "type": "Vector2", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Picture"], "writes": ["gui.Picture"]},
 				{"name": "ImageTransparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Picture"], "writes": ["gui.Picture"]},
 				{"name": "LayoutOrder", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
-				{"name": "Modal", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Button"], "writes": ["gui.Button"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Position", "type": "UDim2", "kind": "field", "bytes": 16, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "Rotation", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "ScaleType", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "ScaleType", "reads": ["gui.Picture"], "writes": ["gui.Picture"]},
 				{"name": "Selectable", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
-				{"name": "Selected", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Button"], "writes": ["gui.Button"]},
 				{"name": "Size", "type": "UDim2", "kind": "field", "bytes": 16, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "SizeConstraint", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "SizeConstraint", "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "SliceCenter", "type": "Rect", "kind": "field", "bytes": 16, "writable": true, "reads": ["gui.Picture"], "writes": ["gui.Picture"]},
@@ -1530,7 +1512,7 @@
 			"constructible": false,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Service"],
 			"properties": [
-				{"name": "Fixture", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Service"], "writes": ["scene.Service"]},
+				{"name": "Fixture", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "reads": ["scene.Service"], "writes": []},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
@@ -1543,7 +1525,7 @@
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Service"],
 			"properties": [
 				{"name": "CurrentCamera", "type": "Instance", "kind": "resource", "bytes": 8, "writable": true, "reads": ["scene.Camera"], "writes": ["scene.Camera"]},
-				{"name": "Fixture", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Service"], "writes": ["scene.Service"]},
+				{"name": "Fixture", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "reads": ["scene.Service"], "writes": []},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]},
@@ -1559,7 +1541,7 @@
 				{"name": "Ambient", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
 				{"name": "Brightness", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
 				{"name": "ClockTime", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
-				{"name": "Fixture", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Service"], "writes": ["scene.Service"]},
+				{"name": "Fixture", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "reads": ["scene.Service"], "writes": []},
 				{"name": "FogColor", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
 				{"name": "FogEnd", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
 				{"name": "FogStart", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
@@ -1576,7 +1558,7 @@
 			"constructible": false,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Service"],
 			"properties": [
-				{"name": "Fixture", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Service"], "writes": ["scene.Service"]},
+				{"name": "Fixture", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "reads": ["scene.Service"], "writes": []},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
@@ -1588,7 +1570,7 @@
 			"constructible": false,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Service"],
 			"properties": [
-				{"name": "Fixture", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Service"], "writes": ["scene.Service"]},
+				{"name": "Fixture", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "reads": ["scene.Service"], "writes": []},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
@@ -1600,7 +1582,7 @@
 			"constructible": false,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Service"],
 			"properties": [
-				{"name": "Fixture", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Service"], "writes": ["scene.Service"]},
+				{"name": "Fixture", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "reads": ["scene.Service"], "writes": []},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
@@ -1612,7 +1594,7 @@
 			"constructible": false,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Service"],
 			"properties": [
-				{"name": "Fixture", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Service"], "writes": ["scene.Service"]},
+				{"name": "Fixture", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "reads": ["scene.Service"], "writes": []},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
@@ -1624,7 +1606,7 @@
 			"constructible": false,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Service"],
 			"properties": [
-				{"name": "Fixture", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Service"], "writes": ["scene.Service"]},
+				{"name": "Fixture", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "reads": ["scene.Service"], "writes": []},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
@@ -1636,7 +1618,7 @@
 			"constructible": false,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Service"],
 			"properties": [
-				{"name": "Fixture", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Service"], "writes": ["scene.Service"]},
+				{"name": "Fixture", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "reads": ["scene.Service"], "writes": []},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
@@ -1648,7 +1630,7 @@
 			"constructible": false,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Service"],
 			"properties": [
-				{"name": "Fixture", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Service"], "writes": ["scene.Service"]},
+				{"name": "Fixture", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "reads": ["scene.Service"], "writes": []},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
@@ -1660,7 +1642,7 @@
 			"constructible": false,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Service"],
 			"properties": [
-				{"name": "Fixture", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Service"], "writes": ["scene.Service"]},
+				{"name": "Fixture", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "reads": ["scene.Service"], "writes": []},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
@@ -1672,7 +1654,7 @@
 			"constructible": false,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Service"],
 			"properties": [
-				{"name": "Fixture", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Service"], "writes": ["scene.Service"]},
+				{"name": "Fixture", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "reads": ["scene.Service"], "writes": []},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
@@ -1685,7 +1667,7 @@
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.PlayersService", "scene.Service"],
 			"properties": [
 				{"name": "CharacterAutoLoads", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.PlayersService"], "writes": ["scene.PlayersService"]},
-				{"name": "Fixture", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Service"], "writes": ["scene.Service"]},
+				{"name": "Fixture", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "reads": ["scene.Service"], "writes": []},
 				{"name": "LocalPlayer", "type": "Instance", "kind": "computed", "bytes": 8, "writable": false, "reads": [], "writes": []},
 				{"name": "MaxPlayers", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.PlayersService"], "writes": ["scene.PlayersService"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
@@ -1701,7 +1683,7 @@
 			"constructible": false,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Service"],
 			"properties": [
-				{"name": "Fixture", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Service"], "writes": ["scene.Service"]},
+				{"name": "Fixture", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "reads": ["scene.Service"], "writes": []},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}

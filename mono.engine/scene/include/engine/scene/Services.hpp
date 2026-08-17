@@ -96,9 +96,8 @@ namespace engine::scene {
 	// shared component with eight unused floats on every service is eight
 	// floats in every snapshot of every world.
 	//
-	// Nothing reads these yet - the renderer's lighting is not driven from a
-	// world's `Lighting` service. They are authored and they round-trip, which
-	// is the half that has to exist before the renderer can read them.
+	// `LightingOf` resolves these into the directional, ambient and fog values
+	// consumed by every view of this world.
 	//
 	// @since v0.7
 	struct LightingServiceComponent {

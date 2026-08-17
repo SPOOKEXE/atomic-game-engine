@@ -77,7 +77,9 @@ int main(int argc, char **argv) {
 	arguments.Value("worlds-per-host", "N", "Shared worlds per host process (default 8)");
 	arguments.Value("host-program", "PATH", "The program a host runs (default: this one)");
 	arguments.Value("processes", "N", "How many processes share this machine (default: worked out)");
+	arguments.Value("profile-out", "PATH", "Fold this run's frame graph into a .folded flamegraph capture");
 	arguments.Value("listen", "PORT", "Serve the world to clients on this UDP port (0 for ephemeral)");
+	arguments.Value("max-clients", "N", "The hard cap on connected clients (default 64)");
 	arguments.Flag("advertise", "Announce this server on the local subnet so clients can find it");
 	arguments.Value("session-name", "NAME", "What to call this session in somebody's browser");
 	arguments.Value(
@@ -204,6 +206,9 @@ int main(int argc, char **argv) {
 	if (auto replay = arguments.Get("replay")) {
 		options.ReplayPath = std::filesystem::path(*replay);
 	}
+	if (auto profile = arguments.Get("profile-out")) {
+		options.ProfilePath = std::filesystem::path(*profile);
+	}
 	if (auto assets = arguments.Get("override-assets-directory")) {
 		options.AssetsDirectory = std::filesystem::path(*assets);
 	}
@@ -240,6 +245,9 @@ int main(int argc, char **argv) {
 		options.ListenPort = static_cast<uint16_t>(port);
 		options.Listening = true;
 	}
+
+	options.MaximumClients =
+		static_cast<uint32_t>(arguments.GetInteger("max-clients", options.MaximumClients));
 
 	options.Advertise = options.Advertise || arguments.Has("advertise");
 	if (auto name = arguments.Get("session-name")) {

@@ -763,7 +763,7 @@ namespace engine::scene {
 		// no link at all - a hole leading nowhere is a wall.
 		const Portal *LinkedPortalOf(Store &store, Entity camera) {
 			const Portal *portal = store.Get<Portal>(camera);
-			if (portal == nullptr || portal->Destination == NULL_ENTITY ||
+			if (portal == nullptr || !portal->Enabled || portal->Destination == NULL_ENTITY ||
 				!store.Alive(portal->Destination)) {
 				return nullptr;
 			}
@@ -790,7 +790,8 @@ namespace engine::scene {
 			store.Each<const Portal, const SurfaceCamera>([&](Entity entity,
 															  const Portal &portal,
 															  const SurfaceCamera &camera) {
-				if (portal.Destination == NULL_ENTITY || !store.Alive(portal.Destination)) {
+				if (!portal.Enabled || portal.Destination == NULL_ENTITY ||
+					!store.Alive(portal.Destination)) {
 					// An unlinked portal falls back to a mirror, and a mirror
 					// is a wall. Walking into one is walking into a wall.
 					return;
@@ -1424,6 +1425,13 @@ namespace engine::scene {
 
 		store.Each<const SurfaceCamera, const Camera, const Transform>(
 			[&](Entity entity, const SurfaceCamera &target, const Camera &lens, const Transform &) {
+				// A disabled portal is neither a recursive hole nor a mirror. Its
+				// pane is left as ordinary geometry and its old slot is cleared by
+				// `AimSurfaceCameras`.
+				if (const Portal *portal = store.Get<Portal>(entity); portal != nullptr && !portal->Enabled) {
+					return;
+				}
+
 				// **A linked portal is `GatherPortalSeams`' pane and not this
 				// one.** Its camera is a warp rather than a reflection, so a
 				// caller handed both descriptions would have two answers for
@@ -1521,6 +1529,18 @@ namespace engine::scene {
 			[&](Entity entity, const SurfaceCamera &target, const Camera &lens, const Transform &) {
 				Face face;
 				if (!FaceOf(store, entity, target.Face, face)) {
+					return;
+				}
+
+				// A disabled mouth keeps its deterministic place in the surface
+				// ordering, but renders nothing. Carrying a non-rendering aim is what
+				// clears a texture slot left by the previous enabled frame.
+				if (const Portal *portal = store.Get<Portal>(entity); portal != nullptr && !portal->Enabled) {
+					Aim aim;
+					aim.Camera = entity;
+					aim.Part = face.Part;
+					aim.Renders = false;
+					pending.push_back(aim);
 					return;
 				}
 
@@ -1897,6 +1917,10 @@ namespace engine::scene {
 
 		store.Each<const SurfaceCamera, const Camera, const Transform>(
 			[&](Entity entity, const SurfaceCamera &target, const Camera &, const Transform &) {
+				if (const Portal *portal = store.Get<Portal>(entity); portal != nullptr && !portal->Enabled) {
+					return;
+				}
+
 				Face face;
 				if (!FaceOf(store, entity, target.Face, face)) {
 					return;
@@ -2071,12 +2095,17 @@ namespace engine::scene {
 	}
 
 	size_t OpenPortals(ecs::Store &store) {
-		// **Gathered before anything is written**, for the reason every other
-		// pass in this file gives: `Store::Set` on a component the row already
-		// has is a plain write, but the gather costs nothing and keeps the shape
-		// the same as its neighbours - and a `Collider` added to a pane that had
-		// none would be an archetype move under an `Each`.
-		std::vector<ecs::Entity> panes;
+		// **Gathered before anything is written**, so one pane shared by several
+		// portal cameras receives one decision and no deferred component writes.
+		// A pane is open when any valid, enabled mouth on it is open. A disabled
+		// mouth closes a pane that has no other live mouth, keeping collision in
+		// step with rendering and crossing.
+		struct Opening {
+			ecs::Entity Pane;
+			bool Open = false;
+		};
+		static thread_local std::vector<Opening> openings;
+		openings.clear();
 
 		store.Each<const Portal, const SurfaceCamera>(
 			[&](ecs::Entity camera, const Portal &, const SurfaceCamera &) {
@@ -2089,22 +2118,31 @@ namespace engine::scene {
 					return;
 				}
 
-				// A pane with no collider is already something a body passes
-				// through, and a pane already open is the every-tick case. Both
-				// cost one lookup and write nothing.
-				const Collider *collider = store.Get<Collider>(pane);
-				if (collider == nullptr || collider->Trigger) {
-					return;
-				}
-
-				panes.push_back(pane);
+				openings.push_back(Opening{pane, LinkedPortalOf(store, camera) != nullptr});
 			}
 		);
 
+		std::sort(openings.begin(), openings.end(), [](const Opening &left, const Opening &right) {
+			return left.Pane.Id < right.Pane.Id;
+		});
+
 		size_t opened = 0;
-		for (const ecs::Entity pane : panes) {
+		for (size_t first = 0; first < openings.size();) {
+			size_t after = first + 1;
+			bool open = openings[first].Open;
+			while (after < openings.size() && openings[after].Pane == openings[first].Pane) {
+				open = open || openings[after].Open;
+				after++;
+			}
+
+			const ecs::Entity pane = openings[first].Pane;
 			const Collider *collider = store.Get<Collider>(pane);
 			if (collider == nullptr) {
+				first = after;
+				continue;
+			}
+			if (collider->Trigger == open) {
+				first = after;
 				continue;
 			}
 
@@ -2113,12 +2151,12 @@ namespace engine::scene {
 			// the row's stamp to decide whether static geometry moved, and a
 			// collider that became a trigger without one would keep being solved
 			// against until something else happened to touch the row. It stamps
-			// once per portal for the life of the world, not once per tick -
-			// the guard above is what makes that true.
+			// only when the authored activation changes, not once per tick.
 			Collider opened_ = *collider;
-			opened_.Trigger = true;
+			opened_.Trigger = open;
 			store.Set(pane, opened_);
-			opened++;
+			opened += open ? 1u : 0u;
+			first = after;
 		}
 
 		return opened;

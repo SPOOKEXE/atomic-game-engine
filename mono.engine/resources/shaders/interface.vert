@@ -14,6 +14,7 @@ layout(location = 2) in vec4 inColour;
 
 layout(location = 0) out vec2 outUv;
 layout(location = 1) out vec4 outColour;
+layout(location = 2) out vec2 outCanvasPosition;
 
 // Vertex uniforms are set 1 for SPIR-V.
 layout(set = 1, binding = 0) uniform Canvas {
@@ -25,6 +26,7 @@ layout(set = 1, binding = 0) uniform Canvas {
 void main() {
 	outUv = inUv;
 	outColour = inColour;
+	outCanvasPosition = inPosition;
 
 	const vec2 normalised = inPosition / canvas.Size;
 

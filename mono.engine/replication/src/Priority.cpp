@@ -26,9 +26,15 @@ namespace engine::replication {
 		}
 
 		const float distance = std::sqrt(squared);
-		const float score = std::clamp(1.0f - distance / FalloffMetres, 0.0f, 1.0f);
+		return std::clamp(1.0f - distance / FalloffMetres, 0.0f, 1.0f);
+	}
 
-		if (!Blocked || score <= OcclusionFloor) {
+	float DistancePriority::Refine(ClientId client, ecs::Entity entity, float score) const {
+		// The floor is what stops a raycast being spent on a row that is already
+		// at the back, and it is checked before the hook rather than inside it
+		// so that a host paying for the query pays only where the answer could
+		// change an order.
+		if (!Blocked || !(score > OcclusionFloor)) {
 			return score;
 		}
 		if (!Blocked(client, entity)) {

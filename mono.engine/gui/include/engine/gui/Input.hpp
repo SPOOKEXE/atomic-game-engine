@@ -63,6 +63,13 @@ namespace engine::gui {
 		// nothing: leaving has to end a hover, and a position outside the
 		// canvas would do that by accident rather than on purpose.
 		bool Inside = true;
+
+		// Restricts the hit test to one collector after a world-space pointer
+		// has been projected onto its canvas. Null leaves the list unrestricted.
+		ecs::Entity Collector;
+
+		// Ignores spatial collectors while testing ordinary window pixels.
+		bool ScreenOnly = false;
 	};
 
 	// What happened, in Roblox's vocabulary.
@@ -157,6 +164,12 @@ namespace engine::gui {
 	// @param point The pointer, in canvas pixels.
 	// @return The element, or `NULL_ENTITY`.
 	ecs::Entity Pick(const ecs::Store &store, const DrawList &list, const core::Vector2 &point);
+
+	ecs::Entity PickInCollector(
+		const ecs::Store &store, const DrawList &list, ecs::Entity collector, const core::Vector2 &point
+	);
+
+	ecs::Entity PickScreen(const ecs::Store &store, const DrawList &list, const core::Vector2 &point);
 
 	// Every element under a point within one subtree, front to back.
 	//

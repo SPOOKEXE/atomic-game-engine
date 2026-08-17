@@ -1077,6 +1077,9 @@ namespace engine::gui {
 			// size all along, and a headless test asserting a layout wants a
 			// number that does not depend on where a camera happens to be.
 			const SpatialCanvas *resolved = store.Get<SpatialCanvas>(collector);
+			if (resolved != nullptr && !resolved->Visible) {
+				return false;
+			}
 
 			if (const Surface *surface = store.Get<Surface>(collector);
 				surface != nullptr && store.IsA(collector, ids.SurfaceGui)) {

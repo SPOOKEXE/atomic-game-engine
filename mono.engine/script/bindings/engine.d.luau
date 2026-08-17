@@ -1123,6 +1123,7 @@ end
 declare extern type Portal extends SurfaceCamera with
 	Destination: Instance
 	DestinationWorld: string
+	Enabled: boolean
 end
 
 declare extern type Sound extends Instance with
@@ -1158,22 +1159,23 @@ declare extern type Humanoid extends Instance with
 end
 
 declare extern type Light extends Instance with
-	Angle: number
 	Brightness: number
 	Color: Color3
 	Enabled: boolean
-	Face: Enum_NormalId
 	Range: number
-	Shadows: boolean
 end
 
 declare extern type PointLight extends Light with
 end
 
 declare extern type SpotLight extends Light with
+	Angle: number
+	Face: Enum_NormalId
 end
 
 declare extern type SurfaceLight extends Light with
+	Angle: number
+	Face: Enum_NormalId
 end
 
 declare extern type ValueBase extends Instance with
@@ -1289,9 +1291,6 @@ declare extern type PVAdornment extends GuiBase3d with
 end
 
 declare extern type SelectionBox extends PVAdornment with
-	LineThickness: number
-	SurfaceColor3: Color3
-	SurfaceTransparency: number
 end
 
 declare extern type SelectionSphere extends PVAdornment with
@@ -1355,20 +1354,16 @@ declare extern type CanvasGroup extends Frame with
 end
 
 declare extern type ScrollingFrame extends Frame with
-	AutomaticCanvasSize: Enum_AutomaticSize
 	CanvasPosition: Vector2
 	CanvasSize: UDim2
 	ScrollBarImageColor3: Color3
 	ScrollBarImageTransparency: number
 	ScrollBarThickness: number
 	ScrollingDirection: Enum_ScrollingDirection
-	ScrollingEnabled: boolean
 end
 
 declare extern type GuiButton extends GuiObject with
 	AutoButtonColor: boolean
-	Modal: boolean
-	Selected: boolean
 end
 
 declare extern type TextButton extends GuiButton with
@@ -1570,7 +1565,7 @@ declare extern type UIScale extends UIComponent with
 end
 
 declare extern type Service extends Instance with
-	Fixture: boolean
+	read Fixture: boolean
 	Scope: Enum_ServiceScope
 end
 

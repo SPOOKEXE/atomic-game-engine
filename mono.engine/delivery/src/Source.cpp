@@ -59,6 +59,8 @@ namespace engine::delivery {
 			return "directory";
 		case SourceKind::Http:
 			return "http";
+		case SourceKind::Relay:
+			return "relay";
 		}
 		return "unknown";
 	}
@@ -79,7 +81,10 @@ namespace engine::delivery {
 		if (Name.empty() || Location.empty()) {
 			return false;
 		}
-		if (Kind == SourceKind::Directory) {
+		if (Kind == SourceKind::Directory || Kind == SourceKind::Relay) {
+			// A relay's `Location` is the label an operator reads rather than
+			// somewhere to connect to, so there is nothing here to parse - see
+			// `SourceKind::Relay`.
 			return true;
 		}
 		std::string_view host;

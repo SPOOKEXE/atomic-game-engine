@@ -749,6 +749,49 @@ TEST_CASE("the interface scene builds and connects its buttons", "[examples][sce
 	CHECK_FALSE(store.Get<engine::gui::Resolved>(hint)->Rendered);
 }
 
+TEST_CASE("the world interface scene contains every collector and a nested scene", "[examples][scene][gui]") {
+	const StagedAssets assets;
+	Store store("interface_world");
+	Scheduler systems;
+
+	std::string error;
+	INFO(error);
+	REQUIRE(LoadScene(store, systems, ExamplePath("InterfaceWorld.luau"), error));
+
+	const Entity pane = InScene(store, "SurfacePanel");
+	const Entity marker = InScene(store, "BillboardMarker");
+	const Entity previewPane = InScene(store, "ViewportPanel");
+	REQUIRE(pane != engine::ecs::NULL_ENTITY);
+	REQUIRE(marker != engine::ecs::NULL_ENTITY);
+	REQUIRE(previewPane != engine::ecs::NULL_ENTITY);
+
+	const Entity surface = store.FindFirstChild(pane, "WorldControls");
+	const Entity billboard = store.FindFirstChild(marker, "MarkerLabel");
+	const Entity previewSurface = store.FindFirstChild(previewPane, "ViewportSurface");
+	const Entity viewport = store.FindFirstChild(previewSurface, "NestedScene");
+	REQUIRE(surface != engine::ecs::NULL_ENTITY);
+	REQUIRE(billboard != engine::ecs::NULL_ENTITY);
+	REQUIRE(viewport != engine::ecs::NULL_ENTITY);
+	CHECK(store.Get<engine::gui::Surface>(surface) != nullptr);
+	CHECK(store.Get<engine::gui::Billboard>(billboard) != nullptr);
+
+	const engine::gui::Viewport *scene = store.Get<engine::gui::Viewport>(viewport);
+	REQUIRE(scene != nullptr);
+	CHECK(store.Get<engine::scene::Camera>(scene->CurrentCamera) != nullptr);
+	CHECK(store.FindFirstChild(viewport, "PreviewFloor") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(viewport, "PreviewCube") != engine::ecs::NULL_ENTITY);
+
+	engine::gui::Screen display;
+	display.Width = 1280.0f;
+	display.Height = 720.0f;
+	CHECK(engine::gui::Layout(store, display) > 0);
+	const engine::gui::Resolved *placed = store.Get<engine::gui::Resolved>(viewport);
+	REQUIRE(placed != nullptr);
+	CHECK(placed->Rendered);
+	CHECK(placed->AbsoluteSize.X == Approx(640.0f));
+	CHECK(placed->AbsoluteSize.Y == Approx(360.0f));
+}
+
 TEST_CASE("the four-world mirrors scene varies by world", "[examples][scene][worlds]") {
 	const StagedAssets assets;
 

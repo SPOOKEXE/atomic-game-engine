@@ -1,6 +1,6 @@
 #pragma once
 
-// The world's one directional light, and where it comes from.
+// The world's resolved lighting, and where it comes from.
 //
 // **Here rather than in `render`, because something other than the renderer
 // needs it now.** The direction lived as a `constexpr` in `Renderer.cpp`, which
@@ -11,18 +11,10 @@
 // differ by exactly that turn. `scene::CutAndCloneSeams` is what maps it, and it
 // cannot reach a constant in the renderer's anonymous namespace.
 //
-// **A resource, because it is authored** - `scene::Gravity` is the same idea and
-// says why: a world underground, at night, or seen from above wants a different
-// vector, and one that wants none turns the brightness down rather than fighting
-// a constant. A world that never sets one gets `SUN_DIRECTION` and
-// `SUN_AMBIENT`, which are the numbers this engine has always drawn with, so
-// nothing that existed before this looks any different.
-//
-// **What it deliberately is not is `Lighting.ClockTime`.** That service already
-// carries a clock and a latitude, and Roblox derives a sun arc from the pair -
-// which is the right feature and a different one: it would move the light in
-// every scene that has ever been authored against a fixed vector. When it
-// arrives it writes this resource, and everything downstream is unchanged.
+// `Lighting` is the authored source. `LightingOf` resolves its clock and
+// latitude into one directional light, then carries the ambient and fog terms
+// without making the renderer search an instance tree. A legacy `Sun` resource
+// remains an explicit C++ override for the direction and ambient term.
 //
 // @tier L7 · shared
 
@@ -61,6 +53,50 @@ namespace engine::scene {
 		// What reaches a surface it does not.
 		core::Color3 Ambient = SUN_AMBIENT;
 	};
+
+	// Everything a world contributes to its built-in lighting model.
+	//
+	// Values are resolved from the `Lighting` service once per presented world.
+	// The renderer receives this copy, so no pointer crosses the world boundary
+	// and recursive portal views can reuse the same authored state with their
+	// own eye position.
+	//
+	// @since v0.16
+	struct WorldLighting {
+		// Which way the sun shines towards, as a unit vector.
+		core::Vector3 Direction = SUN_DIRECTION;
+
+		// Light present on every face.
+		core::Color3 Ambient = SUN_AMBIENT;
+
+		// Sky light applied according to how far a face points upward.
+		core::Color3 OutdoorAmbient{};
+
+		// The directional contribution after `Brightness` and daylight are
+		// applied.
+		core::Color3 Direct{1.0f, 1.0f, 1.0f};
+
+		// What distant geometry fades towards.
+		core::Color3 FogColor{0.05f, 0.06f, 0.09f};
+
+		// Where the distance fade starts and becomes complete, in metres.
+		//@{
+		float FogStart = 100000.0f;
+		float FogEnd = 100001.0f;
+		//@}
+	};
+
+	// Resolves the `Lighting` service into the values a renderer consumes.
+	//
+	// The solar arc is an equinox arc. `ClockTime` supplies the hour angle and
+	// `GeographicLatitude` supplies the noon elevation; a date is deliberately
+	// not invented when the service carries none.
+	//
+	// @param store The world.
+	// @return Its resolved lighting, or the legacy defaults when it has no
+	//         `Lighting` service.
+	// @since v0.16
+	WorldLighting LightingOf(const ecs::Store &store);
 
 	// The world's sun, or the default when it has never set one.
 	//

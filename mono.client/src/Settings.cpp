@@ -89,6 +89,11 @@ namespace client {
 					"A content origin. Repeat the key for more, in priority order. 'dir:PATH' selects a "
 					"local store"
 				);
+				built.List(
+					"client.content-allowed-hosts",
+					"A host a server-named content origin may live on. Repeat the key for more; empty "
+					"allows any host the server names"
+				);
 				built.Text(
 					"client.content-cache",
 					defaults.ContentCache.string(),
@@ -150,8 +155,12 @@ namespace client {
 		options.RendezvousAddress = std::string(Flag("client.rendezvous").Text());
 		options.ServerKey = std::string(Flag("client.server-key").Text());
 
-		const std::span<const std::string> sources = Flag("client.content-sources").Items();
+		const Flag configured("client.content-sources");
+		const std::span<const std::string> sources = configured.Items();
 		options.ContentSources.assign(sources.begin(), sources.end());
+		const Flag permitted("client.content-allowed-hosts");
+		const std::span<const std::string> hosts = permitted.Items();
+		options.ContentAllowedHosts.assign(hosts.begin(), hosts.end());
 		options.ContentCache = std::filesystem::path(Flag("client.content-cache").Text());
 		options.ContentPublisherKey = std::string(Flag("client.publisher-key").Text());
 		options.AssetsDirectory = std::filesystem::path(Flag("client.assets-directory").Text());

@@ -32,6 +32,43 @@ A server serving its own assets is **not** a fourth implementation. It is
 `mono.server`. `mono.cdn` is the same content store deployed on its own. One
 store, one manifest format, three deployments.
 
+## How a server gives a client content *(v0.16)*
+
+The first two rows above became a setting rather than a shape at v0.16, and it
+is one field: `server.content-mode`, `relay` or `redirect`. **There is no
+`RelayServer` and no second settings type**, for the reason `CDNSettings` has
+none - the moment a deployment is a *type*, moving between them is a rebuild.
+
+| Mode | What crosses | The client's origin connection |
+|---|---|---|
+| `relay` (default) | the routes an origin serves, over the game link | none at all |
+| `redirect` | a list of origins, a grant and the publisher key, at admission | its own, to what it was told about |
+
+**Relay is the default because it asks least of a player's network.** One port,
+already reached, already admitted. The server holds the origin connection and
+answers `/manifest`, `/dictionary` and `/bundle/<hex>` for its clients out of
+`delivery::RouteFetcher` - the same module a client fetches with, so a relayed
+group and a fetched one are one artefact rather than two that agree until they
+do not. **The client has no authority in it**: it may ask and it may ask again,
+and how often is decided by `server::ContentRelay`, because a limiter that lived
+in the client would be a limiter the interesting clients do not run.
+
+**Redirect is the mode that scales**, and it is the mode that needs a grant. The
+server names its origins, issues the token that admits *that session*, and names
+the publisher whose signature to trust. `cdn::Gate` then admits the client's
+requests without the origin learning anything about sessions or players - the
+origin decides nothing about who, which is this module's standing rule.
+
+**Neither mode moves the trust boundary.** Whatever arrives is checked against a
+manifest root the publisher signed, in `delivery/AGENTS.md`'s order, so a server
+that relayed the wrong bytes and a server that named a hostile origin are
+refused by the same code in the same place. A server-named origin is untrusted
+twice over: it passes the client's own `AllowedHosts` before it is fetched from,
+and a host *name* rather than an address is skipped with one warning, because
+`net::Endpoint::Parse` refuses one on purpose.
+
+`RUNNING.md`'s settings section carries the flags and a worked configuration.
+
 ## The link row
 
 `core` today; `core`, `parallel` and `assets` at the destination §8 records.

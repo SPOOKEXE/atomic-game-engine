@@ -27,6 +27,25 @@ namespace engine::delivery {
 
 		// An HTTP origin.
 		Http,
+
+		// An origin reached through a connection somebody else owns.
+		//
+		// **What "the server distributes from the CDN" is at this layer.** The
+		// client holds no origin connection at all: it asks for the same routes
+		// an origin serves over a link it already has, and whoever owns that
+		// link answers them. Nothing downstream changes - the manifest is still
+		// verified against the publisher key and every asset against the signed
+		// root - because relaying moves bytes and does not move the trust
+		// boundary.
+		//
+		// **`Location` is a label rather than an address.** A relay is reached
+		// through the `RelayChannel` its owner handed to `MakeAssetClient`, so
+		// there is nothing here to resolve and nothing for an allow-list to
+		// check. It is still a string and still required, because it is what a
+		// log line and a preferences row name the source by - rule 4.
+		//
+		// @since v0.16
+		Relay,
 	};
 
 	// Returns a stable, human-readable name for a source kind.
@@ -129,8 +148,16 @@ namespace engine::delivery {
 		// is writing to a filesystem the caller already has: the key exists to
 		// admit a request to somebody else's origin, and there is no request
 		// here to admit.
+		//
+		// **A `Relay` is never writable.** The routes a relay carries are the
+		// three an origin *serves*, and `net/http` is `GET` and `HEAD` only -
+		// so there is no upload to relay and a client that tried would be
+		// asking a game server to publish on its behalf.
 		bool Writable() const {
-			return Role != SourceRole::Read && (Kind == SourceKind::Directory || !IngestKey.empty());
+			if (Role == SourceRole::Read || Kind == SourceKind::Relay) {
+				return false;
+			}
+			return Kind == SourceKind::Directory || !IngestKey.empty();
 		}
 	};
 

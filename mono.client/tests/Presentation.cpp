@@ -9,6 +9,8 @@
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Scheduler.hpp>
+#include <engine/effects/ParticleSystem.hpp>
+#include <engine/effects/Registration.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Attachments.hpp>
 #include <engine/scene/Components.hpp>
@@ -118,6 +120,39 @@ namespace {
 		});
 		return count;
 	}
+}
+
+TEST_CASE("particle light properties reach the render batch", "[client][presentation][particles]") {
+	Universe universe;
+	const WorldId world = AddWorld(universe, "particle-light-properties");
+
+	universe.Enter(world, [](Store &store) {
+		const Entity workspace = engine::scene::InstallServices(store);
+		engine::scene::PartDesc parentDescription;
+		parentDescription.Anchored = true;
+		const Entity parent = engine::scene::MakePart(store, parentDescription);
+		store.SetParent(parent, workspace);
+
+		const Entity emitter =
+			store.CreateInstance(engine::ecs::Classes::Find(Name("ParticleEmitter")), "LitEmitter");
+		store.SetParent(emitter, parent);
+		auto *settings = store.GetMutable<engine::effects::ParticleEmitter>(emitter);
+		REQUIRE(settings != nullptr);
+		settings->Rate = 60.0f;
+		settings->Lifetime = engine::core::NumberRange{1.0f, 1.0f};
+		settings->LightEmission = 0.35f;
+		settings->LightInfluence = 0.8f;
+
+		engine::scene::ResolveAttachments(store);
+		REQUIRE(engine::effects::RefreshEmitters(store) == 1);
+		REQUIRE(engine::effects::StepParticles(store, 1.0f / 30.0f).Live > 0);
+
+		std::vector<engine::render::ParticleBatch> batches;
+		REQUIRE(client::CollectParticleBatches(store, batches) == 1);
+		REQUIRE(batches.size() == 1);
+		CHECK(batches[0].LightEmission == Catch::Approx(0.35f));
+		CHECK(batches[0].LightInfluence == Catch::Approx(0.8f));
+	});
 }
 
 TEST_CASE("a world with presentation installed publishes what it holds", "[client][presentation]") {
@@ -924,6 +959,38 @@ TEST_CASE("a hole with no partner still recurses, and a lone pane has none", "[c
 
 	REQUIRE(portals.size() == 1);
 	CHECK(portals[0].Partner == -1);
+}
+
+TEST_CASE("a disabled portal mouth leaves no capture or mirror behind", "[client][presentation]") {
+	Universe universe;
+	const WorldId here = AddWorld(universe, "here");
+
+	universe.Enter(here, [](Store &store) {
+		MakePortalPair(store, 60.0f, true);
+
+		bool disabled = false;
+		store.Each<engine::scene::Portal>([&](Entity, engine::scene::Portal &portal) {
+			if (!disabled) {
+				portal.Enabled = false;
+				disabled = true;
+			}
+		});
+		REQUIRE(disabled);
+	});
+
+	universe.Tick(1.0f / 60.0f);
+	universe.Present(here, 1.0f / 60.0f, 0.0f);
+
+	std::vector<engine::render::PortalView> portals;
+	std::vector<engine::render::SurfaceView> mirrors;
+	universe.Enter(here, [&portals, &mirrors](Store &store) {
+		CHECK(client::CollectPortalViews(store, portals) == 1);
+		CHECK(client::CollectSurfaceViews(store, mirrors, portals) == 0);
+	});
+
+	REQUIRE(portals.size() == 1);
+	CHECK(portals[0].Partner == -1);
+	CHECK(mirrors.empty());
 }
 
 TEST_CASE("a cross-world pane keeps its surface camera", "[client][presentation]") {

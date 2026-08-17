@@ -51,21 +51,40 @@ it is not a "just this one" `Insert`.
 
 ## De-duplication is first-shared-cell, and a visited stamp is refused
 
-A proxy spanning several cells appears in several buckets. It is reported from
-the first cell of the walk that lies in both its own cell range and the query's
-- and because every axis is walked ascending, that cell is the corner formed by
-taking the larger minimum on each axis. One comparison, no scratch memory, and
-the same answer whatever order anything runs in.
+A proxy spanning several cells appears in several buckets, and is reported once.
+**There are two walks and each has its own rule, because a rule is only as good
+as the walk it is written against.**
+
+**The volume walk - first shared cell.** A box query reports a proxy from the
+first cell of the walk that lies in both its own cell range and the query's -
+and because every axis is walked ascending, that cell is the corner formed by
+taking the larger minimum on each axis.
+
+**The ray walk - the cell whose predecessor was outside.** A line has no corner,
+so the volume walk's rule cannot be evaluated for one. What replaces it is that
+a straight ray is monotone on every axis, so the cells it visits inside any box
+in cell space are one unbroken run: report where the previous cell of the walk
+was not in the proxy's range, and the first cell of the walk counts as having no
+predecessor.
+
+Both are one comparison, neither needs scratch memory, and both give the same
+answer whatever order anything runs in. Keep those three properties in anything
+that replaces either.
 
 **A per-proxy visited stamp is the change to refuse.** It turns a query into a
 write, which ends thread-safe querying, and it makes the result depend on which
 thread reached a proxy first. A `mutable` member or an "it is only a debug
 counter" is the same change wearing a hat.
 
-The rule has three spellings and two of them are wrong. Report from the query's
-first cell and a proxy in any later cell is never found. Report from the proxy's
-first cell and a proxy that starts outside the query is never found. Both
-failures are silent and both are covered by cases in `tests/HashGrid.cpp`.
+The volume rule has three spellings and two of them are wrong. Report from the
+query's first cell and a proxy in any later cell is never found. Report from the
+proxy's first cell and a proxy that starts outside the query is never found.
+Both failures are silent and both are covered by cases in `tests/HashGrid.cpp`.
+
+The ray rule has one way to be wrong that looks harmless: dropping the "no
+predecessor" case, which loses exactly the proxy the ray starts inside. That and
+the run rule itself are covered in `tests/Query.cpp`, and five cases there fail
+if the comparison is removed.
 
 ## A bucket collision is a false positive and never a miss
 
@@ -176,10 +195,13 @@ Raising either is a measurement, not an opinion.
   allocation and algorithms rule needs a measurement taken in `release` and a
   number written into a comment. `benchmarks/HashGrid.cpp` is where that number
   would come from.
-- **No walk along the ray.** A digital differential walk would visit fewer cells
-  for a long raycast and would visit them in an order that is not the ascending
-  one the de-duplication rule is built on. It is an optimisation with a rule
-  change attached; take both together or neither.
+- **No walk along a swept box.** `ShapeCast` still asks the volume walk for the
+  union of where the box starts and where it ends, which is loose for a long
+  sweep in the same way a raycast's segment bounds were. The ray walk does not
+  answer it: a swept box is a line with thickness, so the cells it touches are a
+  neighbourhood of the line rather than the line, and the run rule above holds
+  for the line alone. It wants its own walk and its own rule, and neither is
+  written. Nothing has measured `ShapeCast` as hot.
 - **No parallel query.** Every query here is a read, and two threads may run two
   of them against one grid - which is what the visited-stamp rule protects.
   Nothing here starts a job, because the grain for a raycast is a `physics`

@@ -579,3 +579,35 @@ TEST_CASE("a destroyed focused box releases nothing and blocks nothing", "[gui][
 	}
 	CHECK(FocusedTextBox(world.Data) == other);
 }
+
+TEST_CASE("screen and spatial picks stay inside their collector", "[gui][input]") {
+	World world("gui_input.collector_filter");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity screenButton = world.Make("TextButton", screen);
+	const Entity spatialCollector = world.Make("ScreenGui");
+	const Entity spatialButton = world.Make("TextButton", spatialCollector);
+
+	SpatialCanvas spatial;
+	spatial.Size = Vector2{200.0f, 100.0f};
+	world.Data.Set(spatialCollector, spatial);
+
+	DrawList list;
+	DrawCommand screenCommand;
+	screenCommand.Kind = DrawKind::Rectangle;
+	screenCommand.Source = screenButton;
+	screenCommand.Collector = screen;
+	screenCommand.Bounds = engine::core::Rect{0.0f, 0.0f, 100.0f, 100.0f};
+	screenCommand.Clip = screenCommand.Bounds;
+	list.Commands.push_back(screenCommand);
+
+	DrawCommand spatialCommand = screenCommand;
+	spatialCommand.Source = spatialButton;
+	spatialCommand.Collector = spatialCollector;
+	list.Commands.push_back(spatialCommand);
+
+	const Vector2 point{50.0f, 50.0f};
+	CHECK(Pick(world.Data, list, point) == spatialButton);
+	CHECK(PickScreen(world.Data, list, point) == screenButton);
+	CHECK(PickInCollector(world.Data, list, spatialCollector, point) == spatialButton);
+	CHECK(PickInCollector(world.Data, list, screen, point) == screenButton);
+}

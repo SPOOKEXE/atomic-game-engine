@@ -1,5 +1,6 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/render/InterfacePass.hpp>
 #include <engine/ui/Fonts.hpp>
 #include <engine/ui/Interface.hpp>
 #include <engine/ui/Theme.hpp>
@@ -15,6 +16,8 @@
 namespace engine::ui {
 
 	struct Interface::Impl {
+		render::InterfacePass Spatial;
+		double SpatialSeconds = 0.0;
 		ImGuiContext *Context = nullptr;
 
 		// Whether the backends are running. False headless, where the context
@@ -117,6 +120,23 @@ namespace engine::ui {
 
 		ApplyEditorTheme(scale);
 
+		if (drawable && !State->Spatial.Initialise(backend.Device, backend.ColourFormat, 16.0f * scale)) {
+			ENGINE_ERROR("ui::Interface could not initialise the spatial GUI pass");
+			ImGui::DestroyContext(State->Context);
+			State->Context = nullptr;
+			return false;
+		}
+		State->Spatial.SetImageSource([this, &renderer](const core::Name &name) {
+			render::InterfaceImage image;
+			image.Texture = renderer.TextureHandle(name);
+			if (image.Texture == nullptr) {
+				return image;
+			}
+			image.Cell = renderer.TextureCell(name, State->SpatialSeconds);
+			(void)renderer.TextureSize(name, image.Width, image.Height);
+			return image;
+		});
+
 		State->Display = ImVec2(
 			static_cast<float>(std::max(settings.DisplayWidth, 1)),
 			static_cast<float>(std::max(settings.DisplayHeight, 1))
@@ -141,6 +161,7 @@ namespace engine::ui {
 
 		if (!ImGui_ImplSDL3_InitForSDLGPU(window)) {
 			ENGINE_ERROR("ImGui_ImplSDL3_InitForSDLGPU failed");
+			State->Spatial.Shutdown();
 			ImGui::DestroyContext(State->Context);
 			State->Context = nullptr;
 			return false;
@@ -154,6 +175,7 @@ namespace engine::ui {
 		if (!ImGui_ImplSDLGPU3_Init(&info)) {
 			ENGINE_ERROR("ImGui_ImplSDLGPU3_Init failed");
 			ImGui_ImplSDL3_Shutdown();
+			State->Spatial.Shutdown();
 			ImGui::DestroyContext(State->Context);
 			State->Context = nullptr;
 			return false;
@@ -174,6 +196,7 @@ namespace engine::ui {
 			// initialised is an assertion inside imgui rather than a no-op.
 			ShutdownBackends();
 		}
+		State->Spatial.Shutdown();
 
 		ImGui::DestroyContext(State->Context);
 
@@ -258,27 +281,61 @@ namespace engine::ui {
 		return State->Ready && ImGui::GetIO().WantCaptureKeyboard;
 	}
 
+	void Interface::SubmitSpatial(
+		const gui::DrawList &list, const core::Vector2 &canvas, ecs::Store &store, double seconds
+	) {
+		State->SpatialSeconds = seconds;
+		State->Spatial.Submit(list, canvas, store);
+	}
+
+	void Interface::SetSpatialViewportSource(std::function<render::InterfaceImage(ecs::Entity)> resolve) {
+		State->Spatial.SetViewportSource(std::move(resolve));
+	}
+
 	bool Interface::Prepare(void *commandBuffer) {
 		ENGINE_PROFILE_CAT("ui.prepare", core::ProfileCategory::Render);
 
-		if (!State->Ready || !State->Drawable || State->Draw == nullptr || commandBuffer == nullptr) {
+		if (!State->Ready || commandBuffer == nullptr) {
 			return false;
+		}
+		const bool spatial = State->Spatial.Prepare(commandBuffer);
+		if (!State->Drawable) {
+			return spatial;
+		}
+		if (State->Draw == nullptr) {
+			return spatial;
 		}
 
 		// A minimised window produces a frame with no area, and the backend
 		// asserts on one rather than skipping it.
 		if (State->Draw->DisplaySize.x <= 0.0f || State->Draw->DisplaySize.y <= 0.0f) {
-			return false;
+			return spatial;
 		}
 
 		ImGui_ImplSDLGPU3_PrepareDrawData(State->Draw, static_cast<SDL_GPUCommandBuffer *>(commandBuffer));
 		return true;
 	}
 
+	uint32_t Interface::RecordWorld(
+		void *commandBuffer,
+		void *renderPass,
+		const glm::mat4 &viewProjection,
+		const core::CFrame &camera,
+		const core::Color3 &ambient,
+		const core::Vector3 &sun,
+		uint32_t width,
+		uint32_t height,
+		bool alwaysOnTop
+	) {
+		return State->Spatial.RecordWorld(
+			commandBuffer, renderPass, viewProjection, camera, ambient, sun, width, height, alwaysOnTop
+		);
+	}
+
 	void Interface::Record(void *commandBuffer, void *renderPass) {
 		ENGINE_PROFILE_CAT("ui.record", core::ProfileCategory::Render);
 
-		if (!State->Ready || State->Draw == nullptr) {
+		if (!State->Ready || !State->Drawable || State->Draw == nullptr) {
 			return;
 		}
 
