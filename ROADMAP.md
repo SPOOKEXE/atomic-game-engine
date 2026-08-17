@@ -55,6 +55,7 @@ The milestone headings below are development labels. Not in line with project ve
     the entrance? We can also do the inside-out the same way (make the inside room exit to a void, but we record the
     lighting, then overaly them on the outside)? This way we can add a "Enabled" button on Portal components that
     skip this step.
+- [_] go through all objects that have properties like services, objects, instances, etc, and ensure they all are hooked up and actually mutate states. I noticed lighting properties don't work and they're attached to nothing. Same for other things.
 
 ### v0.17
 
