@@ -625,6 +625,25 @@ namespace engine::render {
 		//         error and not a reason to fail the frame.
 		virtual bool Prepare(void *commandBuffer) = 0;
 
+		// Records world-space interface collectors into an open scene pass.
+		//
+		// The default keeps editor hooks screen-only. A game interface backend
+		// overrides it for `SurfaceGui` and `BillboardGui`, using the same upload
+		// `Prepare` made for the final screen pass.
+		virtual uint32_t RecordWorld(
+			void *,
+			void *,
+			const glm::mat4 &,
+			const core::CFrame &,
+			const core::Color3 &,
+			const core::Vector3 &,
+			uint32_t,
+			uint32_t,
+			bool
+		) {
+			return 0;
+		}
+
 		// Records draw commands into the swapchain.
 		//
 		// @param commandBuffer The frame's `SDL_GPUCommandBuffer *`.
@@ -994,8 +1013,19 @@ namespace engine::render {
 		// @param direction Where it shines towards. Normalised here; a zero
 		//                  vector is ignored rather than obeyed.
 		// @param ambient   What reaches a surface the sun does not.
+		// @param direct    The colour of the directional contribution.
 		// @since v0.15
-		void SetSun(const core::Vector3 &direction, const core::Color3 &ambient);
+		void SetSun(
+			const core::Vector3 &direction,
+			const core::Color3 &ambient,
+			const core::Color3 &direct = core::Color3{1.0f, 1.0f, 1.0f}
+		);
+
+		// The current directional-light settings, for a temporary nested view
+		// that must restore the enclosing world's lighting.
+		core::Vector3 SunDirection() const;
+		core::Color3 SunAmbient() const;
+		core::Color3 SunColor() const;
 
 		// The backend handle for a registered texture, for an interface pass to
 		// sample.
@@ -1288,7 +1318,8 @@ namespace engine::render {
 			std::span<const effects::RibbonRun> ribbonRuns = {},
 			std::span<const SceneLight> lights = {},
 			std::span<const scene::DrawInstance> foreign = {},
-			std::span<const PortalView> portals = {}
+			std::span<const PortalView> portals = {},
+			bool present = true
 		);
 
 		// The texture the most recent `Render` drew that slot's world into.

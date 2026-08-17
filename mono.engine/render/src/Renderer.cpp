@@ -178,6 +178,7 @@ namespace engine::render {
 		struct LightingUniforms {
 			glm::vec4 Direction;
 			glm::vec4 Ambient;
+			glm::vec4 Direct;
 
 			// x: whether a shadow map was rendered. y: one shadow texel.
 			// z: whether this draw samples the surface texture. w: unused, and
@@ -589,6 +590,7 @@ namespace engine::render {
 		// what writes it from `scene::SunOf`.
 		glm::vec3 Sun{SUN_DIRECTION};
 		glm::vec4 Ambient{SUN_AMBIENT};
+		glm::vec4 Direct{1.0f, 1.0f, 1.0f, 1.0f};
 
 		// What is in each slot of the instance buffer, filled in the same loop
 		// that fills the buffer itself.
@@ -3828,7 +3830,9 @@ namespace engine::render {
 		}
 	}
 
-	void Renderer::SetSun(const core::Vector3 &direction, const core::Color3 &ambient) {
+	void Renderer::SetSun(
+		const core::Vector3 &direction, const core::Color3 &ambient, const core::Color3 &direct
+	) {
 		if (State == nullptr) {
 			return;
 		}
@@ -3843,6 +3847,19 @@ namespace engine::render {
 		}
 
 		State->Ambient = glm::vec4{ambient.R, ambient.G, ambient.B, 1.0f};
+		State->Direct = glm::vec4{direct.R, direct.G, direct.B, 1.0f};
+	}
+
+	core::Vector3 Renderer::SunDirection() const {
+		return core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z};
+	}
+
+	core::Color3 Renderer::SunAmbient() const {
+		return core::Color3{State->Ambient.x, State->Ambient.y, State->Ambient.z};
+	}
+
+	core::Color3 Renderer::SunColor() const {
+		return core::Color3{State->Direct.x, State->Direct.y, State->Direct.z};
 	}
 
 	uint32_t Renderer::PortalDepth() const {
@@ -4108,7 +4125,8 @@ namespace engine::render {
 		std::span<const effects::RibbonRun> ribbonRuns,
 		std::span<const SceneLight> lights,
 		std::span<const scene::DrawInstance> foreign,
-		std::span<const PortalView> portals
+		std::span<const PortalView> portals,
+		bool present
 	) {
 		ENGINE_PROFILE_CAT("Renderer::Render", core::ProfileCategory::Render);
 
@@ -4163,19 +4181,26 @@ namespace engine::render {
 		// is what a latency-sensitive loop calls before it reads its input; a
 		// caller that does not is no worse off than before, because this is the
 		// same acquisition at the same point in the frame. See `Impl::BeginFrame`.
-		if (!State->BeginFrame()) {
-			return result;
-		}
-
 		SDL_GPUCommandBuffer *command = nullptr;
 		SDL_GPUTexture *swapchain = nullptr;
 		uint32_t width = 0;
 		uint32_t height = 0;
-		State->TakeFrame(command, swapchain, width, height);
+		if (present) {
+			if (!State->BeginFrame()) {
+				return result;
+			}
+			State->TakeFrame(command, swapchain, width, height);
+		} else {
+			command = SDL_AcquireGPUCommandBuffer(State->Device);
+			if (command == nullptr) {
+				ENGINE_ERROR("SDL_AcquireGPUCommandBuffer (texture-only): {}", SDL_GetError());
+				return result;
+			}
+		}
 
 		// **Headless has no swapchain, so its size comes from the target** -
 		// nothing else has an opinion about it.
-		if (State->Headless()) {
+		if (swapchain == nullptr) {
 			if (sceneTarget == nullptr || !sceneTarget->IsValid()) {
 				// A headless renderer with nowhere to draw is a caller mistake
 				// rather than a state to tolerate: every pass would run and its
@@ -5638,6 +5663,13 @@ namespace engine::render {
 			);
 		};
 
+		// The interface upload must precede every scene pass that can draw a
+		// spatial collector. `Prepare` opens a copy pass and therefore cannot run
+		// once a mirror, surface or portal render pass is open. Headless frames
+		// still draw into capture targets; a hook that has no backend declines in
+		// `Prepare` itself.
+		const bool drawInterface = interfaceHook != nullptr && interfaceHook->Prepare(command);
+
 		// --- the mirror recursion --------------------------------------------
 		//
 		// **What a pane shows a viewer that is not the eye.**
@@ -5812,6 +5844,7 @@ namespace engine::render {
 				const LightingUniforms levelLighting{
 					glm::vec4{State->Sun, 0.0f},
 					State->Ambient,
+					State->Direct,
 					glm::vec4{
 						haveShadow ? 1.0f : 0.0f, 1.0f / static_cast<float>(SHADOW_RESOLUTION), 0.0f, 1.0f
 					},
@@ -5891,7 +5924,35 @@ namespace engine::render {
 					);
 				}
 
+				if (drawInterface) {
+					result.DrawCalls += interfaceHook->RecordWorld(
+						command,
+						pass,
+						matrices.ViewProjection,
+						eye.Frame,
+						core::Color3{State->Ambient.x, State->Ambient.y, State->Ambient.z},
+						core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z},
+						paneWidth[slot],
+						paneHeight[slot],
+						false
+					);
+				}
+
 				drawBlendedInto(pass, levelFrame, levelLighting, pane.TagFilter, false);
+
+				if (drawInterface) {
+					result.DrawCalls += interfaceHook->RecordWorld(
+						command,
+						pass,
+						matrices.ViewProjection,
+						eye.Frame,
+						core::Color3{State->Ambient.x, State->Ambient.y, State->Ambient.z},
+						core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z},
+						paneWidth[slot],
+						paneHeight[slot],
+						true
+					);
+				}
 
 				SDL_EndGPURenderPass(pass);
 
@@ -6071,6 +6132,7 @@ namespace engine::render {
 					const LightingUniforms surfaceLighting{
 						glm::vec4{State->Sun, 0.0f},
 						State->Ambient,
+						State->Direct,
 						glm::vec4{
 							haveShadow ? 1.0f : 0.0f, 1.0f / static_cast<float>(SHADOW_RESOLUTION), 0.0f, 1.0f
 						},
@@ -6195,6 +6257,7 @@ namespace engine::render {
 								LightingUniforms levelLighting{
 									glm::vec4{State->Sun, 0.0f},
 									State->Ambient,
+									State->Direct,
 									glm::vec4{
 										haveShadow ? 1.0f : 0.0f,
 										1.0f / static_cast<float>(SHADOW_RESOLUTION),
@@ -6250,6 +6313,7 @@ namespace engine::render {
 							LightingUniforms mirrorLighting{
 								glm::vec4{State->Sun, 0.0f},
 								State->Ambient,
+								State->Direct,
 								glm::vec4{
 									haveShadow ? 1.0f : 0.0f,
 									1.0f / static_cast<float>(SHADOW_RESOLUTION),
@@ -6284,6 +6348,20 @@ namespace engine::render {
 
 					drawMirrors(false);
 
+					if (drawInterface && accepted[index].View->InstanceCount == 0) {
+						result.DrawCalls += interfaceHook->RecordWorld(
+							command,
+							pass,
+							state.ViewProjection,
+							accepted[index].View->Frame,
+							core::Color3{State->Ambient.x, State->Ambient.y, State->Ambient.z},
+							core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z},
+							state.Width,
+							state.Height,
+							false
+						);
+					}
+
 					// **`panesFollow` is true here**, because the blended mirrors
 					// below go onto the same pipeline - so a tail of nothing but
 					// mirrors still has to have it bound.
@@ -6293,6 +6371,20 @@ namespace engine::render {
 					// everything drawn into this texture.
 					if (plan.TransparentSurfaces > 0) {
 						drawMirrors(true);
+					}
+
+					if (drawInterface && accepted[index].View->InstanceCount == 0) {
+						result.DrawCalls += interfaceHook->RecordWorld(
+							command,
+							pass,
+							state.ViewProjection,
+							accepted[index].View->Frame,
+							core::Color3{State->Ambient.x, State->Ambient.y, State->Ambient.z},
+							core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z},
+							state.Width,
+							state.Height,
+							true
+						);
 					}
 
 					SDL_EndGPURenderPass(pass);
@@ -6548,6 +6640,7 @@ namespace engine::render {
 					const LightingUniforms subLighting{
 						glm::vec4{State->Sun, 0.0f},
 						State->Ambient,
+						State->Direct,
 						glm::vec4{
 							haveShadow ? 1.0f : 0.0f, 1.0f / static_cast<float>(SHADOW_RESOLUTION), 0.0f, 1.0f
 						},
@@ -6623,7 +6716,35 @@ namespace engine::render {
 					// **`panesFollow` is false here**, because this level's panes
 					// were drawn with the opaque head above - nothing follows that
 					// needs the transparent pipeline bound for it.
+					if (drawInterface) {
+						result.DrawCalls += interfaceHook->RecordWorld(
+							command,
+							pass,
+							sub.Matrices.ViewProjection,
+							sub.Frame,
+							core::Color3{State->Ambient.x, State->Ambient.y, State->Ambient.z},
+							core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z},
+							sceneWidth,
+							sceneHeight,
+							false
+						);
+					}
+
 					drawBlendedInto(pass, subFrameUniforms, subLighting, portal.TagFilter, false);
+
+					if (drawInterface) {
+						result.DrawCalls += interfaceHook->RecordWorld(
+							command,
+							pass,
+							sub.Matrices.ViewProjection,
+							sub.Frame,
+							core::Color3{State->Ambient.x, State->Ambient.y, State->Ambient.z},
+							core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z},
+							sceneWidth,
+							sceneHeight,
+							true
+						);
+					}
 
 					SDL_EndGPURenderPass(pass);
 					result.PortalPasses++;
@@ -6637,18 +6758,6 @@ namespace engine::render {
 				-1
 			);
 		}
-
-		// --- the interface's uploads ----------------------------------------
-		//
-		// **Here, and not beside the pass that draws them.** Dear ImGui's
-		// backend copies its vertex and index buffers through a copy pass, and
-		// SDL refuses to open one while a render pass is in flight - so an
-		// upload issued from `Record` works right up until the first frame with
-		// enough widgets to grow a buffer, which is a bug that arrives months
-		// after the code that caused it. The split is `FrameOverlayHook`'s
-		// contract for exactly that reason.
-		const bool drawInterface =
-			!State->Headless() && interfaceHook != nullptr && interfaceHook->Prepare(command);
 
 		// --- opaque pass ----------------------------------------------------
 
@@ -6785,6 +6894,7 @@ namespace engine::render {
 				const LightingUniforms lighting{
 					glm::vec4{State->Sun, 0.0f},
 					State->Ambient,
+					State->Direct,
 					glm::vec4{
 						haveShadow ? 1.0f : 0.0f, 1.0f / static_cast<float>(SHADOW_RESOLUTION), 0.0f, 0.0f
 					},
@@ -6948,6 +7058,7 @@ namespace engine::render {
 							LightingUniforms mirrored{
 								glm::vec4{State->Sun, 0.0f},
 								State->Ambient,
+								State->Direct,
 								glm::vec4{
 									haveShadow ? 1.0f : 0.0f,
 									1.0f / static_cast<float>(SHADOW_RESOLUTION),
@@ -6996,6 +7107,20 @@ namespace engine::render {
 				if (surfaceInCamera > 0) {
 					drawScreenMirrors(false);
 					bindScreen(nullptr);
+				}
+
+				if (drawInterface) {
+					result.DrawCalls += interfaceHook->RecordWorld(
+						command,
+						pass,
+						viewProjection,
+						cameraFrame,
+						core::Color3{State->Ambient.x, State->Ambient.y, State->Ambient.z},
+						core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z},
+						sceneWidth,
+						sceneHeight,
+						false
+					);
 				}
 
 				if (transparentCount > 0) {
@@ -7067,6 +7192,20 @@ namespace engine::render {
 					);
 				}
 
+				if (drawInterface) {
+					result.DrawCalls += interfaceHook->RecordWorld(
+						command,
+						pass,
+						viewProjection,
+						cameraFrame,
+						core::Color3{State->Ambient.x, State->Ambient.y, State->Ambient.z},
+						core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z},
+						sceneWidth,
+						sceneHeight,
+						true
+					);
+				}
+
 				// **Counted as it is drawn rather than derived from the instance
 				// count.** While everything was a cube, triangles were thirty-six
 				// indices times however many instances; with a mesh per instance
@@ -7109,9 +7248,10 @@ namespace engine::render {
 
 		// --- interface pass -------------------------------------------------
 
-		// `drawInterface` already requires a window - the hook is not asked to
-		// prepare anything headless - so there is no second test here.
-		if (drawInterface) {
+		// Screen-space interface needs the swapchain. A headless capture still
+		// prepares the hook so its spatial collectors can draw in the world pass,
+		// but has no window target for this pass.
+		if (drawInterface && swapchain != nullptr) {
 			ENGINE_PROFILE_CAT("interface pass", core::ProfileCategory::Render);
 			passes.Enter(Pass::Interface);
 
@@ -7144,7 +7284,7 @@ namespace engine::render {
 		const bool captureWantsThis =
 			State->CaptureSlot == Renderer::ANY_VIEWPORT || State->CaptureSlot == targetSlot;
 
-		if (offscreen && !State->CapturePath.empty() && captureWantsThis) {
+		if (present && offscreen && !State->CapturePath.empty() && captureWantsThis) {
 			SDL_GPUTransferBufferCreateInfo info{};
 			info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
 			info.size = sceneWidth * sceneHeight * 4;
@@ -7176,7 +7316,7 @@ namespace engine::render {
 		// reached the swapchain - and presenting a texture the driver handed
 		// back without writing to it shows last frame's image or uninitialised
 		// memory. One clear costs nothing and removes the whole case.
-		if (!State->Headless() && windowTarget.load_op == SDL_GPU_LOADOP_CLEAR) {
+		if (swapchain != nullptr && windowTarget.load_op == SDL_GPU_LOADOP_CLEAR) {
 			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &windowTarget, 1, nullptr);
 			SDL_EndGPURenderPass(pass);
 		}
@@ -7229,7 +7369,7 @@ namespace engine::render {
 		// counting presented frames gets zero from a headless renderer, which is
 		// the honest answer - what it should count instead is captures, or its
 		// own loop.
-		result.Presented = !State->Headless();
+		result.Presented = swapchain != nullptr;
 		return result;
 	}
 }

@@ -410,6 +410,9 @@ namespace studio {
 			ENGINE_ERROR("the editor interface would not start");
 			return false;
 		}
+		Interface.SetSpatialViewportSource(
+			[this](engine::ecs::Entity instance) { return ViewportImages.Resolve(instance); }
+		);
 
 		if (!Interface.IsDrawable()) {
 			ENGINE_INFO("headless: the panels run and nothing draws them");
@@ -1509,6 +1512,23 @@ namespace studio {
 
 		if (shown.IsValid()) {
 			Universe->Enter(shown, [&](Store &store) {
+				if (DrawingViewport < GuiLists.size() && target.IsValid()) {
+					(void)ViewportImages.Render(
+						Renderer,
+						store,
+						GuiLists[DrawingViewport].Commands(),
+						PreviewSlot() + 1
+					);
+					Interface.SubmitSpatial(
+						GuiLists[DrawingViewport].Commands(),
+						engine::core::Vector2{
+							static_cast<float>(target.Width),
+							static_cast<float>(target.Height),
+						},
+						store,
+						AnimationSeconds
+					);
+				}
 				if (const auto *list = store.Resource<client::DrawList>()) {
 					// Copied out rather than borrowed. The renderer's call
 					// happens outside `Enter`, and a span into a store nobody

@@ -42,6 +42,7 @@ layout(set = 2, binding = 3) uniform sampler2D beamMap;
 layout(set = 3, binding = 0) uniform Lighting {
 	vec4 Direction;
 	vec4 Ambient;
+	vec4 Direct;
 	vec4 Flags;
 	vec4 BaseColour;
 	vec4 Surface;
@@ -103,6 +104,6 @@ void main() {
 	float rim = 1.0 - abs(dot(normal, facing));
 	float edge = smoothstep(0.62, 0.92, rim);
 
-	vec3 lit = albedo * (lighting.Ambient.rgb + vec3(banded));
+	vec3 lit = albedo * (lighting.Ambient.rgb + lighting.Direct.rgb * banded);
 	outColour = vec4(mix(lit, albedo, edge), alpha);
 }

@@ -2227,15 +2227,20 @@ namespace client {
 		// answers, and a lambda capturing `this` outlives the frame it is set in.
 		if (!InterfaceImagesReady) {
 			InterfaceImagesReady = true;
-			Interface.SetImageSource(
-				[this](const engine::core::Name &name, engine::render::FlipbookCell &cell) -> void * {
-					void *const handle = Renderer.TextureHandle(name);
-					if (handle != nullptr) {
-						cell = Renderer.TextureCell(name, AnimationSeconds);
-					}
-					return handle;
+			Interface.SetImageSource([this](const engine::core::Name &name) {
+				engine::render::InterfaceImage image;
+				image.Texture = Renderer.TextureHandle(name);
+				if (image.Texture == nullptr) {
+					return image;
 				}
-			);
+
+				image.Cell = Renderer.TextureCell(name, AnimationSeconds);
+				(void)Renderer.TextureSize(name, image.Width, image.Height);
+				return image;
+			});
+			Interface.SetViewportSource([this](engine::ecs::Entity instance) {
+				return ViewportImages.Resolve(instance);
+			});
 		}
 
 		engine::render::InterfacePass *hook = nullptr;
@@ -2364,6 +2369,7 @@ namespace client {
 				// producing motion - what it does *not* do is end the hover,
 				// which is what this flag is for.
 				pointer.Inside = Input.State().Focused;
+				pointer.ScreenOnly = true;
 
 				// **Before the router reads the pointer, so the press is this
 				// frame's.** Synthesising after would put the click one frame
@@ -2376,6 +2382,23 @@ namespace client {
 					pointer.Down = Input.State().IsButtonDown(engine::scene::MouseButton::Left);
 				}
 
+				// A screen interface gets first refusal. If no interactive screen
+				// element is under the pointer, project the same window pixel onto
+				// the nearest interactive `SurfaceGui` or `BillboardGui` and route
+				// in that collector's own canvas coordinates.
+				if (pointer.Inside &&
+					engine::gui::PickScreen(store, InterfaceList.Commands(), pointer.Position) ==
+						engine::ecs::NULL_ENTITY) {
+					engine::render::SpatialPointer spatial;
+					if (engine::render::ResolveSpatialPointer(
+							store, InterfaceList.Commands(), request.Display, pointer.Position, spatial
+						)) {
+						pointer.Position = spatial.Position;
+						pointer.Collector = spatial.Collector;
+						pointer.ScreenOnly = false;
+					}
+				}
+
 				interfaceEvents = InterfaceRouter.Update(store, InterfaceList.Commands(), pointer);
 
 				// **After the router, because this frame's press is what may have
@@ -2383,6 +2406,16 @@ namespace client {
 				// window on the frame it happened, or the first character somebody
 				// types is the one SDL was never asked for.
 				wantsTextInput = engine::gui::FocusedTextBox(store) != engine::ecs::NULL_ENTITY;
+
+				if (!InterfaceList.Commands().Commands.empty()) {
+					(void)ViewportImages.Render(Renderer, store, InterfaceList.Commands(), 1);
+					Interface.Submit(
+						InterfaceList.Commands(),
+						engine::core::Vector2{request.Display.Width, request.Display.Height},
+						store
+					);
+					hook = &Interface;
+				}
 			});
 
 			// **Outside the world's lock, because it reaches a VM.** The span
@@ -2399,14 +2432,6 @@ namespace client {
 						runtime->DeliverGuiEvents(interfaceEvents);
 					}
 				}
-			}
-
-			if (!InterfaceList.Commands().Commands.empty()) {
-				Interface.Submit(
-					InterfaceList.Commands(),
-					engine::core::Vector2{request.Display.Width, request.Display.Height}
-				);
-				hook = &Interface;
 			}
 		}
 

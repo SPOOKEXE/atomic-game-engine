@@ -348,3 +348,149 @@ TEST_CASE("a rotated label turns as a run rather than per glyph", "[render][inte
 	// And barely apart on X, because the run now goes down rather than across.
 	CHECK(std::abs(mesh.Vertices()[4].X - mesh.Vertices()[0].X) < 12.0f);
 }
+
+TEST_CASE("rounded fills and outlines are tessellated around their corners", "[render][interfacemesh]") {
+	GlyphAtlas atlas;
+	engine::gui::DrawList list;
+	auto rounded = Rectangle(10.0f, 20.0f, 100.0f, 50.0f);
+	rounded.CornerRadius = 12.0f;
+	list.Commands.push_back(rounded);
+
+	auto outline = rounded;
+	outline.Kind = engine::gui::DrawKind::Outline;
+	outline.Thickness = 3.0f;
+	list.Commands.push_back(outline);
+
+	InterfaceMesh mesh;
+	mesh.Build(list, atlas);
+
+	CHECK(mesh.Vertices().size() > 20);
+	CHECK(mesh.Indices().size() > 30);
+	for (const auto &vertex : mesh.Vertices()) {
+		CHECK(vertex.X >= 7.0f);
+		CHECK(vertex.X <= 113.0f);
+		CHECK(vertex.Y >= 17.0f);
+		CHECK(vertex.Y <= 73.0f);
+	}
+}
+
+TEST_CASE("spatial collectors never merge into one batch", "[render][interfacemesh]") {
+	GlyphAtlas atlas;
+	engine::gui::DrawList list;
+	auto first = Rectangle(0.0f, 0.0f, 10.0f, 10.0f);
+	first.Collector = engine::ecs::Entity{1};
+	auto second = first;
+	second.Collector = engine::ecs::Entity{2};
+	list.Commands.push_back(first);
+	list.Commands.push_back(second);
+
+	InterfaceMesh mesh;
+	mesh.Build(list, atlas);
+
+	REQUIRE(mesh.Batches().size() == 2);
+	CHECK(mesh.Batches()[0].Collector == first.Collector);
+	CHECK(mesh.Batches()[1].Collector == second.Collector);
+}
+
+TEST_CASE("an image bakes its flipbook cell into final UVs", "[render][interfacemesh]") {
+	GlyphAtlas atlas;
+	engine::gui::DrawList list;
+	auto picture = Rectangle(0.0f, 0.0f, 100.0f, 50.0f);
+	picture.Kind = engine::gui::DrawKind::Image;
+	picture.Image = engine::core::Name("animated");
+	list.Commands.push_back(picture);
+
+	InterfaceMesh mesh;
+	mesh.Build(list, atlas, [](const engine::core::Name &) {
+		engine::render::InterfaceImageInfo info;
+		info.Size = Vector2{100.0f, 50.0f};
+		info.Cell.Scale = 0.25f;
+		info.Cell.OffsetU = 0.5f;
+		info.Cell.OffsetV = 0.25f;
+		return info;
+	});
+
+	REQUIRE(mesh.Vertices().size() == 4);
+	CHECK(mesh.Vertices()[0].U == Approx(0.5f));
+	CHECK(mesh.Vertices()[0].V == Approx(0.25f));
+	CHECK(mesh.Vertices()[2].U == Approx(0.75f));
+	CHECK(mesh.Vertices()[2].V == Approx(0.5f));
+}
+
+TEST_CASE("viewport frames resolve by element and keep target extents", "[render][interfacemesh]") {
+	GlyphAtlas atlas;
+	engine::gui::DrawList list;
+	auto viewport = Rectangle(0.0f, 0.0f, 160.0f, 90.0f);
+	viewport.Kind = engine::gui::DrawKind::Viewport;
+	viewport.Source = engine::ecs::Entity{77};
+	list.Commands.push_back(viewport);
+
+	InterfaceMesh mesh;
+	mesh.Build(list, atlas, {}, [](engine::ecs::Entity source) {
+		CHECK(source == engine::ecs::Entity{77});
+		engine::render::InterfaceImageInfo info;
+		info.Size = Vector2{160.0f, 90.0f};
+		info.UVMax = Vector2{0.75f, 0.5f};
+		return info;
+	});
+
+	REQUIRE(mesh.Batches().size() == 1);
+	CHECK(mesh.Batches()[0].Viewport == viewport.Source);
+	CHECK(mesh.Vertices()[0].U == Approx(0.0f));
+	CHECK(mesh.Vertices()[0].V == Approx(0.0f));
+	CHECK(mesh.Vertices()[2].U == Approx(0.75f));
+	CHECK(mesh.Vertices()[2].V == Approx(0.5f));
+}
+
+TEST_CASE("text size alignment wrapping truncation and stroke affect geometry", "[render][interfacemesh]") {
+	const StagedAssets assets;
+	if (!std::filesystem::exists(engine::core::Paths::Assets() / "fonts" / "Inter.ttf")) {
+		SUCCEED("no staged fonts");
+		return;
+	}
+
+	GlyphAtlas atlas;
+	REQUIRE(atlas.Build(16.0f));
+	InterfaceMesh mesh;
+
+	auto text = Rectangle(0.0f, 0.0f, 120.0f, 80.0f);
+	text.Kind = engine::gui::DrawKind::Text;
+	text.Text = "AB";
+	text.TextSize = 16;
+	text.XAlignment = engine::gui::TextXAlignment::Left;
+	text.YAlignment = engine::gui::TextYAlignment::Top;
+	engine::gui::DrawList list;
+	list.Commands.push_back(text);
+	mesh.Build(list, atlas);
+	REQUIRE(mesh.Vertices().size() == 8);
+	const float smallHeight = mesh.Vertices()[2].Y - mesh.Vertices()[0].Y;
+	const float left = mesh.Vertices()[0].X;
+
+	list.Commands[0].TextSize = 32;
+	list.Commands[0].XAlignment = engine::gui::TextXAlignment::Right;
+	mesh.Build(list, atlas);
+	REQUIRE(mesh.Vertices().size() == 8);
+	CHECK(mesh.Vertices()[2].Y - mesh.Vertices()[0].Y == Approx(smallHeight * 2.0f));
+	CHECK(mesh.Vertices()[0].X > left);
+
+	list.Commands[0] = text;
+	list.Commands[0].Text = "A A A A";
+	list.Commands[0].Bounds.Max.X = 24.0f;
+	list.Commands[0].Wrapped = true;
+	mesh.Build(list, atlas);
+	REQUIRE(mesh.Vertices().size() == 16);
+	CHECK(mesh.Vertices()[12].Y > mesh.Vertices()[0].Y);
+
+	list.Commands[0] = text;
+	list.Commands[0].Text = "A";
+	list.Commands[0].StrokeTransparency = 0.0f;
+	mesh.Build(list, atlas);
+	CHECK(mesh.Vertices().size() == 36);
+
+	list.Commands[0] = text;
+	list.Commands[0].Text = "ABCDEFGHIJK";
+	list.Commands[0].Bounds.Max.X = 30.0f;
+	list.Commands[0].Truncate = engine::gui::TextTruncate::AtEnd;
+	mesh.Build(list, atlas);
+	CHECK(mesh.Vertices().size() < 44);
+}

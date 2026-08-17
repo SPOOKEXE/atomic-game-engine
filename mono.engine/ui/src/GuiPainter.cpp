@@ -2,7 +2,9 @@
 #include <engine/ui/GuiPainter.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <string>
 #include <string_view>
 
 namespace engine::ui {
@@ -52,31 +54,24 @@ namespace engine::ui {
 			}
 		};
 
-		// The four corners of a rectangle, rotated about its own centre.
-		//
-		// imgui has no rotated-rectangle primitive, so a rotated element is
-		// drawn as a convex quad. **Only rectangles rotate.** Text and images
-		// are drawn upright at the rotated rectangle's bounding centre, which
-		// is stated rather than discovered: rotating a glyph run needs per-glyph
-		// quads, and rotating a nine-slice needs the slices rotated
-		// individually. Filed as `D00023`.
-		void RotatedCorners(const ImVec2 &min, const ImVec2 &max, float degrees, ImVec2 out[4]) {
+		// Turns every primitive one command just appended about the element's
+		// centre. Working on imgui's generated vertices preserves rounded corners,
+		// glyph quads, tiles and all nine slices with one rule.
+		void
+		RotateVertices(ImDrawList *into, int first, const ImVec2 &min, const ImVec2 &max, float degrees) {
+			if (degrees == 0.0f) {
+				return;
+			}
 			const ImVec2 centre{(min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f};
 			const float radians = degrees * 3.14159265358979323846f / 180.0f;
 			const float cosine = std::cos(radians);
 			const float sine = std::sin(radians);
 
-			const ImVec2 raw[4]{
-				{min.x, min.y},
-				{max.x, min.y},
-				{max.x, max.y},
-				{min.x, max.y},
-			};
-
-			for (int index = 0; index < 4; index++) {
-				const float x = raw[index].x - centre.x;
-				const float y = raw[index].y - centre.y;
-				out[index] = ImVec2{centre.x + x * cosine - y * sine, centre.y + x * sine + y * cosine};
+			for (int index = first; index < into->VtxBuffer.Size; index++) {
+				ImVec2 &point = into->VtxBuffer[index].pos;
+				const float x = point.x - centre.x;
+				const float y = point.y - centre.y;
+				point = ImVec2{centre.x + x * cosine - y * sine, centre.y + x * sine + y * cosine};
 			}
 		}
 
@@ -212,7 +207,10 @@ namespace engine::ui {
 			const ImU32 tint = Colour(command.Tint, command.Transparency);
 
 			const ImageSource::Resolved resolved =
-				images.Resolve ? images.Resolve(command.Image) : ImageSource::Resolved{};
+				command.Kind == DrawKind::Viewport
+					? (images.ResolveViewport ? images.ResolveViewport(command.Source)
+											  : ImageSource::Resolved{})
+					: (images.Resolve ? images.Resolve(command.Image) : ImageSource::Resolved{});
 			const ImTextureID texture = resolved.Texture;
 
 			if (texture == ImTextureID{}) {
@@ -299,7 +297,8 @@ namespace engine::ui {
 		}
 
 		size_t PaintText(const DrawCommand &command, ImDrawList *into, const Space &space) {
-			const std::string_view text = command.Text;
+			std::string visible = command.Text;
+			std::string_view text = visible;
 			if (text.empty() || command.TextSize <= 0) {
 				return 0;
 			}
@@ -318,6 +317,24 @@ namespace engine::ui {
 			const float wrap = command.Wrapped ? width : 0.0f;
 
 			ImFont *measureFont = font != nullptr ? font : ImGui::GetFont();
+			if (!command.Wrapped && command.Truncate == gui::TextTruncate::AtEnd && width > 0.0f &&
+				measureFont->CalcTextSizeA(size, FLT_MAX, 0.0f, text.data(), text.data() + text.size()).x >
+					width) {
+				constexpr std::string_view dots = "...";
+				while (!visible.empty()) {
+					visible.pop_back();
+					while (!visible.empty() &&
+						   (static_cast<unsigned char>(visible.back()) & 0xC0u) == 0x80u) {
+						visible.pop_back();
+					}
+					const std::string candidate = visible + std::string(dots);
+					if (measureFont->CalcTextSizeA(size, FLT_MAX, 0.0f, candidate.c_str()).x <= width) {
+						visible = candidate;
+						break;
+					}
+				}
+				text = visible;
+			}
 			const ImVec2 extent =
 				measureFont->CalcTextSizeA(size, FLT_MAX, wrap, text.data(), text.data() + text.size());
 
@@ -345,16 +362,29 @@ namespace engine::ui {
 				break;
 			}
 
-			into->AddText(
-				font,
-				size,
-				ImVec2{x, y},
-				Colour(command.Tint, command.Transparency),
-				text.data(),
-				text.data() + text.size(),
-				wrap
-			);
-			return 1;
+			const auto draw = [&](const ImVec2 &position, ImU32 colour) {
+				into->AddText(font, size, position, colour, text.data(), text.data() + text.size(), wrap);
+			};
+
+			size_t drawn = 0;
+			if (command.StrokeTransparency < 1.0f) {
+				const ImU32 stroke = Colour(command.StrokeTint, command.StrokeTransparency);
+				for (const ImVec2 offset : std::array<ImVec2, 8>{
+						 ImVec2{-1.0f, -1.0f},
+						 ImVec2{0.0f, -1.0f},
+						 ImVec2{1.0f, -1.0f},
+						 ImVec2{-1.0f, 0.0f},
+						 ImVec2{1.0f, 0.0f},
+						 ImVec2{-1.0f, 1.0f},
+						 ImVec2{0.0f, 1.0f},
+						 ImVec2{1.0f, 1.0f},
+					 }) {
+					draw(ImVec2{x + offset.x * space.Scale, y + offset.y * space.Scale}, stroke);
+					drawn++;
+				}
+			}
+			draw(ImVec2{x, y}, Colour(command.Tint, command.Transparency));
+			return drawn + 1;
 		}
 	}
 
@@ -369,6 +399,9 @@ namespace engine::ui {
 		size_t drawn = 0;
 
 		for (const DrawCommand &command : list.Commands) {
+			if (command.Spatial) {
+				continue;
+			}
 			// **Pushed with intersection, so a caller may already have one.** A
 			// panel drawing a canvas inside itself has a clip of its own, and a
 			// replacing push would let an element draw over the panel's border.
@@ -378,31 +411,21 @@ namespace engine::ui {
 			const ImVec2 max = space.Point(command.Bounds.Max);
 			const ImU32 tint = Colour(command.Tint, command.Transparency);
 			const float radius = command.CornerRadius * space.Scale;
+			const int firstVertex = into->VtxBuffer.Size;
 
 			switch (command.Kind) {
 			case DrawKind::Rectangle:
-				if (command.Rotation != 0.0f) {
-					ImVec2 corners[4];
-					RotatedCorners(min, max, command.Rotation, corners);
-					into->AddConvexPolyFilled(corners, 4, tint);
-				} else {
-					into->AddRectFilled(min, max, tint, radius);
-				}
+				into->AddRectFilled(min, max, tint, radius);
 				drawn++;
 				break;
 
 			case DrawKind::Outline:
-				if (command.Rotation != 0.0f) {
-					ImVec2 corners[4];
-					RotatedCorners(min, max, command.Rotation, corners);
-					into->AddPolyline(corners, 4, tint, ImDrawFlags_Closed, command.Thickness * space.Scale);
-				} else {
-					into->AddRect(min, max, tint, radius, ImDrawFlags_None, command.Thickness * space.Scale);
-				}
+				into->AddRect(min, max, tint, radius, ImDrawFlags_None, command.Thickness * space.Scale);
 				drawn++;
 				break;
 
 			case DrawKind::Image:
+			case DrawKind::Viewport:
 				drawn += PaintImage(command, into, space, images);
 				break;
 
@@ -410,6 +433,7 @@ namespace engine::ui {
 				drawn += PaintText(command, into, space);
 				break;
 			}
+			RotateVertices(into, firstVertex, min, max, command.Rotation);
 
 			into->PopClipRect();
 		}

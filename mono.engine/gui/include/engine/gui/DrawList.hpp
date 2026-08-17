@@ -48,6 +48,9 @@ namespace engine::gui {
 		// A sampled image, stretched, sliced, tiled, fitted or cropped.
 		Image,
 
+		// A scene rendered from a `ViewportFrame`'s camera.
+		Viewport,
+
 		// A run of text inside `Bounds`, aligned by the two alignment fields.
 		Text,
 	};
@@ -65,6 +68,15 @@ namespace engine::gui {
 		// result and a "what drew this pixel" panel can all name the element,
 		// which is the question every UI debugging session opens with.
 		ecs::Entity Source;
+
+		// The `LayerCollector` whose canvas these pixels belong to.
+		//
+		// A screen collector and a spatial collector may both use (0, 0), but
+		// they do not draw in the same place. Keeping the owner on the flat
+		// command lets a backend split those paths without walking the tree a
+		// second time or asking the source element for its ancestors.
+		ecs::Entity Collector;
+		bool Spatial = false;
 
 		// Where it goes, in canvas pixels.
 		core::Rect Bounds;
@@ -141,8 +153,15 @@ namespace engine::gui {
 		// Whether long text breaks onto further lines.
 		bool Wrapped = false;
 
+		// What happens when an unwrapped run is wider than `Bounds`.
+		TextTruncate Truncate = TextTruncate::None;
+
 		// Multiple of the em size between lines.
 		float LineHeight = 1.0f;
+
+		// The outline around every glyph. A transparency of 1 disables it.
+		core::Color3 StrokeTint;
+		float StrokeTransparency = 1.0f;
 	};
 
 	// A whole frame's worth, in paint order.

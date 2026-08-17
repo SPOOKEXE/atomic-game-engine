@@ -387,13 +387,37 @@ namespace engine::gui {
 	// hosts with different viewports are *supposed* to disagree.
 	//
 	// Absent means "nobody resolved one", and `CanvasFor` then falls back to the
-	// authored pixel size - which is the right answer for a headless world, a
-	// test, and a `SurfaceGui` whose sizing mode is `FixedSize` anyway.
+	// authored pixel size. A drawable fixed-size surface still receives this
+	// component because the renderer needs its world plane as well as its pixels.
 	//
 	// @since v0.8
+	enum class SpatialCanvasKind : uint8_t {
+		Surface,
+		Billboard,
+	};
+
 	struct SpatialCanvas {
 		// The canvas size in pixels.
 		core::Vector2 Size;
+
+		// How the canvas is placed. A surface uses `Origin` and both full-span
+		// axes directly. A billboard uses `Origin` as its anchor and `WorldSize`
+		// against the camera that draws it.
+		core::Vector3 Origin;
+		core::Vector3 AxisX;
+		core::Vector3 AxisY;
+		core::Vector2 WorldSize;
+		core::Vector2 BillboardStuds;
+		core::Vector2 BillboardPixels;
+		core::Vector3 Normal;
+
+		float LightInfluence = 0.0f;
+		float Brightness = 1.0f;
+		float MaxDistance = 0.0f;
+		SpatialCanvasKind Kind = SpatialCanvasKind::Surface;
+		bool AlwaysOnTop = false;
+		bool Visible = true;
+		uint8_t Reserved[1] = {};
 	};
 
 	// A collector projected onto a face of a part.

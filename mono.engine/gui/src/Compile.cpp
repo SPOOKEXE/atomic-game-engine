@@ -437,8 +437,11 @@ namespace engine::gui {
 		void Emit(
 			const Store &store,
 			Entity instance,
+			Entity collector,
 			const Resolved &resolved,
 			const CompileRequest &request,
+			const Color3 &groupTint,
+			float groupOpacity,
 			DrawList &out
 		) {
 			const Element *element = store.Get<Element>(instance);
@@ -479,10 +482,23 @@ namespace engine::gui {
 
 			DrawCommand base;
 			base.Source = instance;
+			base.Collector = collector;
+			base.Spatial = store.Get<SpatialCanvas>(collector) != nullptr;
 			base.Bounds = bounds;
 			base.Clip = resolved.Clip;
 			base.Rotation = resolved.AbsoluteRotation;
 			base.CornerRadius = radius;
+
+			const auto tintByGroup = [&](const Color3 &colour) {
+				return Color3{
+					colour.R * groupTint.R,
+					colour.G * groupTint.G,
+					colour.B * groupTint.B,
+				};
+			};
+			const auto fadeByGroup = [&](float transparency) {
+				return 1.0f - (1.0f - std::clamp(transparency, 0.0f, 1.0f)) * groupOpacity;
+			};
 
 			if (const Background *background = store.Get<Background>(instance);
 				background != nullptr && background->Transparency < 1.0f) {
@@ -503,8 +519,8 @@ namespace engine::gui {
 
 				DrawCommand rectangle = base;
 				rectangle.Kind = DrawKind::Rectangle;
-				rectangle.Tint = fill;
-				rectangle.Transparency = background->Transparency;
+				rectangle.Tint = tintByGroup(fill);
+				rectangle.Transparency = fadeByGroup(background->Transparency);
 				out.Commands.push_back(rectangle);
 
 				if (background->BorderSizePixel > 0) {
@@ -514,12 +530,12 @@ namespace engine::gui {
 						bounds, background->Border, static_cast<float>(background->BorderSizePixel)
 					);
 					border.Thickness = static_cast<float>(background->BorderSizePixel);
-					border.Tint = background->BorderColor;
+					border.Tint = tintByGroup(background->BorderColor);
 
 					// Roblox's border fades with the *background*'s
 					// transparency and has none of its own. Kept, because a
 					// script fading a panel expects the outline to go with it.
-					border.Transparency = background->Transparency;
+					border.Transparency = fadeByGroup(background->Transparency);
 					out.Commands.push_back(border);
 				}
 			}
@@ -529,8 +545,8 @@ namespace engine::gui {
 				DrawCommand image = base;
 				image.Kind = DrawKind::Image;
 				image.Image = picture->Image;
-				image.Tint = picture->Color;
-				image.Transparency = picture->Transparency;
+				image.Tint = tintByGroup(picture->Color);
+				image.Transparency = fadeByGroup(picture->Transparency);
 				image.Scale = picture->Scale;
 				image.SliceCenter = picture->SliceCenter;
 				image.SliceScale = picture->SliceScale;
@@ -543,6 +559,16 @@ namespace engine::gui {
 				};
 				image.Tile = picture->TileSize.Resolve(resolved.AbsoluteSize);
 				out.Commands.push_back(image);
+			}
+
+			if (const Viewport *viewport = store.Get<Viewport>(instance);
+				viewport != nullptr && viewport->CurrentCamera != ecs::NULL_ENTITY &&
+				viewport->Transparency < 1.0f) {
+				DrawCommand scene = base;
+				scene.Kind = DrawKind::Viewport;
+				scene.Tint = tintByGroup(viewport->Color);
+				scene.Transparency = fadeByGroup(viewport->Transparency);
+				out.Commands.push_back(scene);
 			}
 
 			if (const Label *label = store.Get<Label>(instance); label != nullptr) {
@@ -562,14 +588,17 @@ namespace engine::gui {
 					DrawCommand run = base;
 					run.Kind = DrawKind::Text;
 					run.Text = *text;
-					run.Tint = colour;
-					run.Transparency = label->Transparency;
+					run.Tint = tintByGroup(colour);
+					run.Transparency = fadeByGroup(label->Transparency);
 					run.TextSize = resolved.TextSize;
 					run.Font = label->Font;
 					run.XAlignment = label->XAlignment;
 					run.YAlignment = label->YAlignment;
 					run.Wrapped = label->Wrapped;
+					run.Truncate = label->Truncate;
 					run.LineHeight = label->LineHeight;
+					run.StrokeTint = tintByGroup(label->StrokeColor);
+					run.StrokeTransparency = fadeByGroup(label->StrokeTransparency);
 
 					// **Text clips to the element as well as to its
 					// ancestors**, whatever `ClipsDescendants` says. Roblox does
@@ -589,9 +618,88 @@ namespace engine::gui {
 				outline.Kind = DrawKind::Outline;
 				outline.Bounds = BorderRect(bounds, BorderMode::Outline, stroke->Thickness);
 				outline.Thickness = stroke->Thickness;
-				outline.Tint = stroke->Color;
-				outline.Transparency = stroke->Transparency;
+				outline.Tint = tintByGroup(stroke->Color);
+				outline.Transparency = fadeByGroup(stroke->Transparency);
 				out.Commands.push_back(outline);
+			}
+		}
+
+		void EmitScrollbars(
+			const Store &store,
+			Entity instance,
+			Entity collector,
+			const Resolved &resolved,
+			const Color3 &groupTint,
+			float groupOpacity,
+			DrawList &out
+		) {
+			const Scrolling *scrolling = store.Get<Scrolling>(instance);
+			if (scrolling == nullptr || scrolling->BarThickness <= 0 || scrolling->BarTransparency >= 1.0f) {
+				return;
+			}
+
+			const Vector2 viewport = resolved.AbsoluteSize;
+			const Vector2 content = scrolling->CanvasSize.Resolve(viewport);
+			const float thickness = static_cast<float>(scrolling->BarThickness);
+			const uint8_t axes = static_cast<uint8_t>(scrolling->Direction);
+			const bool horizontal =
+				(axes & static_cast<uint8_t>(ScrollingDirection::X)) != 0 && content.X > viewport.X;
+			const bool vertical =
+				(axes & static_cast<uint8_t>(ScrollingDirection::Y)) != 0 && content.Y > viewport.Y;
+
+			const Rect bounds{
+				resolved.AbsolutePosition,
+				Vector2{
+					resolved.AbsolutePosition.X + viewport.X,
+					resolved.AbsolutePosition.Y + viewport.Y,
+				},
+			};
+
+			DrawCommand bar;
+			bar.Kind = DrawKind::Rectangle;
+			bar.Source = instance;
+			bar.Collector = collector;
+			bar.Spatial = store.Get<SpatialCanvas>(collector) != nullptr;
+			bar.Clip = resolved.Clip.Intersection(bounds);
+			bar.CornerRadius = thickness * 0.5f;
+			bar.Tint = Color3{
+				scrolling->BarColor.R * groupTint.R,
+				scrolling->BarColor.G * groupTint.G,
+				scrolling->BarColor.B * groupTint.B,
+			};
+			bar.Transparency =
+				1.0f - (1.0f - std::clamp(scrolling->BarTransparency, 0.0f, 1.0f)) * groupOpacity;
+
+			if (vertical) {
+				const float track = std::max(viewport.Y - (horizontal ? thickness : 0.0f), 0.0f);
+				const float thumb =
+					content.Y > 0.0f ? std::max(track * viewport.Y / content.Y, thickness) : track;
+				const float travel = std::max(track - thumb, 0.0f);
+				const float range = std::max(content.Y - viewport.Y, 0.0f);
+				const float offset =
+					range > 0.0f ? travel * std::clamp(scrolling->CanvasPosition.Y / range, 0.0f, 1.0f)
+								 : 0.0f;
+				bar.Bounds = Rect{
+					Vector2{bounds.Max.X - thickness, bounds.Min.Y + offset},
+					Vector2{bounds.Max.X, bounds.Min.Y + offset + thumb},
+				};
+				out.Commands.push_back(bar);
+			}
+
+			if (horizontal) {
+				const float track = std::max(viewport.X - (vertical ? thickness : 0.0f), 0.0f);
+				const float thumb =
+					content.X > 0.0f ? std::max(track * viewport.X / content.X, thickness) : track;
+				const float travel = std::max(track - thumb, 0.0f);
+				const float range = std::max(content.X - viewport.X, 0.0f);
+				const float offset =
+					range > 0.0f ? travel * std::clamp(scrolling->CanvasPosition.X / range, 0.0f, 1.0f)
+								 : 0.0f;
+				bar.Bounds = Rect{
+					Vector2{bounds.Min.X + offset, bounds.Max.Y - thickness},
+					Vector2{bounds.Min.X + offset + thumb, bounds.Max.Y},
+				};
+				out.Commands.push_back(bar);
 			}
 		}
 
@@ -601,8 +709,16 @@ namespace engine::gui {
 		// over its parent whatever its `ZIndex`**, which is
 		// `ZIndexBehavior::Sibling` and Roblox's modern default; `Global` is
 		// applied afterwards, as a stable sort of the whole collector's list.
-		void
-		Walk(const Store &store, Entity instance, const CompileRequest &request, int depth, DrawList &out) {
+		void Walk(
+			const Store &store,
+			Entity instance,
+			Entity collector,
+			const CompileRequest &request,
+			int depth,
+			const Color3 &inheritedTint,
+			float inheritedOpacity,
+			DrawList &out
+		) {
 			if (depth > 256) {
 				return;
 			}
@@ -612,7 +728,18 @@ namespace engine::gui {
 				return;
 			}
 
-			Emit(store, instance, *resolved, request, out);
+			Color3 tint = inheritedTint;
+			float opacity = inheritedOpacity;
+			if (const Group *group = store.Get<Group>(instance)) {
+				tint = Color3{
+					tint.R * group->Color.R,
+					tint.G * group->Color.G,
+					tint.B * group->Color.B,
+				};
+				opacity *= 1.0f - std::clamp(group->Transparency, 0.0f, 1.0f);
+			}
+
+			Emit(store, instance, collector, *resolved, request, tint, opacity, out);
 
 			std::vector<Entity> children;
 			store.EachChild(instance, [&](Entity child) {
@@ -631,8 +758,12 @@ namespace engine::gui {
 			});
 
 			for (const Entity child : children) {
-				Walk(store, child, request, depth + 1, out);
+				Walk(store, child, collector, request, depth + 1, tint, opacity, out);
 			}
+
+			// Scrollbars belong over the scrolled children. Emitting them after
+			// the subtree keeps that paint order without a renderer special case.
+			EmitScrollbars(store, instance, collector, *resolved, tint, opacity, out);
 		}
 	}
 
@@ -739,7 +870,7 @@ namespace engine::gui {
 			});
 
 			for (const Entity root : roots) {
-				Walk(store, root, request, 1, List);
+				Walk(store, root, collector, request, 1, Color3{1.0f, 1.0f, 1.0f}, 1.0f, List);
 			}
 
 			// **`Global` is a re-sort of what `Sibling` produced**, rather than

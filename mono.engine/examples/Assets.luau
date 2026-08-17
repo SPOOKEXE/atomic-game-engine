@@ -168,8 +168,8 @@ local imageSurface = Instance.new("SurfaceGui")
 imageSurface.Name = "ImageSurface"
 imageSurface.Adornee = imagePane
 
--- `Front` is -Z, which is the face the camera below is on.
-imageSurface.Face = Enum.NormalId.Front
+-- The camera below stands on +Z, which looks at the part's Back face.
+imageSurface.Face = Enum.NormalId.Back
 imageSurface.Parent = imagePane
 
 local imageLabel = Instance.new("ImageLabel")
@@ -211,7 +211,7 @@ videoPane.Parent = workspace
 local videoSurface = Instance.new("SurfaceGui")
 videoSurface.Name = "VideoSurface"
 videoSurface.Adornee = videoPane
-videoSurface.Face = Enum.NormalId.Front
+videoSurface.Face = Enum.NormalId.Back
 videoSurface.Parent = videoPane
 
 local videoText = Instance.new("TextLabel")

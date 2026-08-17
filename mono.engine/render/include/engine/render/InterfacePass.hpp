@@ -24,6 +24,7 @@
 // @tier L12 · client
 
 #include <engine/core/Name.hpp>
+#include <engine/gui/Components.hpp>
 #include <engine/gui/DrawList.hpp>
 #include <engine/render/Flipbook.hpp>
 #include <engine/render/GlyphAtlas.hpp>
@@ -33,8 +34,26 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <vector>
+
+namespace engine::ecs {
+	class Store;
+}
 
 namespace engine::render {
+
+	// One interface image resolved for the current frame.
+	//
+	// The dimensions travel with the handle because every scale mode except
+	// stretch needs the source aspect or source-pixel insets. `Cell` identifies
+	// the current frame of an animated sheet.
+	struct InterfaceImage {
+		void *Texture = nullptr;
+		FlipbookCell Cell;
+		core::Vector2 UVMax{1.0f, 1.0f};
+		uint32_t Width = 0;
+		uint32_t Height = 0;
+	};
 
 	// Draws a compiled `gui::DrawList` into the swapchain.
 	//
@@ -75,7 +94,7 @@ namespace engine::render {
 		// @param list   This frame's compiled list.
 		// @param canvas The target size in pixels, which the vertex shader
 		//        divides by.
-		void Submit(const gui::DrawList &list, const core::Vector2 &canvas);
+		void Submit(const gui::DrawList &list, const core::Vector2 &canvas, ecs::Store &store);
 
 		// Uploads this frame's vertices and indices.
 		//
@@ -88,6 +107,18 @@ namespace engine::render {
 		// @param commandBuffer The frame's `SDL_GPUCommandBuffer *`.
 		// @param renderPass    An open pass bound to the swapchain.
 		void Record(void *commandBuffer, void *renderPass) override;
+
+		uint32_t RecordWorld(
+			void *commandBuffer,
+			void *renderPass,
+			const glm::mat4 &viewProjection,
+			const core::CFrame &camera,
+			const core::Color3 &ambient,
+			const core::Vector3 &sun,
+			uint32_t width,
+			uint32_t height,
+			bool alwaysOnTop
+		) override;
 
 		// How to resolve a content name to a texture.
 		//
@@ -107,8 +138,13 @@ namespace engine::render {
 		// @param resolve Called with a content name and a cell to fill; returns
 		//        an `SDL_GPUTexture *` or null. The cell is left at the identity
 		//        for anything that is not a sheet.
-		void SetImageSource(std::function<void *(const core::Name &, FlipbookCell &)> resolve) {
+		void SetImageSource(std::function<InterfaceImage(const core::Name &)> resolve) {
 			Images = std::move(resolve);
+		}
+
+		// How to resolve the live scene image behind a `ViewportFrame`.
+		void SetViewportSource(std::function<InterfaceImage(ecs::Entity)> resolve) {
+			Viewports = std::move(resolve);
 		}
 
 		// The atlas, for a caller that wants to measure text with it.
@@ -126,8 +162,11 @@ namespace engine::render {
 
 		void *Device = nullptr;
 		void *Pipeline = nullptr;
+		void *SpatialPipeline = nullptr;
+		void *SpatialTopPipeline = nullptr;
 		void *Sampler = nullptr;
 		void *AtlasTexture = nullptr;
+		void *AtlasTransferBuffer = nullptr;
 
 		void *VertexBuffer = nullptr;
 		void *IndexBuffer = nullptr;
@@ -140,8 +179,21 @@ namespace engine::render {
 		InterfaceMesh Mesh;
 		gui::DrawList Pending;
 		core::Vector2 Canvas;
+		struct SpatialCollector {
+			ecs::Entity Collector;
+			gui::SpatialCanvas Canvas;
+		};
+		std::vector<SpatialCollector> SpatialCollectors;
 
-		std::function<void *(const core::Name &, FlipbookCell &)> Images;
+		struct ResolvedImage {
+			core::Name Name;
+			ecs::Entity Viewport;
+			InterfaceImage Value;
+		};
+
+		std::function<InterfaceImage(const core::Name &)> Images;
+		std::function<InterfaceImage(ecs::Entity)> Viewports;
+		std::vector<ResolvedImage> ResolvedImages;
 
 		bool AtlasUploaded = false;
 		size_t Recorded = 0;

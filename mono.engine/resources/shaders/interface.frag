@@ -11,25 +11,25 @@
 
 layout(location = 0) in vec2 inUv;
 layout(location = 1) in vec4 inColour;
+layout(location = 2) in vec2 inCanvasPosition;
 
 layout(location = 0) out vec4 outColour;
 
 // Fragment sampled textures are set 2 for SPIR-V; uniform buffers are set 3.
 layout(set = 2, binding = 0) uniform sampler2D interfaceTexture;
 
-layout(set = 3, binding = 0) uniform Flipbook {
-	// Where the current animation cell sits: x the scale, yz the offset.
-	//
-	// **The identity for everything that is not a sheet**, which is a rectangle,
-	// a glyph and every still image - so this is applied unconditionally rather
-	// than behind a branch. `render::FlipbookCell` carries why a transform
-	// rather than a cell index.
-	vec4 Cell;
-} flipbook;
+layout(set = 3, binding = 0) uniform Batch {
+	// The collector-space scissor. Unlike a GPU scissor this remains correct
+	// after a `SurfaceGui` plane is projected into perspective.
+	vec4 Clip;
+} batch;
 
 void main() {
-	const vec2 cellUv = inUv * flipbook.Cell.x + flipbook.Cell.yz;
-	const vec4 sampled = texture(interfaceTexture, cellUv);
+	if (inCanvasPosition.x < batch.Clip.x || inCanvasPosition.y < batch.Clip.y ||
+		inCanvasPosition.x > batch.Clip.z || inCanvasPosition.y > batch.Clip.w) {
+		discard;
+	}
+	const vec4 sampled = texture(interfaceTexture, inUv);
 
 	// **The atlas is coverage, not colour.** A glyph is one channel of alpha and
 	// the colour is the vertex's, which is what lets one sheet serve every

@@ -21,6 +21,7 @@
 #include <engine/render/Renderer.hpp>
 #include <engine/render/ShaderLibrary.hpp>
 #include <engine/render/SpatialCanvas.hpp>
+#include <engine/render/ViewportFrames.hpp>
 #include <engine/replication/Connector.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Input.hpp>
@@ -602,6 +603,7 @@ namespace client {
 		// the viewer, and `--worlds N` places four *views* rather than four
 		// overlays.
 		engine::render::InterfacePass Interface;
+		engine::render::ViewportFrames ViewportImages;
 
 		// Whether the interface pass has been given its image resolver. Set
 		// once; see the call site for why it is not done at start-up.

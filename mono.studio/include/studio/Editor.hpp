@@ -53,6 +53,7 @@
 #include <engine/render/DebugPanels.hpp>
 #include <engine/render/FrameStatistics.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/render/ViewportFrames.hpp>
 #include <engine/render/ShaderLibrary.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/script/Runtime.hpp>
@@ -2778,6 +2779,7 @@ namespace studio {
 		engine::render::ShaderLibrary Shaders;
 		engine::render::OverlayImage Overlay;
 		engine::ui::Interface Interface;
+		engine::render::ViewportFrames ViewportImages;
 		engine::core::FrameClock Clock;
 		//@}
 

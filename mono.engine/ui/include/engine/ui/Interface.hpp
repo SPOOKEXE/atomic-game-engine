@@ -14,8 +14,9 @@
 // pipelines and its shaders into every client binary to be initialised and
 // never used, and would make "the renderer owns the device and not the
 // decisions" false the moment a widget wanted a font. So `render` declares
-// `render::FrameOverlayHook` - two virtual calls and an opaque handle - and
-// this module is the only implementation of it.
+// `render::FrameOverlayHook`, and this module is its editor implementation.
+// `render::InterfacePass` implements the same seam for a game's own UI without
+// linking imgui.
 //
 // **The hand-rolled overlay is not replaced and must not be.**
 // `render::OverlayImage` draws the F3/F4/F5 panels into a CPU buffer with a
@@ -34,12 +35,19 @@
 //
 // @tier L12 · client
 
+#include <engine/core/types/Vector2.hpp>
+#include <engine/gui/DrawList.hpp>
 #include <engine/render/Renderer.hpp>
 
+#include <functional>
 #include <memory>
 
 struct SDL_Window;
 union SDL_Event;
+
+namespace engine::ecs {
+	class Store;
+}
 
 namespace engine::ui {
 
@@ -169,6 +177,12 @@ namespace engine::ui {
 		//         camera.
 		bool WantsKeyboard() const;
 
+		void SubmitSpatial(
+			const gui::DrawList &list, const core::Vector2 &canvas, ecs::Store &store, double seconds
+		);
+
+		void SetSpatialViewportSource(std::function<render::InterfaceImage(ecs::Entity)> resolve);
+
 		// --- render::FrameOverlayHook ---------------------------------------
 
 		// Uploads this frame's vertices and indices. See `FrameOverlayHook`.
@@ -176,6 +190,18 @@ namespace engine::ui {
 		// @param commandBuffer The frame's `SDL_GPUCommandBuffer *`.
 		// @return `false` when there is nothing to draw.
 		bool Prepare(void *commandBuffer) override;
+
+		uint32_t RecordWorld(
+			void *commandBuffer,
+			void *renderPass,
+			const glm::mat4 &viewProjection,
+			const core::CFrame &camera,
+			const core::Color3 &ambient,
+			const core::Vector3 &sun,
+			uint32_t width,
+			uint32_t height,
+			bool alwaysOnTop
+		) override;
 
 		// Records this frame's draw lists. See `FrameOverlayHook`.
 		//

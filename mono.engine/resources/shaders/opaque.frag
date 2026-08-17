@@ -26,6 +26,7 @@ layout(set = 2, binding = 3) uniform sampler2D beamMap;
 layout(set = 3, binding = 0) uniform Lighting {
 	vec4 Direction;
 	vec4 Ambient;
+	vec4 Direct;
 
 	// x: 1 when a shadow map was rendered this frame, 0 otherwise.
 	// y: one texel of the shadow map, for the sample offsets.
@@ -473,7 +474,8 @@ void main() {
 	// room's own geometry blocks and a beam says what the room through a hole
 	// blocks; light that fails either test does not arrive.
 	float shadow = min(ShadowFactor(normal, toLight), BeamFactor());
-	vec3 lit = albedo * (lighting.Ambient.rgb + vec3(lambert * shadow + bounce) + LocalLight(normal));
+	vec3 lit = albedo *
+		(lighting.Ambient.rgb + lighting.Direct.rgb * (lambert * shadow + bounce) + LocalLight(normal));
 
 	// **A portal pane reads the sub-render by screen position**, which is the
 	// whole of CodeParade's `portal.frag` and the reason the recursive pass can

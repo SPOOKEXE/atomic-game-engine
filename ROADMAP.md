@@ -48,8 +48,8 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] tutorial adding cdn to studio
 - [_] tutorial for launching client to connect to a server (note: the server tells the client where the CDN is and the key needed, add a alternative mode in which the)
 - [x] universe properties in explorer: selecting the universe root exposes its name, execution mode, catch-up cap, bus budget and world count in Properties, with authored tuning saved in the game file
-- [_] thoroughly implement all user interface elements + surfacegui + billboardgui
-- [_] finish portals, lighting doesnt work through it properly and in the seam the character half disappears because geometry doesn't render completey render through them properly. also fix all projections and find a way to make it completely seamless; lighting, physics, rendering, objects inbetween the seam, etc
+- [x] all user interface elements render in the client and Studio, including interactive ScreenGui, lit and depth-tested SurfaceGui and BillboardGui collectors, and nested ViewportFrame scenes
+- [x] portals use recursive off-axis projections, seam-clipped and cloned geometry, through-seam lighting and effects, and paired physics proxies and crossings so bodies and objects remain continuous at the opening
 
 ### v0.17
 

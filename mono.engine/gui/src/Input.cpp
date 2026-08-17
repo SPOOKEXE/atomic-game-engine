@@ -92,50 +92,72 @@ namespace engine::gui {
 		}
 	}
 
-	Entity Pick(const Store &store, const DrawList &list, const Vector2 &point) {
-		ENGINE_PROFILE_CAT("gui pick", engine::core::ProfileCategory::ECS);
+	namespace {
+		Entity PickWhere(
+			const Store &store, const DrawList &list, const Vector2 &point, Entity collector, bool screenOnly
+		) {
+			ENGINE_PROFILE_CAT("gui pick", engine::core::ProfileCategory::ECS);
 
-		// Backwards, which is front to back. `DrawList`'s own comment says the
-		// list is back-to-front for exactly this reason.
-		for (size_t index = list.Commands.size(); index > 0; index--) {
-			const DrawCommand &command = list.Commands[index - 1];
+			// Backwards, which is front to back. `DrawList`'s own comment says the
+			// list is back-to-front for exactly this reason.
+			for (size_t index = list.Commands.size(); index > 0; index--) {
+				const DrawCommand &command = list.Commands[index - 1];
+				if (collector != NULL_ENTITY && command.Collector != collector) {
+					continue;
+				}
+				if (screenOnly && store.Get<SpatialCanvas>(command.Collector) != nullptr) {
+					continue;
+				}
 
-			// **The clip is tested as well as the bounds.** An element scrolled
-			// out of its parent still has a rectangle - `Resolved` keeps it
-			// deliberately - and clicking where it would have been must not
-			// find it.
-			// **The point is turned into the element's own space, not the
-			// rectangle into the screen's.** A rotated rectangle is not a
-			// rectangle and testing one needs a polygon; rotating the *point*
-			// back by the same angle makes the test the axis-aligned one it
-			// already was, exactly.
-			//
-			// This was `D00025`: `Bounds` is the unrotated rectangle and
-			// `Rotation` sat beside it unread, so a rotated button drew in one
-			// place and answered a pointer in another - the kind of bug people
-			// file twice, once against the drawing and once against the input.
-			//
-			// **The clip is deliberately not rotated.** A clip is a scissor
-			// rectangle and a scissor is axis-aligned on every backend there is,
-			// so an element rotated inside a clipped container is still cut by
-			// an upright rectangle - which is what the painter does and what the
-			// hit test therefore has to agree with.
-			const core::Vector2 local = Unrotated(command.Rotation, command.Bounds, point);
-			if (!command.Bounds.Contains(local) || !command.Clip.Contains(point)) {
-				continue;
+				// **The clip is tested as well as the bounds.** An element scrolled
+				// out of its parent still has a rectangle - `Resolved` keeps it
+				// deliberately - and clicking where it would have been must not
+				// find it.
+				// **The point is turned into the element's own space, not the
+				// rectangle into the screen's.** A rotated rectangle is not a
+				// rectangle and testing one needs a polygon; rotating the *point*
+				// back by the same angle makes the test the axis-aligned one it
+				// already was, exactly.
+				//
+				// This was `D00025`: `Bounds` is the unrotated rectangle and
+				// `Rotation` sat beside it unread, so a rotated button drew in one
+				// place and answered a pointer in another - the kind of bug people
+				// file twice, once against the drawing and once against the input.
+				//
+				// **The clip is deliberately not rotated.** A clip is a scissor
+				// rectangle and a scissor is axis-aligned on every backend there is,
+				// so an element rotated inside a clipped container is still cut by
+				// an upright rectangle - which is what the painter does and what the
+				// hit test therefore has to agree with.
+				const core::Vector2 local = Unrotated(command.Rotation, command.Bounds, point);
+				if (!command.Bounds.Contains(local) || !command.Clip.Contains(point)) {
+					continue;
+				}
+
+				if (TakesInput(store, command.Source)) {
+					return command.Source;
+				}
+
+				// Not `break`. An inactive element is transparent to input, so the
+				// walk carries on to whatever is behind it - which is what lets a
+				// background panel exist without swallowing the interface it
+				// contains.
 			}
 
-			if (TakesInput(store, command.Source)) {
-				return command.Source;
-			}
-
-			// Not `break`. An inactive element is transparent to input, so the
-			// walk carries on to whatever is behind it - which is what lets a
-			// background panel exist without swallowing the interface it
-			// contains.
+			return NULL_ENTITY;
 		}
+	}
 
-		return NULL_ENTITY;
+	Entity Pick(const Store &store, const DrawList &list, const Vector2 &point) {
+		return PickWhere(store, list, point, NULL_ENTITY, false);
+	}
+
+	Entity PickInCollector(const Store &store, const DrawList &list, Entity collector, const Vector2 &point) {
+		return PickWhere(store, list, point, collector, false);
+	}
+
+	Entity PickScreen(const Store &store, const DrawList &list, const Vector2 &point) {
+		return PickWhere(store, list, point, NULL_ENTITY, true);
 	}
 
 	size_t ElementsAt(const Store &store, Entity root, const Vector2 &point, std::vector<Entity> &found) {
@@ -222,7 +244,11 @@ namespace engine::gui {
 
 		Events.clear();
 
-		const Entity found = pointer.Inside ? Pick(store, list, pointer.Position) : NULL_ENTITY;
+		const Entity found = !pointer.Inside ? NULL_ENTITY
+							 : pointer.Collector != NULL_ENTITY
+								 ? PickInCollector(store, list, pointer.Collector, pointer.Position)
+							 : pointer.ScreenOnly ? PickScreen(store, list, pointer.Position)
+												  : Pick(store, list, pointer.Position);
 
 		const auto local = [&](Entity instance) -> Vector2 {
 			const Resolved *resolved = store.Get<Resolved>(instance);
