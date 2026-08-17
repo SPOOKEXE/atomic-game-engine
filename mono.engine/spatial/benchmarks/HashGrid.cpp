@@ -410,6 +410,20 @@ BENCH("Raycast · 64 rays over 8m, 4000 colliders, 16m cells", 500) {
 	}
 }
 
+// A long diagonal sweep is the shape whose bounding box is misleading. At one
+// metre cells, the old volume walk reached the scan fallback instead of opening
+// only the neighbourhood of the path.
+BENCH("ShapeCast · 64 1m boxes over 64m, 4000 colliders, 1m cells", 200) {
+	const HashGrid &grid = GridOf(4000, 1.0f);
+	std::array<uint64_t, 64> found{};
+	for (int pass = 0; pass < 200; pass++) {
+		for (const Ray &ray : Rays()) {
+			const AABB box = AABB::FromCentre(ray.Origin, Vector3{0.5f, 0.5f, 0.5f});
+			Consume(ShapeCast(grid, box, ray.Direction * 64.0f, LayerMask::All(), found).Written);
+		}
+	}
+}
+
 // --- the other queries, at one cell size -------------------------------------
 //
 // The sweep is what a character controller runs and the sphere is what a

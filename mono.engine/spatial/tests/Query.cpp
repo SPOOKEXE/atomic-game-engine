@@ -40,6 +40,7 @@ using engine::spatial::Proxy;
 using engine::spatial::QueryResult;
 using engine::spatial::Raycast;
 using engine::spatial::RaycastAll;
+using engine::spatial::RayReciprocal;
 using engine::spatial::ShapeCast;
 
 namespace {
@@ -456,6 +457,98 @@ TEST_CASE("a shape cast rejects the corner its swept bounds cover", "[query]") {
 	// Straight at it, and it is found.
 	const QueryResult direct = ShapeCast(grid, start, Vector3{9.0f, 0.0f, 0.0f}, LayerMask::All(), found);
 	REQUIRE(direct.Written == 1);
+	REQUIRE(found[0] == 1u);
+}
+
+TEST_CASE("the swept-box walk visits the thick line and not its bounding corners", "[query]") {
+	HashGrid grid{UNIT_CELL};
+	const Proxy proxies[] = {
+		Cube(1, Vector3{32.5f, 32.5f, 0.5f}, 0.2f),
+		Cube(2, Vector3{32.5f, 33.2f, 0.5f}, 0.2f), // touched by the box, not its centre line
+		Cube(3, Vector3{60.5f, 2.5f, 0.5f}, 0.2f),	// inside the swept bound, far from the path
+		Proxy{4, AABB{Vector3{-60.0f, 32.0f, -60.0f}, Vector3{60.0f, 33.0f, 60.0f}}, LayerMask::All()},
+		Cube(5, Vector3{40.5f, 40.5f, 0.5f}, 0.2f, LayerMask::Only(1)),
+	};
+	grid.Rebuild(proxies);
+
+	const AABB start = AABB::FromCentre(Vector3{0.5f, 0.5f, 0.5f}, Vector3{0.6f, 0.6f, 0.6f});
+	const Vector3 motion{64.0f, 64.0f, 0.0f};
+	const float distance = motion.Magnitude();
+	const Ray ray{start.Centre(), motion / distance};
+	const RayReciprocal reciprocal{ray.Direction};
+	const AABB swept = start.Union(AABB{start.Minimum + motion, start.Maximum + motion});
+
+	std::array<int, 6> visits{};
+	const bool completed = GridInternals::ForEachCandidateAlongSweptBox(
+		grid,
+		ray,
+		reciprocal,
+		distance,
+		start.Size() * 0.5f,
+		swept,
+		LayerMask::Only(0),
+		[&](const Proxy &proxy) {
+			visits[proxy.Id]++;
+			return true;
+		}
+	);
+
+	REQUIRE(completed);
+	REQUIRE(visits[1] == 1);
+	REQUIRE(visits[2] == 1);
+	REQUIRE(visits[3] == 0);
+	REQUIRE(visits[4] == 1);
+	REQUIRE(visits[5] == 0);
+
+	std::array<uint64_t, 6> found{};
+	const QueryResult result = ShapeCast(grid, start, motion, LayerMask::Only(0), found);
+	REQUIRE(result.Written == 3);
+	REQUIRE_FALSE(result.Overflowed);
+	std::array<bool, 6> returned{};
+	for (size_t index = 0; index < result.Written; index++) {
+		returned[found[index]] = true;
+	}
+	REQUIRE(returned[1]);
+	REQUIRE(returned[2]);
+	REQUIRE_FALSE(returned[3]);
+	REQUIRE(returned[4]);
+	REQUIRE_FALSE(returned[5]);
+}
+
+TEST_CASE("a swept box reports a multi-cell proxy once in either direction", "[query]") {
+	HashGrid grid{UNIT_CELL};
+	const Proxy proxies[] = {Cube(1, Vector3{32.5f, 32.5f, 0.5f}, 2.5f)};
+	grid.Rebuild(proxies);
+
+	std::array<uint64_t, 8> forward{};
+	const AABB fromLeft = AABB::FromCentre(Vector3{0.5f, 0.5f, 0.5f}, Vector3{0.5f, 0.5f, 0.5f});
+	const QueryResult forwardResult =
+		ShapeCast(grid, fromLeft, Vector3{64.0f, 64.0f, 0.0f}, LayerMask::All(), forward);
+	REQUIRE(forwardResult.Written == 1);
+	REQUIRE_FALSE(forwardResult.Overflowed);
+	REQUIRE(forward[0] == 1u);
+
+	std::array<uint64_t, 8> backward{};
+	const AABB fromRight = AABB::FromCentre(Vector3{64.5f, 64.5f, 0.5f}, Vector3{0.5f, 0.5f, 0.5f});
+	const QueryResult backwardResult =
+		ShapeCast(grid, fromRight, Vector3{-64.0f, -64.0f, 0.0f}, LayerMask::All(), backward);
+	REQUIRE(backwardResult.Written == 1);
+	REQUIRE_FALSE(backwardResult.Overflowed);
+	REQUIRE(backward[0] == 1u);
+}
+
+TEST_CASE("a swept box longer than the cell walk is worth takes the scan", "[query]") {
+	HashGrid grid{UNIT_CELL};
+	const Proxy proxies[] = {Cube(1, Vector3{3.5f, 3.5f, 0.5f}, 0.5f)};
+	grid.Rebuild(proxies);
+
+	std::array<uint64_t, 4> found{};
+	const AABB start = AABB::FromCentre(Vector3{0.5f, 0.5f, 0.5f}, Vector3{0.25f, 0.25f, 0.25f});
+	const QueryResult result =
+		ShapeCast(grid, start, Vector3{100000.0f, 100000.0f, 0.0f}, LayerMask::All(), found);
+
+	REQUIRE(result.Written == 1);
+	REQUIRE_FALSE(result.Overflowed);
 	REQUIRE(found[0] == 1u);
 }
 

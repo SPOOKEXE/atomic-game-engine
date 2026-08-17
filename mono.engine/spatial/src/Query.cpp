@@ -199,23 +199,22 @@ namespace engine::spatial {
 		const core::Ray ray{box.Centre(), motion / distance};
 		const RayReciprocal reciprocal{ray.Direction};
 
-		// The cells to look in are everything the box passes through, which is
-		// its start and its end unioned. The exact test then rejects the
-		// corners the union covers and the sweep does not.
 		const core::AABB swept = box.Union(core::AABB{box.Minimum + motion, box.Maximum + motion});
 
-		GridInternals::ForEachCandidate(grid, swept, mask, [&](const Proxy &proxy) {
-			// A moving box against a still box is a moving *point* against the
-			// still box grown by the moving one's half-extent - so the swept
-			// test is the slab test already written, with no second algorithm
-			// to keep correct.
-			const core::AABB expanded =
-				core::AABB::FromCentre(proxy.Bounds.Centre(), proxy.Bounds.Size() * 0.5f + halfExtent);
-			if (!IntersectRayBox(ray, reciprocal, expanded, distance).Touched) {
-				return true;
+		GridInternals::ForEachCandidateAlongSweptBox(
+			grid, ray, reciprocal, distance, halfExtent, swept, mask, [&](const Proxy &proxy) {
+				// A moving box against a still box is a moving *point* against the
+				// still box grown by the moving one's half-extent - so the swept
+				// test is the slab test already written, with no second algorithm
+				// to keep correct.
+				const core::AABB expanded =
+					core::AABB::FromCentre(proxy.Bounds.Centre(), proxy.Bounds.Size() * 0.5f + halfExtent);
+				if (!IntersectRayBox(ray, reciprocal, expanded, distance).Touched) {
+					return true;
+				}
+				return Append(found, proxy.Id, result);
 			}
-			return Append(found, proxy.Id, result);
-		});
+		);
 
 		return result;
 	}
