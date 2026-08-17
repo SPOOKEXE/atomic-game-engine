@@ -50,6 +50,11 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] universe properties in explorer: selecting the universe root exposes its name, execution mode, catch-up cap, bus budget and world count in Properties, with authored tuning saved in the game file
 - [x] all user interface elements render in the client and Studio, including interactive ScreenGui, lit and depth-tested SurfaceGui and BillboardGui collectors, and nested ViewportFrame scenes
 - [x] portals use recursive off-axis projections, seam-clipped and cloned geometry, through-seam lighting and effects, and paired physics proxies and crossings so bodies and objects remain continuous at the opening
+- [_] for the portal seam stuff, could we render each side without the portals connecting (but the lighting enters like
+    a void room), then we record that, then overlay that on the inside of the portal matching the correct geometry of
+    the entrance? We can also do the inside-out the same way (make the inside room exit to a void, but we record the
+    lighting, then overaly them on the outside)? This way we can add a "Enabled" button on Portal components that
+    skip this step.
 
 ### v0.17
 
