@@ -1134,17 +1134,15 @@ namespace engine::game {
 				);
 				settings.BusBudgetPerTick = CountOf(*child, "busBudget", settings.BusBudgetPerTick);
 
-				// **Mode is applied and the rest is not.** `SetMode` is the one
-				// setting `Universe` lets a caller change after construction,
-				// because it is a tuning knob that changes no result. The
-				// others are read into `out` so a caller that is *building* a
-				// universe can honour them, and are not forced onto one that
-				// already exists.
-				universe.SetMode(
-					TextOf(*child, "mode", "WorldParallel") == "WorldSerial"
-						? world::ExecutionMode::WorldSerial
-						: world::ExecutionMode::WorldParallel
-				);
+				// These are authored tuning, so opening a game applies the same
+				// values its file reports. Federation and the router's hard caps
+				// remain construction-time host policy and are not in this file.
+				settings.Mode = TextOf(*child, "mode", "WorldParallel") == "WorldSerial"
+									? world::ExecutionMode::WorldSerial
+									: world::ExecutionMode::WorldParallel;
+				universe.SetMode(settings.Mode);
+				universe.SetMaximumCatchUpTicks(settings.MaximumCatchUpTicks);
+				universe.SetBusBudgetPerTick(settings.BusBudgetPerTick);
 				out.Universe = settings;
 				continue;
 			}

@@ -48,7 +48,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] tutorial for setting up a server with custom cdn
 - [_] tutorial adding cdn to studio
 - [_] tutorial for launching client to connect to a server (note: the server tells the client where the CDN is and the key needed, add a alternative mode in which the)
-- [_] universe properties in explorer
+- [x] universe properties in explorer: selecting the universe root exposes its name, execution mode, catch-up cap, bus budget and world count in Properties, with authored tuning saved in the game file
 
 ### v0.17
 

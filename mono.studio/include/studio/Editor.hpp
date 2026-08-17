@@ -837,6 +837,7 @@ namespace studio {
 		// `FocusedViewport`.
 		void ResolveFocusedViewport();
 		void DrawProperties();
+		void DrawUniverseProperties();
 		void DrawScripts();
 
 		// The breakpoint column beside a script's text.
@@ -2818,6 +2819,9 @@ namespace studio {
 		// As rather than writing somewhere arbitrary.
 		//@{
 		engine::core::Name GameName;
+		// A half-typed name is editor state. It becomes a `Name` only when the
+		// field loses focus, so abandoned prefixes do not fill the intern table.
+		std::string UniverseNameDraft;
 		std::filesystem::path GamePath;
 		bool Modified = false;
 		//@}
@@ -2825,10 +2829,11 @@ namespace studio {
 		// The world the viewport draws and the properties panel edits.
 		WorldId Active;
 
-		// What is selected, and which world it is in. Cleared whenever `Active`
-		// changes, because a selection in a world nobody is looking at is a
-		// delete somebody does not see.
+		// What is selected, and which world an instance selection is in. The
+		// universe is editor selection rather than world state, so it has its
+		// own flag and never enters a store.
 		//@{
+		bool UniverseSelected = false;
 		WorldId SelectionWorld;
 		std::vector<Entity> Selection;
 		//@}

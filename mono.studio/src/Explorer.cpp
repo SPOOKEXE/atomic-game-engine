@@ -276,6 +276,8 @@ namespace studio {
 	void Editor::SelectRange(
 		WorldId world, const HierarchyView &view, engine::ecs::Entity anchor, engine::ecs::Entity to, bool add
 	) {
+		UniverseSelected = false;
+
 		// **The range itself is `RowsBetween`, which is a free function over the
 		// compiled tree and is tested as one.** What is left here is the part
 		// that needs the editor: which world the selection belongs to, and
@@ -579,11 +581,22 @@ namespace studio {
 			std::string(GameName.IsValid() ? Label(GameName) : "Game") + "  (universe)";
 
 		const bool universeOpen = ImGui::TreeNodeEx(
-			universeLabel.c_str(), ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth
+			"##universe",
+			ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth |
+				(UniverseSelected ? ImGuiTreeNodeFlags_Selected : ImGuiTreeNodeFlags_None),
+			"%s",
+			universeLabel.c_str()
 		);
 
 		// Immediately after the node, before anything else is submitted. See
 		// the note in `DrawTreeNode`: imgui has exactly one "last item".
+		if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
+			ClearSelection();
+			SelectionWorld = {};
+			UniverseSelected = true;
+			UniverseNameDraft = std::string(GameName.IsValid() ? GameName.Text() : "Game");
+		}
+
 		if (ImGui::BeginPopupContextItem("##universe-actions")) {
 			// Insert lands in the active world, because a universe holds worlds
 			// and not instances - there is no other honest answer, and refusing
@@ -616,7 +629,7 @@ namespace studio {
 				const Name worldName = Universe->NameOf(world);
 
 				ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnArrow;
-				if (world == Active) {
+				if (world == Active && !UniverseSelected) {
 					flags |= ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_Selected;
 				}
 

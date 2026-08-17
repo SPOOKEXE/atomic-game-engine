@@ -1723,6 +1723,7 @@ namespace studio {
 	// --- selection ---------------------------------------------------------
 
 	void Editor::Select(WorldId world, Entity instance, bool add) {
+		UniverseSelected = false;
 		if (world != SelectionWorld) {
 			Selection.clear();
 			SelectionWorld = world;
@@ -1744,6 +1745,7 @@ namespace studio {
 	}
 
 	void Editor::ClearSelection() {
+		UniverseSelected = false;
 		Selection.clear();
 
 		// The anchor goes with it. `SelectRange` already falls back to a plain
@@ -1908,8 +1910,14 @@ namespace studio {
 		}
 
 		GameName = Name(DEFAULT_GAME);
+		UniverseNameDraft = std::string(GameName.Text());
 		GamePath.clear();
 		Modified = false;
+
+		const engine::world::UniverseSettings defaults;
+		Universe->SetMode(defaults.Mode);
+		Universe->SetMaximumCatchUpTicks(defaults.MaximumCatchUpTicks);
+		Universe->SetBusBudgetPerTick(defaults.BusBudgetPerTick);
 		InstanceCounts.clear();
 		ExpandedWorlds.clear();
 
@@ -2148,6 +2156,7 @@ namespace studio {
 		Trees.clear();
 
 		GameName = info.Name;
+		UniverseNameDraft = std::string(GameName.Text());
 		GamePath = path;
 		Modified = false;
 		InstanceCounts.clear();
@@ -2678,6 +2687,7 @@ namespace studio {
 			return;
 		}
 
+		UniverseSelected = false;
 		Selection = copies;
 		MarkModified();
 	}
