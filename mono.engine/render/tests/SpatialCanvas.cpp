@@ -35,6 +35,7 @@ TEST_DEPENDS("engine.gui.layout")
 using Catch::Approx;
 using engine::core::CFrame;
 using engine::core::UDim2;
+using engine::core::Vector2;
 using engine::core::Vector3;
 using engine::ecs::Entity;
 using engine::ecs::Store;
@@ -150,11 +151,34 @@ TEST_CASE("which face a surface gui is on decides which two studs it spans", "[r
 	CHECK(spans(engine::gui::Face::Top).Y == Approx(1.0f));
 }
 
-TEST_CASE("a fixed-size surface gui is left alone", "[render][canvas]") {
-	// **No component, rather than a component holding the authored number.** If
-	// this wrote the fallback back into the slot, "has a resolved canvas" would
-	// stop distinguishing anything - and the layout would be reading a value
-	// that looked measured and was not.
+TEST_CASE("every surface canvas faces outward without mirroring", "[render][canvas]") {
+	World world("render_canvas.orientation");
+	const Entity part = world.Part(Vector3::Zero, Vector3{2.0f, 1.5f, 0.5f});
+
+	for (const engine::gui::Face face : {
+			 engine::gui::Face::Front,
+			 engine::gui::Face::Back,
+			 engine::gui::Face::Left,
+			 engine::gui::Face::Right,
+			 engine::gui::Face::Top,
+			 engine::gui::Face::Bottom,
+		 }) {
+		const Entity surface = world.Collector("SurfaceGui", part);
+		engine::gui::Surface state;
+		state.On = face;
+		world.Data.Set(surface, state);
+		REQUIRE(ResolveSpatialCanvases(world.Data, world.Display) >= 1);
+
+		const engine::gui::SpatialCanvas *canvas = world.Resolved(surface);
+		REQUIRE(canvas != nullptr);
+		const Vector3 winding = canvas->AxisX.Cross(canvas->AxisY).Unit();
+		CHECK(winding.Dot(canvas->Normal) == Approx(-1.0f));
+	}
+}
+
+TEST_CASE("a fixed-size surface gui keeps its authored canvas and gains a plane", "[render][canvas]") {
+	// Fixed size still needs a resolved world plane. Without it the children lay
+	// out correctly and the renderer has nowhere to put their pixels.
 	World world("render_canvas.fixed");
 
 	const Entity part = world.Part(Vector3::Zero, Vector3{2.0f, 1.5f, 0.5f});
@@ -165,8 +189,13 @@ TEST_CASE("a fixed-size surface gui is left alone", "[render][canvas]") {
 	state.CanvasSize = engine::core::Vector2{640.0f, 480.0f};
 	world.Data.Set(surface, state);
 
-	CHECK(ResolveSpatialCanvases(world.Data, world.Display) == 0);
-	CHECK(world.Resolved(surface) == nullptr);
+	CHECK(ResolveSpatialCanvases(world.Data, world.Display) == 1);
+	const engine::gui::SpatialCanvas *spatial = world.Resolved(surface);
+	REQUIRE(spatial != nullptr);
+	CHECK(spatial->Size.X == Approx(640.0f));
+	CHECK(spatial->Size.Y == Approx(480.0f));
+	CHECK(spatial->AxisX.Magnitude() == Approx(4.0f));
+	CHECK(spatial->AxisY.Magnitude() == Approx(3.0f));
 
 	// And the layout then uses the authored size, which is the fallback the
 	// absence exists to select.
@@ -195,12 +224,7 @@ TEST_CASE("a surface gui on something with no bounds resolves nothing", "[render
 	CHECK(world.Resolved(surface) == nullptr);
 }
 
-TEST_CASE("a resolved canvas is dropped when it stops being resolvable", "[render][canvas]") {
-	// **The case that is easy to leave out and expensive to leave out.** A
-	// canvas nobody refreshed keeps working - it keeps the size the last frame
-	// that could measure it wrote - so the failure surfaces long after the
-	// change that caused it, on whatever frame somebody notices the sign is the
-	// wrong shape.
+TEST_CASE("switching a surface gui to fixed size replaces the measured canvas", "[render][canvas]") {
 	World world("render_canvas.stale");
 
 	const Entity part = world.Part(Vector3::Zero, Vector3{2.0f, 1.5f, 0.5f});
@@ -216,8 +240,12 @@ TEST_CASE("a resolved canvas is dropped when it stops being resolvable", "[rende
 
 	world.Data.GetMutable<engine::gui::Surface>(surface)->Sizing = engine::gui::SurfaceSizingMode::FixedSize;
 
-	CHECK(ResolveSpatialCanvases(world.Data, world.Display) == 0);
-	CHECK(world.Resolved(surface) == nullptr);
+	world.Data.GetMutable<engine::gui::Surface>(surface)->CanvasSize = engine::core::Vector2{320.0f, 180.0f};
+	CHECK(ResolveSpatialCanvases(world.Data, world.Display) == 1);
+	const engine::gui::SpatialCanvas *fixed = world.Resolved(surface);
+	REQUIRE(fixed != nullptr);
+	CHECK(fixed->Size.X == Approx(320.0f));
+	CHECK(fixed->Size.Y == Approx(180.0f));
 }
 
 TEST_CASE("a billboard's scale is studs against the viewport", "[render][canvas]") {
@@ -332,4 +360,44 @@ TEST_CASE("the layout lays out against the resolved canvas", "[render][canvas]")
 	CHECK(resolved->Rendered);
 	CHECK(resolved->AbsoluteSize.X == Approx(200.0f));
 	CHECK(resolved->AbsoluteSize.Y == Approx(75.0f));
+}
+
+TEST_CASE("a window pointer projects onto an interactive surface canvas", "[render][canvas][input]") {
+	World world("render_canvas.pointer");
+	constexpr float RIGHT_ANGLE = 1.57079632679f;
+	world.Camera(Vector3::Zero, RIGHT_ANGLE);
+
+	const Entity part = world.Part(Vector3{0.0f, 0.0f, -10.0f}, Vector3{2.0f, 1.0f, 0.5f});
+	const Entity surface = world.Collector("SurfaceGui", part);
+	engine::gui::Surface state;
+	state.On = engine::gui::Face::Back;
+	state.CanvasSize = Vector2{400.0f, 200.0f};
+	world.Data.Set(surface, state);
+
+	const Entity button = world.Data.CreateInstance(engine::gui::GuiClass("TextButton"), "Press");
+	world.Data.SetParent(button, surface);
+
+	REQUIRE(ResolveSpatialCanvases(world.Data, world.Display) == 1);
+	engine::gui::DrawList list;
+	engine::gui::DrawCommand command;
+	command.Kind = engine::gui::DrawKind::Rectangle;
+	command.Source = button;
+	command.Collector = surface;
+	command.Bounds = engine::core::Rect{0.0f, 0.0f, 400.0f, 200.0f};
+	command.Clip = command.Bounds;
+	list.Commands.push_back(command);
+
+	engine::render::SpatialPointer pointer;
+	REQUIRE(
+		engine::render::ResolveSpatialPointer(
+			world.Data,
+			list,
+			world.Display,
+			Vector2{world.Display.Width * 0.5f, world.Display.Height * 0.5f},
+			pointer
+		)
+	);
+	CHECK(pointer.Collector == surface);
+	CHECK(pointer.Position.X == Approx(200.0f).margin(0.1f));
+	CHECK(pointer.Position.Y == Approx(100.0f).margin(0.1f));
 }

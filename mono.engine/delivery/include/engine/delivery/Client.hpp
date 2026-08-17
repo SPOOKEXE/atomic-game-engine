@@ -55,6 +55,8 @@
 
 namespace engine::delivery {
 
+	class RelayChannel;
+
 	// One delivered asset.
 	//
 	// @since v0.9
@@ -279,7 +281,12 @@ namespace engine::delivery {
 	//        are refused rather than half-applied - a client with no publisher
 	//        key would verify nothing, and one with no source would fetch
 	//        nothing, and neither should look like a working client.
+	// @param relay Who carries a `SourceKind::Relay` source's routes, or null
+	//        when this caller owns no such link. A relay source with nothing to
+	//        carry it is skipped with one warning rather than refusing the whole
+	//        client, because the rest of the list is still perfectly good.
 	// @return The client, or nothing when the settings are not usable.
 	// @since v0.9
-	std::unique_ptr<AssetClient> MakeAssetClient(const DeliverySettings &settings);
+	std::unique_ptr<AssetClient>
+	MakeAssetClient(const DeliverySettings &settings, RelayChannel *relay = nullptr);
 }

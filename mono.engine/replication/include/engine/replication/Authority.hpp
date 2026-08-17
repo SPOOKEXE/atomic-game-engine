@@ -9,6 +9,7 @@
 #include <engine/replication/Protocol.hpp>
 #include <engine/replication/Submission.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <functional>
@@ -90,6 +91,42 @@ namespace engine::replication {
 		// late a value can be is `StarvationTicks + ceil(n/k)`, which is
 		// asserted by a test rather than argued for.
 		uint64_t StarvationTicks = 30;
+
+		// How much wider than a tick's reach the refinement window is.
+		//
+		// **What `SetPriorityRefinement` is asked about, as a multiple of the
+		// rows this tick could carry.** One would refine exactly the rows that
+		// fit, and a row demoted out of them would be replaced by one nothing
+		// had looked at properly. Two leaves a refined row behind every refined
+		// row, which is the cheapest number that does.
+		//
+		// Zero refines nothing and is the way to turn the second hook off
+		// without unregistering it. Raising it buys fidelity at a linear cost in
+		// whatever the refinement does, which is the expensive thing by
+		// construction - it is the reason the hook is separate.
+		//
+		// @since v0.16
+		size_t PriorityRefinementFactor = 2;
+
+		// How many unacknowledged rows one component re-offers to one client in
+		// a tick.
+		//
+		// **A bound on the *rebuild*, not on what is sent.** The recovery walk
+		// re-offers every value a client has not acknowledged, which is right
+		// while a client is keeping up and is the whole world once it is not:
+		// at two hundred clients the measured link took about forty rows a tick
+		// and this function was serialising two thousand of them per component
+		// to choose from.
+		//
+		// Large enough that a healthy connection never reaches it, so this
+		// changes nothing until a client is far behind - which is exactly when a
+		// server can least afford the work. The walk resumes where it stopped,
+		// so a bound costs coverage within a tick and none across ticks.
+		//
+		// Zero is no bound, and is the behaviour from before there was one.
+		//
+		// @since v0.16
+		size_t RecoveryRowsPerTick = 512;
 
 		// The anti-entropy audit over what a client already holds.
 		//
@@ -206,6 +243,41 @@ namespace engine::replication {
 		//        everything the same, which leaves the rotation in sole charge
 		//        and is a plain round robin.
 		void SetPriority(std::function<float(ClientId, ecs::Entity)> score);
+
+		// Adjusts the score of a row near enough to the front to be worth a
+		// second, more expensive look.
+		//
+		// **The split exists because the two halves cost different amounts by
+		// orders of magnitude.** `mono.server`'s score is a subtraction; its
+		// occlusion test is a raycast against the broad phase, and asking it
+		// about every entity for every client was measured at 51% of a
+		// two-hundred-client tick. Every row it was asked about was one the tick
+		// had no budget to send, so the answer was thrown away.
+		//
+		// **It is consulted for the rows that could reach the wire, and not for
+		// the rest.** That window is derived from the same byte and message
+		// budget `Prioritise` sorts against, widened by
+		// `PriorityRefinementFactor` so a row demoted out of the sendable set
+		// has candidates behind it that were looked at properly too.
+		//
+		// **This is an ordering within a tick and not a filter.** A row outside
+		// the window keeps its unrefined score, which is why a refinement must
+		// only ever *lower* one: an unrefined score is then an upper bound, and
+		// a row that could not reach the front on its best case cannot reach it
+		// on its real one. A refinement that raised a score would hide rows it
+		// was never asked about, which is a different and much worse thing.
+		//
+		// **It is an approximation and the honest form of one.** A row just
+		// outside the window that would have overtaken a heavily demoted row
+		// inside it waits a tick. The starvation rotation is what bounds that:
+		// a row that has waited its deadline outranks every score, refined or
+		// not, so nothing here can starve anything.
+		//
+		// @param refine Called as `refine(ClientId, ecs::Entity, float)` with
+		//        the score `SetPriority` gave, returning the score to sort by.
+		//        Empty leaves every score as scored, which is what a host with
+		//        one cheap hook wants and is the default.
+		void SetPriorityRefinement(std::function<float(ClientId, ecs::Entity, float)> refine);
 
 		// Decides which entities a joining client is sent *before* the world.
 		//
@@ -565,6 +637,112 @@ namespace engine::replication {
 			uint64_t ConsideredAt = 0;
 		};
 
+		// What one client still owes an acknowledgement for, in one component.
+		//
+		// **A sorted vector rather than a hash map, and the ordering is the
+		// whole reason.** The recovery walk has to visit these in a fixed order
+		// or two runs of one server produce different bytes, and an
+		// `unordered_map` gave no order at all - so every tick copied every
+		// unconfirmed key of every component of every client into a scratch
+		// vector and sorted it. On a saturated server the unconfirmed set *is*
+		// the world, which made that copy and sort the largest single thing
+		// `BuildComponents` did.
+		//
+		// Held in order instead, the walk is a pass over contiguous memory and
+		// the sort does not exist. What it costs is insertion, which moves the
+		// tail - and insertion is the rare operation here: an entity enters a
+		// client's set once and is looked up every tick until it leaves.
+		//
+		// **Bulk insertion is a separate call for that reason.** Adding a
+		// joining client's whole world one entity at a time is quadratic, so
+		// `EmplaceAll` appends and re-sorts once. See its comment for why the
+		// existing row survives a collision.
+		class OutstandingSet {
+		  public:
+			struct Row {
+				uint64_t Entity = 0;
+				Outstanding Value;
+			};
+
+			// Finds or inserts, exactly as a map's `operator[]` does.
+			Outstanding &operator[](uint64_t entity);
+
+			// Inserts only when absent, leaving an existing row untouched.
+			//
+			// A repair must not restart the clock on something genuinely in
+			// flight, which is what an assigning insert would do.
+			void Emplace(uint64_t entity);
+
+			// The same for a whole span, in one sort rather than one per entity.
+			void EmplaceAll(std::span<const uint64_t> entities);
+
+			void Erase(uint64_t entity);
+
+			// Erases every entity in an **ascending** span, in one pass.
+			//
+			// The recovery walk drops rows as it goes and its input is already
+			// in order, so erasing them one at a time would move the same tail
+			// once per drop.
+			void EraseSorted(std::span<const uint64_t> entities);
+
+			bool Contains(uint64_t entity) const;
+
+			void Clear() {
+				Rows.clear();
+			}
+
+			size_t Size() const {
+				return Rows.size();
+			}
+
+			// Ascending by entity, which is what the recovery walk relies on.
+			std::vector<Row>::const_iterator begin() const {
+				return Rows.begin();
+			}
+
+			std::vector<Row>::const_iterator end() const {
+				return Rows.end();
+			}
+
+			// Fills `into` with up to `limit` entities not considered on `tick`,
+			// resuming where the last call stopped and wrapping once.
+			//
+			// **A bound with a rotation, because the alternative is a bound
+			// with a starvation.** A client far enough behind has every entity
+			// it knows about unconfirmed, so an unbounded walk rebuilds and
+			// re-serialises the whole world to send the forty rows its link will
+			// take. Cutting the walk at the front would rebuild the same rows
+			// every tick and never reach the rest; resuming past them visits
+			// everything within `ceil(held / limit)` ticks, whatever the scores
+			// say.
+			//
+			// **A limit of zero means no limit**, which is what a host that has
+			// not thought about this gets and is the behaviour from before there
+			// was a cursor.
+			//
+			// Ids rather than rows, because offering one inserts into this set.
+			//
+			// @param tick  The tick being built.
+			// @param limit How many to take, or zero for all of them.
+			// @param into  Cleared and filled. Not sorted: the wrap is what
+			//              makes it a rotation.
+			void SelectRecovering(uint64_t tick, size_t limit, std::vector<uint64_t> &into);
+
+			// Drops every row a predicate answers true for, in one pass.
+			template <class Match> void EraseIf(Match &&match) {
+				Rows.erase(std::remove_if(Rows.begin(), Rows.end(), match), Rows.end());
+			}
+
+		  private:
+			std::vector<Row> Rows;
+
+			// Where `SelectRecovering` resumes, as an entity handle rather than
+			// a position - `Client::AuditCursor`'s rule, and for its reason:
+			// entities come and go between ticks, so a position would skip
+			// whatever was inserted in front of it.
+			uint64_t Cursor = 0;
+		};
+
 		// One entity leaving or entering a client's known set.
 		struct Edit {
 			uint64_t Entity = 0;
@@ -657,7 +835,7 @@ namespace engine::replication {
 
 			std::vector<std::vector<std::byte>> Outgoing;
 
-			std::vector<std::unordered_map<uint64_t, Outstanding>> Unconfirmed;
+			std::vector<OutstandingSet> Unconfirmed;
 
 			std::vector<Carried> Carried_;
 
@@ -777,6 +955,21 @@ namespace engine::replication {
 		void Record(Client &client, const Placement &placed, uint64_t tick);
 		void EmitStructure(Client &client, const Structure &structure);
 
+		// Asks `Refinement` about the rows near enough to the front to contend,
+		// and puts that window back in order.
+		//
+		// A template on the comparator rather than a `std::function` of it: this
+		// runs per client per tick and the comparator is the hot part of the
+		// sort beside it. It is instantiated only in `Authority.cpp`, where
+		// `Prioritise` is its one caller.
+		//
+		// @param reachable How far into `Order` the sort put rows in order.
+		// @param spend     The tick's byte budget. The window comes from adding
+		//        up what the ordered rows really encode to, because the sort's
+		//        own bound assumes rows that are all as short as the shortest.
+		template <class Before>
+		void Refine(ClientId client, size_t reachable, size_t spend, const Before &before);
+
 		// Builds this tick's audit for one client, if one is due.
 		//
 		// Emitted after the delta and never before it, so the message the byte
@@ -790,6 +983,10 @@ namespace engine::replication {
 		AuthoritySettings Settings_;
 		std::function<bool(ClientId, ecs::Entity, const ecs::Store &)> Interest;
 		std::function<float(ClientId, ecs::Entity)> Priority;
+
+		// The expensive half of the score, asked only about the rows in
+		// contention. See `SetPriorityRefinement`.
+		std::function<float(ClientId, ecs::Entity, float)> Refinement;
 		std::function<bool(ecs::Entity, const ecs::Store &)> Preface;
 		std::function<bool(ClientId, const Identify &)> IdentityCheck;
 
@@ -841,12 +1038,39 @@ namespace engine::replication {
 
 		std::vector<uint32_t> Order;
 
+		// One score per *entity* per client, indexed against `Bearing`.
+		//
+		// **Because a score is a function of the client and the entity, and a
+		// candidate is a row.** An entity with a transform, a motion, a name and
+		// a class is four candidates that a host's scorer is asked about four
+		// times for one answer - and the answer costs whatever that host's
+		// lookup costs, which for `mono.server` includes an occlusion raycast.
+		// Refilled per client, so nothing survives a publish to disagree with a
+		// world that has moved.
+		std::vector<float> Scores;
+
+		// The same, for the refined half, and a second array rather than a flag
+		// beside the first.
+		//
+		// A refinement is asked about the entities inside the window and about
+		// no others, so "not asked" and "asked and unchanged" have to stay
+		// distinguishable: writing a refined value back over `Scores` would make
+		// the second row of an entity already in the window look unrefined the
+		// moment the window moved.
+		std::vector<float> Refined;
+
 		std::vector<size_t> SourceSlot;
 
 		std::vector<size_t> OpenEntry;
 
-		// Sorted recovery entries preserve deterministic wire order.
+		// Recovery entries in `OutstandingSet` order, which is ascending. Held
+		// as ids rather than walked in place because offering one inserts into
+		// the set it came from.
 		std::vector<uint64_t> Recovering;
+
+		// The rows the recovery walk found nothing behind, dropped in one pass
+		// once the walk has finished. Ascending, because `Recovering` is.
+		std::vector<uint64_t> Dropping;
 
 		std::vector<uint64_t> Appearing;
 

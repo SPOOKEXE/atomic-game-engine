@@ -1122,6 +1122,56 @@ TEST_CASE("a portal with no destination is a mirror", "[scene][surfacecameras]")
 	CHECK_THAT(mirror.Placed().Z, Catch::Matchers::WithinAbs(-20.4f, TOLERANCE));
 }
 
+TEST_CASE("a disabled portal is a solid pane and retains its link", "[scene][surfacecameras]") {
+	Mirror portal;
+
+	const Entity far =
+		portal.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	portal.World.Set<Transform>(far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f})});
+	portal.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+	portal.World.Set<engine::scene::Collider>(
+		portal.Pane, engine::scene::Collider{Vector3{8.0f, 4.5f, 0.2f}}
+	);
+
+	portal.World.Set<engine::scene::Portal>(portal.Reflection, engine::scene::Portal{far});
+	REQUIRE(AimSurfaceCameras(portal.World) == 1);
+	REQUIRE(engine::scene::OpenPortals(portal.World) == 1);
+
+	std::vector<engine::scene::PortalSeam> seams;
+	REQUIRE(engine::scene::GatherPortalSeams(portal.World, seams) == 1);
+	REQUIRE(portal.World.Get<Visual>(portal.Pane)->Surface >= 0);
+	REQUIRE(portal.World.Get<engine::scene::Collider>(portal.Pane)->Trigger);
+
+	engine::scene::Portal disabled = *portal.World.Get<engine::scene::Portal>(portal.Reflection);
+	disabled.Enabled = false;
+	portal.World.Set(portal.Reflection, disabled);
+
+	// One switch owns the visual capture, the seam and the opening in the wall.
+	CHECK(AimSurfaceCameras(portal.World) == 0);
+	CHECK(portal.World.Get<SurfaceCamera>(portal.Reflection)->Surface == -1);
+	CHECK(portal.World.Get<Visual>(portal.Pane)->Surface == -1);
+	CHECK(engine::scene::GatherPortalSeams(portal.World, seams) == 0);
+	CHECK(engine::scene::OpenPortals(portal.World) == 0);
+	CHECK_FALSE(portal.World.Get<engine::scene::Collider>(portal.Pane)->Trigger);
+
+	engine::scene::SeamTransform through;
+	CHECK_FALSE(
+		engine::scene::PortalCrossing(
+			portal.World, Vector3{0.0f, 0.0f, 1.0f}, Vector3{0.0f, 0.0f, -1.0f}, through
+		)
+	);
+
+	std::vector<engine::scene::SurfacePane> mirrors;
+	CHECK(engine::scene::GatherSurfacePanes(portal.World, mirrors) == 0);
+
+	disabled.Enabled = true;
+	portal.World.Set(portal.Reflection, disabled);
+	CHECK(AimSurfaceCameras(portal.World) == 1);
+	CHECK(engine::scene::GatherPortalSeams(portal.World, seams) == 1);
+	CHECK(engine::scene::OpenPortals(portal.World) == 1);
+	CHECK(portal.World.Get<engine::scene::Portal>(portal.Reflection)->Destination == far);
+}
+
 TEST_CASE("a portal pair need not describe one space", "[scene][surfacecameras]") {
 	// **The non-Euclidean claim, as an assertion.** Nothing constrains the two
 	// frames to be consistent: turning the destination turns what comes out of

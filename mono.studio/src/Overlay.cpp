@@ -1536,6 +1536,7 @@ namespace studio {
 		engine::gui::Pointer pointer;
 		pointer.Position = engine::core::Vector2{mouse.x - slot.X, mouse.y - slot.Y};
 		pointer.Down = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+		pointer.ScreenOnly = true;
 
 		// **imgui owns the mouse whenever it is over its own chrome**, and a
 		// panel docked over the viewport is exactly that. Without this the
@@ -1576,6 +1577,22 @@ namespace studio {
 			// Before `Rebuild`, which runs the layout inside itself.
 			engine::render::ResolveSpatialCanvases(store, request.Display);
 			GuiLists[index].Rebuild(store, request);
+			(void)ViewportImages.Render(
+				Renderer,
+				store,
+				GuiLists[index].Commands(),
+				PreviewSlot() + 1
+			);
+			if (engine::gui::PickScreen(store, GuiLists[index].Commands(), pointer.Position) == NULL_ENTITY) {
+				engine::render::SpatialPointer spatial;
+				if (engine::render::ResolveSpatialPointer(
+						store, GuiLists[index].Commands(), request.Display, pointer.Position, spatial
+					)) {
+					pointer.Position = spatial.Position;
+					pointer.Collector = spatial.Collector;
+					pointer.ScreenOnly = false;
+				}
+			}
 
 			// **Copied out of the router's span before the world is left.**
 			// `Router::Update` returns a view into a vector it reuses every
@@ -1647,6 +1664,14 @@ namespace studio {
 			const engine::render::FlipbookCell cell = Renderer.TextureCell(name, AnimationSeconds);
 			resolved.CellMin = ImVec2(cell.OffsetU, cell.OffsetV);
 			resolved.CellMax = ImVec2(cell.OffsetU + cell.Scale, cell.OffsetV + cell.Scale);
+			return resolved;
+		};
+		images.ResolveViewport = [this](engine::ecs::Entity instance) {
+			engine::ui::ImageSource::Resolved resolved;
+			const engine::render::InterfaceImage image = ViewportImages.Resolve(instance);
+			resolved.Texture = reinterpret_cast<ImTextureID>(image.Texture);
+			resolved.Size = ImVec2(static_cast<float>(image.Width), static_cast<float>(image.Height));
+			resolved.CellMax = ImVec2(image.UVMax.X, image.UVMax.Y);
 			return resolved;
 		};
 

@@ -1,4 +1,5 @@
 #include <engine/core/Log.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/net/Packet.hpp>
 #include <engine/replication/Listener.hpp>
 
@@ -336,6 +337,8 @@ namespace engine::replication {
 	}
 
 	void Listener::Poll(double nowSeconds) {
+		ENGINE_PROFILE_CAT("Listener::Poll", core::ProfileCategory::Network);
+
 		for (;;) {
 			const net::Transport::Inbound inbound = Transport_->Receive(Datagram);
 			if (inbound.Status != net::TransportStatus::Ok) {
@@ -395,6 +398,8 @@ namespace engine::replication {
 	}
 
 	void Listener::Advance(double nowSeconds) {
+		ENGINE_PROFILE_CAT("Listener::Advance", core::ProfileCategory::Network);
+
 		for (size_t index = Peers.size(); index > 0; index--) {
 			Peer &peer = Peers[index - 1];
 			peer.Wire->Link().Advance(nowSeconds);
@@ -420,6 +425,15 @@ namespace engine::replication {
 
 	void Listener::Publish(ecs::Store &store, uint64_t tick, double nowSeconds) {
 		Authority_.Publish(store, tick);
+
+		// **One span for every peer's sending rather than one per peer.**
+		// `FrameGraph::MAXIMUM_SPANS` is 4096 and a span per client would spend
+		// most of it on a two-hundred-client host, so the frame that a
+		// flamegraph is of would be the frame the instrumentation overflowed.
+		// What a reader wants here is the split between building a tick and
+		// putting it on the wire, and that is two spans whatever the client
+		// count.
+		ENGINE_PROFILE_CAT("Listener::Send", core::ProfileCategory::Network);
 
 		for (Peer &peer : Peers) {
 			// **The identity gate, and it is here rather than in `Accept`.** A

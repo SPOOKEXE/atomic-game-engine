@@ -8,21 +8,6 @@
 namespace engine::spatial {
 
 	namespace {
-		// The box that encloses a ray segment, which is the volume the grid
-		// walk is given.
-		//
-		// The walk visits cells in a fixed order rather than along the line, so
-		// a raycast asks the same question every other query asks - "what is in
-		// this box" - and then tests the candidates exactly. A digital
-		// differential walk along the ray would visit fewer cells, and would
-		// also visit them in an order that is not the ascending one the
-		// de-duplication rule is built on. See `AGENTS.md`: it is an
-		// optimisation with a rule change attached, not a free improvement.
-		core::AABB SegmentBounds(const core::Ray &ray, float maxDistance) {
-			const core::Vector3 end = ray.PointAt(maxDistance);
-			return core::AABB{ray.Origin, ray.Origin}.Union(core::AABB{end, end});
-		}
-
 		// Whether a ray can find anything at all before a grid is consulted.
 		bool CanTravel(const core::Ray &ray, float maxDistance) {
 			// `!(x > 0)` rather than `x <= 0`, so a NaN distance is refused
@@ -81,17 +66,32 @@ namespace engine::spatial {
 		const RayReciprocal reciprocal{ray.Direction};
 		std::optional<core::RayHit> nearest;
 
-		GridInternals::ForEachCandidate(grid, SegmentBounds(ray, maxDistance), mask, [&](const Proxy &proxy) {
-			const BoxHit box = IntersectRayBox(ray, reciprocal, proxy.Bounds, maxDistance);
-			if (!box.Touched) {
+		GridInternals::ForEachCandidateAlongRay(
+			grid,
+			ray,
+			reciprocal,
+			maxDistance,
+			mask,
+			[&](const Proxy &proxy) {
+				const BoxHit box = IntersectRayBox(ray, reciprocal, proxy.Bounds, maxDistance);
+				if (!box.Touched) {
+					return true;
+				}
+				if (nearest && nearest->Distance <= box.Distance) {
+					return true;
+				}
+				nearest = core::RayHit{proxy.Id, box.Distance, ray.PointAt(box.Distance), box.Normal};
 				return true;
-			}
-			if (nearest && nearest->Distance <= box.Distance) {
-				return true;
-			}
-			nearest = core::RayHit{proxy.Id, box.Distance, ray.PointAt(box.Distance), box.Normal};
-			return true;
-		});
+			},
+			// **The stop that makes the walk worth having.** A proxy is reported
+			// from the first cell of the run the ray makes through its cell
+			// range, so nothing found later can start before this cell ends -
+			// which means a hit at or before the exit is already the nearest
+			// there is. On the occlusion cast that motivated this, the answer is
+			// usually a wall a few cells along and the rest of the line is never
+			// looked at.
+			[&](float exit) { return !nearest || nearest->Distance > exit; }
+		);
 
 		return nearest;
 	}
@@ -110,18 +110,31 @@ namespace engine::spatial {
 
 		const RayReciprocal reciprocal{ray.Direction};
 
-		// No early exit even once the span is full: a later candidate may be
-		// nearer than one already written, and dropping it would make the
-		// answer depend on which cell happened to be walked first.
-		GridInternals::ForEachCandidate(grid, SegmentBounds(ray, maxDistance), mask, [&](const Proxy &proxy) {
-			const BoxHit box = IntersectRayBox(ray, reciprocal, proxy.Bounds, maxDistance);
-			if (box.Touched) {
-				InsertNearest(
-					hits, core::RayHit{proxy.Id, box.Distance, ray.PointAt(box.Distance), box.Normal}, result
-				);
-			}
-			return true;
-		});
+		// **No early stop, unlike `Raycast`.** A full span could stop the moment
+		// the furthest hit it kept is nearer than the cell exit, and the count
+		// it reports would then be wrong: `Overflowed` says "there were more
+		// than fit", and every hit past the stop is one more that did not. The
+		// walk is already the ray's own cells rather than its bounding volume,
+		// which is where the cost went.
+		GridInternals::ForEachCandidateAlongRay(
+			grid,
+			ray,
+			reciprocal,
+			maxDistance,
+			mask,
+			[&](const Proxy &proxy) {
+				const BoxHit box = IntersectRayBox(ray, reciprocal, proxy.Bounds, maxDistance);
+				if (box.Touched) {
+					InsertNearest(
+						hits,
+						core::RayHit{proxy.Id, box.Distance, ray.PointAt(box.Distance), box.Normal},
+						result
+					);
+				}
+				return true;
+			},
+			[](float) { return true; }
+		);
 
 		return result;
 	}
@@ -186,23 +199,22 @@ namespace engine::spatial {
 		const core::Ray ray{box.Centre(), motion / distance};
 		const RayReciprocal reciprocal{ray.Direction};
 
-		// The cells to look in are everything the box passes through, which is
-		// its start and its end unioned. The exact test then rejects the
-		// corners the union covers and the sweep does not.
 		const core::AABB swept = box.Union(core::AABB{box.Minimum + motion, box.Maximum + motion});
 
-		GridInternals::ForEachCandidate(grid, swept, mask, [&](const Proxy &proxy) {
-			// A moving box against a still box is a moving *point* against the
-			// still box grown by the moving one's half-extent - so the swept
-			// test is the slab test already written, with no second algorithm
-			// to keep correct.
-			const core::AABB expanded =
-				core::AABB::FromCentre(proxy.Bounds.Centre(), proxy.Bounds.Size() * 0.5f + halfExtent);
-			if (!IntersectRayBox(ray, reciprocal, expanded, distance).Touched) {
-				return true;
+		GridInternals::ForEachCandidateAlongSweptBox(
+			grid, ray, reciprocal, distance, halfExtent, swept, mask, [&](const Proxy &proxy) {
+				// A moving box against a still box is a moving *point* against the
+				// still box grown by the moving one's half-extent - so the swept
+				// test is the slab test already written, with no second algorithm
+				// to keep correct.
+				const core::AABB expanded =
+					core::AABB::FromCentre(proxy.Bounds.Centre(), proxy.Bounds.Size() * 0.5f + halfExtent);
+				if (!IntersectRayBox(ray, reciprocal, expanded, distance).Touched) {
+					return true;
+				}
+				return Append(found, proxy.Id, result);
 			}
-			return Append(found, proxy.Id, result);
-		});
+		);
 
 		return result;
 	}

@@ -289,9 +289,7 @@ namespace engine::effects {
 		// How much of the parent's own velocity a new particle keeps, 0 to 1.
 		float VelocityInheritance = 0.0f;
 
-		// How self-lit the particle is, 0 to 1.
-		//
-		// At 1 the colour is emitted rather than lit, which is what a spark is.
+		// How far blending moves from ordinary alpha towards additive, 0 to 1.
 		float LightEmission = 0.0f;
 
 		// How much the world's lighting affects it, 0 to 1.

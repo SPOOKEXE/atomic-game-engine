@@ -345,6 +345,16 @@ namespace engine::world {
 		Settings_.Mode = mode;
 	}
 
+	void Universe::SetMaximumCatchUpTicks(int ticks) {
+		RequireDriverThread("SetMaximumCatchUpTicks");
+		Settings_.MaximumCatchUpTicks = std::max(ticks, 1);
+	}
+
+	void Universe::SetBusBudgetPerTick(uint32_t budget) {
+		RequireDriverThread("SetBusBudgetPerTick");
+		Settings_.BusBudgetPerTick = budget;
+	}
+
 	// --- the buses, which BusRouter owns -----------------------------------
 	//
 	// The thread check stays on this side. It is a rule about who may call a

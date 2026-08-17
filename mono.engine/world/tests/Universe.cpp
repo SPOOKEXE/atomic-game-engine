@@ -278,6 +278,26 @@ TEST_CASE("catch-up is capped rather than unbounded", "[world]") {
 	REQUIRE(universe.StatisticsOf(id).Ticks == 4);
 }
 
+TEST_CASE("universe tuning can change between driver ticks", "[world]") {
+	Universe universe;
+	const WorldId id = universe.Create(Named("world.retuned"));
+	Populate(universe, id, 1);
+
+	universe.SetMode(ExecutionMode::WorldSerial);
+	universe.SetMaximumCatchUpTicks(2);
+	universe.SetBusBudgetPerTick(17);
+
+	CHECK(universe.Settings().Mode == ExecutionMode::WorldSerial);
+	CHECK(universe.Settings().MaximumCatchUpTicks == 2);
+	CHECK(universe.Settings().BusBudgetPerTick == 17);
+
+	universe.Tick(10.0f);
+	CHECK(universe.StatisticsOf(id).Ticks == 2);
+
+	universe.SetMaximumCatchUpTicks(0);
+	CHECK(universe.Settings().MaximumCatchUpTicks == 1);
+}
+
 TEST_CASE("many worlds tick independently", "[world]") {
 	Pool pool{4};
 	Universe universe;

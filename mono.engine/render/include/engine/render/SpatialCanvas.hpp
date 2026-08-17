@@ -34,6 +34,7 @@
 //
 // @tier L12 · client
 
+#include <engine/gui/DrawList.hpp>
 #include <engine/gui/Layout.hpp>
 
 #include <cstddef>
@@ -44,18 +45,21 @@ namespace engine::ecs {
 
 namespace engine::render {
 
+	struct SpatialPointer {
+		ecs::Entity Collector;
+		core::Vector2 Position;
+	};
+
 	// Writes `gui::SpatialCanvas` on every `SurfaceGui` and `BillboardGui`.
 	//
-	// **Nothing is written for a collector whose canvas cannot be resolved**,
+	// **Nothing is written for a collector whose placement cannot be resolved**,
 	// rather than a zero or a guess. A `SurfaceGui` on a `Folder` has no
 	// `scene::Bounds` and a billboard in a world with no live camera has no
-	// distance - in both cases the authored pixel size is the better answer, and
-	// leaving the component off is how `gui::CanvasFor` is told to use it.
+	// projection. A fixed-size surface on a real part is resolved because its
+	// authored pixels still need a world plane on which to draw.
 	//
-	// Stale components are cleared for the same reason: a `SurfaceGui` switched
-	// back to `FixedSize` must stop being sized by its adornee on the very next
-	// frame, and a resolved canvas nobody refreshed is exactly the sort of thing
-	// that keeps working until a part is deleted.
+	// Stale components are cleared for the same reason: a collector whose
+	// adornee disappears must stop using the last plane resolved for it.
 	//
 	// @param store  The world. Read for `gui::Surface`, `gui::Billboard`,
 	//        `scene::Bounds`, `scene::Transform` and `scene::ActiveCamera`;
@@ -66,4 +70,15 @@ namespace engine::render {
 	//        making what is in it bigger.
 	// @return How many collectors were given a canvas.
 	size_t ResolveSpatialCanvases(ecs::Store &store, const gui::Screen &screen);
+
+	// Projects a window pixel onto the foremost interactive spatial collector.
+	// Screen interfaces are deliberately not considered; a caller gives those
+	// first refusal with `gui::PickScreen`.
+	bool ResolveSpatialPointer(
+		ecs::Store &store,
+		const gui::DrawList &list,
+		const gui::Screen &screen,
+		const core::Vector2 &point,
+		SpatialPointer &out
+	);
 }

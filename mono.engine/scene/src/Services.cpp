@@ -333,6 +333,24 @@ namespace engine::scene {
 			return property;
 		}
 
+		PropertyDescriptor FixtureProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("Fixture");
+			property.Type = PropertyType::Bool;
+			property.Size = sizeof(bool);
+			property.Kind = PropertyKind::Computed;
+			property.Writable = false;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<ServiceComponent>()});
+			property.Writes = &ecs::ComponentSet::Intern({});
+
+			property.Get = [](const Store &store, Entity instance, void *out) -> bool {
+				const ServiceComponent *service = store.Get<ServiceComponent>(instance);
+				*static_cast<bool *>(out) = service != nullptr && service->Fixture;
+				return true;
+			};
+			return property;
+		}
+
 		// One service: what to call it, who sees it, and where it sits.
 		//
 		// **A table rather than thirteen registration calls**, for `input`'s
@@ -654,17 +672,23 @@ namespace engine::scene {
 			Classes::Property<&PlayersServiceComponent::MaxPlayers>(players, "MaxPlayers");
 			Classes::Property<&PlayersServiceComponent::RespawnTime>(players, "RespawnTime");
 			Classes::Property<&PlayersServiceComponent::CharacterAutoLoads>(players, "CharacterAutoLoads");
-			Classes::Property<&ServiceComponent::Fixture>(service, "Fixture");
+			Classes::Computed(service, FixtureProperty());
 
 			const ClassId lighting = Classes::Find(core::Name("Lighting"));
 			Classes::Property<&LightingServiceComponent::Ambient>(lighting, "Ambient");
 			Classes::Property<&LightingServiceComponent::OutdoorAmbient>(lighting, "OutdoorAmbient");
 			Classes::Property<&LightingServiceComponent::FogColor>(lighting, "FogColor");
-			Classes::Property<&LightingServiceComponent::Brightness>(lighting, "Brightness");
-			Classes::Property<&LightingServiceComponent::ClockTime>(lighting, "ClockTime");
+			Classes::ClampedProperty<&LightingServiceComponent::Brightness, 0.0f, 10000.0f>(
+				lighting, "Brightness"
+			);
+			Classes::ClampedProperty<&LightingServiceComponent::ClockTime, 0.0f, 24.0f>(
+				lighting, "ClockTime"
+			);
 			Classes::Property<&LightingServiceComponent::FogStart>(lighting, "FogStart");
 			Classes::Property<&LightingServiceComponent::FogEnd>(lighting, "FogEnd");
-			Classes::Property<&LightingServiceComponent::GeographicLatitude>(lighting, "GeographicLatitude");
+			Classes::ClampedProperty<&LightingServiceComponent::GeographicLatitude, -90.0f, 90.0f>(
+				lighting, "GeographicLatitude"
+			);
 
 			return service;
 		}

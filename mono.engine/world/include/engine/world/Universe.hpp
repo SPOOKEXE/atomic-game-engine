@@ -417,6 +417,23 @@ namespace engine::world {
 		// @param mode The mode to run in.
 		void SetMode(ExecutionMode mode);
 
+		// Changes how many overdue ticks one world may run at once.
+		//
+		// Like `SetMode`, this is universe tuning and may be changed between
+		// driver ticks. Values below one are clamped to one so an overdue world
+		// can always make progress.
+		//
+		// @param ticks The new catch-up limit.
+		void SetMaximumCatchUpTicks(int ticks);
+
+		// Changes how many bus operations one world may issue per tick.
+		//
+		// Applied when the router refreshes each world's budget at the next
+		// barrier. Zero deliberately disables bus operations.
+		//
+		// @param budget The new per-world budget.
+		void SetBusBudgetPerTick(uint32_t budget);
+
 		// The number of worlds subscribed to a topic.
 		//
 		// A diagnostic rather than a routing primitive: nothing needs this to

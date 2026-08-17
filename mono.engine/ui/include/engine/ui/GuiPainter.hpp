@@ -15,18 +15,13 @@
 // a second compile, so neither backend can drift from the other about where an
 // element is.
 //
-// ## What a shipped client can and cannot do with this today
+// ## Why this backend still exists
 //
-// Stated plainly because it decides where this is useful. `mono.client` does
-// **not** link this module, deliberately - `Interface.hpp` gives the reason: a
-// shipped game draws no editor panels and should not carry imgui's atlas,
-// pipelines and shaders to never use them. So this paints a game's UI inside
-// the *studio*, which is where the v0.8 plan's next step lives, and a shipped
-// client draws no `ScreenGui` until the L12 quad pipeline lands.
-//
-// That is a missing renderer, not a missing feature: the tree, the layout, the
-// save format, the bindings and the input routing are all `shared` and all
-// work headless. `ROADMAP.md` carries the remaining half.
+// `mono.client` deliberately does not link this module because a shipped game
+// should not carry imgui. It draws the same compiled list through
+// `render::InterfacePass`; this painter remains the Studio backend for screen
+// collectors inside viewport panels. Spatial collectors use that render pass
+// in both hosts so depth, portal and mirror projection have one implementation.
 //
 // @tier L12 · client
 
@@ -78,6 +73,9 @@ namespace engine::ui {
 
 		// The texture for a content name.
 		std::function<Resolved(const core::Name &name)> Resolve;
+
+		// The live texture rendered for a `ViewportFrame` element.
+		std::function<Resolved(ecs::Entity instance)> ResolveViewport;
 	};
 
 	// How a compiled list is placed on screen.
@@ -113,7 +111,7 @@ namespace engine::ui {
 	// @param list   The compiled list, in paint order.
 	// @param into   The imgui draw list to record into.
 	// @param target Where the canvas goes and how big.
-	// @param images How to resolve a content name, or an empty hook.
+	// @param images How to resolve content and viewport images, or an empty hook.
 	// @return How many imgui primitives were recorded, for a statistics panel.
 	size_t PaintGui(
 		const gui::DrawList &list, ImDrawList *into, const PaintTarget &target, const ImageSource &images = {}

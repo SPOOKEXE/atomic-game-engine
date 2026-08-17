@@ -156,18 +156,48 @@ TEST_CASE("two clients in different places order the world differently", "[repli
 	CHECK(score(Client(1), At(90)) > score(Client(1), At(10)));
 }
 
+TEST_CASE("scoring never asks whether anything is in the way", "[replication][priority]") {
+	// The split. `operator()` is asked about every entity for every client and
+	// `Refine` is asked about the rows in contention, so an occlusion query
+	// reached from the scorer would be the expensive half running everywhere -
+	// which is the thing the two halves exist to stop.
+	int asked = 0;
+
+	DistancePriority score = Ramp(100.0f);
+	score.Blocked = [&asked](ClientId, Entity) {
+		asked++;
+		return true;
+	};
+
+	CHECK(score(Client(), At(10)) == Approx(0.9f));
+	CHECK(asked == 0);
+}
+
 TEST_CASE("something out of sight scores less but not nothing", "[replication][priority]") {
 	DistancePriority score = Ramp(100.0f);
 	score.Blocked = [](ClientId, Entity entity) { return entity.Id >= 50; };
 
-	const float visible = score(Client(), At(10));
-	const float hidden = score(Client(), At(60));
+	const float visible = score.Refine(Client(), At(10), score(Client(), At(10)));
+	const float hidden = score.Refine(Client(), At(60), score(Client(), At(60)));
 
 	CHECK(visible == Approx(0.9f));
 	CHECK(hidden == Approx(0.4f * 0.25f));
 
 	CHECK(hidden > score(Client(), At(95)));
 	CHECK(hidden < visible);
+}
+
+TEST_CASE("refining only ever lowers a score", "[replication][priority]") {
+	// What lets `Authority` treat an unrefined score as an upper bound and stop
+	// asking about rows no tick could reach. A refinement that raised one would
+	// let a row it never asked about be overtaken invisibly.
+	DistancePriority score = Ramp(100.0f);
+	score.Blocked = [](ClientId, Entity) { return true; };
+
+	for (const uint64_t at : {5u, 25u, 50u, 75u, 99u}) {
+		const float plain = score(Client(), At(at));
+		CHECK(score.Refine(Client(), At(at), plain) <= plain);
+	}
 }
 
 TEST_CASE("occlusion is not asked about below the floor", "[replication][priority]") {
@@ -180,16 +210,23 @@ TEST_CASE("occlusion is not asked about below the floor", "[replication][priorit
 		return true;
 	};
 
-	CHECK(score(Client(), At(10)) == Approx(0.9f * 0.25f));
+	CHECK(score.Refine(Client(), At(10), 0.9f) == Approx(0.9f * 0.25f));
 	CHECK(asked == 1);
 
-	CHECK(score(Client(), At(70)) == Approx(0.3f));
+	CHECK(score.Refine(Client(), At(70), 0.3f) == Approx(0.3f));
+	CHECK(asked == 1);
+
+	// Exactly at the floor is below it. `!(score > floor)` rather than
+	// `score <= floor`, so a NaN score is refused rather than being carried
+	// into a raycast.
+	CHECK(score.Refine(Client(), At(50), 0.5f) == Approx(0.5f));
 	CHECK(asked == 1);
 }
 
 TEST_CASE("no occlusion query is the behaviour from before there was one", "[replication][priority]") {
 	const DistancePriority score = Ramp(100.0f);
 	CHECK(score(Client(), At(10)) == Approx(0.9f));
+	CHECK(score.Refine(Client(), At(10), 0.9f) == Approx(0.9f));
 }
 
 TEST_CASE("a nonsense hidden fraction cannot break the ordering", "[replication][priority]") {
@@ -199,11 +236,11 @@ TEST_CASE("a nonsense hidden fraction cannot break the ordering", "[replication]
 	score.Blocked = [](ClientId, Entity) { return true; };
 
 	score.HiddenFraction = nan;
-	CHECK(std::isfinite(score(Client(), At(10))));
+	CHECK(std::isfinite(score.Refine(Client(), At(10), 0.9f)));
 
 	score.HiddenFraction = 5.0f;
-	CHECK(score(Client(), At(10)) == Approx(0.9f));
+	CHECK(score.Refine(Client(), At(10), 0.9f) == Approx(0.9f));
 
 	score.HiddenFraction = -1.0f;
-	CHECK(score(Client(), At(10)) == Approx(0.0f));
+	CHECK(score.Refine(Client(), At(10), 0.9f) == Approx(0.0f));
 }

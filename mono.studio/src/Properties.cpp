@@ -75,12 +75,121 @@ namespace studio {
 		}
 	}
 
+	void Editor::DrawUniverseProperties() {
+		ImGui::TextUnformatted("Universe");
+		ImGui::Separator();
+
+		ImGui::SetNextItemWidth(-1.0f);
+		TextField("##property-filter", PropertyFilter, "filter properties");
+		ImGui::Separator();
+
+		const auto visible = [this](const char *label) {
+			if (PropertyFilter.empty()) {
+				return true;
+			}
+
+			int score = 0;
+			return FuzzyMatch(PropertyFilter, label, score);
+		};
+
+		if (!ImGui::CollapsingHeader("Universe", ImGuiTreeNodeFlags_DefaultOpen)) {
+			return;
+		}
+
+		if (!ImGui::BeginTable(
+				"Universe", 2, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_RowBg
+			)) {
+			return;
+		}
+
+		ImGui::TableSetupColumn("name", ImGuiTableColumnFlags_WidthStretch, 0.42f);
+		ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch, 0.58f);
+
+		const auto row = [](const char *name) {
+			ImGui::TableNextRow();
+			ImGui::TableSetColumnIndex(0);
+			ImGui::AlignTextToFramePadding();
+			ImGui::TextUnformatted(name);
+			ImGui::TableSetColumnIndex(1);
+			ImGui::PushID(name);
+			ImGui::SetNextItemWidth(-1.0f);
+		};
+
+		if (visible("Name")) {
+			row("Name");
+			TextField("##v", UniverseNameDraft);
+			if (ImGui::IsItemDeactivatedAfterEdit()) {
+				if (UniverseNameDraft.empty()) {
+					UniverseNameDraft = std::string(GameName.Text());
+				} else if (!GameName.IsValid() || UniverseNameDraft != GameName.Text()) {
+					// Intern once after editing, not once per keystroke. `Name` keeps
+					// every spelling it interns for the life of the process.
+					GameName = Name(UniverseNameDraft);
+					MarkModified();
+				}
+			}
+			if (UniverseNameDraft.empty() && ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("A universe name cannot be empty");
+			}
+			ImGui::PopID();
+		}
+
+		const engine::world::UniverseSettings &settings = Universe->Settings();
+
+		if (visible("Execution Mode")) {
+			row("Execution Mode");
+			int mode = settings.Mode == engine::world::ExecutionMode::WorldParallel ? 0 : 1;
+			if (ImGui::Combo("##v", &mode, "World Parallel\0World Serial\0")) {
+				Universe->SetMode(
+					mode == 0 ? engine::world::ExecutionMode::WorldParallel
+							  : engine::world::ExecutionMode::WorldSerial
+				);
+				MarkModified();
+			}
+			ImGui::PopID();
+		}
+
+		if (visible("Maximum Catch-Up Ticks")) {
+			row("Maximum Catch-Up Ticks");
+			int catchUp = settings.MaximumCatchUpTicks;
+			if (ImGui::InputInt("##v", &catchUp)) {
+				Universe->SetMaximumCatchUpTicks(catchUp);
+				MarkModified();
+			}
+			ImGui::PopID();
+		}
+
+		if (visible("Bus Budget Per Tick")) {
+			row("Bus Budget Per Tick");
+			uint32_t budget = settings.BusBudgetPerTick;
+			if (ImGui::InputScalar("##v", ImGuiDataType_U32, &budget)) {
+				Universe->SetBusBudgetPerTick(budget);
+				MarkModified();
+			}
+			ImGui::PopID();
+		}
+
+		if (visible("World Count")) {
+			row("World Count");
+			ImGui::Text("%zu", Universe->Count());
+			ImGui::PopID();
+		}
+
+		ImGui::EndTable();
+	}
+
 	void Editor::DrawProperties() {
 		if (!ShowProperties) {
 			return;
 		}
 
 		if (!ImGui::Begin("Properties", &ShowProperties)) {
+			ImGui::End();
+			return;
+		}
+
+		if (UniverseSelected) {
+			DrawUniverseProperties();
 			ImGui::End();
 			return;
 		}

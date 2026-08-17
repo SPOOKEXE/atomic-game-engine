@@ -328,6 +328,7 @@ mains over the parts of it they need.
 | Exercise one module | its test binary | Catch2 |
 | Re-run only what your change affected | `testrunner` | - |
 | Check the architecture held | a CMake script | - |
+| Put a server under two hundred real clients | `loadtest` *(v0.16)* | many genuine sessions in one process, and a flamegraph of the server |
 
 **The client and the server are shims, not the engine.** What they add is the
 part that has to exist between two machines - name resolution, peer-to-peer,
@@ -407,6 +408,121 @@ line replaces all three, rather than being appended to a list the person running
 it cannot see. A `--flag client.content-sources=` with nothing after it is how a
 command line says "none". Nothing is split on a separator, so a path may contain
 anything.
+
+## Where a client's content comes from *(v0.16)*
+
+A server gives its clients content one of two ways, and **which one is a field
+rather than a shape**: `server.content-mode`, `relay` or `redirect`. There is no
+second server program, no second settings type and no rebuild between them, for
+the reason `cdn`'s three deployments are flag combinations rather than three
+classes - moving between them has to stay a deployment decision.
+
+| Mode | What crosses | The client talks to a CDN |
+|---|---|---|
+| `relay` | content, over the game link the client already has | **no** |
+| `redirect` | a list of origins, a grant and the publisher key | yes, to what it was told about |
+
+**`relay` is the default**, because it asks least of a player's network: one
+port, already reached, already admitted.
+
+### The settings
+
+| Setting | Means |
+|---|---|
+| `server.content-mode` | `relay` or `redirect`. Anything else warns and uses `relay` |
+| `server.content-sources` | An origin, as `dir:PATH` or `HOST:PORT`, optionally `NAME=` in front. **Repeatable, and the order is the priority** |
+| `server.content-publisher-key` | 64 hex characters - the publisher whose signature content must carry |
+| `server.content-store` | Unchanged. Also the fallback for `content-sources` when that names nothing |
+| `server.content-grant-key` | Unchanged. What a `redirect` grant is signed with, and what the origin checks |
+| `client.content-allowed-hosts` | A host a **server-named** origin may live on. Repeatable; empty allows any |
+
+`server.content-sources` is spelled exactly as `client.content-sources` is,
+because it means the same thing. A server with a `content-store` and no
+`content-sources` fetches from its own store, so the self-hosted case is one
+flag rather than two saying the same thing.
+
+### Relay, in full
+
+```ini
+# atomic.cfg - a server that holds the only origin connection
+[server]
+listen = true
+listen-port = 9000
+content-mode = relay
+content-store = /srv/atomic/processed
+content-grant-key = 7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a
+content-publisher-key = ba42458e83ba...
+```
+
+```sh
+just host --config atomic.cfg
+just run --connect 127.0.0.1:9000 --publisher-key ba42458e83ba...
+```
+
+The client asks the server for `/manifest`, `/dictionary` and `/bundle/<hex>`
+over the game link and **verifies every byte against the publisher's signature**
+exactly as it would off a socket - relaying moves the transport and not the trust
+boundary. The server tells it the publisher key at admission, so a client that
+was given none still has a root of trust.
+
+**The client has no authority in it, and the limits are the server's.** It may
+ask and it may ask again; how often is `server::ContentRelay`'s to decide. A
+client over its allowance has the request **dropped** and counted, and one that
+keeps at it is flagged and refused outright for a cooldown - refused rather than
+disconnected, so a client on a bad script stays distinguishable from one on a bad
+network and can recover. `ContentRelayStatistics` counts asking-too-fast,
+nothing-to-serve and the-link-was-full apart, because those are three incidents
+with three different fixes.
+
+**Content never outranks the simulation.** A relayed piece is offered *after* the
+world has been published, out of whatever is left of that tick's link budget, and
+a piece the link would not take is offered again on the next tick from exactly
+where it stopped.
+
+### Redirect, in full
+
+```ini
+# atomic.cfg - a server that names the origins instead
+[server]
+listen = true
+listen-port = 9000
+content-mode = redirect
+content-sources = near=10.0.0.4:9080
+content-sources = far=203.0.113.9:9080
+content-store = /srv/atomic/processed
+content-grant-key = 7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a
+content-publisher-key = ba42458e83ba...
+
+[client]
+# What this machine will let a server point it at. Empty allows any.
+content-allowed-hosts = 10.0.0.4
+content-allowed-hosts = 203.0.113.9
+```
+
+At admission the server sends the list, **a grant issued for that session**, and
+the publisher key. The grant is what lets `cdn::Gate` admit the client's requests
+without the origin knowing anything about sessions or players - so the origins
+need the same `--grant-key` and nothing else about the game.
+
+**What the client does with the list is decided by where each value came from**,
+which is this file's precedence rule applied one layer along:
+
+- **A source this client was configured with wins and is tried first.** The
+  server's list is *appended*, never substituted - the order of the list is the
+  policy, so "mine first, then whatever the host knows about" needs no flag.
+- **The link itself goes last**, when there is one. It is the source that always
+  exists, so it is the one that answers when nothing before it did.
+- **A publisher key pinned with `--publisher-key` is kept.** A server's is
+  adopted only when none was pinned, because a pinned client refuses rather than
+  downgrades.
+- **A server-named origin is untrusted.** It passes `client.content-allowed-hosts`
+  before it is fetched from, and one naming a host *name* rather than an address
+  is skipped with **one** warning - `net::Endpoint::Parse` refuses a name on
+  purpose, because resolving one blocks and nothing on the fetch path may block.
+
+A server that names a hostile origin still cannot hand a client content that
+verifies: the manifest's signature is checked against the publisher key, then a
+group's length against that manifest, then every asset against its root.
 
 ## Turning content formats off
 
@@ -1700,9 +1816,86 @@ Publishing and serving are **two invocations, and the split is deliberate**: the
 signing key belongs to whoever publishes the game and the origin holds none,
 which is what makes it safe to deploy on hardware nobody here owns.
 
-[`SETUP-CDN.md`](SETUP-CDN.md) is the walkthrough - a folder on your own machine,
-a store served from a directory, an origin on localhost, and what it takes to
-reach one from somewhere else. What follows here is the reference.
+## Quick CDN setup
+
+Build with `just cdn`. Put baked assets in `content/`, choose different
+64-character hex signing and grant secrets, then publish:
+
+```sh
+SIGNING_KEY=YOUR_64_HEX_SIGNING_SECRET
+./.cache/build/dev/cdn/cdn \
+    --publish ./content --store ./store --signing-key "$SIGNING_KEY"
+```
+
+Save the `publisher key` printed by the command. To use the folder directly:
+
+```sh
+PUBLISHER_KEY=THE_KEY_PRINTED_BY_PUBLISH
+just run --cdn dir:./store --publisher-key "$PUBLISHER_KEY"
+```
+
+To serve the same store over HTTP:
+
+```sh
+GRANT_KEY=YOUR_DIFFERENT_64_HEX_GRANT_SECRET
+./.cache/build/dev/cdn/cdn \
+    --store ./store --grant-key "$GRANT_KEY" --port 9080
+```
+
+`curl http://127.0.0.1:9080/health` should answer `ok`.
+
+### Use a custom CDN from a game server
+
+In another terminal, point the game server at an IP address its clients can
+reach:
+
+```sh
+GRANT_KEY=THE_SAME_64_HEX_GRANT_SECRET
+PUBLISHER_KEY=THE_KEY_PRINTED_BY_PUBLISH
+CDN_HOST=192.168.1.20
+just host --game My.agame --listen 9000 \
+    --content-grant-key "$GRANT_KEY" \
+    --flag server.content-mode=redirect \
+    --flag server.content-sources="$CDN_HOST:9080" \
+    --flag server.content-publisher-key="$PUBLISHER_KEY"
+```
+
+The CDN and game server must use the same grant key.
+
+### Add the store to Studio
+
+Open **Edit > Preferences > Content**:
+
+1. Choose **Add local store**.
+2. Set **Use** to `read` and **Location** to the published `store/` directory.
+3. Paste the publisher key under **Trust**.
+
+Changes save immediately. For a remote origin, choose **Add origin** and enter
+its `HOST:PORT`. Protected remote downloads still need a grant from a game
+server, so use the local store in Studio for direct authoring and preview.
+
+### Connect a client
+
+Normally the server supplies the CDN address, session grant and publisher key:
+
+```sh
+just run --connect GAME_SERVER:9000
+```
+
+To pin your own CDN and key, pass them explicitly. The client tries this source
+before any source announced by the server and refuses a different publisher:
+
+```sh
+PUBLISHER_KEY=THE_KEY_PRINTED_BY_PUBLISH
+CDN_HOST=192.168.1.20
+just run --connect GAME_SERVER:9000 \
+    --cdn "$CDN_HOST:9080" --publisher-key "$PUBLISHER_KEY"
+```
+
+That HTTP CDN must accept the grant issued by the game server. A `dir:` source
+needs no grant.
+
+The detailed publishing, serving and troubleshooting reference follows.
 
 ### Publish a directory of files
 
@@ -1834,6 +2027,10 @@ A server can run one in-process, which is the self-hosted case:
 ```sh
 just host --content-store ./store --content-grant-key HEX --content-port 9080
 ```
+
+That store is also what a `relay` server relays out of and what a `redirect`
+server names, unless `server.content-sources` says otherwise - see
+[Where a client's content comes from](#where-a-clients-content-comes-from-v016).
 
 The grant is then issued and verified across a function call, and **both halves
 are real** - the MAC is computed and checked. A path skipped in the
@@ -2175,6 +2372,98 @@ is now larger than it was: MSL, DXIL and DXBC all derive their bindings from
 those descriptor sets, and the MSL derived from them is on disk to be read. A
 `server` or `cdn` preset compiles no shader and the recipe says it skipped
 rather than passing quietly.
+
+## The stress test *(v0.16)*
+
+Two hundred real clients against one server, and a flamegraph of what the server
+spent the tick on.
+
+```sh
+just preset=release stress                       # 200 clients, 45 seconds
+just preset=release stress iter1 200 45          # the next capture, under another name
+just preset=release stress quick 50 20 45200     # fewer clients, a different port
+```
+
+**Run it on `release` or `bench`.** First-party code is `-O0` under every other
+preset, so a tick cost measured there is a number about the compiler. The recipe
+does not force the preset, for the reason none of them do: the override goes
+before the recipe name and applies to everything derived from it.
+
+It is deliberately not part of `just check`. It takes a minute, its numbers
+depend on what else the machine is doing, and a gate that fails because somebody
+started a build is a gate people learn to ignore.
+
+### What it runs
+
+`mono.tools/loadtest` opens N genuine sessions in **one process** - a UDP socket
+each, a real X25519 handshake, a real cookie challenge, a real admission, a
+sealed stream and an `ecs::Store` replica the snapshot and every delta are
+applied into. It sends a move input every tick once the server has given that
+client a character.
+
+One process rather than N, because `client --headless` still builds a GPU device
+and two hundred of those measure the driver rather than the server. The harness
+links no `render`, `input`, `audio`, `ui` or `client` - see
+`mono.tools/loadtest/CMakeLists.txt`.
+
+```sh
+./.cache/build/release/tools/loadtest --help
+./.cache/build/release/tools/loadtest --port 45100 --clients 200 --seconds 45
+```
+
+The server it points at is an ordinary `server` with three flags that exist for
+this:
+
+```sh
+server --game .cache/build/release/assets/examples/Stress.luau \
+       --listen 45100 --max-clients 216 --profile-out run.folded
+```
+
+- `--max-clients N` raises `replication::ListenerSettings::MaximumClients`, which
+  is 64 by default.
+- `--profile-out PATH` folds the whole run's frame graph into a `.folded` file.
+  It turns frame collection on with it, so it is a measurement rather than
+  something to leave on in a deployment.
+- `Stress.luau` is a floor, one spawn and `Players.MaxPlayers = 512` - bare on
+  purpose, so what is measured is replication rather than scenery.
+
+### Reading the graphs
+
+Artefacts land in `.cache/stress/`:
+
+| File | What it is |
+|---|---|
+| `<label>_flamegraph.svg` | the graph, root at the bottom, widest child first |
+| `<label>.folded` | one line per stack, `root;child;leaf <microseconds>` |
+| `<label>_top.txt` | the same capture as text, so two runs diff with `diff` |
+| `<label>_server.log` | the server's own output, including `tick ms p50 · p95 · p99` |
+| `<label>_clients.txt` | the harness's report |
+| `<label>_meta.txt` | the commit it was taken at, and whether the tree was dirty |
+| `RESULTS.md` | a row per iteration - what changed and what it bought |
+
+A frame's width is its own line plus every line beneath it, and the number on a
+line is **self** time in microseconds. Colours are hashed from the frame's name,
+so the same span is the same colour in two captures and a change of shape is
+visible by eye. Hovering gives the exact figures.
+
+The renderer is a standalone script and reads any folded file:
+
+```sh
+python3 scripts/flamegraph.py .cache/stress/baseline.folded \
+    --svg out.svg --top out_top.txt --title "whatever this is"
+```
+
+**What the graph cannot see**: only what has an `ENGINE_PROFILE` scope around it
+is in it, so the gap between the sum of the spans and the wall clock is real work
+nobody has named. A span measured on another thread and handed back through
+`FrameGraph::Report` gets a line of its own, so a run that dispatched work to
+workers adds up to more than its wall clock. And `FrameGraph::MAXIMUM_SPANS`
+bounds a frame at 16384 scopes - past that the server says how many it dropped,
+because a partial flamegraph must not look complete.
+
+`perf` is not involved. This machine's `perf_event_paranoid` refuses to open an
+event even for a plain user-space process, so the whole pipeline is the engine's
+own frame graph.
 
 ## The script type check
 

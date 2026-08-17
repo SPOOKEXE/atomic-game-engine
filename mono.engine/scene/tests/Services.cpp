@@ -162,6 +162,38 @@ TEST_CASE("a service carries its scope and Lighting carries more", "[scene][serv
 	CHECK(scope == Name("Server"));
 }
 
+TEST_CASE("fixture identity is read-only and Lighting inputs are bounded", "[scene][services]") {
+	services_test::Ready();
+
+	Store store("services.properties");
+	InstallServices(store);
+
+	const Entity storage = store.FindFirstRoot("ServerStorage");
+	const Entity lighting = store.FindFirstRoot("Lighting");
+	REQUIRE(storage != NULL_ENTITY);
+	REQUIRE(lighting != NULL_ENTITY);
+
+	bool fixture = false;
+	REQUIRE(store.GetProperty(storage, Name("Fixture"), &fixture, sizeof(fixture)));
+	CHECK(fixture);
+	fixture = false;
+	CHECK_FALSE(store.SetProperty(storage, Name("Fixture"), &fixture, sizeof(fixture)));
+	CHECK(store.Get<ServiceComponent>(storage)->Fixture);
+
+	const float negativeBrightness = -4.0f;
+	const float lateClock = 31.0f;
+	const float impossibleLatitude = 120.0f;
+	REQUIRE(store.SetProperty(lighting, Name("Brightness"), &negativeBrightness, sizeof(float)));
+	REQUIRE(store.SetProperty(lighting, Name("ClockTime"), &lateClock, sizeof(float)));
+	REQUIRE(store.SetProperty(lighting, Name("GeographicLatitude"), &impossibleLatitude, sizeof(float)));
+
+	const LightingServiceComponent *state = store.Get<LightingServiceComponent>(lighting);
+	REQUIRE(state != nullptr);
+	CHECK(state->Brightness == 0.0f);
+	CHECK(state->ClockTime == 24.0f);
+	CHECK(state->GeographicLatitude == 90.0f);
+}
+
 TEST_CASE("a server-scoped service and everything under it is hidden from clients", "[scene][services]") {
 	// **The thing `ServiceComponent::Scope` was declared for in v0.7 and that
 	// nothing did until v0.15.** It round-tripped through save files and showed

@@ -84,6 +84,19 @@ mono_add_library(server
 		# the format.
 		Engine::game
 
+		# L11, `shared`. The fetch half of content delivery. `server.content-mode`
+		# `relay` streams content to clients over the game link, and the routes it
+		# relays come out of `delivery::RouteFetcher` - the same module a client
+		# fetches with, so a relayed group and a fetched one are one artefact
+		# rather than two that agree until they do not.
+		#
+		# **It linked transitively through `Mono::cdn` before this line existed**,
+		# which is the problem: a program depending on an edge nobody declared
+		# breaks where the change was not made. Naming it changes no closure and
+		# costs the headless property nothing - a hash, a socket and a compressor,
+		# and `just check-server-is-headless` is the standing proof.
+		Engine::delivery
+
 		# `shared`. The content origin, run in-process when `--content-store`
 		# asks for it - CDN.md §6's "local store", which is the self-hosted
 		# case: a small game, a LAN session, development. It is the same

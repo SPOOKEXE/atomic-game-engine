@@ -32,6 +32,7 @@ using engine::scene::MakePart;
 using engine::scene::Motion;
 using engine::scene::PartClass;
 using engine::scene::PartDesc;
+using engine::scene::Portal;
 using engine::scene::RegisterSceneClasses;
 using engine::scene::RigidBody;
 using engine::scene::ShapeKind;
@@ -222,6 +223,18 @@ namespace {
 	template <class T> bool Write(Store &store, Entity instance, const char *property, const T &value) {
 		return store.SetProperty(instance, Name(property), &value, sizeof(T));
 	}
+}
+
+TEST_CASE("Portal Enabled is an authored property", "[scene][part]") {
+	Store store("portal_property_test");
+	RegisterSceneClasses();
+	const Entity portal = store.CreateInstance(engine::ecs::Classes::Find(Name("Portal")), "Portal");
+	REQUIRE(portal != NULL_ENTITY);
+
+	CHECK(Read<bool>(store, portal, "Enabled"));
+	REQUIRE(Write(store, portal, "Enabled", false));
+	CHECK_FALSE(Read<bool>(store, portal, "Enabled"));
+	CHECK_FALSE(store.Get<Portal>(portal)->Enabled);
 }
 
 TEST_CASE("Position writes the translation and keeps the rotation", "[scene][part]") {
@@ -823,4 +836,32 @@ TEST_CASE("drag reads on an anchored part rather than raising", "[scene][part]")
 	CHECK(damping == 0.0f);
 	CHECK(store.GetProperty(part, Name("AngularDamping"), &damping, sizeof(damping)));
 	CHECK(damping == 0.0f);
+}
+
+TEST_CASE("light classes expose only controls their render path consumes", "[scene][part]") {
+	RegisterSceneClasses();
+	Store store("part_test.light_surface");
+
+	const auto has = [&](std::string_view className, std::string_view propertyName) {
+		const Entity light = store.CreateInstance(Classes::Find(Name(className)), className);
+		for (const auto &property : store.PropertiesOf(light)) {
+			if (property.Name == Name(propertyName)) {
+				return true;
+			}
+		}
+		return false;
+	};
+
+	// The renderer has no local-light shadow pass, and a point has no cone or
+	// face. A writable row for any of those would claim an effect that cannot
+	// occur.
+	CHECK_FALSE(has("PointLight", "Shadows"));
+	CHECK_FALSE(has("PointLight", "Angle"));
+	CHECK_FALSE(has("PointLight", "Face"));
+
+	CHECK(has("SpotLight", "Angle"));
+	CHECK(has("SpotLight", "Face"));
+	CHECK(has("SurfaceLight", "Angle"));
+	CHECK(has("SurfaceLight", "Face"));
+	CHECK(has("PointLight", "Brightness"));
 }

@@ -38,6 +38,13 @@ endif()
 # Line counter.
 add_subdirectory(linecount)
 
+# Many real replication clients against one server.
+#
+# Unconditional, like `shadercheck` and unlike `contentimport`: it links the
+# transport and the replication layer and no device at all, so it builds in a
+# `server` preset - which is the preset somebody measuring a server would use.
+add_subdirectory(loadtest)
+
 # Compiled SPIR-V against the binding contract every backend derives from it.
 #
 # Unconditional, unlike `contentimport` above: it reads `.spv` files and links no

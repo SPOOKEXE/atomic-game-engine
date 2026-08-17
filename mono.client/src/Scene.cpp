@@ -802,6 +802,11 @@ namespace client {
 				const engine::scene::Camera &lens,
 				const Transform &placement
 			) {
+				if (const engine::scene::Portal *portal = store.template Get<engine::scene::Portal>(entity);
+					portal != nullptr && !portal->Enabled) {
+					return;
+				}
+
 				// **A slot the recursive pass owns gets no surface camera.** Both
 				// would draw the same pane - one from a camera derived from this
 				// level and one from a camera placed off the eye - and the second
@@ -816,6 +821,14 @@ namespace client {
 					}
 					return false;
 				};
+
+				// A negative slot is the scene pass's explicit "do not render"
+				// value. Disabled portals and edge-on mirrors clear their old slots
+				// this way, so collecting them would preserve the stale camera as an
+				// invalid surface view instead of stopping its capture.
+				if (target.Surface < 0) {
+					return;
+				}
 
 				if (claimed(target.Surface)) {
 					return;
@@ -1093,6 +1106,8 @@ namespace client {
 				batch.Texture = emitter.Texture;
 				batch.FlipbookSide = static_cast<float>(engine::effects::FlipbookSide(emitter.Flipbook));
 				batch.ZOffset = emitter.ZOffset;
+				batch.LightEmission = emitter.LightEmission;
+				batch.LightInfluence = emitter.LightInfluence;
 				batch.Additive = emitter.Additive;
 				batch.WorldUp =
 					emitter.Orientation == engine::effects::ParticleOrientation::FacingCameraWorldUp;

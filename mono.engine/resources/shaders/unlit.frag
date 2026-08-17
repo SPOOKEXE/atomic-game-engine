@@ -46,6 +46,7 @@ layout(set = 2, binding = 3) uniform sampler2D beamMap;
 layout(set = 3, binding = 0) uniform Lighting {
 	vec4 Direction;
 	vec4 Ambient;
+	vec4 Direct;
 	vec4 Flags;
 	vec4 BaseColour;
 	vec4 Surface;
@@ -53,7 +54,16 @@ layout(set = 3, binding = 0) uniform Lighting {
 	vec4 Mirror;
 	vec4 PaneNormal;
 	vec4 SeamPlane;
+	vec4 OutdoorAmbient;
+	vec4 FogColour;
+	vec4 Fog;
+	vec4 Eye;
 } lighting;
+
+float FogFactor() {
+	float interval = max(lighting.Fog.y - lighting.Fog.x, 0.0001);
+	return clamp((distance(inWorldPosition, lighting.Eye.xyz) - lighting.Fog.x) / interval, 0.0, 1.0);
+}
 
 void main() {
 	// `fract` before the cell transform, so a tiled coordinate stays inside its
@@ -82,5 +92,6 @@ void main() {
 	// `opaque.frag`'s rule and the reason an untextured import looks right: the
 	// texture is what was painted, the base colour is what the material says
 	// the run is, and the tint is what the scene says this copy is.
-	outColour = vec4(inColour.rgb * sampled.rgb * lighting.BaseColour.rgb, alpha);
+	vec3 colour = inColour.rgb * sampled.rgb * lighting.BaseColour.rgb;
+	outColour = vec4(mix(colour, lighting.FogColour.rgb, FogFactor()), alpha);
 }

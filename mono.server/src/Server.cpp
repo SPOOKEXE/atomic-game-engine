@@ -6,7 +6,9 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/delivery/Relay.hpp>
 #include <engine/examples/Scene.hpp>
+#include <engine/game/Content.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Play.hpp>
 #include <engine/gui/Services.hpp>
@@ -30,9 +32,11 @@
 #include <atomic>
 #include <cdn/Origin.hpp>
 #include <cdn/Service.hpp>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <server/ContentRelay.hpp>
 #include <server/Server.hpp>
 #include <server/Simulation.hpp>
 #include <thread>
@@ -56,6 +60,92 @@ namespace server {
 			}
 			return true;
 		}
+
+		// Turns one `--content-sources` entry into a source.
+		//
+		// **The client's spelling, on purpose.** `NAME=LOCATION` names the entry
+		// and `dir:` marks a published tree; anything else is an address. A name
+		// is what a log line and an operator's configuration refer to, which is
+		// AGENTS.md rule 4 - so an entry that gives none is named after the
+		// location it came from rather than after its position in the list.
+		// Wall time, in whole seconds.
+		//
+		// **A grant is checked against wall time because whoever checks it uses
+		// wall time.** `cdn`'s own main says the same in as many words: the origin
+		// on the other side of a relay is a different process and possibly a
+		// different machine, and a steady clock's epoch is neither.
+		// How long a relay's own upstream grant is good for.
+		//
+		// Longer than a client's, because it is reissued only when this process
+		// restarts and a relay that stopped being admitted mid-session would look
+		// exactly like an origin that went down.
+		constexpr uint64_t RELAY_GRANT_SECONDS = 24 * 60 * 60;
+
+		// The session a relay's own grant is issued under.
+		//
+		// **Not zero, because zero is not a session** - `GrantScope::IsValid`
+		// refuses it, so a grant issued under it is never minted at all and the
+		// upstream refuses every bundle with nothing anywhere saying why. And
+		// not a small number either: a client's is `ClientId::Index + 1`, and
+		// this fetch is this process's own rather than any player's.
+		constexpr uint64_t RELAY_SESSION = ~uint64_t{0};
+
+		uint64_t WallSeconds() {
+			using namespace std::chrono;
+			return static_cast<uint64_t>(
+				duration_cast<seconds>(system_clock::now().time_since_epoch()).count()
+			);
+		}
+
+		engine::delivery::Source ParseContentSource(const std::string &entry) {
+			std::string_view text(entry);
+			std::string name;
+
+			if (const size_t equals = text.find('='); equals != std::string_view::npos && equals > 0) {
+				// A `dir:` prefix carries a colon and a Windows path carries a
+				// backslash, so the half in front of the `=` is only read as a name
+				// when it holds neither - otherwise `C:\\store` would be a name.
+				const std::string_view head = text.substr(0, equals);
+				if (head.find('/') == std::string_view::npos && head.find('\\') == std::string_view::npos &&
+					head.find(':') == std::string_view::npos) {
+					name = std::string(head);
+					text = text.substr(equals + 1);
+				}
+			}
+
+			const bool directory = text.starts_with("dir:");
+			engine::delivery::Source source;
+			source.Name = name.empty() ? std::string(text) : name;
+			source.Kind =
+				directory ? engine::delivery::SourceKind::Directory : engine::delivery::SourceKind::Http;
+			source.Location = directory ? std::string(text.substr(4)) : std::string(text);
+			source.Enabled = true;
+			// **Read, because a server relays and never publishes on a client's
+			// behalf.** A write origin is invisible to a fetch, which is exactly
+			// what this list is for - see `delivery::SourceRole`.
+			source.Role = engine::delivery::SourceRole::Read;
+			return source;
+		}
+	}
+
+	const char *Describe(ContentMode mode) {
+		switch (mode) {
+		case ContentMode::Relay:
+			return "relay";
+		case ContentMode::Redirect:
+			return "redirect";
+		}
+		return "unknown";
+	}
+
+	std::optional<ContentMode> ContentModeOf(std::string_view text) {
+		if (text == "relay") {
+			return ContentMode::Relay;
+		}
+		if (text == "redirect") {
+			return ContentMode::Redirect;
+		}
+		return std::nullopt;
 	}
 
 	namespace {
@@ -125,6 +215,7 @@ namespace server {
 
 	// Out of line so CDN types remain incomplete in the public header.
 	Server::~Server() {
+		ContentLink.reset();
 		ContentService.reset();
 		ContentOrigin.reset();
 		ContentGrantSecret.reset();
@@ -241,6 +332,167 @@ namespace server {
 			return std::nullopt;
 		}
 		return grant->Encode();
+	}
+
+	const ContentRelayStatistics *Server::ContentRelayStats() const {
+		return ContentLink ? &ContentLink->Stats() : nullptr;
+	}
+
+	std::vector<engine::delivery::Source> Server::ConfiguredContentSources() const {
+		std::vector<engine::delivery::Source> sources;
+		for (const std::string &entry : Settings.ContentSources) {
+			if (entry.empty()) {
+				continue;
+			}
+			sources.push_back(ParseContentSource(entry));
+		}
+
+		if (sources.empty() && !Settings.ContentStore.empty()) {
+			// **One flag rather than two saying the same thing.** A server told to
+			// serve a store is a server whose content source is that store, and
+			// making an operator write it twice is two places to get it wrong.
+			engine::delivery::Source own;
+			own.Name = "server-store";
+			own.Kind = engine::delivery::SourceKind::Directory;
+			own.Location = Settings.ContentStore.string();
+			own.Role = engine::delivery::SourceRole::Read;
+			sources.push_back(std::move(own));
+		}
+		return sources;
+	}
+
+	bool Server::BeginRelayingContent() {
+		// **Said once at start-up, because the symptom says nothing at all.** A
+		// client is told the publisher key at admission and fetches nothing until
+		// it has one, so a server with content and no key leaves every client
+		// sitting on "waiting for the server to name a publisher key" for the
+		// length of the session - a session that joins the world, draws it, and
+		// never loads an asset, with no error anywhere. This is `ContentRoot::
+		// Mount`'s rule: report the misconfiguration where it was made rather than
+		// as a silence somebody else has to explain.
+		if (!ConfiguredContentSources().empty() && Settings.ContentPublisherKey.empty()) {
+			ENGINE_WARN(
+				"server: content is configured with no --content-publisher-key, so clients are told no "
+				"publisher to trust and will fetch nothing"
+			);
+		}
+
+		if (Settings.ContentDelivery != ContentMode::Relay) {
+			ENGINE_INFO("server: content mode {}", Describe(Settings.ContentDelivery));
+			return true;
+		}
+
+		const std::vector<engine::delivery::Source> sources = ConfiguredContentSources();
+		if (sources.empty()) {
+			// Nothing was configured. Not a failure: a game whose content ships
+			// inside its game file needs no origin at all, and building a relay
+			// with nowhere to fetch from would refuse every route.
+			return true;
+		}
+
+		engine::delivery::DeliverySettings settings;
+		settings.Sources = sources;
+		if (!Settings.ContentPublisherKey.empty()) {
+			const auto key = engine::assets::PublicKey::FromHex(Settings.ContentPublisherKey);
+			if (!key) {
+				ENGINE_ERROR("server: --content-publisher-key is not 64 hex characters");
+				return false;
+			}
+			settings.Publisher = *key;
+		}
+
+		std::unique_ptr<engine::delivery::RouteFetcher> fetcher =
+			engine::delivery::MakeRouteFetcher(settings);
+		if (!fetcher) {
+			ENGINE_ERROR("server: content mode relay names no usable source");
+			return false;
+		}
+
+		ContentLink = std::make_unique<ContentRelay>(std::move(fetcher));
+
+		// **The grant this server presents to its own upstreams**, which is the
+		// half of CDN.md §4 a relay sits on: a client presents nothing because it
+		// reaches no origin, and this process presents what it issued itself. A
+		// `dir:` source admits nobody and needs none, which is why an absent grant
+		// is not an error here.
+		bool upstreamNeedsGrant = false;
+		for (const engine::delivery::Source &source : sources) {
+			upstreamNeedsGrant = upstreamNeedsGrant || source.Kind == engine::delivery::SourceKind::Http;
+		}
+
+		if (const std::optional<std::vector<std::byte>> token =
+				IssueContentGrant(RELAY_SESSION, WallSeconds(), RELAY_GRANT_SECONDS)) {
+			ContentLink->UseGrant(*token);
+		} else if (upstreamNeedsGrant) {
+			// **Said out loud, because the symptom is a manifest that arrives
+			// and a bundle that never does.** An origin admits a fetch against a
+			// grant and nothing else, so a relay with an HTTP source and no
+			// grant to present serves its clients a catalogue of content it
+			// cannot get - which reads as content corruption a long way from
+			// here.
+			ENGINE_WARN(
+				"server: relaying from an origin needs --content-store and --content-grant-key so this "
+				"server can issue itself a grant - bundles will be refused without one"
+			);
+		}
+
+		ENGINE_INFO(
+			"server: content mode relay - {} source(s), first is '{}'", sources.size(), sources.front().Name
+		);
+		return true;
+	}
+
+	void Server::OfferContentDirectory(engine::replication::ClientId client) {
+		if (Replication == nullptr) {
+			return;
+		}
+
+		engine::game::ContentDirectory directory;
+
+		// **Endpoints only in `Redirect`, and the publisher key in both.** A
+		// relaying server has nowhere to point a client at - it *is* where the
+		// content comes from - but a client still needs a root of trust, because
+		// relayed bytes are verified exactly as fetched ones are. Naming origins
+		// in relay mode would hand a client a second way to get content that this
+		// deployment deliberately did not give it.
+		if (Settings.ContentDelivery == ContentMode::Redirect) {
+			for (const engine::delivery::Source &source : ConfiguredContentSources()) {
+				if (directory.Endpoints.size() >= engine::game::MAXIMUM_CONTENT_ENDPOINTS) {
+					break;
+				}
+				directory.Endpoints.push_back(
+					engine::game::ContentEndpoint{
+						.Name = source.Name,
+						.Kind = source.Kind == engine::delivery::SourceKind::Directory ? "dir" : "http",
+						.Location = source.Location,
+					}
+				);
+			}
+
+			if (const std::optional<std::vector<std::byte>> token =
+					IssueContentGrant(client.Index + 1u, WallSeconds())) {
+				// **The grant is what lets `cdn::Gate` admit this client without
+				// the origin knowing anything about sessions or players.** The
+				// origin decides nothing about who; this process does, and it says
+				// so once.
+				directory.Grant = *token;
+			}
+		}
+		directory.PublisherKey = Settings.ContentPublisherKey;
+
+		if (directory.Endpoints.empty() && directory.PublisherKey.empty()) {
+			// Nothing to say. Saying it anyway would make a client rebuild its
+			// delivery client for no reason.
+			return;
+		}
+
+		const std::vector<std::byte> message = engine::game::EncodeContentDirectory(directory);
+		if (!Replication->SendTo(client, message, PollNow)) {
+			// **Not fatal, and said out loud.** A client that never hears where
+			// content is falls back to whatever it was configured with, which on a
+			// client configured with nothing is a world of missing textures.
+			ENGINE_WARN("server: could not tell client {} where content is", client.Index);
+		}
 	}
 
 	bool Server::Initialise(const Options &options) {
@@ -392,6 +644,12 @@ namespace server {
 		}
 
 		if (!BeginServingContent()) {
+			return false;
+		}
+
+		// After the origin, because a relay presents the grant this process
+		// issues and there is nothing to issue one against until it exists.
+		if (!BeginRelayingContent()) {
 			return false;
 		}
 
@@ -547,6 +805,7 @@ namespace server {
 		// yes to that.
 		engine::replication::ListenerSettings streaming;
 		streaming.Authority.Audit.Enabled = true;
+		streaming.MaximumClients = Settings.MaximumClients;
 
 		Replication = std::make_unique<engine::replication::Listener>(*Socket, streaming);
 
@@ -641,18 +900,16 @@ namespace server {
 					return false;
 				}
 
-				bool blocked = false;
-				Worlds().Enter(PrimaryWorld, [&](engine::ecs::Store &store) {
-					const engine::core::Ray ray(eye, gap.Unit());
-					const auto hit = engine::physics::Raycast(store, ray, distance);
+				// `Publishing` is non-null here because `PositionOf` answered,
+				// and that is the only way it does.
+				const engine::core::Ray ray(eye, gap.Unit());
+				const auto hit = engine::physics::Raycast(*Publishing, ray, distance);
 
-					// **A margin, because the entity is hit by its own ray.**
-					// Ten centimetres is well inside anything a wall could be
-					// and well outside the floating-point noise of a cast that
-					// lands on the target's own surface.
-					blocked = hit.has_value() && hit->Owner != entity && hit->Distance < distance - 0.1f;
-				});
-				return blocked;
+				// **A margin, because the entity is hit by its own ray.** Ten
+				// centimetres is well inside anything a wall could be and well
+				// outside the floating-point noise of a cast that lands on the
+				// target's own surface.
+				return hit.has_value() && hit->Owner != entity && hit->Distance < distance - 0.1f;
 			};
 
 			// **`ReplicatedFirst` outranks the distance in the *stream*, which
@@ -675,15 +932,41 @@ namespace server {
 			// is paid the same way.** The alternative is a set rebuilt per
 			// publish, which is a second record of a containment the tree
 			// already states.
+			// Named out here rather than inside the scorer because both hooks
+			// below have to agree about it: one grants the rank and the other has
+			// to recognise it in order to leave it alone.
+			constexpr float REPLICATED_FIRST = 2.0f;
+
 			Replication->Authority().SetPriority(
 				[this, score](engine::replication::ClientId client, engine::ecs::Entity entity) {
-					constexpr float REPLICATED_FIRST = 2.0f;
-
-					bool first = false;
-					Worlds().Enter(PrimaryWorld, [entity, &first](engine::ecs::Store &store) {
-						first = engine::scene::InReplicatedFirst(store, entity);
-					});
+					// The publish's own store, for `PositionOf`'s reason: this runs
+					// once per candidate per client and re-entering the world to
+					// walk one entity's ancestry was the second of the two entries
+					// this path was paying per call.
+					const bool first =
+						Publishing != nullptr && engine::scene::InReplicatedFirst(*Publishing, entity);
 					return first ? REPLICATED_FIRST : score(client, entity);
+				}
+			);
+
+			// **The occlusion raycast, asked only about the rows in
+			// contention.** `SetPriorityRefinement` is consulted for what a
+			// tick could carry rather than for every entity in the world, which
+			// is the difference between two hundred casts a client and two
+			// thousand. `Authority` clamps the answer to the score it was given,
+			// so this can only ever push a row back.
+			//
+			// **`ReplicatedFirst` is exempt, exactly as it is in the score.**
+			// Its rank is deliberately above everything the falloff can produce,
+			// and a quarter of it is not - so demoting a loading screen because
+			// a wall is in front of it would put the screen behind the world it
+			// exists to hide.
+			Replication->Authority().SetPriorityRefinement(
+				[this, score](engine::replication::ClientId client, engine::ecs::Entity entity, float hint) {
+					if (hint >= REPLICATED_FIRST) {
+						return hint;
+					}
+					return score.Refine(client, entity, hint);
 				}
 			);
 
@@ -712,6 +995,19 @@ namespace server {
 		// so a server with no players had nobody to assign it to and
 		// `SetNetworkOwner` had no argument a script could obtain.
 		//
+		// **What a client says about content, and the only thing it may say.**
+		// The payload is opaque to `replication` by design, so this is where it
+		// stops being opaque - and it stops being opaque behind a rate limit, an
+		// outstanding bound and a closed list of routes, because a client is
+		// untrusted and every one of those has to be held on this side.
+		Replication->OnUserMessage(
+			[this](engine::replication::ClientId client, std::span<const std::byte> payload) {
+				if (ContentLink != nullptr) {
+					ContentLink->Receive(client, payload, PollNow);
+				}
+			}
+		);
+
 		Replication->OnAdmitted([this](engine::replication::ClientId client) {
 			Worlds().Enter(PrimaryWorld, [this, client](engine::ecs::Store &store) {
 				// **A world with no `Players` service gets no player, quietly.**
@@ -795,6 +1091,14 @@ namespace server {
 
 				ENGINE_INFO("server: {} joined as '{}'", name, Worlds().NameOf(PrimaryWorld).Text());
 			});
+
+			// **Where content is, said once at admission and outside the world.**
+			// It is per-client - the grant names this session - so it cannot be
+			// replicated, and it is nothing to do with whether the world had a
+			// `Players` service to put anybody in. In relay mode it names no
+			// origin - there is nowhere to point a client at - and still carries
+			// the publisher key, because relayed bytes are verified too.
+			OfferContentDirectory(client);
 		});
 
 		// **And destroyed when they leave, which is what makes the reclaim
@@ -803,6 +1107,14 @@ namespace server {
 		// entity not alive. Leaving it behind would be a body owned for ever by
 		// somebody who has gone.
 		Replication->OnDropped([this](engine::replication::ClientId client) {
+			if (ContentLink != nullptr) {
+				// **Before the player, because a slot is reused immediately.** A
+				// relay session left behind would hand the next client on this slot
+				// the previous one's allowance, and a half-sent group nobody is
+				// waiting for.
+				ContentLink->Forget(client);
+			}
+
 			const auto found = Players.find(client.Index);
 			if (found == Players.end() || found->second.Generation != client.Generation) {
 				return;
@@ -867,45 +1179,58 @@ namespace server {
 		// same split `SetOwnership` makes one block up: `mono.engine/replication`
 		// does not depend on `scene` and must not, because the wire's job is to
 		// move components and it has no business knowing what a service is.
-		Replication->Authority().SetInterest([this](
-												 engine::replication::ClientId client,
-												 engine::ecs::Entity entity,
-												 const engine::ecs::Store &store
-											 ) {
-			if (!engine::scene::VisibleToClients(store, entity)) {
-				return false;
-			}
+		Replication->Authority().SetInterest(
+			[this](
+				engine::replication::ClientId client, engine::ecs::Entity entity, const engine::ecs::Store &
+			) {
+				// **Two lookups into what `SurveyVisibility` worked out this tick,
+				// rather than two walks up the tree.** Both of those questions are
+				// about the world rather than about who is asking, and this runs once
+				// per entity per client - see `HiddenFromClients`.
+				if (std::binary_search(HiddenFromClients.begin(), HiddenFromClients.end(), entity.Id)) {
+					return false;
+				}
 
-			// **Almost everything is nobody's**, so this answers first and the
-			// player lookup below is paid only by the few rows under a player.
-			const engine::ecs::Entity owner = engine::scene::PlayerOwning(store, entity);
-			if (owner == engine::ecs::NULL_ENTITY) {
-				return true;
-			}
+				// **Almost everything is nobody's**, so this answers first and the
+				// player lookup below is paid only by the few rows under a player.
+				const auto owned = std::lower_bound(
+					OwnedByPlayer.begin(),
+					OwnedByPlayer.end(),
+					entity.Id,
+					[](const std::pair<uint64_t, engine::ecs::Entity> &row, uint64_t id) {
+						return row.first < id;
+					}
+				);
+				if (owned == OwnedByPlayer.end() || owned->first != entity.Id) {
+					return true;
+				}
 
-			// **The `Player` row itself goes to everybody; what is *under* it
-			// does not.** Roblox draws the line in the same place and for the
-			// same reason: `Players:GetPlayers()` is how a game knows who is in
-			// it, and a client shown only its own row would think it was alone.
-			// `server.replication`'s "a client is told which player is theirs"
-			// case is what caught this - the first version of this predicate hid
-			// every player from every other client, which reads as a lobby that
-			// never fills.
-			if (entity == owner) {
-				return true;
-			}
+				const engine::ecs::Entity owner = owned->second;
 
-			// **A client this server has forgotten sees nothing under any
-			// player**, rather than everything: the map is the only statement of
-			// who a connection is, and a handle it does not answer for is a
-			// connection that has gone. Failing open here would show a departing
-			// client every player's interface on its way out.
-			const auto found = Players.find(client.Index);
-			if (found == Players.end() || found->second.Generation != client.Generation) {
-				return false;
+				// **The `Player` row itself goes to everybody; what is *under* it
+				// does not.** Roblox draws the line in the same place and for the
+				// same reason: `Players:GetPlayers()` is how a game knows who is in
+				// it, and a client shown only its own row would think it was alone.
+				// `server.replication`'s "a client is told which player is theirs"
+				// case is what caught this - the first version of this predicate hid
+				// every player from every other client, which reads as a lobby that
+				// never fills.
+				if (entity == owner) {
+					return true;
+				}
+
+				// **A client this server has forgotten sees nothing under any
+				// player**, rather than everything: the map is the only statement of
+				// who a connection is, and a handle it does not answer for is a
+				// connection that has gone. Failing open here would show a departing
+				// client every player's interface on its way out.
+				const auto occupant = Players.find(client.Index);
+				if (occupant == Players.end() || occupant->second.Generation != client.Generation) {
+					return false;
+				}
+				return owner == occupant->second.Instance;
 			}
-			return owner == found->second.Instance;
-		});
+		);
 
 		// A delta is the third reader of the dirty bits, so the components that
 		// travel *and change every tick* have to be observed or nothing ever
@@ -946,20 +1271,52 @@ namespace server {
 		return true;
 	}
 
-	bool Server::PositionOf(engine::ecs::Entity entity, engine::core::Vector3 &out) {
-		// **Not `const`, and the `const_cast` this had was the tell.** Entering
-		// a world takes it, which is a mutating operation on the universe
-		// however read-only the callback is - so a `const` here was a claim the
-		// body had to cast away, and a cast whose job is to make a signature
-		// true is a signature that is not.
-		bool found = false;
-		Worlds().Enter(PrimaryWorld, [entity, &out, &found](engine::ecs::Store &store) {
-			if (const auto *placement = store.Get<engine::scene::Transform>(entity)) {
-				out = placement->Frame.Position;
-				found = true;
+	void Server::SurveyVisibility(engine::ecs::Store &store) {
+		ENGINE_PROFILE_CAT("Server::SurveyVisibility", engine::core::ProfileCategory::Network);
+
+		HiddenFromClients.clear();
+		OwnedByPlayer.clear();
+
+		// **One walk for the world, where the predicate it feeds is one walk per
+		// entity per client.** `EachEntity` visits in archetype order, so both
+		// lists are sorted afterwards rather than assumed to be - the predicate
+		// reaches them by binary search.
+		store.EachEntity([this, &store](engine::ecs::Entity entity) {
+			if (!engine::scene::VisibleToClients(store, entity)) {
+				HiddenFromClients.push_back(entity.Id);
+				return;
+			}
+
+			const engine::ecs::Entity owner = engine::scene::PlayerOwning(store, entity);
+			if (owner != engine::ecs::NULL_ENTITY) {
+				OwnedByPlayer.emplace_back(entity.Id, owner);
 			}
 		});
-		return found;
+
+		std::sort(HiddenFromClients.begin(), HiddenFromClients.end());
+		std::sort(OwnedByPlayer.begin(), OwnedByPlayer.end(), [](const auto &left, const auto &right) {
+			return left.first < right.first;
+		});
+	}
+
+	bool Server::PositionOf(engine::ecs::Entity entity, engine::core::Vector3 &out) const {
+		// **The store the publish is already inside, not a fresh entry into it.**
+		// This is asked once per candidate per client, so on a full server it is
+		// the most-called function in the process - and `Universe::Enter` is a
+		// world lookup, a thread check, a rebind and two indirect calls before
+		// it reaches the component. Reading `Publishing` is the same store by
+		// the same pointer the caller above already holds.
+		if (Publishing == nullptr) {
+			return false;
+		}
+
+		const auto *placement = Publishing->Get<engine::scene::Transform>(entity);
+		if (placement == nullptr) {
+			return false;
+		}
+
+		out = placement->Frame.Position;
+		return true;
 	}
 
 	bool Server::ViewpointOf(engine::replication::ClientId client, engine::core::Vector3 &out) const {
@@ -1439,6 +1796,8 @@ namespace server {
 	}
 
 	void Server::ServeClients(double nowSeconds) {
+		ENGINE_PROFILE_CAT("Server::ServeClients", engine::core::ProfileCategory::Network);
+
 		ServeDiscovery(nowSeconds);
 
 		if (Replication == nullptr) {
@@ -1503,28 +1862,58 @@ namespace server {
 			// component became the author's numbers rather than the world's
 			// decision and every part started carrying one. Left as it was, this
 			// would have recorded a rewind history for every wall in the map.
-			if (History.Begin(store.Time().Tick)) {
-				store.Query<const engine::scene::Transform, const engine::scene::RigidBody>()
-					.Without<engine::scene::Anchored>()
-					.Each([this](
-							  engine::ecs::Entity entity,
-							  const engine::scene::Transform &placement,
-							  const engine::scene::RigidBody &body
-						  ) {
-						if (body.Kind == engine::scene::BodyKind::Static) {
-							return;
-						}
-						History.Record(entity, placement.Frame.Position);
-					});
+			{
+				ENGINE_PROFILE_CAT("Server::Rewind", engine::core::ProfileCategory::Network);
+				if (History.Begin(store.Time().Tick)) {
+					store.Query<const engine::scene::Transform, const engine::scene::RigidBody>()
+						.Without<engine::scene::Anchored>()
+						.Each([this](
+								  engine::ecs::Entity entity,
+								  const engine::scene::Transform &placement,
+								  const engine::scene::RigidBody &body
+							  ) {
+							if (body.Kind == engine::scene::BodyKind::Static) {
+								return;
+							}
+							History.Record(entity, placement.Frame.Position);
+						});
+				}
 			}
 
 			// Before `ClearChanges`, which the world does at the start of its
 			// next tick - the bits are the delta source and reading them after
 			// they are cleared is how a tick's worth of movement goes missing.
+			//
+			// The borrow is opened and closed around exactly this call, so the
+			// priority callbacks read the store this walk is in rather than
+			// entering the world again per candidate. See `Publishing`.
+			//
+			// **The visibility survey immediately before it, inside the same
+			// entry**, because what it works out is only true of the world as it
+			// stands now - and nothing between the two mutates one.
+			SurveyVisibility(store);
+			Publishing = &store;
 			Replication->Publish(store, store.Time().Tick, nowSeconds);
+			Publishing = nullptr;
 		});
 
-		ApplyInputs();
+		// **After the world, and that ordering is the whole of "content must not
+		// starve the simulation".** `Publish` has already spent what this tick's
+		// delta needed out of each link's budget, so what a relayed chunk is
+		// offered is whatever is left - and `SendTo` refusing is ordinary
+		// backpressure, so the piece goes out on the next tick from where it
+		// stopped rather than being lost.
+		if (ContentLink != nullptr) {
+			ENGINE_PROFILE_CAT("Server::ContentRelay", engine::core::ProfileCategory::Network);
+			ContentLink->Pump([this](
+								  engine::replication::ClientId client, std::span<const std::byte> payload
+							  ) { return Replication->SendTo(client, payload, PollNow); });
+		}
+
+		{
+			ENGINE_PROFILE_CAT("Server::ApplyInputs", engine::core::ProfileCategory::Simulation);
+			ApplyInputs();
+		}
 		Replication->ClearInputs();
 
 		Replication->Advance(nowSeconds);
@@ -1773,7 +2162,21 @@ namespace server {
 		uint64_t nextTickAt = started;
 		double totalTickSeconds = 0.0;
 
+		// Every tick's cost, for the percentiles below. Four bytes a tick, so an
+		// hour at sixty a second is under a megabyte and a run long enough to
+		// matter is bounded by how long somebody left it running.
+		std::vector<float> tickMilliseconds;
+		size_t droppedSpans = 0;
+
 		const auto ticksSoFar = [this] { return Worlds().StatisticsOf(PrimaryWorld).Ticks; };
+
+		// Collection has to be on for there to be a tree to fold, and asking for
+		// the profile is what says so - `--graph` is the other way in and the
+		// two do not have to be given together.
+		if (!Settings.ProfilePath.empty()) {
+			engine::core::FrameGraph::SetEnabled(true);
+			engine::core::FrameGraph::SetFoldingEnabled(true);
+		}
 
 		if (Settings.ControlPort >= 0) {
 			ControlSurface.AddUniverseTools(Worlds());
@@ -1896,10 +2299,18 @@ namespace server {
 			engine::core::FrameGraph::EndFrame();
 			ENGINE_PROFILE_FRAME();
 
+			// **Counted, because a partial flamegraph must not look complete.**
+			// The collector's per-frame budgets are `MAXIMUM_SPANS` and
+			// `MAXIMUM_DEPTH`, and a host with hundreds of clients on it is
+			// exactly the run that can reach the first. A capture that quietly
+			// lost a subtree is a capture that reports the wrong hot path.
+			droppedSpans += engine::core::FrameGraph::Dropped();
+
 			const uint64_t tickEnded = engine::core::Clock::Nanoseconds();
 			const auto spent = static_cast<double>(tickEnded - tickStarted) / 1e9;
 
 			totalTickSeconds += spent;
+			tickMilliseconds.push_back(static_cast<float>(spent * 1000.0));
 			summary.SlowestTickMilliseconds =
 				std::max(summary.SlowestTickMilliseconds, static_cast<float>(spent * 1000.0));
 
@@ -1949,6 +2360,21 @@ namespace server {
 				? static_cast<float>(totalTickSeconds / static_cast<double>(summary.Ticks) * 1000.0)
 				: 0.0f;
 
+		// Nearest-rank on a sorted copy, for `FrameGraph`'s reason: with
+		// thousands of readings an interpolated percentile reports a tick that
+		// never happened.
+		if (!tickMilliseconds.empty()) {
+			std::sort(tickMilliseconds.begin(), tickMilliseconds.end());
+			const auto at = [&tickMilliseconds](double fraction) {
+				const auto rank =
+					static_cast<size_t>(fraction * static_cast<double>(tickMilliseconds.size() - 1) + 0.5);
+				return tickMilliseconds[std::min(rank, tickMilliseconds.size() - 1)];
+			};
+			summary.TickP50Milliseconds = at(0.50);
+			summary.TickP95Milliseconds = at(0.95);
+			summary.TickP99Milliseconds = at(0.99);
+		}
+
 		ENGINE_INFO(
 			"{} tick(s) over {:.2f}s · mean {:.3f} ms · slowest {:.3f} ms · {} overrun(s)",
 			summary.Ticks,
@@ -1956,6 +2382,17 @@ namespace server {
 			summary.MeanTickMilliseconds,
 			summary.SlowestTickMilliseconds,
 			summary.Overruns
+		);
+
+		// **A separate line, and machine-readable on purpose.** `just stress`
+		// scrapes it: the harness measures what a client saw and cannot see a
+		// server's own tick cost, and the alternative was a second control
+		// channel for a number this process already has.
+		ENGINE_INFO(
+			"tick ms p50 {:.3f} · p95 {:.3f} · p99 {:.3f}",
+			summary.TickP50Milliseconds,
+			summary.TickP95Milliseconds,
+			summary.TickP99Milliseconds
 		);
 
 		// **Two counters that nothing read until now.** `Struck` and `Dropped`
@@ -1970,6 +2407,42 @@ namespace server {
 		// does not print a line of zeroes.
 		if (Struck > 0 || Dropped > 0) {
 			ENGINE_INFO("server: {} shot(s) struck, {} input(s) did not decode", Struck, Dropped);
+		}
+
+		// **The relay's own counters, and they are separate on purpose.** A
+		// client asking too fast, a route nothing could produce and a link that
+		// was full are three incidents with three different fixes, and one
+		// number for them would bury whichever mattered. Said only when
+		// something happened, for the line above's reason.
+		if (const ContentRelayStatistics *const relayed = ContentRelayStats();
+			relayed != nullptr && relayed->Requests > 0) {
+			ENGINE_INFO(
+				"server: content relay served {} route(s) in {} bytes · {} refused · {} dropped for rate · "
+				"{} client(s) flagged · {} chunk(s) deferred",
+				relayed->Served,
+				relayed->SentBytes,
+				relayed->Refused,
+				relayed->Dropped,
+				relayed->Flagged,
+				relayed->Deferred
+			);
+		}
+
+		if (!Settings.ProfilePath.empty()) {
+			engine::core::FrameGraph::SetFoldingEnabled(false);
+			const size_t folded = engine::core::FrameGraph::FoldedFrames();
+			if (engine::core::FrameGraph::WriteFolded(Settings.ProfilePath)) {
+				ENGINE_INFO("profile: {} frame(s) folded into {}", folded, Settings.ProfilePath.string());
+				if (droppedSpans > 0) {
+					ENGINE_WARN(
+						"profile: {} scope(s) were dropped, so the capture is incomplete - see "
+						"FrameGraph::MAXIMUM_SPANS",
+						droppedSpans
+					);
+				}
+			} else {
+				ENGINE_ERROR("profile: nothing to write to '{}'", Settings.ProfilePath.string());
+			}
 		}
 
 		return summary;

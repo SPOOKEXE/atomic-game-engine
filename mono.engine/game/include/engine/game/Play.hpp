@@ -60,6 +60,27 @@ namespace engine::game {
 
 		// Client to host: "this is the way I am trying to move."
 		Move = 2,
+
+		// Host to client: where content is, what admits this client to it, and
+		// whose signature to trust. `game/Content.hpp`.
+		//
+		// @since v0.16
+		ContentDirectory = 3,
+
+		// Client to host: "send me this content route."
+		//
+		// @since v0.16
+		ContentRequest = 4,
+
+		// Host to client: a piece of a content route's bytes.
+		//
+		// @since v0.16
+		ContentChunk = 5,
+
+		// Host to client: no source of this host's produced that route.
+		//
+		// @since v0.16
+		ContentRefusal = 6,
 	};
 
 	// Which player a client is looking through.

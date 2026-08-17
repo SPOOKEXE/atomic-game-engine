@@ -14,6 +14,7 @@
 #include <engine/render/Overlay.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/DrawInstance.hpp>
+#include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 
 // `SurfaceView::Projection` is a matrix. glm has always arrived here through
@@ -490,6 +491,13 @@ namespace engine::render {
 		// How far towards the eye the quads are nudged, in metres.
 		float ZOffset = 0.0f;
 
+		// How blending moves from ordinary alpha to additive, and how much the
+		// world's lighting modulates the particle colour.
+		//@{
+		float LightEmission = 0.0f;
+		float LightInfluence = 0.0f;
+		//@}
+
 		// Whether the colour is added to the target rather than blended into it.
 		//
 		// **Selects a pipeline and not a uniform**, because blend state is baked
@@ -624,6 +632,25 @@ namespace engine::render {
 		// @return `false` to skip `Record` - nothing to draw, which is not an
 		//         error and not a reason to fail the frame.
 		virtual bool Prepare(void *commandBuffer) = 0;
+
+		// Records world-space interface collectors into an open scene pass.
+		//
+		// The default keeps editor hooks screen-only. A game interface backend
+		// overrides it for `SurfaceGui` and `BillboardGui`, using the same upload
+		// `Prepare` made for the final screen pass.
+		virtual uint32_t RecordWorld(
+			void *,
+			void *,
+			const glm::mat4 &,
+			const core::CFrame &,
+			const core::Color3 &,
+			const core::Vector3 &,
+			uint32_t,
+			uint32_t,
+			bool
+		) {
+			return 0;
+		}
 
 		// Records draw commands into the swapchain.
 		//
@@ -975,6 +1002,16 @@ namespace engine::render {
 		// @since v0.15
 		uint32_t PortalDepth() const;
 
+		// Sets every built-in lighting term for the world drawn next.
+		//
+		// The value is copied. A renderer holds no pointer into a world, and a
+		// caller presenting several worlds sets each one's value immediately
+		// before its frame.
+		//
+		// @param lighting The resolved `Lighting` service.
+		// @since v0.16
+		void SetLighting(const scene::WorldLighting &lighting);
+
 		// Which way the world's one directional light shines, and what reaches
 		// what it does not.
 		//
@@ -994,8 +1031,19 @@ namespace engine::render {
 		// @param direction Where it shines towards. Normalised here; a zero
 		//                  vector is ignored rather than obeyed.
 		// @param ambient   What reaches a surface the sun does not.
+		// @param direct    The colour of the directional contribution.
 		// @since v0.15
-		void SetSun(const core::Vector3 &direction, const core::Color3 &ambient);
+		void SetSun(
+			const core::Vector3 &direction,
+			const core::Color3 &ambient,
+			const core::Color3 &direct = core::Color3{1.0f, 1.0f, 1.0f}
+		);
+
+		// The current directional-light settings, for a temporary nested view
+		// that must restore the enclosing world's lighting.
+		core::Vector3 SunDirection() const;
+		core::Color3 SunAmbient() const;
+		core::Color3 SunColor() const;
 
 		// The backend handle for a registered texture, for an interface pass to
 		// sample.
@@ -1288,7 +1336,8 @@ namespace engine::render {
 			std::span<const effects::RibbonRun> ribbonRuns = {},
 			std::span<const SceneLight> lights = {},
 			std::span<const scene::DrawInstance> foreign = {},
-			std::span<const PortalView> portals = {}
+			std::span<const PortalView> portals = {},
+			bool present = true
 		);
 
 		// The texture the most recent `Render` drew that slot's world into.

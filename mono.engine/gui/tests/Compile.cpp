@@ -10,6 +10,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <string>
@@ -544,4 +545,94 @@ TEST_CASE("Invalidate forces one rebuild and no more", "[gui][compile]") {
 	world.List.Invalidate();
 	CHECK(world.Rebuild());
 	CHECK_FALSE(world.Rebuild());
+}
+
+TEST_CASE("a canvas group multiplies colour and opacity through its subtree", "[gui][compile]") {
+	World world("gui_compile.group");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity groupEntity = world.Make("CanvasGroup", screen);
+	const Entity child = world.Make("Frame", groupEntity);
+
+	Group group;
+	group.Color = Color3{0.5f, 0.25f, 1.0f};
+	group.Transparency = 0.5f;
+	world.Data.Set(groupEntity, group);
+
+	Background background;
+	background.Color = Color3{0.8f, 0.4f, 0.2f};
+	background.Transparency = 0.25f;
+	world.Data.Set(child, background);
+
+	REQUIRE(world.Rebuild());
+	const auto found = std::find_if(
+		world.List.Commands().Commands.begin(),
+		world.List.Commands().Commands.end(),
+		[&](const DrawCommand &command) {
+			return command.Source == child && command.Kind == DrawKind::Rectangle;
+		}
+	);
+	REQUIRE(found != world.List.Commands().Commands.end());
+	CHECK(found->Tint.R == Approx(0.4f));
+	CHECK(found->Tint.G == Approx(0.1f));
+	CHECK(found->Tint.B == Approx(0.2f));
+	CHECK(found->Transparency == Approx(0.625f));
+}
+
+TEST_CASE("a viewport frame emits its camera image with authored tint", "[gui][compile]") {
+	World world("gui_compile.viewport");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("ViewportFrame", screen);
+
+	Viewport viewport;
+	viewport.CurrentCamera = Entity{42};
+	viewport.Color = Color3{0.5f, 0.75f, 0.25f};
+	viewport.Transparency = 0.2f;
+	world.Data.Set(frame, viewport);
+
+	REQUIRE(world.Rebuild());
+	const auto found = std::find_if(
+		world.List.Commands().Commands.begin(),
+		world.List.Commands().Commands.end(),
+		[&](const DrawCommand &command) {
+			return command.Source == frame && command.Kind == DrawKind::Viewport;
+		}
+	);
+	REQUIRE(found != world.List.Commands().Commands.end());
+	CHECK(found->Tint == viewport.Color);
+	CHECK(found->Transparency == Approx(0.2f));
+}
+
+TEST_CASE("a scrolling frame emits proportional bars over its children", "[gui][compile]") {
+	World world("gui_compile.scrollbars");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("ScrollingFrame", screen);
+
+	Element element;
+	element.Size = UDim2{0.0f, 100.0f, 0.0f, 100.0f};
+	world.Data.Set(frame, element);
+
+	Scrolling scrolling;
+	scrolling.CanvasSize = UDim2{2.0f, 0.0f, 3.0f, 0.0f};
+	scrolling.CanvasPosition = Vector2{50.0f, 100.0f};
+	scrolling.Direction = ScrollingDirection::XY;
+	scrolling.BarThickness = 10;
+	world.Data.Set(frame, scrolling);
+
+	REQUIRE(world.Rebuild());
+	std::vector<const DrawCommand *> rectangles;
+	for (const DrawCommand &command : world.List.Commands().Commands) {
+		if (command.Source == frame && command.Kind == DrawKind::Rectangle) {
+			rectangles.push_back(&command);
+		}
+	}
+
+	REQUIRE(rectangles.size() == 3);
+	const DrawCommand &vertical = *rectangles[1];
+	const DrawCommand &horizontal = *rectangles[2];
+	CHECK(vertical.Bounds.Width() == Approx(10.0f));
+	CHECK(vertical.Bounds.Height() == Approx(30.0f));
+	CHECK(horizontal.Bounds.Height() == Approx(10.0f));
+	CHECK(horizontal.Bounds.Width() == Approx(45.0f));
+	CHECK(vertical.CornerRadius == Approx(5.0f));
+	CHECK(horizontal.CornerRadius == Approx(5.0f));
 }

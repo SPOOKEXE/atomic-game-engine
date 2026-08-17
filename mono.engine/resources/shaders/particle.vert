@@ -43,6 +43,7 @@ layout(set = 1, binding = 0) uniform Frame {
 
 layout(location = 0) out vec2 outTexCoord;
 layout(location = 1) out vec4 outColour;
+layout(location = 2) out vec3 outWorldPosition;
 
 void main() {
 	// **The corner comes out of the index, not out of a buffer.** Bit 0 is the
@@ -98,6 +99,7 @@ void main() {
 		float((inColour >> 16) & 0xFFu),
 		float(inColour >> 24)
 	) * (1.0 / 255.0);
+	outWorldPosition = world;
 
 	gl_Position = frame.ViewProjection * vec4(world, 1.0);
 }

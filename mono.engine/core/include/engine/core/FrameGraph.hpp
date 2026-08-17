@@ -25,7 +25,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -202,6 +204,53 @@ namespace engine::core {
 	// @since v0.6
 	void AccumulateIdleMilliseconds(std::span<FrameSpan> spans);
 
+	// A running total of folded stacks, keyed by `root;child;leaf`.
+	//
+	// `std::map` rather than an unordered one because the output is written in
+	// this order and a flamegraph two runs apart is compared line by line.
+	//
+	// @since v0.16
+	using FoldedStacks = std::map<std::string, double, std::less<>>;
+
+	// Adds one frame's spans to a running total of folded stacks.
+	//
+	// Folded is the interchange format every flamegraph renderer reads: one line
+	// per distinct stack, `root;child;leaf <microseconds>`, and a renderer sums
+	// the prefixes back up so a parent's width is its own line plus every line
+	// beneath it.
+	//
+	// **Self time, because that is what a folded line means.** A line carrying
+	// inclusive time would be counted again by every ancestor and the graph
+	// would be wider than the run.
+	//
+	// **A `Reported` span keeps its own line**, so the totals of a run that
+	// dispatched work to workers add up to more than its wall clock. That is the
+	// same arithmetic `FrameSpan::Reported` already describes rather than a new
+	// exception, and it is why a reader compares two runs rather than reading a
+	// percentage off one.
+	//
+	// Free rather than a method so the arithmetic is testable over hand-built
+	// spans with no collector running and no file on disk.
+	//
+	// @param spans  A frame's spans in open order, with `Parent` and
+	//               `SelfMilliseconds` filled in - which is what `EndFrame`
+	//               does before publishing.
+	// @param totals Added to. Microseconds, so a span costing a few microseconds
+	//               a frame is still distinguishable after a long run.
+	// @since v0.16
+	void AccumulateFoldedStacks(std::span<const FrameSpan> spans, FoldedStacks &totals);
+
+	// Writes folded stacks to `path`, one line per stack in stack order.
+	//
+	// @param path   The file to create or replace.
+	// @param totals What to write. A stack that rounds to zero microseconds is
+	//               left out rather than written as a line the renderer would
+	//               draw with no width.
+	// @return `false` when the file cannot be opened or writing does not
+	//         complete.
+	// @since v0.16
+	bool WriteFoldedStacks(const std::filesystem::path &path, const FoldedStacks &totals);
+
 	// Collects one thread's nested scopes into a bounded per-frame tree and
 	// short spike history for the in-game overlay.
 	//
@@ -210,10 +259,24 @@ namespace engine::core {
 	// Read and control the graph from the collecting thread.
 	class FrameGraph {
 	  public:
-		// A frame that wants more than this is a frame with an instrumentation
-		// bug, not a frame worth drawing. Overflow is counted, not resized:
-		// reallocating mid-frame would show up in the measurement.
-		static constexpr size_t MAXIMUM_SPANS = 4096;
+		// Overflow is counted, not resized: reallocating mid-frame would show up
+		// in the measurement.
+		//
+		// **Sixteen thousand, and the number moved at v0.16 because 4096 was
+		// wrong about what a frame is.** The argument for the old figure was
+		// that a frame wanting more had an instrumentation bug - which holds for
+		// a client drawing one world and does not hold for a server, where
+		// several of the spans are *per connection* and one is per packet. A
+		// two-hundred-client host measured about 4500 and lost 79671 scopes
+		// across a 218-tick capture, all of them at the end of a frame: the
+		// clients served last simply vanished, and their time was absorbed into
+		// the self time of whatever was still open. A profile that is missing
+		// its tail is worse than no profile, because the tail is where a load
+		// test's answer is.
+		//
+		// The cost is the reservation, taken once when collection turns on and
+		// paid only while something is watching.
+		static constexpr size_t MAXIMUM_SPANS = 16384;
 
 		// Deep enough to reach past the schedule. The first levels are spent
 		// before any real work starts - frame, phase, system - so a smaller
@@ -390,6 +453,50 @@ namespace engine::core {
 		// @return False if no history is retained, the file cannot be opened, or
 		//         writing does not complete successfully.
 		static bool WriteSnapshot(const std::filesystem::path &path);
+
+		// --- folded stacks ---------------------------------------------------
+		//
+		// **Accumulated live rather than derived from the window above, and the
+		// reason is what the window keeps.** A retained frame holds one worst
+		// reading per span *name* and no parentage at all, so a stack cannot be
+		// rebuilt from it after the fact - and the window is five seconds deep
+		// where a flamegraph of a stress run wants the whole run. So the folding
+		// happens in `EndFrame`, while the tree is still in hand, into a total
+		// that is as long as collection has been on.
+		//
+		// It costs a stack string per span per frame, which is why it is a
+		// separate switch from `SetEnabled` rather than something every panel
+		// pays for.
+
+		// Starts or stops folding every collected frame into stacks.
+		//
+		// Turning it *on* clears whatever was accumulated, so a capture covers
+		// one run. Turning it off keeps the totals, so `WriteFolded` may be
+		// called afterwards.
+		//
+		// @param enabled Whether to fold subsequent completed frames.
+		// @since v0.16
+		static void SetFoldingEnabled(bool enabled);
+
+		// Reports whether folding is on.
+		// @since v0.16
+		static bool IsFolding();
+
+		// How many frames have been folded since folding was last turned on.
+		//
+		// The divisor for a per-frame figure, and the number that says whether a
+		// capture saw the run or a corner of it.
+		//
+		// @since v0.16
+		static size_t FoldedFrames();
+
+		// Writes the accumulated stacks to `path`.
+		//
+		// @param path The file to create or replace.
+		// @return `false` when nothing has been folded, or when the file cannot
+		//         be written.
+		// @since v0.16
+		static bool WriteFolded(const std::filesystem::path &path);
 
 		// --- scopes ----------------------------------------------------------
 

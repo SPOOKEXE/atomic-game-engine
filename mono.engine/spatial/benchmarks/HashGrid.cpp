@@ -307,13 +307,18 @@ BENCH("OverlapBox · a 4m box, 4000 colliders, 32m cells", 2000) {
 // few metres - a ground check, a melee reach - and a long one is a line of
 // sight across the world.
 //
-// **The long row is dominated by the walk and not by the candidates**, and that
-// is worth reading rather than averaging away. A raycast asks the grid for
-// everything inside the segment's bounding box, so halving the cell size
-// multiplies the cells walked by eight while the candidates found stay the
-// same. It is the strongest argument for the walk along the ray that
-// `AGENTS.md` records as not here yet, and the reason the default is not chosen
-// from this row.
+// **The long row used to be dominated by the walk rather than by the
+// candidates, and this is the row that paid for changing it.** A raycast asked
+// the grid for everything inside the segment's bounding box, so halving the
+// cell size multiplied the cells walked by eight while the candidates found
+// stayed the same: 10.67 ms at 1 m cells against 26.40 us at 16 m, for one
+// answer. `GridInternals::ForEachCandidateAlongRay` walks the line instead and
+// the same row reads 12.90 us and 7.09 us, so the cost is now linear in the
+// ray's length and the default no longer has to be chosen around it.
+//
+// Keep both ends of the sweep. The cheap fine-cell number is the whole evidence
+// that the walk is linear, and a benchmark trimmed to the cell sizes somebody
+// currently ships stops being able to show that.
 
 BENCH("Raycast · 64 rays, 4000 colliders, 1m cells", 200) {
 	const HashGrid &grid = GridOf(4000, 1.0f);
@@ -401,6 +406,20 @@ BENCH("Raycast · 64 rays over 8m, 4000 colliders, 16m cells", 500) {
 	for (int pass = 0; pass < 500; pass++) {
 		for (const Ray &ray : Rays()) {
 			Consume(Raycast(grid, ray, 8.0f).has_value());
+		}
+	}
+}
+
+// A long diagonal sweep is the shape whose bounding box is misleading. At one
+// metre cells, the old volume walk reached the scan fallback instead of opening
+// only the neighbourhood of the path.
+BENCH("ShapeCast · 64 1m boxes over 64m, 4000 colliders, 1m cells", 200) {
+	const HashGrid &grid = GridOf(4000, 1.0f);
+	std::array<uint64_t, 64> found{};
+	for (int pass = 0; pass < 200; pass++) {
+		for (const Ray &ray : Rays()) {
+			const AABB box = AABB::FromCentre(ray.Origin, Vector3{0.5f, 0.5f, 0.5f});
+			Consume(ShapeCast(grid, box, ray.Direction * 64.0f, LayerMask::All(), found).Written);
 		}
 	}
 }

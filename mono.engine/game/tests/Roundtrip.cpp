@@ -207,6 +207,35 @@ TEST_CASE("a world's settings are an element and survive the trip", "[game][roun
 	std::filesystem::remove(path);
 }
 
+TEST_CASE("authored universe tuning survives the game-file trip", "[game][roundtrip]") {
+	RegisterEverything();
+
+	engine::world::UniverseSettings settings;
+	settings.Mode = engine::world::ExecutionMode::WorldSerial;
+	settings.MaximumCatchUpTicks = 3;
+	settings.BusBudgetPerTick = 19;
+
+	Universe source(settings);
+	AddWorld(source, "Lobby");
+
+	const auto path = ScratchFile("engine-game-universe-settings.agame");
+	std::string error;
+	REQUIRE(SaveGame(source, Name("Tuned"), path, error));
+
+	Universe loaded;
+	GameInfo info;
+	REQUIRE(LoadGame(loaded, path, info, error));
+
+	CHECK(loaded.Settings().Mode == engine::world::ExecutionMode::WorldSerial);
+	CHECK(loaded.Settings().MaximumCatchUpTicks == 3);
+	CHECK(loaded.Settings().BusBudgetPerTick == 19);
+	CHECK(info.Universe.Mode == engine::world::ExecutionMode::WorldSerial);
+	CHECK(info.Universe.MaximumCatchUpTicks == 3);
+	CHECK(info.Universe.BusBudgetPerTick == 19);
+
+	std::filesystem::remove(path);
+}
+
 TEST_CASE("a world's services are in the file like anything else", "[game][roundtrip]") {
 	// **A service is an instance, so the format needed nothing added for it.**
 	// That is the point of making them entities rather than a side table: they

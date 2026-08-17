@@ -46,7 +46,15 @@
     "build and `render` translates a `ShaderScript` while the engine runs, and one",
     "implementation is what stops those two from putting a texture on different",
     "Metal indices. The rows that gained it are exactly the rows that already had",
-    "`render`; the server row gained nothing and still links no shader tooling."
+    "`render`; the server row gained nothing and still links no shader tooling.",
+    "",
+    "v0.16 adds `loadtest` - many real replication clients in one process, for",
+    "measuring a server under load. Its row is the one worth reading for what it",
+    "does *not* name: no `render`, no `input`, no `audio`, no `ui` and no",
+    "`client`. A virtual client here is a socket, a connector and a store, which",
+    "is the whole reason two hundred of them fit in one process where two hundred",
+    "`client --headless` processes would be a measurement of the GPU driver. No",
+    "other row changed: nothing links it."
   ],
   "modules": {
     "assetc": {
@@ -233,6 +241,26 @@
       "tier": "shared",
       "links": [
         "core"
+      ]
+    },
+    "loadtest": {
+      "tier": "shared",
+      "links": [
+        "assets",
+        "bakegraph",
+        "core",
+        "ecs",
+        "game",
+        "graph",
+        "gui",
+        "net",
+        "parallel",
+        "physics",
+        "replication",
+        "scene",
+        "script",
+        "spatial",
+        "world"
       ]
     },
     "msl": {
