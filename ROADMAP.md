@@ -37,22 +37,6 @@ or defer to another version.
 
 The milestone headings below are development labels. Not in line with project versioning.
 
-### v0.16
-
-- [x] do a stress test with 200 (headless) clients connecting to the single server and optimise everything where possible. Always produce a baseline\_flamegraph.ext, then every iteration make a iter\(N\)\_flamegraph.ext so you can compare as you develop. `mono.tools/loadtest`, `just stress`, `scripts/flamegraph.py`, and five iterations in `.cache/stress/RESULTS.md` - p95 tick 1251 ms to 482 ms, clients joined 55 to 180.
-- [x] the two hot frames `.cache/stress/RESULTS.md` leaves: the occlusion raycast in the priority score, and `Authority::BuildComponents`. Five iterations in `.cache/stress/RESULTS.md` - a walk along the ray in `spatial` (Amanatides and Woo, 10.67 ms to 12.90 us on the benchmark's fine-cell row), `Authority::SetPriorityRefinement` so occlusion is asked only about the rows in contention, `Client::Unconfirmed` as a sorted vector, and a bounded rotating recovery walk. p95 tick 416 ms to 280 ms, throughput to clients 6.6 MB/s to 12.3 MB/s, 200 of 200 clients joined.
-- [x] `ShapeCast` walks the thick line of a long sweep and de-duplicates from the first centre-cell neighbourhood shared with each proxy. A measured crossover keeps the volume walk when its small envelope opens fewer cells.
-- [x] setup a CDN mode that is:  1. server distributes from cdn (default) - when clients connect, the server itself connects to the cdn and streams assets as needed to the client (client has no authority for it except rate-limited retries only to the server). 2. server reroutes client - when client connects to server, it tells the clients where all the cdns are that are configured on the server
-- [x] concise `RUNNING.md` tutorial for publishing a CDN store and serving it from a folder or HTTP origin
-- [x] concise `RUNNING.md` tutorial for pointing a game server at a custom CDN
-- [x] concise `RUNNING.md` tutorial for adding a local store or remote origin to Studio
-- [x] concise `RUNNING.md` tutorial for connecting a client using the server-provided CDN, grant and publisher key, with an alternative mode that pins the client's own CDN and key
-- [x] universe properties in explorer: selecting the universe root exposes its name, execution mode, catch-up cap, bus budget and world count in Properties, with authored tuning saved in the game file
-- [x] all user interface elements render in the client and Studio, including interactive ScreenGui, lit and depth-tested SurfaceGui and BillboardGui collectors, and nested ViewportFrame scenes
-- [x] portals use recursive off-axis projections, seam-clipped and cloned geometry, through-seam lighting and effects, and paired physics proxies and crossings so bodies and objects remain continuous at the opening
-- [x] portal mouths use per-view void-side captures: each destination renders without its portal panes, keeps scene and through-portal lighting, then composites nested captures back onto the exact opening. `Portal.Enabled` disables capture, lighting, seam geometry, crossing and pane opening while retaining the authored link.
-- [x] audited the declared property surface against runtime consumers: Lighting now drives per-world sun, ambient, outdoor light, fog, recursive portal views and particles; service fixture identity is read-only; light controls are class-specific; and unsupported GUI, local-shadow and selection-fill controls are no longer advertised as working properties
-
 ### v0.17
 
 - [_] ensure we can attach shaders to (visual) assets as well to change how they render: mesh, texture, gifs, images and videos
