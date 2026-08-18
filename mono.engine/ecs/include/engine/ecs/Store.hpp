@@ -1737,6 +1737,32 @@ namespace engine::ecs {
 			ComponentId component, const std::function<void(const Entity *, void *, size_t)> &body
 		);
 
+		// `EachMatching`, batched by chunk and with the value column in hand -
+		// for a caller that would otherwise call `GetComponent` once per entity
+		// `EachMatching` visits.
+		//
+		// **The runtime-named counterpart of `VisitBatch`.** A templated
+		// `Each<T>` resolves its column once per table because the type is
+		// known at compile time; a caller naming a component by id used to have
+		// no equivalent and paid a full `GetComponent` - a directory lookup, an
+		// archetype fetch, a binary search in its component set - per entity
+		// even though `EachMatching` had already found the right table. This is
+		// that lookup hoisted to once per chunk instead of once per row, the
+		// same trade `EachChangedRuns` already makes for a component with
+		// `DirtyBits` - this is for one that does not carry them, because it
+		// visits every row of a matching table rather than only the changed
+		// ones.
+		//
+		// @param component The component to walk. Every table carrying it is
+		//                   visited; a component nothing carries costs one
+		//                   query-plan lookup and calls `body` zero times.
+		// @param body      Called as `body(const Entity *, void *, size_t rows)`
+		//                  once per chunk-bounded run, with `rows` always
+		//                  non-zero. `void*` is null for a tag component, which
+		//                  has no bytes to point at.
+		// @since v0.18
+		void EachRuns(ComponentId component, const std::function<void(const Entity *, void *, size_t)> &body);
+
 		// --- change signals --------------------------------------------------
 
 		// A registered change signal, so it can be taken back.
@@ -2200,6 +2226,17 @@ namespace engine::ecs {
 		);
 
 		void VisitChangedRuns(
+			std::span<const ComponentId> terms,
+			ComponentId subject,
+			const std::function<void(const Entity *, void *, size_t)> &body
+		);
+
+		// `EachRuns`'s worker. `subject` is `terms[0]` - the caller names one
+		// term and `VisitTables` resolves `Columns` in the caller's order, so
+		// there is no `SubjectPosition` search to do here the way
+		// `VisitChangedRuns` needs one for a subject that rides alongside a
+		// second, unrelated term.
+		void VisitRuns(
 			std::span<const ComponentId> terms,
 			ComponentId subject,
 			const std::function<void(const Entity *, void *, size_t)> &body

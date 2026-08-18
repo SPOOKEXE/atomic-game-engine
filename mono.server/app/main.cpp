@@ -10,6 +10,7 @@
 #include <engine/parallel/Settings.hpp>
 #include <engine/world/Lifecycle.hpp>
 
+#include <algorithm>
 #include <csignal>
 #include <cstdio>
 #include <server/Server.hpp>
@@ -78,6 +79,11 @@ int main(int argc, char **argv) {
 	arguments.Value("host-program", "PATH", "The program a host runs (default: this one)");
 	arguments.Value("processes", "N", "How many processes share this machine (default: worked out)");
 	arguments.Value("profile-out", "PATH", "Fold this run's frame graph into a .folded flamegraph capture");
+	arguments.Value(
+		"profile-window",
+		"TICKS",
+		"With --profile-out, also snapshot every TICKS ticks for scripts/flamegraph.py --average"
+	);
 	arguments.Value("listen", "PORT", "Serve the world to clients on this UDP port (0 for ephemeral)");
 	arguments.Value("max-clients", "N", "The hard cap on connected clients (default 64)");
 	arguments.Flag("advertise", "Announce this server on the local subnet so clients can find it");
@@ -209,6 +215,8 @@ int main(int argc, char **argv) {
 	if (auto profile = arguments.Get("profile-out")) {
 		options.ProfilePath = std::filesystem::path(*profile);
 	}
+	options.ProfileWindowTicks =
+		static_cast<uint64_t>(std::max<int64_t>(0, arguments.GetInteger("profile-window", 0)));
 	if (auto assets = arguments.Get("override-assets-directory")) {
 		options.AssetsDirectory = std::filesystem::path(*assets);
 	}

@@ -1010,6 +1010,12 @@ namespace server {
 		);
 
 		Replication->OnAdmitted([this](engine::replication::ClientId client) {
+			// Apply the world delay before the join notice and first snapshot are
+			// sent. Placeholder worlds have no Player row but still use this value.
+			Replication->SetSimulatedLatency(
+				client, Worlds().SettingsOf(PrimaryWorld).GlobalSimulatedNetworkLatency
+			);
+
 			Worlds().Enter(PrimaryWorld, [this, client](engine::ecs::Store &store) {
 				// **A world with no `Players` service gets no player, quietly.**
 				// That is not a misconfiguration to warn about - it is the
@@ -1821,6 +1827,21 @@ namespace server {
 		UpdateClientViewpoints();
 
 		Worlds().Enter(PrimaryWorld, [this, nowSeconds](engine::ecs::Store &store) {
+			{
+				ENGINE_PROFILE_CAT("Server::NetworkLatency", engine::core::ProfileCategory::Network);
+				const double global = Worlds().SettingsOf(PrimaryWorld).GlobalSimulatedNetworkLatency;
+				for (const auto &[slot, occupant] : Players) {
+					if (!store.Alive(occupant.Instance)) {
+						continue;
+					}
+					const auto *network = store.Get<engine::scene::PlayerNetworkComponent>(occupant.Instance);
+					const double local = network != nullptr ? network->LocalSimulatedNetworkLatency : 0.0;
+					Replication->SetSimulatedLatency(
+						engine::replication::ClientId{slot, occupant.Generation}, global + local
+					);
+				}
+			}
+
 			// **What the clients that own something said, applied before this
 			// tick is published.** Applying after would publish a delta built
 			// from last tick's value and send the owner's own state back to it
@@ -2323,6 +2344,20 @@ namespace server {
 			// From the world, which counted the tick it just ran. The loop does
 			// not keep its own tally.
 			const uint64_t ticks = ticksSoFar();
+
+			// **A cumulative sample, not a second collector.** `WriteFolded` reads
+			// the running total without resetting it, so this is the same call the
+			// shutdown block below makes, just made early and repeatedly. Two
+			// samples N ticks apart subtract into that window's folded stacks -
+			// `scripts/flamegraph.py --average` does the subtracting - so nothing
+			// here has to track a window's spans on its own.
+			if (Settings.ProfileWindowTicks > 0 && !Settings.ProfilePath.empty() &&
+				ticks % Settings.ProfileWindowTicks == 0) {
+				const std::filesystem::path window = Settings.ProfilePath.parent_path() /
+					(Settings.ProfilePath.stem().string() + ".window" + std::to_string(ticks) +
+					 Settings.ProfilePath.extension().string());
+				engine::core::FrameGraph::WriteFolded(window);
+			}
 
 			if (Settings.MaximumTicks >= 0 && ticks >= static_cast<uint64_t>(Settings.MaximumTicks)) {
 				break;

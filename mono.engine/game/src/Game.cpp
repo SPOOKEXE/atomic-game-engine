@@ -724,6 +724,9 @@ namespace engine::game {
 			writer.Open(WORLD_PROPERTIES);
 			writer.Attribute("tickRate", FormatNumber(settings.TickRate));
 			writer.Attribute("idleTickRate", FormatNumber(settings.IdleTickRate));
+			writer.Attribute(
+				"globalSimulatedNetworkLatency", FormatNumber(settings.GlobalSimulatedNetworkLatency)
+			);
 			writer.Attribute("faultLimit", std::to_string(settings.FaultLimit));
 			writer.Attribute(
 				"renderingProfile",
@@ -751,6 +754,7 @@ namespace engine::game {
 
 			settings.TickRate = NumberOf(source, "tickRate", 60.0);
 			settings.IdleTickRate = NumberOf(source, "idleTickRate", 2.0);
+			settings.GlobalSimulatedNetworkLatency = NumberOf(source, "globalSimulatedNetworkLatency", 0.0);
 			settings.FaultLimit = CountOf(source, "faultLimit", 3);
 			settings.RenderingProfile = core::Name(TextOf(source, "renderingProfile", "Default PBR"));
 			return settings;

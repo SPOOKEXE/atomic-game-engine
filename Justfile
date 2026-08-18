@@ -720,6 +720,14 @@ replay-check entities="256" ticks="120": (build "server")
 stress label="baseline" clients="200" seconds="45" port="45100": (build "server") (build "loadtest")
     ./scripts/stress-test.sh {{build}} {{label}} {{clients}} {{seconds}} {{port}}
 
+# Twenty thousand moving replicated parts and real encrypted clients. One client
+# is enough to exercise the full authority-to-replica path without multiplying
+# the object workload by a separate client-count experiment. Windowed every
+# thirty ticks (one second at 30 Hz), so flamegraph.py --average has enough
+# windows across a twenty-second run to make min/max/avg/median mean something.
+stress-motion label="motion-baseline" clients="1" seconds="20" port="45200" window="30": (build "server") (build "loadtest")
+    ./scripts/stress-test.sh {{build}} {{label}} {{clients}} {{seconds}} {{port}} ReplicationStress.luau {{window}}
+
 # Configure and build with no client at all, which is how the tier split is
 # proved rather than asserted: the staged server/ gets no shaders/ directory.
 check-server-is-headless:

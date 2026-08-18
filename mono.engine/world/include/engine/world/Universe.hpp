@@ -589,7 +589,7 @@ namespace engine::world {
 		std::vector<RemoteDelivery> TakeOutbound();
 
 		// The snapshot format this build writes and accepts.
-		static constexpr uint32_t SNAPSHOT_VERSION = 3;
+		static constexpr uint32_t SNAPSHOT_VERSION = 4;
 
 		// Reports whether the caller is the driver thread.
 		//

@@ -94,6 +94,11 @@ namespace engine::world {
 		// and timers expire whether or not somebody is watching.
 		double IdleTickRate = 2.0;
 
+		// Additional one-way delay applied to replication sent from this world,
+		// in milliseconds. A player's local delay is added to this value by the
+		// host, so zero preserves the transport's ordinary timing.
+		double GlobalSimulatedNetworkLatency = 0.0;
+
 		// Whether this world can tolerate sharing a process.
 		//
 		// Not spelled `Isolation`: a member may not share a name with its own

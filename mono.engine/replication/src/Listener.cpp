@@ -125,6 +125,16 @@ namespace engine::replication {
 		return false;
 	}
 
+	bool Listener::SetSimulatedLatency(ClientId client, double milliseconds) {
+		for (Peer &peer : Peers) {
+			if (peer.Client == client && peer.Wire != nullptr) {
+				peer.Wire->SetSimulatedLatency(milliseconds);
+				return true;
+			}
+		}
+		return false;
+	}
+
 	size_t Listener::Broadcast(std::span<const std::byte> message, double nowSeconds, ClientId except) {
 		// Encoded once for everybody. The envelope is the same bytes whoever it
 		// goes to, and re-encoding per client would be the same work done once

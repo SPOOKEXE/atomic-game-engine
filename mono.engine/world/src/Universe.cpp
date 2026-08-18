@@ -481,6 +481,7 @@ namespace engine::world {
 			writer.WriteName(world->Name());
 			writer.WriteDouble(world->Settings().TickRate);
 			writer.WriteDouble(world->Settings().IdleTickRate);
+			writer.WriteDouble(world->Settings().GlobalSimulatedNetworkLatency);
 			writer.WriteUInt8(static_cast<uint8_t>(world->Settings().IsolationLevel));
 			writer.WriteUInt32(world->Settings().FaultLimit);
 			writer.WriteName(world->Settings().RenderingProfile);
@@ -543,6 +544,7 @@ namespace engine::world {
 			settings.Name = reader.ReadName();
 			settings.TickRate = reader.ReadDouble();
 			settings.IdleTickRate = reader.ReadDouble();
+			settings.GlobalSimulatedNetworkLatency = reader.ReadDouble();
 			settings.IsolationLevel = static_cast<Isolation>(reader.ReadUInt8());
 			settings.FaultLimit = reader.ReadUInt32();
 			settings.RenderingProfile = reader.ReadName();

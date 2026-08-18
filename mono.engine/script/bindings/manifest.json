@@ -1693,11 +1693,12 @@
 			"name": "Player",
 			"parent": "Instance",
 			"constructible": true,
-			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.PlayerIdentity"],
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.PlayerIdentity", "scene.PlayerNetworkComponent"],
 			"properties": [
 				{"name": "Backpack", "type": "Instance", "kind": "computed", "bytes": 8, "writable": false, "reads": [], "writes": []},
 				{"name": "Character", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["scene.PlayerCharacter"], "writes": ["scene.PlayerCharacter"]},
 				{"name": "DisplayName", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.PlayerIdentity"], "writes": ["scene.PlayerIdentity"]},
+				{"name": "LocalSimulatedNetworkLatency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.PlayerNetworkComponent"], "writes": ["scene.PlayerNetworkComponent"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "PlayerGui", "type": "Instance", "kind": "computed", "bytes": 8, "writable": false, "reads": [], "writes": []},

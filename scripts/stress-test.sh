@@ -18,6 +18,12 @@
 #   <label>_clients.txt      the harness's report
 #   <label>_meta.txt         the commit the capture was taken at, and whether the tree was dirty
 #
+# With a nonzero seventh argument (ticks per window), also:
+#
+#   <label>.window<T>.folded    a cumulative snapshot taken every T ticks
+#   <label>_average.svg         flamegraph.py --average over those snapshots
+#   <label>_average_top.txt     the same, with a min/max/avg/median table
+#
 # The last one is not bookkeeping. Two graphs are only comparable when they came
 # from the same tree, and this repository has more than one agent working in it.
 
@@ -28,6 +34,10 @@ label=${2:?}
 clients=${3:?}
 seconds=${4:?}
 port=${5:?}
+sceneName=${6:-Stress.luau}
+# Ticks between windowed profile snapshots. 0 (the default) writes only the
+# usual whole-run capture; a positive value also gets flamegraph.py --average.
+windowTicks=${7:-0}
 
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 out="$root/.cache/stress"
@@ -35,7 +45,7 @@ mkdir -p "$out"
 
 server="$build/server/server"
 harness="$build/tools/loadtest"
-scene="$build/assets/examples/Stress.luau"
+scene="$build/assets/examples/$sceneName"
 
 for needed in "$server" "$harness" "$scene"; do
 	test -e "$needed" || { echo "FAIL: nothing at $needed - build first"; exit 1; }
@@ -51,6 +61,7 @@ done
 	echo "build     $build"
 	echo "clients   $clients"
 	echo "seconds   $seconds"
+	echo "scene     $sceneName"
 	echo "captured  $(date -Is)"
 } > "$out/${label}_meta.txt"
 
@@ -60,6 +71,14 @@ done
 serverSeconds=$((seconds + 12))
 
 echo "stress: starting the server on port $port for ${serverSeconds}s"
+windowArgs=()
+if [ "$windowTicks" -gt 0 ]; then
+	windowArgs=(--profile-window "$windowTicks")
+	# Snapshots from an earlier run at this label would be averaged in as if
+	# they belonged to this one - the tick in their name says nothing about
+	# which run wrote them.
+	rm -f "$out/${label}".window*.folded
+fi
 timeout $((serverSeconds + 30)) "$server" \
 	--game "$scene" \
 	--listen "$port" \
@@ -67,6 +86,7 @@ timeout $((serverSeconds + 30)) "$server" \
 	--tick-rate 30 \
 	--seconds "$serverSeconds" \
 	--profile-out "$out/$label.folded" \
+	"${windowArgs[@]}" \
 	> "$out/${label}_server.log" 2>&1 &
 serverPid=$!
 
@@ -109,6 +129,20 @@ python3 "$root/scripts/flamegraph.py" "$out/$label.folded" \
 	--svg "$out/${label}_flamegraph.svg" \
 	--top "$out/${label}_top.txt" \
 	--title "server · $label · $clients clients · $(git -C "$root" rev-parse --short HEAD)"
+
+if [ "$windowTicks" -gt 0 ]; then
+	shopt -s nullglob
+	windows=("$out/${label}".window*.folded)
+	shopt -u nullglob
+	if [ "${#windows[@]}" -ge 2 ]; then
+		python3 "$root/scripts/flamegraph.py" --average "${windows[@]}" \
+			--svg "$out/${label}_average.svg" \
+			--top "$out/${label}_average_top.txt" \
+			--title "server · $label · $clients clients · $(git -C "$root" rev-parse --short HEAD)"
+	else
+		echo "WARN: fewer than two window snapshots at $windowTicks ticks - no averaged graph"
+	fi
+fi
 
 echo
 grep -E "tick ms p50|tick\(s\) over|profile:" "$out/${label}_server.log" || true

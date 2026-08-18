@@ -129,10 +129,14 @@ TEST_CASE("a world's settings are an element and survive the trip", "[game][roun
 	// half; writing the world's real numbers is the half that was a bug.
 	RegisterEverything();
 
-	Universe source;
-	AddWorld(source, "Slow", 30.0);
+	WorldSettings slowSettings;
+	slowSettings.Name = Name("Slow");
+	slowSettings.TickRate = 30.0;
+	slowSettings.GlobalSimulatedNetworkLatency = 42.5;
+	Universe configured;
+	REQUIRE(configured.Create(slowSettings).IsValid());
 
-	const std::string document = WriteGame(source, Name("Settings"));
+	const std::string document = WriteGame(configured, Name("Settings"));
 
 	// The element exists and the numbers are in it, not on `<World>`.
 	XmlDocument parsed;
@@ -161,6 +165,7 @@ TEST_CASE("a world's settings are an element and survive the trip", "[game][roun
 	REQUIRE(properties != nullptr);
 	CHECK(properties->Attribute("tickRate") == "30");
 	CHECK(properties->Attribute("idleTickRate") == "2");
+	CHECK(properties->Attribute("globalSimulatedNetworkLatency") == "42.5");
 	CHECK(properties->Attribute("faultLimit") == "3");
 	CHECK(properties->Attribute("renderingProfile") == "Default PBR");
 
@@ -189,7 +194,8 @@ TEST_CASE("a world's settings are an element and survive the trip", "[game][roun
 	CHECK(exported.find(R"(class="Workspace")") != std::string::npos);
 	CHECK(
 		exported.find(
-			"\t<WorldProperties tickRate=\"60\" idleTickRate=\"2\" faultLimit=\"3\" "
+			"\t<WorldProperties tickRate=\"60\" idleTickRate=\"2\" "
+			"globalSimulatedNetworkLatency=\"0\" faultLimit=\"3\" "
 			"renderingProfile=\"Default PBR\" />"
 		) != std::string::npos
 	);
@@ -197,7 +203,7 @@ TEST_CASE("a world's settings are an element and survive the trip", "[game][roun
 	// And it reads back as 30 rather than as the default, which is the whole
 	// point of writing it.
 	const auto path = ScratchFile("engine-game-settings.agame");
-	REQUIRE(SaveGame(source, Name("Settings"), path, error));
+	REQUIRE(SaveGame(configured, Name("Settings"), path, error));
 
 	Universe loaded;
 	GameInfo info;
@@ -206,6 +212,7 @@ TEST_CASE("a world's settings are an element and survive the trip", "[game][roun
 	const WorldId restored = loaded.Find(Name("Slow"));
 	REQUIRE(restored.IsValid());
 	CHECK(loaded.SettingsOf(restored).TickRate == 30.0);
+	CHECK(loaded.SettingsOf(restored).GlobalSimulatedNetworkLatency == 42.5);
 
 	std::filesystem::remove(path);
 }

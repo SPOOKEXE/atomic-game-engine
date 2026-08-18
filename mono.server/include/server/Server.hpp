@@ -189,6 +189,22 @@ namespace server {
 		// @since v0.16
 		std::filesystem::path ProfilePath;
 
+		// Ticks between windowed snapshots of `ProfilePath`, each written beside it
+		// as `<stem>.window<NNNNN><extension>`. Zero writes none.
+		//
+		// **A cumulative writer sampled periodically, not a second collector.**
+		// `FrameGraph::WriteFolded` reads the running total without clearing it, so
+		// two snapshots N ticks apart subtract into exactly that window's folded
+		// stacks - `scripts/flamegraph.py --average` does the subtracting. Nothing
+		// here has to know that; it only has to sample on a schedule.
+		//
+		// Ignored when `ProfilePath` is empty, for the same reason `ProfilePath`
+		// alone turns collection on: a window of a profile nobody asked for is
+		// still a cost with nothing measuring it.
+		//
+		// @since v0.18
+		uint64_t ProfileWindowTicks = 0;
+
 		// Host the world in a universe that permits several. Named worlds are
 		// the unit a supervisor grants and revokes; one is simply the common
 		// case rather than the only one.

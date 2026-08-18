@@ -620,7 +620,10 @@ namespace engine::scene {
 			// has. Derived from `Instance` rather than from `Service` so the
 			// class picker's service exclusion does not hide it, and so a world
 			// can hold as many as it has occupants.
-			const std::array playerSet{ecs::Components::Of<PlayerIdentity>()};
+			const std::array playerSet{
+				ecs::Components::Of<PlayerIdentity>(),
+				ecs::Components::Of<PlayerNetworkComponent>(),
+			};
 			const ClassId player = Classes::Register("Player", instance, playerSet);
 
 			// **A `Team` is an instance for `Player`'s reason**, one line up: a
@@ -652,6 +655,9 @@ namespace engine::scene {
 			// waits, so a game can hold one person out of a round without
 			// changing the rule for everybody.
 			Classes::Property<&PlayerIdentity::RespawnTime>(player, "RespawnTime");
+			Classes::ClampedProperty<&PlayerNetworkComponent::LocalSimulatedNetworkLatency, 0.0f, 60'000.0f>(
+				player, "LocalSimulatedNetworkLatency"
+			);
 
 			// **The side, and it is what decides where a respawn puts them.**
 			// `FindSpawn` reads this against every `SpawnLocation` in the

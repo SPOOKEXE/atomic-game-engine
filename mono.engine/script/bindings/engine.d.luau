@@ -1646,6 +1646,7 @@ declare extern type Player extends Instance with
 	read Backpack: Instance
 	Character: Instance
 	DisplayName: string
+	LocalSimulatedNetworkLatency: number
 	read PlayerGui: Instance
 	read PlayerScripts: Instance
 	RespawnTime: number

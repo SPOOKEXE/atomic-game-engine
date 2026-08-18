@@ -1465,6 +1465,7 @@ declare interface Player extends Instance {
 	readonly Backpack: Instance;
 	Character: Instance;
 	DisplayName: string;
+	LocalSimulatedNetworkLatency: number;
 	readonly PlayerGui: Instance;
 	readonly PlayerScripts: Instance;
 	RespawnTime: number;

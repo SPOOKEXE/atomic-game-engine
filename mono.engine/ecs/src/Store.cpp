@@ -1134,6 +1134,50 @@ namespace engine::ecs {
 		VisitChangedRuns(terms, component, body);
 	}
 
+	void Store::EachRuns(
+		ComponentId component, const std::function<void(const Entity *, void *, size_t)> &body
+	) {
+		RequireOwningThread("EachRuns");
+		if (!component.IsValid()) {
+			return;
+		}
+
+		const ComponentId terms[] = {component};
+		const DeferScope defer(*this);
+		VisitRuns(terms, component, body);
+	}
+
+	void Store::VisitRuns(
+		std::span<const ComponentId> terms,
+		ComponentId subject,
+		const std::function<void(const Entity *, void *, size_t)> &body
+	) {
+		VisitTables(terms, [&](const TableSlice &slice) {
+			void *const *valueChunks = slice.Columns[0];
+			const size_t stride = Components::Describe(subject).Size;
+
+			// One call per chunk - `VisitBatch`'s shape, for a component named at
+			// runtime rather than one of `Each`'s template arguments. Every row in
+			// range matters here, unlike `VisitChangedRuns`, so a chunk is one run
+			// with no bit-testing inside it.
+			size_t row = 0;
+			while (row < slice.Rows) {
+				const size_t chunk = Column::ChunkOf(row);
+				const size_t base = Column::ChunkStart(chunk);
+				const size_t end = ChunkEnd(row, slice.Rows);
+
+				// A tag has no column - see `VisitChanged` on why `Columns` is
+				// null for one - so there are no bytes to hand back, only entities.
+				auto *values = stride == 0 || valueChunks == nullptr
+									? nullptr
+									: static_cast<std::byte *>(valueChunks[chunk]);
+
+				body(slice.Entities + row, values == nullptr ? nullptr : values + (row - base) * stride, end - row);
+				row = end;
+			}
+		});
+	}
+
 	void Store::VisitChangedRuns(
 		std::span<const ComponentId> terms,
 		ComponentId subject,

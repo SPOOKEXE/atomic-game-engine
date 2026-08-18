@@ -434,6 +434,10 @@ TEST_CASE("a player has an identity and the world is bounded", "[scene][services
 	// own copy is what they actually wait.
 	CHECK(identity->RespawnTime == 3.0f);
 
+	const auto *network = store.Get<engine::scene::PlayerNetworkComponent>(first);
+	REQUIRE(network != nullptr);
+	CHECK(network->LocalSimulatedNetworkLatency == 0.0f);
+
 	// A number the host supplied wins, and the counter is not spent on it.
 	CHECK(store.Get<engine::scene::PlayerIdentity>(second)->UserId == 4242);
 	CHECK(engine::scene::PlayerByUserId(store, 1) == first);

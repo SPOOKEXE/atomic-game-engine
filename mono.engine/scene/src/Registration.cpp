@@ -789,6 +789,11 @@ namespace engine::scene {
 		// those clients poses the handle by. Nothing about that needed a rule of
 		// its own - see `scene/Tools.hpp`.
 		ecs::Components::Register<Tool>("scene.Tool");
+
+		// Appended because component ids are registration order. This is authored
+		// player state, so the generated scalar serializer is sufficient and the
+		// default replication catalogue includes it with the other `scene.` rows.
+		ecs::Components::Register<PlayerNetworkComponent>("scene.PlayerNetworkComponent");
 	}
 
 	void RegisterSceneClasses() {

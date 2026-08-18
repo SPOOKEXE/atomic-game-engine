@@ -197,6 +197,18 @@ namespace engine::scene {
 		float RespawnTime = 5.0f;
 	};
 
+	// Network conditions simulated for one player by the authority.
+	//
+	// Separate from identity because a host may tune this repeatedly while the
+	// stable facts in `PlayerIdentity` remain unchanged.
+	//
+	// @since v0.18
+	struct PlayerNetworkComponent {
+		// Additional one-way replication delay for this player, in milliseconds.
+		// The world's global delay is added by the host.
+		float LocalSimulatedNetworkLatency = 0.0f;
+	};
+
 	// When this player may have a body again.
 	//
 	// **A tick number rather than a countdown**, which is `DebrisQueue`'s rule
