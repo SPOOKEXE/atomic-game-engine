@@ -32,6 +32,8 @@
 #include <chrono>
 #include <client/Compositor.hpp>
 #include <client/ContentLink.hpp>
+#include <client/EditableImages.hpp>
+#include <client/EditableMeshes.hpp>
 #include <client/Scene.hpp>
 #include <client/Sounds.hpp>
 #include <cstdint>
@@ -591,6 +593,23 @@ namespace client {
 		// process-wide names, and `Refresh` takes whichever world is being
 		// drawn.
 		engine::render::ShaderLibrary Shaders;
+
+		// **What `Renderer::PostProcessShaderName` was last set to from this
+		// world's own `scene::PostProcessShaderOf`.** `ShaderLibrary::
+		// Changed` only fires when a *compiled module* moves, so a world
+		// switching between two shaders it had already asked for once - both
+		// already compiled - needs a second signal, and this is it: compared
+		// every frame against what the world currently names, independent of
+		// whether anything recompiled.
+		engine::core::Name LastPostProcessShader;
+
+		// **What an `EditableMesh` a script built converts into and
+		// uploads**, one per client for `Shaders`' own reason: the ledger of
+		// last-uploaded revisions is process-wide state, not world state.
+		client::EditableMeshUploader EditableMeshes;
+
+		// The identical ledger, for `EditableImage`.
+		client::EditableImageUploader EditableImages;
 
 		engine::render::OverlayImage Overlay;
 

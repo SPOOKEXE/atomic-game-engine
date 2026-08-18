@@ -98,6 +98,16 @@ namespace engine::render {
 		// The canvas this batch belongs to. A backend uses this to keep screen
 		// pixels out of a world-space collector and vice versa.
 		ecs::Entity Collector;
+
+		// Which fragment shader draws this run, or invalid for the pass's
+		// own - from `gui::DrawCommand::Shader`.
+		//
+		// **Split for the identical reason a texture change is**: a pipeline
+		// is bound per batch, not per quad, so two quads wanting different
+		// fragment shaders cannot be one draw call whatever else they share.
+		//
+		// @since v0.18
+		core::Name Shader;
 	};
 
 	// The source-pixel extent of an image after selecting its animation cell.

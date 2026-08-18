@@ -149,4 +149,23 @@ namespace engine::gui {
 		// be treated as already compiled and would draw nothing, forever.
 		bool Fresh = false;
 	};
+
+	// Every shader an `ImageLabel` or `ImageButton` in this world names,
+	// without duplicates.
+	//
+	// **`scene::DemandedShaders`'s exact shape, one indirection flatter.**
+	// That function walks `MaterialRef` because a part's shader is authored
+	// on a child instance; a `Picture` carries its own name directly, so this
+	// walks `Picture` rather than anything standing in for it. Both feed the
+	// same `render::ShaderLibrary`, which resolves a name against the same
+	// `scene::ShaderScript` tree and the same built-ins regardless of which
+	// module asked.
+	//
+	// A `const` walk, so this may be called from a read-only consumer.
+	//
+	// @param store The world.
+	// @param out   Filled with the names, sorted by id. Cleared first.
+	// @return How many distinct shaders are named.
+	// @since v0.18
+	size_t DemandedShaders(ecs::Store &store, std::vector<core::Name> &out);
 }

@@ -10,6 +10,7 @@
 #include <engine/examples/Shooting.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Play.hpp>
+#include <engine/gui/Compile.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Layout.hpp>
 #include <engine/gui/Services.hpp>
@@ -23,6 +24,7 @@
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/Materials.hpp>
+#include <engine/scene/Shaders.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/PublishedCatalogue.hpp>
 #include <engine/scene/Services.hpp>
@@ -1676,6 +1678,14 @@ namespace client {
 			ProfilerScroll = 0;
 		}
 
+		if (Actions.Fired(Action::ToggleWireframe)) {
+			// **The renderer holds the one bit of state**, not `Settings` -
+			// `Renderer::Wireframe()` is what the next `Render` call actually
+			// reads, so asking it back here rather than keeping a second flag
+			// in step is what keeps a panel that showed one from ever lying.
+			Renderer.SetWireframe(!Renderer.Wireframe());
+		}
+
 		const auto tabCount = static_cast<int>(ProfilerTab::Count);
 		if (Actions.Fired(Action::NextProfilerTab)) {
 			Settings.Tab = static_cast<ProfilerTab>((static_cast<int>(Settings.Tab) + 1) % tabCount);
@@ -2578,35 +2588,108 @@ namespace client {
 		// pipeline built for a world nothing is presenting is video memory held
 		// for a frame that is not being rendered.
 		Universe_->Enter(Rendered, [this](engine::ecs::Store &shaded, engine::ecs::Scheduler &) {
-			if (Shaders.Refresh(shaded) == 0) {
-				return;
+			const size_t changed = Shaders.Refresh(shaded);
+			const engine::core::Name wantedPostProcess = engine::scene::PostProcessShaderOf(shaded);
+
+			if (changed > 0) {
+				// **Which of the changed names an `ImageLabel` actually asked
+				// for**, and it is worth the second walk: `opaque.frag` and
+				// `interface.frag` declare different binding counts, so a
+				// `ShaderScript` a `Material` alone selected would fail to
+				// build an interface pipeline every time it changed - a real
+				// failure logged for a shader nobody meant to put on a
+				// picture. Only names this set actually holds are offered to
+				// `Interface`, and only `wantedPostProcess` itself is offered
+				// to the postprocess slot, for the identical reason.
+				std::vector<engine::core::Name> guiShaders;
+				engine::gui::DemandedShaders(shaded, guiShaders);
+
+				// **Only what moved.** `Changed` is the whole reason a
+				// refresh returns a count rather than a bool: rebuilding
+				// every pipeline every frame is what this loop exists not to
+				// do.
+				for (const engine::core::Name &name : Shaders.Changed()) {
+					const engine::render::ShaderModule *module = Shaders.Find(name);
+					const bool wantedByGui =
+						std::find(guiShaders.begin(), guiShaders.end(), name) != guiShaders.end();
+					const bool wantedByPostProcess = wantedPostProcess.IsValid() && name == wantedPostProcess;
+
+					// Null is a name nothing asks for any more, so whatever
+					// was built for it is released. The instances that named
+					// it are already gone or already name something else.
+					if (module == nullptr) {
+						(void)Renderer.DropShader(name);
+						if (wantedByGui) {
+							(void)Interface.DropShaderVariant(name);
+						}
+						if (wantedByPostProcess) {
+							Renderer.ClearPostProcessShader();
+							LastPostProcessShader = {};
+						}
+						continue;
+					}
+
+					// **A warning and not a fatal, and the part goes on drawing with
+					// the engine's own shader.** `render/AGENTS.md` is explicit that
+					// a user shader failing is a diagnostic string - the built-in
+					// ones fail the build instead, which is where that belongs.
+					if (!module->Error.empty()) {
+						ENGINE_WARN("shader '{}': {}", name.Text(), module->Error);
+						continue;
+					}
+
+					(void)Renderer.AddShader(name, module->SpirV);
+
+					// **The same words, into the interface pass too, and only
+					// when an `ImageLabel` actually named this shader.** See
+					// `InterfacePass::AddShaderVariant`'s own header for the
+					// binding-count reason a `Material`-only shader must not
+					// be offered here.
+					if (wantedByGui) {
+						(void)Interface.AddShaderVariant(name, module->SpirV);
+					}
+
+					// **And into the postprocess slot, only when this is the
+					// name the world currently wants there.** An author
+					// editing the shader mid-session sees the frame update
+					// through this branch; picking it for the first time or
+					// switching between two already-compiled shaders goes
+					// through the check below instead, because neither of
+					// those moves anything `Changed` reports.
+					if (wantedByPostProcess) {
+						if (Renderer.SetPostProcessShader(name, module->SpirV)) {
+							LastPostProcessShader = name;
+						}
+					}
+				}
 			}
 
-			// **Only what moved.** `Changed` is the whole reason a refresh
-			// returns a count rather than a bool: rebuilding every pipeline
-			// every frame is what this loop exists not to do.
-			for (const engine::core::Name &name : Shaders.Changed()) {
-				const engine::render::ShaderModule *module = Shaders.Find(name);
-
-				// Null is a name nothing asks for any more, so whatever was
-				// built for it is released. The instances that named it are
-				// already gone or already name something else.
-				if (module == nullptr) {
-					(void)Renderer.DropShader(name);
-					continue;
+			// **The selection itself, independent of whether anything
+			// recompiled.** Switching from one already-known postprocess
+			// shader to another - or to none - moves neither `Changed` nor
+			// takes the branch above, so this is the other half of keeping
+			// `Renderer`'s active pipeline in step with what the world
+			// currently names.
+			if (wantedPostProcess != LastPostProcessShader) {
+				if (!wantedPostProcess.IsValid()) {
+					Renderer.ClearPostProcessShader();
+				} else if (const engine::render::ShaderModule *module = Shaders.Find(wantedPostProcess);
+						   module != nullptr && module->Error.empty()) {
+					if (Renderer.SetPostProcessShader(wantedPostProcess, module->SpirV)) {
+						LastPostProcessShader = wantedPostProcess;
+					}
 				}
-
-				// **A warning and not a fatal, and the part goes on drawing with
-				// the engine's own shader.** `render/AGENTS.md` is explicit that
-				// a user shader failing is a diagnostic string - the built-in
-				// ones fail the build instead, which is where that belongs.
-				if (!module->Error.empty()) {
-					ENGINE_WARN("shader '{}': {}", name.Text(), module->Error);
-					continue;
-				}
-
-				(void)Renderer.AddShader(name, module->SpirV);
 			}
+		});
+
+		// **The other half of a world's content that only exists once the
+		// engine is running**, beside the shader refresh above and for the
+		// identical reason: only the world actually being drawn pays for an
+		// upload, and a steady scene - nothing mid-edit - costs one walk and
+		// an integer compare per `EditableMesh`.
+		Universe_->Enter(Rendered, [this](engine::ecs::Store &shaded, engine::ecs::Scheduler &) {
+			(void)EditableMeshes.Refresh(shaded, Renderer);
+			(void)EditableImages.Refresh(shaded, Renderer);
 		});
 
 		engine::render::View view;

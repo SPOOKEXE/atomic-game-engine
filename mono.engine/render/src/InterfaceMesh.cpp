@@ -390,7 +390,8 @@ namespace engine::render {
 			const bool fresh = BatchData.empty() || !SameClip(BatchData.back().Clip, command.Clip) ||
 							   BatchData.back().Image != image ||
 							   BatchData.back().Collector != command.Collector ||
-							   BatchData.back().Viewport != (viewport ? command.Source : ecs::NULL_ENTITY);
+							   BatchData.back().Viewport != (viewport ? command.Source : ecs::NULL_ENTITY) ||
+							   BatchData.back().Shader != command.Shader;
 
 			if (fresh) {
 				InterfaceBatch batch;
@@ -399,6 +400,7 @@ namespace engine::render {
 				batch.Image = image;
 				batch.Collector = command.Collector;
 				batch.Viewport = viewport ? command.Source : ecs::NULL_ENTITY;
+				batch.Shader = command.Shader;
 				BatchData.push_back(batch);
 			}
 

@@ -223,3 +223,27 @@ TEST_CASE("a world reports the shaders its materials ask for", "[scene][shaders]
 	// the engine ships, and only a client-tier library can tell.
 	REQUIRE(ShaderScriptNamed(store, Name("Toon")) == NULL_ENTITY);
 }
+
+TEST_CASE("a world's postprocess shader is demanded the same way a material's is", "[scene][shaders]") {
+	Store store = Fresh("shaders.postprocess");
+
+	CHECK_FALSE(engine::scene::PostProcessShaderOf(store).IsValid());
+
+	std::vector<Name> demanded;
+	REQUIRE(DemandedShaders(store, demanded) == 0);
+
+	engine::scene::SetPostProcessShader(store, Name("Grade"));
+	CHECK(engine::scene::PostProcessShaderOf(store) == Name("Grade"));
+
+	REQUIRE(DemandedShaders(store, demanded) == 1);
+	CHECK(demanded.front() == Name("Grade"));
+
+	// The same name a material asks for is still one entry, not two.
+	const Entity material = store.CreateInstance(MaterialClass(), "Material");
+	store.GetMutable<MaterialRef>(material)->Shader = Name("Grade");
+	REQUIRE(DemandedShaders(store, demanded) == 1);
+
+	// Setting it back to invalid stops asking for it.
+	engine::scene::SetPostProcessShader(store, Name{});
+	CHECK_FALSE(engine::scene::PostProcessShaderOf(store).IsValid());
+}

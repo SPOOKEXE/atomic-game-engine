@@ -125,6 +125,13 @@ namespace engine::gui {
 		// The tile extent in pixels, for `Tile`. Already resolved.
 		core::Vector2 Tile;
 
+		// Which fragment shader draws this image, or invalid for the
+		// interface pass's own - from `Picture::Shader`, whose own header
+		// carries the design.
+		//
+		// @since v0.18
+		core::Name Shader;
+
 		// --- `Text` ----------------------------------------------------------
 
 		// The string.

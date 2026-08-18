@@ -44,7 +44,7 @@
 			"name": "BasePart",
 			"parent": "PVInstance",
 			"constructible": true,
-			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Anchored", "scene.Bounds", "scene.Collider", "scene.PhysicsProperties", "scene.Pivot", "scene.PreviousTransform", "scene.RigidBody", "scene.Surface", "scene.SurfaceAppearance", "scene.Tags", "scene.Transform", "scene.Visual"],
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Anchored", "scene.Bounds", "scene.Collider", "scene.LocalTransparency", "scene.PhysicsProperties", "scene.Pivot", "scene.PreviousTransform", "scene.RigidBody", "scene.Surface", "scene.SurfaceAppearance", "scene.Tags", "scene.Transform", "scene.Visual"],
 			"properties": [
 				{"name": "AlphaCutoff", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
 				{"name": "AlphaMode", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "AlphaMode", "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
@@ -60,6 +60,7 @@
 				{"name": "Elasticity", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.PhysicsProperties"], "writes": ["scene.PhysicsProperties"]},
 				{"name": "Friction", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.PhysicsProperties"], "writes": ["scene.PhysicsProperties"]},
 				{"name": "LinearDamping", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.RigidBody"], "writes": ["scene.RigidBody"]},
+				{"name": "LocalTransparency", "type": "float", "kind": "computed", "bytes": 4, "writable": false, "reads": ["scene.LocalTransparency"], "writes": []},
 				{"name": "Locked", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "Mass", "type": "float", "kind": "field", "bytes": 4, "writable": false, "reads": ["scene.Anchored", "scene.Collider", "scene.PhysicsProperties", "scene.RigidBody"], "writes": []},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
@@ -76,7 +77,7 @@
 			"name": "Part",
 			"parent": "BasePart",
 			"constructible": true,
-			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Anchored", "scene.Bounds", "scene.Collider", "scene.PhysicsProperties", "scene.Pivot", "scene.PreviousTransform", "scene.RigidBody", "scene.Surface", "scene.SurfaceAppearance", "scene.Tags", "scene.Transform", "scene.Visual"],
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Anchored", "scene.Bounds", "scene.Collider", "scene.LocalTransparency", "scene.PhysicsProperties", "scene.Pivot", "scene.PreviousTransform", "scene.RigidBody", "scene.Surface", "scene.SurfaceAppearance", "scene.Tags", "scene.Transform", "scene.Visual"],
 			"properties": [
 				{"name": "AlphaCutoff", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
 				{"name": "AlphaMode", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "AlphaMode", "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
@@ -92,6 +93,7 @@
 				{"name": "Elasticity", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.PhysicsProperties"], "writes": ["scene.PhysicsProperties"]},
 				{"name": "Friction", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.PhysicsProperties"], "writes": ["scene.PhysicsProperties"]},
 				{"name": "LinearDamping", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.RigidBody"], "writes": ["scene.RigidBody"]},
+				{"name": "LocalTransparency", "type": "float", "kind": "computed", "bytes": 4, "writable": false, "reads": ["scene.LocalTransparency"], "writes": []},
 				{"name": "Locked", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "Mass", "type": "float", "kind": "field", "bytes": 4, "writable": false, "reads": ["scene.Anchored", "scene.Collider", "scene.PhysicsProperties", "scene.RigidBody"], "writes": []},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
@@ -108,7 +110,7 @@
 			"name": "SpawnLocation",
 			"parent": "Part",
 			"constructible": true,
-			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Anchored", "scene.Bounds", "scene.Collider", "scene.PhysicsProperties", "scene.Pivot", "scene.PreviousTransform", "scene.RigidBody", "scene.SpawnLocation", "scene.Surface", "scene.SurfaceAppearance", "scene.Tags", "scene.Transform", "scene.Visual"],
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Anchored", "scene.Bounds", "scene.Collider", "scene.LocalTransparency", "scene.PhysicsProperties", "scene.Pivot", "scene.PreviousTransform", "scene.RigidBody", "scene.SpawnLocation", "scene.Surface", "scene.SurfaceAppearance", "scene.Tags", "scene.Transform", "scene.Visual"],
 			"properties": [
 				{"name": "AlphaCutoff", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
 				{"name": "AlphaMode", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "AlphaMode", "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
@@ -125,6 +127,7 @@
 				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.SpawnLocation"], "writes": ["scene.SpawnLocation"]},
 				{"name": "Friction", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.PhysicsProperties"], "writes": ["scene.PhysicsProperties"]},
 				{"name": "LinearDamping", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.RigidBody"], "writes": ["scene.RigidBody"]},
+				{"name": "LocalTransparency", "type": "float", "kind": "computed", "bytes": 4, "writable": false, "reads": ["scene.LocalTransparency"], "writes": []},
 				{"name": "Locked", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "Mass", "type": "float", "kind": "field", "bytes": 4, "writable": false, "reads": ["scene.Anchored", "scene.Collider", "scene.PhysicsProperties", "scene.RigidBody"], "writes": []},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
@@ -172,7 +175,7 @@
 			"name": "MeshPart",
 			"parent": "BasePart",
 			"constructible": true,
-			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Anchored", "scene.Bounds", "scene.Collider", "scene.PhysicsProperties", "scene.Pivot", "scene.PreviousTransform", "scene.RigidBody", "scene.Surface", "scene.SurfaceAppearance", "scene.Tags", "scene.Transform", "scene.Visual"],
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Anchored", "scene.Bounds", "scene.Collider", "scene.LocalTransparency", "scene.PhysicsProperties", "scene.Pivot", "scene.PreviousTransform", "scene.RigidBody", "scene.Surface", "scene.SurfaceAppearance", "scene.Tags", "scene.Transform", "scene.Visual"],
 			"properties": [
 				{"name": "AlphaCutoff", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
 				{"name": "AlphaMode", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "AlphaMode", "reads": ["scene.SurfaceAppearance"], "writes": ["scene.SurfaceAppearance"]},
@@ -188,6 +191,7 @@
 				{"name": "Elasticity", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.PhysicsProperties"], "writes": ["scene.PhysicsProperties"]},
 				{"name": "Friction", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.PhysicsProperties"], "writes": ["scene.PhysicsProperties"]},
 				{"name": "LinearDamping", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.RigidBody"], "writes": ["scene.RigidBody"]},
+				{"name": "LocalTransparency", "type": "float", "kind": "computed", "bytes": 4, "writable": false, "reads": ["scene.LocalTransparency"], "writes": []},
 				{"name": "Locked", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
 				{"name": "Mass", "type": "float", "kind": "field", "bytes": 4, "writable": false, "reads": ["scene.Anchored", "scene.Collider", "scene.PhysicsProperties", "scene.RigidBody"], "writes": []},
 				{"name": "MeshId", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Visual"], "writes": ["scene.Visual"]},
@@ -318,6 +322,7 @@
 			"constructible": true,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Humanoid"],
 			"properties": [
+				{"name": "AutoRotate", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Humanoid"], "writes": ["scene.Humanoid"]},
 				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Humanoid"], "writes": ["scene.Humanoid"]},
 				{"name": "Grounded", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "reads": ["scene.Humanoid"], "writes": []},
 				{"name": "Health", "type": "float", "kind": "computed", "bytes": 4, "writable": true, "reads": ["scene.Humanoid"], "writes": ["scene.Humanoid"]},
@@ -421,6 +426,43 @@
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Value", "type": "String", "kind": "field", "bytes": 32, "writable": true, "reads": ["scene.TextContent"], "writes": ["scene.TextContent"]}
+			]
+		},
+		{
+			"name": "ShaderScript",
+			"parent": "Instance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.ShaderSource"],
+			"properties": [
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Revision", "type": "int32", "kind": "field", "bytes": 4, "writable": false, "reads": ["scene.ShaderSource"], "writes": []},
+				{"name": "Source", "type": "String", "kind": "field", "bytes": 32, "writable": true, "reads": ["scene.ShaderSource"], "writes": ["scene.ShaderSource"]}
+			]
+		},
+		{
+			"name": "EditableMesh",
+			"parent": "Instance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.EditableMesh"],
+			"properties": [
+				{"name": "ContentId", "type": "Name", "kind": "field", "bytes": 4, "writable": false, "reads": ["scene.EditableMesh"], "writes": []},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "TriangleCount", "type": "int32", "kind": "field", "bytes": 4, "writable": false, "reads": ["scene.EditableMesh"], "writes": []},
+				{"name": "VertexCount", "type": "int32", "kind": "field", "bytes": 4, "writable": false, "reads": ["scene.EditableMesh"], "writes": []}
+			]
+		},
+		{
+			"name": "EditableImage",
+			"parent": "Instance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.EditableImage"],
+			"properties": [
+				{"name": "ContentId", "type": "Name", "kind": "field", "bytes": 4, "writable": false, "reads": ["scene.EditableImage"], "writes": []},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Size", "type": "Vector2", "kind": "field", "bytes": 8, "writable": false, "reads": ["scene.EditableImage"], "writes": []}
 			]
 		},
 		{
@@ -1021,6 +1063,7 @@
 				{"name": "Rotation", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "ScaleType", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "ScaleType", "reads": ["gui.Picture"], "writes": ["gui.Picture"]},
 				{"name": "Selectable", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "Shader", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Picture"], "writes": ["gui.Picture"]},
 				{"name": "Size", "type": "UDim2", "kind": "field", "bytes": 16, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "SizeConstraint", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "SizeConstraint", "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "SliceCenter", "type": "Rect", "kind": "field", "bytes": 16, "writable": true, "reads": ["gui.Picture"], "writes": ["gui.Picture"]},
@@ -1133,6 +1176,7 @@
 				{"name": "Rotation", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "ScaleType", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "ScaleType", "reads": ["gui.Picture"], "writes": ["gui.Picture"]},
 				{"name": "Selectable", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
+				{"name": "Shader", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Picture"], "writes": ["gui.Picture"]},
 				{"name": "Size", "type": "UDim2", "kind": "field", "bytes": 16, "writable": true, "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "SizeConstraint", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "SizeConstraint", "reads": ["gui.Element"], "writes": ["gui.Element"]},
 				{"name": "SliceCenter", "type": "Rect", "kind": "field", "bytes": 16, "writable": true, "reads": ["gui.Picture"], "writes": ["gui.Picture"]},
@@ -1549,6 +1593,7 @@
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "OutdoorAmbient", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "PostProcessShader", "type": "Name", "kind": "resource", "bytes": 4, "writable": true, "reads": ["scene.PostProcessing"], "writes": ["scene.PostProcessing"]},
 				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]}
 			]
 		},

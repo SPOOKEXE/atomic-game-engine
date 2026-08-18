@@ -22,8 +22,11 @@
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/effects/Registration.hpp>
 #include <engine/gui/Registration.hpp>
+#include <engine/scene/EditableImage.hpp>
+#include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/Shaders.hpp>
 #include <engine/script/Datatypes.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/Vocabulary.hpp>
@@ -1964,6 +1967,42 @@ declare task: {
 				out << "\tfunction SetNetworkOwner(self, player: Instance?): ()\n";
 				out << "\tfunction GetNetworkOwner(self): Instance?\n";
 
+				// **The one door onto `LocalTransparency`, for the same reason
+				// `SetAttribute` is a method rather than a property write.**
+				// `part.LocalTransparency = x` would go through the ordinary
+				// property door, which a replica refuses regardless of which
+				// property - see `scene::SetLocalTransparency`. Declared on
+				// `Instance` for the reason every method above it is: the
+				// method table is one table, and a part that is not a
+				// `BasePart` gets the runtime's refusal rather than a
+				// type-checked one.
+				out << "\tfunction SetLocalTransparency(self, value: number): ()\n";
+
+				// **The `EditableMesh` core, declared on `Instance` for the
+				// reason every method above it is.** A vertex or triangle id
+				// that names nothing answers `nil` rather than raising -
+				// `AddTriangle`'s own header in `ScriptMethods.cpp` explains
+				// why that one and `AddVertex` differ - so both are typed
+				// optional here rather than as a plain `number`.
+				out << "\tfunction AddVertex(self, position: Vector3, normal: Vector3?, uv: Vector2?): number?\n";
+				out << "\tfunction AddTriangle(self, a: number, b: number, c: number): number?\n";
+				out << "\tfunction RemoveTriangle(self, triangle: number): boolean\n";
+				out << "\tfunction SetVertexPosition(self, vertex: number, position: Vector3): boolean\n";
+				out << "\tfunction SetVertexNormal(self, vertex: number, normal: Vector3): boolean\n";
+				out << "\tfunction SetVertexUV(self, vertex: number, uv: Vector2): boolean\n";
+				out << "\tfunction SetVertexColor(self, vertex: number, colour: Color3, alpha: number?): "
+					   "boolean\n";
+				out << "\tfunction Clear(self): boolean\n";
+
+				// The `EditableImage` core, declared the same way.
+				out << "\tfunction Resize(self, width: number, height: number): boolean\n";
+				out << "\tfunction DrawRectangle(self, position: Vector2, size: Vector2, colour: Color3, "
+					   "transparency: number?): boolean\n";
+				out << "\tfunction DrawLine(self, from: Vector2, to: Vector2, colour: Color3, transparency: "
+					   "number?): boolean\n";
+				out << "\tfunction DrawCircle(self, centre: Vector2, radius: number, colour: Color3, "
+					   "transparency: number?): boolean\n";
+
 				out << "\tfunction GetAttribute(self, name: string): EngineAttribute?\n";
 				out << "\tfunction SetAttribute(self, name: string, value: EngineAttribute?): ()\n";
 				out << "\tfunction GetAttributes(self): { [string]: EngineAttribute }\n";
@@ -3253,6 +3292,31 @@ declare const task: {
 				out << "\tSetNetworkOwner(player?: Instance | null): void;\n";
 				out << "\tGetNetworkOwner(): Instance | null;\n";
 
+				// The one door onto `LocalTransparency`, matching the Luau half
+				// and for the same reason declared there.
+				out << "\tSetLocalTransparency(value: number): void;\n";
+
+				// The `EditableMesh` core, matching the Luau half and for
+				// the same reason declared there.
+				out << "\tAddVertex(position: Vector3, normal?: Vector3, uv?: Vector2): number | "
+					   "undefined;\n";
+				out << "\tAddTriangle(a: number, b: number, c: number): number | undefined;\n";
+				out << "\tRemoveTriangle(triangle: number): boolean;\n";
+				out << "\tSetVertexPosition(vertex: number, position: Vector3): boolean;\n";
+				out << "\tSetVertexNormal(vertex: number, normal: Vector3): boolean;\n";
+				out << "\tSetVertexUV(vertex: number, uv: Vector2): boolean;\n";
+				out << "\tSetVertexColor(vertex: number, colour: Color3, alpha?: number): boolean;\n";
+				out << "\tClear(): boolean;\n";
+
+				// The `EditableImage` core, matching the Luau half.
+				out << "\tResize(width: number, height: number): boolean;\n";
+				out << "\tDrawRectangle(position: Vector2, size: Vector2, colour: Color3, transparency?: "
+					   "number): boolean;\n";
+				out << "\tDrawLine(from: Vector2, to: Vector2, colour: Color3, transparency?: number): "
+					   "boolean;\n";
+				out << "\tDrawCircle(centre: Vector2, radius: number, colour: Color3, transparency?: "
+					   "number): boolean;\n";
+
 				// Attributes, matching the Luau half. The union is the same
 				// closed set and for the same reason.
 				out << "\tGetAttribute(name: string): EngineAttribute | null;\n";
@@ -3442,6 +3506,18 @@ int main(int argc, char **argv) {
 	// from an empty table would be a valid file describing nothing, and its
 	// drift check would pass forever.
 	(void)engine::scene::PartClass();
+
+	// **`ShaderScript` and `EditableMesh`, which `PartClass` does not reach.**
+	// Both self-register through their own accessor rather than through
+	// `RegisterSceneClasses` - `Registration.cpp`'s own comment on the first
+	// explains why - so a bootstrap that only ever called `PartClass` and
+	// `ServiceClass` left two classes' worth of properties undeclared in
+	// both languages, silently: `Instance.new("EditableMesh")` still worked
+	// at runtime, and an author reached for `.VertexCount` with no
+	// completion and no type error to say the property was real.
+	(void)engine::scene::ShaderScriptClass();
+	(void)engine::scene::EditableMeshClass();
+	(void)engine::scene::EditableImageClass();
 
 	// The script classes too. A manifest that described `Part` and not `Script`
 	// would be describing what a script can *build* and not what a world can

@@ -59,7 +59,7 @@ TEST_CASE("every place content can be named is collected", "[client][contentdema
 	store.Set(part, engine::scene::SurfaceAppearance{.ColourMap = Name("part.atex")});
 
 	const Entity label = store.Create();
-	store.Set(label, engine::gui::Picture{.Image = Name("label.atex")});
+	store.Set(label, engine::gui::Picture{.Image = Name("label.atex"), .Shader = {}});
 
 	const Entity emitter = store.Create();
 	engine::effects::ParticleEmitter spark;

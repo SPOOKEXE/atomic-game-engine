@@ -613,6 +613,57 @@ namespace engine::scene {
 		uint8_t Reserved[4] = {};
 	};
 
+	// How much of `Visual` a *viewer* has decided to see through, never the
+	// world.
+	//
+	// **Roblox's `BasePart.LocalTransparencyModifier`, and the same reason for
+	// it: a camera that clips into its own subject has to fade the geometry in
+	// front of the eye, and doing that by writing `Visual::Transparency` would
+	// be one machine editing a fact every other machine draws by.** A crate a
+	// poppercam thinned out for one viewer must stay solid for everyone else
+	// standing in the room, and `Transparency` is `scene.Visual`'s field -
+	// replicated, signed, and the authority's to mean something by.
+	//
+	// **On the class the same way `SurfaceAppearance` is, for the identical
+	// reason.** `client::CollectInstances` is a batched parallel walk over a
+	// fixed signature, and an optional column is exactly what that shape cannot
+	// express - see `SurfaceAppearance`'s own header. Four bytes on every part
+	// is the price already paid for the four components ahead of it in this
+	// file.
+	//
+	// **Overrides rather than adds, and only away from zero.** Roblox's field
+	// is additive and this one is not: an override is what "take priority over
+	// standard transparency if not set to 0" asks for, and it is also the
+	// simpler rule for a script to reason about - a fade driven by distance
+	// does not have to know what `Transparency` already held to cancel it back
+	// out. `MakeDrawInstance` is where the override happens.
+	//
+	// **Never signed, never sent - see `replication::LocalToTheClient`.** A
+	// `scene.`-prefixed component replicates by default, and the whole point of
+	// this one is a value the authority does not get an opinion about. It is
+	// registered so it can be a dense column at all, and excluded by name so
+	// that registration never becomes a leak.
+	//
+	// **Writable only through `scene::SetLocalTransparency`, and not through
+	// `Store::SetProperty`.** The ordinary property door refuses every write on
+	// an adopt-only store, because a script setting a value the next
+	// authoritative delta overwrites is a bug that hides - `Store::
+	// SetPropertyValue` carries the whole argument. That refusal is exactly
+	// right for a fact the authority owns and exactly wrong for one it was
+	// never going to send in the first place: a player standing in a replica
+	// has to be able to fade their own character, and a property that could
+	// not be written on a replica would make the feature work only in
+	// single-player. So this is read as an ordinary computed property and
+	// written through a dedicated door, the same shape `ecs::SetAttribute`
+	// already uses for the same reason.
+	//
+	// @since v0.18
+	struct LocalTransparency {
+		// 0 leaves `Visual::Transparency` alone. Anything else replaces it, for
+		// this viewer, for as long as this row exists.
+		float Value = 0.0f;
+	};
+
 	// The text a `StringValue` or a `LocalizationTable` carries.
 	//
 	// **One component for both, because both are an instance whose whole content

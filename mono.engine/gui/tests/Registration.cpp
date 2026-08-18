@@ -198,6 +198,7 @@ TEST_CASE("a fully populated Picture round-trips through its serialiser", "[gui]
 	written.TileSize = engine::core::UDim2{0.25f, 3.0f, 0.5f, 7.0f};
 	written.RectOffset = engine::core::Vector2{11.0f, 12.0f};
 	written.RectSize = engine::core::Vector2{13.0f, 14.0f};
+	written.Shader = Name("toon");
 
 	const TypeDescriptor &descriptor = Components::Describe(Components::Of<Picture>());
 
@@ -216,6 +217,7 @@ TEST_CASE("a fully populated Picture round-trips through its serialiser", "[gui]
 	CHECK(read.TileSize == written.TileSize);
 	CHECK(read.RectOffset == written.RectOffset);
 	CHECK(read.RectSize == written.RectSize);
+	CHECK(read.Shader == written.Shader);
 }
 
 TEST_CASE("a text box's caret does not cross a save", "[gui][registration]") {

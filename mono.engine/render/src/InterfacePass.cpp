@@ -75,6 +75,7 @@ namespace engine::render {
 	bool InterfacePass::Initialise(void *device, uint32_t swapchainFormat, float pixelSize) {
 		Shutdown();
 		Device = device;
+		SwapchainFormat = swapchainFormat;
 
 		auto *gpu = static_cast<SDL_GPUDevice *>(device);
 		if (gpu == nullptr) {
@@ -295,6 +296,10 @@ namespace engine::render {
 		if (SpatialTopPipeline != nullptr) {
 			SDL_ReleaseGPUGraphicsPipeline(gpu, static_cast<SDL_GPUGraphicsPipeline *>(SpatialTopPipeline));
 		}
+		for (const auto &[id, pipeline] : ShaderVariants) {
+			SDL_ReleaseGPUGraphicsPipeline(gpu, static_cast<SDL_GPUGraphicsPipeline *>(pipeline));
+		}
+		ShaderVariants.clear();
 
 		TransferBuffer = nullptr;
 		IndexBuffer = nullptr;
@@ -306,6 +311,7 @@ namespace engine::render {
 		SpatialPipeline = nullptr;
 		SpatialTopPipeline = nullptr;
 		Device = nullptr;
+		SwapchainFormat = 0;
 
 		VertexCapacity = 0;
 		IndexCapacity = 0;
@@ -320,6 +326,136 @@ namespace engine::render {
 		store.Each<const gui::SpatialCanvas>([&](ecs::Entity collector, const gui::SpatialCanvas &spatial) {
 			SpatialCollectors.push_back(SpatialCollector{collector, spatial});
 		});
+	}
+
+	bool InterfacePass::AddShaderVariant(const core::Name &name, std::span<const uint32_t> spirv) {
+		if (!name.IsValid() || spirv.empty() || Device == nullptr || Pipeline == nullptr) {
+			return false;
+		}
+
+		auto *gpu = static_cast<SDL_GPUDevice *>(Device);
+		const ShaderBinary binary = ShaderBinaryFor(gpu);
+
+		// **The runtime translation `Renderer::Impl::AddShaderVariant` does,
+		// for its own reason**: a `ShaderScript` does not exist when the
+		// build stages MSL, so a Metal device gets nothing at all unless this
+		// translates while the engine runs.
+		const bool toMsl = binary.Form == resources::ShaderForm::Msl;
+		std::string translated;
+		if (toMsl) {
+			msl::Translation result = msl::Translate(spirv);
+			if (result.Failed) {
+				ENGINE_ERROR("interface shader '{}' cannot be translated to MSL: {}", name.Text(), result.Error);
+				return false;
+			}
+			translated = std::move(result.Source);
+		}
+
+		SDL_GPUShaderCreateInfo fragmentInfo{};
+		fragmentInfo.code = toMsl ? reinterpret_cast<const Uint8 *>(translated.data())
+								  : reinterpret_cast<const Uint8 *>(spirv.data());
+		fragmentInfo.code_size = toMsl ? translated.size() : spirv.size() * sizeof(uint32_t);
+		fragmentInfo.entrypoint = binary.EntryPoint;
+		fragmentInfo.format = binary.Format;
+		fragmentInfo.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+
+		// **One sampler and no uniform buffer - `interface.frag`'s own
+		// shape**, matching exactly what `Initialise` declares for it below,
+		// and not `opaque.frag`'s nine and three. This is the contract a
+		// `ShaderScript` meant for an `ImageLabel` is written against; see
+		// this method's own header. The clip rectangle `Record` pushes
+		// reaches the fragment stage through SDL's push-constant path rather
+		// than a bound buffer, which is why it does not appear here.
+		fragmentInfo.num_samplers = 1;
+		fragmentInfo.num_uniform_buffers = 0;
+
+		SDL_GPUShader *fragment = SDL_CreateGPUShader(gpu, &fragmentInfo);
+		if (fragment == nullptr) {
+			ENGINE_ERROR("interface shader '{}': {}", name.Text(), SDL_GetError());
+			return false;
+		}
+
+		// Reloaded rather than kept, because SDL_GPU pipelines own what they
+		// need from the shader objects that built them - `Initialise`
+		// releases its own vertex shader the same way, right after the
+		// pipeline that consumes it exists.
+		SDL_GPUShader *vertex = Load(gpu, "interface.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
+		if (vertex == nullptr) {
+			SDL_ReleaseGPUShader(gpu, fragment);
+			return false;
+		}
+
+		SDL_GPUVertexBufferDescription buffer{};
+		buffer.slot = 0;
+		buffer.pitch = sizeof(InterfaceVertex);
+		buffer.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+
+		SDL_GPUVertexAttribute attributes[3]{};
+		attributes[0].location = 0;
+		attributes[0].buffer_slot = 0;
+		attributes[0].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2;
+		attributes[0].offset = offsetof(InterfaceVertex, X);
+		attributes[1].location = 1;
+		attributes[1].buffer_slot = 0;
+		attributes[1].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2;
+		attributes[1].offset = offsetof(InterfaceVertex, U);
+		attributes[2].location = 2;
+		attributes[2].buffer_slot = 0;
+		attributes[2].format = SDL_GPU_VERTEXELEMENTFORMAT_UBYTE4_NORM;
+		attributes[2].offset = offsetof(InterfaceVertex, R);
+
+		SDL_GPUColorTargetDescription target{};
+		target.format = static_cast<SDL_GPUTextureFormat>(SwapchainFormat);
+		target.blend_state.enable_blend = true;
+		target.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
+		target.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+		target.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+		target.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+		target.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+		target.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+
+		SDL_GPUGraphicsPipelineCreateInfo info{};
+		info.vertex_shader = vertex;
+		info.fragment_shader = fragment;
+		info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+		info.vertex_input_state.vertex_buffer_descriptions = &buffer;
+		info.vertex_input_state.num_vertex_buffers = 1;
+		info.vertex_input_state.vertex_attributes = attributes;
+		info.vertex_input_state.num_vertex_attributes = 3;
+		info.target_info.color_target_descriptions = &target;
+		info.target_info.num_color_targets = 1;
+		info.target_info.has_depth_stencil_target = false;
+		info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+
+		SDL_GPUGraphicsPipeline *pipeline = SDL_CreateGPUGraphicsPipeline(gpu, &info);
+
+		SDL_ReleaseGPUShader(gpu, vertex);
+		SDL_ReleaseGPUShader(gpu, fragment);
+
+		if (pipeline == nullptr) {
+			ENGINE_ERROR("interface shader '{}' pipeline: {}", name.Text(), SDL_GetError());
+			return false;
+		}
+
+		// Replacing is the ordinary case: an author editing a `ShaderScript`
+		// bumps its revision every keystroke that lands.
+		DropShaderVariant(name);
+		ShaderVariants[name.Id()] = pipeline;
+		return true;
+	}
+
+	bool InterfacePass::DropShaderVariant(const core::Name &name) {
+		const auto found = ShaderVariants.find(name.Id());
+		if (found == ShaderVariants.end()) {
+			return false;
+		}
+		if (Device != nullptr) {
+			SDL_ReleaseGPUGraphicsPipeline(
+				static_cast<SDL_GPUDevice *>(Device), static_cast<SDL_GPUGraphicsPipeline *>(found->second)
+			);
+		}
+		ShaderVariants.erase(found);
+		return true;
 	}
 
 	bool InterfacePass::UploadAtlas(void *commandBuffer) {
@@ -541,7 +677,9 @@ namespace engine::render {
 			return;
 		}
 
-		SDL_BindGPUGraphicsPipeline(pass, static_cast<SDL_GPUGraphicsPipeline *>(Pipeline));
+		auto *defaultPipeline = static_cast<SDL_GPUGraphicsPipeline *>(Pipeline);
+		SDL_BindGPUGraphicsPipeline(pass, defaultPipeline);
+		SDL_GPUGraphicsPipeline *boundPipeline = defaultPipeline;
 
 		// The canvas, for the vertex shader's one divide. Pushed rather than
 		// held in a buffer because it is two floats and changes with the window.
@@ -575,6 +713,24 @@ namespace engine::render {
 			);
 			if (spatial) {
 				continue;
+			}
+
+			// **Bound per batch only when it changes**, `bound`'s own reason
+			// applied to a pipeline instead of a texture. A batch naming no
+			// shader - the ordinary case - or one whose variant has not
+			// built yet draws with the pass's own shader rather than
+			// nothing: the same "keep the last frame's" the codebase reaches
+			// for whenever a resolve can fail.
+			SDL_GPUGraphicsPipeline *wanted = defaultPipeline;
+			if (batch.Shader.IsValid()) {
+				const auto found = ShaderVariants.find(batch.Shader.Id());
+				if (found != ShaderVariants.end()) {
+					wanted = static_cast<SDL_GPUGraphicsPipeline *>(found->second);
+				}
+			}
+			if (wanted != boundPipeline) {
+				SDL_BindGPUGraphicsPipeline(pass, wanted);
+				boundPipeline = wanted;
 			}
 
 			SDL_GPUTexture *texture = atlas;

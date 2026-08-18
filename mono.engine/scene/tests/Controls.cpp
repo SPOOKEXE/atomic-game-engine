@@ -143,6 +143,29 @@ TEST_CASE("the wheel zooms between the two distances", "[scene][controls]") {
 	CHECK(world.Camera().Distance == Approx(world.Camera().MinimumDistance));
 }
 
+TEST_CASE("I and O zoom the same way the wheel does, but as a held rate", "[scene][controls]") {
+	World world;
+	world.Camera().Distance = 12.0f;
+	world.Camera().KeyZoomSpeed = 8.0f;
+
+	world.Input().Down.Set(KeyCode::I, true);
+	UpdateCameraControl(world.Store_);
+	CHECK(world.Camera().Distance == Approx(12.0f - 8.0f * (1.0f / 60.0f)));
+
+	world.Input().Down.Set(KeyCode::I, false);
+	world.Input().Down.Set(KeyCode::O, true);
+	UpdateCameraControl(world.Store_);
+	CHECK(world.Camera().Distance == Approx(12.0f));
+
+	// Unfocused holds neither, for `ReadMoveIntent`'s own reason: a key
+	// latched before alt-tabbing away must not keep moving the camera for as
+	// long as the window stays unfocused.
+	world.Input().Focused = false;
+	const float before = world.Camera().Distance;
+	UpdateCameraControl(world.Store_);
+	CHECK(world.Camera().Distance == Approx(before));
+}
+
 TEST_CASE("zooming all the way in is first person, and back out is not", "[scene][controls]") {
 	// Roblox's behaviour, and the reason it is a mode rather than a key: the
 	// transition is continuous, so a player scrolls in until the character
@@ -227,6 +250,32 @@ TEST_CASE("first person puts the eye at the head and third person behind it", "[
 	REQUIRE(PlaceCamera(world.Store_));
 	const Vector3 third = world.Store_.Get<Transform>(eye)->Frame.Position;
 	CHECK((third - Vector3{0.0f, 1.5f, 0.0f}).Magnitude() == Approx(10.0f));
+}
+
+TEST_CASE("a poppercam's occluded distance wins without touching the setting", "[scene][controls]") {
+	World world;
+	const Entity subject = world.Store_.CreateInstance(engine::scene::PartClass(), "Character");
+	world.Store_.Set(subject, Transform{CFrame{Vector3{0.0f, 0.0f, 0.0f}}});
+
+	const Entity eye = world.Store_.CreateInstance(engine::scene::CameraClass(), "Eye");
+	world.Store_.Set(eye, Transform{});
+	world.Store_.SetResource(ActiveCamera{eye});
+
+	world.Camera().Subject = subject;
+	world.Camera().Distance = 10.0f;
+	world.Camera().OccludedDistance = 3.0f;
+	world.Camera().HeadHeight = 0.0f;
+
+	REQUIRE(PlaceCamera(world.Store_));
+	const Vector3 pulledIn = world.Store_.Get<Transform>(eye)->Frame.Position;
+	CHECK(pulledIn.Magnitude() == Approx(3.0f));
+
+	// Clearing it goes straight back to the player's own setting, with
+	// nothing to restore - `Distance` was never touched.
+	world.Camera().OccludedDistance = -1.0f;
+	REQUIRE(PlaceCamera(world.Store_));
+	const Vector3 restored = world.Store_.Get<Transform>(eye)->Frame.Position;
+	CHECK(restored.Magnitude() == Approx(10.0f));
 }
 
 TEST_CASE("a camera with no subject is left where it is", "[scene][controls]") {
@@ -369,6 +418,81 @@ TEST_CASE("the step replaces horizontal velocity and keeps vertical", "[scene][c
 	CHECK(motion->Linear.X == Approx(16.0f));
 	CHECK(motion->Linear.Z == Approx(0.0f));
 	CHECK(motion->Linear.Y == Approx(-25.0f));
+}
+
+TEST_CASE("auto-rotate turns a character to face its own movement", "[scene][controls]") {
+	World world;
+	const Entity character = world.Store_.CreateInstance(engine::scene::PartClass(), "Character");
+	Humanoid humanoid;
+	humanoid.MoveDirection = Vector3{1.0f, 0.0f, 0.0f};
+	world.Store_.Set(character, humanoid);
+	world.Store_.Set(character, Motion{});
+
+	// Starts facing -Z, the identity `CFrame`'s own facing, and is asked to
+	// walk east - a quarter turn away.
+	constexpr float delta = 1.0f / 60.0f;
+	float yaw = 0.0f;
+
+	// **Integrated by hand rather than through `physics::Integrate`**, which
+	// this module may not link. Enough ticks at the module's own turn speed
+	// to resolve a quarter turn several times over, so the case is robust to
+	// the exact constant rather than pinned to it.
+	for (int tick = 0; tick < 30; tick++) {
+		REQUIRE(StepCharacters(world.Store_, delta) == 1);
+		const float rate = world.Store_.Get<Motion>(character)->Angular.Y;
+		yaw += rate * delta;
+		world.Store_.Set(character, Transform{CFrame::Angles(0.0f, yaw, 0.0f)});
+	}
+
+	const Vector3 facing = world.Store_.Get<Transform>(character)->Frame.LookVector();
+	CHECK(facing.X == Approx(1.0f).margin(0.01f));
+	CHECK(facing.Z == Approx(0.0f).margin(0.01f));
+}
+
+TEST_CASE("a character with AutoRotate off never turns", "[scene][controls]") {
+	World world;
+	const Entity character = world.Store_.CreateInstance(engine::scene::PartClass(), "Character");
+	Humanoid humanoid;
+	humanoid.MoveDirection = Vector3{1.0f, 0.0f, 0.0f};
+	humanoid.AutoRotate = false;
+	world.Store_.Set(character, humanoid);
+	world.Store_.Set(character, Motion{});
+
+	REQUIRE(StepCharacters(world.Store_, 1.0f / 60.0f) == 1);
+	CHECK(world.Store_.Get<Motion>(character)->Angular.Y == Approx(0.0f));
+}
+
+TEST_CASE("a shift-locked viewer's own body faces the camera, not its stride", "[scene][controls]") {
+	World world;
+	const Entity character = world.Store_.CreateInstance(engine::scene::PartClass(), "Character");
+
+	// Strafing sideways relative to the camera - if this turned the body to
+	// face its own velocity, a shift-locked strafe would spin the character
+	// to face the direction it is sliding rather than the direction the
+	// camera - and therefore the player - is looking.
+	Humanoid humanoid;
+	humanoid.MoveDirection = Vector3{1.0f, 0.0f, 0.0f};
+	world.Store_.Set(character, humanoid);
+	world.Store_.Set(character, Motion{});
+
+	CameraController camera;
+	camera.Mode = CameraMode::ShiftLock;
+	camera.Subject = character;
+	camera.Angles.Y = std::numbers::pi_v<float>; // Facing +Z, not +X.
+	world.Store_.SetResource(camera);
+
+	constexpr float delta = 1.0f / 60.0f;
+	float yaw = 0.0f;
+	for (int tick = 0; tick < 30; tick++) {
+		REQUIRE(StepCharacters(world.Store_, delta) == 1);
+		const float rate = world.Store_.Get<Motion>(character)->Angular.Y;
+		yaw += rate * delta;
+		world.Store_.Set(character, Transform{CFrame::Angles(0.0f, yaw, 0.0f)});
+	}
+
+	const Vector3 facing = world.Store_.Get<Transform>(character)->Frame.LookVector();
+	CHECK(facing.Z == Approx(1.0f).margin(0.01f));
+	CHECK(facing.X == Approx(0.0f).margin(0.01f));
 }
 
 TEST_CASE("a jump needs the ground and is spent once", "[scene][controls]") {

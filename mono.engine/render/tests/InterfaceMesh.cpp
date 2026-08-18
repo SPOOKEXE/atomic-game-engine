@@ -179,6 +179,35 @@ TEST_CASE("an image starts its own batch and carries its name", "[render][interf
 	CHECK(mesh.Batches()[1].Image == engine::core::Name("rbxasset://textures/wall"));
 }
 
+TEST_CASE("a shader change starts its own batch, the same rule a texture change follows", "[render][interfacemesh]") {
+	GlyphAtlas atlas;
+	engine::gui::DrawList list;
+
+	auto plain = Rectangle(0.0f, 0.0f, 10.0f, 10.0f);
+	plain.Kind = engine::gui::DrawKind::Image;
+	plain.Image = engine::core::Name("rbxasset://textures/wall");
+	list.Commands.push_back(plain);
+
+	// Same image, same clip, same collector - only the shader differs, and
+	// that alone has to be enough to end the run: a pipeline is bound per
+	// batch, and these two want different ones.
+	auto shaded = plain;
+	shaded.Shader = engine::core::Name("toon");
+	list.Commands.push_back(shaded);
+
+	// A second command naming the same shader stays in the batch the first
+	// one opened, rather than starting a third.
+	list.Commands.push_back(shaded);
+
+	InterfaceMesh mesh;
+	mesh.Build(list, atlas);
+
+	REQUIRE(mesh.Batches().size() == 2);
+	CHECK_FALSE(mesh.Batches()[0].Shader.IsValid());
+	CHECK(mesh.Batches()[1].Shader == engine::core::Name("toon"));
+	CHECK(mesh.Batches()[1].IndexCount == 12);
+}
+
 TEST_CASE("text without an atlas draws nothing and breaks nothing", "[render][interfacemesh]") {
 	// **What a client whose fonts failed to stage should show.** The interface
 	// still draws and the text is visibly absent, rather than the frame being

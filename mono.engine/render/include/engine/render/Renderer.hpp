@@ -1083,6 +1083,41 @@ namespace engine::render {
 		// @since v0.15
 		void SetSurfaceBounces(uint32_t bounces);
 
+		// Draws every opaque and blended instance as lines rather than filled
+		// triangles.
+		//
+		// **A developer's view of the geometry rather than a game feature.**
+		// Reflections, portals and shadows are unaffected on purpose - a
+		// shadow map is depth-only and has no fill mode to speak of, and a
+		// mirror showing the wireframe of the room it reflects is still the
+		// room's wireframe, which is the point rather than a gap.
+		//
+		// **A part wearing its own `ShaderScript` keeps it.** This overrides
+		// the engine's own shading, not an author's; see `Renderer.cpp`'s
+		// `BindPipeline` for where that line is drawn.
+		//
+		// **Silently unavailable on a device with no `fillModeNonSolid`
+		// feature**, rather than a call that could fail. The two pipelines
+		// this needs are built once, at `Initialise`, and either both exist
+		// or the toggle does nothing - every ordinary frame renders exactly
+		// as it would have regardless.
+		//
+		// @param enabled Whether to draw wireframe from here on.
+		// @since v0.18
+		void SetWireframe(bool enabled);
+
+		// Whether wireframe was asked for.
+		//
+		// **Not whether the device can actually do it** - a caller wanting to
+		// know that reads `Statistics()` and finds every triangle count at
+		// its ordinary value on a frame this asked for wireframe and did not
+		// get it. This is the setting, for `SurfaceBounces`' own reason.
+		//
+		// @return The last value passed to `SetWireframe`, or `false` before
+		//         the renderer has a device.
+		// @since v0.18
+		bool Wireframe() const;
+
 		// What it is set to: zero for automatic, and zero before the renderer has
 		// a device.
 		//
@@ -1285,6 +1320,49 @@ namespace engine::render {
 		// @return `true` when a variant exists for it.
 		// @since v0.15
 		bool HasShader(const core::Name &name) const;
+
+		// Replaces the engine's own tonemap with this shader, for every
+		// frame drawn until the next call.
+		//
+		// **Written against `tonemap.frag`'s own contract, not
+		// `opaque.frag`'s** - one sampler holding the lit, still-HDR scene,
+		// no bound uniform buffer, one `vec4` out to whatever target this
+		// pass is writing. `scene::PostProcessing`'s own header carries the
+		// full argument for why this is the tonemap slot rather than a pass
+		// appended after it.
+		//
+		// **Only the frame the world presents, never a portal pane's own
+		// preview.** A pane redraws through the engine's plain ACES tonemap
+		// regardless of what the main view is doing, so a custom grade on
+		// the screen does not also recolour every mirror and portal in it -
+		// see `render/AGENTS.md` on why the shadow and surface passes draw
+		// the whole scene while the screen pass draws only what the eye
+		// sees; this is the identical split one stage later.
+		//
+		// **One at a time, replacing rather than accumulating** - there is
+		// one screen, so unlike `AddShader` this releases whatever pipeline
+		// it held before building the new one rather than keeping a table
+		// of names.
+		//
+		// @param name  The shader's name, for the error this logs on
+		//        failure. Not retained past this call.
+		// @param spirv The compiled words.
+		// @return `false` on a device, translation or pipeline failure - the
+		//         frame goes on drawing with the engine's own tonemap either
+		//         way.
+		// @since v0.18
+		bool SetPostProcessShader(const core::Name &name, std::span<const uint32_t> spirv);
+
+		// Goes back to the engine's own tonemap.
+		//
+		// @since v0.18
+		void ClearPostProcessShader();
+
+		// The name last handed to `SetPostProcessShader` and still active,
+		// or an invalid name when the engine's own tonemap is drawing.
+		//
+		// @since v0.18
+		core::Name PostProcessShaderName() const;
 
 		// Waits for the display and claims this frame's image, before the caller
 		// has read a single event.

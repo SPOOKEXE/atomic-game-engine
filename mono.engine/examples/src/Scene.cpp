@@ -154,7 +154,17 @@ namespace engine::examples {
 		// The class trees a script names, and this module's own components for
 		// the C++ path. A script builds out of `Part`; nothing it touches is
 		// registered here.
-		scene::EnsureClassTree();
+		//
+		// **`RegisterSceneClasses`, not `EnsureClassTree` alone - found the
+		// same way the `gui` gap below was.** `ShaderScript` and
+		// `EditableMesh` register through their own accessors, which
+		// `RegisterSceneClasses` calls and `EnsureClassTree` does not; a
+		// scene loaded through this one entry point got "'EditableMesh' is
+		// not a registered class" from `Instance.new`, while the same class
+		// worked from `Game.cpp`'s path and from the studio's - exactly the
+		// "works everywhere somebody looked" shape the comment two lines
+		// down already names.
+		scene::RegisterSceneClasses();
 
 		// **Both trees, because there are two and a scene may use either.**
 		// `Interface.luau` is built entirely out of `ScreenGui` and `Frame` and

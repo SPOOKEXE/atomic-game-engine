@@ -49,6 +49,8 @@ namespace engine::input {
 		IncreaseProfilerDepth,
 		// Writes the retained profiler history to a snapshot.
 		WriteProfilerSnapshot,
+		// Toggles wireframe rendering.
+		ToggleWireframe,
 
 		// Counts actions and is not itself an action.
 		Count,

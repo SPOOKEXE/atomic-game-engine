@@ -478,6 +478,37 @@ namespace engine::scene {
 			return property;
 		}
 
+		// LocalTransparency: read-only through the property table, for
+		// `scene::LocalTransparency`'s own reason.
+		//
+		// **Written through `scene::SetLocalTransparency` instead**, which is
+		// not gated by `Store::AdoptOnly` the way `Store::SetProperty` is - see
+		// that function's header. A script still reads `part.LocalTransparency`
+		// like any other property; it calls a method to change it, the same
+		// shape `Instance:SetAttribute` already asks an author to accept.
+		PropertyDescriptor LocalTransparencyProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("LocalTransparency");
+			property.Type = PropertyType::Float;
+			property.Size = sizeof(float);
+			property.Kind = PropertyKind::Computed;
+
+			property.Writable = false;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<LocalTransparency>()});
+			property.Writes = &ecs::ComponentSet::Intern({});
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const LocalTransparency *local = store.Get<LocalTransparency>(instance);
+				if (local == nullptr) {
+					return false;
+				}
+				*static_cast<float *>(out) = local->Value;
+				return true;
+			};
+
+			return property;
+		}
+
 		// FieldOfView: the camera's vertical angle, in degrees.
 		//
 		// Degrees out, radians stored - Roblox's `Camera.FieldOfView` is
@@ -1361,6 +1392,12 @@ namespace engine::scene {
 				ecs::Components::Of<SurfaceAppearance>(),
 				ecs::Components::Of<Tags>(),
 
+				// **On the class for `SurfaceAppearance`'s reason, and never
+				// replicated for `LocalTransparency`'s own.** Four bytes on
+				// every part, in exchange for `client::CollectInstances`
+				// reading it as a plain column rather than a per-row join.
+				ecs::Components::Of<LocalTransparency>(),
+
 				// **On the class, so every part has one, for
 				// `SurfaceAppearance`'s reason.** A properties panel that could
 				// only show density and friction on the parts somebody had
@@ -1808,6 +1845,11 @@ namespace engine::scene {
 			// Roblox's property and has no such expectation to honour.
 			ecs::Classes::Property<&Visual::Transparency>(basePart, "Transparency");
 
+			// **Read-only through the table and never sent**, for
+			// `LocalTransparencyProperty`'s and `scene::LocalTransparency`'s
+			// own reasons.
+			ecs::Classes::Computed(basePart, LocalTransparencyProperty());
+
 			// **The third of the three, and they are three questions rather
 			// than one.** `Visible` decides whether the part is submitted at
 			// all, `Transparency` decides which pass it lands in, and this
@@ -1981,6 +2023,7 @@ namespace engine::scene {
 			ecs::Classes::ClampedProperty<&Humanoid::JumpSpeed, 0.0f, 1000.0f>(humanoidClass, "JumpPower");
 			ecs::Classes::ClampedProperty<&Humanoid::Height, 0.1f, 100.0f>(humanoidClass, "HipHeight");
 			ecs::Classes::Property<&Humanoid::Enabled>(humanoidClass, "Enabled");
+			ecs::Classes::Property<&Humanoid::AutoRotate>(humanoidClass, "AutoRotate");
 
 			// **The two that decide whether a character is alive**, and both are
 			// written conversions because each is clamped against the other. See
@@ -2041,6 +2084,20 @@ namespace engine::scene {
 		// Through the same helper a property write uses, so a script pivoting a
 		// part and an author dragging one leave the world in the same state.
 		PlaceInstance(store, instance, placement);
+		return true;
+	}
+
+	float LocalTransparencyOf(const ecs::Store &store, ecs::Entity instance) {
+		const LocalTransparency *local = store.Get<LocalTransparency>(instance);
+		return local == nullptr ? 0.0f : local->Value;
+	}
+
+	bool SetLocalTransparency(ecs::Store &store, ecs::Entity instance, float value) {
+		LocalTransparency *local = store.GetMutable<LocalTransparency>(instance);
+		if (local == nullptr) {
+			return false;
+		}
+		local->Value = value;
 		return true;
 	}
 

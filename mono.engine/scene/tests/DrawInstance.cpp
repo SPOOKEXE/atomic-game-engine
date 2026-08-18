@@ -22,7 +22,9 @@ using engine::core::Name;
 using engine::core::Vector3;
 using engine::scene::Bounds;
 using engine::scene::DrawInstance;
+using engine::scene::LocalTransparency;
 using engine::scene::MAX_SURFACES;
+using engine::scene::MakeDrawInstance;
 using engine::scene::OrderScene;
 using engine::scene::ScenePlan;
 using engine::scene::SurfaceRun;
@@ -95,6 +97,34 @@ TEST_CASE("a draw instance is built from scene components without conversion", "
 	CHECK(instance.HalfExtent == bounds.HalfExtent);
 	CHECK(instance.Tint.G == 0.5f);
 	CHECK(instance.Mesh == visual.Mesh);
+}
+
+TEST_CASE("a local override wins over the authored transparency", "[scene][drawinstance]") {
+	Transform transform;
+	Bounds bounds;
+	Visual visual;
+	visual.Transparency = 0.2f;
+
+	SECTION("zero leaves the authored value alone") {
+		LocalTransparency local;
+		local.Value = 0.0f;
+		const DrawInstance instance =
+			MakeDrawInstance(transform.Frame, bounds, visual, nullptr, nullptr, &local);
+		CHECK(instance.Transparency == 0.2f);
+	}
+
+	SECTION("anything else replaces it") {
+		LocalTransparency local;
+		local.Value = 0.9f;
+		const DrawInstance instance =
+			MakeDrawInstance(transform.Frame, bounds, visual, nullptr, nullptr, &local);
+		CHECK(instance.Transparency == 0.9f);
+	}
+
+	SECTION("no row at all is the same as zero") {
+		const DrawInstance instance = MakeDrawInstance(transform.Frame, bounds, visual, nullptr, nullptr);
+		CHECK(instance.Transparency == 0.2f);
+	}
 }
 
 // --- ordering for the transparent pass --------------------------------------

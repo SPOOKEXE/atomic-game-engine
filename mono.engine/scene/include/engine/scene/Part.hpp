@@ -119,6 +119,33 @@ namespace engine::scene {
 	// @since v0.10
 	bool PivotTo(ecs::Store &store, ecs::Entity instance, const core::CFrame &target);
 
+	// How much of `Visual::Transparency` this viewer has locally overridden.
+	//
+	// @param store    The world.
+	// @param instance The part.
+	// @return The value, or 0 for a part with no `LocalTransparency` row.
+	// @since v0.18
+	float LocalTransparencyOf(const ecs::Store &store, ecs::Entity instance);
+
+	// Sets this viewer's own occlusion fade for a part, bypassing the
+	// adopt-only refusal every other property write goes through.
+	//
+	// **The door `scene::LocalTransparency`'s own header names.** A camera
+	// occlusion pass - or a script driving the same effect by hand - has to be
+	// able to fade a part that arrived over the wire, and `Store::SetProperty`
+	// refuses every write on a replica regardless of which property, because
+	// the ordinary case is a script racing the authority. This is not that
+	// case: the value this writes is never sent anywhere, so there is nothing
+	// for a delta to disagree with.
+	//
+	// @param store    The world.
+	// @param instance The part. Anything but a `BasePart` is a no-op.
+	// @param value    0 to stop overriding `Transparency`; anything else to
+	//        replace it, for this viewer alone.
+	// @return `false` when `instance` carries no `LocalTransparency` row.
+	// @since v0.18
+	bool SetLocalTransparency(ecs::Store &store, ecs::Entity instance, float value);
+
 	// Registers the whole scene class tree, once per process.
 	//
 	// **Every class accessor here calls this first**, so a caller asking for

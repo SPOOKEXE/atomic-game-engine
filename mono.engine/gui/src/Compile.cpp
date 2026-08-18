@@ -203,7 +203,8 @@ namespace engine::gui {
 			running = Fold(running, value.SliceScale);
 			running = Fold(running, value.TileSize);
 			running = Fold(running, value.RectOffset);
-			return Fold(running, value.RectSize);
+			running = Fold(running, value.RectSize);
+			return Fold(running, value.Shader);
 		}
 
 		uint64_t Fold(uint64_t running, const Button &value) {
@@ -555,6 +556,7 @@ namespace engine::gui {
 					}
 				};
 				image.Tile = picture->TileSize.Resolve(resolved.AbsoluteSize);
+				image.Shader = picture->Shader;
 				out.Commands.push_back(image);
 			}
 
@@ -899,5 +901,21 @@ namespace engine::gui {
 		}
 
 		return true;
+	}
+
+	size_t DemandedShaders(ecs::Store &store, std::vector<core::Name> &out) {
+		out.clear();
+
+		store.Each<const Picture>([&out](ecs::Entity, const Picture &picture) {
+			if (picture.Shader.IsValid()) {
+				out.push_back(picture.Shader);
+			}
+		});
+
+		std::sort(out.begin(), out.end(), [](const core::Name &left, const core::Name &right) {
+			return left.Id() < right.Id();
+		});
+		out.erase(std::unique(out.begin(), out.end()), out.end());
+		return out.size();
 	}
 }

@@ -1,4 +1,5 @@
 #include <engine/ecs/Store.hpp>
+#include <engine/gui/Compile.hpp>
 #include <engine/render/ShaderCompiler.hpp>
 #include <engine/render/ShaderLibrary.hpp>
 #include <engine/resources/Shaders.hpp>
@@ -79,6 +80,13 @@ namespace engine::render {
 
 		// Scratch for the walk, kept so a steady frame allocates nothing.
 		std::vector<core::Name> Demanded;
+
+		// The other half of the walk - see `gui::DemandedShaders`. Kept
+		// separate from `Demanded` and merged in, rather than widening that
+		// scratch's own writer, because `scene::DemandedShaders` already owns
+		// the contract "cleared first, sorted, deduplicated" and a second
+		// caller into the same buffer would have to know not to violate it.
+		std::vector<core::Name> GuiDemanded;
 	};
 
 	ShaderLibrary::ShaderLibrary() : State(std::make_unique<Impl>()) {}
@@ -88,6 +96,17 @@ namespace engine::render {
 	size_t ShaderLibrary::Refresh(ecs::Store &store) {
 		State->Changed.clear();
 		scene::DemandedShaders(store, State->Demanded);
+
+		// **Merged in rather than resolved by a second pass**, because every
+		// name below this line is treated identically regardless of which
+		// module asked - a `ShaderScript` an `ImageLabel` selects compiles
+		// through the exact door a `Material` selecting the same name does.
+		gui::DemandedShaders(store, State->GuiDemanded);
+		State->Demanded.insert(State->Demanded.end(), State->GuiDemanded.begin(), State->GuiDemanded.end());
+		std::sort(State->Demanded.begin(), State->Demanded.end(), [](const core::Name &left, const core::Name &right) {
+			return left.Id() < right.Id();
+		});
+		State->Demanded.erase(std::unique(State->Demanded.begin(), State->Demanded.end()), State->Demanded.end());
 
 		// **Dropped first, so a name that stops being asked for and starts again
 		// in the same call is resolved rather than skipped.** That is not a

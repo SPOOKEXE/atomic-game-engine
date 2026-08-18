@@ -868,6 +868,19 @@ declare interface Instance {
 	IsKeepingWorldAwake(): boolean;
 	SetNetworkOwner(player?: Instance | null): void;
 	GetNetworkOwner(): Instance | null;
+	SetLocalTransparency(value: number): void;
+	AddVertex(position: Vector3, normal?: Vector3, uv?: Vector2): number | undefined;
+	AddTriangle(a: number, b: number, c: number): number | undefined;
+	RemoveTriangle(triangle: number): boolean;
+	SetVertexPosition(vertex: number, position: Vector3): boolean;
+	SetVertexNormal(vertex: number, normal: Vector3): boolean;
+	SetVertexUV(vertex: number, uv: Vector2): boolean;
+	SetVertexColor(vertex: number, colour: Color3, alpha?: number): boolean;
+	Clear(): boolean;
+	Resize(width: number, height: number): boolean;
+	DrawRectangle(position: Vector2, size: Vector2, colour: Color3, transparency?: number): boolean;
+	DrawLine(from: Vector2, to: Vector2, colour: Color3, transparency?: number): boolean;
+	DrawCircle(centre: Vector2, radius: number, colour: Color3, transparency?: number): boolean;
 	GetAttribute(name: string): EngineAttribute | null;
 	SetAttribute(name: string, value: EngineAttribute | null): void;
 	GetAttributes(): { [name: string]: EngineAttribute };
@@ -913,6 +926,7 @@ declare interface BasePart extends PVInstance {
 	Elasticity: number;
 	Friction: number;
 	LinearDamping: number;
+	readonly LocalTransparency: number;
 	Locked: boolean;
 	readonly Mass: number;
 	Size: Vector3;
@@ -985,6 +999,7 @@ declare interface Material extends Instance {
 }
 
 declare interface Humanoid extends Instance {
+	AutoRotate: boolean;
 	Enabled: boolean;
 	readonly Grounded: boolean;
 	Health: number;
@@ -1023,6 +1038,21 @@ declare interface StringValue extends ValueBase {
 }
 
 declare interface LocalizationTable extends ValueBase {
+}
+
+declare interface ShaderScript extends Instance {
+	readonly Revision: number;
+}
+
+declare interface EditableMesh extends Instance {
+	readonly ContentId: string;
+	readonly TriangleCount: number;
+	readonly VertexCount: number;
+}
+
+declare interface EditableImage extends Instance {
+	readonly ContentId: string;
+	readonly Size: Vector2;
 }
 
 declare interface LuaSourceContainer extends Instance {
@@ -1226,6 +1256,7 @@ declare interface ImageButton extends GuiButton {
 	ImageRectSize: Vector2;
 	ImageTransparency: number;
 	ScaleType: Enum.ScaleType;
+	Shader: string;
 	SliceCenter: Rect;
 	SliceScale: number;
 	TileSize: UDim2;
@@ -1257,6 +1288,7 @@ declare interface ImageLabel extends GuiLabel {
 	ImageRectSize: Vector2;
 	ImageTransparency: number;
 	ScaleType: Enum.ScaleType;
+	Shader: string;
 	SliceCenter: Rect;
 	SliceScale: number;
 	TileSize: UDim2;
@@ -1421,6 +1453,7 @@ declare interface Lighting extends Service {
 	FogStart: number;
 	GeographicLatitude: number;
 	OutdoorAmbient: Color3;
+	PostProcessShader: string;
 }
 
 declare interface ReplicatedFirst extends Service {
@@ -1874,6 +1907,9 @@ declare const Instance: {
 		(className: "ValueBase", parent?: Instance): ValueBase;
 		(className: "StringValue", parent?: Instance): StringValue;
 		(className: "LocalizationTable", parent?: Instance): LocalizationTable;
+		(className: "ShaderScript", parent?: Instance): ShaderScript;
+		(className: "EditableMesh", parent?: Instance): EditableMesh;
+		(className: "EditableImage", parent?: Instance): EditableImage;
 		(className: "LuaSourceContainer", parent?: Instance): LuaSourceContainer;
 		(className: "Script", parent?: Instance): Script;
 		(className: "LocalScript", parent?: Instance): LocalScript;

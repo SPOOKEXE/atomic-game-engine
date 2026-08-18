@@ -15,6 +15,8 @@
 #include <engine/core/Name.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/gui/Components.hpp>
+#include <engine/gui/Registration.hpp>
 #include <engine/render/ShaderLibrary.hpp>
 #include <engine/resources/Shaders.hpp>
 #include <engine/scene/Components.hpp>
@@ -93,6 +95,7 @@ void main() { outColour = vec4(1.0); }
 	Store Fresh(const char *name) {
 		engine::scene::RegisterSceneComponents();
 		engine::scene::RegisterSceneClasses();
+		engine::gui::RegisterGuiClasses();
 		ShaderScriptClass();
 		return Store(name);
 	}
@@ -102,6 +105,14 @@ void main() { outColour = vec4(1.0); }
 		const Entity material = store.CreateInstance(MaterialClass(), "Material");
 		REQUIRE(material != NULL_ENTITY);
 		store.GetMutable<MaterialRef>(material)->Shader = Name(shader);
+	}
+
+	// An `ImageLabel` naming `shader` directly, so the world asks for it the
+	// other way `gui::DemandedShaders` covers.
+	void SelectImage(Store &store, const char *shader) {
+		const Entity label = store.CreateInstance(engine::gui::GuiClass("ImageLabel"), "Picture");
+		REQUIRE(label != NULL_ENTITY);
+		store.GetMutable<engine::gui::Picture>(label)->Shader = Name(shader);
 	}
 
 	// A shader script called `name` holding `code`.
@@ -127,6 +138,57 @@ TEST_CASE("a shader script in the world is compiled by name", "[render][shaders]
 	REQUIRE_FALSE(module->SpirV.empty());
 	REQUIRE(module->SpirV.front() == SPIRV_MAGIC);
 	REQUIRE_FALSE(module->BuiltIn);
+}
+
+TEST_CASE("a world's postprocess shader is compiled the same door a material uses", "[render][shaders]") {
+	Store store = Fresh("library.postprocess");
+	Author(store, "Sepia", VALID);
+	engine::scene::SetPostProcessShader(store, Name("Sepia"));
+
+	ShaderLibrary library;
+	REQUIRE(library.Refresh(store) == 1);
+
+	const ShaderModule *module = library.Find(Name("Sepia"));
+	REQUIRE(module != nullptr);
+	REQUIRE(module->Error.empty());
+	REQUIRE_FALSE(module->SpirV.empty());
+	REQUIRE_FALSE(module->BuiltIn);
+
+	// Switching away stops asking for it, exactly as dropping a material's
+	// selection does.
+	engine::scene::SetPostProcessShader(store, Name{});
+	REQUIRE(library.Refresh(store) == 1);
+	CHECK(library.Find(Name("Sepia")) == nullptr);
+}
+
+TEST_CASE("an ImageLabel's own shader is compiled by name, the same door a material uses", "[render][shaders]") {
+	Store store = Fresh("library.picture");
+	Author(store, "Toon", VALID);
+	SelectImage(store, "Toon");
+
+	ShaderLibrary library;
+	REQUIRE(library.Refresh(store) == 1);
+
+	const ShaderModule *module = library.Find(Name("Toon"));
+	REQUIRE(module != nullptr);
+	REQUIRE(module->Error.empty());
+	REQUIRE_FALSE(module->SpirV.empty());
+	REQUIRE_FALSE(module->BuiltIn);
+}
+
+TEST_CASE("a material and an ImageLabel naming the same shader share one module", "[render][shaders]") {
+	Store store = Fresh("library.shared");
+	Author(store, "Toon", VALID);
+	Select(store, "Toon");
+	SelectImage(store, "Toon");
+
+	ShaderLibrary library;
+
+	// **One, not two** - the whole point of resolving both through one name
+	// space is that a scene and its interface asking for the same shader
+	// compile it once.
+	REQUIRE(library.Refresh(store) == 1);
+	REQUIRE(library.Find(Name("Toon")) != nullptr);
 }
 
 TEST_CASE("an unchanged script is not compiled twice", "[render][shaders]") {

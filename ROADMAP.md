@@ -62,16 +62,15 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] concise `RUNNING.md` tutorial for pointing a game server at a custom CDN
 - [x] concise `RUNNING.md` tutorial for adding a local store or remote origin to Studio
 - [x] concise `RUNNING.md` tutorial for launching a client that accepts the server-announced CDN, grant and publisher key, with an explicit CDN override mode
-
-- [_] ensure we can attach shaders to (visual) assets as well to change how they render: mesh, texture, gifs, images and videos
-- [_] localtransparency property for clients (only visible in local side, server cannot see), take priority over standard transparency if not set to 0
-- [_] character auto-rotation
-- [_] set character with LocalTransparency=1 when you zoom in (make a camera controller system with shift lock, scroll zoom, I/O zoom, poppercam system - add items to ignore in zoom and make partly transparent using LocalTransparency). Would it be worth changing LocalTransparency to a component and we can add/remove as needed per-client?
-- [_] add compute and postprocessing shaders to meshes/textures/pbr
-- [_] wireframe view mode
-- [_] add emissive textures / pbr
-- [_] real mesh creation in real-time (EditableMesh) + ensure it renders properly
-- [_] ensure EditableImage works and renders
+- [x] ensure we can attach shaders to (visual) assets as well to change how they render: mesh, texture, gifs, images and videos
+- [x] localtransparency property for clients (only visible in local side, server cannot see), take priority over standard transparency if not set to 0
+- [x] character auto-rotation
+- [x] set character with LocalTransparency=1 when you zoom in (make a camera controller system with shift lock, scroll zoom, I/O zoom, poppercam system - add items to ignore in zoom and make partly transparent using LocalTransparency). Would it be worth changing LocalTransparency to a component and we can add/remove as needed per-client?
+- [x] add compute and postprocessing shaders to meshes/textures/pbr
+- [x] wireframe view mode
+- [x] add emissive textures / pbr
+- [x] real mesh creation in real-time (EditableMesh) + ensure it renders properly
+- [x] ensure EditableImage works and renders
 
 - [_] add accessories support
 - [_] animation handler

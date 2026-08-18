@@ -170,7 +170,19 @@ namespace engine::replication {
 		// `Authority::Survey` is what turns the observation on, so declaring one
 		// here is the whole of the wiring.
 		bool CannotBeSigned(std::string_view component) {
-			return component == "gui.Label" || component == "gui.Entry" || component == "script.Program";
+			// **`scene.EditableMesh` joins this list for the same reason as
+			// the three above it, arriving at a different scale.** Five
+			// `std::vector`s are five pointers in the object representation
+			// a signature would hash - it would answer about the allocation
+			// and never about a vertex actually moving. `Observed` is exactly
+			// right here rather than merely convenient: every mutator in
+			// `scene/EditableMesh.hpp` reaches the row through `Store::
+			// GetMutable`, which marks the dirty bit for free - there is no
+			// `EachBatch` or raw-pointer door for this type the way there is
+			// for `Visual` and `Bounds`, so there is no hole `Observed`
+			// leaves open for it.
+			return component == "gui.Label" || component == "gui.Entry" || component == "script.Program" ||
+				   component == "scene.EditableMesh" || component == "scene.EditableImage";
 		}
 	}
 
@@ -250,6 +262,17 @@ namespace engine::replication {
 		// wire for something the far side is about to overwrite.
 		if (component == "scene.PreviousTransform" || component == "scene.Rendered" ||
 			component == "scene.QuickHash") {
+			return true;
+		}
+
+		// **A fact about this viewer's own camera, not about the part.**
+		// `scene::LocalTransparency` exists so a poppercam can thin out
+		// whatever stands between the eye and its subject on *this* machine
+		// without editing `Visual::Transparency`, which every other client
+		// draws by. Replicating it would put one viewer's occlusion fade on
+		// every screen, which is the exact bug the split between the two
+		// fields exists to prevent - see the component's own header.
+		if (component == "scene.LocalTransparency") {
 			return true;
 		}
 

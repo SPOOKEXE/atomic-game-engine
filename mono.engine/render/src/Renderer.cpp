@@ -811,6 +811,16 @@ namespace engine::render {
 
 		SDL_GPUGraphicsPipeline *OpaquePipeline = nullptr;
 
+		// The two above, redrawn as lines. See where they are created for why
+		// there are two objects and not a bindable state.
+		SDL_GPUGraphicsPipeline *WireframeOpaquePipeline = nullptr;
+		SDL_GPUGraphicsPipeline *WireframeTransparentPipeline = nullptr;
+
+		// Whether `BindPipeline` should hand out the pair above instead of the
+		// ordinary two. Off unless a caller has asked - `Renderer::
+		// SetWireframe` is the only door.
+		bool WireframeMode = false;
+
 		// The default graph's opaque path. Geometry writes material properties,
 		// then screen-sized passes consume those textures. Portal panes and the
 		// blended tail stay on the forward family below because their projected
@@ -820,6 +830,17 @@ namespace engine::render {
 		SDL_GPUGraphicsPipeline *SsaoPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *DeferredLightingPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *TonemapPipeline = nullptr;
+
+		// `TonemapPipeline`'s replacement, when a world has asked for one -
+		// see `Renderer::SetPostProcessShader`. Null is the ordinary state,
+		// and the "tonemap" graph node falls back to `TonemapPipeline`
+		// whenever it is.
+		SDL_GPUGraphicsPipeline *PostProcessPipeline = nullptr;
+
+		// Which name `PostProcessPipeline` was built for, so `Renderer::
+		// PostProcessShaderName` can answer without a second field to keep
+		// in step.
+		core::Name PostProcessShaderName;
 
 		struct PbrDimensions {
 			uint32_t TargetWidth = 0;
@@ -2205,6 +2226,47 @@ namespace engine::render {
 			ENGINE_ERROR("opaque pipeline: {}", SDL_GetError());
 		}
 
+		// --- wireframe view mode ----------------------------------------------
+		//
+		// **A second pipeline rather than a bindable state, because SDL_GPU has
+		// no bindable state for it.** `rasterizer_state.fill_mode` is baked into
+		// the pipeline object at creation, the same way `cull_mode` is for
+		// `TransparentPipeline` above - there is no `SDL_SetGPU...FillMode` to
+		// call between draws. So a toggle here means a second object with
+		// everything else unchanged, exactly the shape `TransparentPipeline`
+		// already is relative to `OpaquePipeline`.
+		//
+		// **Culling off, so a wireframe view shows every edge and not only the
+		// ones facing the eye.** A wireframe box with back-face culling on
+		// draws as three visible faces and reads as broken geometry; a
+		// developer reaching for this view wants the far side of the mesh
+		// too.
+		//
+		// **Bound in `BindPipeline`, not at each of the dozens of call sites
+		// that ask for `OpaquePipeline` or `TransparentPipeline`.** Every one
+		// of them already funnels through that one function to keep
+		// `ActivePipeline` and `ActiveFamily` correct for `DrawSlots`'
+		// restore - see its own header - so a family-keyed substitution there
+		// reaches the screen pass, the surface pass and every mirror without
+		// a second line anywhere else. A part with its own `ShaderScript`
+		// keeps its own shader even so: `DrawSlots` binds a variant by name
+		// over whatever `BindPipeline` left active, and a debug view is not
+		// the place to override an author's own material.
+		//
+		// **Failure here is a diagnostic and a feature quietly unavailable,
+		// never a reason `CreatePipelines` itself fails.** `fillModeNonSolid`
+		// is an optional device feature on some backends; a machine without it
+		// still renders every ordinary frame correctly and only loses a debug
+		// toggle, which is not worth the whole renderer refusing to start
+		// over.
+		SDL_GPUGraphicsPipelineCreateInfo wireframeOpaque = opaque;
+		wireframeOpaque.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_LINE;
+		wireframeOpaque.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+		WireframeOpaquePipeline = SDL_CreateGPUGraphicsPipeline(Device, &wireframeOpaque);
+		if (!WireframeOpaquePipeline) {
+			ENGINE_WARN("wireframe opaque pipeline unavailable: {}", SDL_GetError());
+		}
+
 		// --- default PBR graph -----------------------------------------------
 
 		SDL_GPUColorTargetDescription gbufferTargets[4]{};
@@ -2305,6 +2367,16 @@ namespace engine::render {
 		TransparentPipeline = SDL_CreateGPUGraphicsPipeline(Device, &transparent);
 		if (!TransparentPipeline) {
 			ENGINE_ERROR("transparent pipeline: {}", SDL_GetError());
+		}
+
+		// The wireframe twin, for `WireframeOpaquePipeline`'s own reason.
+		// Culling is already off on `transparent`, so only the fill mode
+		// changes.
+		SDL_GPUGraphicsPipelineCreateInfo wireframeTransparent = transparent;
+		wireframeTransparent.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_LINE;
+		WireframeTransparentPipeline = SDL_CreateGPUGraphicsPipeline(Device, &wireframeTransparent);
+		if (!WireframeTransparentPipeline) {
+			ENGINE_WARN("wireframe transparent pipeline unavailable: {}", SDL_GetError());
 		}
 
 		// --- what a variant is derived from ---------------------------------
@@ -2581,6 +2653,20 @@ namespace engine::render {
 	void Renderer::Impl::BindPipeline(
 		SDL_GPURenderPass *pass, SDL_GPUGraphicsPipeline *pipeline, PipelineFamily family
 	) {
+		// **The one substitution point for the whole renderer.** Every caller
+		// still names `OpaquePipeline` or `TransparentPipeline`, exactly as
+		// before wireframe existed - this is where that request becomes a
+		// line-drawing one, so the screen pass, the surface pass and every
+		// mirror get it with nothing edited at their own call sites. See
+		// `WireframeOpaquePipeline`'s own header for the rest of the argument.
+		if (WireframeMode) {
+			if (family == PipelineFamily::Opaque && WireframeOpaquePipeline != nullptr) {
+				pipeline = WireframeOpaquePipeline;
+			} else if (family == PipelineFamily::Transparent && WireframeTransparentPipeline != nullptr) {
+				pipeline = WireframeTransparentPipeline;
+			}
+		}
+
 		SDL_BindGPUGraphicsPipeline(pass, pipeline);
 		ActivePipeline = pipeline;
 		ActiveFamily = family;
@@ -5149,16 +5235,25 @@ namespace engine::render {
 		if (State->OpaquePipeline) {
 			SDL_ReleaseGPUGraphicsPipeline(device, State->OpaquePipeline);
 		}
+		if (State->WireframeOpaquePipeline) {
+			SDL_ReleaseGPUGraphicsPipeline(device, State->WireframeOpaquePipeline);
+		}
+		if (State->WireframeTransparentPipeline) {
+			SDL_ReleaseGPUGraphicsPipeline(device, State->WireframeTransparentPipeline);
+		}
 		for (SDL_GPUGraphicsPipeline *pipeline :
 			 {State->GBufferPipeline,
 			  State->DepthLinearPipeline,
 			  State->SsaoPipeline,
 			  State->DeferredLightingPipeline,
-			  State->TonemapPipeline}) {
+			  State->TonemapPipeline,
+			  State->PostProcessPipeline}) {
 			if (pipeline != nullptr) {
 				SDL_ReleaseGPUGraphicsPipeline(device, pipeline);
 			}
 		}
+		State->PostProcessPipeline = nullptr;
+		State->PostProcessShaderName = core::Name{};
 		if (State->TransparentPipeline) {
 			SDL_ReleaseGPUGraphicsPipeline(device, State->TransparentPipeline);
 		}
@@ -5360,6 +5455,16 @@ namespace engine::render {
 		return State == nullptr ? 0u : State->SurfaceBounces;
 	}
 
+	void Renderer::SetWireframe(bool enabled) {
+		if (State != nullptr) {
+			State->WireframeMode = enabled;
+		}
+	}
+
+	bool Renderer::Wireframe() const {
+		return State != nullptr && State->WireframeMode;
+	}
+
 	void Renderer::SetPortalDepth(uint32_t depth) {
 		if (State != nullptr) {
 			// **Clamped rather than floored**, which is the opposite of the
@@ -5508,6 +5613,102 @@ namespace engine::render {
 
 	bool Renderer::HasShader(const core::Name &name) const {
 		return State != nullptr && name.IsValid() && State->ShaderVariants.contains(name.Id());
+	}
+
+	bool Renderer::SetPostProcessShader(const core::Name &name, std::span<const uint32_t> spirv) {
+		if (State == nullptr || State->Device == nullptr || spirv.empty()) {
+			return false;
+		}
+
+		const bool toMsl = State->Binary.Form == resources::ShaderForm::Msl;
+		std::string translated;
+		if (toMsl) {
+			msl::Translation result = msl::Translate(spirv);
+			if (result.Failed) {
+				ENGINE_ERROR("postprocess shader '{}' cannot be translated to MSL: {}", name.Text(), result.Error);
+				return false;
+			}
+			translated = std::move(result.Source);
+		}
+
+		SDL_GPUShaderCreateInfo fragmentInfo{};
+		fragmentInfo.code = toMsl ? reinterpret_cast<const Uint8 *>(translated.data())
+								  : reinterpret_cast<const Uint8 *>(spirv.data());
+		fragmentInfo.code_size = toMsl ? translated.size() : spirv.size() * sizeof(uint32_t);
+		fragmentInfo.entrypoint = State->Binary.EntryPoint;
+		fragmentInfo.format = State->Binary.Format;
+		fragmentInfo.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+
+		// **One sampler and no bound uniform buffer - `tonemap.frag`'s own
+		// shape**, matching what `CreatePipelines` declares for it. See
+		// `SetPostProcessShader`'s own header for the contract a
+		// `ShaderScript` used here is written against.
+		fragmentInfo.num_samplers = 1;
+		fragmentInfo.num_uniform_buffers = 0;
+
+		SDL_GPUShader *fragment = SDL_CreateGPUShader(State->Device, &fragmentInfo);
+		if (fragment == nullptr) {
+			ENGINE_ERROR("postprocess shader '{}': {}", name.Text(), SDL_GetError());
+			return false;
+		}
+
+		// Reloaded rather than kept - SDL_GPU pipelines own what they need
+		// from the shader objects that built them, `InterfacePass::
+		// AddShaderVariant`'s own reason.
+		SDL_GPUShader *vertex = State->LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
+		if (vertex == nullptr) {
+			SDL_ReleaseGPUShader(State->Device, fragment);
+			return false;
+		}
+
+		SDL_GPUColorTargetDescription target{};
+		target.format = State->ColourFormat();
+
+		SDL_GPUGraphicsPipelineCreateInfo info{};
+		info.vertex_shader = vertex;
+		info.fragment_shader = fragment;
+		info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+		info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+		info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+		info.target_info.color_target_descriptions = &target;
+		info.target_info.num_color_targets = 1;
+
+		SDL_GPUGraphicsPipeline *pipeline = SDL_CreateGPUGraphicsPipeline(State->Device, &info);
+
+		SDL_ReleaseGPUShader(State->Device, vertex);
+		SDL_ReleaseGPUShader(State->Device, fragment);
+
+		if (pipeline == nullptr) {
+			ENGINE_ERROR("postprocess shader '{}' pipeline: {}", name.Text(), SDL_GetError());
+			return false;
+		}
+
+		// **Waited for before replacing**, `AddShader`'s own reason: the
+		// frame in flight may still be reading through whatever pipeline
+		// this is about to release.
+		if (State->PostProcessPipeline != nullptr) {
+			(void)WaitForFrame();
+			SDL_ReleaseGPUGraphicsPipeline(State->Device, State->PostProcessPipeline);
+		}
+		State->PostProcessPipeline = pipeline;
+		State->PostProcessShaderName = name;
+		return true;
+	}
+
+	void Renderer::ClearPostProcessShader() {
+		if (State == nullptr || State->PostProcessPipeline == nullptr) {
+			return;
+		}
+		if (State->Device != nullptr) {
+			(void)WaitForFrame();
+			SDL_ReleaseGPUGraphicsPipeline(State->Device, State->PostProcessPipeline);
+		}
+		State->PostProcessPipeline = nullptr;
+		State->PostProcessShaderName = core::Name{};
+	}
+
+	core::Name Renderer::PostProcessShaderName() const {
+		return State == nullptr ? core::Name{} : State->PostProcessShaderName;
 	}
 
 	bool Renderer::Impl::WriteCapture(
@@ -9760,9 +9961,14 @@ namespace engine::render {
 					break;
 				}
 			}
+			// **The one place `PostProcessPipeline` is read.** The portal
+			// preview above always draws with the engine's own tonemap - see
+			// `Renderer::SetPostProcessShader`'s own header for why a custom
+			// grade on the main view must not also recolour every mirror and
+			// portal in it.
 			fullscreen(
 				context.Name,
-				State->TonemapPipeline,
+				State->PostProcessPipeline != nullptr ? State->PostProcessPipeline : State->TonemapPipeline,
 				target.Texture,
 				target.Width,
 				target.Height,

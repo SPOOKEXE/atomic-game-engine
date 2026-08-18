@@ -260,6 +260,10 @@ namespace engine::scene {
 	// @param appearance The row's appearance, or null for the defaults - a
 	//                   replicated row may arrive without one.
 	// @param tags       The row's tags, or null for none.
+	// @param local      This viewer's own occlusion fade, or null for none -
+	//                   see `scene::LocalTransparency`. Never present on a
+	//                   headless host's own draw list, because nothing there
+	//                   is looking at anything.
 	// @return The instance to publish.
 	// @since v0.15
 	inline DrawInstance MakeDrawInstance(
@@ -267,7 +271,8 @@ namespace engine::scene {
 		const Bounds &bounds,
 		const Visual &visual,
 		const SurfaceAppearance *appearance,
-		const Tags *tags
+		const Tags *tags,
+		const LocalTransparency *local = nullptr
 	) {
 		DrawInstance instance;
 		instance.Frame = frame;
@@ -292,6 +297,15 @@ namespace engine::scene {
 		// renderer's decision, because it depends on where the camera is - and a
 		// collector runs once for a world that may be drawn from several views.
 		instance.Transparency = visual.Transparency;
+
+		// **The local override wins, and only away from zero.** See
+		// `scene::LocalTransparency`'s header for why this is an override
+		// rather than a sum, and why it is read here rather than left for the
+		// renderer - the renderer never sees `Visual` at all, only the
+		// instance this function builds.
+		if (local != nullptr && local->Value != 0.0f) {
+			instance.Transparency = local->Value;
+		}
 		instance.Surface = visual.Surface;
 		instance.CastShadow = visual.CastShadow;
 

@@ -234,6 +234,25 @@ namespace engine::gui {
 
 		// The size of that sub-rectangle. Zero means the whole image.
 		core::Vector2 RectSize = {};
+
+		// Which fragment shader samples and colours this image, or invalid
+		// for the interface pass's own.
+		//
+		// **`scene::SurfaceAppearance::Shader`'s exact shape, one indirection
+		// flatter.** A part's shader is authored on a `Material` child because
+		// one mesh may show several materials; one `ImageLabel` shows exactly
+		// one image, so there is nothing a second instance would let an
+		// author say that this field cannot. `render::ShaderLibrary` resolves
+		// it the same two ways either shows it: a `ShaderScript` in the world
+		// under this name, compiled while the engine runs, else a built-in
+		// this engine ships.
+		//
+		// **A name and not a handle**, rule 4: it survives a save file and a
+		// wire, and a headless host can hold and replicate it without a
+		// device.
+		//
+		// @since v0.18
+		core::Name Shader;
 	};
 
 	// What makes a button a button.

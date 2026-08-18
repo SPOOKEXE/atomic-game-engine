@@ -94,6 +94,11 @@ namespace engine::gui {
 				writer.WriteFloat(picture.RectOffset.Y);
 				writer.WriteFloat(picture.RectSize.X);
 				writer.WriteFloat(picture.RectSize.Y);
+
+				// **Added at v0.18, in the same breath as the field - see
+				// `WriteVisuals`' own comment for what happens when that
+				// discipline slips.**
+				writer.WriteName(picture.Shader);
 			}
 		}
 
@@ -120,6 +125,7 @@ namespace engine::gui {
 				picture.RectOffset.Y = reader.ReadFloat();
 				picture.RectSize.X = reader.ReadFloat();
 				picture.RectSize.Y = reader.ReadFloat();
+				picture.Shader = reader.ReadName();
 			}
 		}
 

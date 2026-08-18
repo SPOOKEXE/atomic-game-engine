@@ -1031,6 +1031,19 @@ declare extern type Instance with
 	function IsKeepingWorldAwake(self): boolean
 	function SetNetworkOwner(self, player: Instance?): ()
 	function GetNetworkOwner(self): Instance?
+	function SetLocalTransparency(self, value: number): ()
+	function AddVertex(self, position: Vector3, normal: Vector3?, uv: Vector2?): number?
+	function AddTriangle(self, a: number, b: number, c: number): number?
+	function RemoveTriangle(self, triangle: number): boolean
+	function SetVertexPosition(self, vertex: number, position: Vector3): boolean
+	function SetVertexNormal(self, vertex: number, normal: Vector3): boolean
+	function SetVertexUV(self, vertex: number, uv: Vector2): boolean
+	function SetVertexColor(self, vertex: number, colour: Color3, alpha: number?): boolean
+	function Clear(self): boolean
+	function Resize(self, width: number, height: number): boolean
+	function DrawRectangle(self, position: Vector2, size: Vector2, colour: Color3, transparency: number?): boolean
+	function DrawLine(self, from: Vector2, to: Vector2, colour: Color3, transparency: number?): boolean
+	function DrawCircle(self, centre: Vector2, radius: number, colour: Color3, transparency: number?): boolean
 	function GetAttribute(self, name: string): EngineAttribute?
 	function SetAttribute(self, name: string, value: EngineAttribute?): ()
 	function GetAttributes(self): { [string]: EngineAttribute }
@@ -1076,6 +1089,7 @@ declare extern type BasePart extends PVInstance with
 	Elasticity: number
 	Friction: number
 	LinearDamping: number
+	read LocalTransparency: number
 	Locked: boolean
 	read Mass: number
 	Size: Vector3
@@ -1148,6 +1162,7 @@ declare extern type Material extends Instance with
 end
 
 declare extern type Humanoid extends Instance with
+	AutoRotate: boolean
 	Enabled: boolean
 	read Grounded: boolean
 	Health: number
@@ -1186,6 +1201,21 @@ declare extern type StringValue extends ValueBase with
 end
 
 declare extern type LocalizationTable extends ValueBase with
+end
+
+declare extern type ShaderScript extends Instance with
+	read Revision: number
+end
+
+declare extern type EditableMesh extends Instance with
+	read ContentId: string
+	read TriangleCount: number
+	read VertexCount: number
+end
+
+declare extern type EditableImage extends Instance with
+	read ContentId: string
+	read Size: Vector2
 end
 
 declare extern type LuaSourceContainer extends Instance with
@@ -1389,6 +1419,7 @@ declare extern type ImageButton extends GuiButton with
 	ImageRectSize: Vector2
 	ImageTransparency: number
 	ScaleType: Enum_ScaleType
+	Shader: string
 	SliceCenter: Rect
 	SliceScale: number
 	TileSize: UDim2
@@ -1420,6 +1451,7 @@ declare extern type ImageLabel extends GuiLabel with
 	ImageRectSize: Vector2
 	ImageTransparency: number
 	ScaleType: Enum_ScaleType
+	Shader: string
 	SliceCenter: Rect
 	SliceScale: number
 	TileSize: UDim2
@@ -1590,6 +1622,7 @@ declare extern type Lighting extends Service with
 	FogStart: number
 	GeographicLatitude: number
 	OutdoorAmbient: Color3
+	PostProcessShader: string
 end
 
 declare extern type ReplicatedFirst extends Service with
@@ -2137,6 +2170,9 @@ type CreatableInstances = {
 	ValueBase: ValueBase,
 	StringValue: StringValue,
 	LocalizationTable: LocalizationTable,
+	ShaderScript: ShaderScript,
+	EditableMesh: EditableMesh,
+	EditableImage: EditableImage,
 	LuaSourceContainer: LuaSourceContainer,
 	Script: Script,
 	LocalScript: LocalScript,

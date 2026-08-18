@@ -51,6 +51,7 @@ namespace client {
 	using engine::scene::ActiveCamera;
 	using engine::scene::Bounds;
 	using engine::scene::DrawInstance;
+	using engine::scene::LocalTransparency;
 	using engine::scene::PreviousTransform;
 	using engine::scene::Rendered;
 	using engine::scene::SurfaceAppearance;
@@ -218,6 +219,7 @@ namespace client {
 					Visual,
 					SurfaceAppearance,
 					Tags,
+					LocalTransparency,
 					Rendered>();
 			}
 
@@ -283,6 +285,7 @@ namespace client {
 					const Visual,
 					const SurfaceAppearance,
 					const Tags,
+					const LocalTransparency,
 					const Rendered>(
 					[out, capacity, alpha](
 						size_t first,
@@ -293,6 +296,7 @@ namespace client {
 						const Visual *visuals,
 						const SurfaceAppearance *appearances,
 						const Tags *tags,
+						const LocalTransparency *locals,
 						const Rendered *
 					) {
 						// The count came from a different query than the one
@@ -332,7 +336,8 @@ namespace client {
 								bounds[row],
 								visuals[row],
 								&appearances[row],
-								&tags[row]
+								&tags[row],
+								&locals[row]
 							);
 						}
 					},
@@ -1387,6 +1392,16 @@ namespace client {
 			// speeds.
 			scheduler.Add("camera-control", Phase::PreRender, [](Store &world) {
 				(void)engine::scene::UpdateCameraControl(world);
+
+				// **Between the two, and that is the whole reason it is not a
+				// separate scheduler entry.** It has to run after
+				// `UpdateCameraControl` has settled the player's own distance
+				// for this frame and before `PlaceCamera` reads
+				// `CameraController::OccludedDistance` - two scheduler
+				// entries in one phase have no ordering promise, and a lambda
+				// does.
+				(void)engine::physics::UpdatePoppercam(world);
+
 				(void)engine::scene::PlaceCamera(world);
 			});
 

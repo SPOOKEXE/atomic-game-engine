@@ -8,6 +8,7 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/Shaders.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Teams.hpp>
 
@@ -564,6 +565,31 @@ namespace engine::scene {
 			return property;
 		}
 
+		// **`Lighting`'s reach, and `SurfaceBouncesProperty`'s exact shape** -
+		// `scene::PostProcessing` is a resource for `ActiveCamera`'s reason,
+		// so `instance` is unread here too.
+		PropertyDescriptor PostProcessShaderProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("PostProcessShader");
+			property.Type = PropertyType::Name;
+			property.Size = sizeof(core::Name);
+			property.Kind = PropertyKind::Resource;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<PostProcessing>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity, void *out) -> bool {
+				*static_cast<core::Name *>(out) = PostProcessShaderOf(store);
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity, const void *value) -> bool {
+				SetPostProcessShader(store, *static_cast<const core::Name *>(value));
+				return true;
+			};
+
+			return property;
+		}
+
 		ClassId RegisterServiceTree() {
 			// The root of everything, and the components these classes are sets
 			// of, both through `PartClass`. A service derives from `Instance`,
@@ -701,6 +727,7 @@ namespace engine::scene {
 			Classes::ClampedProperty<&LightingServiceComponent::GeographicLatitude, -90.0f, 90.0f>(
 				lighting, "GeographicLatitude"
 			);
+			Classes::Computed(lighting, PostProcessShaderProperty());
 
 			return service;
 		}

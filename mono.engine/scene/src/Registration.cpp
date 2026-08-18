@@ -5,6 +5,8 @@
 #include <engine/scene/Audio.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/EditableImage.hpp>
+#include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/Materials.hpp>
@@ -161,6 +163,25 @@ namespace engine::scene {
 			}
 		}
 
+		// **A `LocalTransparency` is a fact about this viewer, and its
+		// serialisation says so by writing nothing.**
+		//
+		// A saved world holding last session's camera-occlusion fade would
+		// reopen with a wall standing there permanently half-transparent, for
+		// a poppercam that has not run a single frame yet - the same shape of
+		// bug `RenderedSignature`'s own comment warns against, one row up. The
+		// reader resets every row to the default rather than reading any bytes
+		// at all, so a fresh load always starts from "nothing is faded" and
+		// the very next camera pass decides the truth from there.
+		void WriteLocalTransparencies(core::ByteWriter &, const void *, size_t) {}
+
+		void ReadLocalTransparencies(core::ByteReader &, void *destination, size_t count) {
+			auto *values = static_cast<LocalTransparency *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				values[index] = LocalTransparency{};
+			}
+		}
+
 		// **A `RenderedSignature` is derived state, and its serialisation says
 		// so by writing nothing.**
 		//
@@ -285,6 +306,151 @@ namespace engine::scene {
 			for (size_t index = 0; index < count; index++) {
 				sources[index].Code = std::string(reader.ReadString());
 				sources[index].Revision = reader.ReadUInt32();
+			}
+		}
+
+		// **A written pair for `WriteShaderSources`' reason**: five
+		// `std::vector`s hold no object representation a raw copy could
+		// write. The vertex count is written once and read back to size
+		// every array the same way, rather than once per array, because the
+		// four are parallel by construction - `EditableMesh`'s own header
+		// carries that invariant.
+		void WriteEditableMeshes(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *meshes = static_cast<const EditableMesh *>(source);
+			for (size_t index = 0; index < count; index++) {
+				const EditableMesh &mesh = meshes[index];
+				const auto vertices = static_cast<uint32_t>(mesh.Positions.size());
+				writer.WriteUInt32(vertices);
+				for (uint32_t vertex = 0; vertex < vertices; vertex++) {
+					writer.WriteFloat(mesh.Positions[vertex].X);
+					writer.WriteFloat(mesh.Positions[vertex].Y);
+					writer.WriteFloat(mesh.Positions[vertex].Z);
+					writer.WriteFloat(mesh.Normals[vertex].X);
+					writer.WriteFloat(mesh.Normals[vertex].Y);
+					writer.WriteFloat(mesh.Normals[vertex].Z);
+					writer.WriteFloat(mesh.UVs[vertex].X);
+					writer.WriteFloat(mesh.UVs[vertex].Y);
+					writer.WriteFloat(mesh.Colours[vertex].R);
+					writer.WriteFloat(mesh.Colours[vertex].G);
+					writer.WriteFloat(mesh.Colours[vertex].B);
+					writer.WriteFloat(mesh.Alphas[vertex]);
+				}
+
+				const auto indices = static_cast<uint32_t>(mesh.Indices.size());
+				writer.WriteUInt32(indices);
+				for (uint32_t entry = 0; entry < indices; entry++) {
+					writer.WriteUInt32(mesh.Indices[entry]);
+				}
+
+				// The revision travels with the geometry, for
+				// `WriteShaderSources`' identical reason: a reader that reset
+				// it would believe a reloaded mesh was one already uploaded.
+				writer.WriteUInt32(mesh.Revision);
+			}
+		}
+
+		void ReadEditableMeshes(core::ByteReader &reader, void *destination, size_t count) {
+			auto *meshes = static_cast<EditableMesh *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				EditableMesh &mesh = meshes[index];
+				mesh.Positions.clear();
+				mesh.Normals.clear();
+				mesh.UVs.clear();
+				mesh.Colours.clear();
+				mesh.Alphas.clear();
+				mesh.Indices.clear();
+
+				const uint32_t vertices = reader.ReadUInt32();
+				mesh.Positions.reserve(vertices);
+				mesh.Normals.reserve(vertices);
+				mesh.UVs.reserve(vertices);
+				mesh.Colours.reserve(vertices);
+				mesh.Alphas.reserve(vertices);
+				for (uint32_t vertex = 0; vertex < vertices; vertex++) {
+					core::Vector3 position;
+					position.X = reader.ReadFloat();
+					position.Y = reader.ReadFloat();
+					position.Z = reader.ReadFloat();
+					mesh.Positions.push_back(position);
+
+					core::Vector3 normal;
+					normal.X = reader.ReadFloat();
+					normal.Y = reader.ReadFloat();
+					normal.Z = reader.ReadFloat();
+					mesh.Normals.push_back(normal);
+
+					core::Vector2 uv;
+					uv.X = reader.ReadFloat();
+					uv.Y = reader.ReadFloat();
+					mesh.UVs.push_back(uv);
+
+					core::Color3 colour;
+					colour.R = reader.ReadFloat();
+					colour.G = reader.ReadFloat();
+					colour.B = reader.ReadFloat();
+					mesh.Colours.push_back(colour);
+
+					mesh.Alphas.push_back(reader.ReadFloat());
+				}
+
+				const uint32_t indices = reader.ReadUInt32();
+				mesh.Indices.reserve(indices);
+				for (uint32_t entry = 0; entry < indices; entry++) {
+					mesh.Indices.push_back(reader.ReadUInt32());
+				}
+
+				mesh.Revision = reader.ReadUInt32();
+			}
+		}
+
+		// **A written pair for `WriteEditableMeshes`' identical reason.**
+		// Width and height are written explicitly rather than derived from
+		// the buffer's length, so a corrupt file that lied about one is
+		// caught the moment the two disagree with `Pixels.size()` rather
+		// than read past the end of a shorter buffer.
+		void WriteEditableImages(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *images = static_cast<const EditableImage *>(source);
+			for (size_t index = 0; index < count; index++) {
+				const EditableImage &image = images[index];
+				writer.WriteUInt32(image.Width);
+				writer.WriteUInt32(image.Height);
+				writer.WriteUInt32(static_cast<uint32_t>(image.Pixels.size()));
+				if (!image.Pixels.empty()) {
+					writer.WriteRaw(image.Pixels.data(), image.Pixels.size());
+				}
+				writer.WriteUInt32(image.Revision);
+			}
+		}
+
+		void ReadEditableImages(core::ByteReader &reader, void *destination, size_t count) {
+			auto *images = static_cast<EditableImage *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				EditableImage &image = images[index];
+				image.Width = reader.ReadUInt32();
+				image.Height = reader.ReadUInt32();
+				const uint32_t bytes = reader.ReadUInt32();
+				image.Pixels.assign(bytes, 0);
+				if (bytes > 0) {
+					reader.ReadRaw(image.Pixels.data(), bytes);
+				}
+				image.Revision = reader.ReadUInt32();
+			}
+		}
+
+		// A written pair for `WriteMaterialRefs`' reason: `PostProcessing`
+		// holds a `core::Name`, and the raw object representation is a
+		// process-local id rather than the text it names.
+		void WritePostProcessing(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *settings = static_cast<const PostProcessing *>(source);
+			for (size_t index = 0; index < count; index++) {
+				writer.WriteName(settings[index].Shader);
+			}
+		}
+
+		void ReadPostProcessing(core::ByteReader &reader, void *destination, size_t count) {
+			auto *settings = static_cast<PostProcessing *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				settings[index].Shader = reader.ReadName();
 			}
 		}
 
@@ -524,6 +690,16 @@ namespace engine::scene {
 		// which is serialised beside it, so the mask and the meanings of its
 		// bits travel together or not at all.
 		ecs::Components::Register<Tags>("scene.Tags");
+
+		// **A dense column for the same reason `SurfaceAppearance` and `Tags`
+		// are, and a hand-written pair for `RenderedSignature`'s.** See
+		// `LocalTransparency`'s own header for why the value must not survive
+		// a save, and `replication::LocalToTheClient` for why it must not
+		// cross the wire despite the `scene.` name every replicated component
+		// carries.
+		ecs::Components::Register<LocalTransparency>(
+			"scene.LocalTransparency", WriteLocalTransparencies, ReadLocalTransparencies
+		);
 		ecs::Components::Register<SurfaceCamera>("scene.SurfaceCamera");
 
 		// **A written pair rather than the generated one**, because the type
@@ -597,6 +773,16 @@ namespace engine::scene {
 		// pair because it holds a `std::string`, not because it holds a name.
 		ecs::Components::Register<ShaderSource>("scene.ShaderSource", WriteShaderSources, ReadShaderSources);
 
+		// **What an `EditableMesh` instance holds, beside the shader source
+		// for the same registration-order reason.** A written pair because it
+		// holds five `std::vector`s, not because it holds a name.
+		ecs::Components::Register<EditableMesh>("scene.EditableMesh", WriteEditableMeshes, ReadEditableMeshes);
+
+		// **What an `EditableImage` instance holds, beside its mesh
+		// counterpart for the identical reason.** A written pair because it
+		// holds a `std::vector<uint8_t>` of raw pixels.
+		ecs::Components::Register<EditableImage>("scene.EditableImage", WriteEditableImages, ReadEditableImages);
+
 		// The render gate, at the end for the reason this list opens with.
 		//
 		// **No wire form, and it is not an oversight.** This is a conclusion
@@ -663,6 +849,12 @@ namespace engine::scene {
 		ecs::Components::Register<RenderedSignature>(
 			"scene.RenderedSignature", WriteRenderedSignatures, ReadRenderedSignatures
 		);
+
+		// **One per world, for the identical reason - and authored rather
+		// than derived, so it is saved rather than reset.** A game that
+		// picked a look for its screen expects a reopened place to still
+		// have it.
+		ecs::Components::Register<PostProcessing>("scene.PostProcessing", WritePostProcessing, ReadPostProcessing);
 
 		// **At the end, which is where a new component goes**, per the ordering
 		// note above: an id decides column order and inserting one beside
@@ -817,5 +1009,7 @@ namespace engine::scene {
 		// built by walking everything registered under `Instance`, so a class
 		// nothing registered is a class nobody can create.
 		(void)ShaderScriptClass();
+		(void)EditableMeshClass();
+		(void)EditableImageClass();
 	}
 }

@@ -574,6 +574,12 @@ namespace engine::gui {
 				Classes::Property<&Picture::RectOffset>(owner, "ImageRectOffset");
 				Classes::Property<&Picture::RectSize>(owner, "ImageRectSize");
 				Classes::Computed(owner, EnumField<&Picture::Scale>("ScaleType"));
+
+				// **`scene.SurfaceAppearance.Shader`'s exact vocabulary, one
+				// indirection flatter** - see `Picture::Shader`'s own header
+				// for why an `ImageLabel` names it directly rather than
+				// through a child instance.
+				Classes::Property<&Picture::Shader>(owner, "Shader");
 			}
 
 			Classes::Property<&Button::AutoButtonColor>(guiButton, "AutoButtonColor");

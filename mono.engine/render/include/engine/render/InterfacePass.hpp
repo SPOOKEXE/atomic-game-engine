@@ -34,6 +34,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <span>
+#include <unordered_map>
 #include <vector>
 
 namespace engine::ecs {
@@ -85,6 +87,37 @@ namespace engine::render {
 
 		// Releases everything, in the order the device wants it.
 		void Shutdown();
+
+		// Compiles a fragment shader an `ImageLabel` or `ImageButton` may
+		// select, and builds the pipeline that draws with it.
+		//
+		// **Written against `interface.frag`'s own slots and not
+		// `opaque.frag`'s** - one sampler and no bound uniform buffer -
+		// because the two passes are different pipelines with different
+		// bindings. A `ShaderScript` meant for a `Material` is not
+		// interchangeable with one meant for an `ImageLabel`; each is
+		// authored against the contract the pass that compiles it declares.
+		//
+		// **Replacing rather than refusing a name already held**, so an
+		// author editing a `ShaderScript` sees the change - `Renderer::
+		// AddShader` makes the same call for the identical reason.
+		//
+		// @param name  The shader's name - `gui::Picture::Shader`,
+		//        `gui::DrawCommand::Shader` and `render::ShaderModule`'s own
+		//        all name the same thing.
+		// @param spirv The compiled words, from `render::ShaderLibrary::
+		//        Find(name)->SpirV`.
+		// @return `false` on a device, translation or pipeline failure. The
+		//         caller keeps drawing with the pass's own shader either way.
+		// @since v0.18
+		bool AddShaderVariant(const core::Name &name, std::span<const uint32_t> spirv);
+
+		// Releases a variant this pass no longer needs.
+		//
+		// @param name The shader's name.
+		// @return `false` when nothing was held under it.
+		// @since v0.18
+		bool DropShaderVariant(const core::Name &name);
 
 		// The list to draw next frame, and the canvas it was compiled against.
 		//
@@ -168,6 +201,14 @@ namespace engine::render {
 		void *Sampler = nullptr;
 		void *AtlasTexture = nullptr;
 		void *AtlasTransferBuffer = nullptr;
+		uint32_t SwapchainFormat = 0;
+
+		// A shader-named pipeline, built by `AddShaderVariant`. Keyed by
+		// `core::Name::Id`, matching every other name-keyed cache in this
+		// module.
+		//
+		// @since v0.18
+		std::unordered_map<uint32_t, void *> ShaderVariants;
 
 		void *VertexBuffer = nullptr;
 		void *IndexBuffer = nullptr;
