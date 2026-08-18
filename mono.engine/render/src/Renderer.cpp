@@ -1,4 +1,5 @@
 #include "DisplayColour.hpp"
+#include "ResourcePreview.hpp"
 #include "ShaderBinary.hpp"
 #include "SurfaceScale.hpp"
 #include "VulkanTimestamps.hpp"
@@ -68,6 +69,12 @@ namespace engine::render {
 					core::Name("upload-instances"), graph::NodeScope::View, graph::ExecutionQueue::Transfer
 				},
 				BackendNode{core::Name("surface"), graph::NodeScope::View, graph::ExecutionQueue::Graphics},
+				BackendNode{
+					core::Name("portal-capture"), graph::NodeScope::View, graph::ExecutionQueue::Graphics
+				},
+				BackendNode{
+					core::Name("portal-tonemap"), graph::NodeScope::View, graph::ExecutionQueue::Graphics
+				},
 				BackendNode{core::Name("gbuffer"), graph::NodeScope::View, graph::ExecutionQueue::Graphics},
 				BackendNode{
 					core::Name("depth-linearise"), graph::NodeScope::View, graph::ExecutionQueue::Graphics
@@ -77,6 +84,9 @@ namespace engine::render {
 					core::Name("deferred-lighting"), graph::NodeScope::View, graph::ExecutionQueue::Graphics
 				},
 				BackendNode{core::Name("tonemap"), graph::NodeScope::View, graph::ExecutionQueue::Graphics},
+				BackendNode{
+					core::Name("portal-overlay"), graph::NodeScope::View, graph::ExecutionQueue::Graphics
+				},
 				BackendNode{
 					core::Name("transparent"), graph::NodeScope::View, graph::ExecutionQueue::Graphics
 				},
@@ -660,6 +670,8 @@ namespace engine::render {
 			Depth,
 			Shadow,
 			Surface,
+			PortalImage,
+			PortalDisplay,
 			Albedo,
 			Normal,
 			Material,
@@ -690,6 +702,12 @@ namespace engine::render {
 					if (node->Kind == core::Name("surface")) {
 						return ResourceRole::Surface;
 					}
+					if (node->Kind == core::Name("portal-capture")) {
+						return ResourceRole::PortalImage;
+					}
+					if (node->Kind == core::Name("portal-tonemap")) {
+						return ResourceRole::PortalDisplay;
+					}
 					if (node->Kind == core::Name("gbuffer")) {
 						constexpr std::array roles{
 							ResourceRole::Albedo,
@@ -708,9 +726,6 @@ namespace engine::render {
 					}
 					if (node->Kind == core::Name("deferred-lighting")) {
 						return ResourceRole::Lit;
-					}
-					if (node->Kind == core::Name("tonemap") || node->Kind == core::Name("transparent")) {
-						return ResourceRole::Scene;
 					}
 				}
 			}
@@ -864,9 +879,11 @@ namespace engine::render {
 		struct ResourcePreviewTarget {
 			core::Name Resource;
 			size_t Slot = 0;
-			SDL_GPUTexture *Texture = nullptr;
+			std::array<SDL_GPUTexture *, 2> Textures{};
+			ResourcePreviewSlots Slots;
 			uint32_t Width = 0;
 			uint32_t Height = 0;
+			bool ReverseSpectrum = false;
 			bool Refresh = true;
 		};
 
@@ -1683,6 +1700,7 @@ namespace engine::render {
 		// meaningful for the camera that produced them - which is this frame's.
 		struct PortalTarget {
 			SDL_GPUTexture *Colour = nullptr;
+			SDL_GPUTexture *Display = nullptr;
 			SDL_GPUTexture *Depth = nullptr;
 			uint32_t Width = 0;
 			uint32_t Height = 0;
@@ -4273,13 +4291,18 @@ namespace engine::render {
 		}
 
 		PortalTarget &target = bank.Portals[level].Targets[index];
-		if (target.Colour != nullptr && width == target.Width && height == target.Height) {
+		if (target.Colour != nullptr && target.Display != nullptr && target.Depth != nullptr &&
+			width == target.Width && height == target.Height) {
 			return &target;
 		}
 
 		if (target.Colour != nullptr) {
 			SDL_ReleaseGPUTexture(Device, target.Colour);
 			target.Colour = nullptr;
+		}
+		if (target.Display != nullptr) {
+			SDL_ReleaseGPUTexture(Device, target.Display);
+			target.Display = nullptr;
 		}
 		if (target.Depth != nullptr) {
 			SDL_ReleaseGPUTexture(Device, target.Depth);
@@ -4311,6 +4334,22 @@ namespace engine::render {
 			);
 			return nullptr;
 		}
+		target.Display = SDL_CreateGPUTexture(Device, &colour);
+		if (target.Display == nullptr) {
+			ENGINE_ERROR(
+				"viewport {} portal level {} slot {} display {}x{}: {}",
+				viewport,
+				level,
+				index,
+				width,
+				height,
+				SDL_GetError()
+			);
+			SDL_ReleaseGPUTexture(Device, target.Colour);
+			target.Colour = nullptr;
+			target.Display = nullptr;
+			return nullptr;
+		}
 
 		SDL_GPUTextureCreateInfo depth{};
 		depth.type = SDL_GPU_TEXTURETYPE_2D;
@@ -4334,13 +4373,21 @@ namespace engine::render {
 				SDL_GetError()
 			);
 			SDL_ReleaseGPUTexture(Device, target.Colour);
+			SDL_ReleaseGPUTexture(Device, target.Display);
 			target.Colour = nullptr;
+			target.Display = nullptr;
 			return nullptr;
 		}
 
 		// **Shared with the surface path rather than a second one.** A portal
 		// level is sampled exactly as a mirror's texture is.
 		if (!EnsureSurfaceSampler()) {
+			SDL_ReleaseGPUTexture(Device, target.Colour);
+			SDL_ReleaseGPUTexture(Device, target.Display);
+			SDL_ReleaseGPUTexture(Device, target.Depth);
+			target.Colour = nullptr;
+			target.Display = nullptr;
+			target.Depth = nullptr;
 			return nullptr;
 		}
 
@@ -4897,7 +4944,7 @@ namespace engine::render {
 		// something to be given. D3D12 needs DXIL, which is still not built -
 		// asking for a format we cannot supply would find a device and then fail
 		// at pipeline creation, which is a worse error than being refused here.
-		State->Device = SDL_CreateGPUDevice(SUPPORTED_SHADER_FORMATS, true, nullptr);
+		State->Device = SDL_CreateGPUDevice(SUPPORTED_SHADER_FORMATS, false, nullptr);
 		if (!State->Device) {
 			ENGINE_ERROR("SDL_CreateGPUDevice: {}", SDL_GetError());
 			return false;
@@ -5080,6 +5127,9 @@ namespace engine::render {
 					if (target.Colour) {
 						SDL_ReleaseGPUTexture(device, target.Colour);
 					}
+					if (target.Display) {
+						SDL_ReleaseGPUTexture(device, target.Display);
+					}
 					if (target.Depth) {
 						SDL_ReleaseGPUTexture(device, target.Depth);
 					}
@@ -5116,8 +5166,10 @@ namespace engine::render {
 		}
 		State->PbrSlots.clear();
 		for (Impl::ResourcePreviewTarget &preview : State->ResourcePreviews) {
-			if (preview.Texture != nullptr) {
-				SDL_ReleaseGPUTexture(device, preview.Texture);
+			for (SDL_GPUTexture *texture : preview.Textures) {
+				if (texture != nullptr) {
+					SDL_ReleaseGPUTexture(device, texture);
+				}
 			}
 		}
 		State->ResourcePreviews.clear();
@@ -5521,17 +5573,22 @@ namespace engine::render {
 		return nullptr;
 	}
 
-	void Renderer::RefreshResourcePreview(core::Name resource, size_t slot) {
+	void Renderer::RefreshResourcePreview(core::Name resource, size_t slot, bool reverseSpectrum) {
 		if (State == nullptr || !resource.IsValid()) {
 			return;
 		}
 		for (Impl::ResourcePreviewTarget &preview : State->ResourcePreviews) {
 			if (preview.Resource == resource && preview.Slot == slot) {
+				preview.ReverseSpectrum = reverseSpectrum;
 				preview.Refresh = true;
 				return;
 			}
 		}
-		State->ResourcePreviews.push_back({.Resource = resource, .Slot = slot});
+		Impl::ResourcePreviewTarget preview;
+		preview.Resource = resource;
+		preview.Slot = slot;
+		preview.ReverseSpectrum = reverseSpectrum;
+		State->ResourcePreviews.push_back(std::move(preview));
 	}
 
 	void *Renderer::ResourcePreviewTexture(core::Name resource, size_t slot) const {
@@ -5540,7 +5597,7 @@ namespace engine::render {
 		}
 		for (const Impl::ResourcePreviewTarget &preview : State->ResourcePreviews) {
 			if (preview.Resource == resource && preview.Slot == slot) {
-				return preview.Texture;
+				return preview.Slots.Ready ? preview.Textures[preview.Slots.Visible] : nullptr;
 			}
 		}
 		return nullptr;
@@ -5701,7 +5758,11 @@ namespace engine::render {
 	}
 
 	FrameResult Renderer::Render(
-		std::span<const View> views, OverlayImage &overlay, FrameOverlayHook *interfaceHook, bool present
+		std::span<const View> views,
+		OverlayImage &overlay,
+		FrameOverlayHook *gameInterfaceHook,
+		bool present,
+		FrameOverlayHook *hostOverlayHook
 	) {
 		ENGINE_PROFILE_CAT("Renderer::Render views", core::ProfileCategory::Render);
 		RequireOwningThread("Render views");
@@ -5813,7 +5874,8 @@ namespace engine::render {
 					view.Instances,
 					overlay,
 					view.Surfaces,
-					interfaceHook,
+					gameInterfaceHook,
+					State->BatchFinal ? hostOverlayHook : nullptr,
 					view.Target,
 					view.Slot,
 					view.Particles,
@@ -5895,7 +5957,8 @@ namespace engine::render {
 		std::span<const scene::DrawInstance> instances,
 		OverlayImage &overlay,
 		std::span<const SurfaceView> surfaces,
-		FrameOverlayHook *interfaceHook,
+		FrameOverlayHook *gameInterfaceHook,
+		FrameOverlayHook *hostOverlayHook,
 		const SceneTarget *sceneTarget,
 		size_t targetSlot,
 		std::span<const ParticleBatch> particles,
@@ -7160,22 +7223,54 @@ namespace engine::render {
 		// Builds the per-draw block from world lighting and the camera used by
 		// this pass. Fog is eye-relative, so a reflected or portal sub-view must
 		// not reuse the screen eye even though every other authored term is shared.
-		const auto lightingAt = [&](const core::Vector3 &eye, float surfaceMode, float imageOpacity) {
+		const scene::WorldLighting currentLighting = CurrentLighting();
+		const auto lightingFrom = [&](const scene::WorldLighting &worldLighting,
+									  const core::Vector3 &eye,
+									  float surfaceMode,
+									  float imageOpacity) {
 			LightingUniforms lighting;
-			lighting.Direction = glm::vec4{State->Sun, 0.0f};
-			lighting.Ambient = State->Ambient;
-			lighting.Direct = State->Direct;
+			lighting.Direction = glm::vec4{
+				worldLighting.Direction.X,
+				worldLighting.Direction.Y,
+				worldLighting.Direction.Z,
+				0.0f,
+			};
+			lighting.Ambient = glm::vec4{
+				worldLighting.Ambient.R,
+				worldLighting.Ambient.G,
+				worldLighting.Ambient.B,
+				1.0f,
+			};
+			lighting.Direct = glm::vec4{
+				worldLighting.Direct.R,
+				worldLighting.Direct.G,
+				worldLighting.Direct.B,
+				1.0f,
+			};
 			lighting.Flags = glm::vec4{
 				haveShadow ? 1.0f : 0.0f,
 				1.0f / static_cast<float>(SHADOW_RESOLUTION),
 				surfaceMode,
 				imageOpacity,
 			};
-			lighting.OutdoorAmbient = State->OutdoorAmbient;
-			lighting.FogColour = State->FogColour;
-			lighting.Fog = glm::vec4{State->FogStart, State->FogEnd, 0.0f, 0.0f};
+			lighting.OutdoorAmbient = glm::vec4{
+				worldLighting.OutdoorAmbient.R,
+				worldLighting.OutdoorAmbient.G,
+				worldLighting.OutdoorAmbient.B,
+				1.0f,
+			};
+			lighting.FogColour = glm::vec4{
+				worldLighting.FogColor.R,
+				worldLighting.FogColor.G,
+				worldLighting.FogColor.B,
+				1.0f,
+			};
+			lighting.Fog = glm::vec4{worldLighting.FogStart, worldLighting.FogEnd, 0.0f, 0.0f};
 			lighting.Eye = glm::vec4{eye.X, eye.Y, eye.Z, 0.0f};
 			return lighting;
+		};
+		const auto lightingAt = [&](const core::Vector3 &eye, float surfaceMode, float imageOpacity) {
+			return lightingFrom(currentLighting, eye, surfaceMode, imageOpacity);
 		};
 
 		State->Beams = BeamUniforms{};
@@ -7510,7 +7605,8 @@ namespace engine::render {
 		const auto openScenePass = [&](SDL_GPUTexture *colour,
 									   SDL_GPUTexture *depth,
 									   bool cycle,
-									   const SDL_GPUViewport *viewport) -> SDL_GPURenderPass * {
+									   const SDL_GPUViewport *viewport,
+									   const LightUniforms &passLights) -> SDL_GPURenderPass * {
 			SDL_GPUColorTargetInfo colourInfo{};
 			colourInfo.texture = colour;
 			colourInfo.clear_color = SDL_FColor{
@@ -7551,7 +7647,7 @@ namespace engine::render {
 			// before the draws serves every one of them - which is the whole
 			// reason this is a second buffer rather than fields on the per-draw
 			// `LightingUniforms`.
-			SDL_PushGPUFragmentUniformData(command, 1, &lightUniforms, sizeof(lightUniforms));
+			SDL_PushGPUFragmentUniformData(command, 1, &passLights, sizeof(passLights));
 
 			// **The beams, beside the lights and for the same reason.** Which
 			// holes carry a shadow is a fact about the frame, so it is pushed
@@ -7648,8 +7744,10 @@ namespace engine::render {
 		// once a mirror, surface or portal render pass is open. Headless frames
 		// still draw into capture targets; a hook that has no backend declines in
 		// `Prepare` itself.
-		const bool drawInterface = graphEnabled(core::Name("interface")) && interfaceHook != nullptr &&
-								   interfaceHook->Prepare(command);
+		const bool drawInterface = graphEnabled(core::Name("interface")) && gameInterfaceHook != nullptr &&
+								   gameInterfaceHook->Prepare(command);
+		const bool drawHostOverlay =
+			swapchain != nullptr && hostOverlayHook != nullptr && hostOverlayHook->Prepare(command);
 
 		// --- the mirror recursion --------------------------------------------
 		//
@@ -7820,7 +7918,8 @@ namespace engine::render {
 				// and sampled once, by the pass above it, in that order - see
 				// `Impl::PortalTarget`, where cycling anyway made the device hang
 				// more often rather than less.
-				SDL_GPURenderPass *const pass = openScenePass(target->Colour, target->Depth, false, nullptr);
+				SDL_GPURenderPass *const pass =
+					openScenePass(target->Colour, target->Depth, false, nullptr, lightUniforms);
 
 				const LightingUniforms levelLighting = lightingAt(eye.Frame.Position, 0.0f, 1.0f);
 
@@ -7899,7 +7998,7 @@ namespace engine::render {
 				}
 
 				if (drawInterface) {
-					result.DrawCalls += interfaceHook->RecordWorld(
+					result.DrawCalls += gameInterfaceHook->RecordWorld(
 						command,
 						pass,
 						matrices.ViewProjection,
@@ -7915,7 +8014,7 @@ namespace engine::render {
 				drawBlendedInto(pass, levelFrame, levelLighting, pane.TagFilter, false);
 
 				if (drawInterface) {
-					result.DrawCalls += interfaceHook->RecordWorld(
+					result.DrawCalls += gameInterfaceHook->RecordWorld(
 						command,
 						pass,
 						matrices.ViewProjection,
@@ -8089,8 +8188,16 @@ namespace engine::render {
 						// read by the screen pass in the same frame - see
 						// `openScenePass` for what the other caller does instead. The
 						// whole target is the pass, so there is no viewport to set.
-						SDL_GPURenderPass *const pass =
-							openScenePass(state.Texture[state.Slot], state.Depth, true, nullptr);
+						const SurfaceView &capturedView = *accepted[index].View;
+						const scene::WorldLighting &surfaceWorldLighting =
+							capturedView.OverrideLighting ? capturedView.Lighting : currentLighting;
+						const LightUniforms surfaceLights =
+							capturedView.OverrideLighting
+								? ToGpu(std::span<const SceneLight>(capturedView.Lights))
+								: lightUniforms;
+						SDL_GPURenderPass *const pass = openScenePass(
+							state.Texture[state.Slot], state.Depth, true, nullptr, surfaceLights
+						);
 
 						// **Shadowed, and pointedly not surfaced.** The mirror's own view
 						// gets the shadow map, so what it reflects is lit the way the
@@ -8105,8 +8212,9 @@ namespace engine::render {
 						// the mirror that survived deleting every caster, the frame and
 						// the near-plane hack, and moved when the camera was re-aimed but
 						// not when the floor was.
-						const core::Vector3 surfaceEye = accepted[index].View->Frame.Position;
-						const LightingUniforms surfaceLighting = lightingAt(surfaceEye, 0.0f, 1.0f);
+						const core::Vector3 surfaceEye = capturedView.Frame.Position;
+						const LightingUniforms surfaceLighting =
+							lightingFrom(surfaceWorldLighting, surfaceEye, 0.0f, 1.0f);
 
 						const ShadowBinding shadow = shadowBinding();
 
@@ -8301,13 +8409,13 @@ namespace engine::render {
 						drawMirrors(false);
 
 						if (drawInterface && accepted[index].View->InstanceCount == 0) {
-							result.DrawCalls += interfaceHook->RecordWorld(
+							result.DrawCalls += gameInterfaceHook->RecordWorld(
 								command,
 								pass,
 								state.ViewProjection,
 								accepted[index].View->Frame,
-								core::Color3{State->Ambient.x, State->Ambient.y, State->Ambient.z},
-								core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z},
+								surfaceWorldLighting.Ambient,
+								surfaceWorldLighting.Direction,
 								state.Width,
 								state.Height,
 								false
@@ -8326,13 +8434,13 @@ namespace engine::render {
 						}
 
 						if (drawInterface && accepted[index].View->InstanceCount == 0) {
-							result.DrawCalls += interfaceHook->RecordWorld(
+							result.DrawCalls += gameInterfaceHook->RecordWorld(
 								command,
 								pass,
 								state.ViewProjection,
 								accepted[index].View->Frame,
-								core::Color3{State->Ambient.x, State->Ambient.y, State->Ambient.z},
-								core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z},
+								surfaceWorldLighting.Ambient,
+								surfaceWorldLighting.Direction,
 								state.Width,
 								state.Height,
 								true
@@ -8392,8 +8500,13 @@ namespace engine::render {
 				// whatever this measured, because the simulation never sees it.
 				bank.Bounces = surfaceDepth;
 			}
+			return true;
+		});
 
-			// --- the portal pass -------------------------------------------------
+		frameNodes.Set(core::Name("portal-capture"), [&](const graph::RunContext &context) {
+			enterNamedPass(context.Name);
+
+			// --- the portal capture ----------------------------------------------
 			//
 			// **The same recursion as `fillMirror`, by a different map.** Both derive
 			// each level's camera from the level above - that is what makes either one
@@ -8579,8 +8692,9 @@ namespace engine::render {
 						// device hang more often rather than less. `Impl::PortalDepth`
 						// carries what happens above one level, which is where the same
 						// target *is* written twice.
-						SDL_GPURenderPass *const pass =
-							openScenePass(target->Colour, target->Depth, false, &portalViewport);
+						SDL_GPURenderPass *const pass = openScenePass(
+							target->Colour, target->Depth, false, &portalViewport, lightUniforms
+						);
 
 						const FrameUniforms subFrameUniforms{
 							sub.Matrices.ViewProjection,
@@ -8663,7 +8777,7 @@ namespace engine::render {
 						// were drawn with the opaque head above - nothing follows that
 						// needs the transparent pipeline bound for it.
 						if (drawInterface) {
-							result.DrawCalls += interfaceHook->RecordWorld(
+							result.DrawCalls += gameInterfaceHook->RecordWorld(
 								command,
 								pass,
 								sub.Matrices.ViewProjection,
@@ -8679,7 +8793,7 @@ namespace engine::render {
 						drawBlendedInto(pass, subFrameUniforms, subLighting, portal.TagFilter, false);
 
 						if (drawInterface) {
-							result.DrawCalls += interfaceHook->RecordWorld(
+							result.DrawCalls += gameInterfaceHook->RecordWorld(
 								command,
 								pass,
 								sub.Matrices.ViewProjection,
@@ -8988,6 +9102,39 @@ namespace engine::render {
 					State->ColourFormat(),
 				};
 			}
+			if (role == Impl::ResourceRole::PortalImage && slot < State->SurfaceBanks.size()) {
+				const std::vector<Impl::PortalLevel> &levels = State->SurfaceBanks[slot].Portals;
+				for (auto level = levels.rbegin(); level != levels.rend(); ++level) {
+					for (const Impl::PortalTarget &portal : level->Targets) {
+						SDL_GPUTexture *texture = portal.Colour;
+						if (texture == nullptr) {
+							continue;
+						}
+						return Impl::NamedTexture{
+							texture,
+							portal.Width,
+							portal.Height,
+							State->ColourFormat(),
+						};
+					}
+				}
+			}
+			if (role == Impl::ResourceRole::PortalDisplay && slot < State->SurfaceBanks.size()) {
+				const std::vector<Impl::PortalLevel> &levels = State->SurfaceBanks[slot].Portals;
+				for (auto level = levels.rbegin(); level != levels.rend(); ++level) {
+					for (const Impl::PortalTarget &portal : level->Targets) {
+						if (portal.Display == nullptr) {
+							continue;
+						}
+						return Impl::NamedTexture{
+							portal.Display,
+							portal.Width,
+							portal.Height,
+							State->ColourFormat(),
+						};
+					}
+				}
+			}
 			if (slot >= State->PbrSlots.size()) {
 				return texture;
 			}
@@ -9127,28 +9274,30 @@ namespace engine::render {
 				return false;
 			}
 		};
-		const auto drawImage =
-			[&](const Impl::NamedTexture &source, const Impl::NamedTexture &target, SDL_GPULoadOp load) {
-				if (!source.IsValid() || !target.IsValid()) {
-					return false;
-				}
-				SDL_GPUColorTargetInfo colour{};
-				colour.texture = target.Texture;
-				colour.clear_color = SDL_FColor{0.0f, 0.0f, 0.0f, 1.0f};
-				colour.load_op = load;
-				colour.store_op = SDL_GPU_STOREOP_STORE;
-				colour.cycle = load == SDL_GPU_LOADOP_CLEAR;
-				SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colour, 1, nullptr);
-				State->BindPipeline(pass, State->ImagePipeline, Impl::PipelineFamily::Other);
-				const SDL_GPUTextureSamplerBinding binding{source.Texture, State->SurfaceSampler};
-				SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
-				const glm::vec4 mode{singleChannel(source) ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f};
-				SDL_PushGPUFragmentUniformData(command, 0, &mode, sizeof(mode));
-				SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
-				SDL_EndGPURenderPass(pass);
-				result.DrawCalls++;
-				return true;
-			};
+		const auto drawImage = [&](const Impl::NamedTexture &source,
+								   const Impl::NamedTexture &target,
+								   SDL_GPULoadOp load,
+								   bool reverseSpectrum = false) {
+			if (!source.IsValid() || !target.IsValid()) {
+				return false;
+			}
+			SDL_GPUColorTargetInfo colour{};
+			colour.texture = target.Texture;
+			colour.clear_color = SDL_FColor{0.0f, 0.0f, 0.0f, 1.0f};
+			colour.load_op = load;
+			colour.store_op = SDL_GPU_STOREOP_STORE;
+			colour.cycle = load == SDL_GPU_LOADOP_CLEAR;
+			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colour, 1, nullptr);
+			State->BindPipeline(pass, State->ImagePipeline, Impl::PipelineFamily::Other);
+			const SDL_GPUTextureSamplerBinding binding{source.Texture, State->SurfaceSampler};
+			SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
+			const ImageUniformMode mode = ImageMode(singleChannel(source), reverseSpectrum);
+			SDL_PushGPUFragmentUniformData(command, 0, &mode, sizeof(mode));
+			SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+			SDL_EndGPURenderPass(pass);
+			result.DrawCalls++;
+			return true;
+		};
 		const auto drawOverlayImage =
 			[&](SDL_GPUTexture *source, const Impl::NamedTexture &target, SDL_GPULoadOp load) {
 				if (source == nullptr || !target.IsValid()) {
@@ -9434,13 +9583,48 @@ namespace engine::render {
 		});
 
 		const std::array tonemapBindings = {SDL_GPUTextureSamplerBinding{pbr.Lit, sampler}};
+		frameNodes.Set(core::Name("portal-tonemap"), [&](const graph::RunContext &context) {
+			if (!havePortals || portalLevels == 0 || bank.Portals.size() < portalLevels) {
+				return true;
+			}
+
+			Impl::PortalLevel &top = bank.Portals[portalLevels - 1];
+			for (uint8_t index = 0; index < scene::MAX_SURFACES; index++) {
+				Impl::PortalTarget &portal = top.Targets[index];
+				if (portalOf[index] == nullptr || portal.Colour == nullptr || portal.Display == nullptr) {
+					continue;
+				}
+				const std::array bindings = {
+					SDL_GPUTextureSamplerBinding{portal.Colour, State->SurfaceSampler}
+				};
+				fullscreen(
+					context.Name,
+					State->TonemapPipeline,
+					portal.Display,
+					portal.Width,
+					portal.Height,
+					bindings,
+					nullptr,
+					nullptr,
+					colourTarget.clear_color
+				);
+			}
+			return true;
+		});
 		frameNodes.Set(core::Name("tonemap"), [&](const graph::RunContext &context) {
+			Impl::NamedTexture target;
+			for (const graph::ResourceId resource : context.Writes) {
+				target = graphTexture(resource, context, true);
+				if (target.IsValid()) {
+					break;
+				}
+			}
 			fullscreen(
 				context.Name,
 				State->TonemapPipeline,
-				colourTarget.texture,
-				sceneWidth,
-				sceneHeight,
+				target.Texture,
+				target.Width,
+				target.Height,
 				tonemapBindings,
 				nullptr,
 				nullptr,
@@ -9462,6 +9646,115 @@ namespace engine::render {
 			return true;
 		});
 
+		frameNodes.Set(core::Name("portal-overlay"), [&](const graph::RunContext &context) {
+			enterNamedPass(context.Name);
+			if (!submitUploads()) {
+				return false;
+			}
+
+			Impl::NamedTexture source;
+			Impl::NamedTexture target;
+			if (!context.Reads.empty()) {
+				source = graphTexture(context.Reads.front(), context, false);
+			}
+			for (const graph::ResourceId resource : context.Writes) {
+				target = graphTexture(resource, context, true);
+				if (target.IsValid()) {
+					break;
+				}
+			}
+			if (!drawImage(source, target, SDL_GPU_LOADOP_CLEAR)) {
+				ENGINE_WARN("'{}' needs a scene image and an output image", context.Name.Text());
+				return true;
+			}
+
+			SDL_GPUColorTargetInfo portalTarget{};
+			portalTarget.texture = target.Texture;
+			portalTarget.load_op = SDL_GPU_LOADOP_LOAD;
+			portalTarget.store_op = SDL_GPU_STOREOP_STORE;
+			portalTarget.cycle = false;
+			depthTarget.load_op = SDL_GPU_LOADOP_LOAD;
+			depthTarget.store_op = SDL_GPU_STOREOP_STORE;
+			depthTarget.cycle = false;
+			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &portalTarget, 1, &depthTarget);
+			SDL_PushGPUFragmentUniformData(command, 1, &lightUniforms, sizeof(lightUniforms));
+			SDL_PushGPUFragmentUniformData(command, 2, &State->Beams, sizeof(State->Beams));
+			SDL_SetGPUViewport(pass, &sceneViewport);
+			SDL_SetGPUScissor(pass, &sceneScissor);
+
+			if (haveInstances) {
+				State->BindPipeline(pass, State->OpaquePipeline, Impl::PipelineFamily::Opaque);
+				const SDL_GPUBufferBinding vertexBindings[] = {
+					{State->Meshes.Vertices(), 0},
+					{State->InstanceBuffer, 0},
+				};
+				SDL_BindGPUVertexBuffers(pass, 0, vertexBindings, 2);
+				const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
+				SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+				SDL_PushGPUVertexUniformData(command, 0, &frameUniforms, sizeof(frameUniforms));
+
+				const LightingUniforms portalLighting = lightingAt(cameraFrame.Position, 0.0f, 0.0f);
+				const ShadowBinding shadow = shadowBinding();
+				const auto drawPortals = [&](bool blended) {
+					if (blended) {
+						State->BindPipeline(
+							pass, State->TransparentPipeline, Impl::PipelineFamily::Transparent
+						);
+					}
+					for (uint8_t index = 0; index < scene::MAX_SURFACES; index++) {
+						if (portalOf[index] == nullptr) {
+							continue;
+						}
+						const scene::SurfaceRun &run = cameraRuns[index];
+						const uint32_t count = blended ? run.BlendedCount : run.OpaqueCount;
+						const uint32_t first = blended ? run.BlendedFirst : run.OpaqueFirst;
+						if (count == 0) {
+							continue;
+						}
+
+						const Impl::PortalTarget *captured =
+							graphEnabled(core::Name("portal-capture")) && portalLevels > 0 &&
+									bank.Portals.size() >= portalLevels
+								? &bank.Portals[portalLevels - 1].Targets[index]
+								: nullptr;
+						LightingUniforms paneLighting = portalLighting;
+						SDL_GPUTexture *image = nullptr;
+						if (captured != nullptr && captured->Display != nullptr) {
+							paneLighting.Flags.z = 2.0f;
+							paneLighting.Flags.w = 1.0f;
+							paneLighting.PaneNormal = glm::vec4{
+								portalOf[index]->Normal.X,
+								portalOf[index]->Normal.Y,
+								portalOf[index]->Normal.Z,
+								0.0f,
+							};
+							image = captured->Display;
+							result.SurfaceInstances += count;
+						}
+
+						result.DrawCalls += State->DrawSlots(
+							command,
+							pass,
+							sceneCount + first,
+							count,
+							&paneLighting,
+							shadow.Texture,
+							shadow.Sampler,
+							image,
+							State->SurfaceSampler,
+							0,
+							result.Triangles
+						);
+					}
+				};
+
+				drawPortals(false);
+				drawPortals(true);
+			}
+			SDL_EndGPURenderPass(pass);
+			return true;
+		});
+
 		frameNodes.Set(core::Name("transparent"), [&](const graph::RunContext &context) {
 			ENGINE_PROFILE_CAT("transparent pass", core::ProfileCategory::Render);
 			if (!submitUploads()) {
@@ -9474,6 +9767,26 @@ namespace engine::render {
 			// drew. `Validate` sees the same thing, because the stage's writes
 			// are marked `Clear`.
 			enterNamedPass(context.Name);
+
+			Impl::NamedTexture source;
+			Impl::NamedTexture target;
+			if (!context.Reads.empty()) {
+				source = graphTexture(context.Reads.front(), context, false);
+			}
+			for (const graph::ResourceId resource : context.Writes) {
+				target = graphTexture(resource, context, true);
+				if (target.IsValid()) {
+					break;
+				}
+			}
+			if (!drawImage(source, target, SDL_GPU_LOADOP_CLEAR)) {
+				ENGINE_WARN("'{}' needs a scene image and an output image", context.Name.Text());
+				return true;
+			}
+			colourTarget.texture = target.Texture;
+			colourTarget.load_op = SDL_GPU_LOADOP_LOAD;
+			colourTarget.store_op = SDL_GPU_STOREOP_STORE;
+			colourTarget.cycle = false;
 
 			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colourTarget, 1, &depthTarget);
 			// **The light set, pushed once for the whole pass.** Uniform state
@@ -9619,6 +9932,9 @@ namespace engine::render {
 				const bool surfaceImagesEnabled = graphEnabled(core::Name("surface"));
 				const auto drawScreenMirrors = [&](bool blended) {
 					for (uint8_t index = 0; index < scene::MAX_SURFACES; index++) {
+						if (portalOf[index] != nullptr) {
+							continue;
+						}
 						const scene::SurfaceRun &run = cameraRuns[index];
 						const uint32_t count = blended ? run.BlendedCount : run.OpaqueCount;
 						const uint32_t first = blended ? run.BlendedFirst : run.OpaqueFirst;
@@ -9643,53 +9959,6 @@ namespace engine::render {
 						// looks like a pane, and the marker bars are where "which
 						// face" is answered visibly.
 						const LightingUniforms *uniforms = &lighting;
-						if (portalOf[index] != nullptr) {
-							const Impl::PortalTarget *seen =
-								surfaceImagesEnabled && portalLevels > 0 &&
-										bank.Portals.size() >= portalLevels
-									? &bank.Portals[portalLevels - 1].Targets[index]
-									: nullptr;
-
-							if (seen == nullptr || seen->Colour == nullptr) {
-								bindScreen(nullptr);
-							} else {
-								LightingUniforms holed = lighting;
-
-								// 2 is the screen-position lookup - see
-								// `opaque.frag`.
-								holed.Flags.z = 2.0f;
-								holed.Flags.w = 1.0f;
-								holed.PaneNormal = glm::vec4{
-									portalOf[index]->Normal.X,
-									portalOf[index]->Normal.Y,
-									portalOf[index]->Normal.Z,
-									0.0f
-								};
-
-								bindScreen(seen->Colour);
-								mirroredUniforms = holed;
-								uniforms = &mirroredUniforms;
-
-								result.SurfaceInstances += count;
-							}
-
-							result.DrawCalls += State->DrawSlots(
-								command,
-								pass,
-								sceneCount + first,
-								count,
-								uniforms,
-								shadow,
-								shadowSampler,
-								screenSurface,
-								surfaceSampler,
-								0,
-								result.Triangles
-							);
-
-							bindScreen(nullptr);
-							continue;
-						}
 
 						// Its own tint until the surface has a frame, and for a
 						// pane naming an index nothing renders. Skipping it
@@ -9750,7 +10019,7 @@ namespace engine::render {
 				}
 
 				if (drawInterface) {
-					result.DrawCalls += interfaceHook->RecordWorld(
+					result.DrawCalls += gameInterfaceHook->RecordWorld(
 						command,
 						pass,
 						viewProjection,
@@ -9829,7 +10098,7 @@ namespace engine::render {
 				}
 
 				if (drawInterface) {
-					result.DrawCalls += interfaceHook->RecordWorld(
+					result.DrawCalls += gameInterfaceHook->RecordWorld(
 						command,
 						pass,
 						viewProjection,
@@ -9979,7 +10248,7 @@ namespace engine::render {
 				return true;
 			}
 			ENGINE_PROFILE_CAT("interface pass", core::ProfileCategory::Render);
-			interfaceHook->Record(command, pass);
+			gameInterfaceHook->Record(command, pass);
 			SDL_EndGPURenderPass(pass);
 			result.DrawCalls++;
 			return true;
@@ -10055,11 +10324,24 @@ namespace engine::render {
 						previewHeight = PREVIEW_SIDE;
 					}
 				}
-				if (preview.Texture == nullptr || preview.Width != previewWidth ||
-					preview.Height != previewHeight) {
-					if (preview.Texture != nullptr) {
-						SDL_ReleaseGPUTexture(State->Device, preview.Texture);
+				if (preview.Width != previewWidth || preview.Height != previewHeight) {
+					// The interface draw list was recorded before this graph node and
+					// can still name the visible image. Retire both at the next frame
+					// boundary instead of releasing either under that draw list.
+					for (SDL_GPUTexture *&texture : preview.Textures) {
+						if (texture != nullptr) {
+							State->RetiredScenes.push_back(texture);
+							texture = nullptr;
+						}
 					}
+					preview.Slots.Reset();
+					preview.Width = 0;
+					preview.Height = 0;
+				}
+
+				const uint8_t writeSlot = preview.Slots.Writable();
+				SDL_GPUTexture *&writeTexture = preview.Textures[writeSlot];
+				if (writeTexture == nullptr) {
 					SDL_GPUTextureCreateInfo info{};
 					info.type = SDL_GPU_TEXTURETYPE_2D;
 					info.format = State->ColourFormat();
@@ -10069,18 +10351,19 @@ namespace engine::render {
 					info.layer_count_or_depth = 1;
 					info.num_levels = 1;
 					info.sample_count = SDL_GPU_SAMPLECOUNT_1;
-					preview.Texture = SDL_CreateGPUTexture(State->Device, &info);
-					preview.Width = preview.Texture != nullptr ? previewWidth : 0;
-					preview.Height = preview.Texture != nullptr ? previewHeight : 0;
+					writeTexture = SDL_CreateGPUTexture(State->Device, &info);
+					preview.Width = writeTexture != nullptr ? previewWidth : 0;
+					preview.Height = writeTexture != nullptr ? previewHeight : 0;
 				}
 				const Impl::NamedTexture target{
-					preview.Texture, preview.Width, preview.Height, State->ColourFormat()
+					writeTexture, preview.Width, preview.Height, State->ColourFormat()
 				};
-				if (drawImage(source, target, SDL_GPU_LOADOP_CLEAR)) {
+				if (drawImage(source, target, SDL_GPU_LOADOP_CLEAR, preview.ReverseSpectrum)) {
+					preview.Slots.Publish(writeSlot);
 					preview.Refresh = false;
 				}
 			}
-			if (swapchain == nullptr) {
+			if (swapchain == nullptr && !offscreen) {
 				return true;
 			}
 			Impl::NamedTexture source;
@@ -10090,7 +10373,9 @@ namespace engine::render {
 					break;
 				}
 			}
-			const Impl::NamedTexture target{swapchain, width, height, State->ColourFormat()};
+			const Impl::NamedTexture target =
+				offscreen ? Impl::NamedTexture{viewTarget, sceneWidth, sceneHeight, State->ColourFormat()}
+						  : Impl::NamedTexture{swapchain, width, height, State->ColourFormat()};
 			if (!drawImage(source, target, SDL_GPU_LOADOP_CLEAR)) {
 				ENGINE_WARN("'{}' has no image wired into it", context.Name.Text());
 				return true;
@@ -10213,6 +10498,18 @@ namespace engine::render {
 			} else {
 				ENGINE_ERROR("capture: SDL_CreateGPUTransferBuffer: {}", SDL_GetError());
 			}
+		}
+
+		// Studio chrome is a host concern, not a universe render-graph stage. It
+		// is recorded after `output-image`, so graph previews, authored captures,
+		// and rendering profiles contain only the game image and game interface.
+		if (drawHostOverlay) {
+			ENGINE_PROFILE_CAT("host overlay pass", core::ProfileCategory::Render);
+			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &windowTarget, 1, nullptr);
+			hostOverlayHook->Record(command, pass);
+			SDL_EndGPURenderPass(pass);
+			windowTarget.load_op = SDL_GPU_LOADOP_LOAD;
+			result.DrawCalls++;
 		}
 
 		// **The window, when nothing else touched it.** With the world drawn

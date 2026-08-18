@@ -259,6 +259,25 @@ namespace engine::graph {
 			 {{"surface", K::Colour, RGBA8, true, "One image per surface index."}},
 			 "Renders each mirror's own view into the texture its pane samples."},
 
+			{"portal-capture",
+			 "Portal Capture",
+			 C::Draw,
+			 S::View,
+			 {{"shadow", K::Texture, D32, false, "Shadows, if any."},
+			  {"entities", K::Entities, F::R8, false, "What each portal view draws."},
+			  {"instances", K::Buffer, F::R8, false, "The uploaded instance attributes."}},
+			 {{"portal", K::Texture, LDR, true, "One lit image per portal and recursion level."}},
+			 "Captures recursively warped portal views with the lighting of the world being shown."},
+
+			{"portal-tonemap",
+			 "Portal Tone Map",
+			 C::Composite,
+			 S::View,
+			 {{"portal", K::Texture, LDR, true, "The linear-lit portal captures."}},
+			 {{"portal", K::Texture, LDR, true, "Portal captures in the scene display transform."}},
+			 "Applies the scene tone curve to the top portal level before it is projected over the "
+			 "tone-mapped scene."},
+
 			{"gbuffer",
 			 "G-buffer",
 			 C::Draw,
@@ -289,12 +308,12 @@ namespace engine::graph {
 			 "Transparent",
 			 C::Draw,
 			 S::View,
-			 {{"colour", K::Colour, RGBA16, true, "What to blend over."},
+			 {{"colour", K::Colour, LDR, true, "What to blend over."},
 			  {"depth", K::Depth, D24, true, "The opaque depth."},
 			  {"surface", K::Texture, RGBA8, false, "Mirror and portal images to project."},
 			  {"entities", K::Entities, F::R8, false, "The blended tail, already ordered back to front."},
 			  {"instances", K::Buffer, F::R8, false, "The uploaded instance attributes."}},
-			 {{"colour", K::Colour, RGBA16, true, "The blended frame."}},
+			 {{"colour", K::Colour, LDR, true, "The blended frame."}},
 			 "The blended tail, back to front, tested against the opaque depth."},
 
 			{"sky",
@@ -534,6 +553,19 @@ namespace engine::graph {
 			 false,
 			 "tonemap.frag"},
 
+			{"portal-overlay",
+			 "Portal Overlay",
+			 C::Composite,
+			 S::View,
+			 {{"colour", K::Texture, LDR, true, "The tone-mapped scene below the portals."},
+			  {"depth", K::Depth, D24, true, "The opaque scene depth."},
+			  {"portal", K::Texture, LDR, true, "The display-mapped portal captures."},
+			  {"entities", K::Entities, F::R8, false, "The ordered portal panes."},
+			  {"instances", K::Buffer, F::R8, false, "The uploaded instance attributes."}},
+			 {{"colour", K::Colour, LDR, true, "The scene with portal openings composed."}},
+			 "Projects portal captures onto their entrance geometry after scene tone mapping and before "
+			 "transparent geometry."},
+
 			{"taa",
 			 "Temporal AA",
 			 C::Composite,
@@ -693,7 +725,7 @@ namespace engine::graph {
 			 {{"scene", K::Texture, LDR, true, "The image below."},
 			  {"interface", K::Texture, LDR, false, "The image above."}},
 			 {{"image", K::Colour, LDR, true, "The composed image."}},
-			 "Composes an interface image over a scene image. Debug drawing joins the "
+			 "Composes an in-game interface image over a scene image. Debug drawing joins the "
 			 "same composition instead of bypassing the graph."},
 
 			{"interface",
@@ -701,8 +733,9 @@ namespace engine::graph {
 			 C::Interface,
 			 S::Frame,
 			 {},
-			 {{"image", K::Colour, LDR, true, "The retained widget tree on transparency."}},
-			 "Renders the retained widget tree to a transparent image for a compositor.",
+			 {{"image", K::Colour, LDR, true, "The in-game widget tree on transparency."}},
+			 "Renders the in-game widget tree to a transparent image for a compositor. "
+			 "Studio chrome is a host overlay outside the universe graph.",
 			 true},
 
 			{"present",

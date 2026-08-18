@@ -11,5 +11,6 @@ layout(set = 3, binding = 0) uniform ImageUniforms {
 
 void main() {
 	vec4 sampled = texture(imageTexture, inUv);
-	outColour = image.channelMode.x > 0.5 ? vec4(sampled.rrr, 1.0) : sampled;
+	vec4 colour = image.channelMode.x > 0.5 ? vec4(sampled.rrr, 1.0) : sampled;
+	outColour = image.channelMode.y > 0.5 ? vec4(vec3(1.0) - colour.rgb, colour.a) : colour;
 }

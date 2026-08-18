@@ -89,7 +89,7 @@ TEST_CASE("the default document builds the engine frame", "[graph]") {
 	REQUIRE(graph.Compile(fromDocument, offender) == GraphStatus::Ok);
 
 	REQUIRE(fromDocument.Shared.size() == 2);
-	REQUIRE(fromDocument.PerView.size() == 12);
+	REQUIRE(fromDocument.PerView.size() == 15);
 	REQUIRE(fromDocument.Final.size() == 4);
 	CHECK(graph.Find(fromDocument.Shared.front())->Name == Name("world"));
 	CHECK(graph.Find(fromDocument.Shared.back())->Name == Name("shadow"));
@@ -133,7 +133,7 @@ TEST_CASE("the default PBR document carries material emission and ambient occlus
 	CompiledGraph compiled;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
 	REQUIRE(compiled.Shared.size() == 2);
-	REQUIRE(compiled.PerView.size() == 12);
+	REQUIRE(compiled.PerView.size() == 15);
 	REQUIRE(compiled.Final.size() == 4);
 
 	CHECK(graph.Find(compiled.Shared[0])->Kind == Name("world"));
@@ -144,11 +144,14 @@ TEST_CASE("the default PBR document carries material emission and ambient occlus
 	CHECK(graph.Find(compiled.PerView[3])->Kind == Name("order-draw"));
 	CHECK(graph.Find(compiled.PerView[4])->Kind == Name("upload-instances"));
 	CHECK(graph.Find(compiled.PerView[5])->Kind == Name("surface"));
-	CHECK(graph.Find(compiled.PerView[6])->Kind == Name("gbuffer"));
-	CHECK(graph.Find(compiled.PerView[8])->Kind == Name("ssao"));
-	CHECK(graph.Find(compiled.PerView[9])->Kind == Name("deferred-lighting"));
-	CHECK(graph.Find(compiled.PerView[10])->Kind == Name("tonemap"));
-	CHECK(graph.Find(compiled.PerView[11])->Kind == Name("transparent"));
+	CHECK(graph.Find(compiled.PerView[6])->Kind == Name("portal-capture"));
+	CHECK(graph.Find(compiled.PerView[7])->Kind == Name("portal-tonemap"));
+	CHECK(graph.Find(compiled.PerView[8])->Kind == Name("gbuffer"));
+	CHECK(graph.Find(compiled.PerView[10])->Kind == Name("ssao"));
+	CHECK(graph.Find(compiled.PerView[11])->Kind == Name("deferred-lighting"));
+	CHECK(graph.Find(compiled.PerView[12])->Kind == Name("tonemap"));
+	CHECK(graph.Find(compiled.PerView[13])->Kind == Name("portal-overlay"));
+	CHECK(graph.Find(compiled.PerView[14])->Kind == Name("transparent"));
 	CHECK(graph.Find(compiled.Final[0])->Kind == Name("present"));
 	CHECK(graph.Find(compiled.Final[3])->Kind == Name("output-image"));
 
@@ -318,7 +321,7 @@ TEST_CASE("an enable edit survives the round trip and the build", "[graph]") {
 	// The reason `SetEnabled` is an operation rather than a field: a pass
 	// somebody switched off has to survive a save.
 	PipelineDocument document = DefaultPbrDocument();
-	document.Record(Enable("transparent", false));
+	document.Record(Enable("surface", false));
 
 	PipelineDocument reloaded;
 	Name offender;
@@ -331,7 +334,7 @@ TEST_CASE("an enable edit survives the round trip and the build", "[graph]") {
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
 
 	// Out of the compile entirely, which is what disabling means here.
-	CHECK(compiled.PerView.size() == 11);
+	CHECK(compiled.PerView.size() == 14);
 }
 
 TEST_CASE("per-view and optional survive the round trip", "[graph]") {

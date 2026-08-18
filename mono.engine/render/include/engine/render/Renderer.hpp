@@ -37,6 +37,8 @@
 struct SDL_Window;
 
 namespace engine::render {
+	struct SceneLight;
+
 	// A second view, rendered into a texture instead of the swapchain.
 	//
 	// Surface textures are double-buffered, so what a pane shows the screen is
@@ -242,6 +244,13 @@ namespace engine::render {
 		uint32_t InstanceFirst = 0;
 		uint32_t InstanceCount = 0;
 		//@}
+
+		// Cross-world captures use the destination world's lighting and local
+		// lights. Mirrors and same-world captures leave this disabled and inherit
+		// the view's current lighting.
+		scene::WorldLighting Lighting;
+		std::vector<SceneLight> Lights;
+		bool OverrideLighting = false;
 	};
 
 	// One same-world portal, as the recursive pass needs it.
@@ -633,11 +642,16 @@ namespace engine::render {
 	// Dear ImGui is. The lost type safety is real and is the price; it is paid
 	// at exactly two call sites, both inside one file.
 	//
-	// **`Prepare` is outside every render pass and `Record` is inside the last
-	// one.** That split is not stylistic: uploading vertices is a copy pass, and
+	// **`Prepare` is outside every render pass and `Record` is inside a render
+	// pass.** That split is not stylistic: uploading vertices is a copy pass, and
 	// a copy pass cannot be started while a render pass is open. A hook that
 	// uploaded from `Record` would work until the first frame with enough
 	// widgets to grow its buffer.
+	//
+	// A game interface hook records into the graph's `interface` image. A host
+	// overlay hook records after `output-image`, directly onto the swapchain.
+	// Keeping those roles separate prevents Studio chrome from becoming part of
+	// a universe's rendering profile or its node previews.
 	//
 	// @since v0.7
 	// @client
@@ -671,11 +685,11 @@ namespace engine::render {
 			return 0;
 		}
 
-		// Records draw commands into the swapchain.
+		// Records draw commands into the supplied image target.
 		//
 		// @param commandBuffer The frame's `SDL_GPUCommandBuffer *`.
-		// @param renderPass    An open `SDL_GPURenderPass *` bound to the
-		//                      swapchain with no depth attachment.
+		// @param renderPass    An open `SDL_GPURenderPass *` with no depth
+		//                      attachment.
 		virtual void Record(void *commandBuffer, void *renderPass) = 0;
 	};
 
@@ -1333,8 +1347,9 @@ namespace engine::render {
 		FrameResult Render(
 			std::span<const View> views,
 			OverlayImage &overlay,
-			FrameOverlayHook *interfaceHook = nullptr,
-			bool present = true
+			FrameOverlayHook *gameInterfaceHook = nullptr,
+			bool present = true,
+			FrameOverlayHook *hostOverlayHook = nullptr
 		);
 
 		// The texture the most recent `Render` drew that slot's world into.
@@ -1368,7 +1383,13 @@ namespace engine::render {
 		// Requests a coarse retained copy of a graph image. The renderer refreshes
 		// it after the graph has produced every stage, so an editor may display it
 		// at a lower rate without the live target changing underneath the panel.
-		void RefreshResourcePreview(core::Name resource, size_t slot = 0);
+		// Spectrum reversal changes only this copy and maps each displayed colour
+		// channel from n to 255 - n.
+		//
+		// @param resource        The graph image to retain.
+		// @param slot            The viewport that produced it.
+		// @param reverseSpectrum Whether to reverse its displayed RGB spectrum.
+		void RefreshResourcePreview(core::Name resource, size_t slot = 0, bool reverseSpectrum = false);
 
 		// The most recently refreshed retained copy, or null before its first frame.
 		void *ResourcePreviewTexture(core::Name resource, size_t slot = 0) const;
@@ -1468,7 +1489,8 @@ namespace engine::render {
 			std::span<const scene::DrawInstance> instances,
 			OverlayImage &overlay,
 			std::span<const SurfaceView> surfaces,
-			FrameOverlayHook *interfaceHook,
+			FrameOverlayHook *gameInterfaceHook,
+			FrameOverlayHook *hostOverlayHook,
 			const SceneTarget *sceneTarget,
 			size_t targetSlot,
 			std::span<const ParticleBatch> particles,

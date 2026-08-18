@@ -73,11 +73,14 @@ TEST_CASE("the default graph is dispatched in authored order", "[render][graph]"
 				   "order-draw@0",
 				   "upload-instances@0",
 				   "surface@0",
+				   "portal-capture@0",
+				   "portal-tonemap@0",
 				   "gbuffer@0",
 				   "depth-linearise@0",
 				   "ssao@0",
 				   "deferred-lighting@0",
 				   "tonemap@0",
+				   "portal-overlay@0",
 				   "transparent@0",
 				   "present",
 				   "interface",
@@ -85,7 +88,7 @@ TEST_CASE("the default graph is dispatched in authored order", "[render][graph]"
 				   "output-image",
 			   }
 	);
-	CHECK(runner.Submitted() == 18);
+	CHECK(runner.Submitted() == 21);
 	CHECK_FALSE(runner.Unhandled().IsValid());
 }
 

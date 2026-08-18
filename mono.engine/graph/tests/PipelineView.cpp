@@ -75,7 +75,7 @@ TEST_CASE("every enabled node is placed, in execution order", "[graph]") {
 	const RenderGraph graph = DefaultGraph();
 	const PipelineLayout layout = LayoutOf(graph);
 
-	REQUIRE(layout.Nodes.size() == 18);
+	REQUIRE(layout.Nodes.size() == 21);
 	CHECK(layout.Nodes.front().Name == Name("world"));
 	CHECK(layout.Nodes.back().Name == Name("output-image"));
 }
@@ -121,14 +121,16 @@ TEST_CASE("columns restart within each band", "[graph]") {
 	CHECK(columnOf("shadow") == 1);
 	CHECK(columnOf("camera") == 0);
 	CHECK(columnOf("surface") == 5);
-	CHECK(columnOf("gbuffer") == 6);
+	CHECK(columnOf("portal-capture") == 6);
+	CHECK(columnOf("portal-tonemap") == 7);
+	CHECK(columnOf("gbuffer") == 8);
 	CHECK(columnOf("present") == 0);
 	CHECK(columnOf("interface") == 1);
 	CHECK(columnOf("overlay") == 2);
 	CHECK(columnOf("output-image") == 3);
 
-	// Wide enough for the widest band, which is the per-view one at twelve.
-	CHECK(layout.Columns == 12);
+	// Wide enough for the widest band, which is the per-view one at fifteen.
+	CHECK(layout.Columns == 15);
 }
 
 // --- the edges ----------------------------------------------------------------
@@ -140,8 +142,11 @@ TEST_CASE("an edge joins a reader to the node that wrote what it reads", "[graph
 	CHECK(Joined(graph, layout, "shadow", "surface", "shadow"));
 	CHECK(Joined(graph, layout, "shadow", "deferred-lighting", "shadow"));
 	CHECK(Joined(graph, layout, "surface", "transparent", "surface"));
+	CHECK(Joined(graph, layout, "portal-capture", "portal-tonemap", "portal-image"));
+	CHECK(Joined(graph, layout, "portal-tonemap", "portal-overlay", "portal-display"));
 	CHECK(Joined(graph, layout, "gbuffer", "depth-linearise", "depth"));
-	CHECK(Joined(graph, layout, "tonemap", "transparent", "display"));
+	CHECK(Joined(graph, layout, "tonemap", "portal-overlay", "tonemapped"));
+	CHECK(Joined(graph, layout, "portal-overlay", "transparent", "portaled"));
 	CHECK(Joined(graph, layout, "interface", "overlay", "interface-image"));
 	CHECK(Joined(graph, layout, "overlay", "output-image", "composed-image"));
 }
@@ -235,18 +240,18 @@ TEST_CASE("a disabled node is absent from the layout", "[graph]") {
 	Name offender;
 	REQUIRE(graph.Compile(before, offender) == GraphStatus::Ok);
 
-	engine::graph::NodeId transparent;
+	engine::graph::NodeId surface;
 	for (const auto &placed : LayoutPipeline(graph, before).Nodes) {
-		if (placed.Name == Name("transparent")) {
-			transparent = placed.Node;
+		if (placed.Name == Name("surface")) {
+			surface = placed.Node;
 		}
 	}
-	REQUIRE(transparent.IsValid());
-	REQUIRE(graph.SetEnabled(transparent, false));
+	REQUIRE(surface.IsValid());
+	REQUIRE(graph.SetEnabled(surface, false));
 
 	const PipelineLayout after = LayoutOf(graph);
-	CHECK(after.Nodes.size() == 17);
-	CHECK_FALSE(Joined(graph, after, "tonemap", "transparent", "display"));
+	CHECK(after.Nodes.size() == 20);
+	CHECK_FALSE(Joined(graph, after, "surface", "transparent", "surface"));
 }
 
 TEST_CASE("an empty compile lays out to nothing", "[graph]") {

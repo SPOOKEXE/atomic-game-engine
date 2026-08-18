@@ -44,6 +44,7 @@
 #include <engine/gui/Input.hpp>
 #include <engine/render/DebugPanels.hpp>
 #include <engine/render/FrameStatistics.hpp>
+#include <engine/render/InterfacePass.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/ShaderLibrary.hpp>
 #include <engine/render/ViewportFrames.hpp>
@@ -2786,6 +2787,7 @@ namespace studio {
 		// the panel being drawn shows.
 		engine::render::ShaderLibrary Shaders;
 		engine::render::OverlayImage Overlay;
+		engine::render::InterfacePass GameInterface;
 		engine::ui::Interface Interface;
 		engine::render::ViewportFrames ViewportImages;
 		engine::core::FrameClock Clock;
@@ -4270,6 +4272,7 @@ namespace studio {
 		char RenderPipelineNewName[64] = {};
 		float RenderPipelinePreviewFps = 5.0f;
 		double RenderPipelinePreviewNext = 0.0;
+		bool RenderPipelinePreviewReverse = false;
 		bool RenderPipelineDirty = false;
 		bool RenderPipelineSaveAsWanted = false;
 		bool RenderPipelineCanvasReady = false;

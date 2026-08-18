@@ -411,7 +411,26 @@ namespace studio {
 			ENGINE_ERROR("the editor interface would not start");
 			return false;
 		}
-		Interface.SetSpatialViewportSource([this](engine::ecs::Entity instance) {
+
+		// Game widgets use the same retained renderer as a shipped client. Studio's
+		// Dear ImGui interface is only the host overlay, so a rendering profile can
+		// enable, disable, preview, or replace the `interface` graph node without
+		// taking the editor chrome with it.
+		const engine::render::BackendHandles backend = Renderer.Backend();
+		if (!GameInterface.Initialise(backend.Device, backend.ColourFormat, 16.0f * interfaceSettings.Scale)) {
+			ENGINE_WARN("no game interface pass; viewport ScreenGui elements will not be drawn");
+		}
+		GameInterface.SetImageSource([this](const engine::core::Name &name) {
+			engine::render::InterfaceImage image;
+			image.Texture = Renderer.TextureHandle(name);
+			if (image.Texture == nullptr) {
+				return image;
+			}
+			image.Cell = Renderer.TextureCell(name, AnimationSeconds);
+			(void)Renderer.TextureSize(name, image.Width, image.Height);
+			return image;
+		});
+		GameInterface.SetViewportSource([this](engine::ecs::Entity instance) {
 			return ViewportImages.Resolve(instance);
 		});
 
@@ -602,6 +621,7 @@ namespace studio {
 		// Interface before renderer: the imgui backend releases GPU objects the
 		// device made, so a device destroyed first leaves them to be freed by
 		// nothing.
+		GameInterface.Shutdown();
 		Interface.Shutdown();
 		Renderer.Shutdown();
 
@@ -1519,14 +1539,13 @@ namespace studio {
 					(void)ViewportImages.Render(
 						Renderer, store, GuiLists[DrawingViewport].Commands(), PreviewSlot() + 1
 					);
-					Interface.SubmitSpatial(
+					GameInterface.Submit(
 						GuiLists[DrawingViewport].Commands(),
 						engine::core::Vector2{
 							static_cast<float>(target.Width),
 							static_cast<float>(target.Height),
 						},
-						store,
-						AnimationSeconds
+						store
 					);
 				}
 				if (const auto *list = store.Resource<client::DrawList>()) {
@@ -1695,7 +1714,9 @@ namespace studio {
 		view.Portals = Portals;
 		view.Pipeline = selectedPipeline;
 		view.World = shown.IsValid() ? shown.Index : 0;
-		LastFrame = Renderer.Render(std::span<const engine::render::View>(&view, 1), Overlay, &Interface);
+		LastFrame = Renderer.Render(
+			std::span<const engine::render::View>(&view, 1), Overlay, &GameInterface, true, &Interface
+		);
 
 		// **Presented, or simply drawn when there is nowhere to present.**
 		// A headless renderer never presents by design, so counting presents

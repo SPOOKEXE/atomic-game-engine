@@ -81,9 +81,9 @@ namespace {
 TEST_CASE("the default frame profiles into a full grid", "[graph][profile]") {
 	const PipelineProfile profile = Profiled(DefaultGraph());
 
-	REQUIRE(profile.Passes.size() == 18);
-	REQUIRE(profile.Resources.size() == 20);
-	CHECK(profile.Cells.size() == 360);
+	REQUIRE(profile.Passes.size() == 21);
+	REQUIRE(profile.Resources.size() == 24);
+	CHECK(profile.Cells.size() == 504);
 
 	// The three blocks, in the order a frame runs them.
 	CHECK(profile.Passes.front().Where == engine::graph::Band::Shared);
@@ -94,10 +94,13 @@ TEST_CASE("the default frame profiles into a full grid", "[graph][profile]") {
 	CHECK(profile.At(RowOf(profile, "shadow"), ColumnOf(profile, "shadow")) == Access::Write);
 	CHECK(profile.At(RowOf(profile, "shadow"), ColumnOf(profile, "deferred-lighting")) == Access::Read);
 
-	// **Read *and* write, which is the state a two-colour grid cannot show.**
-	// `transparent` blends over the colour it then writes back, and a version of
-	// this that reported only the write would make it look like a replacement.
-	CHECK(profile.At(RowOf(profile, "display"), ColumnOf(profile, "transparent")) == Access::ReadWrite);
+	CHECK(profile.At(RowOf(profile, "tonemapped"), ColumnOf(profile, "portal-overlay")) == Access::Read);
+	CHECK(profile.At(RowOf(profile, "portal-image"), ColumnOf(profile, "portal-tonemap")) == Access::Read);
+	CHECK(profile.At(RowOf(profile, "portal-display"), ColumnOf(profile, "portal-tonemap")) == Access::Write);
+	CHECK(profile.At(RowOf(profile, "portal-display"), ColumnOf(profile, "portal-overlay")) == Access::Read);
+	CHECK(profile.At(RowOf(profile, "portaled"), ColumnOf(profile, "portal-overlay")) == Access::Write);
+	CHECK(profile.At(RowOf(profile, "portaled"), ColumnOf(profile, "transparent")) == Access::Read);
+	CHECK(profile.At(RowOf(profile, "display"), ColumnOf(profile, "transparent")) == Access::Write);
 	CHECK(profile.At(RowOf(profile, "composed-image"), ColumnOf(profile, "output-image")) == Access::Read);
 
 	// And a pass that never touches a resource says so.

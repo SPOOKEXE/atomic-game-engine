@@ -1220,6 +1220,19 @@ TEST_CASE("a cross-world pane is handed every row of the world it names", "[clie
 	AddPart(universe, there, "Floor");
 	AddPart(universe, there, "SpawnLocation");
 	AddPart(universe, there, "Brick");
+	universe.Enter(there, [](Store &store) {
+		engine::scene::Sun sun;
+		sun.Direction = Vector3{0.0f, -1.0f, 0.0f};
+		sun.Ambient = engine::core::Color3{0.11f, 0.22f, 0.33f};
+		store.SetResource(sun);
+
+		const Entity lamp =
+			store.CreateInstance(engine::ecs::Classes::Find(Name("PointLight")), "DestinationLight");
+		engine::scene::Light light;
+		light.Range = 42.0f;
+		store.Set(lamp, light);
+		store.SetParent(lamp, InScene(store, "Brick"));
+	});
 
 	// The near world's pane, and the stand-in its camera is aimed at. A
 	// cross-world portal has both: `Destination` is a part in *this* world and
@@ -1285,6 +1298,12 @@ TEST_CASE("a cross-world pane is handed every row of the world it names", "[clie
 	CHECK(foreign.size() >= published);
 	CHECK(views[0].InstanceCount == static_cast<uint32_t>(published));
 	CHECK(views[0].InstanceFirst == 0);
+	CHECK(views[0].OverrideLighting);
+	CHECK(views[0].Lighting.Direction == Vector3{0.0f, -1.0f, 0.0f});
+	const engine::core::Color3 expectedAmbient{0.11f, 0.22f, 0.33f};
+	CHECK(views[0].Lighting.Ambient == expectedAmbient);
+	REQUIRE(views[0].Lights.size() == 1);
+	CHECK(views[0].Lights[0].Range == 42.0f);
 }
 
 TEST_CASE("a hole's picture leaves out the far pane and the stand-in", "[client][presentation]") {

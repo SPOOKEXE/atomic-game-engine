@@ -555,6 +555,17 @@ namespace client {
 				continue;
 			}
 
+			const auto viewAt =
+				std::find_if(views.begin(), views.end(), [&](const engine::render::SurfaceView &view) {
+					return view.Index == entry.Surface;
+				});
+			if (viewAt == views.end()) {
+				continue;
+			}
+
+			engine::scene::WorldLighting destinationLighting;
+			std::vector<engine::render::SceneLight> destinationLights;
+
 			// **Whether the far end still owes this one its own straddlers.** A
 			// hole has two mouths and a body may be standing in either, so the
 			// visit below does both halves of one pair in one entry - see the
@@ -566,7 +577,10 @@ namespace client {
 			}
 
 			const auto first = static_cast<uint32_t>(foreign.size());
-			universe.Enter(found, [&foreign, &drawn, &returning, here, returns](Store &store) {
+			universe.Enter(found, [&](Store &store) {
+				destinationLighting = engine::scene::LightingOf(store);
+				(void)CollectLights(store, viewAt->Frame.Position, destinationLights);
+
 				// **The far world's own panes back to here, gathered before its
 				// rows are copied**, because they decide which of those rows may
 				// be copied at all.
@@ -713,6 +727,9 @@ namespace client {
 				}
 				view.InstanceFirst = first;
 				view.InstanceCount = count;
+				view.Lighting = destinationLighting;
+				view.Lights = destinationLights;
+				view.OverrideLighting = true;
 				attached++;
 			}
 		}

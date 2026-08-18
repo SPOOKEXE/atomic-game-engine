@@ -835,6 +835,8 @@ namespace engine::graph {
 
 		resource("shadow", ResourceKind::Depth, ResourceFormat::D32F, 1, true);
 		resource("surface", ResourceKind::Colour, ResourceFormat::RGBA8, 1, true);
+		resource("portal-image", ResourceKind::Texture, ResourceFormat::RGBA8_SRGB, 1, true);
+		resource("portal-display", ResourceKind::Texture, ResourceFormat::RGBA8_SRGB, 1, true);
 		resource("world-entities", ResourceKind::Entities, ResourceFormat::R8);
 		resource("view-camera", ResourceKind::Camera, ResourceFormat::R8);
 		resource("view-entities", ResourceKind::Entities, ResourceFormat::R8);
@@ -849,6 +851,8 @@ namespace engine::graph {
 		resource("linear-depth", ResourceKind::Colour, ResourceFormat::R32F);
 		resource("occlusion", ResourceKind::Colour, ResourceFormat::R8, 2, true);
 		resource("lit", ResourceKind::Colour, ResourceFormat::RGBA16F);
+		resource("tonemapped", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
+		resource("portaled", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
 		resource("display", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
 		resource("scene-image", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
 		resource("interface-image", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB, 1, true);
@@ -887,6 +891,16 @@ namespace engine::graph {
 		touches(EditKind::Reads, "view-instances", "instances");
 		touches(EditKind::Writes, "surface", "surface");
 
+		node("portal-capture", NodeScope::View);
+		touches(EditKind::Reads, "shadow", "shadow");
+		touches(EditKind::Reads, "ordered-entities", "entities");
+		touches(EditKind::Reads, "view-instances", "instances");
+		touches(EditKind::Writes, "portal-image", "portal");
+
+		node("portal-tonemap", NodeScope::View);
+		touches(EditKind::Reads, "portal-image", "portal");
+		touches(EditKind::Writes, "portal-display", "portal");
+
 		node("gbuffer", NodeScope::View);
 		touches(EditKind::Reads, "shadow", "shadow");
 		touches(EditKind::Reads, "ordered-entities", "entities");
@@ -918,10 +932,18 @@ namespace engine::graph {
 
 		node("tonemap", NodeScope::View);
 		touches(EditKind::Reads, "lit", "colour");
-		touches(EditKind::Writes, "display", "colour");
+		touches(EditKind::Writes, "tonemapped", "colour");
 
-		node("transparent", NodeScope::View, true);
-		touches(EditKind::Reads, "display", "colour");
+		node("portal-overlay", NodeScope::View);
+		touches(EditKind::Reads, "tonemapped", "colour");
+		touches(EditKind::Reads, "depth", "depth");
+		touches(EditKind::Reads, "portal-display", "portal");
+		touches(EditKind::Reads, "ordered-entities", "entities");
+		touches(EditKind::Reads, "view-instances", "instances");
+		touches(EditKind::Writes, "portaled", "colour");
+
+		node("transparent", NodeScope::View);
+		touches(EditKind::Reads, "portaled", "colour");
 		touches(EditKind::Reads, "depth", "depth");
 		touches(EditKind::Reads, "surface", "surface");
 		touches(EditKind::Reads, "ordered-entities", "entities");

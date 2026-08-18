@@ -460,15 +460,12 @@ namespace studio {
 		const engine::core::CFrame eye =
 			engine::core::CFrame::LookAt(direction.Unit() * distance, engine::core::Vector3{});
 
-		// **The interface is passed, and leaving it out turned the window
-		// black.** The claim that used to be here was that "passing the editor's
-		// chrome would draw the whole editor into a 132-pixel texture". It does
-		// not: the *world* goes to the offscreen slot named by `targetSlot`, and
-		// the interface pass writes the **swapchain**. They are different
-		// attachments in one call.
+		// **Studio chrome is the host overlay, not the graph interface.** The mesh
+		// goes to the preview slot while the already-built Studio draw list goes
+		// directly to the swapchain after the graph has finished.
 		//
-		// What passing `nullptr` did instead was leave nothing at all touching
-		// the swapchain - and `Renderer::Render` then clears it and presents,
+		// Leaving out that host overlay leaves nothing at all touching the
+		// swapchain, and `Renderer::Render` then clears it and presents,
 		// deliberately, because presenting a texture the driver handed back
 		// unwritten shows uninitialised memory. So every frame spent on a preview
 		// presented a cleared window. Hovering a mesh row blanked the entire
@@ -482,7 +479,9 @@ namespace studio {
 		view.Instances = one;
 		view.Target = &target;
 		view.Slot = PreviewSlot();
-		Renderer.Render(std::span<const engine::render::View>(&view, 1), Overlay, &Interface);
+		Renderer.Render(
+			std::span<const engine::render::View>(&view, 1), Overlay, nullptr, true, &Interface
+		);
 
 		// **What the slot now holds, so a row can draw it.** There is one slot,
 		// so exactly one mesh in the list can be live at a time - and a row that
