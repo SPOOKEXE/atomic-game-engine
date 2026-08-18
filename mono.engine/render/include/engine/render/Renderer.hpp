@@ -1395,13 +1395,16 @@ namespace engine::render {
 		// Spectrum reversal changes only this copy and maps each displayed colour
 		// channel from n to 255 - n.
 		//
+		// @param pipeline        The installed graph that owns the image.
 		// @param resource        The graph image to retain.
 		// @param slot            The viewport that produced it.
 		// @param reverseSpectrum Whether to reverse its displayed RGB spectrum.
-		void RefreshResourcePreview(core::Name resource, size_t slot = 0, bool reverseSpectrum = false);
+		void RefreshResourcePreview(
+			core::Name pipeline, core::Name resource, size_t slot = 0, bool reverseSpectrum = false
+		);
 
 		// The most recently refreshed retained copy, or null before its first frame.
-		void *ResourcePreviewTexture(core::Name resource, size_t slot = 0) const;
+		void *ResourcePreviewTexture(core::Name pipeline, core::Name resource, size_t slot = 0) const;
 
 		// Keeps a copy of what a scene slot currently holds, under a name.
 		//

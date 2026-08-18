@@ -1727,6 +1727,9 @@ namespace studio {
 		LastFrame = Renderer.Render(
 			std::span<const engine::render::View>(&view, 1), Overlay, &GameInterface, true, &Interface
 		);
+		if (shown.IsValid()) {
+			RenderPipelineRenderedSlots[shown.Index] = DrawingViewport;
+		}
 
 		// **Presented, or simply drawn when there is nowhere to present.**
 		// A headless renderer never presents by design, so counting presents

@@ -85,6 +85,9 @@ namespace studio {
 
 		RenderPipelineWorld = world;
 		RenderPipelineName = selected;
+		RenderPipelineInstalledName = engine::core::Name(
+			std::string(selected.Text()) + "#" + std::to_string(world.Index)
+		);
 		RenderPipelineBasis = document;
 		RenderPipelineLoaded = engine::graph::Write(document);
 		RenderPipelineDirty = false;
@@ -108,6 +111,9 @@ namespace studio {
 		}
 
 		RenderingProfiles.Set(RenderPipelineName, saved);
+		RenderPipelineInstalledName = engine::core::Name(
+			std::string(RenderPipelineName.Text()) + "#" + std::to_string(RenderPipelineWorld.Index)
+		);
 		PipelineSelected.clear();
 		MarkModified();
 
@@ -231,6 +237,13 @@ namespace studio {
 			engine::graph::RenderGraph previewGraph;
 			engine::core::Name previewOffender;
 			std::string previewError;
+			const auto renderedSlot = RenderPipelineRenderedSlots.find(RenderPipelineWorld.Index);
+			const auto installedPipeline = PipelineSelected.find(RenderPipelineWorld.Index);
+			const bool previewSourceReady =
+				renderedSlot != RenderPipelineRenderedSlots.end() &&
+				installedPipeline != PipelineSelected.end() &&
+				installedPipeline->second == RenderPipelineInstalledName;
+			const size_t previewSlot = previewSourceReady ? renderedSlot->second : 0;
 			if (SaveRenderPipelineGraph(
 					RenderPipelineGraph, RenderPipelineBasis, previewDocument, previewError
 				) &&
@@ -266,14 +279,20 @@ namespace studio {
 					}
 					const engine::graph::ResourceDesc *resource =
 						previewGraph.FindResource(renderNode->Writes[output]);
-					if (resource != nullptr && refreshPreviews) {
+					if (resource != nullptr && refreshPreviews && previewSourceReady) {
 						const auto reverse = canvasNode.Widgets.find("preview.reverse-spectrum");
 						Renderer.RefreshResourcePreview(
-							resource->Name, 0, reverse != canvasNode.Widgets.end() && reverse->second.Flag
+							RenderPipelineInstalledName,
+							resource->Name,
+							previewSlot,
+							reverse != canvasNode.Widgets.end() && reverse->second.Flag
 						);
 					}
-					void *texture =
-						resource == nullptr ? nullptr : Renderer.ResourcePreviewTexture(resource->Name, 0);
+					void *texture = resource == nullptr
+								? nullptr
+								: Renderer.ResourcePreviewTexture(
+									  RenderPipelineInstalledName, resource->Name, previewSlot
+								  );
 					if (texture != nullptr) {
 						RenderPipelinePreviewTextures[nodegraph::PictureKey(
 							RenderPipelinePreviewEvaluator.RanAt(canvasNode.Id), canvasType->PreviewPort

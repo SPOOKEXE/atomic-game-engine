@@ -19,33 +19,24 @@
 --     see both ends of at once. Crossing it takes twenty-eight, down a corridor
 --     that will not fit in it.
 --
--- ## The trick is that there is only one corridor's worth of space
+-- ## The trick lives in an isolated subspace
 --
--- **The west tunnel's middle is the east tunnel's inside.** Nobody ever walks
--- the west tunnel's middle - its own pair of panes skips over it - so those
--- twenty-six studs are furnished, lit, and standing empty. The east tunnel
--- splices them in. One building lends the space it does not use to the one that
--- cannot hold it, and no hidden third corridor is buried under the map.
---
--- Which means a walker in the small box is standing in the belly of the big one,
--- and a walker crossing the big one steps straight over their head without
--- either seeing the other. The stripes give it away: the east tunnel's inside is
--- painted in the east tunnel's colour, and it is a room inside the west
--- building.
+-- **The east tunnel's long inside is a separate room far outside the playable
+-- plain.** Its portals own that room and the west tunnel's portals own only their
+-- skip. A traveller can therefore stand inside either illusion without entering
+-- the other illusion's physical or rendered space.
 --
 -- ## Six panes in three pairs
 --
 -- Along Z, at the west tunnel's `x`:
 --
---     ‑16    ‑14  ‑13                    +13  +14    +16
---      |      |    |                      |    |      |
---      mouth  skip splice     middle   splice  skip   mouth
+--     ‑16    ‑14                           +14    +16
+--      |      |                               |      |
+--      mouth  skip            middle          skip   mouth
 --
--- The skip pair carries the west walk over the middle. The two splice panes are
--- the middle's own ends, and they lead to the east box's two panes, one stud
--- inside each of its mouths. The one-stud gap between a skip pane and a splice
--- pane is dead space nobody occupies; it is there so the two panes are not
--- coplanar, and so each hides the other's back.
+-- The skip pair carries the west walk over the middle. The other two pairs sit
+-- at the east box and at the isolated room's ends. No pane belongs to both
+-- demonstrations.
 --
 -- ## The one authoring rule
 --
@@ -78,9 +69,8 @@ local SHORT = 4
 -- walked part of that tunnel is therefore `LONG / 2 - SKIP` studs at each end.
 local SKIP = 14
 
--- And where the middle's own ends are - the two panes the east tunnel arrives
--- through. One stud inside the skip pair, so neither pane's back is ever the
--- nearest thing to an eye.
+-- Where the isolated interior ends. Together they provide twenty-six studs of
+-- corridor between the east tunnel's two one-stud entrance sections.
 local SPLICE = 13
 
 -- The east tunnel's pair, one stud inside each of its mouths.
@@ -88,6 +78,12 @@ local ENTRY = 1
 
 local LONG_X = -20
 local SHORT_X = 20
+
+-- Far enough beside the playable plain that the isolated interior cannot cast,
+-- collide, or appear in either tunnel's ordinary view. Keeping its floor at the
+-- world's ordinary ground level also keeps every portal-local vertical measure
+-- identical at the entrance and destination.
+local SUBSPACE_X = 256
 
 local PANE_THICKNESS = 0.25
 
@@ -149,6 +145,7 @@ end
 
 tunnel("Long", LONG_X, LONG / 2)
 tunnel("Short", SHORT_X, SHORT / 2)
+tunnel("ShortInterior", SUBSPACE_X, SPLICE)
 
 -- --- the panes ------------------------------------------------------------
 
@@ -178,10 +175,10 @@ end
 local skipNorth = pane("LongSkipNorth", LONG_X, SKIP, true)
 local skipSouth = pane("LongSkipSouth", LONG_X, -SKIP, false)
 
--- **The middle's own ends**, facing inwards at the middle, because the middle is
+-- **The isolated interior's own ends**, facing inwards because this room is
 -- where a traveller out of the east tunnel arrives.
-local spliceNorth = pane("MiddleNorth", LONG_X, SPLICE, false)
-local spliceSouth = pane("MiddleSouth", LONG_X, -SPLICE, true)
+local interiorNorth = pane("ShortInteriorNorth", SUBSPACE_X, SPLICE, false)
+local interiorSouth = pane("ShortInteriorSouth", SUBSPACE_X, -SPLICE, true)
 
 -- **And the east tunnel's pair**, facing outwards at its two mouths, because
 -- that is where its travellers come from. Between them is one stud of box and
@@ -207,20 +204,18 @@ end
 link(skipNorth, skipSouth, "SkipSouthward")
 link(skipSouth, skipNorth, "SkipNorthward")
 
-link(entryNorth, spliceNorth, "ShortNorthToMiddle")
-link(spliceNorth, entryNorth, "MiddleToShortNorth")
+link(entryNorth, interiorNorth, "ShortNorthToInterior")
+link(interiorNorth, entryNorth, "InteriorToShortNorth")
 
-link(entrySouth, spliceSouth, "ShortSouthToMiddle")
-link(spliceSouth, entrySouth, "MiddleToShortSouth")
+link(entrySouth, interiorSouth, "ShortSouthToInterior")
+link(interiorSouth, entrySouth, "InteriorToShortSouth")
 
 -- --- something to recognise -----------------------------------------------
 --
--- **One colour per *space*, not per building.** Which tunnel a stripe belongs to
--- is the only fact either walk turns on, and the middle belongs to the east
--- tunnel however much it looks like it is inside the west one. Painting it in
--- the east tunnel's blue is the demonstration rather than a decoration: a walker
--- who steps into a four-stud box and finds twenty-six studs of blue floor has
--- found where the space came from.
+-- **One colour per *space*, not per building.** The isolated interior belongs
+-- to the east tunnel, so its stripes continue the east tunnel's blue. A walker
+-- who steps into a four-stud box and finds twenty-six studs of blue floor sees
+-- one continuous tunnel even though the physical room is elsewhere.
 local function stripe(name: string, x: number, z: number, colour: Color3)
 	block(name, Vector3.new(WIDTH, 0.3, 0.6), Vector3.new(x, 0.2, z), colour)
 end
@@ -229,10 +224,10 @@ end
 stripe("LongNorthStripe", LONG_X, SKIP + 1, LONG_MARK)
 stripe("LongSouthStripe", LONG_X, -SKIP - 1, LONG_MARK)
 
--- Its middle, in the east tunnel's colour, because that is whose inside it is.
+-- The east tunnel's isolated interior.
 for index = 0, 6 do
 	local z = -SPLICE + 2 + index * ((SPLICE - 2) * 2 / 6)
-	stripe("MiddleStripe" .. index, LONG_X, z, SHORT_MARK)
+	stripe("ShortInteriorStripe" .. index, SUBSPACE_X, z, SHORT_MARK)
 end
 
 -- And the east box's own stud at either end.
@@ -246,12 +241,9 @@ block("ShortPost", Vector3.new(1, 6, 1), Vector3.new(SHORT_X - 6, 3, SHORT / 2 +
 
 -- --- light ----------------------------------------------------------------
 --
--- **A lamp is the only light a scene can add.** A world's `Lighting` service
--- round-trips and nothing reads it - `scene::LightingServiceComponent` says so -
--- so every lit thing here hangs under a `PointLight`, and `opaque.frag`'s
--- falloff is a windowed inverse square. `Brightness = 1` against `1 / (1 + d²)`
--- is invisible at any distance a tunnel has; two orders up is what reads as a
--- lamp across a room.
+-- Local lamps keep the tunnel comparison readable under any world's ambient
+-- settings. `opaque.frag` uses windowed inverse-square falloff, so a brightness
+-- two orders above one is what reads as a lamp across a room of this length.
 local function lamp(name: string, at: Vector3, range: number)
 	local fitting = block(name, Vector3.new(1, 0.4, 1), at, Color3.new(1, 0.98, 0.92))
 	fitting.CanCollide = false
@@ -264,15 +256,15 @@ local function lamp(name: string, at: Vector3, range: number)
 	bulb.Parent = fitting
 end
 
--- One over each of the west tunnel's stubs, and three down the middle. A
--- corridor you cannot see the end of is a corridor whose length you cannot
--- judge, which is the whole demonstration.
+-- One over each of the west tunnel's stubs, and three down the isolated
+-- interior. A corridor you cannot see the end of is a corridor whose length
+-- you cannot judge, which is the whole demonstration.
 lamp("LongNorthLamp", Vector3.new(LONG_X, HEIGHT - 0.5, SKIP + 1), 40)
 lamp("LongSouthLamp", Vector3.new(LONG_X, HEIGHT - 0.5, -SKIP - 1), 40)
 
 for index = 0, 2 do
 	local z = -SPLICE + 3 + index * ((SPLICE - 3) * 2 / 2)
-	lamp("MiddleLamp" .. index, Vector3.new(LONG_X, HEIGHT - 0.5, z), 44)
+	lamp("ShortInteriorLamp" .. index, Vector3.new(SUBSPACE_X, HEIGHT - 0.5, z), 44)
 end
 
 lamp("ShortLamp", Vector3.new(SHORT_X, HEIGHT - 0.5, 0), 40)
@@ -376,12 +368,15 @@ drifter("LongDrifter", LONG_MARK, {
 	leg(Vector3.new(LONG_X, DRIFT_Y, -SKIP), Vector3.new(LONG_X, DRIFT_Y, -(LONG / 2 + 6))),
 })
 
--- The east walk: six studs of plain, one stud of box, twenty-six studs of the
--- *other* building's middle, one stud of box and out. Forty studs of travel,
+-- The east walk: six studs of plain, one stud of box, twenty-six studs of its
+-- isolated interior, one stud of box and out. Forty studs of travel,
 -- twenty-eight of them inside a building four long.
 drifter("ShortDrifter", SHORT_MARK, {
 	leg(Vector3.new(SHORT_X, DRIFT_Y, SHORT / 2 + 6), Vector3.new(SHORT_X, DRIFT_Y, ENTRY)),
-	leg(Vector3.new(LONG_X, DRIFT_Y, SPLICE), Vector3.new(LONG_X, DRIFT_Y, -SPLICE)),
+	leg(
+		Vector3.new(SUBSPACE_X, DRIFT_Y, SPLICE),
+		Vector3.new(SUBSPACE_X, DRIFT_Y, -SPLICE)
+	),
 	leg(Vector3.new(SHORT_X, DRIFT_Y, -ENTRY), Vector3.new(SHORT_X, DRIFT_Y, -(SHORT / 2 + 6))),
 })
 

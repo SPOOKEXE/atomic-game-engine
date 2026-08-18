@@ -570,8 +570,8 @@ TEST_CASE("the tunnels scene is shorter and longer inside than out", "[examples]
 	//
 	// It is also the one arrangement the other portal scenes do not have: panes
 	// part-way *down* a corridor rather than filling a doorway, two of them back
-	// to back a stud apart, and a middle that belongs to a different building
-	// from the shell around it.
+	// to back a stud apart, and a long interior isolated from both visible
+	// shells.
 	const StagedAssets assets;
 
 	Store store("tunnels");
@@ -593,10 +593,10 @@ TEST_CASE("the tunnels scene is shorter and longer inside than out", "[examples]
 	CHECK(store.Get<engine::scene::Bounds>(InScene(store, "ShortFloor"))->HalfExtent.Z == Approx(2.0f));
 
 	// And the panes, which are what a body measures. The west tunnel's walk is
-	// its two stubs; the east tunnel's is its two studs plus the west tunnel's
-	// whole middle.
+	// its two stubs; the east tunnel's is its two studs plus its isolated
+	// interior.
 	const float westWalk = (16.0f - zOf("LongSkipNorth")) * 2.0f;
-	const float eastWalk = (2.0f - zOf("ShortNorth")) * 2.0f + zOf("MiddleNorth") * 2.0f;
+	const float eastWalk = (2.0f - zOf("ShortNorth")) * 2.0f + zOf("ShortInteriorNorth") * 2.0f;
 
 	INFO("west walk " << westWalk << ", east walk " << eastWalk);
 	CHECK(westWalk == Approx(4.0f));
@@ -630,8 +630,8 @@ TEST_CASE("the tunnels scene is shorter and longer inside than out", "[examples]
 
 	const char *const pairs[][2] = {
 		{"LongSkipNorth", "LongSkipSouth"},
-		{"ShortNorth", "MiddleNorth"},
-		{"ShortSouth", "MiddleSouth"},
+		{"ShortNorth", "ShortInteriorNorth"},
+		{"ShortSouth", "ShortInteriorSouth"},
 	};
 
 	for (const auto &pair : pairs) {
@@ -653,15 +653,13 @@ TEST_CASE("the tunnels scene is shorter and longer inside than out", "[examples]
 	// no transverse offset to flip and the landing is a pure translation.
 	const Entity walker = store.CreateInstance(engine::ecs::Classes::Find(Name("Part")), "Walker");
 
-	const auto step = [&store, walker](float fromX, float fromZ, float toX, float toZ) {
+	const auto step = [&store, walker](engine::core::Vector3 from, engine::core::Vector3 to) {
 		store.Set<engine::scene::PreviousTransform>(
-			walker, engine::scene::PreviousTransform{engine::core::CFrame({fromX, 4.0f, fromZ})}
+			walker, engine::scene::PreviousTransform{engine::core::CFrame(from)}
 		);
-		store.Set<engine::scene::Transform>(
-			walker, engine::scene::Transform{engine::core::CFrame({toX, 4.0f, toZ})}
-		);
+		store.Set<engine::scene::Transform>(walker, engine::scene::Transform{engine::core::CFrame(to)});
 		store.Set<engine::scene::Motion>(
-			walker, engine::scene::Motion{{0.0f, 0.0f, toZ - fromZ}, engine::core::Vector3::Zero}
+			walker, engine::scene::Motion{to - from, engine::core::Vector3::Zero}
 		);
 
 		REQUIRE(engine::scene::CrossPortals(store) == 1);
@@ -670,22 +668,49 @@ TEST_CASE("the tunnels scene is shorter and longer inside than out", "[examples]
 
 	// **Long outside, short inside.** Two studs into a thirty-two stud building
 	// and the walk is already at the far end's last two studs.
-	const engine::core::Vector3 skipped = step(-20.0f, 14.5f, -20.0f, 13.5f);
+	const engine::core::Vector3 skipped = step({-20.0f, 4.0f, 14.5f}, {-20.0f, 4.0f, 13.5f});
 	CHECK(skipped.X == Approx(-20.0f).margin(1e-3f));
 	CHECK(skipped.Y == Approx(4.0f).margin(1e-3f));
 	CHECK(skipped.Z == Approx(-14.75f).margin(1e-3f));
 
-	// **Short outside, long inside, and it lands in the other building.** One
-	// stud into a four stud box, and the arrival is twenty-six studs of corridor
-	// inside the west tunnel's middle - the space the walk above stepped over.
-	const engine::core::Vector3 entered = step(20.0f, 1.5f, 20.0f, 0.5f);
-	CHECK(entered.X == Approx(-20.0f).margin(1e-3f));
+	// **Short outside, long inside, and it lands in its own subspace.** One stud
+	// into a four stud box arrives in twenty-six studs of isolated corridor.
+	const engine::core::Vector3 entered = step({20.0f, 4.0f, 1.5f}, {20.0f, 4.0f, 0.5f});
+	CHECK(entered.X == Approx(256.0f).margin(1e-3f));
+	CHECK(entered.Y == Approx(4.0f).margin(1e-3f));
 	CHECK(entered.Z == Approx(12.25f).margin(1e-3f));
 
 	// And out the far end of the box it never left.
-	const engine::core::Vector3 left = step(-20.0f, -12.5f, -20.0f, -13.5f);
+	const engine::core::Vector3 left = step({256.0f, 4.0f, -12.5f}, {256.0f, 4.0f, -13.5f});
 	CHECK(left.X == Approx(20.0f).margin(1e-3f));
+	CHECK(left.Y == Approx(4.0f).margin(1e-3f));
 	CHECK(left.Z == Approx(-1.75f).margin(1e-3f));
+
+	// The long tunnel no longer lends physical space to the short one.
+	CHECK(InScene(store, "MiddleNorth") == engine::ecs::NULL_ENTITY);
+	CHECK(InScene(store, "MiddleSouth") == engine::ecs::NULL_ENTITY);
+	const Entity interiorFloor = InScene(store, "ShortInteriorFloor");
+	const Entity interiorCeiling = InScene(store, "ShortInteriorCeiling");
+	const Entity interiorPane = InScene(store, "ShortInteriorNorth");
+	REQUIRE(interiorFloor != engine::ecs::NULL_ENTITY);
+	REQUIRE(interiorCeiling != engine::ecs::NULL_ENTITY);
+	REQUIRE(interiorPane != engine::ecs::NULL_ENTITY);
+	const auto *floorPlacement = store.Get<engine::scene::Transform>(interiorFloor);
+	const auto *floorBounds = store.Get<engine::scene::Bounds>(interiorFloor);
+	const auto *ceilingPlacement = store.Get<engine::scene::Transform>(interiorCeiling);
+	const auto *ceilingBounds = store.Get<engine::scene::Bounds>(interiorCeiling);
+	const auto *panePlacement = store.Get<engine::scene::Transform>(interiorPane);
+	const auto *paneBounds = store.Get<engine::scene::Bounds>(interiorPane);
+	REQUIRE(floorPlacement != nullptr);
+	REQUIRE(floorBounds != nullptr);
+	REQUIRE(ceilingPlacement != nullptr);
+	REQUIRE(ceilingBounds != nullptr);
+	REQUIRE(panePlacement != nullptr);
+	REQUIRE(paneBounds != nullptr);
+	CHECK(floorPlacement->Frame.Position.Y + floorBounds->HalfExtent.Y == Approx(0.0f));
+	CHECK(ceilingPlacement->Frame.Position.Y - ceilingBounds->HalfExtent.Y == Approx(8.0f));
+	CHECK(panePlacement->Frame.Position.Y - paneBounds->HalfExtent.Y == Approx(0.0f));
+	CHECK(panePlacement->Frame.Position.Y + paneBounds->HalfExtent.Y == Approx(8.0f));
 
 	// **Nothing is set as the world's camera**, which is what makes this one
 	// walkable where `Hallway.luau` is a capture: a `CurrentCamera` standing in

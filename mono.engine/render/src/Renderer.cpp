@@ -889,8 +889,7 @@ namespace engine::render {
 		std::vector<GraphTarget> GraphTargets;
 
 		struct ResourcePreviewTarget {
-			core::Name Resource;
-			size_t Slot = 0;
+			ResourcePreviewRoute Route;
 			std::array<SDL_GPUTexture *, 2> Textures{};
 			ResourcePreviewSlots Slots;
 			uint32_t Width = 0;
@@ -5663,30 +5662,33 @@ namespace engine::render {
 		return nullptr;
 	}
 
-	void Renderer::RefreshResourcePreview(core::Name resource, size_t slot, bool reverseSpectrum) {
-		if (State == nullptr || !resource.IsValid()) {
+	void Renderer::RefreshResourcePreview(
+		core::Name pipeline, core::Name resource, size_t slot, bool reverseSpectrum
+	) {
+		if (State == nullptr || !pipeline.IsValid() || !resource.IsValid()) {
 			return;
 		}
+		const ResourcePreviewRoute route{pipeline, resource, slot};
 		for (Impl::ResourcePreviewTarget &preview : State->ResourcePreviews) {
-			if (preview.Resource == resource && preview.Slot == slot) {
+			if (preview.Route == route) {
 				preview.ReverseSpectrum = reverseSpectrum;
 				preview.Refresh = true;
 				return;
 			}
 		}
 		Impl::ResourcePreviewTarget preview;
-		preview.Resource = resource;
-		preview.Slot = slot;
+		preview.Route = route;
 		preview.ReverseSpectrum = reverseSpectrum;
 		State->ResourcePreviews.push_back(std::move(preview));
 	}
 
-	void *Renderer::ResourcePreviewTexture(core::Name resource, size_t slot) const {
-		if (State == nullptr || !resource.IsValid()) {
+	void *Renderer::ResourcePreviewTexture(core::Name pipeline, core::Name resource, size_t slot) const {
+		if (State == nullptr || !pipeline.IsValid() || !resource.IsValid()) {
 			return nullptr;
 		}
+		const ResourcePreviewRoute route{pipeline, resource, slot};
 		for (const Impl::ResourcePreviewTarget &preview : State->ResourcePreviews) {
-			if (preview.Resource == resource && preview.Slot == slot) {
+			if (preview.Route == route) {
 				return preview.Slots.Ready ? preview.Textures[preview.Slots.Visible] : nullptr;
 			}
 		}
@@ -10423,20 +10425,21 @@ namespace engine::render {
 		frameNodes.Set(core::Name("output-image"), [&](const graph::RunContext &context) {
 			enterNamedPass(context.Name);
 			for (Impl::ResourcePreviewTarget &preview : State->ResourcePreviews) {
-				if (!preview.Refresh || preview.Slot != targetSlot) {
+				if (!preview.Refresh || preview.Route.Pipeline != selectedPipeline->Name ||
+					preview.Route.Slot != targetSlot) {
 					continue;
 				}
 				graph::ResourceId resource;
 				for (uint32_t value = 1; value <= selectedPipeline->Graph.ResourceCount(); value++) {
 					const graph::ResourceId candidate{value};
 					const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResource(candidate);
-					if (desc != nullptr && desc->Name == preview.Resource) {
+					if (desc != nullptr && desc->Name == preview.Route.Resource) {
 						resource = candidate;
 						break;
 					}
 				}
 				const Impl::NamedTexture source = resource.IsValid()
-													  ? resourceTexture(resource, preview.Slot, false)
+													  ? resourceTexture(resource, preview.Route.Slot, false)
 													  : Impl::NamedTexture{};
 				if (!source.IsValid()) {
 					continue;

@@ -1,9 +1,22 @@
 #pragma once
 
+#include <engine/core/Name.hpp>
+
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 
 namespace engine::render {
+	// Identifies the rendered image that may satisfy a preview request. Resource
+	// names repeat across profiles and viewport slots, so all three fields are
+	// part of the identity.
+	struct ResourcePreviewRoute {
+		core::Name Pipeline;
+		core::Name Resource;
+		size_t Slot = 0;
+
+		bool operator==(const ResourcePreviewRoute &) const = default;
+	};
 
 	// Chooses which retained image the interface may read and which the renderer
 	// may overwrite. The two must differ after the first image is published: an

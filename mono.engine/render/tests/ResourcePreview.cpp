@@ -7,7 +7,28 @@
 TEST_SUITE_ID("engine.render.resourcepreview")
 
 using engine::render::ImageMode;
+using engine::render::ResourcePreviewRoute;
 using engine::render::ResourcePreviewSlots;
+
+TEST_CASE("a preview route includes its pipeline resource and viewport", "[render][preview]") {
+	const ResourcePreviewRoute wanted{
+		engine::core::Name("Default PBR#7"), engine::core::Name("tonemapped"), 2
+	};
+	CHECK(
+		wanted ==
+		ResourcePreviewRoute{engine::core::Name("Default PBR#7"), engine::core::Name("tonemapped"), 2}
+	);
+	CHECK_FALSE(
+		wanted == ResourcePreviewRoute{engine::core::Name("Thermal#7"), engine::core::Name("tonemapped"), 2}
+	);
+	CHECK_FALSE(
+		wanted == ResourcePreviewRoute{engine::core::Name("Default PBR#7"), engine::core::Name("depth"), 2}
+	);
+	CHECK_FALSE(
+		wanted ==
+		ResourcePreviewRoute{engine::core::Name("Default PBR#7"), engine::core::Name("tonemapped"), 1}
+	);
+}
 
 TEST_CASE("a retained preview is never rewritten while the interface reads it", "[render][preview]") {
 	ResourcePreviewSlots slots;

@@ -4262,9 +4262,11 @@ namespace studio {
 		nodegraph::Canvas RenderPipelineCanvas;
 		nodegraph::Evaluator RenderPipelinePreviewEvaluator;
 		std::unordered_map<uint64_t, void *> RenderPipelinePreviewTextures;
+		std::unordered_map<uint32_t, size_t> RenderPipelineRenderedSlots;
 		engine::graph::PipelineDocument RenderPipelineBasis;
 		WorldId RenderPipelineWorld;
 		engine::core::Name RenderPipelineName;
+		engine::core::Name RenderPipelineInstalledName;
 		std::string RenderPipelineLoaded;
 		std::string RenderPipelineStatus;
 		char RenderPipelineFilter[64] = {};
