@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cstring>
 #include <string>
+#include <thread>
 #include <vector>
 
 TEST_SUITE_ID("engine.world.bus")
@@ -85,6 +86,85 @@ namespace bus_test {
 using namespace bus_test;
 
 // --- messaging ------------------------------------------------------------
+
+TEST_CASE("bus and service traffic crosses pinned world lanes at the barrier", "[world][bus]") {
+	Pool pool{4};
+	if (Jobs::PinnedWorkerCount() < 2) {
+		SUCCEED("this platform or process affinity exposes fewer than two pinned workers");
+		return;
+	}
+
+	Universe universe;
+	const WorldId listener = universe.Create(Named("cross-core.listener"));
+	const WorldId sender = universe.Create(Named("cross-core.sender"));
+
+	std::thread::id listenerThread;
+	std::thread::id senderThread;
+	bool listenerMoved = false;
+	bool senderMoved = false;
+	bool channelQueued = false;
+	bool channelHeard = false;
+	bool storeWritten = false;
+	bool storeHeard = false;
+	int listenerTicks = 0;
+	int senderTicks = 0;
+
+	OnTick(universe, listener, [&](Postbox &box) {
+		const std::thread::id current = std::this_thread::get_id();
+		if (listenerThread == std::thread::id{}) {
+			listenerThread = current;
+		} else if (listenerThread != current) {
+			listenerMoved = true;
+		}
+
+		if (listenerTicks == 0) {
+			(void)box.OpenChannel("updates");
+		} else if (listenerTicks == 1) {
+			(void)box.Get(BusKind::MemoryStore, "cross-core.value");
+		} else {
+			for (const Delivery &delivery : box.Deliveries()) {
+				if (delivery.Bus == BusKind::Channel && Text(delivery.Payload) == "hello") {
+					channelHeard = true;
+				}
+				if (delivery.Bus == BusKind::MemoryStore && delivery.Status == BusStatus::Ok &&
+					Text(delivery.Payload) == "stored") {
+					storeHeard = true;
+				}
+			}
+		}
+		listenerTicks++;
+	});
+
+	OnTick(universe, sender, [&](Postbox &box) {
+		const std::thread::id current = std::this_thread::get_id();
+		if (senderThread == std::thread::id{}) {
+			senderThread = current;
+		} else if (senderThread != current) {
+			senderMoved = true;
+		}
+
+		if (senderTicks == 0) {
+			storeWritten = box.Set(BusKind::MemoryStore, "cross-core.value", Bytes("stored")).Expected();
+		} else if (senderTicks == 1) {
+			channelQueued = box.SendTo("cross-core.listener", "updates", Bytes("hello")).Expected();
+		}
+		senderTicks++;
+	});
+
+	for (int frame = 0; frame < 3; frame++) {
+		universe.Tick(1.0f / 60.0f);
+	}
+
+	CHECK(listenerThread != std::thread::id{});
+	CHECK(senderThread != std::thread::id{});
+	CHECK(listenerThread != senderThread);
+	CHECK_FALSE(listenerMoved);
+	CHECK_FALSE(senderMoved);
+	CHECK(storeWritten);
+	CHECK(channelQueued);
+	CHECK(storeHeard);
+	CHECK(channelHeard);
+}
 
 TEST_CASE("a publish reaches its subscribers and nobody else", "[world]") {
 	Universe universe;

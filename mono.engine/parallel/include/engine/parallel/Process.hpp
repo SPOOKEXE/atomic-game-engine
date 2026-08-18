@@ -230,7 +230,8 @@ namespace engine::parallel {
 	// and every one of them is slower than it would have been alone.
 	//
 	// The calling thread of each host drains its own batches, so a host's share
-	// is one fewer worker than its slice of the machine.
+	// is one fewer worker than its slice of the logical processors available to
+	// this process. Operating-system affinity restrictions are part of that count.
 	//
 	// @param hosts The number of hosts sharing this machine, at least one.
 	// @return The worker count for one host, possibly zero.

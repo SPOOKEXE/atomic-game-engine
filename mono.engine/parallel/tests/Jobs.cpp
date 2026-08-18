@@ -1,3 +1,5 @@
+#include "ThreadAffinity.hpp"
+
 #include <engine/parallel/Jobs.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -109,6 +111,105 @@ TEST_CASE("work actually reaches more than one thread", "[jobs]") {
 	}
 
 	REQUIRE(widest > 1);
+}
+
+TEST_CASE("assigned workers execute on distinct pinned physical cores", "[jobs]") {
+	const std::vector<engine::parallel::platform::Processor> coreProcessors =
+		engine::parallel::platform::DistinctCoreProcessors();
+	const unsigned wanted = std::min(static_cast<unsigned>(coreProcessors.size()), 4u);
+	Pool pool{std::max(wanted, 1u)};
+
+	const unsigned pinned = Jobs::PinnedWorkerCount();
+	if (pinned < 2) {
+		SUCCEED("this platform or process affinity exposes fewer than two pinned workers");
+		return;
+	}
+
+	std::vector<unsigned> assignments(pinned);
+	std::iota(assignments.begin(), assignments.end(), 0u);
+	std::vector<engine::parallel::platform::Processor> processors(pinned);
+	std::vector<std::thread::id> threads(pinned);
+
+	Jobs::ForWorkers(assignments, [&](size_t begin, size_t end) {
+		for (size_t index = begin; index < end; index++) {
+			processors[index] = engine::parallel::platform::CurrentProcessor();
+			threads[index] = std::this_thread::get_id();
+		}
+	});
+
+	for (size_t index = 0; index < pinned; index++) {
+		REQUIRE(processors[index] == coreProcessors[index]);
+	}
+	for (size_t left = 0; left < pinned; left++) {
+		for (size_t right = left + 1; right < pinned; right++) {
+			CHECK(processors[left] != processors[right]);
+			CHECK(threads[left] != threads[right]);
+		}
+	}
+	CHECK(Jobs::LastBatch().Participants == pinned);
+}
+
+TEST_CASE("assigned tasks sharing a worker run serially", "[jobs]") {
+	Pool pool{2};
+	if (Jobs::PinnedWorkerCount() == 0) {
+		SUCCEED("this platform could not establish a pinned worker");
+		return;
+	}
+
+	std::vector<unsigned> assignments(64, 0);
+	std::atomic<int> inside{0};
+	std::atomic<int> overlap{0};
+
+	Jobs::ForWorkers(assignments, [&](size_t begin, size_t end) {
+		for (size_t index = begin; index < end; index++) {
+			if (inside.fetch_add(1, std::memory_order_acq_rel) != 0) {
+				overlap.fetch_add(1, std::memory_order_relaxed);
+			}
+			std::this_thread::yield();
+			inside.fetch_sub(1, std::memory_order_acq_rel);
+			(void)index;
+		}
+	});
+
+	CHECK(overlap.load(std::memory_order_relaxed) == 0);
+	CHECK(Jobs::LastBatch().Participants == 1);
+}
+
+TEST_CASE("an assigned worker exception reaches the caller and releases the pool", "[jobs]") {
+	Pool pool{2};
+	if (Jobs::PinnedWorkerCount() == 0) {
+		SUCCEED("this platform could not establish a pinned worker");
+		return;
+	}
+
+	const std::vector<unsigned> assignment{0};
+	CHECK_THROWS_AS(
+		Jobs::ForWorkers(
+			assignment, [](size_t, size_t) { throw std::runtime_error("assigned task failed"); }
+		),
+		std::runtime_error
+	);
+
+	bool ran = false;
+	Jobs::ForWorkers(assignment, [&ran](size_t, size_t) { ran = true; });
+	CHECK(ran);
+}
+
+TEST_CASE("an unavailable worker mapping falls back to the caller", "[jobs]") {
+	Pool pool{2};
+	const std::vector<unsigned> assignment{Jobs::PinnedWorkerCount()};
+	const std::thread::id caller = std::this_thread::get_id();
+
+	bool ran = false;
+	Jobs::ForWorkers(assignment, [&](size_t begin, size_t end) {
+		ran = true;
+		CHECK(begin == 0);
+		CHECK(end == assignment.size());
+		CHECK(std::this_thread::get_id() == caller);
+	});
+
+	CHECK(ran);
+	CHECK(Jobs::LastBatch().Participants == 1);
 }
 
 TEST_CASE("For with no pool still runs everything", "[jobs]") {
@@ -411,6 +512,11 @@ TEST_CASE("forcing serial compute runs every span on the caller", "[parallel][jo
 			threads.insert(std::this_thread::get_id());
 			(void)begin;
 			(void)end;
+		});
+		const std::vector<unsigned> assignments{0, 1};
+		Jobs::ForWorkers(assignments, [&](size_t, size_t) {
+			std::lock_guard lock(guard);
+			threads.insert(std::this_thread::get_id());
 		});
 
 		// The whole point: one thread, and it is this one. A span opened by any

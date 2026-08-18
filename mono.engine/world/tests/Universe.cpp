@@ -7,8 +7,12 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <atomic>
+#include <cstdint>
+#include <set>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 TEST_SUITE_ID("engine.world.universe")
@@ -361,34 +365,47 @@ TEST_CASE("parallel and serial execution produce the same result", "[world]") {
 	REQUIRE(run(ExecutionMode::WorldParallel) == run(ExecutionMode::WorldSerial));
 }
 
-TEST_CASE("a world tick really reaches another thread", "[world]") {
-	// Otherwise the parallel-equals-serial case above would be comparing two
-	// serial runs and proving nothing.
+TEST_CASE("world ticks keep stable assigned workers", "[world]") {
 	Pool pool{4};
+	const unsigned pinned = Jobs::PinnedWorkerCount();
+	if (pinned < 2) {
+		SUCCEED("this platform or process affinity exposes fewer than two pinned workers");
+		return;
+	}
+
 	Universe universe;
 
-	std::atomic<size_t> elsewhere{0};
 	const std::thread::id driver = std::this_thread::get_id();
+	const size_t worldCount = pinned * 2 + 1;
+	std::vector<std::thread::id> owners(worldCount);
+	std::vector<uint8_t> moved(worldCount, 0);
 
-	for (int index = 0; index < 32; index++) {
+	for (size_t index = 0; index < worldCount; index++) {
 		const WorldId id = universe.Create(Named(("world.thread." + std::to_string(index)).c_str()));
-		universe.Enter(id, [&elsewhere, driver](Store &store, Scheduler &systems) {
+		universe.Enter(id, [&owners, &moved, index](Store &store, Scheduler &systems) {
 			store.Set<Counter>(store.Create(), Counter{});
-			systems.Add("observe", Phase::Simulation, [&elsewhere, driver](Store &) {
-				if (std::this_thread::get_id() != driver) {
-					elsewhere.fetch_add(1, std::memory_order_relaxed);
+			systems.Add("observe", Phase::Simulation, [&owners, &moved, index](Store &) {
+				const std::thread::id current = std::this_thread::get_id();
+				if (owners[index] == std::thread::id{}) {
+					owners[index] = current;
+				} else if (owners[index] != current) {
+					moved[index] = 1;
 				}
 			});
 		});
 	}
 
-	// Retried, because one dispatch is allowed to stay on the calling thread -
-	// the driver drains ranges too.
-	for (int attempt = 0; attempt < 25 && elsewhere.load() == 0; attempt++) {
+	for (int frame = 0; frame < 10; frame++) {
 		universe.Tick(1.0f / 60.0f);
 	}
 
-	REQUIRE(elsewhere.load() > 0);
+	std::set<std::thread::id> distinct;
+	for (size_t index = 0; index < worldCount; index++) {
+		CHECK(moved[index] == 0);
+		CHECK(owners[index] != driver);
+		distinct.insert(owners[index]);
+	}
+	CHECK(distinct.size() == pinned);
 }
 
 // --- structural changes from inside a tick --------------------------------

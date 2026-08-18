@@ -337,6 +337,25 @@ TEST_CASE("an enable edit survives the round trip and the build", "[graph]") {
 	CHECK(compiled.PerView.size() == 14);
 }
 
+TEST_CASE("the game interface can be disabled without removing the frame output", "[graph][interface]") {
+	PipelineDocument document = DefaultPbrDocument();
+	document.Record(Enable("interface", false));
+
+	RenderGraph graph;
+	Name offender;
+	REQUIRE(Build(document, graph, offender) == PipelineDocumentStatus::Ok);
+
+	CompiledGraph compiled;
+	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+	REQUIRE(compiled.Final.size() == 3);
+	CHECK(std::none_of(compiled.Final.begin(), compiled.Final.end(), [&](NodeId node) {
+		return graph.Find(node)->Kind == Name("interface");
+	}));
+	CHECK(std::any_of(compiled.Final.begin(), compiled.Final.end(), [&](NodeId node) {
+		return graph.Find(node)->Kind == Name("output-image");
+	}));
+}
+
 TEST_CASE("per-view and optional survive the round trip", "[graph]") {
 	// The field the whole version turns on, and the one a text format is most
 	// likely to write and forget to parse.

@@ -31,9 +31,8 @@ namespace studio {
 				   kind == ResourceKind::Texture || kind == ResourceKind::Storage;
 		}
 
-		const engine::graph::ProfileResource *ProfileResourceOf(
-			const engine::graph::PipelineProfile &profile, engine::graph::ResourceId wanted
-		) {
+		const engine::graph::ProfileResource *
+		ProfileResourceOf(const engine::graph::PipelineProfile &profile, engine::graph::ResourceId wanted) {
 			for (const engine::graph::ProfileResource &resource : profile.Resources) {
 				if (resource.Id == wanted) {
 					return &resource;
@@ -79,8 +78,8 @@ namespace studio {
 		}
 		if (RenderingProfiles.Find(selected) == nullptr) {
 			selected = RenderingProfiles.Find(engine::core::Name("Default PBR")) != nullptr
-						 ? engine::core::Name("Default PBR")
-						 : RenderingProfiles.Names().front();
+						   ? engine::core::Name("Default PBR")
+						   : RenderingProfiles.Names().front();
 		}
 		document = *RenderingProfiles.Find(selected);
 
@@ -131,13 +130,12 @@ namespace studio {
 		if (!RenderPipelineCanvasReady) {
 			RegisterRenderPipelineNodeTypes();
 			RenderPipelineCanvas.Observe(&RenderPipelinePreviewEvaluator);
-			RenderPipelineCanvas.Images([this](
-										  uint64_t key,
-										  const std::function<bool(nodegraph::PreviewImage &)> &
-									  ) {
-				const auto found = RenderPipelinePreviewTextures.find(key);
-				return found == RenderPipelinePreviewTextures.end() ? nullptr : found->second;
-			});
+			RenderPipelineCanvas.Images(
+				[this](uint64_t key, const std::function<bool(nodegraph::PreviewImage &)> &) {
+					const auto found = RenderPipelinePreviewTextures.find(key);
+					return found == RenderPipelinePreviewTextures.end() ? nullptr : found->second;
+				}
+			);
 			RenderPipelineCanvas.Signals.Changed = [this] { RenderPipelineDirty = true; };
 			RenderPipelineCanvasReady = true;
 		}
@@ -184,11 +182,7 @@ namespace studio {
 			ImGui::SameLine();
 			ImGui::SetNextItemWidth(engine::ui::Scaled(90.0f));
 			if (ImGui::SliderFloat(
-					"##render-pipeline-preview-fps",
-					&RenderPipelinePreviewFps,
-					1.0f,
-					60.0f,
-					"%.0f fps"
+					"##render-pipeline-preview-fps", &RenderPipelinePreviewFps, 1.0f, 60.0f, "%.0f fps"
 				)) {
 				RenderPipelinePreviewNext = 0.0;
 			}
@@ -260,7 +254,9 @@ namespace studio {
 						continue;
 					}
 					const auto port = std::find_if(
-						kind->Outputs.begin(), kind->Outputs.end(), [&](const engine::graph::PortSpec &output) {
+						kind->Outputs.begin(),
+						kind->Outputs.end(),
+						[&](const engine::graph::PortSpec &output) {
 							return output.Name.Text() == canvasType->PreviewPort;
 						}
 					);
@@ -271,9 +267,7 @@ namespace studio {
 					const engine::graph::ResourceDesc *resource =
 						previewGraph.FindResource(renderNode->Writes[output]);
 					if (resource != nullptr && refreshPreviews) {
-						Renderer.RefreshResourcePreview(
-							resource->Name, 0, RenderPipelinePreviewReverse
-						);
+						Renderer.RefreshResourcePreview(resource->Name, 0, RenderPipelinePreviewReverse);
 					}
 					void *texture =
 						resource == nullptr ? nullptr : Renderer.ResourcePreviewTexture(resource->Name, 0);
@@ -549,7 +543,7 @@ namespace studio {
 
 		engine::core::Name selected;
 		const char *current = settings.RenderingProfile.IsValid() ? settings.RenderingProfile.Text().data()
-																			 : "(renderer default)";
+																  : "(renderer default)";
 		ImGui::SetNextItemWidth(-1.0f);
 		if (ImGui::BeginCombo("Rendering Profile", current)) {
 			for (const engine::core::Name name : RenderingProfiles.Names()) {
@@ -592,9 +586,7 @@ namespace studio {
 			}
 		}
 
-		ImGui::TextDisabled(
-			"Lighting values remain properties of this world's Lighting service."
-		);
+		ImGui::TextDisabled("Lighting values remain properties of this world's Lighting service.");
 		ImGui::End();
 	}
 
@@ -667,12 +659,10 @@ namespace studio {
 			}
 			if (open) {
 				const engine::graph::Node *node = graph.Find(pass.Node);
-				const bool drewImage = node != nullptr &&
-								   DrawStageImages(profile, *node, [this](const auto &resource) {
-									   DrawProfileImage(
-										   resource.Name, resource.Width, resource.Height, 320.0f
-									   );
-								   });
+				const bool drewImage =
+					node != nullptr && DrawStageImages(profile, *node, [this](const auto &resource) {
+						DrawProfileImage(resource.Name, resource.Width, resource.Height, 320.0f);
+					});
 				if (!drewImage) {
 					ImGui::TextDisabled("This stage does not produce an image.");
 				}

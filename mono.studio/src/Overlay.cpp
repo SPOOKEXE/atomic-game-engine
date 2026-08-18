@@ -1575,12 +1575,7 @@ namespace studio {
 			// Before `Rebuild`, which runs the layout inside itself.
 			engine::render::ResolveSpatialCanvases(store, request.Display);
 			GuiLists[index].Rebuild(store, request);
-			(void)ViewportImages.Render(
-				Renderer,
-				store,
-				GuiLists[index].Commands(),
-				PreviewSlot() + 1
-			);
+			(void)ViewportImages.Render(Renderer, store, GuiLists[index].Commands(), PreviewSlot() + 1);
 			if (engine::gui::PickScreen(store, GuiLists[index].Commands(), pointer.Position) == NULL_ENTITY) {
 				engine::render::SpatialPointer spatial;
 				if (engine::render::ResolveSpatialPointer(

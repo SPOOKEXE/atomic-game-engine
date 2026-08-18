@@ -55,7 +55,8 @@ namespace engine::render {
 		uint32_t Height = 0;
 	};
 
-	// Draws a compiled `gui::DrawList` into the swapchain.
+	// Draws a compiled `gui::DrawList` into the render target selected by the
+	// interface node.
 	//
 	// @since v0.8
 	class InterfacePass : public FrameOverlayHook {
@@ -105,7 +106,7 @@ namespace engine::render {
 		// Records the batches.
 		//
 		// @param commandBuffer The frame's `SDL_GPUCommandBuffer *`.
-		// @param renderPass    An open pass bound to the swapchain.
+		// @param renderPass    An open pass bound to the interface target.
 		void Record(void *commandBuffer, void *renderPass) override;
 
 		uint32_t RecordWorld(

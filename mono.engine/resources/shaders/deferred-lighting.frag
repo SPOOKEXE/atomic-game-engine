@@ -58,7 +58,11 @@ vec3 WorldAt(vec2 uv, float distance) {
 	float farPlane = pass.Planes.y;
 	float raw = (farPlane - nearPlane * farPlane / max(distance, 1e-4)) /
 		max(farPlane - nearPlane, 1e-6);
-	vec4 world = pass.InverseViewProjection * vec4(uv * 2.0 - 1.0, raw, 1.0);
+	// Fullscreen UV starts at the top while SDL clip Y is positive there. Using
+	// the ordinary bottom-origin conversion mirrors the receiver around the eye,
+	// so a vertical camera move makes a world-space shadow move with it.
+	vec2 clip = vec2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+	vec4 world = pass.InverseViewProjection * vec4(clip, raw, 1.0);
 	return world.xyz / max(world.w, 1e-6);
 }
 

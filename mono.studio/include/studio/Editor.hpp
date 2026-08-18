@@ -1477,9 +1477,8 @@ namespace studio {
 		void DrawPipelineProfile();
 		void DrawWorldLighting();
 		void DrawProfileWatch();
-		void DrawProfileImage(
-			engine::core::Name resource, uint32_t width, uint32_t height, float maximumWidth
-		);
+		void
+		DrawProfileImage(engine::core::Name resource, uint32_t width, uint32_t height, float maximumWidth);
 		void LoadRenderPipeline(WorldId world, engine::core::Name pipeline);
 		bool SaveRenderPipeline();
 

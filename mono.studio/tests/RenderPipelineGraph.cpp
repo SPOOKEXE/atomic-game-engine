@@ -4,9 +4,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <studio/RenderPipelineGraph.hpp>
-
 #include <algorithm>
+#include <studio/RenderPipelineGraph.hpp>
 
 TEST_SUITE_ID("studio.renderpipelinegraph")
 TEST_DEPENDS("engine.graph.pipelinedocument")
@@ -32,11 +31,10 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 		}
 	}
 	CHECK(sawSsao);
-	const auto output = std::find_if(
-		canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
+	const auto output =
+		std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
 			return node.Type == "render.pass.output-image";
-		}
-	);
+		});
 	REQUIRE(output != canvas.Nodes().end());
 	CHECK(canvas.LinkInto(output->Id, "image") != nullptr);
 	CHECK(std::none_of(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
@@ -57,8 +55,7 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 	REQUIRE(shadow->Outputs.size() == 1);
 	CHECK(shadow->Outputs.front().Type == "render.image");
 	for (const char *kind : {"portal-capture", "portal-tonemap", "portal-overlay"}) {
-		const nodegraph::NodeType *portal =
-			nodegraph::NodeTypes::Find(std::string("render.pass.") + kind);
+		const nodegraph::NodeType *portal = nodegraph::NodeTypes::Find(std::string("render.pass.") + kind);
 		REQUIRE(portal != nullptr);
 		CHECK_FALSE(portal->PreviewPort.empty());
 	}
@@ -238,7 +235,5 @@ TEST_CASE("the IMAGE socket rejects a non-image before save", "[studio][pipeline
 	const nodegraph::NodeId tonemap = canvas.Add("render.pass.tonemap", 200.0f, 0.0f);
 	REQUIRE(entities != nodegraph::NO_NODE);
 	REQUIRE(tonemap != nodegraph::NO_NODE);
-	CHECK(
-		canvas.Connect(entities, "entities", tonemap, "colour") == nodegraph::LinkResult::TypeMismatch
-	);
+	CHECK(canvas.Connect(entities, "entities", tonemap, "colour") == nodegraph::LinkResult::TypeMismatch);
 }

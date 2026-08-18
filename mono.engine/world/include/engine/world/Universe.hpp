@@ -20,11 +20,11 @@
 // at the barrier, on one thread, which is why creating a world from inside a
 // tick queues rather than mutating the world list underneath the batch.
 //
-// **Worlds are the batch, not threads.** Step 3 is one `Jobs::For` over the
-// active worlds. There is no thread per world: the pool is sized once, the
-// caller drains alongside it, and a world is picked up by whichever worker gets
-// to it. That is why a world's store rebinds every tick and why a world tick
-// must never block.
+// **Worlds keep assigned execution lanes.** Step 3 is one `Jobs::ForWorkers`
+// over the active worlds. Every lane belongs to a worker pinned to one physical
+// core. A world keeps its lane while that pinned worker set is unchanged;
+// excess worlds share lanes and execute serially there. A world tick must never
+// block because its lane may have other worlds waiting behind it.
 //
 // @tier L4 · shared
 
@@ -578,6 +578,7 @@ namespace engine::world {
 
 		void Apply(const Control &control);
 		void DrainControls();
+		void RefreshLanes(unsigned laneCount);
 		WorldId Adopt(const WorldSettings &settings, core::Name host = {});
 		World *Reach(WorldId id);
 		const World *Reach(WorldId id) const;
@@ -599,12 +600,21 @@ namespace engine::world {
 		// inside the thing being booked.
 		std::vector<core::Name> Hosts;
 
+		// The pinned worker holding each local world's stable execution lane,
+		// parallel to `Registry`. More worlds than workers share lanes, but tasks
+		// on one lane are serial and therefore never contend for its processor.
+		static constexpr unsigned INVALID_LANE = static_cast<unsigned>(-1);
+		std::vector<unsigned> LaneByWorld;
+		unsigned LaneCount = 0;
+
 		std::vector<Control> Pending;
 
 		// Reused between driver ticks rather than rebuilt, because the active
 		// list is walked every frame and most frames it is nearly the same.
 		std::vector<World *> ActiveList;
 		std::vector<int> OwedList;
+		std::vector<unsigned> ActiveLanes;
+		std::vector<unsigned> DispatchLanes;
 
 		// The bus backends and the barrier that applies traffic to them. Held
 		// by pointer so the header does not have to describe either - a

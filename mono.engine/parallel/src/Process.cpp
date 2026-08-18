@@ -1,7 +1,8 @@
+#include "ThreadAffinity.hpp"
+
 #include <engine/parallel/Process.hpp>
 
 #include <algorithm>
-#include <thread>
 
 namespace engine::parallel {
 
@@ -24,7 +25,7 @@ namespace engine::parallel {
 			hosts = 1;
 		}
 
-		const unsigned available = std::thread::hardware_concurrency();
+		const unsigned available = static_cast<unsigned>(platform::AvailableProcessors().size());
 		if (available <= 1) {
 			return 0;
 		}

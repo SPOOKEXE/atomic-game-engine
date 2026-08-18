@@ -15,6 +15,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <span>
 
 namespace engine::parallel {
 
@@ -51,8 +52,8 @@ namespace engine::parallel {
 		// Starts the process-wide worker pool if it is not already running.
 		//
 		// The worker count excludes the calling thread, which also drains every
-		// For batch. `Start(0)` creates one fewer worker than reported hardware
-		// threads, or no workers when fewer than two hardware threads are reported.
+		// For batch. `Start(0)` creates one fewer worker than the logical processors
+		// available to this process, or no workers when fewer than two are available.
 		// Calling Start again while the pool is running leaves it unchanged.
 		//
 		// @param workers Worker threads to create, or zero to choose automatically.
@@ -72,6 +73,16 @@ namespace engine::parallel {
 		//         Start.
 		// @threadsafe
 		static unsigned WorkerCount();
+
+		// Reports how many leading workers are pinned to distinct physical cores.
+		//
+		// Assigned-worker dispatch uses only this prefix. A zero means the pool is
+		// absent or the platform could not establish a core binding, so a
+		// caller requiring placement must use its serial fallback.
+		//
+		// @return The number of workers with verified, distinct bindings.
+		// @threadsafe
+		static unsigned PinnedWorkerCount();
 
 		// Runs `body` over `[0, count)` and blocks until every range has finished.
 		//
@@ -115,6 +126,31 @@ namespace engine::parallel {
 		//                the count where that actually pays.
 		static void
 		For(size_t count, size_t grain, const std::function<void(size_t, size_t)> &body, size_t minimum = 0);
+
+		// Runs each index on the pinned worker named for it and blocks until done.
+		//
+		// Unlike For(), the calling thread never takes a range. Each worker in the
+		// pinned prefix has one distinct physical-core binding, so tasks assigned to
+		// different workers cannot execute on sibling logical CPUs. Several tasks
+		// may name one worker; that worker executes them serially in index order.
+		// This is the bounded answer when there are more tasks than physical cores.
+		//
+		// The mapping is consumed only during the call. Every index must name a
+		// worker below PinnedWorkerCount(). With no pinned workers, a bad mapping,
+		// forced serial compute, or a competing batch, the whole span runs inline
+		// on the caller. Inline execution changes placement and no result.
+		//
+		// A pooled exception is captured and rethrown on the caller after every
+		// other task has finished, matching For(). A nested For() from an assigned
+		// task runs inline because this batch owns the process-wide pool.
+		//
+		// @param workerByIndex The pinned worker assigned to every task index.
+		// @param body          Callable receiving either one assigned index or the
+		//                      full span for an inline fallback.
+		// @tick
+		// @threadsafe
+		static void
+		ForWorkers(std::span<const unsigned> workerByIndex, const std::function<void(size_t, size_t)> &body);
 
 		// What the calling thread's most recent `For` cost.
 		//

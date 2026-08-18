@@ -417,7 +417,9 @@ namespace studio {
 		// enable, disable, preview, or replace the `interface` graph node without
 		// taking the editor chrome with it.
 		const engine::render::BackendHandles backend = Renderer.Backend();
-		if (!GameInterface.Initialise(backend.Device, backend.ColourFormat, 16.0f * interfaceSettings.Scale)) {
+		if (!GameInterface.Initialise(
+				backend.Device, backend.ColourFormat, 16.0f * interfaceSettings.Scale
+			)) {
 			ENGINE_WARN("no game interface pass; viewport ScreenGui elements will not be drawn");
 		}
 		GameInterface.SetImageSource([this](const engine::core::Name &name) {
@@ -2666,7 +2668,7 @@ namespace studio {
 		Universe->Enter(world, [&](Store &store) {
 			const engine::ecs::ClassInfo &info = engine::ecs::Classes::Describe(klass);
 			created = authoritative ? store.CreateInstance(klass, Label(info.Name))
-								: store.CreatePredictedInstance(klass, Label(info.Name));
+									: store.CreatePredictedInstance(klass, Label(info.Name));
 			if (created == NULL_ENTITY) {
 				return;
 			}
@@ -2782,8 +2784,8 @@ namespace studio {
 					continue;
 				}
 
-				const Entity copy = authoritative ? store.CloneInstance(source)
-										  : store.ClonePredictedInstance(source);
+				const Entity copy =
+					authoritative ? store.CloneInstance(source) : store.ClonePredictedInstance(source);
 				if (copy == NULL_ENTITY) {
 					continue;
 				}

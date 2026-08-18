@@ -5544,6 +5544,20 @@ namespace engine::render {
 			const Impl::SurfaceSlotState &surface = State->SurfaceBanks[slot].Surfaces[0];
 			return surface.Ready ? surface.Texture[surface.Slot] : nullptr;
 		}
+		if ((role == Impl::ResourceRole::PortalImage || role == Impl::ResourceRole::PortalDisplay) &&
+			slot < State->SurfaceBanks.size()) {
+			const std::vector<Impl::PortalLevel> &levels = State->SurfaceBanks[slot].Portals;
+			for (auto level = levels.rbegin(); level != levels.rend(); ++level) {
+				for (const Impl::PortalTarget &portal : level->Targets) {
+					SDL_GPUTexture *texture =
+						role == Impl::ResourceRole::PortalImage ? portal.Colour : portal.Display;
+					if (texture != nullptr) {
+						return texture;
+					}
+				}
+			}
+			return nullptr;
+		}
 		if (slot >= State->PbrSlots.size()) {
 			return nullptr;
 		}
@@ -5721,7 +5735,8 @@ namespace engine::render {
 			}
 		}
 		const Impl::ResourceRole role = State->RoleFor(resource);
-		if (role == Impl::ResourceRole::Shadow || role == Impl::ResourceRole::Surface) {
+		if (role == Impl::ResourceRole::Shadow || role == Impl::ResourceRole::Surface ||
+			role == Impl::ResourceRole::PortalImage || role == Impl::ResourceRole::PortalDisplay) {
 			return SceneExtent{1.0f, 1.0f};
 		}
 		if (role == Impl::ResourceRole::Scene || role == Impl::ResourceRole::Depth) {
@@ -8826,9 +8841,8 @@ namespace engine::render {
 		// --- view targets ---------------------------------------------------
 
 		// **The world's target, which is the offscreen texture or the window.**
-		// Everything after this pass draws onto the *window* regardless - the
-		// debug overlay is in window pixels and the editor's chrome is the
-		// window - so this is the one target that moves.
+		// Graph passes continue through this target. Host chrome is recorded only
+		// after `output-image`, so it cannot leak into graph previews or captures.
 		SDL_GPUColorTargetInfo colourTarget{};
 		colourTarget.texture = offscreen ? State->SlotAt(targetSlot).Texture : swapchain;
 		colourTarget.clear_color = SDL_FColor{
@@ -9584,6 +9598,7 @@ namespace engine::render {
 
 		const std::array tonemapBindings = {SDL_GPUTextureSamplerBinding{pbr.Lit, sampler}};
 		frameNodes.Set(core::Name("portal-tonemap"), [&](const graph::RunContext &context) {
+			enterNamedPass(context.Name);
 			if (!havePortals || portalLevels == 0 || bank.Portals.size() < portalLevels) {
 				return true;
 			}

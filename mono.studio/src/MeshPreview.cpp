@@ -479,9 +479,7 @@ namespace studio {
 		view.Instances = one;
 		view.Target = &target;
 		view.Slot = PreviewSlot();
-		Renderer.Render(
-			std::span<const engine::render::View>(&view, 1), Overlay, nullptr, true, &Interface
-		);
+		Renderer.Render(std::span<const engine::render::View>(&view, 1), Overlay, nullptr, true, &Interface);
 
 		// **What the slot now holds, so a row can draw it.** There is one slot,
 		// so exactly one mesh in the list can be live at a time - and a row that

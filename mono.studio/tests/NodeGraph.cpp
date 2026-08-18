@@ -162,8 +162,8 @@ TEST_CASE("a hovered render node submits its retained preview texture", "[studio
 		if (ImGui::Begin(
 				"render preview canvas",
 				nullptr,
-				ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
-					ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollbar
+				ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings |
+					ImGuiWindowFlags_NoScrollbar
 			)) {
 			canvas.Draw(graph);
 		}
@@ -181,8 +181,8 @@ TEST_CASE("a hovered render node submits its retained preview texture", "[studio
 			// Font commands carry an ImTextureData that a device backend has not
 			// uploaded in this device-free suite. Read only user texture commands,
 			// whose direct id is exactly what the SDL GPU backend later receives.
-			submitted = submitted ||
-				(command.TexRef._TexData == nullptr && command.TexRef._TexID == expected);
+			submitted =
+				submitted || (command.TexRef._TexData == nullptr && command.TexRef._TexID == expected);
 		}
 	}
 	CHECK(submitted);
