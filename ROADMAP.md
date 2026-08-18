@@ -64,13 +64,19 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] concise `RUNNING.md` tutorial for launching a client that accepts the server-announced CDN, grant and publisher key, with an explicit CDN override mode
 
 - [_] ensure we can attach shaders to (visual) assets as well to change how they render: mesh, texture, gifs, images and videos
+- [_] localtransparency property for clients (only visible in local side, server cannot see), take priority over standard transparency if not set to 0
+- [_] character auto-rotation
+- [_] set character with LocalTransparency=1 when you zoom in (make a camera controller system with shift lock, scroll zoom, I/O zoom, poppercam system - add items to ignore in zoom and make partly transparent using LocalTransparency). Would it be worth changing LocalTransparency to a component and we can add/remove as needed per-client?
+- [_] add compute and postprocessing shaders to meshes/textures/pbr
+- [_] wireframe view mode
+- [_] add emissive textures / pbr
+- [_] real mesh creation in real-time (EditableMesh) + ensure it renders properly
+- [_] ensure EditableImage works and renders
+
 - [_] add accessories support
 - [_] animation handler
 - [_] character controller + humanoid + character states + state controller, etc. More modular than roblox standard humanoid. state machine? node graphs? etc.
 - [_] skinning and animation - `bake` skips joints and weights and keeps the rest pose, because there are no skeletons in the engine yet
-- [_] localtransparency property for clients (only visible in local side, server cannot see), take priority over standard transparency if not set to 0
-- [_] character auto-rotate
-
 - [_] split dependency-bound compute and later transfer work into traffic-plan command buffers; physical overlap remains unavailable because SDL exposes one unified queue rather than independent graphics, compute and transfer queues
 - [_] add conservative occlusion culling after the renderer has a depth hierarchy and indirect draw path; explicit occlusion documents are refused until then
 - [_] `ShapeCast` needs a swept-volume walk and its own de-duplication rule; the current union of the start and end box bounds is loose over long sweeps, and the ray walk's run rule only applies to the centre line
@@ -79,17 +85,11 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] finish portals so lighting, physics, projection, clipping and geometry crossing the seam are seamless
 - [_] prototype portal seam light-field capture: render each room against a lit void, capture both directions, and project the matching result into the portal entrance; expose an `Enabled` property on Portal components to skip this capture path
 - [_] audit every remaining service, object and instance property so edits mutate authoritative state and reach their consumers
-
-- [_] add compute and postprocessing shaders to meshes/textures/pbr
-- [_] add emissive textures / pbr
 - [_] port semi-real raytrace and path-trace as part of nodes
 - [_] make demo render pipelines with semi-real raytrace and path-trace
 - [_] render pipeline nodes for above
-- [_] wireframe view mode
-- [_] build out roblox libraries (Enum library that is auto-required)
-- [_] build out code editor with auto complete (more vs-code like, hover on keywords, right-side minimap)
-- [_] real mesh creation in real-time
 - [_] build ui features out (more roblox)
+- [_] build out code editor with auto complete (more vs-code like, hover on keywords, right-side minimap)
 
 ### FUTURE
 
