@@ -7274,13 +7274,16 @@ namespace engine::render {
 
 				for (uint32_t index = 0; index < live; index++) {
 					const Beam &beam = ordered[index];
+					const core::Vector3 sun{State->Sun.x, State->Sun.y, State->Sun.z};
+
+					// The receiver is carried from the far room back into this
+					// pane's chart by the partner's warp. Its light ray has to take
+					// that same rotation. Mapping only the position makes a turned
+					// portal cast the right silhouette in the wrong direction.
+					const core::Vector3 beamDirection = beam.Partner->Warp.Rotate(sun);
 
 					State->Beams.Light[index] = graph::FitPortalLight(
-						sceneBounds,
-						beam.Pane->Centre,
-						beam.Pane->First,
-						beam.Pane->Second,
-						core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z}
+						sceneBounds, beam.Pane->Centre, beam.Pane->First, beam.Pane->Second, beamDirection
 					);
 
 					State->Beams.Back[index] = scene::SeamMatrix(beam.Partner->Warp);
