@@ -737,12 +737,6 @@ namespace client {
 		// The world the panels report on, and the first view composited.
 		engine::world::WorldId Rendered;
 
-		// TODO(render-pipeline): these two are the world-to-renderer seam.
-		//
-		// Kept rather than deleted so the shape of what was here survives: a
-		// world change installed that world's pipelines and chose one, and the
-		// render call named it. Nothing writes them now.
-		//
 		// Which world's saved pipelines are installed in the renderer.
 		//
 		// **A guard so installing happens on a world change and not per frame.**

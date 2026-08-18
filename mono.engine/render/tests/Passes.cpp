@@ -1,21 +1,11 @@
-// The check D00016 was filed for.
+// Device-free checks for the renderer's graph installation boundary.
 //
-// `Renderer::Render` submits its passes from a function that knows every one of
-// them by name, and `graph::StandardPipeline` is the same list as data. Keeping
-// them in step used to be a sentence in `mono.engine/render/AGENTS.md` - rule 6
-// out loud, a rule the build did not check. This file is the build checking it.
-//
-// **The count is deliberately not written down here.** It said "five" until
-// v0.7 added `interface` and then said something false, which is the failure
-// this file exists to prevent, one level up. The assertions compare the two
-// descriptions against each other and neither against a number.
-//
-// **No device is created here and none is needed.** `PassOrder` is a list of
-// names and `StandardPipeline` is arithmetic over names, so the comparison runs
-// anywhere. That is the whole reason the enum exists as a separate thing from
-// the function body: the body needs a GPU, the description does not.
+// The renderer no longer has a parallel enum or fixed pass list. A pipeline is
+// accepted only when every enabled node has a backend implementation. The
+// default output path belongs to the engine's default graph, not this boundary.
 
-#include <engine/graph/Pipeline.hpp>
+#include <engine/graph/PipelineDocument.hpp>
+#include <engine/graph/RenderGraph.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -27,122 +17,336 @@
 
 TEST_SUITE_ID("engine.render.passes")
 
-// This suite asserts against another module, so it says so. It was the one
-// cross-module assertion in `render` with nothing declared - `DebugPanels.cpp`
-// names `engine.core.framegraph` for the same reason.
-//
-// **And it is what re-runs this file when a stage is added.**
-// `StandardPipeline`'s body is in `graph/src/Pipeline.cpp`, which is in no
-// suite's *header* closure - a test includes the header and links the object.
-// The runner signs each suite over its own module's sources as well as that
-// closure, so an edit there moves `engine.graph.pipeline`, and this line is
-// what carries that up to here. Without it the check would stay green through
-// exactly the change it was written to catch.
-TEST_DEPENDS("engine.graph.pipeline")
+// Graph implementation changes must re-run the backend acceptance checks.
+TEST_DEPENDS("engine.graph.rendergraph")
 
 using engine::core::Name;
-using engine::graph::Pipeline;
-using engine::graph::PipelineStatus;
-using engine::graph::Stage;
-using engine::graph::StandardPipeline;
+using engine::graph::RenderGraph;
 using engine::render::FrameResult;
-using engine::render::Pass;
-using engine::render::PassOrder;
+using engine::render::Renderer;
 
 namespace {
-	// The stage names, in declaration order.
-	//
-	// Bound to a named `Pipeline` rather than taken from the temporary:
-	// `Stages()` is deleted on an rvalue for exactly this reason, and writing
-	// the mistake here once was how that overload came to exist.
-	std::vector<Name> StageNames(const Pipeline &pipeline) {
-		std::vector<Name> names;
-		for (const Stage &stage : pipeline.Stages()) {
-			names.push_back(stage.Name);
+	RenderGraph DefaultGraph() {
+		RenderGraph graph;
+		Name offender;
+		REQUIRE(
+			engine::graph::Build(engine::graph::DefaultPbrDocument(), graph, offender) ==
+			engine::graph::PipelineDocumentStatus::Ok
+		);
+		return graph;
+	}
+
+	engine::graph::PipelineDocument
+	WithSetting(const engine::graph::PipelineDocument &source, Name node, Name key, std::string value) {
+		engine::graph::PipelineDocument configured;
+		bool found = false;
+		for (const engine::graph::Edit &edit : source.Edits()) {
+			configured.Record(edit);
+			if (edit.Kind != engine::graph::EditKind::AddNode || edit.Name != node) {
+				continue;
+			}
+			engine::graph::Edit setting;
+			setting.Kind = engine::graph::EditKind::Set;
+			setting.Key = key;
+			setting.Value = std::move(value);
+			configured.Record(std::move(setting));
+			found = true;
 		}
-		return names;
+		REQUIRE(found);
+		return configured;
 	}
 }
 
-TEST_CASE("the renderer's passes are the standard pipeline's stages", "[render][graph]") {
-	const Pipeline pipeline = StandardPipeline();
-	const std::vector<Name> stages = StageNames(pipeline);
-	const auto order = PassOrder();
+TEST_CASE("named render graphs compile before entering the runtime cache", "[render][graph]") {
+	Renderer renderer;
+	const Name first("main#7");
+	const Name second("main#2");
 
-	// **Count first, and the message matters more than the assertion.** This is
-	// the failure the entry predicted: a sixth pass added to one description and
-	// not the other. Whichever side was edited, the fix is to edit both.
-	INFO(
-		"Renderer submits " << order.size() << " passes and StandardPipeline declares " << stages.size()
-							<< " stages. A pass added to one must be added to the other - see D00016."
+	REQUIRE(renderer.SetPipeline(first, DefaultGraph()));
+	REQUIRE(renderer.SetPipeline(second, DefaultGraph()));
+	CHECK(renderer.Pipelines() == std::vector<Name>{second, first});
+
+	RenderGraph unsupported = DefaultGraph();
+	const engine::graph::ResourceId storage = unsupported.AddResource(
+		{.Name = Name("custom-storage"), .Kind = engine::graph::ResourceKind::Storage}
 	);
-	REQUIRE(order.size() == stages.size());
+	engine::graph::Node node;
+	node.Name = Name("custom-compute");
+	node.Kind = Name("unsupported-test-node");
+	node.Writes = {storage};
+	node.Scope = engine::graph::NodeScope::Frame;
+	REQUIRE(unsupported.AddNode(node).IsValid());
 
-	// **In order, not as a set.** A pipeline holding the right five stages in
-	// the wrong order describes a frame where the colour pass samples a shadow
-	// map nothing has rendered, which is not a crash on a GPU - it is a frame
-	// lit by whatever was in that memory.
-	for (size_t index = 0; index < stages.size(); index++) {
-		INFO("position " << index);
-		CHECK(order[index].Text() == stages[index].Text());
+	// A refusal keeps the complete graph already installed under this key.
+	CHECK_FALSE(renderer.SetPipeline(first, unsupported));
+	CHECK(renderer.Pipelines() == std::vector<Name>{second, first});
+
+	CHECK(renderer.RemovePipeline(first));
+	CHECK_FALSE(renderer.RemovePipeline(first));
+	CHECK(renderer.Pipelines() == std::vector<Name>{second});
+
+	renderer.ResetPipelines();
+	CHECK(renderer.Pipelines().empty());
+}
+
+TEST_CASE("the default PBR graph compiles into the graph backend", "[render][graph]") {
+	Renderer renderer;
+	CHECK(renderer.SetPipeline(Name("Default PBR#1"), DefaultGraph()));
+	CHECK(renderer.Pipelines() == std::vector<Name>{Name("Default PBR#1")});
+}
+
+TEST_CASE("default PBR stages are not mandatory backend policy", "[render][graph]") {
+	RenderGraph graph;
+	const engine::graph::ResourceId display = graph.AddResource(
+		{.Name = Name("display"), .Kind = engine::graph::ResourceKind::Colour, .External = true}
+	);
+	REQUIRE(display.IsValid());
+
+	engine::graph::Node present;
+	present.Name = Name("minimal-present");
+	present.Kind = Name("present");
+	present.Reads = {display};
+	present.Scope = engine::graph::NodeScope::Frame;
+	REQUIRE(graph.AddNode(present).IsValid());
+
+	Renderer renderer;
+	CHECK(renderer.SetPipeline(Name("minimal#1"), graph));
+}
+
+TEST_CASE("authored raster compute and inspection nodes are repeatable backend work", "[render][graph]") {
+	RenderGraph graph;
+	const engine::graph::ResourceId source = graph.AddResource(
+		{.Name = Name("source"), .Kind = engine::graph::ResourceKind::Texture, .External = true}
+	);
+	const engine::graph::ResourceId first =
+		graph.AddResource({.Name = Name("first"), .Kind = engine::graph::ResourceKind::Colour});
+	const engine::graph::ResourceId second =
+		graph.AddResource({.Name = Name("second"), .Kind = engine::graph::ResourceKind::Colour});
+	const engine::graph::ResourceId storage =
+		graph.AddResource({.Name = Name("storage"), .Kind = engine::graph::ResourceKind::Storage});
+	REQUIRE(source.IsValid());
+	REQUIRE(first.IsValid());
+	REQUIRE(second.IsValid());
+	REQUIRE(storage.IsValid());
+
+	engine::graph::Node raster;
+	raster.Name = Name("first-raster");
+	raster.Kind = Name("raster");
+	raster.Reads = {source};
+	raster.Writes = {first};
+	raster.Scope = engine::graph::NodeScope::View;
+	REQUIRE(graph.AddNode(raster).IsValid());
+	raster.Name = Name("second-raster");
+	raster.Reads = {first};
+	raster.Writes = {second};
+	REQUIRE(graph.AddNode(raster).IsValid());
+
+	engine::graph::Node dispatch;
+	dispatch.Name = Name("compute");
+	dispatch.Kind = Name("dispatch");
+	dispatch.Reads = {second};
+	dispatch.Writes = {storage};
+	dispatch.Scope = engine::graph::NodeScope::View;
+	REQUIRE(graph.AddNode(dispatch).IsValid());
+
+	for (const char *kind : {"viewer", "capture", "viewer"}) {
+		engine::graph::Node sink;
+		sink.Name = Name(std::string(kind) + std::to_string(graph.Count()));
+		sink.Kind = Name(kind);
+		sink.Reads = {storage};
+		sink.Scope = engine::graph::NodeScope::Frame;
+		REQUIRE(graph.AddNode(sink).IsValid());
 	}
+
+	Renderer renderer;
+	CHECK(renderer.SetPipeline(Name("authored#1"), graph));
 }
 
-TEST_CASE("the pass enum indexes its own names", "[render]") {
-	// `PassRecorder` shifts by the enum value and `PassOrder` is indexed by it,
-	// so a member inserted in the middle without moving the name beside it
-	// silently renames every pass after it. Cheap to assert and impossible to
-	// notice otherwise.
-	const auto order = PassOrder();
+TEST_CASE("authored compute can be scoped once per world", "[render][graph]") {
+	RenderGraph graph;
+	const engine::graph::ResourceId storage =
+		graph.AddResource({.Name = Name("world-storage"), .Kind = engine::graph::ResourceKind::Storage});
+	REQUIRE(storage.IsValid());
 
-	REQUIRE(order.size() == static_cast<size_t>(Pass::Count));
-	CHECK(order[static_cast<size_t>(Pass::Shadow)].Text() == "shadow");
-	CHECK(order[static_cast<size_t>(Pass::Surface)].Text() == "surface");
-	CHECK(order[static_cast<size_t>(Pass::Opaque)].Text() == "opaque");
-	CHECK(order[static_cast<size_t>(Pass::Transparent)].Text() == "transparent");
-	CHECK(order[static_cast<size_t>(Pass::Overlay)].Text() == "overlay");
+	engine::graph::Node dispatch;
+	dispatch.Name = Name("world-compute");
+	dispatch.Kind = Name("dispatch");
+	dispatch.Writes = {storage};
+	dispatch.Scope = engine::graph::NodeScope::World;
+	REQUIRE(graph.AddNode(dispatch).IsValid());
 
-	// **Added when the sixth pass arrived, which is the case D00016 was filed
-	// against.** The count assertion above caught the pairing; this list did not
-	// grow with it, so `interface` was the one pass whose *name* nothing
-	// checked. Cheap, and exactly the kind of half-updated check this module has
-	// already watched rot once.
-	CHECK(order[static_cast<size_t>(Pass::Interface)].Text() == "interface");
+	Renderer renderer;
+	CHECK(renderer.SetPipeline(Name("world-compute#1"), graph));
 }
 
-TEST_CASE("the standard pipeline the renderer follows is runnable", "[render][graph]") {
-	// The other half of the pairing. `PassOrder` says the renderer agrees with
-	// the pipeline; this says the pipeline is worth agreeing with - no stage
-	// reads a target that no earlier stage wrote.
-	const Pipeline pipeline = StandardPipeline();
+TEST_CASE("optional default nodes can be disabled at the backend boundary", "[render][graph]") {
+	engine::graph::PipelineDocument document = engine::graph::DefaultPbrDocument();
+	engine::graph::Edit disabled;
+	disabled.Kind = engine::graph::EditKind::Enable;
+	disabled.Name = Name("shadow");
+	disabled.Enabled = false;
+	document.Record(disabled);
+	disabled.Name = Name("ssao");
+	document.Record(disabled);
+	disabled.Name = Name("surface");
+	document.Record(disabled);
 
+	RenderGraph graph;
 	Name offender;
-	INFO("offending stage: " << std::string(offender.Text()));
-	CHECK(pipeline.Validate(offender) == PipelineStatus::Ok);
+	REQUIRE(engine::graph::Build(document, graph, offender) == engine::graph::PipelineDocumentStatus::Ok);
+	Renderer renderer;
+	CHECK(renderer.SetPipeline(Name("unshadowed#1"), graph));
 }
 
-TEST_CASE("a frame result reports which passes ran", "[render]") {
-	// Every pass is conditional, so "ran" is a different question from "exists"
-	// and the draw-call count cannot answer it - the shadow pass and the overlay
-	// pass are one draw each and are indistinguishable from there.
+TEST_CASE("backend queue and overlap controls describe the work each node records", "[render][graph]") {
+	engine::graph::PipelineDocument document = engine::graph::DefaultPbrDocument();
+	document = WithSetting(document, Name("cull-frustum"), Name("queue"), "cpu");
+	document = WithSetting(document, Name("upload-instances"), Name("queue"), "transfer");
+	document = WithSetting(document, Name("gbuffer"), Name("queue"), "graphics");
+	document = WithSetting(document, Name("ssao"), Name("async"), "allow");
+
+	RenderGraph graph;
+	Name offender;
+	REQUIRE(engine::graph::Build(document, graph, offender) == engine::graph::PipelineDocumentStatus::Ok);
+	Renderer renderer;
+	CHECK(renderer.SetPipeline(Name("queued#1"), graph));
+}
+
+TEST_CASE("entity culling nodes compose and may repeat in an authored graph", "[render][graph][cull]") {
+	RenderGraph graph;
+	const auto resource = [&graph](const char *name, engine::graph::ResourceKind kind) {
+		return graph.AddResource({.Name = Name(name), .Kind = kind});
+	};
+	const engine::graph::ResourceId camera = resource("camera", engine::graph::ResourceKind::Camera);
+	const engine::graph::ResourceId all = resource("all", engine::graph::ResourceKind::Entities);
+	const engine::graph::ResourceId tagged = resource("tagged", engine::graph::ResourceKind::Entities);
+	const engine::graph::ResourceId retagged = resource("retagged", engine::graph::ResourceKind::Entities);
+	const engine::graph::ResourceId near = resource("near", engine::graph::ResourceKind::Entities);
+	const engine::graph::ResourceId ordered = resource("ordered", engine::graph::ResourceKind::Entities);
+
+	const auto node = [&graph](
+						  const char *name,
+						  const char *kind,
+						  std::vector<engine::graph::ResourceId> reads,
+						  std::vector<engine::graph::ResourceId> writes,
+						  std::vector<engine::graph::NodeParameter> parameters = {}
+					  ) {
+		engine::graph::Node value;
+		value.Name = Name(name);
+		value.Kind = Name(kind);
+		value.Reads = std::move(reads);
+		value.Writes = std::move(writes);
+		value.Parameters = std::move(parameters);
+		REQUIRE(graph.AddNode(value).IsValid());
+	};
+	node("camera", "camera", {}, {camera});
+	node("entities", "entities", {}, {all});
+	node("characters", "filter-tag", {all}, {tagged}, {{Name("mask"), "0x3"}});
+	node("players", "filter-tag", {tagged}, {retagged}, {{Name("mask"), "0x1"}});
+	node("nearby", "cull-distance", {retagged, camera}, {near}, {{Name("radius"), "128.5"}});
+	node("order", "order-draw", {near, camera}, {ordered});
+
+	Renderer renderer;
+	CHECK(renderer.SetPipeline(Name("filtered#1"), graph));
+}
+
+TEST_CASE("culling hints cannot be attached to a pass that ignores entity filters", "[render][graph][cull]") {
+	Renderer renderer;
+	const auto install = [&](Name pipeline, Name node, std::string value) {
+		const engine::graph::PipelineDocument document =
+			WithSetting(engine::graph::DefaultPbrDocument(), node, Name("culling"), std::move(value));
+		RenderGraph graph;
+		Name offender;
+		REQUIRE(engine::graph::Build(document, graph, offender) == engine::graph::PipelineDocumentStatus::Ok);
+		return renderer.SetPipeline(pipeline, graph);
+	};
+
+	CHECK_FALSE(install(Name("ignored-cull#1"), Name("gbuffer"), "none"));
+	CHECK(install(Name("unculled#1"), Name("cull-frustum"), "none"));
+	CHECK_FALSE(install(Name("occlusion#1"), Name("cull-frustum"), "occlusion"));
+}
+
+TEST_CASE("a frame result reports authored node names", "[render]") {
 	FrameResult result;
+	CHECK_FALSE(result.Ran(Name("geometry")));
 
-	for (uint8_t index = 0; index < static_cast<uint8_t>(Pass::Count); index++) {
-		CHECK_FALSE(result.Ran(static_cast<Pass>(index)));
-	}
+	result.Nodes = {Name("geometry"), Name("ao.quality"), Name("present")};
+	CHECK(result.Ran(Name("geometry")));
+	CHECK(result.Ran(Name("ao.quality")));
+	CHECK(result.Ran(Name("present")));
+	CHECK_FALSE(result.Ran(Name("shadow")));
+}
 
-	result.Passes = static_cast<uint8_t>(
-		(1u << static_cast<uint8_t>(Pass::Opaque)) | (1u << static_cast<uint8_t>(Pass::Overlay))
+TEST_CASE("a batched frame result adds counters and de-duplicates nodes", "[render][batch]") {
+	FrameResult frame;
+	frame.DrawCalls = 2;
+	frame.Triangles = 12;
+	frame.Nodes = {Name("shadow"), Name("gbuffer")};
+
+	FrameResult view;
+	view.Presented = true;
+	view.DrawCalls = 3;
+	view.Triangles = 24;
+	view.SurfaceInstances = 2;
+	view.SurfacePasses = 1;
+	view.PortalPasses = 4;
+	view.RibbonVertices = 22;
+	view.Particles = 8;
+	view.Culled = 7;
+	view.ScheduledReadBytes = 1024;
+	view.ScheduledWriteBytes = 2048;
+	view.QueueTransferBytes = 512;
+	view.UploadedBytes = 4096;
+	view.UploadCommandBuffers = 3;
+	view.ComputeDispatches = 4;
+	view.AsyncComputeCommandBuffers = 2;
+	view.ConcurrentWaves = 2;
+	view.Nodes = {Name("gbuffer"), Name("tonemap"), Name("present")};
+
+	frame.Accumulate(view);
+
+	CHECK(frame.Presented);
+	CHECK(frame.DrawCalls == 5);
+	CHECK(frame.Triangles == 36);
+	CHECK(frame.SurfaceInstances == 2);
+	CHECK(frame.SurfacePasses == 1);
+	CHECK(frame.PortalPasses == 4);
+	CHECK(frame.RibbonVertices == 22);
+	CHECK(frame.Particles == 8);
+	CHECK(frame.Culled == 7);
+	CHECK(frame.ScheduledReadBytes == 1024);
+	CHECK(frame.ScheduledWriteBytes == 2048);
+	CHECK(frame.QueueTransferBytes == 512);
+	CHECK(frame.UploadedBytes == 4096);
+	CHECK(frame.UploadCommandBuffers == 3);
+	CHECK(frame.ComputeDispatches == 4);
+	CHECK(frame.AsyncComputeCommandBuffers == 2);
+	CHECK(frame.ConcurrentWaves == 2);
+	CHECK(
+		frame.Nodes == std::vector<Name>{Name("shadow"), Name("gbuffer"), Name("tonemap"), Name("present")}
 	);
+}
 
-	CHECK(result.Ran(Pass::Opaque));
-	CHECK(result.Ran(Pass::Overlay));
+TEST_CASE("a renderer returns the complete lighting state it was given", "[render][batch]") {
+	Renderer renderer;
+	engine::scene::WorldLighting lighting;
+	lighting.Direction = {0.0f, -2.0f, 0.0f};
+	lighting.Ambient = {0.1f, 0.2f, 0.3f};
+	lighting.OutdoorAmbient = {0.4f, 0.5f, 0.6f};
+	lighting.Direct = {0.7f, 0.8f, 0.9f};
+	lighting.FogColor = {0.11f, 0.22f, 0.33f};
+	lighting.FogStart = 12.0f;
+	lighting.FogEnd = 48.0f;
+	renderer.SetLighting(lighting);
 
-	// The interesting one: a frame that drew but cast no shadows, which is what
-	// a scene with no casters looks like and is not a bug.
-	CHECK_FALSE(result.Ran(Pass::Shadow));
-	CHECK_FALSE(result.Ran(Pass::Surface));
-	CHECK_FALSE(result.Ran(Pass::Transparent));
+	const engine::scene::WorldLighting current = renderer.CurrentLighting();
+	CHECK(current.Direction == (engine::core::Vector3{0.0f, -1.0f, 0.0f}));
+	CHECK(current.Ambient == lighting.Ambient);
+	CHECK(current.OutdoorAmbient == lighting.OutdoorAmbient);
+	CHECK(current.Direct == lighting.Direct);
+	CHECK(current.FogColor == lighting.FogColor);
+	CHECK(current.FogStart == 12.0f);
+	CHECK(current.FogEnd == 48.0f);
 }
 
 // The other half of D00016's neighbourhood: a decision that was recorded and

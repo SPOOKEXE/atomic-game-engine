@@ -49,5 +49,7 @@ mono_add_library(render
 	VENDOR SDL3::SDL3 shaderc
 
 	# Atlas headers only; no imgui library is linked.
-	VENDOR_INCLUDES ${CMAKE_SOURCE_DIR}/mono.vendor/imgui
+	VENDOR_INCLUDES
+		${CMAKE_SOURCE_DIR}/mono.vendor/imgui
+		${CMAKE_SOURCE_DIR}/mono.vendor/sdl/src/video/khronos
 )

@@ -10,8 +10,10 @@
 #include <engine/effects/Particles.hpp>
 #include <engine/effects/Ribbon.hpp>
 #include <engine/graph/Frustum.hpp>
+#include <engine/graph/RenderGraph.hpp>
 #include <engine/render/Flipbook.hpp>
 #include <engine/render/Overlay.hpp>
+#include <engine/render/Readback.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/Sunlight.hpp>
@@ -22,55 +24,19 @@
 // type should say where it comes from rather than rely on a neighbour.
 #include <glm/mat4x4.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <span>
 #include <string_view>
 #include <thread>
+#include <unordered_map>
+#include <vector>
 
 struct SDL_Window;
 
 namespace engine::render {
-
-	// The stages `Render` submits, in submission order.
-	//
-	// Tests compare this order with graph::StandardPipeline.
-	//
-	// @since v0.6
-	enum class Pass : uint8_t {
-		// Depth from the light, over the whole scene rather than the culled set.
-		Shadow,
-
-		// The surface camera's view, into a texture a mirror samples.
-		Surface,
-
-		// The screen, with depth written.
-		Opaque,
-
-		// Blended, depth-tested, and not depth-written; shares Opaque's pass.
-		Transparent,
-
-		// The overlay texture, loaded over the frame rather than clearing it.
-		Overlay,
-
-		// Whatever a `FrameOverlayHook` records - the editor's chrome, and
-		// nothing a game ships with.
-		//
-		// Last, so interface content stays above the world.
-		//
-		// @since v0.7
-		Interface,
-
-		// Not a pass. The count, for the bitmask below.
-		Count,
-	};
-
-	// The names of those stages, in the same order.
-	//
-	// @return The six names, valid for the life of the program.
-	std::span<const core::Name> PassOrder();
-
 	// A second view, rendered into a texture instead of the swapchain.
 	//
 	// Surface textures are double-buffered, so what a pane shows the screen is
@@ -552,6 +518,59 @@ namespace engine::render {
 		}
 	};
 
+	// One camera invocation in a graph-owned frame.
+	//
+	// Spans are borrowed for the duration of `Renderer::Render`. A batch groups
+	// views by `World` and `Pipeline`, runs world-scoped nodes once for each
+	// group, records every view into one command buffer, then submits once.
+	//
+	// @since v0.17
+	struct View {
+		// The eye transform and lens for this invocation.
+		//@{
+		core::CFrame CameraFrame;
+		scene::Camera Camera;
+		//@}
+
+		// Borrowed world data consumed by view-scoped nodes.
+		//@{
+		std::span<const scene::DrawInstance> Instances;
+		std::span<const SurfaceView> Surfaces;
+		//@}
+
+		// The offscreen destination, or null for the presenting view.
+		const SceneTarget *Target = nullptr;
+
+		// Which persistent renderer target bank this view owns.
+		size_t Slot = 0;
+
+		// A stable key shared only by views of the same logical world.
+		uint64_t World = 0;
+
+		// A graph installed through `Renderer::SetPipeline`, or invalid for the default.
+		core::Name Pipeline;
+
+		// Borrowed transparent and lighting work for this view.
+		//@{
+		std::span<const ParticleBatch> Particles;
+		std::span<const effects::RibbonVertex> RibbonVertices;
+		std::span<const effects::RibbonRun> RibbonRuns;
+		std::span<const SceneLight> Lights;
+		//@}
+
+		// Borrowed cross-world geometry and portal descriptions.
+		//@{
+		std::span<const scene::DrawInstance> Foreign;
+		std::span<const PortalView> Portals;
+		//@}
+
+		// Per-world lighting used when `OverrideLighting` is true.
+		scene::WorldLighting Lighting;
+
+		// Whether to replace the renderer's current lighting for this view.
+		bool OverrideLighting = false;
+	};
+
 	// How much of a slot's texture the world was actually drawn into.
 	//
 	// **The texture is bigger than the panel on purpose, and this is how a
@@ -739,24 +758,46 @@ namespace engine::render {
 		// wrong, not that the scene is small.
 		uint32_t Culled = 0;
 
-		// One bit per `Pass` that submitted work this frame.
-		//
-		// **Every pass is skippable and most of them usually are**, so "the
-		// shadow pass exists" and "the shadow pass ran" are different questions,
-		// and only the second one explains a frame with no shadows in it. The
-		// draw-call count cannot answer it - the shadow pass and the overlay
-		// pass are one draw each and look identical from there.
-		//
-		// @since v0.6
-		uint8_t Passes = 0;
+		// Resource traffic declared by the graph after world and view scopes are
+		// expanded for this frame. QueueTransferBytes is visibility traffic across
+		// logical queues, not necessarily a physical memory copy.
+		uint64_t ScheduledReadBytes = 0;
+		uint64_t ScheduledWriteBytes = 0;
+		uint64_t QueueTransferBytes = 0;
 
-		// Whether one pass submitted work this frame.
+		// Bytes actually copied from CPU staging memory, and the dedicated SDL
+		// copy command buffers that carried them. Unlike the scheduled figures
+		// above, these are observed backend traffic for this frame. A command
+		// buffer is submitted without a fence so the GPU can consume uploads
+		// while the CPU continues recording render and compute passes.
+		uint64_t UploadedBytes = 0;
+		uint32_t UploadCommandBuffers = 0;
+
+		// Compute work recorded this frame, and how often an async-eligible
+		// dispatch was safe to submit on its own command buffer before any
+		// dependency-bound work entered the main stream.
+		uint32_t ComputeDispatches = 0;
+		uint32_t AsyncComputeCommandBuffers = 0;
+
+		// Dependency waves containing independent work on more than one queue.
+		// SDL records them serially, but the count remains useful to a backend that
+		// exposes native async queues and to the Studio profiler.
+		uint32_t ConcurrentWaves = 0;
+
+		// Graph nodes that submitted work, in first-submission order.
 		//
-		// @param pass Which one.
-		// @return True when it ran.
-		bool Ran(Pass pass) const {
-			return (Passes & static_cast<uint8_t>(1u << static_cast<uint8_t>(pass))) != 0;
+		// Names replace the old six-bit physical-pass mask. A world can author
+		// more than six nodes and the result must report the graph it actually
+		// ran rather than squeeze it back into the removed fixed renderer.
+		std::vector<core::Name> Nodes;
+
+		// Whether a named graph node submitted work this frame.
+		bool Ran(core::Name node) const {
+			return std::find(Nodes.begin(), Nodes.end(), node) != Nodes.end();
 		}
+
+		// Adds one view's counters while keeping node names unique and ordered.
+		void Accumulate(const FrameResult &view);
 	};
 
 	// Owns the client GPU device, window claim, pipelines, and per-frame upload resources.
@@ -901,6 +942,67 @@ namespace engine::render {
 		// @since v0.10
 		void SetAnimationTime(double seconds);
 
+		// Compiles and installs a named render graph for a view to select.
+		//
+		// The device path executes the node kinds its backend implements. The
+		// engine's PBR path is a default graph, not a required set of stages. A
+		// graph that asks for another node the backend does not submit is refused
+		// instead of producing a partial frame.
+		// The previous graph of the same name remains installed after a refusal.
+		//
+		// @param name     The process-local key a view will select.
+		// @param pipeline Copied and compiled before installation.
+		// @return Whether the complete graph can run on this backend.
+		bool SetPipeline(core::Name name, const graph::RenderGraph &pipeline);
+
+		// Removes one named graph. A view naming it uses the engine default graph.
+		bool RemovePipeline(core::Name name);
+
+		// Every installed graph key, sorted by text.
+		std::vector<core::Name> Pipelines() const;
+
+		// Removes every named graph.
+		void ResetPipelines();
+
+		// Starts or stops a nonblocking preview download of one graph resource.
+		// Four-byte colour resources also receive a histogram. Every allocated PBR
+		// image is available through `ResourceTexture` without a readback stall.
+		//
+		// @param resource Which authored resource, or invalid to stop.
+		// @param slot     Which renderer target owns the image, or `ANY_VIEWPORT`.
+		void Inspect(core::Name resource, size_t slot = ANY_VIEWPORT);
+
+		core::Name Inspecting() const;
+
+		struct ReadbackImage {
+			// The authored resource and renderer target this image came from.
+			//@{
+			core::Name Source;
+			size_t Slot = ANY_VIEWPORT;
+			//@}
+			uint32_t Width = 0;
+			uint32_t Height = 0;
+			std::span<const uint32_t> Pixels;
+			ImageHistogram Histogram;
+			uint64_t Age = 0;
+
+			bool IsValid() const {
+				return Width > 0 && Height > 0 && !Pixels.empty();
+			}
+		};
+
+		// Returns the last completed preview without waiting for the GPU.
+		ReadbackImage Readback() const;
+
+		// GPU execution time and CPU command-recording wall time for each
+		// physical pass, in microseconds and keyed by Name::Id. GPU results lag
+		// until the query pool resolves; wall time is from the latest Render.
+		const std::unordered_map<uint32_t, double> &PassTimings() const;
+		const std::unordered_map<uint32_t, double> &PassWallTimes() const;
+
+		// Whether this backend can produce GPU timestamps.
+		bool Timed() const;
+
 		// How many times the surface pass runs per frame.
 		//
 		// **In-frame recursion, and since v0.15 it is a real one.** A surface pass
@@ -1012,6 +1114,9 @@ namespace engine::render {
 		// @since v0.16
 		void SetLighting(const scene::WorldLighting &lighting);
 
+		// The complete lighting state currently used for a view.
+		scene::WorldLighting CurrentLighting() const;
+
 		// Which way the world's one directional light shines, and what reaches
 		// what it does not.
 		//
@@ -1068,7 +1173,7 @@ namespace engine::render {
 		// Where a texture's current animation cell sits.
 		//
 		// **For an interface painter, which has a name and no table.** The
-		// opaque pass reads the same thing from the table directly; this is the
+		// geometry node reads the same thing from the table directly; this is the
 		// same answer for the two callers outside this module.
 		//
 		// @param name    The texture.
@@ -1113,7 +1218,7 @@ namespace engine::render {
 		// the build. Neither is this class's concern - it builds the pipelines a
 		// `scene::DrawInstance::Shader` naming this resolves to.
 		//
-		// **The module must declare what `opaque.frag` declares**: four fragment
+		// **The module must declare what `opaque.frag` declares**: nine fragment
 		// samplers and three uniform buffers, in those slots. A shader object
 		// carries those counts rather than the pipeline doing so, so a module
 		// that declares different ones binds and silently samples nothing - the
@@ -1215,128 +1320,20 @@ namespace engine::render {
 		// @return True when the requested mode was supported and taken.
 		bool SetVerticalSync(bool enabled);
 
-		// Draws one frame and presents it. Returns false in Presented when the
-		// swapchain had no texture - minimised, or resizing - which is not an
-		// error and not a reason to stop ticking. It is also false if SDL rejects
-		// command submission.
+		// Records a graph-owned frame into one command buffer. World-scoped nodes
+		// are shared by views with the same world and pipeline. All but the last
+		// processed view require an offscreen target. Borrowed view data is consumed
+		// before this call returns.
 		//
-		// `overlay` is uploaded only when it has something pending, and drawn
-		// whenever it has content - the texture holds the last thing sent to it,
-		// so a caller may redraw the overlay far less often than it presents.
-		// The renderer marks the overlay uploaded once it has recorded the copy,
-		// which is the only reason it is not a const reference; nothing else
-		// about it is retained past the call.
+		// The old fixed-pass entry point is intentionally absent. Every host names
+		// its world, graph and inputs through `View`, even when it draws one camera.
 		//
-		// The camera and instances are copied during the call and not retained.
-		//
-		// The aspect ratio comes from the swapchain texture this call acquired
-		// rather than from a caller, so a frame taken during a resize is
-		// projected for the image it is actually drawn into. `scene::Camera`
-		// therefore holds no aspect ratio and `scene::ResolveCamera` takes one.
-		//
-		// @param cameraFrame World-space placement of the camera.
-		// @param camera      Field of view and clipping distances.
-		// @param instances   What to draw, as the world described it. Each is
-		//                    turned into a model matrix and a colour here.
-		// @param overlay     CPU premultiplied RGBA8 overlay. Uploaded only when
-		//                    it has a pending region, drawn whenever it has
-		//                    content, and marked uploaded on the way out.
-		// @param surfaces    The offscreen views to render first, one per surface
-		//                    index. Empty for a scene with no mirror in it.
-		// @param interfaceHook An editor's chrome, drawn last, or null. See
-		//                    `FrameOverlayHook` for why this is not imgui.
-		// @param sceneTarget Draw the world into an offscreen texture of this
-		//                    size instead of into the window, or null for the
-		//                    window. Decides the aspect ratio and the cull
-		//                    frustum as well as the target - see `SceneTarget`.
-		// @param targetSlot  Which viewport this call is drawing. A game draws
-		//                    one view and never passes this; a studio keeps a
-		//                    slot per viewport so two panels of different sizes
-		//                    do not reallocate one shared texture twice a frame.
-		//                    See `SceneTexture`.
-		//
-		//                    Selects the surface texture bank for this viewport.
-		// @param particles  One batch per emitter with live particles, drawn after
-		//                    the blended geometry and before the overlay. Empty
-		//                    for a scene with no effects in it, which is every
-		//                    scene that has not installed a particle pool.
-		//
-		//                    **After the blended pass and never sorted against
-		//                    it**, which is the same trade `ScenePlan::
-		//                    TransparentSurfaces` makes for mirrors: a particle in
-		//                    front of a pane of glass is drawn after it whatever
-		//                    the depths say. One sorted run per pipeline is what
-		//                    lets the blend mode be a pipeline binding instead of
-		//                    a per-fragment branch, and interleaving half a million
-		//                    particles into the geometry sort would cost more than
-		//                    the artefact does.
-		// @param ribbonVertices Every beam and trail vertex this world produced,
-		//                    as `effects::BuildRibbons` packed them. Passed as the
-		//                    whole stream rather than per run, because the runs
-		//                    index into it.
-		// @param ribbonRuns  Where each ribbon sits in that stream.
-		//
-		//                    **Drawn after the particles**, which is one more
-		//                    fixed ordering in a pass that has several - see the
-		//                    `particles` note above. A beam is usually the thing
-		//                    an author wants on top of its own sparks, so the
-		//                    order is the useful one rather than an accident, and
-		//                    it is fixed rather than sorted for the same reason
-		//                    every other run here is.
-		// @param lights     The point and spot lights near this view, at most
-		//                    `MAX_SCENE_LIGHTS`. **Added to the directional term
-		//                    rather than replacing it**, so a scene with no lamps
-		//                    looks exactly as it did before v0.10 - which is what
-		//                    makes this safe to switch on for every existing world.
-		//
-		//                    Anything past the cap is dropped, and the caller is
-		//                    the one that should be choosing which: the renderer
-		//                    has no idea which lamp matters. `client::CollectLights`
-		//                    picks the nearest to the eye.
-		// @param foreign    Instances belonging to *other* worlds, drawn only
-		//                    through the surfaces that name them by
-		//                    `SurfaceView::InstanceFirst`.
-		//
-		//                    **Separate from `instances` because everything this
-		//                    call does to `instances` is wrong for these.** They
-		//                    are not culled against this camera, not sorted into
-		//                    this view's plan, and never submitted by the screen
-		//                    pass or the shadow pass - a second world is not
-		//                    part of this world's frame, it is a picture hanging
-		//                    in it. They were appended to `instances` by the host
-		//                    until v0.14, and the two rooms drew on top of each
-		//                    other.
-		//
-		//                    They still share the one instance buffer: the
-		//                    renderer copies them in after this world's rows and
-		//                    shifts each surface's range to match.
-		// @param portals    The same-world holes, drawn by the recursive pass
-		//                    instead of by a surface camera.
-		//
-		//                    **Beside `surfaces` rather than among them**, which
-		//                    is the whole of `PortalView`: a surface's camera is
-		//                    a function of the eye and cannot compose down a
-		//                    recursion, and a portal's has to. A slot named here
-		//                    must not also be named in `surfaces` - the pane
-		//                    would be drawn twice, once by each pass, and the
-		//                    renderer drops the surface with a line in the log
-		//                    rather than choosing silently.
 		// @return Submitted draw counts and whether the frame was presented.
+		// @since v0.17
 		FrameResult Render(
-			const core::CFrame &cameraFrame,
-			const scene::Camera &camera,
-			std::span<const scene::DrawInstance> instances,
+			std::span<const View> views,
 			OverlayImage &overlay,
-			std::span<const SurfaceView> surfaces = {},
 			FrameOverlayHook *interfaceHook = nullptr,
-			const SceneTarget *sceneTarget = nullptr,
-			size_t targetSlot = 0,
-			std::span<const ParticleBatch> particles = {},
-			std::span<const effects::RibbonVertex> ribbonVertices = {},
-			std::span<const effects::RibbonRun> ribbonRuns = {},
-			std::span<const SceneLight> lights = {},
-			std::span<const scene::DrawInstance> foreign = {},
-			std::span<const PortalView> portals = {},
 			bool present = true
 		);
 
@@ -1362,6 +1359,11 @@ namespace engine::render {
 		// @return The texture, or `nullptr` when nothing has been drawn into
 		//         that slot.
 		void *SceneTexture(size_t slot = 0) const;
+
+		// A graph resource's current device image. Supports the default PBR
+		// resources and `colour`; returns null when the selected slot has not run
+		// that graph yet.
+		void *ResourceTexture(core::Name resource, size_t slot = 0) const;
 
 		// Keeps a copy of what a scene slot currently holds, under a name.
 		//
@@ -1409,6 +1411,10 @@ namespace engine::render {
 		//         never been drawn into.
 		SceneExtent SceneTextureExtent(size_t slot = 0) const;
 
+		// The drawn fraction of `ResourceTexture`, including half-resolution
+		// resources such as ambient occlusion.
+		SceneExtent ResourceTextureExtent(core::Name resource, size_t slot = 0) const;
+
 		// Writes the next offscreen frame's world to a file, once.
 		//
 		// **What makes an editor checkable without a screen.** Driving a window
@@ -1446,6 +1452,28 @@ namespace engine::render {
 		BackendHandles Backend() const;
 
 	  private:
+		// Records one prepared view for the graph batch. Kept private so a host
+		// cannot bypass graph-owned world grouping and frame dispatch.
+		FrameResult RenderView(
+			const core::CFrame &cameraFrame,
+			const scene::Camera &camera,
+			std::span<const scene::DrawInstance> instances,
+			OverlayImage &overlay,
+			std::span<const SurfaceView> surfaces,
+			FrameOverlayHook *interfaceHook,
+			const SceneTarget *sceneTarget,
+			size_t targetSlot,
+			std::span<const ParticleBatch> particles,
+			std::span<const effects::RibbonVertex> ribbonVertices,
+			std::span<const effects::RibbonRun> ribbonRuns,
+			std::span<const SceneLight> lights,
+			std::span<const scene::DrawInstance> foreign,
+			std::span<const PortalView> portals,
+			bool present,
+			core::Name pipeline,
+			uint64_t world
+		);
+
 		// Aborts when the caller is not the owning thread. See `IsOnOwningThread`.
 		//
 		// @param what The call being refused, for the message.

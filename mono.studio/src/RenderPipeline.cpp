@@ -1,0 +1,566 @@
+#include <engine/graph/ExecutionPlan.hpp>
+#include <engine/graph/PipelineCatalogue.hpp>
+#include <engine/graph/PipelineProfile.hpp>
+#include <engine/graph/Schedule.hpp>
+#include <engine/ui/Metrics.hpp>
+#include <engine/ui/Theme.hpp>
+
+#include <algorithm>
+#include <array>
+#include <cctype>
+#include <imgui.h>
+#include <studio/Editor.hpp>
+#include <studio/RenderPipelineGraph.hpp>
+
+namespace studio {
+
+	namespace {
+		bool ContainsInsensitive(std::string text, std::string wanted) {
+			for (char &letter : text) {
+				letter = static_cast<char>(std::tolower(static_cast<unsigned char>(letter)));
+			}
+			for (char &letter : wanted) {
+				letter = static_cast<char>(std::tolower(static_cast<unsigned char>(letter)));
+			}
+			return text.find(wanted) != std::string::npos;
+		}
+	}
+
+	void Editor::LoadRenderPipeline(WorldId world, engine::core::Name wanted) {
+		if (Universe == nullptr || !world.IsValid()) {
+			RenderPipelineGraph.Clear();
+			RenderPipelineWorld = {};
+			RenderPipelineStatus = "no active world";
+			return;
+		}
+
+		engine::graph::PipelineDocument document;
+		engine::core::Name selected = wanted;
+		Universe->Enter(world, [&](engine::ecs::Store &store) {
+			const engine::graph::PipelineSet *set = store.Resource<engine::graph::PipelineSet>();
+			if (set != nullptr && set->Count() > 0) {
+				if (!selected.IsValid() || set->Find(selected) == nullptr) {
+					selected = set->Names().front();
+				}
+				document = *set->Find(selected);
+				return;
+			}
+			selected = engine::core::Name("Default PBR");
+			document = engine::graph::DefaultPbrDocument();
+		});
+
+		RenderPipelineWorld = world;
+		RenderPipelineName = selected;
+		RenderPipelineBasis = document;
+		RenderPipelineLoaded = engine::graph::Write(document);
+		RenderPipelineDirty = false;
+
+		if (!LoadRenderPipelineGraph(document, RenderPipelineGraph, RenderPipelineStatus)) {
+			return;
+		}
+		RenderPipelineStatus = "loaded " + std::string(selected.Text());
+		RenderPipelineCanvas.Select(nodegraph::NO_NODE);
+		RenderPipelineCanvas.Fit(RenderPipelineGraph);
+	}
+
+	bool Editor::SaveRenderPipeline() {
+		engine::graph::PipelineDocument saved;
+		if (!SaveRenderPipelineGraph(RenderPipelineGraph, RenderPipelineBasis, saved, RenderPipelineStatus)) {
+			return false;
+		}
+		if (Universe == nullptr || !RenderPipelineWorld.IsValid() || !RenderPipelineName.IsValid()) {
+			RenderPipelineStatus = "no world to save into";
+			return false;
+		}
+
+		Universe->Enter(RenderPipelineWorld, [&](engine::ecs::Store &store) {
+			engine::graph::PipelineSet set;
+			if (const engine::graph::PipelineSet *current = store.Resource<engine::graph::PipelineSet>();
+				current != nullptr) {
+				set = *current;
+			}
+			set.Set(RenderPipelineName, saved);
+			store.SetResource(set);
+		});
+		PipelineSelected.erase(RenderPipelineWorld.Index);
+
+		RenderPipelineBasis = saved;
+		RenderPipelineLoaded = engine::graph::Write(saved);
+		RenderPipelineDirty = false;
+		RenderPipelineStatus = "saved " + std::string(RenderPipelineName.Text()) + " into the world";
+		return true;
+	}
+
+	void Editor::DrawRenderPipeline() {
+		if (!ShowRenderPipeline) {
+			return;
+		}
+		if (!ImGui::Begin("Render Pipeline", &ShowRenderPipeline, ImGuiWindowFlags_MenuBar)) {
+			ImGui::End();
+			return;
+		}
+
+		if (!RenderPipelineCanvasReady) {
+			RegisterRenderPipelineNodeTypes();
+			RenderPipelineCanvas.Signals.Changed = [this] { RenderPipelineDirty = true; };
+			RenderPipelineCanvasReady = true;
+		}
+		if (RenderPipelineWorld != Active || RenderPipelineGraph.Nodes().empty()) {
+			LoadRenderPipeline(Active, {});
+		}
+
+		if (ImGui::BeginMenuBar()) {
+			if (ImGui::BeginMenu("Pipeline")) {
+				engine::graph::PipelineSet choices;
+				if (Universe != nullptr && Active.IsValid()) {
+					Universe->Enter(Active, [&](engine::ecs::Store &store) {
+						if (const auto *set = store.Resource<engine::graph::PipelineSet>(); set != nullptr) {
+							choices = *set;
+						}
+					});
+				}
+				for (const engine::core::Name name : choices.Names()) {
+					if (ImGui::MenuItem(
+							std::string(name.Text()).c_str(), nullptr, name == RenderPipelineName
+						)) {
+						LoadRenderPipeline(Active, name);
+					}
+				}
+				if (choices.Count() > 0) {
+					ImGui::Separator();
+				}
+				if (ImGui::MenuItem("Reset to Default PBR")) {
+					RenderPipelineName = engine::core::Name("Default PBR");
+					RenderPipelineBasis = engine::graph::DefaultPbrDocument();
+					LoadRenderPipelineGraph(RenderPipelineBasis, RenderPipelineGraph, RenderPipelineStatus);
+					RenderPipelineCanvas.Fit(RenderPipelineGraph);
+					RenderPipelineDirty = true;
+				}
+				ImGui::EndMenu();
+			}
+
+			ImGui::BeginDisabled(!RenderPipelineDirty);
+			if (ImGui::MenuItem("Save")) {
+				SaveRenderPipeline();
+			}
+			ImGui::EndDisabled();
+			if (ImGui::MenuItem("Fit")) {
+				RenderPipelineCanvas.Fit(RenderPipelineGraph);
+			}
+			if (RenderPipelineDirty) {
+				ImGui::SameLine();
+				ImGui::TextDisabled("modified");
+			}
+			ImGui::EndMenuBar();
+		}
+
+		const float side = engine::ui::Scaled(280.0f);
+		const ImVec2 room = ImGui::GetContentRegionAvail();
+		if (ImGui::BeginChild("##render-pipeline-canvas", ImVec2(std::max(room.x - side, side), room.y))) {
+			RenderPipelineCanvas.Draw(RenderPipelineGraph);
+		}
+		ImGui::EndChild();
+
+		ImGui::SameLine();
+		if (ImGui::BeginChild("##render-pipeline-side", ImVec2(0.0f, room.y), ImGuiChildFlags_Borders)) {
+			if (ImGui::BeginTabBar("##render-pipeline-tabs")) {
+				if (ImGui::BeginTabItem("Add")) {
+					DrawRenderPipelineLibrary();
+					ImGui::EndTabItem();
+				}
+				if (ImGui::BeginTabItem("Node")) {
+					DrawRenderPipelineInspector();
+					ImGui::EndTabItem();
+				}
+				if (ImGui::BeginTabItem("Schedule")) {
+					DrawRenderPipelineSchedule();
+					ImGui::EndTabItem();
+				}
+				ImGui::EndTabBar();
+			}
+			ImGui::Separator();
+			ImGui::PushStyleColor(
+				ImGuiCol_Text, RenderPipelineDirty ? engine::ui::WarningColour() : engine::ui::MutedColour()
+			);
+			ImGui::TextWrapped("%s", RenderPipelineStatus.c_str());
+			ImGui::PopStyleColor();
+		}
+		ImGui::EndChild();
+
+		// A valid gesture updates the world's component immediately. Invalid and
+		// half-wired states remain editable on the canvas and keep the last valid
+		// world document installed.
+		if (RenderPipelineDirty) {
+			SaveRenderPipeline();
+		}
+		ImGui::End();
+	}
+
+	void Editor::DrawRenderPipelineLibrary() {
+		ImGui::SetNextItemWidth(-1.0f);
+		ImGui::InputTextWithHint(
+			"##render-pipeline-filter", "filter passes", RenderPipelineFilter, sizeof(RenderPipelineFilter)
+		);
+		const std::string wanted = RenderPipelineFilter;
+
+		for (const engine::graph::NodeKindSpec &spec : engine::graph::NodeCatalogue::All()) {
+			const std::string title = spec.Label.empty() ? std::string(spec.Kind.Text()) : spec.Label;
+			if (!wanted.empty() &&
+				!ContainsInsensitive(
+					title + " " + std::string(spec.Kind.Text()) + " " + spec.Summary, wanted
+				)) {
+				continue;
+			}
+			ImGui::PushID(static_cast<int>(spec.Kind.Id()));
+			if (ImGui::Selectable(title.c_str())) {
+				const nodegraph::NodeId made =
+					RenderPipelineGraph.Add("render.pass." + std::string(spec.Kind.Text()), 0.0f, 0.0f);
+				if (made != nodegraph::NO_NODE) {
+					RenderPipelineCanvas.Select(made);
+					RenderPipelineCanvas.Centre(RenderPipelineGraph, made);
+					RenderPipelineDirty = true;
+				}
+			}
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("%s", spec.Summary.c_str());
+			}
+			ImGui::PopID();
+		}
+	}
+
+	void Editor::DrawRenderPipelineInspector() {
+		const std::vector<nodegraph::NodeId> &selection = RenderPipelineCanvas.Selection();
+		if (selection.size() != 1) {
+			ImGui::TextDisabled(selection.empty() ? "select a pass" : "multiple passes selected");
+			return;
+		}
+		const nodegraph::Node *node = RenderPipelineGraph.Find(selection.front());
+		if (node == nullptr) {
+			return;
+		}
+		const nodegraph::NodeType *type = nodegraph::NodeTypes::Find(node->Type);
+		ImGui::TextUnformatted(node->Label.empty() ? node->Type.c_str() : node->Label.c_str());
+		if (type != nullptr) {
+			ImGui::TextDisabled("%s", type->Subtitle.c_str());
+			ImGui::SeparatorText("Inputs");
+			for (const nodegraph::PortSpec &port : type->Inputs) {
+				const nodegraph::Link *link = RenderPipelineGraph.LinkInto(node->Id, port.Name);
+				ImGui::BulletText("%s  %s", port.Name.c_str(), link == nullptr ? "unwired" : "connected");
+			}
+			ImGui::SeparatorText("Outputs");
+			for (const nodegraph::PortSpec &port : type->Outputs) {
+				size_t consumers = 0;
+				for (const nodegraph::Link &link : RenderPipelineGraph.Links()) {
+					consumers += link.From == node->Id && link.FromPort == port.Name ? 1 : 0;
+				}
+				ImGui::BulletText(
+					"%s  %zu consumer%s", port.Name.c_str(), consumers, consumers == 1 ? "" : "s"
+				);
+			}
+		}
+		ImGui::Spacing();
+		ImGui::TextWrapped(
+			"Queue, async, culling, and compute dispatch controls live on the node body. Wires determine "
+			"data order; box position does not."
+		);
+	}
+
+	void Editor::DrawRenderPipelineSchedule() {
+		engine::graph::PipelineDocument document;
+		std::string error;
+		if (!SaveRenderPipelineGraph(RenderPipelineGraph, RenderPipelineBasis, document, error)) {
+			ImGui::TextWrapped("%s", error.c_str());
+			return;
+		}
+
+		engine::graph::RenderGraph graph;
+		engine::core::Name offender;
+		if (engine::graph::Build(document, graph, offender) != engine::graph::PipelineDocumentStatus::Ok) {
+			ImGui::TextWrapped("cannot build %s", std::string(offender.Text()).c_str());
+			return;
+		}
+		engine::graph::ExecutionSchedule schedule;
+		if (const auto status = engine::graph::CompileSchedule(graph, schedule, offender);
+			status != engine::graph::ScheduleStatus::Ok) {
+			ImGui::TextWrapped(
+				"%s: %s", engine::graph::Describe(status), std::string(offender.Text()).c_str()
+			);
+			return;
+		}
+
+		const uint32_t width = WorldTarget.IsValid() ? WorldTarget.Width : 1920;
+		const uint32_t height = WorldTarget.IsValid() ? WorldTarget.Height : 1080;
+		const std::array<uint64_t, 1> worlds = {RenderPipelineWorld.Index};
+		engine::graph::FrameExecutionPlan plan;
+		if (const auto status =
+				engine::graph::PlanFrame(graph, schedule, worlds, width, height, plan, offender);
+			status != engine::graph::ExecutionPlanStatus::Ok) {
+			ImGui::TextWrapped(
+				"%s: %s", engine::graph::Describe(status), std::string(offender.Text()).c_str()
+			);
+			return;
+		}
+
+		uint32_t waveNumber = 0;
+		for (const engine::graph::PlannedWave &wave : plan.Waves) {
+			ImGui::PushID(static_cast<int>(waveNumber));
+			const std::string title = "Wave " + std::to_string(waveNumber++) +
+									  (wave.ConcurrentQueues ? "  async overlap" : "  ordered");
+			if (ImGui::CollapsingHeader(title.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
+				for (const engine::graph::PlannedInvocation &invocation : wave.Invocations) {
+					const engine::graph::ScheduledNode &scheduled = invocation.Scheduled;
+					const engine::graph::Node *node = graph.Find(scheduled.Node);
+					if (node == nullptr) {
+						continue;
+					}
+
+					ImGui::TextUnformatted(std::string(node->Name.Text()).c_str());
+					ImGui::SameLine();
+					ImGui::TextDisabled(
+						"%s  %s  %s  %.2f MiB read  %.2f MiB write  timing unmeasured",
+						engine::graph::Describe(scheduled.Queue),
+						engine::graph::Describe(scheduled.Culling),
+						engine::graph::Describe(invocation.Scope),
+						static_cast<double>(invocation.ReadBytes) / (1024.0 * 1024.0),
+						static_cast<double>(invocation.WriteBytes) / (1024.0 * 1024.0)
+					);
+					if (scheduled.Queue == engine::graph::ExecutionQueue::Compute) {
+						ImGui::TextDisabled(
+							"dispatch %u x %u x %u  async %s",
+							scheduled.GroupsX,
+							scheduled.GroupsY,
+							scheduled.GroupsZ,
+							engine::graph::Describe(scheduled.Async)
+						);
+					}
+				}
+			}
+			ImGui::PopID();
+		}
+
+		ImGui::Separator();
+		ImGui::TextDisabled(
+			"%u x %u: %.2f MiB read, %.2f MiB write, %.2f MiB across %zu queue handoff%s.",
+			width,
+			height,
+			static_cast<double>(plan.ReadBytes) / (1024.0 * 1024.0),
+			static_cast<double>(plan.WriteBytes) / (1024.0 * 1024.0),
+			static_cast<double>(plan.QueueTransferBytes) / (1024.0 * 1024.0),
+			plan.Transfers.size(),
+			plan.Transfers.size() == 1 ? "" : "s"
+		);
+		ImGui::TextDisabled(
+			"GPU and wall-clock timings remain unmeasured until the backend submits this plan."
+		);
+	}
+
+	void Editor::DrawPipelineProfile() {
+		if (!ShowPipelineProfile) {
+			if (Renderer.Inspecting().IsValid()) {
+				Renderer.Inspect({});
+			}
+			return;
+		}
+		if (!ImGui::Begin("Pipeline Profile", &ShowPipelineProfile)) {
+			ImGui::End();
+			return;
+		}
+
+		engine::graph::PipelineDocument document;
+		std::string error;
+		engine::graph::RenderGraph graph;
+		engine::core::Name offender;
+		engine::graph::CompiledGraph compiled;
+		if (!SaveRenderPipelineGraph(RenderPipelineGraph, RenderPipelineBasis, document, error) ||
+			engine::graph::Build(document, graph, offender) != engine::graph::PipelineDocumentStatus::Ok ||
+			graph.Compile(compiled, offender) != engine::graph::GraphStatus::Ok) {
+			ImGui::TextWrapped(
+				"The edited pipeline does not compile: %s",
+				!error.empty() ? error.c_str() : std::string(offender.Text()).c_str()
+			);
+			DrawProfileWatch();
+			ImGui::End();
+			return;
+		}
+
+		const uint32_t width = WorldTarget.IsValid() ? WorldTarget.Width : 1920;
+		const uint32_t height = WorldTarget.IsValid() ? WorldTarget.Height : 1080;
+		engine::graph::PipelineProfile profile =
+			engine::graph::ProfilePipeline(graph, compiled, width, height);
+		const auto &gpuTimings = Renderer.PassTimings();
+		const auto &wallTimings = Renderer.PassWallTimes();
+		for (engine::graph::ProfilePass &pass : profile.Passes) {
+			if (const auto found = gpuTimings.find(pass.Name.Id()); found != gpuTimings.end()) {
+				pass.Elapsed = found->second;
+			}
+			if (const auto found = wallTimings.find(pass.Name.Id()); found != wallTimings.end()) {
+				pass.Wall = found->second;
+			}
+		}
+		const auto mib = [](uint64_t bytes) { return static_cast<double>(bytes) / (1024.0 * 1024.0); };
+
+		ImGui::Text("%zu passes, %zu resources", profile.Passes.size(), profile.Resources.size());
+		ImGui::SameLine();
+		ImGui::TextDisabled(
+			"%.2f MiB peak / %.2f MiB declared / %.2f MiB aliasable",
+			mib(profile.PeakBytes),
+			mib(profile.TotalBytes),
+			mib(profile.TotalBytes - profile.PeakBytes)
+		);
+		for (const engine::graph::ProfilePass &pass : profile.Passes) {
+			ImGui::TextUnformatted(std::string(pass.Name.Text()).c_str());
+			ImGui::SameLine();
+			if (pass.Elapsed > 0.0) {
+				ImGui::TextDisabled("GPU %.3f ms, wall %.3f ms", pass.Elapsed / 1000.0, pass.Wall / 1000.0);
+			} else {
+				ImGui::TextDisabled(
+					Renderer.Timed() ? "GPU pending, wall %.3f ms" : "GPU unavailable, wall %.3f ms",
+					pass.Wall / 1000.0
+				);
+			}
+		}
+
+		if (ImGui::BeginTable(
+				"resource-access",
+				static_cast<int>(profile.Passes.size()) + 1,
+				ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollX |
+					ImGuiTableFlags_SizingFixedFit
+			)) {
+			ImGui::TableSetupScrollFreeze(1, 1);
+			ImGui::TableSetupColumn("Resource", ImGuiTableColumnFlags_WidthFixed, 190.0f);
+			for (const engine::graph::ProfilePass &pass : profile.Passes) {
+				ImGui::TableSetupColumn(
+					std::string(pass.Name.Text()).c_str(), ImGuiTableColumnFlags_WidthFixed, 76.0f
+				);
+			}
+			ImGui::TableHeadersRow();
+
+			for (size_t row = 0; row < profile.Resources.size(); row++) {
+				const engine::graph::ProfileResource &resource = profile.Resources[row];
+				ImGui::TableNextRow();
+				ImGui::TableSetColumnIndex(0);
+				const std::string label(resource.Name.Text());
+				const bool watched = ProfileWatched == resource.Name;
+				if (ImGui::Selectable(label.c_str(), watched, ImGuiSelectableFlags_SpanAllColumns)) {
+					ProfileWatched = watched ? engine::core::Name{} : resource.Name;
+					Renderer.Inspect(ProfileWatched, 0);
+				}
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip(
+						"%s, %s, %ux%u, %.2f MiB%s",
+						engine::graph::Describe(resource.Kind),
+						engine::graph::Describe(resource.Format),
+						resource.Width,
+						resource.Height,
+						mib(resource.Bytes),
+						resource.External ? ", external" : ", transient"
+					);
+				}
+
+				for (size_t column = 0; column < profile.Passes.size(); column++) {
+					ImGui::TableSetColumnIndex(static_cast<int>(column) + 1);
+					const engine::graph::Access access = profile.At(row, column);
+					if (access != engine::graph::Access::None) {
+						ImGui::TextUnformatted(engine::graph::Describe(access));
+					} else if (resource.LiveAt(static_cast<uint32_t>(column))) {
+						ImGui::TextDisabled("alive");
+					}
+				}
+			}
+			ImGui::EndTable();
+		}
+
+		DrawProfileWatch();
+		ImGui::End();
+	}
+
+	void Editor::DrawProfileWatch() {
+		if (!ProfileWatched.IsValid()) {
+			ImGui::TextDisabled("Select a resource to inspect its output.");
+			return;
+		}
+
+		ImGui::Separator();
+		const std::string name(ProfileWatched.Text());
+		void *texture = Renderer.ResourceTexture(ProfileWatched, 0);
+		if (texture == nullptr || !WorldTarget.IsValid()) {
+			ImGui::TextDisabled("%s has no allocated image in the current viewport.", name.c_str());
+			return;
+		}
+		Renderer.Inspect(ProfileWatched, 0);
+
+		const engine::render::Renderer::ReadbackImage readback = Renderer.Readback();
+		const bool matching = readback.IsValid() && readback.Source == ProfileWatched && readback.Slot == 0;
+		ImGui::Text("%s, %ux%u", name.c_str(), WorldTarget.Width, WorldTarget.Height);
+		ImGui::SameLine();
+		const bool histogramSupported = ProfileWatched == engine::core::Name("colour") ||
+										ProfileWatched == engine::core::Name("display") ||
+										ProfileWatched == engine::core::Name("window") ||
+										ProfileWatched == engine::core::Name("albedo") ||
+										ProfileWatched == engine::core::Name("material");
+		if (matching) {
+			ImGui::TextDisabled("histogram %llu frame(s) old", static_cast<unsigned long long>(readback.Age));
+		} else if (!histogramSupported) {
+			ImGui::TextDisabled("live GPU image, histogram unavailable for this format");
+		} else {
+			ImGui::TextDisabled("histogram waiting");
+		}
+
+		const float available = std::max(ImGui::GetContentRegionAvail().x, 64.0f);
+		const float shown = std::min(available, 420.0f);
+		const float aspect = static_cast<float>(WorldTarget.Width) / static_cast<float>(WorldTarget.Height);
+		const engine::render::SceneExtent extent = Renderer.ResourceTextureExtent(ProfileWatched, 0);
+		ImGui::Image(
+			reinterpret_cast<ImTextureID>(texture),
+			ImVec2{shown, shown / std::max(aspect, 0.01f)},
+			ImVec2{0.0f, 0.0f},
+			ImVec2{extent.U, extent.V}
+		);
+
+		if (!matching) {
+			return;
+		}
+
+		const auto histogram = [](const char *label,
+								  const engine::render::ChannelHistogram &channel,
+								  ImU32 colour) {
+			uint32_t peak = 1;
+			for (const uint32_t count : channel.Buckets) {
+				peak = std::max(peak, count);
+			}
+			ImGui::TextDisabled("%s", label);
+			ImGui::SameLine();
+			const ImVec2 origin = ImGui::GetCursorScreenPos();
+			const float width = std::min(std::max(ImGui::GetContentRegionAvail().x - 72.0f, 64.0f), 280.0f);
+			const float height = 28.0f;
+			const float step = width / static_cast<float>(engine::render::HISTOGRAM_BUCKETS);
+			for (size_t bucket = 0; bucket < engine::render::HISTOGRAM_BUCKETS; bucket++) {
+				const float tall =
+					height * static_cast<float>(channel.Buckets[bucket]) / static_cast<float>(peak);
+				ImGui::GetWindowDrawList()->AddRectFilled(
+					ImVec2{origin.x + step * bucket, origin.y + height - tall},
+					ImVec2{origin.x + step * (bucket + 1) - 1.0f, origin.y + height},
+					colour
+				);
+			}
+			ImGui::Dummy(ImVec2{width, height});
+			ImGui::SameLine();
+			ImGui::TextDisabled("%u..%u", channel.Minimum, channel.Maximum);
+		};
+
+		histogram("R", readback.Histogram.Red, IM_COL32(230, 90, 90, 255));
+		histogram("G", readback.Histogram.Green, IM_COL32(100, 215, 100, 255));
+		histogram("B", readback.Histogram.Blue, IM_COL32(100, 140, 240, 255));
+		histogram("A", readback.Histogram.Alpha, IM_COL32(205, 205, 205, 255));
+
+		if (readback.Histogram.Uniform()) {
+			ImGui::TextColored(
+				ImVec4{0.95f, 0.75f, 0.35f, 1.0f}, "Every pixel is identical. The pass may not have run."
+			);
+		} else if (readback.Histogram.Alpha.Blank()) {
+			ImGui::TextColored(
+				ImVec4{0.95f, 0.75f, 0.35f, 1.0f}, "Alpha is blank. This format may be wasting a channel."
+			);
+		}
+	}
+}

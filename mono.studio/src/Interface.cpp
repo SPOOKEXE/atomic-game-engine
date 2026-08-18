@@ -48,10 +48,10 @@ namespace studio {
 		// corner. Bumping costs everybody the arrangement they dragged into
 		// place, which is why `mono.studio/AGENTS.md` says to do it when a
 		// panel is added and not otherwise.
-		// **v8 because Live Instances is a panel the saved layout has never
+		// **v9 because Render Pipeline is a panel the saved layout has never
 		// heard of**, and a panel a layout does not know about opens floating in
 		// a corner - which is exactly the failure it exists to fix.
-		constexpr const char *DOCKSPACE = "StudioDockSpace.v8";
+		constexpr const char *DOCKSPACE = "StudioDockSpace.v9";
 
 		constexpr const char *VIEWPORT = "Viewport";
 		constexpr const char *VIEWPORT2 = "Viewport 2";
@@ -77,10 +77,10 @@ namespace studio {
 		// hoisted into a dozen more constants: a name used twice in one file is
 		// not the drift a constant prevents.
 		constexpr const char *SKINNABLE[]{
-			VIEWPORT,  VIEWPORT2,		 EXPLORER,		   WORLDS,		  INSTANCES,	   PROPERTIES,
-			SCRIPTS,   OUTPUT,			 "Command Bar",	   SETTINGS,	  STATISTICS,	   FRAMEGRAPH,
-			"History", "Assets",		 "Network",		   "Team Create", "Control (MCP)", "Plugins",
-			"Bus",	   "Find Instances", "Script Profile", "Changes",	  "Debugger",
+			VIEWPORT,  VIEWPORT2, EXPLORER,			 WORLDS,		   INSTANCES,	  PROPERTIES,
+			SCRIPTS,   OUTPUT,	  "Command Bar",	 SETTINGS,		   STATISTICS,	  FRAMEGRAPH,
+			"History", "Assets",  "Render Pipeline", "Network",		   "Team Create", "Control (MCP)",
+			"Plugins", "Bus",	  "Find Instances",	 "Script Profile", "Changes",	  "Debugger",
 		};
 
 		// The first-run layout, built once and then owned by the ini file.
@@ -152,6 +152,7 @@ namespace studio {
 			ImGui::DockBuilderDockWindow(SETTINGS, rightLower);
 			ImGui::DockBuilderDockWindow(STATISTICS, rightLower);
 			ImGui::DockBuilderDockWindow(FRAMEGRAPH, bottom);
+			ImGui::DockBuilderDockWindow("Render Pipeline", bottom);
 
 			ImGui::DockBuilderFinish(dockspace);
 		}
@@ -346,8 +347,9 @@ namespace studio {
 			ENGINE_PROFILE_CAT("tools", engine::core::ProfileCategory::Render);
 			Skinned("History", [&] { DrawHistory(); });
 			Skinned("Assets", [&] { DrawAssets(); });
-			// TODO(render-pipeline): `DrawRenderPipeline()`, `DrawAssetsPipeline()`
-			// and `DrawPipelineProfile()` were drawn here.
+			Skinned("Render Pipeline", [&] { DrawRenderPipeline(); });
+			Skinned("Pipeline Profile", [&] { DrawPipelineProfile(); });
+			// TODO(asset-pipeline): draw the asset processing graph beside its catalogue.
 			Skinned("Network", [&] { DrawNetwork(); });
 			Skinned("Team Create", [&] { DrawTeamCreate(); });
 			Skinned("Control (MCP)", [&] { DrawControl(); });
@@ -1126,7 +1128,9 @@ namespace studio {
 		// question and closed again.
 		ImGui::MenuItem("History", nullptr, &ShowHistory);
 		ImGui::MenuItem("Assets", nullptr, &ShowAssets);
-		// TODO(render-pipeline): the three pipeline panels were opened from here.
+		ImGui::MenuItem("Render Pipeline", nullptr, &ShowRenderPipeline);
+		ImGui::MenuItem("Pipeline Profile", nullptr, &ShowPipelineProfile);
+		// TODO(asset-pipeline): expose the asset processing graph from this menu.
 		ImGui::MenuItem("Network", nullptr, &ShowNetwork);
 		ImGui::MenuItem("Team Create", nullptr, &ShowTeamCreate);
 		ImGui::MenuItem("Control (MCP)", nullptr, &ShowControl);

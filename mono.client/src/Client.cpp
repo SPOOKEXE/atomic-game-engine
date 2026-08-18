@@ -1956,12 +1956,10 @@ namespace client {
 							}
 						);
 
-						// TODO(render-pipeline): the world's own pipeline was
-						// installed here, on a world change rather than per
-						// frame. `PipelinesInstalledFor` guarded that and
-						// `PipelineSelected` carried the answer to the render
-						// call below - both members are still declared and both
-						// are marked. See `client::InstallWorldPipelines`.
+						if (PipelinesInstalledFor != id) {
+							PipelinesInstalledFor = id;
+							PipelineSelected = InstallWorldPipelines(store, Renderer, id.Index);
+						}
 
 						// **The particles, from the world being drawn and only
 						// that one.** A batch is a span into this world's pool;
@@ -2585,36 +2583,21 @@ namespace client {
 			}
 		});
 
-		// TODO(render-pipeline): this call took a `render::View` per camera.
-		//
-		// The old system's `Render` takes one camera's worth of arguments
-		// positionally; the one being replaced took `std::span<const View>`, so a
-		// frame could carry several cameras and each could name **its own
-		// pipeline** - `view.World` and `view.Pipeline` were set together here,
-		// because the pipeline key a world installs is qualified by the world id
-		// and a view naming one without the other asks for a pipeline nothing
-		// installed.
-		//
-		// **The two members that fed it are still on this class**, unused, and
-		// marked: `PipelinesInstalledFor` and `PipelineSelected`. They are where
-		// a world's saved pipelines were installed and which one this view
-		// selected. See `client::InstallWorldPipelines` in `Scene.hpp`.
-		LastFrame = Renderer.Render(
-			Views.CameraFrame(),
-			Views.Camera(),
-			drawn,
-			Overlay,
-			Surfaces,
-			hook,
-			sceneTarget,
-			0,
-			Particles,
-			RibbonVertices,
-			RibbonRuns,
-			Lights,
-			Foreign,
-			Portals
-		);
+		engine::render::View view;
+		view.CameraFrame = Views.CameraFrame();
+		view.Camera = Views.Camera();
+		view.Instances = drawn;
+		view.Surfaces = Surfaces;
+		view.Target = sceneTarget;
+		view.Particles = Particles;
+		view.RibbonVertices = RibbonVertices;
+		view.RibbonRuns = RibbonRuns;
+		view.Lights = Lights;
+		view.Foreign = Foreign;
+		view.Portals = Portals;
+		view.Pipeline = PipelineSelected;
+		view.World = Rendered.IsValid() ? Rendered.Index : 0;
+		LastFrame = Renderer.Render(std::span<const engine::render::View>(&view, 1), Overlay, hook);
 
 		// **After the frame rather than before it**, so the capture is of a
 		// frame whose scene texture exists - the studio's own capture states
@@ -2646,6 +2629,12 @@ namespace client {
 		using engine::core::Metrics;
 		Metrics::Count("render.triangles", static_cast<double>(LastFrame.Triangles));
 		Metrics::Count("render.draw-calls", static_cast<double>(LastFrame.DrawCalls));
+		Metrics::Count("render.upload-bytes", static_cast<double>(LastFrame.UploadedBytes));
+		Metrics::Count("render.upload-command-buffers", static_cast<double>(LastFrame.UploadCommandBuffers));
+		Metrics::Count("render.compute-dispatches", static_cast<double>(LastFrame.ComputeDispatches));
+		Metrics::Count(
+			"render.async-compute-command-buffers", static_cast<double>(LastFrame.AsyncComputeCommandBuffers)
+		);
 
 		// **The three that only mean anything as a series.** A batch count says
 		// whether the interface is being rebuilt into more draws than it needs;

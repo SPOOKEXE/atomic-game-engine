@@ -1,13 +1,20 @@
 #include "ShaderBinary.hpp"
 #include "SurfaceScale.hpp"
+#include "VulkanTimestamps.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/graph/Cull.hpp>
+#include <engine/graph/EntityFlow.hpp>
+#include <engine/graph/ExecutionPlan.hpp>
+#include <engine/graph/PipelineDocument.hpp>
+#include <engine/graph/Schedule.hpp>
 #include <engine/graph/Shadow.hpp>
+#include <engine/render/GraphRunner.hpp>
 #include <engine/render/MeshTable.hpp>
 #include <engine/render/MissingTexture.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/render/ShaderCompiler.hpp>
 #include <engine/render/TextureTable.hpp>
 #include <engine/resources/Shaders.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -27,14 +34,72 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <iterator>
+#include <optional>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace engine::render {
 
 	namespace {
+		struct BackendNode {
+			core::Name Kind;
+			graph::NodeScope Scope;
+			graph::ExecutionQueue Queue;
+		};
+
+		std::span<const BackendNode> BackendNodes() {
+			static const std::array nodes{
+				BackendNode{core::Name("world"), graph::NodeScope::World, graph::ExecutionQueue::Cpu},
+				BackendNode{core::Name("shadow"), graph::NodeScope::World, graph::ExecutionQueue::Graphics},
+				BackendNode{core::Name("camera"), graph::NodeScope::View, graph::ExecutionQueue::Cpu},
+				BackendNode{core::Name("entities"), graph::NodeScope::View, graph::ExecutionQueue::Cpu},
+				BackendNode{core::Name("cull-frustum"), graph::NodeScope::View, graph::ExecutionQueue::Cpu},
+				BackendNode{core::Name("cull-distance"), graph::NodeScope::View, graph::ExecutionQueue::Cpu},
+				BackendNode{core::Name("filter-tag"), graph::NodeScope::View, graph::ExecutionQueue::Cpu},
+				BackendNode{core::Name("order-draw"), graph::NodeScope::View, graph::ExecutionQueue::Cpu},
+				BackendNode{
+					core::Name("upload-instances"), graph::NodeScope::View, graph::ExecutionQueue::Transfer
+				},
+				BackendNode{core::Name("surface"), graph::NodeScope::View, graph::ExecutionQueue::Graphics},
+				BackendNode{core::Name("gbuffer"), graph::NodeScope::View, graph::ExecutionQueue::Graphics},
+				BackendNode{
+					core::Name("depth-linearise"), graph::NodeScope::View, graph::ExecutionQueue::Graphics
+				},
+				BackendNode{core::Name("ssao"), graph::NodeScope::View, graph::ExecutionQueue::Graphics},
+				BackendNode{
+					core::Name("deferred-lighting"), graph::NodeScope::View, graph::ExecutionQueue::Graphics
+				},
+				BackendNode{core::Name("tonemap"), graph::NodeScope::View, graph::ExecutionQueue::Graphics},
+				BackendNode{
+					core::Name("transparent"), graph::NodeScope::View, graph::ExecutionQueue::Graphics
+				},
+				BackendNode{core::Name("raster"), graph::NodeScope::View, graph::ExecutionQueue::Graphics},
+				BackendNode{core::Name("dispatch"), graph::NodeScope::View, graph::ExecutionQueue::Compute},
+				BackendNode{core::Name("output"), graph::NodeScope::View, graph::ExecutionQueue::Transfer},
+				BackendNode{core::Name("present"), graph::NodeScope::Frame, graph::ExecutionQueue::Graphics},
+				BackendNode{core::Name("viewer"), graph::NodeScope::Frame, graph::ExecutionQueue::Transfer},
+				BackendNode{core::Name("capture"), graph::NodeScope::Frame, graph::ExecutionQueue::Transfer},
+				BackendNode{core::Name("overlay"), graph::NodeScope::Frame, graph::ExecutionQueue::Graphics},
+				BackendNode{
+					core::Name("interface"), graph::NodeScope::Frame, graph::ExecutionQueue::Graphics
+				},
+			};
+			return nodes;
+		}
+
+		NodeTable BackendTable(const NodeHandler &handler) {
+			NodeTable nodes;
+			for (const BackendNode &node : BackendNodes()) {
+				nodes.Set(node.Kind, handler);
+			}
+			return nodes;
+		}
 
 		// Keep the GPU vertex layout identical to the asset vertex layout.
 		using Vertex = assets::MeshVertex;
@@ -189,8 +254,9 @@ namespace engine::render {
 			glm::vec4 BaseColour{1.0f, 1.0f, 1.0f, 1.0f};
 
 			// x: whether `colourMap` holds this draw's texture. y: the alpha
-			// below which a fragment is discarded, or zero to discard none.
+			// cutoff. z: whether height is present. w: parallax UV scale.
 			glm::vec4 Surface{0.0f, 0.0f, 0.0f, 0.0f};
+			glm::vec4 Material{0.0f, 0.0f, 0.0f, 0.0f};
 
 			// Where the current animation cell sits: x the scale, yz the offset.
 			//
@@ -246,6 +312,35 @@ namespace engine::render {
 			glm::vec4 FogColour{0.0f, 0.0f, 0.0f, 0.0f};
 			glm::vec4 Fog{100000.0f, 100001.0f, 0.0f, 0.0f};
 			glm::vec4 Eye{0.0f, 0.0f, 0.0f, 0.0f};
+		};
+
+		// Shared by the default graph's fullscreen passes. One block keeps the
+		// camera and authored Lighting state identical from depth reconstruction
+		// through ambient occlusion and deferred shading.
+		struct PbrUniforms {
+			glm::mat4 InverseViewProjection{1.0f};
+			glm::mat4 LightViewProjection{1.0f};
+			glm::vec4 Planes{};
+			glm::vec4 Target{};
+			glm::vec4 Direction{};
+			glm::vec4 Ambient{};
+			glm::vec4 OutdoorAmbient{};
+			glm::vec4 Direct{};
+			glm::vec4 Eye{};
+			glm::vec4 FogColour{};
+			glm::vec4 Fog{};
+			glm::vec4 Shadow{};
+		};
+
+		// Slot zero for an authored fullscreen fragment shader. The contract is
+		// intentionally small and stable: target size, reciprocal size, frame
+		// time, and the active camera matrices. Inputs remain sampler slots in the
+		// order the node declares them.
+		struct GraphPassUniforms {
+			glm::mat4 ViewProjection{1.0f};
+			glm::mat4 InverseViewProjection{1.0f};
+			glm::vec4 Target{};
+			glm::vec4 View{};
 		};
 
 		// How many holes may transport a shadow in one frame.
@@ -372,48 +467,159 @@ namespace engine::render {
 			return bytes;
 		}
 
-		// Walks `PassOrder()` as the frame is submitted.
-		//
-		// Runtime guard for pass order; optional passes may be skipped.
-		struct PassRecorder {
-			uint8_t Ran = 0;
-			uint8_t Furthest = 0;
-			bool Complained = false;
-
-			void Enter(Pass pass) {
-				const auto index = static_cast<uint8_t>(pass);
-
-				if (index < Furthest && !Complained) {
-					ENGINE_ERROR(
-						"render pass '{}' submitted after '{}', which PassOrder puts before it",
-						PassOrder()[index].Text(),
-						PassOrder()[Furthest].Text()
-					);
-					Complained = true;
-				}
-
-				if (index > Furthest) {
-					Furthest = index;
-				}
-
-				Ran |= static_cast<uint8_t>(1u << index);
+		SDL_GPUTextureFormat DeviceFormat(graph::ResourceFormat format) {
+			switch (format) {
+			case graph::ResourceFormat::R8:
+				return SDL_GPU_TEXTUREFORMAT_R8_UNORM;
+			case graph::ResourceFormat::RG8:
+				return SDL_GPU_TEXTUREFORMAT_R8G8_UNORM;
+			case graph::ResourceFormat::RGBA8:
+				return SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+			case graph::ResourceFormat::RGBA8_SRGB:
+				return SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB;
+			case graph::ResourceFormat::RGB10A2:
+				return SDL_GPU_TEXTUREFORMAT_R10G10B10A2_UNORM;
+			case graph::ResourceFormat::RG11B10F:
+				return SDL_GPU_TEXTUREFORMAT_R11G11B10_UFLOAT;
+			case graph::ResourceFormat::R16F:
+				return SDL_GPU_TEXTUREFORMAT_R16_FLOAT;
+			case graph::ResourceFormat::RG16F:
+				return SDL_GPU_TEXTUREFORMAT_R16G16_FLOAT;
+			case graph::ResourceFormat::RGBA16F:
+				return SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+			case graph::ResourceFormat::R32F:
+				return SDL_GPU_TEXTUREFORMAT_R32_FLOAT;
+			case graph::ResourceFormat::RG32F:
+				return SDL_GPU_TEXTUREFORMAT_R32G32_FLOAT;
+			case graph::ResourceFormat::D24S8:
+				return SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT;
+			case graph::ResourceFormat::D32F:
+				return SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+			default:
+				return SDL_GPU_TEXTUREFORMAT_INVALID;
 			}
-		};
+		}
+
 	}
 
-	std::span<const core::Name> PassOrder() {
-		// Function-local rather than a namespace-scope array, because a
-		// `core::Name` interns on construction and interning before `main` is
-		// how a static initialisation order bug is written.
-		static const std::array<core::Name, static_cast<size_t>(Pass::Count)> order{
-			core::Name("shadow"),
-			core::Name("surface"),
-			core::Name("opaque"),
-			core::Name("transparent"),
-			core::Name("overlay"),
-			core::Name("interface"),
-		};
-		return order;
+	namespace {
+		bool CompileRenderPipeline(
+			const graph::RenderGraph &pipeline,
+			graph::CompiledGraph &compiled,
+			graph::ExecutionSchedule &schedule,
+			core::Name &offender,
+			std::string &reason
+		) {
+			const graph::GraphStatus graphStatus = pipeline.Compile(compiled, offender);
+			if (graphStatus != graph::GraphStatus::Ok) {
+				reason = graph::Describe(graphStatus);
+				return false;
+			}
+			const graph::ScheduleStatus status = graph::CompileSchedule(pipeline, schedule, offender);
+			if (status != graph::ScheduleStatus::Ok) {
+				reason = graph::Describe(status);
+				return false;
+			}
+
+			// Resource edges, not canvas or declaration position, own execution.
+			// SDL records each dependency wave serially, preserving the schedule on a
+			// backend that exposes one portable command stream.
+			compiled.Shared.clear();
+			compiled.PerView.clear();
+			compiled.Final.clear();
+			for (const graph::ExecutionWave &wave : schedule.Waves) {
+				for (const graph::ScheduledNode &scheduled : wave.Nodes) {
+					const graph::Node *node = pipeline.Find(scheduled.Node);
+					if (node == nullptr) {
+						offender = {};
+						reason = "the compiled schedule names no node";
+						return false;
+					}
+					switch (node->Scope) {
+					case graph::NodeScope::World:
+						compiled.Shared.push_back(scheduled.Node);
+						break;
+					case graph::NodeScope::View:
+						compiled.PerView.push_back(scheduled.Node);
+						break;
+					case graph::NodeScope::Frame:
+						compiled.Final.push_back(scheduled.Node);
+						break;
+					}
+				}
+			}
+
+			const NodeTable backend = BackendTable([](const graph::RunContext &) { return true; });
+			const std::vector<core::Name> missing = backend.Missing(pipeline);
+			if (!missing.empty()) {
+				offender = missing.front();
+				reason = "the renderer has no backend node for this kind";
+				return false;
+			}
+
+			const std::span<const BackendNode> supported = BackendNodes();
+			std::vector<bool> seen(supported.size(), false);
+			for (const graph::ExecutionWave &wave : schedule.Waves) {
+				for (const graph::ScheduledNode &scheduled : wave.Nodes) {
+					const graph::Node *node = pipeline.Find(scheduled.Node);
+					if (node == nullptr) {
+						offender = {};
+						reason = "the compiled schedule names no node";
+						return false;
+					}
+
+					const auto found =
+						std::find_if(supported.begin(), supported.end(), [node](const BackendNode &entry) {
+							return entry.Kind == node->Kind;
+						});
+					if (found == supported.end()) {
+						offender = node->Name;
+						reason = "the renderer has no backend node for this kind";
+						return false;
+					}
+					const size_t index = static_cast<size_t>(found - supported.begin());
+					const bool repeatable =
+						node->Kind == core::Name("cull-frustum") ||
+						node->Kind == core::Name("cull-distance") || node->Kind == core::Name("filter-tag") ||
+						node->Kind == core::Name("order-draw") || node->Kind == core::Name("raster") ||
+						node->Kind == core::Name("dispatch") || node->Kind == core::Name("viewer") ||
+						node->Kind == core::Name("capture");
+					if (seen[index] && !repeatable) {
+						offender = node->Name;
+						reason = "a built-in render node kind may appear only once";
+						return false;
+					}
+					const bool flexibleScope = node->Kind == core::Name("dispatch");
+					if (node->Scope != found->Scope && !flexibleScope) {
+						offender = node->Name;
+						reason = "this backend node cannot run at the authored scope";
+						return false;
+					}
+					seen[index] = true;
+					if (const std::string *queue = node->Parameter(core::Name("queue"));
+						queue != nullptr && *queue != "auto" && *queue != graph::Describe(found->Queue)) {
+						offender = node->Name;
+						reason = "this backend node requires the " +
+								 std::string(graph::Describe(found->Queue)) + " queue";
+						return false;
+					}
+					if (const std::string *culling = node->Parameter(core::Name("culling"));
+						culling != nullptr) {
+						if (*culling == "occlusion") {
+							offender = node->Name;
+							reason = "occlusion culling needs a depth hierarchy and indirect draw backend";
+							return false;
+						}
+						if (*culling != "inherit" && node->Kind != core::Name("cull-frustum")) {
+							offender = node->Name;
+							reason = "culling belongs on an entity filter node, not this backend node";
+							return false;
+						}
+					}
+				}
+			}
+			return true;
+		}
 	}
 
 	// -----------------------------------------------------------------------
@@ -422,7 +628,303 @@ namespace engine::render {
 		SDL_Window *Window = nullptr;
 		SDL_GPUDevice *Device = nullptr;
 
+		struct NamedPipeline {
+			core::Name Name;
+			graph::RenderGraph Graph;
+			graph::CompiledGraph Compiled;
+			graph::ExecutionSchedule Schedule;
+		};
+
+		std::optional<NamedPipeline> EngineDefault;
+		std::vector<NamedPipeline> NamedPipelines;
+		core::Name ActiveGraph;
+
+		const NamedPipeline *PipelineFor(core::Name name) const {
+			if (!name.IsValid()) {
+				return EngineDefault ? &*EngineDefault : nullptr;
+			}
+			for (const NamedPipeline &pipeline : NamedPipelines) {
+				if (pipeline.Name == name) {
+					return &pipeline;
+				}
+			}
+			return EngineDefault ? &*EngineDefault : nullptr;
+		}
+
+		enum class ResourceRole : uint8_t {
+			Unknown,
+			Scene,
+			Depth,
+			Shadow,
+			Surface,
+			Albedo,
+			Normal,
+			Material,
+			Emissive,
+			LinearDepth,
+			Occlusion,
+			Lit,
+			Display,
+		};
+
+		ResourceRole RoleFor(core::Name resource) const {
+			const NamedPipeline *pipeline = PipelineFor(ActiveGraph);
+			if (pipeline == nullptr) {
+				return ResourceRole::Unknown;
+			}
+			for (uint32_t value = 1; value <= pipeline->Graph.Count(); value++) {
+				const graph::Node *node = pipeline->Graph.Find(graph::NodeId{value});
+				if (node == nullptr) {
+					continue;
+				}
+				for (size_t output = 0; output < node->Writes.size(); output++) {
+					const graph::ResourceDesc *desc = pipeline->Graph.FindResource(node->Writes[output]);
+					if (desc == nullptr || desc->Name != resource) {
+						continue;
+					}
+					if (node->Kind == core::Name("shadow")) {
+						return ResourceRole::Shadow;
+					}
+					if (node->Kind == core::Name("surface")) {
+						return ResourceRole::Surface;
+					}
+					if (node->Kind == core::Name("gbuffer")) {
+						constexpr std::array roles{
+							ResourceRole::Albedo,
+							ResourceRole::Normal,
+							ResourceRole::Material,
+							ResourceRole::Emissive,
+							ResourceRole::Depth,
+						};
+						return output < roles.size() ? roles[output] : ResourceRole::Unknown;
+					}
+					if (node->Kind == core::Name("depth-linearise")) {
+						return ResourceRole::LinearDepth;
+					}
+					if (node->Kind == core::Name("ssao")) {
+						return ResourceRole::Occlusion;
+					}
+					if (node->Kind == core::Name("deferred-lighting")) {
+						return ResourceRole::Lit;
+					}
+					if (node->Kind == core::Name("tonemap") || node->Kind == core::Name("transparent")) {
+						return ResourceRole::Display;
+					}
+					if (node->Kind == core::Name("present") || node->Kind == core::Name("overlay") ||
+						node->Kind == core::Name("interface")) {
+						return ResourceRole::Scene;
+					}
+				}
+			}
+			return ResourceRole::Unknown;
+		}
+
+		struct PreviewReadback {
+			SDL_GPUTransferBuffer *Transfer = nullptr;
+			uint32_t Capacity = 0;
+			SDL_GPUFence *Fence = nullptr;
+			core::Name Source;
+			size_t Slot = Renderer::ANY_VIEWPORT;
+			uint32_t Width = 0;
+			uint32_t Height = 0;
+			uint32_t BytesPerPixel = 0;
+			bool Rgba = false;
+			std::vector<uint32_t> Pixels;
+			ImageHistogram Histogram;
+			PendingReadback Pending;
+		};
+
+		PreviewReadback Preview;
+		core::Name Inspected;
+		size_t InspectedSlot = Renderer::ANY_VIEWPORT;
+		uint64_t FrameCounter = 0;
+		bool PreviewSubmitted = false;
+
+		// A multi-view frame lends one command buffer to each view in turn. The
+		// ordinary Render body still records a complete view, while these fields
+		// keep acquisition, graph scope, timings, and submission frame-owned.
+		bool BatchActive = false;
+		bool BatchFirst = false;
+		bool BatchFinal = false;
+		bool BatchShared = false;
+		bool BatchFailed = false;
+		size_t BatchViewIndex = 0;
+		size_t BatchWorldIndex = 0;
+		SDL_GPUCommandBuffer *BatchCommand = nullptr;
+		SDL_GPUTexture *BatchSwapchain = nullptr;
+		uint32_t BatchWidth = 0;
+		uint32_t BatchHeight = 0;
+		uint32_t BatchTimingSlot = VulkanTimestamps::NO_SLOT;
+
+		void CollectPreview();
+		void PollPreview();
+		bool RequestPreview(
+			SDL_GPUCommandBuffer *command,
+			SDL_GPUTexture *texture,
+			uint32_t width,
+			uint32_t height,
+			core::Name source,
+			size_t slot,
+			SDL_GPUTextureFormat format
+		);
+
+		struct PassMarks {
+			core::Name Name;
+			uint32_t Opened = VulkanTimestamps::MARKS;
+			uint32_t Closed = VulkanTimestamps::MARKS;
+		};
+
+		VulkanTimestamps Timestamps;
+		std::array<std::vector<PassMarks>, VulkanTimestamps::SLOTS> PendingMarks;
+		std::array<uint64_t, VulkanTimestamps::SLOTS> TimingSequence{};
+		uint64_t NextTimingSequence = 1;
+		uint64_t ResolvedTimingSequence = 0;
+		std::unordered_map<uint32_t, double> GpuTimings;
+		std::unordered_map<uint32_t, double> WallTimings;
+
+		void CollectTimings();
+
 		SDL_GPUGraphicsPipeline *OpaquePipeline = nullptr;
+
+		// The default graph's opaque path. Geometry writes material properties,
+		// then screen-sized passes consume those textures. Portal panes and the
+		// blended tail stay on the forward family below because their projected
+		// images and ordering are not representable by one G-buffer pixel.
+		SDL_GPUGraphicsPipeline *GBufferPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *DepthLinearPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *SsaoPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *DeferredLightingPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *TonemapPipeline = nullptr;
+
+		struct PbrDimensions {
+			uint32_t TargetWidth = 0;
+			uint32_t TargetHeight = 0;
+			uint32_t ViewWidth = 0;
+			uint32_t ViewHeight = 0;
+			uint32_t LinearWidth = 0;
+			uint32_t LinearHeight = 0;
+			uint32_t OcclusionWidth = 0;
+			uint32_t OcclusionHeight = 0;
+			uint32_t LitWidth = 0;
+			uint32_t LitHeight = 0;
+
+			bool operator==(const PbrDimensions &) const = default;
+		};
+
+		struct PbrSlot {
+			SDL_GPUTexture *Albedo = nullptr;
+			SDL_GPUTexture *Normal = nullptr;
+			SDL_GPUTexture *Material = nullptr;
+			SDL_GPUTexture *Emissive = nullptr;
+			SDL_GPUTexture *LinearDepth = nullptr;
+			SDL_GPUTexture *Occlusion = nullptr;
+			SDL_GPUTexture *Lit = nullptr;
+			SDL_GPUTexture *Display = nullptr;
+			PbrDimensions Dimensions;
+		};
+
+		std::vector<PbrSlot> PbrSlots;
+
+		PbrSlot &PbrAt(size_t slot) {
+			if (PbrSlots.size() <= slot) {
+				PbrSlots.resize(slot + 1);
+			}
+			return PbrSlots[slot];
+		}
+
+		bool EnsurePbr(size_t slot, const PbrDimensions &dimensions);
+		void ReleasePbr(PbrSlot &slot);
+
+		struct NamedTexture {
+			SDL_GPUTexture *Texture = nullptr;
+			uint32_t Width = 0;
+			uint32_t Height = 0;
+			SDL_GPUTextureFormat Format = SDL_GPU_TEXTUREFORMAT_INVALID;
+
+			bool IsValid() const {
+				return Texture != nullptr && Width > 0 && Height > 0;
+			}
+		};
+
+		// Graph targets are isolated by the pipeline that declared them and by
+		// the scope that produced them. A view target belongs to a viewport slot,
+		// while world work belongs to the caller's stable world key. This is the
+		// storage rule that prevents two worlds with identically named resources
+		// from sampling one another.
+		struct GraphTarget {
+			core::Name Pipeline;
+			core::Name Resource;
+			graph::NodeScope Scope = graph::NodeScope::Frame;
+			uint64_t Owner = 0;
+			SDL_GPUTexture *Texture = nullptr;
+			SDL_GPUTextureFormat Format = SDL_GPU_TEXTUREFORMAT_INVALID;
+			uint32_t Width = 0;
+			uint32_t Height = 0;
+		};
+
+		std::vector<GraphTarget> GraphTargets;
+
+		graph::NodeScope ResourceScope(const NamedPipeline &pipeline, graph::ResourceId resource) const;
+		NamedTexture FindGraphTarget(
+			const NamedPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner
+		) const;
+		NamedTexture EnsureGraphTarget(
+			const NamedPipeline &pipeline,
+			graph::ResourceId resource,
+			uint64_t owner,
+			uint32_t viewWidth,
+			uint32_t viewHeight
+		);
+
+		struct GraphRasterPipeline {
+			core::Name Pipeline;
+			core::Name Node;
+			SDL_GPUTextureFormat Format = SDL_GPU_TEXTUREFORMAT_INVALID;
+			uint32_t Samplers = 0;
+			SDL_GPUGraphicsPipeline *Handle = nullptr;
+		};
+
+		struct GraphComputePipeline {
+			core::Name Pipeline;
+			core::Name Node;
+			uint32_t Samplers = 0;
+			uint32_t Storage = 0;
+			uint32_t LocalX = 1;
+			uint32_t LocalY = 1;
+			uint32_t LocalZ = 1;
+			SDL_GPUComputePipeline *Handle = nullptr;
+		};
+
+		std::vector<GraphRasterPipeline> GraphRasterPipelines;
+		std::vector<GraphComputePipeline> GraphComputePipelines;
+		struct GraphCaptureReceipt {
+			core::Name Pipeline;
+			core::Name Node;
+			std::string Path;
+		};
+		std::vector<GraphCaptureReceipt> GraphCaptureReceipts;
+		std::unordered_map<std::string, uint64_t> GraphCaptureFrames;
+
+		bool GraphShaderCode(
+			const graph::Node &node, ShaderStage stage, std::vector<uint8_t> &bytes, std::string &entryPoint
+		) const;
+		SDL_GPUGraphicsPipeline *GraphRasterFor(
+			const NamedPipeline &pipeline,
+			const graph::Node &node,
+			SDL_GPUTextureFormat format,
+			uint32_t samplers
+		);
+		SDL_GPUComputePipeline *GraphComputeFor(
+			const NamedPipeline &pipeline,
+			const graph::Node &node,
+			uint32_t samplers,
+			uint32_t storage,
+			uint32_t localX,
+			uint32_t localY,
+			uint32_t localZ
+		);
+		void ReleaseGraphState(core::Name pipeline);
+		void ReleaseAllGraphState();
 
 		// The same geometry and the same shaders as the opaque pipeline, with
 		// blending on and depth writes off. Two pipelines rather than one with
@@ -504,6 +1006,12 @@ namespace engine::render {
 		// The submission order, rebuilt each frame and kept so it is not
 		// reallocated per frame. See `scene::OrderForDrawing`.
 		std::vector<uint32_t> DrawOrder;
+
+		// Entity-list and viewpoint storage belongs to the renderer rather than one
+		// `RenderView` call. Filter chains clear their contents between views while
+		// retaining the capacity paid for by the largest view seen so far.
+		graph::EntityFlow GraphEntities;
+		graph::Viewpoints GraphViewpoints;
 
 		// What survived culling: the indices, and the instances themselves.
 		//
@@ -612,6 +1120,11 @@ namespace engine::render {
 		// often than it reads them.
 		std::vector<const MeshEntry *> SlotMesh;
 		std::vector<core::Name> SlotTexture;
+		std::vector<core::Name> SlotNormalMap;
+		std::vector<core::Name> SlotRoughnessMap;
+		std::vector<core::Name> SlotOcclusionMap;
+		std::vector<core::Name> SlotHeightMap;
+		std::vector<core::Name> SlotEmissiveMap;
 
 		// Which shader each slot asks for, or an invalid name for the engine's.
 		//
@@ -1027,7 +1540,13 @@ namespace engine::render {
 		// photographs whatever that panel happens to be showing.
 		size_t CaptureSlot = Renderer::ANY_VIEWPORT;
 
-		bool WriteCapture(SDL_GPUTransferBuffer *from, uint32_t width, uint32_t height) const;
+		bool WriteCapture(
+			SDL_GPUTransferBuffer *from,
+			uint32_t width,
+			uint32_t height,
+			SDL_GPUTextureFormat format,
+			const std::filesystem::path &path
+		) const;
 
 		// --- the shadow map -------------------------------------------------
 		//
@@ -1542,7 +2061,7 @@ namespace engine::render {
 			// count above records.
 			"opaque.frag",
 			SDL_GPU_SHADERSTAGE_FRAGMENT,
-			4,
+			9,
 			3
 		);
 
@@ -1550,9 +2069,17 @@ namespace engine::render {
 		SDL_GPUShader *shadowFragment = LoadShader("shadow.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 1);
 		SDL_GPUShader *overlayVertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
 		SDL_GPUShader *overlayFragment = LoadShader("overlay.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
+		SDL_GPUShader *gbufferFragment = LoadShader("gbuffer.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 9, 1);
+		SDL_GPUShader *depthLinearFragment =
+			LoadShader("depth-linearise.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
+		SDL_GPUShader *ssaoFragment = LoadShader("ssao.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1);
+		SDL_GPUShader *deferredLightingFragment =
+			LoadShader("deferred-lighting.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 7, 2);
+		SDL_GPUShader *tonemapFragment = LoadShader("tonemap.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
 
 		if (!opaqueVertex || !opaqueFragment || !shadowVertex || !shadowFragment || !overlayVertex ||
-			!overlayFragment) {
+			!overlayFragment || !gbufferFragment || !depthLinearFragment || !ssaoFragment ||
+			!deferredLightingFragment || !tonemapFragment) {
 			return false;
 		}
 
@@ -1623,6 +2150,48 @@ namespace engine::render {
 		OpaquePipeline = SDL_CreateGPUGraphicsPipeline(Device, &opaque);
 		if (!OpaquePipeline) {
 			ENGINE_ERROR("opaque pipeline: {}", SDL_GetError());
+		}
+
+		// --- default PBR graph -----------------------------------------------
+
+		SDL_GPUColorTargetDescription gbufferTargets[4]{};
+		gbufferTargets[0].format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB;
+		gbufferTargets[1].format = SDL_GPU_TEXTUREFORMAT_R10G10B10A2_UNORM;
+		gbufferTargets[2].format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+		gbufferTargets[3].format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+
+		SDL_GPUGraphicsPipelineCreateInfo gbuffer = opaque;
+		gbuffer.fragment_shader = gbufferFragment;
+		gbuffer.target_info.color_target_descriptions = gbufferTargets;
+		gbuffer.target_info.num_color_targets = 4;
+		GBufferPipeline = SDL_CreateGPUGraphicsPipeline(Device, &gbuffer);
+		if (GBufferPipeline == nullptr) {
+			ENGINE_ERROR("gbuffer pipeline: {}", SDL_GetError());
+		}
+
+		const auto fullscreen = [&](SDL_GPUShader *fragment, SDL_GPUTextureFormat format) {
+			SDL_GPUColorTargetDescription target{};
+			target.format = format;
+
+			SDL_GPUGraphicsPipelineCreateInfo info{};
+			info.vertex_shader = overlayVertex;
+			info.fragment_shader = fragment;
+			info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+			info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+			info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+			info.target_info.color_target_descriptions = &target;
+			info.target_info.num_color_targets = 1;
+			return SDL_CreateGPUGraphicsPipeline(Device, &info);
+		};
+
+		DepthLinearPipeline = fullscreen(depthLinearFragment, SDL_GPU_TEXTUREFORMAT_R32_FLOAT);
+		SsaoPipeline = fullscreen(ssaoFragment, SDL_GPU_TEXTUREFORMAT_R8_UNORM);
+		DeferredLightingPipeline =
+			fullscreen(deferredLightingFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
+		TonemapPipeline = fullscreen(tonemapFragment, swapchainFormat);
+		if (DepthLinearPipeline == nullptr || SsaoPipeline == nullptr ||
+			DeferredLightingPipeline == nullptr || TonemapPipeline == nullptr) {
+			ENGINE_ERROR("default PBR fullscreen pipeline: {}", SDL_GetError());
 		}
 
 		// --- shadow ---------------------------------------------------------
@@ -1916,6 +2485,11 @@ namespace engine::render {
 		// outlive their creation. **`opaqueVertex` is the exception and is
 		// released in `Shutdown` instead** - see `OpaqueVertexShader`.
 		SDL_ReleaseGPUShader(Device, opaqueFragment);
+		SDL_ReleaseGPUShader(Device, gbufferFragment);
+		SDL_ReleaseGPUShader(Device, depthLinearFragment);
+		SDL_ReleaseGPUShader(Device, ssaoFragment);
+		SDL_ReleaseGPUShader(Device, deferredLightingFragment);
+		SDL_ReleaseGPUShader(Device, tonemapFragment);
 		SDL_ReleaseGPUShader(Device, overlayVertex);
 		SDL_ReleaseGPUShader(Device, overlayFragment);
 
@@ -1928,7 +2502,8 @@ namespace engine::render {
 		// for something a scene may not even use. `DrawParticles` checks for null
 		// and draws nothing, with the error already in the log above.
 		return OpaquePipeline != nullptr && TransparentPipeline != nullptr && ShadowPipeline != nullptr &&
-			   OverlayPipeline != nullptr;
+			   OverlayPipeline != nullptr && GBufferPipeline != nullptr && DepthLinearPipeline != nullptr &&
+			   SsaoPipeline != nullptr && DeferredLightingPipeline != nullptr && TonemapPipeline != nullptr;
 	}
 
 	void Renderer::Impl::BindPipeline(
@@ -1982,7 +2557,7 @@ namespace engine::render {
 		info.entrypoint = Binary.EntryPoint;
 		info.format = Binary.Format;
 		info.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
-		info.num_samplers = 4;
+		info.num_samplers = 9;
 		info.num_uniform_buffers = 3;
 
 		SDL_GPUShader *fragment = SDL_CreateGPUShader(Device, &info);
@@ -2154,8 +2729,31 @@ namespace engine::render {
 																				   : Textures.Default();
 				const bool absent = choice == TextureChoice::Missing;
 
+				const auto dataMap = [&](core::Name name) {
+					SDL_GPUTexture *foundMap = Textures.Find(name);
+					if (foundMap != nullptr) {
+						return foundMap;
+					}
+					if (name.IsValid() && !Textures.Expecting(name)) {
+						return Textures.Missing();
+					}
+					return static_cast<SDL_GPUTexture *>(nullptr);
+				};
+
+				SDL_GPUTexture *const normal = dataMap(SlotNormalMap[slot]);
+				SDL_GPUTexture *const roughness = dataMap(SlotRoughnessMap[slot]);
+				SDL_GPUTexture *const occlusion = dataMap(SlotOcclusionMap[slot]);
+				SDL_GPUTexture *const height = dataMap(SlotHeightMap[slot]);
+				SDL_GPUTexture *const emissive = dataMap(SlotEmissiveMap[slot]);
+				SDL_GPUSampler *const fallbackSampler =
+					surfaceSampler != nullptr ? surfaceSampler : Textures.Sampler();
+				SDL_GPUSampler *const sampledShadowSampler =
+					shadowSampler != nullptr ? shadowSampler : fallbackSampler;
+				SDL_GPUSampler *const sampledBeamSampler =
+					ShadowSampler != nullptr ? ShadowSampler : sampledShadowSampler;
+
 				// **The fallback texel is bound rather than the binding being
-				// skipped** for the other two, because a sampler a pipeline
+				// skipped** for data maps, because a sampler a pipeline
 				// declares must have something in it - an unbound one is
 				// undefined behaviour on some backends and a validation error on
 				// others. Those two are genuinely absent features rather than
@@ -2165,13 +2763,17 @@ namespace engine::render {
 				// property of the frame and not of one draw, and threading it
 				// through would put it in a signature five passes call.
 				const SDL_GPUTextureSamplerBinding samplers[] = {
-					{shadow != nullptr ? shadow : FallbackTexture, shadowSampler},
-					{surface != nullptr ? surface : FallbackTexture, surfaceSampler},
+					{shadow != nullptr ? shadow : FallbackTexture, sampledShadowSampler},
+					{surface != nullptr ? surface : FallbackTexture, fallbackSampler},
 					{sampled != nullptr ? sampled : FallbackTexture, Textures.Sampler()},
-					{BeamTexture != nullptr ? BeamTexture : FallbackTexture,
-					 ShadowSampler != nullptr ? ShadowSampler : shadowSampler},
+					{BeamTexture != nullptr ? BeamTexture : FallbackTexture, sampledBeamSampler},
+					{normal != nullptr ? normal : FallbackTexture, Textures.Sampler()},
+					{roughness != nullptr ? roughness : FallbackTexture, Textures.Sampler()},
+					{occlusion != nullptr ? occlusion : FallbackTexture, Textures.Sampler()},
+					{emissive != nullptr ? emissive : FallbackTexture, Textures.Sampler()},
+					{height != nullptr ? height : FallbackTexture, Textures.Sampler()},
 				};
-				SDL_BindGPUFragmentSamplers(pass, 0, samplers, 4);
+				SDL_BindGPUFragmentSamplers(pass, 0, samplers, 9);
 
 				LightingUniforms uniforms = *lighting;
 
@@ -2185,7 +2787,18 @@ namespace engine::render {
 				const std::array<float, 4> tint =
 					absent ? std::array<float, 4>{1.0f, 1.0f, 1.0f, 1.0f} : colour;
 				uniforms.BaseColour = glm::vec4{tint[0], tint[1], tint[2], tint[3]};
-				uniforms.Surface = glm::vec4{sampled != nullptr ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f};
+				uniforms.Surface = glm::vec4{
+					sampled != nullptr ? 1.0f : 0.0f,
+					0.0f,
+					height != nullptr ? 1.0f : 0.0f,
+					0.04f,
+				};
+				uniforms.Material = glm::vec4{
+					normal != nullptr ? 1.0f : 0.0f,
+					roughness != nullptr ? 1.0f : 0.0f,
+					occlusion != nullptr ? 1.0f : 0.0f,
+					emissive != nullptr ? 1.0f : 0.0f,
+				};
 
 				// **The cell is per draw, not per instance**, which is the whole
 				// simplification: a sheet plays on the clock rather than on
@@ -2259,6 +2872,11 @@ namespace engine::render {
 
 			const MeshEntry *const mesh = SlotMesh[slot];
 			const core::Name texture = SlotTexture[slot];
+			const core::Name normalMap = SlotNormalMap[slot];
+			const core::Name roughnessMap = SlotRoughnessMap[slot];
+			const core::Name occlusionMap = SlotOcclusionMap[slot];
+			const core::Name heightMap = SlotHeightMap[slot];
+			const core::Name emissiveMap = SlotEmissiveMap[slot];
 
 			// **The shader joins what ends a run, because it is a pipeline.** A
 			// pipeline bind is per draw at best, so two instances drawn through
@@ -2277,7 +2895,10 @@ namespace engine::render {
 
 			uint32_t run = 1;
 			while (slot + run < first + count && SlotMesh[slot + run] == mesh &&
-				   SlotTexture[slot + run] == texture && SlotShader[slot + run] == shader &&
+				   SlotTexture[slot + run] == texture && SlotNormalMap[slot + run] == normalMap &&
+				   SlotRoughnessMap[slot + run] == roughnessMap &&
+				   SlotOcclusionMap[slot + run] == occlusionMap && SlotHeightMap[slot + run] == heightMap &&
+				   SlotEmissiveMap[slot + run] == emissiveMap && SlotShader[slot + run] == shader &&
 				   SlotSeam[slot + run] == seam && SlotSeamLight[slot + run] == seamLight &&
 				   scene::MatchesTags(SlotTags[slot + run], tagFilter)) {
 				run++;
@@ -2992,7 +3613,9 @@ namespace engine::render {
 		SDL_GPUTextureCreateInfo info{};
 		info.type = SDL_GPU_TEXTURETYPE_2D;
 		info.format = DepthFormat;
-		info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+		// Deferred depth-linearisation samples the same depth the geometry pass
+		// writes. The chosen format was probed for both usages at initialisation.
+		info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
 		info.width = width;
 		info.height = height;
 		info.layer_count_or_depth = 1;
@@ -3014,6 +3637,378 @@ namespace engine::render {
 
 	bool Renderer::Impl::EnsureDepth(uint32_t width, uint32_t height) {
 		return EnsureDepthIn(DepthTexture, DepthWidth, DepthHeight, width, height);
+	}
+
+	void Renderer::Impl::ReleasePbr(PbrSlot &slot) {
+		for (SDL_GPUTexture *texture :
+			 {slot.Albedo,
+			  slot.Normal,
+			  slot.Material,
+			  slot.Emissive,
+			  slot.LinearDepth,
+			  slot.Occlusion,
+			  slot.Lit,
+			  slot.Display}) {
+			if (texture != nullptr) {
+				SDL_ReleaseGPUTexture(Device, texture);
+			}
+		}
+		slot = {};
+	}
+
+	bool Renderer::Impl::EnsurePbr(size_t index, const PbrDimensions &dimensions) {
+		PbrSlot &slot = PbrAt(index);
+		if (slot.Albedo != nullptr && slot.Dimensions == dimensions) {
+			return true;
+		}
+		if (dimensions.TargetWidth == 0 || dimensions.TargetHeight == 0 || dimensions.ViewWidth == 0 ||
+			dimensions.ViewHeight == 0 || dimensions.LinearWidth == 0 || dimensions.LinearHeight == 0 ||
+			dimensions.OcclusionWidth == 0 || dimensions.OcclusionHeight == 0 || dimensions.LitWidth == 0 ||
+			dimensions.LitHeight == 0 || !EnsureSurfaceSampler()) {
+			return false;
+		}
+
+		PbrSlot made;
+		made.Dimensions = dimensions;
+		const auto texture = [&](SDL_GPUTextureFormat format, uint32_t textureWidth, uint32_t textureHeight) {
+			SDL_GPUTextureCreateInfo info{};
+			info.type = SDL_GPU_TEXTURETYPE_2D;
+			info.format = format;
+			info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+			info.width = textureWidth;
+			info.height = textureHeight;
+			info.layer_count_or_depth = 1;
+			info.num_levels = 1;
+			info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+			return SDL_CreateGPUTexture(Device, &info);
+		};
+
+		made.Albedo = texture(
+			SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB, dimensions.TargetWidth, dimensions.TargetHeight
+		);
+		made.Normal =
+			texture(SDL_GPU_TEXTUREFORMAT_R10G10B10A2_UNORM, dimensions.TargetWidth, dimensions.TargetHeight);
+		made.Material =
+			texture(SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, dimensions.TargetWidth, dimensions.TargetHeight);
+		made.Emissive = texture(
+			SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT, dimensions.TargetWidth, dimensions.TargetHeight
+		);
+		made.LinearDepth =
+			texture(SDL_GPU_TEXTUREFORMAT_R32_FLOAT, dimensions.LinearWidth, dimensions.LinearHeight);
+		made.Occlusion =
+			texture(SDL_GPU_TEXTUREFORMAT_R8_UNORM, dimensions.OcclusionWidth, dimensions.OcclusionHeight);
+		made.Lit =
+			texture(SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT, dimensions.LitWidth, dimensions.LitHeight);
+		made.Display = texture(ColourFormat(), dimensions.TargetWidth, dimensions.TargetHeight);
+
+		if (made.Albedo == nullptr || made.Normal == nullptr || made.Material == nullptr ||
+			made.Emissive == nullptr || made.LinearDepth == nullptr || made.Occlusion == nullptr ||
+			made.Lit == nullptr || made.Display == nullptr) {
+			ENGINE_ERROR(
+				"render graph targets for {}x{} view: {}",
+				dimensions.ViewWidth,
+				dimensions.ViewHeight,
+				SDL_GetError()
+			);
+			ReleasePbr(made);
+			return slot.Albedo != nullptr;
+		}
+
+		ReleasePbr(slot);
+		slot = made;
+		return true;
+	}
+
+	graph::NodeScope
+	Renderer::Impl::ResourceScope(const NamedPipeline &pipeline, graph::ResourceId resource) const {
+		graph::NodeScope found = graph::NodeScope::Frame;
+		for (uint32_t value = 1; value <= pipeline.Graph.Count(); value++) {
+			const graph::Node *node = pipeline.Graph.Find(graph::NodeId{value});
+			if (node == nullptr ||
+				std::find(node->Writes.begin(), node->Writes.end(), resource) == node->Writes.end()) {
+				continue;
+			}
+			if (node->Scope == graph::NodeScope::View) {
+				return graph::NodeScope::View;
+			}
+			if (node->Scope == graph::NodeScope::World) {
+				found = graph::NodeScope::World;
+			}
+		}
+		return found;
+	}
+
+	Renderer::Impl::NamedTexture Renderer::Impl::FindGraphTarget(
+		const NamedPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner
+	) const {
+		for (const GraphTarget &target : GraphTargets) {
+			if (target.Pipeline == pipeline.Name && target.Resource == resource && target.Scope == scope &&
+				target.Owner == owner) {
+				return NamedTexture{target.Texture, target.Width, target.Height, target.Format};
+			}
+		}
+		return {};
+	}
+
+	Renderer::Impl::NamedTexture Renderer::Impl::EnsureGraphTarget(
+		const NamedPipeline &pipeline,
+		graph::ResourceId resource,
+		uint64_t owner,
+		uint32_t viewWidth,
+		uint32_t viewHeight
+	) {
+		const graph::ResourceDesc *desc = pipeline.Graph.FindResource(resource);
+		if (desc == nullptr || desc->External || desc->Kind == graph::ResourceKind::Texture ||
+			desc->Kind == graph::ResourceKind::Buffer || desc->Kind == graph::ResourceKind::Camera ||
+			desc->Kind == graph::ResourceKind::Entities) {
+			return {};
+		}
+
+		const SDL_GPUTextureFormat format = DeviceFormat(desc->Format);
+		if (format == SDL_GPU_TEXTUREFORMAT_INVALID) {
+			ENGINE_WARN("graph resource '{}' uses a format the renderer cannot allocate", desc->Name.Text());
+			return {};
+		}
+
+		uint32_t width = 0;
+		uint32_t height = 0;
+		desc->Resolve(viewWidth, viewHeight, width, height);
+		const graph::NodeScope scope = ResourceScope(pipeline, resource);
+		for (GraphTarget &target : GraphTargets) {
+			if (target.Pipeline != pipeline.Name || target.Resource != desc->Name || target.Scope != scope ||
+				target.Owner != owner) {
+				continue;
+			}
+			if (target.Texture != nullptr && target.Format == format && target.Width == width &&
+				target.Height == height) {
+				return NamedTexture{target.Texture, width, height, format};
+			}
+			if (target.Texture != nullptr) {
+				SDL_ReleaseGPUTexture(Device, target.Texture);
+				target.Texture = nullptr;
+			}
+
+			SDL_GPUTextureCreateInfo info{};
+			info.type = SDL_GPU_TEXTURETYPE_2D;
+			info.format = format;
+			info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+			if (desc->Kind == graph::ResourceKind::Storage) {
+				info.usage |= SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
+			} else if (desc->Kind == graph::ResourceKind::Depth) {
+				info.usage |= SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+			} else {
+				info.usage |= SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+			}
+			info.width = width;
+			info.height = height;
+			info.layer_count_or_depth = 1;
+			info.num_levels = 1;
+			info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+			target.Texture = SDL_CreateGPUTexture(Device, &info);
+			target.Format = format;
+			target.Width = width;
+			target.Height = height;
+			if (target.Texture == nullptr) {
+				ENGINE_ERROR("graph target '{}': {}", desc->Name.Text(), SDL_GetError());
+				return {};
+			}
+			return NamedTexture{target.Texture, width, height, format};
+		}
+
+		GraphTargets.push_back(GraphTarget{pipeline.Name, desc->Name, scope, owner});
+		return EnsureGraphTarget(pipeline, resource, owner, viewWidth, viewHeight);
+	}
+
+	bool Renderer::Impl::GraphShaderCode(
+		const graph::Node &node, ShaderStage stage, std::vector<uint8_t> &bytes, std::string &entryPoint
+	) const {
+		bytes.clear();
+		entryPoint = Binary.EntryPoint;
+		const std::string *source = node.Parameter(core::Name("source"));
+		if (source == nullptr || source->empty()) {
+			const std::string *shader = node.Parameter(core::Name("shader"));
+			if (shader == nullptr || shader->empty()) {
+				ENGINE_WARN("'{}' has no shader or GLSL source, so it records no work", node.Name.Text());
+				return false;
+			}
+			bytes = ReadFile(resources::Shader(*shader, Binary.Form));
+			if (bytes.empty()) {
+				ENGINE_WARN("'{}' names shader '{}' but no staged module exists", node.Name.Text(), *shader);
+				return false;
+			}
+			return true;
+		}
+
+		ShaderCompiler compiler;
+		const ShaderCompilation compiled = compiler.Compile(*source, stage, node.Name.Text());
+		if (compiled.Failed) {
+			ENGINE_WARN("shader for '{}': {}", node.Name.Text(), compiled.Error);
+			return false;
+		}
+
+		if (Binary.Form == resources::ShaderForm::Msl) {
+			msl::Translation translated = msl::Translate(compiled.SpirV);
+			if (translated.Failed) {
+				ENGINE_WARN(
+					"shader for '{}' cannot be translated to MSL: {}", node.Name.Text(), translated.Error
+				);
+				return false;
+			}
+			bytes.assign(translated.Source.begin(), translated.Source.end());
+			return true;
+		}
+
+		const auto *first = reinterpret_cast<const uint8_t *>(compiled.SpirV.data());
+		bytes.assign(first, first + compiled.SpirV.size() * sizeof(uint32_t));
+		return true;
+	}
+
+	SDL_GPUGraphicsPipeline *Renderer::Impl::GraphRasterFor(
+		const NamedPipeline &pipeline, const graph::Node &node, SDL_GPUTextureFormat format, uint32_t samplers
+	) {
+		for (const GraphRasterPipeline &entry : GraphRasterPipelines) {
+			if (entry.Pipeline == pipeline.Name && entry.Node == node.Name && entry.Format == format &&
+				entry.Samplers == samplers) {
+				return entry.Handle;
+			}
+		}
+
+		SDL_GPUShader *vertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
+		std::vector<uint8_t> bytes;
+		std::string entryPoint;
+		SDL_GPUShader *fragment = nullptr;
+		if (GraphShaderCode(node, ShaderStage::Fragment, bytes, entryPoint)) {
+			SDL_GPUShaderCreateInfo shader{};
+			shader.code = bytes.data();
+			shader.code_size = bytes.size();
+			shader.entrypoint = entryPoint.c_str();
+			shader.format = Binary.Format;
+			shader.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+			shader.num_samplers = samplers;
+			shader.num_uniform_buffers = 1;
+			fragment = SDL_CreateGPUShader(Device, &shader);
+			if (fragment == nullptr) {
+				ENGINE_WARN("fragment shader for '{}': {}", node.Name.Text(), SDL_GetError());
+			}
+		}
+
+		SDL_GPUGraphicsPipeline *built = nullptr;
+		if (vertex != nullptr && fragment != nullptr) {
+			SDL_GPUColorTargetDescription target{};
+			target.format = format;
+			SDL_GPUGraphicsPipelineCreateInfo info{};
+			info.vertex_shader = vertex;
+			info.fragment_shader = fragment;
+			info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+			info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+			info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+			info.target_info.color_target_descriptions = &target;
+			info.target_info.num_color_targets = 1;
+			built = SDL_CreateGPUGraphicsPipeline(Device, &info);
+			if (built == nullptr) {
+				ENGINE_WARN("raster pipeline for '{}': {}", node.Name.Text(), SDL_GetError());
+			}
+		}
+		if (vertex != nullptr) {
+			SDL_ReleaseGPUShader(Device, vertex);
+		}
+		if (fragment != nullptr) {
+			SDL_ReleaseGPUShader(Device, fragment);
+		}
+		GraphRasterPipelines.push_back({pipeline.Name, node.Name, format, samplers, built});
+		return built;
+	}
+
+	SDL_GPUComputePipeline *Renderer::Impl::GraphComputeFor(
+		const NamedPipeline &pipeline,
+		const graph::Node &node,
+		uint32_t samplers,
+		uint32_t storage,
+		uint32_t localX,
+		uint32_t localY,
+		uint32_t localZ
+	) {
+		for (const GraphComputePipeline &entry : GraphComputePipelines) {
+			if (entry.Pipeline == pipeline.Name && entry.Node == node.Name && entry.Samplers == samplers &&
+				entry.Storage == storage && entry.LocalX == localX && entry.LocalY == localY &&
+				entry.LocalZ == localZ) {
+				return entry.Handle;
+			}
+		}
+
+		std::vector<uint8_t> bytes;
+		std::string entryPoint;
+		SDL_GPUComputePipeline *built = nullptr;
+		if (GraphShaderCode(node, ShaderStage::Compute, bytes, entryPoint)) {
+			SDL_GPUComputePipelineCreateInfo info{};
+			info.code = bytes.data();
+			info.code_size = bytes.size();
+			info.entrypoint = entryPoint.c_str();
+			info.format = Binary.Format;
+			info.num_samplers = samplers;
+			info.num_readwrite_storage_textures = storage;
+			info.threadcount_x = localX;
+			info.threadcount_y = localY;
+			info.threadcount_z = localZ;
+			built = SDL_CreateGPUComputePipeline(Device, &info);
+			if (built == nullptr) {
+				ENGINE_WARN("compute pipeline for '{}': {}", node.Name.Text(), SDL_GetError());
+			}
+		}
+		GraphComputePipelines.push_back(
+			{pipeline.Name, node.Name, samplers, storage, localX, localY, localZ, built}
+		);
+		return built;
+	}
+
+	void Renderer::Impl::ReleaseGraphState(core::Name pipeline) {
+		std::erase_if(GraphCaptureReceipts, [pipeline](const GraphCaptureReceipt &receipt) {
+			return receipt.Pipeline == pipeline;
+		});
+		for (size_t index = GraphTargets.size(); index > 0; index--) {
+			GraphTarget &target = GraphTargets[index - 1];
+			if (target.Pipeline != pipeline) {
+				continue;
+			}
+			if (target.Texture != nullptr && Device != nullptr) {
+				SDL_ReleaseGPUTexture(Device, target.Texture);
+			}
+			GraphTargets.erase(GraphTargets.begin() + static_cast<ptrdiff_t>(index - 1));
+		}
+		for (size_t index = GraphRasterPipelines.size(); index > 0; index--) {
+			GraphRasterPipeline &entry = GraphRasterPipelines[index - 1];
+			if (entry.Pipeline != pipeline) {
+				continue;
+			}
+			if (entry.Handle != nullptr && Device != nullptr) {
+				SDL_ReleaseGPUGraphicsPipeline(Device, entry.Handle);
+			}
+			GraphRasterPipelines.erase(GraphRasterPipelines.begin() + static_cast<ptrdiff_t>(index - 1));
+		}
+		for (size_t index = GraphComputePipelines.size(); index > 0; index--) {
+			GraphComputePipeline &entry = GraphComputePipelines[index - 1];
+			if (entry.Pipeline != pipeline) {
+				continue;
+			}
+			if (entry.Handle != nullptr && Device != nullptr) {
+				SDL_ReleaseGPUComputePipeline(Device, entry.Handle);
+			}
+			GraphComputePipelines.erase(GraphComputePipelines.begin() + static_cast<ptrdiff_t>(index - 1));
+		}
+	}
+
+	void Renderer::Impl::ReleaseAllGraphState() {
+		while (!GraphTargets.empty()) {
+			ReleaseGraphState(GraphTargets.back().Pipeline);
+		}
+		while (!GraphRasterPipelines.empty()) {
+			ReleaseGraphState(GraphRasterPipelines.back().Pipeline);
+		}
+		while (!GraphComputePipelines.empty()) {
+			ReleaseGraphState(GraphComputePipelines.back().Pipeline);
+		}
+		GraphCaptureReceipts.clear();
+		GraphCaptureFrames.clear();
 	}
 
 	bool Renderer::Impl::EnsureBeams() {
@@ -3451,12 +4446,321 @@ namespace engine::render {
 		return true;
 	}
 
+	void Renderer::Impl::CollectTimings() {
+		for (uint32_t slot = 0; slot < VulkanTimestamps::SLOTS; slot++) {
+			if (!Timestamps.Pending(slot)) {
+				continue;
+			}
+			double times[VulkanTimestamps::MARKS]{};
+			uint32_t count = 0;
+			if (!Timestamps.Collect(slot, times, count)) {
+				continue;
+			}
+
+			if (TimingSequence[slot] >= ResolvedTimingSequence) {
+				GpuTimings.clear();
+				for (const PassMarks &marks : PendingMarks[slot]) {
+					if (marks.Opened >= count || marks.Closed >= count) {
+						continue;
+					}
+					GpuTimings[marks.Name.Id()] +=
+						VulkanTimestamps::Between(times, marks.Opened, marks.Closed) / 1000.0;
+				}
+				ResolvedTimingSequence = TimingSequence[slot];
+			}
+			PendingMarks[slot].clear();
+			TimingSequence[slot] = 0;
+		}
+	}
+
+	void Renderer::Impl::CollectPreview() {
+		void *mapped = SDL_MapGPUTransferBuffer(Device, Preview.Transfer, false);
+		if (mapped == nullptr) {
+			ENGINE_ERROR("resource preview: SDL_MapGPUTransferBuffer: {}", SDL_GetError());
+			return;
+		}
+
+		const size_t count = static_cast<size_t>(Preview.Width) * Preview.Height;
+		const auto *bytes = static_cast<const uint8_t *>(mapped);
+		Preview.Pixels.resize(count);
+		if (Preview.BytesPerPixel == 4) {
+			std::memcpy(Preview.Pixels.data(), bytes, count * sizeof(uint32_t));
+		} else if (Preview.BytesPerPixel == 2) {
+			for (size_t index = 0; index < count; index++) {
+				Preview.Pixels[index] = static_cast<uint32_t>(bytes[index * 2]) |
+										(static_cast<uint32_t>(bytes[index * 2 + 1]) << 8) | 0xFF000000u;
+			}
+		} else {
+			for (size_t index = 0; index < count; index++) {
+				const uint32_t value = bytes[index];
+				Preview.Pixels[index] = value | (value << 8) | (value << 16) | 0xFF000000u;
+			}
+		}
+		SDL_UnmapGPUTransferBuffer(Device, Preview.Transfer);
+		Preview.Histogram =
+			Preview.Rgba ? render::HistogramRgba(Preview.Pixels) : render::Histogram(Preview.Pixels);
+	}
+
+	void Renderer::Impl::PollPreview() {
+		if (Preview.Fence == nullptr || !SDL_QueryGPUFence(Device, Preview.Fence)) {
+			return;
+		}
+		SDL_ReleaseGPUFence(Device, Preview.Fence);
+		Preview.Fence = nullptr;
+		if (Preview.Pending.Poll(true)) {
+			CollectPreview();
+		}
+	}
+
+	bool Renderer::Impl::RequestPreview(
+		SDL_GPUCommandBuffer *command,
+		SDL_GPUTexture *texture,
+		uint32_t width,
+		uint32_t height,
+		core::Name source,
+		size_t slot,
+		SDL_GPUTextureFormat format
+	) {
+		if (!Preview.Pending.CanRequest() || command == nullptr || texture == nullptr || width == 0 ||
+			height == 0 || !source.IsValid()) {
+			return false;
+		}
+
+		uint32_t bytesPerPixel = 0;
+		bool rgba = true;
+		switch (format) {
+		case SDL_GPU_TEXTUREFORMAT_R8_UNORM:
+			bytesPerPixel = 1;
+			break;
+		case SDL_GPU_TEXTUREFORMAT_R8G8_UNORM:
+			bytesPerPixel = 2;
+			break;
+		case SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM:
+		case SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB:
+			bytesPerPixel = 4;
+			break;
+		case SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM:
+		case SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM_SRGB:
+			bytesPerPixel = 4;
+			rgba = false;
+			break;
+		default:
+			return false;
+		}
+
+		const uint64_t bytes = static_cast<uint64_t>(width) * height * bytesPerPixel;
+		if (bytes > std::numeric_limits<uint32_t>::max()) {
+			ENGINE_ERROR("resource preview: {}x{} is too large for one transfer", width, height);
+			return false;
+		}
+		if (Preview.Capacity < bytes) {
+			if (Preview.Transfer != nullptr) {
+				SDL_ReleaseGPUTransferBuffer(Device, Preview.Transfer);
+				Preview.Transfer = nullptr;
+			}
+
+			SDL_GPUTransferBufferCreateInfo info{};
+			info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
+			info.size = static_cast<uint32_t>(bytes);
+			Preview.Transfer = SDL_CreateGPUTransferBuffer(Device, &info);
+			if (Preview.Transfer == nullptr) {
+				ENGINE_ERROR("resource preview: SDL_CreateGPUTransferBuffer: {}", SDL_GetError());
+				Preview.Capacity = 0;
+				return false;
+			}
+			Preview.Capacity = static_cast<uint32_t>(bytes);
+		}
+
+		SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(command);
+		if (copy == nullptr) {
+			ENGINE_ERROR("resource preview: SDL_BeginGPUCopyPass: {}", SDL_GetError());
+			return false;
+		}
+		SDL_GPUTextureRegion region{};
+		region.texture = texture;
+		region.w = width;
+		region.h = height;
+		region.d = 1;
+		SDL_GPUTextureTransferInfo destination{};
+		destination.transfer_buffer = Preview.Transfer;
+		destination.pixels_per_row = width;
+		destination.rows_per_layer = height;
+		SDL_DownloadFromGPUTexture(copy, &region, &destination);
+		SDL_EndGPUCopyPass(copy);
+
+		Preview.Source = source;
+		Preview.Slot = slot;
+		Preview.Width = width;
+		Preview.Height = height;
+		Preview.BytesPerPixel = bytesPerPixel;
+		Preview.Rgba = rgba;
+		Preview.Pending.Submitted(FrameCounter);
+		PreviewSubmitted = true;
+		return true;
+	}
+
 	// -----------------------------------------------------------------------
 
-	Renderer::Renderer() : State(std::make_unique<Impl>()), Owner(std::this_thread::get_id()) {}
+	void FrameResult::Accumulate(const FrameResult &view) {
+		Presented = Presented || view.Presented;
+		DrawCalls += view.DrawCalls;
+		Triangles += view.Triangles;
+		SurfaceInstances += view.SurfaceInstances;
+		SurfacePasses += view.SurfacePasses;
+		PortalPasses += view.PortalPasses;
+		RibbonVertices += view.RibbonVertices;
+		Particles += view.Particles;
+		Culled += view.Culled;
+		ScheduledReadBytes += view.ScheduledReadBytes;
+		ScheduledWriteBytes += view.ScheduledWriteBytes;
+		QueueTransferBytes += view.QueueTransferBytes;
+		UploadedBytes += view.UploadedBytes;
+		UploadCommandBuffers += view.UploadCommandBuffers;
+		ComputeDispatches += view.ComputeDispatches;
+		AsyncComputeCommandBuffers += view.AsyncComputeCommandBuffers;
+		ConcurrentWaves += view.ConcurrentWaves;
+		for (const core::Name node : view.Nodes) {
+			if (!Ran(node)) {
+				Nodes.push_back(node);
+			}
+		}
+	}
+
+	Renderer::Renderer() : State(std::make_unique<Impl>()), Owner(std::this_thread::get_id()) {
+		graph::RenderGraph pipeline;
+		core::Name offender;
+		if (graph::Build(graph::DefaultPbrDocument(), pipeline, offender) !=
+			graph::PipelineDocumentStatus::Ok) {
+			ENGINE_ERROR("engine default render graph did not build at '{}'", offender.Text());
+			return;
+		}
+
+		graph::CompiledGraph compiled;
+		graph::ExecutionSchedule schedule;
+		std::string reason;
+		if (!CompileRenderPipeline(pipeline, compiled, schedule, offender, reason)) {
+			ENGINE_ERROR("engine default render graph refused: {} at '{}'", reason, offender.Text());
+			return;
+		}
+		State->EngineDefault = Impl::NamedPipeline{
+			core::Name("Engine Default"), pipeline, std::move(compiled), std::move(schedule)
+		};
+	}
 
 	Renderer::~Renderer() {
 		Shutdown();
+	}
+
+	bool Renderer::SetPipeline(core::Name name, const graph::RenderGraph &pipeline) {
+		RequireOwningThread("SetPipeline");
+		if (!name.IsValid()) {
+			ENGINE_ERROR("a render pipeline needs a name a view can select");
+			return false;
+		}
+
+		graph::CompiledGraph compiled;
+		graph::ExecutionSchedule schedule;
+		core::Name offender;
+		std::string reason;
+		if (!CompileRenderPipeline(pipeline, compiled, schedule, offender, reason)) {
+			ENGINE_ERROR("pipeline '{}' refused: {} at '{}'", name.Text(), reason, offender.Text());
+			return false;
+		}
+
+		for (Impl::NamedPipeline &installed : State->NamedPipelines) {
+			if (installed.Name != name) {
+				continue;
+			}
+			if (State->Device != nullptr) {
+				(void)WaitForFrame();
+			}
+			State->ReleaseGraphState(name);
+			installed.Graph = pipeline;
+			installed.Compiled = std::move(compiled);
+			installed.Schedule = std::move(schedule);
+			return true;
+		}
+
+		State->NamedPipelines.push_back(
+			Impl::NamedPipeline{name, pipeline, std::move(compiled), std::move(schedule)}
+		);
+		return true;
+	}
+
+	bool Renderer::RemovePipeline(core::Name name) {
+		RequireOwningThread("RemovePipeline");
+		for (size_t index = 0; index < State->NamedPipelines.size(); index++) {
+			if (State->NamedPipelines[index].Name != name) {
+				continue;
+			}
+			if (State->Device != nullptr) {
+				(void)WaitForFrame();
+			}
+			State->ReleaseGraphState(name);
+			State->NamedPipelines.erase(State->NamedPipelines.begin() + static_cast<ptrdiff_t>(index));
+			return true;
+		}
+		return false;
+	}
+
+	std::vector<core::Name> Renderer::Pipelines() const {
+		std::vector<core::Name> names;
+		names.reserve(State->NamedPipelines.size());
+		for (const Impl::NamedPipeline &pipeline : State->NamedPipelines) {
+			names.push_back(pipeline.Name);
+		}
+		std::sort(names.begin(), names.end(), [](core::Name first, core::Name second) {
+			return first.Text() < second.Text();
+		});
+		return names;
+	}
+
+	void Renderer::ResetPipelines() {
+		RequireOwningThread("ResetPipelines");
+		if (State->Device != nullptr && !State->NamedPipelines.empty()) {
+			(void)WaitForFrame();
+		}
+		for (const Impl::NamedPipeline &pipeline : State->NamedPipelines) {
+			State->ReleaseGraphState(pipeline.Name);
+		}
+		State->NamedPipelines.clear();
+	}
+
+	void Renderer::Inspect(core::Name resource, size_t slot) {
+		RequireOwningThread("Inspect");
+		State->Inspected = resource;
+		State->InspectedSlot = slot;
+	}
+
+	core::Name Renderer::Inspecting() const {
+		return State == nullptr ? core::Name{} : State->Inspected;
+	}
+
+	Renderer::ReadbackImage Renderer::Readback() const {
+		ReadbackImage image;
+		if (State == nullptr || !State->Preview.Pending.HasImage()) {
+			return image;
+		}
+		image.Source = State->Preview.Source;
+		image.Slot = State->Preview.Slot;
+		image.Width = State->Preview.Width;
+		image.Height = State->Preview.Height;
+		image.Pixels = State->Preview.Pixels;
+		image.Histogram = State->Preview.Histogram;
+		image.Age = State->Preview.Pending.Age(State->FrameCounter);
+		return image;
+	}
+
+	const std::unordered_map<uint32_t, double> &Renderer::PassTimings() const {
+		return State->GpuTimings;
+	}
+
+	const std::unordered_map<uint32_t, double> &Renderer::PassWallTimes() const {
+		return State->WallTimings;
+	}
+
+	bool Renderer::Timed() const {
+		return State != nullptr && State->Timestamps.Ready();
 	}
 
 	std::string_view Renderer::BackendName() const {
@@ -3596,6 +4900,7 @@ namespace engine::render {
 
 		const char *driver = SDL_GetGPUDeviceDriver(State->Device);
 		State->Backend = driver ? driver : "unknown";
+		(void)State->Timestamps.Probe(State->Device);
 
 		// **Before the pipelines, because they name the format too.** A pipeline
 		// built against one depth format and bound beside a texture in another
@@ -3672,14 +4977,34 @@ namespace engine::render {
 		// finished. Waiting once here is simpler and no slower than tracking
 		// per-resource fences for a shutdown path.
 		SDL_WaitForGPUIdle(device);
+		State->Timestamps.Shutdown();
+		if (State->Preview.Fence != nullptr) {
+			SDL_ReleaseGPUFence(device, State->Preview.Fence);
+			State->Preview.Fence = nullptr;
+		}
+		if (State->Preview.Transfer != nullptr) {
+			SDL_ReleaseGPUTransferBuffer(device, State->Preview.Transfer);
+			State->Preview.Transfer = nullptr;
+		}
 
 		// **Before the pipelines they were derived from**, which costs nothing
 		// and reads in the order the objects were built. `SDL_WaitForGPUIdle`
 		// above is what makes releasing any of this safe.
 		State->ReleaseShaderVariants();
+		State->ReleaseAllGraphState();
 
 		if (State->OpaquePipeline) {
 			SDL_ReleaseGPUGraphicsPipeline(device, State->OpaquePipeline);
+		}
+		for (SDL_GPUGraphicsPipeline *pipeline :
+			 {State->GBufferPipeline,
+			  State->DepthLinearPipeline,
+			  State->SsaoPipeline,
+			  State->DeferredLightingPipeline,
+			  State->TonemapPipeline}) {
+			if (pipeline != nullptr) {
+				SDL_ReleaseGPUGraphicsPipeline(device, pipeline);
+			}
 		}
 		if (State->TransparentPipeline) {
 			SDL_ReleaseGPUGraphicsPipeline(device, State->TransparentPipeline);
@@ -3744,6 +5069,10 @@ namespace engine::render {
 				slot.Depth = nullptr;
 			}
 		}
+		for (Impl::PbrSlot &slot : State->PbrSlots) {
+			State->ReleasePbr(slot);
+		}
+		State->PbrSlots.clear();
 
 		// Anything a resize retired and no frame came along to free. Shutting
 		// down is the one path where the next frame never arrives, so leaving
@@ -3908,6 +5237,26 @@ namespace engine::render {
 		State->FogEnd = std::max(lighting.FogEnd, State->FogStart);
 	}
 
+	scene::WorldLighting Renderer::CurrentLighting() const {
+		if (State == nullptr) {
+			return {};
+		}
+
+		scene::WorldLighting lighting;
+		lighting.Direction = core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z};
+		lighting.Ambient = core::Color3{State->Ambient.x, State->Ambient.y, State->Ambient.z};
+		lighting.OutdoorAmbient = core::Color3{
+			State->OutdoorAmbient.x,
+			State->OutdoorAmbient.y,
+			State->OutdoorAmbient.z,
+		};
+		lighting.Direct = core::Color3{State->Direct.x, State->Direct.y, State->Direct.z};
+		lighting.FogColor = core::Color3{State->FogColour.x, State->FogColour.y, State->FogColour.z};
+		lighting.FogStart = State->FogStart;
+		lighting.FogEnd = State->FogEnd;
+		return lighting;
+	}
+
 	core::Vector3 Renderer::SunDirection() const {
 		return core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z};
 	}
@@ -3990,7 +5339,13 @@ namespace engine::render {
 		return State != nullptr && name.IsValid() && State->ShaderVariants.contains(name.Id());
 	}
 
-	bool Renderer::Impl::WriteCapture(SDL_GPUTransferBuffer *from, uint32_t width, uint32_t height) const {
+	bool Renderer::Impl::WriteCapture(
+		SDL_GPUTransferBuffer *from,
+		uint32_t width,
+		uint32_t height,
+		SDL_GPUTextureFormat format,
+		const std::filesystem::path &path
+	) const {
 		void *mapped = SDL_MapGPUTransferBuffer(Device, from, false);
 		if (mapped == nullptr) {
 			ENGINE_ERROR("SDL_MapGPUTransferBuffer: {}", SDL_GetError());
@@ -4001,8 +5356,6 @@ namespace engine::render {
 		// wrong writes a picture with red and blue swapped - which looks like a
 		// shader bug rather than like a file-writing bug, so it is worth
 		// asking rather than assuming.
-		const SDL_GPUTextureFormat format = ColourFormat();
-
 		SDL_PixelFormat pixels = SDL_PIXELFORMAT_UNKNOWN;
 		switch (format) {
 		case SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM:
@@ -4029,7 +5382,7 @@ namespace engine::render {
 
 		bool wrote = false;
 		if (surface != nullptr) {
-			wrote = SDL_SaveBMP(surface, CapturePath.string().c_str());
+			wrote = SDL_SaveBMP(surface, path.string().c_str());
 			if (!wrote) {
 				ENGINE_ERROR("SDL_SaveBMP: {}", SDL_GetError());
 			}
@@ -4056,6 +5409,68 @@ namespace engine::render {
 
 	void *Renderer::SceneTexture(size_t slot) const {
 		return slot < State->SceneSlots.size() ? State->SceneSlots[slot].Texture : nullptr;
+	}
+
+	void *Renderer::ResourceTexture(core::Name resource, size_t slot) const {
+		if (State == nullptr || !resource.IsValid()) {
+			return nullptr;
+		}
+		const Impl::NamedPipeline *pipeline = State->PipelineFor(State->ActiveGraph);
+		if (pipeline != nullptr) {
+			for (const Impl::GraphTarget &target : State->GraphTargets) {
+				if (target.Pipeline != pipeline->Name || target.Resource != resource ||
+					target.Texture == nullptr) {
+					continue;
+				}
+				if (target.Scope != graph::NodeScope::View || target.Owner == slot) {
+					return target.Texture;
+				}
+			}
+		}
+		const Impl::ResourceRole role = State->RoleFor(resource);
+		if (role == Impl::ResourceRole::Scene) {
+			return SceneTexture(slot);
+		}
+		if (role == Impl::ResourceRole::Depth) {
+			return slot < State->SceneSlots.size() ? State->SceneSlots[slot].Depth : nullptr;
+		}
+		if (role == Impl::ResourceRole::Shadow) {
+			return State->ShadowTexture;
+		}
+		if (role == Impl::ResourceRole::Surface && slot < State->SurfaceBanks.size()) {
+			const Impl::SurfaceSlotState &surface = State->SurfaceBanks[slot].Surfaces[0];
+			return surface.Ready ? surface.Texture[surface.Slot] : nullptr;
+		}
+		if (slot >= State->PbrSlots.size()) {
+			return nullptr;
+		}
+
+		const Impl::PbrSlot &pbr = State->PbrSlots[slot];
+		if (role == Impl::ResourceRole::Albedo) {
+			return pbr.Albedo;
+		}
+		if (role == Impl::ResourceRole::Normal) {
+			return pbr.Normal;
+		}
+		if (role == Impl::ResourceRole::Material) {
+			return pbr.Material;
+		}
+		if (role == Impl::ResourceRole::Emissive) {
+			return pbr.Emissive;
+		}
+		if (role == Impl::ResourceRole::LinearDepth) {
+			return pbr.LinearDepth;
+		}
+		if (role == Impl::ResourceRole::Occlusion) {
+			return pbr.Occlusion;
+		}
+		if (role == Impl::ResourceRole::Lit) {
+			return pbr.Lit;
+		}
+		if (role == Impl::ResourceRole::Display) {
+			return pbr.Display;
+		}
+		return nullptr;
 	}
 
 	bool Renderer::CaptureSceneTexture(size_t slot, const core::Name &name) {
@@ -4160,6 +5575,50 @@ namespace engine::render {
 		};
 	}
 
+	SceneExtent Renderer::ResourceTextureExtent(core::Name resource, size_t slot) const {
+		if (State == nullptr) {
+			return {};
+		}
+		const Impl::NamedPipeline *pipeline = State->PipelineFor(State->ActiveGraph);
+		if (pipeline != nullptr) {
+			for (const Impl::GraphTarget &target : State->GraphTargets) {
+				if (target.Pipeline != pipeline->Name || target.Resource != resource ||
+					target.Texture == nullptr ||
+					(target.Scope == graph::NodeScope::View && target.Owner != slot)) {
+					continue;
+				}
+				return SceneExtent{1.0f, 1.0f};
+			}
+		}
+		const Impl::ResourceRole role = State->RoleFor(resource);
+		if (role == Impl::ResourceRole::Shadow || role == Impl::ResourceRole::Surface) {
+			return SceneExtent{1.0f, 1.0f};
+		}
+		if (role == Impl::ResourceRole::Scene || role == Impl::ResourceRole::Depth ||
+			role == Impl::ResourceRole::Display) {
+			return SceneTextureExtent(slot);
+		}
+		if (slot >= State->PbrSlots.size()) {
+			return {};
+		}
+
+		const Impl::PbrSlot &pbr = State->PbrSlots[slot];
+		const Impl::PbrDimensions &dimensions = pbr.Dimensions;
+		if (dimensions.TargetWidth == 0 || dimensions.TargetHeight == 0 || dimensions.ViewWidth == 0 ||
+			dimensions.ViewHeight == 0) {
+			return {};
+		}
+
+		if (role == Impl::ResourceRole::Albedo || role == Impl::ResourceRole::Normal ||
+			role == Impl::ResourceRole::Material || role == Impl::ResourceRole::Emissive) {
+			return SceneExtent{
+				static_cast<float>(dimensions.ViewWidth) / static_cast<float>(dimensions.TargetWidth),
+				static_cast<float>(dimensions.ViewHeight) / static_cast<float>(dimensions.TargetHeight),
+			};
+		}
+		return SceneExtent{1.0f, 1.0f};
+	}
+
 	BackendHandles Renderer::Backend() const {
 		BackendHandles handles;
 		if (State->Device != nullptr) {
@@ -4170,6 +5629,195 @@ namespace engine::render {
 	}
 
 	FrameResult Renderer::Render(
+		std::span<const View> views, OverlayImage &overlay, FrameOverlayHook *interfaceHook, bool present
+	) {
+		ENGINE_PROFILE_CAT("Renderer::Render views", core::ProfileCategory::Render);
+		RequireOwningThread("Render views");
+
+		FrameResult frame;
+		if (State == nullptr || State->Device == nullptr || views.empty() || State->BatchActive) {
+			return frame;
+		}
+
+		struct ViewGroup {
+			uint64_t World = 0;
+			core::Name Pipeline;
+			std::vector<size_t> Views;
+		};
+		std::vector<ViewGroup> groups;
+		groups.reserve(views.size());
+		for (size_t index = 0; index < views.size(); index++) {
+			const View &view = views[index];
+			auto found = std::find_if(groups.begin(), groups.end(), [&](const ViewGroup &group) {
+				return group.World == view.World && group.Pipeline == view.Pipeline;
+			});
+			if (found == groups.end()) {
+				groups.push_back({view.World, view.Pipeline, {index}});
+			} else {
+				found->Views.push_back(index);
+			}
+		}
+
+		// Presentation belongs to the caller's last view. Keep that group last so
+		// another world's shared targets cannot overwrite it before its view runs.
+		if (present) {
+			const size_t finalView = views.size() - 1;
+			const auto finalGroup = std::find_if(groups.begin(), groups.end(), [&](const ViewGroup &group) {
+				return std::find(group.Views.begin(), group.Views.end(), finalView) != group.Views.end();
+			});
+			if (finalGroup != groups.end() && std::next(finalGroup) != groups.end()) {
+				std::rotate(finalGroup, std::next(finalGroup), groups.end());
+			}
+		}
+
+		std::vector<size_t> order;
+		order.reserve(views.size());
+		for (const ViewGroup &group : groups) {
+			order.insert(order.end(), group.Views.begin(), group.Views.end());
+		}
+		for (size_t position = 0; position + 1 < order.size(); position++) {
+			const SceneTarget *target = views[order[position]].Target;
+			if (target == nullptr || !target->IsValid()) {
+				ENGINE_ERROR("render batch view {} has no offscreen target", order[position]);
+				return frame;
+			}
+		}
+
+		SDL_GPUCommandBuffer *command = nullptr;
+		SDL_GPUTexture *swapchain = nullptr;
+		uint32_t width = 0;
+		uint32_t height = 0;
+		if (present) {
+			if (!State->BeginFrame()) {
+				return frame;
+			}
+			State->TakeFrame(command, swapchain, width, height);
+		} else {
+			command = SDL_AcquireGPUCommandBuffer(State->Device);
+			if (command == nullptr) {
+				ENGINE_ERROR("SDL_AcquireGPUCommandBuffer (view batch): {}", SDL_GetError());
+				return frame;
+			}
+		}
+
+		const SceneTarget *finalTarget = views[order.back()].Target;
+		if (swapchain == nullptr && (finalTarget == nullptr || !finalTarget->IsValid())) {
+			// A headless Studio has no swapchain and its viewport has no extent
+			// until the first interface layout. That frame has nowhere to draw by
+			// design. A windowed caller reaching the same state lost its target.
+			if (!State->Headless()) {
+				ENGINE_ERROR("render batch final view has neither a swapchain nor an offscreen target");
+			}
+			SDL_SubmitGPUCommandBuffer(command);
+			return frame;
+		}
+
+		const scene::WorldLighting previousLighting = CurrentLighting();
+		State->BatchActive = true;
+		State->BatchFailed = false;
+		State->BatchCommand = command;
+		State->BatchSwapchain = swapchain;
+		State->BatchWidth = width;
+		State->BatchHeight = height;
+		State->BatchTimingSlot = VulkanTimestamps::NO_SLOT;
+
+		size_t position = 0;
+		for (size_t groupIndex = 0; groupIndex < groups.size() && !State->BatchFailed; groupIndex++) {
+			const ViewGroup &group = groups[groupIndex];
+			for (size_t member = 0; member < group.Views.size(); member++, position++) {
+				const size_t viewIndex = group.Views[member];
+				const View &view = views[viewIndex];
+				SetLighting(view.OverrideLighting ? view.Lighting : previousLighting);
+
+				State->BatchFirst = position == 0;
+				State->BatchFinal = position + 1 == order.size();
+				State->BatchShared = member == 0;
+				State->BatchViewIndex = viewIndex;
+				State->BatchWorldIndex = groupIndex;
+
+				frame.Accumulate(RenderView(
+					view.CameraFrame,
+					view.Camera,
+					view.Instances,
+					overlay,
+					view.Surfaces,
+					interfaceHook,
+					view.Target,
+					view.Slot,
+					view.Particles,
+					view.RibbonVertices,
+					view.RibbonRuns,
+					view.Lights,
+					view.Foreign,
+					view.Portals,
+					State->BatchFinal && present,
+					view.Pipeline,
+					view.World
+				));
+				if (State->BatchFailed) {
+					break;
+				}
+			}
+		}
+
+		for (const ViewGroup &group : groups) {
+			const Impl::NamedPipeline *named = State->PipelineFor(group.Pipeline);
+			if (named == nullptr) {
+				continue;
+			}
+			uint32_t planWidth = width;
+			uint32_t planHeight = height;
+			std::vector<uint64_t> worlds;
+			worlds.reserve(group.Views.size());
+			for (const size_t viewIndex : group.Views) {
+				const View &view = views[viewIndex];
+				worlds.push_back(view.World);
+				if (view.Target != nullptr && view.Target->IsValid()) {
+					planWidth = std::max(planWidth, view.Target->Width);
+					planHeight = std::max(planHeight, view.Target->Height);
+				}
+			}
+			planWidth = std::max(planWidth, 1u);
+			planHeight = std::max(planHeight, 1u);
+
+			graph::FrameExecutionPlan plan;
+			core::Name offender;
+			if (graph::PlanFrame(
+					named->Graph, named->Schedule, worlds, planWidth, planHeight, plan, offender
+				) == graph::ExecutionPlanStatus::Ok) {
+				frame.ScheduledReadBytes += plan.ReadBytes;
+				frame.ScheduledWriteBytes += plan.WriteBytes;
+				frame.QueueTransferBytes += plan.QueueTransferBytes;
+				frame.ConcurrentWaves += static_cast<uint32_t>(
+					std::count_if(plan.Waves.begin(), plan.Waves.end(), [](const graph::PlannedWave &wave) {
+						return wave.ConcurrentQueues;
+					})
+				);
+			}
+		}
+
+		SetLighting(previousLighting);
+		if (State->BatchCommand != nullptr) {
+			State->Timestamps.Abandon(State->BatchTimingSlot);
+			if (State->BatchTimingSlot < VulkanTimestamps::SLOTS) {
+				State->PendingMarks[State->BatchTimingSlot].clear();
+			}
+			SDL_SubmitGPUCommandBuffer(State->BatchCommand);
+			State->BatchCommand = nullptr;
+		}
+		State->BatchActive = false;
+		State->BatchFirst = false;
+		State->BatchFinal = false;
+		State->BatchShared = false;
+		State->BatchFailed = false;
+		State->BatchSwapchain = nullptr;
+		State->BatchWidth = 0;
+		State->BatchHeight = 0;
+		State->BatchTimingSlot = VulkanTimestamps::NO_SLOT;
+		return frame;
+	}
+
+	FrameResult Renderer::RenderView(
 		const core::CFrame &cameraFrame,
 		const scene::Camera &camera,
 		std::span<const scene::DrawInstance> instances,
@@ -4184,15 +5832,17 @@ namespace engine::render {
 		std::span<const SceneLight> lights,
 		std::span<const scene::DrawInstance> foreign,
 		std::span<const PortalView> portals,
-		bool present
+		bool present,
+		core::Name pipeline,
+		uint64_t world
 	) {
-		ENGINE_PROFILE_CAT("Renderer::Render", core::ProfileCategory::Render);
+		ENGINE_PROFILE_CAT("Renderer::RenderView", core::ProfileCategory::Render);
 
 		// **The single-threaded recording contract, checked rather than
 		// described.** A studio draws one viewport after another; a second one
 		// recording from another thread is the failure this refuses. See
 		// `IsOnOwningThread` for why that is the design and not a limitation.
-		RequireOwningThread("Render");
+		RequireOwningThread("RenderView");
 
 		// **Which target this frame draws into, read by `EnsureScene`.** Passed
 		// through a member rather than an argument because `EnsureScene` is
@@ -4204,6 +5854,36 @@ namespace engine::render {
 		if (!State->Device) {
 			return result;
 		}
+
+		State->ActiveGraph = pipeline;
+		const Impl::NamedPipeline *selectedPipeline = State->PipelineFor(pipeline);
+		if (selectedPipeline == nullptr) {
+			ENGINE_ERROR("render graph '{}' is not installed", pipeline.Text());
+			State->BatchFailed = State->BatchActive;
+			return result;
+		}
+		NodeTable frameNodes = BackendTable([](const graph::RunContext &) { return true; });
+		const auto graphNode = [&](core::Name kind) -> const graph::Node * {
+			for (size_t index = 0; index < selectedPipeline->Graph.Count(); index++) {
+				const graph::Node *node =
+					selectedPipeline->Graph.Find(graph::NodeId{static_cast<uint32_t>(index + 1)});
+				if (node != nullptr && node->Enabled && node->Kind == kind) {
+					return node;
+				}
+			}
+			return nullptr;
+		};
+		const auto graphEnabled = [&](core::Name kind) { return graphNode(kind) != nullptr; };
+		const auto scheduledFor = [&](graph::NodeId id) -> const graph::ScheduledNode * {
+			for (const graph::ExecutionWave &wave : selectedPipeline->Schedule.Waves) {
+				for (const graph::ScheduledNode &scheduled : wave.Nodes) {
+					if (scheduled.Node == id) {
+						return &scheduled;
+					}
+				}
+			}
+			return nullptr;
+		};
 
 		// How close the nearest hole is, and the near plane that follows from it.
 		//
@@ -4243,7 +5923,14 @@ namespace engine::render {
 		SDL_GPUTexture *swapchain = nullptr;
 		uint32_t width = 0;
 		uint32_t height = 0;
-		if (present) {
+		if (State->BatchActive) {
+			command = State->BatchCommand;
+			if (State->BatchFinal) {
+				swapchain = State->BatchSwapchain;
+				width = State->BatchWidth;
+				height = State->BatchHeight;
+			}
+		} else if (present) {
 			if (!State->BeginFrame()) {
 				return result;
 			}
@@ -4255,6 +5942,18 @@ namespace engine::render {
 				return result;
 			}
 		}
+		if (State->BatchFirst || !State->BatchActive) {
+			State->FrameCounter++;
+			State->PreviewSubmitted = false;
+			State->PollPreview();
+		}
+		const auto endIncompleteView = [&] {
+			if (State->BatchActive) {
+				State->BatchFailed = true;
+			} else {
+				SDL_SubmitGPUCommandBuffer(command);
+			}
+		};
 
 		// **Headless has no swapchain, so its size comes from the target** -
 		// nothing else has an opinion about it.
@@ -4263,7 +5962,7 @@ namespace engine::render {
 				// A headless renderer with nowhere to draw is a caller mistake
 				// rather than a state to tolerate: every pass would run and its
 				// result would be discarded.
-				SDL_SubmitGPUCommandBuffer(command);
+				endIncompleteView();
 				return result;
 			}
 
@@ -4290,7 +5989,7 @@ namespace engine::render {
 		if (State->Headless() && !offscreen) {
 			// The target could not be allocated. Headless has no window to fall
 			// back to, so the frame ends here rather than drawing into nothing.
-			SDL_SubmitGPUCommandBuffer(command);
+			endIncompleteView();
 			return result;
 		}
 
@@ -4341,7 +6040,7 @@ namespace engine::render {
 			}
 
 			if (!depthReady) {
-				SDL_SubmitGPUCommandBuffer(command);
+				endIncompleteView();
 				return result;
 			}
 		}
@@ -4486,7 +6185,8 @@ namespace engine::render {
 
 		// **Read once here, so the pass that fills the pool and the pass that
 		// samples it cannot disagree about how many levels there are.** The top
-		// level is `portalLevels - 1`, which is the index the opaque pass reads.
+		// level is `portalLevels - 1`, which is the index the transparent surface
+		// composition reads.
 		const uint32_t portalLevels = std::min(State->PortalDepth, MAX_PORTAL_DEPTH);
 
 		for (const SurfaceView &view : surfaces) {
@@ -4575,34 +6275,55 @@ namespace engine::render {
 			anyPane = true;
 		}
 
-		size_t visibleCount = 0;
+		const float cameraAspect = static_cast<float>(sceneWidth) / static_cast<float>(sceneHeight);
+		const glm::mat4 cameraMatrix =
+			scene::ResolveCamera(cameraFrame, drawCamera, cameraAspect).ViewProjection;
+		const core::AABB sceneBounds = graph::BoundsOfAll(instances);
 
-		// **What the light has to see, out of the walk the culler was making
-		// anyway.** Deriving an instance's world box is three quaternion
-		// rotations and nine abs-mul-adds, and this frame used to pay for it
-		// twice over the same span - once to fit the light and once to test the
-		// frustum. `graph::CullAndBound` is those two passes fused; the union is
-		// six comparisons on a box that already exists. See its comment for why
-		// this is not a cache.
-		core::AABB sceneBounds;
+		graph::EntityFlow &entityFlow = State->GraphEntities;
+		graph::Viewpoints &viewpoints = State->GraphViewpoints;
+		entityFlow.Clear();
+		viewpoints.Clear();
+		std::unordered_map<uint32_t, double> cpuNodeWall;
+		graph::Viewpoint fallbackViewpoint;
+		fallbackViewpoint.Frame = cameraFrame;
+		fallbackViewpoint.Lens = drawCamera;
 
-		// **Kept past the cull, because the refresh decision below needs it
-		// too.** Whether a pane is on screen is the same question the culler
-		// already answers for every instance, and building a second frustum
-		// from the same camera would be a second answer to it.
-		graph::Frustum cameraFrustum{};
-
-		// The same camera as a matrix, because deciding a surface's *resolution*
-		// needs "how much of the screen" and a frustum only answers "any of it".
-		glm::mat4 cameraMatrix{1.0f};
-		{
-			ENGINE_PROFILE_CAT("cull instances", core::ProfileCategory::Render);
-
-			const float aspect = static_cast<float>(sceneWidth) / static_cast<float>(sceneHeight);
-			cameraMatrix = scene::ResolveCamera(cameraFrame, drawCamera, aspect).ViewProjection;
-			cameraFrustum = graph::Frustum::FromViewProjection(cameraMatrix);
-			visibleCount = graph::CullAndBound(instances, cameraFrustum, State->Visible, sceneBounds);
+		size_t visibleCount = instances.size();
+		size_t opaqueCount = 0;
+		core::Name orderedEntities;
+		for (const graph::NodeId id : selectedPipeline->Compiled.PerView) {
+			const graph::Node *node = selectedPipeline->Graph.Find(id);
+			if (node == nullptr) {
+				continue;
+			}
+			const auto started = std::chrono::steady_clock::now();
+			const graph::EntityNodeRun run = graph::RunEntityNode(
+				selectedPipeline->Graph,
+				*node,
+				instances,
+				fallbackViewpoint,
+				cameraAspect,
+				entityFlow,
+				viewpoints
+			);
+			if (!run.Handled) {
+				continue;
+			}
+			visibleCount = run.Output.IsValid() ? run.Count : visibleCount;
+			if (run.Ordered) {
+				opaqueCount = run.Opaque;
+				orderedEntities = run.Output;
+			}
+			const auto ended = std::chrono::steady_clock::now();
+			cpuNodeWall[node->Name.Id()] +=
+				std::chrono::duration<double, std::micro>(ended - started).count();
 		}
+
+		const std::span<const uint32_t> ordered = entityFlow.Get(orderedEntities);
+		State->VisibleInstances.assign(instances.begin(), instances.end());
+		State->DrawOrder.assign(ordered.begin(), ordered.end());
+		visibleCount = ordered.size();
 
 		// **Fitted to the whole draw list, not to what survived culling.** A
 		// caster outside the camera's frustum still shadows into it, so the
@@ -4611,26 +6332,10 @@ namespace engine::render {
 		// leave the screen. That is why `sceneBounds` is the union over
 		// `instances` and not over `State->Visible`.
 		//
-		// Built here rather than before the cull only because the cull is now
-		// what produces the bound. Nothing between the two reads it, and its
-		// first use is the shadow pass.
+		// The graph cull only changes what the view draws. Shadows still fit the
+		// whole world so an off-screen caster cannot disappear from the map.
 		const glm::mat4 lightViewProjection =
 			graph::FitDirectionalLight(sceneBounds, core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z});
-
-		// Ordered over the survivors, so the two passes are two ranges of one
-		// buffer. Opaque first in whatever order the world produced, then the
-		// transparent tail back to front from where the camera is.
-		State->VisibleInstances.resize(visibleCount);
-		for (size_t index = 0; index < visibleCount; index++) {
-			State->VisibleInstances[index] = instances[State->Visible[index]];
-		}
-
-		size_t opaqueCount = 0;
-		{
-			ENGINE_PROFILE_CAT("order instances", core::ProfileCategory::Render);
-			opaqueCount =
-				scene::OrderForDrawing(State->VisibleInstances, cameraFrame.Position, State->DrawOrder);
-		}
 		const auto transparentCount = static_cast<uint32_t>(visibleCount - opaqueCount);
 
 		// **Surface instances moved to the back of the opaque head**, so the
@@ -4966,11 +6671,17 @@ namespace engine::render {
 		scene::ScenePlan plan;
 		{
 			ENGINE_PROFILE_CAT("order scene", core::ProfileCategory::Render);
+			const auto started = std::chrono::steady_clock::now();
 			plan = scene::OrderScene(
 				std::span<const scene::DrawInstance>(State->SceneInstances).first(ownCount),
 				sceneEye,
 				State->SceneOrder
 			);
+			if (const graph::Node *worldNode = graphNode(core::Name("world")); worldNode != nullptr) {
+				cpuNodeWall[worldNode->Name.Id()] +=
+					std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - started)
+						.count();
+			}
 		}
 
 		const auto sceneCount = static_cast<uint32_t>(State->SceneInstances.size());
@@ -4998,8 +6709,8 @@ namespace engine::render {
 			// Safe to skip only because the screen pass no longer borrows this
 			// texture when the shadow map is missing; see `FallbackTexture`.
 			ENGINE_PROFILE_CAT("ensure overlay", core::ProfileCategory::Render);
-			haveOverlay = !State->Headless() && overlay.HasContent() && !overlay.IsEmpty() &&
-						  State->EnsureOverlay(overlay.GetWidth(), overlay.GetHeight());
+			haveOverlay = graphEnabled(core::Name("overlay")) && !State->Headless() && overlay.HasContent() &&
+						  !overlay.IsEmpty() && State->EnsureOverlay(overlay.GetWidth(), overlay.GetHeight());
 		}
 
 		const auto instanceCount = static_cast<uint32_t>(visibleCount);
@@ -5054,6 +6765,11 @@ namespace engine::render {
 					// buffer offset and the instance it came from is gone.
 					State->SlotMesh.resize(uploadCount);
 					State->SlotTexture.resize(uploadCount);
+					State->SlotNormalMap.resize(uploadCount);
+					State->SlotRoughnessMap.resize(uploadCount);
+					State->SlotOcclusionMap.resize(uploadCount);
+					State->SlotHeightMap.resize(uploadCount);
+					State->SlotEmissiveMap.resize(uploadCount);
 					State->SlotShader.resize(uploadCount);
 					State->SlotTags.resize(uploadCount);
 					State->SlotSeam.resize(uploadCount);
@@ -5067,6 +6783,11 @@ namespace engine::render {
 						const MeshEntry &mesh = State->Meshes.Resolve(instance.Mesh);
 						State->SlotMesh[slot] = &mesh;
 						State->SlotTexture[slot] = instance.Texture;
+						State->SlotNormalMap[slot] = instance.NormalMap;
+						State->SlotRoughnessMap[slot] = instance.RoughnessMap;
+						State->SlotOcclusionMap[slot] = instance.OcclusionMap;
+						State->SlotHeightMap[slot] = instance.HeightMap;
+						State->SlotEmissiveMap[slot] = instance.EmissiveMap;
 						State->SlotShader[slot] = instance.Shader;
 						State->SlotTags[slot] = instance.TagMask;
 						State->SlotSeam[slot] = glm::vec4{
@@ -5129,10 +6850,10 @@ namespace engine::render {
 		uint32_t ribbonCount = 0;
 		{
 			ENGINE_PROFILE_CAT("prepare particles", core::ProfileCategory::Render);
-			particleCount = State->PrepareParticles(particles);
+			particleCount = graphEnabled(core::Name("transparent")) ? State->PrepareParticles(particles) : 0;
 			result.Particles = particleCount;
 
-			ribbonCount = State->PrepareRibbons(ribbonVertices);
+			ribbonCount = graphEnabled(core::Name("transparent")) ? State->PrepareRibbons(ribbonVertices) : 0;
 			result.RibbonVertices = ribbonCount;
 		}
 
@@ -5142,10 +6863,149 @@ namespace engine::render {
 		const bool uploadOverlay =
 			haveOverlay && (State->OverlayUninitialised || overlay.UploadRegion().Width > 0);
 
-		if (haveInstances || uploadOverlay || particleCount > 0 || ribbonCount > 0) {
-			ENGINE_PROFILE_CAT("copy pass", core::ProfileCategory::Render);
+		// Timings and the frame result use authored node names. This is the
+		// execution record of the selected graph, not a second fixed pass list.
+		if (State->BatchFirst || !State->BatchActive) {
+			State->CollectTimings();
+			State->WallTimings.clear();
+		}
+		uint32_t timingSlot = State->BatchActive ? (State->BatchFirst ? State->Timestamps.Begin(command)
+																	  : State->BatchTimingSlot)
+												 : State->Timestamps.Begin(command);
+		if (State->BatchActive && State->BatchFirst) {
+			State->BatchTimingSlot = timingSlot;
+		}
+		if ((State->BatchFirst || !State->BatchActive) && timingSlot < VulkanTimestamps::SLOTS) {
+			State->PendingMarks[timingSlot].clear();
+		}
+		core::Name timedName;
+		uint32_t openedMark = VulkanTimestamps::MARKS;
+		SDL_GPUCommandBuffer *timedCommand = command;
+		auto openedWall = std::chrono::steady_clock::now();
+		bool mainGpuWorkRecorded = State->BatchActive && !State->BatchFirst;
+		bool dedicatedComputeSubmitted = false;
+		const auto closePass = [&] {
+			if (!timedName.IsValid()) {
+				return;
+			}
+			const auto now = std::chrono::steady_clock::now();
+			State->WallTimings[timedName.Id()] +=
+				std::chrono::duration<double, std::micro>(now - openedWall).count();
+			if (timingSlot < VulkanTimestamps::SLOTS) {
+				const uint32_t closedMark = State->Timestamps.Mark(timedCommand);
+				if (openedMark < VulkanTimestamps::MARKS && closedMark < VulkanTimestamps::MARKS) {
+					State->PendingMarks[timingSlot].push_back({timedName, openedMark, closedMark});
+				}
+			}
+			timedName = {};
+		};
+		const auto enterNamedPass = [&](core::Name name, SDL_GPUCommandBuffer *recordedCommand = nullptr) {
+			closePass();
+			timedName = name;
+			timedCommand = recordedCommand != nullptr ? recordedCommand : command;
+			const graph::Node *node = nullptr;
+			const graph::ScheduledNode *scheduled = nullptr;
+			for (const graph::ExecutionWave &wave : selectedPipeline->Schedule.Waves) {
+				for (const graph::ScheduledNode &candidate : wave.Nodes) {
+					const graph::Node *candidateNode = selectedPipeline->Graph.Find(candidate.Node);
+					if (candidateNode != nullptr && candidateNode->Name == name) {
+						node = candidateNode;
+						scheduled = &candidate;
+						break;
+					}
+				}
+				if (scheduled != nullptr) {
+					break;
+				}
+			}
+			if (scheduled != nullptr &&
+				(scheduled->Queue == graph::ExecutionQueue::Graphics ||
+				 scheduled->Queue == graph::ExecutionQueue::Transfer) &&
+				node->Kind != core::Name("upload-instances")) {
+				mainGpuWorkRecorded = true;
+			}
+			if (std::find(result.Nodes.begin(), result.Nodes.end(), name) == result.Nodes.end()) {
+				result.Nodes.push_back(name);
+			}
+			openedWall = std::chrono::steady_clock::now();
+			openedMark = timingSlot < VulkanTimestamps::SLOTS ? State->Timestamps.Mark(timedCommand)
+															  : VulkanTimestamps::MARKS;
+		};
+		const auto finishCpuNode = [&](const graph::RunContext &context) {
+			closePass();
+			if (std::find(result.Nodes.begin(), result.Nodes.end(), context.Name) == result.Nodes.end()) {
+				result.Nodes.push_back(context.Name);
+			}
+			if (const auto found = cpuNodeWall.find(context.Name.Id()); found != cpuNodeWall.end()) {
+				State->WallTimings[context.Name.Id()] += found->second;
+			}
+			return true;
+		};
+		for (const char *kind :
+			 {"world", "camera", "entities", "cull-frustum", "cull-distance", "filter-tag", "order-draw"}) {
+			frameNodes.Set(core::Name(kind), finishCpuNode);
+		}
+		bool uploadsSubmitted = false;
+		const auto submitUploads = [&] {
+			if (uploadsSubmitted) {
+				return true;
+			}
 
-			SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(command);
+			const bool uploadInstances = haveInstances;
+			if (!uploadInstances && !uploadOverlay && particleCount == 0 && ribbonCount == 0) {
+				uploadsSubmitted = true;
+				return true;
+			}
+
+			OverlayImage::Region overlayRegion;
+			if (uploadOverlay) {
+				ENGINE_PROFILE_CAT("stage overlay", core::ProfileCategory::Render);
+				overlayRegion = State->OverlayUninitialised
+									? OverlayImage::Region{0, 0, overlay.GetWidth(), overlay.GetHeight()}
+									: overlay.UploadRegion();
+				const auto rowBytes =
+					static_cast<size_t>(overlayRegion.Width) * OverlayImage::BYTES_PER_PIXEL;
+				void *mapped = SDL_MapGPUTransferBuffer(State->Device, State->OverlayTransfer, true);
+				if (mapped == nullptr) {
+					ENGINE_ERROR("upload overlay: SDL_MapGPUTransferBuffer: {}", SDL_GetError());
+					return false;
+				}
+
+				auto *destination = static_cast<uint8_t *>(mapped);
+				const uint8_t *pixels = overlay.GetPixels();
+				const auto stride = static_cast<size_t>(overlay.GetWidth()) * OverlayImage::BYTES_PER_PIXEL;
+				for (int row = 0; row < overlayRegion.Height; row++) {
+					const size_t offset =
+						static_cast<size_t>(overlayRegion.Y + row) * stride +
+						static_cast<size_t>(overlayRegion.X) * OverlayImage::BYTES_PER_PIXEL;
+					std::memcpy(destination + static_cast<size_t>(row) * rowBytes, pixels + offset, rowBytes);
+				}
+				SDL_UnmapGPUTransferBuffer(State->Device, State->OverlayTransfer);
+			}
+
+			SDL_GPUCommandBuffer *uploadCommand = SDL_AcquireGPUCommandBuffer(State->Device);
+			if (uploadCommand == nullptr) {
+				ENGINE_ERROR("upload: SDL_AcquireGPUCommandBuffer: {}", SDL_GetError());
+				return false;
+			}
+			SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(uploadCommand);
+			if (copy == nullptr) {
+				ENGINE_ERROR("upload instances: SDL_BeginGPUCopyPass: {}", SDL_GetError());
+				SDL_CancelGPUCommandBuffer(uploadCommand);
+				return false;
+			}
+
+			uint64_t uploadedBytes = 0;
+			if (uploadInstances) {
+				const SDL_GPUTransferBufferLocation source{State->InstanceTransfer, 0};
+				const SDL_GPUBufferRegion destination{
+					State->InstanceBuffer,
+					0,
+					uploadCount * static_cast<uint32_t>(sizeof(GpuInstance)),
+				};
+				SDL_UploadToGPUBuffer(copy, &source, &destination, true);
+				uploadedBytes += destination.size;
+			}
 
 			if (ribbonCount > 0) {
 				const SDL_GPUTransferBufferLocation source{State->RibbonTransfer, 0};
@@ -5155,6 +7015,7 @@ namespace engine::render {
 					ribbonCount * static_cast<uint32_t>(sizeof(effects::RibbonVertex)),
 				};
 				SDL_UploadToGPUBuffer(copy, &source, &destination, true);
+				uploadedBytes += destination.size;
 			}
 
 			if (particleCount > 0) {
@@ -5164,103 +7025,54 @@ namespace engine::render {
 					0,
 					particleCount * static_cast<uint32_t>(sizeof(effects::ParticleInstance)),
 				};
-				// Cycled, for the instance buffer's reason: a fresh allocation
-				// rather than a stall on the copy the previous frame may still be
-				// reading.
 				SDL_UploadToGPUBuffer(copy, &source, &destination, true);
-			}
-
-			if (haveInstances) {
-				const SDL_GPUTransferBufferLocation source{State->InstanceTransfer, 0};
-				const SDL_GPUBufferRegion destination{
-					State->InstanceBuffer,
-					0,
-					uploadCount * static_cast<uint32_t>(sizeof(GpuInstance)),
-				};
-				// Cycling hands back a fresh allocation rather than stalling on
-				// the copy the previous frame may still be reading.
-				SDL_UploadToGPUBuffer(copy, &source, &destination, true);
+				uploadedBytes += destination.size;
 			}
 
 			if (uploadOverlay) {
-				// Only the part of the overlay that anything has drawn on.
-				//
-				// The image is the size of the window and the panels are a
-				// corner of it, so sending all of it meant megabytes of
-				// transparent pixels per frame that had not changed since the
-				// program started - measured as the largest single cost in the
-				// frame. The region covers what was drawn this frame and what
-				// was drawn last frame, the second being how the pixels a
-				// shrinking panel vacates get told they are transparent now.
-				ENGINE_PROFILE_CAT("upload overlay", core::ProfileCategory::Render);
-
-				// The whole image on the frame the texture was created, so that
-				// the parts no panel ever covers are transparent rather than
-				// whatever the driver handed back.
-				const auto region = State->OverlayUninitialised
-										? OverlayImage::Region{0, 0, overlay.GetWidth(), overlay.GetHeight()}
-										: overlay.UploadRegion();
-				State->OverlayUninitialised = false;
-
-				const auto rowBytes = static_cast<size_t>(region.Width) * OverlayImage::BYTES_PER_PIXEL;
-
-				void *mapped = nullptr;
-				{
-					ENGINE_PROFILE_CAT("map overlay", core::ProfileCategory::Render);
-					mapped = SDL_MapGPUTransferBuffer(State->Device, State->OverlayTransfer, true);
-				}
-
-				{
-					// Row by row, because the region is narrower than the image
-					// and its rows are not adjacent in it. Packed tightly on the
-					// way out, which is what pixels_per_row below promises.
-					ENGINE_PROFILE_CAT("copy overlay", core::ProfileCategory::Render);
-
-					auto *destination = static_cast<uint8_t *>(mapped);
-					const uint8_t *pixels = overlay.GetPixels();
-					const auto stride =
-						static_cast<size_t>(overlay.GetWidth()) * OverlayImage::BYTES_PER_PIXEL;
-
-					for (int row = 0; row < region.Height; row++) {
-						const size_t offset = static_cast<size_t>(region.Y + row) * stride +
-											  static_cast<size_t>(region.X) * OverlayImage::BYTES_PER_PIXEL;
-						std::memcpy(
-							destination + static_cast<size_t>(row) * rowBytes, pixels + offset, rowBytes
-						);
-					}
-				}
-
-				SDL_UnmapGPUTransferBuffer(State->Device, State->OverlayTransfer);
-
 				SDL_GPUTextureTransferInfo source{};
 				source.transfer_buffer = State->OverlayTransfer;
-				source.pixels_per_row = static_cast<uint32_t>(region.Width);
-				source.rows_per_layer = static_cast<uint32_t>(region.Height);
+				source.pixels_per_row = static_cast<uint32_t>(overlayRegion.Width);
+				source.rows_per_layer = static_cast<uint32_t>(overlayRegion.Height);
 
 				SDL_GPUTextureRegion destination{};
 				destination.texture = State->OverlayTexture;
-				destination.x = static_cast<uint32_t>(region.X);
-				destination.y = static_cast<uint32_t>(region.Y);
-				destination.w = static_cast<uint32_t>(region.Width);
-				destination.h = static_cast<uint32_t>(region.Height);
+				destination.x = static_cast<uint32_t>(overlayRegion.X);
+				destination.y = static_cast<uint32_t>(overlayRegion.Y);
+				destination.w = static_cast<uint32_t>(overlayRegion.Width);
+				destination.h = static_cast<uint32_t>(overlayRegion.Height);
 				destination.d = 1;
 
-				// False, not true. Cycling hands back a *fresh* texture, and a
-				// fresh texture is uninitialised everywhere this upload does not
-				// reach - which is now everywhere outside the panels.
+				// Keep the texture allocation because a partial upload must preserve
+				// every pixel outside the dirty rectangle.
 				SDL_UploadToGPUTexture(copy, &source, &destination, false);
-
-				// The GPU matches the image now, so nothing is pending until
-				// something draws again.
-				overlay.MarkUploaded();
+				uploadedBytes += static_cast<uint64_t>(overlayRegion.Width) * overlayRegion.Height *
+								 OverlayImage::BYTES_PER_PIXEL;
 			}
 
 			SDL_EndGPUCopyPass(copy);
-		}
+			if (!SDL_SubmitGPUCommandBuffer(uploadCommand)) {
+				ENGINE_ERROR("upload: SDL_SubmitGPUCommandBuffer: {}", SDL_GetError());
+				return false;
+			}
 
-		// The passes below, recorded as they are submitted. See `PassRecorder`.
-		PassRecorder passes;
-
+			// No fence here. Resource cycling gives each later view a fresh
+			// destination while its draw commands retain the version they bound.
+			// The GPU can consume this copy while the CPU records the main command
+			// buffer, and queue submission order makes every draw see its upload.
+			if (uploadOverlay) {
+				State->OverlayUninitialised = false;
+				overlay.MarkUploaded();
+			}
+			result.UploadedBytes += uploadedBytes;
+			result.UploadCommandBuffers++;
+			uploadsSubmitted = true;
+			return true;
+		};
+		frameNodes.Set(core::Name("upload-instances"), [&](const graph::RunContext &context) {
+			enterNamedPass(context.Name);
+			return submitUploads();
+		});
 		// --- shadow pass ----------------------------------------------------
 		//
 		// **The scene range, not the camera's**, and no colour target at all.
@@ -5270,7 +7082,7 @@ namespace engine::render {
 		// rather than clearing a depth target nothing writes to - and the
 		// colour pass then samples a shadow map that was never rendered, which
 		// is what `FrameResult::Ran` exists to make visible.
-		const bool haveShadow = haveInstances && sceneCount > 0 &&
+		const bool haveShadow = graphEnabled(core::Name("shadow")) && haveInstances && sceneCount > 0 &&
 								(reflectedCasters > 0 || surfaceCasters > 0) && State->EnsureShadow();
 
 		// Builds the per-draw block from world lighting and the camera used by
@@ -5294,244 +7106,62 @@ namespace engine::render {
 			return lighting;
 		};
 
-		if (haveShadow) {
-			ENGINE_PROFILE_CAT("shadow pass", core::ProfileCategory::Render);
-			passes.Enter(Pass::Shadow);
-
-			SDL_GPUDepthStencilTargetInfo shadowTarget{};
-			shadowTarget.texture = State->ShadowTexture;
-			shadowTarget.clear_depth = 1.0f;
-			shadowTarget.load_op = SDL_GPU_LOADOP_CLEAR;
-
-			// **Stored, unlike the colour pass's depth.** This one is read by
-			// the next pass, which is the entire point of rendering it.
-			shadowTarget.store_op = SDL_GPU_STOREOP_STORE;
-			shadowTarget.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
-			shadowTarget.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
-			shadowTarget.cycle = true;
-
-			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, nullptr, 0, &shadowTarget);
-			State->BindPipeline(pass, State->ShadowPipeline, Impl::PipelineFamily::Other);
-
-			const SDL_GPUBufferBinding vertexBindings[] = {
-				{State->Meshes.Vertices(), 0},
-				{State->InstanceBuffer, 0},
-			};
-			SDL_BindGPUVertexBuffers(pass, 0, vertexBindings, 2);
-
-			const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
-			SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
-
-			SDL_PushGPUVertexUniformData(command, 0, &lightViewProjection, sizeof(lightViewProjection));
-
-			// **Only the opaque part of the scene casts**, and of that only what
-			// `Visual::CastShadow` left switched on. A transparent pane writing
-			// full depth into the shadow map would cast a solid shadow, which is
-			// the most obviously wrong thing glass can do; an opaque thing that
-			// should not occlude is the case the author decides, and it arrives
-			// here as the caster runs `partition casters` produced.
-			//
-			// Two draws because the two runs are not adjacent - the surface
-			// partition sits between them. The second is empty in every scene
-			// with no mirror in it, which is almost all of them.
-			// Depth only, so no samplers and no fragment uniforms - the null
-			// lighting pointer is what says so.
-			uint64_t shadowTriangles = 0;
-			if (reflectedCasters > 0) {
-				result.DrawCalls += State->DrawSlots(
-					command,
-					pass,
-					0,
-					reflectedCasters,
-					nullptr,
-					nullptr,
-					nullptr,
-					nullptr,
-					nullptr,
-					0,
-					shadowTriangles
-				);
-			}
-			if (surfaceCasters > 0) {
-				result.DrawCalls += State->DrawSlots(
-					command,
-					pass,
-					sceneReflected,
-					surfaceCasters,
-					nullptr,
-					nullptr,
-					nullptr,
-					nullptr,
-					nullptr,
-					0,
-					shadowTriangles
-				);
-			}
-
-			SDL_EndGPURenderPass(pass);
-		}
-
-		// --- portal beams ----------------------------------------------------
-		//
-		// **A hole carries occlusion as well as a picture.** Both rooms already
-		// have the world's sun, so what a portal transports is not light but the
-		// *absence* of it: a caster standing in front of a hole darkens the floor
-		// beyond it, and a body cut at the seam is shadowed by whatever shadows
-		// its other half. Adding a second contribution instead would double-light
-		// every floor near a doorway.
-		//
-		// **The casters are left where they are and the receiver is mapped
-		// back**, which is the whole reason this is affordable. The obvious
-		// arrangement renders the near room's casters *transformed* into the far
-		// room, and that needs a second instance buffer holding a mapped copy of
-		// the world. Mapping the other way needs none: a far-side fragment goes
-		// through `Back` into the near room and is looked up there, where the
-		// casters already are. `NON-EUCLIDEAN.md` Part V.3 is the derivation.
-		//
-		// **The frustum is the aperture.** `graph::FitPortalLight` fits the sides
-		// of the box to the pane's own rectangle, so a fragment the beam does not
-		// reach projects outside `0..1` and the lookup already reads that as lit.
-		// There is no rectangle test in the shader because the matrix is one.
 		State->Beams = BeamUniforms{};
-
-		if (havePortals && haveShadow && State->EnsureBeams()) {
-			ENGINE_PROFILE_CAT("portal beams", core::ProfileCategory::Render);
-
-			// The holes nearest the eye, because every fragment tests every live
-			// beam and four is what a corridor needs.
-			struct Beam {
-				const PortalView *Pane = nullptr;
-				const PortalView *Partner = nullptr;
-				float Distance = 0.0f;
-			};
-
-			Beam ordered[scene::MAX_SURFACES];
-			size_t candidates = 0;
-
-			for (uint8_t slot = 0; slot < scene::MAX_SURFACES; slot++) {
-				const PortalView *const portal = portalOf[slot];
-				if (portal == nullptr || portal->Partner < 0) {
-					continue;
-				}
-
-				// **A pane with no partner in this frame's set carries nothing**,
-				// because the map back is the partner's own warp - one map per
-				// pane, and a pair's two are each other's inverse. Deriving an
-				// inverse here would be a second arithmetic to get wrong.
-				const PortalView *const partner = portalOf[static_cast<uint8_t>(portal->Partner)];
-				if (partner == nullptr) {
-					continue;
-				}
-
-				ordered[candidates++] = Beam{
-					portal,
-					partner,
-					scene::RectangleDistance(
-						portal->Centre, portal->First, portal->Second, cameraFrame.Position
-					)
-				};
+		frameNodes.Set(core::Name("shadow"), [&](const graph::RunContext &context) {
+			enterNamedPass(context.Name);
+			if (!haveShadow) {
+				return true;
+			}
+			if (!submitUploads()) {
+				return false;
 			}
 
-			std::sort(ordered, ordered + candidates, [](const Beam &left, const Beam &right) {
-				return left.Distance < right.Distance;
-			});
+			{
+				ENGINE_PROFILE_CAT("shadow pass", core::ProfileCategory::Render);
 
-			if (candidates > MAX_PORTAL_BEAMS) {
-				// **Logged rather than dropped quietly.** A shadow that stops
-				// crossing when a fifth pane comes on screen reads as the feature
-				// not working at all, which is a much harder thing to look for
-				// than a line saying which holes were left out.
-				ENGINE_WARN(
-					"{} holes could carry a shadow and only {} may; the farther ones do not",
-					candidates,
-					MAX_PORTAL_BEAMS
-				);
-			}
+				SDL_GPUDepthStencilTargetInfo shadowTarget{};
+				shadowTarget.texture = State->ShadowTexture;
+				shadowTarget.clear_depth = 1.0f;
+				shadowTarget.load_op = SDL_GPU_LOADOP_CLEAR;
 
-			const auto live = static_cast<uint32_t>(std::min<size_t>(candidates, MAX_PORTAL_BEAMS));
+				// **Stored, unlike the colour pass's depth.** This one is read by
+				// the next pass, which is the entire point of rendering it.
+				shadowTarget.store_op = SDL_GPU_STOREOP_STORE;
+				shadowTarget.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+				shadowTarget.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+				shadowTarget.cycle = true;
 
-			const auto half = static_cast<float>(SHADOW_RESOLUTION / 2);
+				SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, nullptr, 0, &shadowTarget);
+				State->BindPipeline(pass, State->ShadowPipeline, Impl::PipelineFamily::Other);
 
-			for (uint32_t index = 0; index < live; index++) {
-				const Beam &beam = ordered[index];
-
-				State->Beams.Light[index] = graph::FitPortalLight(
-					sceneBounds,
-					beam.Pane->Centre,
-					beam.Pane->First,
-					beam.Pane->Second,
-					core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z}
-				);
-
-				State->Beams.Back[index] = scene::SeamMatrix(beam.Partner->Warp);
-
-				State->Beams.Plane[index] = glm::vec4{
-					beam.Pane->Normal.X,
-					beam.Pane->Normal.Y,
-					beam.Pane->Normal.Z,
-					beam.Pane->Normal.Dot(beam.Pane->Centre)
-				};
-
-				// Half the atlas on each axis, in the reading order the viewport
-				// below uses.
-				State->Beams.Region[index] = glm::vec4{
-					0.5f, 0.5f, static_cast<float>(index % 2) * 0.5f, static_cast<float>(index / 2) * 0.5f
-				};
-
-				SDL_GPUDepthStencilTargetInfo beamTarget{};
-				beamTarget.texture = State->BeamTexture;
-				beamTarget.clear_depth = 1.0f;
-
-				// **The first beam clears the whole atlas and the rest load it.**
-				// A clear is not confined by the viewport, so clearing per beam
-				// would wipe the ones already drawn - and a quadrant nobody wrote
-				// stays at the far plane, which the lookup reads as lit.
-				beamTarget.load_op = index == 0 ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
-				beamTarget.store_op = SDL_GPU_STOREOP_STORE;
-				beamTarget.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
-				beamTarget.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
-				beamTarget.cycle = false;
-
-				SDL_GPURenderPass *beamPass = SDL_BeginGPURenderPass(command, nullptr, 0, &beamTarget);
-				State->BindPipeline(beamPass, State->ShadowPipeline, Impl::PipelineFamily::Other);
-
-				const SDL_GPUViewport beamViewport{
-					static_cast<float>(index % 2) * half,
-					static_cast<float>(index / 2) * half,
-					half,
-					half,
-					0.0f,
-					1.0f
-				};
-				SDL_SetGPUViewport(beamPass, &beamViewport);
-
-				const SDL_Rect beamScissor{
-					static_cast<int>(index % 2) * static_cast<int>(half),
-					static_cast<int>(index / 2) * static_cast<int>(half),
-					static_cast<int>(half),
-					static_cast<int>(half)
-				};
-				SDL_SetGPUScissor(beamPass, &beamScissor);
-
-				const SDL_GPUBufferBinding beamBindings[] = {
+				const SDL_GPUBufferBinding vertexBindings[] = {
 					{State->Meshes.Vertices(), 0},
 					{State->InstanceBuffer, 0},
 				};
-				SDL_BindGPUVertexBuffers(beamPass, 0, beamBindings, 2);
+				SDL_BindGPUVertexBuffers(pass, 0, vertexBindings, 2);
 
-				const SDL_GPUBufferBinding beamIndices{State->Meshes.Indices(), 0};
-				SDL_BindGPUIndexBuffer(beamPass, &beamIndices, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+				const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
+				SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
 
-				SDL_PushGPUVertexUniformData(command, 0, &State->Beams.Light[index], sizeof(glm::mat4));
+				SDL_PushGPUVertexUniformData(command, 0, &lightViewProjection, sizeof(lightViewProjection));
 
-				// The same caster runs the world's own shadow map draws, for the
-				// same reason: a caster outside the beam is culled by the matrix
-				// rather than by a list.
-				uint64_t beamTriangles = 0;
+				// **Only the opaque part of the scene casts**, and of that only what
+				// `Visual::CastShadow` left switched on. A transparent pane writing
+				// full depth into the shadow map would cast a solid shadow, which is
+				// the most obviously wrong thing glass can do; an opaque thing that
+				// should not occlude is the case the author decides, and it arrives
+				// here as the caster runs `partition casters` produced.
+				//
+				// Two draws because the two runs are not adjacent - the surface
+				// partition sits between them. The second is empty in every scene
+				// with no mirror in it, which is almost all of them.
+				// Depth only, so no samplers and no fragment uniforms - the null
+				// lighting pointer is what says so.
+				uint64_t shadowTriangles = 0;
 				if (reflectedCasters > 0) {
 					result.DrawCalls += State->DrawSlots(
 						command,
-						beamPass,
+						pass,
 						0,
 						reflectedCasters,
 						nullptr,
@@ -5540,13 +7170,13 @@ namespace engine::render {
 						nullptr,
 						nullptr,
 						0,
-						beamTriangles
+						shadowTriangles
 					);
 				}
 				if (surfaceCasters > 0) {
 					result.DrawCalls += State->DrawSlots(
 						command,
-						beamPass,
+						pass,
 						sceneReflected,
 						surfaceCasters,
 						nullptr,
@@ -5555,15 +7185,206 @@ namespace engine::render {
 						nullptr,
 						nullptr,
 						0,
-						beamTriangles
+						shadowTriangles
 					);
 				}
 
-				SDL_EndGPURenderPass(beamPass);
+				SDL_EndGPURenderPass(pass);
 			}
 
-			State->Beams.Count.x = static_cast<float>(live);
-		}
+			// --- portal beams ----------------------------------------------------
+			//
+			// **A hole carries occlusion as well as a picture.** Both rooms already
+			// have the world's sun, so what a portal transports is not light but the
+			// *absence* of it: a caster standing in front of a hole darkens the floor
+			// beyond it, and a body cut at the seam is shadowed by whatever shadows
+			// its other half. Adding a second contribution instead would double-light
+			// every floor near a doorway.
+			//
+			// **The casters are left where they are and the receiver is mapped
+			// back**, which is the whole reason this is affordable. The obvious
+			// arrangement renders the near room's casters *transformed* into the far
+			// room, and that needs a second instance buffer holding a mapped copy of
+			// the world. Mapping the other way needs none: a far-side fragment goes
+			// through `Back` into the near room and is looked up there, where the
+			// casters already are. `NON-EUCLIDEAN.md` Part V.3 is the derivation.
+			//
+			// **The frustum is the aperture.** `graph::FitPortalLight` fits the sides
+			// of the box to the pane's own rectangle, so a fragment the beam does not
+			// reach projects outside `0..1` and the lookup already reads that as lit.
+			// There is no rectangle test in the shader because the matrix is one.
+			if (havePortals && haveShadow && State->EnsureBeams()) {
+				ENGINE_PROFILE_CAT("portal beams", core::ProfileCategory::Render);
+
+				// The holes nearest the eye, because every fragment tests every live
+				// beam and four is what a corridor needs.
+				struct Beam {
+					const PortalView *Pane = nullptr;
+					const PortalView *Partner = nullptr;
+					float Distance = 0.0f;
+				};
+
+				Beam ordered[scene::MAX_SURFACES];
+				size_t candidates = 0;
+
+				for (uint8_t slot = 0; slot < scene::MAX_SURFACES; slot++) {
+					const PortalView *const portal = portalOf[slot];
+					if (portal == nullptr || portal->Partner < 0) {
+						continue;
+					}
+
+					// **A pane with no partner in this frame's set carries nothing**,
+					// because the map back is the partner's own warp - one map per
+					// pane, and a pair's two are each other's inverse. Deriving an
+					// inverse here would be a second arithmetic to get wrong.
+					const PortalView *const partner = portalOf[static_cast<uint8_t>(portal->Partner)];
+					if (partner == nullptr) {
+						continue;
+					}
+
+					ordered[candidates++] = Beam{
+						portal,
+						partner,
+						scene::RectangleDistance(
+							portal->Centre, portal->First, portal->Second, cameraFrame.Position
+						)
+					};
+				}
+
+				std::sort(ordered, ordered + candidates, [](const Beam &left, const Beam &right) {
+					return left.Distance < right.Distance;
+				});
+
+				if (candidates > MAX_PORTAL_BEAMS) {
+					// **Logged rather than dropped quietly.** A shadow that stops
+					// crossing when a fifth pane comes on screen reads as the feature
+					// not working at all, which is a much harder thing to look for
+					// than a line saying which holes were left out.
+					ENGINE_WARN(
+						"{} holes could carry a shadow and only {} may; the farther ones do not",
+						candidates,
+						MAX_PORTAL_BEAMS
+					);
+				}
+
+				const auto live = static_cast<uint32_t>(std::min<size_t>(candidates, MAX_PORTAL_BEAMS));
+
+				const auto half = static_cast<float>(SHADOW_RESOLUTION / 2);
+
+				for (uint32_t index = 0; index < live; index++) {
+					const Beam &beam = ordered[index];
+
+					State->Beams.Light[index] = graph::FitPortalLight(
+						sceneBounds,
+						beam.Pane->Centre,
+						beam.Pane->First,
+						beam.Pane->Second,
+						core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z}
+					);
+
+					State->Beams.Back[index] = scene::SeamMatrix(beam.Partner->Warp);
+
+					State->Beams.Plane[index] = glm::vec4{
+						beam.Pane->Normal.X,
+						beam.Pane->Normal.Y,
+						beam.Pane->Normal.Z,
+						beam.Pane->Normal.Dot(beam.Pane->Centre)
+					};
+
+					// Half the atlas on each axis, in the reading order the viewport
+					// below uses.
+					State->Beams.Region[index] = glm::vec4{
+						0.5f, 0.5f, static_cast<float>(index % 2) * 0.5f, static_cast<float>(index / 2) * 0.5f
+					};
+
+					SDL_GPUDepthStencilTargetInfo beamTarget{};
+					beamTarget.texture = State->BeamTexture;
+					beamTarget.clear_depth = 1.0f;
+
+					// **The first beam clears the whole atlas and the rest load it.**
+					// A clear is not confined by the viewport, so clearing per beam
+					// would wipe the ones already drawn - and a quadrant nobody wrote
+					// stays at the far plane, which the lookup reads as lit.
+					beamTarget.load_op = index == 0 ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
+					beamTarget.store_op = SDL_GPU_STOREOP_STORE;
+					beamTarget.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+					beamTarget.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+					beamTarget.cycle = false;
+
+					SDL_GPURenderPass *beamPass = SDL_BeginGPURenderPass(command, nullptr, 0, &beamTarget);
+					State->BindPipeline(beamPass, State->ShadowPipeline, Impl::PipelineFamily::Other);
+
+					const SDL_GPUViewport beamViewport{
+						static_cast<float>(index % 2) * half,
+						static_cast<float>(index / 2) * half,
+						half,
+						half,
+						0.0f,
+						1.0f
+					};
+					SDL_SetGPUViewport(beamPass, &beamViewport);
+
+					const SDL_Rect beamScissor{
+						static_cast<int>(index % 2) * static_cast<int>(half),
+						static_cast<int>(index / 2) * static_cast<int>(half),
+						static_cast<int>(half),
+						static_cast<int>(half)
+					};
+					SDL_SetGPUScissor(beamPass, &beamScissor);
+
+					const SDL_GPUBufferBinding beamBindings[] = {
+						{State->Meshes.Vertices(), 0},
+						{State->InstanceBuffer, 0},
+					};
+					SDL_BindGPUVertexBuffers(beamPass, 0, beamBindings, 2);
+
+					const SDL_GPUBufferBinding beamIndices{State->Meshes.Indices(), 0};
+					SDL_BindGPUIndexBuffer(beamPass, &beamIndices, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+
+					SDL_PushGPUVertexUniformData(command, 0, &State->Beams.Light[index], sizeof(glm::mat4));
+
+					// The same caster runs the world's own shadow map draws, for the
+					// same reason: a caster outside the beam is culled by the matrix
+					// rather than by a list.
+					uint64_t beamTriangles = 0;
+					if (reflectedCasters > 0) {
+						result.DrawCalls += State->DrawSlots(
+							command,
+							beamPass,
+							0,
+							reflectedCasters,
+							nullptr,
+							nullptr,
+							nullptr,
+							nullptr,
+							nullptr,
+							0,
+							beamTriangles
+						);
+					}
+					if (surfaceCasters > 0) {
+						result.DrawCalls += State->DrawSlots(
+							command,
+							beamPass,
+							sceneReflected,
+							surfaceCasters,
+							nullptr,
+							nullptr,
+							nullptr,
+							nullptr,
+							nullptr,
+							0,
+							beamTriangles
+						);
+					}
+
+					SDL_EndGPURenderPass(beamPass);
+				}
+
+				State->Beams.Count.x = static_cast<float>(live);
+			}
+			return true;
+		});
 
 		// --- what a scene pass is, wherever it is opened ----------------------
 		//
@@ -5752,7 +7573,8 @@ namespace engine::render {
 		// once a mirror, surface or portal render pass is open. Headless frames
 		// still draw into capture targets; a hook that has no backend declines in
 		// `Prepare` itself.
-		const bool drawInterface = interfaceHook != nullptr && interfaceHook->Prepare(command);
+		const bool drawInterface = graphEnabled(core::Name("interface")) && interfaceHook != nullptr &&
+								   interfaceHook->Prepare(command);
 
 		// --- the mirror recursion --------------------------------------------
 		//
@@ -6070,325 +7892,193 @@ namespace engine::render {
 		// frame, and the screen pass samples it exactly as if it had just been
 		// rendered. See `SignatureOf` for what counts as a change and, more to
 		// the point, what deliberately does not.
-		if (wantSurface && haveInstances && sceneCount > 0 && refreshCount > 0) {
-			ENGINE_PROFILE_CAT("surface pass", core::ProfileCategory::Render);
-			passes.Enter(Pass::Surface);
+		frameNodes.Set(core::Name("surface"), [&](const graph::RunContext &context) {
+			enterNamedPass(context.Name);
+			if (wantSurface && haveInstances && sceneCount > 0 && refreshCount > 0) {
+				ENGINE_PROFILE_CAT("surface pass", core::ProfileCategory::Render);
 
-			// **The whole pass, run once per bounce, which is how depth used to be
-			// had - and is not how it is had any more where a pane carries its
-			// rectangle.** `D00112`'s remaining half was that a surface samples the
-			// *other* surfaces from the textures they had last frame, so a chain
-			// resolved over frames rather than within one. Iterating fixed that:
-			// bounce zero draws every surface sampling last frame's neighbours, the
-			// flip makes bounce zero's output the read side, and bounce one
-			// therefore samples *this* frame's neighbours.
-			//
-			// **What it never fixed is the viewpoint, and no number of runs
-			// could.** Every bounce redrew the same eye-derived cameras. The
-			// pictures got fresher and stayed taken from where nobody was standing,
-			// which is the flat slab `fillMirror` above exists to remove.
-			//
-			// So: **one run when the panes carry rectangles**, because the depth is
-			// the recursion's now and running the whole pass again would only
-			// redraw the same answer at the same viewpoints. A view with no
-			// rectangle - a camera parented to the world, or a cross-world pane -
-			// still resolves its chain by iterating, which is what it always did
-			// and is still the best available for it: nothing here can reflect a
-			// camera through a pane it was never told about.
-			//
-			// **The ping-pong stays either way.** With the recursion nothing
-			// samples a slot being written, so the pair is not load-bearing for
-			// mirrors - but the screen pass and the iterating path both still read
-			// `Slot ^ 1`, and a surface skipped this frame must keep the matrices
-			// that drew what it holds.
-			//
-			// **`graph::VisibleSurfaces` is given `surfaceBounces` regardless**,
-			// above, where `cullRounds` is computed - and it must be. That decides
-			// how many levels of surface-seen-in-surface are *marked visible*, and
-			// a level the recursion draws without being marked is a level culled,
-			// which is what made a mirror's deeper reflections vanish as the viewer
-			// turned. The two numbers describe the same depth by two routes.
-			const uint32_t bounces = anyPane ? 1u : (acceptedCount > 1 ? std::max(surfaceBounces, 1u) : 1u);
-
-			for (uint32_t bounce = 0; bounce < bounces; bounce++) {
-
-				// **Flipped for every refreshing surface before the first pass runs,
-				// not inside the loop.** A surface pass samples the other surfaces'
-				// read slots, so every slot has to have finished flipping before any
-				// of them is read - flipping inside the loop would have the second
-				// pass sample the first surface's *new* texture, which is this
-				// frame's half-drawn image and the exact self-reference the pair
-				// exists to make impossible.
+				// **The whole pass, run once per bounce, which is how depth used to be
+				// had - and is not how it is had any more where a pane carries its
+				// rectangle.** `D00112`'s remaining half was that a surface samples the
+				// *other* surfaces from the textures they had last frame, so a chain
+				// resolved over frames rather than within one. Iterating fixed that:
+				// bounce zero draws every surface sampling last frame's neighbours, the
+				// flip makes bounce zero's output the read side, and bounce one
+				// therefore samples *this* frame's neighbours.
 				//
-				// **A skipped surface does not flip, and its matrices do not move.**
-				// Both halves of that are one fact: the slot still holds the frame it
-				// held, so `ViewProjection` must still be the camera that drew it and
-				// `PreviousViewProjection` the one before. Advancing either for a
-				// surface that did not render would project a texture with a camera
-				// that never took it - a reflection sliding across a pane that
-				// nothing in the scene is moving, which is the hardest possible
-				// version of this bug to attribute.
-				for (size_t index = 0; index < acceptedCount; index++) {
-					if (!accepted[index].Refresh) {
-						continue;
+				// **What it never fixed is the viewpoint, and no number of runs
+				// could.** Every bounce redrew the same eye-derived cameras. The
+				// pictures got fresher and stayed taken from where nobody was standing,
+				// which is the flat slab `fillMirror` above exists to remove.
+				//
+				// So: **one run when the panes carry rectangles**, because the depth is
+				// the recursion's now and running the whole pass again would only
+				// redraw the same answer at the same viewpoints. A view with no
+				// rectangle - a camera parented to the world, or a cross-world pane -
+				// still resolves its chain by iterating, which is what it always did
+				// and is still the best available for it: nothing here can reflect a
+				// camera through a pane it was never told about.
+				//
+				// **The ping-pong stays either way.** With the recursion nothing
+				// samples a slot being written, so the pair is not load-bearing for
+				// mirrors - but the screen pass and the iterating path both still read
+				// `Slot ^ 1`, and a surface skipped this frame must keep the matrices
+				// that drew what it holds.
+				//
+				// **`graph::VisibleSurfaces` is given `surfaceBounces` regardless**,
+				// above, where `cullRounds` is computed - and it must be. That decides
+				// how many levels of surface-seen-in-surface are *marked visible*, and
+				// a level the recursion draws without being marked is a level culled,
+				// which is what made a mirror's deeper reflections vanish as the viewer
+				// turned. The two numbers describe the same depth by two routes.
+				const uint32_t bounces =
+					anyPane ? 1u : (acceptedCount > 1 ? std::max(surfaceBounces, 1u) : 1u);
+
+				for (uint32_t bounce = 0; bounce < bounces; bounce++) {
+
+					// **Flipped for every refreshing surface before the first pass runs,
+					// not inside the loop.** A surface pass samples the other surfaces'
+					// read slots, so every slot has to have finished flipping before any
+					// of them is read - flipping inside the loop would have the second
+					// pass sample the first surface's *new* texture, which is this
+					// frame's half-drawn image and the exact self-reference the pair
+					// exists to make impossible.
+					//
+					// **A skipped surface does not flip, and its matrices do not move.**
+					// Both halves of that are one fact: the slot still holds the frame it
+					// held, so `ViewProjection` must still be the camera that drew it and
+					// `PreviousViewProjection` the one before. Advancing either for a
+					// surface that did not render would project a texture with a camera
+					// that never took it - a reflection sliding across a pane that
+					// nothing in the scene is moving, which is the hardest possible
+					// version of this bug to attribute.
+					for (size_t index = 0; index < acceptedCount; index++) {
+						if (!accepted[index].Refresh) {
+							continue;
+						}
+
+						Impl::SurfaceSlotState &state = bank.Surfaces[accepted[index].Index];
+						state.PreviousViewProjection = state.ViewProjection;
+						state.PreviousSampling = state.Sampling;
+						state.ViewProjection = accepted[index].ViewProjection;
+						state.Sampling = accepted[index].Sampling;
+						state.Slot ^= 1u;
 					}
 
-					Impl::SurfaceSlotState &state = bank.Surfaces[accepted[index].Index];
-					state.PreviousViewProjection = state.ViewProjection;
-					state.PreviousSampling = state.Sampling;
-					state.ViewProjection = accepted[index].ViewProjection;
-					state.Sampling = accepted[index].Sampling;
-					state.Slot ^= 1u;
-				}
+					for (size_t index = 0; index < acceptedCount; index++) {
+						if (!accepted[index].Refresh) {
+							continue;
+						}
 
-				for (size_t index = 0; index < acceptedCount; index++) {
-					if (!accepted[index].Refresh) {
-						continue;
-					}
+						const uint8_t self = accepted[index].Index;
 
-					const uint8_t self = accepted[index].Index;
+						// **Taken here rather than at each draw**, because `drawMirrors`
+						// below shadows `index` with its own loop over surfaces - so
+						// `accepted[index]` inside it would name a different view
+						// entirely, and the filter would silently be another surface's.
+						const uint32_t surfaceFilter = accepted[index].View->TagFilter;
+						Impl::SurfaceSlotState &state = bank.Surfaces[self];
 
-					// **Taken here rather than at each draw**, because `drawMirrors`
-					// below shadows `index` with its own loop over surfaces - so
-					// `accepted[index]` inside it would name a different view
-					// entirely, and the filter would silently be another surface's.
-					const uint32_t surfaceFilter = accepted[index].View->TagFilter;
-					Impl::SurfaceSlotState &state = bank.Surfaces[self];
+						// **The levels below this one, filled from *this* camera and
+						// not from the eye.** That is the whole of the fix: every pane
+						// this pass is about to draw needs a picture taken from where
+						// this camera stands, and `fillMirror` is what takes it.
+						//
+						// **Here rather than once for the frame**, because the pool is
+						// per level and not per level per parent: the targets filled
+						// now are consumed by the draws a few lines down and then
+						// overwritten by the next pane's descent. Hoisting this out of
+						// the loop would give every pane the last one's reflections.
+						//
+						// **And with no levels below it, the same question is asked
+						// here instead**, because one bounce is a depth the automatic
+						// rule has to be able to climb out of: a corridor at one level
+						// draws every inner pane flat, and nothing else in the frame
+						// would say that a second level had anything to show.
+						if (mirrorLevels > 0 && havePanes[self]) {
+							fillMirror(
+								accepted[index].ViewProjection,
+								accepted[index].View->Frame,
+								mirrorLevels - 1,
+								static_cast<int8_t>(self)
+							);
+						} else if (havePanes[self]) {
+							surfaceDepth.Deeper = surfaceDepth.Deeper || wouldDescend(
+																			 accepted[index].ViewProjection,
+																			 accepted[index].View->Frame,
+																			 static_cast<int8_t>(self)
+																		 );
+						}
 
-					// **The levels below this one, filled from *this* camera and
-					// not from the eye.** That is the whole of the fix: every pane
-					// this pass is about to draw needs a picture taken from where
-					// this camera stands, and `fillMirror` is what takes it.
-					//
-					// **Here rather than once for the frame**, because the pool is
-					// per level and not per level per parent: the targets filled
-					// now are consumed by the draws a few lines down and then
-					// overwritten by the next pane's descent. Hoisting this out of
-					// the loop would give every pane the last one's reflections.
-					//
-					// **And with no levels below it, the same question is asked
-					// here instead**, because one bounce is a depth the automatic
-					// rule has to be able to climb out of: a corridor at one level
-					// draws every inner pane flat, and nothing else in the frame
-					// would say that a second level had anything to show.
-					if (mirrorLevels > 0 && havePanes[self]) {
-						fillMirror(
-							accepted[index].ViewProjection,
-							accepted[index].View->Frame,
-							mirrorLevels - 1,
-							static_cast<int8_t>(self)
-						);
-					} else if (havePanes[self]) {
-						surfaceDepth.Deeper = surfaceDepth.Deeper || wouldDescend(
-																		 accepted[index].ViewProjection,
-																		 accepted[index].View->Frame,
-																		 static_cast<int8_t>(self)
-																	 );
-					}
+						// **Cycled**, because this half of the pair is written here and
+						// read by the screen pass in the same frame - see
+						// `openScenePass` for what the other caller does instead. The
+						// whole target is the pass, so there is no viewport to set.
+						SDL_GPURenderPass *const pass =
+							openScenePass(state.Texture[state.Slot], state.Depth, true, nullptr);
 
-					// **Cycled**, because this half of the pair is written here and
-					// read by the screen pass in the same frame - see
-					// `openScenePass` for what the other caller does instead. The
-					// whole target is the pass, so there is no viewport to set.
-					SDL_GPURenderPass *const pass =
-						openScenePass(state.Texture[state.Slot], state.Depth, true, nullptr);
+						// **Shadowed, and pointedly not surfaced.** The mirror's own view
+						// gets the shadow map, so what it reflects is lit the way the
+						// screen lights it.
+						//
+						// **`Flags.z` is zero for the world, and it has to be.** It means
+						// "this draw samples a surface texture instead of its own tint",
+						// and it is set below for exactly the mirror runs. Setting it for
+						// the whole pass is what made the floor sample the previous
+						// frame's reflection and come out as the clear colour wherever
+						// that projection landed on untouched texels - a black wedge in
+						// the mirror that survived deleting every caster, the frame and
+						// the near-plane hack, and moved when the camera was re-aimed but
+						// not when the floor was.
+						const core::Vector3 surfaceEye = accepted[index].View->Frame.Position;
+						const LightingUniforms surfaceLighting = lightingAt(surfaceEye, 0.0f, 1.0f);
 
-					// **Shadowed, and pointedly not surfaced.** The mirror's own view
-					// gets the shadow map, so what it reflects is lit the way the
-					// screen lights it.
-					//
-					// **`Flags.z` is zero for the world, and it has to be.** It means
-					// "this draw samples a surface texture instead of its own tint",
-					// and it is set below for exactly the mirror runs. Setting it for
-					// the whole pass is what made the floor sample the previous
-					// frame's reflection and come out as the clear colour wherever
-					// that projection landed on untouched texels - a black wedge in
-					// the mirror that survived deleting every caster, the frame and
-					// the near-plane hack, and moved when the camera was re-aimed but
-					// not when the floor was.
-					const core::Vector3 surfaceEye = accepted[index].View->Frame.Position;
-					const LightingUniforms surfaceLighting = lightingAt(surfaceEye, 0.0f, 1.0f);
+						const ShadowBinding shadow = shadowBinding();
 
-					const ShadowBinding shadow = shadowBinding();
+						// **The samplers are bound per draw now rather than per run**,
+						// because the third one - the colour map - changes with the
+						// mesh being drawn and the other two do not. `DrawSlots` binds
+						// all three together; what is left here is remembering which
+						// surface texture the next draws should sample.
+						SDL_GPUTexture *surfaceTexture = nullptr;
+						const auto bindSurface = [&](SDL_GPUTexture *texture) { surfaceTexture = texture; };
 
-					// **The samplers are bound per draw now rather than per run**,
-					// because the third one - the colour map - changes with the
-					// mesh being drawn and the other two do not. `DrawSlots` binds
-					// all three together; what is left here is remembering which
-					// surface texture the next draws should sample.
-					SDL_GPUTexture *surfaceTexture = nullptr;
-					const auto bindSurface = [&](SDL_GPUTexture *texture) { surfaceTexture = texture; };
+						const FrameUniforms worldFrame{
+							state.ViewProjection,
+							lightViewProjection,
+							glm::mat4{1.0f},
+						};
 
-					const FrameUniforms worldFrame{
-						state.ViewProjection,
-						lightViewProjection,
-						glm::mat4{1.0f},
-					};
+						const auto plainly = [&]() {
+							SDL_PushGPUVertexUniformData(command, 0, &worldFrame, sizeof(worldFrame));
+							bindSurface(nullptr);
+						};
 
-					const auto plainly = [&]() {
-						SDL_PushGPUVertexUniformData(command, 0, &worldFrame, sizeof(worldFrame));
-						bindSurface(nullptr);
-					};
+						plainly();
 
-					plainly();
-
-					// **Another world's instances, when the host handed some over.**
-					// `SurfaceView::InstanceCount` says why this bypasses the plan:
-					// the plan partitions *this* world's draw list and knows nothing
-					// about the tail behind it, so a foreign surface is one plain run
-					// and no mirror runs at all. That is what lets a portal in one
-					// world show a live second world.
-					//
-					// **`ownCount` is what turns the host's index into a slot.** The
-					// host counts from zero within its own `foreign` list, because
-					// nothing outside this call knows where this world's rows end or
-					// that the plan reordered them.
-					//
-					// **`continue`, so the plan-driven draws below are skipped
-					// entirely.** Drawing both would put this world's floor into the
-					// far world's picture, which reads as the two rooms bleeding
-					// into each other.
-					if (accepted[index].View->InstanceCount > 0) {
-						result.DrawCalls += State->DrawSlots(
-							command,
-							pass,
-							ownCount + accepted[index].View->InstanceFirst,
-							accepted[index].View->InstanceCount,
-							&surfaceLighting,
-							shadow.Texture,
-							shadow.Sampler,
-							surfaceTexture,
-							State->SurfaceSampler,
-							surfaceFilter,
-							result.Triangles
-						);
-
-						// **Ended and left for the sweep below to mark ready**, which
-						// is the invariant this must not shortcut: a surface written
-						// this frame may not be sampled as another surface's
-						// "previous" within the same frame.
-						SDL_EndGPURenderPass(pass);
-						continue;
-					}
-
-					drawWorldInto(pass, surfaceLighting, surfaceFilter);
-
-					// **Every mirror except this one, one draw each.** `self` is
-					// skipped because nothing sees itself in its own reflection -
-					// drawing it would fill this texture with the pane it belongs
-					// to, and the mirror would show itself rather than the room.
-					//
-					// A surface that has no frame yet, or that no camera is
-					// rendering this frame, is drawn **plainly** rather than skipped.
-					// A pane that vanishes until its mirror warms up is worse than
-					// one that is briefly its own colour, and a pane naming an index
-					// nothing renders is a scene mistake that should be visible as a
-					// flat pane rather than as a hole in the geometry.
-					//
-					// Sampled draws project with the matrix that *rendered* the
-					// texture being read - `PreviousViewProjection`, not the one
-					// just resolved - because the image is a frame old and
-					// projecting it with a fresh camera slides it across the pane.
-					//
-					// **And the recursion's level is preferred to the slot's own
-					// texture whenever there is one.** The slot holds the pane as
-					// the *eye* sees it; the level holds it as this camera sees it,
-					// which is the only one of the two that belongs in this
-					// picture. The slot is still the fallback for a pane the
-					// recursion could not reach - off screen from here, edge-on, or
-					// a camera with no rectangle at all - because a stale
-					// reflection of a reflection is a better answer than a blank
-					// one.
-					const auto drawMirrors = [&](bool blended) {
-						for (uint8_t index = 0; index < scene::MAX_SURFACES; index++) {
-							if (index == self) {
-								continue;
-							}
-
-							const scene::SurfaceRun &run = plan.Runs[index];
-							const uint32_t count = blended ? run.BlendedCount : run.OpaqueCount;
-							const uint32_t first = blended ? run.BlendedFirst : run.OpaqueFirst;
-							if (count == 0) {
-								continue;
-							}
-
-							const Impl::MirrorTarget *const level =
-								mirrorLevels > 0 && bank.Mirrors.size() >= mirrorLevels
-									? &bank.Mirrors[mirrorLevels - 1].Targets[index]
-									: nullptr;
-
-							if (level != nullptr && level->Ready) {
-								const Impl::SurfaceSlotState &shown = bank.Surfaces[index];
-
-								const FrameUniforms levelFrame{
-									state.ViewProjection,
-									lightViewProjection,
-									level->Sampling,
-								};
-								LightingUniforms levelLighting =
-									lightingAt(surfaceEye, 1.0f, shown.ImageOpacity);
-								levelLighting.Mirror.x = static_cast<float>(shown.Effect);
-
-								SDL_PushGPUVertexUniformData(command, 0, &levelFrame, sizeof(levelFrame));
-								bindSurface(level->Colour);
-
-								result.DrawCalls += State->DrawSlots(
-									command,
-									pass,
-									first,
-									count,
-									&levelLighting,
-									shadow.Texture,
-									shadow.Sampler,
-									surfaceTexture,
-									State->SurfaceSampler,
-									surfaceFilter,
-									result.Triangles
-								);
-								continue;
-							}
-
-							const Impl::SurfaceSlotState &shown = bank.Surfaces[index];
-							if (!shown.Ready || !claimed[index]) {
-								plainly();
-								result.DrawCalls += State->DrawSlots(
-									command,
-									pass,
-									first,
-									count,
-									&surfaceLighting,
-									shadow.Texture,
-									shadow.Sampler,
-									surfaceTexture,
-									State->SurfaceSampler,
-									surfaceFilter,
-									result.Triangles
-								);
-								continue;
-							}
-
-							const FrameUniforms mirrorFrame{
-								state.ViewProjection,
-								lightViewProjection,
-								shown.PreviousSampling,
-							};
-							LightingUniforms mirrorLighting =
-								lightingAt(surfaceEye, 1.0f, shown.ImageOpacity);
-
-							// Which grade this surface's image goes through. On the
-							// composite rather than on the render, so switching one
-							// costs no redraw of the texture.
-							mirrorLighting.Mirror.x = static_cast<float>(shown.Effect);
-
-							SDL_PushGPUVertexUniformData(command, 0, &mirrorFrame, sizeof(mirrorFrame));
-							bindSurface(shown.Texture[shown.Slot ^ 1u]);
-
+						// **Another world's instances, when the host handed some over.**
+						// `SurfaceView::InstanceCount` says why this bypasses the plan:
+						// the plan partitions *this* world's draw list and knows nothing
+						// about the tail behind it, so a foreign surface is one plain run
+						// and no mirror runs at all. That is what lets a portal in one
+						// world show a live second world.
+						//
+						// **`ownCount` is what turns the host's index into a slot.** The
+						// host counts from zero within its own `foreign` list, because
+						// nothing outside this call knows where this world's rows end or
+						// that the plan reordered them.
+						//
+						// **`continue`, so the plan-driven draws below are skipped
+						// entirely.** Drawing both would put this world's floor into the
+						// far world's picture, which reads as the two rooms bleeding
+						// into each other.
+						if (accepted[index].View->InstanceCount > 0) {
 							result.DrawCalls += State->DrawSlots(
 								command,
 								pass,
-								first,
-								count,
-								&mirrorLighting,
+								ownCount + accepted[index].View->InstanceFirst,
+								accepted[index].View->InstanceCount,
+								&surfaceLighting,
 								shadow.Texture,
 								shadow.Sampler,
 								surfaceTexture,
@@ -6396,416 +8086,555 @@ namespace engine::render {
 								surfaceFilter,
 								result.Triangles
 							);
+
+							// **Ended and left for the sweep below to mark ready**, which
+							// is the invariant this must not shortcut: a surface written
+							// this frame may not be sampled as another surface's
+							// "previous" within the same frame.
+							SDL_EndGPURenderPass(pass);
+							continue;
 						}
-					};
 
-					drawMirrors(false);
+						drawWorldInto(pass, surfaceLighting, surfaceFilter);
 
-					if (drawInterface && accepted[index].View->InstanceCount == 0) {
-						result.DrawCalls += interfaceHook->RecordWorld(
-							command,
-							pass,
-							state.ViewProjection,
-							accepted[index].View->Frame,
-							core::Color3{State->Ambient.x, State->Ambient.y, State->Ambient.z},
-							core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z},
-							state.Width,
-							state.Height,
-							false
-						);
+						// **Every mirror except this one, one draw each.** `self` is
+						// skipped because nothing sees itself in its own reflection -
+						// drawing it would fill this texture with the pane it belongs
+						// to, and the mirror would show itself rather than the room.
+						//
+						// A surface that has no frame yet, or that no camera is
+						// rendering this frame, is drawn **plainly** rather than skipped.
+						// A pane that vanishes until its mirror warms up is worse than
+						// one that is briefly its own colour, and a pane naming an index
+						// nothing renders is a scene mistake that should be visible as a
+						// flat pane rather than as a hole in the geometry.
+						//
+						// Sampled draws project with the matrix that *rendered* the
+						// texture being read - `PreviousViewProjection`, not the one
+						// just resolved - because the image is a frame old and
+						// projecting it with a fresh camera slides it across the pane.
+						//
+						// **And the recursion's level is preferred to the slot's own
+						// texture whenever there is one.** The slot holds the pane as
+						// the *eye* sees it; the level holds it as this camera sees it,
+						// which is the only one of the two that belongs in this
+						// picture. The slot is still the fallback for a pane the
+						// recursion could not reach - off screen from here, edge-on, or
+						// a camera with no rectangle at all - because a stale
+						// reflection of a reflection is a better answer than a blank
+						// one.
+						const auto drawMirrors = [&](bool blended) {
+							for (uint8_t index = 0; index < scene::MAX_SURFACES; index++) {
+								if (index == self) {
+									continue;
+								}
+
+								const scene::SurfaceRun &run = plan.Runs[index];
+								const uint32_t count = blended ? run.BlendedCount : run.OpaqueCount;
+								const uint32_t first = blended ? run.BlendedFirst : run.OpaqueFirst;
+								if (count == 0) {
+									continue;
+								}
+
+								const Impl::MirrorTarget *const level =
+									mirrorLevels > 0 && bank.Mirrors.size() >= mirrorLevels
+										? &bank.Mirrors[mirrorLevels - 1].Targets[index]
+										: nullptr;
+
+								if (level != nullptr && level->Ready) {
+									const Impl::SurfaceSlotState &shown = bank.Surfaces[index];
+
+									const FrameUniforms levelFrame{
+										state.ViewProjection,
+										lightViewProjection,
+										level->Sampling,
+									};
+									LightingUniforms levelLighting =
+										lightingAt(surfaceEye, 1.0f, shown.ImageOpacity);
+									levelLighting.Mirror.x = static_cast<float>(shown.Effect);
+
+									SDL_PushGPUVertexUniformData(command, 0, &levelFrame, sizeof(levelFrame));
+									bindSurface(level->Colour);
+
+									result.DrawCalls += State->DrawSlots(
+										command,
+										pass,
+										first,
+										count,
+										&levelLighting,
+										shadow.Texture,
+										shadow.Sampler,
+										surfaceTexture,
+										State->SurfaceSampler,
+										surfaceFilter,
+										result.Triangles
+									);
+									continue;
+								}
+
+								const Impl::SurfaceSlotState &shown = bank.Surfaces[index];
+								if (!shown.Ready || !claimed[index]) {
+									plainly();
+									result.DrawCalls += State->DrawSlots(
+										command,
+										pass,
+										first,
+										count,
+										&surfaceLighting,
+										shadow.Texture,
+										shadow.Sampler,
+										surfaceTexture,
+										State->SurfaceSampler,
+										surfaceFilter,
+										result.Triangles
+									);
+									continue;
+								}
+
+								const FrameUniforms mirrorFrame{
+									state.ViewProjection,
+									lightViewProjection,
+									shown.PreviousSampling,
+								};
+								LightingUniforms mirrorLighting =
+									lightingAt(surfaceEye, 1.0f, shown.ImageOpacity);
+
+								// Which grade this surface's image goes through. On the
+								// composite rather than on the render, so switching one
+								// costs no redraw of the texture.
+								mirrorLighting.Mirror.x = static_cast<float>(shown.Effect);
+
+								SDL_PushGPUVertexUniformData(command, 0, &mirrorFrame, sizeof(mirrorFrame));
+								bindSurface(shown.Texture[shown.Slot ^ 1u]);
+
+								result.DrawCalls += State->DrawSlots(
+									command,
+									pass,
+									first,
+									count,
+									&mirrorLighting,
+									shadow.Texture,
+									shadow.Sampler,
+									surfaceTexture,
+									State->SurfaceSampler,
+									surfaceFilter,
+									result.Triangles
+								);
+							}
+						};
+
+						drawMirrors(false);
+
+						if (drawInterface && accepted[index].View->InstanceCount == 0) {
+							result.DrawCalls += interfaceHook->RecordWorld(
+								command,
+								pass,
+								state.ViewProjection,
+								accepted[index].View->Frame,
+								core::Color3{State->Ambient.x, State->Ambient.y, State->Ambient.z},
+								core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z},
+								state.Width,
+								state.Height,
+								false
+							);
+						}
+
+						// **`panesFollow` is true here**, because the blended mirrors
+						// below go onto the same pipeline - so a tail of nothing but
+						// mirrors still has to have it bound.
+						drawBlendedInto(pass, worldFrame, surfaceLighting, surfaceFilter, true);
+
+						// And the blended mirrors that are not this one, last of
+						// everything drawn into this texture.
+						if (plan.TransparentSurfaces > 0) {
+							drawMirrors(true);
+						}
+
+						if (drawInterface && accepted[index].View->InstanceCount == 0) {
+							result.DrawCalls += interfaceHook->RecordWorld(
+								command,
+								pass,
+								state.ViewProjection,
+								accepted[index].View->Frame,
+								core::Color3{State->Ambient.x, State->Ambient.y, State->Ambient.z},
+								core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z},
+								state.Width,
+								state.Height,
+								true
+							);
+						}
+
+						SDL_EndGPURenderPass(pass);
 					}
-
-					// **`panesFollow` is true here**, because the blended mirrors
-					// below go onto the same pipeline - so a tail of nothing but
-					// mirrors still has to have it bound.
-					drawBlendedInto(pass, worldFrame, surfaceLighting, surfaceFilter, true);
-
-					// And the blended mirrors that are not this one, last of
-					// everything drawn into this texture.
-					if (plan.TransparentSurfaces > 0) {
-						drawMirrors(true);
-					}
-
-					if (drawInterface && accepted[index].View->InstanceCount == 0) {
-						result.DrawCalls += interfaceHook->RecordWorld(
-							command,
-							pass,
-							state.ViewProjection,
-							accepted[index].View->Frame,
-							core::Color3{State->Ambient.x, State->Ambient.y, State->Ambient.z},
-							core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z},
-							state.Width,
-							state.Height,
-							true
-						);
-					}
-
-					SDL_EndGPURenderPass(pass);
 				}
-			}
 
-			// **Marked ready only after every bounce has run**, so a surface that
-			// was written this frame cannot be sampled as another surface's
-			// "previous" within the same frame. From here the screen pass may
-			// sample what was just written and the next frame's surface passes
-			// may sample it as their previous.
-			//
-			// **The signature is recorded here and not where it was computed**,
-			// which is what makes a surface that failed to render try again. A
-			// slot only claims to be drawn with this signature once a pass has
-			// actually drawn it; storing it up front would mark a skipped or
-			// abandoned surface as current and leave it holding the wrong image
-			// until something else in the scene moved.
-			for (size_t index = 0; index < acceptedCount; index++) {
-				if (!accepted[index].Refresh) {
-					continue;
-				}
-
-				Impl::SurfaceSlotState &state = bank.Surfaces[accepted[index].Index];
-				state.Ready = true;
-				state.Signature = surfaceSignature;
-
-				// **Stamped here for the same reason the signature is.** A slot
-				// only claims to have drawn at a time once a pass has actually
-				// drawn it; stamping up front would start the interval for a
-				// surface that was then skipped or abandoned, and the picture
-				// would end up an interval staler than the cap promises.
-				state.Drawn = frameSeconds;
-				result.SurfacePasses++;
-
-				// The surface pass is level one, so a frame that drew any
-				// surface at all has resolved at least that much.
-				surfaceDepth.Resolved = std::max(surfaceDepth.Resolved, 1u);
-			}
-
-			// **Written back only where the pass actually ran**, which is the
-			// half that is easy to get wrong and was. A surface whose signature
-			// has not moved is deliberately not redrawn, so on a still scene most
-			// frames draw no surface at all - and a measurement written on those
-			// frames says "nothing was resolved", which reads back as one level
-			// and throws away a depth the frames that did draw had worked out. A
-			// skipped pass has measured nothing rather than measured zero.
-			//
-			// **A render fact, and it stays one.** Nothing here reaches an
-			// `ecs::Store`: next frame's depth is derived from last frame's
-			// picture, which is exactly the sort of thing `AGENTS.md` rule 5
-			// refuses to let into a tick. A recorded run replays byte-identically
-			// whatever this measured, because the simulation never sees it.
-			bank.Bounces = surfaceDepth;
-		}
-
-		// --- the portal pass -------------------------------------------------
-		//
-		// **The same recursion as `fillMirror`, by a different map.** Both derive
-		// each level's camera from the level above - that is what makes either one
-		// compose, and the mirror pass was an iteration until v0.15 and wrong at
-		// every level past the first for exactly the want of it.
-		//
-		// Here the derivation is the warp applied to *that* camera's frame, and
-		// that camera's own projection skewed onto the mapped pane - exactly as
-		// `Portal::Draw` composes `portalCam.worldView *= warp->delta`.
-		// `NON-EUCLIDEAN.md`'s Part III is the whole argument.
-		//
-		// **What stays separate is the map and the lookup**, which is why the two
-		// share `openScenePass`, `drawWorldInto` and `drawBlendedInto` and nothing
-		// above them. A hole's sub-render is the screen's own frustum, so its pane
-		// reads the texel it is standing on; a mirror's is fitted to its own
-		// rectangle, so its pane reads by projecting its world position. Neither
-		// lookup is expressible in the other's target.
-		//
-		// **Depth first, and every level's targets survive until the level above
-		// has drawn all of its panes.** That is why the pool is indexed by level
-		// *and* slot: level `L` renders the world and then draws every hole it can
-		// see, so all of level `L-1` is live at once.
-		if (havePortals && haveInstances && sceneCount > 0 && portalLevels > 0) {
-			ENGINE_PROFILE_CAT("portal pass", core::ProfileCategory::Render);
-
-			// **The unskewed screen projection, kept and re-skewed at every
-			// level.** `scene::ObliqueProjection` substitutes the whole depth row,
-			// reading two of the entries it is about to overwrite - so skewing an
-			// already-skewed matrix is not the same as skewing the original
-			// against the new plane, which is the arrangement `Camera::ClipOblique`
-			// gets for free by writing the row from the untouched half of the
-			// matrix. Starting from this every time is what makes each level's
-			// frustum the screen's own, which is what makes the screen-position
-			// lookup in `opaque.frag` exact.
-			const float portalAspect = static_cast<float>(sceneWidth) / static_cast<float>(sceneHeight);
-			const glm::mat4 screenProjection =
-				scene::ResolveCamera(cameraFrame, drawCamera, portalAspect).Projection;
-
-			// **Made before anything is captured, because a world of nothing but
-			// holes never reaches `EnsureSurface`.** The sampler used to be
-			// created there, so a portal-only scene took a null one into
-			// `SDL_BindGPUFragmentSamplers` and died inside the backend - and a
-			// scene with one mirror in it hid that completely.
-			(void)State->EnsureSurfaceSampler();
-
-			const ShadowBinding shadow = shadowBinding();
-
-			// Where a hole's sub-camera stands, and what it looks through.
-			//
-			// **Which warp is a question about this level's camera, asked again at
-			// every level.** A pane is a hole from either side, and one map serves
-			// both: it carries the pane's front hemisphere to the far pane's back
-			// one and its back to the far pane's front, so a sub-camera that has
-			// stepped through and is now on the other side of something is carried
-			// by the same matrix, the other way, for free. CodeParade's
-			// `Portal::Connect` writes the same `delta` into both warps.
-			//
-			// Which *side* still has to be asked, because the clip plane's normal
-			// is the way this camera is looking and that does flip.
-			struct SubCamera {
-				core::CFrame Frame;
-				scene::CameraMatrices Matrices;
-			};
-
-			const auto subCameraFor = [&](const PortalView &portal, const core::CFrame &from) {
-				const float side = (from.Position - portal.Centre).Dot(portal.Normal);
-				const scene::SeamTransform &warp = portal.Warp;
-
-				const core::CFrame placed = warp.Place(from);
-
-				// **The clip normal points back through the hole**, which is the
-				// one sign here worth deriving rather than trying. The map sends
-				// the eye's side of the source pane to the *opposite* side of the
-				// far one, so a sub-camera placed from an eye at `+outward` lands
-				// behind the mapped pane looking back along `outward`'s image.
-				// What has to survive clipping is everything beyond the mapped
-				// pane, so the normal is the way this camera is looking and not
-				// the way the pane faces.
-				const core::Vector3 outward = portal.Normal * (side >= 0.0f ? 1.0f : -1.0f);
-				const core::Vector3 clipNormal = warp.Rotate(outward) * -1.0f;
-
-				// **Moved back towards this camera by a sliver, so the plane
-				// keeps a little more rather than a little less.** The oblique
-				// substitution makes this plane the near plane, so everything
-				// between the sub-camera and it is thrown away - and the far
-				// room's own geometry meets the mapped pane exactly, which after
-				// two matrix products means some of it lands a float either side.
-				// The half that lands short is clipped, and what that looks like
-				// is a hairline of background around the inside of every hole,
-				// with parts poking through it.
+				// **Marked ready only after every bounce has run**, so a surface that
+				// was written this frame cannot be sampled as another surface's
+				// "previous" within the same frame. From here the screen pass may
+				// sample what was just written and the next frame's surface passes
+				// may sample it as their previous.
 				//
-				// **The sign is the whole of it and it is worth deriving rather
-				// than trying.** `clipNormal` is the way this camera looks, so
-				// adding along it pushes the plane deeper into the far room and
-				// removes a slab of whatever is standing in the hole - a body
-				// straddling the seam loses its far half and reads as a character
-				// cut in two. CodeParade's `extra_clip` subtracts for this
-				// reason: `pos - normal*extra_clip` with `normal` pointing away
-				// from the camera is the pane moved *towards* it.
-				const core::Vector3 clipPoint =
-					warp.Point(portal.Centre) - clipNormal * scene::PortalClipBias(nearestPane);
+				// **The signature is recorded here and not where it was computed**,
+				// which is what makes a surface that failed to render try again. A
+				// slot only claims to be drawn with this signature once a pass has
+				// actually drawn it; storing it up front would mark a skipped or
+				// abandoned surface as current and leave it holding the wrong image
+				// until something else in the scene moved.
+				for (size_t index = 0; index < acceptedCount; index++) {
+					if (!accepted[index].Refresh) {
+						continue;
+					}
 
-				return SubCamera{
-					placed,
-					scene::ResolveSurfaceCamera(
-						placed,
-						scene::ObliqueProjection(
-							screenProjection, placed, clipNormal, clipNormal.Dot(clipPoint)
-						)
-					),
-				};
-			};
+					Impl::SurfaceSlotState &state = bank.Surfaces[accepted[index].Index];
+					state.Ready = true;
+					state.Signature = surfaceSignature;
 
-			// One level: fill `bank.Portals[level][i]` for every hole `i` this
-			// camera can see, then leave them for the caller to sample.
+					// **Stamped here for the same reason the signature is.** A slot
+					// only claims to have drawn at a time once a pass has actually
+					// drawn it; stamping up front would start the interval for a
+					// surface that was then skipped or abandoned, and the picture
+					// would end up an interval staler than the cap promises.
+					state.Drawn = frameSeconds;
+					result.SurfacePasses++;
+
+					// The surface pass is level one, so a frame that drew any
+					// surface at all has resolved at least that much.
+					surfaceDepth.Resolved = std::max(surfaceDepth.Resolved, 1u);
+				}
+
+				// **Written back only where the pass actually ran**, which is the
+				// half that is easy to get wrong and was. A surface whose signature
+				// has not moved is deliberately not redrawn, so on a still scene most
+				// frames draw no surface at all - and a measurement written on those
+				// frames says "nothing was resolved", which reads back as one level
+				// and throws away a depth the frames that did draw had worked out. A
+				// skipped pass has measured nothing rather than measured zero.
+				//
+				// **A render fact, and it stays one.** Nothing here reaches an
+				// `ecs::Store`: next frame's depth is derived from last frame's
+				// picture, which is exactly the sort of thing `AGENTS.md` rule 5
+				// refuses to let into a tick. A recorded run replays byte-identically
+				// whatever this measured, because the simulation never sees it.
+				bank.Bounces = surfaceDepth;
+			}
+
+			// --- the portal pass -------------------------------------------------
 			//
-			// A `std::function` because it calls itself and captures the frame.
-			// The depth is bounded by `MAX_PORTAL_DEPTH`, so the recursion is four
-			// deep at worst and the indirection is paid once per hole per level
-			// beside a whole scene render.
-			std::function<void(const scene::CameraMatrices &, const core::CFrame &, uint32_t, int8_t)>
-				fillLevel;
+			// **The same recursion as `fillMirror`, by a different map.** Both derive
+			// each level's camera from the level above - that is what makes either one
+			// compose, and the mirror pass was an iteration until v0.15 and wrong at
+			// every level past the first for exactly the want of it.
+			//
+			// Here the derivation is the warp applied to *that* camera's frame, and
+			// that camera's own projection skewed onto the mapped pane - exactly as
+			// `Portal::Draw` composes `portalCam.worldView *= warp->delta`.
+			// `NON-EUCLIDEAN.md`'s Part III is the whole argument.
+			//
+			// **What stays separate is the map and the lookup**, which is why the two
+			// share `openScenePass`, `drawWorldInto` and `drawBlendedInto` and nothing
+			// above them. A hole's sub-render is the screen's own frustum, so its pane
+			// reads the texel it is standing on; a mirror's is fitted to its own
+			// rectangle, so its pane reads by projecting its world position. Neither
+			// lookup is expressible in the other's target.
+			//
+			// **Depth first, and every level's targets survive until the level above
+			// has drawn all of its panes.** That is why the pool is indexed by level
+			// *and* slot: level `L` renders the world and then draws every hole it can
+			// see, so all of level `L-1` is live at once.
+			if (havePortals && haveInstances && sceneCount > 0 && portalLevels > 0) {
+				ENGINE_PROFILE_CAT("portal pass", core::ProfileCategory::Render);
 
-			fillLevel = [&](const scene::CameraMatrices &from,
-							const core::CFrame &fromFrame,
-							uint32_t level,
-							int8_t skip) {
-				for (uint8_t slot = 0; slot < scene::MAX_SURFACES; slot++) {
-					if (portalOf[slot] == nullptr) {
-						continue;
-					}
+				// **The unskewed screen projection, kept and re-skewed at every
+				// level.** `scene::ObliqueProjection` substitutes the whole depth row,
+				// reading two of the entries it is about to overwrite - so skewing an
+				// already-skewed matrix is not the same as skewing the original
+				// against the new plane, which is the arrangement `Camera::ClipOblique`
+				// gets for free by writing the row from the untouched half of the
+				// matrix. Starting from this every time is what makes each level's
+				// frustum the screen's own, which is what makes the screen-position
+				// lookup in `opaque.frag` exact.
+				const float portalAspect = static_cast<float>(sceneWidth) / static_cast<float>(sceneHeight);
+				const glm::mat4 screenProjection =
+					scene::ResolveCamera(cameraFrame, drawCamera, portalAspect).Projection;
 
-					const PortalView &portal = *portalOf[slot];
+				// **Made before anything is captured, because a world of nothing but
+				// holes never reaches `EnsureSurface`.** The sampler used to be
+				// created there, so a portal-only scene took a null one into
+				// `SDL_BindGPUFragmentSamplers` and died inside the backend - and a
+				// scene with one mirror in it hid that completely.
+				(void)State->EnsureSurfaceSampler();
 
-					// **The hole this camera just came out of**, which is at this
-					// level's own clip plane and would render a scene that is then
-					// entirely clipped away. CodeParade's `skipPortal` argument.
-					if (portal.Index == skip) {
-						continue;
-					}
+				const ShadowBinding shadow = shadowBinding();
 
-					// **Per portal per level, which is what stops the cost being
-					// `holes ^ depth`.** A hole behind this level's camera costs
-					// nothing, and most of them are.
-					if (!graph::VisiblePane(
-							from.ViewProjection, portal.Centre, portal.First, portal.Second
-						)) {
-						continue;
-					}
+				// Where a hole's sub-camera stands, and what it looks through.
+				//
+				// **Which warp is a question about this level's camera, asked again at
+				// every level.** A pane is a hole from either side, and one map serves
+				// both: it carries the pane's front hemisphere to the far pane's back
+				// one and its back to the far pane's front, so a sub-camera that has
+				// stepped through and is now on the other side of something is carried
+				// by the same matrix, the other way, for free. CodeParade's
+				// `Portal::Connect` writes the same `delta` into both warps.
+				//
+				// Which *side* still has to be asked, because the clip plane's normal
+				// is the way this camera is looking and that does flip.
+				struct SubCamera {
+					core::CFrame Frame;
+					scene::CameraMatrices Matrices;
+				};
 
-					const SubCamera sub = subCameraFor(portal, fromFrame);
+				const auto subCameraFor = [&](const PortalView &portal, const core::CFrame &from) {
+					const float side = (from.Position - portal.Centre).Dot(portal.Normal);
+					const scene::SeamTransform &warp = portal.Warp;
 
-					if (level > 0) {
-						fillLevel(sub.Matrices, sub.Frame, level - 1, portal.Partner);
-					}
+					const core::CFrame placed = warp.Place(from);
 
-					Impl::PortalTarget *target =
-						State->EnsurePortal(targetSlot, level, slot, targetWidth, targetHeight);
-					if (target == nullptr) {
-						continue;
-					}
+					// **The clip normal points back through the hole**, which is the
+					// one sign here worth deriving rather than trying. The map sends
+					// the eye's side of the source pane to the *opposite* side of the
+					// far one, so a sub-camera placed from an eye at `+outward` lands
+					// behind the mapped pane looking back along `outward`'s image.
+					// What has to survive clipping is everything beyond the mapped
+					// pane, so the normal is the way this camera is looking and not
+					// the way the pane faces.
+					const core::Vector3 outward = portal.Normal * (side >= 0.0f ? 1.0f : -1.0f);
+					const core::Vector3 clipNormal = warp.Rotate(outward) * -1.0f;
 
-					// **The same rectangle as the level above draws into.** The
-					// target is the attachment's size, and the world fills the
-					// viewport's corner of it - so a pane in the level above reads
-					// the texel it is standing on. Setting a different one here is
-					// the whole of what would make the picture slide.
-					const SDL_GPUViewport portalViewport{
-						0.0f,
-						0.0f,
-						static_cast<float>(sceneWidth),
-						static_cast<float>(sceneHeight),
-						0.0f,
-						1.0f
+					// **Moved back towards this camera by a sliver, so the plane
+					// keeps a little more rather than a little less.** The oblique
+					// substitution makes this plane the near plane, so everything
+					// between the sub-camera and it is thrown away - and the far
+					// room's own geometry meets the mapped pane exactly, which after
+					// two matrix products means some of it lands a float either side.
+					// The half that lands short is clipped, and what that looks like
+					// is a hairline of background around the inside of every hole,
+					// with parts poking through it.
+					//
+					// **The sign is the whole of it and it is worth deriving rather
+					// than trying.** `clipNormal` is the way this camera looks, so
+					// adding along it pushes the plane deeper into the far room and
+					// removes a slab of whatever is standing in the hole - a body
+					// straddling the seam loses its far half and reads as a character
+					// cut in two. CodeParade's `extra_clip` subtracts for this
+					// reason: `pos - normal*extra_clip` with `normal` pointing away
+					// from the camera is the pane moved *towards* it.
+					const core::Vector3 clipPoint =
+						warp.Point(portal.Centre) - clipNormal * scene::PortalClipBias(nearestPane);
+
+					return SubCamera{
+						placed,
+						scene::ResolveSurfaceCamera(
+							placed,
+							scene::ObliqueProjection(
+								screenProjection, placed, clipNormal, clipNormal.Dot(clipPoint)
+							)
+						),
 					};
+				};
 
-					// **Not cycled, unlike a surface slot, and it was measured
-					// rather than reasoned.** Cycling hands back a fresh allocation
-					// per write, which is the right answer when two passes in one
-					// frame share a texture - and at one level nothing does: a
-					// target is written once and sampled once, by the pass above it,
-					// in that order. Asking for a fresh allocation anyway made the
-					// device hang more often rather than less. `Impl::PortalDepth`
-					// carries what happens above one level, which is where the same
-					// target *is* written twice.
-					SDL_GPURenderPass *const pass =
-						openScenePass(target->Colour, target->Depth, false, &portalViewport);
+				// One level: fill `bank.Portals[level][i]` for every hole `i` this
+				// camera can see, then leave them for the caller to sample.
+				//
+				// A `std::function` because it calls itself and captures the frame.
+				// The depth is bounded by `MAX_PORTAL_DEPTH`, so the recursion is four
+				// deep at worst and the indirection is paid once per hole per level
+				// beside a whole scene render.
+				std::function<void(const scene::CameraMatrices &, const core::CFrame &, uint32_t, int8_t)>
+					fillLevel;
 
-					const FrameUniforms subFrameUniforms{
-						sub.Matrices.ViewProjection,
-						lightViewProjection,
-						glm::mat4{1.0f},
-					};
-					SDL_PushGPUVertexUniformData(command, 0, &subFrameUniforms, sizeof(subFrameUniforms));
-
-					const LightingUniforms subLighting = lightingAt(sub.Frame.Position, 0.0f, 1.0f);
-
-					drawWorldInto(pass, subLighting, portal.TagFilter);
-
-					// The holes this level can see, put back one at a time. Their
-					// targets are `level - 1`, filled by the call above and still
-					// untouched - which is why the pool is per level per slot.
-					for (uint8_t seenSlot = 0; seenSlot < scene::MAX_SURFACES; seenSlot++) {
-						if (portalOf[seenSlot] == nullptr || portalOf[seenSlot]->Index == portal.Partner) {
+				fillLevel = [&](const scene::CameraMatrices &from,
+								const core::CFrame &fromFrame,
+								uint32_t level,
+								int8_t skip) {
+					for (uint8_t slot = 0; slot < scene::MAX_SURFACES; slot++) {
+						if (portalOf[slot] == nullptr) {
 							continue;
 						}
 
-						const PortalView &inner = *portalOf[seenSlot];
-						const scene::SurfaceRun &run = plan.Runs[seenSlot];
-						if (run.OpaqueCount == 0) {
+						const PortalView &portal = *portalOf[slot];
+
+						// **The hole this camera just came out of**, which is at this
+						// level's own clip plane and would render a scene that is then
+						// entirely clipped away. CodeParade's `skipPortal` argument.
+						if (portal.Index == skip) {
 							continue;
 						}
 
+						// **Per portal per level, which is what stops the cost being
+						// `holes ^ depth`.** A hole behind this level's camera costs
+						// nothing, and most of them are.
 						if (!graph::VisiblePane(
-								sub.Matrices.ViewProjection, inner.Centre, inner.First, inner.Second
+								from.ViewProjection, portal.Centre, portal.First, portal.Second
 							)) {
 							continue;
 						}
 
-						const Impl::PortalTarget *seen = level > 0 && bank.Portals.size() >= level
-															 ? &bank.Portals[level - 1].Targets[seenSlot]
-															 : nullptr;
+						const SubCamera sub = subCameraFor(portal, fromFrame);
 
-						LightingUniforms paneLighting = subLighting;
-						SDL_GPUTexture *paneTexture = nullptr;
-
-						if (seen != nullptr && seen->Colour != nullptr) {
-							// 2 is the screen-position lookup - see `opaque.frag`.
-							paneLighting.Flags.z = 2.0f;
-							paneTexture = seen->Colour;
-							paneLighting.PaneNormal =
-								glm::vec4{inner.Normal.X, inner.Normal.Y, inner.Normal.Z, 0.0f};
-						} else {
-							// **The terminus, and it is a shade rather than the
-							// pane's own material.** This is the deepest level the
-							// recursion goes to, so a hole seen here has nothing
-							// behind it - and a lit grey slab at the end of a
-							// corridor of holes reads as a wall somebody built,
-							// which is the one thing the corridor is trying not to
-							// look like. CodeParade draws pink here, deliberately
-							// wrong, because their demo is about the mechanism; a
-							// shipped world wants the chain to fade.
-							//
-							// The ambient is what it fades to, which is the far
-							// room's own unlit tone and needs no second uniform to
-							// say - 3 is the flat branch in `opaque.frag`.
-							paneLighting.Flags.z = 3.0f;
+						if (level > 0) {
+							fillLevel(sub.Matrices, sub.Frame, level - 1, portal.Partner);
 						}
 
-						result.DrawCalls += State->DrawSlots(
-							command,
-							pass,
-							run.OpaqueFirst,
-							run.OpaqueCount,
-							&paneLighting,
-							shadow.Texture,
-							shadow.Sampler,
-							paneTexture,
-							State->SurfaceSampler,
-							portal.TagFilter,
-							result.Triangles
-						);
-					}
+						Impl::PortalTarget *target =
+							State->EnsurePortal(targetSlot, level, slot, targetWidth, targetHeight);
+						if (target == nullptr) {
+							continue;
+						}
 
-					// **`panesFollow` is false here**, because this level's panes
-					// were drawn with the opaque head above - nothing follows that
-					// needs the transparent pipeline bound for it.
-					if (drawInterface) {
-						result.DrawCalls += interfaceHook->RecordWorld(
-							command,
-							pass,
+						// **The same rectangle as the level above draws into.** The
+						// target is the attachment's size, and the world fills the
+						// viewport's corner of it - so a pane in the level above reads
+						// the texel it is standing on. Setting a different one here is
+						// the whole of what would make the picture slide.
+						const SDL_GPUViewport portalViewport{
+							0.0f,
+							0.0f,
+							static_cast<float>(sceneWidth),
+							static_cast<float>(sceneHeight),
+							0.0f,
+							1.0f
+						};
+
+						// **Not cycled, unlike a surface slot, and it was measured
+						// rather than reasoned.** Cycling hands back a fresh allocation
+						// per write, which is the right answer when two passes in one
+						// frame share a texture - and at one level nothing does: a
+						// target is written once and sampled once, by the pass above it,
+						// in that order. Asking for a fresh allocation anyway made the
+						// device hang more often rather than less. `Impl::PortalDepth`
+						// carries what happens above one level, which is where the same
+						// target *is* written twice.
+						SDL_GPURenderPass *const pass =
+							openScenePass(target->Colour, target->Depth, false, &portalViewport);
+
+						const FrameUniforms subFrameUniforms{
 							sub.Matrices.ViewProjection,
-							sub.Frame,
-							core::Color3{State->Ambient.x, State->Ambient.y, State->Ambient.z},
-							core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z},
-							sceneWidth,
-							sceneHeight,
-							false
-						);
+							lightViewProjection,
+							glm::mat4{1.0f},
+						};
+						SDL_PushGPUVertexUniformData(command, 0, &subFrameUniforms, sizeof(subFrameUniforms));
+
+						const LightingUniforms subLighting = lightingAt(sub.Frame.Position, 0.0f, 1.0f);
+
+						drawWorldInto(pass, subLighting, portal.TagFilter);
+
+						// The holes this level can see, put back one at a time. Their
+						// targets are `level - 1`, filled by the call above and still
+						// untouched - which is why the pool is per level per slot.
+						for (uint8_t seenSlot = 0; seenSlot < scene::MAX_SURFACES; seenSlot++) {
+							if (portalOf[seenSlot] == nullptr ||
+								portalOf[seenSlot]->Index == portal.Partner) {
+								continue;
+							}
+
+							const PortalView &inner = *portalOf[seenSlot];
+							const scene::SurfaceRun &run = plan.Runs[seenSlot];
+							if (run.OpaqueCount == 0) {
+								continue;
+							}
+
+							if (!graph::VisiblePane(
+									sub.Matrices.ViewProjection, inner.Centre, inner.First, inner.Second
+								)) {
+								continue;
+							}
+
+							const Impl::PortalTarget *seen = level > 0 && bank.Portals.size() >= level
+																 ? &bank.Portals[level - 1].Targets[seenSlot]
+																 : nullptr;
+
+							LightingUniforms paneLighting = subLighting;
+							SDL_GPUTexture *paneTexture = nullptr;
+
+							if (seen != nullptr && seen->Colour != nullptr) {
+								// 2 is the screen-position lookup - see `opaque.frag`.
+								paneLighting.Flags.z = 2.0f;
+								paneTexture = seen->Colour;
+								paneLighting.PaneNormal =
+									glm::vec4{inner.Normal.X, inner.Normal.Y, inner.Normal.Z, 0.0f};
+							} else {
+								// **The terminus, and it is a shade rather than the
+								// pane's own material.** This is the deepest level the
+								// recursion goes to, so a hole seen here has nothing
+								// behind it - and a lit grey slab at the end of a
+								// corridor of holes reads as a wall somebody built,
+								// which is the one thing the corridor is trying not to
+								// look like. CodeParade draws pink here, deliberately
+								// wrong, because their demo is about the mechanism; a
+								// shipped world wants the chain to fade.
+								//
+								// The ambient is what it fades to, which is the far
+								// room's own unlit tone and needs no second uniform to
+								// say - 3 is the flat branch in `opaque.frag`.
+								paneLighting.Flags.z = 3.0f;
+							}
+
+							result.DrawCalls += State->DrawSlots(
+								command,
+								pass,
+								run.OpaqueFirst,
+								run.OpaqueCount,
+								&paneLighting,
+								shadow.Texture,
+								shadow.Sampler,
+								paneTexture,
+								State->SurfaceSampler,
+								portal.TagFilter,
+								result.Triangles
+							);
+						}
+
+						// **`panesFollow` is false here**, because this level's panes
+						// were drawn with the opaque head above - nothing follows that
+						// needs the transparent pipeline bound for it.
+						if (drawInterface) {
+							result.DrawCalls += interfaceHook->RecordWorld(
+								command,
+								pass,
+								sub.Matrices.ViewProjection,
+								sub.Frame,
+								core::Color3{State->Ambient.x, State->Ambient.y, State->Ambient.z},
+								core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z},
+								sceneWidth,
+								sceneHeight,
+								false
+							);
+						}
+
+						drawBlendedInto(pass, subFrameUniforms, subLighting, portal.TagFilter, false);
+
+						if (drawInterface) {
+							result.DrawCalls += interfaceHook->RecordWorld(
+								command,
+								pass,
+								sub.Matrices.ViewProjection,
+								sub.Frame,
+								core::Color3{State->Ambient.x, State->Ambient.y, State->Ambient.z},
+								core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z},
+								sceneWidth,
+								sceneHeight,
+								true
+							);
+						}
+
+						SDL_EndGPURenderPass(pass);
+						result.PortalPasses++;
 					}
+				};
 
-					drawBlendedInto(pass, subFrameUniforms, subLighting, portal.TagFilter, false);
+				fillLevel(
+					scene::CameraMatrices{
+						glm::inverse(cameraFrame.ToMatrix()), screenProjection, cameraMatrix
+					},
+					cameraFrame,
+					portalLevels - 1,
+					-1
+				);
+			}
+			return true;
+		});
 
-					if (drawInterface) {
-						result.DrawCalls += interfaceHook->RecordWorld(
-							command,
-							pass,
-							sub.Matrices.ViewProjection,
-							sub.Frame,
-							core::Color3{State->Ambient.x, State->Ambient.y, State->Ambient.z},
-							core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z},
-							sceneWidth,
-							sceneHeight,
-							true
-						);
-					}
-
-					SDL_EndGPURenderPass(pass);
-					result.PortalPasses++;
-				}
-			};
-
-			fillLevel(
-				scene::CameraMatrices{glm::inverse(cameraFrame.ToMatrix()), screenProjection, cameraMatrix},
-				cameraFrame,
-				portalLevels - 1,
-				-1
-			);
-		}
-
-		// --- opaque pass ----------------------------------------------------
+		// --- view targets ---------------------------------------------------
 
 		// **The world's target, which is the offscreen texture or the window.**
 		// Everything after this pass draws onto the *window* regardless - the
@@ -6846,15 +8675,666 @@ namespace engine::render {
 		depthTarget.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
 		depthTarget.cycle = true;
 
-		{
-			ENGINE_PROFILE_CAT("opaque pass", core::ProfileCategory::Render);
+		// --- default PBR graph ---------------------------------------------
+		//
+		// The material-producing head and its explicit consumers. Projected
+		// surfaces and blended geometry are submitted by the graph's transparent
+		// node over the finished image.
+		const auto outputDimensions =
+			[&](core::Name kind, size_t output, uint32_t &outWidth, uint32_t &outHeight) {
+				outWidth = sceneWidth;
+				outHeight = sceneHeight;
+				const graph::Node *node = nullptr;
+				for (uint32_t value = 1; value <= selectedPipeline->Graph.Count(); value++) {
+					const graph::Node *candidate = selectedPipeline->Graph.Find(graph::NodeId{value});
+					if (candidate != nullptr && candidate->Kind == kind) {
+						node = candidate;
+						break;
+					}
+				}
+				if (node == nullptr || output >= node->Writes.size()) {
+					return;
+				}
+				const graph::ResourceDesc *resource =
+					selectedPipeline->Graph.FindResource(node->Writes[output]);
+				if (resource != nullptr) {
+					resource->Resolve(sceneWidth, sceneHeight, outWidth, outHeight);
+				}
+			};
+		Impl::PbrDimensions pbrDimensions;
+		pbrDimensions.TargetWidth = targetWidth;
+		pbrDimensions.TargetHeight = targetHeight;
+		pbrDimensions.ViewWidth = sceneWidth;
+		pbrDimensions.ViewHeight = sceneHeight;
+		pbrDimensions.LinearWidth = sceneWidth;
+		pbrDimensions.LinearHeight = sceneHeight;
+		pbrDimensions.OcclusionWidth = sceneWidth;
+		pbrDimensions.OcclusionHeight = sceneHeight;
+		pbrDimensions.LitWidth = sceneWidth;
+		pbrDimensions.LitHeight = sceneHeight;
+		outputDimensions(
+			core::Name("depth-linearise"), 0, pbrDimensions.LinearWidth, pbrDimensions.LinearHeight
+		);
+		outputDimensions(core::Name("ssao"), 0, pbrDimensions.OcclusionWidth, pbrDimensions.OcclusionHeight);
+		outputDimensions(core::Name("deferred-lighting"), 0, pbrDimensions.LitWidth, pbrDimensions.LitHeight);
+		const bool needsPbrTargets =
+			graphEnabled(core::Name("gbuffer")) || graphEnabled(core::Name("depth-linearise")) ||
+			graphEnabled(core::Name("ssao")) || graphEnabled(core::Name("deferred-lighting")) ||
+			graphEnabled(core::Name("tonemap")) || graphEnabled(core::Name("transparent"));
+		const bool graphTargetsReady = !needsPbrTargets || State->EnsurePbr(targetSlot, pbrDimensions);
+		if (!graphTargetsReady) {
+			closePass();
+			State->Timestamps.Abandon(timingSlot);
+			if (timingSlot < VulkanTimestamps::SLOTS) {
+				State->PendingMarks[timingSlot].clear();
+			}
+			endIncompleteView();
+			return result;
+		}
+		Impl::PbrSlot &pbr = State->PbrAt(targetSlot);
+		SDL_GPUTexture *const viewTarget = colourTarget.texture;
+		if (needsPbrTargets) {
+			colourTarget.texture = pbr.Display;
+		}
+		const float aspect = static_cast<float>(sceneWidth) / static_cast<float>(sceneHeight);
+		const scene::CameraMatrices matrices = scene::ResolveCamera(cameraFrame, drawCamera, aspect);
+		const FrameUniforms frameUniforms{
+			matrices.ViewProjection,
+			lightViewProjection,
+			glm::mat4{1.0f},
+		};
+		const LightingUniforms lighting = lightingAt(cameraFrame.Position, 0.0f, 0.0f);
+
+		PbrUniforms uniforms;
+		uniforms.InverseViewProjection = glm::inverse(matrices.ViewProjection);
+		uniforms.LightViewProjection = lightViewProjection;
+		uniforms.Planes = glm::vec4{
+			drawCamera.NearPlane,
+			drawCamera.FarPlane,
+			drawCamera.NearPlane > 0.0f ? 1.0f / drawCamera.NearPlane : 0.0f,
+			drawCamera.FarPlane > 0.0f ? 1.0f / drawCamera.FarPlane : 0.0f,
+		};
+		uniforms.Target = glm::vec4{
+			static_cast<float>(sceneWidth),
+			static_cast<float>(sceneHeight),
+			static_cast<float>(sceneWidth) / static_cast<float>(targetWidth),
+			static_cast<float>(sceneHeight) / static_cast<float>(targetHeight),
+		};
+		uniforms.Direction = glm::vec4{State->Sun, 0.0f};
+		uniforms.Ambient = State->Ambient;
+		uniforms.OutdoorAmbient = State->OutdoorAmbient;
+		uniforms.Direct = State->Direct;
+		uniforms.Eye =
+			glm::vec4{cameraFrame.Position.X, cameraFrame.Position.Y, cameraFrame.Position.Z, 1.0f};
+		uniforms.FogColour = State->FogColour;
+		uniforms.Fog = glm::vec4{State->FogStart, State->FogEnd, 0.0f, 0.0f};
+		uniforms.Shadow = glm::vec4{
+			haveShadow ? 1.0f : 0.0f,
+			1.0f / static_cast<float>(SHADOW_RESOLUTION),
+			0.0f,
+			0.0f,
+		};
+
+		const SDL_GPUViewport sceneViewport{
+			0.0f,
+			0.0f,
+			static_cast<float>(sceneWidth),
+			static_cast<float>(sceneHeight),
+			0.0f,
+			1.0f,
+		};
+		const SDL_Rect sceneScissor{0, 0, static_cast<int>(sceneWidth), static_cast<int>(sceneHeight)};
+
+		frameNodes.Set(core::Name("gbuffer"), [&](const graph::RunContext &context) {
+			enterNamedPass(context.Name);
+			SDL_GPUColorTargetInfo gbufferTargets[4]{};
+			for (size_t target = 0; target < 4; target++) {
+				gbufferTargets[target].clear_color = SDL_FColor{0.0f, 0.0f, 0.0f, 0.0f};
+				gbufferTargets[target].load_op = SDL_GPU_LOADOP_CLEAR;
+				gbufferTargets[target].store_op = SDL_GPU_STOREOP_STORE;
+				gbufferTargets[target].cycle = true;
+			}
+			gbufferTargets[0].texture = pbr.Albedo;
+			gbufferTargets[1].texture = pbr.Normal;
+			gbufferTargets[2].texture = pbr.Material;
+			gbufferTargets[3].texture = pbr.Emissive;
+
+			depthTarget.load_op = SDL_GPU_LOADOP_CLEAR;
+			depthTarget.store_op = SDL_GPU_STOREOP_STORE;
+			SDL_GPURenderPass *gbuffer = SDL_BeginGPURenderPass(command, gbufferTargets, 4, &depthTarget);
+			State->BindPipeline(gbuffer, State->GBufferPipeline, Impl::PipelineFamily::Other);
+			SDL_SetGPUViewport(gbuffer, &sceneViewport);
+			SDL_SetGPUScissor(gbuffer, &sceneScissor);
+			SDL_PushGPUVertexUniformData(command, 0, &frameUniforms, sizeof(frameUniforms));
+			if (haveInstances && plainOpaque > 0) {
+				const SDL_GPUBufferBinding vertexBindings[] = {
+					{State->Meshes.Vertices(), 0},
+					{State->InstanceBuffer, 0},
+				};
+				SDL_BindGPUVertexBuffers(gbuffer, 0, vertexBindings, 2);
+				const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
+				SDL_BindGPUIndexBuffer(gbuffer, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+				result.DrawCalls += State->DrawSlots(
+					command,
+					gbuffer,
+					sceneCount,
+					plainOpaque,
+					&lighting,
+					State->ShadowTexture,
+					State->ShadowSampler,
+					nullptr,
+					State->SurfaceSampler,
+					0,
+					result.Triangles
+				);
+			}
+			SDL_EndGPURenderPass(gbuffer);
+			return true;
+		});
+
+		const auto fullscreen = [&](core::Name name,
+									SDL_GPUGraphicsPipeline *pipeline,
+									SDL_GPUTexture *target,
+									uint32_t passWidth,
+									uint32_t passHeight,
+									std::span<const SDL_GPUTextureSamplerBinding> bindings,
+									const PbrUniforms *passUniforms,
+									const LightUniforms *passLights,
+									SDL_FColor clear) {
+			enterNamedPass(name);
+			SDL_GPUColorTargetInfo colour{};
+			colour.texture = target;
+			colour.clear_color = clear;
+			colour.load_op = SDL_GPU_LOADOP_CLEAR;
+			colour.store_op = SDL_GPU_STOREOP_STORE;
+			colour.cycle = true;
+			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colour, 1, nullptr);
+			SDL_BindGPUGraphicsPipeline(pass, pipeline);
+			if (!bindings.empty()) {
+				SDL_BindGPUFragmentSamplers(pass, 0, bindings.data(), static_cast<uint32_t>(bindings.size()));
+			}
+			if (passUniforms != nullptr) {
+				SDL_PushGPUFragmentUniformData(command, 0, passUniforms, sizeof(*passUniforms));
+			}
+			if (passLights != nullptr) {
+				SDL_PushGPUFragmentUniformData(command, 1, passLights, sizeof(*passLights));
+			}
+			const SDL_GPUViewport viewport{
+				0.0f, 0.0f, static_cast<float>(passWidth), static_cast<float>(passHeight), 0.0f, 1.0f
+			};
+			const SDL_Rect scissor{0, 0, static_cast<int>(passWidth), static_cast<int>(passHeight)};
+			SDL_SetGPUViewport(pass, &viewport);
+			SDL_SetGPUScissor(pass, &scissor);
+			SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+			SDL_EndGPURenderPass(pass);
+			result.DrawCalls++;
+		};
+
+		const auto fixedTexture = [&](core::Name resource, size_t slot) {
+			Impl::NamedTexture texture;
+			const Impl::ResourceRole role = State->RoleFor(resource);
+			if (role == Impl::ResourceRole::Scene) {
+				if (slot == targetSlot) {
+					return Impl::NamedTexture{viewTarget, sceneWidth, sceneHeight, State->ColourFormat()};
+				}
+				if (slot < State->SceneSlots.size()) {
+					const Impl::SceneSlot &scene = State->SceneSlots[slot];
+					return Impl::NamedTexture{
+						scene.Texture, scene.DrawnWidth, scene.DrawnHeight, State->ColourFormat()
+					};
+				}
+				return texture;
+			}
+			if (role == Impl::ResourceRole::Depth) {
+				if (slot < State->SceneSlots.size()) {
+					const Impl::SceneSlot &scene = State->SceneSlots[slot];
+					return Impl::NamedTexture{
+						scene.Depth, scene.DepthWidth, scene.DepthHeight, State->DepthFormat
+					};
+				}
+				return texture;
+			}
+			if (role == Impl::ResourceRole::Shadow) {
+				return Impl::NamedTexture{
+					State->ShadowTexture,
+					SHADOW_RESOLUTION,
+					SHADOW_RESOLUTION,
+					State->DepthFormat,
+				};
+			}
+			if (role == Impl::ResourceRole::Surface && slot < State->SurfaceBanks.size()) {
+				const Impl::SurfaceSlotState &surface = State->SurfaceBanks[slot].Surfaces[0];
+				return Impl::NamedTexture{
+					surface.Ready ? surface.Texture[surface.Slot] : nullptr,
+					surface.Width,
+					surface.Height,
+					State->ColourFormat(),
+				};
+			}
+			if (slot >= State->PbrSlots.size()) {
+				return texture;
+			}
+			const Impl::PbrSlot &slotPbr = State->PbrSlots[slot];
+			if (role == Impl::ResourceRole::Albedo) {
+				return Impl::NamedTexture{
+					slotPbr.Albedo,
+					slotPbr.Dimensions.TargetWidth,
+					slotPbr.Dimensions.TargetHeight,
+					SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB,
+				};
+			}
+			if (role == Impl::ResourceRole::Normal) {
+				return Impl::NamedTexture{
+					slotPbr.Normal,
+					slotPbr.Dimensions.TargetWidth,
+					slotPbr.Dimensions.TargetHeight,
+					SDL_GPU_TEXTUREFORMAT_R10G10B10A2_UNORM,
+				};
+			}
+			if (role == Impl::ResourceRole::Material) {
+				return Impl::NamedTexture{
+					slotPbr.Material,
+					slotPbr.Dimensions.TargetWidth,
+					slotPbr.Dimensions.TargetHeight,
+					SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
+				};
+			}
+			if (role == Impl::ResourceRole::Emissive) {
+				return Impl::NamedTexture{
+					slotPbr.Emissive,
+					slotPbr.Dimensions.TargetWidth,
+					slotPbr.Dimensions.TargetHeight,
+					SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT,
+				};
+			}
+			if (role == Impl::ResourceRole::LinearDepth) {
+				return Impl::NamedTexture{
+					slotPbr.LinearDepth,
+					slotPbr.Dimensions.LinearWidth,
+					slotPbr.Dimensions.LinearHeight,
+					SDL_GPU_TEXTUREFORMAT_R32_FLOAT,
+				};
+			}
+			if (role == Impl::ResourceRole::Occlusion) {
+				return Impl::NamedTexture{
+					slotPbr.Occlusion,
+					slotPbr.Dimensions.OcclusionWidth,
+					slotPbr.Dimensions.OcclusionHeight,
+					SDL_GPU_TEXTUREFORMAT_R8_UNORM,
+				};
+			}
+			if (role == Impl::ResourceRole::Lit) {
+				return Impl::NamedTexture{
+					slotPbr.Lit,
+					slotPbr.Dimensions.LitWidth,
+					slotPbr.Dimensions.LitHeight,
+					SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT,
+				};
+			}
+			if (role == Impl::ResourceRole::Display) {
+				return Impl::NamedTexture{
+					slotPbr.Display,
+					slotPbr.Dimensions.ViewWidth,
+					slotPbr.Dimensions.ViewHeight,
+					State->ColourFormat(),
+				};
+			}
+			return texture;
+		};
+
+		const auto graphTexture = [&](graph::ResourceId resource,
+									  const graph::RunContext &context,
+									  bool make) {
+			const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResource(resource);
+			if (desc == nullptr) {
+				return Impl::NamedTexture{};
+			}
+			const graph::Node *node = selectedPipeline->Graph.Find(context.Node);
+			const size_t selectedSlot = context.View == graph::RunContext::WHOLE_FRAME && node != nullptr
+											? node->Integer(core::Name("view"), 0)
+											: targetSlot;
+			Impl::NamedTexture fixed = fixedTexture(desc->Name, selectedSlot);
+			if (fixed.IsValid()) {
+				return fixed;
+			}
+			if (desc->External) {
+				if (desc->Name == core::Name("window")) {
+					return Impl::NamedTexture{swapchain, width, height, State->ColourFormat()};
+				}
+				return Impl::NamedTexture{};
+			}
+
+			const graph::NodeScope scope = State->ResourceScope(*selectedPipeline, resource);
+			const uint64_t owner = scope == graph::NodeScope::View	  ? static_cast<uint64_t>(selectedSlot)
+								   : scope == graph::NodeScope::World ? world
+																	  : 0;
+			if (make) {
+				return State->EnsureGraphTarget(*selectedPipeline, resource, owner, sceneWidth, sceneHeight);
+			}
+			return State->FindGraphTarget(*selectedPipeline, desc->Name, scope, owner);
+		};
+
+		const auto textureBindings = [&](const graph::RunContext &context) {
+			std::vector<SDL_GPUTextureSamplerBinding> bindings;
+			for (const graph::ResourceId resource : context.Reads) {
+				const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResource(resource);
+				if (desc == nullptr || desc->Kind == graph::ResourceKind::Buffer ||
+					desc->Kind == graph::ResourceKind::Camera ||
+					desc->Kind == graph::ResourceKind::Entities) {
+					continue;
+				}
+				Impl::NamedTexture source = graphTexture(resource, context, false);
+				bindings.push_back(
+					SDL_GPUTextureSamplerBinding{
+						source.IsValid() ? source.Texture : State->FallbackTexture,
+						State->SurfaceSampler,
+					}
+				);
+			}
+			return bindings;
+		};
+
+		frameNodes.Set(core::Name("raster"), [&](const graph::RunContext &context) {
+			enterNamedPass(context.Name);
+			const graph::Node *node = selectedPipeline->Graph.Find(context.Node);
+			if (node == nullptr) {
+				return false;
+			}
+			Impl::NamedTexture target;
+			for (const graph::ResourceId resource : context.Writes) {
+				const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResource(resource);
+				if (desc != nullptr && desc->Kind == graph::ResourceKind::Colour) {
+					target = graphTexture(resource, context, true);
+					break;
+				}
+			}
+			if (!target.IsValid()) {
+				ENGINE_WARN("'{}' has no colour target to draw into", context.Name.Text());
+				return true;
+			}
+			const std::vector<SDL_GPUTextureSamplerBinding> bindings = textureBindings(context);
+			SDL_GPUGraphicsPipeline *raster =
+				State->GraphRasterFor(*selectedPipeline, *node, target.Format, bindings.size());
+			if (raster == nullptr) {
+				return true;
+			}
+
+			GraphPassUniforms passUniforms;
+			passUniforms.ViewProjection = matrices.ViewProjection;
+			passUniforms.InverseViewProjection = glm::inverse(matrices.ViewProjection);
+			passUniforms.Target = glm::vec4{
+				static_cast<float>(target.Width),
+				static_cast<float>(target.Height),
+				1.0f / static_cast<float>(target.Width),
+				1.0f / static_cast<float>(target.Height),
+			};
+			passUniforms.View = glm::vec4{
+				static_cast<float>(State->AnimationSeconds),
+				drawCamera.FieldOfViewRadians,
+				static_cast<float>(target.Width) / static_cast<float>(target.Height),
+				0.0f,
+			};
+
+			SDL_GPUColorTargetInfo colour{};
+			colour.texture = target.Texture;
+			colour.clear_color = SDL_FColor{
+				node->Number(core::Name("clear.r"), 0.0f),
+				node->Number(core::Name("clear.g"), 0.0f),
+				node->Number(core::Name("clear.b"), 0.0f),
+				node->Number(core::Name("clear.a"), 1.0f),
+			};
+			const std::string *load = node->Parameter(core::Name("load"));
+			colour.load_op = load != nullptr && *load == "load" ? SDL_GPU_LOADOP_LOAD : SDL_GPU_LOADOP_CLEAR;
+			colour.store_op = SDL_GPU_STOREOP_STORE;
+			colour.cycle = true;
+			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colour, 1, nullptr);
+			SDL_BindGPUGraphicsPipeline(pass, raster);
+			if (!bindings.empty()) {
+				SDL_BindGPUFragmentSamplers(pass, 0, bindings.data(), static_cast<uint32_t>(bindings.size()));
+			}
+			SDL_PushGPUFragmentUniformData(command, 0, &passUniforms, sizeof(passUniforms));
+			SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+			SDL_EndGPURenderPass(pass);
+			result.DrawCalls++;
+			return true;
+		});
+
+		frameNodes.Set(core::Name("dispatch"), [&](const graph::RunContext &context) {
+			const graph::Node *node = selectedPipeline->Graph.Find(context.Node);
+			if (node == nullptr) {
+				return false;
+			}
+			std::vector<SDL_GPUStorageTextureReadWriteBinding> writes;
+			Impl::NamedTexture firstTarget;
+			for (const graph::ResourceId resource : context.Writes) {
+				const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResource(resource);
+				if (desc == nullptr || desc->Kind != graph::ResourceKind::Storage) {
+					continue;
+				}
+				Impl::NamedTexture target = graphTexture(resource, context, true);
+				if (!target.IsValid()) {
+					continue;
+				}
+				if (!firstTarget.IsValid()) {
+					firstTarget = target;
+				}
+				SDL_GPUStorageTextureReadWriteBinding binding{};
+				binding.texture = target.Texture;
+				binding.cycle = true;
+				writes.push_back(binding);
+			}
+			if (writes.empty()) {
+				ENGINE_WARN("'{}' has no storage target to dispatch into", context.Name.Text());
+				return true;
+			}
+			const std::vector<SDL_GPUTextureSamplerBinding> bindings = textureBindings(context);
+			const uint32_t localX = node->Integer(core::Name("local.x"), 8);
+			const uint32_t localY = node->Integer(core::Name("local.y"), 8);
+			const uint32_t localZ = node->Integer(core::Name("local.z"), 1);
+			if (localX == 0 || localY == 0 || localZ == 0) {
+				ENGINE_WARN("'{}' asks for a zero-sized compute thread group", context.Name.Text());
+				return true;
+			}
+			SDL_GPUComputePipeline *compute = State->GraphComputeFor(
+				*selectedPipeline, *node, bindings.size(), writes.size(), localX, localY, localZ
+			);
+			if (compute == nullptr) {
+				return true;
+			}
+
+			const graph::ScheduledNode *scheduled = scheduledFor(context.Node);
+			const bool separateCommand = scheduled != nullptr && scheduled->AsyncEligible &&
+										 !mainGpuWorkRecorded && !dedicatedComputeSubmitted &&
+										 (!State->BatchActive || State->BatchFirst);
+			SDL_GPUCommandBuffer *dispatchCommand = command;
+			if (separateCommand) {
+				dispatchCommand = SDL_AcquireGPUCommandBuffer(State->Device);
+				if (dispatchCommand == nullptr) {
+					ENGINE_ERROR(
+						"'{}': SDL_AcquireGPUCommandBuffer: {}", context.Name.Text(), SDL_GetError()
+					);
+					return false;
+				}
+
+				// `Begin` put the query reset in the main command buffer, which is
+				// submitted after this prefix. Use another slot whose reset and marks
+				// travel together on the command buffer that reaches the queue first.
+				const uint32_t laterReset = timingSlot;
+				State->Timestamps.Abandon(laterReset);
+				if (laterReset < VulkanTimestamps::SLOTS) {
+					State->PendingMarks[laterReset].clear();
+					State->TimingSequence[laterReset] = 0;
+				}
+				timingSlot = State->Timestamps.Begin(dispatchCommand, laterReset);
+				if (State->BatchActive) {
+					State->BatchTimingSlot = timingSlot;
+				}
+			}
+			enterNamedPass(context.Name, dispatchCommand);
+			SDL_GPUComputePass *pass = SDL_BeginGPUComputePass(
+				dispatchCommand, writes.data(), static_cast<uint32_t>(writes.size()), nullptr, 0
+			);
+			if (pass == nullptr) {
+				ENGINE_ERROR("'{}': SDL_BeginGPUComputePass: {}", context.Name.Text(), SDL_GetError());
+				closePass();
+				if (separateCommand) {
+					State->Timestamps.Abandon(timingSlot);
+					if (timingSlot < VulkanTimestamps::SLOTS) {
+						State->PendingMarks[timingSlot].clear();
+					}
+					timingSlot = VulkanTimestamps::NO_SLOT;
+					if (State->BatchActive) {
+						State->BatchTimingSlot = timingSlot;
+					}
+					SDL_CancelGPUCommandBuffer(dispatchCommand);
+				}
+				return false;
+			}
+			SDL_BindGPUComputePipeline(pass, compute);
+			if (!bindings.empty()) {
+				SDL_BindGPUComputeSamplers(pass, 0, bindings.data(), static_cast<uint32_t>(bindings.size()));
+			}
+			const std::string *mode = node->Parameter(core::Name("dispatch.mode"));
+			const bool coverTarget = mode == nullptr || *mode != "groups";
+			const uint32_t groupsX = coverTarget ? (firstTarget.Width + localX - 1) / localX
+												 : node->Integer(core::Name("dispatch.x"), 1);
+			const uint32_t groupsY = coverTarget ? (firstTarget.Height + localY - 1) / localY
+												 : node->Integer(core::Name("dispatch.y"), 1);
+			const uint32_t groupsZ = coverTarget ? 1 : node->Integer(core::Name("dispatch.z"), 1);
+			SDL_DispatchGPUCompute(pass, groupsX, groupsY, groupsZ);
+			SDL_EndGPUComputePass(pass);
+			result.ComputeDispatches++;
+			if (separateCommand) {
+				closePass();
+				if (!SDL_SubmitGPUCommandBuffer(dispatchCommand)) {
+					ENGINE_ERROR("'{}': SDL_SubmitGPUCommandBuffer: {}", context.Name.Text(), SDL_GetError());
+					State->Timestamps.Abandon(timingSlot);
+					if (timingSlot < VulkanTimestamps::SLOTS) {
+						State->PendingMarks[timingSlot].clear();
+					}
+					return false;
+				}
+				dedicatedComputeSubmitted = true;
+				result.AsyncComputeCommandBuffers++;
+			} else {
+				mainGpuWorkRecorded = true;
+			}
+			return true;
+		});
+
+		SDL_GPUSampler *const sampler = State->SurfaceSampler;
+		const std::array depthBindings = {SDL_GPUTextureSamplerBinding{depthTarget.texture, sampler}};
+		frameNodes.Set(core::Name("depth-linearise"), [&](const graph::RunContext &context) {
+			fullscreen(
+				context.Name,
+				State->DepthLinearPipeline,
+				pbr.LinearDepth,
+				pbrDimensions.LinearWidth,
+				pbrDimensions.LinearHeight,
+				depthBindings,
+				&uniforms,
+				nullptr,
+				SDL_FColor{drawCamera.FarPlane, 0.0f, 0.0f, 0.0f}
+			);
+			return true;
+		});
+
+		frameNodes.Set(core::Name("ssao"), [&](const graph::RunContext &context) {
+			const std::array aoBindings = {
+				SDL_GPUTextureSamplerBinding{pbr.LinearDepth, sampler},
+				SDL_GPUTextureSamplerBinding{pbr.Normal, sampler},
+			};
+			fullscreen(
+				context.Name,
+				State->SsaoPipeline,
+				pbr.Occlusion,
+				pbrDimensions.OcclusionWidth,
+				pbrDimensions.OcclusionHeight,
+				aoBindings,
+				&uniforms,
+				nullptr,
+				SDL_FColor{1.0f, 1.0f, 1.0f, 1.0f}
+			);
+			return true;
+		});
+
+		const auto clearOcclusion = [&] {
+			SDL_GPUColorTargetInfo clearAo{};
+			clearAo.texture = pbr.Occlusion;
+			clearAo.clear_color = SDL_FColor{1.0f, 1.0f, 1.0f, 1.0f};
+			clearAo.load_op = SDL_GPU_LOADOP_CLEAR;
+			clearAo.store_op = SDL_GPU_STOREOP_STORE;
+			clearAo.cycle = true;
+			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &clearAo, 1, nullptr);
+			SDL_EndGPURenderPass(pass);
+		};
+
+		const std::array lightingBindings = {
+			SDL_GPUTextureSamplerBinding{pbr.Albedo, sampler},
+			SDL_GPUTextureSamplerBinding{pbr.Normal, sampler},
+			SDL_GPUTextureSamplerBinding{pbr.Material, sampler},
+			SDL_GPUTextureSamplerBinding{pbr.Emissive, sampler},
+			SDL_GPUTextureSamplerBinding{pbr.LinearDepth, sampler},
+			SDL_GPUTextureSamplerBinding{pbr.Occlusion, sampler},
+			SDL_GPUTextureSamplerBinding{
+				State->ShadowTexture != nullptr ? State->ShadowTexture : State->FallbackTexture,
+				State->ShadowSampler != nullptr ? State->ShadowSampler : sampler,
+			},
+		};
+		frameNodes.Set(core::Name("deferred-lighting"), [&](const graph::RunContext &context) {
+			if (!graphEnabled(core::Name("ssao"))) {
+				clearOcclusion();
+			}
+			fullscreen(
+				context.Name,
+				State->DeferredLightingPipeline,
+				pbr.Lit,
+				pbrDimensions.LitWidth,
+				pbrDimensions.LitHeight,
+				lightingBindings,
+				&uniforms,
+				&lightUniforms,
+				SDL_FColor{State->FogColour.r, State->FogColour.g, State->FogColour.b, 1.0f}
+			);
+			return true;
+		});
+
+		const std::array tonemapBindings = {SDL_GPUTextureSamplerBinding{pbr.Lit, sampler}};
+		frameNodes.Set(core::Name("tonemap"), [&](const graph::RunContext &context) {
+			fullscreen(
+				context.Name,
+				State->TonemapPipeline,
+				colourTarget.texture,
+				sceneWidth,
+				sceneHeight,
+				tonemapBindings,
+				nullptr,
+				nullptr,
+				colourTarget.clear_color
+			);
+
+			// The forward tail consumes both completed attachments.
+			colourTarget.load_op = SDL_GPU_LOADOP_LOAD;
+			depthTarget.load_op = SDL_GPU_LOADOP_LOAD;
+			depthTarget.store_op = SDL_GPU_STOREOP_DONT_CARE;
+			// Cycling selects fresh backing storage, which cannot contain the depth
+			// this pass explicitly loads from the G-buffer pass.
+			depthTarget.cycle = false;
+			return true;
+		});
+
+		frameNodes.Set(core::Name("transparent"), [&](const graph::RunContext &context) {
+			ENGINE_PROFILE_CAT("transparent pass", core::ProfileCategory::Render);
+			if (!submitUploads()) {
+				return false;
+			}
 
 			// Entered unconditionally, and that is the honest reading rather
 			// than a convenience: the stage clears colour and depth, so a frame
 			// with nothing in it still ran this pass - the background is what it
 			// drew. `Validate` sees the same thing, because the stage's writes
 			// are marked `Clear`.
-			passes.Enter(Pass::Opaque);
+			enterNamedPass(context.Name);
 
 			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colourTarget, 1, &depthTarget);
 			// **The light set, pushed once for the whole pass.** Uniform state
@@ -6985,22 +9465,6 @@ namespace engine::render {
 				// possible without a second upload: the instance attributes are
 				// per-instance vertex data, so the offset picks up where the
 				// opaque range left off.
-				if (plainOpaque > 0) {
-					result.DrawCalls += State->DrawSlots(
-						command,
-						pass,
-						sceneCount,
-						plainOpaque,
-						&lighting,
-						shadow,
-						shadowSampler,
-						screenSurface,
-						surfaceSampler,
-						0,
-						result.Triangles
-					);
-				}
-
 				// **The surface draws, one per index rather than one for "the
 				// mirrors".** Each index owns a texture and a projection, so
 				// what used to be a single run is a run each - grouped by
@@ -7013,6 +9477,7 @@ namespace engine::render {
 				// is current. Only what a mirror sees *of another mirror* is a
 				// frame behind, and that is the staleness the pair exists for.
 				LightingUniforms mirroredUniforms{};
+				const bool surfaceImagesEnabled = graphEnabled(core::Name("surface"));
 				const auto drawScreenMirrors = [&](bool blended) {
 					for (uint8_t index = 0; index < scene::MAX_SURFACES; index++) {
 						const scene::SurfaceRun &run = cameraRuns[index];
@@ -7041,7 +9506,8 @@ namespace engine::render {
 						const LightingUniforms *uniforms = &lighting;
 						if (portalOf[index] != nullptr) {
 							const Impl::PortalTarget *seen =
-								portalLevels > 0 && bank.Portals.size() >= portalLevels
+								surfaceImagesEnabled && portalLevels > 0 &&
+										bank.Portals.size() >= portalLevels
 									? &bank.Portals[portalLevels - 1].Targets[index]
 									: nullptr;
 
@@ -7091,7 +9557,7 @@ namespace engine::render {
 						// instead would leave a hole in the geometry, which reads
 						// as a culling bug rather than as a mirror that has not
 						// warmed up.
-						if (!shown.Ready) {
+						if (!surfaceImagesEnabled || !shown.Ready) {
 							bindScreen(nullptr);
 						} else {
 							const FrameUniforms mirrorFrame{
@@ -7168,8 +9634,6 @@ namespace engine::render {
 					// Still its own stage, sharing a render pass. What the list
 					// describes is what is drawn and in what order, not how many
 					// times a target is bound.
-					passes.Enter(Pass::Transparent);
-
 					State->BindPipeline(pass, State->TransparentPipeline, Impl::PipelineFamily::Transparent);
 
 					if (plainTransparent > 0) {
@@ -7206,13 +9670,12 @@ namespace engine::render {
 				// million particles into the geometry's own order would cost more
 				// than the artefact of not doing it.
 				//
-				// **Not their own `Pass` member**, deliberately. `render::Pass` is
-				// compared against `graph::StandardPipeline` by a test, and adding
-				// a stage to one and not the other is exactly the drift D00016
-				// records. Particles are part of what `Transparent` means until
-				// the pipeline is a graph rather than a function body.
+				// **Not their own node**, deliberately. Particles share the ordered
+				// transparent target and depth state, so the graph's `transparent`
+				// node owns them along with blended geometry. Splitting that node
+				// would require a resource edge and an independently executable
+				// backend operation, not another fixed pass label in this body.
 				if (particleCount > 0) {
-					passes.Enter(Pass::Transparent);
 					result.DrawCalls += State->DrawParticles(
 						command, pass, frameUniforms.ViewProjection, cameraFrame, particles
 					);
@@ -7221,7 +9684,6 @@ namespace engine::render {
 				// The beams and trails, after the particles. See the header for
 				// why the order is fixed rather than sorted.
 				if (ribbonCount > 0) {
-					passes.Enter(Pass::Transparent);
 					result.DrawCalls += State->DrawRibbons(
 						command, pass, frameUniforms.ViewProjection, cameraFrame, ribbonRuns
 					);
@@ -7251,14 +9713,130 @@ namespace engine::render {
 			}
 
 			SDL_EndGPURenderPass(pass);
-		}
+			return true;
+		});
+		Impl::NamedTexture authoredCapture;
+		std::filesystem::path authoredCapturePath;
+		core::Name authoredCaptureNode;
+		bool authoredCaptureOnce = false;
+		frameNodes.Set(core::Name("viewer"), [&](const graph::RunContext &context) {
+			enterNamedPass(context.Name);
+			for (const graph::ResourceId resource : context.Reads) {
+				const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResource(resource);
+				const Impl::NamedTexture source = graphTexture(resource, context, false);
+				if (desc == nullptr || !source.IsValid()) {
+					continue;
+				}
+				const graph::Node *node = selectedPipeline->Graph.Find(context.Node);
+				const size_t slot = node != nullptr ? node->Integer(core::Name("view"), 0) : targetSlot;
+				(void)State->RequestPreview(
+					command, source.Texture, source.Width, source.Height, desc->Name, slot, source.Format
+				);
+				break;
+			}
+			return true;
+		});
+		frameNodes.Set(core::Name("capture"), [&](const graph::RunContext &context) {
+			enterNamedPass(context.Name);
+			const graph::Node *node = selectedPipeline->Graph.Find(context.Node);
+			const std::string *path = node != nullptr ? node->Parameter(core::Name("path")) : nullptr;
+			if (node == nullptr || path == nullptr || path->empty() || authoredCapture.IsValid()) {
+				return true;
+			}
+			const std::string *mode = node->Parameter(core::Name("capture.mode"));
+			authoredCaptureOnce = mode == nullptr || *mode != "every-frame";
+			if (authoredCaptureOnce) {
+				const auto done = std::find_if(
+					State->GraphCaptureReceipts.begin(),
+					State->GraphCaptureReceipts.end(),
+					[&](const Impl::GraphCaptureReceipt &receipt) {
+						// A file path is process-wide even when the same authored
+						// pipeline is installed once per world. Claiming by path keeps
+						// those instances from overwriting one another in the same frame.
+						return receipt.Node == context.Name && receipt.Path == *path;
+					}
+				);
+				if (done != State->GraphCaptureReceipts.end()) {
+					return true;
+				}
+			} else {
+				const auto claimed = State->GraphCaptureFrames.find(*path);
+				if (claimed != State->GraphCaptureFrames.end() && claimed->second == State->FrameCounter) {
+					return true;
+				}
+				State->GraphCaptureFrames[*path] = State->FrameCounter;
+			}
+			for (const graph::ResourceId resource : context.Reads) {
+				const Impl::NamedTexture source = graphTexture(resource, context, false);
+				if (!source.IsValid()) {
+					continue;
+				}
+				if (source.Format != SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM &&
+					source.Format != SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB &&
+					source.Format != SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM &&
+					source.Format != SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM_SRGB) {
+					ENGINE_WARN("capture node '{}' needs a four-byte display target", context.Name.Text());
+					return true;
+				}
+				authoredCapture = source;
+				authoredCapturePath = *path;
+				authoredCaptureNode = context.Name;
+				if (authoredCaptureOnce) {
+					State->GraphCaptureReceipts.push_back(
+						{selectedPipeline->Name, authoredCaptureNode, authoredCapturePath.string()}
+					);
+				}
+				break;
+			}
+			return true;
+		});
+		frameNodes.Set(core::Name("output"), [&](const graph::RunContext &context) {
+			enterNamedPass(context.Name);
+			Impl::NamedTexture source;
+			for (const graph::ResourceId resource : context.Reads) {
+				source = graphTexture(resource, context, false);
+				if (source.IsValid()) {
+					break;
+				}
+			}
+			if (!source.IsValid()) {
+				ENGINE_WARN("'{}' has no image wired into it", context.Name.Text());
+				return true;
+			}
+			if (source.Texture == viewTarget) {
+				return true;
+			}
+
+			SDL_GPUBlitInfo blit{};
+			blit.source.texture = source.Texture;
+			blit.source.w = source.Width;
+			blit.source.h = source.Height;
+			blit.destination.texture = viewTarget;
+			blit.destination.w = sceneWidth;
+			blit.destination.h = sceneHeight;
+			blit.load_op = SDL_GPU_LOADOP_DONT_CARE;
+			blit.filter = source.Width == sceneWidth && source.Height == sceneHeight ? SDL_GPU_FILTER_NEAREST
+																					 : SDL_GPU_FILTER_LINEAR;
+			blit.cycle = true;
+			SDL_BlitGPUTexture(command, &blit);
+			return true;
+		});
+		frameNodes.Set(core::Name("present"), [&](const graph::RunContext &context) {
+			enterNamedPass(context.Name);
+			return true;
+		});
 
 		// --- overlay pass ---------------------------------------------------
 
-		// `haveOverlay` already requires a window, so there is no second test.
-		if (haveOverlay) {
+		frameNodes.Set(core::Name("overlay"), [&](const graph::RunContext &context) {
+			enterNamedPass(context.Name);
+			if (!haveOverlay) {
+				return true;
+			}
+			if (!submitUploads()) {
+				return false;
+			}
 			ENGINE_PROFILE_CAT("overlay pass", core::ProfileCategory::Render);
-			passes.Enter(Pass::Overlay);
 
 			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &windowTarget, 1, nullptr);
 
@@ -7279,16 +9857,20 @@ namespace engine::render {
 			SDL_EndGPURenderPass(pass);
 
 			result.DrawCalls++;
-		}
+			return true;
+		});
 
 		// --- interface pass -------------------------------------------------
 
 		// Screen-space interface needs the swapchain. A headless capture still
 		// prepares the hook so its spatial collectors can draw in the world pass,
 		// but has no window target for this pass.
-		if (drawInterface && swapchain != nullptr) {
+		frameNodes.Set(core::Name("interface"), [&](const graph::RunContext &context) {
+			enterNamedPass(context.Name);
+			if (!drawInterface || swapchain == nullptr) {
+				return true;
+			}
 			ENGINE_PROFILE_CAT("interface pass", core::ProfileCategory::Render);
-			passes.Enter(Pass::Interface);
 
 			// No depth attachment. Panels are drawn in the order the interface
 			// submitted them and testing them against the world's depth would
@@ -7303,6 +9885,67 @@ namespace engine::render {
 			// "what did the engine draw", and a widget count is the editor's
 			// business rather than the renderer's.
 			result.DrawCalls++;
+			return true;
+		});
+
+		GraphRunner frameRunner(frameNodes);
+		bool dispatched = false;
+		if (State->BatchActive) {
+			dispatched = selectedPipeline->Graph.ExecuteView(
+				selectedPipeline->Compiled,
+				frameRunner,
+				State->BatchViewIndex,
+				State->BatchWorldIndex,
+				State->BatchShared
+			);
+			if (dispatched && State->BatchFinal) {
+				dispatched = selectedPipeline->Graph.ExecuteFinal(selectedPipeline->Compiled, frameRunner);
+			}
+		} else {
+			const uint64_t worlds[] = {world};
+			dispatched = selectedPipeline->Graph.Execute(selectedPipeline->Compiled, frameRunner, worlds);
+		}
+		if (!dispatched) {
+			ENGINE_ERROR(
+				"render graph '{}' refused while executing '{}'",
+				selectedPipeline->Name.Text(),
+				frameRunner.Unhandled().Text()
+			);
+			closePass();
+			State->BatchFailed = State->BatchActive;
+			endIncompleteView();
+			return result;
+		}
+
+		closePass();
+
+		// Byte and two-byte masks are expanded to RGBA by the readback path. Float
+		// targets remain directly inspectable on the GPU without pretending their
+		// bytes are display colour.
+		if (offscreen && State->Inspected.IsValid() &&
+			(State->InspectedSlot == Renderer::ANY_VIEWPORT || State->InspectedSlot == targetSlot)) {
+			Impl::NamedTexture inspected = fixedTexture(State->Inspected, targetSlot);
+			if (!inspected.IsValid()) {
+				for (const Impl::GraphTarget &target : State->GraphTargets) {
+					if (target.Pipeline == selectedPipeline->Name && target.Resource == State->Inspected &&
+						target.Texture != nullptr &&
+						(target.Scope != graph::NodeScope::View || target.Owner == targetSlot)) {
+						inspected = {target.Texture, target.Width, target.Height, target.Format};
+						break;
+					}
+				}
+			}
+			if (inspected.IsValid()) {
+				(void)State->RequestPreview(
+					command,
+					inspected.Texture,
+					inspected.Width,
+					inspected.Height,
+					State->Inspected,
+					targetSlot,
+					inspected.Format
+				);
+			}
 		}
 
 		// --- the capture ----------------------------------------------------
@@ -7318,26 +9961,41 @@ namespace engine::render {
 		// frames as there are panels.
 		const bool captureWantsThis =
 			State->CaptureSlot == Renderer::ANY_VIEWPORT || State->CaptureSlot == targetSlot;
+		const bool explicitCapture = present && offscreen && !State->CapturePath.empty() && captureWantsThis;
+		const bool capturingAuthored = authoredCapture.IsValid();
+		Impl::NamedTexture captureSource = authoredCapture;
+		std::filesystem::path capturePath = authoredCapturePath;
+		if (!captureSource.IsValid() && explicitCapture) {
+			const Impl::SceneSlot &scene = State->SlotAt(targetSlot);
+			captureSource = {scene.Texture, sceneWidth, sceneHeight, State->ColourFormat()};
+			capturePath = State->CapturePath;
+		}
 
-		if (present && offscreen && !State->CapturePath.empty() && captureWantsThis) {
+		if (captureSource.IsValid() && !capturePath.empty()) {
 			SDL_GPUTransferBufferCreateInfo info{};
 			info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
-			info.size = sceneWidth * sceneHeight * 4;
+			const uint64_t captureBytes =
+				static_cast<uint64_t>(captureSource.Width) * captureSource.Height * sizeof(uint32_t);
+			if (captureBytes > std::numeric_limits<uint32_t>::max()) {
+				ENGINE_ERROR("capture: {}x{} is too large", captureSource.Width, captureSource.Height);
+			} else {
+				info.size = static_cast<uint32_t>(captureBytes);
+			}
 
-			capture = SDL_CreateGPUTransferBuffer(State->Device, &info);
+			capture = info.size > 0 ? SDL_CreateGPUTransferBuffer(State->Device, &info) : nullptr;
 			if (capture != nullptr) {
 				SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(command);
 
 				SDL_GPUTextureRegion source{};
-				source.texture = State->SlotAt(targetSlot).Texture;
-				source.w = sceneWidth;
-				source.h = sceneHeight;
+				source.texture = captureSource.Texture;
+				source.w = captureSource.Width;
+				source.h = captureSource.Height;
 				source.d = 1;
 
 				SDL_GPUTextureTransferInfo destination{};
 				destination.transfer_buffer = capture;
-				destination.pixels_per_row = sceneWidth;
-				destination.rows_per_layer = sceneHeight;
+				destination.pixels_per_row = captureSource.Width;
+				destination.rows_per_layer = captureSource.Height;
 
 				SDL_DownloadFromGPUTexture(copy, &source, &destination);
 				SDL_EndGPUCopyPass(copy);
@@ -7356,9 +10014,17 @@ namespace engine::render {
 			SDL_EndGPURenderPass(pass);
 		}
 
+		// Every earlier view has finished recording, but the command buffer still
+		// belongs to the batch. The last view alone transfers ownership to SDL.
+		if (State->BatchActive && !State->BatchFinal) {
+			return result;
+		}
+		if (State->BatchActive) {
+			State->BatchCommand = nullptr;
+		}
+
 		// Before the submit rather than after it, so a frame that fails to
 		// submit still reports what it built.
-		result.Passes = passes.Ran;
 
 		{
 			// Hands the whole buffer over and queues the present. The passes
@@ -7375,16 +10041,29 @@ namespace engine::render {
 				SDL_GPUFence *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(command);
 				if (fence == nullptr) {
 					ENGINE_ERROR("SDL_SubmitGPUCommandBufferAndAcquireFence: {}", SDL_GetError());
+					State->Timestamps.Abandon(timingSlot);
+					if (timingSlot < VulkanTimestamps::SLOTS) {
+						State->PendingMarks[timingSlot].clear();
+					}
 					SDL_ReleaseGPUTransferBuffer(State->Device, capture);
 					return result;
 				}
 
 				SDL_WaitForGPUFences(State->Device, true, &fence, 1);
 				SDL_ReleaseGPUFence(State->Device, fence);
+				if (State->PreviewSubmitted) {
+					State->Preview.Pending.Poll(true);
+					State->CollectPreview();
+				}
 
-				if (State->WriteCapture(capture, sceneWidth, sceneHeight)) {
+				if (State->WriteCapture(
+						capture, captureSource.Width, captureSource.Height, captureSource.Format, capturePath
+					)) {
 					ENGINE_INFO(
-						"captured {} x {} to {}", sceneWidth, sceneHeight, State->CapturePath.string()
+						"captured {} x {} to {}",
+						captureSource.Width,
+						captureSource.Height,
+						capturePath.string()
 					);
 				}
 
@@ -7392,11 +10071,40 @@ namespace engine::render {
 
 				// Once. A request that repeated would write a file every frame
 				// and stall every one of them.
-				State->CapturePath.clear();
-				State->CaptureSlot = Renderer::ANY_VIEWPORT;
+				if (explicitCapture && !capturingAuthored) {
+					State->CapturePath.clear();
+					State->CaptureSlot = Renderer::ANY_VIEWPORT;
+				}
+			} else if (State->PreviewSubmitted) {
+				State->Preview.Fence = SDL_SubmitGPUCommandBufferAndAcquireFence(command);
+				if (State->Preview.Fence == nullptr) {
+					ENGINE_ERROR(
+						"resource preview: SDL_SubmitGPUCommandBufferAndAcquireFence: {}", SDL_GetError()
+					);
+					State->Timestamps.Abandon(timingSlot);
+					if (timingSlot < VulkanTimestamps::SLOTS) {
+						State->PendingMarks[timingSlot].clear();
+					}
+					State->Preview.Pending.Poll(true);
+					State->Preview.Pixels.clear();
+					State->Preview.Histogram = ImageHistogram{};
+					return result;
+				}
 			} else if (!SDL_SubmitGPUCommandBuffer(command)) {
 				ENGINE_ERROR("SDL_SubmitGPUCommandBuffer: {}", SDL_GetError());
+				State->Timestamps.Abandon(timingSlot);
+				if (timingSlot < VulkanTimestamps::SLOTS) {
+					State->PendingMarks[timingSlot].clear();
+				}
 				return result;
+			}
+		}
+		if (timingSlot < VulkanTimestamps::SLOTS) {
+			State->Timestamps.Submitted(timingSlot);
+			if (!State->PendingMarks[timingSlot].empty()) {
+				State->TimingSequence[timingSlot] = State->NextTimingSequence++;
+			} else {
+				State->TimingSequence[timingSlot] = 0;
 			}
 		}
 

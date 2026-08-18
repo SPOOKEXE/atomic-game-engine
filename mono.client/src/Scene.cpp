@@ -11,6 +11,8 @@
 #include <engine/effects/Registration.hpp>
 #include <engine/effects/Ribbon.hpp>
 #include <engine/examples/Scene.hpp>
+#include <engine/graph/PipelineCatalogue.hpp>
+#include <engine/graph/PipelineDocument.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/physics/Characters.hpp>
 #include <engine/physics/Query.hpp>
@@ -1491,31 +1493,60 @@ namespace client {
 		return true;
 	}
 
-	// TODO(render-pipeline): `InstallWorldPipelines` lived here.
-	//
-	// It was the join between a world and the renderer, and **it was the last
-	// link to be built** - the catalogue, the document, the editor panel, the
-	// `PipelineSet` on the world and `Renderer::SetPipeline` all existed while
-	// nothing connected the last two, so "Save to world" wrote a document that
-	// round-tripped perfectly and never drew a pixel. Whatever replaces it, this
-	// is the seam to check first.
-	//
-	// Three decisions in it are worth carrying over:
-	//
-	// - **Here rather than in `render`, for `CollectSurfaceViews`'s reason.** A
-	//   world's pipelines live on an `ecs::Store` and `render` is L12, which does
-	//   not know what a store is. The renderer took a compiled graph and knew
-	//   nothing about worlds; this is where the two met.
-	// - **The installed key was qualified by world id**, because pipelines are
-	//   global to the renderer by name while a world's names are its own. Two
-	//   worlds each calling theirs `main` is ordinary, and with a second viewport
-	//   open both draw in one frame - an unqualified key meant whichever world
-	//   installed last drew both.
-	// - **Installed on a world change, not per frame.** Installing compiles the
-	//   graph and reports what is wrong with it, so per frame that is a compile
-	//   per pipeline per frame and every complaint about a half-wired one
-	//   repeated sixty times a second. Saving dropped the cache entry, which is
-	//   what made a save visible in the viewport rather than only in the file.
+	engine::core::Name
+	InstallWorldPipelines(Store &store, engine::render::Renderer &renderer, uint64_t world) {
+		engine::graph::RegisterPipelineComponents();
+		engine::graph::RegisterRenderNodeKinds();
+
+		const std::string suffix = "#" + std::to_string(world);
+		for (const engine::core::Name key : renderer.Pipelines()) {
+			if (key.Text().ends_with(suffix)) {
+				(void)renderer.RemovePipeline(key);
+			}
+		}
+
+		const auto *set = store.Resource<engine::graph::PipelineSet>();
+		if (set == nullptr || set->Count() == 0) {
+			// Every world starts from the same editable graph, then owns its copy.
+			// Putting it in the Store here means the first export carries it and a
+			// later edit affects this world rather than a process-wide renderer.
+			engine::graph::PipelineSet defaults;
+			defaults.Set(engine::core::Name("Default PBR"), engine::graph::DefaultPbrDocument());
+			store.SetResource(defaults);
+			set = store.Resource<engine::graph::PipelineSet>();
+		}
+
+		engine::core::Name selected;
+		for (const engine::core::Name name : set->Names()) {
+			const engine::graph::PipelineDocument *document = set->Find(name);
+			if (document == nullptr) {
+				continue;
+			}
+
+			engine::graph::RenderGraph graph;
+			engine::core::Name offender;
+			const engine::graph::PipelineDocumentStatus status =
+				engine::graph::Build(*document, graph, offender);
+			if (status != engine::graph::PipelineDocumentStatus::Ok) {
+				ENGINE_ERROR(
+					"pipeline '{}' does not build: {} at '{}'",
+					name.Text(),
+					engine::graph::Describe(status),
+					offender.Text()
+				);
+				continue;
+			}
+
+			const engine::core::Name key(std::format("{}#{}", name.Text(), world));
+			if (!renderer.SetPipeline(key, graph)) {
+				continue;
+			}
+			if (!selected.IsValid() || name == engine::core::Name("main")) {
+				selected = key;
+			}
+		}
+		return selected;
+	}
 
 	void RegisterClientComponents() {
 		// **A `DrawList` is derived state, and its serialisation says so by

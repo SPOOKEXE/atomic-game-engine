@@ -53,10 +53,7 @@ mono_add_library(game
 		# edge wants widening to `bake`, the answer is no. `D00102`.
 		Engine::bakegraph
 
-		# TODO(render-pipeline): kept for the save format's sake, and nothing in
-		# `game` names a `graph::` type today.
-		#
-		# A world carried its render pipelines the way it carries its scripts -
+		# A world carries its render pipelines the way it carries its scripts:
 		# authored content, and a world that exported its parts but forgot how it
 		# was drawn would lose an editor's work on exit. The set serialised to
 		# text, so the format embedded it rather than inventing a second one.

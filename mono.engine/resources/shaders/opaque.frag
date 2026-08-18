@@ -22,6 +22,11 @@ layout(set = 2, binding = 2) uniform sampler2D colourMap;
 // what makes that coherent with one global sun; adding a second contribution
 // would double-light every floor near a doorway.
 layout(set = 2, binding = 3) uniform sampler2D beamMap;
+layout(set = 2, binding = 4) uniform sampler2D normalMap;
+layout(set = 2, binding = 5) uniform sampler2D roughnessMap;
+layout(set = 2, binding = 6) uniform sampler2D occlusionMap;
+layout(set = 2, binding = 7) uniform sampler2D emissiveMap;
+layout(set = 2, binding = 8) uniform sampler2D heightMap;
 
 layout(set = 3, binding = 0) uniform Lighting {
 	vec4 Direction;
@@ -46,7 +51,11 @@ layout(set = 3, binding = 0) uniform Lighting {
 	// x: 1 when `colourMap` holds this draw's texture rather than the one-texel
 	//    stand-in.
 	// y: the alpha below which a fragment is discarded, or 0 to discard none.
+	// z: 1 when a height map is present. w: its world-independent UV scale.
 	vec4 Surface;
+
+	// Presence of normal, roughness, occlusion, and emissive data maps.
+	vec4 Material;
 
 	// Where the current animation cell sits in its sheet: x the scale, yz the
 	// offset. The identity (1, 0, 0) for a texture that is not a sheet, so this
@@ -432,14 +441,39 @@ float ShadowFactor(vec3 normal, vec3 toLight) {
 	return lit * 0.25;
 }
 
+mat3 CotangentFrame(vec3 normal, vec3 position, vec2 uv) {
+	vec3 positionX = dFdx(position);
+	vec3 positionY = dFdy(position);
+	vec2 uvX = dFdx(uv);
+	vec2 uvY = dFdy(uv);
+	vec3 tangent = positionX * uvY.y - positionY * uvX.y;
+	vec3 bitangent = -positionX * uvY.x + positionY * uvX.x;
+	float scale = inversesqrt(max(max(dot(tangent, tangent), dot(bitangent, bitangent)), 1e-8));
+	return mat3(tangent * scale, bitangent * scale, normal);
+}
+
+float DistributionGGX(vec3 normal, vec3 halfway, float roughness) {
+	float alpha = roughness * roughness;
+	float alphaSquared = alpha * alpha;
+	float normalHalf = max(dot(normal, halfway), 0.0);
+	float denominator = normalHalf * normalHalf * (alphaSquared - 1.0) + 1.0;
+	return alphaSquared / max(3.14159265 * denominator * denominator, 1e-5);
+}
+
+float GeometrySchlickGGX(float cosine, float roughness) {
+	float radius = roughness + 1.0;
+	float factor = radius * radius * 0.125;
+	return cosine / max(cosine * (1.0 - factor) + factor, 1e-5);
+}
+
+vec3 FresnelSchlick(float cosine, vec3 base) {
+	return base + (1.0 - base) * pow(clamp(1.0 - cosine, 0.0, 1.0), 5.0);
+}
+
 void main() {
 	vec3 normal = normalize(inNormal);
 	vec3 toLight = -normalize(lighting.Direction.xyz);
 	float lambert = max(dot(normal, toLight), 0.0);
-
-	// The outdoor term is directional enough to distinguish sky-facing surfaces
-	// without pretending the engine has indoor volumes it does not yet model.
-	float sky = max(normal.y, 0.0);
 
 	// **The three colour sources multiply rather than one winning.** The
 	// texture is what the artist painted, the base colour is what the *material*
@@ -452,9 +486,32 @@ void main() {
 	// repeats them, which is right for a whole sheet and catastrophic for a cell:
 	// without this a coordinate of 1.2 would land two cells further along and a
 	// GIF on a tiled surface would show several frames at once.
-	const vec2 cellUv = fract(inTexCoord) * lighting.Flipbook.x + lighting.Flipbook.yz;
+	vec2 localUv = fract(inTexCoord);
+	vec2 cellUv = localUv * lighting.Flipbook.x + lighting.Flipbook.yz;
+	if (lighting.Surface.z > 0.5) {
+		mat3 tangentFrame = CotangentFrame(normal, inWorldPosition, cellUv);
+		vec3 tangentEye = transpose(tangentFrame) * normalize(lighting.Eye.xyz - inWorldPosition);
+		float height = texture(heightMap, cellUv).r - 0.5;
+		float grazing = max(abs(tangentEye.z), 0.2);
+		localUv = fract(localUv - tangentEye.xy * (height * lighting.Surface.w / grazing));
+		cellUv = localUv * lighting.Flipbook.x + lighting.Flipbook.yz;
+	}
+	if (lighting.Material.x > 0.5) {
+		vec3 mappedNormal = texture(normalMap, cellUv).xyz * 2.0 - 1.0;
+		normal = normalize(CotangentFrame(normal, inWorldPosition, cellUv) * mappedNormal);
+		toLight = -normalize(lighting.Direction.xyz);
+		lambert = max(dot(normal, toLight), 0.0);
+	}
+
+	// The outdoor term follows the final material normal. Computing it before
+	// the normal map made raised detail receive the sky light of the flat mesh.
+	float sky = max(normal.y, 0.0);
 
 	vec4 sampled = lighting.Surface.x > 0.5 ? texture(colourMap, cellUv) : vec4(1.0);
+	float roughness = lighting.Material.y > 0.5 ? texture(roughnessMap, cellUv).r : 0.65;
+	roughness = clamp(roughness, 0.045, 1.0);
+	float occlusion = lighting.Material.z > 0.5 ? texture(occlusionMap, cellUv).r : 1.0;
+	vec3 emissive = lighting.Material.w > 0.5 ? texture(emissiveMap, cellUv).rgb : vec3(0.0);
 
 	// Cut-out before anything else is computed. A hair card is authored as a
 	// plane with a mask, and discarding is what keeps it opaque and out of the
@@ -487,9 +544,17 @@ void main() {
 	// room's own geometry blocks and a beam says what the room through a hole
 	// blocks; light that fails either test does not arrive.
 	float shadow = min(ShadowFactor(normal, toLight), BeamFactor());
-	vec3 lit = albedo *
-		(lighting.Ambient.rgb + lighting.OutdoorAmbient.rgb * sky +
-		 lighting.Direct.rgb * lambert * shadow + LocalLight(normal));
+	vec3 viewDirection = normalize(lighting.Eye.xyz - inWorldPosition);
+	vec3 halfway = normalize(viewDirection + toLight);
+	vec3 fresnel = FresnelSchlick(max(dot(halfway, viewDirection), 0.0), vec3(0.04));
+	float distribution = DistributionGGX(normal, halfway, roughness);
+	float geometry = GeometrySchlickGGX(max(dot(normal, viewDirection), 0.0), roughness) *
+		GeometrySchlickGGX(lambert, roughness);
+	vec3 specular = distribution * geometry * fresnel /
+		max(4.0 * max(dot(normal, viewDirection), 0.0) * lambert, 1e-4);
+	vec3 ambient = albedo * (lighting.Ambient.rgb + lighting.OutdoorAmbient.rgb * sky) * occlusion;
+	vec3 direct = (albedo * (1.0 - fresnel) * lambert + specular) * lighting.Direct.rgb * shadow;
+	vec3 lit = ambient + direct + albedo * LocalLight(normal) + emissive;
 	lit = mix(lit, lighting.FogColour.rgb, FogFactor());
 
 	// **A portal pane reads the sub-render by screen position**, which is the

@@ -724,12 +724,8 @@ namespace engine::scene {
 		// somebody has to remember to author. Roughness and occlusion fall back
 		// to constants for the same reason.
 		//
-		// **`HeightMap` is carried and not yet sampled**, which is the one
-		// exception to the rule above and is deliberate: parallax needs a loop
-		// in the vertex or fragment stage that the G-buffer pass does not have,
-		// and a name that survives a save file costs nothing to carry meanwhile.
-		// It is named here so a material round-trips whole rather than losing a
-		// map every time a world is written.
+		// Height is sampled as a bounded parallax offset by the default PBR
+		// G-buffer and forward surface paths. Invalid keeps the original UV.
 		//@{
 		core::Name NormalMap = {};
 		core::Name RoughnessMap = {};

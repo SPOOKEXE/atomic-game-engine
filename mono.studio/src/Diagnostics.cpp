@@ -89,10 +89,15 @@ namespace studio {
 			float red = 0.0f;
 			float green = 0.0f;
 			float blue = 0.0f;
-			ImGui::ColorConvertHSVtoRGB(hue, std::max(saturation, 0.45f), std::max(value, 0.70f), red, green, blue);
+			ImGui::ColorConvertHSVtoRGB(
+				hue, std::max(saturation, 0.45f), std::max(value, 0.70f), red, green, blue
+			);
 
 			return IM_COL32(
-				static_cast<int>(red * 255.0f), static_cast<int>(green * 255.0f), static_cast<int>(blue * 255.0f), 235
+				static_cast<int>(red * 255.0f),
+				static_cast<int>(green * 255.0f),
+				static_cast<int>(blue * 255.0f),
+				235
 			);
 		}
 
@@ -131,9 +136,7 @@ namespace studio {
 		// The headline, big enough to read from across a desk - which is what
 		// somebody watching for a stutter is doing.
 		{
-			const engine::ui::ScopedFont large(
-				engine::ui::Typeface::Interface, engine::ui::TextSize::Large
-			);
+			const engine::ui::ScopedFont large(engine::ui::Typeface::Interface, engine::ui::TextSize::Large);
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::BrightColour());
 			ImGui::Text("%.0f fps", static_cast<double>(Statistics.Current()));
 			ImGui::PopStyleColor();
@@ -174,6 +177,17 @@ namespace studio {
 
 			Row("draw calls", "%u", LastFrame.DrawCalls);
 			Row("triangles", "%llu", static_cast<unsigned long long>(LastFrame.Triangles));
+			Row("uploads",
+				"%.2f MiB in %u buffer%s",
+				static_cast<double>(LastFrame.UploadedBytes) / (1024.0 * 1024.0),
+				LastFrame.UploadCommandBuffers,
+				LastFrame.UploadCommandBuffers == 1 ? "" : "s");
+			Row("compute",
+				"%u dispatch%s, %u dedicated buffer%s on SDL's unified queue",
+				LastFrame.ComputeDispatches,
+				LastFrame.ComputeDispatches == 1 ? "" : "es",
+				LastFrame.AsyncComputeCommandBuffers,
+				LastFrame.AsyncComputeCommandBuffers == 1 ? "" : "s");
 
 			size_t instances = 0;
 			for (const WorldId world : Universe->Worlds()) {
@@ -213,9 +227,12 @@ namespace studio {
 		ImGui::Text("%.2f ms", static_cast<double>(frameMs));
 		ImGui::SameLine();
 		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
-		ImGui::Text("  busy %.2f   idle %.2f   unmarked %.2f", static_cast<double>(busyMs),
-					static_cast<double>(idleMs),
-					static_cast<double>(FrameGraph::UnmarkedMilliseconds()));
+		ImGui::Text(
+			"  busy %.2f   idle %.2f   unmarked %.2f",
+			static_cast<double>(busyMs),
+			static_cast<double>(idleMs),
+			static_cast<double>(FrameGraph::UnmarkedMilliseconds())
+		);
 		ImGui::PopStyleColor();
 
 		// **The share is of busy, not of the frame.** With vsync on, fifteen of
@@ -338,8 +355,11 @@ namespace studio {
 				static_cast<double>(hovered->SelfMilliseconds),
 				static_cast<double>(hovered->IdleMilliseconds)
 			);
-			ImGui::Text("%s%s", GetCategoryName(hovered->Category).data(),
-						hovered->Reported ? "   (reported from another thread)" : "");
+			ImGui::Text(
+				"%s%s",
+				GetCategoryName(hovered->Category).data(),
+				hovered->Reported ? "   (reported from another thread)" : ""
+			);
 			ImGui::PopStyleColor();
 			ImGui::EndTooltip();
 		}

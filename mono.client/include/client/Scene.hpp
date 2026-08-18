@@ -330,11 +330,24 @@ namespace client {
 	//         already had one.
 	bool InstallDefaultCamera(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler);
 
-	// TODO(render-pipeline): `InstallWorldPipelines` was declared here.
+	// Installs a world's valid render pipelines under keys qualified by world.
 	//
-	// See the marker in `Scene.cpp` for what it did and the three decisions in
-	// it worth carrying over. Its callers are marked too: `Client.cpp`'s render
-	// call, and the studio's viewport.
+	// The renderer owns compiled device plans and knows nothing about stores.
+	// This client-tier join reads the world's `PipelineSet`, removes stale keys
+	// from an earlier install, and hands complete graphs across. Two worlds may
+	// both author `main` without colliding because the installed key includes
+	// `world`.
+	//
+	// `main` is selected when present. Otherwise the first valid pipeline is
+	// selected, which makes a one-pipeline world useful without a naming rule.
+	// An invalid return selects the renderer's standard frame.
+	//
+	// @param store    The world holding the authored documents.
+	// @param renderer The runtime cache to update.
+	// @param world    The stable world number used to qualify keys.
+	// @return The key this world's primary view should select.
+	engine::core::Name
+	InstallWorldPipelines(engine::ecs::Store &store, engine::render::Renderer &renderer, uint64_t world);
 
 	// Registers this module's own types under explicit names.
 	//

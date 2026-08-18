@@ -24,6 +24,7 @@ mono_add_library(studio
 		Engine::world
 		Engine::scene
 		Engine::script
+		Engine::graph
 
 		# L6, `shared`. The simulation. **Named here rather than reached
 		# through `Engine::script`**, which is where it was arriving from: since

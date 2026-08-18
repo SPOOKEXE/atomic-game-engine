@@ -27,34 +27,26 @@
 // `world::Universe::Save` and `Load` are exactly that operation and already
 // exist; this program is the first caller with a reason to use them.
 
+#include <engine/assets/AssetKind.hpp>
+#include <engine/assets/Texture.hpp>
 #include <engine/control/Server.hpp>
 #include <engine/control/Surface.hpp>
 #include <engine/core/Clock.hpp>
 #include <engine/core/Name.hpp>
-#include <engine/ecs/Entity.hpp>
-#include <engine/ecs/Store.hpp>
-#include <engine/game/Game.hpp>
-
-#include <studio/Complete.hpp>
-#include <studio/Config.hpp>
-#include <studio/Plugins.hpp>
-#include <studio/Widgets.hpp>
-// TODO(render-pipeline): `<engine/nodeview/Editor.hpp>` and `State.hpp` were
-// included here. `Engine::nodeview` was the node-canvas module the Render and
-// Assets Pipeline panels were built on; it is removed. See the member and
-// method markers below.
-#include <engine/assets/AssetKind.hpp>
-#include <engine/assets/Texture.hpp>
 #include <engine/delivery/Client.hpp>
 #include <engine/delivery/IntakeBudget.hpp>
 #include <engine/delivery/Uploader.hpp>
+#include <engine/ecs/Entity.hpp>
+#include <engine/ecs/Store.hpp>
+#include <engine/game/Game.hpp>
+#include <engine/graph/PipelineDocument.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Input.hpp>
 #include <engine/render/DebugPanels.hpp>
 #include <engine/render/FrameStatistics.hpp>
 #include <engine/render/Renderer.hpp>
-#include <engine/render/ViewportFrames.hpp>
 #include <engine/render/ShaderLibrary.hpp>
+#include <engine/render/ViewportFrames.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/ui/Interface.hpp>
@@ -79,13 +71,17 @@
 #include <string>
 #include <studio/AssetCatalogue.hpp>
 #include <studio/Commands.hpp>
+#include <studio/Complete.hpp>
+#include <studio/Config.hpp>
 #include <studio/ContentSources.hpp>
 #include <studio/Hierarchy.hpp>
 #include <studio/Operators.hpp>
 #include <studio/PlayLink.hpp>
+#include <studio/Plugins.hpp>
 #include <studio/Preview.hpp>
 #include <studio/Projection.hpp>
 #include <studio/TeamCreate.hpp>
+#include <studio/Widgets.hpp>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -1462,7 +1458,14 @@ namespace studio {
 		// need a render target per open editor; boxes and lines on a draw list need
 		// none, and this panel is the editor's chrome rather than a game's UI.
 		//@{
-		// TODO(render-pipeline): `void DrawRenderPipeline();` drew the Render Pipeline node editor.
+		void DrawRenderPipeline();
+		void DrawRenderPipelineLibrary();
+		void DrawRenderPipelineInspector();
+		void DrawRenderPipelineSchedule();
+		void DrawPipelineProfile();
+		void DrawProfileWatch();
+		void LoadRenderPipeline(WorldId world, engine::core::Name pipeline);
+		bool SaveRenderPipeline();
 
 		// The pipeline as a grid: passes across, resources down, what each does
 		// to each where they meet.
@@ -1473,24 +1476,14 @@ namespace studio {
 		// different question and wants a different shape.
 		// `docs/PIPELINE_NODES.md` §7 argues the point; `graph::PipelineProfile`
 		// is the arithmetic and this is only the drawing.
-		// TODO(render-pipeline): `void DrawPipelineProfile();` drew the profile grid - passes across the top,
-		// resources down the side.
+		// The picture and histogram under the access grid use the renderer's
+		// nonblocking resource readback. See `ProfileWatched`.
 
-		// The picture and histogram under the access grid. See `ProfileWatched`.
-		// TODO(render-pipeline): `void DrawProfileWatch();` drew the picture and channel histogram under the
-		// profile grid.
+		// Node parameters, including authored shader source, live in the graph
+		// canvas widgets. Resource images and channel histograms live under the
+		// profile access grid so both views read the same graph document.
 
-		// The selected node's own settings, under the canvas.
-		//
-		// **Without it the parameters are unreachable.** Which shader a `raster`
-		// runs is a node's own business, and a canvas that could only wire
-		// things could describe the shape of a frame and nothing about it.
-		// TODO(render-pipeline): `DrawNodeParameters` edited a node's parameters,
-		// including the multi-line GLSL box a `raster` node's shader was typed into.
-
-		// TODO(render-pipeline): `DrawChannelHistogram` drew one channel's
-		// distribution as sixteen bars and a range, over `render::ChannelHistogram`.
-		// TODO(render-pipeline): `void DrawAssetsPipeline();` drew the Assets Pipeline node editor.
+		// TODO(asset-pipeline): add a separate editor for asset processing graphs.
 
 		//@}
 
@@ -2927,12 +2920,13 @@ namespace studio {
 		// `client::CollectPortalViews`.
 		std::vector<engine::render::PortalView> Portals;
 
-		// TODO(render-pipeline): `PipelineSelected` mapped world index to the
-		// pipeline key installed for it - a map rather than one name, because two
-		// viewports can show two worlds in the same frame, which is exactly what
-		// `InstallWorldPipelines` qualified its keys for. An absent entry meant
-		// "install on the next frame", and saving a pipeline erased the entry,
-		// which is what made a save visible in the viewport.
+		// Each world's selected runtime pipeline, keyed by world index.
+		//
+		// Absence requests installation on the next presentation. Saving a graph
+		// erases its entry so the viewport cannot keep drawing a stale compiled
+		// plan. A map is required because separate viewports may show separate
+		// worlds whose authored pipeline names are identical.
+		std::unordered_map<uint32_t, engine::core::Name> PipelineSelected;
 
 		// One world's run, for as long as it is running.
 		//
@@ -4236,18 +4230,21 @@ namespace studio {
 		engine::core::Name ProfileWatched;
 		//@}
 
-		// TODO(render-pipeline): the Render Pipeline editor's state lived here.
-		//
-		// Roughly a dozen members: two `nodeview::CanvasState`s (selection and
-		// scroll, held **outside** the canvas because they outlive a rebuild), an
-		// `EditorGraph` model, the world it was loaded for, a dirty flag, the
-		// canvas view, what was selected, what was being dragged and from where,
-		// the half-drawn wire, and where the add-node menu was opened.
-		//
-		// **The one that mattered was the load guard.** The graph was rebuilt
-		// from the world's document only when the world changed or the graph was
-		// empty - a panel that rebuilt every frame would throw away a wire on the
-		// frame it was dragged and have nowhere to put a node somebody moved.
+		// The Render Pipeline canvas is an editor view over the active world's
+		// `PipelineSet`. It reloads when the world or selected pipeline changes,
+		// never while a gesture is in progress.
+		//@{
+		nodegraph::Graph RenderPipelineGraph;
+		nodegraph::Canvas RenderPipelineCanvas;
+		engine::graph::PipelineDocument RenderPipelineBasis;
+		WorldId RenderPipelineWorld;
+		engine::core::Name RenderPipelineName;
+		std::string RenderPipelineLoaded;
+		std::string RenderPipelineStatus;
+		char RenderPipelineFilter[64] = {};
+		bool RenderPipelineDirty = false;
+		bool RenderPipelineCanvasReady = false;
+		//@}
 
 		// Where the add-file and add-folder dialogs are looking.
 		//

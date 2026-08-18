@@ -567,6 +567,12 @@ TEST_CASE("every field a surface can see moves the signature", "[scene][drawinst
 	CHECK(moved([](DrawInstance &i) { i.Transparency = 0.5f; }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.Mesh = Name("drawinstance_test.Other"); }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.Texture = Name("drawinstance_test.Steel"); }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.NormalMap = Name("drawinstance_test.Normal"); }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.RoughnessMap = Name("drawinstance_test.Roughness"); }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.OcclusionMap = Name("drawinstance_test.Occlusion"); }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.HeightMap = Name("drawinstance_test.Height"); }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.EmissiveMap = Name("drawinstance_test.Emissive"); }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.Shader = Name("drawinstance_test.Shader"); }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.Surface = 0; }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.CastShadow = false; }) != unchanged);
 
@@ -574,6 +580,27 @@ TEST_CASE("every field a surface can see moves the signature", "[scene][drawinst
 	// that a position-only hash would miss entirely - and a mirror on a
 	// turntable is exactly the case that would expose it.
 	CHECK(moved([](DrawInstance &i) { i.Frame = CFrame::Angles(0.0f, 1.0f, 0.0f); }) != unchanged);
+}
+
+TEST_CASE("a draw instance carries every authored material map", "[scene][drawinstance]") {
+	engine::scene::SurfaceAppearance appearance;
+	appearance.ColourMap = Name("drawinstance_test.Colour");
+	appearance.NormalMap = Name("drawinstance_test.Normal");
+	appearance.RoughnessMap = Name("drawinstance_test.Roughness");
+	appearance.OcclusionMap = Name("drawinstance_test.Occlusion");
+	appearance.HeightMap = Name("drawinstance_test.Height");
+	appearance.EmissiveMap = Name("drawinstance_test.Emissive");
+	appearance.Shader = Name("drawinstance_test.Shader");
+
+	const DrawInstance instance =
+		engine::scene::MakeDrawInstance(CFrame{}, Bounds{}, Visual{}, &appearance, nullptr);
+	CHECK(instance.Texture == appearance.ColourMap);
+	CHECK(instance.NormalMap == appearance.NormalMap);
+	CHECK(instance.RoughnessMap == appearance.RoughnessMap);
+	CHECK(instance.OcclusionMap == appearance.OcclusionMap);
+	CHECK(instance.HeightMap == appearance.HeightMap);
+	CHECK(instance.EmissiveMap == appearance.EmissiveMap);
+	CHECK(instance.Shader == appearance.Shader);
 }
 
 TEST_CASE("a signature depends on how many instances there are and their order", "[scene][drawinstance]") {

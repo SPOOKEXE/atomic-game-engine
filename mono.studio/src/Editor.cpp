@@ -20,6 +20,7 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
@@ -40,8 +41,8 @@
 #include <studio/Editor.hpp>
 #include <studio/Keybinds.hpp>
 #include <studio/Presentation.hpp>
-#include <studio/ViewerLens.hpp>
 #include <studio/RojoSync.hpp>
+#include <studio/ViewerLens.hpp>
 #include <studio/Widgets.hpp>
 #include <thread>
 
@@ -410,9 +411,9 @@ namespace studio {
 			ENGINE_ERROR("the editor interface would not start");
 			return false;
 		}
-		Interface.SetSpatialViewportSource(
-			[this](engine::ecs::Entity instance) { return ViewportImages.Resolve(instance); }
-		);
+		Interface.SetSpatialViewportSource([this](engine::ecs::Entity instance) {
+			return ViewportImages.Resolve(instance);
+		});
 
 		if (!Interface.IsDrawable()) {
 			ENGINE_INFO("headless: the panels run and nothing draws them");
@@ -554,10 +555,6 @@ namespace studio {
 		// a runtime outliving the world it was started against is a reference
 		// into a store that has gone.
 		LoadPlugins();
-
-		// TODO(render-pipeline): the Pipeline Profile panel opened here with
-		// `colour` watched, and `Renderer::Inspect` told the renderer to keep a
-		// readable copy of that resource so the panel could show its picture.
 
 		Running = true;
 		return true;
@@ -1512,12 +1509,14 @@ namespace studio {
 
 		if (shown.IsValid()) {
 			Universe->Enter(shown, [&](Store &store) {
+				// Lighting is authored per world and Studio presents worlds without
+				// going through client::Client. Resolve it here so editing the
+				// service changes this viewport on the same frame.
+				Renderer.SetLighting(engine::scene::LightingOf(store));
+
 				if (DrawingViewport < GuiLists.size() && target.IsValid()) {
 					(void)ViewportImages.Render(
-						Renderer,
-						store,
-						GuiLists[DrawingViewport].Commands(),
-						PreviewSlot() + 1
+						Renderer, store, GuiLists[DrawingViewport].Commands(), PreviewSlot() + 1
 					);
 					Interface.SubmitSpatial(
 						GuiLists[DrawingViewport].Commands(),
@@ -1602,9 +1601,10 @@ namespace studio {
 					}
 				}
 
-				// TODO(render-pipeline): the world's pipelines were installed here
-				// on first sight of the world, and the chosen key went into the
-				// view below. See `client::InstallWorldPipelines`.
+				if (PipelineSelected.find(shown.Index) == PipelineSelected.end()) {
+					PipelineSelected[shown.Index] =
+						client::InstallWorldPipelines(store, Renderer, shown.Index);
+				}
 			});
 
 			// **The far world draws itself first, and this is the step that was
@@ -1674,27 +1674,26 @@ namespace studio {
 		// another panel's current one. They shared one set until v0.75, and
 		// flying either camera moved the mirrors in both windows.
 
-		// TODO(render-pipeline): this took a `render::View` per camera, and the
-		// viewport set `view.World` and `view.Pipeline` together - the pipeline
-		// key a world installs is qualified by the world id, so naming one
-		// without the other asks for a pipeline nothing installed.
-		LastFrame = Renderer.Render(
-			eye,
-			lens,
-			instances != nullptr ? std::span<const engine::scene::DrawInstance>(*instances)
-								 : std::span<const engine::scene::DrawInstance>{},
-			Overlay,
-			Surfaces,
-			&Interface,
-			target.IsValid() ? &target : nullptr,
-			DrawingViewport,
-			{},
-			{},
-			{},
-			{},
-			foreign,
-			Portals
-		);
+		engine::core::Name selectedPipeline;
+		if (shown.IsValid()) {
+			const auto found = PipelineSelected.find(shown.Index);
+			if (found != PipelineSelected.end()) {
+				selectedPipeline = found->second;
+			}
+		}
+		engine::render::View view;
+		view.CameraFrame = eye;
+		view.Camera = lens;
+		view.Instances = instances != nullptr ? std::span<const engine::scene::DrawInstance>(*instances)
+											  : std::span<const engine::scene::DrawInstance>{};
+		view.Surfaces = Surfaces;
+		view.Target = target.IsValid() ? &target : nullptr;
+		view.Slot = DrawingViewport;
+		view.Foreign = foreign;
+		view.Portals = Portals;
+		view.Pipeline = selectedPipeline;
+		view.World = shown.IsValid() ? shown.Index : 0;
+		LastFrame = Renderer.Render(std::span<const engine::render::View>(&view, 1), Overlay, &Interface);
 
 		// **Presented, or simply drawn when there is nowhere to present.**
 		// A headless renderer never presents by design, so counting presents
