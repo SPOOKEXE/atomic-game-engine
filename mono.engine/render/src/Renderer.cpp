@@ -1,3 +1,4 @@
+#include "DisplayColour.hpp"
 #include "ShaderBinary.hpp"
 #include "SurfaceScale.hpp"
 #include "VulkanTimestamps.hpp"
@@ -8766,7 +8767,12 @@ namespace engine::render {
 		uniforms.Direct = State->Direct;
 		uniforms.Eye =
 			glm::vec4{cameraFrame.Position.X, cameraFrame.Position.Y, cameraFrame.Position.Z, 1.0f};
-		uniforms.FogColour = State->FogColour;
+		uniforms.FogColour = glm::vec4{
+			WorkingFromDisplay(State->FogColour.r),
+			WorkingFromDisplay(State->FogColour.g),
+			WorkingFromDisplay(State->FogColour.b),
+			1.0f,
+		};
 		uniforms.Fog = glm::vec4{State->FogStart, State->FogEnd, 0.0f, 0.0f};
 		uniforms.Shadow = glm::vec4{
 			haveShadow ? 1.0f : 0.0f,

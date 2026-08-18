@@ -105,13 +105,13 @@ namespace engine::scene {
 		core::Color3 Ambient{0.078f, 0.078f, 0.078f};
 
 		// The ambient term outdoors, which a sky replaces indoors.
-		core::Color3 OutdoorAmbient{0.502f, 0.502f, 0.502f};
+		core::Color3 OutdoorAmbient{0.058f, 0.058f, 0.058f};
 
 		// What distance fades to.
-		core::Color3 FogColor{0.753f, 0.753f, 0.753f};
+		core::Color3 FogColor{0.0f, 0.0f, 0.0f};
 
 		// How strong the sun is.
-		float Brightness = 2.0f;
+		float Brightness = 0.440f;
 
 		// The time of day, in hours. 14 is Roblox's default afternoon.
 		float ClockTime = 14.0f;

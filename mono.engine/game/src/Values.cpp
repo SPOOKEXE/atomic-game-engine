@@ -173,70 +173,94 @@ namespace engine::game {
 		return false;
 	}
 
+	namespace {
+		bool WritePropertyValue(
+			ecs::Store &store,
+			ecs::Entity instance,
+			const ecs::PropertyDescriptor &descriptor,
+			const PropertyValue &value,
+			bool authored
+		) {
+			if (value.Type != descriptor.Type || !descriptor.Writable) {
+				return false;
+			}
+
+			const auto set = [&](const void *data, size_t bytes) {
+				return authored ? store.SetPropertyAuthored(instance, descriptor, data, bytes)
+								: store.SetProperty(instance, descriptor, data, bytes);
+			};
+
+			switch (descriptor.Type) {
+			case PropertyType::Bool:
+				return set(&value.Bool, sizeof(value.Bool));
+			case PropertyType::Int32:
+				return set(&value.Int32, sizeof(value.Int32));
+			case PropertyType::Int64:
+				return set(&value.Int64, sizeof(value.Int64));
+			case PropertyType::Float:
+				return set(&value.Float, sizeof(value.Float));
+			case PropertyType::Double:
+				return set(&value.Double, sizeof(value.Double));
+			case PropertyType::Name:
+				return set(&value.Name, sizeof(value.Name));
+			case PropertyType::String:
+				return set(&value.String, sizeof(value.String));
+			case PropertyType::Enum:
+				// **Checked here as well as at the binding.** A game file is
+				// text somebody could have edited, so `Material` reading
+				// "Plsatic" has to be refused where it was read rather than
+				// landing in the component and surfacing as a part drawn with
+				// the default for reasons nobody can see - which is exactly what
+				// `PropertyType::Enum` was added to prevent.
+				if (descriptor.EnumName.IsValid() && !ecs::EnumTable::Has(descriptor.EnumName, value.Name)) {
+					return false;
+				}
+				return set(&value.Name, sizeof(value.Name));
+			case PropertyType::Reference:
+				return set(&value.Reference, sizeof(value.Reference));
+			case PropertyType::Vector3:
+				return set(&value.Vector3, sizeof(value.Vector3));
+			case PropertyType::CFrame:
+				return set(&value.CFrame, sizeof(value.CFrame));
+			case PropertyType::Color3:
+				return set(&value.Color3, sizeof(value.Color3));
+			case PropertyType::Vector2:
+				return set(&value.Vector2, sizeof(value.Vector2));
+			case PropertyType::UDim:
+				return set(&value.UDim, sizeof(value.UDim));
+			case PropertyType::UDim2:
+				return set(&value.UDim2, sizeof(value.UDim2));
+			case PropertyType::Rect:
+				return set(&value.Rect, sizeof(value.Rect));
+			case PropertyType::NumberRange:
+				return set(&value.NumberRange, sizeof(value.NumberRange));
+			case PropertyType::NumberSequence:
+				return set(&value.NumberSequence, sizeof(value.NumberSequence));
+			case PropertyType::ColorSequence:
+				return set(&value.ColorSequence, sizeof(value.ColorSequence));
+			case PropertyType::Opaque:
+				return false;
+			}
+			return false;
+		}
+	}
+
 	bool WriteProperty(
 		ecs::Store &store,
 		ecs::Entity instance,
 		const ecs::PropertyDescriptor &descriptor,
 		const PropertyValue &value
 	) {
-		if (value.Type != descriptor.Type || !descriptor.Writable) {
-			return false;
-		}
+		return WritePropertyValue(store, instance, descriptor, value, false);
+	}
 
-		switch (descriptor.Type) {
-		case PropertyType::Bool:
-			return store.SetProperty(instance, descriptor, &value.Bool, sizeof(value.Bool));
-		case PropertyType::Int32:
-			return store.SetProperty(instance, descriptor, &value.Int32, sizeof(value.Int32));
-		case PropertyType::Int64:
-			return store.SetProperty(instance, descriptor, &value.Int64, sizeof(value.Int64));
-		case PropertyType::Float:
-			return store.SetProperty(instance, descriptor, &value.Float, sizeof(value.Float));
-		case PropertyType::Double:
-			return store.SetProperty(instance, descriptor, &value.Double, sizeof(value.Double));
-		case PropertyType::Name:
-			return store.SetProperty(instance, descriptor, &value.Name, sizeof(value.Name));
-		case PropertyType::String:
-			return store.SetProperty(instance, descriptor, &value.String, sizeof(value.String));
-		case PropertyType::Enum:
-			// **Checked here as well as at the binding.** A game file is
-			// text somebody could have edited, so `Material` reading
-			// "Plsatic" has to be refused where it was read rather than
-			// landing in the component and surfacing as a part drawn with
-			// the default for reasons nobody can see - which is exactly what
-			// `PropertyType::Enum` was added to prevent.
-			if (descriptor.EnumName.IsValid() && !ecs::EnumTable::Has(descriptor.EnumName, value.Name)) {
-				return false;
-			}
-			return store.SetProperty(instance, descriptor, &value.Name, sizeof(value.Name));
-		case PropertyType::Reference:
-			return store.SetProperty(instance, descriptor, &value.Reference, sizeof(value.Reference));
-		case PropertyType::Vector3:
-			return store.SetProperty(instance, descriptor, &value.Vector3, sizeof(value.Vector3));
-		case PropertyType::CFrame:
-			return store.SetProperty(instance, descriptor, &value.CFrame, sizeof(value.CFrame));
-		case PropertyType::Color3:
-			return store.SetProperty(instance, descriptor, &value.Color3, sizeof(value.Color3));
-		case PropertyType::Vector2:
-			return store.SetProperty(instance, descriptor, &value.Vector2, sizeof(value.Vector2));
-		case PropertyType::UDim:
-			return store.SetProperty(instance, descriptor, &value.UDim, sizeof(value.UDim));
-		case PropertyType::UDim2:
-			return store.SetProperty(instance, descriptor, &value.UDim2, sizeof(value.UDim2));
-		case PropertyType::Rect:
-			return store.SetProperty(instance, descriptor, &value.Rect, sizeof(value.Rect));
-		case PropertyType::NumberRange:
-			return store.SetProperty(instance, descriptor, &value.NumberRange, sizeof(value.NumberRange));
-		case PropertyType::NumberSequence:
-			return store.SetProperty(
-				instance, descriptor, &value.NumberSequence, sizeof(value.NumberSequence)
-			);
-		case PropertyType::ColorSequence:
-			return store.SetProperty(instance, descriptor, &value.ColorSequence, sizeof(value.ColorSequence));
-		case PropertyType::Opaque:
-			return false;
-		}
-		return false;
+	bool WriteAuthoredProperty(
+		ecs::Store &store,
+		ecs::Entity instance,
+		const ecs::PropertyDescriptor &descriptor,
+		const PropertyValue &value
+	) {
+		return WritePropertyValue(store, instance, descriptor, value, true);
 	}
 
 	std::string FormatValue(const PropertyValue &value) {

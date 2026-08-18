@@ -597,15 +597,21 @@ namespace engine::scene {
 			};
 
 			for (const ServiceDesc &desc : SERVICES) {
+				ClassId registered;
 				if (desc.Name == "Lighting") {
-					Classes::Register(desc.Name, service, lightingSet);
-					continue;
+					registered = Classes::Register(desc.Name, service, lightingSet);
+				} else if (desc.Name == "Players") {
+					registered = Classes::Register(desc.Name, service, playersSet);
+				} else {
+					registered = Classes::Register(desc.Name, service, {});
 				}
-				if (desc.Name == "Players") {
-					Classes::Register(desc.Name, service, playersSet);
-					continue;
-				}
-				Classes::Register(desc.Name, service, {});
+
+				// The class default, not a repair after creation. This makes an
+				// authored `Shared` on `ServerStorage` differ from its Server
+				// default in a game file and survive the next `InstallServices`.
+				ServiceComponent defaults;
+				defaults.Scope = desc.Scope;
+				Classes::Default(registered, defaults);
 			}
 
 			// **A `Player` is an instance, not a service.** There are many of
@@ -1015,14 +1021,8 @@ namespace engine::scene {
 				}
 			}
 
-			// Set every time rather than only on creation. A world from an old
-			// file has the class but not the scope, and a service whose
-			// audience defaulted to `Shared` is a `ServerStorage` that is not
-			// one.
 			if (ServiceComponent *component = store.GetMutable<ServiceComponent>(existing);
 				component != nullptr) {
-				component->Scope = desc.Scope;
-
 				// **`Fixture` finally refuses something.** The field has said
 				// since v0.7 that an author may not delete or reparent a
 				// service, and nothing read it - a script could `Destroy()`

@@ -81,7 +81,33 @@ namespace prediction_test {
 	ClassId NodeClass() {
 		static const ClassId node = [] {
 			const std::array<engine::ecs::ComponentId, 1> members{Components::Of<Spot>()};
-			return Classes::Register("prediction_test.Node", {}, members);
+			const ClassId registered = Classes::Register("prediction_test.Node", {}, members);
+
+			engine::ecs::PropertyDescriptor property;
+			property.Name = engine::core::Name("X");
+			property.Type = engine::ecs::PropertyType::Float;
+			property.Size = sizeof(float);
+			property.Kind = engine::ecs::PropertyKind::Computed;
+			property.Reads = &engine::ecs::ComponentSet::Intern({Components::Of<Spot>()});
+			property.Writes = property.Reads;
+			property.Get = [](const Store &store, Entity instance, void *out) -> bool {
+				const Spot *spot = store.Get<Spot>(instance);
+				if (spot == nullptr) {
+					return false;
+				}
+				*static_cast<float *>(out) = spot->X;
+				return true;
+			};
+			property.Set = [](Store &store, Entity instance, const void *value) -> bool {
+				Spot *spot = store.GetMutable<Spot>(instance);
+				if (spot == nullptr) {
+					return false;
+				}
+				spot->X = *static_cast<const float *>(value);
+				return true;
+			};
+			Classes::Computed(registered, property);
+			return registered;
 		}();
 		return node;
 	}
@@ -246,6 +272,16 @@ TEST_CASE("CreateInstance honours adopt-only", "[ecs]") {
 	REQUIRE(replica.CreateInstance(NodeClass(), "named") == NULL_ENTITY);
 }
 
+TEST_CASE("predicted instances use the replica-owned range", "[ecs]") {
+	Store replica("replica");
+	replica.SetAdoptOnly(true);
+
+	const Entity instance = replica.CreatePredictedInstance(NodeClass(), "local");
+	REQUIRE(instance != NULL_ENTITY);
+	CHECK(Store::IsPredicted(instance));
+	CHECK(replica.InstanceNameOf(instance) == engine::core::Name("local"));
+}
+
 TEST_CASE("CloneInstance honours adopt-only", "[ecs]") {
 	// The third minting path, and the one easiest to forget: a clone is a mint.
 	Store world("world");
@@ -254,6 +290,32 @@ TEST_CASE("CloneInstance honours adopt-only", "[ecs]") {
 
 	world.SetAdoptOnly(true);
 	REQUIRE(world.CloneInstance(source) == NULL_ENTITY);
+
+	const Entity copy = world.ClonePredictedInstance(source);
+	REQUIRE(copy != NULL_ENTITY);
+	CHECK(Store::IsPredicted(copy));
+	CHECK(world.InstanceNameOf(copy) == engine::core::Name("source"));
+}
+
+TEST_CASE("an authored property write may inspect a client-local outcome", "[ecs]") {
+	Store replica("replica");
+	const Entity instance = replica.CreateInstance(NodeClass(), "before");
+	REQUIRE(instance != NULL_ENTITY);
+
+	const engine::ecs::PropertyDescriptor *spot = nullptr;
+	for (const engine::ecs::PropertyDescriptor &property : replica.PropertiesOf(instance)) {
+		if (property.Name == engine::core::Name("X")) {
+			spot = &property;
+			break;
+		}
+	}
+	REQUIRE(spot != nullptr);
+
+	replica.SetAdoptOnly(true);
+	const float after = 4.5f;
+	CHECK_FALSE(replica.SetProperty(instance, *spot, &after, sizeof(after)));
+	REQUIRE(replica.SetPropertyAuthored(instance, *spot, &after, sizeof(after)));
+	CHECK(replica.Get<Spot>(instance)->X == after);
 }
 
 // --- promotion -------------------------------------------------------------
@@ -357,12 +419,9 @@ TEST_CASE("promotion relinks the instance tree around it", "[ecs]") {
 	const Entity after = world.CreateInstance(NodeClass(), "after");
 	const Entity child = world.CreateInstance(NodeClass(), "child");
 
-	// A predicted instance is not a thing `Store` mints today - the class path
-	// is authoritative - so the node is built by hand out of the same
-	// components, which is what the tree is made of anyway.
-	const Entity guess = world.CreatePredicted();
-	world.Set<Hierarchy>(guess, Hierarchy{});
-	world.Set<Spot>(guess, Spot{1.0f});
+	const Entity guess = world.CreatePredictedInstance(NodeClass(), "guess");
+	REQUIRE(guess != NULL_ENTITY);
+	world.GetMutable<Spot>(guess)->X = 1.0f;
 
 	REQUIRE(world.SetParent(before, parent));
 	REQUIRE(world.SetParent(guess, parent));

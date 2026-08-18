@@ -913,7 +913,7 @@ namespace studio {
 											 CFrame(was.Position).Inverse() * was;
 								}
 
-								(void)store.SetProperty(
+								(void)store.SetPropertyAuthored(
 									instance, engine::core::Name("PivotOffset"), &offset, sizeof(offset)
 								);
 								continue;
@@ -1048,7 +1048,7 @@ namespace studio {
 								// below makes - and making both go through the
 								// property is what keeps them one answer.
 								const Vector3 full = grown * 2.0f;
-								(void)store.SetProperty(
+								(void)store.SetPropertyAuthored(
 									instance, engine::core::Name("Size"), &full, sizeof(full)
 								);
 								break;

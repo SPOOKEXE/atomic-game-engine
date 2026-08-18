@@ -156,6 +156,24 @@ namespace engine::game {
 		const PropertyValue &value
 	);
 
+	// Writes one property as an explicit editor action.
+	//
+	// This has the same type and descriptor checks as `WriteProperty`, but may
+	// locally alter an authority-owned row in an adopt-only client view.
+	// Runtime bindings deliberately keep using `WriteProperty`.
+	//
+	// @param store      The exact world being inspected.
+	// @param instance   The instance.
+	// @param descriptor The property to write.
+	// @param value      The value, whose type must match the descriptor's.
+	// @return `false` on an ordinary validation or conversion failure.
+	bool WriteAuthoredProperty(
+		ecs::Store &store,
+		ecs::Entity instance,
+		const ecs::PropertyDescriptor &descriptor,
+		const PropertyValue &value
+	);
+
 	// A number as the shortest text that reads back as the same value.
 	//
 	// **Exposed because a document has numbers that are not property values** -

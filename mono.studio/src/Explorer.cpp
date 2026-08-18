@@ -276,6 +276,10 @@ namespace studio {
 	void Editor::SelectRange(
 		WorldId world, const HierarchyView &view, engine::ecs::Entity anchor, engine::ecs::Entity to, bool add
 	) {
+		if (ViewportWorld(FocusedViewport) != world) {
+			RetargetEditingViewport(FocusedViewport, world);
+		}
+
 		UniverseSelected = false;
 
 		// **The range itself is `RowsBetween`, which is a free function over the
@@ -562,6 +566,7 @@ namespace studio {
 		TextField("##explorer-filter", ExplorerFilter, "filter by name");
 
 		ImGui::Separator();
+		const WorldId editingWorld = ViewportWorld(FocusedViewport);
 
 		// **The universe is the root, and it is `game`.** `script`'s bindings
 		// already map `game` to `world::Universe` and `workspace` to the world a
@@ -601,7 +606,7 @@ namespace studio {
 			// Insert lands in the active world, because a universe holds worlds
 			// and not instances - there is no other honest answer, and refusing
 			// outright would make the root the one row with no menu.
-			DrawInsertMenu("insert-universe", Active, NULL_ENTITY);
+			DrawInsertMenu("insert-universe", editingWorld, NULL_ENTITY);
 
 			ImGui::Separator();
 
@@ -629,7 +634,7 @@ namespace studio {
 				const Name worldName = Universe->NameOf(world);
 
 				ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnArrow;
-				if (world == Active && !UniverseSelected) {
+				if (world == editingWorld && !UniverseSelected) {
 					flags |= ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_Selected;
 				}
 
@@ -658,9 +663,7 @@ namespace studio {
 				const bool open = ImGui::TreeNodeEx("##world", flags, "%s", label.c_str());
 
 				if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
-					Active = world;
-					SelectionWorld = world;
-					ClearSelection();
+					RetargetEditingViewport(FocusedViewport, world);
 				}
 
 				// **A world row takes a drop too**, and it means "a root of
@@ -704,10 +707,8 @@ namespace studio {
 
 					ImGui::Separator();
 
-					if (ImGui::MenuItem("Set Active")) {
-						Active = world;
-						SelectionWorld = world;
-						ClearSelection();
+					if (ImGui::MenuItem("Show in Editing Viewport")) {
+						RetargetEditingViewport(FocusedViewport, world);
 					}
 					if (ImGui::MenuItem("Export World...")) {
 						Active = world;
@@ -916,6 +917,7 @@ namespace studio {
 
 		if (PendingReparent.World.IsValid()) {
 			const WorldId world = PendingReparent.World;
+			const bool authoritative = AuthorityOf(world) == EditAuthority::Authoritative;
 			const engine::ecs::Entity parent = PendingReparent.Parent;
 			const std::vector<engine::ecs::Entity> moving = PendingReparent.Instances;
 			PendingReparent = PendingReparentAction{};
@@ -970,7 +972,7 @@ namespace studio {
 			// **Recorded only for the ones that landed.** A refused reparent is
 			// not an edit, and logging one would put an entry on the stack
 			// whose undo restores the parent it never left.
-			if (Commands != nullptr) {
+			if (authoritative && Commands != nullptr) {
 				for (const Applied &entry : applied) {
 					Commands->RecordReparent(world, entry.Instance, entry.Was, parent, "Move " + entry.Named);
 				}
@@ -978,7 +980,9 @@ namespace studio {
 
 			if (!applied.empty()) {
 				OpenPathTo(world, applied.front().Instance);
-				MarkModified();
+				if (authoritative) {
+					MarkModified();
+				}
 			}
 
 			if (refused > 0) {
@@ -995,6 +999,7 @@ namespace studio {
 		if (PendingRenameInstance.World.IsValid()) {
 			const PendingRenameInstanceAction rename = PendingRenameInstance;
 			PendingRenameInstance = PendingRenameInstanceAction{};
+			const bool authoritative = AuthorityOf(rename.World) == EditAuthority::Authoritative;
 
 			bool renamed = false;
 			engine::game::PropertyValue before;
@@ -1025,12 +1030,14 @@ namespace studio {
 			});
 
 			if (renamed) {
-				if (Commands != nullptr) {
+				if (authoritative && Commands != nullptr) {
 					Commands->RecordProperty(
 						rename.World, rename.Instance, Name("Name"), before, after, "Rename to " + rename.To
 					);
 				}
-				MarkModified();
+				if (authoritative) {
+					MarkModified();
+				}
 			}
 		}
 

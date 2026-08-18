@@ -250,6 +250,10 @@ TEST_CASE("a world's services are in the file like anything else", "[game][round
 	source.Enter(world, [](Store &store) {
 		const Entity workspace = engine::scene::InstallServices(store);
 		store.SetParent(store.CreateInstance(engine::scene::PartClass(), "Baseplate"), workspace);
+
+		const Entity storage = store.FindFirstRoot("ServerStorage");
+		const Name shared("Shared");
+		REQUIRE(store.SetProperty(storage, Name("Scope"), &shared, sizeof(shared)));
 	});
 
 	const auto path = ScratchFile("engine-game-services.agame");
@@ -274,16 +278,20 @@ TEST_CASE("a world's services are in the file like anything else", "[game][round
 		REQUIRE(starter != NULL_ENTITY);
 		CHECK(ChildNamed(store, starter, "StarterPlayerScripts") != NULL_ENTITY);
 
-		// **The scope survives, and it is the one that would not have.** It is
+		// **An authored scope survives, and it is the one that would not have.** It is
 		// a computed property over a `uint8_t`, so it is written as a word and
-		// read back through a setter - the path a plain field never takes. A
-		// `ServerStorage` that loaded as `Shared` is a container that stops
-		// being server-only, which is the kind of thing nobody checks.
+		// read back through a setter, the path a plain field never takes.
 		const Entity storage = store.FindFirstRoot("ServerStorage");
 		REQUIRE(storage != NULL_ENTITY);
 		const auto *service = store.Get<engine::scene::ServiceComponent>(storage);
 		REQUIRE(service != nullptr);
-		CHECK(service->Scope == engine::scene::ServiceScope::Server);
+		CHECK(service->Scope == engine::scene::ServiceScope::Shared);
+
+		const Entity scripts = store.FindFirstRoot("ServerScriptService");
+		REQUIRE(scripts != NULL_ENTITY);
+		CHECK(
+			store.Get<engine::scene::ServiceComponent>(scripts)->Scope == engine::scene::ServiceScope::Server
+		);
 	});
 
 	std::filesystem::remove(path);

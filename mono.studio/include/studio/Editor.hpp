@@ -1355,6 +1355,17 @@ namespace studio {
 
 		// --- selection -------------------------------------------------------
 
+		// Makes one viewport the source of truth for Explorer and Properties.
+		//
+		// @param index 0 is the main viewport, later indices are extra panels.
+		void EditThroughViewport(size_t index);
+
+		// Points the editing viewport at a world and moves panel selection with it.
+		//
+		// @param index The viewport being edited through.
+		// @param world The authoritative or client-replica world to show.
+		void RetargetEditingViewport(size_t index, WorldId world);
+
 		void Select(WorldId world, Entity instance, bool add);
 		void ClearSelection();
 

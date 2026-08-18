@@ -123,6 +123,7 @@ namespace studio {
 
 		const engine::core::Name key(property);
 		size_t written = 0;
+		const bool authoritative = AuthorityOf(SelectionWorld) == EditAuthority::Authoritative;
 
 		Universe->Enter(SelectionWorld, [&](Store &store) {
 			for (const Entity instance : Selection) {
@@ -137,11 +138,11 @@ namespace studio {
 					continue;
 				}
 
-				if (!store.SetProperty(instance, key, &value, sizeof(value))) {
+				if (!store.SetPropertyAuthored(instance, key, &value, sizeof(value))) {
 					continue;
 				}
 
-				if (Commands != nullptr) {
+				if (authoritative && Commands != nullptr) {
 					engine::game::PropertyValue before;
 					before.Type = engine::ecs::PropertyType::Bool;
 					before.Bool = was;
@@ -157,7 +158,9 @@ namespace studio {
 		});
 
 		if (written > 0) {
-			MarkModified();
+			if (authoritative) {
+				MarkModified();
+			}
 			Say(std::string(label) + ": " + std::to_string(written) + " instance(s)");
 		}
 	}
@@ -170,6 +173,7 @@ namespace studio {
 		const engine::core::Name key("PivotOffset");
 		const engine::core::CFrame identity;
 		size_t written = 0;
+		const bool authoritative = AuthorityOf(SelectionWorld) == EditAuthority::Authoritative;
 
 		Universe->Enter(SelectionWorld, [&](Store &store) {
 			for (const Entity instance : Selection) {
@@ -185,11 +189,11 @@ namespace studio {
 					continue;
 				}
 
-				if (!store.SetProperty(instance, key, &identity, sizeof(identity))) {
+				if (!store.SetPropertyAuthored(instance, key, &identity, sizeof(identity))) {
 					continue;
 				}
 
-				if (Commands != nullptr) {
+				if (authoritative && Commands != nullptr) {
 					engine::game::PropertyValue before;
 					before.Type = engine::ecs::PropertyType::CFrame;
 					before.CFrame = was;
@@ -207,7 +211,9 @@ namespace studio {
 		});
 
 		if (written > 0) {
-			MarkModified();
+			if (authoritative) {
+				MarkModified();
+			}
 			Say("reset the pivot of " + std::to_string(written) + " instance(s)");
 		}
 	}

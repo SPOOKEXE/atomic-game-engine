@@ -640,6 +640,12 @@ namespace engine::ecs {
 		return engine::ecs::CreateInstance(*State, id, name);
 	}
 
+	Entity Store::CreatePredictedInstance(ClassId id, std::string_view name) {
+		RequireOwningThread("CreatePredictedInstance");
+
+		return engine::ecs::CreateInstance(*State, id, name, EntityRange::Predicted);
+	}
+
 	ClassId Store::ClassOf(Entity instance) const {
 		return engine::ecs::ClassOf(*State, instance);
 	}
@@ -704,8 +710,28 @@ namespace engine::ecs {
 		return SetProperty(instance, *descriptor, value, bytes);
 	}
 
+	bool Store::SetPropertyAuthored(Entity instance, core::Name property, const void *value, size_t bytes) {
+		const PropertyDescriptor *descriptor = FindProperty(*this, instance, property);
+		if (descriptor == nullptr) {
+			return false;
+		}
+		return SetPropertyAuthored(instance, *descriptor, value, bytes);
+	}
+
 	bool Store::SetProperty(
 		Entity instance, const PropertyDescriptor &descriptor, const void *value, size_t bytes
+	) {
+		return SetPropertyValue(instance, descriptor, value, bytes, false);
+	}
+
+	bool Store::SetPropertyAuthored(
+		Entity instance, const PropertyDescriptor &descriptor, const void *value, size_t bytes
+	) {
+		return SetPropertyValue(instance, descriptor, value, bytes, true);
+	}
+
+	bool Store::SetPropertyValue(
+		Entity instance, const PropertyDescriptor &descriptor, const void *value, size_t bytes, bool authored
 	) {
 		RequireOwningThread("SetProperty");
 
@@ -725,7 +751,7 @@ namespace engine::ecs {
 		// Refused loudly rather than quietly, because a script author cannot
 		// see the difference between a write that was rejected and one that
 		// was applied and then replaced.
-		if (AdoptOnly()) {
+		if (AdoptOnly() && !authored) {
 			ENGINE_ERROR(
 				"store '{}': refusing to set '{}' in a replica. The authority owns this row, and "
 				"a value written here survives until its next delta and no longer.",
@@ -895,8 +921,20 @@ namespace engine::ecs {
 			return NULL_ENTITY;
 		}
 
+		return CloneInstanceInRange(source, false);
+	}
+
+	Entity Store::ClonePredictedInstance(Entity source) {
+		RequireOwningThread("ClonePredictedInstance");
+
+		return CloneInstanceInRange(source, true);
+	}
+
+	Entity Store::CloneInstanceInRange(Entity source, bool predicted) {
 		std::vector<engine::ecs::ClonedPair> made;
-		const Entity copy = engine::ecs::CloneInstance(*State, source, made);
+		const Entity copy = engine::ecs::CloneInstance(
+			*State, source, made, predicted ? EntityRange::Predicted : EntityRange::Authoritative
+		);
 		if (copy == NULL_ENTITY) {
 			return NULL_ENTITY;
 		}

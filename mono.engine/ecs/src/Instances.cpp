@@ -160,7 +160,7 @@ namespace engine::ecs {
 		}
 
 		// Copies one instance without its subtree.
-		Entity CloneOne(StoreState &state, Entity source) {
+		Entity CloneOne(StoreState &state, Entity source, EntityRange range) {
 			const EntityId key = EntityId::Of(source);
 			const EntityLocation from = *state.Directory.Locate(key.Index);
 			if (from.Archetype == EntityLocation::NO_ARCHETYPE) {
@@ -169,7 +169,7 @@ namespace engine::ecs {
 
 			const ComponentSet &set = state.Tables[from.Archetype].Set();
 
-			const Entity copy = CreateEntity(state);
+			const Entity copy = CreateEntity(state, range);
 			if (copy == NULL_ENTITY) {
 				// The range is full. Reported by whoever asked; there is no
 				// half-made instance to unwind because nothing has been written
@@ -340,13 +340,13 @@ namespace engine::ecs {
 		return instance;
 	}
 
-	Entity CreateInstance(StoreState &state, ClassId id, std::string_view name) {
+	Entity CreateInstance(StoreState &state, ClassId id, std::string_view name, EntityRange range) {
 		const ClassInfo &info = Classes::Describe(id);
 		if (info.Set == nullptr) {
 			return NULL_ENTITY;
 		}
 
-		const Entity entity = CreateEntity(state);
+		const Entity entity = CreateEntity(state, range);
 		if (entity == NULL_ENTITY) {
 			return NULL_ENTITY;
 		}
@@ -869,7 +869,8 @@ namespace engine::ecs {
 		// @param source The instance to copy.
 		// @param made   Appended to as `{source, copy}` for every row copied.
 		// @return The copy, or NULL_ENTITY when the source is not archivable.
-		Entity CloneSubtree(StoreState &state, Entity source, std::vector<ClonedPair> &made) {
+		Entity
+		CloneSubtree(StoreState &state, Entity source, std::vector<ClonedPair> &made, EntityRange range) {
 			if (!IsEntityAlive(state, source) || NodeOf(state, source) == nullptr) {
 				return NULL_ENTITY;
 			}
@@ -882,7 +883,7 @@ namespace engine::ecs {
 				return NULL_ENTITY;
 			}
 
-			const Entity copy = CloneOne(state, source);
+			const Entity copy = CloneOne(state, source, range);
 			if (copy == NULL_ENTITY) {
 				return NULL_ENTITY;
 			}
@@ -893,7 +894,7 @@ namespace engine::ecs {
 			EachChild(state, source, [&children](Entity child) { children.push_back(child); });
 
 			for (const Entity child : children) {
-				const Entity copied = CloneSubtree(state, child, made);
+				const Entity copied = CloneSubtree(state, child, made, range);
 				if (copied != NULL_ENTITY) {
 					SetParent(state, copied, copy);
 				}
@@ -903,7 +904,7 @@ namespace engine::ecs {
 		}
 	}
 
-	Entity CloneInstance(StoreState &state, Entity source, std::vector<ClonedPair> &made) {
-		return CloneSubtree(state, source, made);
+	Entity CloneInstance(StoreState &state, Entity source, std::vector<ClonedPair> &made, EntityRange range) {
+		return CloneSubtree(state, source, made, range);
 	}
 }

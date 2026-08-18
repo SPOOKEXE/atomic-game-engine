@@ -1012,7 +1012,7 @@ namespace studio {
 		if (hovered &&
 			(ImGui::IsMouseClicked(ImGuiMouseButton_Right) || ImGui::IsMouseClicked(ImGuiMouseButton_Left))) {
 			ImGui::SetWindowFocus();
-			FocusedViewport = index;
+			EditThroughViewport(index);
 
 			// Held for the rest of the frame so a later panel's stale
 			// `IsWindowFocused` cannot take it back. See the note above.
@@ -1372,13 +1372,14 @@ namespace studio {
 			ImGui::EndMenu();
 		}
 
-		if (ImGui::BeginMenu("Insert", Active.IsValid())) {
+		const WorldId editingWorld = ViewportWorld(FocusedViewport);
+		if (ImGui::BeginMenu("Insert", editingWorld.IsValid())) {
 			ImGui::TextDisabled("into %s", Selection.empty() ? "the world" : "the selection");
 			ImGui::Separator();
 
 			if (const engine::ecs::ClassId chosen = DrawClassPicker("insert-menu"); chosen.IsValid()) {
 				InsertInstance(
-					Active, chosen, Selection.empty() ? engine::ecs::NULL_ENTITY : Selection.front()
+					editingWorld, chosen, Selection.empty() ? engine::ecs::NULL_ENTITY : Selection.front()
 				);
 				ImGui::CloseCurrentPopup();
 			}
@@ -1645,7 +1646,7 @@ namespace studio {
 			}
 
 			if (window == focused || window == context->NavWindow) {
-				FocusedViewport = index;
+				EditThroughViewport(index);
 				FocusedIsViewport = true;
 				return;
 			}
@@ -1810,7 +1811,6 @@ namespace studio {
 		// mirror and reading the skygrid's state. See `FocusedViewport`.
 		const size_t reporting = FocusedViewport;
 		const WorldId shown = ViewportWorld(reporting);
-		ViewportState *reported = ExtraAt(reporting);
 
 		// Which panel is being described, so the readout is never ambiguous
 		// about *whose* state it is showing.
@@ -1832,13 +1832,7 @@ namespace studio {
 			for (const WorldId id : Universe->Worlds()) {
 				const Name name = Universe->NameOf(id);
 				if (ImGui::Selectable(name.IsValid() ? Label(name) : "?", id == shown)) {
-					if (reported != nullptr) {
-						reported->World = id;
-					} else {
-						Active = id;
-						SelectionWorld = id;
-						ClearSelection();
-					}
+					RetargetEditingViewport(reporting, id);
 				}
 			}
 			ImGui::EndCombo();

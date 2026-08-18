@@ -1740,8 +1740,35 @@ namespace studio {
 	}
 
 	// --- selection ---------------------------------------------------------
+	void Editor::EditThroughViewport(size_t index) {
+		FocusedViewport = index;
+
+		const WorldId shown = ViewportWorld(index);
+		if (shown != SelectionWorld) {
+			SelectionWorld = shown;
+			ClearSelection();
+		}
+	}
+
+	void Editor::RetargetEditingViewport(size_t index, WorldId world) {
+		if (!world.IsValid()) {
+			return;
+		}
+
+		if (ViewportState *extra = ExtraAt(index); extra != nullptr) {
+			extra->World = world;
+		} else {
+			Active = world;
+		}
+
+		EditThroughViewport(index);
+	}
 
 	void Editor::Select(WorldId world, Entity instance, bool add) {
+		if (ViewportWorld(FocusedViewport) != world) {
+			RetargetEditingViewport(FocusedViewport, world);
+		}
+
 		UniverseSelected = false;
 		if (world != SelectionWorld) {
 			Selection.clear();
@@ -2566,10 +2593,12 @@ namespace studio {
 
 		Entity created = NULL_ENTITY;
 		Entity landed = NULL_ENTITY;
+		const bool authoritative = AuthorityOf(world) == EditAuthority::Authoritative;
 
 		Universe->Enter(world, [&](Store &store) {
 			const engine::ecs::ClassInfo &info = engine::ecs::Classes::Describe(klass);
-			created = store.CreateInstance(klass, Label(info.Name));
+			created = authoritative ? store.CreateInstance(klass, Label(info.Name))
+								: store.CreatePredictedInstance(klass, Label(info.Name));
 			if (created == NULL_ENTITY) {
 				return;
 			}
@@ -2595,7 +2624,7 @@ namespace studio {
 			// from is taken here, and one taken before `SetParent` would rebuild
 			// the instance as a root - an undo followed by a redo would quietly
 			// move it out of the tree.
-			if (Commands != nullptr) {
+			if (authoritative && Commands != nullptr) {
 				Commands->RecordCreate(store, world, created, "Insert " + std::string(Label(info.Name)));
 			}
 		});
@@ -2605,7 +2634,9 @@ namespace studio {
 			SelectionAnchor = created;
 			OpenPathTo(world, created);
 			RevealSelection = true;
-			MarkModified();
+			if (authoritative) {
+				MarkModified();
+			}
 
 			// **Invalidated on a structural change and not on every edit.** A
 			// property write is what actually *names* an asset, and invalidating
@@ -2630,6 +2661,7 @@ namespace studio {
 		// Copied, because closing a script tab walks `Selection` too and
 		// erasing from underneath the loop is the classic version of this bug.
 		const std::vector<Entity> doomed = Selection;
+		const bool authoritative = AuthorityOf(SelectionWorld) == EditAuthority::Authoritative;
 
 		for (const Entity instance : doomed) {
 			for (size_t index = Scripts.size(); index > 0; index--) {
@@ -2647,7 +2679,7 @@ namespace studio {
 					// empty document - which reads as "undo did nothing" rather
 					// than as a fault, and is therefore the version of this
 					// mistake nobody reports.
-					if (Commands != nullptr) {
+					if (authoritative && Commands != nullptr) {
 						Commands->RecordDestroy(
 							store,
 							SelectionWorld,
@@ -2662,7 +2694,9 @@ namespace studio {
 		});
 
 		ClearSelection();
-		MarkModified();
+		if (authoritative) {
+			MarkModified();
+		}
 	}
 
 	void Editor::DuplicateSelection() {
@@ -2672,6 +2706,7 @@ namespace studio {
 
 		const std::vector<Entity> sources = Selection;
 		std::vector<Entity> copies;
+		const bool authoritative = AuthorityOf(SelectionWorld) == EditAuthority::Authoritative;
 
 		Universe->Enter(SelectionWorld, [&](Store &store) {
 			for (const Entity source : sources) {
@@ -2679,7 +2714,8 @@ namespace studio {
 					continue;
 				}
 
-				const Entity copy = store.CloneInstance(source);
+				const Entity copy = authoritative ? store.CloneInstance(source)
+										  : store.ClonePredictedInstance(source);
 				if (copy == NULL_ENTITY) {
 					continue;
 				}
@@ -2691,7 +2727,7 @@ namespace studio {
 				store.SetParent(copy, store.ParentOf(source));
 				copies.push_back(copy);
 
-				if (Commands != nullptr) {
+				if (authoritative && Commands != nullptr) {
 					Commands->RecordCreate(
 						store,
 						SelectionWorld,
@@ -2708,7 +2744,9 @@ namespace studio {
 
 		UniverseSelected = false;
 		Selection = copies;
-		MarkModified();
+		if (authoritative) {
+			MarkModified();
+		}
 	}
 
 	// --- running --------------------------------------------------------------

@@ -227,6 +227,7 @@ namespace studio {
 		};
 		Edit edit;
 
+		const bool authoritative = AuthorityOf(SelectionWorld) == EditAuthority::Authoritative;
 		Universe->Enter(SelectionWorld, [&](Store &store) {
 			if (!store.Alive(primary)) {
 				ImGui::TextDisabled("the selection is gone");
@@ -749,8 +750,8 @@ namespace studio {
 						PropertyValue before;
 						const bool had = ReadProperty(store, instance, descriptor, before);
 
-						if (WriteProperty(store, instance, descriptor, edit.Value) && had &&
-							Commands != nullptr) {
+						if (engine::game::WriteAuthoredProperty(store, instance, descriptor, edit.Value) && had &&
+							authoritative && Commands != nullptr) {
 							Commands->RecordProperty(
 								SelectionWorld,
 								instance,
@@ -778,6 +779,8 @@ namespace studio {
 			}
 		}
 
-		MarkModified();
+		if (authoritative) {
+			MarkModified();
+		}
 	}
 }

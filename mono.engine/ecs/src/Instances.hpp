@@ -72,7 +72,9 @@ namespace engine::ecs {
 	// @param name  The instance's name, which need not be unique. An empty name
 	//              leaves the instance unnamed.
 	// @return The new instance, or NULL_ENTITY for an invalid class.
-	Entity CreateInstance(StoreState &state, ClassId id, std::string_view name);
+	Entity CreateInstance(
+		StoreState &state, ClassId id, std::string_view name, EntityRange range = EntityRange::Authoritative
+	);
 
 	// The class an entity was created as.
 	//
@@ -267,5 +269,10 @@ namespace engine::ecs {
 	// @param made   Appended to as `{source, copy}` for every row copied.
 	// @return The copy, parented nowhere, or NULL_ENTITY when the source is not
 	//         an instance or is not archivable.
-	Entity CloneInstance(StoreState &state, Entity source, std::vector<ClonedPair> &made);
+	Entity CloneInstance(
+		StoreState &state,
+		Entity source,
+		std::vector<ClonedPair> &made,
+		EntityRange range = EntityRange::Authoritative
+	);
 }
