@@ -68,7 +68,8 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] animation handler
 - [_] character controller + humanoid + character states + state controller, etc. More modular than roblox standard humanoid. state machine? node graphs? etc.
 - [_] skinning and animation - `bake` skips joints and weights and keeps the rest pose, because there are no skeletons in the engine yet
-- [_] porting roblox games (DEFER THIS UNTIL LATER ONCE TYPES ARE BUILT UP) - untouched, and the trigger is unchanged: there are four instance classes in this engine and a Roblox place names hundreds
+- [_] localtransparency property for clients (only visible in local side, server cannot see), take priority over standard transparency if not set to 0
+- [_] character auto-rotate
 
 - [_] split dependency-bound compute and later transfer work into traffic-plan command buffers; physical overlap remains unavailable because SDL exposes one unified queue rather than independent graphics, compute and transfer queues
 - [_] add conservative occlusion culling after the renderer has a depth hierarchy and indirect draw path; explicit occlusion documents are refused until then
@@ -79,8 +80,20 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] prototype portal seam light-field capture: render each room against a lit void, capture both directions, and project the matching result into the portal entrance; expose an `Enabled` property on Portal components to skip this capture path
 - [_] audit every remaining service, object and instance property so edits mutate authoritative state and reach their consumers
 
-### v0.18
+- [_] add compute and postprocessing shaders to meshes/textures/pbr
+- [_] add emissive textures / pbr
+- [_] port semi-real raytrace and path-trace as part of nodes
+- [_] make demo render pipelines with semi-real raytrace and path-trace
+- [_] render pipeline nodes for above
+- [_] wireframe view mode
+- [_] build out roblox libraries (Enum library that is auto-required)
+- [_] build out code editor with auto complete (more vs-code like, hover on keywords, right-side minimap)
+- [_] real mesh creation in real-time
+- [_] build ui features out (more roblox)
 
+### FUTURE
+
+- [_] porting roblox games (DEFER THIS UNTIL LATER ONCE TYPES ARE BUILT UP) - untouched, and the trigger is unchanged: there are four instance classes in this engine and a Roblox place names hundreds
 - [_] add modulescript boundaries between luau and javascript VMs. moving values between vms.
 - [_] consider adding C# as another scripting langauge?
 - [_] constraints system
