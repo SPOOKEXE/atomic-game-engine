@@ -52,6 +52,11 @@ namespace studio {
 			return root;
 		}
 
+		bool &RootOverridden() {
+			static bool overridden = false;
+			return overridden;
+		}
+
 		// Reads a whole file, or reports that there was none.
 		bool ReadFile(const std::filesystem::path &path, std::string &out, std::string &error) {
 			std::error_code failed;
@@ -101,6 +106,7 @@ namespace studio {
 	}
 
 	void SetConfigRoot(const std::filesystem::path &root) {
+		RootOverridden() = !root.empty();
 		Root() = root.empty() ? HomeDirectory() / "Documents" / "atomic-game-engine" / "studio" : root;
 	}
 
@@ -415,6 +421,13 @@ namespace studio {
 		) {
 			if (load(wanted)) {
 				return true;
+			}
+
+			// An explicit root is an isolation boundary. Falling back to files
+			// beside the installed binary would make a test run read a person's
+			// keybinds and content origins despite being pointed at a scratch root.
+			if (RootOverridden()) {
+				return false;
 			}
 
 			std::error_code failed;

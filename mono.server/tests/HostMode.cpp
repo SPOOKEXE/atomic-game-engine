@@ -124,6 +124,30 @@ TEST_CASE("a spawned host comes up, says it is ready, and heartbeats", "[server]
 	supervisor.StopAll();
 }
 
+TEST_CASE("a listening host reports its own replication port", "[server]") {
+	if (!ServerAvailable()) {
+		SKIP("the server program was not built into this preset");
+	}
+
+	SupervisorSettings settings = Settings();
+	settings.Arguments.emplace_back("--listen");
+	settings.Arguments.emplace_back("0");
+	Supervisor supervisor(settings);
+
+	HostPlan plan;
+	plan.Name = Name("host.listening");
+	plan.Worlds = {Name("lobby")};
+
+	REQUIRE(supervisor.Start({plan}) == 1);
+	REQUIRE(Settle(supervisor, plan.Name, [](const HostStatus &status) { return status.Ready; }));
+
+	const HostStatus status = supervisor.StatusOf(plan.Name);
+	CHECK(status.Worlds == plan.Worlds);
+	CHECK(status.Port != 0);
+
+	supervisor.StopAll();
+}
+
 TEST_CASE("a host stops when its driver asks over the link", "[server]") {
 	if (!ServerAvailable()) {
 		SKIP("the server program was not built into this preset");
@@ -322,5 +346,38 @@ TEST_CASE("a driver and its hosts share one machine's worth of workers", "[serve
 	REQUIRE(shared <= alone);
 
 	driver.Run();
+	driver.Shutdown();
+}
+
+TEST_CASE("listening remote worlds receive one process and port each", "[server]") {
+	if (!ServerAvailable()) {
+		SKIP("the server program was not built into this preset");
+	}
+
+	server::Options options;
+	options.RemoteWorlds = {"network.one", "network.two"};
+	options.WorldsPerHost = 8;
+	options.HostProgram = ServerProgram();
+	options.Listening = true;
+	options.ListenPort = 0;
+	options.Entities = 1;
+
+	server::Server driver;
+	REQUIRE(driver.Initialise(options));
+	Supervisor &supervisor = driver.Hosts()->Hosts();
+	REQUIRE(supervisor.Count() == 2);
+
+	const Name first("host.shared.0");
+	const Name second("host.shared.1");
+	const auto listening = [](const HostStatus &status) { return status.Ready && status.Port != 0; };
+	REQUIRE(Settle(supervisor, first, listening));
+	REQUIRE(Settle(supervisor, second, listening));
+
+	const HostStatus firstStatus = supervisor.StatusOf(first);
+	const HostStatus secondStatus = supervisor.StatusOf(second);
+	CHECK(firstStatus.Worlds == std::vector<Name>{Name("network.one")});
+	CHECK(secondStatus.Worlds == std::vector<Name>{Name("network.two")});
+	CHECK(firstStatus.Port != secondStatus.Port);
+
 	driver.Shutdown();
 }

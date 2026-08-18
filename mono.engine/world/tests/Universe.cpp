@@ -7,6 +7,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <set>
@@ -26,6 +27,7 @@ using engine::ecs::Store;
 using engine::parallel::Jobs;
 using engine::world::ExecutionMode;
 using engine::world::Isolation;
+using engine::world::Presentation;
 using engine::world::Universe;
 using engine::world::UniverseSettings;
 using engine::world::WorldId;
@@ -583,6 +585,86 @@ TEST_CASE("presentation runs only the render phase, and only when asked", "[worl
 TEST_CASE("presenting a world that does not exist is reported", "[world]") {
 	Universe universe;
 	REQUIRE(universe.Present(WorldId{7}, 0.016f, 0.0f) == WorldStatus::NoSuchWorld);
+}
+
+TEST_CASE("presentation keeps each world on its physical-core lane", "[world][parallel]") {
+	Pool pool{4};
+	if (Jobs::PinnedWorkerCount() < 2 || engine::parallel::ForceSerialCompute()) {
+		SKIP("this platform could not pin two job workers to distinct physical cores");
+	}
+
+	Universe universe;
+	const WorldId first = universe.Create(Named("world.present.first"));
+	const WorldId second = universe.Create(Named("world.present.second"));
+
+	std::thread::id firstTickThread;
+	std::thread::id secondTickThread;
+	std::thread::id firstPresentationThread;
+	std::thread::id secondPresentationThread;
+	std::atomic<unsigned> arrived{0};
+	std::atomic<bool> release{false};
+
+	const auto install =
+		[&](WorldId world, std::thread::id &tickThread, std::thread::id &presentationThread) {
+			universe.Enter(world, [&](Store &, Scheduler &systems) {
+				systems.Add("record-tick-lane", Phase::Simulation, [&tickThread](Store &) {
+					tickThread = std::this_thread::get_id();
+				});
+				systems.Add(
+					"record-presentation-lane",
+					Phase::PreRender,
+					[&presentationThread, &arrived, &release](Store &) {
+						presentationThread = std::this_thread::get_id();
+						arrived.fetch_add(1, std::memory_order_release);
+						while (!release.load(std::memory_order_acquire)) {
+							if (arrived.load(std::memory_order_acquire) == 2) {
+								release.store(true, std::memory_order_release);
+							}
+							std::this_thread::yield();
+						}
+					}
+				);
+			});
+		};
+	install(first, firstTickThread, firstPresentationThread);
+	install(second, secondTickThread, secondPresentationThread);
+	universe.Tick(1.0f / 60.0f);
+
+	const std::array requests{
+		Presentation{first, 1.0f / 60.0f, 0.25f},
+		Presentation{second, 1.0f / 60.0f, 0.75f},
+	};
+	REQUIRE(universe.PresentMany(requests) == 2);
+	CHECK(firstPresentationThread == firstTickThread);
+	CHECK(secondPresentationThread == secondTickThread);
+	CHECK(firstPresentationThread != std::this_thread::get_id());
+	CHECK(secondPresentationThread != std::this_thread::get_id());
+	CHECK(firstPresentationThread != secondPresentationThread);
+
+	universe.Enter(first, [](Store &store) { CHECK(store.Time().Alpha == 0.25f); });
+	universe.Enter(second, [](Store &store) { CHECK(store.Time().Alpha == 0.75f); });
+}
+
+TEST_CASE("presentation demand ignores absent, remote, and duplicate worlds", "[world]") {
+	Universe universe;
+	const WorldId local = universe.Create(Named("world.present.local"));
+	const WorldId remote = universe.CreateRemote(Named("world.present.remote"), Name("host.present.remote"));
+	CHECK(universe.Present(remote, 0.016f, 0.5f) == WorldStatus::Ok);
+
+	size_t presented = 0;
+	universe.Enter(local, [&](Store &, Scheduler &systems) {
+		systems.Add("count-presentation", Phase::PreRender, [&](Store &) { presented++; });
+	});
+
+	const std::array requests{
+		Presentation{local, 0.016f, 0.5f},
+		Presentation{local, 0.032f, 1.0f},
+		Presentation{remote, 0.016f, 0.5f},
+		Presentation{WorldId{999}, 0.016f, 0.5f},
+	};
+	CHECK(universe.PresentMany(requests) == 1);
+	CHECK(presented == 1);
+	universe.Enter(local, [](Store &store) { CHECK(store.Time().Alpha == 0.5f); });
 }
 
 // --- churn ----------------------------------------------------------------

@@ -1771,9 +1771,9 @@ namespace client {
 		// drawn from input that is already a frame old. The client has the same
 		// shape as the studio and had the same frame of delay in it.
 		//
-		// It costs a frame of nothing when it fails - minimised, or mid-resize -
-		// and `Render` reaches the same conclusion for itself below.
-		Renderer.WaitForFrame();
+		// A failure means minimised or mid-resize. The result gates presentation
+		// below after simulation and external services have continued.
+		const bool renderingActive = Renderer.WaitForFrame();
 
 		const float delta = Clock.Tick();
 
@@ -1829,6 +1829,18 @@ namespace client {
 		// because presentation is where the frame stops being about state.
 		PumpSounds();
 
+		// A hidden, minimised, or resizing window has no frame to consume. The
+		// simulation, replication, content delivery, and audio above continue,
+		// while PreRender and every GPU allocation below remain demand driven.
+		// Headless rendering still returns true so captures and bounded runs keep
+		// their existing behaviour.
+		if (!renderingActive) {
+			FrameGraph::EndFrame();
+			ENGINE_PROFILE_FRAME();
+			Metrics::Clear();
+			return;
+		}
+
 		// **The requested size when there is no window to ask.** A headless run
 		// still lays the panels out and still renders into an offscreen target
 		// of this size, so the numbers have to come from somewhere - and
@@ -1873,8 +1885,9 @@ namespace client {
 			RibbonVertices = {};
 			RibbonRuns = {};
 
+			std::vector<engine::world::Presentation> presentationDemand;
+			presentationDemand.reserve(Simulated.size());
 			for (const engine::world::WorldId id : Simulated) {
-				const engine::core::Name selectedProfile = Universe_->SettingsOf(id).RenderingProfile;
 				// **Written before `Present`, so this frame's `PreRender` sees
 				// this frame's input.** A camera controller reads the state and
 				// places the camera in the same pass; writing afterwards would
@@ -1904,9 +1917,17 @@ namespace client {
 						store, static_cast<uint32_t>(pixelWidth), static_cast<uint32_t>(pixelHeight)
 					);
 				});
+				presentationDemand.push_back(engine::world::Presentation{id, delta, Universe_->AlphaOf(id)});
+			}
 
-				Universe_->Present(id, delta, Universe_->AlphaOf(id));
+			// All demanded worlds prepare their draw packets together. Each
+			// PreRender pass stays on the world's stable physical-core lane and
+			// the joined result below is still copied through ViewChannel before
+			// the renderer sees it.
+			(void)Universe_->PresentMany(presentationDemand);
 
+			for (const engine::world::WorldId id : Simulated) {
+				const engine::core::Name selectedProfile = Universe_->SettingsOf(id).RenderingProfile;
 				// Published from inside the world, straight after its PreRender
 				// phase filled the draw list. The camera and the list stay
 				// where they were produced; what leaves is a copy in a buffer

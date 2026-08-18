@@ -382,11 +382,10 @@ namespace studio {
 		interfaceSettings.DisplayWidth = Settings.Width;
 		interfaceSettings.DisplayHeight = Settings.Height;
 
-		// Beside the binary rather than in the working directory, which is
-		// wherever the launcher happened to be. A layout that moved every time
-		// somebody started the editor from a different shell would read as the
-		// editor forgetting it.
-		interfaceSettings.LayoutPath = (engine::core::Paths::Base() / "studio-layout.ini").string();
+		// The layout is configuration too. Keeping it under the same root as the
+		// preferences makes a second or automated Studio fully isolated instead
+		// of silently reading and rewriting the live editor's dock arrangement.
+		interfaceSettings.LayoutPath = studio::ConfigPath("layout.ini").string();
 
 		// **Beside the layout, for the layout's reason.** Keys are a thing
 		// somebody sets once and expects to find again; a table forgotten on
@@ -645,12 +644,11 @@ namespace studio {
 			// The editor was measured at 0.8 ms of CPU work in a 16.67 ms frame:
 			// the delay was never the work, it was where the sleeping happened.
 			//
-			// Nothing is done with the result. A frame that could not be acquired
-			// is minimised or mid-resize, and `Render` reaches the same
-			// conclusion for itself a few lines later - checking it twice would
-			// mean deciding here what to skip, which is exactly the knowledge
-			// this loop does not have.
-			Renderer.WaitForFrame();
+			// A frame that could not be acquired is minimised or mid-resize. The
+			// result gates presentation below, after simulation, control,
+			// collaboration, and plugins have continued, so an invisible editor
+			// allocates and submits no rendering work.
+			const bool renderingActive = Renderer.WaitForFrame();
 
 			const float delta = Clock.Tick();
 			const double frameBegan = Clock.Now();
@@ -684,7 +682,9 @@ namespace studio {
 			PumpPlugins(delta);
 
 			Simulate(delta);
-			Present(delta);
+			if (renderingActive) {
+				Present(delta);
+			}
 
 			engine::core::FrameGraph::EndFrame();
 
@@ -1216,6 +1216,8 @@ namespace studio {
 			);
 		});
 
+		std::vector<engine::world::Presentation> demand;
+		demand.reserve(wanted.size());
 		for (const Name &name : wanted) {
 			for (const WorldId candidate : Universe->Worlds()) {
 				if (candidate == shown || Universe->NameOf(candidate) != name) {
@@ -1226,14 +1228,23 @@ namespace studio {
 				// `PresentationAlpha`'s whole subject: a world nothing is
 				// advancing has no next tick to interpolate towards, and asking
 				// for its accumulator draws every part at its birthplace.
-				Universe->Present(
-					candidate,
-					frameSeconds,
-					PresentationAlpha(Advancing, Universe->StateOf(candidate), Universe->AlphaOf(candidate))
+				demand.push_back(
+					engine::world::Presentation{
+						candidate,
+						frameSeconds,
+						PresentationAlpha(
+							Advancing, Universe->StateOf(candidate), Universe->AlphaOf(candidate)
+						),
+					}
 				);
 				break;
 			}
 		}
+
+		// Portal destinations are independent worlds. Preparing them as one
+		// joined batch keeps each on its own lane while the GPU owner consumes
+		// their copied draw lists later in PresentWorld.
+		(void)Universe->PresentMany(demand);
 	}
 
 	void Editor::PresentWorld(float frameSeconds) {

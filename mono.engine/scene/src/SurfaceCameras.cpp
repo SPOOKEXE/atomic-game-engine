@@ -1167,19 +1167,16 @@ namespace engine::scene {
 
 		const Vector3 offset = frame.Position - seam.Centre;
 
-		// **Strictly inside, and the margin is what identifies the hole
-		// itself.** A pane's own row is exactly the seam's rectangle - that is
-		// what the rectangle was measured from - so an inclusive test says every
-		// pane fits through itself, and a copy of one lands on the far pane and
-		// z-fights a wall with a picture on it. `CutAndCloneSeams` could refuse
-		// it by surface slot because it reads rows a viewer's world has aimed;
-		// the cross-world half reads rows from a world that may have no camera
-		// in it at all, where no pane carries a slot. A rule about size needs
-		// neither.
+		// **The rim is part of the aperture.** A character standing in the
+		// opening puts its lowest limbs exactly on the bottom edge, and an inward
+		// margin rejects only those limbs while the rest of the rig crosses. The
+		// small outward tolerance absorbs transform round-off; a real overhang is
+		// still refused.
 		//
-		// It also says the plain thing it looks like it says: to pass through a
-		// hole you have to be smaller than the hole. A body wedged exactly into
-		// a doorway is drawn whole on its own side, which is what it looks like.
+		// A row filling both axes is the pane itself in a world whose camera has
+		// not assigned surface slots yet. It is the one equality that must not
+		// cross: its copy lands on the partner pane and z-fights it. Contact on
+		// only one rim is ordinary doorway geometry and remains valid.
 		constexpr float SNUG = 1.0e-3f;
 
 		// **And it has to have two halves to be cut into**, which is the same
@@ -1191,9 +1188,13 @@ namespace engine::scene {
 		// question of a bounding sphere, which is the conservative form; this is
 		// the exact one, and it is free here because the support is already
 		// built.
+		const float firstReach = std::abs(offset.Dot(first)) + span(first);
+		const float secondReach = std::abs(offset.Dot(second)) + span(second);
+		const bool fillsPane =
+			std::abs(firstReach - firstLength) <= SNUG && std::abs(secondReach - secondLength) <= SNUG;
+
 		cut.Fits = span(seam.Normal) > std::abs(offset.Dot(seam.Normal)) + SNUG &&
-				   std::abs(offset.Dot(first)) + span(first) <= firstLength - SNUG &&
-				   std::abs(offset.Dot(second)) + span(second) <= secondLength - SNUG;
+				   firstReach <= firstLength + SNUG && secondReach <= secondLength + SNUG && !fillsPane;
 
 		return cut;
 	}

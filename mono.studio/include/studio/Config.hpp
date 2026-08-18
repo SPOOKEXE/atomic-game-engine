@@ -10,6 +10,7 @@
 //       cdn.json           the content origins and the order they are tried
 //       recent.json        the last five projects opened
 //       keybinds.json      what every action is bound to
+//       layout.ini         where panels are docked
 //
 // Three decisions, and each replaced something worse:
 //

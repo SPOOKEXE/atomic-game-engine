@@ -185,6 +185,19 @@ namespace engine::world {
 		uint64_t Deliveries = 0;
 	};
 
+	// One request to prepare a world's frame-rate presentation data.
+	//
+	// The request is a value so a host can gather several visible worlds, leave
+	// every store, and then dispatch them together. No store reference or pointer
+	// crosses the lane boundary.
+	//
+	// @since v0.17
+	struct Presentation {
+		WorldId World;
+		float FrameSeconds = 0.0f;
+		float Alpha = 0.0f;
+	};
+
 	// Owns worlds and drives them.
 	//
 	// @since v0.2
@@ -364,17 +377,39 @@ namespace engine::world {
 		// @tick
 		void Tick(float frameSeconds);
 
-		// Runs one world's presentation phase, on the driver thread.
+		// Runs one world's presentation phase on its stable execution lane.
 		//
 		// Separate from Tick because a client renders one world while the rest
 		// keep simulating, and because presentation advances at the frame rate
 		// rather than the tick rate.
+		//
+		// In WorldParallel mode the call blocks while the world's pinned worker
+		// runs PreRender. SceneParallel mode and unavailable affinity use the
+		// driver-thread fallback, preserving the same result with different
+		// placement.
 		//
 		// @param id           The world to present.
 		// @param frameSeconds Wall seconds the frame took.
 		// @param alpha        Interpolation position between the last two ticks.
 		// @return Whether the world exists.
 		WorldStatus Present(WorldId id, float frameSeconds, float alpha);
+
+		// Runs several worlds' presentation phases on their stable lanes.
+		//
+		// A client or editor should submit exactly the worlds demanded by visible
+		// viewports and cross-world captures. Distinct lanes run concurrently;
+		// worlds sharing a lane remain serial. The call joins before returning, so
+		// copied draw packets can be collected immediately and no work crosses a
+		// frame boundary.
+		//
+		// Unknown and remote worlds are ignored. Repeated world ids are refused by
+		// omission after the first request because one PreRender pass is one frame
+		// of derived world state.
+		//
+		// @param requests Value-only presentation requests.
+		// @return The number of local worlds presented.
+		// @tick
+		size_t PresentMany(std::span<const Presentation> requests);
 
 		// Runs `body` against a world's storage, on the driver thread.
 		//
@@ -615,6 +650,13 @@ namespace engine::world {
 		std::vector<int> OwedList;
 		std::vector<unsigned> ActiveLanes;
 		std::vector<unsigned> DispatchLanes;
+
+		// Reused by PresentMany. The public requests are values, while these
+		// pointers remain private to the joined dispatch that consumes them.
+		std::vector<World *> PresentationList;
+		std::vector<Presentation> PresentationRequests;
+		std::vector<unsigned> PresentationLanes;
+		std::vector<uint8_t> PresentationQueued;
 
 		// The bus backends and the barrier that applies traffic to them. Held
 		// by pointer so the header does not have to describe either - a

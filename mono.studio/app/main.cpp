@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <studio/Config.hpp>
 #include <studio/Editor.hpp>
 
@@ -52,6 +53,7 @@ int main(int argc, char **argv) {
 
 	arguments.Value("game", "PATH", "Game file to open at startup (.agame)");
 	arguments.Value("rojo", "PATH", "Sync this Rojo project or universe at startup ($ATOMIC_ROJO_PROJECT)");
+	arguments.Value("config-root", "DIR", "Keep this run's Studio configuration in DIR");
 	arguments.Value("width", "PX", "Window width (default 1600)");
 	arguments.Value("height", "PX", "Window height (default 900)");
 	arguments.Value("scale", "FACTOR", "Interface scale (default 1.0)");
@@ -82,6 +84,13 @@ int main(int argc, char **argv) {
 	if (parsed.HelpRequested) {
 		std::fputs(arguments.Help().c_str(), stdout);
 		return 0;
+	}
+
+	// Applied before the first preference, keybind, recent-project or layout
+	// read. This is one override for the whole editor rather than a test mode
+	// each configuration owner has to remember independently.
+	if (const auto configRoot = arguments.Get("config-root")) {
+		studio::SetConfigRoot(std::filesystem::path(*configRoot));
 	}
 
 	// **Before anything starts a world or a job.** The flag is read on every

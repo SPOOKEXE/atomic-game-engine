@@ -573,6 +573,7 @@ just run  --game My.agame       # single-player, both roles in one process
 | `--force-serial-compute` | off | run parallel dispatches on one thread |
 | `--game PATH` | - | open a game file at startup |
 | `--rojo PATH` | `$ATOMIC_ROJO_PROJECT` | sync a Rojo project or universe once the scene exists |
+| `--config-root DIR` | user config folder | keep this run's preferences, keybinds and layout in `DIR` |
 | `--width`, `--height` | 1600×900 | window size |
 | `--scale FACTOR` | 1.0 | multiplies every font and padding |
 | `--tick-rate HZ` | 60 | simulation rate while running |
@@ -680,6 +681,13 @@ whatever number it produced.
 ```sh
 just studio-smoke                      # loads, plays, renders, writes a capture
 just edit --headless --frames 12 --run play --capture shot.bmp
+```
+
+For window, swapchain, docking and mouse tests without touching the live
+desktop or Studio configuration, run the whole editor on a private X display:
+
+```sh
+scripts/run-studio-virtual.sh --frames 120 --run play
 ```
 
 **`--headless` is a renderer with no window rather than a hidden one.** There is

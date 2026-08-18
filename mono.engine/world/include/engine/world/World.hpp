@@ -252,11 +252,15 @@ namespace engine::world {
 		// @tick
 		void Tick(int ticks);
 
-		// Runs the presentation phase once, at the driver's frame rate.
+		// Runs the presentation phase once, at the host's frame rate.
 		//
 		// Separate from Tick because simulation and rendering do not advance
 		// together: the simulation runs zero or more times per frame at a fixed
 		// delta, and this runs once with whatever is left over as `alpha`.
+		//
+		// In a world-parallel universe this runs on the same stable physical-core
+		// lane as Tick. It binds the store for the call and completes before the
+		// driver reads any copied presentation output.
 		//
 		// @param frameSeconds Wall seconds the frame took.
 		// @param alpha        Interpolation position between the last two ticks.

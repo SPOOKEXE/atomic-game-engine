@@ -260,13 +260,11 @@ TEST_CASE("a tick reports itself to the frame graph and the metrics sink", "[ser
 	};
 
 	// The server no longer has a tick span of its own: the universe drives the
-	// barrier and the world runs the phases, so those are what the graph names.
-	// A span called after the program rather than after the work would have
-	// said less, not more.
+	// barrier and reports the joined time its pinned workers measured. Worker
+	// scopes cannot enter the driver-owned frame graph, so expecting individual
+	// world and system spans here would require contention on every worker span.
 	REQUIRE(named("Universe::Tick"));
-	REQUIRE(named("World::Tick"));
-	REQUIRE(named("integrate"));
-	REQUIRE(named("bounce"));
+	REQUIRE(named("worlds (pinned workers)"));
 
 	const auto counters = Metrics::Drain();
 	REQUIRE(std::any_of(counters.begin(), counters.end(), [](const auto &counter) {

@@ -14,6 +14,7 @@
 #include <cstring>
 #include <imgui.h>
 #include <imgui_internal.h>
+#include <SDL3/SDL_video.h>
 #include <span>
 #include <studio/Editor.hpp>
 #include <studio/Keybinds.hpp>
@@ -901,12 +902,18 @@ namespace studio {
 		// image stretched back up, which reads as a blurry renderer.
 		const ImVec2 origin = ImGui::GetCursorScreenPos();
 		const ImVec2 size = ImGui::GetContentRegionAvail();
-		const ImVec2 scale = ImGui::GetIO().DisplayFramebufferScale;
-		const float horizontal = scale.x > 0.0f ? scale.x : 1.0f;
-		const float vertical = scale.y > 0.0f ? scale.y : 1.0f;
 
-		target.Width = static_cast<uint32_t>(std::max(size.x, 1.0f) * horizontal);
-		target.Height = static_cast<uint32_t>(std::max(size.y, 1.0f) * vertical);
+		// Pixel density is scalar because display pixels are square. The imgui
+		// backend derives X and Y independently from two window-size queries;
+		// during a compositor resize those queries can briefly describe different
+		// window generations. Feeding that mismatched pair into the camera target
+		// changes its aspect while the panel's aspect has not changed, stretching
+		// both the world and game UI along one axis.
+		const float reportedDensity = Window != nullptr ? SDL_GetWindowPixelDensity(Window) : 1.0f;
+		const float density = reportedDensity > 0.0f ? reportedDensity : 1.0f;
+
+		target.Width = static_cast<uint32_t>(std::max(size.x, 1.0f) * density);
+		target.Height = static_cast<uint32_t>(std::max(size.y, 1.0f) * density);
 
 		// **The texture the renderer holds now, and it is usually this frame's
 		// picture rather than the last one's.** imgui records its draw lists
@@ -920,15 +927,19 @@ namespace studio {
 		// **Sampled to its extent rather than whole.** The texture is rounded up
 		// to a block and the world fills the corner, so drawing all of it would
 		// show the unwritten border down two edges.
-		if (void *texture = Renderer.SceneTexture(index); texture != nullptr) {
-			const engine::render::SceneExtent extent = Renderer.SceneTextureExtent(index);
+		const engine::render::SceneExtent extent = Renderer.SceneTextureExtent(index);
+		void *texture = Renderer.SceneTexture(index);
+		const bool textureMatchesPanel =
+			extent.DrawnWidth == target.Width && extent.DrawnHeight == target.Height;
+		if (texture != nullptr && textureMatchesPanel) {
 			ImGui::Image(
 				reinterpret_cast<ImTextureID>(texture), size, ImVec2(0.0f, 0.0f), ImVec2(extent.U, extent.V)
 			);
 		} else {
-			// The first frame, and any frame after a resize the renderer has not
-			// caught up with. Nothing to show yet; the button below still makes
-			// the panel drivable.
+			// The first frame, and the one catch-up frame after a panel resize.
+			// Showing the old image at the new aspect stretches the world; blanking
+			// this frame preserves the camera projection and the button below still
+			// makes the panel drivable.
 			ImGui::Dummy(size);
 		}
 

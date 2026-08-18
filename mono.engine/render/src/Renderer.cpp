@@ -1596,6 +1596,11 @@ namespace engine::render {
 		// zero is the ordinary case and the shader's loop ends immediately.
 		BeamUniforms Beams;
 
+		// The largest overflow already reported. Portal counts are stable for
+		// most scenes, so logging the same capacity decision every frame only
+		// hides later rendering diagnostics in thousands of duplicate lines.
+		size_t MaximumBeamCandidatesWarned = MAX_PORTAL_BEAMS;
+
 		// --- the surface target ----------------------------------------------
 		//
 		// Surface targets use colour and depth, with ping-pong textures to prevent
@@ -5716,6 +5721,8 @@ namespace engine::render {
 		return SceneExtent{
 			static_cast<float>(target.DrawnWidth) / static_cast<float>(target.Width),
 			static_cast<float>(target.DrawnHeight) / static_cast<float>(target.Height),
+			target.DrawnWidth,
+			target.DrawnHeight,
 		};
 	}
 
@@ -7398,8 +7405,11 @@ namespace engine::render {
 			if (havePortals && haveShadow && State->EnsureBeams()) {
 				ENGINE_PROFILE_CAT("portal beams", core::ProfileCategory::Render);
 
-				// The holes nearest the eye, because every fragment tests every live
-				// beam and four is what a corridor needs.
+				// The receiver holes nearest the eye, because every fragment tests
+				// every live beam and four is what a corridor needs. A directional
+				// beam starts at `Pane` and arrives at `Partner`; ranking the source
+				// drops the incoming beam for the room the eye is actually in when
+				// several pairs compete for the budget.
 				struct Beam {
 					const PortalView *Pane = nullptr;
 					const PortalView *Partner = nullptr;
@@ -7428,7 +7438,7 @@ namespace engine::render {
 						portal,
 						partner,
 						scene::RectangleDistance(
-							portal->Centre, portal->First, portal->Second, cameraFrame.Position
+							partner->Centre, partner->First, partner->Second, cameraFrame.Position
 						)
 					};
 				}
@@ -7437,7 +7447,7 @@ namespace engine::render {
 					return left.Distance < right.Distance;
 				});
 
-				if (candidates > MAX_PORTAL_BEAMS) {
+				if (candidates > State->MaximumBeamCandidatesWarned) {
 					// **Logged rather than dropped quietly.** A shadow that stops
 					// crossing when a fifth pane comes on screen reads as the feature
 					// not working at all, which is a much harder thing to look for
@@ -7447,6 +7457,7 @@ namespace engine::render {
 						candidates,
 						MAX_PORTAL_BEAMS
 					);
+					State->MaximumBeamCandidatesWarned = candidates;
 				}
 
 				const auto live = static_cast<uint32_t>(std::min<size_t>(candidates, MAX_PORTAL_BEAMS));
@@ -9235,10 +9246,11 @@ namespace engine::render {
 			}
 
 			if (make) {
-				const uint32_t resourceWidth =
-					scope == graph::NodeScope::Frame && width > 0 ? width : sceneWidth;
-				const uint32_t resourceHeight =
-					scope == graph::NodeScope::Frame && height > 0 ? height : sceneHeight;
+				// Graph images ultimately feed this view's output target. Using the
+				// Studio swapchain here makes an offscreen interface draw in one
+				// coordinate space while its pixel scissors are applied in another.
+				const uint32_t resourceWidth = sceneWidth;
+				const uint32_t resourceHeight = sceneHeight;
 				return State->EnsureGraphTarget(
 					*selectedPipeline, resource, owner, resourceWidth, resourceHeight
 				);

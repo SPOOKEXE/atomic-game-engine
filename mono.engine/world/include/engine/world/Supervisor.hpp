@@ -151,6 +151,9 @@ namespace engine::world {
 		// could otherwise say about where a host's time goes.
 		float Milliseconds = 0.0f;
 
+		// The host's replication port, or zero when it serves no clients.
+		uint16_t Port = 0;
+
 		// Whether it has a link the driver can speak on.
 		bool Linked = false;
 
@@ -349,6 +352,7 @@ namespace engine::world {
 			double LastHeartbeat = 0.0;
 			uint64_t Tick = 0;
 			float Milliseconds = 0.0f;
+			uint16_t Port = 0;
 			bool EverBeat = false;
 			bool Ready = false;
 		};

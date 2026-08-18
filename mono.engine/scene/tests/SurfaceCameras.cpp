@@ -2172,6 +2172,20 @@ TEST_CASE("nothing larger than a hole is drawn through it", "[scene][surfacecame
 		narrow, through, CFrame(Vector3{0.0f, 0.0f, -0.2f}), Vector3{1.0f, 2.0f, 1.0f}
 	);
 	CHECK(cut.Fits);
+
+	// Contact with the rim is still inside the aperture. The character fixture
+	// below puts its feet exactly here, and rejecting equality drops only those
+	// limbs while the rest of the rig crosses normally.
+	const engine::scene::SeamCut touching = engine::scene::CutOfSeam(
+		narrow, through, CFrame(Vector3{0.0f, -0.5f, -0.2f}), Vector3{1.0f, 2.0f, 1.0f}
+	);
+	CHECK(touching.Fits);
+
+	// Tolerance at the rim must not turn an actual overhang into a valid cut.
+	const engine::scene::SeamCut overhanging = engine::scene::CutOfSeam(
+		narrow, through, CFrame(Vector3{0.0f, -0.51f, -0.2f}), Vector3{1.0f, 2.0f, 1.0f}
+	);
+	CHECK_FALSE(overhanging.Fits);
 }
 
 TEST_CASE("the near plane and the clip follow the eye into a hole", "[scene][surfacecameras]") {

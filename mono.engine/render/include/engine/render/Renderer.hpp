@@ -603,6 +603,15 @@ namespace engine::render {
 
 		// The bottom edge of the drawn region, as a fraction of the texture.
 		float V = 1.0f;
+
+		// The pixel rectangle represented by this image. A panel may already
+		// have requested another size while its round-robin view still holds
+		// this one, so the sampling fractions alone cannot say whether showing
+		// it would stretch the camera projection.
+		//@{
+		uint32_t DrawnWidth = 0;
+		uint32_t DrawnHeight = 0;
+		//@}
 	};
 
 	// The backend handles a hook needs to build its own pipelines.

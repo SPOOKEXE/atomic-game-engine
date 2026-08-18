@@ -743,13 +743,76 @@ namespace engine::world {
 	WorldStatus Universe::Present(WorldId id, float frameSeconds, float alpha) {
 		RequireDriverThread("Present");
 
-		World *world = Reach(id);
-		if (world == nullptr) {
+		if (Reach(id) == nullptr) {
 			return WorldStatus::NoSuchWorld;
 		}
+		if (IsRemote(id)) {
+			return WorldStatus::Ok;
+		}
 
-		world->Present(frameSeconds, alpha);
+		const Presentation request{id, frameSeconds, alpha};
+		(void)PresentMany(std::span<const Presentation>(&request, 1));
 		return WorldStatus::Ok;
+	}
+
+	size_t Universe::PresentMany(std::span<const Presentation> requests) {
+		RequireDriverThread("PresentMany");
+
+		if (Ticking) {
+			ENGINE_ERROR("universe: PresentMany called while a tick batch is in flight.");
+			std::abort();
+		}
+
+		RefreshLanes(parallel::Jobs::PinnedWorkerCount());
+		PresentationList.clear();
+		PresentationRequests.clear();
+		PresentationLanes.clear();
+		PresentationList.reserve(requests.size());
+		PresentationRequests.reserve(requests.size());
+		PresentationLanes.reserve(requests.size());
+		PresentationQueued.resize(Registry.size());
+		std::fill(PresentationQueued.begin(), PresentationQueued.end(), uint8_t{0});
+
+		for (const Presentation &request : requests) {
+			World *world = Reach(request.World);
+			if (world == nullptr || IsRemote(request.World)) {
+				continue;
+			}
+
+			if (PresentationQueued[request.World.Index] != 0) {
+				continue;
+			}
+			PresentationQueued[request.World.Index] = 1;
+
+			PresentationList.push_back(world);
+			PresentationRequests.push_back(request);
+			PresentationLanes.push_back(
+				request.World.Index < LaneByWorld.size() ? LaneByWorld[request.World.Index] : INVALID_LANE
+			);
+		}
+
+		const bool parallel =
+			Settings_.Mode == ExecutionMode::WorldParallel && !parallel::ForceSerialCompute() &&
+			LaneCount > 0 &&
+			std::all_of(PresentationLanes.begin(), PresentationLanes.end(), [this](unsigned lane) {
+				return lane < LaneCount;
+			});
+
+		if (parallel && !PresentationList.empty()) {
+			parallel::Jobs::ForWorkers(PresentationLanes, [this](size_t begin, size_t end) {
+				for (size_t index = begin; index < end; index++) {
+					const Presentation &request = PresentationRequests[index];
+					PresentationList[index]->Present(request.FrameSeconds, request.Alpha);
+				}
+			});
+		} else {
+			for (size_t index = 0; index < PresentationList.size(); index++) {
+				const Presentation &request = PresentationRequests[index];
+				PresentationList[index]->Present(request.FrameSeconds, request.Alpha);
+			}
+		}
+
+		return PresentationList.size();
 	}
 
 	WorldStatus Universe::Enter(WorldId id, const std::function<void(ecs::Store &, ecs::Scheduler &)> &body) {

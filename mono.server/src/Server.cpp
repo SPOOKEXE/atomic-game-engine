@@ -532,7 +532,10 @@ namespace server {
 
 		engine::world::DriverSettings driver;
 		driver.Universe = universe;
-		driver.Hosts.WorldsPerHost = Settings.WorldsPerHost;
+		// A listening host is one replication authority and one UDP endpoint.
+		// Keeping one world in it makes the process, physics state, ECS store,
+		// and listener share the same failure and restart boundary.
+		driver.Hosts.WorldsPerHost = Settings.Listening ? 1u : Settings.WorldsPerHost;
 
 		driver.Hosts.Program = Settings.HostProgram.empty() ? ThisProgram() : Settings.HostProgram;
 
@@ -549,6 +552,13 @@ namespace server {
 
 		if (Settings.Chatter) {
 			driver.Hosts.Arguments.emplace_back("--chatter");
+		}
+		if (Settings.Listening) {
+			// Every child asks the OS for its own free port. The bound value comes
+			// back in its Ready frame, so no process races another over a guessed
+			// range and the driver can publish the exact endpoint.
+			driver.Hosts.Arguments.emplace_back("--listen");
+			driver.Hosts.Arguments.emplace_back("0");
 		}
 
 		Driver_ = std::make_unique<engine::world::Driver>(driver);
@@ -777,15 +787,6 @@ namespace server {
 	bool Server::BeginListening() {
 		if (!Settings.Listening) {
 			return true;
-		}
-
-		if (IsHost()) {
-			// A driver is the authority for every world in the universe,
-			// including the ones a host holds. A host that also streamed would
-			// be a second answer to the same world, which is the split brain the
-			// federated universe exists to prevent.
-			ENGINE_ERROR("--listen is for a driver. A host serves its driver, not clients.");
-			return false;
 		}
 
 		Socket = engine::net::MakeUdpTransport(Settings.ListenPort);
@@ -1935,7 +1936,7 @@ namespace server {
 			remote.push_back(world);
 		}
 
-		return engine::world::PlanHosts(remote, Settings.WorldsPerHost).size();
+		return engine::world::PlanHosts(remote, Settings.Listening ? 1u : Settings.WorldsPerHost).size();
 	}
 
 	bool Server::StartHosts() {
@@ -2011,8 +2012,13 @@ namespace server {
 			}
 		}
 
+		if (!BeginListening()) {
+			return false;
+		}
+
 		engine::world::HostFrame ready;
 		ready.Signal = engine::world::HostSignal::Ready;
+		ready.Port = ListeningOn().Port;
 		Link->Send(ready);
 
 		Running = true;
