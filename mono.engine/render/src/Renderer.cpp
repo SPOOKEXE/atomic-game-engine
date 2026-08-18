@@ -4897,7 +4897,7 @@ namespace engine::render {
 		// something to be given. D3D12 needs DXIL, which is still not built -
 		// asking for a format we cannot supply would find a device and then fail
 		// at pipeline creation, which is a worse error than being refused here.
-		State->Device = SDL_CreateGPUDevice(SUPPORTED_SHADER_FORMATS, false, nullptr);
+		State->Device = SDL_CreateGPUDevice(SUPPORTED_SHADER_FORMATS, true, nullptr);
 		if (!State->Device) {
 			ENGINE_ERROR("SDL_CreateGPUDevice: {}", SDL_GetError());
 			return false;
