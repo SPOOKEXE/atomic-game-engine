@@ -687,7 +687,7 @@ namespace engine::graph {
 
 			// --- interface and output ---------------------------------------------
 			{"overlay",
-			 "Overlay",
+			 "Debug Image Overlay",
 			 C::Interface,
 			 S::Frame,
 			 {{"window", K::Colour, LDR, false, "The frame to draw over."}},
@@ -695,7 +695,7 @@ namespace engine::graph {
 			 "The debug panels, drawn once over the whole frame rather than per view."},
 
 			{"interface",
-			 "Interface",
+			 "Interface Image Overlay",
 			 C::Interface,
 			 S::Frame,
 			 {{"window", K::Colour, LDR, false, "The frame to draw over."}},
@@ -703,7 +703,7 @@ namespace engine::graph {
 			 "The retained widget tree, last, over everything."},
 
 			{"present",
-			 "Present",
+			 "Scene Image",
 			 C::Output,
 			 S::Frame,
 			 {{"colour", K::Texture, LDR, true, "The frame to show."}},
@@ -833,7 +833,7 @@ namespace engine::graph {
 			 "downstream changes a list nobody reads."},
 
 			{"output",
-			 "Output",
+			 "View Image",
 			 C::Output,
 			 S::View,
 			 {{"colour", K::Texture, LDR, true, "The image this pipeline produced."}},
@@ -844,6 +844,17 @@ namespace engine::graph {
 			 "frame** - a camera's pipeline ends in that camera's picture, and a "
 			 "frame-scoped output could not be reached by an authored pipeline at "
 			 "all, because the frame's own block is always the standard graph's.",
+			 false},
+
+			{"output-image",
+			 "Output Image",
+			 C::Output,
+			 S::Frame,
+			 {{"image", K::Texture, LDR, true, "The fully composed frame."}},
+			 {},
+			 "The terminal image after presentation, debug drawing and interface "
+			 "composition. It has no output socket because nothing in the frame may "
+			 "run after the image handed to the display.",
 			 false},
 
 			{"overdraw",

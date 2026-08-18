@@ -85,12 +85,12 @@ TEST_CASE("the default frame compiles and its shadow pass is shared", "[graph]")
 	// draws for itself, and the window's overlay and chrome once over the lot.
 	CHECK(compiled.Shared.size() == 2);
 	CHECK(compiled.PerView.size() == 13);
-	CHECK(compiled.Final.size() == 3);
+	CHECK(compiled.Final.size() == 4);
 
 	CHECK(graph.Find(compiled.Shared.front())->Name == Name("world"));
 	CHECK(graph.Find(compiled.Shared.back())->Name == Name("shadow"));
 	CHECK(graph.Find(compiled.Final.front())->Name == Name("present"));
-	CHECK(graph.Find(compiled.Final.back())->Name == Name("interface"));
+	CHECK(graph.Find(compiled.Final.back())->Name == Name("output-image"));
 }
 
 TEST_CASE("four views pay for one shadow pass and four colour passes", "[graph]") {
@@ -133,12 +133,13 @@ TEST_CASE("no views runs the shared work and nothing else", "[graph]") {
 	// editor with every viewport closed still has panels to draw. **Both ends of
 	// the frame survive a viewless one** - which is the same contract
 	// `Renderer::Render` documents for an empty span of views.
-	REQUIRE(recorder.Ran.size() == 5);
+	REQUIRE(recorder.Ran.size() == 6);
 	CHECK(recorder.Ran[0] == "world");
 	CHECK(recorder.Ran[1] == "shadow");
 	CHECK(recorder.Ran[2] == "present");
 	CHECK(recorder.Ran[3] == "overlay");
 	CHECK(recorder.Ran[4] == "interface");
+	CHECK(recorder.Ran[5] == "output-image");
 }
 
 TEST_CASE("one view's passes are adjacent rather than interleaved", "[graph]") {
@@ -690,8 +691,9 @@ TEST_CASE("the default frame draws the window's nodes after every view", "[graph
 	// **The editor's chrome is drawn once, last, however many viewports there
 	// are.** Marking it per view would draw the panels twice here, each into
 	// whichever target that viewport was using.
-	CHECK(recorder.Ran.back() == "interface");
+	CHECK(recorder.Ran.back() == "output-image");
 	CHECK(std::count(recorder.Ran.begin(), recorder.Ran.end(), "interface") == 1);
+	CHECK(std::count(recorder.Ran.begin(), recorder.Ran.end(), "output-image") == 1);
 	CHECK(std::count(recorder.Ran.begin(), recorder.Ran.end(), "overlay") == 1);
 
 	// And the world's passes really did run twice.

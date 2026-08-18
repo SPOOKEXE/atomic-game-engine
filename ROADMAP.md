@@ -60,7 +60,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] sample `SurfaceAppearance.HeightMap` with parallax UVs in the opaque and G-buffer material paths
 - [x] render pipeline is per world, not per process
 - [x] render pipelines are saved in the world's export data
-- [x] rendering pipeline debugger and profiler with per-node operations, CPU wall time, GPU timestamps, resource images and histograms
+- [x] rendering pipeline debugger and profiler with per-node operations, CPU wall time, GPU timestamps, expandable stage images and histograms; the default graph ends at one `Output Image` after scene, debug and interface image composition
 - [x] preserve valid per-node Vulkan GPU timestamps when an async-eligible compute prefix uses a dedicated command buffer submitted before the main graph command buffer
 - [x] rendering pipeline additions: ambient occlusion, emissive, PBR and a default node setup containing all of them
 - [x] apply the useful traffic, clear and CPU-to-GPU lessons from https://www.youtube.com/watch?v=SnNm7rSSvlg (Threat Interactive Tutorial: How To Optimize Almost Every Step In Modern Game Rendering)

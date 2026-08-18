@@ -24,6 +24,41 @@ namespace studio {
 			}
 			return text.find(wanted) != std::string::npos;
 		}
+
+		bool IsImage(engine::graph::ResourceKind kind) {
+			using engine::graph::ResourceKind;
+			return kind == ResourceKind::Colour || kind == ResourceKind::Depth ||
+				   kind == ResourceKind::Texture || kind == ResourceKind::Storage;
+		}
+
+		const engine::graph::ProfileResource *ProfileResourceOf(
+			const engine::graph::PipelineProfile &profile, engine::graph::ResourceId wanted
+		) {
+			for (const engine::graph::ProfileResource &resource : profile.Resources) {
+				if (resource.Id == wanted) {
+					return &resource;
+				}
+			}
+			return nullptr;
+		}
+
+		template <typename Draw>
+		bool DrawStageImages(
+			const engine::graph::PipelineProfile &profile, const engine::graph::Node &node, Draw draw
+		) {
+			const std::vector<engine::graph::ResourceId> &images =
+				node.Writes.empty() ? node.Reads : node.Writes;
+			bool drewImage = false;
+			for (const engine::graph::ResourceId resourceId : images) {
+				const engine::graph::ProfileResource *resource = ProfileResourceOf(profile, resourceId);
+				if (resource == nullptr || !IsImage(resource->Kind)) {
+					continue;
+				}
+				drewImage = true;
+				draw(*resource);
+			}
+			return drewImage;
+		}
 	}
 
 	void Editor::LoadRenderPipeline(WorldId world, engine::core::Name wanted) {
@@ -258,6 +293,54 @@ namespace studio {
 				);
 			}
 		}
+
+		engine::graph::PipelineDocument document;
+		std::string error;
+		engine::graph::RenderGraph graph;
+		engine::core::Name offender;
+		engine::graph::CompiledGraph compiled;
+		const auto canvasNode = std::find_if(
+			RenderPipelineGraph.Nodes().begin(),
+			RenderPipelineGraph.Nodes().end(),
+			[node](const nodegraph::Node &candidate) { return candidate.Id == node->Id; }
+		);
+		if (canvasNode != RenderPipelineGraph.Nodes().end() &&
+			SaveRenderPipelineGraph(RenderPipelineGraph, RenderPipelineBasis, document, error) &&
+			engine::graph::Build(document, graph, offender) == engine::graph::PipelineDocumentStatus::Ok &&
+			graph.Compile(compiled, offender) == engine::graph::GraphStatus::Ok) {
+			const auto offset = static_cast<uint32_t>(canvasNode - RenderPipelineGraph.Nodes().begin());
+			const engine::graph::Node *renderNode = graph.Find(engine::graph::NodeId{offset + 1});
+			if (renderNode != nullptr) {
+				const auto &gpuTimings = Renderer.PassTimings();
+				const auto &wallTimings = Renderer.PassWallTimes();
+				const auto gpu = gpuTimings.find(renderNode->Name.Id());
+				const auto wall = wallTimings.find(renderNode->Name.Id());
+				ImGui::SeparatorText("Profile");
+				if (gpu != gpuTimings.end() && gpu->second > 0.0) {
+					ImGui::Text(
+						"GPU %.3f ms, wall %.3f ms",
+						gpu->second / 1000.0,
+						wall == wallTimings.end() ? 0.0 : wall->second / 1000.0
+					);
+				} else {
+					ImGui::TextDisabled(
+						Renderer.Timed() ? "GPU pending, wall %.3f ms" : "GPU unavailable, wall %.3f ms",
+						wall == wallTimings.end() ? 0.0 : wall->second / 1000.0
+					);
+				}
+
+				const uint32_t width = WorldTarget.IsValid() ? WorldTarget.Width : 1920;
+				const uint32_t height = WorldTarget.IsValid() ? WorldTarget.Height : 1080;
+				const engine::graph::PipelineProfile profile =
+					engine::graph::ProfilePipeline(graph, compiled, width, height);
+				const bool drewImage = DrawStageImages(profile, *renderNode, [this](const auto &resource) {
+					DrawProfileImage(resource.Name, resource.Width, resource.Height, 240.0f);
+				});
+				if (!drewImage) {
+					ImGui::TextDisabled("This stage does not produce an image.");
+				}
+			}
+		}
 		ImGui::Spacing();
 		ImGui::TextWrapped(
 			"Queue, async, culling, and compute dispatch controls live on the node body. Wires determine "
@@ -407,17 +490,34 @@ namespace studio {
 			mib(profile.TotalBytes),
 			mib(profile.TotalBytes - profile.PeakBytes)
 		);
+		ImGui::SeparatorText("Stage images and timings");
 		for (const engine::graph::ProfilePass &pass : profile.Passes) {
-			ImGui::TextUnformatted(std::string(pass.Name.Text()).c_str());
+			ImGui::PushID(static_cast<int>(pass.Node.Value));
+			const std::string name(pass.Name.Text());
+			const bool open = ImGui::TreeNodeEx(name.c_str(), ImGuiTreeNodeFlags_SpanAvailWidth);
 			ImGui::SameLine();
 			if (pass.Elapsed > 0.0) {
-				ImGui::TextDisabled("GPU %.3f ms, wall %.3f ms", pass.Elapsed / 1000.0, pass.Wall / 1000.0);
+				ImGui::TextDisabled("GPU %.3f ms  wall %.3f ms", pass.Elapsed / 1000.0, pass.Wall / 1000.0);
 			} else {
 				ImGui::TextDisabled(
-					Renderer.Timed() ? "GPU pending, wall %.3f ms" : "GPU unavailable, wall %.3f ms",
+					Renderer.Timed() ? "GPU pending  wall %.3f ms" : "GPU unavailable  wall %.3f ms",
 					pass.Wall / 1000.0
 				);
 			}
+			if (open) {
+				const engine::graph::Node *node = graph.Find(pass.Node);
+				const bool drewImage = node != nullptr &&
+								   DrawStageImages(profile, *node, [this](const auto &resource) {
+									   DrawProfileImage(
+										   resource.Name, resource.Width, resource.Height, 320.0f
+									   );
+								   });
+				if (!drewImage) {
+					ImGui::TextDisabled("This stage does not produce an image.");
+				}
+				ImGui::TreePop();
+			}
+			ImGui::PopID();
 		}
 
 		if (ImGui::BeginTable(
@@ -472,6 +572,37 @@ namespace studio {
 
 		DrawProfileWatch();
 		ImGui::End();
+	}
+
+	void Editor::DrawProfileImage(
+		engine::core::Name resource, uint32_t width, uint32_t height, float maximumWidth
+	) {
+		const std::string name(resource.Text());
+		void *texture = Renderer.ResourceTexture(resource, 0);
+		ImGui::TextUnformatted(name.c_str());
+		if (texture == nullptr || width == 0 || height == 0) {
+			ImGui::TextDisabled("No image is allocated for the current viewport.");
+			return;
+		}
+
+		const float available = std::max(ImGui::GetContentRegionAvail().x, 64.0f);
+		const float shown = std::min(available, maximumWidth);
+		const float aspect = static_cast<float>(width) / static_cast<float>(height);
+		const engine::render::SceneExtent extent = Renderer.ResourceTextureExtent(resource, 0);
+		ImGui::Image(
+			reinterpret_cast<ImTextureID>(texture),
+			ImVec2{shown, shown / std::max(aspect, 0.01f)},
+			ImVec2{0.0f, 0.0f},
+			ImVec2{extent.U, extent.V}
+		);
+		if (ImGui::IsItemClicked()) {
+			ProfileWatched = resource;
+			ShowPipelineProfile = true;
+			Renderer.Inspect(resource, 0);
+		}
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Click to inspect %s with its histogram.", name.c_str());
+		}
 	}
 
 	void Editor::DrawProfileWatch() {

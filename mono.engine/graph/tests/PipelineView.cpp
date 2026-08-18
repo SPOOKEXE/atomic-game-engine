@@ -75,9 +75,9 @@ TEST_CASE("every enabled node is placed, in execution order", "[graph]") {
 	const RenderGraph graph = DefaultGraph();
 	const PipelineLayout layout = LayoutOf(graph);
 
-	REQUIRE(layout.Nodes.size() == 18);
+	REQUIRE(layout.Nodes.size() == 19);
 	CHECK(layout.Nodes.front().Name == Name("world"));
-	CHECK(layout.Nodes.back().Name == Name("interface"));
+	CHECK(layout.Nodes.back().Name == Name("output-image"));
 }
 
 TEST_CASE("nodes are banded the way the frame runs", "[graph]") {
@@ -97,6 +97,7 @@ TEST_CASE("nodes are banded the way the frame runs", "[graph]") {
 	CHECK(bandOf("shadow") == Band::Shared);
 	CHECK(bandOf("gbuffer") == Band::PerView);
 	CHECK(bandOf("interface") == Band::Final);
+	CHECK(bandOf("output-image") == Band::Final);
 }
 
 TEST_CASE("columns restart within each band", "[graph]") {
@@ -124,6 +125,7 @@ TEST_CASE("columns restart within each band", "[graph]") {
 	CHECK(columnOf("present") == 0);
 	CHECK(columnOf("overlay") == 1);
 	CHECK(columnOf("interface") == 2);
+	CHECK(columnOf("output-image") == 3);
 
 	// Wide enough for the widest band, which is the per-view one at twelve.
 	CHECK(layout.Columns == 13);
@@ -140,6 +142,7 @@ TEST_CASE("an edge joins a reader to the node that wrote what it reads", "[graph
 	CHECK(Joined(graph, layout, "surface", "transparent", "surface"));
 	CHECK(Joined(graph, layout, "gbuffer", "depth-linearise", "depth"));
 	CHECK(Joined(graph, layout, "tonemap", "transparent", "display"));
+	CHECK(Joined(graph, layout, "interface", "output-image", "window"));
 }
 
 TEST_CASE("the edge comes from the last writer, not from every earlier one", "[graph]") {
@@ -241,7 +244,7 @@ TEST_CASE("a disabled node is absent from the layout", "[graph]") {
 	REQUIRE(graph.SetEnabled(transparent, false));
 
 	const PipelineLayout after = LayoutOf(graph);
-	CHECK(after.Nodes.size() == 17);
+	CHECK(after.Nodes.size() == 18);
 	CHECK_FALSE(Joined(graph, after, "tonemap", "transparent", "display"));
 }
 

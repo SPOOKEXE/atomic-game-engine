@@ -81,9 +81,9 @@ namespace {
 TEST_CASE("the default frame profiles into a full grid", "[graph][profile]") {
 	const PipelineProfile profile = Profiled(DefaultGraph());
 
-	REQUIRE(profile.Passes.size() == 18);
+	REQUIRE(profile.Passes.size() == 19);
 	REQUIRE(profile.Resources.size() == 18);
-	CHECK(profile.Cells.size() == 324);
+	CHECK(profile.Cells.size() == 342);
 
 	// The three blocks, in the order a frame runs them.
 	CHECK(profile.Passes.front().Where == engine::graph::Band::Shared);
@@ -98,6 +98,7 @@ TEST_CASE("the default frame profiles into a full grid", "[graph][profile]") {
 	// `transparent` blends over the colour it then writes back, and a version of
 	// this that reported only the write would make it look like a replacement.
 	CHECK(profile.At(RowOf(profile, "display"), ColumnOf(profile, "transparent")) == Access::ReadWrite);
+	CHECK(profile.At(RowOf(profile, "window"), ColumnOf(profile, "output-image")) == Access::Read);
 
 	// And a pass that never touches a resource says so.
 	CHECK(profile.At(RowOf(profile, "shadow"), ColumnOf(profile, "interface")) == Access::None);

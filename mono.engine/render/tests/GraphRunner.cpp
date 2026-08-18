@@ -83,9 +83,10 @@ TEST_CASE("the default graph is dispatched in authored order", "[render][graph]"
 				   "present",
 				   "overlay",
 				   "interface",
+				   "output-image",
 			   }
 	);
-	CHECK(runner.Submitted() == 18);
+	CHECK(runner.Submitted() == 19);
 	CHECK_FALSE(runner.Unhandled().IsValid());
 }
 

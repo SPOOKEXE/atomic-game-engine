@@ -171,7 +171,8 @@ TEST_CASE("the default PBR frame's kinds and material ports are registered", "[g
 		  "transparent",
 		  "present",
 		  "overlay",
-		  "interface"}) {
+		  "interface",
+		  "output-image"}) {
 		INFO("kind: " << name);
 		CHECK(NodeCatalogue::Find(Name(name)) != nullptr);
 	}
@@ -222,6 +223,22 @@ TEST_CASE("a kind's slot count matches what the default frame binds", "[graph][c
 	ports("present", 1, 1);
 	ports("overlay", 1, 1);
 	ports("interface", 1, 1);
+	ports("output-image", 1, 0);
+}
+
+TEST_CASE("the composed frame ends at one output image sink", "[graph][catalogue][output]") {
+	Kinds();
+
+	const NodeKindSpec *view = NodeCatalogue::Find(Name("output"));
+	const NodeKindSpec *final = NodeCatalogue::Find(Name("output-image"));
+	REQUIRE(view != nullptr);
+	REQUIRE(final != nullptr);
+	CHECK(view->Label == "View Image");
+	CHECK(view->Scope == engine::graph::NodeScope::View);
+	CHECK(final->Label == "Output Image");
+	CHECK(final->Scope == engine::graph::NodeScope::Frame);
+	CHECK(final->Inputs.size() == 1);
+	CHECK(final->Outputs.empty());
 }
 
 TEST_CASE("registering a kind twice replaces it", "[graph][catalogue]") {

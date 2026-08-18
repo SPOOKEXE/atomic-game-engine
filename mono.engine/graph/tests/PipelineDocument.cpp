@@ -90,12 +90,12 @@ TEST_CASE("the default document builds the engine frame", "[graph]") {
 
 	REQUIRE(fromDocument.Shared.size() == 2);
 	REQUIRE(fromDocument.PerView.size() == 13);
-	REQUIRE(fromDocument.Final.size() == 3);
+	REQUIRE(fromDocument.Final.size() == 4);
 	CHECK(graph.Find(fromDocument.Shared.front())->Name == Name("world"));
 	CHECK(graph.Find(fromDocument.Shared.back())->Name == Name("shadow"));
 	CHECK(graph.Find(fromDocument.PerView.front())->Name == Name("camera"));
 	CHECK(graph.Find(fromDocument.PerView.back())->Name == Name("output"));
-	CHECK(graph.Find(fromDocument.Final.back())->Name == Name("interface"));
+	CHECK(graph.Find(fromDocument.Final.back())->Name == Name("output-image"));
 }
 
 TEST_CASE("the default document round trips through text", "[graph]") {
@@ -134,7 +134,7 @@ TEST_CASE("the default PBR document carries material emission and ambient occlus
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
 	REQUIRE(compiled.Shared.size() == 2);
 	REQUIRE(compiled.PerView.size() == 13);
-	REQUIRE(compiled.Final.size() == 3);
+	REQUIRE(compiled.Final.size() == 4);
 
 	CHECK(graph.Find(compiled.Shared[0])->Kind == Name("world"));
 	CHECK(graph.Find(compiled.Shared[1])->Kind == Name("shadow"));
@@ -151,6 +151,7 @@ TEST_CASE("the default PBR document carries material emission and ambient occlus
 	CHECK(graph.Find(compiled.PerView[11])->Kind == Name("transparent"));
 	CHECK(graph.Find(compiled.PerView[12])->Kind == Name("output"));
 	CHECK(graph.Find(compiled.Final[0])->Kind == Name("present"));
+	CHECK(graph.Find(compiled.Final[3])->Kind == Name("output-image"));
 
 	bool emissive = false;
 	bool occlusion = false;

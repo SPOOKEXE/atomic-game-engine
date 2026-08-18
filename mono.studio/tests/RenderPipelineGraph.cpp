@@ -6,6 +6,8 @@
 
 #include <studio/RenderPipelineGraph.hpp>
 
+#include <algorithm>
+
 TEST_SUITE_ID("studio.renderpipelinegraph")
 TEST_DEPENDS("engine.graph.pipelinedocument")
 
@@ -16,8 +18,8 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 	std::string error;
 	REQUIRE(studio::LoadRenderPipelineGraph(DefaultPbrDocument(), canvas, error));
 
-	CHECK(canvas.Nodes().size() == 18);
-	CHECK(canvas.Links().size() == 32);
+	CHECK(canvas.Nodes().size() == 19);
+	CHECK(canvas.Links().size() == 33);
 	CHECK(canvas.Ordered().size() == canvas.Nodes().size());
 
 	bool sawSsao = false;
@@ -30,6 +32,13 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 		}
 	}
 	CHECK(sawSsao);
+	const auto output = std::find_if(
+		canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
+			return node.Type == "render.pass.output-image";
+		}
+	);
+	REQUIRE(output != canvas.Nodes().end());
+	CHECK(canvas.LinkInto(output->Id, "image") != nullptr);
 }
 
 TEST_CASE("a canvas edit round trips to a schedulable world document", "[studio][pipeline]") {

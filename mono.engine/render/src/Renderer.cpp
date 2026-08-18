@@ -90,6 +90,9 @@ namespace engine::render {
 				BackendNode{
 					core::Name("interface"), graph::NodeScope::Frame, graph::ExecutionQueue::Graphics
 				},
+				BackendNode{
+					core::Name("output-image"), graph::NodeScope::Frame, graph::ExecutionQueue::Transfer
+				},
 			};
 			return nodes;
 		}
@@ -9894,6 +9897,13 @@ namespace engine::render {
 			// "what did the engine draw", and a widget count is the editor's
 			// business rather than the renderer's.
 			result.DrawCalls++;
+			return true;
+		});
+		frameNodes.Set(core::Name("output-image"), [&](const graph::RunContext &context) {
+			// The frame is already in its external image. This terminal records its
+			// place in timings and makes the actual final resource inspectable without
+			// copying it to a second texture only to name the end of the graph.
+			enterNamedPass(context.Name);
 			return true;
 		});
 

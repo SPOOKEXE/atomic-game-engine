@@ -941,6 +941,9 @@ namespace engine::graph {
 		touches(EditKind::Reads, "window", "window");
 		touches(EditKind::Writes, "window", "window");
 
+		node("output-image", NodeScope::Frame);
+		touches(EditKind::Reads, "window", "image");
+
 		return document;
 	}
 }
