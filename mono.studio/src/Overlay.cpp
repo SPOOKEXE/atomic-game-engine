@@ -25,6 +25,7 @@
 #include <imgui.h>
 #include <optional>
 #include <studio/Editor.hpp>
+#include <studio/Viewports.hpp>
 #include <vector>
 
 namespace studio {
@@ -1517,13 +1518,12 @@ namespace studio {
 		}
 
 		const ViewportState *viewport = ExtraAt(index);
-		const engine::render::SceneTarget &display = viewport != nullptr ? viewport->Target : WorldTarget;
-		const float scaleX = display.IsValid() ? static_cast<float>(display.Width) / slot.Width : 1.0f;
-		const float scaleY = display.IsValid() ? static_cast<float>(display.Height) / slot.Height : 1.0f;
-
+		const ImVec2 mouse = ImGui::GetIO().MousePos;
+		const ViewportCanvas canvas =
+			CanvasForViewport(slot.X, slot.Y, slot.Width, slot.Height, mouse.x, mouse.y);
 		engine::gui::CompileRequest request;
-		request.Display.Width = display.IsValid() ? static_cast<float>(display.Width) : slot.Width;
-		request.Display.Height = display.IsValid() ? static_cast<float>(display.Height) : slot.Height;
+		request.Display.Width = canvas.Width;
+		request.Display.Height = canvas.Height;
 
 		// **Fed back from the previous frame's routing, deliberately.** The
 		// hover is computed from the list a compile produced, so a compile that
@@ -1536,11 +1536,10 @@ namespace studio {
 		// The pointer in canvas space, which is the panel's own corner as the
 		// origin. A `ScreenGui` inside a panel is laid out from that corner, so
 		// anything else would hit-test against a canvas nobody drew.
-		const ImVec2 mouse = ImGui::GetIO().MousePos;
 		engine::gui::Pointer pointer;
 		pointer.Position = engine::core::Vector2{
-			(mouse.x - slot.X) * scaleX,
-			(mouse.y - slot.Y) * scaleY,
+			canvas.PointerX,
+			canvas.PointerY,
 		};
 		pointer.Down = ImGui::IsMouseDown(ImGuiMouseButton_Left);
 		pointer.ScreenOnly = true;

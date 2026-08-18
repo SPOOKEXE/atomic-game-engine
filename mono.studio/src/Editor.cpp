@@ -1554,10 +1554,7 @@ namespace studio {
 					);
 					GameInterface.Submit(
 						GuiLists[DrawingViewport].Commands(),
-						engine::core::Vector2{
-							static_cast<float>(target.Width),
-							static_cast<float>(target.Height),
-						},
+						GuiLists[DrawingViewport].Commands().CanvasSize,
 						store
 					);
 				}

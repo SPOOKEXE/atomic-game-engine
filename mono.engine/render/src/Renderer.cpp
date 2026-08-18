@@ -68,7 +68,12 @@ namespace engine::render {
 				BackendNode{
 					core::Name("upload-instances"), graph::NodeScope::View, graph::ExecutionQueue::Transfer
 				},
-				BackendNode{core::Name("surface"), graph::NodeScope::View, graph::ExecutionQueue::Graphics},
+				BackendNode{
+					core::Name("last-frame"), graph::NodeScope::View, graph::ExecutionQueue::Graphics
+				},
+				BackendNode{
+					core::Name("mirror-capture"), graph::NodeScope::View, graph::ExecutionQueue::Graphics
+				},
 				BackendNode{
 					core::Name("portal-capture"), graph::NodeScope::View, graph::ExecutionQueue::Graphics
 				},
@@ -670,6 +675,7 @@ namespace engine::render {
 		enum class ResourceRole : uint8_t {
 			Unknown,
 			Scene,
+			PreviousFrame,
 			Depth,
 			Shadow,
 			Surface,
@@ -702,7 +708,10 @@ namespace engine::render {
 					if (node->Kind == core::Name("shadow")) {
 						return ResourceRole::Shadow;
 					}
-					if (node->Kind == core::Name("surface")) {
+					if (node->Kind == core::Name("last-frame")) {
+						return ResourceRole::PreviousFrame;
+					}
+					if (node->Kind == core::Name("mirror-capture")) {
 						return ResourceRole::Surface;
 					}
 					if (node->Kind == core::Name("portal-capture")) {
@@ -1345,6 +1354,14 @@ namespace engine::render {
 			SDL_GPUTexture *Depth = nullptr;
 			uint32_t DepthWidth = 0;
 			uint32_t DepthHeight = 0;
+
+			// The previous completed graph output. A swapchain image is neither
+			// owned by the renderer nor guaranteed to support sampling, so the
+			// last-frame graph resource must never alias it.
+			SDL_GPUTexture *History = nullptr;
+			uint32_t HistoryWidth = 0;
+			uint32_t HistoryHeight = 0;
+			bool HistoryReady = false;
 		};
 
 		std::vector<SceneSlot> SceneSlots;
@@ -2021,6 +2038,7 @@ namespace engine::render {
 			uint32_t height
 		);
 		bool EnsureScene(uint32_t width, uint32_t height);
+		bool EnsureHistory(size_t slot, uint32_t width, uint32_t height);
 
 		// Whether this renderer has a window at all.
 		//
@@ -3653,6 +3671,45 @@ namespace engine::render {
 		return true;
 	}
 
+	bool Renderer::Impl::EnsureHistory(size_t slot, uint32_t width, uint32_t height) {
+		SceneSlot &history = SlotAt(slot);
+		if (history.History != nullptr && history.HistoryWidth == width && history.HistoryHeight == height) {
+			return true;
+		}
+
+		if (history.History != nullptr) {
+			// The texture may still be sampled by work submitted for the previous
+			// frame. Retiring it follows the same frame-boundary ownership rule as
+			// a resized viewport target.
+			RetiredScenes.push_back(history.History);
+			history.History = nullptr;
+		}
+		history.HistoryWidth = 0;
+		history.HistoryHeight = 0;
+		history.HistoryReady = false;
+		if (width == 0 || height == 0) {
+			return false;
+		}
+
+		SDL_GPUTextureCreateInfo info{};
+		info.type = SDL_GPU_TEXTURETYPE_2D;
+		info.format = ColourFormat();
+		info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+		info.width = width;
+		info.height = height;
+		info.layer_count_or_depth = 1;
+		info.num_levels = 1;
+		info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+		history.History = SDL_CreateGPUTexture(Device, &info);
+		if (history.History == nullptr) {
+			ENGINE_ERROR("SDL_CreateGPUTexture (frame history): {}", SDL_GetError());
+			return false;
+		}
+		history.HistoryWidth = width;
+		history.HistoryHeight = height;
+		return true;
+	}
+
 	bool Renderer::Impl::EnsureDepthIn(
 		SDL_GPUTexture *&texture, uint32_t &haveWidth, uint32_t &haveHeight, uint32_t width, uint32_t height
 	) {
@@ -5168,6 +5225,10 @@ namespace engine::render {
 				SDL_ReleaseGPUTexture(device, slot.Depth);
 				slot.Depth = nullptr;
 			}
+			if (slot.History) {
+				SDL_ReleaseGPUTexture(device, slot.History);
+				slot.History = nullptr;
+			}
 		}
 		for (Impl::PbrSlot &slot : State->PbrSlots) {
 			State->ReleasePbr(slot);
@@ -5539,6 +5600,13 @@ namespace engine::render {
 			}
 		}
 		const Impl::ResourceRole role = State->RoleFor(resource);
+		if (role == Impl::ResourceRole::PreviousFrame) {
+			if (slot >= State->SceneSlots.size()) {
+				return nullptr;
+			}
+			const Impl::SceneSlot &history = State->SceneSlots[slot];
+			return history.HistoryReady ? history.History : nullptr;
+		}
 		if (role == Impl::ResourceRole::Scene) {
 			return SceneTexture(slot);
 		}
@@ -5745,8 +5813,9 @@ namespace engine::render {
 			}
 		}
 		const Impl::ResourceRole role = State->RoleFor(resource);
-		if (role == Impl::ResourceRole::Shadow || role == Impl::ResourceRole::Surface ||
-			role == Impl::ResourceRole::PortalImage || role == Impl::ResourceRole::PortalDisplay) {
+		if (role == Impl::ResourceRole::PreviousFrame || role == Impl::ResourceRole::Shadow ||
+			role == Impl::ResourceRole::Surface || role == Impl::ResourceRole::PortalImage ||
+			role == Impl::ResourceRole::PortalDisplay) {
 			return SceneExtent{1.0f, 1.0f};
 		}
 		if (role == Impl::ResourceRole::Scene || role == Impl::ResourceRole::Depth) {
@@ -6627,10 +6696,21 @@ namespace engine::render {
 		// the iterating path is not the thing being measured - a cross-world pane
 		// shows a second simulation and a camera parented to the world has no
 		// face, so neither can be descended into and neither reports a depth.
+		const graph::Node *mirrorCapture = graphNode(core::Name("mirror-capture"));
+		const uint32_t mirrorDepthLimit = std::clamp(
+			mirrorCapture != nullptr ? mirrorCapture->Integer(core::Name("max-recursion"), MAX_SURFACE_DEPTH)
+									 : MAX_SURFACE_DEPTH,
+			1u,
+			MAX_SURFACE_DEPTH
+		);
+		const bool mirrorHistory = mirrorCapture == nullptr ||
+								   mirrorCapture->Parameter(core::Name("feedback")) == nullptr ||
+								   *mirrorCapture->Parameter(core::Name("feedback")) != "flat";
 		const uint32_t surfaceBounces =
-			State->SurfaceBounces > 0 ? std::min(State->SurfaceBounces, MAX_SURFACE_DEPTH)
-									  : (anyPane ? scene::NextSurfaceBounces(bank.Bounces, MAX_SURFACE_DEPTH)
-												 : scene::DEFAULT_SURFACE_BOUNCES);
+			State->SurfaceBounces > 0
+				? std::min(State->SurfaceBounces, mirrorDepthLimit)
+				: (anyPane ? scene::NextSurfaceBounces(bank.Bounces, mirrorDepthLimit)
+						   : std::min(scene::DEFAULT_SURFACE_BOUNCES, mirrorDepthLimit));
 
 		// What this frame reaches, which the next one reads back out of the bank.
 		//
@@ -7962,12 +8042,10 @@ namespace engine::render {
 				drawWorldInto(pass, levelLighting, pane.TagFilter);
 
 				// The other panes, put back one at a time, each sampling the level
-				// below. A pane whose level below was not reached - off screen,
-				// edge-on, or at the bottom of the recursion - draws as its own lit
-				// material, which is what a mirror at the end of a chain looks
-				// like and is deliberately not the portal pass's ambient terminus:
-				// a hole with nothing behind it is a hole, and a mirror with
-				// nothing behind it is a pane of glass.
+				// below. At the recursion bound it samples that pane's completed
+				// image from the prior frame. This preserves a continuing corridor
+				// without adding another same-frame scene draw. A pane with no
+				// history yet draws as its own lit material for the first frame.
 				//
 				// **The opaque runs only, exactly as the portal pass does it.** A
 				// pane that went transparent left the opaque head, and
@@ -8007,6 +8085,17 @@ namespace engine::render {
 						};
 						SDL_PushGPUVertexUniformData(command, 0, &seenFrame, sizeof(seenFrame));
 						paneTexture = below->Colour;
+					} else if (mirrorHistory && bank.Surfaces[seen].Ready) {
+						const Impl::SurfaceSlotState &history = bank.Surfaces[seen];
+						paneLighting = lightingAt(eye.Frame.Position, 1.0f, history.ImageOpacity);
+						paneLighting.Mirror.x = static_cast<float>(history.Effect);
+						const FrameUniforms historyFrame{
+							matrices.ViewProjection,
+							lightViewProjection,
+							history.Sampling,
+						};
+						SDL_PushGPUVertexUniformData(command, 0, &historyFrame, sizeof(historyFrame));
+						paneTexture = history.Texture[history.Slot];
 					} else {
 						SDL_PushGPUVertexUniformData(command, 0, &levelFrame, sizeof(levelFrame));
 					}
@@ -8095,7 +8184,7 @@ namespace engine::render {
 		// frame, and the screen pass samples it exactly as if it had just been
 		// rendered. See `SignatureOf` for what counts as a change and, more to
 		// the point, what deliberately does not.
-		frameNodes.Set(core::Name("surface"), [&](const graph::RunContext &context) {
+		frameNodes.Set(core::Name("mirror-capture"), [&](const graph::RunContext &context) {
 			enterNamedPass(context.Name);
 			if (wantSurface && haveInstances && sceneCount > 0 && refreshCount > 0) {
 				ENGINE_PROFILE_CAT("surface pass", core::ProfileCategory::Render);
@@ -9092,6 +9181,18 @@ namespace engine::render {
 		const auto fixedTexture = [&](core::Name resource, size_t slot) {
 			Impl::NamedTexture texture;
 			const Impl::ResourceRole role = State->RoleFor(resource);
+			if (role == Impl::ResourceRole::PreviousFrame) {
+				if (slot < State->SceneSlots.size()) {
+					const Impl::SceneSlot &history = State->SceneSlots[slot];
+					return Impl::NamedTexture{
+						history.HistoryReady ? history.History : nullptr,
+						history.HistoryWidth,
+						history.HistoryHeight,
+						State->ColourFormat(),
+					};
+				}
+				return texture;
+			}
 			if (role == Impl::ResourceRole::Scene) {
 				if (slot == targetSlot) {
 					return Impl::NamedTexture{viewTarget, sceneWidth, sceneHeight, State->ColourFormat()};
@@ -9345,6 +9446,14 @@ namespace engine::render {
 				result.DrawCalls++;
 				return true;
 			};
+
+		frameNodes.Set(core::Name("last-frame"), [&](const graph::RunContext &context) {
+			// `output-image` copies the completed graph output into renderer-owned
+			// history. This node is the dependency and profile boundary at which the
+			// following frame may sample that image.
+			enterNamedPass(context.Name);
+			return true;
+		});
 
 		frameNodes.Set(core::Name("raster"), [&](const graph::RunContext &context) {
 			enterNamedPass(context.Name);
@@ -9844,7 +9953,7 @@ namespace engine::render {
 
 				const LightingUniforms plainLighting = lightingAt(cameraFrame.Position, 0.0f, 0.0f);
 				const ShadowBinding shadow = shadowBinding();
-				const bool surfaceImagesEnabled = graphEnabled(core::Name("surface"));
+				const bool surfaceImagesEnabled = graphEnabled(core::Name("mirror-capture"));
 				LightingUniforms mirroredUniforms{};
 
 				const auto drawMirrors = [&](bool blended) {
@@ -10399,6 +10508,19 @@ namespace engine::render {
 			if (!drawImage(source, target, SDL_GPU_LOADOP_CLEAR)) {
 				ENGINE_WARN("'{}' has no image wired into it", context.Name.Text());
 				return true;
+			}
+			if (State->EnsureHistory(targetSlot, sceneWidth, sceneHeight)) {
+				Impl::SceneSlot &history = State->SlotAt(targetSlot);
+				const Impl::NamedTexture historyTarget{
+					history.History,
+					history.HistoryWidth,
+					history.HistoryHeight,
+					State->ColourFormat(),
+				};
+				if (source.Texture == historyTarget.Texture ||
+					drawImage(source, historyTarget, SDL_GPU_LOADOP_CLEAR)) {
+					history.HistoryReady = true;
+				}
 			}
 			windowTarget.load_op = SDL_GPU_LOADOP_LOAD;
 			return true;

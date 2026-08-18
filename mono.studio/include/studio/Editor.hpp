@@ -4271,7 +4271,6 @@ namespace studio {
 		char RenderPipelineNewName[64] = {};
 		float RenderPipelinePreviewFps = 5.0f;
 		double RenderPipelinePreviewNext = 0.0;
-		bool RenderPipelinePreviewReverse = false;
 		bool RenderPipelineDirty = false;
 		bool RenderPipelineSaveAsWanted = false;
 		bool RenderPipelineCanvasReady = false;

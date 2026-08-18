@@ -17,8 +17,8 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 	std::string error;
 	REQUIRE(studio::LoadRenderPipelineGraph(DefaultPbrDocument(), canvas, error));
 
-	CHECK(canvas.Nodes().size() == 22);
-	CHECK(canvas.Links().size() == 45);
+	CHECK(canvas.Nodes().size() == 23);
+	CHECK(canvas.Links().size() == 47);
 	CHECK(canvas.Ordered().size() == canvas.Nodes().size());
 
 	bool sawSsao = false;
@@ -31,6 +31,15 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 		}
 	}
 	CHECK(sawSsao);
+	const auto mirrorCapture =
+		std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
+			return node.Type == "render.pass.mirror-capture";
+		});
+	REQUIRE(mirrorCapture != canvas.Nodes().end());
+	CHECK(canvas.LinkInto(mirrorCapture->Id, "last-frame") != nullptr);
+	CHECK(canvas.LinkInto(mirrorCapture->Id, "world-state") != nullptr);
+	CHECK(mirrorCapture->Widgets.at("feedback").Text == "last-frame");
+	CHECK(mirrorCapture->Widgets.at("max-recursion").Number == 3.0);
 	const auto output =
 		std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
 			return node.Type == "render.pass.output-image";
@@ -44,6 +53,11 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 	const nodegraph::NodeType *gbuffer = nodegraph::NodeTypes::Find("render.pass.gbuffer");
 	REQUIRE(gbuffer != nullptr);
 	CHECK(gbuffer->PreviewPort == "albedo");
+	REQUIRE(gbuffer->Widgets.size() >= 2);
+	CHECK(gbuffer->Widgets[0].Key == "preview.enabled");
+	CHECK(gbuffer->Widgets[0].Default.Flag);
+	CHECK(gbuffer->Widgets[1].Key == "preview.reverse-spectrum");
+	CHECK_FALSE(gbuffer->Widgets[1].Default.Flag);
 	REQUIRE_FALSE(gbuffer->Outputs.empty());
 	CHECK(gbuffer->Outputs.front().Type == "render.image");
 	const nodegraph::DataType *image = nodegraph::DataTypes::Find("render.image");
@@ -59,6 +73,71 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 		REQUIRE(pass != nullptr);
 		CHECK_FALSE(pass->PreviewPort.empty());
 	}
+}
+
+TEST_CASE("mirror feedback and its bounded recursion are saved as node policy", "[studio][pipeline][mirror]") {
+	const PipelineDocument basis = DefaultPbrDocument();
+	nodegraph::Graph canvas;
+	std::string error;
+	REQUIRE(studio::LoadRenderPipelineGraph(basis, canvas, error));
+	const auto mirror = std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const auto &node) {
+		return node.Type == "render.pass.mirror-capture";
+	});
+	REQUIRE(mirror != canvas.Nodes().end());
+	mirror->Widgets.at("feedback").Text = "last-frame";
+	mirror->Widgets.at("max-recursion").Number = 2.0;
+
+	PipelineDocument saved;
+	REQUIRE(studio::SaveRenderPipelineGraph(canvas, basis, saved, error));
+	RenderGraph graph;
+	engine::core::Name offender;
+	REQUIRE(Build(saved, graph, offender) == PipelineDocumentStatus::Ok);
+	const Node *captured = nullptr;
+	for (uint32_t value = 1; value <= graph.Count(); value++) {
+		const Node *candidate = graph.Find(NodeId{value});
+		if (candidate != nullptr && candidate->Kind == engine::core::Name("mirror-capture")) {
+			captured = candidate;
+			break;
+		}
+	}
+	REQUIRE(captured != nullptr);
+	REQUIRE(captured->Parameter(engine::core::Name("feedback")) != nullptr);
+	CHECK(*captured->Parameter(engine::core::Name("feedback")) == "last-frame");
+	CHECK(captured->Integer(engine::core::Name("max-recursion"), 0) == 2);
+}
+
+TEST_CASE("preview controls belong to image nodes and round trip with the profile", "[studio][pipeline]") {
+	const PipelineDocument basis = DefaultPbrDocument();
+	nodegraph::Graph canvas;
+	std::string error;
+	REQUIRE(studio::LoadRenderPipelineGraph(basis, canvas, error));
+
+	for (nodegraph::Node &node : canvas.Nodes()) {
+		const nodegraph::NodeType *type = nodegraph::NodeTypes::Find(node.Type);
+		REQUIRE(type != nullptr);
+		if (type->PreviewPort.empty()) {
+			CHECK_FALSE(node.Widgets.contains("preview.enabled"));
+			CHECK_FALSE(node.Widgets.contains("preview.reverse-spectrum"));
+			continue;
+		}
+		REQUIRE(node.Widgets.contains("preview.enabled"));
+		REQUIRE(node.Widgets.contains("preview.reverse-spectrum"));
+		if (node.Type == "render.pass.gbuffer") {
+			node.Widgets["preview.enabled"].Flag = false;
+			node.Widgets["preview.reverse-spectrum"].Flag = true;
+		}
+	}
+
+	PipelineDocument saved;
+	REQUIRE(studio::SaveRenderPipelineGraph(canvas, basis, saved, error));
+	nodegraph::Graph restored;
+	REQUIRE(studio::LoadRenderPipelineGraph(saved, restored, error));
+	const auto gbuffer = std::find_if(restored.Nodes().begin(), restored.Nodes().end(), [](const auto &node) {
+		return node.Type == "render.pass.gbuffer";
+	});
+	REQUIRE(gbuffer != restored.Nodes().end());
+	CHECK_FALSE(gbuffer->Widgets.at("preview.enabled").Flag);
+	CHECK(gbuffer->Widgets.at("preview.reverse-spectrum").Flag);
 }
 
 TEST_CASE("a canvas edit round trips to a schedulable world document", "[studio][pipeline]") {

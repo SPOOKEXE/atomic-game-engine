@@ -36,6 +36,9 @@ namespace studio {
 				   kind == ResourceKind::Texture || kind == ResourceKind::Storage;
 		}
 
+		constexpr const char *PREVIEW_ENABLED = "preview.enabled";
+		constexpr const char *PREVIEW_REVERSE = "preview.reverse-spectrum";
+
 		std::string ResourceType(ResourceKind kind) {
 			switch (kind) {
 			case ResourceKind::Colour:
@@ -235,10 +238,7 @@ namespace studio {
 
 		for (const auto &[id, label, tint, description] : std::array{
 				 std::tuple{
-					 "render.image",
-					 "IMAGE",
-					 0xD07852u,
-					 "A sampled, colour, depth, or compute image."
+					 "render.image", "IMAGE", 0xD07852u, "A sampled, colour, depth, or compute image."
 				 },
 				 std::tuple{"render.buffer", "Buffer", 0xB39A58u, "A structured GPU buffer."},
 				 std::tuple{"render.camera", "Camera", 0x53A7A0u, "A viewpoint and projection."},
@@ -280,10 +280,12 @@ namespace studio {
 				if (IsImage(port.Kind)) {
 					type.PreviewPort = std::string(port.Name.Text());
 					type.Preview = [](const std::any &, nodegraph::PreviewImage &) { return false; };
+					type.Widgets.push_back(nodegraph::Toggle(PREVIEW_ENABLED, "Preview", true));
+					type.Widgets.push_back(nodegraph::Toggle(PREVIEW_REVERSE, "Reverse spectrum", false));
 					break;
 				}
 			}
-			type.Widgets = {
+			const std::array commonWidgets{
 				nodegraph::Toggle("enabled", "Enabled", true),
 				nodegraph::Toggle("optional", "Optional", false),
 				nodegraph::Select(
@@ -297,6 +299,7 @@ namespace studio {
 				nodegraph::Select("queue", "Queue", {"auto", "cpu", "graphics", "compute", "transfer"}, 0),
 				nodegraph::Select("async", "Async", {"auto", "allow", "serial"}, 0),
 			};
+			type.Widgets.insert(type.Widgets.end(), commonWidgets.begin(), commonWidgets.end());
 			if (spec.Kind == Name("cull-frustum")) {
 				type.Widgets.push_back(
 					nodegraph::Select("culling", "Culling", {"inherit", "none", "frustum"}, 0)
@@ -307,6 +310,10 @@ namespace studio {
 			}
 			if (spec.Kind == Name("filter-tag")) {
 				type.Widgets.push_back(nodegraph::Text("mask", "Tag mask", "0"));
+			}
+			if (spec.Kind == Name("mirror-capture")) {
+				type.Widgets.push_back(nodegraph::Select("feedback", "Feedback", {"last-frame", "flat"}, 0));
+				type.Widgets.push_back(nodegraph::Number("max-recursion", "Max recursion", 3));
 			}
 			if (spec.Kind == Name("raster") || spec.Kind == Name("dispatch")) {
 				type.Widgets.push_back(nodegraph::Text("shader", "Shader", ""));
@@ -397,13 +404,16 @@ namespace studio {
 			PutSelect(node, "scope", Describe(source.Scope));
 			for (const NodeParameter &parameter : source.Parameters) {
 				const std::string key(parameter.Key.Text());
-				if (key == "queue" || key == "async" || key == "load" || key == "dispatch.mode" ||
-					key == "capture.mode") {
+				if (key == PREVIEW_ENABLED || key == PREVIEW_REVERSE) {
+					PutToggle(node, key.c_str(), parameter.Value == "true");
+				} else if (key == "queue" || key == "async" || key == "load" || key == "dispatch.mode" ||
+						   key == "capture.mode" || key == "feedback") {
 					PutSelect(node, key.c_str(), parameter.Value);
 				} else if (key == "culling" && node.Widgets.contains("culling")) {
 					PutSelect(node, key.c_str(), parameter.Value);
 				} else if (key == "dispatch.x" || key == "dispatch.y" || key == "dispatch.z" ||
-						   key == "local.x" || key == "local.y" || key == "local.z" || key == "view") {
+						   key == "local.x" || key == "local.y" || key == "local.z" || key == "view" ||
+						   key == "max-recursion") {
 					uint32_t number = 1;
 					std::from_chars(
 						parameter.Value.data(), parameter.Value.data() + parameter.Value.size(), number
@@ -677,12 +687,33 @@ namespace studio {
 				set.Value = SelectOf(node, key, "auto");
 				document.Record(set);
 			}
+			if (node.Widgets.contains(PREVIEW_ENABLED)) {
+				for (const char *key : {PREVIEW_ENABLED, PREVIEW_REVERSE}) {
+					Edit set;
+					set.Kind = EditKind::Set;
+					set.Key = Name(key);
+					set.Value = ToggleOf(node, key, key == PREVIEW_ENABLED) ? "true" : "false";
+					document.Record(set);
+				}
+			}
 			if (node.Widgets.contains("culling")) {
 				Edit set;
 				set.Kind = EditKind::Set;
 				set.Key = Name("culling");
 				set.Value = SelectOf(node, "culling", "inherit");
 				document.Record(set);
+			}
+			if (kind == Name("mirror-capture")) {
+				Edit feedback;
+				feedback.Kind = EditKind::Set;
+				feedback.Key = Name("feedback");
+				feedback.Value = SelectOf(node, "feedback", "last-frame");
+				document.Record(feedback);
+				Edit recursion;
+				recursion.Kind = EditKind::Set;
+				recursion.Key = Name("max-recursion");
+				recursion.Value = NumberText(node, "max-recursion");
+				document.Record(recursion);
 			}
 			if (kind == Name("cull-distance") || kind == Name("filter-tag")) {
 				const char *key = kind == Name("cull-distance") ? "radius" : "mask";

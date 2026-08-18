@@ -834,7 +834,8 @@ namespace engine::graph {
 		};
 
 		resource("shadow", ResourceKind::Depth, ResourceFormat::D32F, 1, true);
-		resource("surface", ResourceKind::Colour, ResourceFormat::RGBA8, 1, true);
+		resource("last-frame", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB, 1, true);
+		resource("mirror-views", ResourceKind::Colour, ResourceFormat::RGBA8, 1, true);
 		resource("portal-image", ResourceKind::Texture, ResourceFormat::RGBA8_SRGB, 1, true);
 		resource("portal-display", ResourceKind::Texture, ResourceFormat::RGBA8_SRGB, 1, true);
 		resource("world-entities", ResourceKind::Entities, ResourceFormat::R8);
@@ -869,6 +870,9 @@ namespace engine::graph {
 		node("camera", NodeScope::View);
 		touches(EditKind::Writes, "view-camera", "camera");
 
+		node("last-frame", NodeScope::View);
+		touches(EditKind::Writes, "last-frame", "image");
+
 		node("entities", NodeScope::View);
 		touches(EditKind::Writes, "view-entities", "entities");
 
@@ -886,11 +890,25 @@ namespace engine::graph {
 		touches(EditKind::Reads, "ordered-entities", "entities");
 		touches(EditKind::Writes, "view-instances", "instances");
 
-		node("surface", NodeScope::View, true);
+		node("mirror-capture", NodeScope::View, true);
+		touches(EditKind::Reads, "last-frame", "last-frame");
+		touches(EditKind::Reads, "world-entities", "world-state");
 		touches(EditKind::Reads, "shadow", "shadow");
 		touches(EditKind::Reads, "ordered-entities", "entities");
 		touches(EditKind::Reads, "view-instances", "instances");
-		touches(EditKind::Writes, "surface", "surface");
+		touches(EditKind::Writes, "mirror-views", "surface");
+		{
+			Edit feedback;
+			feedback.Kind = EditKind::Set;
+			feedback.Key = core::Name("feedback");
+			feedback.Value = "last-frame";
+			document.Record(std::move(feedback));
+			Edit recursion;
+			recursion.Kind = EditKind::Set;
+			recursion.Key = core::Name("max-recursion");
+			recursion.Value = "3";
+			document.Record(std::move(recursion));
+		}
 
 		node("portal-capture", NodeScope::View);
 		touches(EditKind::Reads, "shadow", "shadow");
@@ -946,7 +964,7 @@ namespace engine::graph {
 		node("mirror-overlay", NodeScope::View);
 		touches(EditKind::Reads, "portaled", "colour");
 		touches(EditKind::Reads, "depth", "depth");
-		touches(EditKind::Reads, "surface", "surface");
+		touches(EditKind::Reads, "mirror-views", "surface");
 		touches(EditKind::Reads, "ordered-entities", "entities");
 		touches(EditKind::Reads, "view-instances", "instances");
 		touches(EditKind::Writes, "mirrored", "colour");

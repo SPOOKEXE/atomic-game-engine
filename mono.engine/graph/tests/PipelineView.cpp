@@ -75,7 +75,7 @@ TEST_CASE("every enabled node is placed, in execution order", "[graph]") {
 	const RenderGraph graph = DefaultGraph();
 	const PipelineLayout layout = LayoutOf(graph);
 
-	REQUIRE(layout.Nodes.size() == 22);
+	REQUIRE(layout.Nodes.size() == 23);
 	CHECK(layout.Nodes.front().Name == Name("world"));
 	CHECK(layout.Nodes.back().Name == Name("output-image"));
 }
@@ -102,7 +102,7 @@ TEST_CASE("nodes are banded the way the frame runs", "[graph]") {
 
 TEST_CASE("columns restart within each band", "[graph]") {
 	// **A column is a position within a band, not across the frame.** The three
-	// bands are drawn as three groups, so `shadow` and `surface` both sit at
+	// bands are drawn as three groups, so `shadow` and `mirror-capture` both sit at
 	// the left of their own.
 	const RenderGraph graph = DefaultGraph();
 	const PipelineLayout layout = LayoutOf(graph);
@@ -120,17 +120,17 @@ TEST_CASE("columns restart within each band", "[graph]") {
 	CHECK(columnOf("world") == 0);
 	CHECK(columnOf("shadow") == 1);
 	CHECK(columnOf("camera") == 0);
-	CHECK(columnOf("surface") == 5);
-	CHECK(columnOf("portal-capture") == 6);
-	CHECK(columnOf("portal-tonemap") == 7);
-	CHECK(columnOf("gbuffer") == 8);
+	CHECK(columnOf("mirror-capture") == 6);
+	CHECK(columnOf("portal-capture") == 7);
+	CHECK(columnOf("portal-tonemap") == 8);
+	CHECK(columnOf("gbuffer") == 9);
 	CHECK(columnOf("present") == 0);
 	CHECK(columnOf("interface") == 1);
 	CHECK(columnOf("overlay") == 2);
 	CHECK(columnOf("output-image") == 3);
 
-	// Wide enough for the widest band, which is the per-view one at sixteen.
-	CHECK(layout.Columns == 16);
+	// Wide enough for the widest band, which is the per-view one at seventeen.
+	CHECK(layout.Columns == 17);
 }
 
 // --- the edges ----------------------------------------------------------------
@@ -139,9 +139,11 @@ TEST_CASE("an edge joins a reader to the node that wrote what it reads", "[graph
 	const RenderGraph graph = DefaultGraph();
 	const PipelineLayout layout = LayoutOf(graph);
 
-	CHECK(Joined(graph, layout, "shadow", "surface", "shadow"));
+	CHECK(Joined(graph, layout, "last-frame", "mirror-capture", "last-frame"));
+	CHECK(Joined(graph, layout, "world", "mirror-capture", "world-entities"));
+	CHECK(Joined(graph, layout, "shadow", "mirror-capture", "shadow"));
 	CHECK(Joined(graph, layout, "shadow", "deferred-lighting", "shadow"));
-	CHECK(Joined(graph, layout, "surface", "mirror-overlay", "surface"));
+	CHECK(Joined(graph, layout, "mirror-capture", "mirror-overlay", "mirror-views"));
 	CHECK(Joined(graph, layout, "portal-capture", "portal-tonemap", "portal-image"));
 	CHECK(Joined(graph, layout, "portal-tonemap", "portal-overlay", "portal-display"));
 	CHECK(Joined(graph, layout, "gbuffer", "depth-linearise", "depth"));
@@ -241,18 +243,18 @@ TEST_CASE("a disabled node is absent from the layout", "[graph]") {
 	Name offender;
 	REQUIRE(graph.Compile(before, offender) == GraphStatus::Ok);
 
-	engine::graph::NodeId surface;
+	engine::graph::NodeId mirrorCapture;
 	for (const auto &placed : LayoutPipeline(graph, before).Nodes) {
-		if (placed.Name == Name("surface")) {
-			surface = placed.Node;
+		if (placed.Name == Name("mirror-capture")) {
+			mirrorCapture = placed.Node;
 		}
 	}
-	REQUIRE(surface.IsValid());
-	REQUIRE(graph.SetEnabled(surface, false));
+	REQUIRE(mirrorCapture.IsValid());
+	REQUIRE(graph.SetEnabled(mirrorCapture, false));
 
 	const PipelineLayout after = LayoutOf(graph);
-	CHECK(after.Nodes.size() == 21);
-	CHECK_FALSE(Joined(graph, after, "surface", "mirror-overlay", "surface"));
+	CHECK(after.Nodes.size() == 22);
+	CHECK_FALSE(Joined(graph, after, "mirror-capture", "mirror-overlay", "mirror-views"));
 }
 
 TEST_CASE("an empty compile lays out to nothing", "[graph]") {

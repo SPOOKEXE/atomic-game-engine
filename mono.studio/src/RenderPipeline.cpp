@@ -186,10 +186,6 @@ namespace studio {
 				)) {
 				RenderPipelinePreviewNext = 0.0;
 			}
-			ImGui::SameLine();
-			if (ImGui::Checkbox("Reverse spectrum", &RenderPipelinePreviewReverse)) {
-				RenderPipelinePreviewNext = 0.0;
-			}
 			if (RenderPipelineDirty) {
 				ImGui::SameLine();
 				ImGui::TextDisabled("modified");
@@ -248,6 +244,10 @@ namespace studio {
 					if (canvasType == nullptr || canvasType->PreviewPort.empty() || renderNode == nullptr) {
 						continue;
 					}
+					const auto previewEnabled = canvasNode.Widgets.find("preview.enabled");
+					if (previewEnabled == canvasNode.Widgets.end() || !previewEnabled->second.Flag) {
+						continue;
+					}
 					const engine::graph::NodeKindSpec *kind =
 						engine::graph::NodeCatalogue::Find(renderNode->Kind);
 					if (kind == nullptr) {
@@ -267,7 +267,10 @@ namespace studio {
 					const engine::graph::ResourceDesc *resource =
 						previewGraph.FindResource(renderNode->Writes[output]);
 					if (resource != nullptr && refreshPreviews) {
-						Renderer.RefreshResourcePreview(resource->Name, 0, RenderPipelinePreviewReverse);
+						const auto reverse = canvasNode.Widgets.find("preview.reverse-spectrum");
+						Renderer.RefreshResourcePreview(
+							resource->Name, 0, reverse != canvasNode.Widgets.end() && reverse->second.Flag
+						);
 					}
 					void *texture =
 						resource == nullptr ? nullptr : Renderer.ResourcePreviewTexture(resource->Name, 0);

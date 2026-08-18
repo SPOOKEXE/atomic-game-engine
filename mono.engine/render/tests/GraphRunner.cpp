@@ -68,11 +68,12 @@ TEST_CASE("the default graph is dispatched in authored order", "[render][graph]"
 				   "world",
 				   "shadow",
 				   "camera@0",
+				   "last-frame@0",
 				   "entities@0",
 				   "cull-frustum@0",
 				   "order-draw@0",
 				   "upload-instances@0",
-				   "surface@0",
+				   "mirror-capture@0",
 				   "portal-capture@0",
 				   "portal-tonemap@0",
 				   "gbuffer@0",
@@ -89,7 +90,7 @@ TEST_CASE("the default graph is dispatched in authored order", "[render][graph]"
 				   "output-image",
 			   }
 	);
-	CHECK(runner.Submitted() == 22);
+	CHECK(runner.Submitted() == 23);
 	CHECK_FALSE(runner.Unhandled().IsValid());
 }
 

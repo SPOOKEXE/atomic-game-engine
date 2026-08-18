@@ -89,7 +89,7 @@ TEST_CASE("the default document builds the engine frame", "[graph]") {
 	REQUIRE(graph.Compile(fromDocument, offender) == GraphStatus::Ok);
 
 	REQUIRE(fromDocument.Shared.size() == 2);
-	REQUIRE(fromDocument.PerView.size() == 16);
+	REQUIRE(fromDocument.PerView.size() == 17);
 	REQUIRE(fromDocument.Final.size() == 4);
 	CHECK(graph.Find(fromDocument.Shared.front())->Name == Name("world"));
 	CHECK(graph.Find(fromDocument.Shared.back())->Name == Name("shadow"));
@@ -133,26 +133,27 @@ TEST_CASE("the default PBR document carries material emission and ambient occlus
 	CompiledGraph compiled;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
 	REQUIRE(compiled.Shared.size() == 2);
-	REQUIRE(compiled.PerView.size() == 16);
+	REQUIRE(compiled.PerView.size() == 17);
 	REQUIRE(compiled.Final.size() == 4);
 
 	CHECK(graph.Find(compiled.Shared[0])->Kind == Name("world"));
 	CHECK(graph.Find(compiled.Shared[1])->Kind == Name("shadow"));
 	CHECK(graph.Find(compiled.PerView[0])->Kind == Name("camera"));
-	CHECK(graph.Find(compiled.PerView[1])->Kind == Name("entities"));
-	CHECK(graph.Find(compiled.PerView[2])->Kind == Name("cull-frustum"));
-	CHECK(graph.Find(compiled.PerView[3])->Kind == Name("order-draw"));
-	CHECK(graph.Find(compiled.PerView[4])->Kind == Name("upload-instances"));
-	CHECK(graph.Find(compiled.PerView[5])->Kind == Name("surface"));
-	CHECK(graph.Find(compiled.PerView[6])->Kind == Name("portal-capture"));
-	CHECK(graph.Find(compiled.PerView[7])->Kind == Name("portal-tonemap"));
-	CHECK(graph.Find(compiled.PerView[8])->Kind == Name("gbuffer"));
-	CHECK(graph.Find(compiled.PerView[10])->Kind == Name("ssao"));
-	CHECK(graph.Find(compiled.PerView[11])->Kind == Name("deferred-lighting"));
-	CHECK(graph.Find(compiled.PerView[12])->Kind == Name("tonemap"));
-	CHECK(graph.Find(compiled.PerView[13])->Kind == Name("portal-overlay"));
-	CHECK(graph.Find(compiled.PerView[14])->Kind == Name("mirror-overlay"));
-	CHECK(graph.Find(compiled.PerView[15])->Kind == Name("transparent"));
+	CHECK(graph.Find(compiled.PerView[1])->Kind == Name("last-frame"));
+	CHECK(graph.Find(compiled.PerView[2])->Kind == Name("entities"));
+	CHECK(graph.Find(compiled.PerView[3])->Kind == Name("cull-frustum"));
+	CHECK(graph.Find(compiled.PerView[4])->Kind == Name("order-draw"));
+	CHECK(graph.Find(compiled.PerView[5])->Kind == Name("upload-instances"));
+	CHECK(graph.Find(compiled.PerView[6])->Kind == Name("mirror-capture"));
+	CHECK(graph.Find(compiled.PerView[7])->Kind == Name("portal-capture"));
+	CHECK(graph.Find(compiled.PerView[8])->Kind == Name("portal-tonemap"));
+	CHECK(graph.Find(compiled.PerView[9])->Kind == Name("gbuffer"));
+	CHECK(graph.Find(compiled.PerView[11])->Kind == Name("ssao"));
+	CHECK(graph.Find(compiled.PerView[12])->Kind == Name("deferred-lighting"));
+	CHECK(graph.Find(compiled.PerView[13])->Kind == Name("tonemap"));
+	CHECK(graph.Find(compiled.PerView[14])->Kind == Name("portal-overlay"));
+	CHECK(graph.Find(compiled.PerView[15])->Kind == Name("mirror-overlay"));
+	CHECK(graph.Find(compiled.PerView[16])->Kind == Name("transparent"));
 	CHECK(graph.Find(compiled.Final[0])->Kind == Name("present"));
 	CHECK(graph.Find(compiled.Final[3])->Kind == Name("output-image"));
 
@@ -189,9 +190,9 @@ TEST_CASE("optional default graph nodes can be disabled without breaking their c
 	Edit ssao = shadow;
 	ssao.Name = Name("ssao");
 	document.Record(ssao);
-	Edit surface = shadow;
-	surface.Name = Name("surface");
-	document.Record(surface);
+	Edit mirrorCapture = shadow;
+	mirrorCapture.Name = Name("mirror-capture");
+	document.Record(mirrorCapture);
 
 	RenderGraph graph;
 	Name offender;
@@ -204,7 +205,7 @@ TEST_CASE("optional default graph nodes can be disabled without breaking their c
 	}
 	for (const NodeId id : compiled.PerView) {
 		CHECK(graph.Find(id)->Kind != Name("ssao"));
-		CHECK(graph.Find(id)->Kind != Name("surface"));
+		CHECK(graph.Find(id)->Kind != Name("mirror-capture"));
 	}
 }
 
@@ -322,7 +323,7 @@ TEST_CASE("an enable edit survives the round trip and the build", "[graph]") {
 	// The reason `SetEnabled` is an operation rather than a field: a pass
 	// somebody switched off has to survive a save.
 	PipelineDocument document = DefaultPbrDocument();
-	document.Record(Enable("surface", false));
+	document.Record(Enable("mirror-capture", false));
 
 	PipelineDocument reloaded;
 	Name offender;
@@ -335,7 +336,7 @@ TEST_CASE("an enable edit survives the round trip and the build", "[graph]") {
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
 
 	// Out of the compile entirely, which is what disabling means here.
-	CHECK(compiled.PerView.size() == 15);
+	CHECK(compiled.PerView.size() == 16);
 }
 
 TEST_CASE("the game interface can be disabled without removing the frame output", "[graph][interface]") {

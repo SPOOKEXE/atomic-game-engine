@@ -47,6 +47,31 @@ namespace studio {
 		bool Open = false;
 	};
 
+	// The logical canvas and pointer coordinates a game interface receives from
+	// one viewport panel. GPU targets may be block-rounded or high-DPI; neither
+	// changes authored ScreenGui layout.
+	//
+	// @since v0.15
+	struct ViewportCanvas {
+		float Width = 0.0f;
+		float Height = 0.0f;
+		float PointerX = 0.0f;
+		float PointerY = 0.0f;
+	};
+
+	// Resolves panel-local game UI coordinates without involving render-target
+	// allocation dimensions.
+	//
+	// @since v0.15
+	ViewportCanvas CanvasForViewport(
+		float panelX,
+		float panelY,
+		float panelWidth,
+		float panelHeight,
+		float pointerX,
+		float pointerY
+	);
+
 	// Which panel should show a world.
 	//
 	// **A panel already showing it wins over everything**, including a free one:

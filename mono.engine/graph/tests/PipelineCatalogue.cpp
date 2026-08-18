@@ -155,11 +155,11 @@ TEST_CASE("every output can land somewhere", "[graph][catalogue]") {
 TEST_CASE("the default PBR frame's kinds and material ports are registered", "[graph][catalogue]") {
 	Kinds();
 	for (const char *name :
-		 {"world",			"shadow",			"camera",	   "entities",			"cull-frustum",
-		  "order-draw",		"upload-instances", "surface",	   "portal-capture",	"portal-tonemap",
-		  "gbuffer",		"depth-linearise",	"ssao",		   "deferred-lighting", "tonemap",
-		  "portal-overlay", "mirror-overlay",	"transparent", "present",			"overlay",
-		  "interface",		"output-image"}) {
+		 {"world",			"shadow",		  "camera",			  "last-frame",		"entities",
+		  "cull-frustum",	"order-draw",	  "upload-instances", "mirror-capture", "portal-capture",
+		  "portal-tonemap", "gbuffer",		  "depth-linearise",  "ssao",			"deferred-lighting",
+		  "tonemap",		"portal-overlay", "mirror-overlay",	  "transparent",	"present",
+		  "overlay",		"interface",	  "output-image"}) {
 		INFO("kind: " << name);
 		CHECK(NodeCatalogue::Find(Name(name)) != nullptr);
 	}
@@ -196,11 +196,12 @@ TEST_CASE("a kind's slot count matches what the default frame binds", "[graph][c
 	ports("world", 0, 1);
 	ports("shadow", 1, 1);
 	ports("camera", 0, 1);
+	ports("last-frame", 0, 1);
 	ports("entities", 0, 1);
 	ports("cull-frustum", 2, 1);
 	ports("order-draw", 2, 1);
 	ports("upload-instances", 1, 1);
-	ports("surface", 3, 1);
+	ports("mirror-capture", 5, 1);
 	ports("portal-capture", 3, 1);
 	ports("portal-tonemap", 1, 1);
 	ports("gbuffer", 3, 5);

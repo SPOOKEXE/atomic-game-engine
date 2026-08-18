@@ -81,9 +81,9 @@ namespace {
 TEST_CASE("the default frame profiles into a full grid", "[graph][profile]") {
 	const PipelineProfile profile = Profiled(DefaultGraph());
 
-	REQUIRE(profile.Passes.size() == 22);
-	REQUIRE(profile.Resources.size() == 25);
-	CHECK(profile.Cells.size() == 550);
+	REQUIRE(profile.Passes.size() == 23);
+	REQUIRE(profile.Resources.size() == 26);
+	CHECK(profile.Cells.size() == 598);
 
 	// The three blocks, in the order a frame runs them.
 	CHECK(profile.Passes.front().Where == engine::graph::Band::Shared);
@@ -270,7 +270,8 @@ TEST_CASE("rows keep declaration order and columns keep execution order", "[grap
 	// reordered.** A grid whose rows shuffled between two runs is one nobody can
 	// read across a change, which is exactly when somebody needs to.
 	CHECK(profile.Resources[0].Name == Name("shadow"));
-	CHECK(profile.Resources[1].Name == Name("surface"));
+	CHECK(profile.Resources[1].Name == Name("last-frame"));
+	CHECK(profile.Resources[2].Name == Name("mirror-views"));
 
 	// Columns in the order the frame runs, which is `Compile`'s answer and not
 	// this type's to re-derive.

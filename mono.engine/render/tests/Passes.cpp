@@ -188,7 +188,7 @@ TEST_CASE("optional default nodes can be disabled at the backend boundary", "[re
 	document.Record(disabled);
 	disabled.Name = Name("ssao");
 	document.Record(disabled);
-	disabled.Name = Name("surface");
+	disabled.Name = Name("mirror-capture");
 	document.Record(disabled);
 
 	RenderGraph graph;
