@@ -313,6 +313,17 @@ namespace engine::world {
 		//         world.
 		WorldSettings SettingsOf(WorldId id) const;
 
+		// Selects one universe-owned rendering profile for a world.
+		//
+		// The name is stored with the world and resolved by a client. An invalid
+		// name deliberately selects no authored profile, which lets the renderer
+		// use its built-in fallback.
+		//
+		// @param id      The world whose presentation changes.
+		// @param profile The stable profile name.
+		// @return `NoSuchWorld`, or `Ok`.
+		WorldStatus SetRenderingProfile(WorldId id, core::Name profile);
+
 		// What state a world is in.
 		//
 		// @param id The world to ask about.
@@ -543,7 +554,7 @@ namespace engine::world {
 		std::vector<RemoteDelivery> TakeOutbound();
 
 		// The snapshot format this build writes and accepts.
-		static constexpr uint32_t SNAPSHOT_VERSION = 2;
+		static constexpr uint32_t SNAPSHOT_VERSION = 3;
 
 		// Reports whether the caller is the driver thread.
 		//

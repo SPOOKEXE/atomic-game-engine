@@ -687,28 +687,32 @@ namespace engine::graph {
 
 			// --- interface and output ---------------------------------------------
 			{"overlay",
-			 "Debug Image Overlay",
+			 "Image Overlay",
 			 C::Interface,
 			 S::Frame,
-			 {{"window", K::Colour, LDR, false, "The frame to draw over."}},
-			 {{"window", K::Colour, LDR, true, "The swapchain."}},
-			 "The debug panels, drawn once over the whole frame rather than per view."},
+			 {{"scene", K::Texture, LDR, true, "The image below."},
+			  {"interface", K::Texture, LDR, false, "The image above."}},
+			 {{"image", K::Colour, LDR, true, "The composed image."}},
+			 "Composes an interface image over a scene image. Debug drawing joins the "
+			 "same composition instead of bypassing the graph."},
 
 			{"interface",
-			 "Interface Image Overlay",
+			 "Interface Image",
 			 C::Interface,
 			 S::Frame,
-			 {{"window", K::Colour, LDR, false, "The frame to draw over."}},
-			 {{"window", K::Colour, LDR, true, "The swapchain."}},
-			 "The retained widget tree, last, over everything."},
+			 {},
+			 {{"image", K::Colour, LDR, true, "The retained widget tree on transparency."}},
+			 "Renders the retained widget tree to a transparent image for a compositor.",
+			 true},
 
 			{"present",
 			 "Scene Image",
 			 C::Output,
 			 S::Frame,
-			 {{"colour", K::Texture, LDR, true, "The frame to show."}},
-			 {{"window", K::Colour, LDR, true, "The swapchain."}},
-			 "Puts a finished image on the window."},
+			 {{"image", K::Texture, LDR, true, "Any image produced by the view graph."}},
+			 {{"image", K::Colour, LDR, true, "The scene image at frame resolution."}},
+			 "Turns any view image, including depth and intermediate targets, into the "
+			 "scene image consumed by frame compositors."},
 
 			// --- the entity flow ---------------------------------------------
 			//
@@ -832,29 +836,14 @@ namespace engine::graph {
 			 "upstream of one of these changes the frame; a filter with none "
 			 "downstream changes a list nobody reads."},
 
-			{"output",
-			 "View Image",
-			 C::Output,
-			 S::View,
-			 {{"colour", K::Texture, LDR, true, "The image this pipeline produced."}},
-			 {},
-			 "The end of the pipeline: the image it produced, handed back. A "
-			 "graph with no output node draws into targets nobody collects, which "
-			 "is a pipeline that runs and produces nothing. **Per view, not per "
-			 "frame** - a camera's pipeline ends in that camera's picture, and a "
-			 "frame-scoped output could not be reached by an authored pipeline at "
-			 "all, because the frame's own block is always the standard graph's.",
-			 false},
-
 			{"output-image",
 			 "Output Image",
 			 C::Output,
 			 S::Frame,
-			 {{"image", K::Texture, LDR, true, "The fully composed frame."}},
+			 {{"image", K::Texture, LDR, true, "Any image to put on the display."}},
 			 {},
-			 "The terminal image after presentation, debug drawing and interface "
-			 "composition. It has no output socket because nothing in the frame may "
-			 "run after the image handed to the display.",
+			 "The one terminal display sink. Colour, depth, storage and intermediate "
+			 "images can all end here; image conversion happens while presenting it.",
 			 false},
 
 			{"overdraw",

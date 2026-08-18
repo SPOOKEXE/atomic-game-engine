@@ -138,7 +138,7 @@ TEST_CASE("a world's settings are an element and survive the trip", "[game][roun
 	XmlDocument parsed;
 	REQUIRE(ParseXml(document, parsed) == XmlStatus::Ok);
 	REQUIRE(parsed.Root() != nullptr);
-	CHECK(parsed.Root()->Attribute("format") == "2");
+	CHECK(parsed.Root()->Attribute("format") == "3");
 
 	const engine::game::XmlElement *world = nullptr;
 	for (const uint32_t index : parsed.Root()->Children) {
@@ -162,6 +162,7 @@ TEST_CASE("a world's settings are an element and survive the trip", "[game][roun
 	CHECK(properties->Attribute("tickRate") == "30");
 	CHECK(properties->Attribute("idleTickRate") == "2");
 	CHECK(properties->Attribute("faultLimit") == "3");
+	CHECK(properties->Attribute("renderingProfile") == "Default PBR");
 
 	// **The exported world document has the same section**, spelled out as
 	// text rather than re-parsed. `scripts/Lobby.aworld` is checked in as the
@@ -178,7 +179,7 @@ TEST_CASE("a world's settings are an element and survive the trip", "[game][roun
 
 	const std::string exported = engine::game::WriteWorldDocument(plain, plain.Find(Name("Lobby")), error);
 
-	CHECK(exported.find(R"(<World format="2" name="Lobby">)") != std::string::npos);
+	CHECK(exported.find(R"(<World format="3" name="Lobby">)") != std::string::npos);
 
 	// **No camera in the example either.** `scripts/Lobby.aworld` is the worked
 	// example of this format and it carried one until the viewer's camera
@@ -187,8 +188,10 @@ TEST_CASE("a world's settings are an element and survive the trip", "[game][roun
 	CHECK(exported.find(R"(class="Camera")") == std::string::npos);
 	CHECK(exported.find(R"(class="Workspace")") != std::string::npos);
 	CHECK(
-		exported.find("\t<WorldProperties tickRate=\"60\" idleTickRate=\"2\" faultLimit=\"3\" />") !=
-		std::string::npos
+		exported.find(
+			"\t<WorldProperties tickRate=\"60\" idleTickRate=\"2\" faultLimit=\"3\" "
+			"renderingProfile=\"Default PBR\" />"
+		) != std::string::npos
 	);
 
 	// And it reads back as 30 rather than as the default, which is the whole

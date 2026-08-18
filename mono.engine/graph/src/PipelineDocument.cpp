@@ -850,7 +850,9 @@ namespace engine::graph {
 		resource("occlusion", ResourceKind::Colour, ResourceFormat::R8, 2, true);
 		resource("lit", ResourceKind::Colour, ResourceFormat::RGBA16F);
 		resource("display", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
-		resource("window", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB, 1, true);
+		resource("scene-image", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
+		resource("interface-image", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB, 1, true);
+		resource("composed-image", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
 
 		node("world", NodeScope::World);
 		touches(EditKind::Writes, "world-entities", "entities");
@@ -926,23 +928,20 @@ namespace engine::graph {
 		touches(EditKind::Reads, "view-instances", "instances");
 		touches(EditKind::Writes, "display", "colour");
 
-		node("output", NodeScope::View);
-		touches(EditKind::Reads, "display", "colour");
-
 		node("present", NodeScope::Frame);
-		touches(EditKind::Reads, "display", "colour");
-		touches(EditKind::Writes, "window", "window");
-
-		node("overlay", NodeScope::Frame, true);
-		touches(EditKind::Reads, "window", "window");
-		touches(EditKind::Writes, "window", "window");
+		touches(EditKind::Reads, "display", "image");
+		touches(EditKind::Writes, "scene-image", "image");
 
 		node("interface", NodeScope::Frame, true);
-		touches(EditKind::Reads, "window", "window");
-		touches(EditKind::Writes, "window", "window");
+		touches(EditKind::Writes, "interface-image", "image");
+
+		node("overlay", NodeScope::Frame);
+		touches(EditKind::Reads, "scene-image", "scene");
+		touches(EditKind::Reads, "interface-image", "interface");
+		touches(EditKind::Writes, "composed-image", "image");
 
 		node("output-image", NodeScope::Frame);
-		touches(EditKind::Reads, "window", "image");
+		touches(EditKind::Reads, "composed-image", "image");
 
 		return document;
 	}

@@ -1474,6 +1474,7 @@ namespace studio {
 		void DrawRenderPipelineInspector();
 		void DrawRenderPipelineSchedule();
 		void DrawPipelineProfile();
+		void DrawWorldLighting();
 		void DrawProfileWatch();
 		void DrawProfileImage(
 			engine::core::Name resource, uint32_t width, uint32_t height, float maximumWidth
@@ -2934,6 +2935,11 @@ namespace studio {
 		// `client::CollectPortalViews`.
 		std::vector<engine::render::PortalView> Portals;
 
+		// The universe-authored rendering profiles. Worlds hold only the name
+		// they select, so one graph edit reaches every world using that profile
+		// and the game writer emits the library once.
+		engine::graph::PipelineSet RenderingProfiles;
+
 		// Each world's selected runtime pipeline, keyed by world index.
 		//
 		// Absence requests installation on the next presentation. Saving a graph
@@ -4232,6 +4238,9 @@ namespace studio {
 		// top, every resource down the side. See `Editor::DrawPipelineProfile`.
 		bool ShowPipelineProfile = false;
 
+		// Per-world lighting and rendering profile selection.
+		bool ShowWorldLighting = true;
+
 		// Which resource the profile panel is showing a picture of.
 		//
 		// **The grid says who wrote what; this says what they wrote.** Unset is
@@ -4250,13 +4259,19 @@ namespace studio {
 		//@{
 		nodegraph::Graph RenderPipelineGraph;
 		nodegraph::Canvas RenderPipelineCanvas;
+		nodegraph::Evaluator RenderPipelinePreviewEvaluator;
+		std::unordered_map<uint64_t, void *> RenderPipelinePreviewTextures;
 		engine::graph::PipelineDocument RenderPipelineBasis;
 		WorldId RenderPipelineWorld;
 		engine::core::Name RenderPipelineName;
 		std::string RenderPipelineLoaded;
 		std::string RenderPipelineStatus;
 		char RenderPipelineFilter[64] = {};
+		char RenderPipelineNewName[64] = {};
+		float RenderPipelinePreviewFps = 5.0f;
+		double RenderPipelinePreviewNext = 0.0;
 		bool RenderPipelineDirty = false;
+		bool RenderPipelineSaveAsWanted = false;
 		bool RenderPipelineCanvasReady = false;
 		//@}
 

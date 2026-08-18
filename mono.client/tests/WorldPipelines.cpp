@@ -1,7 +1,6 @@
 // The join from a world's saved render documents to the renderer's compiled
 // runtime cache.
 
-#include <engine/ecs/Store.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/testing/Suite.hpp>
@@ -17,54 +16,54 @@ TEST_DEPENDS("engine.graph.pipelinedocument")
 TEST_DEPENDS("engine.render.passes")
 
 using engine::core::Name;
-using engine::ecs::Store;
 using engine::graph::PipelineSet;
 using engine::render::Renderer;
 
-TEST_CASE("a world's pipelines are qualified, selected, and replaced", "[client][pipeline]") {
-	engine::graph::RegisterPipelineComponents();
-
-	Store store("client.worldpipelines");
+TEST_CASE("universe profiles are qualified, selected, and replaced", "[client][pipeline]") {
 	PipelineSet first;
 	REQUIRE(first.Set(Name("main"), engine::graph::DefaultPbrDocument()));
 	REQUIRE(first.Set(Name("reflection"), engine::graph::DefaultPbrDocument()));
-	store.SetResource(first);
 
 	Renderer renderer;
-	CHECK(client::InstallWorldPipelines(store, renderer, 17) == Name("main#17"));
-	CHECK(renderer.Pipelines() == std::vector<Name>{Name("main#17"), Name("reflection#17")});
+	CHECK(client::InstallRenderingProfiles(first, renderer, 17, Name("reflection")) == Name("reflection#17"));
+	CHECK(renderer.Pipelines() == std::vector<Name>{Name("reflection#17")});
 
 	PipelineSet replacement;
 	REQUIRE(replacement.Set(Name("cinematic"), engine::graph::DefaultPbrDocument()));
-	store.SetResource(replacement);
 
-	CHECK(client::InstallWorldPipelines(store, renderer, 17) == Name("cinematic#17"));
+	CHECK(
+		client::InstallRenderingProfiles(replacement, renderer, 17, Name("cinematic")) == Name("cinematic#17")
+	);
 	CHECK(renderer.Pipelines() == std::vector<Name>{Name("cinematic#17")});
 }
 
 TEST_CASE("worlds with the same authored name keep separate runtime keys", "[client][pipeline]") {
-	engine::graph::RegisterPipelineComponents();
-
-	Store first("client.worldpipelines.first");
-	Store second("client.worldpipelines.second");
 	PipelineSet pipelines;
 	REQUIRE(pipelines.Set(Name("main"), engine::graph::DefaultPbrDocument()));
-	first.SetResource(pipelines);
-	second.SetResource(pipelines);
 
 	Renderer renderer;
-	CHECK(client::InstallWorldPipelines(first, renderer, 4) == Name("main#4"));
-	CHECK(client::InstallWorldPipelines(second, renderer, 9) == Name("main#9"));
+	CHECK(client::InstallRenderingProfiles(pipelines, renderer, 4, Name("main")) == Name("main#4"));
+	CHECK(client::InstallRenderingProfiles(pipelines, renderer, 9, Name("main")) == Name("main#9"));
 	CHECK(renderer.Pipelines() == std::vector<Name>{Name("main#4"), Name("main#9")});
 }
 
-TEST_CASE("a world with no pipelines installs the engine default graph", "[client][pipeline]") {
-	Store store("client.worldpipelines.empty");
+TEST_CASE("an empty profile library installs the engine default graph", "[client][pipeline]") {
+	PipelineSet profiles;
 	Renderer renderer;
 
-	CHECK(client::InstallWorldPipelines(store, renderer, 3) == Name("Default PBR#3"));
+	CHECK(
+		client::InstallRenderingProfiles(profiles, renderer, 3, Name("Default PBR")) == Name("Default PBR#3")
+	);
 	CHECK(renderer.Pipelines() == std::vector<Name>{Name("Default PBR#3")});
-	const PipelineSet *saved = store.Resource<PipelineSet>();
-	REQUIRE(saved != nullptr);
-	CHECK(saved->Find(Name("Default PBR")) != nullptr);
+}
+
+TEST_CASE("a missing selection falls back to Default PBR", "[client][pipeline]") {
+	PipelineSet profiles;
+	REQUIRE(profiles.Set(Name("Cinematic"), engine::graph::DefaultPbrDocument()));
+	REQUIRE(profiles.Set(Name("Default PBR"), engine::graph::DefaultPbrDocument()));
+	Renderer renderer;
+
+	CHECK(
+		client::InstallRenderingProfiles(profiles, renderer, 12, Name("Missing")) == Name("Default PBR#12")
+	);
 }

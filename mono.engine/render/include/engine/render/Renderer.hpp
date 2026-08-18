@@ -1365,6 +1365,14 @@ namespace engine::render {
 		// that graph yet.
 		void *ResourceTexture(core::Name resource, size_t slot = 0) const;
 
+		// Requests a coarse retained copy of a graph image. The renderer refreshes
+		// it after the graph has produced every stage, so an editor may display it
+		// at a lower rate without the live target changing underneath the panel.
+		void RefreshResourcePreview(core::Name resource, size_t slot = 0);
+
+		// The most recently refreshed retained copy, or null before its first frame.
+		void *ResourcePreviewTexture(core::Name resource, size_t slot = 0) const;
+
 		// Keeps a copy of what a scene slot currently holds, under a name.
 		//
 		// **A slot is scratch and this is how a picture outlives it.** There are

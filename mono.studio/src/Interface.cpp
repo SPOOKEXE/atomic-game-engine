@@ -51,7 +51,7 @@ namespace studio {
 		// **v9 because Render Pipeline is a panel the saved layout has never
 		// heard of**, and a panel a layout does not know about opens floating in
 		// a corner - which is exactly the failure it exists to fix.
-		constexpr const char *DOCKSPACE = "StudioDockSpace.v9";
+		constexpr const char *DOCKSPACE = "StudioDockSpace.v10";
 
 		constexpr const char *VIEWPORT = "Viewport";
 		constexpr const char *VIEWPORT2 = "Viewport 2";
@@ -79,7 +79,8 @@ namespace studio {
 		constexpr const char *SKINNABLE[]{
 			VIEWPORT,  VIEWPORT2, EXPLORER,			 WORLDS,		   INSTANCES,	  PROPERTIES,
 			SCRIPTS,   OUTPUT,	  "Command Bar",	 SETTINGS,		   STATISTICS,	  FRAMEGRAPH,
-			"History", "Assets",  "Render Pipeline", "Network",		   "Team Create", "Control (MCP)",
+			"History", "Assets",  "Render Pipeline", "World Lighting",  "Network",     "Team Create",
+			"Control (MCP)",
 			"Plugins", "Bus",	  "Find Instances",	 "Script Profile", "Changes",	  "Debugger",
 		};
 
@@ -143,6 +144,7 @@ namespace studio {
 			// question: what this game *has*, and what of it is *running*.
 			ImGui::DockBuilderDockWindow(INSTANCES, rightUpper);
 			ImGui::DockBuilderDockWindow(PROPERTIES, rightLower);
+			ImGui::DockBuilderDockWindow("World Lighting", rightLower);
 			ImGui::DockBuilderDockWindow(SCRIPTS, bottom);
 			ImGui::DockBuilderDockWindow(OUTPUT, bottom);
 
@@ -348,6 +350,7 @@ namespace studio {
 			Skinned("History", [&] { DrawHistory(); });
 			Skinned("Assets", [&] { DrawAssets(); });
 			Skinned("Render Pipeline", [&] { DrawRenderPipeline(); });
+			Skinned("World Lighting", [&] { DrawWorldLighting(); });
 			Skinned("Pipeline Profile", [&] { DrawPipelineProfile(); });
 			// TODO(asset-pipeline): draw the asset processing graph beside its catalogue.
 			Skinned("Network", [&] { DrawNetwork(); });
@@ -1129,6 +1132,7 @@ namespace studio {
 		ImGui::MenuItem("History", nullptr, &ShowHistory);
 		ImGui::MenuItem("Assets", nullptr, &ShowAssets);
 		ImGui::MenuItem("Render Pipeline", nullptr, &ShowRenderPipeline);
+		ImGui::MenuItem("World Lighting", nullptr, &ShowWorldLighting);
 		ImGui::MenuItem("Pipeline Profile", nullptr, &ShowPipelineProfile);
 		// TODO(asset-pipeline): expose the asset processing graph from this menu.
 		ImGui::MenuItem("Network", nullptr, &ShowNetwork);

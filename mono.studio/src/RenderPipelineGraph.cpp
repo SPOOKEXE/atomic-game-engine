@@ -31,16 +31,18 @@ namespace studio {
 			return Name(std::string_view(node.Type).substr(TYPE_PREFIX.size()));
 		}
 
+		bool IsImage(ResourceKind kind) {
+			return kind == ResourceKind::Colour || kind == ResourceKind::Depth ||
+				   kind == ResourceKind::Texture || kind == ResourceKind::Storage;
+		}
+
 		std::string ResourceType(ResourceKind kind) {
 			switch (kind) {
 			case ResourceKind::Colour:
-				return "render.colour";
 			case ResourceKind::Depth:
-				return "render.depth";
 			case ResourceKind::Texture:
-				return nodegraph::ANY_TYPE;
 			case ResourceKind::Storage:
-				return "render.storage";
+				return "render.image";
 			case ResourceKind::Buffer:
 				return "render.buffer";
 			case ResourceKind::Camera:
@@ -232,9 +234,12 @@ namespace studio {
 		RegisterRenderNodeKinds();
 
 		for (const auto &[id, label, tint, description] : std::array{
-				 std::tuple{"render.colour", "Colour target", 0xD07852u, "A raster colour attachment."},
-				 std::tuple{"render.depth", "Depth target", 0x657FBCu, "A raster depth attachment."},
-				 std::tuple{"render.storage", "Storage image", 0xA865B5u, "A compute-writable image."},
+				 std::tuple{
+					 "render.image",
+					 "IMAGE",
+					 0xD07852u,
+					 "A sampled, colour, depth, or compute image."
+				 },
 				 std::tuple{"render.buffer", "Buffer", 0xB39A58u, "A structured GPU buffer."},
 				 std::tuple{"render.camera", "Camera", 0x53A7A0u, "A viewpoint and projection."},
 				 std::tuple{"render.entities", "Entities", 0x73A856u, "A filtered ordered draw list."},
@@ -263,6 +268,20 @@ namespace studio {
 				type.Outputs.push_back(
 					nodegraph::Port(std::string(port.Name.Text()), ResourceType(port.Kind))
 				);
+			}
+			type.Evaluate = [outputs = type.Outputs](const nodegraph::Inputs &) {
+				nodegraph::Outputs made;
+				for (const nodegraph::PortSpec &output : outputs) {
+					made.emplace(output.Name, uint8_t{0});
+				}
+				return made;
+			};
+			for (const PortSpec &port : spec.Outputs) {
+				if (IsImage(port.Kind)) {
+					type.PreviewPort = std::string(port.Name.Text());
+					type.Preview = [](const std::any &, nodegraph::PreviewImage &) { return false; };
+					break;
+				}
 			}
 			type.Widgets = {
 				nodegraph::Toggle("enabled", "Enabled", true),

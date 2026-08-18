@@ -109,6 +109,16 @@ TEST_CASE("a world is created and found by name", "[world]") {
 	REQUIRE(universe.StateOf(id) == WorldState::Active);
 }
 
+TEST_CASE("a world selects a rendering profile by stable name", "[world]") {
+	Universe universe;
+	const WorldId id = universe.Create(Named("world.lit"));
+
+	CHECK(universe.SettingsOf(id).RenderingProfile == Name("Default PBR"));
+	CHECK(universe.SetRenderingProfile(id, Name("Cinematic")) == WorldStatus::Ok);
+	CHECK(universe.SettingsOf(id).RenderingProfile == Name("Cinematic"));
+	CHECK(universe.SetRenderingProfile(WorldId{999}, Name("Missing")) == WorldStatus::NoSuchWorld);
+}
+
 TEST_CASE("a world with no name is refused", "[world]") {
 	// Everything crossing a boundary addresses a world by name, so one without
 	// a name cannot be reached by anything outside itself.

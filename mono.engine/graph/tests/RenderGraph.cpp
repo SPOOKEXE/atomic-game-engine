@@ -81,10 +81,10 @@ TEST_CASE("the default frame compiles and its shadow pass is shared", "[graph]")
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
 
 	// **Shared at both ends, per view in the middle**, which is the shape of a
-	// real frame: world input and one shadow map every view samples, thirteen passes each view
+	// real frame: world input and one shadow map every view samples, twelve passes each view
 	// draws for itself, and the window's overlay and chrome once over the lot.
 	CHECK(compiled.Shared.size() == 2);
-	CHECK(compiled.PerView.size() == 13);
+	CHECK(compiled.PerView.size() == 12);
 	CHECK(compiled.Final.size() == 4);
 
 	CHECK(graph.Find(compiled.Shared.front())->Name == Name("world"));
@@ -137,8 +137,8 @@ TEST_CASE("no views runs the shared work and nothing else", "[graph]") {
 	CHECK(recorder.Ran[0] == "world");
 	CHECK(recorder.Ran[1] == "shadow");
 	CHECK(recorder.Ran[2] == "present");
-	CHECK(recorder.Ran[3] == "overlay");
-	CHECK(recorder.Ran[4] == "interface");
+	CHECK(recorder.Ran[3] == "interface");
+	CHECK(recorder.Ran[4] == "overlay");
 	CHECK(recorder.Ran[5] == "output-image");
 }
 
@@ -299,20 +299,20 @@ TEST_CASE("a shared and a per-view node cannot write one resource", "[graph]") {
 
 TEST_CASE("a disabled node leaves the compile entirely", "[graph]") {
 	RenderGraph graph = DefaultGraph();
+	const ResourceId inspection = Colour(graph, "inspection");
+	const engine::graph::NodeId optional = graph.AddNode({
+		.Name = Name("optional-inspection"),
+		.Kind = Name("clear"),
+		.Writes = {inspection},
+		.Scope = NodeScope::Frame,
+	});
+	REQUIRE(optional.IsValid());
 
 	CompiledGraph before;
 	Name offender;
 	REQUIRE(graph.Compile(before, offender) == GraphStatus::Ok);
 
-	// Find the overlay and switch it off.
-	engine::graph::NodeId overlay;
-	for (const engine::graph::NodeId id : before.Final) {
-		if (graph.Find(id)->Name == Name("overlay")) {
-			overlay = id;
-		}
-	}
-	REQUIRE(overlay.IsValid());
-	REQUIRE(graph.SetEnabled(overlay, false));
+	REQUIRE(graph.SetEnabled(optional, false));
 
 	CompiledGraph after;
 	REQUIRE(graph.Compile(after, offender) == GraphStatus::Ok);
@@ -324,7 +324,31 @@ TEST_CASE("a disabled node leaves the compile entirely", "[graph]") {
 
 	Recorder recorder;
 	REQUIRE(graph.Execute(after, recorder, 1));
-	CHECK(std::find(recorder.Ran.begin(), recorder.Ran.end(), "overlay") == recorder.Ran.end());
+	CHECK(std::find(recorder.Ran.begin(), recorder.Ran.end(), "optional-inspection") == recorder.Ran.end());
+}
+
+TEST_CASE("the interface image may be disabled without disconnecting composition", "[graph]") {
+	RenderGraph graph = DefaultGraph();
+	CompiledGraph before;
+	Name offender;
+	REQUIRE(graph.Compile(before, offender) == GraphStatus::Ok);
+
+	engine::graph::NodeId interface;
+	for (const engine::graph::NodeId id : before.Final) {
+		if (graph.Find(id)->Name == Name("interface")) {
+			interface = id;
+		}
+	}
+	REQUIRE(interface.IsValid());
+	REQUIRE(graph.SetEnabled(interface, false));
+
+	CompiledGraph after;
+	REQUIRE(graph.Compile(after, offender) == GraphStatus::Ok);
+	Recorder recorder;
+	REQUIRE(graph.Execute(after, recorder, 1));
+	CHECK(std::find(recorder.Ran.begin(), recorder.Ran.end(), "interface") == recorder.Ran.end());
+	CHECK(std::count(recorder.Ran.begin(), recorder.Ran.end(), "overlay") == 1);
+	CHECK(recorder.Ran.back() == "output-image");
 }
 
 TEST_CASE("disabling a producer is a missing producer and says so", "[graph]") {

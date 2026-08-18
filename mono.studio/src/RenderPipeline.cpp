@@ -71,18 +71,18 @@ namespace studio {
 
 		engine::graph::PipelineDocument document;
 		engine::core::Name selected = wanted;
-		Universe->Enter(world, [&](engine::ecs::Store &store) {
-			const engine::graph::PipelineSet *set = store.Resource<engine::graph::PipelineSet>();
-			if (set != nullptr && set->Count() > 0) {
-				if (!selected.IsValid() || set->Find(selected) == nullptr) {
-					selected = set->Names().front();
-				}
-				document = *set->Find(selected);
-				return;
-			}
-			selected = engine::core::Name("Default PBR");
-			document = engine::graph::DefaultPbrDocument();
-		});
+		if (!selected.IsValid()) {
+			selected = Universe->SettingsOf(world).RenderingProfile;
+		}
+		if (RenderingProfiles.Count() == 0) {
+			RenderingProfiles.Set(engine::core::Name("Default PBR"), engine::graph::DefaultPbrDocument());
+		}
+		if (RenderingProfiles.Find(selected) == nullptr) {
+			selected = RenderingProfiles.Find(engine::core::Name("Default PBR")) != nullptr
+						 ? engine::core::Name("Default PBR")
+						 : RenderingProfiles.Names().front();
+		}
+		document = *RenderingProfiles.Find(selected);
 
 		RenderPipelineWorld = world;
 		RenderPipelineName = selected;
@@ -104,25 +104,18 @@ namespace studio {
 			return false;
 		}
 		if (Universe == nullptr || !RenderPipelineWorld.IsValid() || !RenderPipelineName.IsValid()) {
-			RenderPipelineStatus = "no world to save into";
+			RenderPipelineStatus = "no universe to save into";
 			return false;
 		}
 
-		Universe->Enter(RenderPipelineWorld, [&](engine::ecs::Store &store) {
-			engine::graph::PipelineSet set;
-			if (const engine::graph::PipelineSet *current = store.Resource<engine::graph::PipelineSet>();
-				current != nullptr) {
-				set = *current;
-			}
-			set.Set(RenderPipelineName, saved);
-			store.SetResource(set);
-		});
-		PipelineSelected.erase(RenderPipelineWorld.Index);
+		RenderingProfiles.Set(RenderPipelineName, saved);
+		PipelineSelected.clear();
+		MarkModified();
 
 		RenderPipelineBasis = saved;
 		RenderPipelineLoaded = engine::graph::Write(saved);
 		RenderPipelineDirty = false;
-		RenderPipelineStatus = "saved " + std::string(RenderPipelineName.Text()) + " into the world";
+		RenderPipelineStatus = "saved " + std::string(RenderPipelineName.Text()) + " into the universe";
 		return true;
 	}
 
@@ -137,6 +130,14 @@ namespace studio {
 
 		if (!RenderPipelineCanvasReady) {
 			RegisterRenderPipelineNodeTypes();
+			RenderPipelineCanvas.Observe(&RenderPipelinePreviewEvaluator);
+			RenderPipelineCanvas.Images([this](
+										  uint64_t key,
+										  const std::function<bool(nodegraph::PreviewImage &)> &
+									  ) {
+				const auto found = RenderPipelinePreviewTextures.find(key);
+				return found == RenderPipelinePreviewTextures.end() ? nullptr : found->second;
+			});
 			RenderPipelineCanvas.Signals.Changed = [this] { RenderPipelineDirty = true; };
 			RenderPipelineCanvasReady = true;
 		}
@@ -145,24 +146,20 @@ namespace studio {
 		}
 
 		if (ImGui::BeginMenuBar()) {
-			if (ImGui::BeginMenu("Pipeline")) {
-				engine::graph::PipelineSet choices;
-				if (Universe != nullptr && Active.IsValid()) {
-					Universe->Enter(Active, [&](engine::ecs::Store &store) {
-						if (const auto *set = store.Resource<engine::graph::PipelineSet>(); set != nullptr) {
-							choices = *set;
-						}
-					});
-				}
-				for (const engine::core::Name name : choices.Names()) {
+			if (ImGui::BeginMenu("Profile")) {
+				for (const engine::core::Name name : RenderingProfiles.Names()) {
 					if (ImGui::MenuItem(
 							std::string(name.Text()).c_str(), nullptr, name == RenderPipelineName
 						)) {
 						LoadRenderPipeline(Active, name);
 					}
 				}
-				if (choices.Count() > 0) {
+				if (RenderingProfiles.Count() > 0) {
 					ImGui::Separator();
+				}
+				if (ImGui::MenuItem("Save Profile As...")) {
+					RenderPipelineNewName[0] = '\0';
+					RenderPipelineSaveAsWanted = true;
 				}
 				if (ImGui::MenuItem("Reset to Default PBR")) {
 					RenderPipelineName = engine::core::Name("Default PBR");
@@ -182,6 +179,19 @@ namespace studio {
 			if (ImGui::MenuItem("Fit")) {
 				RenderPipelineCanvas.Fit(RenderPipelineGraph);
 			}
+			ImGui::Separator();
+			ImGui::TextUnformatted("Preview");
+			ImGui::SameLine();
+			ImGui::SetNextItemWidth(engine::ui::Scaled(90.0f));
+			if (ImGui::SliderFloat(
+					"##render-pipeline-preview-fps",
+					&RenderPipelinePreviewFps,
+					1.0f,
+					60.0f,
+					"%.0f fps"
+				)) {
+				RenderPipelinePreviewNext = 0.0;
+			}
 			if (RenderPipelineDirty) {
 				ImGui::SameLine();
 				ImGui::TextDisabled("modified");
@@ -189,9 +199,85 @@ namespace studio {
 			ImGui::EndMenuBar();
 		}
 
+		if (RenderPipelineSaveAsWanted) {
+			ImGui::OpenPopup("Save Rendering Profile As");
+			RenderPipelineSaveAsWanted = false;
+		}
+		if (ImGui::BeginPopupModal("Save Rendering Profile As", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+			ImGui::SetNextItemWidth(engine::ui::Scaled(280.0f));
+			ImGui::InputText("Name", RenderPipelineNewName, sizeof(RenderPipelineNewName));
+			const bool named = RenderPipelineNewName[0] != '\0';
+			ImGui::BeginDisabled(!named);
+			if (ImGui::Button("Save")) {
+				RenderPipelineName = engine::core::Name(RenderPipelineNewName);
+				RenderPipelineDirty = true;
+				if (SaveRenderPipeline()) {
+					ImGui::CloseCurrentPopup();
+				}
+			}
+			ImGui::EndDisabled();
+			ImGui::SameLine();
+			if (ImGui::Button("Cancel")) {
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::EndPopup();
+		}
+
 		const float side = engine::ui::Scaled(280.0f);
 		const ImVec2 room = ImGui::GetContentRegionAvail();
 		if (ImGui::BeginChild("##render-pipeline-canvas", ImVec2(std::max(room.x - side, side), room.y))) {
+			RenderPipelinePreviewEvaluator.Run(RenderPipelineGraph);
+			RenderPipelinePreviewTextures.clear();
+			const double previewNow = Clock.Now();
+			const bool refreshPreviews = previewNow >= RenderPipelinePreviewNext;
+			if (refreshPreviews) {
+				RenderPipelinePreviewNext = previewNow + 1.0 / std::max(RenderPipelinePreviewFps, 1.0f);
+			}
+			engine::graph::PipelineDocument previewDocument;
+			engine::graph::RenderGraph previewGraph;
+			engine::core::Name previewOffender;
+			std::string previewError;
+			if (SaveRenderPipelineGraph(
+					RenderPipelineGraph, RenderPipelineBasis, previewDocument, previewError
+				) &&
+				engine::graph::Build(previewDocument, previewGraph, previewOffender) ==
+					engine::graph::PipelineDocumentStatus::Ok) {
+				for (size_t index = 0; index < RenderPipelineGraph.Nodes().size(); index++) {
+					const nodegraph::Node &canvasNode = RenderPipelineGraph.Nodes()[index];
+					const nodegraph::NodeType *canvasType = nodegraph::NodeTypes::Find(canvasNode.Type);
+					const engine::graph::Node *renderNode =
+						previewGraph.Find(engine::graph::NodeId{static_cast<uint32_t>(index + 1)});
+					if (canvasType == nullptr || canvasType->PreviewPort.empty() || renderNode == nullptr) {
+						continue;
+					}
+					const engine::graph::NodeKindSpec *kind =
+						engine::graph::NodeCatalogue::Find(renderNode->Kind);
+					if (kind == nullptr) {
+						continue;
+					}
+					const auto port = std::find_if(
+						kind->Outputs.begin(), kind->Outputs.end(), [&](const engine::graph::PortSpec &output) {
+							return output.Name.Text() == canvasType->PreviewPort;
+						}
+					);
+					const size_t output = static_cast<size_t>(port - kind->Outputs.begin());
+					if (port == kind->Outputs.end() || output >= renderNode->Writes.size()) {
+						continue;
+					}
+					const engine::graph::ResourceDesc *resource =
+						previewGraph.FindResource(renderNode->Writes[output]);
+					if (resource != nullptr && refreshPreviews) {
+						Renderer.RefreshResourcePreview(resource->Name, 0);
+					}
+					void *texture =
+						resource == nullptr ? nullptr : Renderer.ResourcePreviewTexture(resource->Name, 0);
+					if (texture != nullptr) {
+						RenderPipelinePreviewTextures[nodegraph::PictureKey(
+							RenderPipelinePreviewEvaluator.RanAt(canvasNode.Id), canvasType->PreviewPort
+						)] = texture;
+					}
+				}
+			}
 			RenderPipelineCanvas.Draw(RenderPipelineGraph);
 		}
 		ImGui::EndChild();
@@ -435,6 +521,75 @@ namespace studio {
 		ImGui::TextDisabled(
 			"GPU and wall-clock timings remain unmeasured until the backend submits this plan."
 		);
+	}
+
+	void Editor::DrawWorldLighting() {
+		if (!ShowWorldLighting) {
+			return;
+		}
+		if (!ImGui::Begin("World Lighting", &ShowWorldLighting)) {
+			ImGui::End();
+			return;
+		}
+		if (Universe == nullptr || !Active.IsValid()) {
+			ImGui::TextDisabled("no active world");
+			ImGui::End();
+			return;
+		}
+
+		const engine::world::WorldSettings settings = Universe->SettingsOf(Active);
+		ImGui::Text("World: %s", settings.Name.IsValid() ? settings.Name.Text().data() : "(unnamed)");
+		ImGui::Separator();
+
+		engine::core::Name selected;
+		const char *current = settings.RenderingProfile.IsValid() ? settings.RenderingProfile.Text().data()
+																			 : "(renderer default)";
+		ImGui::SetNextItemWidth(-1.0f);
+		if (ImGui::BeginCombo("Rendering Profile", current)) {
+			for (const engine::core::Name name : RenderingProfiles.Names()) {
+				if (ImGui::Selectable(name.Text().data(), name == settings.RenderingProfile)) {
+					selected = name;
+				}
+			}
+			ImGui::EndCombo();
+		}
+
+		if (selected.IsValid() && selected != settings.RenderingProfile &&
+			Universe->SetRenderingProfile(Active, selected) == engine::world::WorldStatus::Ok) {
+			PipelineSelected.erase(Active.Index);
+			MarkModified();
+		}
+
+		if (RenderingProfiles.Find(settings.RenderingProfile) == nullptr) {
+			ImGui::TextColored(
+				ImVec4{0.95f, 0.75f, 0.35f, 1.0f},
+				"The selected profile is missing. The renderer will use its fallback."
+			);
+		}
+
+		if (ImGui::Button("Edit Rendering Profiles")) {
+			ShowRenderPipeline = true;
+			LoadRenderPipeline(Active, settings.RenderingProfile);
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Lighting Service Properties")) {
+			engine::ecs::Entity lighting = engine::ecs::NULL_ENTITY;
+			Universe->Enter(Active, [&](engine::ecs::Store &store) {
+				lighting = store.FindFirstRoot("Lighting");
+			});
+			if (lighting != engine::ecs::NULL_ENTITY) {
+				Selection = {lighting};
+				SelectionWorld = Active;
+				UniverseSelected = false;
+				ShowProperties = true;
+				RevealSelection = true;
+			}
+		}
+
+		ImGui::TextDisabled(
+			"Lighting values remain properties of this world's Lighting service."
+		);
+		ImGui::End();
 	}
 
 	void Editor::DrawPipelineProfile() {

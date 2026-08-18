@@ -1493,9 +1493,12 @@ namespace client {
 		return true;
 	}
 
-	engine::core::Name
-	InstallWorldPipelines(Store &store, engine::render::Renderer &renderer, uint64_t world) {
-		engine::graph::RegisterPipelineComponents();
+	engine::core::Name InstallRenderingProfiles(
+		const engine::graph::PipelineSet &profiles,
+		engine::render::Renderer &renderer,
+		uint64_t world,
+		engine::core::Name selectedProfile
+	) {
 		engine::graph::RegisterRenderNodeKinds();
 
 		const std::string suffix = "#" + std::to_string(world);
@@ -1505,23 +1508,29 @@ namespace client {
 			}
 		}
 
-		const auto *set = store.Resource<engine::graph::PipelineSet>();
-		if (set == nullptr || set->Count() == 0) {
-			// Every world starts from the same editable graph, then owns its copy.
-			// Putting it in the Store here means the first export carries it and a
-			// later edit affects this world rather than a process-wide renderer.
-			engine::graph::PipelineSet defaults;
+		engine::graph::PipelineSet defaults;
+		const engine::graph::PipelineSet *set = &profiles;
+		if (profiles.Count() == 0) {
 			defaults.Set(engine::core::Name("Default PBR"), engine::graph::DefaultPbrDocument());
-			store.SetResource(defaults);
-			set = store.Resource<engine::graph::PipelineSet>();
+			set = &defaults;
 		}
 
-		engine::core::Name selected;
-		for (const engine::core::Name name : set->Names()) {
-			const engine::graph::PipelineDocument *document = set->Find(name);
-			if (document == nullptr) {
-				continue;
+		std::vector<engine::core::Name> candidates;
+		const auto addCandidate = [&](engine::core::Name name) {
+			if (name.IsValid() && set->Find(name) != nullptr &&
+				std::find(candidates.begin(), candidates.end(), name) == candidates.end()) {
+				candidates.push_back(name);
 			}
+		};
+		addCandidate(selectedProfile);
+		addCandidate(engine::core::Name("Default PBR"));
+		for (const engine::core::Name name : set->Names()) {
+			addCandidate(name);
+		}
+
+		for (const engine::core::Name name : candidates) {
+			const engine::graph::PipelineDocument *document = set->Find(name);
+			assert(document != nullptr);
 
 			engine::graph::RenderGraph graph;
 			engine::core::Name offender;
@@ -1538,14 +1547,11 @@ namespace client {
 			}
 
 			const engine::core::Name key(std::format("{}#{}", name.Text(), world));
-			if (!renderer.SetPipeline(key, graph)) {
-				continue;
-			}
-			if (!selected.IsValid() || name == engine::core::Name("main")) {
-				selected = key;
+			if (renderer.SetPipeline(key, graph)) {
+				return key;
 			}
 		}
-		return selected;
+		return {};
 	}
 
 	void RegisterClientComponents() {

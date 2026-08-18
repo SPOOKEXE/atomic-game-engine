@@ -106,6 +106,13 @@ namespace engine::world {
 		// restore and re-fault forever, consuming its host's budget while
 		// looking alive on every dashboard.
 		uint32_t FaultLimit = 3;
+
+		// The universe rendering profile this world presents through.
+		//
+		// A name rather than a graph because `world` sits below `graph`, and
+		// because the selection crosses game files and host boundaries. The
+		// client resolves it against the universe's authored profile library.
+		core::Name RenderingProfile{"Default PBR"};
 	};
 
 	// One world's diagnostics, as the driver and the overlay read them.
@@ -169,6 +176,14 @@ namespace engine::world {
 		// @return The settings, including the rates and the isolation level.
 		const WorldSettings &Settings() const {
 			return Settings_;
+		}
+
+		// Changes which universe rendering profile presents this world.
+		//
+		// This does not change simulation timing, so unlike the tick settings it
+		// is safe to update between frames.
+		void SetRenderingProfile(core::Name profile) {
+			Settings_.RenderingProfile = profile;
 		}
 
 		// Whether the world is ticking, and why not when it is not.

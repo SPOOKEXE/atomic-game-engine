@@ -325,6 +325,16 @@ namespace engine::world {
 		return world == nullptr ? WorldSettings{} : world->Settings();
 	}
 
+	WorldStatus Universe::SetRenderingProfile(WorldId id, core::Name profile) {
+		RequireDriverThread("SetRenderingProfile");
+		World *world = Reach(id);
+		if (world == nullptr) {
+			return WorldStatus::NoSuchWorld;
+		}
+		world->SetRenderingProfile(profile);
+		return WorldStatus::Ok;
+	}
+
 	WorldState Universe::StateOf(WorldId id) const {
 		const World *world = Reach(id);
 		return world == nullptr ? WorldState::Suspended : world->State();
@@ -426,6 +436,7 @@ namespace engine::world {
 			writer.WriteDouble(world->Settings().IdleTickRate);
 			writer.WriteUInt8(static_cast<uint8_t>(world->Settings().IsolationLevel));
 			writer.WriteUInt32(world->Settings().FaultLimit);
+			writer.WriteName(world->Settings().RenderingProfile);
 			writer.WriteUInt8(static_cast<uint8_t>(world->State()));
 
 			// The host holding it, or an invalid Name for a world this process
@@ -486,6 +497,7 @@ namespace engine::world {
 			settings.IdleTickRate = reader.ReadDouble();
 			settings.IsolationLevel = static_cast<Isolation>(reader.ReadUInt8());
 			settings.FaultLimit = reader.ReadUInt32();
+			settings.RenderingProfile = reader.ReadName();
 
 			const auto state = static_cast<WorldState>(reader.ReadUInt8());
 			const core::Name host = reader.ReadName();

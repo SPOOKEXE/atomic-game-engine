@@ -18,8 +18,8 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 	std::string error;
 	REQUIRE(studio::LoadRenderPipelineGraph(DefaultPbrDocument(), canvas, error));
 
-	CHECK(canvas.Nodes().size() == 19);
-	CHECK(canvas.Links().size() == 33);
+	CHECK(canvas.Nodes().size() == 18);
+	CHECK(canvas.Links().size() == 32);
 	CHECK(canvas.Ordered().size() == canvas.Nodes().size());
 
 	bool sawSsao = false;
@@ -39,6 +39,18 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 	);
 	REQUIRE(output != canvas.Nodes().end());
 	CHECK(canvas.LinkInto(output->Id, "image") != nullptr);
+	CHECK(std::none_of(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
+		return node.Type == "render.pass.output";
+	}));
+
+	const nodegraph::NodeType *gbuffer = nodegraph::NodeTypes::Find("render.pass.gbuffer");
+	REQUIRE(gbuffer != nullptr);
+	CHECK(gbuffer->PreviewPort == "albedo");
+	REQUIRE_FALSE(gbuffer->Outputs.empty());
+	CHECK(gbuffer->Outputs.front().Type == "render.image");
+	const nodegraph::DataType *image = nodegraph::DataTypes::Find("render.image");
+	REQUIRE(image != nullptr);
+	CHECK(image->Label == "IMAGE");
 }
 
 TEST_CASE("a canvas edit round trips to a schedulable world document", "[studio][pipeline]") {
@@ -208,17 +220,14 @@ TEST_CASE("entity filters expose only controls their backend executes", "[studio
 	CHECK(tag->Integer(engine::core::Name("mask"), 0) == 0x21);
 }
 
-TEST_CASE("render compatibility rejects a wildcard canvas link that is not an image", "[studio][pipeline]") {
+TEST_CASE("the IMAGE socket rejects a non-image before save", "[studio][pipeline]") {
 	studio::RegisterRenderPipelineNodeTypes();
 	nodegraph::Graph canvas;
 	const nodegraph::NodeId entities = canvas.Add("render.pass.entities", 0.0f, 0.0f);
 	const nodegraph::NodeId tonemap = canvas.Add("render.pass.tonemap", 200.0f, 0.0f);
 	REQUIRE(entities != nodegraph::NO_NODE);
 	REQUIRE(tonemap != nodegraph::NO_NODE);
-	REQUIRE(canvas.Connect(entities, "entities", tonemap, "colour") == nodegraph::LinkResult::Made);
-
-	PipelineDocument saved;
-	std::string error;
-	CHECK_FALSE(studio::SaveRenderPipelineGraph(canvas, {}, saved, error));
-	CHECK(error == "these two slots hold different sorts of resource");
+	CHECK(
+		canvas.Connect(entities, "entities", tonemap, "colour") == nodegraph::LinkResult::TypeMismatch
+	);
 }

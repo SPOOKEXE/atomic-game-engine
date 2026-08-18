@@ -75,7 +75,7 @@ TEST_CASE("every enabled node is placed, in execution order", "[graph]") {
 	const RenderGraph graph = DefaultGraph();
 	const PipelineLayout layout = LayoutOf(graph);
 
-	REQUIRE(layout.Nodes.size() == 19);
+	REQUIRE(layout.Nodes.size() == 18);
 	CHECK(layout.Nodes.front().Name == Name("world"));
 	CHECK(layout.Nodes.back().Name == Name("output-image"));
 }
@@ -123,12 +123,12 @@ TEST_CASE("columns restart within each band", "[graph]") {
 	CHECK(columnOf("surface") == 5);
 	CHECK(columnOf("gbuffer") == 6);
 	CHECK(columnOf("present") == 0);
-	CHECK(columnOf("overlay") == 1);
-	CHECK(columnOf("interface") == 2);
+	CHECK(columnOf("interface") == 1);
+	CHECK(columnOf("overlay") == 2);
 	CHECK(columnOf("output-image") == 3);
 
 	// Wide enough for the widest band, which is the per-view one at twelve.
-	CHECK(layout.Columns == 13);
+	CHECK(layout.Columns == 12);
 }
 
 // --- the edges ----------------------------------------------------------------
@@ -142,7 +142,8 @@ TEST_CASE("an edge joins a reader to the node that wrote what it reads", "[graph
 	CHECK(Joined(graph, layout, "surface", "transparent", "surface"));
 	CHECK(Joined(graph, layout, "gbuffer", "depth-linearise", "depth"));
 	CHECK(Joined(graph, layout, "tonemap", "transparent", "display"));
-	CHECK(Joined(graph, layout, "interface", "output-image", "window"));
+	CHECK(Joined(graph, layout, "interface", "overlay", "interface-image"));
+	CHECK(Joined(graph, layout, "overlay", "output-image", "composed-image"));
 }
 
 TEST_CASE("the edge comes from the last writer, not from every earlier one", "[graph]") {
@@ -244,7 +245,7 @@ TEST_CASE("a disabled node is absent from the layout", "[graph]") {
 	REQUIRE(graph.SetEnabled(transparent, false));
 
 	const PipelineLayout after = LayoutOf(graph);
-	CHECK(after.Nodes.size() == 18);
+	CHECK(after.Nodes.size() == 17);
 	CHECK_FALSE(Joined(graph, after, "tonemap", "transparent", "display"));
 }
 

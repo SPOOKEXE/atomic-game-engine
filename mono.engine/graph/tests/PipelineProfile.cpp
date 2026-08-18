@@ -81,9 +81,9 @@ namespace {
 TEST_CASE("the default frame profiles into a full grid", "[graph][profile]") {
 	const PipelineProfile profile = Profiled(DefaultGraph());
 
-	REQUIRE(profile.Passes.size() == 19);
-	REQUIRE(profile.Resources.size() == 18);
-	CHECK(profile.Cells.size() == 342);
+	REQUIRE(profile.Passes.size() == 18);
+	REQUIRE(profile.Resources.size() == 20);
+	CHECK(profile.Cells.size() == 360);
 
 	// The three blocks, in the order a frame runs them.
 	CHECK(profile.Passes.front().Where == engine::graph::Band::Shared);
@@ -98,7 +98,7 @@ TEST_CASE("the default frame profiles into a full grid", "[graph][profile]") {
 	// `transparent` blends over the colour it then writes back, and a version of
 	// this that reported only the write would make it look like a replacement.
 	CHECK(profile.At(RowOf(profile, "display"), ColumnOf(profile, "transparent")) == Access::ReadWrite);
-	CHECK(profile.At(RowOf(profile, "window"), ColumnOf(profile, "output-image")) == Access::Read);
+	CHECK(profile.At(RowOf(profile, "composed-image"), ColumnOf(profile, "output-image")) == Access::Read);
 
 	// And a pass that never touches a resource says so.
 	CHECK(profile.At(RowOf(profile, "shadow"), ColumnOf(profile, "interface")) == Access::None);
@@ -130,13 +130,13 @@ TEST_CASE("a resource's lifetime is where it is written to where it is last read
 TEST_CASE("an external resource is alive for the whole frame", "[graph][profile]") {
 	const PipelineProfile profile = Profiled(DefaultGraph());
 
-	// The swapchain exists before the frame and after it, so no pass boundary
+	// The shadow target is owned outside the authored graph, so no pass boundary
 	// frees it and nothing may be aliased over it.
-	const ProfileResource &window = profile.Resources[RowOf(profile, "window")];
-	REQUIRE(window.External);
+	const ProfileResource &shadow = profile.Resources[RowOf(profile, "shadow")];
+	REQUIRE(shadow.External);
 
 	for (uint32_t pass = 0; pass < profile.Passes.size(); pass++) {
-		CHECK(window.LiveAt(pass));
+		CHECK(shadow.LiveAt(pass));
 	}
 }
 

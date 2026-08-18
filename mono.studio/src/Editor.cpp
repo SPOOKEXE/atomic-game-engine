@@ -1508,7 +1508,8 @@ namespace studio {
 		Surfaces.clear();
 
 		if (shown.IsValid()) {
-			Universe->Enter(shown, [&](Store &store) {
+			const Name selectedProfile = Universe->SettingsOf(shown).RenderingProfile;
+			Universe->Enter(shown, [&, selectedProfile](Store &store) {
 				// Lighting is authored per world and Studio presents worlds without
 				// going through client::Client. Resolve it here so editing the
 				// service changes this viewport on the same frame.
@@ -1602,8 +1603,9 @@ namespace studio {
 				}
 
 				if (PipelineSelected.find(shown.Index) == PipelineSelected.end()) {
-					PipelineSelected[shown.Index] =
-						client::InstallWorldPipelines(store, Renderer, shown.Index);
+					PipelineSelected[shown.Index] = client::InstallRenderingProfiles(
+						RenderingProfiles, Renderer, shown.Index, selectedProfile
+					);
 				}
 			});
 
@@ -1959,6 +1961,9 @@ namespace studio {
 		UniverseNameDraft = std::string(GameName.Text());
 		GamePath.clear();
 		Modified = false;
+		RenderingProfiles.Clear();
+		RenderingProfiles.Set(Name("Default PBR"), engine::graph::DefaultPbrDocument());
+		PipelineSelected.clear();
 
 		const engine::world::UniverseSettings defaults;
 		Universe->SetMode(defaults.Mode);
@@ -2202,6 +2207,11 @@ namespace studio {
 		Trees.clear();
 
 		GameName = info.Name;
+		RenderingProfiles = std::move(info.RenderingProfiles);
+		if (RenderingProfiles.Count() == 0) {
+			RenderingProfiles.Set(Name("Default PBR"), engine::graph::DefaultPbrDocument());
+		}
+		PipelineSelected.clear();
 		UniverseNameDraft = std::string(GameName.Text());
 		GamePath = path;
 		Modified = false;
@@ -2387,7 +2397,7 @@ namespace studio {
 		}
 
 		std::string error;
-		if (!engine::game::SaveGame(*Universe, GameName, path, error)) {
+		if (!engine::game::SaveGame(*Universe, GameName, RenderingProfiles, path, error)) {
 			Say("save failed: " + error, LogLevel::Error);
 			return false;
 		}
@@ -2443,7 +2453,7 @@ namespace studio {
 		}
 
 		std::string error;
-		if (!engine::game::SaveGame(*Universe, GameName, path, error)) {
+		if (!engine::game::SaveGame(*Universe, GameName, RenderingProfiles, path, error)) {
 			Say("export failed: " + error, LogLevel::Error);
 			return false;
 		}
@@ -2496,6 +2506,43 @@ namespace studio {
 			Say("import failed: " + error, LogLevel::Error);
 			return false;
 		}
+
+		// Rendering profiles belong to the imported universe, not to any one
+		// world. Merge them once and redirect only the imported worlds when a
+		// same-named profile already means something different here.
+		std::unordered_map<uint32_t, Name> importedProfileNames;
+		for (const Name name : info.RenderingProfiles.Names()) {
+			const engine::graph::PipelineDocument *incoming = info.RenderingProfiles.Find(name);
+			if (incoming == nullptr) {
+				continue;
+			}
+
+			Name destination = name;
+			if (const engine::graph::PipelineDocument *existing = RenderingProfiles.Find(name);
+				existing != nullptr && engine::graph::Write(*existing) != engine::graph::Write(*incoming)) {
+				const std::string base = std::string(info.Name.Text()) + "/" + std::string(name.Text());
+				destination = Name(base);
+				for (uint32_t suffix = 2; RenderingProfiles.Find(destination) != nullptr; suffix++) {
+					destination = Name(base + " " + std::to_string(suffix));
+				}
+			}
+
+			RenderingProfiles.Set(destination, *incoming);
+			importedProfileNames[name.Id()] = destination;
+		}
+
+		for (const Name worldName : info.Worlds) {
+			const WorldId importedWorld = Universe->Find(worldName);
+			if (!importedWorld.IsValid()) {
+				continue;
+			}
+			const Name sourceProfile = Universe->SettingsOf(importedWorld).RenderingProfile;
+			const auto renamed = importedProfileNames.find(sourceProfile.Id());
+			if (renamed != importedProfileNames.end()) {
+				(void)Universe->SetRenderingProfile(importedWorld, renamed->second);
+			}
+		}
+		PipelineSelected.clear();
 
 		// The client's half and the fixtures, on every world that arrived -
 		// the same two things `OpenGame` does, for the same reasons. A world

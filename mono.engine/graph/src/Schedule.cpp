@@ -92,7 +92,7 @@ namespace engine::graph {
 			}
 
 			if (node.Kind == core::Name("viewer") || node.Kind == core::Name("capture") ||
-				node.Kind == core::Name("upload-instances") || node.Kind == core::Name("output")) {
+				node.Kind == core::Name("upload-instances")) {
 				return ExecutionQueue::Transfer;
 			}
 

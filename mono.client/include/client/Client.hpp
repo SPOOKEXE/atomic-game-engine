@@ -10,6 +10,7 @@
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Content.hpp>
+#include <engine/graph/PipelineDocument.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Input.hpp>
 #include <engine/input/Actions.hpp>
@@ -737,14 +738,22 @@ namespace client {
 		// The world the panels report on, and the first view composited.
 		engine::world::WorldId Rendered;
 
-		// Which world's saved pipelines are installed in the renderer.
+		// The one rendering profile library loaded with this universe.
+		engine::graph::PipelineSet RenderingProfiles;
+
+		// Which world's selected profile is installed in the renderer.
 		//
 		// **A guard so installing happens on a world change and not per frame.**
-		// `client::InstallWorldPipelines` compiles every pipeline it installs
+		// `client::InstallRenderingProfiles` compiles every profile it installs
 		// and reports what is wrong with each - worth paying when the world
 		// changes, and sixty complaints a second about a half-wired one if it
 		// were not guarded.
-		engine::world::WorldId PipelinesInstalledFor;
+		engine::world::WorldId ProfilesInstalledFor;
+
+		// The selection used for that install. A replicated WorldSettings change
+		// keeps the same WorldId, so the world id alone cannot invalidate the
+		// selected runtime key.
+		engine::core::Name ProfileInstalledSelection;
 
 		// What to put in `render::View::Pipeline`, from that install.
 		//

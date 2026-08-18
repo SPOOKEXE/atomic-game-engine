@@ -23,6 +23,7 @@
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/examples/Scene.hpp>
+#include <engine/graph/PipelineDocument.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/world/Universe.hpp>
@@ -330,24 +331,31 @@ namespace client {
 	//         already had one.
 	bool InstallDefaultCamera(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler);
 
-	// Installs a world's valid render pipelines under keys qualified by world.
+	// Installs one universe rendering profile under a key qualified by world.
 	//
 	// The renderer owns compiled device plans and knows nothing about stores.
-	// This client-tier join reads the world's `PipelineSet`, removes stale keys
-	// from an earlier install, and hands complete graphs across. Two worlds may
-	// both author `main` without colliding because the installed key includes
-	// `world`.
+	// This client-tier join reads the universe `PipelineSet`, removes a stale key
+	// from an earlier install, and hands one complete graph across. Two worlds may
+	// select the same profile without colliding because the installed key
+	// includes `world`.
 	//
-	// `main` is selected when present. Otherwise the first valid pipeline is
-	// selected, which makes a one-pipeline world useful without a naming rule.
+	// The world's selected profile is tried first. Otherwise `Default PBR` and
+	// then each remaining profile are tried, which also recovers from an invalid
+	// authored graph. Profiles that this world does not select stay as documents
+	// and consume no runtime renderer resources.
 	// An invalid return selects the renderer's standard frame.
 	//
-	// @param store    The world holding the authored documents.
+	// @param profiles The universe's authored documents.
 	// @param renderer The runtime cache to update.
 	// @param world    The stable world number used to qualify keys.
+	// @param selected The profile selected in this world's settings.
 	// @return The key this world's primary view should select.
-	engine::core::Name
-	InstallWorldPipelines(engine::ecs::Store &store, engine::render::Renderer &renderer, uint64_t world);
+	engine::core::Name InstallRenderingProfiles(
+		const engine::graph::PipelineSet &profiles,
+		engine::render::Renderer &renderer,
+		uint64_t world,
+		engine::core::Name selected
+	);
 
 	// Registers this module's own types under explicit names.
 	//

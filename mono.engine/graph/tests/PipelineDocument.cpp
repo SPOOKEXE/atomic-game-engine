@@ -89,12 +89,12 @@ TEST_CASE("the default document builds the engine frame", "[graph]") {
 	REQUIRE(graph.Compile(fromDocument, offender) == GraphStatus::Ok);
 
 	REQUIRE(fromDocument.Shared.size() == 2);
-	REQUIRE(fromDocument.PerView.size() == 13);
+	REQUIRE(fromDocument.PerView.size() == 12);
 	REQUIRE(fromDocument.Final.size() == 4);
 	CHECK(graph.Find(fromDocument.Shared.front())->Name == Name("world"));
 	CHECK(graph.Find(fromDocument.Shared.back())->Name == Name("shadow"));
 	CHECK(graph.Find(fromDocument.PerView.front())->Name == Name("camera"));
-	CHECK(graph.Find(fromDocument.PerView.back())->Name == Name("output"));
+	CHECK(graph.Find(fromDocument.PerView.back())->Name == Name("transparent"));
 	CHECK(graph.Find(fromDocument.Final.back())->Name == Name("output-image"));
 }
 
@@ -133,7 +133,7 @@ TEST_CASE("the default PBR document carries material emission and ambient occlus
 	CompiledGraph compiled;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
 	REQUIRE(compiled.Shared.size() == 2);
-	REQUIRE(compiled.PerView.size() == 13);
+	REQUIRE(compiled.PerView.size() == 12);
 	REQUIRE(compiled.Final.size() == 4);
 
 	CHECK(graph.Find(compiled.Shared[0])->Kind == Name("world"));
@@ -149,13 +149,12 @@ TEST_CASE("the default PBR document carries material emission and ambient occlus
 	CHECK(graph.Find(compiled.PerView[9])->Kind == Name("deferred-lighting"));
 	CHECK(graph.Find(compiled.PerView[10])->Kind == Name("tonemap"));
 	CHECK(graph.Find(compiled.PerView[11])->Kind == Name("transparent"));
-	CHECK(graph.Find(compiled.PerView[12])->Kind == Name("output"));
 	CHECK(graph.Find(compiled.Final[0])->Kind == Name("present"));
 	CHECK(graph.Find(compiled.Final[3])->Kind == Name("output-image"));
 
 	bool emissive = false;
 	bool occlusion = false;
-	bool externalWindow = false;
+	bool composedImage = false;
 	for (uint32_t value = 1; value <= graph.ResourceCount(); value++) {
 		const auto *resource = graph.FindResource(engine::graph::ResourceId{value});
 		REQUIRE(resource != nullptr);
@@ -164,11 +163,11 @@ TEST_CASE("the default PBR document carries material emission and ambient occlus
 		occlusion =
 			occlusion || (resource->Name == Name("occlusion") &&
 						  resource->Format == engine::graph::ResourceFormat::R8 && resource->Divisor == 2);
-		externalWindow = externalWindow || (resource->Name == Name("window") && resource->External);
+		composedImage = composedImage || (resource->Name == Name("composed-image") && !resource->External);
 	}
 	CHECK(emissive);
 	CHECK(occlusion);
-	CHECK(externalWindow);
+	CHECK(composedImage);
 
 	PipelineDocument reloaded;
 	REQUIRE(Read(Write(DefaultPbrDocument()), reloaded, offender) == PipelineDocumentStatus::Ok);
@@ -332,7 +331,7 @@ TEST_CASE("an enable edit survives the round trip and the build", "[graph]") {
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
 
 	// Out of the compile entirely, which is what disabling means here.
-	CHECK(compiled.PerView.size() == 12);
+	CHECK(compiled.PerView.size() == 11);
 }
 
 TEST_CASE("per-view and optional survive the round trip", "[graph]") {

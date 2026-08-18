@@ -1,4 +1,4 @@
-// A world's render pipelines survive being saved and loaded.
+// A universe's rendering profiles survive being saved and loaded.
 //
 // **The claim is that an editor's work outlives the process**, which is the
 // whole reason `graph::PipelineDocument` records edits as data rather than
@@ -77,18 +77,19 @@ namespace {
 	}
 }
 
-TEST_CASE("a world's pipelines survive a save and a load", "[game]") {
+TEST_CASE("universe rendering profiles survive a save and a load", "[game]") {
 	// `RegisterGameClasses` names the pipeline resource beside the classes, so
 	// nothing here has to remember to - which is the point of it being there.
 	engine::game::RegisterGameClasses();
 
 	Universe source;
 	const WorldId start = AddWorld(source, "Start");
-	source.Enter(start, [](Store &store) { store.SetResource(TwoPipelines()); });
+	REQUIRE(source.SetRenderingProfile(start, Name("reflection")) == engine::world::WorldStatus::Ok);
+	const PipelineSet profiles = TwoPipelines();
 
 	const auto path = ScratchFile("engine-game-pipelines.agame");
 	std::string error;
-	REQUIRE(SaveGame(source, Name("Pipelines"), path, error));
+	REQUIRE(SaveGame(source, Name("Pipelines"), profiles, path, error));
 	CHECK(error.empty());
 
 	Universe loaded;
@@ -98,36 +99,38 @@ TEST_CASE("a world's pipelines survive a save and a load", "[game]") {
 
 	const WorldId restored = loaded.Find(Name("Start"));
 	REQUIRE(restored.IsValid());
+	CHECK(loaded.SettingsOf(restored).RenderingProfile == Name("reflection"));
 
-	loaded.Enter(restored, [](Store &store) {
-		const auto *set = store.Resource<PipelineSet>();
-		REQUIRE(set != nullptr);
+	const PipelineSet &set = info.RenderingProfiles;
+	REQUIRE(set.Count() == 2);
+	CHECK(set.Names()[0] == Name("main"));
+	CHECK(set.Names()[1] == Name("reflection"));
 
-		// **Both trees, by name.** A wiring that wrote only the first would pass
-		// a count check on a one-pipeline world, which is why this one holds
-		// two.
-		REQUIRE(set->Count() == 2);
-		CHECK(set->Names()[0] == Name("main"));
-		CHECK(set->Names()[1] == Name("reflection"));
+	// And the main one still describes a frame that compiles, which is the
+	// difference between text that reloaded and a profile that works.
+	const engine::graph::PipelineDocument *main = set.Find(Name("main"));
+	REQUIRE(main != nullptr);
 
-		// And the main one still describes a frame that compiles, which is the
-		// difference between text that reloaded and a pipeline that works.
-		const engine::graph::PipelineDocument *main = set->Find(Name("main"));
-		REQUIRE(main != nullptr);
-
-		engine::graph::RenderGraph graph;
-		Name offender;
-		CHECK(Build(*main, graph, offender) == engine::graph::PipelineDocumentStatus::Ok);
-	});
+	engine::graph::RenderGraph graph;
+	Name offender;
+	CHECK(Build(*main, graph, offender) == engine::graph::PipelineDocumentStatus::Ok);
 }
 
-TEST_CASE("a world with no pipelines writes no element and loads clean", "[game]") {
-	// **The ordinary case, and it must not cost a byte.** Every world that has
-	// never been near the editor is this one.
-	// `RegisterGameClasses` names the pipeline resource beside the classes, so
-	// nothing here has to remember to - which is the point of it being there.
-	engine::game::RegisterGameClasses();
+TEST_CASE("rendering profiles are written once outside every world", "[game]") {
+	Universe source;
+	AddWorld(source, "One");
+	AddWorld(source, "Two");
 
+	const std::string text = engine::game::WriteGame(source, Name("Profiles"), TwoPipelines());
+	const size_t first = text.find("<RenderingProfiles>");
+	REQUIRE(first != std::string::npos);
+	CHECK(text.find("<RenderingProfiles>", first + 1) == std::string::npos);
+	CHECK(text.find("<Pipelines>") == std::string::npos);
+}
+
+TEST_CASE("an empty rendering profile library writes no element and loads clean", "[game]") {
+	// The ordinary case for a program constructing a universe directly, and it
+	// must not cost a byte.
 	Universe source;
 	AddWorld(source, "Start");
 
@@ -137,7 +140,7 @@ TEST_CASE("a world with no pipelines writes no element and loads clean", "[game]
 
 	std::ifstream file(path);
 	const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-	CHECK(text.find("<Pipelines>") == std::string::npos);
+	CHECK(text.find("<RenderingProfiles>") == std::string::npos);
 
 	Universe loaded;
 	GameInfo info;
@@ -145,25 +148,20 @@ TEST_CASE("a world with no pipelines writes no element and loads clean", "[game]
 
 	const WorldId restored = loaded.Find(Name("Start"));
 	REQUIRE(restored.IsValid());
-	loaded.Enter(restored, [](Store &store) { CHECK(store.Resource<PipelineSet>() == nullptr); });
+	CHECK(info.RenderingProfiles.Count() == 0);
 }
 
-TEST_CASE("a corrupted pipeline block loses the pipeline and keeps the world", "[game]") {
-	// **The recovery decision, stated as a test.** A world whose parts all
-	// loaded and whose pipeline did not is recoverable - it draws with the
+TEST_CASE("a corrupted profile block loses the profiles and keeps every world", "[game]") {
+	// **The recovery decision, stated as a test.** A universe whose worlds all
+	// loaded and whose profiles did not is recoverable. It draws with the
 	// standard frame and somebody fixes the pipeline. Refusing the document
 	// would lose the parts too, which is a worse answer to the same file.
-	// `RegisterGameClasses` names the pipeline resource beside the classes, so
-	// nothing here has to remember to - which is the point of it being there.
-	engine::game::RegisterGameClasses();
-
 	Universe source;
-	const WorldId start = AddWorld(source, "Start");
-	source.Enter(start, [](Store &store) { store.SetResource(TwoPipelines()); });
+	AddWorld(source, "Start");
 
 	const auto path = ScratchFile("engine-game-pipelines-broken.agame");
 	std::string error;
-	REQUIRE(SaveGame(source, Name("Broken"), path, error));
+	REQUIRE(SaveGame(source, Name("Broken"), TwoPipelines(), path, error));
 
 	// Corrupt one edit inside the block, leaving the XML itself well formed.
 	{
@@ -185,5 +183,33 @@ TEST_CASE("a corrupted pipeline block loses the pipeline and keeps the world", "
 
 	const WorldId restored = loaded.Find(Name("Start"));
 	REQUIRE(restored.IsValid());
+	CHECK(info.RenderingProfiles.Count() == 0);
+}
+
+TEST_CASE("format two world pipelines migrate into universe profiles", "[game]") {
+	const auto path = ScratchFile("engine-game-pipelines-legacy.agame");
+	const std::string legacy = "<Game format=\"2\" name=\"Legacy\">\n"
+							   "\t<Universe mode=\"WorldParallel\" catchUp=\"8\" busBudget=\"64\" />\n"
+							   "\t<World name=\"Start\">\n"
+							   "\t\t<WorldProperties tickRate=\"60\" idleTickRate=\"2\" faultLimit=\"3\" />\n"
+							   "\t\t<Pipelines><![CDATA[" +
+							   engine::graph::Write(TwoPipelines()) +
+							   "]]></Pipelines>\n"
+							   "\t</World>\n"
+							   "</Game>\n";
+	{
+		std::ofstream file(path, std::ios::trunc);
+		file << legacy;
+	}
+
+	Universe loaded;
+	GameInfo info;
+	std::string error;
+	REQUIRE(LoadGame(loaded, path, info, error));
+	REQUIRE(info.RenderingProfiles.Count() == 2);
+
+	const WorldId restored = loaded.Find(Name("Start"));
+	REQUIRE(restored.IsValid());
+	CHECK(loaded.SettingsOf(restored).RenderingProfile == Name("main"));
 	loaded.Enter(restored, [](Store &store) { CHECK(store.Resource<PipelineSet>() == nullptr); });
 }

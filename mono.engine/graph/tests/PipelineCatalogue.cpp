@@ -221,20 +221,17 @@ TEST_CASE("a kind's slot count matches what the default frame binds", "[graph][c
 	ports("tonemap", 1, 1);
 	ports("transparent", 5, 1);
 	ports("present", 1, 1);
-	ports("overlay", 1, 1);
-	ports("interface", 1, 1);
+	ports("overlay", 2, 1);
+	ports("interface", 0, 1);
 	ports("output-image", 1, 0);
 }
 
 TEST_CASE("the composed frame ends at one output image sink", "[graph][catalogue][output]") {
 	Kinds();
 
-	const NodeKindSpec *view = NodeCatalogue::Find(Name("output"));
 	const NodeKindSpec *final = NodeCatalogue::Find(Name("output-image"));
-	REQUIRE(view != nullptr);
 	REQUIRE(final != nullptr);
-	CHECK(view->Label == "View Image");
-	CHECK(view->Scope == engine::graph::NodeScope::View);
+	CHECK(NodeCatalogue::Find(Name("output")) == nullptr);
 	CHECK(final->Label == "Output Image");
 	CHECK(final->Scope == engine::graph::NodeScope::Frame);
 	CHECK(final->Inputs.size() == 1);

@@ -82,7 +82,6 @@ namespace engine::render {
 				},
 				BackendNode{core::Name("raster"), graph::NodeScope::View, graph::ExecutionQueue::Graphics},
 				BackendNode{core::Name("dispatch"), graph::NodeScope::View, graph::ExecutionQueue::Compute},
-				BackendNode{core::Name("output"), graph::NodeScope::View, graph::ExecutionQueue::Transfer},
 				BackendNode{core::Name("present"), graph::NodeScope::Frame, graph::ExecutionQueue::Graphics},
 				BackendNode{core::Name("viewer"), graph::NodeScope::Frame, graph::ExecutionQueue::Transfer},
 				BackendNode{core::Name("capture"), graph::NodeScope::Frame, graph::ExecutionQueue::Transfer},
@@ -668,7 +667,6 @@ namespace engine::render {
 			LinearDepth,
 			Occlusion,
 			Lit,
-			Display,
 		};
 
 		ResourceRole RoleFor(core::Name resource) const {
@@ -712,10 +710,6 @@ namespace engine::render {
 						return ResourceRole::Lit;
 					}
 					if (node->Kind == core::Name("tonemap") || node->Kind == core::Name("transparent")) {
-						return ResourceRole::Display;
-					}
-					if (node->Kind == core::Name("present") || node->Kind == core::Name("overlay") ||
-						node->Kind == core::Name("interface")) {
 						return ResourceRole::Scene;
 					}
 				}
@@ -823,7 +817,6 @@ namespace engine::render {
 			SDL_GPUTexture *LinearDepth = nullptr;
 			SDL_GPUTexture *Occlusion = nullptr;
 			SDL_GPUTexture *Lit = nullptr;
-			SDL_GPUTexture *Display = nullptr;
 			PbrDimensions Dimensions;
 		};
 
@@ -867,6 +860,17 @@ namespace engine::render {
 		};
 
 		std::vector<GraphTarget> GraphTargets;
+
+		struct ResourcePreviewTarget {
+			core::Name Resource;
+			size_t Slot = 0;
+			SDL_GPUTexture *Texture = nullptr;
+			uint32_t Width = 0;
+			uint32_t Height = 0;
+			bool Refresh = true;
+		};
+
+		std::vector<ResourcePreviewTarget> ResourcePreviews;
 
 		graph::NodeScope ResourceScope(const NamedPipeline &pipeline, graph::ResourceId resource) const;
 		NamedTexture FindGraphTarget(
@@ -1044,6 +1048,7 @@ namespace engine::render {
 		std::vector<scene::DrawInstance> DrawableForeign;
 
 		std::vector<uint32_t> SceneOrder;
+		SDL_GPUGraphicsPipeline *ImagePipeline = nullptr;
 		SDL_GPUGraphicsPipeline *OverlayPipeline = nullptr;
 
 		// Every mesh and texture available to the renderer.
@@ -2072,6 +2077,7 @@ namespace engine::render {
 		SDL_GPUShader *shadowVertex = LoadShader("shadow.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
 		SDL_GPUShader *shadowFragment = LoadShader("shadow.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 1);
 		SDL_GPUShader *overlayVertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
+		SDL_GPUShader *imageFragment = LoadShader("image.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
 		SDL_GPUShader *overlayFragment = LoadShader("overlay.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
 		SDL_GPUShader *gbufferFragment = LoadShader("gbuffer.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 9, 1);
 		SDL_GPUShader *depthLinearFragment =
@@ -2082,7 +2088,7 @@ namespace engine::render {
 		SDL_GPUShader *tonemapFragment = LoadShader("tonemap.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
 
 		if (!opaqueVertex || !opaqueFragment || !shadowVertex || !shadowFragment || !overlayVertex ||
-			!overlayFragment || !gbufferFragment || !depthLinearFragment || !ssaoFragment ||
+			!imageFragment || !overlayFragment || !gbufferFragment || !depthLinearFragment || !ssaoFragment ||
 			!deferredLightingFragment || !tonemapFragment) {
 			return false;
 		}
@@ -2456,7 +2462,24 @@ namespace engine::render {
 			SDL_ReleaseGPUShader(Device, ribbonFragment);
 		}
 
-		// --- overlay --------------------------------------------------------
+		// --- image and overlay ----------------------------------------------
+
+		SDL_GPUColorTargetDescription imageTarget{};
+		imageTarget.format = swapchainFormat;
+
+		SDL_GPUGraphicsPipelineCreateInfo image{};
+		image.vertex_shader = overlayVertex;
+		image.fragment_shader = imageFragment;
+		image.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+		image.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+		image.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+		image.target_info.color_target_descriptions = &imageTarget;
+		image.target_info.num_color_targets = 1;
+
+		ImagePipeline = SDL_CreateGPUGraphicsPipeline(Device, &image);
+		if (!ImagePipeline) {
+			ENGINE_ERROR("image pipeline: {}", SDL_GetError());
+		}
 
 		SDL_GPUColorTargetDescription overlayTarget{};
 		overlayTarget.format = swapchainFormat;
@@ -2495,6 +2518,7 @@ namespace engine::render {
 		SDL_ReleaseGPUShader(Device, deferredLightingFragment);
 		SDL_ReleaseGPUShader(Device, tonemapFragment);
 		SDL_ReleaseGPUShader(Device, overlayVertex);
+		SDL_ReleaseGPUShader(Device, imageFragment);
 		SDL_ReleaseGPUShader(Device, overlayFragment);
 
 		SDL_ReleaseGPUShader(Device, shadowVertex);
@@ -2506,8 +2530,9 @@ namespace engine::render {
 		// for something a scene may not even use. `DrawParticles` checks for null
 		// and draws nothing, with the error already in the log above.
 		return OpaquePipeline != nullptr && TransparentPipeline != nullptr && ShadowPipeline != nullptr &&
-			   OverlayPipeline != nullptr && GBufferPipeline != nullptr && DepthLinearPipeline != nullptr &&
-			   SsaoPipeline != nullptr && DeferredLightingPipeline != nullptr && TonemapPipeline != nullptr;
+			   ImagePipeline != nullptr && OverlayPipeline != nullptr && GBufferPipeline != nullptr &&
+			   DepthLinearPipeline != nullptr && SsaoPipeline != nullptr &&
+			   DeferredLightingPipeline != nullptr && TonemapPipeline != nullptr;
 	}
 
 	void Renderer::Impl::BindPipeline(
@@ -3651,8 +3676,7 @@ namespace engine::render {
 			  slot.Emissive,
 			  slot.LinearDepth,
 			  slot.Occlusion,
-			  slot.Lit,
-			  slot.Display}) {
+			  slot.Lit}) {
 			if (texture != nullptr) {
 				SDL_ReleaseGPUTexture(Device, texture);
 			}
@@ -3703,11 +3727,10 @@ namespace engine::render {
 			texture(SDL_GPU_TEXTUREFORMAT_R8_UNORM, dimensions.OcclusionWidth, dimensions.OcclusionHeight);
 		made.Lit =
 			texture(SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT, dimensions.LitWidth, dimensions.LitHeight);
-		made.Display = texture(ColourFormat(), dimensions.TargetWidth, dimensions.TargetHeight);
 
 		if (made.Albedo == nullptr || made.Normal == nullptr || made.Material == nullptr ||
 			made.Emissive == nullptr || made.LinearDepth == nullptr || made.Occlusion == nullptr ||
-			made.Lit == nullptr || made.Display == nullptr) {
+			made.Lit == nullptr) {
 			ENGINE_ERROR(
 				"render graph targets for {}x{} view: {}",
 				dimensions.ViewWidth,
@@ -3762,13 +3785,28 @@ namespace engine::render {
 		uint32_t viewHeight
 	) {
 		const graph::ResourceDesc *desc = pipeline.Graph.FindResource(resource);
-		if (desc == nullptr || desc->External || desc->Kind == graph::ResourceKind::Texture ||
+		if (desc == nullptr || desc->Kind == graph::ResourceKind::Texture ||
 			desc->Kind == graph::ResourceKind::Buffer || desc->Kind == graph::ResourceKind::Camera ||
 			desc->Kind == graph::ResourceKind::Entities) {
 			return {};
 		}
 
-		const SDL_GPUTextureFormat format = DeviceFormat(desc->Format);
+		bool presentationImage = false;
+		for (uint32_t value = 1; value <= pipeline.Graph.Count(); value++) {
+			const graph::Node *writer = pipeline.Graph.Find(graph::NodeId{value});
+			if (writer == nullptr ||
+				std::find(writer->Writes.begin(), writer->Writes.end(), resource) == writer->Writes.end()) {
+				continue;
+			}
+			presentationImage = writer->Kind == core::Name("present") ||
+								writer->Kind == core::Name("interface") ||
+								writer->Kind == core::Name("overlay");
+			break;
+		}
+		if (desc->External && !presentationImage) {
+			return {};
+		}
+		const SDL_GPUTextureFormat format = presentationImage ? ColourFormat() : DeviceFormat(desc->Format);
 		if (format == SDL_GPU_TEXTUREFORMAT_INVALID) {
 			ENGINE_WARN("graph resource '{}' uses a format the renderer cannot allocate", desc->Name.Text());
 			return {};
@@ -5077,12 +5115,21 @@ namespace engine::render {
 			State->ReleasePbr(slot);
 		}
 		State->PbrSlots.clear();
+		for (Impl::ResourcePreviewTarget &preview : State->ResourcePreviews) {
+			if (preview.Texture != nullptr) {
+				SDL_ReleaseGPUTexture(device, preview.Texture);
+			}
+		}
+		State->ResourcePreviews.clear();
 
 		// Anything a resize retired and no frame came along to free. Shutting
 		// down is the one path where the next frame never arrives, so leaving
 		// this to `DrainRetiredScenes` would leak a texture per resize on exit.
 		State->DrainRetiredScenes();
 
+		if (State->ImagePipeline) {
+			SDL_ReleaseGPUGraphicsPipeline(device, State->ImagePipeline);
+		}
 		if (State->OverlayPipeline) {
 			SDL_ReleaseGPUGraphicsPipeline(device, State->OverlayPipeline);
 		}
@@ -5471,8 +5518,30 @@ namespace engine::render {
 		if (role == Impl::ResourceRole::Lit) {
 			return pbr.Lit;
 		}
-		if (role == Impl::ResourceRole::Display) {
-			return pbr.Display;
+		return nullptr;
+	}
+
+	void Renderer::RefreshResourcePreview(core::Name resource, size_t slot) {
+		if (State == nullptr || !resource.IsValid()) {
+			return;
+		}
+		for (Impl::ResourcePreviewTarget &preview : State->ResourcePreviews) {
+			if (preview.Resource == resource && preview.Slot == slot) {
+				preview.Refresh = true;
+				return;
+			}
+		}
+		State->ResourcePreviews.push_back({.Resource = resource, .Slot = slot});
+	}
+
+	void *Renderer::ResourcePreviewTexture(core::Name resource, size_t slot) const {
+		if (State == nullptr || !resource.IsValid()) {
+			return nullptr;
+		}
+		for (const Impl::ResourcePreviewTarget &preview : State->ResourcePreviews) {
+			if (preview.Resource == resource && preview.Slot == slot) {
+				return preview.Texture;
+			}
 		}
 		return nullptr;
 	}
@@ -5598,8 +5667,7 @@ namespace engine::render {
 		if (role == Impl::ResourceRole::Shadow || role == Impl::ResourceRole::Surface) {
 			return SceneExtent{1.0f, 1.0f};
 		}
-		if (role == Impl::ResourceRole::Scene || role == Impl::ResourceRole::Depth ||
-			role == Impl::ResourceRole::Display) {
+		if (role == Impl::ResourceRole::Scene || role == Impl::ResourceRole::Depth) {
 			return SceneTextureExtent(slot);
 		}
 		if (slot >= State->PbrSlots.size()) {
@@ -8740,9 +8808,6 @@ namespace engine::render {
 		}
 		Impl::PbrSlot &pbr = State->PbrAt(targetSlot);
 		SDL_GPUTexture *const viewTarget = colourTarget.texture;
-		if (needsPbrTargets) {
-			colourTarget.texture = pbr.Display;
-		}
 		const float aspect = static_cast<float>(sceneWidth) / static_cast<float>(sceneHeight);
 		const scene::CameraMatrices matrices = scene::ResolveCamera(cameraFrame, drawCamera, aspect);
 		const FrameUniforms frameUniforms{
@@ -8983,48 +9048,50 @@ namespace engine::render {
 					SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT,
 				};
 			}
-			if (role == Impl::ResourceRole::Display) {
-				return Impl::NamedTexture{
-					slotPbr.Display,
-					slotPbr.Dimensions.ViewWidth,
-					slotPbr.Dimensions.ViewHeight,
-					State->ColourFormat(),
-				};
-			}
 			return texture;
 		};
 
-		const auto graphTexture = [&](graph::ResourceId resource,
-									  const graph::RunContext &context,
-									  bool make) {
+		const auto resourceTexture = [&](graph::ResourceId resource, size_t selectedSlot, bool make) {
 			const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResource(resource);
 			if (desc == nullptr) {
 				return Impl::NamedTexture{};
 			}
-			const graph::Node *node = selectedPipeline->Graph.Find(context.Node);
-			const size_t selectedSlot = context.View == graph::RunContext::WHOLE_FRAME && node != nullptr
-											? node->Integer(core::Name("view"), 0)
-											: targetSlot;
 			Impl::NamedTexture fixed = fixedTexture(desc->Name, selectedSlot);
 			if (fixed.IsValid()) {
 				return fixed;
 			}
-			if (desc->External) {
-				if (desc->Name == core::Name("window")) {
-					return Impl::NamedTexture{swapchain, width, height, State->ColourFormat()};
-				}
-				return Impl::NamedTexture{};
-			}
-
 			const graph::NodeScope scope = State->ResourceScope(*selectedPipeline, resource);
 			const uint64_t owner = scope == graph::NodeScope::View	  ? static_cast<uint64_t>(selectedSlot)
 								   : scope == graph::NodeScope::World ? world
 																	  : 0;
+			if (desc->External) {
+				if (desc->Name == core::Name("window")) {
+					return Impl::NamedTexture{swapchain, width, height, State->ColourFormat()};
+				}
+				if (!make) {
+					return State->FindGraphTarget(*selectedPipeline, desc->Name, scope, owner);
+				}
+			}
+
 			if (make) {
-				return State->EnsureGraphTarget(*selectedPipeline, resource, owner, sceneWidth, sceneHeight);
+				const uint32_t resourceWidth =
+					scope == graph::NodeScope::Frame && width > 0 ? width : sceneWidth;
+				const uint32_t resourceHeight =
+					scope == graph::NodeScope::Frame && height > 0 ? height : sceneHeight;
+				return State->EnsureGraphTarget(
+					*selectedPipeline, resource, owner, resourceWidth, resourceHeight
+				);
 			}
 			return State->FindGraphTarget(*selectedPipeline, desc->Name, scope, owner);
 		};
+		const auto graphTexture =
+			[&](graph::ResourceId resource, const graph::RunContext &context, bool make) {
+				const graph::Node *node = selectedPipeline->Graph.Find(context.Node);
+				const bool selectsView = context.View == graph::RunContext::WHOLE_FRAME && node != nullptr &&
+										 node->Parameter(core::Name("view")) != nullptr;
+				const size_t selectedSlot = selectsView ? node->Integer(core::Name("view"), 0) : targetSlot;
+				return resourceTexture(resource, selectedSlot, make);
+			};
 
 		const auto textureBindings = [&](const graph::RunContext &context) {
 			std::vector<SDL_GPUTextureSamplerBinding> bindings;
@@ -9045,6 +9112,61 @@ namespace engine::render {
 			}
 			return bindings;
 		};
+
+		const auto singleChannel = [](const Impl::NamedTexture &source) {
+			switch (source.Format) {
+			case SDL_GPU_TEXTUREFORMAT_R8_UNORM:
+			case SDL_GPU_TEXTUREFORMAT_R32_FLOAT:
+			case SDL_GPU_TEXTUREFORMAT_D16_UNORM:
+			case SDL_GPU_TEXTUREFORMAT_D24_UNORM:
+			case SDL_GPU_TEXTUREFORMAT_D32_FLOAT:
+			case SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT:
+			case SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT:
+				return true;
+			default:
+				return false;
+			}
+		};
+		const auto drawImage =
+			[&](const Impl::NamedTexture &source, const Impl::NamedTexture &target, SDL_GPULoadOp load) {
+				if (!source.IsValid() || !target.IsValid()) {
+					return false;
+				}
+				SDL_GPUColorTargetInfo colour{};
+				colour.texture = target.Texture;
+				colour.clear_color = SDL_FColor{0.0f, 0.0f, 0.0f, 1.0f};
+				colour.load_op = load;
+				colour.store_op = SDL_GPU_STOREOP_STORE;
+				colour.cycle = load == SDL_GPU_LOADOP_CLEAR;
+				SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colour, 1, nullptr);
+				State->BindPipeline(pass, State->ImagePipeline, Impl::PipelineFamily::Other);
+				const SDL_GPUTextureSamplerBinding binding{source.Texture, State->SurfaceSampler};
+				SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
+				const glm::vec4 mode{singleChannel(source) ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f};
+				SDL_PushGPUFragmentUniformData(command, 0, &mode, sizeof(mode));
+				SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+				SDL_EndGPURenderPass(pass);
+				result.DrawCalls++;
+				return true;
+			};
+		const auto drawOverlayImage =
+			[&](SDL_GPUTexture *source, const Impl::NamedTexture &target, SDL_GPULoadOp load) {
+				if (source == nullptr || !target.IsValid()) {
+					return false;
+				}
+				SDL_GPUColorTargetInfo colour{};
+				colour.texture = target.Texture;
+				colour.load_op = load;
+				colour.store_op = SDL_GPU_STOREOP_STORE;
+				SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colour, 1, nullptr);
+				State->BindPipeline(pass, State->OverlayPipeline, Impl::PipelineFamily::Other);
+				const SDL_GPUTextureSamplerBinding binding{source, State->OverlaySampler};
+				SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
+				SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+				SDL_EndGPURenderPass(pass);
+				result.DrawCalls++;
+				return true;
+			};
 
 		frameNodes.Set(core::Name("raster"), [&](const graph::RunContext &context) {
 			enterNamedPass(context.Name);
@@ -9328,7 +9450,12 @@ namespace engine::render {
 			// The forward tail consumes both completed attachments.
 			colourTarget.load_op = SDL_GPU_LOADOP_LOAD;
 			depthTarget.load_op = SDL_GPU_LOADOP_LOAD;
-			depthTarget.store_op = SDL_GPU_STOREOP_DONT_CARE;
+			// An offscreen slot exposes this attachment through `ResourceTexture`
+			// after the graph finishes, including the profiler's stage thumbnails.
+			// Discarding it here returned a valid texture handle holding undefined
+			// pixels. A window render has no later depth consumer and may still skip
+			// the final store.
+			depthTarget.store_op = offscreen ? SDL_GPU_STOREOP_STORE : SDL_GPU_STOREOP_DONT_CARE;
 			// Cycling selects fresh backing storage, which cannot contain the depth
 			// this pass explicitly loads from the G-buffer pass.
 			depthTarget.cycle = false;
@@ -9802,8 +9929,160 @@ namespace engine::render {
 			}
 			return true;
 		});
-		frameNodes.Set(core::Name("output"), [&](const graph::RunContext &context) {
+		frameNodes.Set(core::Name("present"), [&](const graph::RunContext &context) {
 			enterNamedPass(context.Name);
+			Impl::NamedTexture source;
+			Impl::NamedTexture target;
+			for (const graph::ResourceId resource : context.Reads) {
+				source = graphTexture(resource, context, false);
+				if (source.IsValid()) {
+					break;
+				}
+			}
+			for (const graph::ResourceId resource : context.Writes) {
+				target = graphTexture(resource, context, true);
+				if (target.IsValid()) {
+					break;
+				}
+			}
+			if (!drawImage(source, target, SDL_GPU_LOADOP_CLEAR)) {
+				ENGINE_WARN("'{}' needs one readable image and one writable image", context.Name.Text());
+			}
+			return true;
+		});
+
+		// --- interface image ------------------------------------------------
+
+		frameNodes.Set(core::Name("interface"), [&](const graph::RunContext &context) {
+			enterNamedPass(context.Name);
+			Impl::NamedTexture target;
+			for (const graph::ResourceId resource : context.Writes) {
+				target = graphTexture(resource, context, true);
+				if (target.IsValid()) {
+					break;
+				}
+			}
+			if (!target.IsValid()) {
+				ENGINE_WARN("'{}' has no image target", context.Name.Text());
+				return true;
+			}
+
+			SDL_GPUColorTargetInfo interfaceTarget{};
+			interfaceTarget.texture = target.Texture;
+			interfaceTarget.clear_color = SDL_FColor{0.0f, 0.0f, 0.0f, 0.0f};
+			interfaceTarget.load_op = SDL_GPU_LOADOP_CLEAR;
+			interfaceTarget.store_op = SDL_GPU_STOREOP_STORE;
+			interfaceTarget.cycle = true;
+			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &interfaceTarget, 1, nullptr);
+			if (!drawInterface) {
+				SDL_EndGPURenderPass(pass);
+				return true;
+			}
+			ENGINE_PROFILE_CAT("interface pass", core::ProfileCategory::Render);
+			interfaceHook->Record(command, pass);
+			SDL_EndGPURenderPass(pass);
+			result.DrawCalls++;
+			return true;
+		});
+
+		// --- image composition ----------------------------------------------
+
+		frameNodes.Set(core::Name("overlay"), [&](const graph::RunContext &context) {
+			enterNamedPass(context.Name);
+			Impl::NamedTexture sceneImage;
+			Impl::NamedTexture interfaceImage;
+			Impl::NamedTexture target;
+			if (!context.Reads.empty()) {
+				sceneImage = graphTexture(context.Reads[0], context, false);
+			}
+			if (context.Reads.size() > 1) {
+				interfaceImage = graphTexture(context.Reads[1], context, false);
+			}
+			for (const graph::ResourceId resource : context.Writes) {
+				target = graphTexture(resource, context, true);
+				if (target.IsValid()) {
+					break;
+				}
+			}
+			if (!drawImage(sceneImage, target, SDL_GPU_LOADOP_CLEAR)) {
+				ENGINE_WARN("'{}' has no scene image to compose", context.Name.Text());
+				return true;
+			}
+
+			if (haveOverlay) {
+				if (!submitUploads()) {
+					return false;
+				}
+				ENGINE_PROFILE_CAT("debug image overlay", core::ProfileCategory::Render);
+				drawOverlayImage(State->OverlayTexture, target, SDL_GPU_LOADOP_LOAD);
+			}
+			if (graphEnabled(core::Name("interface")) && interfaceImage.IsValid()) {
+				drawOverlayImage(interfaceImage.Texture, target, SDL_GPU_LOADOP_LOAD);
+			}
+			return true;
+		});
+
+		frameNodes.Set(core::Name("output-image"), [&](const graph::RunContext &context) {
+			enterNamedPass(context.Name);
+			for (Impl::ResourcePreviewTarget &preview : State->ResourcePreviews) {
+				if (!preview.Refresh || preview.Slot != targetSlot) {
+					continue;
+				}
+				graph::ResourceId resource;
+				for (uint32_t value = 1; value <= selectedPipeline->Graph.ResourceCount(); value++) {
+					const graph::ResourceId candidate{value};
+					const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResource(candidate);
+					if (desc != nullptr && desc->Name == preview.Resource) {
+						resource = candidate;
+						break;
+					}
+				}
+				const Impl::NamedTexture source = resource.IsValid()
+													  ? resourceTexture(resource, preview.Slot, false)
+													  : Impl::NamedTexture{};
+				if (!source.IsValid()) {
+					continue;
+				}
+				constexpr uint32_t PREVIEW_SIDE = 256;
+				uint32_t previewWidth = source.Width;
+				uint32_t previewHeight = source.Height;
+				if (std::max(previewWidth, previewHeight) > PREVIEW_SIDE) {
+					if (previewWidth >= previewHeight) {
+						previewHeight = std::max(1u, previewHeight * PREVIEW_SIDE / previewWidth);
+						previewWidth = PREVIEW_SIDE;
+					} else {
+						previewWidth = std::max(1u, previewWidth * PREVIEW_SIDE / previewHeight);
+						previewHeight = PREVIEW_SIDE;
+					}
+				}
+				if (preview.Texture == nullptr || preview.Width != previewWidth ||
+					preview.Height != previewHeight) {
+					if (preview.Texture != nullptr) {
+						SDL_ReleaseGPUTexture(State->Device, preview.Texture);
+					}
+					SDL_GPUTextureCreateInfo info{};
+					info.type = SDL_GPU_TEXTURETYPE_2D;
+					info.format = State->ColourFormat();
+					info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+					info.width = previewWidth;
+					info.height = previewHeight;
+					info.layer_count_or_depth = 1;
+					info.num_levels = 1;
+					info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+					preview.Texture = SDL_CreateGPUTexture(State->Device, &info);
+					preview.Width = preview.Texture != nullptr ? previewWidth : 0;
+					preview.Height = preview.Texture != nullptr ? previewHeight : 0;
+				}
+				const Impl::NamedTexture target{
+					preview.Texture, preview.Width, preview.Height, State->ColourFormat()
+				};
+				if (drawImage(source, target, SDL_GPU_LOADOP_CLEAR)) {
+					preview.Refresh = false;
+				}
+			}
+			if (swapchain == nullptr) {
+				return true;
+			}
 			Impl::NamedTexture source;
 			for (const graph::ResourceId resource : context.Reads) {
 				source = graphTexture(resource, context, false);
@@ -9811,99 +10090,12 @@ namespace engine::render {
 					break;
 				}
 			}
-			if (!source.IsValid()) {
+			const Impl::NamedTexture target{swapchain, width, height, State->ColourFormat()};
+			if (!drawImage(source, target, SDL_GPU_LOADOP_CLEAR)) {
 				ENGINE_WARN("'{}' has no image wired into it", context.Name.Text());
 				return true;
 			}
-			if (source.Texture == viewTarget) {
-				return true;
-			}
-
-			SDL_GPUBlitInfo blit{};
-			blit.source.texture = source.Texture;
-			blit.source.w = source.Width;
-			blit.source.h = source.Height;
-			blit.destination.texture = viewTarget;
-			blit.destination.w = sceneWidth;
-			blit.destination.h = sceneHeight;
-			blit.load_op = SDL_GPU_LOADOP_DONT_CARE;
-			blit.filter = source.Width == sceneWidth && source.Height == sceneHeight ? SDL_GPU_FILTER_NEAREST
-																					 : SDL_GPU_FILTER_LINEAR;
-			blit.cycle = true;
-			SDL_BlitGPUTexture(command, &blit);
-			return true;
-		});
-		frameNodes.Set(core::Name("present"), [&](const graph::RunContext &context) {
-			enterNamedPass(context.Name);
-			return true;
-		});
-
-		// --- overlay pass ---------------------------------------------------
-
-		frameNodes.Set(core::Name("overlay"), [&](const graph::RunContext &context) {
-			enterNamedPass(context.Name);
-			if (!haveOverlay) {
-				return true;
-			}
-			if (!submitUploads()) {
-				return false;
-			}
-			ENGINE_PROFILE_CAT("overlay pass", core::ProfileCategory::Render);
-
-			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &windowTarget, 1, nullptr);
-
-			// Whoever got here first has cleared it; everything after loads.
 			windowTarget.load_op = SDL_GPU_LOADOP_LOAD;
-
-			State->BindPipeline(pass, State->OverlayPipeline, Impl::PipelineFamily::Other);
-
-			const SDL_GPUTextureSamplerBinding binding{
-				State->OverlayTexture,
-				State->OverlaySampler,
-			};
-			SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
-
-			// Three vertices, no buffer: the vertex shader builds a fullscreen
-			// triangle from gl_VertexIndex.
-			SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
-			SDL_EndGPURenderPass(pass);
-
-			result.DrawCalls++;
-			return true;
-		});
-
-		// --- interface pass -------------------------------------------------
-
-		// Screen-space interface needs the swapchain. A headless capture still
-		// prepares the hook so its spatial collectors can draw in the world pass,
-		// but has no window target for this pass.
-		frameNodes.Set(core::Name("interface"), [&](const graph::RunContext &context) {
-			enterNamedPass(context.Name);
-			if (!drawInterface || swapchain == nullptr) {
-				return true;
-			}
-			ENGINE_PROFILE_CAT("interface pass", core::ProfileCategory::Render);
-
-			// No depth attachment. Panels are drawn in the order the interface
-			// submitted them and testing them against the world's depth would
-			// hide a window behind a wall.
-			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &windowTarget, 1, nullptr);
-			windowTarget.load_op = SDL_GPU_LOADOP_LOAD;
-			interfaceHook->Record(command, pass);
-			SDL_EndGPURenderPass(pass);
-
-			// One, whatever the interface submitted. What this counter is for is
-			// the frame's shape - the panel that reads it is trying to answer
-			// "what did the engine draw", and a widget count is the editor's
-			// business rather than the renderer's.
-			result.DrawCalls++;
-			return true;
-		});
-		frameNodes.Set(core::Name("output-image"), [&](const graph::RunContext &context) {
-			// The frame is already in its external image. This terminal records its
-			// place in timings and makes the actual final resource inspectable without
-			// copying it to a second texture only to name the end of the graph.
-			enterNamedPass(context.Name);
 			return true;
 		});
 

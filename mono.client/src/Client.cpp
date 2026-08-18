@@ -174,6 +174,7 @@ namespace client {
 			ENGINE_ERROR("--game '{}' failed: {}", Settings.GameFile.string(), error);
 			return false;
 		}
+		RenderingProfiles = std::move(info.RenderingProfiles);
 
 		const auto worlds = Universe_->Worlds();
 		if (worlds.empty()) {
@@ -1873,6 +1874,7 @@ namespace client {
 			RibbonRuns = {};
 
 			for (const engine::world::WorldId id : Simulated) {
+				const engine::core::Name selectedProfile = Universe_->SettingsOf(id).RenderingProfile;
 				// **Written before `Present`, so this frame's `PreRender` sees
 				// this frame's input.** A camera controller reads the state and
 				// places the camera in the same pass; writing afterwards would
@@ -1909,7 +1911,7 @@ namespace client {
 				// phase filled the draw list. The camera and the list stay
 				// where they were produced; what leaves is a copy in a buffer
 				// the renderer owns the other end of.
-				Universe_->Enter(id, [this, id](engine::ecs::Store &store) {
+				Universe_->Enter(id, [this, id, selectedProfile](engine::ecs::Store &store) {
 					const auto *active = store.Resource<engine::scene::ActiveCamera>();
 					const auto *list = store.Resource<DrawList>();
 					if (active == nullptr || list == nullptr) {
@@ -1956,9 +1958,12 @@ namespace client {
 							}
 						);
 
-						if (PipelinesInstalledFor != id) {
-							PipelinesInstalledFor = id;
-							PipelineSelected = InstallWorldPipelines(store, Renderer, id.Index);
+						if (ProfilesInstalledFor != id || ProfileInstalledSelection != selectedProfile) {
+							ProfilesInstalledFor = id;
+							ProfileInstalledSelection = selectedProfile;
+							PipelineSelected = InstallRenderingProfiles(
+								RenderingProfiles, Renderer, id.Index, selectedProfile
+							);
 						}
 
 						// **The particles, from the world being drawn and only
