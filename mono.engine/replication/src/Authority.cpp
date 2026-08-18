@@ -439,6 +439,14 @@ namespace engine::replication {
 				continue;
 			}
 
+			// One span per component, not one for the whole loop - `Resign`
+			// used to be a single frame no capture could see inside: twenty
+			// components signed for one 39%-of-the-tick line gives a reader no
+			// way to tell whether that is one expensive component or several
+			// cheap ones. The name is stable for the life of the run, so this
+			// is the `_STABLE` form rather than the copying one.
+			ENGINE_PROFILE_DYNAMIC_STABLE("Authority::Resign::slot", Components[slot].Text(), core::ProfileCategory::Network);
+
 			// This slot's actual carriers, hashed straight out of the column -
 			// not `Bearing` filtered down to them and not read back through
 			// `GetComponent`. `Bearing` is the union of every replicated

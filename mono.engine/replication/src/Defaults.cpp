@@ -125,6 +125,24 @@ namespace engine::replication {
 		// those buys a dirty column paid every tick and read never, and *not*
 		// signing them is the v0.7 bug where a part recoloured at runtime kept
 		// its old colour on every client for ever.
+		//
+		// **Tried widening this to everything a grep for `SetComponent`/`Set<T>`
+		// found no write site for, at v0.18, and reverted it the same day.**
+		// `scene.Visual` and `scene.Bounds` passed that search and are exactly
+		// as write-once as `scene.Transform` looked from the same angle - and
+		// `mono.unified_server_client/tests/Harness.cpp` still failed five cases,
+		// because a real system reaches both through `Store::GetMutable<T>` and
+		// `Store::EachBatch<T>`, which hand out raw column pointers and set no
+		// bit *by design* - the cost that path exists to avoid is exactly the
+		// per-row check `Observed` would add back. A grep across call sites
+		// cannot rule that out for a component it has not been told is safe;
+		// only a system's own author can say a component is never reached that
+		// way, and none of the ten beyond `Transform` and `Motion` have made
+		// that claim. `Authority::Resign`'s profile against
+		// `examples/ReplicationStress.luau` found the two functions above
+		// costing roughly 3% of the tick each at twenty thousand carriers - real
+		// and worth reducing, but not by guessing a component's write path from
+		// outside the module that owns it.
 		bool WrittenEveryTick(std::string_view component) {
 			return component == "scene.Transform" || component == "scene.Motion";
 		}
