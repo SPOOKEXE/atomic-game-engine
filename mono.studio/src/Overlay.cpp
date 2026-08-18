@@ -1516,9 +1516,14 @@ namespace studio {
 			return;
 		}
 
+		const ViewportState *viewport = ExtraAt(index);
+		const engine::render::SceneTarget &display = viewport != nullptr ? viewport->Target : WorldTarget;
+		const float scaleX = display.IsValid() ? static_cast<float>(display.Width) / slot.Width : 1.0f;
+		const float scaleY = display.IsValid() ? static_cast<float>(display.Height) / slot.Height : 1.0f;
+
 		engine::gui::CompileRequest request;
-		request.Display.Width = slot.Width;
-		request.Display.Height = slot.Height;
+		request.Display.Width = display.IsValid() ? static_cast<float>(display.Width) : slot.Width;
+		request.Display.Height = display.IsValid() ? static_cast<float>(display.Height) : slot.Height;
 
 		// **Fed back from the previous frame's routing, deliberately.** The
 		// hover is computed from the list a compile produced, so a compile that
@@ -1533,7 +1538,10 @@ namespace studio {
 		// anything else would hit-test against a canvas nobody drew.
 		const ImVec2 mouse = ImGui::GetIO().MousePos;
 		engine::gui::Pointer pointer;
-		pointer.Position = engine::core::Vector2{mouse.x - slot.X, mouse.y - slot.Y};
+		pointer.Position = engine::core::Vector2{
+			(mouse.x - slot.X) * scaleX,
+			(mouse.y - slot.Y) * scaleY,
+		};
 		pointer.Down = ImGui::IsMouseDown(ImGuiMouseButton_Left);
 		pointer.ScreenOnly = true;
 
@@ -1556,8 +1564,7 @@ namespace studio {
 		// see through all of them - a slider being dragged in the properties
 		// panel is imgui's mouse and the game's UI should not light up under it
 		// on the way past.
-		const ViewportState *held = ExtraAt(index);
-		const bool driving = held != nullptr ? held->Active : ViewportActive;
+		const bool driving = viewport != nullptr ? viewport->Active : ViewportActive;
 
 		pointer.Inside = (ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow) || driving) &&
 						 ImGui::IsMouseHoveringRect(

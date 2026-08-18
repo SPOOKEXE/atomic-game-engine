@@ -566,6 +566,18 @@ namespace engine::graph {
 			 "Projects portal captures onto their entrance geometry after scene tone mapping and before "
 			 "transparent geometry."},
 
+			{"mirror-overlay",
+			 "Mirror Overlay",
+			 C::Composite,
+			 S::View,
+			 {{"colour", K::Texture, LDR, true, "The scene below the mirror panes."},
+			  {"depth", K::Depth, D24, true, "The opaque scene depth."},
+			  {"surface", K::Texture, RGBA8, false, "The captured mirror views."},
+			  {"entities", K::Entities, F::R8, false, "The ordered mirror panes."},
+			  {"instances", K::Buffer, F::R8, false, "The uploaded instance attributes."}},
+			 {{"colour", K::Colour, LDR, true, "The scene with mirror panes composed."}},
+			 "Projects each captured mirror view onto its pane before ordinary transparent geometry."},
+
 			{"taa",
 			 "Temporal AA",
 			 C::Composite,

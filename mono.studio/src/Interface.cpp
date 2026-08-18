@@ -9,12 +9,13 @@
 #include <engine/ui/Metrics.hpp>
 #include <engine/ui/Theme.hpp>
 
+#include <SDL3/SDL_video.h>
+
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <imgui.h>
 #include <imgui_internal.h>
-#include <SDL3/SDL_video.h>
 #include <span>
 #include <studio/Editor.hpp>
 #include <studio/Keybinds.hpp>
@@ -78,11 +79,13 @@ namespace studio {
 		// hoisted into a dozen more constants: a name used twice in one file is
 		// not the drift a constant prevents.
 		constexpr const char *SKINNABLE[]{
-			VIEWPORT,  VIEWPORT2, EXPLORER,			 WORLDS,		   INSTANCES,	  PROPERTIES,
-			SCRIPTS,   OUTPUT,	  "Command Bar",	 SETTINGS,		   STATISTICS,	  FRAMEGRAPH,
-			"History", "Assets",  "Render Pipeline", "World Lighting",  "Network",     "Team Create",
-			"Control (MCP)",
-			"Plugins", "Bus",	  "Find Instances",	 "Script Profile", "Changes",	  "Debugger",
+			VIEWPORT,	   VIEWPORT2,		 EXPLORER,			WORLDS,
+			INSTANCES,	   PROPERTIES,		 SCRIPTS,			OUTPUT,
+			"Command Bar", SETTINGS,		 STATISTICS,		FRAMEGRAPH,
+			"History",	   "Assets",		 "Render Pipeline", "World Lighting",
+			"Network",	   "Team Create",	 "Control (MCP)",	"Plugins",
+			"Bus",		   "Find Instances", "Script Profile",	"Changes",
+			"Debugger",
 		};
 
 		// The first-run layout, built once and then owned by the ini file.
@@ -935,11 +938,27 @@ namespace studio {
 			ImGui::Image(
 				reinterpret_cast<ImTextureID>(texture), size, ImVec2(0.0f, 0.0f), ImVec2(extent.U, extent.V)
 			);
+		} else if (texture != nullptr && extent.DrawnWidth > 0 && extent.DrawnHeight > 0) {
+			// Keep the last complete frame visible while the new target is being
+			// allocated. It is fitted uniformly inside the panel, so a resize can
+			// letterbox for one frame but cannot stretch either the world or its UI.
+			const float oldWidth = static_cast<float>(extent.DrawnWidth) / density;
+			const float oldHeight = static_cast<float>(extent.DrawnHeight) / density;
+			const float scale = std::min(size.x / oldWidth, size.y / oldHeight);
+			const ImVec2 fitted{oldWidth * scale, oldHeight * scale};
+			const ImVec2 inset{(size.x - fitted.x) * 0.5f, (size.y - fitted.y) * 0.5f};
+			const ImVec2 minimum{origin.x + inset.x, origin.y + inset.y};
+			const ImVec2 maximum{minimum.x + fitted.x, minimum.y + fitted.y};
+			ImGui::GetWindowDrawList()->AddImage(
+				reinterpret_cast<ImTextureID>(texture),
+				minimum,
+				maximum,
+				ImVec2(0.0f, 0.0f),
+				ImVec2(extent.U, extent.V)
+			);
+			ImGui::Dummy(size);
 		} else {
-			// The first frame, and the one catch-up frame after a panel resize.
-			// Showing the old image at the new aspect stretches the world; blanking
-			// this frame preserves the camera projection and the button below still
-			// makes the panel drivable.
+			// Only the first frame has no complete image to retain.
 			ImGui::Dummy(size);
 		}
 

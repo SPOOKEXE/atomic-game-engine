@@ -88,6 +88,9 @@ namespace engine::render {
 					core::Name("portal-overlay"), graph::NodeScope::View, graph::ExecutionQueue::Graphics
 				},
 				BackendNode{
+					core::Name("mirror-overlay"), graph::NodeScope::View, graph::ExecutionQueue::Graphics
+				},
+				BackendNode{
 					core::Name("transparent"), graph::NodeScope::View, graph::ExecutionQueue::Graphics
 				},
 				BackendNode{core::Name("raster"), graph::NodeScope::View, graph::ExecutionQueue::Graphics},
@@ -9782,6 +9785,127 @@ namespace engine::render {
 			return true;
 		});
 
+		frameNodes.Set(core::Name("mirror-overlay"), [&](const graph::RunContext &context) {
+			ENGINE_PROFILE_CAT("mirror overlay pass", core::ProfileCategory::Render);
+			if (!submitUploads()) {
+				return false;
+			}
+			enterNamedPass(context.Name);
+
+			Impl::NamedTexture source;
+			Impl::NamedTexture target;
+			if (!context.Reads.empty()) {
+				source = graphTexture(context.Reads.front(), context, false);
+			}
+			for (const graph::ResourceId resource : context.Writes) {
+				target = graphTexture(resource, context, true);
+				if (target.IsValid()) {
+					break;
+				}
+			}
+			if (!drawImage(source, target, SDL_GPU_LOADOP_CLEAR)) {
+				ENGINE_WARN("'{}' needs a scene image and an output image", context.Name.Text());
+				return true;
+			}
+
+			colourTarget.texture = target.Texture;
+			colourTarget.load_op = SDL_GPU_LOADOP_LOAD;
+			colourTarget.store_op = SDL_GPU_STOREOP_STORE;
+			colourTarget.cycle = false;
+			depthTarget.load_op = SDL_GPU_LOADOP_LOAD;
+			depthTarget.store_op = SDL_GPU_STOREOP_STORE;
+			depthTarget.cycle = false;
+
+			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colourTarget, 1, &depthTarget);
+			SDL_PushGPUFragmentUniformData(command, 1, &lightUniforms, sizeof(lightUniforms));
+			SDL_PushGPUFragmentUniformData(command, 2, &State->Beams, sizeof(State->Beams));
+			SDL_SetGPUViewport(pass, &sceneViewport);
+			SDL_SetGPUScissor(pass, &sceneScissor);
+
+			if (haveInstances && (surfaceInCamera > 0 || transparentSurfaces > 0)) {
+				State->BindPipeline(pass, State->OpaquePipeline, Impl::PipelineFamily::Opaque);
+				const SDL_GPUBufferBinding vertexBindings[] = {
+					{State->Meshes.Vertices(), 0},
+					{State->InstanceBuffer, 0},
+				};
+				SDL_BindGPUVertexBuffers(pass, 0, vertexBindings, 2);
+				const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
+				SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+
+				const float aspect = static_cast<float>(sceneWidth) / static_cast<float>(sceneHeight);
+				const glm::mat4 viewProjection =
+					scene::ResolveCamera(cameraFrame, drawCamera, aspect).ViewProjection;
+				const FrameUniforms frameUniforms{
+					viewProjection,
+					lightViewProjection,
+					glm::mat4{1.0f},
+				};
+				SDL_PushGPUVertexUniformData(command, 0, &frameUniforms, sizeof(frameUniforms));
+
+				const LightingUniforms plainLighting = lightingAt(cameraFrame.Position, 0.0f, 0.0f);
+				const ShadowBinding shadow = shadowBinding();
+				const bool surfaceImagesEnabled = graphEnabled(core::Name("surface"));
+				LightingUniforms mirroredUniforms{};
+
+				const auto drawMirrors = [&](bool blended) {
+					for (uint8_t index = 0; index < scene::MAX_SURFACES; index++) {
+						if (portalOf[index] != nullptr) {
+							continue;
+						}
+						const scene::SurfaceRun &run = cameraRuns[index];
+						const uint32_t count = blended ? run.BlendedCount : run.OpaqueCount;
+						const uint32_t first = blended ? run.BlendedFirst : run.OpaqueFirst;
+						if (count == 0) {
+							continue;
+						}
+
+						const Impl::SurfaceSlotState &shown = bank.Surfaces[index];
+						const LightingUniforms *paneLighting = &plainLighting;
+						SDL_GPUTexture *image = nullptr;
+						if (surfaceImagesEnabled && shown.Ready) {
+							const FrameUniforms mirrorFrame{
+								viewProjection,
+								lightViewProjection,
+								shown.Sampling,
+							};
+							mirroredUniforms = lightingAt(cameraFrame.Position, 1.0f, shown.ImageOpacity);
+							mirroredUniforms.Mirror.x = static_cast<float>(shown.Effect);
+							SDL_PushGPUVertexUniformData(command, 0, &mirrorFrame, sizeof(mirrorFrame));
+							paneLighting = &mirroredUniforms;
+							image = shown.Texture[shown.Slot];
+							result.SurfaceInstances += count;
+						}
+
+						result.DrawCalls += State->DrawSlots(
+							command,
+							pass,
+							sceneCount + first,
+							count,
+							paneLighting,
+							shadow.Texture,
+							shadow.Sampler,
+							image,
+							State->SurfaceSampler,
+							0,
+							result.Triangles
+						);
+						SDL_PushGPUVertexUniformData(command, 0, &frameUniforms, sizeof(frameUniforms));
+					}
+				};
+
+				if (surfaceInCamera > 0) {
+					drawMirrors(false);
+				}
+				if (transparentSurfaces > 0) {
+					State->BindPipeline(pass, State->TransparentPipeline, Impl::PipelineFamily::Transparent);
+					drawMirrors(true);
+				}
+			}
+
+			SDL_EndGPURenderPass(pass);
+			return true;
+		});
+
 		frameNodes.Set(core::Name("transparent"), [&](const graph::RunContext &context) {
 			ENGINE_PROFILE_CAT("transparent pass", core::ProfileCategory::Render);
 			if (!submitUploads()) {
@@ -9904,14 +10028,6 @@ namespace engine::render {
 				const LightingUniforms lighting = lightingAt(cameraFrame.Position, 0.0f, 0.0f);
 				SDL_PushGPUFragmentUniformData(command, 0, &lighting, sizeof(lighting));
 
-				// The same, for the runs that sample the surface texture.
-				//
-				// **Declared beside the ordinary one because two runs push it
-				// now**, not one: the opaque mirrors and, since a faded mirror
-				// stopped vanishing, the blended ones at the very end of the
-				// tail. `Flags.w` is the image's own opacity and was unused
-				// until a mirror had to be legible on a pane that is itself
-				// transparent - see `SurfaceView::ImageOpacity`.
 				// Both samplers, every draw. A shadow map that was not rendered
 				// binds another texture in its place rather than nothing: the
 				// flag above is what stops it being read, and an unbound sampler
@@ -9930,120 +10046,6 @@ namespace engine::render {
 					State->ShadowSampler != nullptr ? State->ShadowSampler : State->OverlaySampler;
 				SDL_GPUSampler *const surfaceSampler =
 					State->SurfaceSampler != nullptr ? State->SurfaceSampler : shadowSampler;
-
-				// Remembered rather than bound, for the surface pass's reason:
-				// `DrawSlots` binds all three samplers together because the
-				// third changes per mesh.
-				SDL_GPUTexture *screenSurface = nullptr;
-				const auto bindScreen = [&](SDL_GPUTexture *texture) { screenSurface = texture; };
-
-				bindScreen(nullptr);
-
-				// **Two draws over one buffer, split at the boundary the
-				// ordering produced.** `first_instance` is what makes that
-				// possible without a second upload: the instance attributes are
-				// per-instance vertex data, so the offset picks up where the
-				// opaque range left off.
-				// **The surface draws, one per index rather than one for "the
-				// mirrors".** Each index owns a texture and a projection, so
-				// what used to be a single run is a run each - grouped by
-				// `scene::GroupSurfaces` into `cameraRuns` so every one of them
-				// is still an offset and a count rather than a per-instance
-				// branch.
-				//
-				// **This frame's texture, not the previous one.** The surface
-				// passes have already run, so the screen shows a reflection that
-				// is current. Only what a mirror sees *of another mirror* is a
-				// frame behind, and that is the staleness the pair exists for.
-				LightingUniforms mirroredUniforms{};
-				const bool surfaceImagesEnabled = graphEnabled(core::Name("surface"));
-				const auto drawScreenMirrors = [&](bool blended) {
-					for (uint8_t index = 0; index < scene::MAX_SURFACES; index++) {
-						if (portalOf[index] != nullptr) {
-							continue;
-						}
-						const scene::SurfaceRun &run = cameraRuns[index];
-						const uint32_t count = blended ? run.BlendedCount : run.OpaqueCount;
-						const uint32_t first = blended ? run.BlendedFirst : run.OpaqueFirst;
-						if (count == 0) {
-							continue;
-						}
-
-						const Impl::SurfaceSlotState &shown = bank.Surfaces[index];
-
-						// **A hole rather than a mirror, and it reads its picture
-						// by screen position.** The recursive pass has already
-						// filled the top level of the pool from *this* camera, and
-						// the target is the size of this attachment - so the pane
-						// samples the texel it is standing on and the image is
-						// pixel-exact at every distance. That is what removes the
-						// pixelation the fitted path could only mitigate.
-						//
-						// **Flat when the pool has nothing**, which is the depth-
-						// zero terminus and the frame a target could not be
-						// allocated. Its own material rather than the demo's pink:
-						// a shipped world wants the chain to end in something that
-						// looks like a pane, and the marker bars are where "which
-						// face" is answered visibly.
-						const LightingUniforms *uniforms = &lighting;
-
-						// Its own tint until the surface has a frame, and for a
-						// pane naming an index nothing renders. Skipping it
-						// instead would leave a hole in the geometry, which reads
-						// as a culling bug rather than as a mirror that has not
-						// warmed up.
-						if (!surfaceImagesEnabled || !shown.Ready) {
-							bindScreen(nullptr);
-						} else {
-							const FrameUniforms mirrorFrame{
-								viewProjection,
-								lightViewProjection,
-								shown.Sampling,
-							};
-							LightingUniforms mirrored =
-								lightingAt(cameraFrame.Position, 1.0f, shown.ImageOpacity);
-
-							// Which grade this surface's image goes through. On the
-							// composite rather than on the render, so switching one
-							// costs no redraw of the texture.
-							mirrored.Mirror.x = static_cast<float>(shown.Effect);
-
-							SDL_PushGPUVertexUniformData(command, 0, &mirrorFrame, sizeof(mirrorFrame));
-							bindScreen(shown.Texture[shown.Slot]);
-
-							// Held rather than pushed: `DrawSlots` pushes the
-							// fragment uniforms itself, because it has to write
-							// the submesh's colour into them.
-							mirroredUniforms = mirrored;
-							uniforms = &mirroredUniforms;
-
-							result.SurfaceInstances += count;
-						}
-
-						result.DrawCalls += State->DrawSlots(
-							command,
-							pass,
-							sceneCount + first,
-							count,
-							uniforms,
-							shadow,
-							shadowSampler,
-							screenSurface,
-							surfaceSampler,
-							0,
-							result.Triangles
-						);
-
-						// Back to the ordinary uniforms, so the next draw does
-						// not inherit this mirror's projection.
-						SDL_PushGPUVertexUniformData(command, 0, &frameUniforms, sizeof(frameUniforms));
-					}
-				};
-
-				if (surfaceInCamera > 0) {
-					drawScreenMirrors(false);
-					bindScreen(nullptr);
-				}
 
 				if (drawInterface) {
 					result.DrawCalls += gameInterfaceHook->RecordWorld(
@@ -10080,20 +10082,11 @@ namespace engine::render {
 							&lighting,
 							shadow,
 							shadowSampler,
-							screenSurface,
+							nullptr,
 							surfaceSampler,
 							0,
 							result.Triangles
 						);
-					}
-
-					// **The blended mirrors, last of everything.** Same pipeline
-					// and same sort, different uniforms: these runs are the ones
-					// that sample a surface texture, so a pane at any
-					// transparency still shows its reflection at the image's own
-					// opacity.
-					if (transparentSurfaces > 0) {
-						drawScreenMirrors(true);
 					}
 				}
 

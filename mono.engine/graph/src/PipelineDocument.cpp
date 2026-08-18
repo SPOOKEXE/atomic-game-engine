@@ -853,6 +853,7 @@ namespace engine::graph {
 		resource("lit", ResourceKind::Colour, ResourceFormat::RGBA16F);
 		resource("tonemapped", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
 		resource("portaled", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
+		resource("mirrored", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
 		resource("display", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
 		resource("scene-image", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
 		resource("interface-image", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB, 1, true);
@@ -942,10 +943,17 @@ namespace engine::graph {
 		touches(EditKind::Reads, "view-instances", "instances");
 		touches(EditKind::Writes, "portaled", "colour");
 
-		node("transparent", NodeScope::View);
+		node("mirror-overlay", NodeScope::View);
 		touches(EditKind::Reads, "portaled", "colour");
 		touches(EditKind::Reads, "depth", "depth");
 		touches(EditKind::Reads, "surface", "surface");
+		touches(EditKind::Reads, "ordered-entities", "entities");
+		touches(EditKind::Reads, "view-instances", "instances");
+		touches(EditKind::Writes, "mirrored", "colour");
+
+		node("transparent", NodeScope::View);
+		touches(EditKind::Reads, "mirrored", "colour");
+		touches(EditKind::Reads, "depth", "depth");
 		touches(EditKind::Reads, "ordered-entities", "entities");
 		touches(EditKind::Reads, "view-instances", "instances");
 		touches(EditKind::Writes, "display", "colour");

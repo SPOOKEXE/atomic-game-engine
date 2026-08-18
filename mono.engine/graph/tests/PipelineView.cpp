@@ -75,7 +75,7 @@ TEST_CASE("every enabled node is placed, in execution order", "[graph]") {
 	const RenderGraph graph = DefaultGraph();
 	const PipelineLayout layout = LayoutOf(graph);
 
-	REQUIRE(layout.Nodes.size() == 21);
+	REQUIRE(layout.Nodes.size() == 22);
 	CHECK(layout.Nodes.front().Name == Name("world"));
 	CHECK(layout.Nodes.back().Name == Name("output-image"));
 }
@@ -129,8 +129,8 @@ TEST_CASE("columns restart within each band", "[graph]") {
 	CHECK(columnOf("overlay") == 2);
 	CHECK(columnOf("output-image") == 3);
 
-	// Wide enough for the widest band, which is the per-view one at fifteen.
-	CHECK(layout.Columns == 15);
+	// Wide enough for the widest band, which is the per-view one at sixteen.
+	CHECK(layout.Columns == 16);
 }
 
 // --- the edges ----------------------------------------------------------------
@@ -141,12 +141,13 @@ TEST_CASE("an edge joins a reader to the node that wrote what it reads", "[graph
 
 	CHECK(Joined(graph, layout, "shadow", "surface", "shadow"));
 	CHECK(Joined(graph, layout, "shadow", "deferred-lighting", "shadow"));
-	CHECK(Joined(graph, layout, "surface", "transparent", "surface"));
+	CHECK(Joined(graph, layout, "surface", "mirror-overlay", "surface"));
 	CHECK(Joined(graph, layout, "portal-capture", "portal-tonemap", "portal-image"));
 	CHECK(Joined(graph, layout, "portal-tonemap", "portal-overlay", "portal-display"));
 	CHECK(Joined(graph, layout, "gbuffer", "depth-linearise", "depth"));
 	CHECK(Joined(graph, layout, "tonemap", "portal-overlay", "tonemapped"));
-	CHECK(Joined(graph, layout, "portal-overlay", "transparent", "portaled"));
+	CHECK(Joined(graph, layout, "portal-overlay", "mirror-overlay", "portaled"));
+	CHECK(Joined(graph, layout, "mirror-overlay", "transparent", "mirrored"));
 	CHECK(Joined(graph, layout, "interface", "overlay", "interface-image"));
 	CHECK(Joined(graph, layout, "overlay", "output-image", "composed-image"));
 }
@@ -250,8 +251,8 @@ TEST_CASE("a disabled node is absent from the layout", "[graph]") {
 	REQUIRE(graph.SetEnabled(surface, false));
 
 	const PipelineLayout after = LayoutOf(graph);
-	CHECK(after.Nodes.size() == 20);
-	CHECK_FALSE(Joined(graph, after, "surface", "transparent", "surface"));
+	CHECK(after.Nodes.size() == 21);
+	CHECK_FALSE(Joined(graph, after, "surface", "mirror-overlay", "surface"));
 }
 
 TEST_CASE("an empty compile lays out to nothing", "[graph]") {

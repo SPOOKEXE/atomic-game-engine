@@ -81,9 +81,9 @@ namespace {
 TEST_CASE("the default frame profiles into a full grid", "[graph][profile]") {
 	const PipelineProfile profile = Profiled(DefaultGraph());
 
-	REQUIRE(profile.Passes.size() == 21);
-	REQUIRE(profile.Resources.size() == 24);
-	CHECK(profile.Cells.size() == 504);
+	REQUIRE(profile.Passes.size() == 22);
+	REQUIRE(profile.Resources.size() == 25);
+	CHECK(profile.Cells.size() == 550);
 
 	// The three blocks, in the order a frame runs them.
 	CHECK(profile.Passes.front().Where == engine::graph::Band::Shared);
@@ -99,7 +99,9 @@ TEST_CASE("the default frame profiles into a full grid", "[graph][profile]") {
 	CHECK(profile.At(RowOf(profile, "portal-display"), ColumnOf(profile, "portal-tonemap")) == Access::Write);
 	CHECK(profile.At(RowOf(profile, "portal-display"), ColumnOf(profile, "portal-overlay")) == Access::Read);
 	CHECK(profile.At(RowOf(profile, "portaled"), ColumnOf(profile, "portal-overlay")) == Access::Write);
-	CHECK(profile.At(RowOf(profile, "portaled"), ColumnOf(profile, "transparent")) == Access::Read);
+	CHECK(profile.At(RowOf(profile, "portaled"), ColumnOf(profile, "mirror-overlay")) == Access::Read);
+	CHECK(profile.At(RowOf(profile, "mirrored"), ColumnOf(profile, "mirror-overlay")) == Access::Write);
+	CHECK(profile.At(RowOf(profile, "mirrored"), ColumnOf(profile, "transparent")) == Access::Read);
 	CHECK(profile.At(RowOf(profile, "display"), ColumnOf(profile, "transparent")) == Access::Write);
 	CHECK(profile.At(RowOf(profile, "composed-image"), ColumnOf(profile, "output-image")) == Access::Read);
 

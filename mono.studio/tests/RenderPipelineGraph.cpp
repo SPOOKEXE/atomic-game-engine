@@ -17,8 +17,8 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 	std::string error;
 	REQUIRE(studio::LoadRenderPipelineGraph(DefaultPbrDocument(), canvas, error));
 
-	CHECK(canvas.Nodes().size() == 21);
-	CHECK(canvas.Links().size() == 41);
+	CHECK(canvas.Nodes().size() == 22);
+	CHECK(canvas.Links().size() == 45);
 	CHECK(canvas.Ordered().size() == canvas.Nodes().size());
 
 	bool sawSsao = false;
@@ -54,10 +54,10 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 	CHECK(shadow->PreviewPort == "shadow");
 	REQUIRE(shadow->Outputs.size() == 1);
 	CHECK(shadow->Outputs.front().Type == "render.image");
-	for (const char *kind : {"portal-capture", "portal-tonemap", "portal-overlay"}) {
-		const nodegraph::NodeType *portal = nodegraph::NodeTypes::Find(std::string("render.pass.") + kind);
-		REQUIRE(portal != nullptr);
-		CHECK_FALSE(portal->PreviewPort.empty());
+	for (const char *kind : {"portal-capture", "portal-tonemap", "portal-overlay", "mirror-overlay"}) {
+		const nodegraph::NodeType *pass = nodegraph::NodeTypes::Find(std::string("render.pass.") + kind);
+		REQUIRE(pass != nullptr);
+		CHECK_FALSE(pass->PreviewPort.empty());
 	}
 }
 

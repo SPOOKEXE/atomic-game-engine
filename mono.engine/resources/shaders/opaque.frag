@@ -130,12 +130,15 @@ vec2 MirrorLookup(vec2 uv, float effect, float seconds) {
 		return uv;
 	}
 
-	// About the middle of the pane, falling off to nothing at the edge, and
-	// turning slowly. Clamped rather than wrapped: a mirror whose image tiled
-	// at the rim would read as a texture rather than as a twist.
+	// About the middle of the pane, falling off to nothing at every edge. Time
+	// changes the amount of twist instead of adding a rotation shared by every
+	// texel, which keeps the pane's frame anchored to the world.
 	vec2 centred = uv - 0.5;
 	float radius = length(centred);
-	float twist = (0.35 - min(radius, 0.35)) * 7.0 + seconds * 0.4;
+	vec2 edgeDistance = min(uv, vec2(1.0) - uv);
+	float boundary = smoothstep(0.0, 0.30, min(edgeDistance.x, edgeDistance.y));
+	float centre = 1.0 - smoothstep(0.08, 0.72, radius);
+	float twist = boundary * centre * (2.6 + sin(seconds * 0.55) * 0.65);
 
 	float sine = sin(twist);
 	float cosine = cos(twist);
@@ -152,11 +155,29 @@ vec2 MirrorLookup(vec2 uv, float effect, float seconds) {
 // every thermal camera ships with, because it is the one that keeps its
 // ordering legible to somebody who has never seen one before.
 vec3 ThermalRamp(float level) {
-	vec3 colour = mix(vec3(0.0, 0.0, 0.18), vec3(0.35, 0.0, 0.62), smoothstep(0.0, 0.28, level));
-	colour = mix(colour, vec3(0.90, 0.10, 0.25), smoothstep(0.28, 0.52, level));
-	colour = mix(colour, vec3(1.0, 0.55, 0.0), smoothstep(0.52, 0.74, level));
-	colour = mix(colour, vec3(1.0, 0.95, 0.35), smoothstep(0.74, 0.90, level));
-	return mix(colour, vec3(1.0), smoothstep(0.90, 1.0, level));
+	if (level < 0.12) {
+		return mix(vec3(0.0), vec3(0.0, 0.05, 0.42), smoothstep(0.0, 0.12, level));
+	}
+	if (level < 0.32) {
+		return mix(
+			vec3(0.0, 0.05, 0.42), vec3(0.58, 0.0, 0.72), smoothstep(0.12, 0.32, level)
+		);
+	}
+	if (level < 0.54) {
+		return mix(
+			vec3(0.58, 0.0, 0.72), vec3(0.96, 0.04, 0.04), smoothstep(0.32, 0.54, level)
+		);
+	}
+	if (level < 0.78) {
+		return mix(
+			vec3(0.96, 0.04, 0.04), vec3(1.0, 0.86, 0.02), smoothstep(0.54, 0.78, level)
+		);
+	}
+	return mix(vec3(1.0, 0.86, 0.02), vec3(1.0), smoothstep(0.78, 1.0, level));
+}
+
+float MirrorVignette(float edge, float inner, float outer) {
+	return 1.0 - smoothstep(inner, outer, edge);
 }
 
 // What the pane shows, once the sampled image has been graded.
@@ -180,14 +201,14 @@ vec3 MirrorGrade(vec3 image, vec2 uv, float effect, float seconds) {
 		// that saturated the mid-tones made a lit room a flat green rectangle,
 		// which is a filter rather than a picture: what makes this read as a
 		// scope is that the shapes survive it.
-		float gained = pow(clamp(level * 1.35 + 0.03, 0.0, 1.0), 0.85);
+		float gained = max(1.0 - exp(-max(level, 0.0) * 5.5), 0.07);
 
 		// Grain that moves. A still grain reads as dirt on the glass.
 		float grain = MirrorNoise(uv * 640.0 + seconds * 37.0);
-		gained = clamp(gained + (grain - 0.5) * 0.16, 0.0, 1.0);
+		gained = clamp(gained + (grain - 0.5) * 0.08, 0.0, 1.0);
 
-		float lines = 0.90 + 0.10 * sin(uv.y * 900.0);
-		float vignette = smoothstep(0.78, 0.16, edge);
+		float lines = 0.94 + 0.06 * sin(uv.y * 900.0);
+		float vignette = mix(0.38, 1.0, MirrorVignette(edge, 0.34, 0.70));
 		return vec3(gained * 0.18, gained, gained * 0.30) * lines * vignette;
 	}
 
@@ -196,7 +217,8 @@ vec3 MirrorGrade(vec3 image, vec2 uv, float effect, float seconds) {
 		// engine with no thermal model cannot avoid - `scene::SurfaceEffect`
 		// says so rather than implying otherwise. It reads right because bright
 		// things in a lit scene usually are the hot ones.
-		return ThermalRamp(clamp(level * 1.25, 0.0, 1.0));
+		float temperature = pow(clamp(level * 1.8, 0.0, 1.0), 0.62);
+		return ThermalRamp(temperature);
 	}
 
 	if (effect < float(EFFECT_CCTV) + 0.5) {
@@ -207,8 +229,8 @@ vec3 MirrorGrade(vec3 image, vec2 uv, float effect, float seconds) {
 
 		float lines = 0.82 + 0.18 * sin(uv.y * 620.0);
 		float grain = MirrorNoise(uv * 380.0 + seconds * 53.0);
-		float band = smoothstep(0.10, 0.0, abs(fract(uv.y + seconds * 0.22) - 0.5));
-		float vignette = smoothstep(0.85, 0.25, edge);
+		float band = 1.0 - smoothstep(0.0, 0.10, abs(fract(uv.y + seconds * 0.22) - 0.5));
+		float vignette = mix(0.45, 1.0, MirrorVignette(edge, 0.36, 0.72));
 
 		float value = clamp(grey * lines + (grain - 0.5) * 0.07 + band * 0.16, 0.0, 1.0);
 
