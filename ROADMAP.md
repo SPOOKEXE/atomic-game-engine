@@ -81,25 +81,60 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] show Universe in Explorer with mutable execution mode, maximum catch-up ticks, bus budget, channel queue limit and channels-per-world; show federated mode, world counts, fault counts, tick cost and bus traffic read-only
 - [x] build ui features out (more roblox): flex list layouts - `UIListLayout` `Wraps`/`HorizontalFlex`/`VerticalFlex`/`ItemLineAlignment` and `UIFlexItem` with `FlexMode`/`GrowRatio`/`ShrinkRatio`, laid out, saved, bound and in the Properties panel
 - [x] build out code editor with auto complete (more vs-code like, hover on keywords, right-side minimap) - hover tooltips from the same language-aware surface the completion uses, a run-stripe minimap with click/drag scroll, Tab accepts, matched prefix highlighted, kind/doc footer on the list
-- [_] thoroughly implement every user-interface element, including `SurfaceGui` and `BillboardGui`
 
-- [_] add accessories support
-- [_] animation handler
-- [_] character controller + humanoid + character states + state controller, etc. More modular than roblox standard humanoid. state machine? node graphs? etc.
-- [_] skinning and animation - `bake` skips joints and weights and keeps the rest pose, because there are no skeletons in the engine yet
+### v0.18
+
+- [_] build out proper code architecture documents (AGENTS.md, docs/CODE_FORMAT.md, docs/CODE_QUALITY.md) => CODE_ARCH.md
+- [_] DOMAIN DRIVEN DESIGN & HEXAGONAL ARCHITECTURE
+- [_] check if we need to move files / classes / structures around in the codebase to properly fit (mainly focus on engine)
+- [_] properly make a ECS component document list so i can see all components and what they're for
+- [_] clean up all ECS components that exist and find better ways to represent stuff (e.g. merge, split, rename).
+- [_] in the engine, rename Anchored to Static, keep roblox shim as Anchored but refer to static when changing property
+
+### v0.19
+
+- [_] thoroughly implement every user-interface element, including `SurfaceGui` and `BillboardGui`
+- [_] build out all remaining roblox surfaces with available underlying surface
+- [_] port many particle features from unity to here (https://docs.unity3d.com/6000.5/Documentation/ScriptReference/ParticleSystem.html)
+- [_] full particle demo (try reach 5 million rendering particles)
+
+### v0.20
+
 - [_] finish portals so lighting, physics, projection, clipping and geometry crossing the seam are seamless
+- [_] ensure per-mesh render capabilities, global lighting render capabilities, camera lighting render capabilities, etc. compute shaders, post-processing, etc.
+- [_] simplify and strip old rendering code that is not part of the node system. Everything should be in the node system.
 - [_] port semi-real raytrace and path-trace as part of nodes
 - [_] make demo render pipelines with semi-real raytrace and path-trace
 - [_] render pipeline nodes for above
+- [_] plan the entire rendering system to a visual compositor system like Unity. https://docs.unity3d.com/Manual/scriptable-render-pipeline-introduction.html https://docs.unity3d.com/Packages/com.unity.visual-compositor@0.27/manual/nodes.html
+
+### v0.21
+
+- [_] build out default plugins (move all topbar tools and stuff to plugins as a "Default Studio" plugin)
+- [_] build out plugin function suite (create dropdown, edit toolbar, edit viewport, edit script editors, etc)
+- [_] universe shared assets folder and setup easy cdn with it (when you load the universe file, it sets up a cdn with it).
+- [_] add a universe loading widget - shows cdns the universe has and asks to allow permission, also http enabled property if changed
+- [_] add tabs to the universe importer: general, assets, permissions, cdn, misc with all or per-world breakdown
+
+### v0.22
+
+- [_] default R6 base character (capsule collider)
+- [_] gtlf default character (unreal)
+- [_] make humanoid a shim for character controller (so not a black box), loads a default one in
+- [_] character controller + humanoid + character states + state controller + bone controller, etc. More modular than roblox standard humanoid. state machine? node graphs? etc.
+- [_] animation handler
+- [_] skinning and animation - `bake` skips joints and weights and keeps the rest pose, because there are no skeletons in the engine yet
+- [_] add accessories support
 
 ### FUTURE
 
+- [_] unity porting tools / unity shop
+- [_] roblox porting tools (rbxl) - in the widget that pops up, show all asset ids and make a assets selector so you can click which asset id points to which file asset (same for animations and whatnot where possible).
 - [_] (procedural, node-based) terrain generator (refer to discord references)
-- [_] plan the entire rendering system to a visual compositor system like Unity. https://docs.unity3d.com/Manual/scriptable-render-pipeline-introduction.html https://docs.unity3d.com/Packages/com.unity.visual-compositor@0.27/manual/nodes.html
-- [_] ensure per-mesh render capabilities, global lighting render capabilities, camera lighting render capabilities, etc. compute shaders, post-processing, etc.
 - [_] porting roblox games (DEFER THIS UNTIL LATER ONCE TYPES ARE BUILT UP) - untouched, and the trigger is unchanged: there are four instance classes in this engine and a Roblox place names hundreds. Will show a widget that tells you conflicts and missing classes.
 - [_] add modulescript boundaries between luau and javascript VMs. moving values between vms.
 - [_] consider adding C# as another scripting langauge?
 - [_] constraints system
 - [_] deferred `D00106` - JavaScript and TypeScript breakpoints. The vendored QuickJS exposes no line hook and no debugger API at all, so this is a submodule decision rather than a feature. Asking for one on a .js/.ts chunk is refused with the reason, at the service, the gutter and the panel alike. **The TypeScript half of the entry shipped at v0.15 and is not part of this** - source maps are emitted and read, so the lines a debugger would land on are already the right ones.
 - [_] full audio DAW (digital audio workbench) system
+- [_] embedded whiteboxing tools (planning)
