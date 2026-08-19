@@ -79,6 +79,8 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] split dependency-bound compute and later transfer work into traffic-plan command buffers; physical overlap remains unavailable because SDL exposes one unified queue rather than independent graphics, compute and transfer queues - `graph::PlanCommandBuffers` is the traffic plan, downloads ride a later-transfer buffer submitted after the main one, the async compute prefix is plan-gated, and dependency-bound compute stays in the main stream because the present is bound to the buffer that acquired the swapchain
 - [x] `ShapeCast` needs a swept-volume walk and its own de-duplication rule; the current union of the start and end box bounds is loose over long sweeps, and the ray walk's run rule only applies to the centre line
 - [x] show Universe in Explorer with mutable execution mode, maximum catch-up ticks, bus budget, channel queue limit and channels-per-world; show federated mode, world counts, fault counts, tick cost and bus traffic read-only
+- [_] build ui features out (more roblox)
+- [_] build out code editor with auto complete (more vs-code like, hover on keywords, right-side minimap)
 
 - [_] add accessories support
 - [_] animation handler
@@ -89,8 +91,6 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] port semi-real raytrace and path-trace as part of nodes
 - [_] make demo render pipelines with semi-real raytrace and path-trace
 - [_] render pipeline nodes for above
-- [_] build ui features out (more roblox)
-- [_] build out code editor with auto complete (more vs-code like, hover on keywords, right-side minimap)
 
 ### FUTURE
 
