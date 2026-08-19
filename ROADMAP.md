@@ -82,6 +82,11 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] build ui features out (more roblox): flex list layouts - `UIListLayout` `Wraps`/`HorizontalFlex`/`VerticalFlex`/`ItemLineAlignment` and `UIFlexItem` with `FlexMode`/`GrowRatio`/`ShrinkRatio`, laid out, saved, bound and in the Properties panel
 - [x] build out code editor with auto complete (more vs-code like, hover on keywords, right-side minimap) - hover tooltips from the same language-aware surface the completion uses, a run-stripe minimap with click/drag scroll, Tab accepts, matched prefix highlighted, kind/doc footer on the list
 - [x] add per-world physics tick-rate and replication tick-rate - `WorldSettings` gains `PhysicsTickRate` and `ReplicationTickRate`, zero on either meaning "follow the tick rate"; `physics::PhysicsClock` is a per-world store resource that turns simulated seconds into fixed steps, so a world may solve slower or faster than it ticks and a fast world finishes its extra steps inside `physics.contacts`; the replication clock lives on `World` and holds the change bits across the ticks it does not publish, so a property written on a skipped tick still reaches the wire; both survive the `.agame` file and the universe snapshot, both reach a host process through `--physics-tick-rate`/`--replication-tick-rate`, and the control surface reports them. The studio has no per-world properties panel to edit them in, which is the gap `TickRate` already had
+- [_] full particle demo (spam a ton of emitters in a baseplate scene)
+- [_] full physics demo (100k parts moving around)
+- [_] make a ico-sphere mirror ball scene (subdivisions, radius) - basically to stress test mirrors
+- [_] go back through the scenes and ensure it all works
+- [_] fix cross-world portal rendering (cannot see character on other side) - ensure test
 
 ### v0.18
 
