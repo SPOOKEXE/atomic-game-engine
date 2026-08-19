@@ -999,6 +999,8 @@ namespace engine::game {
 		);
 		writer.Attribute("catchUp", std::to_string(settings.MaximumCatchUpTicks));
 		writer.Attribute("busBudget", std::to_string(settings.BusBudgetPerTick));
+		writer.Attribute("channelQueue", std::to_string(settings.ChannelQueueLimit));
+		writer.Attribute("channelsPerWorld", std::to_string(settings.ChannelsPerWorld));
 		writer.Close();
 
 		WriteRenderingProfiles(writer, renderingProfiles);
@@ -1229,16 +1231,21 @@ namespace engine::game {
 					CountOf(*child, "catchUp", static_cast<uint32_t>(settings.MaximumCatchUpTicks))
 				);
 				settings.BusBudgetPerTick = CountOf(*child, "busBudget", settings.BusBudgetPerTick);
+				settings.ChannelQueueLimit = CountOf(*child, "channelQueue", settings.ChannelQueueLimit);
+				settings.ChannelsPerWorld =
+					CountOf(*child, "channelsPerWorld", settings.ChannelsPerWorld);
 
 				// These are authored tuning, so opening a game applies the same
-				// values its file reports. Federation and the router's hard caps
-				// remain construction-time host policy and are not in this file.
+				// values its file reports. Federation alone remains
+				// construction-time host policy and is not in this file.
 				settings.Mode = TextOf(*child, "mode", "WorldParallel") == "WorldSerial"
 									? world::ExecutionMode::WorldSerial
 									: world::ExecutionMode::WorldParallel;
 				universe.SetMode(settings.Mode);
 				universe.SetMaximumCatchUpTicks(settings.MaximumCatchUpTicks);
 				universe.SetBusBudgetPerTick(settings.BusBudgetPerTick);
+				universe.SetChannelQueueLimit(settings.ChannelQueueLimit);
+				universe.SetChannelsPerWorld(settings.ChannelsPerWorld);
 				out.Universe = settings;
 				continue;
 			}

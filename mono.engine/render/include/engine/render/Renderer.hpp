@@ -802,6 +802,23 @@ namespace engine::render {
 		uint32_t ComputeDispatches = 0;
 		uint32_t AsyncComputeCommandBuffers = 0;
 
+		// Later-transfer command buffers submitted after the main buffer:
+		// resource previews and captures download through them, so on SDL's
+		// one unified queue they read the frame's finished images without a
+		// copy pass inside the graphics stream.
+		//
+		// @since v0.17
+		uint32_t DownloadCommandBuffers = 0;
+
+		// Command buffers the traffic plan splits the frame into, summed over
+		// the pipelines this frame ran. SDL submits them serially on its one
+		// unified queue; the count is the boundary a backend with independent
+		// device queues would exploit, reported beside `ConcurrentWaves` for
+		// the same reason.
+		//
+		// @since v0.17
+		uint32_t TrafficCommandBuffers = 0;
+
 		// Dependency waves containing independent work on more than one queue.
 		// SDL records them serially, but the count remains useful to a backend that
 		// exposes native async queues and to the Studio profiler.

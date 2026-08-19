@@ -188,6 +188,14 @@ namespace studio {
 				LastFrame.ComputeDispatches == 1 ? "" : "es",
 				LastFrame.AsyncComputeCommandBuffers,
 				LastFrame.AsyncComputeCommandBuffers == 1 ? "" : "s");
+			Row("downloads",
+				"%u later-transfer buffer%s after the main stream",
+				LastFrame.DownloadCommandBuffers,
+				LastFrame.DownloadCommandBuffers == 1 ? "" : "s");
+			Row("traffic plan",
+				"%u command buffer%s, submitted serially",
+				LastFrame.TrafficCommandBuffers,
+				LastFrame.TrafficCommandBuffers == 1 ? "" : "s");
 
 			size_t instances = 0;
 			for (const WorldId world : Universe->Worlds()) {

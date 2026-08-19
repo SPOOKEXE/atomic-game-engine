@@ -24,10 +24,10 @@
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/Materials.hpp>
-#include <engine/scene/Shaders.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/PublishedCatalogue.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/Shaders.hpp>
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/TextureCatalogue.hpp>
@@ -2743,6 +2743,12 @@ namespace client {
 		Metrics::Count("render.compute-dispatches", static_cast<double>(LastFrame.ComputeDispatches));
 		Metrics::Count(
 			"render.async-compute-command-buffers", static_cast<double>(LastFrame.AsyncComputeCommandBuffers)
+		);
+		Metrics::Count(
+			"render.download-command-buffers", static_cast<double>(LastFrame.DownloadCommandBuffers)
+		);
+		Metrics::Count(
+			"render.traffic-command-buffers", static_cast<double>(LastFrame.TrafficCommandBuffers)
 		);
 
 		// **The three that only mean anything as a series.** A batch count says

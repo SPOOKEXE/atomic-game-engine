@@ -438,6 +438,33 @@ TEST_CASE("a surface camera has its own opacity, clamped the same way", "[scene]
 	CHECK(Read<float>(store, camera, "ImageTransparency") == 0.0f);
 }
 
+TEST_CASE("resizing a surface camera keeps its grade, face and filter", "[scene][part]") {
+	Store store("surface_size_test");
+	RegisterSceneClasses();
+
+	const Entity camera =
+		store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "Reflection");
+	REQUIRE(camera != NULL_ENTITY);
+
+	// Everything on the component that is not the size, authored first.
+	REQUIRE(Write(store, camera, "Effect", Name("Thermal")));
+	REQUIRE(Write(store, camera, "Face", Name("Left")));
+	REQUIRE(Write(store, camera, "ImageTransparency", 0.5f));
+
+	// **The regression this pins:** `SurfaceSize`'s setter built a fresh
+	// `SurfaceCamera` and `store.Set` replaced the whole component, so a
+	// resize silently reset the grade, the face, the filter and the opacity.
+	REQUIRE(Write(store, camera, "SurfaceSize", Vector3{512.0f, 256.0f, 0.0f}));
+
+	const engine::scene::SurfaceCamera *surface = store.Get<engine::scene::SurfaceCamera>(camera);
+	REQUIRE(surface != nullptr);
+	CHECK(surface->Width == 512);
+	CHECK(surface->Height == 256);
+	CHECK(Read<Name>(store, camera, "Effect") == Name("Thermal"));
+	CHECK(Read<Name>(store, camera, "Face") == Name("Left"));
+	CHECK(Read<float>(store, camera, "ImageTransparency") == 0.5f);
+}
+
 TEST_CASE("LocalTransparency is read-only and written through its own door", "[scene][part]") {
 	Store store("local_transparency_test");
 	const Entity part = MakePart(store, PartDesc{});

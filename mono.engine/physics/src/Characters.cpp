@@ -1,3 +1,5 @@
+#include "WorldResource.hpp"
+
 #include <engine/core/Name.hpp>
 #include <engine/core/types/Ray.hpp>
 #include <engine/ecs/Scheduler.hpp>
@@ -173,7 +175,8 @@ namespace engine::physics {
 		// sharper edge than one that is a frame late clearing a wall that
 		// was, and the ordinary case - no portal in the shot - pays nothing
 		// extra either way.
-		const core::Vector3 head = subject->Frame.Position + core::Vector3{0.0f, controller->HeadHeight, 0.0f};
+		const core::Vector3 head =
+			subject->Frame.Position + core::Vector3{0.0f, controller->HeadHeight, 0.0f};
 		const float pitch = controller->Angles.X;
 		const float yaw = controller->Angles.Y;
 		const core::Vector3 forward{
@@ -247,6 +250,13 @@ namespace engine::physics {
 	}
 
 	size_t WakeMovingCharacters(ecs::Store &store) {
+		// Silent like `GhostPortalBodies`, and guarded the same way: hosts
+		// without a solver run this system, and the typed lookup would register
+		// the resource under the compiler's spelling to say it found nothing -
+		// see `WorldResource.hpp`.
+		if (!PhysicsWorldRegistered()) {
+			return 0;
+		}
 		auto *world = store.ResourceMutable<PhysicsWorld>();
 		if (world == nullptr) {
 			return 0;

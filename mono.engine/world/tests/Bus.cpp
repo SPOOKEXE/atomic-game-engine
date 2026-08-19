@@ -1084,6 +1084,48 @@ TEST_CASE("a world may not hold more channels than the universe allows", "[world
 	CHECK(freed[0].Status == BusStatus::Ok);
 }
 
+TEST_CASE("channel bounds retune between barriers", "[world]") {
+	// **The setters are read at the barrier, not copied at construction.**
+	// `BusRouter::Route` takes the settings by reference every tick, and this
+	// pins that: a router that copied them once would keep enforcing the
+	// numbers the universe was built with, and the studio's Universe panel
+	// would be writing to a dead copy nothing ever reads.
+	Universe universe;
+	const WorldId sender = universe.Create(Named("channel.retune.sender"));
+	const WorldId victim = universe.Create(Named("channel.retune.victim"));
+
+	universe.Enter(victim, [](Store &store) { REQUIRE(Postbox(store).OpenChannel("first").Expected()); });
+	universe.Tick(1.0f / 60.0f);
+
+	universe.SetChannelQueueLimit(2);
+	universe.SetChannelsPerWorld(1);
+
+	// The table bound: a second open is past the retuned cap of one, though
+	// the default the universe was built with would have taken it.
+	universe.Enter(victim, [](Store &store) { REQUIRE(Postbox(store).OpenChannel("second").Expected()); });
+	universe.Tick(1.0f / 60.0f);
+
+	const std::vector<Delivery> verdicts = Received(universe, victim);
+	REQUIRE(verdicts.size() == 1);
+	CHECK(verdicts[0].Status == BusStatus::TooManyChannels);
+
+	// The queue bound: the third send in one barrier is past the retuned two.
+	universe.Enter(sender, [](Store &store) {
+		Postbox box(store);
+		for (int message = 0; message < 3; message++) {
+			REQUIRE(box.SendTo("channel.retune.victim", "first", Bytes("x")).Expected());
+		}
+	});
+	universe.Tick(1.0f / 60.0f);
+
+	CHECK(Received(universe, victim).size() == 2);
+
+	const std::vector<Delivery> replies = Received(universe, sender);
+	REQUIRE(replies.size() == 3);
+	CHECK(replies[1].Status == BusStatus::Ok);
+	CHECK(replies[2].Status == BusStatus::Overflow);
+}
+
 TEST_CASE("what a world holds is what it comes back holding", "[world]") {
 	// The cap is a count of what is in the router's table, and a snapshot carries
 	// that table - so the count has to be rebuilt from it. Otherwise saving and

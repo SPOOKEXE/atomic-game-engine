@@ -584,6 +584,28 @@ TEST_CASE("a shape cast reports a box it already overlaps", "[query]") {
 	REQUIRE(ShapeCast(grid, box, Vector3{5.0f, 0.0f, 0.0f}, LayerMask::All(), found).Written == 1);
 }
 
+TEST_CASE("a shape cast that outgrows the span keeps a walk-order prefix", "[query]") {
+	// The same `Overflowed` contract as the overlaps, pinned for the sweep:
+	// the span holds a prefix, the flag says there was more, and the prefix
+	// is the walk's own order - which for a straight sweep is along the path.
+	HashGrid grid{UNIT_CELL};
+	const Proxy proxies[] = {
+		Cube(1, Vector3{2.5f, 0.5f, 0.5f}, 0.5f),
+		Cube(2, Vector3{4.5f, 0.5f, 0.5f}, 0.5f),
+		Cube(3, Vector3{6.5f, 0.5f, 0.5f}, 0.5f),
+	};
+	grid.Rebuild(proxies);
+
+	std::array<uint64_t, 2> found{};
+	const AABB start = AABB::FromCentre(Vector3{0.5f, 0.5f, 0.5f}, Vector3{0.25f, 0.25f, 0.25f});
+	const QueryResult result = ShapeCast(grid, start, Vector3{9.0f, 0.0f, 0.0f}, LayerMask::All(), found);
+
+	REQUIRE(result.Written == 2);
+	REQUIRE(result.Overflowed);
+	REQUIRE(found[0] == 1u);
+	REQUIRE(found[1] == 2u);
+}
+
 TEST_CASE("every query answers an empty grid with nothing", "[query]") {
 	const HashGrid grid{UNIT_CELL};
 	std::array<uint64_t, 4> ids{};

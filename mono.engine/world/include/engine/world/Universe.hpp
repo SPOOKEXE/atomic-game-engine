@@ -480,6 +480,28 @@ namespace engine::world {
 		// @param budget The new per-world budget.
 		void SetBusBudgetPerTick(uint32_t budget);
 
+		// Changes how many channel deliveries one world may have queued per
+		// barrier.
+		//
+		// The router reads the settings at every barrier, so the new bound
+		// applies from the next one. Zero refuses every channel delivery,
+		// which is the same deliberate reading `SetBusBudgetPerTick` gives
+		// zero.
+		//
+		// @param limit The new per-destination queue bound.
+		// @since v0.17
+		void SetChannelQueueLimit(uint32_t limit);
+
+		// Changes how many channels one world may hold open.
+		//
+		// Applies to *opens* from the next barrier; channels already held stay
+		// held, because closing one on the world's behalf is the refusal
+		// `world/AGENTS.md` argues against.
+		//
+		// @param channels The new per-world channel table bound.
+		// @since v0.17
+		void SetChannelsPerWorld(uint32_t channels);
+
 		// The number of worlds subscribed to a topic.
 		//
 		// A diagnostic rather than a routing primitive: nothing needs this to

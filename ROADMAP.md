@@ -72,13 +72,13 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] real mesh creation in real-time (EditableMesh) + ensure it renders properly
 - [x] ensure EditableImage works and renders
 - [x] add conservative occlusion culling after the renderer has a depth hierarchy and indirect draw path; explicit occlusion documents are refused until then
-- [_] create portal test scenes for lighting through portals and out of portals (one light in portal, check if emits out of portal, two colored lights on either side of portal, check emits inside and mixes)
-- [_] audit every remaining service, object and instance property so edits mutate authoritative state and reach their consumers
-- [_] prototype portal seam light-field capture: render each room against a lit void, capture both directions, and project the matching result into the portal entrance; expose an `Enabled` property on Portal components to skip this capture path
-- [_] check raytracing with portal test scene as well
-- [_] split dependency-bound compute and later transfer work into traffic-plan command buffers; physical overlap remains unavailable because SDL exposes one unified queue rather than independent graphics, compute and transfer queues
-- [_] `ShapeCast` needs a swept-volume walk and its own de-duplication rule; the current union of the start and end box bounds is loose over long sweeps, and the ray walk's run rule only applies to the centre line
-- [_] show Universe in Explorer with mutable execution mode, maximum catch-up ticks, bus budget, channel queue limit and channels-per-world; show federated mode, world counts, fault counts, tick cost and bus traffic read-only
+- [x] create portal test scenes for lighting through portals and out of portals (one light in portal, check if emits out of portal, two colored lights on either side of portal, check emits inside and mixes)
+- [x] audit every remaining service, object and instance property so edits mutate authoritative state and reach their consumers
+- [x] prototype portal seam light-field capture: render each room against a lit void, capture both directions, and project the matching result into the portal entrance; expose an `Enabled` property on Portal components to skip this capture path - prototype-scoped: the `portal-capture` node renders each enabled mouth's far room into a 128x128 probe cleared to the world ambient (fog disabled), and `deferred-lighting.frag` projects the nearest two probes out of their entrances as a windowed rectangle light; `Portal.Enabled = false` withdraws the seam and with it the probe, the spill and the light copies. Two projectors per view, opaque-list content, no interreflection - the full seam-lighting item below is where that grows up
+- [x] check raytracing with portal test scene as well - there is no executable raytraced path yet: the catalogue's `raytrace` kind has no backend node, the renderer refuses such a graph whole and the profile falls back to Default PBR, pinned in `client.scene.worldpipelines`; portal scenes therefore light through the raster seam-copy path only until the raytrace port lands
+- [x] split dependency-bound compute and later transfer work into traffic-plan command buffers; physical overlap remains unavailable because SDL exposes one unified queue rather than independent graphics, compute and transfer queues - `graph::PlanCommandBuffers` is the traffic plan, downloads ride a later-transfer buffer submitted after the main one, the async compute prefix is plan-gated, and dependency-bound compute stays in the main stream because the present is bound to the buffer that acquired the swapchain
+- [x] `ShapeCast` needs a swept-volume walk and its own de-duplication rule; the current union of the start and end box bounds is loose over long sweeps, and the ray walk's run rule only applies to the centre line
+- [x] show Universe in Explorer with mutable execution mode, maximum catch-up ticks, bus budget, channel queue limit and channels-per-world; show federated mode, world counts, fault counts, tick cost and bus traffic read-only
 
 - [_] add accessories support
 - [_] animation handler

@@ -31,6 +31,7 @@
 #include <array>
 #include <cmath>
 #include <filesystem>
+#include <limits>
 #include <numbers>
 #include <string>
 #include <string_view>
@@ -1231,5 +1232,75 @@ TEST_CASE("the player list names everybody in the world", "[examples][scene][pla
 			}
 		});
 		CHECK(named == 2);
+	}
+}
+
+TEST_CASE("the portal lighting scenes author lamps a seam can carry", "[examples][scene]") {
+	// **What a scene gets wrong about portal lighting is placement, and it is
+	// silent.** The transport itself is `client::CollectLights`' and
+	// `mono.client/tests/PortalLighting.cpp` asserts it; what belongs here is
+	// that the two shipped scenes hand that pass what it needs - a linked pair
+	// of mouths, every lamp inside its own seam's reach, and a world dark
+	// enough that a capture of the far room measures transported light rather
+	// than the sun. A lamp authored a stud out of range would load, render,
+	// and quietly turn the far room into the dark frame the capture script
+	// calls a failure.
+	const StagedAssets assets;
+
+	struct Lamp {
+		engine::core::Vector3 Position;
+		float Range = 0.0f;
+	};
+
+	struct Authoring {
+		const char *Scene;
+		size_t Lamps;
+	};
+
+	for (const Authoring &expected : {Authoring{"PortalLightOut.luau", 1}, {"PortalLightMix.luau", 2}}) {
+		INFO(expected.Scene);
+
+		Store store("portal-lighting");
+		Scheduler systems;
+
+		std::string error;
+		const bool loaded = LoadScene(store, systems, ExamplePath(expected.Scene), error);
+		INFO(error);
+		REQUIRE(loaded);
+
+		// A linked pair, neither mouth crossing worlds, both enabled.
+		static thread_local std::vector<engine::scene::PortalSeam> seams;
+		REQUIRE(engine::scene::GatherPortalSeams(store, seams) == 2);
+		for (const engine::scene::PortalSeam &seam : seams) {
+			CHECK(!seam.Crosses);
+		}
+
+		// Every lamp within reach of at least one seam, or nothing crosses.
+		std::vector<Lamp> lamps;
+		store.Each<const engine::scene::Light>([&](Entity bulb, const engine::scene::Light &light) {
+			const auto *fitting = store.Get<engine::scene::Transform>(store.ParentOf(bulb));
+			REQUIRE(fitting != nullptr);
+			lamps.push_back({fitting->Frame.Position, light.Range});
+		});
+		REQUIRE(lamps.size() == expected.Lamps);
+
+		for (const Lamp &lamp : lamps) {
+			float nearest = std::numeric_limits<float>::infinity();
+			for (const engine::scene::PortalSeam &seam : seams) {
+				nearest = std::min(nearest, engine::scene::SeamDistance(seam, lamp.Position));
+			}
+			CHECK(nearest < lamp.Range);
+		}
+
+		// No sun and no ambient, so the far room's floor answers for the seam
+		// alone - the property both capture reports lean on.
+		bool dark = false;
+		store.Each<const engine::scene::LightingServiceComponent>(
+			[&](Entity, const engine::scene::LightingServiceComponent &lighting) {
+				dark = lighting.Brightness == 0.0f && lighting.Ambient.R == 0.0f &&
+					   lighting.OutdoorAmbient.R == 0.0f;
+			}
+		);
+		CHECK(dark);
 	}
 }

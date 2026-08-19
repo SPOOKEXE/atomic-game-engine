@@ -169,9 +169,83 @@ namespace studio {
 			ImGui::PopID();
 		}
 
+		if (visible("Channel Queue Limit")) {
+			row("Channel Queue Limit");
+			uint32_t queueLimit = settings.ChannelQueueLimit;
+			if (ImGui::InputScalar("##v", ImGuiDataType_U32, &queueLimit)) {
+				Universe->SetChannelQueueLimit(queueLimit);
+				MarkModified();
+			}
+			ImGui::PopID();
+		}
+
+		if (visible("Channels Per World")) {
+			row("Channels Per World");
+			uint32_t channels = settings.ChannelsPerWorld;
+			if (ImGui::InputScalar("##v", ImGuiDataType_U32, &channels)) {
+				Universe->SetChannelsPerWorld(channels);
+				MarkModified();
+			}
+			ImGui::PopID();
+		}
+
+		// --- diagnostics, read-only ------------------------------------
+		//
+		// Read every frame rather than cached, which is this program's rule
+		// about anything the universe owns - a cached count is wrong for one
+		// frame after a world is created, and one frame is enough to see.
+		const engine::world::UniverseStatistics statistics = Universe->Statistics();
+
+		if (visible("Federated Mode")) {
+			row("Federated Mode");
+			ImGui::TextUnformatted(settings.Federated ? "Federated" : "Local");
+			ImGui::PopID();
+		}
+
 		if (visible("World Count")) {
 			row("World Count");
 			ImGui::Text("%zu", Universe->Count());
+			ImGui::PopID();
+		}
+
+		if (visible("World States")) {
+			row("World States");
+			ImGui::Text(
+				"%zu active · %zu suspended · %zu remote",
+				statistics.ActiveWorlds,
+				statistics.Suspended,
+				statistics.Remote
+			);
+			ImGui::PopID();
+		}
+
+		if (visible("Fault Counts")) {
+			row("Fault Counts");
+
+			// Summed here rather than kept by the universe: a per-world fault
+			// tally already exists on each world's statistics, and a second
+			// running total would be the two-copies drift rule 2 names.
+			uint32_t tickFaults = 0;
+			for (const engine::world::WorldId world : Universe->Worlds()) {
+				tickFaults += Universe->StatisticsOf(world).Faults;
+			}
+			ImGui::Text("%zu faulted worlds · %u tick faults", statistics.Faulted, tickFaults);
+			ImGui::PopID();
+		}
+
+		if (visible("Tick Cost")) {
+			row("Tick Cost");
+			ImGui::Text("%.2f ms", statistics.LastTickMilliseconds);
+			ImGui::PopID();
+		}
+
+		if (visible("Bus Traffic")) {
+			row("Bus Traffic");
+			ImGui::Text(
+				"%llu operations · %llu deliveries",
+				static_cast<unsigned long long>(statistics.BusOperations),
+				static_cast<unsigned long long>(statistics.Deliveries)
+			);
 			ImGui::PopID();
 		}
 

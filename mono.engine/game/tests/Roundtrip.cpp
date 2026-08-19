@@ -224,6 +224,8 @@ TEST_CASE("authored universe tuning survives the game-file trip", "[game][roundt
 	settings.Mode = engine::world::ExecutionMode::WorldSerial;
 	settings.MaximumCatchUpTicks = 3;
 	settings.BusBudgetPerTick = 19;
+	settings.ChannelQueueLimit = 7;
+	settings.ChannelsPerWorld = 9;
 
 	Universe source(settings);
 	AddWorld(source, "Lobby");
@@ -239,9 +241,13 @@ TEST_CASE("authored universe tuning survives the game-file trip", "[game][roundt
 	CHECK(loaded.Settings().Mode == engine::world::ExecutionMode::WorldSerial);
 	CHECK(loaded.Settings().MaximumCatchUpTicks == 3);
 	CHECK(loaded.Settings().BusBudgetPerTick == 19);
+	CHECK(loaded.Settings().ChannelQueueLimit == 7);
+	CHECK(loaded.Settings().ChannelsPerWorld == 9);
 	CHECK(info.Universe.Mode == engine::world::ExecutionMode::WorldSerial);
 	CHECK(info.Universe.MaximumCatchUpTicks == 3);
 	CHECK(info.Universe.BusBudgetPerTick == 19);
+	CHECK(info.Universe.ChannelQueueLimit == 7);
+	CHECK(info.Universe.ChannelsPerWorld == 9);
 
 	std::filesystem::remove(path);
 }

@@ -412,6 +412,16 @@ namespace engine::world {
 		Settings_.BusBudgetPerTick = budget;
 	}
 
+	void Universe::SetChannelQueueLimit(uint32_t limit) {
+		RequireDriverThread("SetChannelQueueLimit");
+		Settings_.ChannelQueueLimit = limit;
+	}
+
+	void Universe::SetChannelsPerWorld(uint32_t channels) {
+		RequireDriverThread("SetChannelsPerWorld");
+		Settings_.ChannelsPerWorld = channels;
+	}
+
 	// --- the buses, which BusRouter owns -----------------------------------
 	//
 	// The thread check stays on this side. It is a rule about who may call a

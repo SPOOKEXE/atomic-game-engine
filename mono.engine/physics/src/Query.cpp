@@ -20,6 +20,8 @@
 #include <engine/spatial/LayerMask.hpp>
 #include <engine/spatial/Query.hpp>
 
+#include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -66,6 +68,66 @@ namespace engine::physics {
 			}
 			found[result.Written++] = entity;
 			return true;
+		}
+
+		// Below this a sweep direction component counts as parallel to a pair
+		// of slab planes. `spatial/src/RayBox.hpp` says why the branch has to
+		// exist and where the value sits; this is the same number for the same
+		// reason, restated here because that header is another module's `src/`.
+		constexpr float SWEEP_PARALLEL_EPSILON = 1e-20f;
+
+		// The stretch of a sweep during which the moving bound overlaps `box`.
+		struct SweepWindow {
+			bool Touched = false;
+
+			// Both along the sweep in metres, already clamped to [0, distance].
+			float Entry = 0.0f;
+			float Exit = 0.0f;
+		};
+
+		// The slab test once more, but keeping the exit as well as the entry.
+		//
+		// `spatial`'s own slab prunes the same candidates and keeps only the
+		// entry; `ShapeCast` needs the whole window, because the envelope of
+		// the moving bound over exactly that window is what its exact test
+		// runs against.
+		SweepWindow WindowAlongSweep(
+			const core::Vector3 &origin, const core::Vector3 &direction, float distance, const core::AABB &box
+		) {
+			const float from[3] = {origin.X, origin.Y, origin.Z};
+			const float along[3] = {direction.X, direction.Y, direction.Z};
+			const float minimum[3] = {box.Minimum.X, box.Minimum.Y, box.Minimum.Z};
+			const float maximum[3] = {box.Maximum.X, box.Maximum.Y, box.Maximum.Z};
+
+			float entry = 0.0f;
+			float exit = distance;
+			for (int axis = 0; axis < 3; axis++) {
+				if (std::abs(along[axis]) < SWEEP_PARALLEL_EPSILON) {
+					// Answered without arithmetic: zero times an infinite
+					// reciprocal is a NaN that compares false both ways.
+					if (from[axis] < minimum[axis] || from[axis] > maximum[axis]) {
+						return SweepWindow{};
+					}
+					continue;
+				}
+
+				const float inverse = 1.0f / along[axis];
+				float near = (minimum[axis] - from[axis]) * inverse;
+				float far = (maximum[axis] - from[axis]) * inverse;
+				if (near > far) {
+					const float swapped = near;
+					near = far;
+					far = swapped;
+				}
+
+				entry = std::max(entry, near);
+				exit = std::min(exit, far);
+			}
+
+			if (entry > exit) {
+				return SweepWindow{};
+			}
+			return SweepWindow{true, entry, exit};
 		}
 
 		// The two indexes of a world, in a fixed order.
@@ -340,12 +402,81 @@ namespace engine::physics {
 			return OverlapExact(store, volume, start, mask, found);
 		}
 
-		// The path's envelope: the shape's own bound at both ends, unioned. The
-		// exact test then runs the candidates against *that box* rather than
-		// against the moving shape - which is why the header calls this
-		// conservative and says what it is not.
-		const core::AABB swept = start.Union(core::AABB{start.Minimum + motion, start.Maximum + motion});
-		const ShapeInstance volume{core::CFrame{swept.Centre()}, swept.Size() * 0.5f, scene::ShapeKind::Box};
-		return OverlapExact(store, volume, swept, mask, found);
+		spatial::QueryResult result;
+		const Indexes indexes = IndexesOf(store);
+		if (!indexes.Valid) {
+			return result;
+		}
+
+		// `!(x > 0)` refuses a NaN motion here rather than letting it become a
+		// NaN ray the grid walk compares false against everything.
+		const float distance = motion.Magnitude();
+		if (!(distance > 0.0f)) {
+			return result;
+		}
+		const core::Vector3 direction = motion / distance;
+		const core::Vector3 origin = start.Centre();
+		const core::Vector3 halfExtent = start.Size() * 0.5f;
+
+		// Candidates come from `spatial::ShapeCast`'s walk along the sweep
+		// itself, not from an overlap of the start-to-end union box - over a
+		// long sweep that box holds a whole quadrant the shape never enters.
+		//
+		// **De-duplication is the walk's, and it is enough.** The swept walk
+		// reports a proxy once per grid however many cells it spans, and a
+		// collider lives in exactly one of the two indexes, so no candidate is
+		// seen twice here and no set is needed. The order is the walk's order,
+		// dynamic index first - stable for a given world and input, which is
+		// what makes the prefix a full span keeps reproducible.
+		uint64_t candidates[QUERY_CANDIDATE_LIMIT];
+		for (const Index &index : indexes.Entry) {
+			const spatial::QueryResult found_ =
+				spatial::ShapeCast(*index.Grid, start, motion, mask, std::span<uint64_t>{candidates});
+			result.Overflowed = result.Overflowed || found_.Overflowed;
+
+			for (size_t at = 0; at < found_.Written; at++) {
+				const Candidate candidate = ResolveCandidate(store, index, candidates[at]);
+				if (!candidate.Present) {
+					continue;
+				}
+
+				// The window of the sweep during which the two *bounds* can
+				// touch at all: the moving bound against a still bound is the
+				// bound's centre line against the still bound grown by the
+				// moving half-extent.
+				scene::Collider candidateCollider;
+				candidateCollider.Shape = candidate.Shape.Shape;
+				candidateCollider.Extent = candidate.Shape.Extent;
+				const core::AABB bound = ShapeWorldBounds(candidateCollider, candidate.Shape.Frame);
+				const core::AABB expanded =
+					core::AABB::FromCentre(bound.Centre(), bound.Size() * 0.5f + halfExtent);
+				const SweepWindow window = WindowAlongSweep(origin, direction, distance, expanded);
+				if (!window.Touched) {
+					continue;
+				}
+
+				// The exact test is against the moving bound's envelope over
+				// just that window, not the whole path: any real contact
+				// happens inside the window, and the moving shape never leaves
+				// its own bound, so nothing is missed - while a collider the
+				// bounds merely pass beside is thrown out here exactly.
+				const core::Vector3 nearOffset = direction * window.Entry;
+				const core::Vector3 farOffset = direction * window.Exit;
+				const core::AABB envelope =
+					core::AABB{start.Minimum + nearOffset, start.Maximum + nearOffset}.Union(
+						core::AABB{start.Minimum + farOffset, start.Maximum + farOffset}
+					);
+				const ShapeInstance sweptHere{
+					core::CFrame{envelope.Centre()}, envelope.Size() * 0.5f, scene::ShapeKind::Box
+				};
+				if (!ContactBetween(sweptHere, candidate.Shape).Touching) {
+					continue;
+				}
+				if (!Append(found, candidate.Owner, result)) {
+					return result;
+				}
+			}
+		}
+		return result;
 	}
 }

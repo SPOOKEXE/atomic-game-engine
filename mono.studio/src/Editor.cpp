@@ -2003,6 +2003,8 @@ namespace studio {
 		Universe->SetMode(defaults.Mode);
 		Universe->SetMaximumCatchUpTicks(defaults.MaximumCatchUpTicks);
 		Universe->SetBusBudgetPerTick(defaults.BusBudgetPerTick);
+		Universe->SetChannelQueueLimit(defaults.ChannelQueueLimit);
+		Universe->SetChannelsPerWorld(defaults.ChannelsPerWorld);
 		InstanceCounts.clear();
 		ExpandedWorlds.clear();
 

@@ -98,4 +98,45 @@ namespace engine::graph {
 		FrameExecutionPlan &out,
 		core::Name &offender
 	);
+
+	// Which traffic-plan command buffer records a node's device work. CPU nodes
+	// run on no device queue and belong to no buffer.
+	enum class CommandBufferClass : uint8_t {
+		Graphics,
+		Compute,
+		Transfer,
+	};
+
+	const char *Describe(CommandBufferClass bufferClass);
+
+	// One command buffer of a schedule's traffic plan, in submission order.
+	//
+	// SDL exposes one unified queue rather than independent graphics, compute
+	// and transfer queues, so these buffers cannot physically overlap -
+	// submitting them in this order on that queue is what preserves every wave
+	// dependency. The split is a structural boundary: dependency-bound compute
+	// and later transfer work already sit in buffers of their own class, so a
+	// backend with real device queues can lift each class onto its queue
+	// without re-planning the frame.
+	struct PlannedCommandBuffer {
+		CommandBufferClass Class = CommandBufferClass::Graphics;
+
+		// The schedule waves this buffer spans, inclusive. Buffers of different
+		// classes share a wave when it holds independent work for several
+		// queues.
+		size_t FirstWave = 0;
+		size_t LastWave = 0;
+
+		// Every scheduled node recording into this buffer, in wave order.
+		std::vector<NodeId> Nodes;
+	};
+
+	// Splits a compiled schedule into traffic-plan command buffers.
+	//
+	// Consecutive waves of one queue class share a buffer, because a boundary
+	// with the same class on both sides orders nothing. Within one wave the
+	// classes are emitted transfer, compute, graphics: wave members are
+	// independent by definition, and that order matches how the backend already
+	// submits uploads and async-eligible compute ahead of raster work.
+	std::vector<PlannedCommandBuffer> PlanCommandBuffers(const ExecutionSchedule &schedule);
 }

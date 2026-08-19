@@ -1281,7 +1281,16 @@ namespace engine::scene {
 				// allows fails at creation with a driver message nobody can act
 				// on; sixteen thousand is past every limit worth having and
 				// small enough to allocate.
+				//
+				// **Read-modify-write, so a resize keeps the rest of the
+				// component.** A fresh `SurfaceCamera` here silently reset
+				// `Face`, `Effect`, `TagFilter` and `ImageTransparency` on
+				// every size edit - a mirror that lost its thermal grade the
+				// moment somebody dragged its resolution.
 				SurfaceCamera surface;
+				if (const SurfaceCamera *existing = store.Get<SurfaceCamera>(instance)) {
+					surface = *existing;
+				}
 				surface.Width = static_cast<uint16_t>(std::min(size.X, 16384.0f));
 				surface.Height = static_cast<uint16_t>(std::min(size.Y, 16384.0f));
 				store.Set(instance, surface);

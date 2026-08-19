@@ -302,10 +302,14 @@ TEST_CASE("universe tuning can change between driver ticks", "[world]") {
 	universe.SetMode(ExecutionMode::WorldSerial);
 	universe.SetMaximumCatchUpTicks(2);
 	universe.SetBusBudgetPerTick(17);
+	universe.SetChannelQueueLimit(5);
+	universe.SetChannelsPerWorld(3);
 
 	CHECK(universe.Settings().Mode == ExecutionMode::WorldSerial);
 	CHECK(universe.Settings().MaximumCatchUpTicks == 2);
 	CHECK(universe.Settings().BusBudgetPerTick == 17);
+	CHECK(universe.Settings().ChannelQueueLimit == 5);
+	CHECK(universe.Settings().ChannelsPerWorld == 3);
 
 	universe.Tick(10.0f);
 	CHECK(universe.StatisticsOf(id).Ticks == 2);

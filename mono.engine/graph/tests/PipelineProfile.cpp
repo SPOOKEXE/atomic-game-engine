@@ -82,8 +82,8 @@ TEST_CASE("the default frame profiles into a full grid", "[graph][profile]") {
 	const PipelineProfile profile = Profiled(DefaultGraph());
 
 	REQUIRE(profile.Passes.size() == 23);
-	REQUIRE(profile.Resources.size() == 26);
-	CHECK(profile.Cells.size() == 598);
+	REQUIRE(profile.Resources.size() == 27);
+	CHECK(profile.Cells.size() == 621);
 
 	// The three blocks, in the order a frame runs them.
 	CHECK(profile.Passes.front().Where == engine::graph::Band::Shared);
@@ -96,6 +96,11 @@ TEST_CASE("the default frame profiles into a full grid", "[graph][profile]") {
 
 	CHECK(profile.At(RowOf(profile, "tonemapped"), ColumnOf(profile, "portal-overlay")) == Access::Read);
 	CHECK(profile.At(RowOf(profile, "portal-image"), ColumnOf(profile, "portal-tonemap")) == Access::Read);
+
+	// The seam light-field: captured beside the portal images, projected by the
+	// lit pass - the edge that orders the two nodes.
+	CHECK(profile.At(RowOf(profile, "portal-light"), ColumnOf(profile, "portal-capture")) == Access::Write);
+	CHECK(profile.At(RowOf(profile, "portal-light"), ColumnOf(profile, "deferred-lighting")) == Access::Read);
 	CHECK(profile.At(RowOf(profile, "portal-display"), ColumnOf(profile, "portal-tonemap")) == Access::Write);
 	CHECK(profile.At(RowOf(profile, "portal-display"), ColumnOf(profile, "portal-overlay")) == Access::Read);
 	CHECK(profile.At(RowOf(profile, "portaled"), ColumnOf(profile, "portal-overlay")) == Access::Write);

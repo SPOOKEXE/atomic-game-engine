@@ -1,3 +1,5 @@
+#include "WorldResource.hpp"
+
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
@@ -52,7 +54,12 @@ namespace engine::physics {
 		// `PreparePhysicsWorld` - a scene of anchored parts and a camera needs no
 		// solver - and the overlap below reports a missing world as an error
 		// once per body per tick, which is a log nobody can read past.
-		if (!store.HasResource<PhysicsWorld>()) {
+		//
+		// The registration check comes first because `HasResource` registers the
+		// type under the compiler's spelling to answer, and this is reached by
+		// exactly the hosts that never registered it - `WorldResource.hpp` names
+		// the abort that follows.
+		if (!PhysicsWorldRegistered() || !store.HasResource<PhysicsWorld>()) {
 			return 0;
 		}
 

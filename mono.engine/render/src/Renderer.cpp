@@ -38,6 +38,7 @@
 #include <array>
 #include <bit>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
@@ -337,6 +338,22 @@ namespace engine::render {
 			glm::vec4 Eye{0.0f, 0.0f, 0.0f, 0.0f};
 		};
 
+		// How many portal mouths may project their light field in one frame.
+		//
+		// **Two, which is one pair, and it is the prototype's budget.** Each is
+		// a sampler binding and four vec4s in `PbrUniforms`, both spelled out in
+		// `deferred-lighting.frag` - the three counts move together. The nearest
+		// mouths win, so a corridor of pairs lights the one the viewer is at.
+		constexpr size_t MAX_SEAM_LIGHTS = 2;
+
+		// The side of one seam light-field capture, in texels.
+		//
+		// Small on purpose: the capture is read back as a pool of light on the
+		// floor, low-frequency by the time the spread and the falloff have been
+		// applied, and 128 keeps a pair of captures cheaper than one shadow
+		// cascade.
+		constexpr uint32_t SEAM_LIGHT_RESOLUTION = 128;
+
 		// Shared by the default graph's fullscreen passes. One block keeps the
 		// camera and authored Lighting state identical from depth reconstruction
 		// through ambient occlusion and deferred shading.
@@ -353,6 +370,17 @@ namespace engine::render {
 			glm::vec4 FogColour{};
 			glm::vec4 Fog{};
 			glm::vec4 Shadow{};
+
+			// The seam light projectors - see the matching `SeamCentre` block in
+			// `deferred-lighting.frag`. `Centre.w` is the live flag, `Outward.w`
+			// the spill range; zeroed slots project nothing, so a frame with no
+			// portals pays two dot products per pixel and no texture taps.
+			//@{
+			glm::vec4 SeamCentre[MAX_SEAM_LIGHTS]{};
+			glm::vec4 SeamOutward[MAX_SEAM_LIGHTS]{};
+			glm::vec4 SeamFirst[MAX_SEAM_LIGHTS]{};
+			glm::vec4 SeamSecond[MAX_SEAM_LIGHTS]{};
+			//@}
 		};
 
 		// Slot zero for an authored fullscreen fragment shader. The contract is
@@ -670,6 +698,11 @@ namespace engine::render {
 			graph::RenderGraph Graph;
 			graph::CompiledGraph Compiled;
 			graph::ExecutionSchedule Schedule;
+
+			// The schedule's traffic plan, computed once at install. It decides
+			// which command buffer class records each node, and its order is the
+			// frame's submission order on SDL's one unified queue.
+			std::vector<graph::PlannedCommandBuffer> Buffers;
 		};
 
 		std::optional<NamedPipeline> EngineDefault;
@@ -697,6 +730,7 @@ namespace engine::render {
 			Surface,
 			PortalImage,
 			PortalDisplay,
+			PortalLight,
 			Albedo,
 			Normal,
 			Material,
@@ -731,7 +765,9 @@ namespace engine::render {
 						return ResourceRole::Surface;
 					}
 					if (node->Kind == core::Name("portal-capture")) {
-						return ResourceRole::PortalImage;
+						// Output 0 is the recursion pool, output 1 the seam
+						// light-field atlas - the default document's order.
+						return output == 0 ? ResourceRole::PortalImage : ResourceRole::PortalLight;
 					}
 					if (node->Kind == core::Name("portal-tonemap")) {
 						return ResourceRole::PortalDisplay;
@@ -796,6 +832,42 @@ namespace engine::render {
 		uint32_t BatchWidth = 0;
 		uint32_t BatchHeight = 0;
 		uint32_t BatchTimingSlot = VulkanTimestamps::NO_SLOT;
+
+		// The traffic plan's later-transfer command buffer: every download this
+		// frame records - resource previews and captures - lands here rather
+		// than in the main buffer, and it is submitted after the main buffer.
+		// SDL's one unified queue executes submissions in order, so the copies
+		// read the frame's finished images without a fence between the two.
+		// Physical overlap is not available on that queue; the split is the
+		// structural boundary `graph::PlanCommandBuffers` plans, in place for a
+		// backend with an independent transfer queue.
+		SDL_GPUCommandBuffer *DownloadCommand = nullptr;
+
+		SDL_GPUCommandBuffer *DownloadBuffer() {
+			if (DownloadCommand == nullptr) {
+				DownloadCommand = SDL_AcquireGPUCommandBuffer(Device);
+				if (DownloadCommand == nullptr) {
+					ENGINE_ERROR("SDL_AcquireGPUCommandBuffer (downloads): {}", SDL_GetError());
+				}
+			}
+			return DownloadCommand;
+		}
+
+		// A frame that failed after downloads were recorded: the buffer is
+		// cancelled rather than submitted, and a pending preview stops waiting
+		// for pixels that will never arrive.
+		void DropDownloads() {
+			if (DownloadCommand != nullptr) {
+				SDL_CancelGPUCommandBuffer(DownloadCommand);
+				DownloadCommand = nullptr;
+			}
+			if (PreviewSubmitted) {
+				Preview.Pending.Poll(true);
+				Preview.Pixels.clear();
+				Preview.Histogram = ImageHistogram{};
+				PreviewSubmitted = false;
+			}
+		}
 
 		void CollectPreview();
 		void PollPreview();
@@ -1936,6 +2008,32 @@ namespace engine::render {
 			MirrorTarget Targets[scene::MAX_SURFACES];
 		};
 
+		// One portal mouth's light-field capture: the room its seam opens onto,
+		// rendered against a lit void from a stand-in eye at the mouth.
+		//
+		// **The seam's geometry travels with the texture**, because the capture
+		// and the projection are two passes reading one record - a projector fed
+		// a rectangle the capture was not taken at throws another room's light
+		// onto this one's floor, at an angle nothing authored.
+		//
+		// `Ready` is cleared at the top of every portal pass rather than
+		// trusted, for `MirrorTarget::Ready`'s reason: a mouth that was disabled
+		// or walked away from must not go on projecting last frame's rooms.
+		struct SeamLightTarget {
+			SDL_GPUTexture *Colour = nullptr;
+			SDL_GPUTexture *Depth = nullptr;
+			uint32_t Width = 0;
+			uint32_t Height = 0;
+			bool Ready = false;
+
+			// The projector, in world space: xyz centre / w unused, xyz unit
+			// normal toward the lit room / w spill range, and the two half axes.
+			glm::vec4 Centre{};
+			glm::vec4 Outward{};
+			glm::vec4 First{};
+			glm::vec4 Second{};
+		};
+
 		struct SurfaceBank {
 			SurfaceSlotState Surfaces[scene::MAX_SURFACES];
 
@@ -1946,6 +2044,12 @@ namespace engine::render {
 			// The same, for mirrors. Two pools rather than one, because the two
 			// passes size their targets differently - see `MirrorTarget`.
 			std::vector<MirrorLevel> Mirrors;
+
+			// The seam light-field captures, one per mouth slot. Fixed at
+			// `SEAM_LIGHT_RESOLUTION` rather than pooled by level: a mouth
+			// captures its far room once per frame however deep the picture
+			// recursion goes.
+			SeamLightTarget SeamLights[scene::MAX_SURFACES];
 
 			// What the last frame drawn into this bank reached, which is what an
 			// automatic depth reads.
@@ -2043,6 +2147,12 @@ namespace engine::render {
 		//         level to a flat pane for the frame rather than the frame.
 		MirrorTarget *
 		EnsureMirror(size_t viewport, uint32_t level, uint8_t index, uint32_t width, uint32_t height);
+
+		// One mouth's light-field capture pair, at `SEAM_LIGHT_RESOLUTION`.
+		//
+		// @return `null` when either texture could not be made, which loses the
+		//         mouth's spill for the frame rather than the frame.
+		SeamLightTarget *EnsureSeamLight(size_t viewport, uint8_t index);
 
 		// One opaque white texel, bound wherever a real texture is missing.
 		//
@@ -2311,8 +2421,10 @@ namespace engine::render {
 		SDL_GPUShader *depthLinearFragment =
 			LoadShader("depth-linearise.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
 		SDL_GPUShader *ssaoFragment = LoadShader("ssao.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1);
+		// Nine samplers: the seven G-buffer and shadow inputs plus the two seam
+		// light-field captures - `MAX_SEAM_LIGHTS`, bound last.
 		SDL_GPUShader *deferredLightingFragment =
-			LoadShader("deferred-lighting.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 7, 2);
+			LoadShader("deferred-lighting.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 9, 2);
 		SDL_GPUShader *tonemapFragment = LoadShader("tonemap.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
 
 		if (!opaqueVertex || !opaqueFragment || !shadowVertex || !shadowFragment || !overlayVertex ||
@@ -5200,6 +5312,55 @@ namespace engine::render {
 		return &target;
 	}
 
+	Renderer::Impl::SeamLightTarget *Renderer::Impl::EnsureSeamLight(size_t viewport, uint8_t index) {
+		if (index >= scene::MAX_SURFACES) {
+			return nullptr;
+		}
+
+		SeamLightTarget &target = SurfacesAt(viewport).SeamLights[index];
+		if (target.Colour != nullptr && target.Depth != nullptr) {
+			return &target;
+		}
+
+		SDL_GPUTextureCreateInfo colour{};
+		colour.type = SDL_GPU_TEXTURETYPE_2D;
+		colour.format = ColourFormat();
+		colour.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+		colour.width = SEAM_LIGHT_RESOLUTION;
+		colour.height = SEAM_LIGHT_RESOLUTION;
+		colour.layer_count_or_depth = 1;
+		colour.num_levels = 1;
+		colour.sample_count = SDL_GPU_SAMPLECOUNT_1;
+
+		target.Colour = SDL_CreateGPUTexture(Device, &colour);
+		if (target.Colour == nullptr) {
+			ENGINE_ERROR("viewport {} seam light {} colour: {}", viewport, index, SDL_GetError());
+			return nullptr;
+		}
+
+		SDL_GPUTextureCreateInfo depth{};
+		depth.type = SDL_GPU_TEXTURETYPE_2D;
+		depth.format = DepthFormat;
+		depth.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+		depth.width = SEAM_LIGHT_RESOLUTION;
+		depth.height = SEAM_LIGHT_RESOLUTION;
+		depth.layer_count_or_depth = 1;
+		depth.num_levels = 1;
+		depth.sample_count = SDL_GPU_SAMPLECOUNT_1;
+
+		target.Depth = SDL_CreateGPUTexture(Device, &depth);
+		if (target.Depth == nullptr) {
+			ENGINE_ERROR("viewport {} seam light {} depth: {}", viewport, index, SDL_GetError());
+			SDL_ReleaseGPUTexture(Device, target.Colour);
+			target.Colour = nullptr;
+			return nullptr;
+		}
+
+		target.Width = SEAM_LIGHT_RESOLUTION;
+		target.Height = SEAM_LIGHT_RESOLUTION;
+		return &target;
+	}
+
 	bool Renderer::Impl::EnsureOverlay(int width, int height) {
 		if (OverlayTexture && width == OverlayWidth && height == OverlayHeight) {
 			return true;
@@ -5421,6 +5582,8 @@ namespace engine::render {
 		UploadCommandBuffers += view.UploadCommandBuffers;
 		ComputeDispatches += view.ComputeDispatches;
 		AsyncComputeCommandBuffers += view.AsyncComputeCommandBuffers;
+		DownloadCommandBuffers += view.DownloadCommandBuffers;
+		TrafficCommandBuffers += view.TrafficCommandBuffers;
 		ConcurrentWaves += view.ConcurrentWaves;
 		for (const core::Name node : view.Nodes) {
 			if (!Ran(node)) {
@@ -5445,8 +5608,13 @@ namespace engine::render {
 			ENGINE_ERROR("engine default render graph refused: {} at '{}'", reason, offender.Text());
 			return;
 		}
+		std::vector<graph::PlannedCommandBuffer> buffers = graph::PlanCommandBuffers(schedule);
 		State->EngineDefault = Impl::NamedPipeline{
-			core::Name("Engine Default"), pipeline, std::move(compiled), std::move(schedule)
+			core::Name("Engine Default"),
+			pipeline,
+			std::move(compiled),
+			std::move(schedule),
+			std::move(buffers)
 		};
 	}
 
@@ -5480,12 +5648,14 @@ namespace engine::render {
 			State->ReleaseGraphState(name);
 			installed.Graph = pipeline;
 			installed.Compiled = std::move(compiled);
+			installed.Buffers = graph::PlanCommandBuffers(schedule);
 			installed.Schedule = std::move(schedule);
 			return true;
 		}
 
+		std::vector<graph::PlannedCommandBuffer> buffers = graph::PlanCommandBuffers(schedule);
 		State->NamedPipelines.push_back(
-			Impl::NamedPipeline{name, pipeline, std::move(compiled), std::move(schedule)}
+			Impl::NamedPipeline{name, pipeline, std::move(compiled), std::move(schedule), std::move(buffers)}
 		);
 		return true;
 	}
@@ -5868,6 +6038,15 @@ namespace engine::render {
 					if (target.Depth) {
 						SDL_ReleaseGPUTexture(device, target.Depth);
 					}
+				}
+			}
+
+			for (Impl::SeamLightTarget &target : bank.SeamLights) {
+				if (target.Colour) {
+					SDL_ReleaseGPUTexture(device, target.Colour);
+				}
+				if (target.Depth) {
+					SDL_ReleaseGPUTexture(device, target.Depth);
 				}
 			}
 		}
@@ -6401,6 +6580,14 @@ namespace engine::render {
 			}
 			return nullptr;
 		}
+		if (role == Impl::ResourceRole::PortalLight && slot < State->SurfaceBanks.size()) {
+			for (const Impl::SeamLightTarget &seamLight : State->SurfaceBanks[slot].SeamLights) {
+				if (seamLight.Ready && seamLight.Colour != nullptr) {
+					return seamLight.Colour;
+				}
+			}
+			return nullptr;
+		}
 		if (slot >= State->PbrSlots.size()) {
 			return nullptr;
 		}
@@ -6791,6 +6978,7 @@ namespace engine::render {
 						return wave.ConcurrentQueues;
 					})
 				);
+				frame.TrafficCommandBuffers += static_cast<uint32_t>(named->Buffers.size());
 			}
 		}
 
@@ -6802,6 +6990,10 @@ namespace engine::render {
 			}
 			SDL_SubmitGPUCommandBuffer(State->BatchCommand);
 			State->BatchCommand = nullptr;
+
+			// A failed batch never reached the final view's submit, so any
+			// downloads an earlier view recorded still hold their buffer.
+			State->DropDownloads();
 		}
 		State->BatchActive = false;
 		State->BatchFirst = false;
@@ -6948,9 +7140,11 @@ namespace engine::render {
 		}
 		const auto endIncompleteView = [&] {
 			if (State->BatchActive) {
+				// The batch owner drops any recorded downloads with the frame.
 				State->BatchFailed = true;
 			} else {
 				SDL_SubmitGPUCommandBuffer(command);
+				State->DropDownloads();
 			}
 		};
 
@@ -8739,19 +8933,24 @@ namespace engine::render {
 		// the whole of it: a surface texture is made the size of the pass that
 		// writes it and a portal target is not. The scissor follows the
 		// viewport, because nothing here draws outside the rectangle it set.
+		// `clearColour` overrides the fog clear when given: the seam light
+		// captures clear to the world's ambient - the lit void - so their
+		// background carries the room's light level rather than a sky wash.
 		const auto openScenePass = [&](SDL_GPUTexture *colour,
 									   SDL_GPUTexture *depth,
 									   bool cycle,
 									   const SDL_GPUViewport *viewport,
-									   const LightUniforms &passLights) -> SDL_GPURenderPass * {
+									   const LightUniforms &passLights,
+									   const SDL_FColor *clearColour = nullptr) -> SDL_GPURenderPass * {
 			SDL_GPUColorTargetInfo colourInfo{};
 			colourInfo.texture = colour;
-			colourInfo.clear_color = SDL_FColor{
-				State->FogColour.r,
-				State->FogColour.g,
-				State->FogColour.b,
-				1.0f,
-			};
+			colourInfo.clear_color = clearColour != nullptr ? *clearColour
+															: SDL_FColor{
+																  State->FogColour.r,
+																  State->FogColour.g,
+																  State->FogColour.b,
+																  1.0f,
+															  };
 			colourInfo.load_op = SDL_GPU_LOADOP_CLEAR;
 			colourInfo.store_op = SDL_GPU_STOREOP_STORE;
 			colourInfo.cycle = cycle;
@@ -9652,6 +9851,13 @@ namespace engine::render {
 		frameNodes.Set(core::Name("portal-capture"), [&](const graph::RunContext &context) {
 			enterNamedPass(context.Name);
 
+			// Last frame's light fields are for mouths that may be gone - a
+			// disabled `Portal` reaches here as no `PortalView` at all, and its
+			// spill has to go out with it. See `SeamLightTarget::Ready`.
+			for (Impl::SeamLightTarget &seamLight : bank.SeamLights) {
+				seamLight.Ready = false;
+			}
+
 			// --- the portal capture ----------------------------------------------
 			//
 			// **The same recursion as `fillMirror`, by a different map.** Both derive
@@ -9965,6 +10171,130 @@ namespace engine::render {
 					portalLevels - 1,
 					-1
 				);
+
+				// --- the seam light-field captures -------------------------------
+				//
+				// **Each mouth's far room, rendered against a lit void.** A
+				// stand-in eye at the mouth's centre looks through the hole and
+				// is carried by the same warp a body crosses by, so what it sees
+				// is the light arriving at the seam. The clear is the world's
+				// ambient rather than the fog - a lit void - and the fog is
+				// pushed out of reach, so the capture holds room lighting and
+				// nothing atmospheric. `deferred-lighting.frag`'s `SeamSpill`
+				// projects the matching capture back out of the entrance.
+				//
+				// **Viewer-independent, unlike the recursion above.** Light
+				// spills out of a doorway whether or not anybody is looking at
+				// the pane, so this does not test `VisiblePane` - a pair costs
+				// two 128x128 forward passes per frame while its mouths are
+				// enabled, and a disabled mouth never reaches this loop.
+				for (uint8_t slot = 0; slot < scene::MAX_SURFACES; slot++) {
+					if (portalOf[slot] == nullptr) {
+						continue;
+					}
+					const PortalView &portal = *portalOf[slot];
+
+					// The lit side is the viewer's side of this mouth: spill
+					// onto the room the camera is in, and the partner mouth
+					// serves the far room the same way.
+					const float side = (cameraFrame.Position - portal.Centre).Dot(portal.Normal);
+					const core::Vector3 outward = portal.Normal * (side >= 0.0f ? 1.0f : -1.0f);
+
+					// Far enough off the plane that the oblique clip below stays
+					// in front of the eye: the bias is derived from this same
+					// distance, and a plane that lands behind the camera inverts
+					// the frustum and captures nothing.
+					constexpr float STAND_OFF = 0.5f;
+					const core::Vector3 standPosition = portal.Centre + outward * STAND_OFF;
+					const core::Vector3 upAxis = std::abs(outward.Y) > 0.99f
+													 ? core::Vector3{0.0f, 0.0f, 1.0f}
+													 : core::Vector3{0.0f, 1.0f, 0.0f};
+					const core::CFrame stand =
+						core::CFrame::LookAt(standPosition, standPosition - outward, upAxis);
+					const core::CFrame placed = portal.Warp.Place(stand);
+
+					// Wide and square: the capture is a light probe of a room,
+					// not a picture, and a narrow lens would miss the lamps
+					// standing beside the doorway.
+					scene::Camera captureCamera = drawCamera;
+					captureCamera.FieldOfViewRadians = 1.9f;
+					captureCamera.NearPlane = 0.05f;
+					const glm::mat4 captureProjection =
+						scene::ResolveCamera(placed, captureCamera, 1.0f).Projection;
+
+					// The same backward-pointing clip as `subCameraFor`, so the
+					// wall the far mouth is set into does not fill the capture.
+					// The bias is the stand-in eye's own seam distance rather
+					// than the viewer's - `PortalClipBias` halves it, keeping
+					// the plane in front of an eye the viewer's bias could put
+					// it behind.
+					const core::Vector3 clipNormal = portal.Warp.Rotate(outward) * -1.0f;
+					const core::Vector3 clipPoint =
+						portal.Warp.Point(portal.Centre) - clipNormal * scene::PortalClipBias(STAND_OFF);
+					const scene::CameraMatrices captureMatrices = scene::ResolveSurfaceCamera(
+						placed,
+						scene::ObliqueProjection(
+							captureProjection, placed, clipNormal, clipNormal.Dot(clipPoint)
+						)
+					);
+
+					Impl::SeamLightTarget *seamLight = State->EnsureSeamLight(targetSlot, slot);
+					if (seamLight == nullptr) {
+						continue;
+					}
+
+					const SDL_GPUViewport seamViewport{
+						0.0f,
+						0.0f,
+						static_cast<float>(seamLight->Width),
+						static_cast<float>(seamLight->Height),
+						0.0f,
+						1.0f
+					};
+
+					// The lit void. `Ambient` is already in the linear working
+					// space the pass writes, which is the space a clear on an
+					// sRGB target is given in.
+					const SDL_FColor voidColour{
+						State->Ambient.x,
+						State->Ambient.y,
+						State->Ambient.z,
+						1.0f,
+					};
+
+					SDL_GPURenderPass *const pass = openScenePass(
+						seamLight->Colour, seamLight->Depth, false, &seamViewport, lightUniforms, &voidColour
+					);
+
+					const FrameUniforms captureUniforms{
+						captureMatrices.ViewProjection,
+						lightViewProjection,
+						glm::mat4{1.0f},
+					};
+					SDL_PushGPUVertexUniformData(command, 0, &captureUniforms, sizeof(captureUniforms));
+
+					LightingUniforms voidLighting = lightingAt(placed.Position, 0.0f, 1.0f);
+					// No fog in a light probe: what falls to distance falls to
+					// the void the clear already painted.
+					voidLighting.Fog = glm::vec4{1.0e6f, 1.0e6f + 1.0f, 0.0f, 0.0f};
+
+					drawWorldInto(pass, voidLighting, portal.TagFilter);
+					drawBlendedInto(pass, captureUniforms, voidLighting, portal.TagFilter, false);
+
+					SDL_EndGPURenderPass(pass);
+
+					seamLight->Centre = glm::vec4{portal.Centre.X, portal.Centre.Y, portal.Centre.Z, 1.0f};
+
+					// The spill reaches about a doorway's span into the room:
+					// past that the window falloff has taken it below anything
+					// the ambient does not already cover.
+					const float reach =
+						2.0f * std::max(portal.First.Magnitude() + portal.Second.Magnitude(), 1.0f);
+					seamLight->Outward = glm::vec4{outward.X, outward.Y, outward.Z, reach};
+					seamLight->First = glm::vec4{portal.First.X, portal.First.Y, portal.First.Z, 0.0f};
+					seamLight->Second = glm::vec4{portal.Second.X, portal.Second.Y, portal.Second.Z, 0.0f};
+					seamLight->Ready = true;
+				}
 			}
 			return true;
 		});
@@ -10365,6 +10695,18 @@ namespace engine::render {
 					}
 				}
 			}
+			if (role == Impl::ResourceRole::PortalLight && slot < State->SurfaceBanks.size()) {
+				for (const Impl::SeamLightTarget &seamLight : State->SurfaceBanks[slot].SeamLights) {
+					if (seamLight.Ready && seamLight.Colour != nullptr) {
+						return Impl::NamedTexture{
+							seamLight.Colour,
+							seamLight.Width,
+							seamLight.Height,
+							State->ColourFormat(),
+						};
+					}
+				}
+			}
 			if (slot >= State->PbrSlots.size()) {
 				return texture;
 			}
@@ -10665,8 +11007,36 @@ namespace engine::render {
 			}
 
 			const graph::ScheduledNode *scheduled = scheduledFor(context.Node);
+
+			// The traffic plan decides which command buffer this dispatch
+			// belongs to. A compute buffer ahead of the plan's first graphics
+			// buffer may submit on its own before the main stream; the runtime
+			// guards below keep that promise when a batch or execution order
+			// has already put work in the main buffer.
+			//
+			// Dependency-bound compute - a compute buffer the plan places
+			// between graphics buffers - stays in the main stream on SDL: one
+			// unified queue offers no overlap to win, the present is bound to
+			// the buffer that acquired the swapchain so the graphics stream
+			// cannot be cut around it, and a pass recorded for later submission
+			// could read textures a later main-stream pass cycles. The plan
+			// still carries the boundary, so a backend with an independent
+			// compute queue can lift it without re-planning.
+			const auto planLeadsGraphics = [&](graph::NodeId node) {
+				for (const graph::PlannedCommandBuffer &buffer : selectedPipeline->Buffers) {
+					if (buffer.Class == graph::CommandBufferClass::Graphics) {
+						return false;
+					}
+					if (buffer.Class == graph::CommandBufferClass::Compute &&
+						std::find(buffer.Nodes.begin(), buffer.Nodes.end(), node) != buffer.Nodes.end()) {
+						return true;
+					}
+				}
+				return false;
+			};
 			const bool separateCommand = scheduled != nullptr && scheduled->AsyncEligible &&
-										 !mainGpuWorkRecorded && !dedicatedComputeSubmitted &&
+										 planLeadsGraphics(context.Node) && !mainGpuWorkRecorded &&
+										 !dedicatedComputeSubmitted &&
 										 (!State->BatchActive || State->BatchFirst);
 			SDL_GPUCommandBuffer *dispatchCommand = command;
 			if (separateCommand) {
@@ -10828,13 +11198,71 @@ namespace engine::render {
 			if (!graphEnabled(core::Name("ssao"))) {
 				clearOcclusion();
 			}
+
+			// The seam light projectors, chosen and bound here rather than with
+			// `lightingBindings`, because the capture textures are made inside
+			// the portal-capture node this same frame - the graph's
+			// portal-light edge is what guarantees that node has already run.
+			// The nearest ready mouths win the two slots; empty slots stay
+			// zeroed in `uniforms` and bind the fallback texel.
+			std::array<SDL_GPUTextureSamplerBinding, lightingBindings.size() + MAX_SEAM_LIGHTS>
+				spillBindings{};
+			std::copy(lightingBindings.begin(), lightingBindings.end(), spillBindings.begin());
+
+			std::array<const Impl::SeamLightTarget *, scene::MAX_SURFACES> ready{};
+			size_t readyCount = 0;
+			if (graphEnabled(core::Name("portal-capture"))) {
+				for (const Impl::SeamLightTarget &seamLight : bank.SeamLights) {
+					if (seamLight.Ready) {
+						ready[readyCount++] = &seamLight;
+					}
+				}
+			}
+			const auto distanceTo = [&](const Impl::SeamLightTarget *candidate) {
+				const core::Vector3 offset{
+					candidate->Centre.x - cameraFrame.Position.X,
+					candidate->Centre.y - cameraFrame.Position.Y,
+					candidate->Centre.z - cameraFrame.Position.Z,
+				};
+				return offset.Dot(offset);
+			};
+			std::sort(
+				ready.begin(),
+				ready.begin() + static_cast<std::ptrdiff_t>(readyCount),
+				[&](const Impl::SeamLightTarget *left, const Impl::SeamLightTarget *right) {
+					return distanceTo(left) < distanceTo(right);
+				}
+			);
+
+			std::array<const Impl::SeamLightTarget *, MAX_SEAM_LIGHTS> chosen{};
+			for (size_t slot = 0; slot < chosen.size() && slot < readyCount; slot++) {
+				chosen[slot] = ready[slot];
+			}
+
+			for (size_t slot = 0; slot < chosen.size(); slot++) {
+				SDL_GPUTextureSamplerBinding &binding = spillBindings[lightingBindings.size() + slot];
+				if (chosen[slot] != nullptr) {
+					uniforms.SeamCentre[slot] = chosen[slot]->Centre;
+					uniforms.SeamOutward[slot] = chosen[slot]->Outward;
+					uniforms.SeamFirst[slot] = chosen[slot]->First;
+					uniforms.SeamSecond[slot] = chosen[slot]->Second;
+					binding = SDL_GPUTextureSamplerBinding{chosen[slot]->Colour, sampler};
+				} else {
+					uniforms.SeamCentre[slot] = glm::vec4{};
+					uniforms.SeamOutward[slot] = glm::vec4{};
+					uniforms.SeamFirst[slot] = glm::vec4{};
+					uniforms.SeamSecond[slot] = glm::vec4{};
+					binding = SDL_GPUTextureSamplerBinding{State->FallbackTexture, sampler};
+				}
+			}
+
 			fullscreen(
 				context.Name,
 				State->DeferredLightingPipeline,
 				pbr.Lit,
 				pbrDimensions.LitWidth,
 				pbrDimensions.LitHeight,
-				lightingBindings,
+				spillBindings,
 				&uniforms,
 				&lightUniforms,
 				SDL_FColor{State->FogColour.r, State->FogColour.g, State->FogColour.b, 1.0f}
@@ -11393,8 +11821,16 @@ namespace engine::render {
 				}
 				const graph::Node *node = selectedPipeline->Graph.Find(context.Node);
 				const size_t slot = node != nullptr ? node->Integer(core::Name("view"), 0) : targetSlot;
+				// Onto the later-transfer buffer, per the traffic plan: this node
+				// reads finished images, and the main buffer is submitted first.
 				(void)State->RequestPreview(
-					command, source.Texture, source.Width, source.Height, desc->Name, slot, source.Format
+					State->DownloadBuffer(),
+					source.Texture,
+					source.Width,
+					source.Height,
+					desc->Name,
+					slot,
+					source.Format
 				);
 				break;
 			}
@@ -11703,7 +12139,7 @@ namespace engine::render {
 			}
 			if (inspected.IsValid()) {
 				(void)State->RequestPreview(
-					command,
+					State->DownloadBuffer(),
 					inspected.Texture,
 					inspected.Width,
 					inspected.Height,
@@ -11749,8 +12185,20 @@ namespace engine::render {
 			}
 
 			capture = info.size > 0 ? SDL_CreateGPUTransferBuffer(State->Device, &info) : nullptr;
+			if (capture == nullptr) {
+				ENGINE_ERROR("capture: SDL_CreateGPUTransferBuffer: {}", SDL_GetError());
+			}
+
+			// The copy records on the later-transfer buffer, which is submitted
+			// after the main buffer - so the picture is the frame as drawn, on
+			// the same one-queue ordering the previews rely on.
+			SDL_GPUCommandBuffer *downloads = capture != nullptr ? State->DownloadBuffer() : nullptr;
+			if (capture != nullptr && downloads == nullptr) {
+				SDL_ReleaseGPUTransferBuffer(State->Device, capture);
+				capture = nullptr;
+			}
 			if (capture != nullptr) {
-				SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(command);
+				SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(downloads);
 
 				SDL_GPUTextureRegion source{};
 				source.texture = captureSource.Texture;
@@ -11765,8 +12213,6 @@ namespace engine::render {
 
 				SDL_DownloadFromGPUTexture(copy, &source, &destination);
 				SDL_EndGPUCopyPass(copy);
-			} else {
-				ENGINE_ERROR("capture: SDL_CreateGPUTransferBuffer: {}", SDL_GetError());
 			}
 		}
 
@@ -11811,70 +12257,87 @@ namespace engine::render {
 			// the work, and where any cost of building it lands.
 			ENGINE_PROFILE_CAT("submit", core::ProfileCategory::Render);
 
-			if (capture != nullptr) {
-				// **A fence, and the stall is the point.** The pixels are not
-				// there until the GPU has run the copy, so a capture has to wait
-				// for it. That is a frame's worth of latency on the frames a
-				// caller asked to capture and on no others.
-				SDL_GPUFence *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(command);
-				if (fence == nullptr) {
-					ENGINE_ERROR("SDL_SubmitGPUCommandBufferAndAcquireFence: {}", SDL_GetError());
-					State->Timestamps.Abandon(timingSlot);
-					if (timingSlot < VulkanTimestamps::SLOTS) {
-						State->PendingMarks[timingSlot].clear();
-					}
-					SDL_ReleaseGPUTransferBuffer(State->Device, capture);
-					return result;
-				}
-
-				SDL_WaitForGPUFences(State->Device, true, &fence, 1);
-				SDL_ReleaseGPUFence(State->Device, fence);
-				if (State->PreviewSubmitted) {
-					State->Preview.Pending.Poll(true);
-					State->CollectPreview();
-				}
-
-				if (State->WriteCapture(
-						capture, captureSource.Width, captureSource.Height, captureSource.Format, capturePath
-					)) {
-					ENGINE_INFO(
-						"captured {} x {} to {}",
-						captureSource.Width,
-						captureSource.Height,
-						capturePath.string()
-					);
-				}
-
-				SDL_ReleaseGPUTransferBuffer(State->Device, capture);
-
-				// Once. A request that repeated would write a file every frame
-				// and stall every one of them.
-				if (explicitCapture && !capturingAuthored) {
-					State->CapturePath.clear();
-					State->CaptureSlot = Renderer::ANY_VIEWPORT;
-				}
-			} else if (State->PreviewSubmitted) {
-				State->Preview.Fence = SDL_SubmitGPUCommandBufferAndAcquireFence(command);
-				if (State->Preview.Fence == nullptr) {
-					ENGINE_ERROR(
-						"resource preview: SDL_SubmitGPUCommandBufferAndAcquireFence: {}", SDL_GetError()
-					);
-					State->Timestamps.Abandon(timingSlot);
-					if (timingSlot < VulkanTimestamps::SLOTS) {
-						State->PendingMarks[timingSlot].clear();
-					}
-					State->Preview.Pending.Poll(true);
-					State->Preview.Pixels.clear();
-					State->Preview.Histogram = ImageHistogram{};
-					return result;
-				}
-			} else if (!SDL_SubmitGPUCommandBuffer(command)) {
+			// The main buffer goes first: its submit queues the present, and on
+			// SDL's one unified queue it is what guarantees every pass has
+			// executed before the later-transfer buffer's downloads read their
+			// textures. The fences below therefore move to that second buffer.
+			if (!SDL_SubmitGPUCommandBuffer(command)) {
 				ENGINE_ERROR("SDL_SubmitGPUCommandBuffer: {}", SDL_GetError());
 				State->Timestamps.Abandon(timingSlot);
 				if (timingSlot < VulkanTimestamps::SLOTS) {
 					State->PendingMarks[timingSlot].clear();
 				}
+				if (capture != nullptr) {
+					SDL_ReleaseGPUTransferBuffer(State->Device, capture);
+				}
+				State->DropDownloads();
 				return result;
+			}
+
+			if (SDL_GPUCommandBuffer *downloads = State->DownloadCommand; downloads != nullptr) {
+				State->DownloadCommand = nullptr;
+				result.DownloadCommandBuffers++;
+				if (capture != nullptr) {
+					// **A fence, and the stall is the point.** The pixels are
+					// not there until the GPU has run the copy, so a capture has
+					// to wait for it. That is a frame's worth of latency on the
+					// frames a caller asked to capture and on no others. The
+					// main buffer is already on the queue, so a failure here
+					// loses this frame's downloads, never the frame itself.
+					SDL_GPUFence *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(downloads);
+					if (fence == nullptr) {
+						ENGINE_ERROR("SDL_SubmitGPUCommandBufferAndAcquireFence: {}", SDL_GetError());
+						SDL_ReleaseGPUTransferBuffer(State->Device, capture);
+						if (State->PreviewSubmitted) {
+							State->Preview.Pending.Poll(true);
+							State->Preview.Pixels.clear();
+							State->Preview.Histogram = ImageHistogram{};
+						}
+					} else {
+						SDL_WaitForGPUFences(State->Device, true, &fence, 1);
+						SDL_ReleaseGPUFence(State->Device, fence);
+						if (State->PreviewSubmitted) {
+							State->Preview.Pending.Poll(true);
+							State->CollectPreview();
+						}
+
+						if (State->WriteCapture(
+								capture,
+								captureSource.Width,
+								captureSource.Height,
+								captureSource.Format,
+								capturePath
+							)) {
+							ENGINE_INFO(
+								"captured {} x {} to {}",
+								captureSource.Width,
+								captureSource.Height,
+								capturePath.string()
+							);
+						}
+
+						SDL_ReleaseGPUTransferBuffer(State->Device, capture);
+
+						// Once. A request that repeated would write a file
+						// every frame and stall every one of them.
+						if (explicitCapture && !capturingAuthored) {
+							State->CapturePath.clear();
+							State->CaptureSlot = Renderer::ANY_VIEWPORT;
+						}
+					}
+				} else if (State->PreviewSubmitted) {
+					State->Preview.Fence = SDL_SubmitGPUCommandBufferAndAcquireFence(downloads);
+					if (State->Preview.Fence == nullptr) {
+						ENGINE_ERROR(
+							"resource preview: SDL_SubmitGPUCommandBufferAndAcquireFence: {}", SDL_GetError()
+						);
+						State->Preview.Pending.Poll(true);
+						State->Preview.Pixels.clear();
+						State->Preview.Histogram = ImageHistogram{};
+					}
+				} else if (!SDL_SubmitGPUCommandBuffer(downloads)) {
+					ENGINE_ERROR("SDL_SubmitGPUCommandBuffer (downloads): {}", SDL_GetError());
+				}
 			}
 		}
 		if (timingSlot < VulkanTimestamps::SLOTS) {

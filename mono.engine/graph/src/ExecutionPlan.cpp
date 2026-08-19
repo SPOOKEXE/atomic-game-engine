@@ -1,6 +1,7 @@
 #include <engine/graph/ExecutionPlan.hpp>
 
 #include <algorithm>
+#include <array>
 #include <unordered_map>
 
 namespace engine::graph {
@@ -282,5 +283,63 @@ namespace engine::graph {
 
 		offender = core::Name{};
 		return ExecutionPlanStatus::Ok;
+	}
+
+	const char *Describe(CommandBufferClass bufferClass) {
+		switch (bufferClass) {
+		case CommandBufferClass::Graphics:
+			return "graphics";
+		case CommandBufferClass::Compute:
+			return "compute";
+		case CommandBufferClass::Transfer:
+			return "transfer";
+		}
+		return "unknown";
+	}
+
+	std::vector<PlannedCommandBuffer> PlanCommandBuffers(const ExecutionSchedule &schedule) {
+		std::vector<PlannedCommandBuffer> buffers;
+		std::array<std::vector<NodeId>, 3> waveClasses;
+		for (size_t wave = 0; wave < schedule.Waves.size(); wave++) {
+			for (std::vector<NodeId> &nodes : waveClasses) {
+				nodes.clear();
+			}
+			for (const ScheduledNode &scheduled : schedule.Waves[wave].Nodes) {
+				switch (scheduled.Queue) {
+				case ExecutionQueue::Cpu:
+					// CPU work records no device commands and takes no buffer.
+					break;
+				case ExecutionQueue::Graphics:
+					waveClasses[static_cast<size_t>(CommandBufferClass::Graphics)].push_back(scheduled.Node);
+					break;
+				case ExecutionQueue::Compute:
+					waveClasses[static_cast<size_t>(CommandBufferClass::Compute)].push_back(scheduled.Node);
+					break;
+				case ExecutionQueue::Transfer:
+					waveClasses[static_cast<size_t>(CommandBufferClass::Transfer)].push_back(scheduled.Node);
+					break;
+				}
+			}
+
+			for (const CommandBufferClass bufferClass :
+				 {CommandBufferClass::Transfer, CommandBufferClass::Compute, CommandBufferClass::Graphics}) {
+				std::vector<NodeId> &nodes = waveClasses[static_cast<size_t>(bufferClass)];
+				if (nodes.empty()) {
+					continue;
+				}
+				if (!buffers.empty() && buffers.back().Class == bufferClass) {
+					buffers.back().LastWave = wave;
+					buffers.back().Nodes.insert(buffers.back().Nodes.end(), nodes.begin(), nodes.end());
+					continue;
+				}
+				PlannedCommandBuffer buffer;
+				buffer.Class = bufferClass;
+				buffer.FirstWave = wave;
+				buffer.LastWave = wave;
+				buffer.Nodes = std::move(nodes);
+				buffers.push_back(std::move(buffer));
+			}
+		}
+		return buffers;
 	}
 }

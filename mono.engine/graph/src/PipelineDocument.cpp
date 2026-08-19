@@ -838,6 +838,7 @@ namespace engine::graph {
 		resource("mirror-views", ResourceKind::Colour, ResourceFormat::RGBA8, 1, true);
 		resource("portal-image", ResourceKind::Texture, ResourceFormat::RGBA8_SRGB, 1, true);
 		resource("portal-display", ResourceKind::Texture, ResourceFormat::RGBA8_SRGB, 1, true);
+		resource("portal-light", ResourceKind::Texture, ResourceFormat::RGBA8_SRGB, 1, true);
 		resource("world-entities", ResourceKind::Entities, ResourceFormat::R8);
 		resource("view-camera", ResourceKind::Camera, ResourceFormat::R8);
 		resource("view-entities", ResourceKind::Entities, ResourceFormat::R8);
@@ -915,6 +916,7 @@ namespace engine::graph {
 		touches(EditKind::Reads, "ordered-entities", "entities");
 		touches(EditKind::Reads, "view-instances", "instances");
 		touches(EditKind::Writes, "portal-image", "portal");
+		touches(EditKind::Writes, "portal-light", "light");
 
 		node("portal-tonemap", NodeScope::View);
 		touches(EditKind::Reads, "portal-image", "portal");
@@ -947,6 +949,9 @@ namespace engine::graph {
 		touches(EditKind::Reads, "linear-depth", "depth");
 		touches(EditKind::Reads, "occlusion", "occlusion");
 		touches(EditKind::Reads, "shadow", "shadow");
+		// The seam light-field: what orders this pass after portal-capture, so
+		// the projection samples this frame's captures rather than last frame's.
+		touches(EditKind::Reads, "portal-light", "portal-light");
 		touches(EditKind::Writes, "lit", "colour");
 
 		node("tonemap", NodeScope::View);

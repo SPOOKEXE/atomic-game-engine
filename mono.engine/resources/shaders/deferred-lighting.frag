@@ -11,6 +11,13 @@ layout(set = 2, binding = 4) uniform sampler2D depthImage;
 layout(set = 2, binding = 5) uniform sampler2D occlusionImage;
 layout(set = 2, binding = 6) uniform sampler2D shadowImage;
 
+// The seam light-field captures: each portal mouth's far room rendered against
+// a lit void, projected back out of the entrance as spill. Two mouths is one
+// pair, which is the prototype's budget; the renderer binds its fallback
+// texture and zeroes the seam when fewer are live.
+layout(set = 2, binding = 7) uniform sampler2D seamLightA;
+layout(set = 2, binding = 8) uniform sampler2D seamLightB;
+
 layout(set = 3, binding = 0) uniform Pass {
 	mat4 InverseViewProjection;
 	mat4 LightViewProjection;
@@ -26,6 +33,13 @@ layout(set = 3, binding = 0) uniform Pass {
 	vec4 Fog;
 	// x: shadow map present. y: one shadow texel.
 	vec4 Shadow;
+	// Per seam light projector. Centre: xyz the mouth's centre, w whether the
+	// slot is live. Outward: xyz the unit normal toward the room being lit,
+	// w the spill range along it. First and Second: the mouth's half axes.
+	vec4 SeamCentre[2];
+	vec4 SeamOutward[2];
+	vec4 SeamFirst[2];
+	vec4 SeamSecond[2];
 } pass;
 
 layout(set = 3, binding = 1) uniform Lights {
@@ -118,6 +132,60 @@ vec3 LocalLight(vec3 world, vec3 normal, vec3 albedo) {
 	return total;
 }
 
+// Light spilling out of one portal entrance: the matching capture, projected
+// from the mouth's rectangle onto nearby geometry.
+//
+// The seam is treated as a textured window: a receiver is projected back onto
+// the mouth's plane, the capture is sampled there, and the sample is attenuated
+// by distance from the plane, by incidence, and by how far outside the
+// rectangle the receiver sits. The cone widens with distance so the pool reads
+// as light through an opening rather than a hard-edged projector.
+vec3 SeamSpill(int seam, vec3 world, vec3 normal, vec3 albedo) {
+	if (pass.SeamCentre[seam].w < 0.5) {
+		return vec3(0.0);
+	}
+	vec3 outward = pass.SeamOutward[seam].xyz;
+	float range = pass.SeamOutward[seam].w;
+	vec3 offset = world - pass.SeamCentre[seam].xyz;
+	float depth = dot(offset, outward);
+	if (depth <= 0.0 || depth >= range) {
+		return vec3(0.0);
+	}
+
+	vec3 first = pass.SeamFirst[seam].xyz;
+	vec3 second = pass.SeamSecond[seam].xyz;
+	vec3 planar = offset - outward * depth;
+	float alongFirst = dot(planar, first) / max(dot(first, first), 1e-4);
+	float alongSecond = dot(planar, second) / max(dot(second, second), 1e-4);
+
+	// The 45-degree spread: a receiver one half-axis past the rim is still lit
+	// at one half-axis of depth. Sampling clamps to the rectangle, so the rim
+	// of the pool repeats the capture's edge rather than the void.
+	float spreadFirst = 1.0 + depth / max(length(first), 1e-3);
+	float spreadSecond = 1.0 + depth / max(length(second), 1e-3);
+	float outsideFirst = max(abs(alongFirst) - 1.0, 0.0) / max(spreadFirst - 1.0, 1e-3);
+	float outsideSecond = max(abs(alongSecond) - 1.0, 0.0) / max(spreadSecond - 1.0, 1e-3);
+	float fade = (1.0 - smoothstep(0.0, 1.0, outsideFirst)) * (1.0 - smoothstep(0.0, 1.0, outsideSecond));
+	if (fade <= 0.0) {
+		return vec3(0.0);
+	}
+
+	vec2 uv = vec2(
+		clamp(alongFirst, -1.0, 1.0) * 0.5 + 0.5,
+		0.5 - clamp(alongSecond, -1.0, 1.0) * 0.5
+	);
+	vec3 captured = seam == 0 ? texture(seamLightA, uv).rgb : texture(seamLightB, uv).rgb;
+
+	// Incidence is taken from the mouth's centre rather than the nearest rim
+	// point: light through a doorway arrives from the whole opening, and the
+	// rim direction is parallel to any floor the doorway meets - which would
+	// zero exactly the pool a lit door visibly throws.
+	float lambert = max(dot(normal, normalize(pass.SeamCentre[seam].xyz - world)), 0.0);
+	float ratio = depth / range;
+	float window = (1.0 - ratio * ratio) * (1.0 - ratio * ratio);
+	return albedo * captured * lambert * window * fade;
+}
+
 void main() {
 	vec2 geometryUv = inUv * pass.Target.zw;
 	vec4 albedo = texture(albedoImage, geometryUv);
@@ -149,7 +217,8 @@ void main() {
 	vec3 ambient = albedo.rgb * (pass.Ambient.rgb + pass.OutdoorAmbient.rgb * sky) * occlusion;
 	vec3 direct = (albedo.rgb * (1.0 - fresnel) * lambert + specular) * pass.Direct.rgb *
 		ShadowFactor(world, normal, toLight);
-	vec3 lit = ambient + direct + LocalLight(world, normal, albedo.rgb) + emissive;
+	vec3 lit = ambient + direct + LocalLight(world, normal, albedo.rgb) + emissive +
+		SeamSpill(0, world, normal, albedo.rgb) + SeamSpill(1, world, normal, albedo.rgb);
 	float fogRange = max(pass.Fog.y - pass.Fog.x, 0.0001);
 	float fog = clamp((distance(world, pass.Eye.xyz) - pass.Fog.x) / fogRange, 0.0, 1.0);
 	outColour = vec4(mix(lit, pass.FogColour.rgb, fog), albedo.a);
