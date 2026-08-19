@@ -969,6 +969,58 @@ namespace studio {
 		store.SetProperty(script, Name("Source"), &PATH, sizeof(PATH));
 	}
 
+	bool Editor::AddExampleWorld(std::string_view file) {
+		// The stem, because "StressMirrors" is a scene and "StressMirrors.luau"
+		// is a file. What goes into the world is still the full name - see the
+		// `InstallExampleScript` call below - so nothing downstream has to guess
+		// the extension back.
+		std::string stem(file);
+		if (const size_t dot = stem.rfind('.'); dot != std::string::npos && dot > 0) {
+			stem.erase(dot);
+		}
+
+		// **Suffixed rather than refused when the name is taken.** Somebody
+		// asking for a second copy of a scene is asking for a second world, and
+		// `Universe::Create` answers `NameTaken` rather than picking for them -
+		// which as an error message reads as the menu being broken. This is the
+		// rule `ImportUniverseFile` already applies to an imported world.
+		const auto taken = [this](const std::string &candidate) {
+			const Name wanted(candidate);
+			for (const WorldId id : Universe->Worlds()) {
+				if (Universe->NameOf(id) == wanted) {
+					return true;
+				}
+			}
+			return false;
+		};
+
+		std::string name = stem;
+		for (int suffix = 2; suffix < 1000 && taken(name); suffix++) {
+			name = stem + " " + std::to_string(suffix);
+		}
+
+		const WorldId created = AddWorld(Name(name));
+		if (!created.IsValid()) {
+			return false;
+		}
+
+		// **A script in the tree rather than a scene built here**, for the whole
+		// of `InstallExampleScript`'s reason: the world is empty until Play runs
+		// the script, and Stop takes its work away again. That matters more for
+		// these than for the template's, because the scenes a person reaches for
+		// through this menu are the ones that build a hundred thousand parts -
+		// running one at edit time would put all of them in the save file.
+		Universe->Enter(created, [this, file, &stem](Store &store) {
+			InstallExampleScript(store, file, stem + "Scene");
+		});
+
+		Active = created;
+		SelectionWorld = created;
+		ClearSelection();
+		Say("added world '" + name + "' from " + std::string(file));
+		return true;
+	}
+
 	void Editor::ExpandWorldTree(WorldId world) {
 		WorldTree &tree = TreeFor(world);
 		tree.Open.clear();

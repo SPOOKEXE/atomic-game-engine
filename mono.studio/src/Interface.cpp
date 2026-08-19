@@ -1425,6 +1425,17 @@ namespace studio {
 				AskingNewWorld = true;
 				NameBuffer = "World " + std::to_string(Universe->Count() + 1);
 			}
+
+			// **Every shipped scene, read off the staging directory rather than
+			// listed here.** Ten of them are named by hand in
+			// `RecreateDefaultWorlds` because a new place opens with them; the
+			// rest - the stress scenes, the portal probes, the mirror
+			// measurements - existed only behind `client --script` and could not
+			// be opened in the editor at all. A hardcoded menu would be a second
+			// list to keep in step with the directory, so
+			// `examples::ExampleScenes` walks it.
+			DrawExampleSceneMenu();
+
 			if (ImGui::MenuItem("Remove Active World", nullptr, false, Universe->Count() > 1)) {
 				RemoveWorld(Active);
 			}

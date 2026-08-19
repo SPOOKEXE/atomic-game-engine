@@ -364,4 +364,32 @@ namespace engine::examples {
 		// path somebody meant rather than the fallback they have never heard of.
 		return preferred.string();
 	}
+
+	std::vector<std::string> ExampleScenes() {
+		// **`ExamplePath("")` rather than the two branches written out again.**
+		// The layout mismatch it bridges is the same one - the scenes stage into
+		// a sibling of `Paths::Assets()` rather than into it - and two copies of
+		// that rule would disagree the first time either moved. An empty name
+		// resolves to the directory itself.
+		const std::filesystem::path root = std::filesystem::path(ExamplePath("")).parent_path();
+
+		std::vector<std::string> found;
+
+		// The error-code overload, so a missing directory yields nothing rather
+		// than throwing. A program built without the example target is a real
+		// situation and not an error - see the header.
+		std::error_code failure;
+		for (const auto &entry : std::filesystem::directory_iterator(root, failure)) {
+			if (!entry.is_regular_file(failure)) {
+				continue;
+			}
+			if (entry.path().extension() != ".luau") {
+				continue;
+			}
+			found.push_back(entry.path().filename().string());
+		}
+
+		std::sort(found.begin(), found.end());
+		return found;
+	}
 }

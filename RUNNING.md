@@ -767,6 +767,59 @@ shifts everything below a multi-line annotation upward, so the two rarely agree.
 language, doing the same thing - so that the binding surface is exercised from
 both.
 
+### Opening an example in the studio
+
+Every staged `.luau` scene is offered by the studio in three places, all of which
+already offer New World:
+
+- the **World** menu, as `New Scene from Example`;
+- the universe's right-click menu at the top of the **Explorer**;
+- the **Example...** button in the **Worlds** panel, beside New and Import.
+
+Picking one adds a world named after the file and puts the scene in it as a
+`Script` in `ServerScriptService`, so nothing is built until Play runs it and
+Stop takes it away again. The list walks the staged directory rather than a
+hand-kept table, so a scene added to `mono.engine/examples/` is there after a
+build.
+
+It is refused while anything is running, for the reason New World is: the
+snapshot Stop restores was taken before the run began, so a world added during
+Play would vanish on Stop.
+
+### The stress scenes *(v0.17)*
+
+Three scenes exist to be measured rather than looked at. All three name their
+knobs at the top of the file and say what each one costs.
+
+| scene | what it loads | run it with |
+| --- | --- | --- |
+| `StressParticles.luau` | ten bays covering every authored `ParticleEmitter` property, then 102,400 emitters at five particles each | `just run --script .../StressParticles.luau --stats` |
+| `StressPhysics.luau` | 100,000 unanchored blocks in a tray that tilts, so nothing ever settles | `server --game .../StressPhysics.luau --physics-tick-rate 20` |
+| `StressMirrors.luau` | an ico-sphere mirror ball - 80 facets, 16 of them mirrors | `just run --script .../StressMirrors.luau` |
+
+Two things are worth knowing before running them rather than afterwards.
+
+**A client does not simulate `StressPhysics.luau`.** A client installs the
+character systems and not the physics pipeline, so a scripted client world
+integrates nothing: the blocks hang in the air. The studio's Play and
+`server --game` are the two hosts that install it, and
+`--physics-tick-rate` - or the world's `PhysicsTickRate` in the studio - is what
+makes a hundred thousand bodies affordable, by solving slower than the world
+ticks. Measured on `release`, 24 threads, headless at 30 Hz over 600 ticks: the
+tick rate costs a 361 ms mean tick, and `--physics-tick-rate 10` costs 125 ms.
+The scene's own header carries the percentiles, and the short version is that a
+hundred thousand contacting bodies is past interactive either way.
+
+**`StressMirrors.luau` states its own bounce depth**, and the line is a guard
+rather than a preference: a ball is the worst shape the automatic depth rule has,
+because every pane can see most of the others and it therefore asks for one level
+deeper every frame. The passes go as `panes x (panes - 1) ^ (levels - 1)`, so
+sixteen panes cost 16 at one level and 3,600 at three. Compare depths with
+`--surface-bounces N`, which overrides the scene.
+
+`dev` is `-O0` and no frame-rate number from it means anything. Build `release`
+before quoting one.
+
 ### Shared Luau libraries
 
 `mono.engine/examples/lib/` holds Luau *libraries* rather than scenes. Every

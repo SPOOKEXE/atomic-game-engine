@@ -115,6 +115,27 @@ lives in one function.
 A class added by any module appears in the palette with nothing here changing.
 That is the same property the properties panel has, for the same reason.
 
+## The example menu never hard-codes a scene either
+
+`New Scene from Example` lists whatever `examples::ExampleScenes` found in the
+staged directory, sorted. A scene added to `mono.engine/examples` is in the menu
+after a build, with nothing here changing.
+
+**Three places offer it and one function submits it.** The `World` menu, the
+universe's context menu in the explorer and the Worlds panel all offer "add a
+world" already, so all three offer this too - through `DrawExampleSceneItems`,
+because three copies of a list read off a directory would be three chances to
+filter it differently. The rows sit in a scrolling child: there are more than
+forty scenes and an imgui menu that does not fit is clamped rather than
+scrolled, so the bottom of the list would be unreachable.
+
+The ten scenes named by hand in `RecreateDefaultWorlds` are a different thing
+and stay one: those are what a *new place* opens with, which is a choice about
+the first thing somebody sees rather than a list of what exists. Refuse a change
+that turns the menu into a second copy of that list, and refuse one that adds a
+stress scene to the template - a new place that built a hundred thousand parts
+on open is a studio that looks broken.
+
 ## The viewport is a texture in a panel, not a hole in the dockspace
 
 The cheap version - draw the world to the swapchain and put a

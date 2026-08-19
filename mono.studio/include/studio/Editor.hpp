@@ -2615,6 +2615,49 @@ namespace studio {
 		void
 		InstallExampleScript(engine::ecs::Store &store, std::string_view file, std::string_view instanceName);
 
+		// Adds a world holding one of the shipped example scenes.
+		//
+		// **What makes an example something a person can open rather than
+		// something a `--script` flag can.** The template that a new place is
+		// built from names ten of them by hand, and every other scene in
+		// `mono.engine/examples` was reachable from the client's command line and
+		// from nowhere in the editor - including the three stress scenes v0.17
+		// adds, which are exactly the ones somebody wants to press Play on and
+		// watch the frame graph.
+		//
+		// The world is named after the file's stem, suffixed when that name is
+		// already in the universe, and the scene arrives as a `Script` rather
+		// than as geometry - see `InstallExampleScript`.
+		//
+		// **Structural, so it is for a stopped universe.** The snapshot Stop
+		// restores was taken before the run began, so a world added during Play
+		// would vanish on Stop. The caller is what refuses; this does not check.
+		//
+		// @param file The staged scene's file name, from `examples::ExampleScenes`.
+		// @return `false` when the world could not be created.
+		bool AddExampleWorld(std::string_view file);
+
+		// One row per shipped scene, each of which adds a world holding it.
+		//
+		// **Submitted into whatever menu or popup is already open**, which is
+		// what lets the three places that offer "add a world" share it: the
+		// `World` menu, the universe's context menu in the explorer, and the
+		// Worlds panel's own button. Three copies of a list read off a directory
+		// would be three chances to filter it differently.
+		//
+		// The rows live in a scrolling child rather than directly in the menu.
+		// There are more than forty scenes, an imgui menu that does not fit is
+		// clamped rather than scrolled, and the entries past the bottom of the
+		// screen would be unreachable.
+		void DrawExampleSceneItems();
+
+		// The same, wrapped in a submenu and greyed while anything is running.
+		//
+		// **For the two callers that are inside a menu.** The Worlds panel is a
+		// button and a popup, so it submits the rows itself and carries the
+		// refusal on its button.
+		void DrawExampleSceneMenu();
+
 		// Marks every instance in a world as expanded in the explorer.
 		//
 		// **A request rather than a state, which is what `Expanded` already

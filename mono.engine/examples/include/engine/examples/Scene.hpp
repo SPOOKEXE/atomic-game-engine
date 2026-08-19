@@ -31,6 +31,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace engine::script {
 	class Runtime;
@@ -133,4 +134,28 @@ namespace engine::examples {
 	// @param name The file name, such as "Rings.luau".
 	// @return The absolute path.
 	std::string ExamplePath(const std::string &name);
+
+	// Every Luau scene shipped with the engine, by file name.
+	//
+	// **The directory rather than a list, because a list is a second place a
+	// scene has to be added to.** The studio offers these as worlds a person can
+	// create, and the alternative - a table of names beside the menu - is one
+	// that goes stale the first time somebody writes a scene and forgets it. The
+	// staging rule is already "every `.luau` in this directory"; this reads back
+	// exactly what that rule put there.
+	//
+	// **Sorted, so the order is the same on every machine.** A directory walk is
+	// in whatever order the filesystem answers in, and a menu that reshuffles
+	// itself between runs is one nobody builds muscle memory for.
+	//
+	// The `.ts` scenes are deliberately absent: they are staged as `.js` and
+	// `LoadScene` picks its runtime off the extension, so listing the source
+	// would name a file no program on this path can read. `Rings.js` and the
+	// other transpiled twins are absent for the same reason - they are second
+	// copies of a scene already in the list, in a second language.
+	//
+	// @return The file names, such as "Rings.luau", sorted. Empty when nothing
+	//         was staged, which is a real situation rather than an error: a
+	//         program built without the example target still runs.
+	std::vector<std::string> ExampleScenes();
 }

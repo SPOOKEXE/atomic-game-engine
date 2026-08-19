@@ -1304,3 +1304,103 @@ TEST_CASE("the portal lighting scenes author lamps a seam can carry", "[examples
 		CHECK(dark);
 	}
 }
+
+// The mirror ball, and the two things about it that are arithmetic rather than
+// authoring.
+//
+// **The facets are placed by a formula and nothing else in the repository would
+// notice it going wrong.** A tile whose front face points *inward* reflects the
+// inside of the ball, which the renderer draws perfectly and which looks exactly
+// like a tile that is not reflecting at all - so the sign of `CFrame.lookAt`'s
+// look direction is a one-character mistake with no visible symptom and no test
+// but this one. `Mirrors-1-world.luau`'s case pins the same property for four
+// unrotated walls, where a face is an axis; here every facet is rotated
+// differently and the answer has to come out of the geometry.
+//
+// **And the stated bounce depth is a guard rather than a preference.** A ball is
+// the worst shape the automatic rule has: every pane can see most of the others,
+// so it says "deeper" at every level and climbs to `render::MAX_SURFACE_DEPTH`,
+// where the passes go as `panes x (panes - 1) ^ (levels - 1)` - 3,600 of them at
+// sixteen panes. A change that dropped the `workspace.SurfaceBounces = 1` line
+// would turn this scene from slow into a hang.
+TEST_CASE("the mirror ball faces its facets out and asks for one bounce", "[examples][scene]") {
+	const StagedAssets assets;
+
+	Store store("mirrorball");
+	Scheduler systems;
+
+	std::string error;
+	const bool loaded = LoadScene(store, systems, ExamplePath("StressMirrors.luau"), error);
+	INFO(error);
+	REQUIRE(loaded);
+
+	// One subdivision of an icosahedron is eighty faces, and the count is
+	// checked rather than assumed because the midpoint cache is what makes it
+	// eighty - without the sharing every face would still be split into four and
+	// the vertex count would be wrong while this number stayed right.
+	size_t facets = 0;
+	store.Each<const engine::scene::Transform>([&](Entity part, const engine::scene::Transform &) {
+		if (store.InstanceNameOf(part).Text().rfind("Facet_", 0) == 0) {
+			facets++;
+		}
+	});
+	CHECK(facets == 80);
+
+	// **Sixteen, which is `scene::MAX_SURFACES` and is the scene's whole
+	// point.** Authoring eighty cameras would leave sixty-four of them aimed
+	// every frame and reaching no screen; the scene spreads sixteen over the
+	// ball instead, and this is what says it still does.
+	static thread_local std::vector<engine::scene::SurfacePane> panes;
+	REQUIRE(engine::scene::GatherSurfacePanes(store, panes) == 16);
+
+	// The ball's middle, taken from the core rather than from a literal - the
+	// scene's `RADIUS` and `HEIGHT` are free to change without this following
+	// them.
+	const Entity core = InScene(store, "Core");
+	REQUIRE(core != engine::ecs::NULL_ENTITY);
+	const auto *hub = store.Get<engine::scene::Transform>(core);
+	REQUIRE(hub != nullptr);
+
+	for (const engine::scene::SurfacePane &pane : panes) {
+		// Every pane on the sphere, facing away from its middle. The radius is
+		// not checked against a number for the same reason the centre is not;
+		// what matters is that the normal and the outward direction agree.
+		const engine::core::Vector3 outward = pane.Centre - hub->Frame.Position;
+		CHECK(outward.Magnitude() > 0.0f);
+		CHECK(outward.Dot(pane.Normal) > 0.0f);
+	}
+
+	CHECK(engine::scene::SurfaceBouncesOf(store) == 1);
+}
+
+// What the studio's `World -> New Scene from Example` menu is built from.
+//
+// **The menu walks the staged directory rather than naming scenes**, so the
+// thing that can break is the walk: a listing that comes back empty is a menu
+// that says "no staged examples" in a build that staged forty of them, and
+// nothing else in the editor would notice. Checked against scenes this suite
+// already loads by name, so the two cannot disagree about what is shipped.
+TEST_CASE("every staged scene is offered by name, sorted", "[examples][scene]") {
+	const StagedAssets assets;
+
+	const std::vector<std::string> scenes = engine::examples::ExampleScenes();
+	REQUIRE(!scenes.empty());
+
+	CHECK(std::is_sorted(scenes.begin(), scenes.end()));
+
+	for (const char *shipped :
+		 {"Rings.luau", "StressMirrors.luau", "StressParticles.luau", "StressPhysics.luau"}) {
+		INFO(shipped);
+		CHECK(std::find(scenes.begin(), scenes.end(), shipped) != scenes.end());
+	}
+
+	// **Luau only.** A `.ts` scene is staged as transpiled JavaScript under a
+	// `.js` name, so offering either would name a second copy of a scene already
+	// in the list - and offering the `.ts` itself would name a file no program
+	// on this path can read.
+	for (const std::string &scene : scenes) {
+		INFO(scene);
+		CHECK(scene.size() > 5);
+		CHECK(scene.compare(scene.size() - 5, 5, ".luau") == 0);
+	}
+}
