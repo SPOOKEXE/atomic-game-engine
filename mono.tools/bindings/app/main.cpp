@@ -952,6 +952,18 @@ declare extern type PointerSignal with
 	function Once(self, handler: (x: number, y: number) -> ()): RBXScriptConnection
 end
 
+-- `uiDragDetector.DragStart`, `.DragContinue` and `.DragEnd`.
+--
+-- **Four numbers: where the pointer is, and how far it has come.** Roblox hands
+-- a drag handler an `InputObject`; this engine has none for the reason
+-- `GuiSignal` above gives, and the two things a handler actually reads off one
+-- are exactly these. The travel is zero on `DragStart`, which is what "how far
+-- has this gesture gone" means at its first frame.
+declare extern type DragSignal with
+	function Connect(self, handler: (x: number, y: number, dx: number, dy: number) -> ()): RBXScriptConnection
+	function Once(self, handler: (x: number, y: number, dx: number, dy: number) -> ()): RBXScriptConnection
+end
+
 -- `textBox.Focused`, which takes no arguments.
 --
 -- **Its own name rather than `GuiSignal`**, for `TweenCompletedSignal`'s
@@ -1984,7 +1996,8 @@ declare task: {
 				// `AddTriangle`'s own header in `ScriptMethods.cpp` explains
 				// why that one and `AddVertex` differ - so both are typed
 				// optional here rather than as a plain `number`.
-				out << "\tfunction AddVertex(self, position: Vector3, normal: Vector3?, uv: Vector2?): number?\n";
+				out << "\tfunction AddVertex(self, position: Vector3, normal: Vector3?, uv: Vector2?): "
+					   "number?\n";
 				out << "\tfunction AddTriangle(self, a: number, b: number, c: number): number?\n";
 				out << "\tfunction RemoveTriangle(self, triangle: number): boolean\n";
 				out << "\tfunction SetVertexPosition(self, vertex: number, position: Vector3): boolean\n";
@@ -2057,6 +2070,14 @@ declare task: {
 				out << "\tMouseEnter: PointerSignal\n";
 				out << "\tMouseLeave: PointerSignal\n";
 				out << "\tMouseMoved: PointerSignal\n";
+
+				// **A `UIDragDetector`'s three, on `Instance` for the reason the
+				// six above are.** Only a detector is ever the subject of one -
+				// `gui::Router` names the modifier it found - so a connection
+				// anywhere else is inert by construction.
+				out << "\tDragStart: DragSignal\n";
+				out << "\tDragContinue: DragSignal\n";
+				out << "\tDragEnd: DragSignal\n";
 
 				// **A `TextBox`'s pair, on `Instance` for the reason the six
 				// above it are.** Only a box can take the keyboard -
@@ -2532,6 +2553,15 @@ declare interface PointerSignal {
 	Connect(handler: (x: number, y: number) => void): RBXScriptConnection;
 	Once(handler: (x: number, y: number) => void): RBXScriptConnection;
 	Equals(other: PointerSignal): boolean;
+}
+
+// `uiDragDetector.DragStart`, `.DragContinue` and `.DragEnd`. Four numbers:
+// where the pointer is, then how far the gesture has come. The Luau half says
+// why there is no input object.
+declare interface DragSignal {
+	Connect(handler: (x: number, y: number, dx: number, dy: number) => void): RBXScriptConnection;
+	Once(handler: (x: number, y: number, dx: number, dy: number) => void): RBXScriptConnection;
+	Equals(other: DragSignal): boolean;
 }
 
 // `textBox.Focused`. Its own name rather than `GuiSignal` for the reason the
@@ -3349,6 +3379,12 @@ declare const task: {
 				out << "\treadonly MouseEnter: PointerSignal;\n";
 				out << "\treadonly MouseLeave: PointerSignal;\n";
 				out << "\treadonly MouseMoved: PointerSignal;\n";
+
+				// A `UIDragDetector`'s three, on `Instance` and inert anywhere
+				// else - the Luau half says why.
+				out << "\treadonly DragStart: DragSignal;\n";
+				out << "\treadonly DragContinue: DragSignal;\n";
+				out << "\treadonly DragEnd: DragSignal;\n";
 
 				// A `TextBox`'s pair, on `Instance` and inert anywhere else -
 				// the Luau half says why.

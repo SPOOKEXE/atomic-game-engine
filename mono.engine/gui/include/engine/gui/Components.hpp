@@ -48,6 +48,7 @@
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Color3.hpp>
 #include <engine/core/types/Rect.hpp>
+#include <engine/core/types/Sequence.hpp>
 #include <engine/core/types/UDim.hpp>
 #include <engine/core/types/Vector2.hpp>
 #include <engine/core/types/Vector3.hpp>
@@ -116,6 +117,18 @@ namespace engine::gui {
 		// Whether gamepad selection may land on this element.
 		bool Selectable = false;
 
+		// Whether the element responds to a pointer at all.
+		//
+		// **Not `Active` with a second name.** `Active` decides whether a click
+		// *stops* here or passes through to what is behind; this decides whether
+		// the element reacts, and a `GuiButton` is `Active` by class whatever it
+		// says. Clearing this on a button is how a game greys one out: it still
+		// swallows the click, it just does nothing with it and stops lighting up
+		// under the pointer.
+		//
+		// @since v0.18
+		bool Interactable = true;
+
 		// Which of the parent's axes a scale resolves against.
 		SizeConstraint Constraint = SizeConstraint::RelativeXY;
 
@@ -123,7 +136,51 @@ namespace engine::gui {
 		AutomaticSize Automatic = AutomaticSize::None;
 
 		// Explicit padding, for the reason every other `Reserved` gives.
-		uint8_t Reserved[2] = {};
+		uint8_t Reserved[1] = {};
+	};
+
+	// Where a gamepad's selection goes from this element, and what marks it.
+	//
+	// **A component of its own rather than five more fields on `Element`.** The
+	// layout pass reads `Element` for every node in the tree every frame and
+	// would load forty bytes of handles it never looks at; this is read only when
+	// the selection moves, which is a keypress rather than a frame. That is
+	// `ecs/AGENTS.md`'s split-by-what-is-iterated rule, and it is the same one
+	// that keeps `Label` off a `Frame`.
+	//
+	// **Every field is optional and null is the useful default**, which is what
+	// lets the component sit on every `GuiObject` and cost nothing to ignore:
+	// `SelectNext` scores by direction unless one of these names an answer.
+	//
+	// @since v0.18
+	struct Selection {
+		// Where the selection goes from here, per direction. Null lets
+		// `SelectNext` work it out by geometry.
+		//@{
+		ecs::Entity NextUp;
+		ecs::Entity NextDown;
+		ecs::Entity NextLeft;
+		ecs::Entity NextRight;
+		//@}
+
+		// A `GuiObject` drawn over this element while it is selected, or null
+		// for the default highlight.
+		//
+		// **Drawn over rather than cloned into the tree**, which is the one place
+		// this differs from Roblox and it is deliberate: a clone would be an
+		// instance nothing authored appearing in the explorer, in `GetChildren`
+		// and in a save file. `Compile.cpp` emits the referenced object's own
+		// fill and image at the selected element's rectangle instead, which is
+		// what a highlight is for and needs no second tree.
+		ecs::Entity ImageObject;
+
+		// Which element `SelectNext` seeds on when nothing is selected. Lower
+		// goes first, which is Roblox's sense.
+		int32_t Order = 0;
+
+		// Explicit padding, for the reason every other `Reserved` gives. The
+		// handles align the whole component to eight.
+		uint8_t Reserved[4] = {};
 	};
 
 	// The box an element draws for itself.
@@ -202,6 +259,39 @@ namespace engine::gui {
 
 		// Line spacing as a multiple of the em size.
 		float LineHeight = 1.0f;
+
+		// How many characters of the string are shown, or -1 for all of it.
+		//
+		// **Characters and not bytes**, which is `Entry::CursorPosition`'s
+		// distinction and matters for the same reason: a typewriter effect
+		// counting bytes reveals half of an accented letter and draws a
+		// replacement glyph. `src/Utf8.hpp` is the one place that crosses
+		// between the two.
+		//
+		// **Roblox calls these graphemes and this engine counts codepoints**,
+		// which differ for a letter written as a base plus a combining accent
+		// and for an emoji built from several. Naming the property Roblox's way
+		// and stating the difference here is the honest trade: closing it needs a
+		// grapheme-breaking table, which is a `core` dependency this module does
+		// not have.
+		//
+		// @since v0.18
+		int32_t MaxVisible = -1;
+
+		// Whether the string is read as markup rather than as literal text.
+		//
+		// **The parse produces spans and never a second command.** A run is one
+		// `DrawCommand` with a list of styled byte ranges over it, because the
+		// backend is the only thing that can measure a glyph - laying spans out
+		// here would put compile-time estimates next to run-time metrics and the
+		// two would disagree about where the second word starts. `DrawSpan`
+		// carries the argument at the other end.
+		//
+		// @since v0.18
+		bool Rich = false;
+
+		// Explicit padding, for the reason every other `Reserved` gives.
+		uint8_t Reserved[3] = {};
 	};
 
 	// The image an element shows.
@@ -253,6 +343,34 @@ namespace engine::gui {
 		//
 		// @since v0.18
 		core::Name Shader;
+
+		// What an `ImageButton` shows instead of `Image` under the pointer and
+		// while it is held. Unset leaves `Image` showing.
+		//
+		// **On `Picture` rather than on `Button`, because they are images and
+		// `Picture` is where an image lives.** A `TextButton` never has one and
+		// pays four bytes each for the pair, which is the same trade `Element`
+		// makes for `Selectable` on a `Frame` - and the alternative is a second
+		// component that exists to hold two names.
+		//
+		// **Swapped in the compile and not stored back**, exactly as
+		// `Button::AutoButtonColor`'s shift is: `Image` reads what the author
+		// wrote however the pointer is behaving.
+		//
+		// @since v0.18
+		//@{
+		core::Name HoverImage;
+		core::Name PressedImage;
+		//@}
+
+		// How the texels are filtered when the image is not drawn at its own
+		// size.
+		//
+		// @since v0.18
+		ResampleMode Resample = ResampleMode::Default;
+
+		// Explicit padding, for the reason every other `Reserved` gives.
+		uint8_t Reserved[3] = {};
 	};
 
 	// What makes a button a button.
@@ -293,27 +411,95 @@ namespace engine::gui {
 		// How far the canvas is scrolled, in pixels.
 		core::Vector2 CanvasPosition;
 
-		// How wide the bars are, in pixels. Zero hides them.
-		int32_t BarThickness = 12;
-
 		// The bar's colour.
 		core::Color3 BarColor{0.098f, 0.098f, 0.098f};
+
+		// The three images a bar is drawn from - its two caps and the length
+		// between them, nine-sliced along the bar's own axis.
+		//
+		// **Names and not handles**, rule 4, and unset means the bar is drawn as
+		// a plain rounded rectangle. That is the fallback rather than a missing-
+		// image marker because a scroll bar with no art is a perfectly ordinary
+		// thing to ship and an author who set none did not make a mistake.
+		//
+		// @since v0.18
+		//@{
+		core::Name TopImage;
+		core::Name MidImage;
+		core::Name BottomImage;
+		//@}
+
+		// How wide the bars are, in pixels. Zero hides them.
+		int32_t BarThickness = 12;
 
 		// 0 is opaque and 1 is invisible.
 		float BarTransparency = 0.0f;
 
-		// Reserved for wheel and drag input. CanvasPosition remains the supported
-		// authored route until the input router handles scrolling.
+		// Whether a wheel or a drag may move the canvas.
+		//
+		// **`CanvasPosition` is still writable when this is false**, which is
+		// Roblox's rule and the useful one: a script driving a carousel wants to
+		// place the canvas itself and wants a person's wheel to leave it alone.
 		bool Enabled = true;
 
 		// Which axes may be scrolled.
 		ScrollingDirection Direction = ScrollingDirection::Y;
 
-		// Reserved until layout computes content bounds back into the canvas.
+		// Which axes grow the canvas to fit what is inside the frame.
+		//
+		// **The content's extent replaces that axis of `CanvasSize` rather than
+		// adding to it**, which is Roblox's behaviour: a list that grows a row
+		// scrolls one row further, and a `CanvasSize` an author left at its
+		// default does not double the answer.
 		AutomaticSize AutomaticCanvas = AutomaticSize::None;
+
+		// Whether a drag may pull the canvas past its end.
+		//
+		// **Declared, pinned and not yet animated.** Nothing here springs the
+		// canvas back, because a spring needs a clock and `gui` is L7 with no
+		// notion of a frame time - so the honest state is that the property is
+		// authored and replicated and the pull is clamped. `ElasticBehavior`'s
+		// own comment says why the set is registered whole regardless.
+		ElasticBehavior Elastic = ElasticBehavior::WhenScrollable;
+
+		// Whether each bar eats into the room the content gets.
+		//@{
+		ScrollBarInset HorizontalInset = ScrollBarInset::None;
+		ScrollBarInset VerticalInset = ScrollBarInset::None;
+		//@}
+
+		// Which side the vertical bar sits on.
+		BarPosition VerticalBar = BarPosition::Right;
 
 		// Explicit padding, for the reason every other `Reserved` gives.
 		uint8_t Reserved[1] = {};
+	};
+
+	// What the layout worked out about a scrolling frame.
+	//
+	// **Derived, like `Resolved`, and written by the same pass.** Three
+	// consumers need these numbers and none of them may recompute them: a
+	// script reads `AbsoluteCanvasSize`, the compile draws the bars, and the
+	// router hit-tests a drag against the thumb. Three copies of the same
+	// arithmetic is the stale-cache bug `Resolved` exists to refuse, one class
+	// along - and the specific failure here is a thumb you can see and cannot
+	// grab.
+	//
+	// @since v0.18
+	struct ScrollState {
+		// The scrollable extent in pixels, after `AutomaticCanvas`.
+		core::Vector2 CanvasSize;
+
+		// The visible extent in pixels, after any bar inset.
+		core::Vector2 WindowSize;
+
+		// Where each thumb is, in canvas pixels. Empty when that bar is not
+		// shown, which is what makes "is there a bar here" one test rather than
+		// a repeat of the decision that produced it.
+		//@{
+		core::Rect VerticalThumb;
+		core::Rect HorizontalThumb;
+		//@}
 	};
 
 	// What makes a text box editable.
@@ -437,10 +623,35 @@ namespace engine::gui {
 		float LightInfluence = 0.0f;
 		float Brightness = 1.0f;
 		float MaxDistance = 0.0f;
+
+		// How far the camera that resolved this was from the collector, in studs.
+		//
+		// **Both kinds carry it, and only one of them has a property for it.**
+		// `BillboardGui.CurrentDistance` is the readable half - a script fading a
+		// name tag by range wants the number the size was already computed from
+		// rather than one it recomputes from a camera it has to find. A surface
+		// writes it too because `MaxDistance` is decided against the same
+		// measurement and a reader of one wants the other.
+		//
+		// @since v0.18
+		float CurrentDistance = 0.0f;
+
 		SpatialCanvasKind Kind = SpatialCanvasKind::Surface;
 		bool AlwaysOnTop = false;
 		bool Visible = true;
-		uint8_t Reserved[1] = {};
+
+		// Whether a pointer projected onto the world may land on this canvas.
+		//
+		// **Resolved rather than read from the collector at the point of use**,
+		// because the reader is `render::ResolveSpatialPointer`, which walks this
+		// component and nothing else - asking each candidate which of the two
+		// classes it is would be a class lookup per collector per pointer sample
+		// for a fact the resolve already had.
+		//
+		// @since v0.18
+		bool Interactive = false;
+
+		uint8_t Reserved[4] = {};
 	};
 
 	// A collector projected onto a face of a part.
@@ -463,6 +674,28 @@ namespace engine::gui {
 		// A multiplier on the fullbright part of the result.
 		float Brightness = 1.0f;
 
+		// How far off the face the canvas floats, in studs.
+		//
+		// **Zero still floats, and the amount is not authored.** A canvas exactly
+		// on a face z-fights with it, so the resolve adds a hairline bias
+		// whatever this holds; this is what an author adds on top to lift a sign
+		// clear of a bumpy wall or to stack two surfaces on one face.
+		//
+		// @since v0.18
+		float ZOffset = 0.0f;
+
+		// Beyond this many studs from the camera it is not drawn. Zero means no
+		// limit.
+		//
+		// **A thousand rather than zero**, which is Roblox's default and is the
+		// one default in this struct chosen against the engine's usual "the
+		// unset value is the inert one" rule. A sign legible at a thousand studs
+		// is a sign smaller than a pixel, and the alternative default has every
+		// surface in a world resolving and compiling forever.
+		//
+		// @since v0.18
+		float MaxDistance = 1000.0f;
+
 		// Which face of that part.
 		Face On = Face::Front;
 
@@ -472,8 +705,24 @@ namespace engine::gui {
 		// Whether it draws over geometry in front of it.
 		bool AlwaysOnTop = false;
 
+		// Whether what its subtree draws is cut to the canvas.
+		//
+		// @since v0.18
+		bool ClipsDescendants = true;
+
+		// Whether a pointer in the world may land on it at all.
+		//
+		// **False by default, which is Roblox's and is the surprising half.** A
+		// surface gui is a decal before it is a control panel, and an interactive
+		// one intercepts every click that crosses its plane - including the ones
+		// meant for the part behind it. Making that opt-in is what stops a
+		// decorative sign swallowing a player's aim.
+		//
+		// @since v0.18
+		bool Active = false;
+
 		// Explicit padding, for the reason every other `Reserved` gives.
-		uint8_t Reserved[1] = {};
+		uint8_t Reserved[7] = {};
 	};
 
 	// A collector that faces the camera at a point in the world.
@@ -482,6 +731,18 @@ namespace engine::gui {
 	struct Billboard {
 		// The part this hangs off, or the parent when unset.
 		ecs::Entity Adornee;
+
+		// A viewer this one is hidden from, or null.
+		//
+		// **A `Player` instance, and the check is the drawing host's.** A
+		// billboard is resolved once per world and drawn once per viewer, so the
+		// only place "is this me" can be asked is where a viewer is known - which
+		// is `client::Client` holding its own `Player`, not this module and not
+		// `ResolveSpatialCanvases`. What is here is the authored half: which
+		// player, by handle, replicated like every other field.
+		//
+		// @since v0.18
+		ecs::Entity PlayerToHideFrom;
 
 		// How big the billboard is, in studs or pixels per its `Element`.
 		core::UDim2 Size{0.0f, 200.0f, 0.0f, 50.0f};
@@ -492,20 +753,69 @@ namespace engine::gui {
 		// An offset in world axes, in studs.
 		core::Vector3 StudsOffsetWorldSpace;
 
-		// An offset in multiples of the adornee's size.
+		// An offset in multiples of the adornee's size, in the adornee's axes.
 		core::Vector3 ExtentsOffset;
+
+		// The same offset in world axes, so it does not turn with the adornee.
+		//
+		// **The pair is the point.** A name tag over a rotating part wants to
+		// stay above it, which is this one; an arrow pinned to a part's own nose
+		// wants to turn with it, which is the field above. Roblox carries both
+		// for exactly that reason and they add rather than override.
+		//
+		// @since v0.18
+		core::Vector3 ExtentsOffsetWorldSpace;
+
+		// An anchor point, in multiples of the billboard's own size.
+		//
+		// **Roblox's numbering and not `AnchorPoint`'s**, which is worth stating
+		// because the two look interchangeable and are not: this is signed and
+		// centred, so `(0, 0)` centres the billboard on its anchor and
+		// `(0.5, 0.5)` puts the anchor at the *bottom left* of it. A `GuiObject`'s
+		// `AnchorPoint` is unsigned and measured from the top left.
+		//
+		// @since v0.18
+		core::Vector2 SizeOffset;
 
 		// How much scene lighting tints it. 0 is fullbright.
 		float LightInfluence = 0.0f;
 
+		// A multiplier on the fullbright part of the result.
+		//
+		// @since v0.18
+		float Brightness = 1.0f;
+
 		// Beyond this many studs it is not drawn. Zero means no limit.
 		float MaxDistance = 0.0f;
+
+		// How coarsely the distance the size is computed from is quantised, in
+		// studs. Zero measures exactly.
+		//
+		// **What it buys is not performance.** A billboard scaled from an exact
+		// distance changes size every frame a player walks, and text re-fitted
+		// every frame shimmers; stepping the distance makes the size change in
+		// visible jumps that hold still in between, which is the trade Roblox
+		// offers and the reason the property is not a boolean.
+		//
+		// @since v0.18
+		float DistanceStep = 0.0f;
 
 		// Whether it draws over geometry in front of it.
 		bool AlwaysOnTop = false;
 
+		// Whether what its subtree draws is cut to the canvas.
+		//
+		// @since v0.18
+		bool ClipsDescendants = true;
+
+		// Whether a pointer in the world may land on it at all. `Surface::Active`
+		// carries the argument for the default.
+		//
+		// @since v0.18
+		bool Active = false;
+
 		// Explicit padding, for the reason every other `Reserved` gives.
-		uint8_t Reserved[3] = {};
+		uint8_t Reserved[5] = {};
 	};
 
 	// What a `CanvasGroup` composites its subtree with.
@@ -684,6 +994,140 @@ namespace engine::gui {
 		uint8_t Reserved[3] = {};
 	};
 
+	// Makes the parent element draggable with a pointer.
+	//
+	// **A modifier on the element rather than a flag on it**, which is Roblox's
+	// `UIDragDetector` and is the right shape here for the reason every other
+	// modifier is one: almost nothing is draggable, and a field per drag setting
+	// on `Element` would be that memory on every node in every interface.
+	//
+	// **The router writes `Element::Position`, and that is the whole feature.**
+	// A drag is a gesture and a position is a property, so the only thing this
+	// component decides is how one becomes the other - and what it produces is an
+	// ordinary authored value a script reads back, a save file keeps and a
+	// replica receives. Nothing here holds a "drag state" of its own;
+	// `gui::Router` holds where a gesture is part-way through, exactly as it
+	// holds the hover and the press.
+	//
+	// @since v0.18
+	struct DragDetector {
+		// An element the dragged one is kept inside, or null for no bound.
+		ecs::Entity BoundingUI;
+
+		// The line a `TranslateLine` drag runs along, in canvas pixels. Its
+		// length does not matter; only its direction is read.
+		core::Vector2 Axis{1.0f, 0.0f};
+
+		// How far the element may be moved from where the drag started, in
+		// pixels. **A translation and not a position**, so the same detector on
+		// two elements bounds each of them relative to itself.
+		//@{
+		core::Vector2 MinTranslation{-1.0e6f, -1.0e6f};
+		core::Vector2 MaxTranslation{1.0e6f, 1.0e6f};
+		//@}
+
+		// What the drag does. Roblox's default, and the one an author who added
+		// a detector and set nothing else means: move it about freely.
+		DragStyle Style = DragStyle::TranslatePlane;
+
+		// Which half of the parent's `Position` it writes.
+		DragResponse Response = DragResponse::Offset;
+
+		// Whether the drag happens at all.
+		bool Enabled = true;
+
+		// Explicit padding, for the reason every other `Reserved` gives.
+		// `BoundingUI` aligns the whole component to eight.
+		uint8_t Reserved[5] = {};
+	};
+
+	// Lays the parent's children out as rows, and *their* children as cells.
+	//
+	// **The only layout in this module that reaches two levels down**, and that
+	// is what a table is: a row decides nothing about its own children's widths,
+	// because a column has to be the same width in every row or the thing is not
+	// a table. Roblox says the same in its own words - a `UITableLayout` "takes
+	// control of sibling and cell elements' Size and Position".
+	//
+	// A cell's measured size is still what decides the column, so a
+	// `UISizeConstraint` on a header cell sets that column's width for every row
+	// under it. That is the idiom Roblox's own sample is built on.
+	//
+	// @since v0.18
+	struct TableLayout {
+		// Space between one row and the next, and one cell and the next.
+		core::UDim2 Padding;
+
+		// Whether the parent's children are rows stacked down, or columns
+		// stacked across.
+		FillDirection Direction = FillDirection::Vertical;
+
+		// Where the whole table sits inside the parent.
+		//@{
+		HorizontalAlignment Horizontal = HorizontalAlignment::Left;
+		VerticalAlignment Vertical = VerticalAlignment::Top;
+		//@}
+
+		// What order the rows and the cells are visited in.
+		SortOrder Order = SortOrder::LayoutOrder;
+
+		// Whether spare room is shared out among the columns and the rows.
+		//
+		// **Off by default, which is Roblox's and is the surprising half**: a
+		// table whose cells do not fill the parent extends *past* it rather than
+		// stretching to it, because a column's width is a fact about its content
+		// until an author says otherwise.
+		//@{
+		bool FillEmptySpaceColumns = false;
+		bool FillEmptySpaceRows = false;
+		//@}
+
+		// Explicit padding, for the reason every other `Reserved` gives.
+		uint8_t Reserved[2] = {};
+	};
+
+	// Shows one of the parent's children at a time and slides the rest aside.
+	//
+	// **What is here is the placement, and the animation is honestly absent.**
+	// Roblox's `UIPageLayout` tweens between pages, and a tween needs a clock -
+	// `gui` is L7 and has no notion of a frame time, which is why `Animated`,
+	// `TweenTime`, `EasingStyle` and `EasingDirection` are *not* declared rather
+	// than declared and ignored. A game that wants motion animates
+	// `CurrentPage`'s neighbours itself, or drives the offset with its own
+	// tween; what this gives is the paging.
+	//
+	// **`CurrentPage` is writable here and read-only in Roblox**, where it moves
+	// through `JumpTo`, `Next` and `Previous`. A property a script can assign is
+	// the same three methods without a method table, and it is what makes a page
+	// a value a save file and a replica can carry.
+	//
+	// @since v0.18
+	struct PageLayout {
+		// The child being shown, or null for the first in order.
+		ecs::Entity CurrentPage;
+
+		// Space between one page and the next, in the fill direction.
+		core::UDim Padding;
+
+		// Which way the pages are stacked.
+		FillDirection Direction = FillDirection::Horizontal;
+
+		// What order the pages are in.
+		SortOrder Order = SortOrder::LayoutOrder;
+
+		// Whether the last page's neighbour is the first.
+		//
+		// **It changes where the pages *are*, not only what a script may jump
+		// to.** With this set the strip wraps, so the page before the first is
+		// drawn on the near side rather than off the far end - which is what
+		// makes a carousel read as a loop while it is moving.
+		bool Circular = false;
+
+		// Explicit padding, for the reason every other `Reserved` gives.
+		// `CurrentPage` aligns the whole component to eight.
+		uint8_t Reserved[5] = {};
+	};
+
 	// Forces the parent's resolved size to a ratio.
 	//
 	// @since v0.8
@@ -753,6 +1197,70 @@ namespace engine::gui {
 		float Thickness = 1.0f;
 		float Transparency = 0.0f;
 		//@}
+
+		// Whether the outline is drawn at all.
+		//
+		// **A property rather than "set the transparency to one".** A game that
+		// flashes a focus ring wants to put the colour and the thickness back
+		// exactly as they were, and a script that had to remember the old
+		// transparency to do it would be storing engine state in a table.
+		//
+		// @since v0.18
+		bool Enabled = true;
+
+		// What it outlines - the rectangle, or the content inside it.
+		//
+		// @since v0.18
+		StrokeMode Apply = StrokeMode::Contextual;
+
+		// Explicit padding, for the reason every other `Reserved` gives.
+		uint8_t Reserved[2] = {};
+	};
+
+	// Multiplies a ramp of colour and transparency into what the parent draws.
+	//
+	// **A modifier and not a fill, which is why it multiplies.** Roblox's
+	// `UIGradient` tints whatever its parent already draws - a background, an
+	// image and a text run alike - so a white gradient is invisible and a
+	// gradient on a red panel ramps red. That is what lets one gradient sit under
+	// an `ImageLabel` and shade the picture rather than covering it.
+	//
+	// **On a `UIStroke` it ramps that stroke instead.** The parent decides which,
+	// and it is the same component either way, which is Roblox's arrangement -
+	// an outline that fades along its length is a gradient parented one level
+	// deeper rather than a second set of properties on the stroke.
+	//
+	// @since v0.18
+	struct Gradient {
+		// The colour ramp, sampled along the gradient's own axis.
+		core::ColorSequence Color{core::Color3{1.0f, 1.0f, 1.0f}};
+
+		// The transparency ramp, sampled along the same axis. **Added to what
+		// the element already has rather than replacing it**, which is Roblox's
+		// composition: an element at 0.5 under a gradient ramping 0 to 0.5 fades
+		// from half to fully clear.
+		core::NumberSequence Transparency{0.0f};
+
+		// How far the ramp is slid along, in multiples of the parent's own size.
+		//
+		// A value of `(1, 0)` moves the whole ramp one element-width to the
+		// right, which - depending on `Rotation` - can put all of it outside the
+		// element and leave one flat colour.
+		core::Vector2 Offset;
+
+		// The ramp's clockwise rotation in degrees, starting left to right.
+		//
+		// **The ends still snap to the element's edges.** A rotated gradient
+		// spans the element's extent *along the rotated axis*, so turning one by
+		// ninety degrees ramps top to bottom over the full height rather than
+		// over the width.
+		float Rotation = 0.0f;
+
+		// Whether the ramp is applied at all.
+		bool Enabled = true;
+
+		// Explicit padding, for the reason every other `Reserved` gives.
+		uint8_t Reserved[3] = {};
 	};
 
 	// Multiplies the parent's resolved size and text size.
@@ -802,6 +1310,17 @@ namespace engine::gui {
 		// `TextSizeLimits`. Equal to `Label::Size` when neither applies.
 		int32_t TextSize = 0;
 
+		// How much room the string takes at `TextSize`, in canvas pixels.
+		//
+		// **The layout's estimate and not a backend's measurement**, which is
+		// `Layout.hpp`'s standing rule: `AVERAGE_ADVANCE` is the one answer this
+		// engine has, so `TextBounds` agrees with what `TextScaled` fitted and
+		// with what a headless test asserts. A backend with real metrics would
+		// disagree with both, which is why nothing asks one.
+		//
+		// @since v0.18
+		core::Vector2 TextBounds;
+
 		// How deep in the tree, counted from the collector. The tiebreak that
 		// makes paint order total.
 		int32_t Depth = 0;
@@ -825,8 +1344,17 @@ namespace engine::gui {
 		// after being detached.
 		bool Rendered = false;
 
+		// Whether `TextBounds` fits inside `AbsoluteSize`.
+		//
+		// Roblox's `TextFits`, and it is stored rather than left for a caller to
+		// derive so that the comparison happens once, in the pass that produced
+		// both numbers.
+		//
+		// @since v0.18
+		bool TextFits = true;
+
 		// Explicit padding, for the reason every other `Reserved` gives.
-		uint8_t Reserved[3] = {};
+		uint8_t Reserved[2] = {};
 	};
 
 	// What every 3D adornment carries.

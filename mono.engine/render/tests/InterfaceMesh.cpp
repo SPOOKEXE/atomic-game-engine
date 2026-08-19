@@ -179,7 +179,9 @@ TEST_CASE("an image starts its own batch and carries its name", "[render][interf
 	CHECK(mesh.Batches()[1].Image == engine::core::Name("rbxasset://textures/wall"));
 }
 
-TEST_CASE("a shader change starts its own batch, the same rule a texture change follows", "[render][interfacemesh]") {
+TEST_CASE(
+	"a shader change starts its own batch, the same rule a texture change follows", "[render][interfacemesh]"
+) {
 	GlyphAtlas atlas;
 	engine::gui::DrawList list;
 
@@ -522,4 +524,97 @@ TEST_CASE("text size alignment wrapping truncation and stroke affect geometry", 
 	list.Commands[0].Truncate = engine::gui::TextTruncate::AtEnd;
 	mesh.Build(list, atlas);
 	CHECK(mesh.Vertices().size() < 44);
+}
+
+TEST_CASE("a two-stop gradient ramps a quad's own vertices", "[render][interfacemesh]") {
+	// **Four vertices and no split, which is the case that has to stay cheap.**
+	// A ramp with a stop at each end is one linear segment, and a linear
+	// function interpolated across a triangle from exact vertex values is exact
+	// - so subdividing would be work that changed no pixel.
+	engine::gui::DrawList list;
+	engine::gui::DrawCommand fill = Rectangle(0.0f, 0.0f, 100.0f, 40.0f);
+	fill.Gradient = 0;
+	list.Commands.push_back(fill);
+
+	engine::gui::DrawGradient ramp;
+	ramp.Color = engine::core::ColorSequence{
+		engine::core::Color3{1.0f, 1.0f, 1.0f}, engine::core::Color3{0.0f, 0.0f, 0.0f}
+	};
+	ramp.Origin = Vector2{0.0f, 0.0f};
+	ramp.Axis = Vector2{100.0f, 0.0f};
+	list.Gradients.push_back(ramp);
+
+	GlyphAtlas atlas;
+	InterfaceMesh mesh;
+	mesh.Build(list, atlas);
+
+	REQUIRE(mesh.Vertices().size() == 4);
+
+	// The clipper winds a rectangle top-left, top-right, bottom-right,
+	// bottom-left, so the two left-hand corners are the white end.
+	CHECK(mesh.Vertices()[0].R == 255);
+	CHECK(mesh.Vertices()[3].R == 255);
+	CHECK(mesh.Vertices()[1].R == 0);
+	CHECK(mesh.Vertices()[2].R == 0);
+}
+
+TEST_CASE("a three-stop gradient splits the shape at its keypoint", "[render][interfacemesh]") {
+	// **The reason `PushShaded` exists.** A ramp that is white, then black, then
+	// white again is two linear segments; one quad interpolated across both
+	// would read the midpoint as white at every pixel of it, which is the
+	// opposite of what was authored.
+	engine::gui::DrawList list;
+	engine::gui::DrawCommand fill = Rectangle(0.0f, 0.0f, 100.0f, 40.0f);
+	fill.Gradient = 0;
+	list.Commands.push_back(fill);
+
+	engine::gui::DrawGradient ramp;
+	ramp.Color.Add(engine::core::ColorKeypoint{0.0f, engine::core::Color3{1.0f, 1.0f, 1.0f}});
+	ramp.Color.Add(engine::core::ColorKeypoint{0.5f, engine::core::Color3{0.0f, 0.0f, 0.0f}});
+	ramp.Color.Add(engine::core::ColorKeypoint{1.0f, engine::core::Color3{1.0f, 1.0f, 1.0f}});
+	ramp.Origin = Vector2{0.0f, 0.0f};
+	ramp.Axis = Vector2{100.0f, 0.0f};
+	list.Gradients.push_back(ramp);
+
+	GlyphAtlas atlas;
+	InterfaceMesh mesh;
+	mesh.Build(list, atlas);
+
+	// Two bands, four corners each: the cut runs down the middle of the quad.
+	REQUIRE(mesh.Vertices().size() == 8);
+
+	bool sawSeam = false;
+	for (const engine::render::InterfaceVertex &vertex : mesh.Vertices()) {
+		if (vertex.X > 49.0f && vertex.X < 51.0f) {
+			sawSeam = true;
+			CHECK(vertex.R == 0);
+		}
+	}
+	CHECK(sawSeam);
+}
+
+TEST_CASE("a gradient's transparency adds to what the command already has", "[render][interfacemesh]") {
+	// Roblox's composition, and the half that is easy to get backwards: a
+	// gradient is a modifier on what the element draws, so a half-faded element
+	// under a ramp that fades to one ends up fully clear rather than half.
+	engine::gui::DrawList list;
+	engine::gui::DrawCommand fill = Rectangle(0.0f, 0.0f, 100.0f, 40.0f);
+	fill.Transparency = 0.5f;
+	fill.Gradient = 0;
+	list.Commands.push_back(fill);
+
+	engine::gui::DrawGradient ramp;
+	ramp.Color = engine::core::ColorSequence{engine::core::Color3{1.0f, 1.0f, 1.0f}};
+	ramp.Transparency = engine::core::NumberSequence{0.0f, 1.0f};
+	ramp.Origin = Vector2{0.0f, 0.0f};
+	ramp.Axis = Vector2{100.0f, 0.0f};
+	list.Gradients.push_back(ramp);
+
+	GlyphAtlas atlas;
+	InterfaceMesh mesh;
+	mesh.Build(list, atlas);
+
+	REQUIRE(mesh.Vertices().size() == 4);
+	CHECK(mesh.Vertices()[0].A == 128);
+	CHECK(mesh.Vertices()[1].A == 0);
 }

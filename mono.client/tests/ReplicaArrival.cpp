@@ -303,11 +303,17 @@ TEST_CASE("every interface and script component is classified", "[client][replic
 
 		INFO("component: " << name);
 
-		// Three interface rows are what the machine looking at the world works
+		// Four interface rows are what the machine looking at the world works
 		// out for itself, and the world's script table is a resource that could
 		// only ever cross whole. Everything else is authored and crosses.
+		//
+		// `gui.ScrollState` joined the four at v0.18 and is `gui.Resolved`'s case
+		// for one class: the pixel canvas, the visible window and the thumb
+		// rectangles are all derived from an `AbsoluteSize` that belongs to the
+		// display doing the looking.
 		const bool excluded = name == "gui.Resolved" || name == "gui.SpatialCanvas" ||
-							  name == "gui.GuiServiceState" || name == "script.SourceCache";
+							  name == "gui.GuiServiceState" || name == "gui.ScrollState" ||
+							  name == "script.SourceCache";
 
 		CHECK((excluded == (Row(name) == nullptr)));
 	}

@@ -74,6 +74,21 @@ namespace engine::gui {
 
 		// The element the pointer is pressed on, or null.
 		ecs::Entity Pressed;
+
+		// The `Player` this list is being compiled for, or null.
+		//
+		// **Only `BillboardGui.PlayerToHideFrom` reads it, and that is enough to
+		// justify it being here rather than in the renderer.** The alternative is
+		// a backend testing a handle while it records - which would mean the
+		// compiled list said one thing and the frame drew another, and a headless
+		// test could not assert what a player actually sees. Deciding it here
+		// also folds it into the signature, so switching viewers rebuilds.
+		//
+		// Null means "no particular viewer", which is the studio's answer and a
+		// test's: nothing is hidden.
+		//
+		// @since v0.18
+		ecs::Entity Viewer;
 	};
 
 	// A compiled draw list and the signature that says whether it is still

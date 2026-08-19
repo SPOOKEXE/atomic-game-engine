@@ -36,6 +36,71 @@ entries are in `docs/retired/DEFERRED.md`.
 
 ## Deferred Items
 
+### [_] D00120
+
+**The interface members that are absent because the thing behind them is.** The
+2D tree is otherwise complete against Roblox's as of v0.18; what follows is
+every member left out, each with what it would need first. The rule they are all
+filed under is `SoundService.cpp`'s and `gui/tests/Registration.cpp`'s: **a
+property with nothing behind it reads as decided**, so each of these is named
+here rather than declared and left answering a default.
+
+- **`VideoFrame`.** The class needs a video decoder; this engine has one image
+  path and a GIF flipbook, which is `render::Flipbook`. `Playing`,
+  `TimePosition`, `Looped` and `Volume` are all facts about a stream nothing can
+  produce. **Reopen trigger: a decoder in `mono.vendor` and a
+  `assets::VideoData` beside `TextureData`.**
+
+- **`SelectionBox.LineThickness`, `.SurfaceColor3` and `.SurfaceTransparency`.**
+  `render::AdornmentGeometry` emits `AdornmentLine` and nothing else, and its own
+  header says why: an adornment is twelve edges and filling one would hide the
+  thing it is drawn around. A thickness needs variable-width world lines and a
+  surface needs filled faces, which are two renderer capabilities rather than two
+  properties. **Reopen trigger: a triangle path for adornments.**
+
+- **`ImageLabel.IsLoaded` and `ImageButton.IsLoaded`.** Whether a texture has
+  staged is the client's texture cache's answer, and `gui` is L7 `shared` - the
+  same wall `D00022` describes for a `SurfaceGui`'s canvas. Unlike that one, the
+  fact does not fit `SpatialCanvas`'s shape: it is per *content name* rather than
+  per instance, so the slot would be a table rather than a component. **Reopen
+  trigger: a `shared` content-state table something above L12 fills.**
+
+- **`TextLabel.OpenTypeFeatures` and `.TextDirection`.** Both need a shaping
+  engine. `GlyphAtlas` is stb_truetype at one instance per family with no
+  substitution, no kerning table and no bidi pass, so ligatures and
+  right-to-left runs are not a property away. **Reopen trigger: HarfBuzz or
+  equivalent behind the atlas.**
+
+- **The animated halves: `UIPageLayout.Animated`, `.TweenTime`, `.EasingStyle`,
+  `.EasingDirection`, and `ScrollingFrame.ElasticBehavior`'s spring.** A tween
+  needs a clock and `gui` is L7 with no notion of a frame time - the standing
+  rule `render::Flipbook` and `assets::Grant` both keep. The *placement* both
+  properties decorate is implemented; what is missing is motion between two
+  states. `ElasticBehavior` is declared and pinned anyway, because its three
+  members are the save format. **Reopen trigger: a tick this module may read, or
+  a `control`-tier animator that writes the two properties from above.**
+
+- **`GuiObject.GuiState` and `.InputSink`.** `GuiState` is Idle/Hover/Press and
+  those live on `gui::Router`, which is deliberately not a component - nobody
+  replicates where a mouse is, and `gui/AGENTS.md` says so. Exposing it would
+  mean a per-element row two clients write. `InputSink` is `Active` under a
+  second name and is not worth a second property. **Reopen trigger: none
+  expected for `InputSink`.**
+
+- **`UIStroke.LineJoinMode`, `.BorderOffset`, `.StrokeSizingMode` and
+  `.ZIndex`.** The first three are corner and offset geometry on the stroke ring
+  that `InterfaceMesh::PushRoundedOutline` does not distinguish; `ZIndex` would
+  need the stroke to be sortable independently of the element it is on, which the
+  compile's paint order does not express. **Reopen trigger: an outline builder
+  that takes a join rule.**
+
+- **`SurfaceGui.ToolPunchThroughDistance`.** There is no `Tool` class, so there
+  is nothing the distance is about.
+
+- **`BillboardGui.DistanceLowerLimit` and `.DistanceUpperLimit`.** Deprecated in
+  Roblox and superseded by `DistanceStep`, which is implemented. Not worth
+  carrying a deprecation forward into a new engine.
+
 ### [_] D00119
 
 **`Player.CharacterAppearanceId` is absent, and it is absent because the thing

@@ -28,6 +28,14 @@ surface.SizingMode = Enum.SurfaceSizingMode.PixelsPerStud
 surface.PixelsPerStud = 64
 surface.LightInfluence = 0.55
 surface.Brightness = 1.15
+
+-- **A surface gui takes no pointer unless it says so**, which is Roblox's
+-- default and the reason the rows below are clickable at all: an interactive
+-- surface intercepts every click crossing its plane, including the ones meant
+-- for whatever is behind it, so it is opt-in.
+surface.Active = true
+surface.MaxDistance = 220
+surface.ZOffset = 0.02
 surface.Parent = pane
 
 local surfaceCard = Instance.new("CanvasGroup")
@@ -47,14 +55,31 @@ surfaceCorner.Parent = surfaceCard
 local surfaceStroke = Instance.new("UIStroke")
 surfaceStroke.Color = Color3.fromRGB(90, 190, 255)
 surfaceStroke.Thickness = 4
+
+-- The panel is a `CanvasGroup` with no text of its own, so a contextual stroke
+-- falls back to outlining the rectangle - which is what the border is for.
+surfaceStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 surfaceStroke.Parent = surfaceCard
+
+-- A gradient on the card, and a second one on the outline. The two are the same
+-- class parented one level apart, which is what lets an outline fade along its
+-- length without a second set of properties.
+local cardRamp = Instance.new("UIGradient")
+cardRamp.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255), Color3.fromRGB(150, 190, 240))
+cardRamp.Rotation = 90
+cardRamp.Parent = surfaceCard
+
+local strokeRamp = Instance.new("UIGradient")
+strokeRamp.Transparency = NumberSequence.new(0, 0.85)
+strokeRamp.Parent = surfaceStroke
 
 local title = Instance.new("TextLabel")
 title.Name = "SurfaceTitle"
 title.Size = UDim2.new(1, -32, 0, 90)
 title.Position = UDim2.new(0, 16, 0, 12)
 title.BackgroundTransparency = 1
-title.Text = "SURFACE GUI\nrounded, lit, clipped"
+title.RichText = true
+title.Text = '<b>SURFACE GUI</b>\n<font color="#5ABEFF">rounded</font>, lit, <i>clipped</i>' 
 title.TextColor3 = Color3.new(1, 1, 1)
 title.TextStrokeColor3 = Color3.new(0, 0, 0)
 title.TextStrokeTransparency = 0.15
@@ -73,6 +98,13 @@ scroller.CanvasSize = UDim2.new(0, 0, 2, 0)
 scroller.CanvasPosition = Vector2.new(0, 70)
 scroller.ScrollBarThickness = 12
 scroller.ScrollBarImageColor3 = Color3.fromRGB(90, 190, 255)
+
+-- The canvas grows to the rows rather than being a number kept in step with
+-- them by hand, and the bar reserves its strip so the list does not shift
+-- sideways the first time it overflows.
+scroller.AutomaticCanvasSize = Enum.AutomaticSize.Y
+scroller.CanvasSize = UDim2.new()
+scroller.VerticalScrollBarInset = Enum.ScrollBarInset.Always
 scroller.Parent = surfaceCard
 
 local list = Instance.new("UIListLayout")
@@ -112,6 +144,12 @@ billboard.StudsOffset = Vector3.new(0, 2.8, 0)
 billboard.MaxDistance = 80
 billboard.LightInfluence = 0.25
 billboard.AlwaysOnTop = false
+
+-- Stepped, so the label's text stops re-fitting on every frame a player walks -
+-- it changes size in visible jumps and holds still between them.
+billboard.DistanceStep = 4
+billboard.Brightness = 1.1
+billboard.SizeOffset = Vector2.new(0, -0.25)
 billboard.Parent = marker
 
 local bubble = Instance.new("TextLabel")

@@ -217,6 +217,18 @@ namespace engine::render {
 			return false;
 		}
 
+		// **A second sampler rather than a second pipeline**, which is what
+		// makes `ResampleMode` cheap: filtering is sampler state and nothing
+		// else about the draw changes, so the two differ by one bind. The
+		// batcher splits on the mode for the same reason it splits on a texture.
+		sampler.min_filter = SDL_GPU_FILTER_NEAREST;
+		sampler.mag_filter = SDL_GPU_FILTER_NEAREST;
+		PixelSampler = SDL_CreateGPUSampler(gpu, &sampler);
+		if (PixelSampler == nullptr) {
+			ENGINE_ERROR("interface pass: pixel sampler: {}", SDL_GetError());
+			return false;
+		}
+
 		if (Glyphs.Ready()) {
 			SDL_GPUTextureCreateInfo texture{};
 			texture.type = SDL_GPU_TEXTURETYPE_2D;
@@ -284,6 +296,9 @@ namespace engine::render {
 		if (AtlasTexture != nullptr) {
 			SDL_ReleaseGPUTexture(gpu, static_cast<SDL_GPUTexture *>(AtlasTexture));
 		}
+		if (PixelSampler != nullptr) {
+			SDL_ReleaseGPUSampler(gpu, static_cast<SDL_GPUSampler *>(PixelSampler));
+		}
 		if (Sampler != nullptr) {
 			SDL_ReleaseGPUSampler(gpu, static_cast<SDL_GPUSampler *>(Sampler));
 		}
@@ -307,6 +322,7 @@ namespace engine::render {
 		AtlasTexture = nullptr;
 		AtlasTransferBuffer = nullptr;
 		Sampler = nullptr;
+		PixelSampler = nullptr;
 		Pipeline = nullptr;
 		SpatialPipeline = nullptr;
 		SpatialTopPipeline = nullptr;
@@ -345,7 +361,9 @@ namespace engine::render {
 		if (toMsl) {
 			msl::Translation result = msl::Translate(spirv);
 			if (result.Failed) {
-				ENGINE_ERROR("interface shader '{}' cannot be translated to MSL: {}", name.Text(), result.Error);
+				ENGINE_ERROR(
+					"interface shader '{}' cannot be translated to MSL: {}", name.Text(), result.Error
+				);
 				return false;
 			}
 			translated = std::move(result.Source);
@@ -698,12 +716,13 @@ namespace engine::render {
 		SDL_BindGPUIndexBuffer(pass, &index, SDL_GPU_INDEXELEMENTSIZE_16BIT);
 
 		auto *atlas = static_cast<SDL_GPUTexture *>(AtlasTexture);
-		auto *sampler = static_cast<SDL_GPUSampler *>(Sampler);
 
 		// **Rebound per batch only when it changes.** A bind is cheap and a
 		// redundant one is not free; tracking the last one is four lines against
-		// a bind per quad.
+		// a bind per quad. The sampler is part of the same binding, so a change
+		// of filtering counts as a change of texture for this purpose.
 		SDL_GPUTexture *bound = nullptr;
+		SDL_GPUSampler *boundSampler = nullptr;
 
 		for (const InterfaceBatch &batch : Mesh.Batches()) {
 			const bool spatial = std::any_of(
@@ -757,12 +776,18 @@ namespace engine::render {
 				continue;
 			}
 
-			if (texture != bound) {
+			auto *sampler = static_cast<SDL_GPUSampler *>(
+				batch.Resample == gui::ResampleMode::Pixelated && PixelSampler != nullptr ? PixelSampler
+																						  : Sampler
+			);
+
+			if (texture != bound || sampler != boundSampler) {
 				SDL_GPUTextureSamplerBinding binding{};
 				binding.texture = texture;
 				binding.sampler = sampler;
 				SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
 				bound = texture;
+				boundSampler = sampler;
 			}
 
 			const float clip[4] = {
@@ -822,8 +847,8 @@ namespace engine::render {
 		SDL_SetGPUScissor(pass, &whole);
 
 		auto *atlas = static_cast<SDL_GPUTexture *>(AtlasTexture);
-		auto *sampler = static_cast<SDL_GPUSampler *>(Sampler);
 		SDL_GPUTexture *bound = nullptr;
+		SDL_GPUSampler *boundSampler = nullptr;
 		void *boundPipeline = nullptr;
 		uint32_t drawn = 0;
 
@@ -936,10 +961,16 @@ namespace engine::render {
 			if (texture == nullptr) {
 				continue;
 			}
-			if (texture != bound) {
+			auto *sampler = static_cast<SDL_GPUSampler *>(
+				batch.Resample == gui::ResampleMode::Pixelated && PixelSampler != nullptr ? PixelSampler
+																						  : Sampler
+			);
+
+			if (texture != bound || sampler != boundSampler) {
 				const SDL_GPUTextureSamplerBinding binding{texture, sampler};
 				SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
 				bound = texture;
+				boundSampler = sampler;
 			}
 
 			const float clip[4]{

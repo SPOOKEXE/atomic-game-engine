@@ -319,8 +319,14 @@ namespace engine::replication {
 		// two clients writing one row, and the authority would hand each of them
 		// back the other's answer. A client's own keyboard is its own, exactly
 		// as `scene.InputState` is.
+		//
+		// **`gui.ScrollState` is `gui.Resolved`'s case restated for one class.**
+		// It is the pixel canvas, the visible window and the two thumb
+		// rectangles a `ScrollingFrame` worked out - all of them derived from an
+		// `AbsoluteSize` that is this display's. What an author wrote is
+		// `gui.Scrolling`, and that crosses.
 		if (component == "gui.Resolved" || component == "gui.SpatialCanvas" ||
-			component == "gui.GuiServiceState") {
+			component == "gui.GuiServiceState" || component == "gui.ScrollState") {
 			return true;
 		}
 

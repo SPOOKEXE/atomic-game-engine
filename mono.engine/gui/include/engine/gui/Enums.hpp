@@ -80,6 +80,18 @@ namespace engine::gui {
 		Crop = 4,
 	};
 
+	// How an image's texels are filtered when it is not drawn at its own size.
+	//
+	// `Default` is linear, which is what a photograph or an icon wants;
+	// `Pixelated` is nearest, which is the only one that keeps pixel art looking
+	// like pixel art rather than like a blurred photograph of pixel art.
+	//
+	// @since v0.18
+	enum class ResampleMode : uint8_t {
+		Default = 0,
+		Pixelated = 1,
+	};
+
 	// Horizontal placement of text inside its element.
 	//
 	// @since v0.8
@@ -196,6 +208,88 @@ namespace engine::gui {
 		XY = 3,
 	};
 
+	// Whether a scrolling frame lets a drag pull the canvas past its end.
+	//
+	// **Declared and pinned even though the pull is not animated yet.** Roblox's
+	// three members are the format, and a set registered with two of them now
+	// and three later would renumber `Never` - which is the failure this file's
+	// opening paragraph is about. `Scrolling::Elastic` says what each does here.
+	//
+	// @since v0.18
+	enum class ElasticBehavior : uint8_t {
+		WhenScrollable = 0,
+		Always = 1,
+		Never = 2,
+	};
+
+	// Whether a scrolling frame's bar eats into the room its content gets.
+	//
+	// `None` draws the bar over the content, `ScrollBar` reserves the strip only
+	// while a bar is showing, and `Always` reserves it whether or not one is -
+	// which is what stops a list jumping sideways the moment it grows past the
+	// frame.
+	//
+	// @since v0.18
+	enum class ScrollBarInset : uint8_t {
+		None = 0,
+		ScrollBar = 1,
+		Always = 2,
+	};
+
+	// Which side of a scrolling frame the vertical bar sits on.
+	//
+	// @since v0.18
+	enum class BarPosition : uint8_t {
+		Right = 0,
+		Left = 1,
+	};
+
+	// What a `UIStroke` outlines.
+	//
+	// `Border` draws around the element's own rectangle. `Contextual` draws
+	// around whatever the element's *content* is - which on a text element means
+	// around the glyphs, and on everything else is the rectangle again. That is
+	// Roblox's rule and it is the reason the set is not a boolean: a stroke on a
+	// `TextLabel` is almost always meant for the letters.
+	//
+	// @since v0.18
+	enum class StrokeMode : uint8_t {
+		Contextual = 0,
+		Border = 1,
+	};
+
+	// What a drag does to the element it is attached to.
+	//
+	// **Five members because five is the format**, and three of them do
+	// something here. `TranslateLineOrPlane` is Roblox's "a line if an axis was
+	// set, a plane otherwise" and is exactly that; `Scriptable` moves nothing and
+	// leaves a script to read the events and decide, which is what the name says
+	// and is a complete implementation of it.
+	//
+	// @since v0.18
+	enum class DragStyle : uint8_t {
+		TranslatePlane = 0,
+		TranslateLine = 1,
+		TranslateLineOrPlane = 2,
+		Rotate = 3,
+		Scriptable = 4,
+	};
+
+	// Which half of a `UDim2` a drag writes.
+	//
+	// `Offset` moves the element in pixels and `Scale` in fractions of its
+	// parent, which is the difference between a panel that stays put as a window
+	// resizes and one that moves with it. The two `Custom` members write nothing
+	// and hand the drag to a script, which is Roblox's meaning of the word.
+	//
+	// @since v0.18
+	enum class DragResponse : uint8_t {
+		Offset = 0,
+		Scale = 1,
+		CustomOffset = 2,
+		CustomScale = 3,
+	};
+
 	// How a list layout distributes spare room along one axis.
 	//
 	// Roblox's `UIFlexAlignment`, and it is asked twice per layout - once per
@@ -304,6 +398,7 @@ namespace engine::gui {
 	const char *Describe(AutomaticSize value);
 	const char *Describe(BorderMode value);
 	const char *Describe(ScaleType value);
+	const char *Describe(ResampleMode value);
 	const char *Describe(TextXAlignment value);
 	const char *Describe(TextYAlignment value);
 	const char *Describe(TextTruncate value);
@@ -316,6 +411,12 @@ namespace engine::gui {
 	const char *Describe(AspectType value);
 	const char *Describe(DominantAxis value);
 	const char *Describe(ScrollingDirection value);
+	const char *Describe(StrokeMode value);
+	const char *Describe(DragStyle value);
+	const char *Describe(DragResponse value);
+	const char *Describe(ElasticBehavior value);
+	const char *Describe(ScrollBarInset value);
+	const char *Describe(BarPosition value);
 	const char *Describe(FlexAlignment value);
 	const char *Describe(ItemLineAlignment value);
 	const char *Describe(FlexMode value);

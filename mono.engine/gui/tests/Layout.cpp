@@ -912,6 +912,47 @@ TEST_CASE("only the world-attached collectors draw from the Workspace", "[gui][l
 	CHECK(world.Data.Get<Resolved>(billboard)->Rendered);
 }
 
+TEST_CASE("a spatial collector that clips nothing still lays out against its canvas", "[gui][layout]") {
+	// **Two rectangles, and the case exists because they are easy to conflate.**
+	// `ClipsDescendants` decides what the subtree is *cut* to and nothing about
+	// what a `UDim2` resolves against - so a half-width child of an unclipped
+	// surface is half the canvas, not half of the very large rectangle the clip
+	// becomes. Folding the two into one number would produce a child five
+	// hundred thousand pixels wide and nothing would say why.
+	World world("gui_layout.unclipped");
+
+	const Entity workspace = world.Data.CreateInstance(
+		engine::ecs::Classes::Find(engine::core::Name("Instance")), std::string(WORKSPACE)
+	);
+
+	const Entity surface = world.Make("SurfaceGui", workspace);
+	Surface state;
+	state.CanvasSize = Vector2{400.0f, 300.0f};
+	state.ClipsDescendants = false;
+	world.Data.Set(surface, state);
+
+	const Entity frame = world.Make("Frame", surface);
+	Element element;
+	element.Size = UDim2{0.5f, 0.0f, 0.5f, 0.0f};
+	world.Data.Set(frame, element);
+
+	Layout(world.Data, world.Display);
+
+	CHECK(world.Where(frame).AbsoluteSize.X == Approx(200.0f));
+	CHECK(world.Where(frame).AbsoluteSize.Y == Approx(150.0f));
+
+	// The clip is what changed, and it has to be wide enough to cut nothing an
+	// author meant to draw.
+	CHECK(world.Where(frame).Clip.Width() > 400.0f);
+
+	state.ClipsDescendants = true;
+	world.Data.Set(surface, state);
+	Layout(world.Data, world.Display);
+
+	CHECK(world.Where(frame).Clip.Width() == Approx(400.0f));
+	CHECK(world.Where(frame).AbsoluteSize.X == Approx(200.0f));
+}
+
 TEST_CASE("the container names are the ones scene registers", "[gui][layout]") {
 	// **The pin at this end**, and `scene/tests/Services.cpp` holds the other.
 	//
@@ -1288,4 +1329,125 @@ TEST_CASE("an invisible child is not measured into its parent", "[gui][layout][a
 	Layout(world.Data, world.Display);
 
 	CHECK(world.Where(box).AbsoluteSize.Y == Approx(30.0f));
+}
+
+TEST_CASE("a table layout gives a column one width in every row", "[gui][layout]") {
+	// **The reason a table is not a grid of frames**, and the only thing it is
+	// for: a column has to be the same width in every row, which means the
+	// layout has to reach two levels down and size the cells rather than letting
+	// each row decide for itself.
+	World world("gui_layout.table");
+
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("Frame", screen);
+
+	Element outer;
+	outer.Size = UDim2{0.0f, 400.0f, 0.0f, 300.0f};
+	world.Data.Set(frame, outer);
+
+	const Entity layout = world.Make("UITableLayout", frame);
+	world.Data.Set(layout, TableLayout{});
+
+	// Two rows, two cells each. The first column is wide in one row and narrow
+	// in the other; the widest wins for both.
+	const float widths[2][2]{{200.0f, 40.0f}, {60.0f, 90.0f}};
+	Entity cells[2][2]{};
+
+	for (int row = 0; row < 2; row++) {
+		const Entity rowNode = world.Make("Frame", frame);
+		Element rowElement;
+		rowElement.Size = UDim2{0.0f, 0.0f, 0.0f, 30.0f};
+		rowElement.LayoutOrder = row;
+		world.Data.Set(rowNode, rowElement);
+
+		for (int column = 0; column < 2; column++) {
+			cells[row][column] = world.Make("TextLabel", rowNode);
+			Element cell;
+			cell.Size = UDim2{0.0f, widths[row][column], 0.0f, 24.0f};
+			cell.LayoutOrder = column;
+			world.Data.Set(cells[row][column], cell);
+		}
+	}
+
+	Layout(world.Data, world.Display);
+
+	// Column one is two hundred wide in both rows, because one cell asked for
+	// two hundred; column two is ninety, for the same reason.
+	CHECK(world.Where(cells[0][0]).AbsoluteSize.X == Approx(200.0f));
+	CHECK(world.Where(cells[1][0]).AbsoluteSize.X == Approx(200.0f));
+	CHECK(world.Where(cells[0][1]).AbsoluteSize.X == Approx(90.0f));
+	CHECK(world.Where(cells[1][1]).AbsoluteSize.X == Approx(90.0f));
+
+	// The second column starts where the first ends, and the second row below
+	// the first.
+	CHECK(world.Where(cells[0][1]).AbsolutePosition.X == Approx(200.0f));
+	CHECK(world.Where(cells[1][0]).AbsolutePosition.Y > world.Where(cells[0][0]).AbsolutePosition.Y);
+
+	// **Rows are laid out and remain instances.** A row that stopped being
+	// rendered would take its own background with it, which is how a table gets
+	// its stripes.
+	CHECK(world.Where(cells[0][0]).Rendered);
+
+	// Filling shares the spare width out, so the table reaches the parent's edge.
+	TableLayout filled;
+	filled.FillEmptySpaceColumns = true;
+	world.Data.Set(layout, filled);
+	Layout(world.Data, world.Display);
+
+	const float across = world.Where(cells[0][0]).AbsoluteSize.X + world.Where(cells[0][1]).AbsoluteSize.X;
+	CHECK(across == Approx(400.0f));
+}
+
+TEST_CASE("a page layout shows one child and slides the rest aside", "[gui][layout]") {
+	// Every page is the container's own size and sits one step further along, so
+	// the strip moves under the container rather than the pages moving inside
+	// it. Nothing animates - `gui::PageLayout` says why the tween is absent
+	// rather than ignored.
+	World world("gui_layout.pages");
+
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("Frame", screen);
+
+	Element outer;
+	outer.Position = UDim2{0.0f, 100.0f, 0.0f, 0.0f};
+	outer.Size = UDim2{0.0f, 200.0f, 0.0f, 100.0f};
+	outer.ClipsDescendants = true;
+	world.Data.Set(frame, outer);
+
+	const Entity layout = world.Make("UIPageLayout", frame);
+
+	Entity pages[3]{};
+	for (int index = 0; index < 3; index++) {
+		pages[index] = world.Make("Frame", frame);
+		Element page;
+		page.LayoutOrder = index;
+		world.Data.Set(pages[index], page);
+	}
+
+	PageLayout paging;
+	paging.CurrentPage = pages[1];
+	world.Data.Set(layout, paging);
+
+	Layout(world.Data, world.Display);
+
+	// The current page fills the container; its neighbours sit one container
+	// width either side of it.
+	CHECK(world.Where(pages[1]).AbsolutePosition.X == Approx(100.0f));
+	CHECK(world.Where(pages[1]).AbsoluteSize.X == Approx(200.0f));
+	CHECK(world.Where(pages[0]).AbsolutePosition.X == Approx(-100.0f));
+	CHECK(world.Where(pages[2]).AbsolutePosition.X == Approx(300.0f));
+
+	// **An unset `CurrentPage` is the first one**, which is what an author who
+	// set nothing means and what a page destroyed mid-show leaves behind.
+	world.Data.Set(layout, PageLayout{});
+	Layout(world.Data, world.Display);
+	CHECK(world.Where(pages[0]).AbsolutePosition.X == Approx(100.0f));
+
+	// Circular wraps to the nearer side, so the page before the first is drawn
+	// just off the near edge rather than at the far end of everything.
+	PageLayout loop;
+	loop.Circular = true;
+	world.Data.Set(layout, loop);
+	Layout(world.Data, world.Display);
+	CHECK(world.Where(pages[2]).AbsolutePosition.X == Approx(-100.0f));
 }

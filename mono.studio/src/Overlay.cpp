@@ -1544,6 +1544,11 @@ namespace studio {
 		pointer.Down = ImGui::IsMouseDown(ImGuiMouseButton_Left);
 		pointer.ScreenOnly = true;
 
+		// The same notches the client hands over, so a `ScrollingFrame` moves by
+		// the same amount in the editor as in the game. `pointer.Inside` below
+		// is what stops a wheel meant for a docked panel reaching the world.
+		pointer.Wheel = ImGui::GetIO().MouseWheel;
+
 		// **imgui owns the mouse whenever it is over its own chrome**, and a
 		// panel docked over the viewport is exactly that. Without this the
 		// game's UI would receive clicks meant for the explorer sitting on top

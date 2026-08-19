@@ -7,13 +7,16 @@
 #include <engine/gui/Services.hpp>
 #include <engine/testing/Suite.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <span>
 #include <string_view>
 #include <vector>
 
 TEST_SUITE_ID("engine.gui.input")
 
+using Catch::Approx;
 using engine::core::UDim2;
 using engine::core::Vector2;
 using engine::ecs::Entity;
@@ -610,4 +613,223 @@ TEST_CASE("screen and spatial picks stay inside their collector", "[gui][input]"
 	CHECK(PickScreen(world.Data, list, point) == screenButton);
 	CHECK(PickInCollector(world.Data, list, spatialCollector, point) == spatialButton);
 	CHECK(PickInCollector(world.Data, list, screen, point) == screenButton);
+}
+
+namespace {
+	// One frame of routing with a pointer the case built itself.
+	//
+	// `World::Move` covers position and the button; a wheel turn and a bar drag
+	// need the whole struct, so these two cases build one and this compiles
+	// first for `World::Move`'s reason - the router reads the list the compile
+	// produced.
+	std::vector<GuiEvent> Send(World &world, const Pointer &pointer) {
+		world.Compile();
+		const std::span<const GuiEvent> events =
+			world.Route.Update(world.Data, world.List.Commands(), pointer);
+		return std::vector<GuiEvent>(events.begin(), events.end());
+	}
+}
+
+TEST_CASE("a wheel scrolls the nearest frame that can take it", "[gui][input]") {
+	// **Up the ancestors from what is under the pointer**, which is the rule
+	// that makes a wheel over a button inside a list scroll the list. A wheel
+	// that only worked when the pointer was over bare frame would be one nobody
+	// could use, because a list is made of things.
+	World world("gui_input.wheel");
+
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("ScrollingFrame", screen);
+	world.Box(frame, 0.0f, 0.0f, 100.0f, 100.0f);
+
+	Scrolling scrolling;
+	scrolling.CanvasSize = UDim2{0.0f, 100.0f, 0.0f, 400.0f};
+	world.Data.Set(frame, scrolling);
+
+	const Entity button = world.Make("TextButton", screen);
+	world.Data.SetParent(button, frame);
+	world.Box(button, 0.0f, 0.0f, 80.0f, 20.0f);
+
+	Pointer pointer;
+	pointer.Position = Vector2{40.0f, 10.0f};
+
+	// A turn away from the person moves the canvas back towards its start, and
+	// it is already there - so this does nothing, which is what pins the sign.
+	pointer.Wheel = 1.0f;
+	Send(world, pointer);
+	CHECK(world.Data.Get<Scrolling>(frame)->CanvasPosition.Y == Approx(0.0f));
+
+	pointer.Wheel = -2.0f;
+	Send(world, pointer);
+	CHECK(world.Data.Get<Scrolling>(frame)->CanvasPosition.Y == Approx(120.0f));
+
+	// **Clamped at the writer**, so turning the wheel at the bottom of a list
+	// does not build up a position the frame will never use.
+	pointer.Wheel = -100.0f;
+	Send(world, pointer);
+	CHECK(world.Data.Get<Scrolling>(frame)->CanvasPosition.Y == Approx(300.0f));
+
+	// And a frame told not to scroll ignores the wheel entirely, while a script
+	// may still place its canvas - which is the split the property is for.
+	scrolling.Enabled = false;
+	scrolling.CanvasPosition = Vector2{10.0f, 10.0f};
+	world.Data.Set(frame, scrolling);
+
+	pointer.Wheel = -5.0f;
+	Send(world, pointer);
+	CHECK(world.Data.Get<Scrolling>(frame)->CanvasPosition.Y == Approx(10.0f));
+}
+
+TEST_CASE("dragging a scroll bar moves the canvas and presses nothing", "[gui][input]") {
+	// **The bar is chrome and not an instance.** Grabbing it must not produce an
+	// `InputBegan` at the frame, because nothing in the tree was pressed - and a
+	// release must not produce an `Activated` at whatever the pointer wandered
+	// over on the way.
+	World world("gui_input.bardrag");
+
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("ScrollingFrame", screen);
+	world.Box(frame, 0.0f, 0.0f, 100.0f, 100.0f);
+
+	Scrolling scrolling;
+	scrolling.CanvasSize = UDim2{0.0f, 100.0f, 0.0f, 200.0f};
+	scrolling.BarThickness = 10;
+	world.Data.Set(frame, scrolling);
+
+	world.Compile();
+
+	const ScrollState *state = world.Data.Get<ScrollState>(frame);
+	REQUIRE(state != nullptr);
+	REQUIRE_FALSE(state->VerticalThumb.Empty());
+
+	// The thumb is half the track, because the window is half the canvas.
+	CHECK(state->VerticalThumb.Height() == Approx(50.0f));
+
+	const Vector2 grab{
+		(state->VerticalThumb.Min.X + state->VerticalThumb.Max.X) * 0.5f,
+		state->VerticalThumb.Min.Y + 5.0f,
+	};
+
+	Pointer pointer;
+	pointer.Position = grab;
+	pointer.Down = true;
+	CHECK(Send(world, pointer).empty());
+	CHECK(world.Route.ScrollBarHeld() == frame);
+
+	// Dragged well past the end of its travel, which stops at the end of the
+	// canvas rather than running on.
+	pointer.Position = Vector2{grab.X, grab.Y + 500.0f};
+	CHECK(Send(world, pointer).empty());
+	CHECK(world.Data.Get<Scrolling>(frame)->CanvasPosition.Y == Approx(100.0f));
+
+	pointer.Down = false;
+	for (const GuiEvent &event : Send(world, pointer)) {
+		CHECK(event.Kind != EventKind::Activated);
+		CHECK(event.Kind != EventKind::InputBegan);
+	}
+	CHECK(world.Route.ScrollBarHeld() == engine::ecs::NULL_ENTITY);
+}
+
+TEST_CASE("a drag detector moves its parent and not the press", "[gui][input]") {
+	// **A drag is not a press and must not become one.** A draggable button that
+	// fired `Activated` every time it was moved would be the shape of bug people
+	// file against the button rather than against the drag.
+	World world("gui_input.drag");
+
+	const Entity screen = world.Make("ScreenGui");
+	const Entity panel = world.Make("TextButton", screen);
+	world.Box(panel, 100.0f, 100.0f, 80.0f, 40.0f);
+
+	const Entity detector = world.Make("UIDragDetector", panel);
+	world.Data.Set(detector, DragDetector{});
+
+	Pointer pointer;
+	pointer.Position = Vector2{120.0f, 110.0f};
+	pointer.Down = true;
+
+	// **The hover still moves onto the button**, which is why this is a search
+	// rather than a count: a drag is not a press and does not suppress the
+	// pointer entering the thing it is about to move.
+	const auto only = [](const std::vector<GuiEvent> &events, EventKind kind) {
+		for (const GuiEvent &event : events) {
+			if (event.Kind == kind) {
+				return event;
+			}
+		}
+		FAIL("no event of that kind");
+		return GuiEvent{};
+	};
+
+	std::vector<GuiEvent> events = Send(world, pointer);
+	CHECK(only(events, EventKind::DragBegan).Instance == detector);
+	CHECK(world.Route.DragHeld() == detector);
+
+	// Nothing was pressed, so nothing is holding.
+	CHECK(world.Route.Pressed() == engine::ecs::NULL_ENTITY);
+
+	// **`MouseMoved` still fires beside it**, which is Roblox's behaviour and the
+	// useful one: a drag is a gesture the pointer is making *over* an element,
+	// and a handler watching the pointer has not stopped being interested.
+	pointer.Position = Vector2{150.0f, 130.0f};
+	events = Send(world, pointer);
+	CHECK(only(events, EventKind::DragContinue).Local.X == Approx(30.0f));
+	CHECK(only(events, EventKind::DragContinue).Instance == detector);
+
+	// The element moved by exactly the pointer's travel, in offset.
+	CHECK(world.Data.Get<Element>(panel)->Position.X.Offset == Approx(130.0f));
+	CHECK(world.Data.Get<Element>(panel)->Position.Y.Offset == Approx(120.0f));
+
+	pointer.Down = false;
+	events = Send(world, pointer);
+	CHECK(only(events, EventKind::DragEnded).Instance == detector);
+	for (const GuiEvent &event : events) {
+		CHECK(event.Kind != EventKind::Activated);
+	}
+	CHECK(world.Route.DragHeld() == engine::ecs::NULL_ENTITY);
+}
+
+TEST_CASE("a line drag keeps only what lies along its axis", "[gui][input]") {
+	World world("gui_input.dragline");
+
+	const Entity screen = world.Make("ScreenGui");
+	const Entity panel = world.Make("Frame", screen);
+	world.Box(panel, 0.0f, 0.0f, 80.0f, 40.0f);
+
+	const Entity detector = world.Make("UIDragDetector", panel);
+	DragDetector along;
+	along.Style = DragStyle::TranslateLine;
+	along.Axis = Vector2{0.0f, 1.0f};
+	world.Data.Set(detector, along);
+
+	Pointer pointer;
+	pointer.Position = Vector2{10.0f, 10.0f};
+	pointer.Down = true;
+	Send(world, pointer);
+
+	pointer.Position = Vector2{200.0f, 60.0f};
+	Send(world, pointer);
+
+	// The sideways travel is dropped whole; only the fifty pixels down survive.
+	CHECK(world.Data.Get<Element>(panel)->Position.X.Offset == Approx(0.0f));
+	CHECK(world.Data.Get<Element>(panel)->Position.Y.Offset == Approx(50.0f));
+
+	// **The clamp is on the *translation* and not on the position**, so it
+	// bounds how far one gesture may move the element rather than where the
+	// element may end up. A second drag therefore starts its own twenty pixels
+	// from wherever the first one left it, which is what makes grabbing again
+	// and again a way to travel.
+	pointer.Down = false;
+	Send(world, pointer);
+
+	along.MaxTranslation = Vector2{1.0e6f, 20.0f};
+	world.Data.Set(detector, along);
+
+	// Grabbed where the element *is now*, which is fifty pixels lower than it
+	// was - the drag is a gesture on a rectangle, not on a name.
+	pointer.Position = Vector2{10.0f, 60.0f};
+	pointer.Down = true;
+	Send(world, pointer);
+	pointer.Position = Vector2{10.0f, 500.0f};
+	Send(world, pointer);
+
+	CHECK(world.Data.Get<Element>(panel)->Position.Y.Offset == Approx(70.0f));
 }

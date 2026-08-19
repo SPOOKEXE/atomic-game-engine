@@ -2325,6 +2325,17 @@ namespace client {
 				// everything inside it.
 				engine::render::ResolveSpatialCanvases(store, request.Display);
 				engine::gui::Layout(store, request.Display);
+
+				// **Whose eyes this list is for**, which only
+				// `BillboardGui.PlayerToHideFrom` reads and which only this
+				// caller can answer: a world is compiled once per viewer and the
+				// viewer is a resource in the world being drawn. A studio or a
+				// test leaves it null and hides nothing, which is right - there
+				// is nobody for a billboard to be hidden from.
+				if (const auto *local = store.Resource<engine::scene::LocalPlayer>()) {
+					request.Viewer = local->Instance;
+				}
+
 				InterfaceList.Rebuild(store, request);
 
 				// **This frame's characters, and before the press that may move
@@ -2404,6 +2415,13 @@ namespace client {
 				// which is what this flag is for.
 				pointer.Inside = Input.State().Focused;
 				pointer.ScreenOnly = true;
+
+				// **The wheel, in notches, straight from the translator.** How
+				// many pixels a notch moves a canvas is `gui::Router`'s decision
+				// and not this one - a list has to move the same distance in the
+				// client and in the editor, and scaling here would be the second
+				// answer.
+				pointer.Wheel = Input.State().WheelDelta;
 
 				// **Before the router reads the pointer, so the press is this
 				// frame's.** Synthesising after would put the click one frame

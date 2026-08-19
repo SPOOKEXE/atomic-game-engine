@@ -292,6 +292,15 @@ declare interface PointerSignal {
 	Equals(other: PointerSignal): boolean;
 }
 
+// `uiDragDetector.DragStart`, `.DragContinue` and `.DragEnd`. Four numbers:
+// where the pointer is, then how far the gesture has come. The Luau half says
+// why there is no input object.
+declare interface DragSignal {
+	Connect(handler: (x: number, y: number, dx: number, dy: number) => void): RBXScriptConnection;
+	Once(handler: (x: number, y: number, dx: number, dy: number) => void): RBXScriptConnection;
+	Equals(other: DragSignal): boolean;
+}
+
 // `textBox.Focused`. Its own name rather than `GuiSignal` for the reason the
 // Luau half gives: the two are structurally identical and this one is about the
 // keyboard.
@@ -335,6 +344,7 @@ declare interface EnumItem { readonly Name: string; readonly EnumType: string; E
 
 declare namespace Enum {
 	interface AlphaMode extends EnumItem { readonly __enum: "AlphaMode"; }
+	interface ApplyStrokeMode extends EnumItem { readonly __enum: "ApplyStrokeMode"; }
 	interface AspectType extends EnumItem { readonly __enum: "AspectType"; }
 	interface AutomaticSize extends EnumItem { readonly __enum: "AutomaticSize"; }
 	interface BorderMode extends EnumItem { readonly __enum: "BorderMode"; }
@@ -343,6 +353,7 @@ declare namespace Enum {
 	interface DominantAxis extends EnumItem { readonly __enum: "DominantAxis"; }
 	interface EasingDirection extends EnumItem { readonly __enum: "EasingDirection"; }
 	interface EasingStyle extends EnumItem { readonly __enum: "EasingStyle"; }
+	interface ElasticBehavior extends EnumItem { readonly __enum: "ElasticBehavior"; }
 	interface FillDirection extends EnumItem { readonly __enum: "FillDirection"; }
 	interface Font extends EnumItem { readonly __enum: "Font"; }
 	interface HorizontalAlignment extends EnumItem { readonly __enum: "HorizontalAlignment"; }
@@ -357,8 +368,10 @@ declare namespace Enum {
 	interface ParticleFlipbookLayout extends EnumItem { readonly __enum: "ParticleFlipbookLayout"; }
 	interface ParticleFlipbookMode extends EnumItem { readonly __enum: "ParticleFlipbookMode"; }
 	interface ParticleOrientation extends EnumItem { readonly __enum: "ParticleOrientation"; }
+	interface ResamplerMode extends EnumItem { readonly __enum: "ResamplerMode"; }
 	interface ScaleType extends EnumItem { readonly __enum: "ScaleType"; }
 	interface ScriptLanguage extends EnumItem { readonly __enum: "ScriptLanguage"; }
+	interface ScrollBarInset extends EnumItem { readonly __enum: "ScrollBarInset"; }
 	interface ScrollingDirection extends EnumItem { readonly __enum: "ScrollingDirection"; }
 	interface ServiceScope extends EnumItem { readonly __enum: "ServiceScope"; }
 	interface SizeConstraint extends EnumItem { readonly __enum: "SizeConstraint"; }
@@ -369,17 +382,24 @@ declare namespace Enum {
 	interface TextTruncate extends EnumItem { readonly __enum: "TextTruncate"; }
 	interface TextXAlignment extends EnumItem { readonly __enum: "TextXAlignment"; }
 	interface TextYAlignment extends EnumItem { readonly __enum: "TextYAlignment"; }
+	interface UIDragDetectorDragStyle extends EnumItem { readonly __enum: "UIDragDetectorDragStyle"; }
+	interface UIDragDetectorDragStyleResponse extends EnumItem { readonly __enum: "UIDragDetectorDragStyleResponse"; }
 	interface UIFlexAlignment extends EnumItem { readonly __enum: "UIFlexAlignment"; }
 	interface UIFlexMode extends EnumItem { readonly __enum: "UIFlexMode"; }
 	interface UserInputState extends EnumItem { readonly __enum: "UserInputState"; }
 	interface UserInputType extends EnumItem { readonly __enum: "UserInputType"; }
 	interface VerticalAlignment extends EnumItem { readonly __enum: "VerticalAlignment"; }
+	interface VerticalScrollBarPosition extends EnumItem { readonly __enum: "VerticalScrollBarPosition"; }
 	interface ZIndexBehavior extends EnumItem { readonly __enum: "ZIndexBehavior"; }
 
 	const AlphaMode: {
 		readonly Opaque: AlphaMode;
 		readonly Clip: AlphaMode;
 		readonly Blend: AlphaMode;
+	};
+	const ApplyStrokeMode: {
+		readonly Contextual: ApplyStrokeMode;
+		readonly Border: ApplyStrokeMode;
 	};
 	const AspectType: {
 		readonly FitWithinMaxSize: AspectType;
@@ -427,6 +447,11 @@ declare namespace Enum {
 		readonly Back: EasingStyle;
 		readonly Elastic: EasingStyle;
 		readonly Bounce: EasingStyle;
+	};
+	const ElasticBehavior: {
+		readonly WhenScrollable: ElasticBehavior;
+		readonly Always: ElasticBehavior;
+		readonly Never: ElasticBehavior;
 	};
 	const FillDirection: {
 		readonly Horizontal: FillDirection;
@@ -566,6 +591,10 @@ declare namespace Enum {
 		readonly VelocityParallel: ParticleOrientation;
 		readonly VelocityPerpendicular: ParticleOrientation;
 	};
+	const ResamplerMode: {
+		readonly Default: ResamplerMode;
+		readonly Pixelated: ResamplerMode;
+	};
 	const ScaleType: {
 		readonly Stretch: ScaleType;
 		readonly Slice: ScaleType;
@@ -576,6 +605,11 @@ declare namespace Enum {
 	const ScriptLanguage: {
 		readonly Luau: ScriptLanguage;
 		readonly JavaScript: ScriptLanguage;
+	};
+	const ScrollBarInset: {
+		readonly None: ScrollBarInset;
+		readonly ScrollBar: ScrollBarInset;
+		readonly Always: ScrollBarInset;
 	};
 	const ScrollingDirection: {
 		readonly X: ScrollingDirection;
@@ -628,6 +662,19 @@ declare namespace Enum {
 		readonly Center: TextYAlignment;
 		readonly Bottom: TextYAlignment;
 	};
+	const UIDragDetectorDragStyle: {
+		readonly TranslatePlane: UIDragDetectorDragStyle;
+		readonly TranslateLine: UIDragDetectorDragStyle;
+		readonly TranslateLineOrPlane: UIDragDetectorDragStyle;
+		readonly Rotate: UIDragDetectorDragStyle;
+		readonly Scriptable: UIDragDetectorDragStyle;
+	};
+	const UIDragDetectorDragStyleResponse: {
+		readonly Offset: UIDragDetectorDragStyleResponse;
+		readonly Scale: UIDragDetectorDragStyleResponse;
+		readonly CustomOffset: UIDragDetectorDragStyleResponse;
+		readonly CustomScale: UIDragDetectorDragStyleResponse;
+	};
 	const UIFlexAlignment: {
 		readonly None: UIFlexAlignment;
 		readonly Fill: UIFlexAlignment;
@@ -659,6 +706,10 @@ declare namespace Enum {
 		readonly Top: VerticalAlignment;
 		readonly Center: VerticalAlignment;
 		readonly Bottom: VerticalAlignment;
+	};
+	const VerticalScrollBarPosition: {
+		readonly Right: VerticalScrollBarPosition;
+		readonly Left: VerticalScrollBarPosition;
 	};
 	const ZIndexBehavior: {
 		readonly Global: ZIndexBehavior;
@@ -921,6 +972,9 @@ declare interface Instance {
 	readonly MouseEnter: PointerSignal;
 	readonly MouseLeave: PointerSignal;
 	readonly MouseMoved: PointerSignal;
+	readonly DragStart: DragSignal;
+	readonly DragContinue: DragSignal;
+	readonly DragEnd: DragSignal;
 	readonly Focused: FocusSignal;
 	readonly FocusLost: FocusLostSignal;
 	GetGuiObjectsAtPosition(x: number, y: number): Instance[];
@@ -1226,10 +1280,17 @@ declare interface GuiObject extends GuiBase2d {
 	BorderMode: Enum.BorderMode;
 	BorderSizePixel: number;
 	ClipsDescendants: boolean;
+	Interactable: boolean;
 	LayoutOrder: number;
+	NextSelectionDown: Instance;
+	NextSelectionLeft: Instance;
+	NextSelectionRight: Instance;
+	NextSelectionUp: Instance;
 	Position: UDim2;
 	Rotation: number;
 	Selectable: boolean;
+	SelectionImageObject: Instance;
+	SelectionOrder: number;
 	Size: UDim2;
 	SizeConstraint: Enum.SizeConstraint;
 	Visible: boolean;
@@ -1245,12 +1306,23 @@ declare interface CanvasGroup extends Frame {
 }
 
 declare interface ScrollingFrame extends Frame {
+	readonly AbsoluteCanvasSize: Vector2;
+	readonly AbsoluteWindowSize: Vector2;
+	AutomaticCanvasSize: Enum.AutomaticSize;
+	BottomImage: string;
 	CanvasPosition: Vector2;
 	CanvasSize: UDim2;
+	ElasticBehavior: Enum.ElasticBehavior;
+	HorizontalScrollBarInset: Enum.ScrollBarInset;
+	MidImage: string;
 	ScrollBarImageColor3: Color3;
 	ScrollBarImageTransparency: number;
 	ScrollBarThickness: number;
 	ScrollingDirection: Enum.ScrollingDirection;
+	ScrollingEnabled: boolean;
+	TopImage: string;
+	VerticalScrollBarInset: Enum.ScrollBarInset;
+	VerticalScrollBarPosition: Enum.VerticalScrollBarPosition;
 }
 
 declare interface GuiButton extends GuiObject {
@@ -1258,10 +1330,15 @@ declare interface GuiButton extends GuiObject {
 }
 
 declare interface TextButton extends GuiButton {
+	readonly ContentText: string;
 	Font: Enum.Font;
 	LineHeight: number;
+	MaxVisibleGraphemes: number;
+	RichText: boolean;
 	Text: string;
+	readonly TextBounds: Vector2;
 	TextColor3: Color3;
+	readonly TextFits: boolean;
 	TextScaled: boolean;
 	TextSize: number;
 	TextStrokeColor3: Color3;
@@ -1274,11 +1351,14 @@ declare interface TextButton extends GuiButton {
 }
 
 declare interface ImageButton extends GuiButton {
+	HoverImage: string;
 	Image: string;
 	ImageColor3: Color3;
 	ImageRectOffset: Vector2;
 	ImageRectSize: Vector2;
 	ImageTransparency: number;
+	PressedImage: string;
+	ResampleMode: Enum.ResamplerMode;
 	ScaleType: Enum.ScaleType;
 	Shader: string;
 	SliceCenter: Rect;
@@ -1290,10 +1370,15 @@ declare interface GuiLabel extends GuiObject {
 }
 
 declare interface TextLabel extends GuiLabel {
+	readonly ContentText: string;
 	Font: Enum.Font;
 	LineHeight: number;
+	MaxVisibleGraphemes: number;
+	RichText: boolean;
 	Text: string;
+	readonly TextBounds: Vector2;
 	TextColor3: Color3;
+	readonly TextFits: boolean;
 	TextScaled: boolean;
 	TextSize: number;
 	TextStrokeColor3: Color3;
@@ -1311,6 +1396,7 @@ declare interface ImageLabel extends GuiLabel {
 	ImageRectOffset: Vector2;
 	ImageRectSize: Vector2;
 	ImageTransparency: number;
+	ResampleMode: Enum.ResamplerMode;
 	ScaleType: Enum.ScaleType;
 	Shader: string;
 	SliceCenter: Rect;
@@ -1320,16 +1406,21 @@ declare interface ImageLabel extends GuiLabel {
 
 declare interface TextBox extends GuiObject {
 	ClearTextOnFocus: boolean;
+	readonly ContentText: string;
 	CursorPosition: number;
 	Font: Enum.Font;
 	LineHeight: number;
+	MaxVisibleGraphemes: number;
 	MultiLine: boolean;
 	PlaceholderColor3: Color3;
 	PlaceholderText: string;
+	RichText: boolean;
 	SelectionStart: number;
 	Text: string;
+	readonly TextBounds: Vector2;
 	TextColor3: Color3;
 	TextEditable: boolean;
+	readonly TextFits: boolean;
 	TextScaled: boolean;
 	TextSize: number;
 	TextStrokeColor3: Color3;
@@ -1362,23 +1453,35 @@ declare interface ScreenGui extends LayerCollector {
 }
 
 declare interface SurfaceGui extends LayerCollector {
+	Active: boolean;
 	Adornee: Instance;
 	AlwaysOnTop: boolean;
 	Brightness: number;
 	CanvasSize: Vector2;
+	ClipsDescendants: boolean;
 	Face: Enum.NormalId;
 	LightInfluence: number;
+	MaxDistance: number;
 	PixelsPerStud: number;
 	SizingMode: Enum.SurfaceSizingMode;
+	ZOffset: number;
 }
 
 declare interface BillboardGui extends LayerCollector {
+	Active: boolean;
 	Adornee: Instance;
 	AlwaysOnTop: boolean;
+	Brightness: number;
+	ClipsDescendants: boolean;
+	readonly CurrentDistance: number;
+	DistanceStep: number;
 	ExtentsOffset: Vector3;
+	ExtentsOffsetWorldSpace: Vector3;
 	LightInfluence: number;
 	MaxDistance: number;
+	PlayerToHideFrom: Instance;
 	Size: UDim2;
+	SizeOffset: Vector2;
 	StudsOffset: Vector3;
 	StudsOffsetWorldSpace: Vector3;
 }
@@ -1421,6 +1524,24 @@ declare interface UIGridLayout extends UILayout {
 	VerticalAlignment: Enum.VerticalAlignment;
 }
 
+declare interface UITableLayout extends UILayout {
+	FillDirection: Enum.FillDirection;
+	FillEmptySpaceColumns: boolean;
+	FillEmptySpaceRows: boolean;
+	HorizontalAlignment: Enum.HorizontalAlignment;
+	Padding: UDim2;
+	SortOrder: Enum.SortOrder;
+	VerticalAlignment: Enum.VerticalAlignment;
+}
+
+declare interface UIPageLayout extends UILayout {
+	Circular: boolean;
+	CurrentPage: Instance;
+	FillDirection: Enum.FillDirection;
+	Padding: UDim;
+	SortOrder: Enum.SortOrder;
+}
+
 declare interface UIConstraint extends UIComponent {
 }
 
@@ -1452,7 +1573,9 @@ declare interface UICorner extends UIComponent {
 }
 
 declare interface UIStroke extends UIComponent {
+	ApplyStrokeMode: Enum.ApplyStrokeMode;
 	Color: Color3;
+	Enabled: boolean;
 	Thickness: number;
 	Transparency: number;
 }
@@ -1466,6 +1589,24 @@ declare interface UIFlexItem extends UIComponent {
 	GrowRatio: number;
 	ItemLineAlignment: Enum.ItemLineAlignment;
 	ShrinkRatio: number;
+}
+
+declare interface UIGradient extends UIComponent {
+	Color: ColorSequence;
+	Enabled: boolean;
+	Offset: Vector2;
+	Rotation: number;
+	Transparency: NumberSequence;
+}
+
+declare interface UIDragDetector extends UIComponent {
+	BoundingUI: Instance;
+	DragAxis: Vector2;
+	DragStyle: Enum.UIDragDetectorDragStyle;
+	Enabled: boolean;
+	MaxDragTranslation: Vector2;
+	MinDragTranslation: Vector2;
+	ResponseStyle: Enum.UIDragDetectorDragStyleResponse;
 }
 
 declare interface Service extends Instance {
@@ -1989,6 +2130,8 @@ declare const Instance: {
 		(className: "UILayout", parent?: Instance): UILayout;
 		(className: "UIListLayout", parent?: Instance): UIListLayout;
 		(className: "UIGridLayout", parent?: Instance): UIGridLayout;
+		(className: "UITableLayout", parent?: Instance): UITableLayout;
+		(className: "UIPageLayout", parent?: Instance): UIPageLayout;
 		(className: "UIConstraint", parent?: Instance): UIConstraint;
 		(className: "UIAspectRatioConstraint", parent?: Instance): UIAspectRatioConstraint;
 		(className: "UISizeConstraint", parent?: Instance): UISizeConstraint;
@@ -1998,6 +2141,8 @@ declare const Instance: {
 		(className: "UIStroke", parent?: Instance): UIStroke;
 		(className: "UIScale", parent?: Instance): UIScale;
 		(className: "UIFlexItem", parent?: Instance): UIFlexItem;
+		(className: "UIGradient", parent?: Instance): UIGradient;
+		(className: "UIDragDetector", parent?: Instance): UIDragDetector;
 		(className: "Player", parent?: Instance): Player;
 		(className: "Team", parent?: Instance): Team;
 	};

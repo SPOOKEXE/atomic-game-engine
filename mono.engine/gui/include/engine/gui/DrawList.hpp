@@ -25,6 +25,7 @@
 #include <engine/core/Name.hpp>
 #include <engine/core/types/Color3.hpp>
 #include <engine/core/types/Rect.hpp>
+#include <engine/core/types/Sequence.hpp>
 #include <engine/core/types/Vector2.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/gui/Enums.hpp>
@@ -53,6 +54,50 @@ namespace engine::gui {
 
 		// A run of text inside `Bounds`, aligned by the two alignment fields.
 		Text,
+	};
+
+	// One styled stretch of a text run.
+	//
+	// **A range over the command's own string rather than a string of its own.**
+	// The backend is the only thing that can measure a glyph, so a rich-text run
+	// has to reach it as one string it lays out in one pass - spans carrying
+	// their own text would have to be positioned by whoever built them, using
+	// compile-time estimates, and the second word would land somewhere the
+	// renderer disagrees with. That is `Layout.hpp`'s one-answer rule applied to
+	// markup.
+	//
+	// Ranges are byte offsets, in order, and do not overlap. Anything not
+	// covered by a span is drawn in the command's own colour, face and size.
+	//
+	// @since v0.18
+	struct DrawSpan {
+		// The half-open byte range of `DrawCommand::Text` this styles.
+		//@{
+		uint32_t Begin = 0;
+		uint32_t End = 0;
+		//@}
+
+		// The glyph colour over this range.
+		core::Color3 Tint{1.0f, 1.0f, 1.0f};
+
+		// 0 is opaque and 1 is invisible.
+		float Transparency = 0.0f;
+
+		// The em size over this range, or 0 for the command's own.
+		int32_t Size = 0;
+
+		// Which face, by role.
+		FontFace Font = FontFace::Regular;
+
+		// Whether a rule is drawn under or through this range.
+		//@{
+		bool Underline = false;
+		bool Strike = false;
+		//@}
+
+		// Explicit padding, for the reason every `Reserved` in this engine
+		// gives - a `DrawList` reaches a benchmark's hash and a test's compare.
+		uint8_t Reserved[1] = {};
 	};
 
 	// One thing to draw.
@@ -110,6 +155,13 @@ namespace engine::gui {
 
 		// How it fills `Bounds`.
 		ScaleType Scale = ScaleType::Stretch;
+
+		// How its texels are filtered. A backend that has one sampler ignores
+		// this and draws linear, which is the honest degradation: an image is
+		// still in the right place and is merely smoother than asked for.
+		//
+		// @since v0.18
+		ResampleMode Resample = ResampleMode::Default;
 
 		// The nine-slice centre, in image pixels. Only read for `Slice`.
 		core::Rect SliceCenter;
@@ -169,6 +221,57 @@ namespace engine::gui {
 		// The outline around every glyph. A transparency of 1 disables it.
 		core::Color3 StrokeTint;
 		float StrokeTransparency = 1.0f;
+
+		// The styled ranges over `Text`, in order and non-overlapping.
+		//
+		// Empty for an ordinary run, which is almost all of them, and filled by
+		// the rich-text parse. **A backend that ignores this draws the whole run
+		// in the command's own colour and face**, which is the right degradation:
+		// the words are all there and correct, only the emphasis is missing.
+		//
+		// @since v0.18
+		std::vector<DrawSpan> Spans;
+
+		// --- gradient --------------------------------------------------------
+
+		// Which of `DrawList::Gradients` ramps this command, or -1 for none.
+		//
+		// **An index into a side table rather than the ramp itself.** A
+		// `core::ColorSequence` and a `core::NumberSequence` together are over
+		// six hundred bytes, and almost no command has one - carrying them
+		// inline would make every rectangle in every interface pay for a feature
+		// a handful of them use. The table is per frame and shared by the
+		// several commands one element emits, which is also what lets a backend
+		// batch by "same ramp" if it ever wants to.
+		//
+		// @since v0.18
+		int32_t Gradient = -1;
+	};
+
+	// A colour and transparency ramp, resolved into the space it applies to.
+	//
+	// **Already in canvas pixels, like everything else here.** `gui::Gradient`
+	// authors an offset in multiples of the parent's size and a rotation in
+	// degrees; what a backend needs is the two ends of the line the ramp runs
+	// along, so the compile resolves the one into the other and a backend
+	// projects each point onto `Axis` and samples.
+	//
+	// @since v0.18
+	struct DrawGradient {
+		// The colour multiplied into whatever the command already draws.
+		core::ColorSequence Color;
+
+		// The transparency added to whatever the command already has.
+		core::NumberSequence Transparency;
+
+		// Where the ramp starts, in canvas pixels, before any rotation the
+		// command itself carries.
+		core::Vector2 Origin;
+
+		// From `Origin` to where the ramp ends. A point's position on the ramp
+		// is its projection onto this, divided by this vector's own square
+		// length - which is the whole of the arithmetic a backend does.
+		core::Vector2 Axis;
 	};
 
 	// A whole frame's worth, in paint order.
@@ -179,6 +282,9 @@ namespace engine::gui {
 		// this list is drawn over one earlier in it, and the hit test walks it
 		// backwards for exactly that reason.
 		std::vector<DrawCommand> Commands;
+
+		// The ramps `DrawCommand::Gradient` indexes. Usually empty.
+		std::vector<DrawGradient> Gradients;
 
 		// The canvas this was compiled against, in pixels.
 		core::Vector2 CanvasSize;

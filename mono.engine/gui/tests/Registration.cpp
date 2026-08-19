@@ -36,11 +36,39 @@ namespace {
 	// is what makes it show up as a failing test rather than as a save that
 	// loads into a narrower world.
 	const std::vector<std::string_view> EXPECTED_COMPONENTS{
-		"gui.Element",	  "gui.Background",	 "gui.Label",	   "gui.Picture",		 "gui.Button",
-		"gui.Scrolling",  "gui.Entry",		 "gui.Layer",	   "gui.Canvas",		 "gui.Surface",
-		"gui.Billboard",  "gui.Group",		 "gui.Viewport",   "gui.Padding",		 "gui.ListLayout",
-		"gui.GridLayout", "gui.AspectRatio", "gui.SizeLimits", "gui.TextSizeLimits", "gui.Corner",
-		"gui.Stroke",	  "gui.Scale",		 "gui.Resolved",   "gui.FlexItem",
+		"gui.Element",
+		"gui.Background",
+		"gui.Label",
+		"gui.Picture",
+		"gui.Button",
+		"gui.Scrolling",
+		"gui.Entry",
+		"gui.Layer",
+		"gui.Canvas",
+		"gui.Surface",
+		"gui.Billboard",
+		"gui.Group",
+		"gui.Viewport",
+		"gui.Padding",
+		"gui.ListLayout",
+		"gui.GridLayout",
+		"gui.AspectRatio",
+		"gui.SizeLimits",
+		"gui.TextSizeLimits",
+		"gui.Corner",
+		"gui.Stroke",
+		"gui.Scale",
+		"gui.Resolved",
+		"gui.FlexItem",
+
+		// v0.18: the gradient, the scrolling frame's derived state, the
+		// selection handles, and the two layouts that arrived with them.
+		"gui.Gradient",
+		"gui.ScrollState",
+		"gui.Selection",
+		"gui.TableLayout",
+		"gui.PageLayout",
+		"gui.DragDetector",
 	};
 }
 
@@ -70,12 +98,12 @@ TEST_CASE("the class tree registers every promised class", "[gui][registration]"
 	// The list is a contract in both directions: a class registered and not
 	// listed would go unmentioned by the palette and the manifest.
 	//
-	// **Forty-six**: the thirty-four of the 2D tree, `GuiService`, and the
-	// eleven of the 3D branch. The service is in this list rather than in
+	// **Fifty**: the thirty-eight of the 2D tree, `GuiService`, and the eleven
+	// of the 3D branch. The service is in this list rather than in
 	// `scene`'s because it is a `gui` class - the two modules may not link each
 	// other - and it is registered at all because it owns the selection, which
 	// is what finally gave `GuiObject::Selectable` a reader.
-	CHECK(GuiClassNames().size() == 46);
+	CHECK(GuiClassNames().size() == 50);
 }
 
 TEST_CASE("the 2D tree descends the way a script expects", "[gui][registration]") {
@@ -130,8 +158,15 @@ TEST_CASE("the property surface exposes no controls without consumers", "[gui][r
 	// would turn a successful write into a visible no-op.
 	CHECK_FALSE(has("TextButton", "Modal"));
 	CHECK_FALSE(has("TextButton", "Selected"));
-	CHECK_FALSE(has("ScrollingFrame", "ScrollingEnabled"));
-	CHECK_FALSE(has("ScrollingFrame", "AutomaticCanvasSize"));
+
+	// **`ScrollingEnabled` and `AutomaticCanvasSize` left this list at v0.18**,
+	// which is what the list is for: the rule is that a property appears when
+	// something reads it, and both are now read - the first by `gui::Router`,
+	// which is what a wheel and a bar drag go through, and the second by
+	// `gui::ContentArea`, which measures the content back into the canvas.
+	CHECK(has("ScrollingFrame", "ScrollingEnabled"));
+	CHECK(has("ScrollingFrame", "AutomaticCanvasSize"));
+
 	CHECK_FALSE(has("SelectionBox", "LineThickness"));
 	CHECK_FALSE(has("SelectionBox", "SurfaceColor3"));
 	CHECK_FALSE(has("SelectionBox", "SurfaceTransparency"));
@@ -163,6 +198,8 @@ TEST_CASE("a fully populated Label round-trips through its serialiser", "[gui][r
 	written.StrokeColor = engine::core::Color3{0.4f, 0.5f, 0.6f};
 	written.StrokeTransparency = 0.75f;
 	written.LineHeight = 1.5f;
+	written.MaxVisible = 9;
+	written.Rich = true;
 
 	const TypeDescriptor &descriptor = Components::Describe(Components::Of<Label>());
 
@@ -188,6 +225,8 @@ TEST_CASE("a fully populated Label round-trips through its serialiser", "[gui][r
 	CHECK(read.StrokeColor.R == written.StrokeColor.R);
 	CHECK(read.StrokeTransparency == written.StrokeTransparency);
 	CHECK(read.LineHeight == written.LineHeight);
+	CHECK(read.MaxVisible == written.MaxVisible);
+	CHECK(read.Rich == written.Rich);
 }
 
 TEST_CASE("a fully populated Picture round-trips through its serialiser", "[gui][registration]") {
@@ -204,6 +243,9 @@ TEST_CASE("a fully populated Picture round-trips through its serialiser", "[gui]
 	written.RectOffset = engine::core::Vector2{11.0f, 12.0f};
 	written.RectSize = engine::core::Vector2{13.0f, 14.0f};
 	written.Shader = Name("toon");
+	written.HoverImage = Name("rbxasset://textures/panel-hover.png");
+	written.PressedImage = Name("rbxasset://textures/panel-press.png");
+	written.Resample = ResampleMode::Pixelated;
 
 	const TypeDescriptor &descriptor = Components::Describe(Components::Of<Picture>());
 
@@ -223,6 +265,9 @@ TEST_CASE("a fully populated Picture round-trips through its serialiser", "[gui]
 	CHECK(read.RectOffset == written.RectOffset);
 	CHECK(read.RectSize == written.RectSize);
 	CHECK(read.Shader == written.Shader);
+	CHECK(read.HoverImage == written.HoverImage);
+	CHECK(read.PressedImage == written.PressedImage);
+	CHECK(read.Resample == written.Resample);
 }
 
 TEST_CASE("a text box's caret does not cross a save", "[gui][registration]") {

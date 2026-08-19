@@ -81,6 +81,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] show Universe in Explorer with mutable execution mode, maximum catch-up ticks, bus budget, channel queue limit and channels-per-world; show federated mode, world counts, fault counts, tick cost and bus traffic read-only
 - [x] build ui features out (more roblox): flex list layouts - `UIListLayout` `Wraps`/`HorizontalFlex`/`VerticalFlex`/`ItemLineAlignment` and `UIFlexItem` with `FlexMode`/`GrowRatio`/`ShrinkRatio`, laid out, saved, bound and in the Properties panel
 - [x] build out code editor with auto complete (more vs-code like, hover on keywords, right-side minimap) - hover tooltips from the same language-aware surface the completion uses, a run-stripe minimap with click/drag scroll, Tab accepts, matched prefix highlighted, kind/doc footer on the list
+- [_] add per-world physics tick-rate and replication tick-rate
 
 ### v0.18
 
@@ -90,10 +91,11 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] properly make a ECS component document list so i can see all components and what they're for
 - [_] clean up all ECS components that exist and find better ways to represent stuff (e.g. merge, split, rename).
 - [_] in the engine, rename Anchored to Static, keep roblox shim as Anchored but refer to static when changing property
+- [_] think plan for future features as well listed in roadmap and 
 
 ### v0.19
 
-- [_] thoroughly implement every user-interface element, including `SurfaceGui` and `BillboardGui`
+- [x] thoroughly implement every user-interface element, including `SurfaceGui` and `BillboardGui` - `SurfaceGui` gains `ZOffset`, `MaxDistance`, `ClipsDescendants` and `Active`, and `BillboardGui` gains `Active`, `Brightness`, `ClipsDescendants`, `CurrentDistance`, `DistanceStep`, `ExtentsOffsetWorldSpace`, `SizeOffset` and `PlayerToHideFrom`; new classes `UIGradient`, `UITableLayout`, `UIPageLayout` and `UIDragDetector`; `ScrollingFrame` completed with `ScrollingEnabled`, `AutomaticCanvasSize`, the two `ScrollBarInset`s, `VerticalScrollBarPosition`, `ElasticBehavior`, the three bar images and `AbsoluteCanvasSize`/`AbsoluteWindowSize`, plus wheel and thumb-drag input; `RichText`, `MaxVisibleGraphemes`, `ContentText`, `TextBounds` and `TextFits` on every text class; `Interactable`, the four `NextSelection*`, `SelectionOrder` and `SelectionImageObject` on `GuiObject`; `HoverImage`, `PressedImage` and `ResampleMode` on the image classes; `Enabled` and `ApplyStrokeMode` on `UIStroke`. Laid out, drawn by both backends, saved, replicated, bound and in the Properties panel. `D00120` carries the members that need a subsystem this engine has not got
 - [_] build out all remaining roblox surfaces with available underlying surface
 - [_] port many particle features from unity to here (https://docs.unity3d.com/6000.5/Documentation/ScriptReference/ParticleSystem.html)
 - [_] full particle demo (try reach 5 million rendering particles)
@@ -105,6 +107,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] simplify and strip old rendering code that is not part of the node system. Everything should be in the node system.
 - [_] port semi-real raytrace and path-trace as part of nodes
 - [_] make demo render pipelines with semi-real raytrace and path-trace
+- [_] (dynamic) ambient occulusion, screen-space, fog, atmosphere, clouds, global illumination, displacement maps (make it rendering only but not physical)
 - [_] render pipeline nodes for above
 - [_] plan the entire rendering system to a visual compositor system like Unity. https://docs.unity3d.com/Manual/scriptable-render-pipeline-introduction.html https://docs.unity3d.com/Packages/com.unity.visual-compositor@0.27/manual/nodes.html
 
@@ -138,3 +141,6 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] deferred `D00106` - JavaScript and TypeScript breakpoints. The vendored QuickJS exposes no line hook and no debugger API at all, so this is a submodule decision rather than a feature. Asking for one on a .js/.ts chunk is refused with the reason, at the service, the gutter and the panel alike. **The TypeScript half of the entry shipped at v0.15 and is not part of this** - source maps are emitted and read, so the lines a debugger would land on are already the right ones.
 - [_] full audio DAW (digital audio workbench) system
 - [_] embedded whiteboxing tools (planning)
+- [_] full procedural terrain studio tools
+- [_] full ui features
+- [_] level-of-details (4 different meshes version, auto-decimate version, smart-triangle-reduction-version thinking of nanite triangle surface area)

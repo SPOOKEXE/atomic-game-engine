@@ -64,6 +64,16 @@ namespace engine::gui {
 		return "Stretch";
 	}
 
+	const char *Describe(ResampleMode value) {
+		switch (value) {
+		case ResampleMode::Default:
+			return "Default";
+		case ResampleMode::Pixelated:
+			return "Pixelated";
+		}
+		return "Default";
+	}
+
 	const char *Describe(TextXAlignment value) {
 		switch (value) {
 		case TextXAlignment::Left:
@@ -202,6 +212,80 @@ namespace engine::gui {
 			return "XY";
 		}
 		return "Y";
+	}
+
+	const char *Describe(StrokeMode value) {
+		switch (value) {
+		case StrokeMode::Contextual:
+			return "Contextual";
+		case StrokeMode::Border:
+			return "Border";
+		}
+		return "Contextual";
+	}
+
+	const char *Describe(DragStyle value) {
+		switch (value) {
+		case DragStyle::TranslatePlane:
+			return "TranslatePlane";
+		case DragStyle::TranslateLine:
+			return "TranslateLine";
+		case DragStyle::TranslateLineOrPlane:
+			return "TranslateLineOrPlane";
+		case DragStyle::Rotate:
+			return "Rotate";
+		case DragStyle::Scriptable:
+			return "Scriptable";
+		}
+		return "TranslatePlane";
+	}
+
+	const char *Describe(DragResponse value) {
+		switch (value) {
+		case DragResponse::Offset:
+			return "Offset";
+		case DragResponse::Scale:
+			return "Scale";
+		case DragResponse::CustomOffset:
+			return "CustomOffset";
+		case DragResponse::CustomScale:
+			return "CustomScale";
+		}
+		return "Offset";
+	}
+
+	const char *Describe(ElasticBehavior value) {
+		switch (value) {
+		case ElasticBehavior::WhenScrollable:
+			return "WhenScrollable";
+		case ElasticBehavior::Always:
+			return "Always";
+		case ElasticBehavior::Never:
+			return "Never";
+		}
+		return "WhenScrollable";
+	}
+
+	const char *Describe(ScrollBarInset value) {
+		switch (value) {
+		case ScrollBarInset::None:
+			return "None";
+		case ScrollBarInset::ScrollBar:
+			return "ScrollBar";
+		case ScrollBarInset::Always:
+			return "Always";
+		}
+		return "None";
+	}
+
+	const char *Describe(BarPosition value) {
+		switch (value) {
+		case BarPosition::Right:
+			return "Right";
+		case BarPosition::Left:
+			return "Left";
+		}
+		return "Right";
 	}
 
 	const char *Describe(FlexAlignment value) {

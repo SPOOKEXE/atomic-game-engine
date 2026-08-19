@@ -44,6 +44,12 @@ namespace engine::gui {
 				writer.WriteFloat(label.StrokeColor.B);
 				writer.WriteFloat(label.StrokeTransparency);
 				writer.WriteFloat(label.LineHeight);
+
+				// **Added at v0.18, in the same breath as the fields.** This
+				// pair is exactly the discipline the comment above this function
+				// exists to keep, and the reason it is written down twice.
+				writer.WriteInt32(label.MaxVisible);
+				writer.WriteBool(label.Rich);
 			}
 		}
 
@@ -68,6 +74,8 @@ namespace engine::gui {
 				label.StrokeColor.B = reader.ReadFloat();
 				label.StrokeTransparency = reader.ReadFloat();
 				label.LineHeight = reader.ReadFloat();
+				label.MaxVisible = reader.ReadInt32();
+				label.Rich = reader.ReadBool();
 			}
 		}
 
@@ -99,6 +107,12 @@ namespace engine::gui {
 				// `WriteVisuals`' own comment for what happens when that
 				// discipline slips.**
 				writer.WriteName(picture.Shader);
+
+				// **Added at v0.18, in the same breath as the fields**, which is
+				// the discipline the comment above exists to keep.
+				writer.WriteName(picture.HoverImage);
+				writer.WriteName(picture.PressedImage);
+				writer.WriteInt8(static_cast<int8_t>(picture.Resample));
 			}
 		}
 
@@ -126,6 +140,9 @@ namespace engine::gui {
 				picture.RectSize.X = reader.ReadFloat();
 				picture.RectSize.Y = reader.ReadFloat();
 				picture.Shader = reader.ReadName();
+				picture.HoverImage = reader.ReadName();
+				picture.PressedImage = reader.ReadName();
+				picture.Resample = static_cast<ResampleMode>(reader.ReadInt8());
 			}
 		}
 
@@ -236,5 +253,22 @@ namespace engine::gui {
 		// the list is append-only because ids decide archetype column order,
 		// so arriving at v0.17 puts it here rather than beside `Scale`.
 		ecs::Components::Register<FlexItem>("gui.FlexItem");
+
+		// Append-only, for the reason above. Trivially copyable despite holding
+		// two sequences - `core::Sequence` is fixed-capacity precisely so that a
+		// ramp can be a component, and its own header carries the argument.
+		ecs::Components::Register<Gradient>("gui.Gradient");
+
+		// Derived, so it belongs with `Resolved` by nature and at the end by
+		// rule. Excluded from replication for `Resolved`'s exact reason: every
+		// client recomputes it from the tree it was sent, and a bar sized on the
+		// authority's canvas is a bar sized for somebody else's window.
+		ecs::Components::Register<ScrollState>("gui.ScrollState");
+
+		// Authored, and still at the end because the list is append-only.
+		ecs::Components::Register<Selection>("gui.Selection");
+		ecs::Components::Register<TableLayout>("gui.TableLayout");
+		ecs::Components::Register<PageLayout>("gui.PageLayout");
+		ecs::Components::Register<DragDetector>("gui.DragDetector");
 	}
 }

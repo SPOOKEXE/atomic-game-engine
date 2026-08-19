@@ -199,6 +199,12 @@ namespace engine::render {
 		void *SpatialPipeline = nullptr;
 		void *SpatialTopPipeline = nullptr;
 		void *Sampler = nullptr;
+
+		// The nearest-filter twin, for `gui::ResampleMode::Pixelated`. See
+		// `Initialise` for why it is a second sampler and not a second pipeline.
+		//
+		// @since v0.18
+		void *PixelSampler = nullptr;
 		void *AtlasTexture = nullptr;
 		void *AtlasTransferBuffer = nullptr;
 		uint32_t SwapchainFormat = 0;
