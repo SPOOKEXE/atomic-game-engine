@@ -91,7 +91,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] properly make a ECS component document list so i can see all components and what they're for
 - [_] clean up all ECS components that exist and find better ways to represent stuff (e.g. merge, split, rename).
 - [_] in the engine, rename Anchored to Static, keep roblox shim as Anchored but refer to static when changing property
-- [_] think plan for future features as well listed in roadmap and 
+- [_] think plan for future features as well listed in roadmap and plan for them now
 
 ### v0.19
 
