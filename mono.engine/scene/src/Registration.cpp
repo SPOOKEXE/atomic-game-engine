@@ -5,9 +5,9 @@
 #include <engine/scene/Audio.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Controls.hpp>
 #include <engine/scene/EditableImage.hpp>
 #include <engine/scene/EditableMesh.hpp>
-#include <engine/scene/Controls.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/Materials.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
@@ -776,12 +776,16 @@ namespace engine::scene {
 		// **What an `EditableMesh` instance holds, beside the shader source
 		// for the same registration-order reason.** A written pair because it
 		// holds five `std::vector`s, not because it holds a name.
-		ecs::Components::Register<EditableMesh>("scene.EditableMesh", WriteEditableMeshes, ReadEditableMeshes);
+		ecs::Components::Register<EditableMesh>(
+			"scene.EditableMesh", WriteEditableMeshes, ReadEditableMeshes
+		);
 
 		// **What an `EditableImage` instance holds, beside its mesh
 		// counterpart for the identical reason.** A written pair because it
 		// holds a `std::vector<uint8_t>` of raw pixels.
-		ecs::Components::Register<EditableImage>("scene.EditableImage", WriteEditableImages, ReadEditableImages);
+		ecs::Components::Register<EditableImage>(
+			"scene.EditableImage", WriteEditableImages, ReadEditableImages
+		);
 
 		// The render gate, at the end for the reason this list opens with.
 		//
@@ -854,7 +858,9 @@ namespace engine::scene {
 		// than derived, so it is saved rather than reset.** A game that
 		// picked a look for its screen expects a reopened place to still
 		// have it.
-		ecs::Components::Register<PostProcessing>("scene.PostProcessing", WritePostProcessing, ReadPostProcessing);
+		ecs::Components::Register<PostProcessing>(
+			"scene.PostProcessing", WritePostProcessing, ReadPostProcessing
+		);
 
 		// **At the end, which is where a new component goes**, per the ordering
 		// note above: an id decides column order and inserting one beside

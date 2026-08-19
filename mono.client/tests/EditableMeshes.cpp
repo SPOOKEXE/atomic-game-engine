@@ -7,14 +7,14 @@
 // reason. This pins the conversion: what a mesh built one triangle at a time
 // looks like once it is in the format `render::MeshTable::Add` takes.
 
-#include <client/EditableMeshes.hpp>
-
 #include <engine/assets/Mesh.hpp>
 #include <engine/scene/EditableMesh.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+
+#include <client/EditableMeshes.hpp>
 
 TEST_SUITE_ID("client.editablemeshes")
 TEST_DEPENDS("engine.scene.editablemesh")

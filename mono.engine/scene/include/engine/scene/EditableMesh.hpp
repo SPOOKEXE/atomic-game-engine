@@ -186,14 +186,17 @@ namespace engine::scene {
 	// @return `false` when the instance is not an `EditableMesh` or the id
 	//         is out of range.
 	// @since v0.18
-	bool SetVertexPosition(ecs::Store &store, ecs::Entity instance, uint32_t vertex, const core::Vector3 &position);
+	bool SetVertexPosition(
+		ecs::Store &store, ecs::Entity instance, uint32_t vertex, const core::Vector3 &position
+	);
 
 	// Sets one vertex's normal.
 	//
 	// @return `false` when the instance is not an `EditableMesh` or the id
 	//         is out of range.
 	// @since v0.18
-	bool SetVertexNormal(ecs::Store &store, ecs::Entity instance, uint32_t vertex, const core::Vector3 &normal);
+	bool
+	SetVertexNormal(ecs::Store &store, ecs::Entity instance, uint32_t vertex, const core::Vector3 &normal);
 
 	// Sets one vertex's texture coordinate.
 	//
@@ -208,7 +211,11 @@ namespace engine::scene {
 	//         is out of range.
 	// @since v0.18
 	bool SetVertexColor(
-		ecs::Store &store, ecs::Entity instance, uint32_t vertex, const core::Color3 &colour, float alpha = 0.0f
+		ecs::Store &store,
+		ecs::Entity instance,
+		uint32_t vertex,
+		const core::Color3 &colour,
+		float alpha = 0.0f
 	);
 
 	// Empties every array and bumps the revision once.

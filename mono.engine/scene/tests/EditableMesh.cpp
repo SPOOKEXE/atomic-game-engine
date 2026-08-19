@@ -52,7 +52,8 @@ TEST_CASE("AddVertex returns a stable id and defaults sensibly", "[scene][editab
 	REQUIRE(first.has_value());
 	CHECK(*first == 0);
 
-	const auto second = AddVertex(store, mesh, Vector3{4.0f, 5.0f, 6.0f}, Vector3{0.0f, 0.0f, 1.0f}, Vector2{0.5f, 0.5f});
+	const auto second =
+		AddVertex(store, mesh, Vector3{4.0f, 5.0f, 6.0f}, Vector3{0.0f, 0.0f, 1.0f}, Vector2{0.5f, 0.5f});
 	REQUIRE(second.has_value());
 	CHECK(*second == 1);
 
@@ -130,7 +131,9 @@ TEST_CASE("removing the last triangle needs no swap and still shrinks", "[scene]
 	CHECK(store.Get<EditableMesh>(mesh)->Indices.empty());
 }
 
-TEST_CASE("per-vertex attributes are set independently and out of range is refused", "[scene][editablemesh]") {
+TEST_CASE(
+	"per-vertex attributes are set independently and out of range is refused", "[scene][editablemesh]"
+) {
 	Store store("editablemesh.attributes");
 	const Entity mesh = MakeEditableMesh(store);
 	AddVertex(store, mesh, Vector3{});

@@ -4,13 +4,13 @@
 // carries the full argument for why this and not `EditableImageUploader::
 // Refresh` is what gets a unit suite.
 
-#include <client/EditableImages.hpp>
-
 #include <engine/assets/Texture.hpp>
 #include <engine/scene/EditableImage.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+
+#include <client/EditableImages.hpp>
 
 TEST_SUITE_ID("client.editableimages")
 TEST_DEPENDS("engine.scene.editableimage")
@@ -35,7 +35,7 @@ TEST_CASE("the pixel bytes cross unchanged", "[client][editableimages]") {
 	image.Height = 1;
 	image.Pixels.assign(2 * 1 * 4, 0);
 	image.Pixels[0] = 200; // R of the first pixel
-	image.Pixels[7] = 77; // A of the second pixel
+	image.Pixels[7] = 77;  // A of the second pixel
 
 	const engine::assets::TextureData built = client::BuildTextureData(image);
 

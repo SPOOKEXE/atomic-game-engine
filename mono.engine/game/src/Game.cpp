@@ -1232,8 +1232,7 @@ namespace engine::game {
 				);
 				settings.BusBudgetPerTick = CountOf(*child, "busBudget", settings.BusBudgetPerTick);
 				settings.ChannelQueueLimit = CountOf(*child, "channelQueue", settings.ChannelQueueLimit);
-				settings.ChannelsPerWorld =
-					CountOf(*child, "channelsPerWorld", settings.ChannelsPerWorld);
+				settings.ChannelsPerWorld = CountOf(*child, "channelsPerWorld", settings.ChannelsPerWorld);
 
 				// These are authored tuning, so opening a game applies the same
 				// values its file reports. Federation alone remains

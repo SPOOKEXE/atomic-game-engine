@@ -166,8 +166,9 @@ namespace engine::scene {
 				requested += rate;
 			}
 			if (requested != 0.0f) {
-				controller->Distance =
-					std::clamp(controller->Distance + requested, controller->MinimumDistance, controller->MaximumDistance);
+				controller->Distance = std::clamp(
+					controller->Distance + requested, controller->MinimumDistance, controller->MaximumDistance
+				);
 				moved = true;
 			}
 		}

@@ -103,10 +103,14 @@ namespace engine::render {
 		// through the exact door a `Material` selecting the same name does.
 		gui::DemandedShaders(store, State->GuiDemanded);
 		State->Demanded.insert(State->Demanded.end(), State->GuiDemanded.begin(), State->GuiDemanded.end());
-		std::sort(State->Demanded.begin(), State->Demanded.end(), [](const core::Name &left, const core::Name &right) {
-			return left.Id() < right.Id();
-		});
-		State->Demanded.erase(std::unique(State->Demanded.begin(), State->Demanded.end()), State->Demanded.end());
+		std::sort(
+			State->Demanded.begin(),
+			State->Demanded.end(),
+			[](const core::Name &left, const core::Name &right) { return left.Id() < right.Id(); }
+		);
+		State->Demanded.erase(
+			std::unique(State->Demanded.begin(), State->Demanded.end()), State->Demanded.end()
+		);
 
 		// **Dropped first, so a name that stops being asked for and starts again
 		// in the same call is resolved rather than skipped.** That is not a

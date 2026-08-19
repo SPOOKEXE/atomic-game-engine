@@ -49,7 +49,8 @@ namespace engine::scene {
 
 			const auto mix = [&](uint8_t under, float over) {
 				const float dstColour = static_cast<float>(under) / 255.0f;
-				const float outColour = (over * srcAlpha + dstColour * dstAlpha * (1.0f - srcAlpha)) / outAlpha;
+				const float outColour =
+					(over * srcAlpha + dstColour * dstAlpha * (1.0f - srcAlpha)) / outAlpha;
 				return static_cast<uint8_t>(std::clamp(outColour * 255.0f, 0.0f, 255.0f));
 			};
 			image.Pixels[offset + 0] = mix(image.Pixels[offset + 0], colour.R);
@@ -158,7 +159,8 @@ namespace engine::scene {
 		const int32_t bottom = static_cast<int32_t>(std::ceil(position.Y + size.Y));
 
 		for (int32_t y = std::max(0, top); y < std::min(bottom, static_cast<int32_t>(image->Height)); y++) {
-			for (int32_t x = std::max(0, left); x < std::min(right, static_cast<int32_t>(image->Width)); x++) {
+			for (int32_t x = std::max(0, left); x < std::min(right, static_cast<int32_t>(image->Width));
+				 x++) {
 				Blend(*image, x, y, colour, alpha);
 			}
 		}
@@ -242,7 +244,8 @@ namespace engine::scene {
 		const int64_t squared = static_cast<int64_t>(r) * r;
 		for (int32_t y = std::max(0, cy - r); y <= std::min(cy + r, static_cast<int32_t>(image->Height) - 1);
 			 y++) {
-			for (int32_t x = std::max(0, cx - r); x <= std::min(cx + r, static_cast<int32_t>(image->Width) - 1);
+			for (int32_t x = std::max(0, cx - r);
+				 x <= std::min(cx + r, static_cast<int32_t>(image->Width) - 1);
 				 x++) {
 				const int64_t dx = x - cx;
 				const int64_t dy = y - cy;

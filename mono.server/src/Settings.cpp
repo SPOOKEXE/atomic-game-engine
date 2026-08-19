@@ -196,9 +196,8 @@ namespace server {
 		options.IdentityKey = std::string(Flag("server.identity-key").Text());
 
 		options.ProfilePath = std::filesystem::path(Flag("server.profile-out").Text());
-		options.ProfileWindowTicks = static_cast<uint64_t>(std::max<int64_t>(
-			0, Flag("server.profile-window").Integer()
-		));
+		options.ProfileWindowTicks =
+			static_cast<uint64_t>(std::max<int64_t>(0, Flag("server.profile-window").Integer()));
 
 		options.ControlPort = static_cast<int>(Flag("server.control-port").Integer());
 

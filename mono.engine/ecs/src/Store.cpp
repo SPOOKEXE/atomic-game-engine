@@ -1134,9 +1134,8 @@ namespace engine::ecs {
 		VisitChangedRuns(terms, component, body);
 	}
 
-	void Store::EachRuns(
-		ComponentId component, const std::function<void(const Entity *, void *, size_t)> &body
-	) {
+	void
+	Store::EachRuns(ComponentId component, const std::function<void(const Entity *, void *, size_t)> &body) {
 		RequireOwningThread("EachRuns");
 		if (!component.IsValid()) {
 			return;
@@ -1169,10 +1168,14 @@ namespace engine::ecs {
 				// A tag has no column - see `VisitChanged` on why `Columns` is
 				// null for one - so there are no bytes to hand back, only entities.
 				auto *values = stride == 0 || valueChunks == nullptr
-									? nullptr
-									: static_cast<std::byte *>(valueChunks[chunk]);
+								   ? nullptr
+								   : static_cast<std::byte *>(valueChunks[chunk]);
 
-				body(slice.Entities + row, values == nullptr ? nullptr : values + (row - base) * stride, end - row);
+				body(
+					slice.Entities + row,
+					values == nullptr ? nullptr : values + (row - base) * stride,
+					end - row
+				);
 				row = end;
 			}
 		});

@@ -757,8 +757,8 @@ namespace engine::script {
 		void EditableMeshAddVertex(ScriptCall &call) {
 			const core::Vector3 position = AsVector3(call, 0, "AddVertex");
 			const core::Vector3 normal = call.Arguments() > 1 && !call.IsNil(1)
-				? AsVector3(call, 1, "AddVertex")
-				: core::Vector3{0.0f, 1.0f, 0.0f};
+											 ? AsVector3(call, 1, "AddVertex")
+											 : core::Vector3{0.0f, 1.0f, 0.0f};
 			const core::Vector2 uv =
 				call.Arguments() > 2 && !call.IsNil(2) ? AsVector2(call, 2, "AddVertex") : core::Vector2{};
 

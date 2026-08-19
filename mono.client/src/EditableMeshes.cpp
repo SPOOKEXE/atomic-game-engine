@@ -1,9 +1,9 @@
-#include <client/EditableMeshes.hpp>
-
 #include <engine/assets/Mesh.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/scene/EditableMesh.hpp>
+
+#include <client/EditableMeshes.hpp>
 
 namespace client {
 
@@ -63,31 +63,30 @@ namespace client {
 	size_t EditableMeshUploader::Refresh(engine::ecs::Store &store, engine::render::Renderer &renderer) {
 		size_t uploaded = 0;
 
-		store.Each<const engine::scene::EditableMesh>(
-			[&](engine::ecs::Entity entity, const engine::scene::EditableMesh &mesh) {
-				const auto found = Uploaded.find(entity.Id);
-				if (found != Uploaded.end() && found->second == mesh.Revision) {
-					// The steady state: an integer compare, for
-					// `ShaderLibrary::Refresh`'s exact reason.
-					return;
-				}
-
-				const engine::assets::MeshData built = BuildMeshData(mesh);
-				if (!built.IsValid()) {
-					// An author mid-edit - vertices added, no triangle yet -
-					// is the ordinary state right after `Instance.
-					// new("EditableMesh")` and must not be reported as a
-					// failure.
-					return;
-				}
-
-				const engine::core::Name name = engine::scene::EditableMeshContentName(store, entity);
-				if (renderer.AddMesh(name, built)) {
-					Uploaded[entity.Id] = mesh.Revision;
-					uploaded++;
-				}
+		store.Each<const engine::scene::EditableMesh>([&](engine::ecs::Entity entity,
+														  const engine::scene::EditableMesh &mesh) {
+			const auto found = Uploaded.find(entity.Id);
+			if (found != Uploaded.end() && found->second == mesh.Revision) {
+				// The steady state: an integer compare, for
+				// `ShaderLibrary::Refresh`'s exact reason.
+				return;
 			}
-		);
+
+			const engine::assets::MeshData built = BuildMeshData(mesh);
+			if (!built.IsValid()) {
+				// An author mid-edit - vertices added, no triangle yet -
+				// is the ordinary state right after `Instance.
+				// new("EditableMesh")` and must not be reported as a
+				// failure.
+				return;
+			}
+
+			const engine::core::Name name = engine::scene::EditableMeshContentName(store, entity);
+			if (renderer.AddMesh(name, built)) {
+				Uploaded[entity.Id] = mesh.Revision;
+				uploaded++;
+			}
+		});
 
 		return uploaded;
 	}

@@ -204,7 +204,8 @@ namespace engine::scene {
 		return true;
 	}
 
-	bool SetVertexNormal(ecs::Store &store, ecs::Entity instance, uint32_t vertex, const core::Vector3 &normal) {
+	bool
+	SetVertexNormal(ecs::Store &store, ecs::Entity instance, uint32_t vertex, const core::Vector3 &normal) {
 		EditableMesh *mesh = store.GetMutable<EditableMesh>(instance);
 		if (mesh == nullptr || vertex >= mesh->Normals.size()) {
 			return false;

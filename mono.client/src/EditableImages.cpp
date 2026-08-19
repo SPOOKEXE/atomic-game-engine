@@ -1,10 +1,9 @@
-#include <client/EditableImages.hpp>
-
 #include <engine/assets/Texture.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/scene/EditableImage.hpp>
 
+#include <client/EditableImages.hpp>
 #include <cstring>
 
 namespace client {
@@ -29,21 +28,20 @@ namespace client {
 	size_t EditableImageUploader::Refresh(engine::ecs::Store &store, engine::render::Renderer &renderer) {
 		size_t uploaded = 0;
 
-		store.Each<const engine::scene::EditableImage>(
-			[&](engine::ecs::Entity entity, const engine::scene::EditableImage &image) {
-				const auto found = Uploaded.find(entity.Id);
-				if (found != Uploaded.end() && found->second == image.Revision) {
-					return;
-				}
-
-				const engine::assets::TextureData built = BuildTextureData(image);
-				const engine::core::Name name = engine::scene::EditableImageContentName(store, entity);
-				if (renderer.AddTexture(name, built)) {
-					Uploaded[entity.Id] = image.Revision;
-					uploaded++;
-				}
+		store.Each<const engine::scene::EditableImage>([&](engine::ecs::Entity entity,
+														   const engine::scene::EditableImage &image) {
+			const auto found = Uploaded.find(entity.Id);
+			if (found != Uploaded.end() && found->second == image.Revision) {
+				return;
 			}
-		);
+
+			const engine::assets::TextureData built = BuildTextureData(image);
+			const engine::core::Name name = engine::scene::EditableImageContentName(store, entity);
+			if (renderer.AddTexture(name, built)) {
+				Uploaded[entity.Id] = image.Revision;
+				uploaded++;
+			}
+		});
 
 		return uploaded;
 	}

@@ -44,7 +44,9 @@ namespace {
 			return {0, 0, 0, 0};
 		}
 		const size_t offset = (static_cast<size_t>(y) * image.Width + x) * 4;
-		return {image.Pixels[offset], image.Pixels[offset + 1], image.Pixels[offset + 2], image.Pixels[offset + 3]};
+		return {
+			image.Pixels[offset], image.Pixels[offset + 1], image.Pixels[offset + 2], image.Pixels[offset + 3]
+		};
 	}
 }
 
@@ -97,7 +99,9 @@ TEST_CASE("DrawRectangle fills exactly its own footprint, clipped to the image",
 	CHECK(PixelAt(*held, 15, 15)[1] == 255);
 }
 
-TEST_CASE("a transparent draw blends towards the new colour rather than replacing it", "[scene][editableimage]") {
+TEST_CASE(
+	"a transparent draw blends towards the new colour rather than replacing it", "[scene][editableimage]"
+) {
 	Store store("editableimage.blend");
 	const Entity image = MakeEditableImage(store);
 	REQUIRE(ResizeEditableImage(store, image, 4, 4));
@@ -137,8 +141,8 @@ TEST_CASE("DrawCircle fills the disc and leaves the corners of its box untouched
 
 	const EditableImage *held = store.Get<EditableImage>(image);
 	CHECK(PixelAt(*held, 10, 10)[3] == 255); // The centre.
-	CHECK(PixelAt(*held, 10, 5)[3] == 255); // On the radius, straight up.
-	CHECK(PixelAt(*held, 0, 0)[3] == 0); // Corner of the bounding box, outside the disc.
+	CHECK(PixelAt(*held, 10, 5)[3] == 255);	 // On the radius, straight up.
+	CHECK(PixelAt(*held, 0, 0)[3] == 0);	 // Corner of the bounding box, outside the disc.
 }
 
 TEST_CASE("every door refuses an instance that is not an EditableImage", "[scene][editableimage]") {

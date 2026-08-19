@@ -2353,7 +2353,8 @@ namespace server {
 			// here has to track a window's spans on its own.
 			if (Settings.ProfileWindowTicks > 0 && !Settings.ProfilePath.empty() &&
 				ticks % Settings.ProfileWindowTicks == 0) {
-				const std::filesystem::path window = Settings.ProfilePath.parent_path() /
+				const std::filesystem::path window =
+					Settings.ProfilePath.parent_path() /
 					(Settings.ProfilePath.stem().string() + ".window" + std::to_string(ticks) +
 					 Settings.ProfilePath.extension().string());
 				engine::core::FrameGraph::WriteFolded(window);

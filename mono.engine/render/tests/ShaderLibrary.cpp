@@ -161,7 +161,9 @@ TEST_CASE("a world's postprocess shader is compiled the same door a material use
 	CHECK(library.Find(Name("Sepia")) == nullptr);
 }
 
-TEST_CASE("an ImageLabel's own shader is compiled by name, the same door a material uses", "[render][shaders]") {
+TEST_CASE(
+	"an ImageLabel's own shader is compiled by name, the same door a material uses", "[render][shaders]"
+) {
 	Store store = Fresh("library.picture");
 	Author(store, "Toon", VALID);
 	SelectImage(store, "Toon");
