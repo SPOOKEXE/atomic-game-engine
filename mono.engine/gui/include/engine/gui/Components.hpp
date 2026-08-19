@@ -591,6 +591,64 @@ namespace engine::gui {
 
 		// What order the children are visited in.
 		SortOrder Order = SortOrder::LayoutOrder;
+
+		// How spare horizontal room is spent - growth or spacing.
+		//
+		// **Named by axis rather than by role, which is Roblox's shape.** In a
+		// horizontal list this is the fill axis and `Fill` grows the children;
+		// in a vertical list it is the cross axis and `Fill` stretches them.
+		//
+		// @since v0.17
+		FlexAlignment HorizontalFlex = FlexAlignment::None;
+
+		// How spare vertical room is spent. The other half of the pair above.
+		//
+		// @since v0.17
+		FlexAlignment VerticalFlex = FlexAlignment::None;
+
+		// Where each child sits across its own line.
+		//
+		// `Automatic` follows the cross-axis alignment - or stretches, when the
+		// cross axis is flexed. A child's own `FlexItem` may override this.
+		//
+		// @since v0.17
+		ItemLineAlignment ItemLine = ItemLineAlignment::Automatic;
+
+		// Whether children start a new line instead of overflowing the fill
+		// axis.
+		//
+		// @since v0.17
+		bool Wraps = false;
+	};
+
+	// How one element trades size for spare room in a flexed list.
+	//
+	// A modifier on the *child* rather than on the layout, which is Roblox's
+	// `UIFlexItem`: the list decides the default and this overrides it for one
+	// element, which is what lets a toolbar hold one spring beside fixed
+	// buttons.
+	//
+	// @since v0.17
+	struct FlexItem {
+		// How much of the spare room this element takes, against its
+		// siblings' ratios. Read only when `Mode` is `Custom`.
+		//
+		// Zero, so a `Custom` item with untouched ratios flexes not at all -
+		// the honest reading of ratios nobody set.
+		float GrowRatio = 0.0f;
+
+		// How much of an overflow this element absorbs. Read only when `Mode`
+		// is `Custom`.
+		float ShrinkRatio = 0.0f;
+
+		// The fixed grow:shrink ratio, or `Custom` for the two fields above.
+		FlexMode Mode = FlexMode::None;
+
+		// Where this element sits across its line, overriding the layout's.
+		ItemLineAlignment ItemLine = ItemLineAlignment::Automatic;
+
+		// Explicit padding, for the reason every other `Reserved` gives.
+		uint8_t Reserved[2] = {};
 	};
 
 	// Places the parent's children on a grid.

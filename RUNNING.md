@@ -869,9 +869,9 @@ its own, and it needs no language server and no configuration:
 | `Ctrl+Space` | offer a list, whatever is under the caret |
 | `.` or `:`, or two characters | offer one automatically |
 | `Up` / `Down` | move through it |
-| `Enter`, or a click | accept |
+| `Enter`, `Tab`, or a click | accept |
 | `Escape` | dismiss |
-| `Tab` | still indents - it is never the accept key |
+| `Tab` with the list closed | indents, as always |
 
 It offers classes inside an `Instance.new` call, properties after a dot, methods
 and signals after a colon, enum sets and their members, the globals of whichever
@@ -893,6 +893,21 @@ because the class is written on the line; one from `FindFirstChild` gets the
 union of every scriptable property instead - a longer list, never a wrong one.
 `D00114` carries what narrowing it would take and why the obvious answer only
 helps one of the two languages.
+
+The list shows the typed prefix highlighted in each row and, under it, what
+kind of thing the chosen row is - for a keyword, its one-line doc.
+
+**Resting the mouse on a word** shows the same information as a tooltip: a
+keyword's doc line, what a global is, an enum set, a class and its parent, a
+sibling instance, a narrowed local's class, or a property's type and declaring
+class. It stays quiet over strings, comments, numbers, empty space and
+anything the editor does not know, and it never appears while the completion
+list is up.
+
+**The minimap** on the code field's right is a shrunken impression of the
+whole file - bright stripes for identifiers, dim for punctuation, since the
+field itself does no syntax tinting - with the visible region marked. Click or
+drag it to scroll.
 
 ### What happens today
 

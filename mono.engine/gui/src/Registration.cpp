@@ -231,5 +231,10 @@ namespace engine::gui {
 		ecs::Components::Register<Adornment>("gui.Adornment");
 		ecs::Components::Register<SelectionOutline>("gui.SelectionOutline");
 		ecs::Components::Register<HandleShape>("gui.HandleShape");
+
+		// A modifier by nature, and still registered after the 3D branch:
+		// the list is append-only because ids decide archetype column order,
+		// so arriving at v0.17 puts it here rather than beside `Scale`.
+		ecs::Components::Register<FlexItem>("gui.FlexItem");
 	}
 }

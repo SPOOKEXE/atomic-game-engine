@@ -220,6 +220,285 @@ TEST_CASE("a list layout stacks children and ignores their positions", "[gui][la
 	}
 }
 
+namespace {
+	// A frame of a fixed pixel size under `parent`, for the flex cases below.
+	// They build wide rows of these and the four lines per child drowned what
+	// each case was actually asserting.
+	Entity Block(World &world, Entity parent, float width, float height) {
+		const Entity made = world.Make("Frame", parent);
+		Element element;
+		element.Size = UDim2{0.0f, width, 0.0f, height};
+		world.Data.Set(made, element);
+		return made;
+	}
+
+	// A container with a horizontal list layout, handing back both.
+	Entity ListIn(World &world, Entity screen, const ListLayout &stack, Entity &layout) {
+		const Entity holder = world.Make("Frame", screen);
+		Element container;
+		container.Size = UDim2{0.0f, 300.0f, 0.0f, 300.0f};
+		world.Data.Set(holder, container);
+
+		layout = world.Make("UIListLayout", holder);
+		world.Data.Set(layout, stack);
+		return holder;
+	}
+}
+
+TEST_CASE("a wrapped list breaks lines at the fill axis", "[gui][layout][flex]") {
+	World world("gui_layout.wraps");
+	const Entity screen = world.Make("ScreenGui");
+
+	ListLayout stack;
+	stack.Direction = FillDirection::Horizontal;
+	stack.Padding = UDim{0.0f, 10.0f};
+	stack.Wraps = true;
+
+	Entity layout;
+	const Entity holder = ListIn(world, screen, stack, layout);
+
+	// Two fit on a line with the gap; the third would land at 380 of 300.
+	Entity rows[3];
+	for (Entity &row : rows) {
+		row = Block(world, holder, 120.0f, 20.0f);
+	}
+
+	Layout(world.Data, world.Display);
+
+	const Vector2 origin = world.Where(holder).AbsolutePosition;
+	CHECK(world.Where(rows[0]).AbsolutePosition.X == Approx(origin.X));
+	CHECK(world.Where(rows[1]).AbsolutePosition.X == Approx(origin.X + 130.0f));
+	CHECK(world.Where(rows[1]).AbsolutePosition.Y == Approx(origin.Y));
+
+	// The second line starts one line's height plus the gap down, at the
+	// left edge again - `Padding` serves both axes, resolved against each.
+	CHECK(world.Where(rows[2]).AbsolutePosition.X == Approx(origin.X));
+	CHECK(world.Where(rows[2]).AbsolutePosition.Y == Approx(origin.Y + 30.0f));
+}
+
+TEST_CASE("Fill on the fill axis grows children to close the container", "[gui][layout][flex]") {
+	World world("gui_layout.flex_fill");
+	const Entity screen = world.Make("ScreenGui");
+
+	ListLayout stack;
+	stack.Direction = FillDirection::Horizontal;
+	stack.HorizontalFlex = FlexAlignment::Fill;
+
+	Entity layout;
+	const Entity holder = ListIn(world, screen, stack, layout);
+	const Entity left = Block(world, holder, 50.0f, 20.0f);
+	const Entity right = Block(world, holder, 50.0f, 20.0f);
+
+	Layout(world.Data, world.Display);
+
+	// 200 spare, split by equal grow weights: 150 each.
+	const float x = world.Where(holder).AbsolutePosition.X;
+	CHECK(world.Where(left).AbsoluteSize.X == Approx(150.0f));
+	CHECK(world.Where(right).AbsoluteSize.X == Approx(150.0f));
+	CHECK(world.Where(left).AbsolutePosition.X == Approx(x));
+	CHECK(world.Where(right).AbsolutePosition.X == Approx(x + 150.0f));
+}
+
+TEST_CASE("a UIFlexItem spring takes the whole of the spare room", "[gui][layout][flex]") {
+	World world("gui_layout.flex_spring");
+	const Entity screen = world.Make("ScreenGui");
+
+	ListLayout stack;
+	stack.Direction = FillDirection::Horizontal;
+
+	Entity layout;
+	const Entity holder = ListIn(world, screen, stack, layout);
+	const Entity leading = Block(world, holder, 50.0f, 20.0f);
+	const Entity spring = Block(world, holder, 50.0f, 20.0f);
+	const Entity trailing = Block(world, holder, 50.0f, 20.0f);
+
+	FlexItem grow;
+	grow.Mode = FlexMode::Grow;
+	world.Data.Set(world.Make("UIFlexItem", spring), grow);
+
+	Layout(world.Data, world.Display);
+
+	// The toolbar shape: fixed buttons at both ends, the spring between them
+	// swallowing the 150 the line had spare.
+	const float x = world.Where(holder).AbsolutePosition.X;
+	CHECK(world.Where(leading).AbsoluteSize.X == Approx(50.0f));
+	CHECK(world.Where(spring).AbsoluteSize.X == Approx(200.0f));
+	CHECK(world.Where(trailing).AbsoluteSize.X == Approx(50.0f));
+	CHECK(world.Where(trailing).AbsolutePosition.X == Approx(x + 250.0f));
+}
+
+TEST_CASE("FlexMode None opts a child out of a Fill row", "[gui][layout][flex]") {
+	World world("gui_layout.flex_optout");
+	const Entity screen = world.Make("ScreenGui");
+
+	ListLayout stack;
+	stack.Direction = FillDirection::Horizontal;
+	stack.HorizontalFlex = FlexAlignment::Fill;
+
+	Entity layout;
+	const Entity holder = ListIn(world, screen, stack, layout);
+	const Entity fixed = Block(world, holder, 50.0f, 20.0f);
+	const Entity growing = Block(world, holder, 50.0f, 20.0f);
+
+	// A `UIFlexItem` at `None` is an override, not an absence - the row is
+	// `Fill` and this child still keeps its authored width.
+	world.Data.Set(world.Make("UIFlexItem", fixed), FlexItem{});
+
+	Layout(world.Data, world.Display);
+
+	CHECK(world.Where(fixed).AbsoluteSize.X == Approx(50.0f));
+	CHECK(world.Where(growing).AbsoluteSize.X == Approx(250.0f));
+}
+
+TEST_CASE("the spacing modes spend spare room as gaps", "[gui][layout][flex]") {
+	World world("gui_layout.flex_spacing");
+	const Entity screen = world.Make("ScreenGui");
+
+	ListLayout between;
+	between.Direction = FillDirection::Horizontal;
+	between.HorizontalFlex = FlexAlignment::SpaceBetween;
+
+	Entity layout;
+	const Entity first = ListIn(world, screen, between, layout);
+	const Entity firstRows[3]{
+		Block(world, first, 60.0f, 20.0f),
+		Block(world, first, 60.0f, 20.0f),
+		Block(world, first, 60.0f, 20.0f),
+	};
+
+	ListLayout evenly = between;
+	evenly.HorizontalFlex = FlexAlignment::SpaceEvenly;
+	const Entity second = ListIn(world, screen, evenly, layout);
+	const Entity secondRows[2]{
+		Block(world, second, 50.0f, 20.0f),
+		Block(world, second, 50.0f, 20.0f),
+	};
+
+	ListLayout around = between;
+	around.HorizontalFlex = FlexAlignment::SpaceAround;
+	const Entity third = ListIn(world, screen, around, layout);
+	const Entity thirdRows[2]{
+		Block(world, third, 50.0f, 20.0f),
+		Block(world, third, 50.0f, 20.0f),
+	};
+
+	Layout(world.Data, world.Display);
+
+	// SpaceBetween: 120 spare over two gaps, nothing at the ends.
+	float x = world.Where(first).AbsolutePosition.X;
+	CHECK(world.Where(firstRows[0]).AbsolutePosition.X == Approx(x));
+	CHECK(world.Where(firstRows[1]).AbsolutePosition.X == Approx(x + 120.0f));
+	CHECK(world.Where(firstRows[2]).AbsolutePosition.X == Approx(x + 240.0f));
+
+	// SpaceEvenly: 200 spare over three equal shares.
+	x = world.Where(second).AbsolutePosition.X;
+	CHECK(world.Where(secondRows[0]).AbsolutePosition.X == Approx(x + 200.0f / 3.0f));
+	CHECK(world.Where(secondRows[1]).AbsolutePosition.X == Approx(x + 400.0f / 3.0f + 50.0f));
+
+	// SpaceAround: a full share between, half a share at each end.
+	x = world.Where(third).AbsolutePosition.X;
+	CHECK(world.Where(thirdRows[0]).AbsolutePosition.X == Approx(x + 50.0f));
+	CHECK(world.Where(thirdRows[1]).AbsolutePosition.X == Approx(x + 200.0f));
+}
+
+TEST_CASE("shrink absorbs an overflow in proportion to size", "[gui][layout][flex]") {
+	World world("gui_layout.flex_shrink");
+	const Entity screen = world.Make("ScreenGui");
+
+	ListLayout stack;
+	stack.Direction = FillDirection::Horizontal;
+	stack.HorizontalFlex = FlexAlignment::Fill;
+
+	Entity layout;
+	const Entity holder = ListIn(world, screen, stack, layout);
+	const Entity wide = Block(world, holder, 240.0f, 20.0f);
+	const Entity narrow = Block(world, holder, 120.0f, 20.0f);
+
+	Layout(world.Data, world.Display);
+
+	// 60 over, weighted by basis: the wide child gives up twice as much as
+	// the narrow one, which is CSS's weighting and keeps the pair's ratio.
+	CHECK(world.Where(wide).AbsoluteSize.X == Approx(200.0f));
+	CHECK(world.Where(narrow).AbsoluteSize.X == Approx(100.0f));
+}
+
+TEST_CASE("the cross axis stretches when it is flexed", "[gui][layout][flex]") {
+	World world("gui_layout.flex_stretch");
+	const Entity screen = world.Make("ScreenGui");
+
+	ListLayout stack;
+	stack.Direction = FillDirection::Horizontal;
+	stack.VerticalFlex = FlexAlignment::Fill;
+
+	Entity layout;
+	const Entity holder = ListIn(world, screen, stack, layout);
+	const Entity row = Block(world, holder, 100.0f, 20.0f);
+
+	Layout(world.Data, world.Display);
+
+	// `ItemLineAlignment::Automatic` reads a flexed cross axis as `Stretch`,
+	// and `Fill` grows the single line to the whole container.
+	CHECK(world.Where(row).AbsoluteSize.Y == Approx(300.0f));
+	CHECK(world.Where(row).AbsoluteSize.X == Approx(100.0f));
+}
+
+TEST_CASE("ItemLineAlignment places a child against its line", "[gui][layout][flex]") {
+	World world("gui_layout.flex_line");
+	const Entity screen = world.Make("ScreenGui");
+
+	ListLayout stack;
+	stack.Direction = FillDirection::Horizontal;
+	stack.ItemLine = ItemLineAlignment::End;
+
+	Entity layout;
+	const Entity holder = ListIn(world, screen, stack, layout);
+	const Entity shallow = Block(world, holder, 50.0f, 20.0f);
+	const Entity deep = Block(world, holder, 50.0f, 60.0f);
+	const Entity centred = Block(world, holder, 50.0f, 20.0f);
+
+	// The child's own `UIFlexItem` overrides the layout's `End`.
+	FlexItem middle;
+	middle.ItemLine = ItemLineAlignment::Center;
+	world.Data.Set(world.Make("UIFlexItem", centred), middle);
+
+	Layout(world.Data, world.Display);
+
+	// The line is as deep as its deepest child; `End` sits on its floor and
+	// the override centres against the same line.
+	const float top = world.Where(holder).AbsolutePosition.Y;
+	CHECK(world.Where(deep).AbsolutePosition.Y == Approx(top));
+	CHECK(world.Where(shallow).AbsolutePosition.Y == Approx(top + 40.0f));
+	CHECK(world.Where(centred).AbsolutePosition.Y == Approx(top + 20.0f));
+}
+
+TEST_CASE("an automatic container grows to its wrapped lines", "[gui][layout][automatic][flex]") {
+	World world("gui_layout.flex_automatic");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity holder = world.Make("Frame", screen);
+
+	Element container;
+	container.Size = UDim2{0.0f, 300.0f, 0.0f, 0.0f};
+	container.Automatic = AutomaticSize::Y;
+	world.Data.Set(holder, container);
+
+	ListLayout stack;
+	stack.Direction = FillDirection::Horizontal;
+	stack.Padding = UDim{0.0f, 10.0f};
+	stack.Wraps = true;
+	world.Data.Set(world.Make("UIListLayout", holder), stack);
+
+	for (int index = 0; index < 3; index++) {
+		Block(world, holder, 120.0f, 20.0f);
+	}
+
+	Layout(world.Data, world.Display);
+
+	// Two lines of 20 and the gap between them - the measure wraps at the
+	// same span the placement does, or the two would disagree by a line.
+	CHECK(world.Where(holder).AbsoluteSize.Y == Approx(50.0f));
+	CHECK(world.Where(holder).AbsoluteSize.X == Approx(300.0f));
+}
+
 TEST_CASE("a grid layout gives every child the cell's size", "[gui][layout]") {
 	World world("gui_layout.grid");
 	const Entity screen = world.Make("ScreenGui");

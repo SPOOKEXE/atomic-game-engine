@@ -1429,11 +1429,15 @@
 			"properties": [
 				{"name": "FillDirection", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "FillDirection", "reads": ["gui.ListLayout"], "writes": ["gui.ListLayout"]},
 				{"name": "HorizontalAlignment", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "HorizontalAlignment", "reads": ["gui.ListLayout"], "writes": ["gui.ListLayout"]},
+				{"name": "HorizontalFlex", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "UIFlexAlignment", "reads": ["gui.ListLayout"], "writes": ["gui.ListLayout"]},
+				{"name": "ItemLineAlignment", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "ItemLineAlignment", "reads": ["gui.ListLayout"], "writes": ["gui.ListLayout"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Padding", "type": "UDim", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.ListLayout"], "writes": ["gui.ListLayout"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "SortOrder", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "SortOrder", "reads": ["gui.ListLayout"], "writes": ["gui.ListLayout"]},
-				{"name": "VerticalAlignment", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "VerticalAlignment", "reads": ["gui.ListLayout"], "writes": ["gui.ListLayout"]}
+				{"name": "VerticalAlignment", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "VerticalAlignment", "reads": ["gui.ListLayout"], "writes": ["gui.ListLayout"]},
+				{"name": "VerticalFlex", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "UIFlexAlignment", "reads": ["gui.ListLayout"], "writes": ["gui.ListLayout"]},
+				{"name": "Wraps", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.ListLayout"], "writes": ["gui.ListLayout"]}
 			]
 		},
 		{
@@ -1548,6 +1552,20 @@
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Scale", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Scale"], "writes": ["gui.Scale"]}
+			]
+		},
+		{
+			"name": "UIFlexItem",
+			"parent": "UIComponent",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.FlexItem"],
+			"properties": [
+				{"name": "FlexMode", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "UIFlexMode", "reads": ["gui.FlexItem"], "writes": ["gui.FlexItem"]},
+				{"name": "GrowRatio", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.FlexItem"], "writes": ["gui.FlexItem"]},
+				{"name": "ItemLineAlignment", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "ItemLineAlignment", "reads": ["gui.FlexItem"], "writes": ["gui.FlexItem"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "ShrinkRatio", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.FlexItem"], "writes": ["gui.FlexItem"]}
 			]
 		},
 		{
@@ -1779,6 +1797,7 @@
 		{"name": "FillDirection", "members": ["Horizontal", "Vertical"]},
 		{"name": "Font", "members": ["Regular", "Bold", "Italic", "Code"]},
 		{"name": "HorizontalAlignment", "members": ["Left", "Center", "Right"]},
+		{"name": "ItemLineAlignment", "members": ["Automatic", "Start", "Center", "End", "Stretch"]},
 		{"name": "KeyCode", "members": ["Unknown", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Space", "Return", "Escape", "Backspace", "Tab", "LeftShift", "RightShift", "LeftControl", "RightControl", "LeftAlt", "RightAlt", "Up", "Down", "Left", "Right", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"]},
 		{"name": "ListenerType", "members": ["Camera", "ObjectPosition"]},
 		{"name": "MouseBehavior", "members": ["Default", "LockCenter", "LockCurrentPosition"]},
@@ -1801,6 +1820,8 @@
 		{"name": "TextTruncate", "members": ["None", "AtEnd"]},
 		{"name": "TextXAlignment", "members": ["Left", "Center", "Right"]},
 		{"name": "TextYAlignment", "members": ["Top", "Center", "Bottom"]},
+		{"name": "UIFlexAlignment", "members": ["None", "Fill", "SpaceAround", "SpaceBetween", "SpaceEvenly"]},
+		{"name": "UIFlexMode", "members": ["None", "Grow", "Shrink", "Fill", "Custom"]},
 		{"name": "UserInputState", "members": ["Begin", "Change", "End"]},
 		{"name": "UserInputType", "members": ["MouseButton1", "MouseButton2", "MouseButton3", "Keyboard", "MouseMovement", "MouseWheel"]},
 		{"name": "VerticalAlignment", "members": ["Top", "Center", "Bottom"]},

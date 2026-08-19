@@ -194,6 +194,66 @@ namespace studio {
 	std::vector<Completion>
 	CompleteAt(std::string_view text, size_t caret, const CompletionSources &sources, size_t limit = 40);
 
+	// What kind of thing a completion row is, as one lowercase word or phrase.
+	//
+	// The popup's footer and nothing else, so a row's kind is visible without
+	// each drawing site keeping its own copy of the mapping.
+	//
+	// @param kind The row's kind.
+	// @return A static string, never empty.
+	// @since v0.17
+	std::string_view Describe(CompletionKind kind);
+
+	// One sentence about a reserved word, for a hover and for the popup's
+	// footer.
+	//
+	// **Written down rather than derived, and that is fine here.** Everything
+	// else the editor offers is read live from a VM or the class table because
+	// those change; a language's keywords change when the language does, which
+	// is a vendor bump somebody reads the notes of. `tests/Complete.cpp` holds
+	// the two lists together: every word `script::Keywords` answers has a line
+	// here, so a keyword added upstream fails a test rather than hovering
+	// silent.
+	//
+	// @param language Whose reserved words.
+	// @param word     The keyword.
+	// @return The sentence, or empty when `word` is not one of that
+	//         language's keywords.
+	// @since v0.17
+	std::string_view KeywordDoc(engine::script::Language language, std::string_view word);
+
+	// The identifier under a byte offset.
+	//
+	// @param text   The whole buffer.
+	// @param offset A byte offset into it.
+	// @return The word the byte sits inside, or empty when it sits on
+	//         whitespace, punctuation, or past the end.
+	// @since v0.17
+	std::string_view WordAt(std::string_view text, size_t offset);
+
+	// What the editor knows about the word under a byte offset, for a hover
+	// tooltip.
+	//
+	// **Empty means no tooltip, and empty is the common answer.** A hover that
+	// says "no information" over most of a file is a hover somebody turns off;
+	// one that appears only when it has a sentence worth reading is the
+	// convention every editor follows. Inside a string or a line comment it is
+	// always empty - a keyword quoted in prose is prose.
+	//
+	// What it can say, first match wins: a keyword's doc line, what a global
+	// is, that a name is a method or signal every instance carries, an enum
+	// set, a class and its parent, an instance beside this script, a local
+	// whose class the buffer states (the same assignment following
+	// `CompleteAt` narrows with, and only that), or a property's type and the
+	// class that declares it.
+	//
+	// @param text    The whole buffer.
+	// @param offset  A byte offset into it.
+	// @param sources The same sources a completion at that spot would use.
+	// @return One or two lines for a tooltip, or empty for no tooltip.
+	// @since v0.17
+	std::string HoverText(std::string_view text, size_t offset, const CompletionSources &sources);
+
 	// The classes an author may write where a class name is wanted.
 	//
 	// **One function, because the class picker and the completion popup are two

@@ -196,6 +196,55 @@ namespace engine::gui {
 		XY = 3,
 	};
 
+	// How a list layout distributes spare room along one axis.
+	//
+	// Roblox's `UIFlexAlignment`, and it is asked twice per layout - once per
+	// axis - so which axis it governs is the property's business
+	// (`HorizontalFlex`, `VerticalFlex`) rather than the set's. On the fill
+	// axis `Fill` grows the children and the spacing members spread them; on
+	// the cross axis `Fill` stretches lines and the spacing members spread
+	// them, which is CSS's `justify-content`/`align-content` pair under one
+	// name.
+	//
+	// @since v0.17
+	enum class FlexAlignment : uint8_t {
+		None = 0,
+		Fill = 1,
+		SpaceAround = 2,
+		SpaceBetween = 3,
+		SpaceEvenly = 4,
+	};
+
+	// Where a child sits across its own line, in a wrapped or flexed list.
+	//
+	// `Automatic` defers to the layout's cross-axis alignment - unless the
+	// cross axis is flexed at all, in which case Roblox stretches, and so does
+	// this engine.
+	//
+	// @since v0.17
+	enum class ItemLineAlignment : uint8_t {
+		Automatic = 0,
+		Start = 1,
+		Center = 2,
+		End = 3,
+		Stretch = 4,
+	};
+
+	// How one child trades size for spare room in a flexed list.
+	//
+	// Roblox's `UIFlexMode`. The first four are fixed grow:shrink ratios -
+	// `Grow` is 1:0, `Shrink` 0:1, `Fill` 1:1 - and `Custom` reads the two
+	// ratio fields beside it on `FlexItem`.
+	//
+	// @since v0.17
+	enum class FlexMode : uint8_t {
+		None = 0,
+		Grow = 1,
+		Shrink = 2,
+		Fill = 3,
+		Custom = 4,
+	};
+
 	// Whether a layer collector's `ZIndex` values are compared across the whole
 	// collector or only among siblings.
 	//
@@ -267,6 +316,9 @@ namespace engine::gui {
 	const char *Describe(AspectType value);
 	const char *Describe(DominantAxis value);
 	const char *Describe(ScrollingDirection value);
+	const char *Describe(FlexAlignment value);
+	const char *Describe(ItemLineAlignment value);
+	const char *Describe(FlexMode value);
 	const char *Describe(ZIndexBehavior value);
 	const char *Describe(SurfaceSizingMode value);
 	const char *Describe(Face value);

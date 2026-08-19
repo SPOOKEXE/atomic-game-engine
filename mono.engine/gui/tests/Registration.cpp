@@ -40,7 +40,7 @@ namespace {
 		"gui.Scrolling",  "gui.Entry",		 "gui.Layer",	   "gui.Canvas",		 "gui.Surface",
 		"gui.Billboard",  "gui.Group",		 "gui.Viewport",   "gui.Padding",		 "gui.ListLayout",
 		"gui.GridLayout", "gui.AspectRatio", "gui.SizeLimits", "gui.TextSizeLimits", "gui.Corner",
-		"gui.Stroke",	  "gui.Scale",		 "gui.Resolved",
+		"gui.Stroke",	  "gui.Scale",		 "gui.Resolved",   "gui.FlexItem",
 	};
 }
 
@@ -70,12 +70,12 @@ TEST_CASE("the class tree registers every promised class", "[gui][registration]"
 	// The list is a contract in both directions: a class registered and not
 	// listed would go unmentioned by the palette and the manifest.
 	//
-	// **Forty-five**: the thirty-three of the 2D tree, `GuiService`, and the
+	// **Forty-six**: the thirty-four of the 2D tree, `GuiService`, and the
 	// eleven of the 3D branch. The service is in this list rather than in
 	// `scene`'s because it is a `gui` class - the two modules may not link each
 	// other - and it is registered at all because it owns the selection, which
 	// is what finally gave `GuiObject::Selectable` a reader.
-	CHECK(GuiClassNames().size() == 45);
+	CHECK(GuiClassNames().size() == 46);
 }
 
 TEST_CASE("the 2D tree descends the way a script expects", "[gui][registration]") {
@@ -94,6 +94,11 @@ TEST_CASE("the 2D tree descends the way a script expects", "[gui][registration]"
 	CHECK(Classes::IsA(GuiClass("DockWidgetPluginGui"), GuiClass("PluginGui")));
 	CHECK(Classes::IsA(GuiClass("UIListLayout"), GuiClass("UILayout")));
 	CHECK(Classes::IsA(GuiClass("UIAspectRatioConstraint"), GuiClass("UIConstraint")));
+
+	// A `UIFlexItem` is a component-style modifier and not a constraint - a
+	// migrating script tells the two apart with exactly this pair.
+	CHECK(Classes::IsA(GuiClass("UIFlexItem"), GuiClass("UIComponent")));
+	CHECK_FALSE(Classes::IsA(GuiClass("UIFlexItem"), GuiClass("UIConstraint")));
 
 	// **A collector is not a `GuiObject`**, which is the one relation people
 	// assume and Roblox does not have. A `ScreenGui` has no `Position` and no

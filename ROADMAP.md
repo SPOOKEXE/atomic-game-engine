@@ -79,8 +79,9 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] split dependency-bound compute and later transfer work into traffic-plan command buffers; physical overlap remains unavailable because SDL exposes one unified queue rather than independent graphics, compute and transfer queues - `graph::PlanCommandBuffers` is the traffic plan, downloads ride a later-transfer buffer submitted after the main one, the async compute prefix is plan-gated, and dependency-bound compute stays in the main stream because the present is bound to the buffer that acquired the swapchain
 - [x] `ShapeCast` needs a swept-volume walk and its own de-duplication rule; the current union of the start and end box bounds is loose over long sweeps, and the ray walk's run rule only applies to the centre line
 - [x] show Universe in Explorer with mutable execution mode, maximum catch-up ticks, bus budget, channel queue limit and channels-per-world; show federated mode, world counts, fault counts, tick cost and bus traffic read-only
+- [x] build ui features out (more roblox): flex list layouts - `UIListLayout` `Wraps`/`HorizontalFlex`/`VerticalFlex`/`ItemLineAlignment` and `UIFlexItem` with `FlexMode`/`GrowRatio`/`ShrinkRatio`, laid out, saved, bound and in the Properties panel
 - [_] build ui features out (more roblox)
-- [_] build out code editor with auto complete (more vs-code like, hover on keywords, right-side minimap)
+- [x] build out code editor with auto complete (more vs-code like, hover on keywords, right-side minimap) - hover tooltips from the same language-aware surface the completion uses, a run-stripe minimap with click/drag scroll, Tab accepts, matched prefix highlighted, kind/doc footer on the list
 
 - [_] add accessories support
 - [_] animation handler
@@ -94,6 +95,7 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### FUTURE
 
+- [_] (procedural, node-based) terrain generator (refer to discord references)
 - [_] plan the entire rendering system to a visual compositor system like Unity. https://docs.unity3d.com/Manual/scriptable-render-pipeline-introduction.html https://docs.unity3d.com/Packages/com.unity.visual-compositor@0.27/manual/nodes.html
 - [_] ensure per-mesh render capabilities, global lighting render capabilities, camera lighting render capabilities, etc. compute shaders, post-processing, etc.
 - [_] porting roblox games (DEFER THIS UNTIL LATER ONCE TYPES ARE BUILT UP) - untouched, and the trigger is unchanged: there are four instance classes in this engine and a Roblox place names hundreds

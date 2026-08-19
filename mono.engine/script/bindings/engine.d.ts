@@ -346,6 +346,7 @@ declare namespace Enum {
 	interface FillDirection extends EnumItem { readonly __enum: "FillDirection"; }
 	interface Font extends EnumItem { readonly __enum: "Font"; }
 	interface HorizontalAlignment extends EnumItem { readonly __enum: "HorizontalAlignment"; }
+	interface ItemLineAlignment extends EnumItem { readonly __enum: "ItemLineAlignment"; }
 	interface KeyCode extends EnumItem { readonly __enum: "KeyCode"; }
 	interface ListenerType extends EnumItem { readonly __enum: "ListenerType"; }
 	interface MouseBehavior extends EnumItem { readonly __enum: "MouseBehavior"; }
@@ -368,6 +369,8 @@ declare namespace Enum {
 	interface TextTruncate extends EnumItem { readonly __enum: "TextTruncate"; }
 	interface TextXAlignment extends EnumItem { readonly __enum: "TextXAlignment"; }
 	interface TextYAlignment extends EnumItem { readonly __enum: "TextYAlignment"; }
+	interface UIFlexAlignment extends EnumItem { readonly __enum: "UIFlexAlignment"; }
+	interface UIFlexMode extends EnumItem { readonly __enum: "UIFlexMode"; }
 	interface UserInputState extends EnumItem { readonly __enum: "UserInputState"; }
 	interface UserInputType extends EnumItem { readonly __enum: "UserInputType"; }
 	interface VerticalAlignment extends EnumItem { readonly __enum: "VerticalAlignment"; }
@@ -439,6 +442,13 @@ declare namespace Enum {
 		readonly Left: HorizontalAlignment;
 		readonly Center: HorizontalAlignment;
 		readonly Right: HorizontalAlignment;
+	};
+	const ItemLineAlignment: {
+		readonly Automatic: ItemLineAlignment;
+		readonly Start: ItemLineAlignment;
+		readonly Center: ItemLineAlignment;
+		readonly End: ItemLineAlignment;
+		readonly Stretch: ItemLineAlignment;
 	};
 	const KeyCode: {
 		readonly Unknown: KeyCode;
@@ -617,6 +627,20 @@ declare namespace Enum {
 		readonly Top: TextYAlignment;
 		readonly Center: TextYAlignment;
 		readonly Bottom: TextYAlignment;
+	};
+	const UIFlexAlignment: {
+		readonly None: UIFlexAlignment;
+		readonly Fill: UIFlexAlignment;
+		readonly SpaceAround: UIFlexAlignment;
+		readonly SpaceBetween: UIFlexAlignment;
+		readonly SpaceEvenly: UIFlexAlignment;
+	};
+	const UIFlexMode: {
+		readonly None: UIFlexMode;
+		readonly Grow: UIFlexMode;
+		readonly Shrink: UIFlexMode;
+		readonly Fill: UIFlexMode;
+		readonly Custom: UIFlexMode;
 	};
 	const UserInputState: {
 		readonly Begin: UserInputState;
@@ -1377,9 +1401,13 @@ declare interface UILayout extends UIComponent {
 declare interface UIListLayout extends UILayout {
 	FillDirection: Enum.FillDirection;
 	HorizontalAlignment: Enum.HorizontalAlignment;
+	HorizontalFlex: Enum.UIFlexAlignment;
+	ItemLineAlignment: Enum.ItemLineAlignment;
 	Padding: UDim;
 	SortOrder: Enum.SortOrder;
 	VerticalAlignment: Enum.VerticalAlignment;
+	VerticalFlex: Enum.UIFlexAlignment;
+	Wraps: boolean;
 }
 
 declare interface UIGridLayout extends UILayout {
@@ -1431,6 +1459,13 @@ declare interface UIStroke extends UIComponent {
 
 declare interface UIScale extends UIComponent {
 	Scale: number;
+}
+
+declare interface UIFlexItem extends UIComponent {
+	FlexMode: Enum.UIFlexMode;
+	GrowRatio: number;
+	ItemLineAlignment: Enum.ItemLineAlignment;
+	ShrinkRatio: number;
 }
 
 declare interface Service extends Instance {
@@ -1962,6 +1997,7 @@ declare const Instance: {
 		(className: "UICorner", parent?: Instance): UICorner;
 		(className: "UIStroke", parent?: Instance): UIStroke;
 		(className: "UIScale", parent?: Instance): UIScale;
+		(className: "UIFlexItem", parent?: Instance): UIFlexItem;
 		(className: "Player", parent?: Instance): Player;
 		(className: "Team", parent?: Instance): Team;
 	};

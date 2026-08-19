@@ -71,6 +71,7 @@
 #include <span>
 #include <string>
 #include <studio/AssetCatalogue.hpp>
+#include <studio/CodeMetrics.hpp>
 #include <studio/Commands.hpp>
 #include <studio/Complete.hpp>
 #include <studio/Config.hpp>
@@ -848,6 +849,38 @@ namespace studio {
 		// @param tab The script being edited.
 		// @return How wide the column drew, so the caller can lay out beside it.
 		float DrawScriptGutter(const OpenScript &tab);
+
+		// The minimap column on the code field's right.
+		//
+		// A shrunken impression of the whole file - stripes per text run, not
+		// tiny glyphs - with the visible region marked, and a click or drag
+		// scrolls the code there. The gutter's sibling in every discipline:
+		// its own child window, the same `##text` scroll lookup with the same
+		// benign fallback, and one `InvisibleButton` so imgui owns the
+		// hit-testing.
+		//
+		// @param tab   The script being edited.
+		// @param width How wide to draw, already scaled.
+		// @since v0.17
+		void DrawScriptMinimap(const OpenScript &tab, float width);
+
+		// The tooltip for whatever word the mouse is resting on.
+		//
+		// The inverse of the completion popup's caret arithmetic: the popup
+		// turns a byte into a cell into pixels, this turns the mouse's pixels
+		// into a cell into a byte, and `CodeMetrics.hpp` keeps the two
+		// mappings honest about tabs. What it says comes from
+		// `HoverText` - the same language-aware surface the completion uses -
+		// and nothing appears over empty space, inside strings or comments,
+		// or while the completion popup is up.
+		//
+		// @param tab      The script being edited.
+		// @param fieldMin The code field's top-left, in screen space.
+		// @param hovered  Whether the field reported a rested hover this
+		//                 frame, read by the caller right after the field so
+		//                 imgui's hover delay owns the timing.
+		// @since v0.17
+		void DrawScriptHover(OpenScript &tab, ImVec2 fieldMin, bool hovered);
 
 		// Rebuilds the completion list when there is a reason to.
 		//
@@ -3149,7 +3182,40 @@ namespace studio {
 		int ScriptPopupAnchor = -1;
 		int ScriptPopupCaret = -1;
 		std::vector<Completion> ScriptCompletions;
+
+		// The language the list was built against, kept so the popup's footer
+		// can look a keyword's doc line up without re-resolving the tab's
+		// container selector every frame.
+		//
+		// @since v0.17
+		engine::script::Language ScriptPopupLanguage = engine::script::Language::Luau;
 		//@}
+
+		// The hover tooltip's cache: which occurrence of which word it was
+		// last built for, in which script, and what it says.
+		//
+		// **Keyed rather than rebuilt per frame**, because building it walks
+		// the tab's siblings inside `Universe::Enter` and a tooltip rests on
+		// one word for many frames. The anchor keeps two occurrences of one
+		// spelling apart - assignment following can answer differently for
+		// each - and the instance keeps two tabs in two languages from
+		// serving each other's answer. Empty text with a non-empty word is a
+		// remembered "nothing to say", which is what stops the walk repeating
+		// every frame over a word the editor does not know.
+		//
+		// @since v0.17
+		//@{
+		std::string ScriptHoverWord;
+		std::string ScriptHoverText;
+		int ScriptHoverAnchor = -1;
+		Entity ScriptHoverInstance;
+		//@}
+
+		// Scratch for the minimap's per-line runs, reused so drawing a few
+		// hundred visible lines does not allocate per line per frame.
+		//
+		// @since v0.17
+		std::vector<MinimapRun> ScriptMinimapRuns;
 
 		// How much bigger the code is drawn than the interface around it.
 		//

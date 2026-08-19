@@ -110,10 +110,12 @@ namespace studio {
 		// focus to the next widget would make the editor unusable for the one
 		// thing it is for.
 		//
-		// **`AllowTabInput` is also why Tab cannot accept a completion.**
-		// `imgui_widgets.cpp` asserts that it and `CallbackCompletion` are never
-		// both set, because both want the key - so the popup takes Enter, and
-		// claims it with `SetKeyOwner` while it is open.
+		// **`CallbackCompletion` stays off**: `imgui_widgets.cpp` asserts that
+		// it and `AllowTabInput` are never both set, because both want the key.
+		// The completion popup does not need it - the field polls Tab and
+		// Enter through `Shortcut` against its own id, so the popup claims
+		// both with `SetKeyOwner` while it is open, and Tab indents again the
+		// moment it closes.
 		auto flags = ImGuiInputTextFlags_CallbackResize | ImGuiInputTextFlags_AllowTabInput;
 		if (edit != nullptr) {
 			flags |= ImGuiInputTextFlags_CallbackAlways;

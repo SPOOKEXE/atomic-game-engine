@@ -204,6 +204,54 @@ namespace engine::gui {
 		return "Y";
 	}
 
+	const char *Describe(FlexAlignment value) {
+		switch (value) {
+		case FlexAlignment::None:
+			return "None";
+		case FlexAlignment::Fill:
+			return "Fill";
+		case FlexAlignment::SpaceAround:
+			return "SpaceAround";
+		case FlexAlignment::SpaceBetween:
+			return "SpaceBetween";
+		case FlexAlignment::SpaceEvenly:
+			return "SpaceEvenly";
+		}
+		return "None";
+	}
+
+	const char *Describe(ItemLineAlignment value) {
+		switch (value) {
+		case ItemLineAlignment::Automatic:
+			return "Automatic";
+		case ItemLineAlignment::Start:
+			return "Start";
+		case ItemLineAlignment::Center:
+			return "Center";
+		case ItemLineAlignment::End:
+			return "End";
+		case ItemLineAlignment::Stretch:
+			return "Stretch";
+		}
+		return "Automatic";
+	}
+
+	const char *Describe(FlexMode value) {
+		switch (value) {
+		case FlexMode::None:
+			return "None";
+		case FlexMode::Grow:
+			return "Grow";
+		case FlexMode::Shrink:
+			return "Shrink";
+		case FlexMode::Fill:
+			return "Fill";
+		case FlexMode::Custom:
+			return "Custom";
+		}
+		return "None";
+	}
+
 	const char *Describe(ZIndexBehavior value) {
 		switch (value) {
 		case ZIndexBehavior::Global:

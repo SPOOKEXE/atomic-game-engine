@@ -27,6 +27,15 @@ namespace engine::gui {
 		// way to find out.
 		constexpr int MAXIMUM_DEPTH = 256;
 
+		// How far past the fill axis a child may land before a wrapped list
+		// breaks the line.
+		//
+		// Three children at a third of the parent each can sum a ULP over the
+		// span, and wrapping the last one onto its own line for that is the
+		// bug an author cannot see. A quarter pixel is invisible at any scale
+		// a UI draws at.
+		constexpr float WRAP_TOLERANCE = 0.25f;
+
 		// The class ids this pass tests against, looked up once per process.
 		//
 		// **Ids and not names.** `Store::IsA` is an ancestor scan over a handful
@@ -150,6 +159,11 @@ namespace engine::gui {
 			const SizeLimits *Limits = nullptr;
 			const TextSizeLimits *TextLimits = nullptr;
 			const Scale *Factor = nullptr;
+
+			// Read by the *parent's* list layout rather than by this node's
+			// own placement - a `UIFlexItem` describes how its parent trades
+			// size for the line's spare room.
+			const FlexItem *Flex = nullptr;
 		};
 
 		// Everything one walk of a node's child list produces.
@@ -256,9 +270,9 @@ namespace engine::gui {
 		// A `UIPadding` under a frame is a child in the tree, and a list layout
 		// that stacked it would leave a blank row where the modifier was. "Does
 		// it have an `Element`" is exactly what makes something a `GuiObject`,
-		// so the same test that finds the children rules out all seven modifier
+		// so the same test that finds the children rules out all eight modifier
 		// lookups for each of them - which matters because the common container
-		// is a frame full of frames and seven misses against one hit is the
+		// is a frame full of frames and eight misses against one hit is the
 		// ratio in every real interface.
 		Scan ScanChildren(const Store &store, Entity instance, std::vector<Entity> &arena) {
 			Scan found;
@@ -290,6 +304,9 @@ namespace engine::gui {
 				}
 				if (found.Mods.Factor == nullptr) {
 					found.Mods.Factor = store.Get<Scale>(child);
+				}
+				if (found.Mods.Flex == nullptr) {
+					found.Mods.Flex = store.Get<FlexItem>(child);
 				}
 			});
 
@@ -525,12 +542,32 @@ namespace engine::gui {
 			const bool stacked = modifiers.List != nullptr;
 			const bool horizontal = stacked && modifiers.List->Direction == FillDirection::Horizontal;
 
+			// A wrapped list only wraps against a real span - a container
+			// growing along its own fill axis has no edge to wrap at, so its
+			// children stay one line, which is also what resolves the
+			// circularity of "wrap against the width the wrapping decides".
+			const float gap =
+				stacked ? modifiers.List->Padding.Resolve(horizontal ? basis.X : basis.Y) : 0.0f;
+			const float lineGap =
+				stacked ? modifiers.List->Padding.Resolve(horizontal ? basis.Y : basis.X) : 0.0f;
+			const float wrapSpan = horizontal ? basis.X : basis.Y;
+			const bool wraps = stacked && modifiers.List->Wraps && wrapSpan > 0.0f;
+
+			// The line being filled, and the lines already closed. For an
+			// unwrapped list everything lands on the first line and the totals
+			// reduce to the plain sum-and-maximum this always was.
+			float lineAlong = 0.0f;
+			float lineAcross = 0.0f;
+			uint32_t lineCounted = 0;
+			float widestLine = 0.0f;
+			float closedAcross = 0.0f;
+			uint32_t lines = 0;
+
 			float along = 0.0f;
 			float across = 0.0f;
-			uint32_t counted = 0;
 
 			// Free positioning accumulates a bounding box instead, which is what
-			// the two locals above hold when `stacked` is false.
+			// `along` and `across` hold when `stacked` is false.
 			for (uint32_t index = 0; index < scan.ChildCount; index++) {
 				const Entity node = arena[scan.ChildFirst + index];
 
@@ -543,9 +580,26 @@ namespace engine::gui {
 				const Vector2 size = Measure(store, node, basis, depth, found, arena);
 
 				if (stacked) {
-					along += horizontal ? size.X : size.Y;
-					across = std::max(across, horizontal ? size.Y : size.X);
-					counted++;
+					const float mainSize = horizontal ? size.X : size.Y;
+					const float extended = lineAlong + (lineCounted > 0 ? gap : 0.0f) + mainSize;
+
+					// The same break `ScanLine` makes, against the same span,
+					// or the measured height and the placed height disagree by
+					// one line - the wrap arithmetic lives in two passes and
+					// this is the half that sizes.
+					if (wraps && lineCounted > 0 && extended > wrapSpan + WRAP_TOLERANCE) {
+						widestLine = std::max(widestLine, lineAlong);
+						closedAcross += lineAcross;
+						lines++;
+						lineAlong = mainSize;
+						lineAcross = horizontal ? size.Y : size.X;
+						lineCounted = 1;
+						continue;
+					}
+
+					lineAlong = extended;
+					lineAcross = std::max(lineAcross, horizontal ? size.Y : size.X);
+					lineCounted++;
 					continue;
 				}
 
@@ -563,9 +617,16 @@ namespace engine::gui {
 				return Vector2{std::max(along, 0.0f), std::max(across, 0.0f)};
 			}
 
-			if (counted > 1) {
-				const float gap = modifiers.List->Padding.Resolve(horizontal ? basis.X : basis.Y);
-				along += gap * static_cast<float>(counted - 1);
+			if (lineCounted > 0) {
+				widestLine = std::max(widestLine, lineAlong);
+				closedAcross += lineAcross;
+				lines++;
+			}
+
+			along = widestLine;
+			across = closedAcross;
+			if (lines > 1) {
+				across += lineGap * static_cast<float>(lines - 1);
 			}
 
 			return horizontal ? Vector2{along, across} : Vector2{across, along};
@@ -810,7 +871,154 @@ namespace engine::gui {
 			}
 		}
 
-		// Places a container's children in a stack.
+		// The grow and shrink weights one child brings to its line.
+		struct FlexFactors {
+			float Grow = 0.0f;
+			float Shrink = 0.0f;
+		};
+
+		// What a child flexes as, from its own `UIFlexItem` else the layout.
+		//
+		// **A `FlexItem` overrides the layout even at `None`** - Roblox reads
+		// that member as "unaffected", which is what lets one fixed button sit
+		// in a `Fill` row. Without one, `Fill` on the fill axis means every
+		// child grows and shrinks alike; the spacing members size nothing.
+		FlexFactors FactorsFor(const FlexItem *flex, FlexAlignment mainFlex) {
+			if (flex == nullptr) {
+				return mainFlex == FlexAlignment::Fill ? FlexFactors{1.0f, 1.0f} : FlexFactors{};
+			}
+
+			switch (flex->Mode) {
+			case FlexMode::None:
+				return {};
+			case FlexMode::Grow:
+				return {1.0f, 0.0f};
+			case FlexMode::Shrink:
+				return {0.0f, 1.0f};
+			case FlexMode::Fill:
+				return {1.0f, 1.0f};
+			case FlexMode::Custom:
+				// Clamped because a negative ratio would grow on shrink and
+				// shrink on grow, which no author means and CSS also refuses.
+				return {std::max(flex->GrowRatio, 0.0f), std::max(flex->ShrinkRatio, 0.0f)};
+			}
+			return {};
+		}
+
+		// Where a child sits across its line, after every override has spoken:
+		// its own `UIFlexItem` first, the layout's `ItemLineAlignment` second,
+		// and `Automatic` falls through to the cross alignment - or to
+		// `Stretch` when the cross axis is flexed at all, which is Roblox's
+		// documented reading of `Automatic`.
+		ItemLineAlignment LineAlignmentFor(
+			const FlexItem *flex, const ListLayout &layout, FlexAlignment crossFlex, int crossAlign
+		) {
+			if (flex != nullptr && flex->ItemLine != ItemLineAlignment::Automatic) {
+				return flex->ItemLine;
+			}
+			if (layout.ItemLine != ItemLineAlignment::Automatic) {
+				return layout.ItemLine;
+			}
+			if (crossFlex != FlexAlignment::None) {
+				return ItemLineAlignment::Stretch;
+			}
+			// The alignments and `ItemLineAlignment` agree on start/centre/end
+			// order, one ordinal apart - `Automatic` occupies zero.
+			return static_cast<ItemLineAlignment>(crossAlign + 1);
+		}
+
+		// The lead-in and the extra gap spare room becomes under one flex
+		// spacing mode. `aligned` is where plain alignment would put the
+		// block, which is the answer whenever no spacing mode applies.
+		struct Spacing {
+			float Lead = 0.0f;
+			float Between = 0.0f;
+		};
+
+		Spacing SpacingFor(FlexAlignment flex, float spare, size_t count, float aligned) {
+			if (spare <= 0.0f || count == 0) {
+				return {aligned, 0.0f};
+			}
+
+			switch (flex) {
+			case FlexAlignment::SpaceBetween:
+				// One item has no between, and CSS parks it at the start.
+				return count > 1 ? Spacing{0.0f, spare / static_cast<float>(count - 1)} : Spacing{};
+			case FlexAlignment::SpaceAround: {
+				const float share = spare / static_cast<float>(count);
+				return {share * 0.5f, share};
+			}
+			case FlexAlignment::SpaceEvenly: {
+				const float share = spare / static_cast<float>(count + 1);
+				return {share, share};
+			}
+			case FlexAlignment::None:
+			case FlexAlignment::Fill:
+				break;
+			}
+			return {aligned, 0.0f};
+		}
+
+		// One line of a list, found by walking forward from `first`.
+		//
+		// Recomputed rather than stored: the walk below needs every line twice
+		// - once to total the cross extents, once to place - and scanning a
+		// range again is cheaper than a per-frame vector of lines at every
+		// depth of the recursion, which is the allocation `ScratchAt` exists
+		// to avoid.
+		struct LineRun {
+			// One past the last item on the line.
+			size_t End = 0;
+
+			// Basis sizes plus the authored gaps.
+			float MainExtent = 0.0f;
+
+			// The tallest basis cross size on the line.
+			float CrossExtent = 0.0f;
+
+			// The line's grow total, and its shrink total weighted by basis -
+			// CSS's weighting, so a wide child gives up more than a narrow one.
+			float Grow = 0.0f;
+			float ShrinkWeight = 0.0f;
+		};
+
+		LineRun ScanLine(
+			const std::vector<Item> &items,
+			size_t first,
+			bool horizontal,
+			float gap,
+			float mainSpan,
+			bool wraps,
+			FlexAlignment mainFlex
+		) {
+			LineRun line;
+			size_t index = first;
+
+			for (; index < items.size(); index++) {
+				const float mainSize = horizontal ? items[index].Size.X : items[index].Size.Y;
+				const float extended = line.MainExtent + (index > first ? gap : 0.0f) + mainSize;
+
+				// The first item always lands, however big, or the walk would
+				// never advance past a child wider than the container.
+				if (wraps && index > first && extended > mainSpan + WRAP_TOLERANCE) {
+					break;
+				}
+
+				line.MainExtent = extended;
+				line.CrossExtent =
+					std::max(line.CrossExtent, horizontal ? items[index].Size.Y : items[index].Size.X);
+
+				const FlexFactors factors = FactorsFor(items[index].Found.Mods.Flex, mainFlex);
+				line.Grow += factors.Grow;
+				line.ShrinkWeight += factors.Shrink * mainSize;
+			}
+
+			line.End = index;
+			return line;
+		}
+
+		// Places a container's children in a stack - one line, or several once
+		// `Wraps` or a flex alignment is involved.
 		size_t RunList(
 			Store &store,
 			const ListLayout &layout,
@@ -824,35 +1032,127 @@ namespace engine::gui {
 
 			const Vector2 span = area.Size();
 			const bool horizontal = layout.Direction == FillDirection::Horizontal;
-			const float gap = layout.Padding.Resolve(horizontal ? span.X : span.Y);
+			const float mainSpan = horizontal ? span.X : span.Y;
+			const float crossSpan = horizontal ? span.Y : span.X;
 
-			float extent = 0.0f;
-			for (size_t index = 0; index < items.size(); index++) {
-				extent += horizontal ? items[index].Size.X : items[index].Size.Y;
-				if (index + 1 < items.size()) {
-					extent += gap;
-				}
+			// One `Padding` serves both axes, resolved against each: the gap
+			// between items along a line, and between lines across them.
+			const float gap = layout.Padding.Resolve(mainSpan);
+			const float lineGap = layout.Padding.Resolve(crossSpan);
+
+			// The flex pair is named by axis and the layout runs by role, so
+			// which one is "along the fill" depends on the direction.
+			const FlexAlignment mainFlex = horizontal ? layout.HorizontalFlex : layout.VerticalFlex;
+			const FlexAlignment crossFlex = horizontal ? layout.VerticalFlex : layout.HorizontalFlex;
+			const int mainAlign =
+				horizontal ? static_cast<int>(layout.Horizontal) : static_cast<int>(layout.Vertical);
+			const int crossAlign =
+				horizontal ? static_cast<int>(layout.Vertical) : static_cast<int>(layout.Horizontal);
+
+			// Pass one: every line, because the cross-axis arithmetic - where
+			// the block of lines starts, and what `Fill` stretches each line by
+			// - has to see all of them before the first is placed.
+			size_t lineCount = 0;
+			float linesExtent = 0.0f;
+			for (size_t first = 0; first < items.size();) {
+				const LineRun line =
+					ScanLine(items, first, horizontal, gap, mainSpan, layout.Wraps, mainFlex);
+				linesExtent += line.CrossExtent;
+				lineCount++;
+				first = line.End;
+			}
+			if (lineCount > 1) {
+				linesExtent += lineGap * static_cast<float>(lineCount - 1);
 			}
 
-			// The alignment along the fill axis positions the whole stack; the
-			// one across it positions each item on its own, because items in a
-			// stack may differ in the cross extent and centring the block would
-			// leave the narrow ones off-centre.
-			float along = horizontal ? AlignedStart(span.X, extent, static_cast<int>(layout.Horizontal))
-									 : AlignedStart(span.Y, extent, static_cast<int>(layout.Vertical));
+			// `Fill` across the lines is CSS's `align-content: stretch`: the
+			// spare room grows every line equally and the block starts at the
+			// top. The spacing members spend the same room between the lines.
+			const float crossFree = crossSpan - linesExtent;
+			float lineStretch = 0.0f;
+			Spacing crossSpacing;
+			if (crossFlex == FlexAlignment::Fill) {
+				lineStretch =
+					lineCount > 0 ? std::max(crossFree, 0.0f) / static_cast<float>(lineCount) : 0.0f;
+			} else {
+				crossSpacing = SpacingFor(
+					crossFlex, crossFree, lineCount, AlignedStart(crossSpan, linesExtent, crossAlign)
+				);
+			}
 
 			size_t placed = 0;
-			for (const Item &item : items) {
-				const float across =
-					horizontal ? AlignedStart(span.Y, item.Size.Y, static_cast<int>(layout.Vertical))
-							   : AlignedStart(span.X, item.Size.X, static_cast<int>(layout.Horizontal));
+			float crossPos = (horizontal ? area.Min.Y : area.Min.X) + crossSpacing.Lead;
 
-				const Vector2 corner = horizontal ? Vector2{area.Min.X + along, area.Min.Y + across}
-												  : Vector2{area.Min.X + across, area.Min.Y + along};
+			for (size_t first = 0; first < items.size();) {
+				const LineRun line =
+					ScanLine(items, first, horizontal, gap, mainSpan, layout.Wraps, mainFlex);
+				const float lineCross = line.CrossExtent + lineStretch;
+				const size_t count = line.End - first;
 
-				placed +=
-					Place(store, item.Node, FromCorner(corner, item.Size), clip, depth, rotation, item.Found);
-				along += (horizontal ? item.Size.X : item.Size.Y) + gap;
+				// Spare room feeds growth first; only what the growers leave is
+				// spent as spacing. Shrinking is the same trade under overflow,
+				// weighted by basis so a wide child gives up more - and a line
+				// that cannot shrink overflows from its aligned start, exactly
+				// as the single unwrapped line always has.
+				const float freeRoom = mainSpan - line.MainExtent;
+				float growUnit = 0.0f;
+				float shrinkUnit = 0.0f;
+				float effectiveExtent = line.MainExtent;
+				if (freeRoom > 0.0f && line.Grow > 0.0f) {
+					growUnit = freeRoom / line.Grow;
+					effectiveExtent = mainSpan;
+				} else if (freeRoom < 0.0f && line.ShrinkWeight > 0.0f) {
+					shrinkUnit = freeRoom / line.ShrinkWeight;
+					effectiveExtent = mainSpan;
+				}
+
+				const Spacing mainSpacing = SpacingFor(
+					mainFlex,
+					mainSpan - effectiveExtent,
+					count,
+					AlignedStart(mainSpan, effectiveExtent, mainAlign)
+				);
+
+				float along = (horizontal ? area.Min.X : area.Min.Y) + mainSpacing.Lead;
+
+				for (size_t index = first; index < line.End; index++) {
+					const Item &item = items[index];
+					const FlexFactors factors = FactorsFor(item.Found.Mods.Flex, mainFlex);
+
+					float mainSize = horizontal ? item.Size.X : item.Size.Y;
+					mainSize += growUnit * factors.Grow + shrinkUnit * factors.Shrink * mainSize;
+
+					// A ratio large enough to shrink past zero is clamped and
+					// the loss is not redistributed - a second pass could hand
+					// it to the survivors, and one pass that leaves a pixel
+					// short beats two that can disagree.
+					mainSize = std::max(mainSize, 0.0f);
+
+					float crossSize = horizontal ? item.Size.Y : item.Size.X;
+					const ItemLineAlignment lineAlign =
+						LineAlignmentFor(item.Found.Mods.Flex, layout, crossFlex, crossAlign);
+
+					float crossOffset = 0.0f;
+					if (lineAlign == ItemLineAlignment::Stretch) {
+						crossSize = lineCross;
+					} else {
+						// `Start`, `Center`, `End` are one past the alignment
+						// ordinals `AlignedStart` reads.
+						crossOffset = AlignedStart(lineCross, crossSize, static_cast<int>(lineAlign) - 1);
+					}
+
+					const Vector2 size =
+						horizontal ? Vector2{mainSize, crossSize} : Vector2{crossSize, mainSize};
+					const Vector2 corner = horizontal ? Vector2{along, crossPos + crossOffset}
+													  : Vector2{crossPos + crossOffset, along};
+
+					placed +=
+						Place(store, item.Node, FromCorner(corner, size), clip, depth, rotation, item.Found);
+					along += mainSize + gap + mainSpacing.Between;
+				}
+
+				crossPos += lineCross + lineGap + crossSpacing.Between;
+				first = line.End;
 			}
 
 			return placed;

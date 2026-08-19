@@ -18,7 +18,11 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 	REQUIRE(studio::LoadRenderPipelineGraph(DefaultPbrDocument(), canvas, error));
 
 	CHECK(canvas.Nodes().size() == 23);
-	CHECK(canvas.Links().size() == 47);
+
+	// 48th link is the seam light-field: portal-capture's `light` output into
+	// deferred-lighting's `portal-light` input, pinned by name below so this
+	// count reads as a checksum rather than a mystery.
+	CHECK(canvas.Links().size() == 48);
 	CHECK(canvas.Ordered().size() == canvas.Nodes().size());
 
 	bool sawSsao = false;
@@ -40,6 +44,12 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 	CHECK(canvas.LinkInto(mirrorCapture->Id, "world-state") != nullptr);
 	CHECK(mirrorCapture->Widgets.at("feedback").Text == "last-frame");
 	CHECK(mirrorCapture->Widgets.at("max-recursion").Number == 3.0);
+	const auto deferredLighting =
+		std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
+			return node.Type == "render.pass.deferred-lighting";
+		});
+	REQUIRE(deferredLighting != canvas.Nodes().end());
+	CHECK(canvas.LinkInto(deferredLighting->Id, "portal-light") != nullptr);
 	const auto output =
 		std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
 			return node.Type == "render.pass.output-image";

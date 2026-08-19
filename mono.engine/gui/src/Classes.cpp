@@ -34,7 +34,7 @@ namespace engine::gui {
 		// **A function template keyed on the C++ enum, not a parameter.** The
 		// generated conversions below are captureless function pointers, so
 		// they cannot close over a name; keying on the type is what lets one
-		// template generate the getter and setter for all nineteen sets.
+		// template generate the getter and setter for all twenty-two sets.
 
 		template <class E> const core::Name &EnumNameOf();
 
@@ -60,6 +60,9 @@ namespace engine::gui {
 		GUI_ENUM_NAME(AspectType, "AspectType")
 		GUI_ENUM_NAME(DominantAxis, "DominantAxis")
 		GUI_ENUM_NAME(ScrollingDirection, "ScrollingDirection")
+		GUI_ENUM_NAME(FlexAlignment, "UIFlexAlignment")
+		GUI_ENUM_NAME(ItemLineAlignment, "ItemLineAlignment")
+		GUI_ENUM_NAME(FlexMode, "UIFlexMode")
 		GUI_ENUM_NAME(ZIndexBehavior, "ZIndexBehavior")
 		GUI_ENUM_NAME(SurfaceSizingMode, "SurfaceSizingMode")
 		GUI_ENUM_NAME(Face, "NormalId")
@@ -107,6 +110,9 @@ namespace engine::gui {
 		GUI_ENUM_COUNT(AspectType, 2)
 		GUI_ENUM_COUNT(DominantAxis, 2)
 		GUI_ENUM_COUNT(ScrollingDirection, 3)
+		GUI_ENUM_COUNT(FlexAlignment, 5)
+		GUI_ENUM_COUNT(ItemLineAlignment, 5)
+		GUI_ENUM_COUNT(FlexMode, 5)
 		GUI_ENUM_COUNT(ZIndexBehavior, 2)
 		GUI_ENUM_COUNT(SurfaceSizingMode, 2)
 		GUI_ENUM_COUNT(Face, 6)
@@ -291,6 +297,7 @@ namespace engine::gui {
 			"UICorner",
 			"UIStroke",
 			"UIScale",
+			"UIFlexItem",
 			"GuiService",
 
 			// The 3D branch. `GuiBase3d` and `PVAdornment` are abstract in
@@ -332,6 +339,9 @@ namespace engine::gui {
 			RegisterEnum<AspectType>();
 			RegisterEnum<DominantAxis>();
 			RegisterEnum<ScrollingDirection>();
+			RegisterEnum<FlexAlignment>();
+			RegisterEnum<ItemLineAlignment>();
+			RegisterEnum<FlexMode>();
 			RegisterEnum<ZIndexBehavior>();
 			RegisterEnum<SurfaceSizingMode>();
 
@@ -503,6 +513,11 @@ namespace engine::gui {
 			const std::array scale{Components::Of<Scale>()};
 			const ClassId uiScale = Classes::Register("UIScale", uiComponent, scale);
 
+			// On the *child* being flexed, not on the layout - Roblox's shape,
+			// and the one that lets one spring sit beside fixed buttons.
+			const std::array flexItem{Components::Of<FlexItem>()};
+			const ClassId uiFlexItem = Classes::Register("UIFlexItem", uiComponent, flexItem);
+
 			// --- the property surface ----------------------------------------
 			//
 			// Each declared on the class that first holds what it projects, so
@@ -642,10 +657,14 @@ namespace engine::gui {
 			Classes::Property<&Padding::Right>(uiPadding, "PaddingRight");
 
 			Classes::Property<&ListLayout::Padding>(uiListLayout, "Padding");
+			Classes::Property<&ListLayout::Wraps>(uiListLayout, "Wraps");
 			Classes::Computed(uiListLayout, EnumField<&ListLayout::Direction>("FillDirection"));
 			Classes::Computed(uiListLayout, EnumField<&ListLayout::Horizontal>("HorizontalAlignment"));
 			Classes::Computed(uiListLayout, EnumField<&ListLayout::Vertical>("VerticalAlignment"));
 			Classes::Computed(uiListLayout, EnumField<&ListLayout::Order>("SortOrder"));
+			Classes::Computed(uiListLayout, EnumField<&ListLayout::HorizontalFlex>("HorizontalFlex"));
+			Classes::Computed(uiListLayout, EnumField<&ListLayout::VerticalFlex>("VerticalFlex"));
+			Classes::Computed(uiListLayout, EnumField<&ListLayout::ItemLine>("ItemLineAlignment"));
 
 			Classes::Property<&GridLayout::CellSize>(uiGridLayout, "CellSize");
 			Classes::Property<&GridLayout::CellPadding>(uiGridLayout, "CellPadding");
@@ -673,6 +692,11 @@ namespace engine::gui {
 			Classes::Property<&Stroke::Transparency>(uiStroke, "Transparency");
 
 			Classes::Property<&Scale::Factor>(uiScale, "Scale");
+
+			Classes::Property<&FlexItem::GrowRatio>(uiFlexItem, "GrowRatio");
+			Classes::Property<&FlexItem::ShrinkRatio>(uiFlexItem, "ShrinkRatio");
+			Classes::Computed(uiFlexItem, EnumField<&FlexItem::Mode>("FlexMode"));
+			Classes::Computed(uiFlexItem, EnumField<&FlexItem::ItemLine>("ItemLineAlignment"));
 
 			Classes::Property<&Adornment::Adornee>(pvAdornment, "Adornee");
 			Classes::Property<&Adornment::Color>(pvAdornment, "Color3");

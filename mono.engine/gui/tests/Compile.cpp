@@ -223,6 +223,7 @@ TEST_CASE("every declared property moves the signature", "[gui][compile]") {
 		"UICorner",
 		"UIStroke",
 		"UIScale",
+		"UIFlexItem",
 	};
 
 	size_t checked = 0;

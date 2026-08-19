@@ -434,6 +434,9 @@ end
 declare extern type Enum_HorizontalAlignment extends EnumItem with
 end
 
+declare extern type Enum_ItemLineAlignment extends EnumItem with
+end
+
 declare extern type Enum_KeyCode extends EnumItem with
 end
 
@@ -498,6 +501,12 @@ declare extern type Enum_TextXAlignment extends EnumItem with
 end
 
 declare extern type Enum_TextYAlignment extends EnumItem with
+end
+
+declare extern type Enum_UIFlexAlignment extends EnumItem with
+end
+
+declare extern type Enum_UIFlexMode extends EnumItem with
 end
 
 declare extern type Enum_UserInputState extends EnumItem with
@@ -579,6 +588,13 @@ declare Enum: {
 		Left: Enum_HorizontalAlignment,
 		Center: Enum_HorizontalAlignment,
 		Right: Enum_HorizontalAlignment,
+	},
+	ItemLineAlignment: {
+		Automatic: Enum_ItemLineAlignment,
+		Start: Enum_ItemLineAlignment,
+		Center: Enum_ItemLineAlignment,
+		End: Enum_ItemLineAlignment,
+		Stretch: Enum_ItemLineAlignment,
 	},
 	KeyCode: {
 		Unknown: Enum_KeyCode,
@@ -757,6 +773,20 @@ declare Enum: {
 		Top: Enum_TextYAlignment,
 		Center: Enum_TextYAlignment,
 		Bottom: Enum_TextYAlignment,
+	},
+	UIFlexAlignment: {
+		None: Enum_UIFlexAlignment,
+		Fill: Enum_UIFlexAlignment,
+		SpaceAround: Enum_UIFlexAlignment,
+		SpaceBetween: Enum_UIFlexAlignment,
+		SpaceEvenly: Enum_UIFlexAlignment,
+	},
+	UIFlexMode: {
+		None: Enum_UIFlexMode,
+		Grow: Enum_UIFlexMode,
+		Shrink: Enum_UIFlexMode,
+		Fill: Enum_UIFlexMode,
+		Custom: Enum_UIFlexMode,
 	},
 	UserInputState: {
 		Begin: Enum_UserInputState,
@@ -1540,9 +1570,13 @@ end
 declare extern type UIListLayout extends UILayout with
 	FillDirection: Enum_FillDirection
 	HorizontalAlignment: Enum_HorizontalAlignment
+	HorizontalFlex: Enum_UIFlexAlignment
+	ItemLineAlignment: Enum_ItemLineAlignment
 	Padding: UDim
 	SortOrder: Enum_SortOrder
 	VerticalAlignment: Enum_VerticalAlignment
+	VerticalFlex: Enum_UIFlexAlignment
+	Wraps: boolean
 end
 
 declare extern type UIGridLayout extends UILayout with
@@ -1594,6 +1628,13 @@ end
 
 declare extern type UIScale extends UIComponent with
 	Scale: number
+end
+
+declare extern type UIFlexItem extends UIComponent with
+	FlexMode: Enum_UIFlexMode
+	GrowRatio: number
+	ItemLineAlignment: Enum_ItemLineAlignment
+	ShrinkRatio: number
 end
 
 declare extern type Service extends Instance with
@@ -2225,6 +2266,7 @@ type CreatableInstances = {
 	UICorner: UICorner,
 	UIStroke: UIStroke,
 	UIScale: UIScale,
+	UIFlexItem: UIFlexItem,
 	Player: Player,
 	Team: Team,
 }

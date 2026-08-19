@@ -287,7 +287,11 @@ namespace engine::gui {
 			running = Fold(running, value.Padding);
 			running = Fold(running, value.Horizontal);
 			running = Fold(running, value.Vertical);
-			return Fold(running, value.Order);
+			running = Fold(running, value.Order);
+			running = Fold(running, value.HorizontalFlex);
+			running = Fold(running, value.VerticalFlex);
+			running = Fold(running, value.ItemLine);
+			return Fold(running, value.Wraps);
 		}
 
 		uint64_t Fold(uint64_t running, const GridLayout &value) {
@@ -329,6 +333,13 @@ namespace engine::gui {
 
 		uint64_t Fold(uint64_t running, const Scale &value) {
 			return Fold(running, value.Factor);
+		}
+
+		uint64_t Fold(uint64_t running, const FlexItem &value) {
+			running = Fold(running, value.GrowRatio);
+			running = Fold(running, value.ShrinkRatio);
+			running = Fold(running, value.Mode);
+			return Fold(running, value.ItemLine);
 		}
 
 		// One pass over every row carrying `T`, folding the row's identity, its
@@ -819,6 +830,7 @@ namespace engine::gui {
 		stamp = FoldRows<Corner>(store, stamp);
 		stamp = FoldRows<Stroke>(store, stamp);
 		stamp = FoldRows<Scale>(store, stamp);
+		stamp = FoldRows<FlexItem>(store, stamp);
 
 		if (Fresh && stamp == Stamp) {
 			return false;
