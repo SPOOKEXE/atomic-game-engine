@@ -80,14 +80,13 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] `ShapeCast` needs a swept-volume walk and its own de-duplication rule; the current union of the start and end box bounds is loose over long sweeps, and the ray walk's run rule only applies to the centre line
 - [x] show Universe in Explorer with mutable execution mode, maximum catch-up ticks, bus budget, channel queue limit and channels-per-world; show federated mode, world counts, fault counts, tick cost and bus traffic read-only
 - [x] build ui features out (more roblox): flex list layouts - `UIListLayout` `Wraps`/`HorizontalFlex`/`VerticalFlex`/`ItemLineAlignment` and `UIFlexItem` with `FlexMode`/`GrowRatio`/`ShrinkRatio`, laid out, saved, bound and in the Properties panel
-- [_] build ui features out (more roblox)
 - [x] build out code editor with auto complete (more vs-code like, hover on keywords, right-side minimap) - hover tooltips from the same language-aware surface the completion uses, a run-stripe minimap with click/drag scroll, Tab accepts, matched prefix highlighted, kind/doc footer on the list
+- [_] thoroughly implement every user-interface element, including `SurfaceGui` and `BillboardGui`
 
 - [_] add accessories support
 - [_] animation handler
 - [_] character controller + humanoid + character states + state controller, etc. More modular than roblox standard humanoid. state machine? node graphs? etc.
 - [_] skinning and animation - `bake` skips joints and weights and keeps the rest pose, because there are no skeletons in the engine yet
-- [_] thoroughly implement every user-interface element, including `SurfaceGui` and `BillboardGui`
 - [_] finish portals so lighting, physics, projection, clipping and geometry crossing the seam are seamless
 - [_] port semi-real raytrace and path-trace as part of nodes
 - [_] make demo render pipelines with semi-real raytrace and path-trace
