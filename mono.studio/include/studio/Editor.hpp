@@ -1981,6 +1981,18 @@ namespace studio {
 		// @since v0.13
 		static void PrepareWorld(engine::ecs::Store &store, engine::ecs::Scheduler &systems);
 
+		// `PrepareWorld` on a world this editor holds, plus the settings that
+		// only the world's handle can answer for.
+		//
+		// **The reason `PrepareWorld` is not simply called with the settings.**
+		// It is a function pointer at five call sites and takes what a store
+		// needs; the physics rate is a property of the *world*, not of its
+		// store, so somebody has to read it from the universe first. This is
+		// that somebody, and every one of the five now goes through it.
+		//
+		// @param id The world to prepare.
+		void PrepareWorldIn(engine::world::WorldId id);
+
 		// The colours a panel was given, by the title imgui identifies it with.
 		//
 		// @param panel The panel's title.

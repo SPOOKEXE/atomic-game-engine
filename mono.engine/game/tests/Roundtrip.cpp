@@ -132,6 +132,8 @@ TEST_CASE("a world's settings are an element and survive the trip", "[game][roun
 	WorldSettings slowSettings;
 	slowSettings.Name = Name("Slow");
 	slowSettings.TickRate = 30.0;
+	slowSettings.PhysicsTickRate = 15.0;
+	slowSettings.ReplicationTickRate = 10.0;
 	slowSettings.GlobalSimulatedNetworkLatency = 42.5;
 	Universe configured;
 	REQUIRE(configured.Create(slowSettings).IsValid());
@@ -165,6 +167,8 @@ TEST_CASE("a world's settings are an element and survive the trip", "[game][roun
 	REQUIRE(properties != nullptr);
 	CHECK(properties->Attribute("tickRate") == "30");
 	CHECK(properties->Attribute("idleTickRate") == "2");
+	CHECK(properties->Attribute("physicsTickRate") == "15");
+	CHECK(properties->Attribute("replicationTickRate") == "10");
 	CHECK(properties->Attribute("globalSimulatedNetworkLatency") == "42.5");
 	CHECK(properties->Attribute("faultLimit") == "3");
 	CHECK(properties->Attribute("renderingProfile") == "Default PBR");
@@ -195,6 +199,7 @@ TEST_CASE("a world's settings are an element and survive the trip", "[game][roun
 	CHECK(
 		exported.find(
 			"\t<WorldProperties tickRate=\"60\" idleTickRate=\"2\" "
+			"physicsTickRate=\"0\" replicationTickRate=\"0\" "
 			"globalSimulatedNetworkLatency=\"0\" faultLimit=\"3\" "
 			"renderingProfile=\"Default PBR\" />"
 		) != std::string::npos
@@ -212,6 +217,8 @@ TEST_CASE("a world's settings are an element and survive the trip", "[game][roun
 	const WorldId restored = loaded.Find(Name("Slow"));
 	REQUIRE(restored.IsValid());
 	CHECK(loaded.SettingsOf(restored).TickRate == 30.0);
+	CHECK(loaded.SettingsOf(restored).PhysicsTickRate == 15.0);
+	CHECK(loaded.SettingsOf(restored).ReplicationTickRate == 10.0);
 	CHECK(loaded.SettingsOf(restored).GlobalSimulatedNetworkLatency == 42.5);
 
 	std::filesystem::remove(path);
@@ -484,6 +491,12 @@ TEST_CASE("a format 1 file keeps its own settings", "[game][roundtrip]") {
 	CHECK(settings.TickRate == 15.0);
 	CHECK(settings.IdleTickRate == 5.0);
 	CHECK(settings.FaultLimit == 9);
+
+	// A file written before the two rates existed says nothing about them, and
+	// zero is "follow the tick rate" and "publish every tick" - which is what
+	// such a file meant.
+	CHECK(settings.PhysicsTickRate == 0.0);
+	CHECK(settings.ReplicationTickRate == 0.0);
 
 	loaded.Enter(world, [](Store &store) { CHECK(store.FindFirstRoot("Survivor") != NULL_ENTITY); });
 

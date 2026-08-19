@@ -11,6 +11,7 @@
 #include <engine/parallel/Process.hpp>
 #include <engine/parallel/Settings.hpp>
 #include <engine/physics/Characters.hpp>
+#include <engine/physics/Clock.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
@@ -1980,6 +1981,20 @@ namespace studio {
 		// same system name twice under one phase is how it was found.
 	}
 
+	void Editor::PrepareWorldIn(WorldId id) {
+		// Read outside the borrow, because the settings belong to the universe
+		// and the store being prepared cannot answer for them.
+		const double physicsTickRate = Universe->SettingsOf(id).PhysicsTickRate;
+
+		Universe->Enter(id, [physicsTickRate](Store &store, Scheduler &systems) {
+			PrepareWorld(store, systems);
+
+			// After `PrepareWorld`, because that is what gives the world the
+			// clock this writes to.
+			engine::physics::SetPhysicsTickRate(store, physicsTickRate);
+		});
+	}
+
 	void Editor::NewGame() {
 		EndAllRuns();
 		Scripts.clear();
@@ -2257,7 +2272,7 @@ namespace studio {
 		// draw list renders as an empty frame, which reads as a broken renderer
 		// rather than as a missing system.
 		for (const WorldId id : Universe->Worlds()) {
-			Universe->Enter(id, PrepareWorld);
+			PrepareWorldIn(id);
 		}
 
 		Active = Universe->Worlds().empty() ? WorldId{} : Universe->Worlds().front();
@@ -2521,7 +2536,7 @@ namespace studio {
 			return false;
 		}
 
-		Universe->Enter(imported, PrepareWorld);
+		PrepareWorldIn(imported);
 
 		Active = imported;
 		SelectionWorld = imported;
@@ -2584,7 +2599,7 @@ namespace studio {
 		// the same two things `OpenGame` does, for the same reasons. A world
 		// with no draw list renders as an empty frame.
 		for (const WorldId id : Universe->Worlds()) {
-			Universe->Enter(id, PrepareWorld);
+			PrepareWorldIn(id);
 		}
 
 		InstanceCounts.clear();
@@ -2627,7 +2642,7 @@ namespace studio {
 			return id;
 		}
 
-		Universe->Enter(id, PrepareWorld);
+		PrepareWorldIn(id);
 
 		// **`WorldId` is a reused slot**, so a cached count keyed by one can
 		// outlive the world it counted and be shown for the next world to take
@@ -3238,7 +3253,7 @@ namespace studio {
 		// this used to do.** A world restored by Stop went back without services
 		// - every other path installs them - so it was the one world in the
 		// program where `game:GetService` could fail.
-		Universe->Enter(restored, PrepareWorld);
+		PrepareWorldIn(restored);
 
 		// **Everything that held the old handle, repointed.** `Adopt` normally
 		// hands back the same slot, but nothing promises it - and a viewport

@@ -4,6 +4,7 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/physics/Clock.hpp>
 #include <engine/physics/Integrate.hpp>
 #include <engine/scene/Components.hpp>
 
@@ -12,9 +13,11 @@ namespace engine::physics {
 	void IntegrateMotion(ecs::Store &store) {
 		ENGINE_PROFILE_CAT("physics.integrate", core::ProfileCategory::Physics);
 
-		// The fixed tick delta, read from the world. A system takes no float
-		// argument precisely so that nobody can hand it a frame time.
-		const float delta = store.Time().Delta;
+		// The fixed step delta, read from the world. A system takes no float
+		// argument precisely so that nobody can hand it a frame time. This is
+		// the world's tick unless the world runs physics at a rate of its own,
+		// in which case it is that rate's step - see `Clock.hpp`.
+		const float delta = PhysicsStepSeconds(store);
 
 		// `const Motion`, so the query cannot be widened into one that writes
 		// velocity - that is the solver's job and it runs in another phase. No

@@ -31,6 +31,7 @@
 // world prepared" is answered with `Components::Find`, which takes a name and
 // registers nothing.
 
+#include <engine/physics/Clock.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
 
 #include <string_view>
@@ -47,6 +48,10 @@ namespace engine::physics {
 	// for it.** Two copies of this string would disagree exactly once, and the
 	// symptom would be a module that thinks no world is ever prepared.
 	inline constexpr std::string_view PHYSICS_WORLD_COMPONENT = "physics.PhysicsWorld";
+
+	// The name `PhysicsClock` is registered under, for the same reason and with
+	// the same one-spelling rule.
+	inline constexpr std::string_view PHYSICS_CLOCK_COMPONENT = "physics.PhysicsClock";
 
 	// Whether this process has registered the resource type at all.
 	//
@@ -69,4 +74,34 @@ namespace engine::physics {
 	// @param store The world to read.
 	// @return The resource, or `nullptr` when the world was never prepared.
 	PhysicsWorld *PreparedWorldMutable(ecs::Store &store);
+
+	// The world's physics clock, or `nullptr` when the world was never prepared.
+	//
+	// **Silent where `PreparedWorld` complains.** A step called directly rather
+	// than through the pipeline is the ordinary case in this module's suites and
+	// benchmarks, and such a world has no clock by design -
+	// `PhysicsStepSeconds` falls back to the world's tick for exactly that. A
+	// line per read would be a log full of a supported case.
+	//
+	// @param store The world to read.
+	// @return The clock, or `nullptr`.
+	// @threadsafe
+	const PhysicsClock *PreparedClock(const ecs::Store &store);
+
+	// The same, for the steps that charge time to it.
+	//
+	// @param store The world to read.
+	// @return The clock, or `nullptr`.
+	PhysicsClock *PreparedClockMutable(ecs::Store &store);
+
+	// The one rule about what a physics rate may be.
+	//
+	// Private because both callers are in this module - `SetPhysicsTickRate`
+	// and the snapshot reader - and because two copies of the rule would
+	// disagree exactly once, on the input that was crafted to find it.
+	//
+	// @param stepsPerSecond The rate as it arrived.
+	// @return Zero for anything not above zero, and `PhysicsClock::
+	//         MAXIMUM_RATE` for anything above that.
+	double SanePhysicsRate(double stepsPerSecond);
 }

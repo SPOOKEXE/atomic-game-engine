@@ -9,6 +9,7 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/physics/Clock.hpp>
 #include <engine/physics/Contacts.hpp>
 #include <engine/physics/NarrowPhase.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
@@ -58,9 +59,19 @@ namespace engine::physics {
 		// The event list is cleared here rather than in `Publish` so that a
 		// world whose narrow phase ran and whose solver did not cannot hand a
 		// reader last tick's events as though they were this tick's.
+		//
+		// **The manifolds belong to a step and the events belong to a tick**,
+		// which only differ on a world stepping physics more than once per
+		// tick. A reader asks what touched this tick, and a touch that began on
+		// the second step of one is a touch that happened - clearing per step
+		// would drop every contact that began and ended inside a tick, and the
+		// faster the world was configured the more of them it would drop.
 		std::vector<ContactManifold> &manifolds = PipelineInternals::Manifolds(*world);
 		manifolds.clear();
-		PipelineInternals::Events(*world).clear();
+
+		if (FirstPhysicsStepOfTick(store)) {
+			PipelineInternals::Events(*world).clear();
+		}
 
 		// **Serial, and measured rather than assumed.** A pair function is pure
 		// - it reads two placed shapes and writes one manifold - so splitting

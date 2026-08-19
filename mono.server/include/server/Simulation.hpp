@@ -107,6 +107,11 @@ namespace server {
 	// deduplicate, so a world prepared twice integrates twice per tick - which
 	// is a world running at double gravity rather than an error anybody sees.
 	//
+	// @param store            The world to prepare.
+	// @param scheduler        Its scheduler.
+	// @param physicsTickRate  Physics steps per second from the world's
+	//                         settings, or zero to follow its tick rate.
 	// @since v0.13
-	void PrepareSimulation(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler);
+	void
+	PrepareSimulation(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler, double physicsTickRate);
 }

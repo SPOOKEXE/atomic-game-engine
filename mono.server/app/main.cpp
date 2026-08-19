@@ -60,6 +60,8 @@ int main(int argc, char **argv) {
 	arguments.Flag("chatter", "Make every world publish on a shared topic (no game file yet)");
 
 	arguments.Value("tick-rate", "HZ", "Ticks per second (default 30)");
+	arguments.Value("physics-tick-rate", "HZ", "Physics steps per second (default: the tick rate)");
+	arguments.Value("replication-tick-rate", "HZ", "Snapshots per second (default: every tick)");
 	arguments.Value("entities", "N", "Entities in the placeholder world (default 4096)");
 	arguments.Value("ticks", "N", "Exit after N ticks");
 	arguments.Value("seconds", "N", "Exit after N seconds");
@@ -145,6 +147,8 @@ int main(int argc, char **argv) {
 	// `main` for the precedence this expresses.
 	server::Options options = server::OptionsFromFlags();
 	options.TickRate = arguments.GetNumber("tick-rate", options.TickRate);
+	options.PhysicsTickRate = arguments.GetNumber("physics-tick-rate", options.PhysicsTickRate);
+	options.ReplicationTickRate = arguments.GetNumber("replication-tick-rate", options.ReplicationTickRate);
 	options.Entities = static_cast<uint32_t>(arguments.GetInteger("entities", options.Entities));
 	options.MaximumTicks = arguments.GetInteger("ticks", -1);
 	options.Seconds = arguments.GetNumber("seconds", 0.0);

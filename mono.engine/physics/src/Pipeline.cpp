@@ -6,6 +6,7 @@
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/physics/Broadphase.hpp>
+#include <engine/physics/Clock.hpp>
 #include <engine/physics/Integrate.hpp>
 #include <engine/physics/NarrowPhase.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
@@ -40,6 +41,36 @@ namespace engine::physics {
 				// world to the scale it happened to have when it was saved -
 				// and it would never measure again.
 				writer.WriteBool(worlds[index].CellSizeMeasured());
+			}
+		}
+
+		// The clock's rate and nothing else, for `WritePhysicsWorlds`' reason
+		// one step further: the accumulator, the owed count and the counters
+		// are all derived from the rate and from the ticks that have run since,
+		// so writing them would be writing a second copy of a fact the tick
+		// stream already carries.
+		void WritePhysicsClocks(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *clocks = static_cast<const PhysicsClock *>(source);
+			for (size_t index = 0; index < count; index++) {
+				writer.WriteDouble(clocks[index].Rate);
+			}
+		}
+
+		void ReadPhysicsClocks(core::ByteReader &reader, void *destination, size_t count) {
+			auto *clocks = static_cast<PhysicsClock *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				// A fresh clock at the saved rate. A restored world owes no
+				// steps until its next tick charges one, which is what stops a
+				// load from stepping physics for the time the file spent on
+				// disk.
+				//
+				// **Through the same rule the setter uses, because a snapshot
+				// is hostile.** A raw `Rate` of NaN or infinity out of a
+				// crafted file reaches `BeginPhysicsTick`'s cast to an
+				// `int32_t`, and that is undefined behaviour rather than a
+				// strange step count.
+				clocks[index] = PhysicsClock{};
+				clocks[index].Rate = SanePhysicsRate(reader.ReadDouble());
 			}
 		}
 
@@ -78,12 +109,21 @@ namespace engine::physics {
 		ecs::Components::Register<PhysicsWorld>(
 			PHYSICS_WORLD_COMPONENT, WritePhysicsWorlds, ReadPhysicsWorlds
 		);
+
+		ecs::Components::Register<PhysicsClock>(
+			PHYSICS_CLOCK_COMPONENT, WritePhysicsClocks, ReadPhysicsClocks
+		);
 	}
 
 	void PreparePhysicsWorld(ecs::Store &store, float cellSize) {
 		RegisterPhysicsComponents();
 
 		store.SetResource(PhysicsWorld{cellSize});
+
+		// At zero, which follows the world's tick rate. A host with a rate to
+		// apply calls `SetPhysicsTickRate` after this; a host with nothing to
+		// say gets what physics did before the clock existed.
+		store.SetResource(PhysicsClock{});
 
 		// Declared when the world is built, per `Store::Observe`: observing
 		// later moves every row already carrying the component into an
@@ -104,6 +144,23 @@ namespace engine::physics {
 		// registration order, which it does not. Each step opens its own
 		// profiler span, so the overlay still separates them.
 		scheduler.Add("physics.simulation", ecs::Phase::Simulation, [](ecs::Store &store) {
+			// **The tick is charged here and spent across both systems.** A
+			// world at the default rate owes exactly one step and this reads as
+			// it always did; a world with a rate of its own may owe none, in
+			// which case both systems are a branch and nothing else.
+			//
+			// **A world with no clock at all steps once**, which is a world
+			// somebody registered the systems on without preparing. Every
+			// other step in the pipeline already refuses that world loudly
+			// through `PreparedWorld`; making this one silently integrate
+			// nothing would turn a noisy misconfiguration into a still one.
+			if (PhysicsClockOf(store) != nullptr) {
+				BeginPhysicsTick(store);
+				if (!BeginPhysicsStep(store)) {
+					return;
+				}
+			}
+
 			IntegrateMotion(store);
 			SyncBroadphase(store);
 		});
@@ -115,11 +172,38 @@ namespace engine::physics {
 		// solver left in the body array. Registered separately they would run
 		// in whatever order the scheduler chose, and three of the four would
 		// read last tick's answer.
+		//
+		// **The second and later steps of a fast world run here too**, after
+		// the first one's contacts. A world stepping physics twice per tick
+		// integrates once in `Phase::Simulation` - so everything else in that
+		// phase still sees exactly one integration, as it did before rates
+		// existed - and finishes the rest of its steps whole inside this one.
+		// Splitting them across the two phases instead would run a bare
+		// integration with no solver behind it, which is a body passing through
+		// a wall on every other step.
 		scheduler.Add("physics.contacts", ecs::Phase::PostSimulation, [](ecs::Store &store) {
+			const PhysicsClock *clock = PhysicsClockOf(store);
+			if (clock != nullptr && !clock->Stepping) {
+				// `physics.simulation` owed no step this tick, so there is
+				// nothing integrated for a contact to be against. A world with
+				// no clock is the unprepared one above, and it falls through
+				// to the same four steps it always ran.
+				return;
+			}
+
 			BroadPhase(store);
 			NarrowPhase(store);
 			Solve(store);
 			Publish(store);
+
+			while (BeginPhysicsStep(store)) {
+				IntegrateMotion(store);
+				SyncBroadphase(store);
+				BroadPhase(store);
+				NarrowPhase(store);
+				Solve(store);
+				Publish(store);
+			}
 		});
 	}
 }

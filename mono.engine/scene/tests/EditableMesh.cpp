@@ -173,6 +173,22 @@ TEST_CASE("Clear empties every array and bumps the revision once", "[scene][edit
 }
 
 TEST_CASE("every door refuses an instance that is not an EditableMesh", "[scene][editablemesh]") {
+	// **The registration first, because this is the one case here that never
+	// makes a mesh.** Every other case opens with `MakeEditableMesh`, which
+	// reaches `EnsureClassTree` and registers `scene.EditableMesh` under its
+	// explicit name. This one only ever asks whether an entity *has* the
+	// component - and `Store::Get<T>` mints the id under the compiler's
+	// spelling as a side effect of looking, so running it first left
+	// `engine::scene::EditableMesh` registered and aborted the next case to
+	// reach the explicit name with "a type has one name".
+	//
+	// It fired on about one seed in forty, in whichever case the shuffle put
+	// after this one, which is what made it read as a flake in an unrelated
+	// suite. Reproduce it with:
+	//
+	//     test_scene "[editablemesh]" --order rand --rng-seed 3221043763
+	engine::scene::RegisterSceneComponents();
+
 	Store store("editablemesh.wrongtype");
 	const Entity notAMesh = store.Create();
 

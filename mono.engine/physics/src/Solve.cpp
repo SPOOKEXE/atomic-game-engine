@@ -7,6 +7,7 @@
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/physics/Clock.hpp>
 #include <engine/physics/Contacts.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Solver.hpp>
@@ -235,7 +236,7 @@ namespace engine::physics {
 			return;
 		}
 
-		const float delta = store.Time().Delta;
+		const float delta = PhysicsStepSeconds(store);
 		const std::vector<ContactManifold> &manifolds = PipelineInternals::Manifolds(*world);
 		std::vector<SolverBody> &bodies = PipelineInternals::Bodies(*world);
 		std::vector<ContactRow> &rows = PipelineInternals::Rows(*world);

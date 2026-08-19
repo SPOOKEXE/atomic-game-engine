@@ -63,6 +63,11 @@ namespace engine::physics {
 	// `Phase::PostSimulation`, which pairs, intersects, solves and publishes.
 	// Six steps in two systems, in the order `v02v03v04.md` §3.5 lists them.
 	//
+	// **How many times the six run is the world's `PhysicsClock`'s business.**
+	// A world that never set a rate runs them once per tick, which is what they
+	// did before the clock existed. A slower world skips whole ticks; a faster
+	// one finishes its extra steps inside `physics.contacts`. See `Clock.hpp`.
+	//
 	// @param scheduler The scheduler to add to.
 	void RegisterPhysicsSystems(ecs::Scheduler &scheduler);
 }

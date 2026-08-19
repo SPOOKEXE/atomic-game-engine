@@ -1475,6 +1475,8 @@ just host --ticks 300 --entities 20000
 --force-serial-compute           Run parallel dispatches on one thread
 --mcp-port PORT                  Open the loopback control surface (default 8734)
 --tick-rate HZ                   Ticks per second (default 30)
+--physics-tick-rate HZ           Physics steps per second (default: the tick rate)
+--replication-tick-rate HZ       Snapshots per second (default: every tick)
 --entities N                     Entities in the placeholder world (default 4096)
 --ticks N                        Exit after N ticks
 --seconds N                      Exit after N seconds
@@ -1496,6 +1498,33 @@ just host --ticks 300 --entities 20000
 --content-grant-key HEX          Secret used for content grants
 --help                           Show this text
 ```
+
+### Three rates, not one
+
+A world ticks, steps its physics, and publishes snapshots. Those are three
+different costs and they get three different numbers:
+
+```sh
+./server --game My.agame --tick-rate 60 --physics-tick-rate 30 --replication-tick-rate 20
+```
+
+- `--tick-rate` is what scripts, signals and character input run at.
+- `--physics-tick-rate` is what the solver runs at. Lower it when a world is
+  spending its tick in physics and the scripts still need the full rate; raise
+  it for a world of fast, precise bodies. Zero follows the tick rate.
+- `--replication-tick-rate` is how often a snapshot goes on the wire. Zero
+  publishes every tick. Lowering it does not lose state: the world holds its
+  change bits across the ticks it does not publish, so a property written on
+  any of them still reaches the client on the next one that does.
+
+Both are measured in *simulated* seconds, so a suspended world owes nothing for
+the time it was asked to and an idle world at 2 Hz cannot publish twenty times a
+second however loudly it was asked to.
+
+The three flags apply to the worlds this program creates itself. A `.agame`
+carries `physicsTickRate` and `replicationTickRate` per world under
+`<WorldProperties>`, and those win - a scene authored to solve at 30 solves at
+30 whoever hosts it.
 
 ### Recording and replaying
 

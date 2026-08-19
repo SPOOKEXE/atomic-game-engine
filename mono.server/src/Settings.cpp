@@ -18,6 +18,16 @@ namespace server {
 				engine::core::FlagTableBuilder built;
 
 				built.Number("server.tick-rate", defaults.TickRate, "Ticks per second");
+				built.Number(
+					"server.physics-tick-rate",
+					defaults.PhysicsTickRate,
+					"Physics steps per second, or 0 to follow the tick rate"
+				);
+				built.Number(
+					"server.replication-tick-rate",
+					defaults.ReplicationTickRate,
+					"Snapshots published per second, or 0 to publish every tick"
+				);
 				built.Integer("server.entities", defaults.Entities, "Entities in the placeholder world");
 				built.Boolean(
 					"server.unpaced", defaults.Unpaced, "Tick back to back instead of pacing to the tick rate"
@@ -166,6 +176,8 @@ namespace server {
 		using engine::core::Flag;
 
 		options.TickRate = Flag("server.tick-rate").Number();
+		options.PhysicsTickRate = Flag("server.physics-tick-rate").Number();
+		options.ReplicationTickRate = Flag("server.replication-tick-rate").Number();
 		options.Entities = static_cast<uint32_t>(Flag("server.entities").Integer());
 		options.Unpaced = Flag("server.unpaced").Boolean();
 		options.Chatter = Flag("server.chatter").Boolean();

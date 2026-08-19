@@ -94,6 +94,37 @@ namespace engine::world {
 		// and timers expire whether or not somebody is watching.
 		double IdleTickRate = 2.0;
 
+		// Physics steps per second. Zero follows whichever of the two rates
+		// above is in force.
+		//
+		// Separate from the tick rate because the two are paid for very
+		// differently. Scripts, signals and character input want the tick rate
+		// they were written against; the solver is the most expensive thing
+		// inside a tick and the least sensitive to running at a different one.
+		// A world of a thousand crates can solve at 30 while everything else
+		// stays at 60, and a world of six precise moving platforms can solve at
+		// 120.
+		//
+		// The world does not act on this itself - `physics` is above `world`
+		// and cannot be named here. Whatever built the world hands it to
+		// `physics::SetPhysicsTickRate`, which is the same arrangement the
+		// physics cell size already has.
+		double PhysicsTickRate = 0.0;
+
+		// Snapshots published per second. Zero publishes on every tick.
+		//
+		// Measured in *simulated* seconds, so a world suspended for an hour
+		// owes no snapshots for it and an idle world at 2 Hz does not publish
+		// twenty times a second because somebody asked for twenty. The
+		// alternative - wall time - would make what a client receives depend on
+		// how busy the host was, which is the one thing a rate is supposed to
+		// stop.
+		//
+		// **Change bits are held rather than cleared between two published
+		// ticks**, so a property written on a tick that is not published still
+		// reaches the wire on the one that is. `World::Tick` carries that.
+		double ReplicationTickRate = 0.0;
+
 		// Additional one-way delay applied to replication sent from this world,
 		// in milliseconds. A player's local delay is added to this value by the
 		// host, so zero preserves the transport's ordinary timing.
@@ -143,6 +174,14 @@ namespace engine::world {
 		// catch-up cap. A number that keeps climbing is a world that cannot
 		// keep up with its own rate.
 		uint64_t DroppedTicks = 0;
+
+		// Ticks that came round on the world's replication clock since it was
+		// created, whether or not anything was listening.
+		//
+		// Counted here rather than in `replication` because it is the world's
+		// clock that decides, and because a headless world with no listener
+		// still has an answer to "how often would this publish".
+		uint64_t ReplicationTicks = 0;
 	};
 
 	// A store, a scheduler, a clock, and the state machine around them.
@@ -257,6 +296,22 @@ namespace engine::world {
 		// @tick
 		void Tick(int ticks);
 
+		// Whether a tick that should be published has run since this was last
+		// asked, clearing the answer.
+		//
+		// **Consumed rather than merely read**, so a host that asks twice in one
+		// frame publishes once. At most one per call whatever the world owes,
+		// for the same reason: a snapshot carries the world as it stands, so
+		// three back to back would put the same state on the wire three times.
+		//
+		// A world with no replication rate answers `true` after every tick,
+		// which is what a host that never heard of this did already.
+		//
+		// Called on the driver thread, after the tick batch.
+		//
+		// @return `true` when this world should publish now.
+		bool TakeReplicationTick();
+
 		// Runs the presentation phase once, at the host's frame rate.
 		//
 		// Separate from Tick because simulation and rendering do not advance
@@ -303,6 +358,11 @@ namespace engine::world {
 		}
 
 	  private:
+		// Charges one tick to the replication clock.
+		//
+		// @return `true` when this tick is one that should be published.
+		bool AdvanceReplication();
+
 		WorldId Handle;
 		WorldSettings Settings_;
 		WorldState State_ = WorldState::Active;
@@ -310,6 +370,13 @@ namespace engine::world {
 		ecs::Store Store_;
 		ecs::Scheduler Scheduler_;
 		core::FixedTimestep Timestep;
+
+		// The replication clock, in simulated seconds. `Pending` is what
+		// `TakeReplicationTick` hands over and `Holding` is whether the change
+		// bits are being kept for a publish that has not happened yet.
+		double ReplicationAccumulator = 0.0;
+		bool ReplicationPending = false;
+		bool HoldingChanges = false;
 
 		ecs::Entity RootEntity;
 		WorldStatistics Stats;

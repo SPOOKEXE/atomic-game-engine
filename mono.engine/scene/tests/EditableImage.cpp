@@ -146,6 +146,12 @@ TEST_CASE("DrawCircle fills the disc and leaves the corners of its box untouched
 }
 
 TEST_CASE("every door refuses an instance that is not an EditableImage", "[scene][editableimage]") {
+	// The registration first, for the reason `EditableMesh.cpp`'s matching case
+	// carries in full: this is the one case here that never makes an image, so
+	// it is the one that would mint `engine::scene::EditableImage` under the
+	// compiler's spelling and abort whichever case the shuffle ran next.
+	engine::scene::RegisterSceneComponents();
+
 	Store store("editableimage.wrongtype");
 	const Entity notAnImage = store.Create();
 

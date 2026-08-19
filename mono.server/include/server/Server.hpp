@@ -97,6 +97,17 @@ namespace server {
 		// one world this version hosts runs at.
 		double TickRate = 30.0;
 
+		// Physics steps per second, and snapshots published per second, for the
+		// worlds this program creates itself. Zero follows `TickRate`.
+		//
+		// **Only for the worlds this program creates.** A `.agame` carries a
+		// rate per world and those win, for the reason `TickRate` does not
+		// overwrite them either: a scene authored to solve at 30 should solve
+		// at 30 whoever hosts it. `world::WorldSettings` documents what the two
+		// numbers mean.
+		double PhysicsTickRate = 0.0;
+		double ReplicationTickRate = 0.0;
+
 		// Entities in the placeholder world, until there is a game file to load
 		// one from.
 		uint32_t Entities = 4096;

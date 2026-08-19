@@ -63,8 +63,11 @@ every existing test:
 
 - **No unordered container iterated anywhere in a system.** A lookup is fine; a
   walk is not, because the bucket order is a function of the allocator.
-- **No wall clock.** The delta is `Store::Time().Delta`, the fixed tick. A
-  system takes no float argument precisely so nobody can hand it a frame time.
+- **No wall clock.** The delta is `PhysicsStepSeconds(store)` - the world's
+  fixed tick, or the fixed step of the world's own physics rate. A system takes
+  no float argument precisely so nobody can hand it a frame time, and the clock
+  in `Clock.hpp` is fed simulated seconds rather than wall ones for the same
+  reason.
 - **No pointer address in a sort key, an id or a hash.** Addresses differ
   between runs under ASLR.
 - **No thread id anywhere.** `EachParallel` partitions rows and each range
@@ -232,6 +235,43 @@ opens its own profiler span, so the overlay still separates them.
 
 Refuse a change that splits them back into two registered systems in one phase
 "because the table says so".
+
+## How often the six run is the clock's business, not the tick's
+
+`PhysicsClock` turns simulated seconds into whole steps of a fixed length, so a
+world can solve at a rate of its own while its scripts and its characters stay
+on the world's tick. `Rate` at zero follows the tick, which is what every world
+in this repository is and what the module did before the clock existed.
+
+Three things about the arrangement are deliberate:
+
+- **It is fed simulated seconds, never wall ones.** `core::FixedTimestep` turns
+  wall time into ticks and is the wrong tool here for §2.4's reason: the number
+  of steps a recording produces must be a property of the recording.
+- **A world stepping faster than it ticks integrates once in `Phase::Simulation`
+  and finishes the rest inside `physics.contacts`.** Everything else in the
+  simulation phase therefore still sees exactly one integration, as it did
+  before rates existed. Splitting the extra steps across the two phases instead
+  would run a bare integration with no solver behind it, which is a body through
+  a wall on every other step.
+- **`PhysicsStepSeconds` falls back to `Store::Time().Delta` when no step is
+  running.** Every suite and benchmark here calls a step directly against a
+  store nobody prepared, and the delta they mean is the world's tick. Refuse a
+  change that makes the fallback an error: it would not find a bug, it would
+  break sixty cases that are calling the function correctly.
+
+The manifolds belong to a step and the **contact events belong to the tick**:
+`NarrowPhase` clears the event list only on `FirstPhysicsStepOfTick`. Clearing
+it per step would drop every contact that began and ended inside one tick, and
+the faster the world was configured the more it would drop. The list therefore
+accumulates across a tick's steps, so a pair that stayed in contact for three of
+them contributes three `Persisted` rows. That is the honest reading - each step
+did have that contact - and a consumer that wants one row per pair per tick has
+to say so. There is no consumer outside this module's suites yet.
+
+`character.control` and `character.pose` stay on the world's tick and are not
+stepped by this clock. A character controller is input-driven kinematic
+movement rather than a solved body, and the input arrives once per tick.
 
 ## The grain is measured and the default is wrong for this body
 

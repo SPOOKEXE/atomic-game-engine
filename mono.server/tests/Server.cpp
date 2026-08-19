@@ -2,6 +2,7 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/testing/Suite.hpp>
+#include <engine/world/Universe.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -20,6 +21,9 @@ TEST_SUITE_ID("server.host")
 TEST_DEPENDS("engine.ecs.store")
 TEST_DEPENDS("engine.ecs.scheduler")
 TEST_DEPENDS("engine.scene.components")
+// The world's settings are what the options are copied into, and the rates that
+// arrived there are read straight back out.
+TEST_DEPENDS("engine.world.universe")
 
 using Catch::Approx;
 using engine::core::FrameGraph;
@@ -402,4 +406,36 @@ TEST_CASE("a replay of a file that does not exist is refused", "[server]") {
 
 	REQUIRE_FALSE(host.Initialise(options));
 	host.Shutdown();
+}
+
+TEST_CASE("the configured rates reach the world this program creates", "[server]") {
+	// **The wiring, not the behaviour.** What a physics rate and a replication
+	// rate *do* is `engine.physics.clock` and `engine.world.universe`; what
+	// this catches is the flag parsed into a field nothing read, which is the
+	// failure `Replication.cpp` opens by naming.
+	server::Server host;
+
+	auto options = Headless(8, 1);
+	options.PhysicsTickRate = 20.0;
+	options.ReplicationTickRate = 10.0;
+	REQUIRE(host.Initialise(options));
+
+	const engine::world::WorldId primary = host.Worlds().Worlds().front();
+	const engine::world::WorldSettings settings = host.Worlds().SettingsOf(primary);
+	CHECK(settings.PhysicsTickRate == Approx(20.0));
+	CHECK(settings.ReplicationTickRate == Approx(10.0));
+
+	host.Shutdown();
+}
+
+TEST_CASE("a world with no rates configured keeps following its tick", "[server]") {
+	Hosted hosted{8, 1};
+
+	const engine::world::WorldId primary = hosted.Host.Worlds().Worlds().front();
+	const engine::world::WorldSettings settings = hosted.Host.Worlds().SettingsOf(primary);
+
+	// Zero, which is "step physics on every tick" and "publish on every tick" -
+	// what this program did before either rate existed.
+	CHECK(settings.PhysicsTickRate == 0.0);
+	CHECK(settings.ReplicationTickRate == 0.0);
 }

@@ -372,6 +372,12 @@ namespace engine::world {
 		return world == nullptr ? WorldSettings{} : world->Settings();
 	}
 
+	bool Universe::TakeReplicationTick(WorldId id) {
+		RequireDriverThread("TakeReplicationTick");
+		World *world = Reach(id);
+		return world != nullptr && world->TakeReplicationTick();
+	}
+
 	WorldStatus Universe::SetRenderingProfile(WorldId id, core::Name profile) {
 		RequireDriverThread("SetRenderingProfile");
 		World *world = Reach(id);
@@ -491,6 +497,8 @@ namespace engine::world {
 			writer.WriteName(world->Name());
 			writer.WriteDouble(world->Settings().TickRate);
 			writer.WriteDouble(world->Settings().IdleTickRate);
+			writer.WriteDouble(world->Settings().PhysicsTickRate);
+			writer.WriteDouble(world->Settings().ReplicationTickRate);
 			writer.WriteDouble(world->Settings().GlobalSimulatedNetworkLatency);
 			writer.WriteUInt8(static_cast<uint8_t>(world->Settings().IsolationLevel));
 			writer.WriteUInt32(world->Settings().FaultLimit);
@@ -554,6 +562,8 @@ namespace engine::world {
 			settings.Name = reader.ReadName();
 			settings.TickRate = reader.ReadDouble();
 			settings.IdleTickRate = reader.ReadDouble();
+			settings.PhysicsTickRate = reader.ReadDouble();
+			settings.ReplicationTickRate = reader.ReadDouble();
 			settings.GlobalSimulatedNetworkLatency = reader.ReadDouble();
 			settings.IsolationLevel = static_cast<Isolation>(reader.ReadUInt8());
 			settings.FaultLimit = reader.ReadUInt32();

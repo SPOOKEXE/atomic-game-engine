@@ -94,6 +94,36 @@ So:
   already claimed. That changes timing and not results - see
   `parallel/AGENTS.md`.
 
+## Three rates per world, and only one of them is a tick
+
+`WorldSettings` carries `TickRate`, `PhysicsTickRate` and `ReplicationTickRate`.
+They are three separate numbers because they are paid for separately: the tick
+is what scripts, signals and character input run at, the physics rate is what
+the solver costs, and the replication rate is what the wire costs. Zero on
+either of the last two means "follow the tick", which is what every world in
+this repository is.
+
+Only the first is this module's own machinery. `physics::PhysicsClock` owns the
+second - `physics` sits at L8 and cannot be named from here, so whatever built
+the world pushes the number down. Refuse a change that adds a `physics` edge to
+this module to shorten that path.
+
+The third is here, and two things about it are load-bearing:
+
+- **It is charged in simulated seconds, never wall ones.** A world suspended for
+  an hour owes no snapshots for it, and a world at its 2 Hz idle rate publishes
+  at most twice a second however loudly it was asked for twenty. A wall clock
+  would make what a client receives a function of how busy the host was.
+- **`World::Tick` holds the change bits across the ticks between two published
+  ones.** They are the delta source, so clearing them on a tick nobody published
+  is how a property written on that tick reaches no client. A world with no
+  replication rate clears every tick exactly as it always did, so the hold costs
+  it one branch.
+
+Asking is what consumes: `Universe::TakeReplicationTick` answers once per
+published tick and then answers `false`. A host that asks twice in a frame
+publishes once.
+
 ## Two kinds of failure, and they are not the same
 
 | | Caught | Blast radius |

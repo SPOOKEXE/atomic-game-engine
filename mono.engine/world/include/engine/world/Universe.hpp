@@ -326,6 +326,18 @@ namespace engine::world {
 		//         world.
 		WorldSettings SettingsOf(WorldId id) const;
 
+		// Whether a world has ticked past its replication clock since this was
+		// last asked, clearing the answer.
+		//
+		// The host calls it once per frame per world it publishes; `World::
+		// TakeReplicationTick` carries what the answer means and why asking is
+		// what clears it. A remote or unknown world answers `false`, because
+		// this process is not the one that would publish it.
+		//
+		// @param id The world to ask about.
+		// @return `true` when the world should publish now.
+		bool TakeReplicationTick(WorldId id);
+
 		// Selects one universe-owned rendering profile for a world.
 		//
 		// The name is stored with the world and resolved by a client. An invalid
@@ -611,7 +623,7 @@ namespace engine::world {
 		std::vector<RemoteDelivery> TakeOutbound();
 
 		// The snapshot format this build writes and accepts.
-		static constexpr uint32_t SNAPSHOT_VERSION = 4;
+		static constexpr uint32_t SNAPSHOT_VERSION = 5;
 
 		// Reports whether the caller is the driver thread.
 		//

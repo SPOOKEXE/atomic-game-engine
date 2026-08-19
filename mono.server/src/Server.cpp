@@ -546,6 +546,15 @@ namespace server {
 			"--tick-rate",
 			std::to_string(Settings.TickRate),
 
+			// Carried to the child, so a world hosted in another process steps
+			// and publishes at the rate this one was asked for. Without these a
+			// federated universe would run the same world at two rates
+			// depending on which process picked it up.
+			"--physics-tick-rate",
+			std::to_string(Settings.PhysicsTickRate),
+			"--replication-tick-rate",
+			std::to_string(Settings.ReplicationTickRate),
+
 			"--processes",
 			std::to_string(1u + PlannedHosts()),
 		};
@@ -618,6 +627,8 @@ namespace server {
 			engine::world::WorldSettings world;
 			world.Name = engine::core::Name(PRIMARY);
 			world.TickRate = Settings.TickRate;
+			world.PhysicsTickRate = Settings.PhysicsTickRate;
+			world.ReplicationTickRate = Settings.ReplicationTickRate;
 
 			PrimaryWorld = Worlds().Create(world);
 			if (!PrimaryWorld.IsValid()) {
@@ -712,17 +723,23 @@ namespace server {
 				continue;
 			}
 
+			// Read before the borrow, so the settings lookup is not made from
+			// inside the world it is asking about.
+			const double physicsTickRate = Worlds().SettingsOf(id).PhysicsTickRate;
+
 			std::string failure;
 			Worlds().Enter(
 				id,
-				[this, &limits, &failure, id](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+				[this, &limits, &failure, id, physicsTickRate](
+					engine::ecs::Store &store, engine::ecs::Scheduler &systems
+				) {
 					// **Before the scripts, because a script may create a
 					// part.** `PreparePhysicsWorld` calls `Store::Observe`,
 					// which moves every row already carrying the component
 					// into an archetype with somewhere to put the change
 					// bits - a structural change, and one that is free on an
 					// empty world and a re-shuffle on a populated one.
-					PrepareSimulation(store, systems);
+					PrepareSimulation(store, systems, physicsTickRate);
 
 					// The same call the studio's Play makes. What "running a
 					// game" means is one function, or the two drift and the
@@ -774,7 +791,7 @@ namespace server {
 		// What it does *not* install is the client's half - there is no camera
 		// and no draw list here, because a server draws nothing. That split is
 		// the reason the loader stops where it does.
-		PrepareSimulation(store, scheduler);
+		PrepareSimulation(store, scheduler, Settings.PhysicsTickRate);
 
 		std::string error;
 		if (!engine::examples::LoadScene(store, scheduler, Settings.GamePath, error)) {
@@ -1826,7 +1843,15 @@ namespace server {
 		// player stands still and exactly wrong while they run.
 		UpdateClientViewpoints();
 
-		Worlds().Enter(PrimaryWorld, [this, nowSeconds](engine::ecs::Store &store) {
+		// **Asked once per frame, and asking is what clears it.** A world with
+		// no replication rate answers `true` after every tick, which is what
+		// this program did before rates existed. A world at 20 Hz inside a 60 Hz
+		// simulation answers `true` on one tick in three, and the world has been
+		// holding its change bits across the other two so that the delta built
+		// below covers all three - see `World::Tick`.
+		const bool publishDue = Worlds().TakeReplicationTick(PrimaryWorld);
+
+		Worlds().Enter(PrimaryWorld, [this, nowSeconds, publishDue](engine::ecs::Store &store) {
 			{
 				ENGINE_PROFILE_CAT("Server::NetworkLatency", engine::core::ProfileCategory::Network);
 				const double global = Worlds().SettingsOf(PrimaryWorld).GlobalSimulatedNetworkLatency;
@@ -1913,6 +1938,22 @@ namespace server {
 			// **The visibility survey immediately before it, inside the same
 			// entry**, because what it works out is only true of the world as it
 			// stands now - and nothing between the two mutates one.
+			//
+			// **The survey and the publish are skipped together on a tick this
+			// world does not publish.** What the survey works out is only true
+			// of the world as it stands, so running it for a delta nobody is
+			// building is its whole cost for nothing.
+			if (!publishDue) {
+				// **The wire is still pumped.** `Listener::Flush` exists for
+				// exactly this caller: acknowledgements that never leave fill
+				// the far side's reliable window, and a link that is working
+				// perfectly then gives up. What waits for the next published
+				// tick is the queued outgoing messages, which is what a
+				// replication rate is asking for.
+				Replication->Flush(nowSeconds);
+				return;
+			}
+
 			SurveyVisibility(store);
 			Publishing = &store;
 			Replication->Publish(store, store.Time().Tick, nowSeconds);
@@ -1972,6 +2013,8 @@ namespace server {
 			engine::world::WorldSettings world;
 			world.Name = engine::core::Name(name);
 			world.TickRate = Settings.TickRate;
+			world.PhysicsTickRate = Settings.PhysicsTickRate;
+			world.ReplicationTickRate = Settings.ReplicationTickRate;
 			remote.push_back(world);
 		}
 
@@ -2009,6 +2052,8 @@ namespace server {
 			engine::world::WorldSettings world;
 			world.Name = engine::core::Name(name);
 			world.TickRate = Settings.TickRate;
+			world.PhysicsTickRate = Settings.PhysicsTickRate;
+			world.ReplicationTickRate = Settings.ReplicationTickRate;
 
 			const engine::world::WorldId id = Worlds().Create(world);
 			if (!id.IsValid()) {

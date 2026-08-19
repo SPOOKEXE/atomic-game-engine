@@ -10,6 +10,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <limits>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -786,4 +787,177 @@ TEST_CASE("presentation still sees what the tick changed", "[world]") {
 	universe.Present(id, 1.0f / 60.0f, 0.0f);
 
 	REQUIRE(seenWhileDrawing == 1);
+}
+
+TEST_CASE("a world with no replication rate publishes on every tick", "[world]") {
+	// The behaviour every host had before rates existed, and the one every
+	// world in this repository still has.
+	Universe universe;
+	const WorldId id = universe.Create(Named("replication.default"));
+	Populate(universe, id, 1);
+
+	for (int frame = 0; frame < 5; frame++) {
+		universe.Tick(1.0f / 60.0f);
+		CHECK(universe.TakeReplicationTick(id));
+	}
+
+	CHECK(universe.StatisticsOf(id).ReplicationTicks == 5);
+}
+
+TEST_CASE("asking twice publishes once", "[world]") {
+	// It is consumed, so a host that asks again in the same frame does not
+	// build a second delta out of a world that has not moved.
+	Universe universe;
+	const WorldId id = universe.Create(Named("replication.consumed"));
+	Populate(universe, id, 1);
+
+	universe.Tick(1.0f / 60.0f);
+	CHECK(universe.TakeReplicationTick(id));
+	CHECK_FALSE(universe.TakeReplicationTick(id));
+}
+
+TEST_CASE("a world that has not ticked publishes nothing", "[world]") {
+	Universe universe;
+	const WorldId id = universe.Create(Named("replication.untouched"));
+	Populate(universe, id, 1);
+
+	CHECK_FALSE(universe.TakeReplicationTick(id));
+
+	// And an unknown world answers the same way rather than inventing a tick.
+	CHECK_FALSE(universe.TakeReplicationTick(WorldId{}));
+}
+
+TEST_CASE("a replication rate publishes on some ticks and not others", "[world]") {
+	Universe universe;
+	WorldSettings settings = Named("replication.slower", 60.0);
+	settings.ReplicationTickRate = 20.0;
+	const WorldId id = universe.Create(settings);
+	Populate(universe, id, 1);
+
+	int published = 0;
+	for (int frame = 0; frame < 60; frame++) {
+		universe.Tick(1.0f / 60.0f);
+		published += universe.TakeReplicationTick(id) ? 1 : 0;
+	}
+
+	// A second of ticks at 60 buys twenty snapshots, and the world ran all
+	// sixty ticks while doing it.
+	CHECK(published == 20);
+	CHECK(universe.StatisticsOf(id).Ticks == 60);
+	CHECK(universe.StatisticsOf(id).ReplicationTicks == 20);
+}
+
+TEST_CASE("a replication rate above the tick rate publishes every tick", "[world]") {
+	// **A world cannot publish a tick it has not run.** Asking for more is not
+	// an error, and it must not build a debt the world can never pay - an
+	// uncapped accumulator would climb for ever and produce this same answer
+	// with a number growing behind it.
+	Universe universe;
+	WorldSettings settings = Named("replication.faster", 60.0);
+	settings.ReplicationTickRate = 240.0;
+	const WorldId id = universe.Create(settings);
+	Populate(universe, id, 1);
+
+	for (int frame = 0; frame < 30; frame++) {
+		universe.Tick(1.0f / 60.0f);
+		CHECK(universe.TakeReplicationTick(id));
+	}
+	CHECK(universe.StatisticsOf(id).ReplicationTicks == 30);
+}
+
+TEST_CASE("an idle world publishes at its idle rate", "[world]") {
+	// The clock is charged in simulated seconds, so a world ticking at 6 Hz
+	// cannot publish twenty times a second however loudly it was asked to. A
+	// wall clock here would have published twenty snapshots of six ticks.
+	Universe universe;
+	WorldSettings settings = Named("replication.idle", 60.0);
+	settings.IdleTickRate = 6.0;
+	settings.ReplicationTickRate = 20.0;
+	const WorldId id = universe.Create(settings);
+	Populate(universe, id, 1);
+
+	universe.SetState(id, WorldState::Idle);
+
+	int published = 0;
+	for (int frame = 0; frame < 60; frame++) {
+		universe.Tick(1.0f / 60.0f);
+		published += universe.TakeReplicationTick(id) ? 1 : 0;
+	}
+
+	CHECK(universe.StatisticsOf(id).Ticks == 6);
+	CHECK(published == 6);
+}
+
+TEST_CASE("change bits survive the ticks between two published ones", "[world]") {
+	// **The reason `World::Tick` does not clear on every tick once a rate is
+	// set.** A property written on a tick that is not published would otherwise
+	// go into a bitmap nobody ever reads, and the delta built on the next
+	// published tick would carry whatever happened to move on that one tick
+	// alone.
+	Universe universe;
+	WorldSettings settings = Named("replication.held", 60.0);
+	settings.ReplicationTickRate = 20.0;
+	const WorldId id = universe.Create(settings);
+
+	Entity subject = engine::ecs::NULL_ENTITY;
+	universe.Enter(id, [&subject](Store &store, Scheduler &systems) {
+		store.Observe<universe_test::Tracked>();
+		subject = store.Create();
+		store.Set<universe_test::Tracked>(subject, universe_test::Tracked{0});
+
+		// Writes on the first tick and never again, which is the shape of a
+		// script setting a property once.
+		systems.Add("bump-once", Phase::Simulation, [subject](Store &world) {
+			if (world.Time().Tick == 1) {
+				world.GetMutable<universe_test::Tracked>(subject)->Value++;
+			}
+		});
+	});
+
+	// Three ticks: the write lands on the first and the publish comes round on
+	// the third.
+	size_t changed = 0;
+	for (int frame = 0; frame < 3; frame++) {
+		universe.Tick(1.0f / 60.0f);
+		if (universe.TakeReplicationTick(id)) {
+			universe.Enter(id, [&changed](Store &store) {
+				store.EachChanged<universe_test::Tracked>([&changed](Entity, universe_test::Tracked &) {
+					changed++;
+				});
+			});
+		}
+	}
+
+	CHECK(changed == 1);
+}
+
+TEST_CASE("a replication rate that is not a number publishes every tick", "[world]") {
+	// The rate arrives from a game file and from a universe snapshot, and
+	// `docs/CODE_QUALITY.md` §7 calls both hostile. `1.0 / NaN` compared
+	// against an accumulator holds the world on the every-tick path anyway, so
+	// the guard is a positive test and the accumulator never sees a NaN.
+	Universe universe;
+	WorldSettings settings = Named("replication.nan", 60.0);
+	settings.ReplicationTickRate = std::numeric_limits<double>::quiet_NaN();
+	const WorldId id = universe.Create(settings);
+	Populate(universe, id, 1);
+
+	for (int frame = 0; frame < 5; frame++) {
+		universe.Tick(1.0f / 60.0f);
+		CHECK(universe.TakeReplicationTick(id));
+	}
+}
+
+TEST_CASE("an unbounded replication rate publishes every tick", "[world]") {
+	Universe universe;
+	WorldSettings settings = Named("replication.infinite", 60.0);
+	settings.ReplicationTickRate = std::numeric_limits<double>::infinity();
+	const WorldId id = universe.Create(settings);
+	Populate(universe, id, 1);
+
+	for (int frame = 0; frame < 5; frame++) {
+		universe.Tick(1.0f / 60.0f);
+		CHECK(universe.TakeReplicationTick(id));
+	}
+	CHECK(universe.StatisticsOf(id).ReplicationTicks == 5);
 }
