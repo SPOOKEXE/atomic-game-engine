@@ -263,7 +263,47 @@ TEST_CASE("culling hints cannot be attached to a pass that ignores entity filter
 
 	CHECK_FALSE(install(Name("ignored-cull#1"), Name("gbuffer"), "none"));
 	CHECK(install(Name("unculled#1"), Name("cull-frustum"), "none"));
-	CHECK_FALSE(install(Name("occlusion#1"), Name("cull-frustum"), "occlusion"));
+
+	// Accepted since the backend grew its depth pyramid and indirect draw
+	// path: the default document carries the gbuffer pass whose early phase
+	// seeds the pyramid.
+	CHECK(install(Name("occlusion#1"), Name("cull-frustum"), "occlusion"));
+}
+
+TEST_CASE("occlusion culling is refused without the pass that seeds its pyramid", "[render][graph][cull]") {
+	RenderGraph graph;
+	const auto resource = [&graph](const char *name, engine::graph::ResourceKind kind) {
+		return graph.AddResource({.Name = Name(name), .Kind = kind});
+	};
+	const engine::graph::ResourceId camera = resource("camera", engine::graph::ResourceKind::Camera);
+	const engine::graph::ResourceId all = resource("all", engine::graph::ResourceKind::Entities);
+	const engine::graph::ResourceId visible = resource("visible", engine::graph::ResourceKind::Entities);
+	const engine::graph::ResourceId ordered = resource("ordered", engine::graph::ResourceKind::Entities);
+
+	const auto node = [&graph](
+						  const char *name,
+						  const char *kind,
+						  std::vector<engine::graph::ResourceId> reads,
+						  std::vector<engine::graph::ResourceId> writes,
+						  std::vector<engine::graph::NodeParameter> parameters = {}
+					  ) {
+		engine::graph::Node value;
+		value.Name = Name(name);
+		value.Kind = Name(kind);
+		value.Reads = std::move(reads);
+		value.Writes = std::move(writes);
+		value.Parameters = std::move(parameters);
+		REQUIRE(graph.AddNode(value).IsValid());
+	};
+	node("camera", "camera", {}, {camera});
+	node("entities", "entities", {}, {all});
+	node("cull", "cull-frustum", {all, camera}, {visible}, {{Name("culling"), "occlusion"}});
+	node("order", "order-draw", {visible, camera}, {ordered});
+
+	// No gbuffer pass, so nothing writes the depth the pyramid reduces - the
+	// hint authored a cull nothing can feed.
+	Renderer renderer;
+	CHECK_FALSE(renderer.SetPipeline(Name("blind-occlusion#1"), graph));
 }
 
 TEST_CASE("a frame result reports authored node names", "[render]") {

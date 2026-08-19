@@ -36,6 +36,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -84,6 +85,7 @@ namespace engine::render {
 				BackendNode{
 					core::Name("depth-linearise"), graph::NodeScope::View, graph::ExecutionQueue::Graphics
 				},
+				BackendNode{core::Name("hzb"), graph::NodeScope::View, graph::ExecutionQueue::Compute},
 				BackendNode{core::Name("ssao"), graph::NodeScope::View, graph::ExecutionQueue::Graphics},
 				BackendNode{
 					core::Name("deferred-lighting"), graph::NodeScope::View, graph::ExecutionQueue::Graphics
@@ -626,15 +628,29 @@ namespace engine::render {
 					}
 					if (const std::string *culling = node->Parameter(core::Name("culling"));
 						culling != nullptr) {
-						if (*culling == "occlusion") {
-							offender = node->Name;
-							reason = "occlusion culling needs a depth hierarchy and indirect draw backend";
-							return false;
-						}
 						if (*culling != "inherit" && node->Kind != core::Name("cull-frustum")) {
 							offender = node->Name;
 							reason = "culling belongs on an entity filter node, not this backend node";
 							return false;
+						}
+						// Occlusion is accepted since the backend grew its depth
+						// pyramid and indirect draw path, but it composes behind
+						// the gbuffer pass: that pass's early phase is what
+						// seeds the pyramid the cull tests against, so a
+						// document without it authored a cull nothing can feed.
+						if (*culling == "occlusion") {
+							bool depthWriter = false;
+							for (uint32_t value = 1; value <= pipeline.Count() && !depthWriter; value++) {
+								const graph::Node *writer = pipeline.Find(graph::NodeId{value});
+								depthWriter = writer != nullptr && writer->Enabled &&
+											  writer->Kind == core::Name("gbuffer");
+							}
+							if (!depthWriter) {
+								offender = node->Name;
+								reason = "occlusion culling needs the gbuffer pass to seed its "
+										 "depth pyramid";
+								return false;
+							}
 						}
 					}
 				}
@@ -1214,6 +1230,103 @@ namespace engine::render {
 		SDL_GPUBuffer *InstanceBuffer = nullptr;
 		SDL_GPUTransferBuffer *InstanceTransfer = nullptr;
 		uint32_t InstanceCapacity = 0;
+
+		// --- occlusion culling ------------------------------------------------
+		//
+		// The machinery behind `culling = "occlusion"` on an authored entity
+		// filter node: a depth pyramid seeded by the occluders the CPU picked,
+		// a compute pass that tests every remaining opaque instance's box
+		// against it, and indexed indirect draw arguments so the survivor
+		// counts never make the round trip back to the CPU.
+		//
+		// **The pyramid is separate textures rather than one texture's mips.**
+		// A compute pass cannot bind one mip of a texture for writing while
+		// sampling another mip of the same texture, and SDL's read-only
+		// storage-texture binding cannot name a mip at all. Twelve levels cover
+		// a screen rectangle up to 2048 texels wide; a candidate wider than
+		// that is declared visible, which is the conservative direction.
+		static constexpr uint32_t PYRAMID_LEVEL_LIMIT = 12;
+
+		struct OcclusionState {
+			SDL_GPUComputePipeline *Seed = nullptr;
+			SDL_GPUComputePipeline *Reduce = nullptr;
+			SDL_GPUComputePipeline *Cull = nullptr;
+			SDL_GPUComputePipeline *Args = nullptr;
+
+			SDL_GPUTexture *Levels[PYRAMID_LEVEL_LIMIT] = {};
+			uint32_t Width = 0;
+			uint32_t Height = 0;
+			uint32_t LevelCount = 0;
+
+			// The per-frame buffers, all sized in whole entries and grown in
+			// powers of two like `InstanceBuffer`. One transfer buffer stages
+			// everything the CPU writes, packed back to back.
+			SDL_GPUBuffer *Arguments = nullptr;	 // indexed indirect commands, early then late
+			SDL_GPUBuffer *Candidates = nullptr; // two vec4 per candidate
+			SDL_GPUBuffer *RunTable = nullptr;	 // per slot-run: first late slot
+			SDL_GPUBuffer *ArgRuns = nullptr;	 // per late argument: its slot-run
+			SDL_GPUBuffer *Counts = nullptr;	 // per slot-run: survivor count
+			SDL_GPUBuffer *LateInstances = nullptr;
+			SDL_GPUTransferBuffer *Transfer = nullptr;
+			uint32_t ArgumentCapacity = 0;
+			uint32_t CandidateCapacity = 0;
+			uint32_t RunCapacity = 0;
+			uint32_t LateCapacity = 0;
+			uint32_t TransferCapacity = 0;
+		};
+		OcclusionState Occlusion;
+
+		// What this frame's cull draws, decided while the instances convert.
+		//
+		// `RunEarly[r]` instances at the head of slot-run `r` are the occluders
+		// the CPU picked; the `RunCandidates[r]` behind them wait on the GPU
+		// test. Both phases walk the same runs `DrawSlots` walks, so the
+		// argument order is the walk order and nothing stores a mapping.
+		struct OcclusionPlan {
+			bool Active = false;
+			uint32_t RunCount = 0;
+			uint32_t ArgCount = 0; // per phase: one per slot-run material range
+			uint32_t CandidateCount = 0;
+			uint32_t EarlyTotal = 0;
+			std::vector<uint32_t> RunEarly;
+			std::vector<uint32_t> RunCandidates;
+			std::vector<uint32_t> RunFirstSlot;
+			// Two vec4 per candidate, already in the layout the cull reads -
+			// see occlusion-cull.comp.
+			std::vector<glm::vec4> CandidatePairs;
+		};
+		OcclusionPlan OcclusionFrame;
+
+		// Whether two slots may share one instanced draw. Everything a run
+		// binds per draw has to agree, so this is the run-break rule - the one
+		// `DrawSlots` walks with and the occlusion plan must walk with, or the
+		// plan's argument order names the wrong runs.
+		bool SlotsShareRun(uint32_t slot, uint32_t next) const {
+			return SlotMesh[next] == SlotMesh[slot] && SlotTexture[next] == SlotTexture[slot] &&
+				   SlotNormalMap[next] == SlotNormalMap[slot] &&
+				   SlotRoughnessMap[next] == SlotRoughnessMap[slot] &&
+				   SlotOcclusionMap[next] == SlotOcclusionMap[slot] &&
+				   SlotHeightMap[next] == SlotHeightMap[slot] &&
+				   SlotEmissiveMap[next] == SlotEmissiveMap[slot] && SlotShader[next] == SlotShader[slot] &&
+				   SlotSeam[next] == SlotSeam[slot] && SlotSeamLight[next] == SlotSeamLight[slot];
+		}
+
+		// One phase of the occlusion-culled pass for `DrawSlots`: where its
+		// indirect arguments start and how many instances each slot-run may
+		// draw, which is what lets a run with nothing to draw skip its binds.
+		struct IndirectPhase {
+			SDL_GPUBuffer *Arguments = nullptr;
+			uint32_t FirstArgument = 0;
+			const std::vector<uint32_t> *RunDraws = nullptr;
+		};
+
+		bool EnsureOcclusionResources(
+			uint32_t argCount, uint32_t candidateCount, uint32_t runCount, uint32_t lateCount
+		);
+		bool EnsurePyramid(uint32_t width, uint32_t height);
+		void BuildPyramid(SDL_GPUCommandBuffer *command, SDL_GPUTexture *depth);
+		void DispatchOcclusionCull(SDL_GPUCommandBuffer *command, const glm::mat4 &viewProjection);
+		void ReleaseOcclusion();
 
 		// --- particles --------------------------------------------------------
 		//
@@ -1969,6 +2082,19 @@ namespace engine::render {
 			std::string_view name, SDL_GPUShaderStage stage, uint32_t samplers, uint32_t uniformBuffers
 		) const;
 
+		// A built-in compute pipeline from the same staged directory
+		// `LoadShader` reads. The counts are the shader's declared bindings in
+		// SDL's order; the thread counts must match its `local_size`.
+		SDL_GPUComputePipeline *LoadComputePipeline(
+			std::string_view name,
+			uint32_t samplers,
+			uint32_t readStorageBuffers,
+			uint32_t writeStorageTextures,
+			uint32_t writeStorageBuffers,
+			uint32_t threadsX,
+			uint32_t threadsY
+		) const;
+
 		bool CreatePipelines();
 
 		// Binds a pipeline and records which family it belongs to.
@@ -2041,7 +2167,8 @@ namespace engine::render {
 			SDL_GPUTexture *surface,
 			SDL_GPUSampler *surfaceSampler,
 			uint32_t tagFilter,
-			uint64_t &triangles
+			uint64_t &triangles,
+			const IndirectPhase *indirect = nullptr
 		);
 
 		bool CreateGeometry();
@@ -2117,6 +2244,43 @@ namespace engine::render {
 			ENGINE_ERROR("SDL_CreateGPUShader failed for {}: {}", name, SDL_GetError());
 		}
 		return shader;
+	}
+
+	SDL_GPUComputePipeline *Renderer::Impl::LoadComputePipeline(
+		std::string_view name,
+		uint32_t samplers,
+		uint32_t readStorageBuffers,
+		uint32_t writeStorageTextures,
+		uint32_t writeStorageBuffers,
+		uint32_t threadsX,
+		uint32_t threadsY
+	) const {
+		const auto path = resources::Shader(name, Binary.Form);
+		const auto code = ReadFile(path);
+		if (code.empty()) {
+			ENGINE_ERROR("shader not found or empty: {}", path.string());
+			return nullptr;
+		}
+
+		SDL_GPUComputePipelineCreateInfo info{};
+		info.code = code.data();
+		info.code_size = code.size();
+		info.entrypoint = Binary.EntryPoint;
+		info.format = Binary.Format;
+		info.num_samplers = samplers;
+		info.num_readonly_storage_buffers = readStorageBuffers;
+		info.num_readwrite_storage_textures = writeStorageTextures;
+		info.num_readwrite_storage_buffers = writeStorageBuffers;
+		info.num_uniform_buffers = 1;
+		info.threadcount_x = threadsX;
+		info.threadcount_y = threadsY;
+		info.threadcount_z = 1;
+
+		SDL_GPUComputePipeline *pipeline = SDL_CreateGPUComputePipeline(Device, &info);
+		if (!pipeline) {
+			ENGINE_ERROR("SDL_CreateGPUComputePipeline failed for {}: {}", name, SDL_GetError());
+		}
+		return pipeline;
 	}
 
 	bool Renderer::Impl::CreatePipelines() {
@@ -2639,6 +2803,15 @@ namespace engine::render {
 		SDL_ReleaseGPUShader(Device, shadowVertex);
 		SDL_ReleaseGPUShader(Device, shadowFragment);
 
+		// The occlusion culling compute set. Not in the conjunction below for
+		// the particle pipelines' reason: a build these failed on still draws a
+		// world, and the validation path refuses `culling = "occlusion"`
+		// documents with the failure named rather than the client dying here.
+		Occlusion.Seed = LoadComputePipeline("hzb-seed.comp", 1, 0, 1, 0, 8, 8);
+		Occlusion.Reduce = LoadComputePipeline("hzb-reduce.comp", 1, 0, 1, 0, 8, 8);
+		Occlusion.Cull = LoadComputePipeline("occlusion-cull.comp", PYRAMID_LEVEL_LIMIT, 3, 0, 2, 64, 1);
+		Occlusion.Args = LoadComputePipeline("occlusion-args.comp", 0, 2, 0, 1, 64, 1);
+
 		// **The particle pipelines are deliberately not in this conjunction.** A
 		// build whose particle shaders failed to compile still draws a world, and
 		// failing initialisation over an effect would take the whole client down
@@ -2819,6 +2992,24 @@ namespace engine::render {
 		return nullptr;
 	}
 
+	namespace {
+		// How many indirect draw arguments one slot-run emits: one per non-empty
+		// material range, or one for the whole mesh. `DrawSlots`' emit skips an
+		// empty range without advancing its argument index, so anything walking
+		// the arguments has to count the same way or drift one entry per empty
+		// range and draw with a neighbour's geometry.
+		uint32_t DrawArgumentCount(const MeshEntry &mesh) {
+			if (mesh.Runs.empty()) {
+				return mesh.Whole.IndexCount > 0 ? 1u : 0u;
+			}
+			uint32_t entries = 0;
+			for (const MeshRange &range : mesh.Runs) {
+				entries += range.IndexCount > 0 ? 1u : 0u;
+			}
+			return entries;
+		}
+	}
+
 	uint32_t Renderer::Impl::DrawSlots(
 		SDL_GPUCommandBuffer *command,
 		SDL_GPURenderPass *pass,
@@ -2830,13 +3021,21 @@ namespace engine::render {
 		SDL_GPUTexture *surface,
 		SDL_GPUSampler *surfaceSampler,
 		uint32_t tagFilter,
-		uint64_t &triangles
+		uint64_t &triangles,
+		const IndirectPhase *indirect
 	) {
 		if (count == 0 || first + count > SlotMesh.size()) {
 			return 0;
 		}
 
 		uint32_t calls = 0;
+
+		// Which slot-run and which draw argument the walk is at, for the
+		// indirect phases. Argument order **is** walk order - the builder in
+		// the upload path walks the same slots with the same predicate, so an
+		// index here names the entry it wrote there.
+		uint32_t slotRun = 0;
+		uint32_t argument = 0;
 
 		// What the pass bound before this call, so it can be put back.
 		//
@@ -3007,9 +3206,24 @@ namespace engine::render {
 				SDL_PushGPUFragmentUniformData(command, 0, &plane, sizeof(plane));
 			}
 
-			SDL_DrawGPUIndexedPrimitives(
-				pass, range.IndexCount, run, range.FirstIndex, range.VertexOffset, slot
-			);
+			if (indirect != nullptr) {
+				// The counts live on the GPU. `run` here is the phase's upper
+				// bound, so the triangle tally can only overcount what the
+				// cull discarded - an estimate is honest for a number whose
+				// exact value never comes back to the CPU.
+				SDL_DrawGPUIndexedPrimitivesIndirect(
+					pass,
+					indirect->Arguments,
+					(indirect->FirstArgument + argument) *
+						static_cast<uint32_t>(sizeof(SDL_GPUIndexedIndirectDrawCommand)),
+					1
+				);
+				argument++;
+			} else {
+				SDL_DrawGPUIndexedPrimitives(
+					pass, range.IndexCount, run, range.FirstIndex, range.VertexOffset, slot
+				);
+			}
 			calls++;
 			triangles += static_cast<uint64_t>(range.IndexCount / 3) * run;
 		};
@@ -3030,36 +3244,36 @@ namespace engine::render {
 
 			const MeshEntry *const mesh = SlotMesh[slot];
 			const core::Name texture = SlotTexture[slot];
-			const core::Name normalMap = SlotNormalMap[slot];
-			const core::Name roughnessMap = SlotRoughnessMap[slot];
-			const core::Name occlusionMap = SlotOcclusionMap[slot];
-			const core::Name heightMap = SlotHeightMap[slot];
-			const core::Name emissiveMap = SlotEmissiveMap[slot];
 
 			// **The shader joins what ends a run, because it is a pipeline.** A
 			// pipeline bind is per draw at best, so two instances drawn through
 			// different fragment shaders cannot share one - the same reason the
 			// seam plane breaks a run, one level up from a uniform. A world
 			// where nothing selects a shader holds one invalid name throughout
-			// and never breaks on it.
+			// and never breaks on it. `SlotsShareRun` is the whole rule: the
+			// data maps, the shader, the seam plane and its light all join the
+			// mesh and the texture in what ends a run.
 			const core::Name shader = SlotShader[slot];
 
-			// **And the seam plane joins the mesh and the texture in what ends a
-			// run.** It is a per-draw uniform, so two instances cut differently
-			// cannot share a draw; a world with no hole in it holds one value
-			// throughout and never breaks on it.
-			const glm::vec4 seam = SlotSeam[slot];
-			const glm::vec4 seamLight = SlotSeamLight[slot];
-
 			uint32_t run = 1;
-			while (slot + run < first + count && SlotMesh[slot + run] == mesh &&
-				   SlotTexture[slot + run] == texture && SlotNormalMap[slot + run] == normalMap &&
-				   SlotRoughnessMap[slot + run] == roughnessMap &&
-				   SlotOcclusionMap[slot + run] == occlusionMap && SlotHeightMap[slot + run] == heightMap &&
-				   SlotEmissiveMap[slot + run] == emissiveMap && SlotShader[slot + run] == shader &&
-				   SlotSeam[slot + run] == seam && SlotSeamLight[slot + run] == seamLight &&
+			while (slot + run < first + count && SlotsShareRun(slot, slot + run) &&
 				   scene::MatchesTags(SlotTags[slot + run], tagFilter)) {
 				run++;
+			}
+
+			// **An indirect phase with nothing in this run skips its binds but
+			// not its argument entries.** The argument buffer holds every run's
+			// draws in walk order, so a run stepped over still advances the
+			// index by the draws it would have emitted.
+			const uint32_t phaseInstances =
+				indirect != nullptr
+					? (slotRun < indirect->RunDraws->size() ? (*indirect->RunDraws)[slotRun] : 0u)
+					: run;
+			if (indirect != nullptr && phaseInstances == 0) {
+				argument += DrawArgumentCount(*mesh);
+				slotRun++;
+				slot += run;
+				continue;
 			}
 
 			// **Bound per run and only where it changes.** A scene with no
@@ -3074,7 +3288,7 @@ namespace engine::render {
 
 			if (mesh->Runs.empty()) {
 				// A mesh with no materials of its own - every built-in.
-				emit(mesh->Whole, texture, {1.0f, 1.0f, 1.0f, 1.0f}, slot, run);
+				emit(mesh->Whole, texture, {1.0f, 1.0f, 1.0f, 1.0f}, slot, phaseInstances);
 			} else {
 				for (size_t index = 0; index < mesh->Runs.size(); index++) {
 					// **The instance's texture wins when it has one.** That is
@@ -3086,11 +3300,12 @@ namespace engine::render {
 						texture.IsValid() ? texture : mesh->Textures[index],
 						mesh->Colours[index],
 						slot,
-						run
+						phaseInstances
 					);
 				}
 			}
 
+			slotRun++;
 			slot += run;
 		}
 
@@ -3197,7 +3412,9 @@ namespace engine::render {
 		const uint32_t bytes = capacity * static_cast<uint32_t>(sizeof(GpuInstance));
 
 		SDL_GPUBufferCreateInfo bufferInfo{};
-		bufferInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
+		// Compute-readable as well as a vertex stream: the occlusion cull reads
+		// candidate rows out of this buffer to compact its survivors.
+		bufferInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
 		bufferInfo.size = bytes;
 		InstanceBuffer = SDL_CreateGPUBuffer(Device, &bufferInfo);
 
@@ -3214,6 +3431,353 @@ namespace engine::render {
 
 		InstanceCapacity = capacity;
 		return true;
+	}
+
+	bool Renderer::Impl::EnsureOcclusionResources(
+		uint32_t argCount, uint32_t candidateCount, uint32_t runCount, uint32_t lateCount
+	) {
+		// Powers of two, for `EnsureInstanceCapacity`'s reason. One helper
+		// because six buffers grown six ways is six chances to grow five.
+		const auto grown = [](uint32_t have, uint32_t need) {
+			uint32_t capacity = have == 0 ? 64 : have;
+			while (capacity < need) {
+				capacity *= 2;
+			}
+			return capacity;
+		};
+		const auto ensure = [&](SDL_GPUBuffer *&buffer,
+								uint32_t &capacity,
+								uint32_t need,
+								uint32_t stride,
+								SDL_GPUBufferUsageFlags usage,
+								const char *what) {
+			if (need <= capacity && buffer != nullptr) {
+				return true;
+			}
+			const uint32_t entries = grown(capacity, need);
+			if (buffer != nullptr) {
+				SDL_ReleaseGPUBuffer(Device, buffer);
+			}
+			SDL_GPUBufferCreateInfo info{};
+			info.usage = usage;
+			info.size = entries * stride;
+			buffer = SDL_CreateGPUBuffer(Device, &info);
+			if (buffer == nullptr) {
+				ENGINE_ERROR("occlusion {} buffer of {} entries: {}", what, entries, SDL_GetError());
+				capacity = 0;
+				return false;
+			}
+			capacity = entries;
+			return true;
+		};
+
+		constexpr uint32_t COMMAND_BYTES = sizeof(SDL_GPUIndexedIndirectDrawCommand);
+		constexpr uint32_t CANDIDATE_BYTES = 32; // two vec4 - see occlusion-cull.comp
+
+		// `ArgRuns` shares the argument capacity and `Counts` the run capacity,
+		// because each pair grows for the same reason on the same frame. The
+		// paired buffer is recreated whenever its partner was, which the null
+		// check after a release makes true by construction.
+		bool ready = true;
+		if (argCount * 2 > Occlusion.ArgumentCapacity || Occlusion.Arguments == nullptr ||
+			Occlusion.ArgRuns == nullptr) {
+			if (Occlusion.ArgRuns != nullptr) {
+				SDL_ReleaseGPUBuffer(Device, Occlusion.ArgRuns);
+				Occlusion.ArgRuns = nullptr;
+			}
+			ready = ensure(
+						Occlusion.Arguments,
+						Occlusion.ArgumentCapacity,
+						argCount * 2,
+						COMMAND_BYTES,
+						SDL_GPU_BUFFERUSAGE_INDIRECT | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE,
+						"argument"
+					) &&
+					ready;
+			if (ready) {
+				SDL_GPUBufferCreateInfo info{};
+				info.usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
+				info.size = Occlusion.ArgumentCapacity * static_cast<uint32_t>(sizeof(uint32_t));
+				Occlusion.ArgRuns = SDL_CreateGPUBuffer(Device, &info);
+				ready = Occlusion.ArgRuns != nullptr;
+				if (!ready) {
+					ENGINE_ERROR("occlusion argument-run buffer: {}", SDL_GetError());
+				}
+			}
+		}
+
+		if (runCount > Occlusion.RunCapacity || Occlusion.RunTable == nullptr ||
+			Occlusion.Counts == nullptr) {
+			if (Occlusion.Counts != nullptr) {
+				SDL_ReleaseGPUBuffer(Device, Occlusion.Counts);
+				Occlusion.Counts = nullptr;
+			}
+			ready = ensure(
+						Occlusion.RunTable,
+						Occlusion.RunCapacity,
+						runCount,
+						sizeof(uint32_t),
+						SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ,
+						"run table"
+					) &&
+					ready;
+			if (ready) {
+				SDL_GPUBufferCreateInfo info{};
+				info.usage =
+					SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
+				info.size = Occlusion.RunCapacity * static_cast<uint32_t>(sizeof(uint32_t));
+				Occlusion.Counts = SDL_CreateGPUBuffer(Device, &info);
+				ready = Occlusion.Counts != nullptr;
+				if (!ready) {
+					ENGINE_ERROR("occlusion count buffer: {}", SDL_GetError());
+				}
+			}
+		}
+
+		ready = ensure(
+					Occlusion.Candidates,
+					Occlusion.CandidateCapacity,
+					candidateCount,
+					CANDIDATE_BYTES,
+					SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ,
+					"candidate"
+				) &&
+				ready;
+		ready = ensure(
+					Occlusion.LateInstances,
+					Occlusion.LateCapacity,
+					lateCount,
+					sizeof(GpuInstance),
+					SDL_GPU_BUFFERUSAGE_VERTEX | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE,
+					"late instance"
+				) &&
+				ready;
+
+		// One transfer stages everything the CPU writes, packed back to back in
+		// the order `submitUploads` copies it out: arguments, candidates, run
+		// table, argument runs, count zeros.
+		const uint32_t staged = argCount * 2 * COMMAND_BYTES + candidateCount * CANDIDATE_BYTES +
+								runCount * static_cast<uint32_t>(sizeof(uint32_t)) +
+								argCount * static_cast<uint32_t>(sizeof(uint32_t)) +
+								runCount * static_cast<uint32_t>(sizeof(uint32_t));
+		if (staged > Occlusion.TransferCapacity || Occlusion.Transfer == nullptr) {
+			if (Occlusion.Transfer != nullptr) {
+				SDL_ReleaseGPUTransferBuffer(Device, Occlusion.Transfer);
+			}
+			const uint32_t bytes = grown(Occlusion.TransferCapacity, staged);
+			SDL_GPUTransferBufferCreateInfo info{};
+			info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+			info.size = bytes;
+			Occlusion.Transfer = SDL_CreateGPUTransferBuffer(Device, &info);
+			if (Occlusion.Transfer == nullptr) {
+				ENGINE_ERROR("occlusion transfer buffer of {} bytes: {}", bytes, SDL_GetError());
+				Occlusion.TransferCapacity = 0;
+				ready = false;
+			} else {
+				Occlusion.TransferCapacity = bytes;
+			}
+		}
+		return ready;
+	}
+
+	bool Renderer::Impl::EnsurePyramid(uint32_t width, uint32_t height) {
+		if (Occlusion.Width == width && Occlusion.Height == height && Occlusion.Levels[0] != nullptr) {
+			return true;
+		}
+		for (SDL_GPUTexture *&level : Occlusion.Levels) {
+			if (level != nullptr) {
+				SDL_ReleaseGPUTexture(Device, level);
+				level = nullptr;
+			}
+		}
+		Occlusion.Width = 0;
+		Occlusion.Height = 0;
+		Occlusion.LevelCount = 0;
+
+		uint32_t levelWidth = width;
+		uint32_t levelHeight = height;
+		uint32_t count = 0;
+		while (count < PYRAMID_LEVEL_LIMIT) {
+			SDL_GPUTextureCreateInfo info{};
+			info.type = SDL_GPU_TEXTURETYPE_2D;
+			info.format = SDL_GPU_TEXTUREFORMAT_R32_FLOAT;
+			info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
+			info.width = levelWidth;
+			info.height = levelHeight;
+			info.layer_count_or_depth = 1;
+			info.num_levels = 1;
+			info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+			Occlusion.Levels[count] = SDL_CreateGPUTexture(Device, &info);
+			if (Occlusion.Levels[count] == nullptr) {
+				ENGINE_ERROR("depth pyramid level {}: {}", count, SDL_GetError());
+				return false;
+			}
+			count++;
+			if (levelWidth == 1 && levelHeight == 1) {
+				break;
+			}
+			levelWidth = std::max(levelWidth / 2, 1u);
+			levelHeight = std::max(levelHeight / 2, 1u);
+		}
+
+		Occlusion.Width = width;
+		Occlusion.Height = height;
+		Occlusion.LevelCount = count;
+		return true;
+	}
+
+	void Renderer::Impl::BuildPyramid(SDL_GPUCommandBuffer *command, SDL_GPUTexture *depth) {
+		ENGINE_PROFILE_CAT("depth pyramid", core::ProfileCategory::Render);
+
+		// The shaders reproduce this halving, so the two must stay one rule:
+		// level n is `max(size >> n, 1)` of level zero.
+		uint32_t sourceWidth = Occlusion.Width;
+		uint32_t sourceHeight = Occlusion.Height;
+		for (uint32_t level = 0; level < Occlusion.LevelCount; level++) {
+			const uint32_t destinationWidth = level == 0 ? sourceWidth : std::max(sourceWidth / 2, 1u);
+			const uint32_t destinationHeight = level == 0 ? sourceHeight : std::max(sourceHeight / 2, 1u);
+
+			SDL_GPUStorageTextureReadWriteBinding destination{};
+			destination.texture = Occlusion.Levels[level];
+			// A fresh version per view: another view's pyramid may still be in
+			// flight, and its cull already bound the version it reads.
+			destination.cycle = true;
+
+			SDL_GPUComputePass *pass = SDL_BeginGPUComputePass(command, &destination, 1, nullptr, 0);
+			if (pass == nullptr) {
+				ENGINE_ERROR("depth pyramid: SDL_BeginGPUComputePass: {}", SDL_GetError());
+				return;
+			}
+			SDL_BindGPUComputePipeline(pass, level == 0 ? Occlusion.Seed : Occlusion.Reduce);
+
+			const SDL_GPUTextureSamplerBinding source{
+				level == 0 ? depth : Occlusion.Levels[level - 1], Textures.Sampler()
+			};
+			SDL_BindGPUComputeSamplers(pass, 0, &source, 1);
+
+			// The seed reads xy as its own size; the reduce reads source then
+			// destination.
+			const int32_t sizes[4] = {
+				static_cast<int32_t>(level == 0 ? destinationWidth : sourceWidth),
+				static_cast<int32_t>(level == 0 ? destinationHeight : sourceHeight),
+				static_cast<int32_t>(destinationWidth),
+				static_cast<int32_t>(destinationHeight),
+			};
+			SDL_PushGPUComputeUniformData(command, 0, sizes, sizeof(sizes));
+			SDL_DispatchGPUCompute(pass, (destinationWidth + 7) / 8, (destinationHeight + 7) / 8, 1);
+			SDL_EndGPUComputePass(pass);
+
+			sourceWidth = destinationWidth;
+			sourceHeight = destinationHeight;
+		}
+	}
+
+	void
+	Renderer::Impl::DispatchOcclusionCull(SDL_GPUCommandBuffer *command, const glm::mat4 &viewProjection) {
+		ENGINE_PROFILE_CAT("occlusion cull", core::ProfileCategory::Render);
+
+		// Pass one: test every candidate and compact the survivors.
+		{
+			SDL_GPUStorageBufferReadWriteBinding outputs[2]{};
+			// `Counts` is not cycled: the upload wrote this frame's zeros into
+			// the version the atomics must land in. The late buffer took no
+			// upload, so this write is its first touch and may cycle.
+			outputs[0].buffer = Occlusion.Counts;
+			outputs[1].buffer = Occlusion.LateInstances;
+			outputs[1].cycle = true;
+
+			SDL_GPUComputePass *pass = SDL_BeginGPUComputePass(command, nullptr, 0, outputs, 2);
+			if (pass == nullptr) {
+				ENGINE_ERROR("occlusion cull: SDL_BeginGPUComputePass: {}", SDL_GetError());
+				return;
+			}
+			SDL_BindGPUComputePipeline(pass, Occlusion.Cull);
+
+			SDL_GPUTextureSamplerBinding levels[PYRAMID_LEVEL_LIMIT];
+			for (uint32_t level = 0; level < PYRAMID_LEVEL_LIMIT; level++) {
+				// The tail past `LevelCount` is never selected; level zero fills
+				// it because a declared sampler must have something bound.
+				levels[level] = SDL_GPUTextureSamplerBinding{
+					Occlusion.Levels[std::min(level, Occlusion.LevelCount - 1)], Textures.Sampler()
+				};
+			}
+			SDL_BindGPUComputeSamplers(pass, 0, levels, PYRAMID_LEVEL_LIMIT);
+
+			SDL_GPUBuffer *const reads[3] = {Occlusion.Candidates, InstanceBuffer, Occlusion.RunTable};
+			SDL_BindGPUComputeStorageBuffers(pass, 0, reads, 3);
+
+			struct CullUniform {
+				glm::mat4 ViewProjection;
+				uint32_t Counts[4];
+				float Level0[4];
+			} uniform{
+				viewProjection,
+				{OcclusionFrame.CandidateCount, Occlusion.LevelCount, 0, 0},
+				{static_cast<float>(Occlusion.Width), static_cast<float>(Occlusion.Height), 0.0f, 0.0f},
+			};
+			SDL_PushGPUComputeUniformData(command, 0, &uniform, sizeof(uniform));
+			SDL_DispatchGPUCompute(pass, (OcclusionFrame.CandidateCount + 63) / 64, 1, 1);
+			SDL_EndGPUComputePass(pass);
+		}
+
+		// Pass two: copy each run's survivor count into every indirect draw
+		// argument that run emits. Its own pass, so the counts are complete
+		// before anything reads them.
+		{
+			SDL_GPUStorageBufferReadWriteBinding output{};
+			output.buffer = Occlusion.Arguments;
+
+			SDL_GPUComputePass *pass = SDL_BeginGPUComputePass(command, nullptr, 0, &output, 1);
+			if (pass == nullptr) {
+				ENGINE_ERROR("occlusion arguments: SDL_BeginGPUComputePass: {}", SDL_GetError());
+				return;
+			}
+			SDL_BindGPUComputePipeline(pass, Occlusion.Args);
+
+			SDL_GPUBuffer *const reads[2] = {Occlusion.ArgRuns, Occlusion.Counts};
+			SDL_BindGPUComputeStorageBuffers(pass, 0, reads, 2);
+
+			const uint32_t range[4] = {OcclusionFrame.ArgCount, OcclusionFrame.ArgCount, 0, 0};
+			SDL_PushGPUComputeUniformData(command, 0, range, sizeof(range));
+			SDL_DispatchGPUCompute(pass, (OcclusionFrame.ArgCount + 63) / 64, 1, 1);
+			SDL_EndGPUComputePass(pass);
+		}
+	}
+
+	void Renderer::Impl::ReleaseOcclusion() {
+		for (SDL_GPUTexture *&level : Occlusion.Levels) {
+			if (level != nullptr) {
+				SDL_ReleaseGPUTexture(Device, level);
+				level = nullptr;
+			}
+		}
+		const auto releaseBuffer = [&](SDL_GPUBuffer *&buffer) {
+			if (buffer != nullptr) {
+				SDL_ReleaseGPUBuffer(Device, buffer);
+				buffer = nullptr;
+			}
+		};
+		releaseBuffer(Occlusion.Arguments);
+		releaseBuffer(Occlusion.Candidates);
+		releaseBuffer(Occlusion.RunTable);
+		releaseBuffer(Occlusion.ArgRuns);
+		releaseBuffer(Occlusion.Counts);
+		releaseBuffer(Occlusion.LateInstances);
+		if (Occlusion.Transfer != nullptr) {
+			SDL_ReleaseGPUTransferBuffer(Device, Occlusion.Transfer);
+			Occlusion.Transfer = nullptr;
+		}
+		const auto releasePipeline = [&](SDL_GPUComputePipeline *&pipeline) {
+			if (pipeline != nullptr) {
+				SDL_ReleaseGPUComputePipeline(Device, pipeline);
+				pipeline = nullptr;
+			}
+		};
+		releasePipeline(Occlusion.Seed);
+		releasePipeline(Occlusion.Reduce);
+		releasePipeline(Occlusion.Cull);
+		releasePipeline(Occlusion.Args);
+		Occlusion = OcclusionState{};
 	}
 
 	bool Renderer::Impl::ReserveParticles(uint32_t count) {
@@ -5231,6 +5795,7 @@ namespace engine::render {
 		// above is what makes releasing any of this safe.
 		State->ReleaseShaderVariants();
 		State->ReleaseAllGraphState();
+		State->ReleaseOcclusion();
 
 		if (State->OpaquePipeline) {
 			SDL_ReleaseGPUGraphicsPipeline(device, State->OpaquePipeline);
@@ -5625,7 +6190,9 @@ namespace engine::render {
 		if (toMsl) {
 			msl::Translation result = msl::Translate(spirv);
 			if (result.Failed) {
-				ENGINE_ERROR("postprocess shader '{}' cannot be translated to MSL: {}", name.Text(), result.Error);
+				ENGINE_ERROR(
+					"postprocess shader '{}' cannot be translated to MSL: {}", name.Text(), result.Error
+				);
 				return false;
 			}
 			translated = std::move(result.Source);
@@ -7165,6 +7732,24 @@ namespace engine::render {
 		// second bind.
 		const uint32_t uploadCount = sceneCount + instanceCount;
 
+		// Whether this view's pipeline authored `culling = "occlusion"` on its
+		// entity filter, and the backend can serve it this frame. The CPU
+		// frustum cull already ran - occlusion composes behind it rather than
+		// replacing it.
+		bool occlusionCulling = false;
+		if (const Impl::NamedPipeline *active = State->PipelineFor(State->ActiveGraph);
+			active != nullptr && State->Occlusion.Seed != nullptr && State->Occlusion.Reduce != nullptr &&
+			State->Occlusion.Cull != nullptr && State->Occlusion.Args != nullptr) {
+			for (uint32_t value = 1; value <= active->Graph.Count() && !occlusionCulling; value++) {
+				const graph::Node *node = active->Graph.Find(graph::NodeId{value});
+				if (node == nullptr || !node->Enabled || node->Kind != core::Name("cull-frustum")) {
+					continue;
+				}
+				const std::string *culling = node->Parameter(core::Name("culling"));
+				occlusionCulling = culling != nullptr && *culling == "occlusion";
+			}
+		}
+
 		if (uploadCount > 0) {
 			bool capacity = false;
 			{
@@ -7269,9 +7854,219 @@ namespace engine::render {
 							State->VisibleInstances[State->DrawOrder[index]];
 						camera[index] = ToGpu(instance, *record(cameraBase + index, instance));
 					}
+
+					// --- the occlusion plan --------------------------------
+					//
+					// Each opaque slot-run is partitioned in place: the
+					// instances big and near enough to occlude move to its
+					// head and draw in the early phase; the tail waits on the
+					// GPU test against the pyramid the early phase's depth
+					// seeds. **Only the instance rows move.** Every per-slot
+					// array is constant across a run by `SlotsShareRun`'s
+					// definition, so swapping rows inside one changes no run
+					// boundary and no other pass's picture - an opaque draw
+					// is order-independent under the depth test.
+					State->OcclusionFrame = Impl::OcclusionPlan{};
+					if (occlusionCulling && plainOpaque > 0) {
+						ENGINE_PROFILE_CAT("occlusion plan", core::ProfileCategory::Render);
+						Impl::OcclusionPlan &occlusionPlan = State->OcclusionFrame;
+
+						// Drawn as an occluder when its widest world extent
+						// subtends at least this fraction of its distance -
+						// roughly six degrees. Lower drafts more occluders and
+						// costs early-phase overdraw; higher seeds the pyramid
+						// with too little to cull against. Not measured
+						// finely; revisit with a real scene if the cull rate
+						// disappoints.
+						constexpr float OCCLUDER_SCORE = 0.1f;
+
+						const glm::vec3 eye{
+							cameraFrame.Position.X, cameraFrame.Position.Y, cameraFrame.Position.Z
+						};
+						const auto base = static_cast<uint32_t>(cameraBase);
+						const uint32_t opaqueEnd = base + plainOpaque;
+
+						std::vector<GpuInstance> earlyRows;
+						std::vector<GpuInstance> lateRows;
+						uint32_t slot = base;
+						while (slot < opaqueEnd) {
+							uint32_t run = 1;
+							while (slot + run < opaqueEnd && State->SlotsShareRun(slot, slot + run)) {
+								run++;
+							}
+
+							const MeshEntry &runMesh = *State->SlotMesh[slot];
+							const glm::vec3 meshCentre{runMesh.Centre.X, runMesh.Centre.Y, runMesh.Centre.Z};
+							const glm::vec3 meshExtent{runMesh.Extent.X, runMesh.Extent.Y, runMesh.Extent.Z};
+
+							const auto runIndex = static_cast<uint32_t>(occlusionPlan.RunFirstSlot.size());
+							const size_t pairFirst = occlusionPlan.CandidatePairs.size();
+							earlyRows.clear();
+							lateRows.clear();
+							for (uint32_t at = slot; at < slot + run; at++) {
+								const GpuInstance &row = out[at];
+
+								// The world box, from the same matrix the
+								// vertex shader draws with: the mesh's own box
+								// mapped through the model. `ToGpu` built the
+								// model to fill the part's box exactly, so
+								// this bound is tight rather than approximate.
+								const glm::mat3 basis{row.Model};
+								const glm::vec3 centre = glm::vec3(row.Model * glm::vec4(meshCentre, 1.0f));
+								const glm::vec3 extent = glm::abs(basis[0]) * meshExtent.x +
+														 glm::abs(basis[1]) * meshExtent.y +
+														 glm::abs(basis[2]) * meshExtent.z;
+
+								const float widest = std::max(extent.x, std::max(extent.y, extent.z));
+								const float away = std::max(glm::distance(centre, eye), 0.01f);
+								if (widest >= away * OCCLUDER_SCORE) {
+									earlyRows.push_back(row);
+								} else {
+									lateRows.push_back(row);
+									occlusionPlan.CandidatePairs.emplace_back(
+										centre, std::bit_cast<float>(runIndex)
+									);
+									occlusionPlan.CandidatePairs.emplace_back(extent, 0.0f);
+								}
+							}
+
+							const auto earlyCount = static_cast<uint32_t>(earlyRows.size());
+							std::copy(earlyRows.begin(), earlyRows.end(), out + slot);
+							std::copy(lateRows.begin(), lateRows.end(), out + slot + earlyCount);
+
+							// A candidate names the instance row it became
+							// after the partition, which is only known now.
+							for (size_t pair = pairFirst; pair < occlusionPlan.CandidatePairs.size();
+								 pair += 2) {
+								const auto order = static_cast<uint32_t>((pair - pairFirst) / 2);
+								occlusionPlan.CandidatePairs[pair + 1].w =
+									std::bit_cast<float>(slot + earlyCount + order);
+							}
+
+							occlusionPlan.RunFirstSlot.push_back(slot);
+							occlusionPlan.RunEarly.push_back(earlyCount);
+							occlusionPlan.RunCandidates.push_back(static_cast<uint32_t>(lateRows.size()));
+							occlusionPlan.EarlyTotal += earlyCount;
+							occlusionPlan.ArgCount += DrawArgumentCount(runMesh);
+							slot += run;
+						}
+
+						occlusionPlan.RunCount = static_cast<uint32_t>(occlusionPlan.RunFirstSlot.size());
+						occlusionPlan.CandidateCount =
+							static_cast<uint32_t>(occlusionPlan.CandidatePairs.size() / 2);
+
+						// Nothing big enough to seed the pyramid means nothing
+						// can be culled, and nothing to test means nothing to
+						// cull either way - both fall back to the plain draw,
+						// which is what "conservative" costs in the worst case.
+						occlusionPlan.Active = occlusionPlan.EarlyTotal > 0 &&
+											   occlusionPlan.CandidateCount > 0 && occlusionPlan.ArgCount > 0;
+					}
 				}
 				SDL_UnmapGPUTransferBuffer(State->Device, State->InstanceTransfer);
 				haveInstances = true;
+
+				// Stage what the cull reads and the indirect draws consume. Its
+				// own transfer rather than a tail on the instance one, so the
+				// plain path pays nothing for a feature it never authored.
+				if (State->OcclusionFrame.Active) {
+					Impl::OcclusionPlan &occlusionPlan = State->OcclusionFrame;
+					if (!State->EnsureOcclusionResources(
+							occlusionPlan.ArgCount,
+							occlusionPlan.CandidateCount,
+							occlusionPlan.RunCount,
+							plainOpaque
+						)) {
+						occlusionPlan.Active = false;
+					} else {
+						void *staged =
+							SDL_MapGPUTransferBuffer(State->Device, State->Occlusion.Transfer, true);
+						if (staged == nullptr) {
+							ENGINE_ERROR("occlusion staging: SDL_MapGPUTransferBuffer: {}", SDL_GetError());
+							occlusionPlan.Active = false;
+						} else {
+							const auto cameraBase = static_cast<uint32_t>(sceneCount);
+							auto *commands = static_cast<SDL_GPUIndexedIndirectDrawCommand *>(staged);
+							auto *lateArgRuns = reinterpret_cast<uint32_t *>(
+								reinterpret_cast<uint8_t *>(staged) +
+								static_cast<size_t>(occlusionPlan.ArgCount) * 2 *
+									sizeof(SDL_GPUIndexedIndirectDrawCommand) +
+								static_cast<size_t>(occlusionPlan.CandidateCount) * 2 * sizeof(glm::vec4) +
+								static_cast<size_t>(occlusionPlan.RunCount) * sizeof(uint32_t)
+							);
+
+							// The early and late commands for one draw differ
+							// only in what fills their instance count and where
+							// their instances start: the early phase draws the
+							// run's occluder head out of the instance buffer,
+							// the late phase draws the compacted survivors out
+							// of the late buffer, whose slots drop `cameraBase`
+							// so a view's opaque head starts it at zero.
+							uint32_t argument = 0;
+							for (uint32_t runIndex = 0; runIndex < occlusionPlan.RunCount; runIndex++) {
+								const MeshEntry &runMesh =
+									*State->SlotMesh[occlusionPlan.RunFirstSlot[runIndex]];
+								const uint32_t firstSlot = occlusionPlan.RunFirstSlot[runIndex];
+								const uint32_t lateFirst =
+									firstSlot - cameraBase + occlusionPlan.RunEarly[runIndex];
+								const auto emitArgs = [&](const MeshRange &range) {
+									if (range.IndexCount == 0) {
+										return;
+									}
+									commands[argument] = SDL_GPUIndexedIndirectDrawCommand{
+										range.IndexCount,
+										occlusionPlan.RunEarly[runIndex],
+										range.FirstIndex,
+										range.VertexOffset,
+										firstSlot,
+									};
+									commands[occlusionPlan.ArgCount + argument] =
+										SDL_GPUIndexedIndirectDrawCommand{
+											range.IndexCount,
+											0,
+											range.FirstIndex,
+											range.VertexOffset,
+											lateFirst,
+										};
+									lateArgRuns[argument] = runIndex;
+									argument++;
+								};
+								if (runMesh.Runs.empty()) {
+									emitArgs(runMesh.Whole);
+								} else {
+									for (const MeshRange &range : runMesh.Runs) {
+										emitArgs(range);
+									}
+								}
+							}
+
+							auto *cursor = reinterpret_cast<uint8_t *>(staged) +
+										   static_cast<size_t>(occlusionPlan.ArgCount) * 2 *
+											   sizeof(SDL_GPUIndexedIndirectDrawCommand);
+							std::memcpy(
+								cursor,
+								occlusionPlan.CandidatePairs.data(),
+								occlusionPlan.CandidatePairs.size() * sizeof(glm::vec4)
+							);
+							cursor += occlusionPlan.CandidatePairs.size() * sizeof(glm::vec4);
+
+							auto *runTable = reinterpret_cast<uint32_t *>(cursor);
+							for (uint32_t runIndex = 0; runIndex < occlusionPlan.RunCount; runIndex++) {
+								runTable[runIndex] = occlusionPlan.RunFirstSlot[runIndex] - cameraBase +
+													 occlusionPlan.RunEarly[runIndex];
+							}
+							cursor += static_cast<size_t>(occlusionPlan.RunCount) * sizeof(uint32_t) +
+									  static_cast<size_t>(occlusionPlan.ArgCount) * sizeof(uint32_t);
+
+							// The zeros the cull's atomics count up from.
+							std::memset(
+								cursor, 0, static_cast<size_t>(occlusionPlan.RunCount) * sizeof(uint32_t)
+							);
+
+							SDL_UnmapGPUTransferBuffer(State->Device, State->Occlusion.Transfer);
+						}
+					}
+				}
 			}
 		}
 
@@ -7448,6 +8243,36 @@ namespace engine::render {
 				};
 				SDL_UploadToGPUBuffer(copy, &source, &destination, true);
 				uploadedBytes += destination.size;
+			}
+
+			// The occlusion plan's five buffers, in the order its staging wrote
+			// them. Cycled like the instances: this copy is each buffer's first
+			// touch of the frame, so a later view gets a fresh version while
+			// the previous view's dispatches keep the one they bound. The cull
+			// pass itself must *not* cycle `Counts` again - its atomics count
+			// up from the zeros this copy delivers.
+			if (uploadInstances && State->OcclusionFrame.Active) {
+				const Impl::OcclusionPlan &occlusionPlan = State->OcclusionFrame;
+				uint32_t offset = 0;
+				const auto stage = [&](SDL_GPUBuffer *buffer, uint32_t bytes) {
+					const SDL_GPUTransferBufferLocation source{State->Occlusion.Transfer, offset};
+					const SDL_GPUBufferRegion destination{buffer, 0, bytes};
+					SDL_UploadToGPUBuffer(copy, &source, &destination, true);
+					offset += bytes;
+					uploadedBytes += bytes;
+				};
+				stage(
+					State->Occlusion.Arguments,
+					occlusionPlan.ArgCount * 2 *
+						static_cast<uint32_t>(sizeof(SDL_GPUIndexedIndirectDrawCommand))
+				);
+				stage(
+					State->Occlusion.Candidates,
+					occlusionPlan.CandidateCount * 2 * static_cast<uint32_t>(sizeof(glm::vec4))
+				);
+				stage(State->Occlusion.RunTable, occlusionPlan.RunCount * sizeof(uint32_t));
+				stage(State->Occlusion.ArgRuns, occlusionPlan.ArgCount * sizeof(uint32_t));
+				stage(State->Occlusion.Counts, occlusionPlan.RunCount * sizeof(uint32_t));
 			}
 
 			if (ribbonCount > 0) {
@@ -9298,48 +10123,121 @@ namespace engine::render {
 
 		frameNodes.Set(core::Name("gbuffer"), [&](const graph::RunContext &context) {
 			enterNamedPass(context.Name);
-			SDL_GPUColorTargetInfo gbufferTargets[4]{};
-			for (size_t target = 0; target < 4; target++) {
-				gbufferTargets[target].clear_color = SDL_FColor{0.0f, 0.0f, 0.0f, 0.0f};
-				gbufferTargets[target].load_op = SDL_GPU_LOADOP_CLEAR;
-				gbufferTargets[target].store_op = SDL_GPU_STOREOP_STORE;
-				gbufferTargets[target].cycle = true;
-			}
-			gbufferTargets[0].texture = pbr.Albedo;
-			gbufferTargets[1].texture = pbr.Normal;
-			gbufferTargets[2].texture = pbr.Material;
-			gbufferTargets[3].texture = pbr.Emissive;
 
-			depthTarget.load_op = SDL_GPU_LOADOP_CLEAR;
-			depthTarget.store_op = SDL_GPU_STOREOP_STORE;
-			SDL_GPURenderPass *gbuffer = SDL_BeginGPURenderPass(command, gbufferTargets, 4, &depthTarget);
-			State->BindPipeline(gbuffer, State->GBufferPipeline, Impl::PipelineFamily::Other);
-			SDL_SetGPUViewport(gbuffer, &sceneViewport);
-			SDL_SetGPUScissor(gbuffer, &sceneScissor);
-			SDL_PushGPUVertexUniformData(command, 0, &frameUniforms, sizeof(frameUniforms));
-			if (haveInstances && plainOpaque > 0) {
-				const SDL_GPUBufferBinding vertexBindings[] = {
-					{State->Meshes.Vertices(), 0},
-					{State->InstanceBuffer, 0},
+			// One pass plainly, or two around the occlusion cull. The second
+			// begins where the first ended - every target loads - so the two
+			// together paint exactly the frame one pass would have, minus the
+			// pixels the cull proved covered.
+			const bool occluded = State->OcclusionFrame.Active && haveInstances && plainOpaque > 0 &&
+								  State->EnsurePyramid(sceneWidth, sceneHeight);
+
+			const auto beginGBuffer = [&](bool clear) {
+				SDL_GPUColorTargetInfo gbufferTargets[4]{};
+				for (size_t target = 0; target < 4; target++) {
+					gbufferTargets[target].clear_color = SDL_FColor{0.0f, 0.0f, 0.0f, 0.0f};
+					gbufferTargets[target].load_op = clear ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
+					gbufferTargets[target].store_op = SDL_GPU_STOREOP_STORE;
+					// Cycling is for the frame's first touch; the late pass
+					// must draw over the early pass's pixels, not fresh memory.
+					gbufferTargets[target].cycle = clear;
+				}
+				gbufferTargets[0].texture = pbr.Albedo;
+				gbufferTargets[1].texture = pbr.Normal;
+				gbufferTargets[2].texture = pbr.Material;
+				gbufferTargets[3].texture = pbr.Emissive;
+
+				depthTarget.load_op = clear ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
+				depthTarget.store_op = SDL_GPU_STOREOP_STORE;
+				depthTarget.cycle = clear;
+
+				SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, gbufferTargets, 4, &depthTarget);
+				if (pass == nullptr) {
+					return pass;
+				}
+				State->BindPipeline(pass, State->GBufferPipeline, Impl::PipelineFamily::Other);
+				SDL_SetGPUViewport(pass, &sceneViewport);
+				SDL_SetGPUScissor(pass, &sceneScissor);
+				SDL_PushGPUVertexUniformData(command, 0, &frameUniforms, sizeof(frameUniforms));
+				return pass;
+			};
+			const auto drawOpaque =
+				[&](SDL_GPURenderPass *pass, SDL_GPUBuffer *instances, const Impl::IndirectPhase *phase) {
+					const SDL_GPUBufferBinding vertexBindings[] = {
+						{State->Meshes.Vertices(), 0},
+						{instances, 0},
+					};
+					SDL_BindGPUVertexBuffers(pass, 0, vertexBindings, 2);
+					const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
+					SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+					result.DrawCalls += State->DrawSlots(
+						command,
+						pass,
+						sceneCount,
+						plainOpaque,
+						&lighting,
+						State->ShadowTexture,
+						State->ShadowSampler,
+						nullptr,
+						State->SurfaceSampler,
+						0,
+						result.Triangles,
+						phase
+					);
 				};
-				SDL_BindGPUVertexBuffers(gbuffer, 0, vertexBindings, 2);
-				const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
-				SDL_BindGPUIndexBuffer(gbuffer, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
-				result.DrawCalls += State->DrawSlots(
-					command,
-					gbuffer,
-					sceneCount,
-					plainOpaque,
-					&lighting,
-					State->ShadowTexture,
-					State->ShadowSampler,
-					nullptr,
-					State->SurfaceSampler,
-					0,
-					result.Triangles
-				);
+
+			if (!occluded) {
+				SDL_GPURenderPass *gbuffer = beginGBuffer(true);
+				if (gbuffer == nullptr) {
+					ENGINE_ERROR("gbuffer: SDL_BeginGPURenderPass: {}", SDL_GetError());
+					return false;
+				}
+				if (haveInstances && plainOpaque > 0) {
+					drawOpaque(gbuffer, State->InstanceBuffer, nullptr);
+				}
+				SDL_EndGPURenderPass(gbuffer);
+				return true;
 			}
-			SDL_EndGPURenderPass(gbuffer);
+
+			// Trace rather than a counter in `FrameResult`: the survivor count
+			// lives on the GPU and never comes back, so the honest numbers are
+			// the two the CPU decided.
+			ENGINE_TRACE(
+				"gbuffer: occlusion cull of {} candidate(s) behind {} occluder(s) in {} run(s)",
+				State->OcclusionFrame.CandidateCount,
+				State->OcclusionFrame.EarlyTotal,
+				State->OcclusionFrame.RunCount
+			);
+
+			// Early phase: the CPU-picked occluders, by indirect arguments so
+			// both phases drive their draws the same way.
+			const Impl::IndirectPhase early{State->Occlusion.Arguments, 0, &State->OcclusionFrame.RunEarly};
+			SDL_GPURenderPass *earlyPass = beginGBuffer(true);
+			if (earlyPass == nullptr) {
+				ENGINE_ERROR("gbuffer early: SDL_BeginGPURenderPass: {}", SDL_GetError());
+				return false;
+			}
+			drawOpaque(earlyPass, State->InstanceBuffer, &early);
+			SDL_EndGPURenderPass(earlyPass);
+
+			// The pyramid over what the occluders wrote, then the cull that
+			// compacts the survivors and fills the late arguments.
+			State->BuildPyramid(command, depthTarget.texture);
+			State->DispatchOcclusionCull(command, frameUniforms.ViewProjection);
+
+			// Late phase: the survivors, loading everything the early phase
+			// stored.
+			const Impl::IndirectPhase late{
+				State->Occlusion.Arguments,
+				State->OcclusionFrame.ArgCount,
+				&State->OcclusionFrame.RunCandidates
+			};
+			SDL_GPURenderPass *latePass = beginGBuffer(false);
+			if (latePass == nullptr) {
+				ENGINE_ERROR("gbuffer late: SDL_BeginGPURenderPass: {}", SDL_GetError());
+				return false;
+			}
+			drawOpaque(latePass, State->Occlusion.LateInstances, &late);
+			SDL_EndGPURenderPass(latePass);
 			return true;
 		});
 
@@ -9860,6 +10758,27 @@ namespace engine::render {
 				nullptr,
 				SDL_FColor{drawCamera.FarPlane, 0.0f, 0.0f, 0.0f}
 			);
+			return true;
+		});
+
+		// The authored depth hierarchy: the same pyramid the occlusion cull
+		// seeds mid-gbuffer, rebuilt here over the *finished* depth so
+		// screen-space consumers walk a pyramid that saw every opaque draw.
+		// When the cull also ran this frame, this is a rebuild rather than a
+		// duplicate resource - the levels are reused, and the cull already
+		// consumed the version it made.
+		frameNodes.Set(core::Name("hzb"), [&](const graph::RunContext &context) {
+			enterNamedPass(context.Name);
+			if (State->Occlusion.Seed == nullptr || State->Occlusion.Reduce == nullptr) {
+				// The compute shaders failed at startup; the log already
+				// carries the reason, and a missing pyramid only disables what
+				// reads it.
+				return true;
+			}
+			if (!State->EnsurePyramid(sceneWidth, sceneHeight)) {
+				return false;
+			}
+			State->BuildPyramid(command, depthTarget.texture);
 			return true;
 		});
 

@@ -301,8 +301,11 @@ namespace studio {
 			};
 			type.Widgets.insert(type.Widgets.end(), commonWidgets.begin(), commonWidgets.end());
 			if (spec.Kind == Name("cull-frustum")) {
+				// "occlusion" composes behind the frustum test: the entity flow
+				// still culls by frustum on the CPU, and the renderer's gbuffer
+				// pass adds the depth-pyramid test on the GPU.
 				type.Widgets.push_back(
-					nodegraph::Select("culling", "Culling", {"inherit", "none", "frustum"}, 0)
+					nodegraph::Select("culling", "Culling", {"inherit", "none", "frustum", "occlusion"}, 0)
 				);
 			}
 			if (spec.Kind == Name("cull-distance")) {

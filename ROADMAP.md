@@ -71,19 +71,21 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] add emissive textures / pbr
 - [x] real mesh creation in real-time (EditableMesh) + ensure it renders properly
 - [x] ensure EditableImage works and renders
+- [x] add conservative occlusion culling after the renderer has a depth hierarchy and indirect draw path; explicit occlusion documents are refused until then
+- [_] create portal test scenes for lighting through portals and out of portals (one light in portal, check if emits out of portal, two colored lights on either side of portal, check emits inside and mixes)
+- [_] audit every remaining service, object and instance property so edits mutate authoritative state and reach their consumers
+- [_] prototype portal seam light-field capture: render each room against a lit void, capture both directions, and project the matching result into the portal entrance; expose an `Enabled` property on Portal components to skip this capture path
+- [_] check raytracing with portal test scene as well
+- [_] split dependency-bound compute and later transfer work into traffic-plan command buffers; physical overlap remains unavailable because SDL exposes one unified queue rather than independent graphics, compute and transfer queues
+- [_] `ShapeCast` needs a swept-volume walk and its own de-duplication rule; the current union of the start and end box bounds is loose over long sweeps, and the ray walk's run rule only applies to the centre line
+- [_] show Universe in Explorer with mutable execution mode, maximum catch-up ticks, bus budget, channel queue limit and channels-per-world; show federated mode, world counts, fault counts, tick cost and bus traffic read-only
 
 - [_] add accessories support
 - [_] animation handler
 - [_] character controller + humanoid + character states + state controller, etc. More modular than roblox standard humanoid. state machine? node graphs? etc.
 - [_] skinning and animation - `bake` skips joints and weights and keeps the rest pose, because there are no skeletons in the engine yet
-- [_] split dependency-bound compute and later transfer work into traffic-plan command buffers; physical overlap remains unavailable because SDL exposes one unified queue rather than independent graphics, compute and transfer queues
-- [_] add conservative occlusion culling after the renderer has a depth hierarchy and indirect draw path; explicit occlusion documents are refused until then
-- [_] `ShapeCast` needs a swept-volume walk and its own de-duplication rule; the current union of the start and end box bounds is loose over long sweeps, and the ray walk's run rule only applies to the centre line
-- [_] show Universe in Explorer with mutable execution mode, maximum catch-up ticks, bus budget, channel queue limit and channels-per-world; show federated mode, world counts, fault counts, tick cost and bus traffic read-only
 - [_] thoroughly implement every user-interface element, including `SurfaceGui` and `BillboardGui`
 - [_] finish portals so lighting, physics, projection, clipping and geometry crossing the seam are seamless
-- [_] prototype portal seam light-field capture: render each room against a lit void, capture both directions, and project the matching result into the portal entrance; expose an `Enabled` property on Portal components to skip this capture path
-- [_] audit every remaining service, object and instance property so edits mutate authoritative state and reach their consumers
 - [_] port semi-real raytrace and path-trace as part of nodes
 - [_] make demo render pipelines with semi-real raytrace and path-trace
 - [_] render pipeline nodes for above
@@ -92,6 +94,8 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### FUTURE
 
+- [_] plan the entire rendering system to a visual compositor system like Unity. https://docs.unity3d.com/Manual/scriptable-render-pipeline-introduction.html https://docs.unity3d.com/Packages/com.unity.visual-compositor@0.27/manual/nodes.html
+- [_] ensure per-mesh render capabilities, global lighting render capabilities, camera lighting render capabilities, etc. compute shaders, post-processing, etc.
 - [_] porting roblox games (DEFER THIS UNTIL LATER ONCE TYPES ARE BUILT UP) - untouched, and the trigger is unchanged: there are four instance classes in this engine and a Roblox place names hundreds
 - [_] add modulescript boundaries between luau and javascript VMs. moving values between vms.
 - [_] consider adding C# as another scripting langauge?
