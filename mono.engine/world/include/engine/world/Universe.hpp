@@ -313,18 +313,52 @@ namespace engine::world {
 
 		// What a world was configured with.
 		//
-		// **Read-only, and there is no setter to match it.** A world's tick
-		// rate is decided when it is created and changing one underneath a
-		// running simulation is a different operation with different answers
-		// about the ticks already in flight. This exists because a save file
-		// has to write what a world actually is: `game::WriteGame` wrote the
-		// defaults for every world before it, so a scene authored at 30Hz
-		// saved as 60 and nothing said so.
+		// **A copy, and `Reconfigure` below is the way back.** This exists
+		// because a save file has to write what a world actually is:
+		// `game::WriteGame` wrote the defaults for every world before it, so a
+		// scene authored at 30Hz saved as 60 and nothing said so.
+		//
+		// It said there was no setter until v0.17, on the grounds that changing
+		// a rate underneath a running simulation is a different operation with
+		// different answers about the ticks already in flight. That reasoning
+		// survives in what `Reconfigure` will not do - it will not rename a
+		// world, and it does not rebuild the timestep - rather than in refusing
+		// the whole thing.
 		//
 		// @param id The world to ask about.
 		// @return The settings, or a default-constructed set for an unknown
 		//         world.
 		WorldSettings SettingsOf(WorldId id) const;
+
+		// Re-applies a world's settings, keeping its name.
+		//
+		// **The setter the paragraph above used to say did not exist.** The
+		// argument it made still holds for what this refuses: a *name* is what
+		// the registry is keyed on and what crosses every boundary, so renaming
+		// is a different operation and this ignores `settings.Name`. What it no
+		// longer refuses is the rates, and the reason is that they turned out to
+		// be the numbers somebody most needs to change and had no way to: the
+		// three tick rates reach a `.agame` file and a server command line, and
+		// until v0.17 they reached no editor at all - so a world of a hundred
+		// thousand bodies could be made affordable everywhere except in the
+		// program somebody builds it in.
+		//
+		// **Applied at once rather than queued to the barrier.** `Create` and
+		// `Destroy` queue because they move the world list underneath a running
+		// batch; this writes one world's own settings and moves nothing, which
+		// is the same ground `SetRenderingProfile` stands on. `World::Owed`
+		// re-reads the rate every frame, so a change is in force on the next
+		// frame with the accumulator intact.
+		//
+		// **`PhysicsTickRate` is stored and not pushed.** This module is at L4
+		// and `physics` at L8, so a caller that changes it must also call
+		// `physics::SetPhysicsTickRate` on the world's store - `World::
+		// Reconfigure` carries the whole of that argument.
+		//
+		// @param id       The world to re-configure.
+		// @param settings What to become. `Name` is ignored.
+		// @return `Ok`, or `NoSuchWorld`.
+		WorldStatus Reconfigure(WorldId id, const WorldSettings &settings);
 
 		// Whether a world has ticked past its replication clock since this was
 		// last asked, clearing the answer.

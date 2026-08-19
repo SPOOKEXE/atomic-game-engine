@@ -1858,7 +1858,7 @@ namespace studio {
 			RetargetEditingViewport(FocusedViewport, world);
 		}
 
-		UniverseSelected = false;
+		ClearRootSelection();
 		if (world != SelectionWorld) {
 			Selection.clear();
 			SelectionWorld = world;
@@ -1879,8 +1879,29 @@ namespace studio {
 		Selection.push_back(instance);
 	}
 
-	void Editor::ClearSelection() {
+	void Editor::ClearRootSelection() {
 		UniverseSelected = false;
+		SelectedWorldRow = {};
+	}
+
+	void Editor::ApplyWorldSettings(WorldId world, const engine::world::WorldSettings &settings) {
+		if (Universe->Reconfigure(world, settings) != engine::world::WorldStatus::Ok) {
+			return;
+		}
+
+		// **The push `Universe::Reconfigure` cannot make.** See the declaration:
+		// the rate is a world's property and the clock is a store resource one
+		// tier system above, so the host is what joins them - which is this
+		// editor, exactly as it is in `PrepareWorldIn`.
+		Universe->Enter(world, [&settings](Store &store) {
+			engine::physics::SetPhysicsTickRate(store, settings.PhysicsTickRate);
+		});
+
+		MarkModified();
+	}
+
+	void Editor::ClearSelection() {
+		ClearRootSelection();
 		Selection.clear();
 
 		// The anchor goes with it. `SelectRange` already falls back to a plain
@@ -2892,7 +2913,7 @@ namespace studio {
 			return;
 		}
 
-		UniverseSelected = false;
+		ClearRootSelection();
 		Selection = copies;
 		if (authoritative) {
 			MarkModified();

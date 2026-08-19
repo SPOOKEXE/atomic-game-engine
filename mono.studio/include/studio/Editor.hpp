@@ -837,6 +837,17 @@ namespace studio {
 		void ResolveFocusedViewport();
 		void DrawProperties();
 		void DrawUniverseProperties();
+
+		// The settings of one world, when its row in the explorer is selected.
+		//
+		// **The panel the three tick rates never had.** They reach an `.agame`
+		// file and a server command line, and until this they reached no editor
+		// at all - so a world could be tuned everywhere except in the program
+		// somebody builds it in, which is the gap `ROADMAP.md` recorded when
+		// `PhysicsTickRate` landed.
+		//
+		// @param world The world whose row was clicked.
+		void DrawWorldProperties(WorldId world);
 		void DrawScripts();
 
 		// The breakpoint column beside a script's text.
@@ -2637,6 +2648,33 @@ namespace studio {
 		// @return `false` when the world could not be created.
 		bool AddExampleWorld(std::string_view file);
 
+		// Forgets that the universe row or a world row was clicked.
+		//
+		// **One definition of "no root is selected", because there are two
+		// fields and six places that mean it.** Every one of those places is
+		// "something else has just been selected" - a range, an instance, a
+		// gallery tile, a pipeline node - and two assignments in six places is
+		// the drift `AGENTS.md` rule 2 names. `ClearSelection` calls this, so a
+		// caller clearing the instance selection gets it for free.
+		void ClearRootSelection();
+
+		// Re-applies a world's settings and pushes the parts of them that live
+		// outside the world.
+		//
+		// **`Universe::Reconfigure` is not enough on its own, and that is a
+		// layer fact rather than an oversight.** `world` is at L4 and `physics`
+		// at L8, so the physics rate is *stored* on the world and *applied* to
+		// its store by whoever built it - this editor, in `PrepareWorldIn`.
+		// Changing the number without pushing it leaves the world solving at the
+		// old rate while every panel reports the new one, which is the worst
+		// shape a setting can have.
+		//
+		// @param world    The world to re-configure.
+		// @param settings What to become. `Name` is ignored - renaming is the
+		//                 explorer's operation, because the registry is keyed on
+		//                 it.
+		void ApplyWorldSettings(WorldId world, const engine::world::WorldSettings &settings);
+
 		// One row per shipped scene, each of which adds a world holding it.
 		//
 		// **Submitted into whatever menu or popup is already open**, which is
@@ -2929,10 +2967,22 @@ namespace studio {
 		WorldId Active;
 
 		// What is selected, and which world an instance selection is in. The
-		// universe is editor selection rather than world state, so it has its
-		// own flag and never enters a store.
+		// universe and a world are editor selection rather than world state, so
+		// they have their own fields and never enter a store.
+		//
+		// **`SelectedWorldRow` is not `SelectionWorld`, and the two are one
+		// letter apart for a reason worth stating.** `SelectionWorld` says which
+		// world the *instance* selection lives in and is meaningless on its own;
+		// `SelectedWorldRow` says the person clicked the world row itself and
+		// wants that world's settings. Both can be valid at once and mean
+		// different things.
+		//
+		// The three are mutually exclusive as a *view*: `ClearRootSelection`
+		// is what makes "an instance is selected" and "a root is selected" one
+		// question rather than two flags that drift.
 		//@{
 		bool UniverseSelected = false;
+		WorldId SelectedWorldRow;
 		WorldId SelectionWorld;
 		std::vector<Entity> Selection;
 		//@}

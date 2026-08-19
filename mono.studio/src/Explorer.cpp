@@ -280,7 +280,7 @@ namespace studio {
 			RetargetEditingViewport(FocusedViewport, world);
 		}
 
-		UniverseSelected = false;
+		ClearRootSelection();
 
 		// **The range itself is `RowsBetween`, which is a free function over the
 		// compiled tree and is tested as one.** What is left here is the part
@@ -585,9 +585,22 @@ namespace studio {
 		const std::string universeLabel =
 			std::string(GameName.IsValid() ? Label(GameName) : "Game") + "  (universe)";
 
+		// **`OpenOnArrow`, and without it this row could not be selected at
+		// all.** A tree node with no such flag toggles open on a click anywhere
+		// along it, which sets imgui's `IsItemToggledOpen` for that frame - and
+		// the guard below refuses a click that toggled, because a person opening
+		// a node is not choosing it. The two together meant every click on the
+		// universe row opened or closed it and none of them ever reached the
+		// selection, so `UniverseSelected` was false for the life of the session
+		// and the Properties panel showed "nothing selected" for a root whose
+		// editable settings were sitting behind it.
+		//
+		// The world rows below have always had the flag, which is why they
+		// select and this did not.
 		const bool universeOpen = ImGui::TreeNodeEx(
 			"##universe",
 			ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth |
+				ImGuiTreeNodeFlags_OpenOnArrow |
 				(UniverseSelected ? ImGuiTreeNodeFlags_Selected : ImGuiTreeNodeFlags_None),
 			"%s",
 			universeLabel.c_str()
@@ -670,6 +683,22 @@ namespace studio {
 
 				if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
 					RetargetEditingViewport(FocusedViewport, world);
+
+					// **Selecting the row as well as retargeting the viewport**,
+					// which is the rule the universe row above already follows:
+					// clicking a row in this tree selects that row. Until v0.17
+					// a world row was the one exception - it moved the viewport
+					// and left the Properties panel showing whichever instance
+					// was selected before, so the world's own tick rates had
+					// nowhere to be shown even after they became editable.
+					//
+					// `ClearSelection` first, so the instance selection goes
+					// with it: an explorer highlighting an instance while
+					// Properties describes a world is two answers to "what am I
+					// looking at".
+					ClearSelection();
+					SelectionWorld = {};
+					SelectedWorldRow = world;
 				}
 
 				// **A world row takes a drop too**, and it means "a root of

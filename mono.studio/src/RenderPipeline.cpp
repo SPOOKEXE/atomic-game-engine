@@ -602,7 +602,7 @@ namespace studio {
 			if (lighting != engine::ecs::NULL_ENTITY) {
 				Selection = {lighting};
 				SelectionWorld = Active;
-				UniverseSelected = false;
+				ClearRootSelection();
 				ShowProperties = true;
 				RevealSelection = true;
 			}

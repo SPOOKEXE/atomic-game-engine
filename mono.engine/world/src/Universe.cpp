@@ -372,6 +372,16 @@ namespace engine::world {
 		return world == nullptr ? WorldSettings{} : world->Settings();
 	}
 
+	WorldStatus Universe::Reconfigure(WorldId id, const WorldSettings &settings) {
+		RequireDriverThread("Reconfigure");
+		World *world = Reach(id);
+		if (world == nullptr) {
+			return WorldStatus::NoSuchWorld;
+		}
+		world->Reconfigure(settings);
+		return WorldStatus::Ok;
+	}
+
 	bool Universe::TakeReplicationTick(WorldId id) {
 		RequireDriverThread("TakeReplicationTick");
 		World *world = Reach(id);

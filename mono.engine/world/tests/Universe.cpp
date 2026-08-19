@@ -961,3 +961,59 @@ TEST_CASE("an unbounded replication rate publishes every tick", "[world]") {
 	}
 	CHECK(universe.StatisticsOf(id).ReplicationTicks == 5);
 }
+
+TEST_CASE("reconfiguring a world changes its rates and never its name", "[world]") {
+	// **The name is the one field that cannot move.** The registry is keyed on
+	// it, `Find` is what everything crossing a boundary uses, and a world whose
+	// settings say one thing while the registry says another is reachable under
+	// a name nobody can read off it. So `Reconfigure` takes a whole
+	// `WorldSettings` and quietly keeps the name it already had.
+	Universe universe;
+	const WorldId id = universe.Create(Named("world.tuned", 60.0));
+	REQUIRE(id.IsValid());
+
+	WorldSettings wanted = universe.SettingsOf(id);
+	wanted.Name = Name("world.renamed");
+	wanted.TickRate = 30.0;
+	wanted.PhysicsTickRate = 10.0;
+	wanted.ReplicationTickRate = 20.0;
+	wanted.FaultLimit = 9;
+
+	REQUIRE(universe.Reconfigure(id, wanted) == WorldStatus::Ok);
+
+	const WorldSettings applied = universe.SettingsOf(id);
+	CHECK(applied.Name == Name("world.tuned"));
+	CHECK(applied.TickRate == 30.0);
+	CHECK(applied.PhysicsTickRate == 10.0);
+	CHECK(applied.ReplicationTickRate == 20.0);
+	CHECK(applied.FaultLimit == 9u);
+
+	// Still reachable under the name it was created with, and not under the one
+	// that was asked for.
+	CHECK(universe.Find(Name("world.tuned")) == id);
+	CHECK(!universe.Find(Name("world.renamed")).IsValid());
+
+	CHECK(universe.Reconfigure(WorldId{999}, wanted) == WorldStatus::NoSuchWorld);
+}
+
+TEST_CASE("a rate changed between frames takes effect on the next one", "[world]") {
+	// **The accumulator is kept rather than rebuilt**, which is what makes this
+	// a change of rate and not a skip forward. `World::Owed` re-reads the rate
+	// from the settings every frame, so `Reconfigure` writes a number and the
+	// next frame is owed against it.
+	Universe universe;
+	const WorldId id = universe.Create(Named("world.rate", 60.0));
+	Populate(universe, id, 1);
+
+	// A tenth of a second at 60 Hz is six ticks.
+	universe.Tick(1.0f / 10.0f);
+	CHECK(universe.StatisticsOf(id).Ticks == 6);
+
+	WorldSettings slower = universe.SettingsOf(id);
+	slower.TickRate = 10.0;
+	REQUIRE(universe.Reconfigure(id, slower) == WorldStatus::Ok);
+
+	// The same tenth of a second at 10 Hz is one.
+	universe.Tick(1.0f / 10.0f);
+	CHECK(universe.StatisticsOf(id).Ticks == 7);
+}

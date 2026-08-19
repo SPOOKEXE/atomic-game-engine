@@ -230,6 +230,37 @@ namespace engine::world {
 			Settings_.RenderingProfile = profile;
 		}
 
+		// Re-applies everything about a world except what identifies it.
+		//
+		// **The rates, and the name is deliberately not among them.** A world is
+		// addressed by name everywhere that crosses a boundary - the router, a
+		// snapshot, a host link - and the universe keys its registry on it, so
+		// renaming is that registry's operation rather than this one. Passing a
+		// different `WorldSettings::Name` here changes nothing, which is the only
+		// answer that cannot leave the two disagreeing.
+		//
+		// **`Timestep` is not re-seeded and must not be.** `Owed` calls
+		// `SetRate` from these settings on every frame already, so a new rate is
+		// in force on the next frame with the accumulator intact - and rebuilding
+		// the timestep would throw away the simulated time this world has been
+		// charged for, which is a world that silently skips forward whenever
+		// somebody touches a slider. `SetPhysicsTickRate` keeps its accumulator
+		// for the same reason and says so.
+		//
+		// **`PhysicsTickRate` is carried and not applied.** `physics` is at L8
+		// and this module is at L4, so the number lives here and the host pushes
+		// it into the store - exactly the arrangement `WorldSettings::
+		// PhysicsTickRate` describes. A caller changing it here has to call
+		// `physics::SetPhysicsTickRate` too, or the world keeps solving at the
+		// old rate while every panel reports the new one.
+		//
+		// @param settings What to become. `Name` is ignored.
+		void Reconfigure(const WorldSettings &settings) {
+			const core::Name kept = Settings_.Name;
+			Settings_ = settings;
+			Settings_.Name = kept;
+		}
+
 		// Whether the world is ticking, and why not when it is not.
 		//
 		// @return The current state.

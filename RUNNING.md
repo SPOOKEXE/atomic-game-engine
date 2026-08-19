@@ -565,6 +565,27 @@ just host --game My.agame       # a dedicated server hosting every world in it
 just run  --game My.agame       # single-player, both roles in one process
 ```
 
+### Editing a universe and a world
+
+Click a row in the Explorer and the Properties panel describes it. There are
+three kinds of row and all three answer:
+
+- **the universe row** at the top: name, execution mode, maximum catch-up ticks,
+  bus budget per tick, channel queue limit and channels per world, with the
+  federated flag, world counts, fault counts, tick cost and bus traffic
+  read-only;
+- **a world row**: `TickRate`, `IdleTickRate`, `PhysicsTickRate`,
+  `ReplicationTickRate`, the simulated network latency and the fault limit, with
+  the world's state, isolation, rendering profile and per-world statistics
+  read-only. A world's *name* is changed with Rename Scene in the row's own
+  context menu, because the universe's registry is keyed on it;
+- **an instance row**: its class's properties, as before.
+
+**`PhysicsTickRate` is the one to reach for on a world that cannot keep up.**
+Zero follows the tick rate; anything lower runs the solver every few ticks while
+scripts, signals and rendering keep the tick rate. A climbing `Dropped Ticks` in
+the same panel is what says a world needs it.
+
 ### Options
 
 | Option | Default | What it does |

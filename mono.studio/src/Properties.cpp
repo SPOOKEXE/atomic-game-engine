@@ -3,6 +3,7 @@
 #include <engine/game/Values.hpp>
 #include <engine/ui/Metrics.hpp>
 #include <engine/ui/Theme.hpp>
+#include <engine/world/Enums.hpp>
 
 #include <algorithm>
 #include <imgui.h>
@@ -252,6 +253,237 @@ namespace studio {
 		ImGui::EndTable();
 	}
 
+	void Editor::DrawWorldProperties(WorldId world) {
+		const Name name = Universe->NameOf(world);
+
+		ImGui::Text("%s", name.IsValid() ? Label(name) : "?");
+		ImGui::SameLine();
+		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+		ImGui::TextUnformatted("(world)");
+		ImGui::PopStyleColor();
+		ImGui::Separator();
+
+		ImGui::SetNextItemWidth(-1.0f);
+		TextField("##property-filter", PropertyFilter, "filter properties");
+		ImGui::Separator();
+
+		const auto visible = [this](const char *label) {
+			if (PropertyFilter.empty()) {
+				return true;
+			}
+
+			int score = 0;
+			return FuzzyMatch(PropertyFilter, label, score);
+		};
+
+		if (!ImGui::CollapsingHeader("World", ImGuiTreeNodeFlags_DefaultOpen)) {
+			return;
+		}
+
+		if (!ImGui::BeginTable("World", 2, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_RowBg)) {
+			return;
+		}
+
+		ImGui::TableSetupColumn("name", ImGuiTableColumnFlags_WidthStretch, 0.42f);
+		ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch, 0.58f);
+
+		const auto row = [](const char *label) {
+			ImGui::TableNextRow();
+			ImGui::TableSetColumnIndex(0);
+			ImGui::AlignTextToFramePadding();
+			ImGui::TextUnformatted(label);
+			ImGui::TableSetColumnIndex(1);
+			ImGui::PushID(label);
+			ImGui::SetNextItemWidth(-1.0f);
+		};
+
+		// **Read every frame rather than held in a draft.** The universe panel's
+		// rule and for its reason: these are the world's own numbers, a Play run
+		// or a game file load can change them underneath this panel, and a
+		// cached copy would show the old one until somebody clicked away.
+		engine::world::WorldSettings settings = Universe->SettingsOf(world);
+		bool edited = false;
+
+		// **The name is not editable here.** The registry is keyed on it and
+		// `Universe::Reconfigure` ignores it outright; renaming is Rename Scene
+		// in the explorer's own context menu, which does the registry half.
+		if (visible("Name")) {
+			row("Name");
+			ImGui::TextUnformatted(name.IsValid() ? Label(name) : "?");
+			ImGui::PopID();
+		}
+
+		if (visible("State")) {
+			row("State");
+			ImGui::TextUnformatted(engine::world::Describe(Universe->StateOf(world)));
+			ImGui::PopID();
+		}
+
+		// --- the three rates, which is what this panel exists for ------------
+
+		if (visible("Tick Rate")) {
+			row("Tick Rate");
+			double rate = settings.TickRate;
+			if (ImGui::InputDouble("##v", &rate, 0.0, 0.0, "%.1f Hz")) {
+				// **Floored at one rather than left at what was typed.**
+				// `FixedTimestep::SetRate` already refuses zero and substitutes
+				// one, so a zero typed here would be shown back as zero and run
+				// at 1 Hz - a panel disagreeing with the clock it is reporting.
+				settings.TickRate = std::max(rate, 1.0);
+				edited = true;
+			}
+			ImGui::PopID();
+		}
+
+		if (visible("Idle Tick Rate")) {
+			row("Idle Tick Rate");
+			double rate = settings.IdleTickRate;
+			if (ImGui::InputDouble("##v", &rate, 0.0, 0.0, "%.1f Hz")) {
+				settings.IdleTickRate = std::max(rate, 1.0);
+				edited = true;
+			}
+			ImGui::PopID();
+		}
+
+		if (visible("Physics Tick Rate")) {
+			row("Physics Tick Rate");
+			double rate = settings.PhysicsTickRate;
+			if (ImGui::InputDouble("##v", &rate, 0.0, 0.0, "%.1f Hz")) {
+				// Zero is meaningful here and is the default: it follows
+				// whichever tick rate is in force. Negative is not, and
+				// `physics::SanePhysicsRate` would turn it into zero anyway -
+				// clamping here means the panel shows what the clock will do.
+				settings.PhysicsTickRate = std::max(rate, 0.0);
+				edited = true;
+			}
+			ImGui::PopID();
+
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip(
+					"Physics steps per second. 0 follows the tick rate.\n"
+					"Lower it to make a heavy world affordable: the solver is the most\n"
+					"expensive thing in a tick and the least sensitive to running slower."
+				);
+			}
+		}
+
+		if (visible("Replication Tick Rate")) {
+			row("Replication Tick Rate");
+			double rate = settings.ReplicationTickRate;
+			if (ImGui::InputDouble("##v", &rate, 0.0, 0.0, "%.1f Hz")) {
+				settings.ReplicationTickRate = std::max(rate, 0.0);
+				edited = true;
+			}
+			ImGui::PopID();
+
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip(
+					"Snapshots published per second. 0 publishes on every tick.\n"
+					"Change bits are held across the ticks between two published ones,\n"
+					"so a property written on a skipped tick still reaches the wire."
+				);
+			}
+		}
+
+		if (visible("Simulated Latency")) {
+			row("Simulated Latency");
+			double latency = settings.GlobalSimulatedNetworkLatency;
+			if (ImGui::InputDouble("##v", &latency, 0.0, 0.0, "%.1f ms")) {
+				settings.GlobalSimulatedNetworkLatency = std::max(latency, 0.0);
+				edited = true;
+			}
+			ImGui::PopID();
+		}
+
+		if (visible("Fault Limit")) {
+			row("Fault Limit");
+			int limit = static_cast<int>(settings.FaultLimit);
+			if (ImGui::InputInt("##v", &limit)) {
+				settings.FaultLimit = static_cast<uint32_t>(std::max(limit, 1));
+				edited = true;
+			}
+			ImGui::PopID();
+		}
+
+		// --- what a world is, rather than how fast it runs -------------------
+
+		if (visible("Isolation")) {
+			row("Isolation");
+			ImGui::TextUnformatted(engine::world::Describe(settings.IsolationLevel));
+			ImGui::PopID();
+		}
+
+		// **Read-only here and editable in the render pipeline panel**, which is
+		// the one place that knows which profiles the universe actually has. Two
+		// editors for one name would be two ways to set it to something that
+		// does not exist.
+		if (visible("Rendering Profile")) {
+			row("Rendering Profile");
+			ImGui::TextUnformatted(
+				settings.RenderingProfile.IsValid() ? Label(settings.RenderingProfile) : "-"
+			);
+			ImGui::PopID();
+		}
+
+		// --- diagnostics, read-only ------------------------------------------
+
+		const engine::world::WorldStatistics statistics = Universe->StatisticsOf(world);
+
+		if (visible("Ticks")) {
+			row("Ticks");
+			ImGui::Text("%llu", static_cast<unsigned long long>(statistics.Ticks));
+			ImGui::PopID();
+		}
+
+		if (visible("Tick Cost")) {
+			row("Tick Cost");
+			ImGui::Text(
+				"%.2f ms · slowest %.2f ms",
+				statistics.LastTickMilliseconds,
+				statistics.SlowestTickMilliseconds
+			);
+			ImGui::PopID();
+		}
+
+		// **Dropped ticks beside the rate that produces them.** A number that
+		// keeps climbing is a world that cannot keep up with its own tick rate,
+		// which is the exact reading that should send somebody to the physics
+		// rate two rows above.
+		if (visible("Dropped Ticks")) {
+			row("Dropped Ticks");
+			if (statistics.DroppedTicks > 0) {
+				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
+				ImGui::Text("%llu", static_cast<unsigned long long>(statistics.DroppedTicks));
+				ImGui::PopStyleColor();
+			} else {
+				ImGui::TextUnformatted("0");
+			}
+			ImGui::PopID();
+		}
+
+		if (visible("Replication Ticks")) {
+			row("Replication Ticks");
+			ImGui::Text("%llu", static_cast<unsigned long long>(statistics.ReplicationTicks));
+			ImGui::PopID();
+		}
+
+		if (visible("Faults")) {
+			row("Faults");
+			ImGui::Text("%u", statistics.Faults);
+			ImGui::PopID();
+		}
+
+		ImGui::EndTable();
+
+		// **Applied after the table rather than inside it**, because
+		// `ApplyWorldSettings` enters the world and a panel that entered while
+		// drawing a row would be inside `Universe::Enter` twice over the course
+		// of one table. The edit is one frame of numbers either way.
+		if (edited) {
+			ApplyWorldSettings(world, settings);
+		}
+	}
+
 	void Editor::DrawProperties() {
 		if (!ShowProperties) {
 			return;
@@ -264,6 +496,15 @@ namespace studio {
 
 		if (UniverseSelected) {
 			DrawUniverseProperties();
+			ImGui::End();
+			return;
+		}
+
+		// **After the universe and before the instance branch**, which is the
+		// order the explorer's tree is in. The three are mutually exclusive
+		// because `ClearRootSelection` is what any other selection goes through.
+		if (SelectedWorldRow.IsValid()) {
+			DrawWorldProperties(SelectedWorldRow);
 			ImGui::End();
 			return;
 		}
