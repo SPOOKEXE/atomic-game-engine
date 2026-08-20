@@ -76,6 +76,40 @@ namespace engine::examples {
 	// Idempotent. Calling it is not optional on any path that writes one: a
 	// component minted under the compiler's spelling for a type is a name one
 	// build can write into a recording and another cannot read back.
+	// Mounts a scene's own Luau modules as children of the script that uses
+	// them.
+	//
+	// **A scene's libraries belong to the scene, not to every world in the
+	// program.** These used to be mirrored into `ReplicatedStorage` from a
+	// single staged `assets/lib` tree, which made them a property of the *host*:
+	// `MagicCore` and `TerrainCore` appeared under every world of every game,
+	// including a brand-new empty one somebody had just made, and a scene that
+	// wanted them had no way to say so - it asserted that somebody else had
+	// already put them there and failed with "is assets/lib staged?" whenever
+	// nobody had. That is the shape a shipped engine library has, and these are
+	// a demo's modules.
+	//
+	// So they are staged per scene - `assets/examples/Magic/MagicCore/...` -
+	// and mounted under the `Script` instance itself, which is Rojo's own
+	// arrangement and the one every `require(script.Parent.X)` inside the
+	// modules was written against. A world that never loads `Magic.luau` has no
+	// trace of any of it.
+	//
+	// **Idempotent by name**, for the reason a module always has: a module is
+	// cached per instance, so two trees under one script would give `require`
+	// two copies that share no state.
+	//
+	// Does nothing when the scene has no library directory, which is every scene
+	// but three.
+	//
+	// @param store  The world the script is in.
+	// @param script The `Script` or `ModuleScript` the modules belong to.
+	// @param scene  The scene's file name or stem - `Magic.luau` and `Magic`
+	//        both resolve to the same directory.
+	// @return How many top-level modules were mounted.
+	// @since v0.17
+	size_t MountSceneLibraries(ecs::Store &store, ecs::Entity script, std::string_view scene);
+
 	void RegisterExampleComponents();
 
 	// Installs the systems that move what a script built.

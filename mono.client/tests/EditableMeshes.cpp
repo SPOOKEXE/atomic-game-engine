@@ -74,7 +74,7 @@ TEST_CASE("a triangle converts position, normal and UV without touching them", "
 	CHECK(built.Indices[2] == 2);
 }
 
-TEST_CASE("vertex colours average into the one submesh's flat colour", "[client][editablemeshes]") {
+TEST_CASE("one triangle's vertex colours average into its run's flat colour", "[client][editablemeshes]") {
 	EditableMesh mesh;
 	mesh.Positions = {Vector3{}, Vector3{1.0f, 0.0f, 0.0f}, Vector3{0.0f, 1.0f, 0.0f}};
 	mesh.Normals = {Vector3{0.0f, 1.0f, 0.0f}, Vector3{0.0f, 1.0f, 0.0f}, Vector3{0.0f, 1.0f, 0.0f}};
@@ -99,6 +99,81 @@ TEST_CASE("vertex colours average into the one submesh's flat colour", "[client]
 	// Transparency`'s sense rather than an opacity's.
 	CHECK(submesh.BaseColour[3] == Approx(1.0f - 0.3f));
 	CHECK(submesh.IndexCount == 3);
+}
+
+// **The case the single-triangle test above cannot see**, and the one every
+// script-built scene actually hits: a mesh whose faces are painted different
+// colours. `assets::MeshVertex` carries no colour, so the only place a second
+// colour can live is a second submesh run - and the conversion collapsing them
+// into one average is what made a coloured terrain read as uniform mud.
+TEST_CASE("faces of different colours become separate submesh runs", "[client][editablemeshes]") {
+	EditableMesh mesh;
+
+	// Two triangles sharing no vertex, so each face's three corners agree and
+	// the average is exact.
+	mesh.Positions = {
+		Vector3{},
+		Vector3{1.0f, 0.0f, 0.0f},
+		Vector3{0.0f, 0.0f, 1.0f},
+		Vector3{4.0f, 0.0f, 0.0f},
+		Vector3{5.0f, 0.0f, 0.0f},
+		Vector3{4.0f, 0.0f, 1.0f},
+	};
+	mesh.Normals.assign(6, Vector3{0.0f, 1.0f, 0.0f});
+	mesh.UVs.assign(6, Vector2{});
+	mesh.Colours = {
+		Color3{1.0f, 0.0f, 0.0f},
+		Color3{1.0f, 0.0f, 0.0f},
+		Color3{1.0f, 0.0f, 0.0f},
+		Color3{0.0f, 0.0f, 1.0f},
+		Color3{0.0f, 0.0f, 1.0f},
+		Color3{0.0f, 0.0f, 1.0f},
+	};
+	mesh.Alphas.assign(6, 0.0f);
+	mesh.Indices = {0, 1, 2, 3, 4, 5};
+
+	const engine::assets::MeshData built = client::BuildMeshData(mesh);
+
+	REQUIRE(built.IsValid());
+	REQUIRE(built.Submeshes.size() == 2);
+
+	// First-appearance order, so a second conversion of the same mesh produces
+	// the same file.
+	CHECK(built.Submeshes[0].BaseColour[0] == Approx(1.0f));
+	CHECK(built.Submeshes[0].BaseColour[2] == Approx(0.0f));
+	CHECK(built.Submeshes[1].BaseColour[0] == Approx(0.0f));
+	CHECK(built.Submeshes[1].BaseColour[2] == Approx(1.0f));
+
+	// Contiguous and covering, which is what a run means.
+	CHECK(built.Submeshes[0].FirstIndex == 0);
+	CHECK(built.Submeshes[0].IndexCount == 3);
+	CHECK(built.Submeshes[1].FirstIndex == 3);
+	CHECK(built.Submeshes[1].IndexCount == 3);
+	CHECK(built.Indices.size() == 6);
+}
+
+// Two colours a display cannot tell apart must not cost two draw runs.
+TEST_CASE("colours within a quantisation step share one run", "[client][editablemeshes]") {
+	EditableMesh mesh;
+	mesh.Positions = {
+		Vector3{},
+		Vector3{1.0f, 0.0f, 0.0f},
+		Vector3{0.0f, 0.0f, 1.0f},
+		Vector3{4.0f, 0.0f, 0.0f},
+		Vector3{5.0f, 0.0f, 0.0f},
+		Vector3{4.0f, 0.0f, 1.0f},
+	};
+	mesh.Normals.assign(6, Vector3{0.0f, 1.0f, 0.0f});
+	mesh.UVs.assign(6, Vector2{});
+	mesh.Colours.assign(3, Color3{0.5f, 0.5f, 0.5f});
+	mesh.Colours.resize(6, Color3{0.5f + 1.0f / 2000.0f, 0.5f, 0.5f});
+	mesh.Alphas.assign(6, 0.0f);
+	mesh.Indices = {0, 1, 2, 3, 4, 5};
+
+	const engine::assets::MeshData built = client::BuildMeshData(mesh);
+
+	REQUIRE(built.Submeshes.size() == 1);
+	CHECK(built.Submeshes.front().IndexCount == 6);
 }
 
 TEST_CASE("an empty mesh converts to an empty, invalid MeshData", "[client][editablemeshes]") {

@@ -137,6 +137,37 @@ namespace engine::scene {
 		float Turn = 0.0f;
 	};
 
+	// The last `PortalTransit::Serial` a presenting host has drawn.
+	//
+	// **Render-side history with no wire form, exactly like
+	// `PreviousTransform`** - and it is here for the same problem that one has.
+	// `CrossPortals` maps a crossing body's `PreviousTransform` through the seam
+	// so the frames between the tick and the next one blend *inside* the
+	// destination room rather than across the hundred units between the panes.
+	// That fix is local to whoever simulated the crossing, and a client did not:
+	// it receives a `Transform` that has jumped and holds a `PreviousTransform`
+	// from the room the body left, so it interpolates straight through the gap
+	// and the character is drawn once or twice somewhere in between. What that
+	// looks like is a body streaking across the world on every crossing.
+	//
+	// **A serial rather than a flag, and it is the same serial the camera
+	// already follows.** A flag has to be cleared by somebody and is lost with
+	// the packet that carried it; a counter is idempotent, survives a dropped
+	// delta, and answers "how many crossings have I not drawn yet" rather than
+	// "was there one". `PortalTransit` crosses the wire already, so this needed
+	// no new packet at all - which is what the "portal move packet" question was
+	// really asking.
+	//
+	// The authority writes this at the moment it crosses a body, so the snap
+	// below is a no-op there and the mapped `PreviousTransform` it computed
+	// survives. A replica never writes it except by drawing, so the snap fires
+	// exactly once per crossing per viewer.
+	//
+	// @since v0.17
+	struct PortalTransitSeen {
+		uint32_t Serial = 0;
+	};
+
 	// How far a thing reaches from its own origin, on each local axis.
 	//
 	// **The single source a world AABB is derived from**, by both the broad

@@ -923,6 +923,13 @@ namespace engine::scene {
 		// with no name and no handle in them.
 		ecs::Components::Register<PortalTransit>("scene.PortalTransit");
 
+		// **No wire form, for `PreviousTransform`'s reason**: it is a record of
+		// what a *viewer* has drawn, so a replica must keep its own and never be
+		// handed the authority's. Giving it one would make every client agree
+		// that a crossing had already been shown, which is precisely the state
+		// in which nothing snaps.
+		ecs::Components::Register<PortalTransitSeen>("scene.PortalTransitSeen");
+
 		// **The three the player pipeline added, appended for this list's
 		// standing reason.** Component ids are a dense counter and an archetype
 		// is a sorted list of them, so inserting one anywhere but the end

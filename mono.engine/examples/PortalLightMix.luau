@@ -117,7 +117,23 @@ block("SpawnLocation", Vector3.new(6, 1, 6), CFrame.new(0, 0.5, -14), FLOOR)
 -- The line `capture-portal-lighting.sh` rewrites; `_G` is readonly in the
 -- script sandbox, so substitution is the only mechanism that works from a
 -- shell. Same arrangement as `PortalSeam.luau`.
-local VIEW = ""
+--
+-- **It defaults to the near room rather than to nothing, and the empty default
+-- was read as a broken feature.** With no viewpoint the scene left
+-- `workspace.CurrentCamera` alone, so `client --script PortalLightMix.luau`
+-- opened on the client's own starting eye - a long way off, square to nothing,
+-- with both twenty-stud pools outside the frame. What that draws is a nearly
+-- black picture, and the reasonable thing to conclude from a nearly black
+-- picture in a scene whose first line is `Lighting.Brightness = 0` is that
+-- setting the sun to zero had put every lamp out.
+--
+-- It had not. Measured from the near viewpoint with `Brightness = 0`, the frame
+-- holds 153,662 red pixels and 26,598 green ones - both pools, both channels,
+-- exactly what the header says correct looks like. At `Brightness = 1` the same
+-- frame holds 20,030 red and 529 green, because the sun washes the pools out.
+-- The scene is *more* legible with no sun, which is the whole reason it has
+-- none, and the only thing missing was somewhere to stand.
+local VIEW = "near"
 local WHICH = VIEW
 local viewpoint: CFrame? = nil
 

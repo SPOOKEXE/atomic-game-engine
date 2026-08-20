@@ -1,9 +1,5 @@
-#include <studio/Config.hpp>
-
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
-#include <studio/Editor.hpp>
-#include <studio/Keybinds.hpp>
 
 #include <algorithm>
 #include <cstdio>
@@ -12,6 +8,9 @@
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <sstream>
+#include <studio/Config.hpp>
+#include <studio/Editor.hpp>
+#include <studio/Keybinds.hpp>
 
 namespace studio {
 
@@ -282,8 +281,7 @@ namespace studio {
 		// **Written as its name rather than its index.** An index would make
 		// reordering `ScaleSide` a silent change to how everybody's scale drag
 		// behaves, and this is a file a person reads.
-		if (const auto sides = document.find("scaleSides");
-			sides != document.end() && sides->is_string()) {
+		if (const auto sides = document.find("scaleSides"); sides != document.end() && sides->is_string()) {
 			const std::string wanted = sides->get<std::string>();
 			for (size_t index = 0; index < SCALE_SIDE_COUNT; index++) {
 				const auto side = static_cast<ScaleSide>(index);
@@ -295,12 +293,36 @@ namespace studio {
 		}
 		ControlPort = Integer(document, "controlPort", ControlPort);
 
-		if (const auto panels = document.find("panels");
-			panels != document.end() && panels->is_object()) {
+		if (const auto rates = document.find("frameRates"); rates != document.end() && rates->is_object()) {
+			FrameCap = Number(*rates, "cap", FrameCap);
+			InterfaceActiveHz = Number(*rates, "interfaceActive", InterfaceActiveHz);
+			InterfaceIdleHz = Number(*rates, "interfaceIdle", InterfaceIdleHz);
+			RendererFocusedHz = Number(*rates, "rendererFocused", RendererFocusedHz);
+			RendererUnfocusedHz = Number(*rates, "rendererUnfocused", RendererUnfocusedHz);
+		}
+
+		if (const auto panels = document.find("panels"); panels != document.end() && panels->is_object()) {
 			ShowStatistics = Flag(*panels, "statistics", ShowStatistics);
 			ShowFrameGraph = Flag(*panels, "frameGraph", ShowFrameGraph);
 			ShowAssets = Flag(*panels, "assets", ShowAssets);
 			ShowControl = Flag(*panels, "control", ShowControl);
+		}
+
+		// **A missing array and an empty one are different answers.** Absent is
+		// a file written before the preference existed and means "use the
+		// catalogue's defaults"; present and empty is somebody who unticked
+		// every row and means an empty new game, which is a thing they are
+		// allowed to want. `DefaultWorlds` stays empty in the first case and the
+		// editor decides; the flag below is what tells the two apart.
+		if (const auto worlds = document.find("defaultWorlds");
+			worlds != document.end() && worlds->is_array()) {
+			DefaultWorldsChosen = true;
+			DefaultWorlds.clear();
+			for (const auto &entry : *worlds) {
+				if (entry.is_string()) {
+					DefaultWorlds.push_back(entry.get<std::string>());
+				}
+			}
 		}
 
 		// **A colour nobody recognises is skipped, not an error.** This document
@@ -318,8 +340,7 @@ namespace studio {
 
 				engine::ui::ThemeColours entry;
 				for (const auto &[name, value] : chosen.items()) {
-					const std::optional<engine::ui::ThemeColour> which =
-						engine::ui::ParseThemeColour(name);
+					const std::optional<engine::ui::ThemeColour> which = engine::ui::ParseThemeColour(name);
 					if (!which || !value.is_string()) {
 						continue;
 					}
@@ -352,6 +373,16 @@ namespace studio {
 		SnapDistance = std::max(0.001f, SnapDistance);
 		SnapDegrees = std::max(0.001f, SnapDegrees);
 		ControlPort = std::clamp(ControlPort, 0, 65535);
+
+		// **Clamped rather than refused, and zero survives.** Zero means "this
+		// one imposes no ceiling", which is a real answer for every one of them
+		// - a negative is not, and a file with one in it is a typo rather than a
+		// document to reject.
+		FrameCap = std::clamp(FrameCap, 0.0f, 1000.0f);
+		InterfaceActiveHz = std::clamp(InterfaceActiveHz, 0.0f, 1000.0f);
+		InterfaceIdleHz = std::clamp(InterfaceIdleHz, 0.0f, 1000.0f);
+		RendererFocusedHz = std::clamp(RendererFocusedHz, 0.0f, 1000.0f);
+		RendererUnfocusedHz = std::clamp(RendererUnfocusedHz, 0.0f, 1000.0f);
 		return true;
 	}
 
@@ -376,7 +407,7 @@ namespace studio {
 			}
 		}
 
-		const json document{
+		json document{
 			{"scale", Scale},
 			{"showGrid", ShowGrid},
 			{"snap", SnapEnabled},
@@ -395,7 +426,19 @@ namespace studio {
 				 {"control", ShowControl},
 			 }},
 			{"panelColours", std::move(panelColours)},
+			{"frameRates",
+			 json{
+				 {"cap", FrameCap},
+				 {"interfaceActive", InterfaceActiveHz},
+				 {"interfaceIdle", InterfaceIdleHz},
+				 {"rendererFocused", RendererFocusedHz},
+				 {"rendererUnfocused", RendererUnfocusedHz},
+			 }},
 		};
+
+		if (DefaultWorldsChosen) {
+			document["defaultWorlds"] = DefaultWorlds;
+		}
 
 		std::string error;
 		if (!WriteConfigDocument("preferences.json", document, error)) {
@@ -416,9 +459,8 @@ namespace studio {
 		// folder - so the first run after this change reads the old file and
 		// every run after it reads the new one.
 		template <class Load>
-		bool LoadWithLegacy(
-			const std::filesystem::path &wanted, const std::filesystem::path &legacy, Load load
-		) {
+		bool
+		LoadWithLegacy(const std::filesystem::path &wanted, const std::filesystem::path &legacy, Load load) {
 			if (load(wanted)) {
 				return true;
 			}
@@ -460,6 +502,12 @@ namespace studio {
 		ScaleSides = Prefs.Sides;
 		DragAligns = Prefs.DragAligns;
 		ShowFacing = Prefs.ShowFacing;
+
+		FrameCap = Prefs.FrameCap;
+		InterfaceActiveHz = Prefs.InterfaceActiveHz;
+		InterfaceIdleHz = Prefs.InterfaceIdleHz;
+		RendererFocusedHz = Prefs.RendererFocusedHz;
+		RendererUnfocusedHz = Prefs.RendererUnfocusedHz;
 
 		// **The panel flags are ORed rather than assigned**, because `Options`
 		// has already reconciled a command-line flag against this same file -
@@ -511,6 +559,11 @@ namespace studio {
 		Prefs.DragAligns = DragAligns;
 		Prefs.ShowFacing = ShowFacing;
 		Prefs.Scale = Settings.Scale;
+		Prefs.FrameCap = FrameCap;
+		Prefs.InterfaceActiveHz = InterfaceActiveHz;
+		Prefs.InterfaceIdleHz = InterfaceIdleHz;
+		Prefs.RendererFocusedHz = RendererFocusedHz;
+		Prefs.RendererUnfocusedHz = RendererUnfocusedHz;
 
 		Prefs.Save();
 		Recent.Save();

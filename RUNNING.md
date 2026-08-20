@@ -83,7 +83,7 @@ already learnt from `just docs-check` at v0.2.
 
 **The hook builds and does not test**, which is the whole of its design. The
 failure class is a warning going fatal, and that is a compile-time property; the
-suites are `just check`'s job, cost two and a half minutes, and go red for
+suites are `just check`'s job, cost about a minute and a half, and go red for
 whoever else's half-finished module is in the tree. A gate that fails for work
 that is not yours is a gate that gets skipped every time.
 
@@ -92,7 +92,7 @@ that is not yours is a gate that gets skipped every time.
 | `just preset=ci build`, nothing changed | ~1 s |
 | `just preset=ci build`, a day of another preset's drift | ~1 min |
 | `just preset=ci build`, from an empty `.cache/build/ci/` | ~3 min, once - 1,998 targets, vendors included |
-| `just preset=ci check`, warm | ~3 min, and `test-all` is 2.5 of them |
+| `just preset=ci check`, warm | ~2 min, and `test-all` is 1.5 of them |
 
 `ci` builds into `.cache/build/ci/`, a tree of its own, so the first push after
 working in `dev` recompiles what changed since the last push rather than
@@ -2317,7 +2317,29 @@ just test-list                                # what it would run, and why
 --all         Run every suite, cache or not
 --list        List suites and signatures, run nothing
 --verbose     Name every skipped suite
+--jobs N      Suites to run at once (default 2; 1 is one after another)
 ```
+
+**Suites run beside each other, and the default is two.** The slowest suites are
+the ones that wait: `server.replication` is 35 seconds of a 168-second run and
+`server.hostmode` another 12, and nearly all of both is a client ticking in real
+time while a spawned server process gets somewhere. That wait cannot be
+shortened without breaking what it waits for, and a sleeping suite does not need
+a core - so the saving is running them alongside each other.
+
+Measured on this machine, 24 threads:
+
+| `--jobs` | Wall clock | Stability |
+|---|---|---|
+| 1 | 2 min 54 s | the old behaviour |
+| 2 | 1 min 36 s | three clean runs |
+| 4 | 1 min 11 s | `server.replication` red once in three |
+
+Two is the default because it is the fastest setting that was not observed to
+flake: loading the machine loads the server the tests are waiting for, and a
+runner that goes red under its own concurrency is worse than a slow one. Results
+are printed in list order rather than completion order, so a run can still be
+diffed against another.
 
 It prints what it skipped, and warns when it had to narrow - no header closure
 for a suite, an unknown `TEST_DEPENDS`, a dependency cycle. Those warnings mean

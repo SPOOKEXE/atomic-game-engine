@@ -1071,38 +1071,54 @@ TEST_CASE("the studio's TypeScript property grid builds its tree", "[examples][s
 
 namespace {
 
-	// Every voxel box the terrain scene built, as a canonical sorted list.
+	// Every terrain chunk the scene built, as a canonical sorted list of
+	// vertex positions.
 	//
 	// Sorted rather than taken in iteration order, because two worlds built the
-	// same way are only guaranteed to hold the same *set* of rows - an
-	// archetype walk is free to visit them in a different sequence, and a
-	// determinism check that compared sequences would fail for a reason that has
-	// nothing to do with the generator.
-	std::vector<std::array<float, 6>> VoxelBoxes(Store &store) {
-		std::vector<std::array<float, 6>> boxes;
+	// same way are only guaranteed to hold the same *set* of rows - an archetype
+	// walk is free to visit them in a different sequence, and a determinism
+	// check that compared sequences would fail for a reason that has nothing to
+	// do with the generator.
+	std::vector<std::array<float, 3>> TerrainVertices(Store &store) {
+		std::vector<std::array<float, 3>> points;
 
-		store.Each<const engine::scene::Transform, const engine::scene::Bounds, const Visual>(
-			[&](Entity entity,
-				const engine::scene::Transform &transform,
-				const engine::scene::Bounds &bounds,
-				const Visual &visual) {
-				if (store.InstanceNameOf(entity) != Name("Voxels") || !visual.Visible) {
-					return;
+		store.Each<const engine::scene::EditableMesh>([&](Entity, const engine::scene::EditableMesh &mesh) {
+			for (const engine::core::Vector3 &at : mesh.Positions) {
+				points.push_back({at.X, at.Y, at.Z});
+			}
+		});
+
+		std::sort(points.begin(), points.end());
+		return points;
+	}
+
+	// How many chunk parts the scene has put in the world so far.
+	size_t TerrainChunks(Store &store) {
+		size_t chunks = 0;
+		store.Each<const engine::scene::Transform, const Visual>(
+			[&](Entity entity, const engine::scene::Transform &, const Visual &) {
+				if (store.InstanceNameOf(entity).Text().rfind("Terrain_", 0) == 0) {
+					chunks++;
 				}
-
-				const engine::core::Vector3 &at = transform.Frame.Position;
-				boxes.push_back(
-					{at.X, at.Y, at.Z, bounds.HalfExtent.X, bounds.HalfExtent.Y, bounds.HalfExtent.Z}
-				);
 			}
 		);
+		return chunks;
+	}
 
-		std::sort(boxes.begin(), boxes.end());
-		return boxes;
+	// Ticks until the scene has finished building, or gives up.
+	//
+	// **The scene builds a chunk a frame rather than all of them before the
+	// first present**, so a test that only loaded it would find an empty world -
+	// which is the scene working as its header describes rather than a failure.
+	// The bound is generous and the loop stops as soon as the count settles.
+	void BuildTerrain(Store &store, Scheduler &systems, size_t expected) {
+		for (int tick = 0; tick < 400 && TerrainChunks(store) < expected; tick++) {
+			systems.Tick(store, 1.0f / 60.0f);
+		}
 	}
 }
 
-TEST_CASE("the terrain scene generates a voxel world from noise", "[examples][scene]") {
+TEST_CASE("the terrain scene builds a coloured heightfield mesh", "[examples][scene]") {
 	const StagedAssets assets;
 
 	Store store("terrain");
@@ -1113,64 +1129,77 @@ TEST_CASE("the terrain scene generates a voxel world from noise", "[examples][sc
 	INFO(error);
 	REQUIRE(loaded);
 
-	// The prefill runs before the first frame, so a world exists the moment the
-	// scene is loaded rather than one beat later. Nine chunks of it - the exact
-	// count depends on the terrain the camera starts over, so this asserts the
-	// order of magnitude and not a number that would have to be edited every
-	// time a constant moved.
-	const std::vector<std::array<float, 6>> boxes = VoxelBoxes(store);
-	CHECK(boxes.size() > 100);
-	CHECK(boxes.size() < 20000);
+	// 512 studs cut into 64-stud chunks is 8 by 8 of them.
+	constexpr size_t CHUNKS = 64;
+	BuildTerrain(store, systems, CHUNKS);
+	CHECK(TerrainChunks(store) == CHUNKS);
 
-	// **The merge actually merged.** A box wider or deeper than one metre is a
-	// run of voxels that became one part, and this is the assertion that
-	// separates "the generator emitted something" from "the generator emitted a
-	// quarter of a million one-metre cubes". Half-extents, so 0.5 is one block.
-	size_t merged = 0;
-	for (const std::array<float, 6> &box : boxes) {
-		if (box[3] > 0.5f || box[5] > 0.5f) {
-			merged++;
+	// **One `EditableMesh` per chunk and not one shared between them**, which is
+	// what makes each a `MeshPart` the frustum can reject on its own. A scene
+	// that built one enormous mesh would pass a part count and fail here.
+	size_t meshes = 0;
+	size_t vertices = 0;
+	size_t indices = 0;
+	store.Each<const engine::scene::EditableMesh>([&](Entity, const engine::scene::EditableMesh &mesh) {
+		meshes++;
+		vertices += mesh.Positions.size();
+		indices += mesh.Indices.size();
+	});
+
+	CHECK(meshes == CHUNKS);
+
+	// A chunk is 65 by 65 samples - the extra column and row are the ones it
+	// shares with its neighbours, which is what makes the surface continuous -
+	// and 64 by 64 cells of two triangles each.
+	CHECK(vertices == CHUNKS * 65 * 65);
+	CHECK(indices == CHUNKS * 64 * 64 * 2 * 3);
+
+	// **More than one colour, which is the whole of the "color them" ask.** The
+	// bands are cut from the field that was generated rather than from constants
+	// beside it, so this asserts that the scene painted *something* different
+	// somewhere rather than pinning which band a given corner fell in.
+	//
+	// It is also the only place this suite can see the colours at all: turning
+	// them into draw runs is `client::BuildMeshData`'s job and `client` is two
+	// tiers above this one.
+	size_t distinct = 0;
+	store.Each<const engine::scene::EditableMesh>([&](Entity, const engine::scene::EditableMesh &mesh) {
+		std::vector<std::array<float, 3>> seen;
+		for (const engine::core::Color3 &colour : mesh.Colours) {
+			const std::array<float, 3> entry{colour.R, colour.G, colour.B};
+			if (std::find(seen.begin(), seen.end(), entry) == seen.end()) {
+				seen.push_back(entry);
+			}
 		}
-	}
-	CHECK(merged > boxes.size() / 4);
+		distinct = std::max(distinct, seen.size());
+	});
+	CHECK(distinct > 1);
 
-	// Nothing reaches below bedrock or above the height field's ceiling. A
-	// generator that produced a column stretching to the origin is the failure
-	// this catches, and it is invisible in a part count.
-	for (const std::array<float, 6> &box : boxes) {
-		const float bottom = box[1] - box[4];
-		const float top = box[1] + box[4];
-		CHECK(bottom >= -8.0f);
-		CHECK(top <= 200.0f);
-	}
-
-	// The camera the scene placed, above the ground rather than inside it.
+	// The camera the scene placed, outside the map looking in.
 	REQUIRE(store.Resource<ActiveCamera>() != nullptr);
 
 	const Entity eye = InScene(store, "Surveyor");
 	REQUIRE(eye != engine::ecs::NULL_ENTITY);
-	CHECK(store.Get<engine::scene::Transform>(eye)->Frame.Position.Y > 34.0f);
+	CHECK(store.Get<engine::scene::Transform>(eye)->Frame.Position.Y > 100.0f);
 
-	// Measured bounds, not declared. A streamed world reaches as far as what is
-	// loaded, which is the camera's neighbourhood rather than the whole map -
-	// the 16384-block extent exists as a function and never as geometry.
+	// Measured bounds, not declared: the whole field is built, so the world
+	// reaches the half-width of the map plus whatever the relief adds.
 	REQUIRE(store.Resource<WorldBounds>() != nullptr);
-	CHECK(store.Resource<WorldBounds>()->HalfExtent > 100.0f);
+	CHECK(store.Resource<WorldBounds>()->HalfExtent > 200.0f);
 }
 
 TEST_CASE("the terrain generator is a pure function of its seed", "[examples][scene]") {
 	const StagedAssets assets;
 
-	// **Rule 5, asserted rather than asserted-in-a-comment.** The map is
-	// 268 million columns and is never stored, so every block anybody ever sees
-	// comes out of `HeightAt` - which means a recording replays if and only if
-	// two runs of that function agree. The integer hashing exists for this, and
-	// a change that reached for `math.random` or wall time would pass every
-	// other check in this file.
-	std::vector<std::array<float, 6>> first;
-	std::vector<std::array<float, 6>> second;
+	// **Rule 5, asserted rather than asserted-in-a-comment.** Every vertex on
+	// screen comes out of `HeightAt`, which means a recording replays if and
+	// only if two runs of that function agree. The integer hashing exists for
+	// this, and a change that reached for `math.random` or wall time would pass
+	// every other check in this file.
+	std::vector<std::array<float, 3>> first;
+	std::vector<std::array<float, 3>> second;
 
-	for (std::vector<std::array<float, 6>> *into : {&first, &second}) {
+	for (std::vector<std::array<float, 3>> *into : {&first, &second}) {
 		Store store("terrain.determinism");
 		Scheduler systems;
 
@@ -1179,18 +1208,79 @@ TEST_CASE("the terrain generator is a pure function of its seed", "[examples][sc
 		INFO(error);
 		REQUIRE(loaded);
 
-		// Ten fixed ticks each, so the camera moves and the streaming runs -
-		// comparing only the prefill would pin the generator and leave the part
-		// of the file that decides *when* a chunk is built untested.
-		for (int tick = 0; tick < 10; tick++) {
+		// Four chunks each rather than all sixty-four: the generator is the
+		// thing under test and a quarter of a million vertices proves it as
+		// well as a million do, at a quarter of the cost.
+		for (int tick = 0; tick < 4; tick++) {
 			systems.Tick(store, 1.0f / 60.0f);
 		}
 
-		*into = VoxelBoxes(store);
+		*into = TerrainVertices(store);
 	}
 
+	REQUIRE(!first.empty());
 	REQUIRE(first.size() == second.size());
 	CHECK(first == second);
+}
+
+// **A world nobody loaded a scene into, which is the editor's shape.**
+// `LoadScene` mounts a scene's modules on the way past, so every test below
+// proves the mount only for programs that go through it - and `studio::Editor`
+// does not: it installs an example as a `Script` instance in a world it built
+// itself. A scene whose first line is `require(script.MagicCore)` therefore
+// worked under `client --script` and failed in the one program it is authored
+// in. This pins the door the editor calls.
+TEST_CASE("a scene's modules mount under a script nothing loaded", "[examples][scene]") {
+	const StagedAssets assets;
+
+	Store store("libraries.bare");
+
+	engine::scene::RegisterSceneClasses();
+	engine::scene::InstallServices(store);
+
+	const Entity holder = store.CreateInstance(engine::script::ScriptClass(), std::string("LibrariesScene"));
+	REQUIRE(holder != engine::ecs::NULL_ENTITY);
+	REQUIRE(store.FindFirstChild(holder, "MagicCore") == engine::ecs::NULL_ENTITY);
+
+	CHECK(engine::examples::MountSceneLibraries(store, holder, "Libraries.luau") == 2);
+
+	const Entity magic = store.FindFirstChild(holder, "MagicCore");
+	REQUIRE(magic != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(magic, "Compiler") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(holder, "TerrainCore") != engine::ecs::NULL_ENTITY);
+
+	// **Nothing in `ReplicatedStorage`, which is the point of the move.** These
+	// used to be mirrored there for every world in the program, so a brand-new
+	// empty game carried a demo's modules and a scene had no way to say it
+	// wanted them.
+	const Entity replicated = store.FindFirstRoot("ReplicatedStorage");
+	REQUIRE(replicated != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(replicated, "MagicCore") == engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(replicated, "TerrainCore") == engine::ecs::NULL_ENTITY);
+
+	// **Twice is once**, which is what lets a host call it whatever the script's
+	// age: a module is cached per instance, so two trees under one script would
+	// give `require` two copies that share no state.
+	CHECK(engine::examples::MountSceneLibraries(store, holder, "Libraries.luau") == 0);
+
+	size_t named = 0;
+	store.EachChild(holder, [&](Entity child) {
+		named += store.InstanceNameOf(child) == Name("MagicCore") ? 1 : 0;
+	});
+	CHECK(named == 1);
+}
+
+// A scene with no modules of its own gets none, which is every scene but three.
+TEST_CASE("a scene with no modules mounts nothing", "[examples][scene]") {
+	const StagedAssets assets;
+
+	Store store("libraries.none");
+	engine::scene::RegisterSceneClasses();
+
+	const Entity holder = store.CreateInstance(engine::script::ScriptClass(), std::string("RingsScene"));
+	REQUIRE(holder != engine::ecs::NULL_ENTITY);
+
+	CHECK(engine::examples::MountSceneLibraries(store, holder, "Rings.luau") == 0);
 }
 
 TEST_CASE("the shipped Luau libraries mount and run", "[examples][scene]") {
@@ -1204,12 +1294,13 @@ TEST_CASE("the shipped Luau libraries mount and run", "[examples][scene]") {
 	INFO(error);
 	REQUIRE(loaded);
 
-	// **Mounted where a Rojo place would put them**, which is the whole contract
-	// the ported libraries were written against.
-	const Entity replicated = store.FindFirstRoot("ReplicatedStorage");
-	REQUIRE(replicated != engine::ecs::NULL_ENTITY);
+	// **Mounted under the script that requires them**, which is Rojo's own
+	// arrangement and the contract every `require(script.Parent.X)` inside the
+	// ported libraries was written against.
+	const Entity holder = InScene(store, "Libraries");
+	REQUIRE(holder != engine::ecs::NULL_ENTITY);
 
-	const Entity magic = store.FindFirstChild(replicated, "MagicCore");
+	const Entity magic = store.FindFirstChild(holder, "MagicCore");
 	REQUIRE(magic != engine::ecs::NULL_ENTITY);
 	CHECK(store.FindFirstChild(magic, "Compiler") != engine::ecs::NULL_ENTITY);
 	CHECK(store.FindFirstChild(magic, "SpellSolver") != engine::ecs::NULL_ENTITY);
@@ -1222,7 +1313,7 @@ TEST_CASE("the shipped Luau libraries mount and run", "[examples][scene]") {
 	CHECK(store.ClassOf(presets) == engine::script::ModuleScriptClass());
 	CHECK(store.FindFirstChild(presets, "ChainLightning") != engine::ecs::NULL_ENTITY);
 
-	const Entity terrain = store.FindFirstChild(replicated, "TerrainCore");
+	const Entity terrain = store.FindFirstChild(holder, "TerrainCore");
 	REQUIRE(terrain != engine::ecs::NULL_ENTITY);
 	CHECK(store.FindFirstChild(terrain, "Noise") != engine::ecs::NULL_ENTITY);
 

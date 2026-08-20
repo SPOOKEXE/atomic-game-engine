@@ -30,7 +30,9 @@
 #include <engine/assets/Mesh.hpp>
 #include <engine/assets/Texture.hpp>
 #include <engine/core/Bytes.hpp>
+#include <engine/core/FrameGraph.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/delivery/Client.hpp>
 #include <engine/delivery/Uploader.hpp>
 #include <engine/scene/Materials.hpp>
@@ -190,7 +192,16 @@ namespace studio {
 	void Editor::PumpContent(double frameSeconds) {
 		ContentSeconds += frameSeconds;
 
+		// **Three spans rather than one, because "content costs 0.1 ms in an
+		// idle editor" is not an answer.** The three things under here are a
+		// delivery client polling a socket, a walk over parts waiting for a mesh
+		// to size them against, and an upload queue - and in an editor with
+		// nothing downloading they cost very different amounts for very
+		// different reasons. One bar labelled `content` could only say that the
+		// total was small and non-zero, which is exactly the reading that
+		// prompts somebody to go looking and find nothing.
 		if (ContentClient) {
+			ENGINE_PROFILE_CAT("content.deliver", engine::core::ProfileCategory::Assets);
 			ContentClient->Pump();
 			DrainContent();
 		}
@@ -199,9 +210,13 @@ namespace studio {
 		// already-loaded mesh in a process with no delivery client at all - a
 		// built-in, a duplicate, an undo - and those are exactly the cases the
 		// arrival-driven fit never saw.
-		FitPendingParts();
+		{
+			ENGINE_PROFILE_CAT("content.fit", engine::core::ProfileCategory::Assets);
+			FitPendingParts();
+		}
 
 		if (ContentUploads) {
+			ENGINE_PROFILE_CAT("content.upload", engine::core::ProfileCategory::Assets);
 			ContentUploads->Pump();
 			for (const engine::delivery::UploadOutcome &outcome : ContentUploads->Take()) {
 				if (!outcome.Delivered) {

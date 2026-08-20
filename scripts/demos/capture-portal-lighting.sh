@@ -48,8 +48,14 @@ capture() {
 	# **The line is rewritten rather than a global set.** `_G` is readonly in
 	# the script sandbox, so a scene cannot be told anything from outside except
 	# by editing it - see the note beside `VIEW` in the scenes.
+	#
+	# **Whatever the scene's own default is, not only an empty one.** A scene
+	# that picks a sensible viewpoint when nobody says otherwise is a scene that
+	# shows something when it is run by hand, and matching only `""` made this
+	# script fail the moment one of them did. The guard below is what turns that
+	# into a message rather than a capture of the wrong view.
 	local staged="$out/$scene-$view.luau"
-	sed "s/^local VIEW = \"\"$/local VIEW = \"$view\"/" "$source" > "$staged"
+	sed "s/^local VIEW = \"[^\"]*\"$/local VIEW = \"$view\"/" "$source" > "$staged"
 
 	if ! grep -q "^local VIEW = \"$view\"$" "$staged"; then
 		echo "  the view line in $scene.luau moved; this script did not follow" >&2

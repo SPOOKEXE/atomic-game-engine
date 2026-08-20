@@ -55,10 +55,11 @@ mesh:AddTriangle(v2 :: number, v1 :: number, apex :: number)
 mesh:AddTriangle(v3 :: number, v2 :: number, apex :: number)
 mesh:AddTriangle(v0 :: number, v3 :: number, apex :: number)
 
--- A colour per base vertex, so the pyramid reads as more than a grey wedge -
--- `client::BuildMeshData` averages these into the one flat colour
--- `assets::Submesh` can hold, so the four together land as a warm amber
--- rather than any one of them alone.
+-- A colour per vertex, so the pyramid reads as more than a grey wedge.
+-- `assets::MeshVertex` has no colour of its own, so `client::BuildMeshData`
+-- averages each *triangle's* three corners and gives every distinct result its
+-- own submesh run - which is why the four sides here come out as four shades
+-- rather than as one blended amber.
 mesh:SetVertexColor(v0 :: number, Color3.fromRGB(214, 158, 74))
 mesh:SetVertexColor(v1 :: number, Color3.fromRGB(196, 84, 72))
 mesh:SetVertexColor(v2 :: number, Color3.fromRGB(214, 158, 74))

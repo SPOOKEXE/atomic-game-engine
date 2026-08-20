@@ -106,6 +106,30 @@ local CASTER_SPREAD = 9
 local EYE = Vector3.new(0, 6, 16)
 local EYE_FOV = 60
 
+-- --- the light ---------------------------------------------------------------
+--
+-- **Set here rather than left to the service defaults, and the reason is what
+-- the report said.** This scene touched `Lighting` nowhere, so it ran on
+-- `Brightness = 0.44` under a 14:00 sun at 41.7 degrees - which lands on a wall
+-- almost edge-on. Every surface came out at about a quarter of its authored
+-- colour: an `Ember` wall of (196, 84, 72) read as (51, 37, 17), and the
+-- palette this demo exists to make legible was four barely-distinguishable
+-- browns.
+--
+-- **It read as "the reflection is super dark", and the reflection was
+-- innocent.** A pane shows what the surface camera rendered, and what it
+-- rendered was this same under-lit room - measured, the pane's floor and the
+-- directly drawn floor differ by three counts out of 255. Turning up the sun
+-- fixes both halves at once, because there was only ever one.
+--
+-- Noon rather than the afternoon default, so the sun is overhead and the four
+-- rooms are lit the same whichever way round the compositor puts them.
+local Lighting = game:GetService("Lighting")
+Lighting.Brightness = 2.2
+Lighting.ClockTime = 12
+Lighting.Ambient = Color3.fromRGB(46, 46, 52)
+Lighting.OutdoorAmbient = Color3.fromRGB(64, 66, 74)
+
 local floor = Instance.new("Part")
 floor.Name = "Baseplate"
 floor.Anchored = true

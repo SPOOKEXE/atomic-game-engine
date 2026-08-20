@@ -2,11 +2,13 @@
 
 #include <engine/ecs/Classes.hpp>
 #include <engine/game/Values.hpp>
+#include <engine/scene/Components.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/ui/Fonts.hpp>
 #include <engine/ui/Theme.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <imgui.h>
 #include <studio/Complete.hpp>
 #include <studio/Editor.hpp>
@@ -203,6 +205,17 @@ namespace studio {
 				}
 			}
 
+			// **Only for something with a place.** An `EditableMesh`, a
+			// `ModuleScript` or a service has no `Transform`, so there is
+			// nowhere to point a camera at - the item is greyed rather than
+			// hidden, because a menu whose length changes per row is one nobody
+			// learns the shape of.
+			const bool placed = store.Get<engine::scene::Transform>(instance) != nullptr;
+			if (ImGui::MenuItem("Zoom To", nullptr, false, placed)) {
+				PendingZoomWorld = world;
+				PendingZoomTo = instance;
+			}
+
 			if (ImGui::MenuItem("Unparent")) {
 				PendingReparent.World = world;
 				PendingReparent.Parent = NULL_ENTITY;
@@ -217,6 +230,83 @@ namespace studio {
 				}
 			}
 		}
+	}
+
+	void Editor::ZoomViewportTo(WorldId world, Entity instance) {
+		if (!world.IsValid() || instance == NULL_ENTITY) {
+			return;
+		}
+
+		engine::core::CFrame placement;
+		float radius = 0.0f;
+		bool found = false;
+
+		Universe->Enter(world, [&](Store &store) {
+			const auto *transform = store.Get<engine::scene::Transform>(instance);
+			if (transform == nullptr) {
+				return;
+			}
+
+			placement = transform->Frame;
+			found = true;
+
+			// **The bounding sphere of the box, not the box.** A camera pulled
+			// back far enough for the half-extent alone leaves a part's corners
+			// outside the frame whenever it is turned, and a part somebody has
+			// just asked to look at is usually turned.
+			const auto *bounds = store.Get<engine::scene::Bounds>(instance);
+			const engine::core::Vector3 half =
+				bounds != nullptr ? bounds->HalfExtent : engine::core::Vector3{0.5f, 0.5f, 0.5f};
+			radius = half.Magnitude();
+		});
+
+		if (!found) {
+			Say("that instance has no place in the world to look at");
+			return;
+		}
+
+		// A part may be authored at zero on an axis - a pane is - and one
+		// authored at zero on all three would put the camera inside it.
+		radius = std::max(radius, 0.5f);
+
+		// The viewport this applies to: the focused one when it is showing the
+		// world, and the main one otherwise.
+		//
+		// **One panel rather than every panel showing the world.** Two viewports
+		// both jumping because a row was right-clicked once is the surprise; the
+		// second panel is usually the one being kept still on purpose.
+		size_t panel = 0;
+		if (FocusedIsViewport && ViewportWorld(FocusedViewport) == world) {
+			panel = FocusedViewport;
+		} else if (Active != world) {
+			for (size_t index = 1; index <= Extras.size(); index++) {
+				if (Extras[index - 1].Open && ViewportWorld(index) == world) {
+					panel = index;
+					break;
+				}
+			}
+		}
+
+		ViewportState *view = ExtraAt(panel);
+		engine::core::CFrame &frame = view != nullptr ? view->Frame : CameraFrame;
+		const float yaw = view != nullptr ? view->Yaw : CameraYaw;
+		const float pitch = view != nullptr ? view->Pitch : CameraPitch;
+
+		// **The same framing arithmetic `MeshPreview` uses**, and for the same
+		// reason: the distance at which a sphere of this radius subtends the
+		// whole of a vertical field of view is `radius / tan(fov / 2)`, and the
+		// padding is what stops it touching the edges.
+		constexpr float PADDING = 1.8f;
+		const float halfFov = engine::scene::Camera{}.FieldOfViewRadians * 0.5f;
+		const float distance = (radius / std::tan(halfFov)) * PADDING;
+
+		const engine::core::Vector3 forward =
+			engine::core::CFrame::Angles(pitch, yaw, 0.0f)
+				.VectorToWorldSpace(engine::core::Vector3{0.0f, 0.0f, -1.0f});
+
+		frame = engine::core::CFrame(placement.Position - forward * distance, frame.Rotation());
+
+		Say("framed the selection");
 	}
 
 	Editor::WorldTree &Editor::TreeFor(WorldId world) {
@@ -1089,6 +1179,14 @@ namespace studio {
 
 			Say(FollowCamera == NULL_ENTITY ? "back to the editor camera"
 											: "looking through the scene's camera - right-drag to fly");
+		}
+
+		if (PendingZoomWorld.IsValid()) {
+			const WorldId world = PendingZoomWorld;
+			const Entity instance = PendingZoomTo;
+			PendingZoomWorld = WorldId{};
+			PendingZoomTo = NULL_ENTITY;
+			ZoomViewportTo(world, instance);
 		}
 
 		if (PendingOpenScript.World.IsValid()) {

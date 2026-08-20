@@ -103,6 +103,118 @@ namespace studio {
 		constexpr std::string_view IMMERSIVE_TWO = "immersive-portals-demo-2";
 	}
 
+	// --- the worlds a new game may open with ----------------------------------
+	//
+	// **A table rather than a function body, and that is the whole change.** The
+	// worlds below used to be twenty `AddWorld`/`Enter` pairs written out in
+	// `NewGame`, which meant the set was a property of the source and nobody
+	// could open with a different one without editing it. Every row here is the
+	// same three facts the code held - a world name, the scripts that build it,
+	// and why it is worth having - so the set becomes a preference and the
+	// reasoning survives as the note beside each row.
+	//
+	// The keys are what land in `studio.json` and they never change. A row may
+	// be renamed for the interface freely; renaming its key silently unticks it
+	// for everybody who had it on.
+	const std::array<Editor::DefaultWorldEntry, 13> &DefaultWorldCatalogue() {
+		static const std::array<Editor::DefaultWorldEntry, 13> catalogue{{
+			{"rings",
+			 "Rings",
+			 "Rings.luau",
+			 "",
+			 "Orbiting rings of parts. The scene this engine has drawn since v0.1, and the "
+			 "cheapest thing on this list to open.",
+			 true},
+			{"meshgrid",
+			 "MeshGrid",
+			 "MeshGrid.luau",
+			 "",
+			 "Every built-in mesh on a pedestal. Seeded from the six built-in ids, so it names "
+			 "no content and issues no fetch.",
+			 true},
+			{"hallway",
+			 "Hallway",
+			 "Hallway.luau",
+			 "",
+			 "A lit corridor - the scene for looking at shadows and local lights without a "
+			 "skybox washing them out.",
+			 true},
+			{"skygrid",
+			 std::string_view(SKYGRID_WORLD),
+			 "SkyGrid.luau",
+			 "Interface.luau",
+			 "Sparse geometry over empty sky, with the 2D widget example over it. Mostly "
+			 "background, so nothing hides a culling or projection mistake.",
+			 false},
+			{"mirrors",
+			 std::string_view(MIRROR_WORLD),
+			 "Mirrors-1-world.luau",
+			 "",
+			 "A surface camera, a texture sampled back and a floor under it. Lays its own "
+			 "floor, so it wants no baseplate.",
+			 false},
+			{"assets",
+			 std::string_view(ASSETS_WORLD),
+			 "Assets.luau",
+			 "",
+			 "One labelled bay for each of the six kinds of content this engine can name, so "
+			 "the frame says which pipeline broke rather than only that one did.",
+			 false},
+			{"slide",
+			 std::string_view(SLIDE_WORLD),
+			 "Slide.luau",
+			 "",
+			 "The one that moves. Blocks down a curve and off the end asks for integrate, "
+			 "broad phase, narrow phase and solver at once, and each fails visibly.",
+			 false},
+			{"portals",
+			 std::string_view(PORTAL_WORLD),
+			 "Portals-1-world.luau",
+			 "",
+			 "Three rooms three hundred units apart with six holes between them. A `Portal` is "
+			 "invisible in a properties panel, so this is where the class is a thing you can "
+			 "see.",
+			 false},
+			{"tunnels",
+			 std::string_view(TUNNELS_WORLD),
+			 "Tunnels.luau",
+			 "",
+			 "The portal world's claim made walkable: two tunnels whose insides are not the "
+			 "length their outsides promise.",
+			 false},
+			{"playground",
+			 std::string_view(PLAYGROUND_WORLD),
+			 "Playground.luau",
+			 "PlaygroundPad.luau",
+			 "Half of the teleport pair - walk onto a pad and arrive in the arena. The pad is "
+			 "its own script because a scene naming a destination only works in a universe "
+			 "that has one.",
+			 false},
+			{"arena",
+			 std::string_view(ARENA_WORLD),
+			 "Arena.luau",
+			 "ArenaPad.luau",
+			 "The other half of the teleport pair.",
+			 false},
+			{"immersive-one",
+			 std::string_view(IMMERSIVE_ONE),
+			 "ImmersivePortals.luau",
+			 "",
+			 "Crossing by walking through a hole rather than by standing on a tile. One script "
+			 "in both worlds, branching on the world's own name - two files mirroring each "
+			 "other by hand drift.",
+			 false},
+			{"immersive-two",
+			 std::string_view(IMMERSIVE_TWO),
+			 "ImmersivePortals.luau",
+			 "",
+			 "The far side of the pair above. Both are held awake so neither is a frozen "
+			 "picture of the other.",
+			 false},
+		}};
+		return catalogue;
+	}
+
 	// The engine log, teed into the Output panel.
 	//
 	// **Without this the Output panel is a list of the editor's own
@@ -645,16 +757,29 @@ namespace studio {
 			// The editor was measured at 0.8 ms of CPU work in a 16.67 ms frame:
 			// the delay was never the work, it was where the sleeping happened.
 			//
-			// A frame that could not be acquired is minimised or mid-resize. The
-			// result gates presentation below, after simulation, control,
-			// collaboration, and plugins have continued, so an invisible editor
-			// allocates and submits no rendering work.
-			const bool renderingActive = Renderer.WaitForFrame();
+			// **The frame is opened before the wait rather than after it**, and
+			// that is what puts the wait on the graph. `WaitForFrame` blocks on
+			// the display and used to sit outside every span, so the largest
+			// single thing an editor does with vertical sync on was invisible -
+			// the panel reported a two-millisecond frame while the wall clock
+			// said sixteen, and the difference had nowhere to be. `Idle` is the
+			// honest category for it, which is what lets the panel keep leading
+			// with busy time while the graph still accounts for the whole frame.
+			engine::core::FrameGraph::BeginFrame();
+
+			bool renderingActive = false;
+			{
+				ENGINE_PROFILE_CAT("wait for frame", engine::core::ProfileCategory::Idle);
+
+				// A frame that could not be acquired is minimised or mid-resize.
+				// The result gates presentation below, after simulation,
+				// control, collaboration, and plugins have continued, so an
+				// invisible editor allocates and submits no rendering work.
+				renderingActive = Renderer.WaitForFrame();
+			}
 
 			const float delta = Clock.Tick();
 			const double frameBegan = Clock.Now();
-
-			engine::core::FrameGraph::BeginFrame();
 
 			PumpEvents();
 
@@ -666,10 +791,14 @@ namespace studio {
 			ControlWantsProfile = ControlSurface.WantsProfiling();
 
 			// Beside the control surface, and idle unless somebody has opened
-			// the panel: `TeamCreate` holds no socket until it is asked to look,
-			// so this is a null check on every frame of every editor that never
-			// uses it.
+			// the panel: `TeamCreate` holds no socket until it is asked to look.
 			if (Team != nullptr) {
+				// **Named, because a pump that is not on the graph is
+				// indistinguishable from a stall.** It holds no socket until
+				// somebody opens the panel, so on most frames this span is the
+				// null check and nothing else - which is a useful thing for the
+				// graph to say out loud.
+				ENGINE_PROFILE_CAT("team create", engine::core::ProfileCategory::Network);
 				Team->Pump(engine::core::Clock::Seconds());
 			}
 
@@ -697,8 +826,9 @@ namespace studio {
 			// Only when vertical sync is off: with it on the display already
 			// paces the frame, and a second limiter would beat against it and
 			// produce a stutter neither one causes alone.
-			if (!VerticalSync && FrameCap > 0.0f && !Settings.Headless) {
-				const double budget = 1.0 / static_cast<double>(FrameCap);
+			if (const float ceiling = PacingCeiling();
+				!VerticalSync && ceiling > 0.0f && !Settings.Headless) {
+				const double budget = 1.0 / static_cast<double>(ceiling);
 				const double spent = Clock.Now() - frameBegan;
 
 				if (spent < budget) {
@@ -727,6 +857,28 @@ namespace studio {
 
 			if (event.type == SDL_EVENT_QUIT) {
 				Running = false;
+			}
+
+			// **What "idle" means, decided here rather than asked of imgui.**
+			// `ImGuiIO::WantCaptureMouse` answers whether the *interface* wanted
+			// an event, which is false for every frame somebody spends flying
+			// the viewport - and a camera being flown is the last moment to drop
+			// to the idle frame rate. Any input at all resets the clock.
+			switch (event.type) {
+			case SDL_EVENT_MOUSE_MOTION:
+			case SDL_EVENT_MOUSE_BUTTON_DOWN:
+			case SDL_EVENT_MOUSE_BUTTON_UP:
+			case SDL_EVENT_MOUSE_WHEEL:
+			case SDL_EVENT_KEY_DOWN:
+			case SDL_EVENT_KEY_UP:
+			case SDL_EVENT_TEXT_INPUT:
+			case SDL_EVENT_DROP_FILE:
+			case SDL_EVENT_WINDOW_RESIZED:
+			case SDL_EVENT_WINDOW_FOCUS_GAINED:
+				LastInputSeconds = engine::core::Clock::Seconds();
+				break;
+			default:
+				break;
 			}
 
 			// **One event per dropped path, which is what makes multi-select
@@ -853,12 +1005,16 @@ namespace studio {
 		// **Before the panels draw, so the numbers they show are this frame's.**
 		// Sampling afterwards would put the frame-rate history one frame behind
 		// the graph it is drawn beside.
-		SampleFrame(frameSeconds);
+		{
+			ENGINE_PROFILE_CAT("sample frame", engine::core::ProfileCategory::Render);
+			SampleFrame(frameSeconds);
+		}
 
 		// Drained once per frame, before anything draws it. The sink collects
 		// from whatever thread logged; this is the only place the panel's own
 		// list is written, which is what keeps the panel free of a lock.
 		if (Sink != nullptr) {
+			ENGINE_PROFILE_CAT("output", engine::core::ProfileCategory::Engine);
 			for (Message &line : Sink->Take()) {
 				line.Serial = NextOutputSerial++;
 				Output.push_back(std::move(line));
@@ -896,11 +1052,17 @@ namespace studio {
 			// what makes "only rows imgui actually drew" the bound: a row asks
 			// for a picture while drawing, and this builds a couple of them in
 			// the gap. See Thumbnails.cpp.
-			PumpThumbnails();
+			{
+				ENGINE_PROFILE_CAT("thumbnails", engine::core::ProfileCategory::Assets);
+				PumpThumbnails();
+			}
 
 			// The node demo's own previews, bounded the same way and in the same
 			// gap - see `PumpNodeDemoImages`.
-			PumpNodeDemoImages();
+			{
+				ENGINE_PROFILE_CAT("node previews", engine::core::ProfileCategory::Assets);
+				PumpNodeDemoImages();
+			}
 		}
 
 		{
@@ -911,7 +1073,17 @@ namespace studio {
 			Interface.End();
 		}
 
-		PresentWorld(frameSeconds);
+		{
+			// **The whole of the second half of the frame, which had no span at
+			// all.** `PresentWorld` picks a panel, gathers its portals and
+			// surfaces, uploads whatever a script changed, presents the world
+			// and then calls `Renderer::Render` - and only the last of those was
+			// named. Everything before it read as a gap between "build
+			// interface" and "Renderer::render", which is exactly the shape a
+			// missing span has and exactly how it was reported.
+			ENGINE_PROFILE_CAT("present world", engine::core::ProfileCategory::Render);
+			PresentWorld(frameSeconds);
+		}
 	}
 
 	void Editor::InstallExampleScript(Store &store, std::string_view file, std::string_view instanceName) {
@@ -967,6 +1139,19 @@ namespace studio {
 
 		store.SetParent(script, service);
 		store.SetProperty(script, Name("Source"), &PATH, sizeof(PATH));
+
+		// **And the scene's own modules under it**, which is what makes an
+		// example that requires them openable here at all. `examples::LoadScene`
+		// does this on the way past and the editor does not go through it - it
+		// installs a `Script` instance in a world it built itself - so a scene
+		// whose first line is `require(script.MagicCore)` ran correctly under
+		// `client --script` and failed in the one program it is authored in.
+		//
+		// Under the script rather than in `ReplicatedStorage`, which is the
+		// whole of `MountSceneLibraries`: a world that never opens `Magic.luau`
+		// has no trace of `MagicCore` in it, and a brand-new game's tree is
+		// empty rather than carrying a demo's modules.
+		(void)engine::examples::MountSceneLibraries(store, script, file);
 	}
 
 	bool Editor::AddExampleWorld(std::string_view file) {
@@ -1313,6 +1498,33 @@ namespace studio {
 		(void)Universe->PresentMany(demand);
 	}
 
+	float Editor::PacingCeiling() const {
+		// `FrameCap` is still the master switch: zero is `--uncapped` and the
+		// Preferences checkbox, and neither should be overridden by a per-state
+		// rate somebody set months ago.
+		if (FrameCap <= 0.0f) {
+			return 0.0f;
+		}
+
+		const bool focused = Window == nullptr || (SDL_GetWindowFlags(Window) & SDL_WINDOW_INPUT_FOCUS) != 0;
+		const bool idle = engine::core::Clock::Seconds() - LastInputSeconds > IDLE_AFTER_SECONDS;
+
+		const float interface_ = idle ? InterfaceIdleHz : InterfaceActiveHz;
+		const float renderer = focused ? RendererFocusedHz : RendererUnfocusedHz;
+
+		// **The lowest ceiling that applies**, and zero on either means that one
+		// imposes none - see the fields' own comment for why they combine rather
+		// than run independently.
+		float ceiling = FrameCap;
+		if (interface_ > 0.0f) {
+			ceiling = std::min(ceiling, interface_);
+		}
+		if (renderer > 0.0f) {
+			ceiling = std::min(ceiling, renderer);
+		}
+		return ceiling;
+	}
+
 	void Editor::PresentWorld(float frameSeconds) {
 		// **Which panel this frame draws.** `Renderer::Render` owns the whole
 		// frame - swapchain, interface, present - so it draws one world per
@@ -1584,6 +1796,7 @@ namespace studio {
 			// returning before the tick. `studio::PresentationAlpha` carries
 			// the whole argument and is where it is now decided, because
 			// nothing in this class is reachable from a test.
+			ENGINE_PROFILE_CAT("world present", engine::core::ProfileCategory::ECS);
 			Universe->Present(
 				shown,
 				frameSeconds,
@@ -1648,8 +1861,11 @@ namespace studio {
 				// leave alone.** Same-world portals are drawn by the recursive
 				// pass; only cross-world ones stay surfaces. See
 				// `render::PortalView`.
-				(void)client::CollectPortalViews(store, Portals);
-				(void)client::CollectSurfaceViews(store, Surfaces, Portals);
+				{
+					ENGINE_PROFILE_CAT("collect surfaces", engine::core::ProfileCategory::Render);
+					(void)client::CollectPortalViews(store, Portals);
+					(void)client::CollectSurfaceViews(store, Surfaces, Portals);
+				}
 
 				// **How deep this world's mirrors go, pushed with the world that
 				// says it.** The number is `workspace.SurfaceBounces` or the
@@ -1677,6 +1893,7 @@ namespace studio {
 				//
 				// `Refresh` is an integer compare per distinct shader on a
 				// world nobody is editing - see `scene::ShaderSource::Revision`.
+				ENGINE_PROFILE_CAT("shaders", engine::core::ProfileCategory::Render);
 				if (Shaders.Refresh(store) > 0) {
 					for (const engine::core::Name &shader : Shaders.Changed()) {
 						const engine::render::ShaderModule *module = Shaders.Find(shader);
@@ -1715,8 +1932,11 @@ namespace studio {
 				// `Refresh` is an integer compare per mesh on a world nobody is
 				// editing, which is `scene::EditableMesh::Revision`'s whole
 				// job.
-				(void)EditableMeshes.Refresh(store, Renderer);
-				(void)EditableImages.Refresh(store, Renderer);
+				{
+					ENGINE_PROFILE_CAT("editable upload", engine::core::ProfileCategory::Assets);
+					(void)EditableMeshes.Refresh(store, Renderer);
+					(void)EditableImages.Refresh(store, Renderer);
+				}
 
 				if (PipelineSelected.find(shown.Index) == PipelineSelected.end()) {
 					PipelineSelected[shown.Index] = client::InstallRenderingProfiles(
@@ -2130,222 +2350,147 @@ namespace studio {
 		InstanceCounts.clear();
 		ExpandedWorlds.clear();
 
-		// **Two worlds, and the pair is the point rather than a bigger sample.**
-		// A one-world template is a template for the thing this engine is not:
-		// the universe holds subworlds, they tick *alongside* each other under
-		// `ExecutionMode::WorldParallel`, and a viewport per world is what makes
-		// that visible instead of asserted. A new game that opened one world
-		// taught everybody the single-scene habit, and the second world was a
-		// menu item nobody had a reason to click.
+		// **The set is a preference now, and the reasoning moved with it.** This
+		// used to be twenty `AddWorld`/`Enter` pairs written out here, each with
+		// a paragraph saying why that world earned its place - which made the
+		// set a property of this function and meant nobody could open with a
+		// different one without editing it. `DefaultWorldCatalogue` is that same
+		// list as a table, one row per world, the paragraphs kept as the note
+		// beside each row, and Preferences is where the ticking happens.
 		//
-		// They are also two different kinds of scene on purpose. The skygrid is
-		// sparse geometry over empty sky - mostly background, nothing to hide a
-		// culling or projection mistake behind. The mirror is the opposite: a
-		// surface camera, a texture sampled back, and a floor under it. One
-		// template exercises both halves of the renderer.
-		const WorldId grid = AddWorld(Name(SKYGRID_WORLD));
-		const WorldId mirrors = AddWorld(Name(MIRROR_WORLD));
+		// **No baseplate is laid for any of them**, which was already true of
+		// every world here and is worth saying once rather than eight times: the
+		// general rule an empty world came from - a black frame looks like a
+		// broken renderer - does not hold for one whose script lays a floor the
+		// moment it runs, and two coplanar surfaces is z-fighting.
+		std::vector<WorldId> opened;
+		std::vector<std::string_view> names;
 
-		// **A third, and it is the one that shows what a `MeshPart` is.** The
-		// other two are made of `Part`s, so a new game contained no example of
-		// the class the mesh picker, the content pipeline and half of v0.9 exist
-		// to serve - somebody looking for "how do I use a mesh" found a menu
-		// item and no scene.
-		//
-		// **It costs nothing at start-up, which is the only reason it can be
-		// here.** `MeshGrid.luau` seeds from the six built-in ids, and a built-in
-		// is generated in-process and never fetched - `Editor::
-		// RequestContentAsset` refuses to ask a CDN for one. So this world names
-		// six meshes that are already registered and issues no request at all: a
-		// template that pulled content on open would put back the twenty-nine
-		// second start-up v0.10 spent a version removing.
-		const WorldId assets = AddWorld(Name(ASSETS_WORLD));
+		for (const DefaultWorldEntry &entry : DefaultWorldCatalogue()) {
+			if (!DefaultWorldEnabled(entry.Key)) {
+				continue;
+			}
 
-		// **A fourth, and it is the one that moves.** The other three are
-		// anchored throughout, which is exactly why nothing in this repository
-		// ever ran the physics module: an anchored part carries no rigid body,
-		// so integrate, broad phase, narrow phase and solver had suites,
-		// benchmarks and no consumer at all - `DEFERRED.md` D00039.
-		//
-		// A slide rather than a stack, because a stack tests the solver and
-		// nothing else. Blocks sliding down a curve and launching off the end
-		// ask for all four steps at once, and each one fails visibly: a block
-		// that does not accelerate is not being integrated, one that sinks into
-		// the ramp is a wrong contact normal, and one that tunnels through the
-		// block ahead is the solver. A slide that works looks like a slide.
-		const WorldId slide = AddWorld(Name(SLIDE_WORLD));
+			const WorldId world = AddWorld(Name(std::string(entry.World)));
+			if (!world.IsValid()) {
+				continue;
+			}
 
-		// **A fifth, and it is the one that is not a place.** The other four are
-		// ordinary space seen four ways; this one is three rooms three hundred
-		// units apart with six holes between them, two of which put the same
-		// room through opposite walls of the one being stood in.
-		//
-		// **It is here because a `Portal` is invisible in a properties panel.**
-		// The class is a `SurfaceCamera` with one extra reference on it, so a
-		// template without it leaves the v0.14 headline as a class in the insert
-		// menu and a paragraph in the roadmap - which is the "an API with no
-		// caller" the interface world was added to avoid, one version on.
-		//
-		// It also exercises a rendering path the mirror world cannot reach on
-		// its own: an off-axis frustum whose extents are genuinely asymmetric,
-		// and the oblique clip doing work. A mirror's clip plane is its own pane
-		// and over-clipping there is invisible; a portal's is a wall the camera
-		// stands inside, and getting it wrong draws the back of that wall over
-		// the whole hole.
-		const WorldId portals = AddWorld(Name(PORTAL_WORLD));
+			Universe->Enter(world, [&entry, this](Store &store) {
+				InstallExampleScript(store, entry.First, std::string(entry.World) + std::string("Scene"));
+				if (!entry.Second.empty()) {
+					// **The second script is a separate instance rather than
+					// more lines in the first.** A pad naming another world only
+					// works in a universe that has one, and the scene it stands
+					// in is also hosted on its own by
+					// `scripts/demos/run-local-server.sh`.
+					InstallExampleScript(
+						store, entry.Second, std::string(entry.World) + std::string("Extra")
+					);
+				}
+			});
 
-		// **A sixth, and it is the portal world's claim made walkable.** The
-		// three rooms above prove a hole *renders*; two tunnels whose insides
-		// are not the length their outsides promise prove it is a hole rather
-		// than a picture, which is the only claim a `Portal` makes that a
-		// `SurfaceCamera` does not. It is also the pane arrangement neither of
-		// the other portal worlds has: panes part-way *down* a corridor rather
-		// than filling a doorway, back to back a stud apart, with a walker
-		// crossing one while another shows the space they are crossing.
-		const WorldId tunnels = AddWorld(Name(TUNNELS_WORLD));
+			opened.push_back(world);
+			names.push_back(entry.World);
+			ExpandWorldTree(world);
+		}
 
-		// The two a person actually stands in. See the constants above.
-		const WorldId playground = AddWorld(Name(PLAYGROUND_WORLD));
-		const WorldId arena = AddWorld(Name(ARENA_WORLD));
+		// **A world regardless, because a universe with none cannot be edited.**
+		// Unticking every row is a thing somebody is allowed to want and an
+		// editor with nowhere to put a part is not what they meant by it, so the
+		// floor is one empty world under the name a new game has always used.
+		if (opened.empty()) {
+			const WorldId only = AddWorld(Name(DEFAULT_WORLD));
+			if (only.IsValid()) {
+				opened.push_back(only);
+				names.push_back(DEFAULT_WORLD);
+				ExpandWorldTree(only);
+			}
+		}
 
-		const WorldId immersiveOne = AddWorld(Name(IMMERSIVE_ONE));
-		const WorldId immersiveTwo = AddWorld(Name(IMMERSIVE_TWO));
+		if (opened.empty()) {
+			Say("new game: no worlds could be created", LogLevel::Error);
+			return;
+		}
 
-		Active = grid;
+		Active = opened.front();
 		SelectionWorld = Active;
 
 		// **Explicit, though it is also the default.** A universe that had
 		// loaded a game which set something else keeps that setting, and the
-		// whole reason this template has two worlds is to show them running
-		// together. See `world::ExecutionMode`.
+		// whole reason this template opens several worlds is to show them
+		// running together. See `world::ExecutionMode`.
 		Universe->SetMode(engine::world::ExecutionMode::WorldParallel);
 
-		// **No floor here, and the example says why in its header.** A skygrid
-		// with a baseplate under it is a baseplate with decoration above it: the
-		// frustum fills with floor, nothing is culled, and the scene stops being
-		// the thing it was written to be.
-		Universe->Enter(grid, [this](Store &store) {
-			InstallExampleScript(store, "SkyGrid.luau", "SkyGridScene");
-
-			// **The 2D tree beside the 3D one, in the same world.** v0.8's
-			// widget set is the version's headline and a template that did not
-			// show it would leave `Instance.new("Frame")` as a thing you have
-			// to know about - which is the "an API with no caller" the roadmap
-			// refuses. The example builds its own `ScreenGui` from a script, so
-			// it exercises the bindings as well as the layout.
-			//
-			// In the skygrid world rather than the mirror one: the skygrid is
-			// mostly empty sky, so a panel over it is legible, and the mirror
-			// scene is already the busy half of the template.
-			InstallExampleScript(store, "Interface.luau", "InterfaceScene");
-		});
-
-		// **No baseplate here either, and the reason is specific rather than
-		// symmetric.** `Mirrors-1-world.luau` builds its own `Floor` - 60x60,
-		// top face at y = 0 - and the editor's baseplate is 128x128 with its top
-		// face at *the same* y = 0. Two coplanar surfaces is z-fighting, and
-		// during Play the mirror world showed a floor tearing between two greys.
-		//
-		// The general rule the baseplate came from - an empty world is a black
-		// frame and a black frame looks like a broken renderer - still holds for
-		// a world somebody made themselves. It does not hold for one whose
-		// script lays a floor the moment it runs.
-		Universe->Enter(mirrors, [this](Store &store) {
-			InstallExampleScript(store, "Mirrors-1-world.luau", "MirrorScene");
-		});
-
-		// The assets world lays its own floor and its own camera, so it needs the
-		// same nothing the other two do.
-		//
-		// **It was the mesh grid until v0.15.** That scene answered one question
-		// thoroughly - did every *mesh* arrive - and the question a default game
-		// wants answered on open is wider and shallower: of the six kinds this
-		// engine can name, which reach the screen at all. One labelled bay each,
-		// so the frame says which pipeline broke rather than only that one did.
-		// `MeshGrid.luau` is still in `examples/` for the narrow question.
-		Universe->Enter(assets, [this](Store &store) {
-			InstallExampleScript(store, "Assets.luau", "AssetsScene");
-		});
-
-		// The slide lays its own floor and its own ramp, so it needs the same
-		// nothing the other three do.
-		Universe->Enter(slide, [this](Store &store) {
-			InstallExampleScript(store, "Slide.luau", "SlideScene");
-		});
-
-		// Three floors, three ceilings and twelve walls, all laid by the script
-		// - and a baseplate under them would be a floor stretched between rooms
-		// that are supposed to have nothing between them.
-		Universe->Enter(portals, [this](Store &store) {
-			InstallExampleScript(store, "Portals-1-world.luau", "PortalScene");
-		});
-
-		// Two shells and a black plain, all laid by the script - and a baseplate
-		// under them would be a second surface coplanar with the one the scene
-		// lays, which is the z-fighting the mirror world's comment describes.
-		Universe->Enter(tunnels, [this](Store &store) {
-			InstallExampleScript(store, "Tunnels.luau", "TunnelsScene");
-		});
-
-		// **Two scripts each, and the split is the point.** The world's geometry
-		// is one file and the pad naming the *other* world is another, because a
-		// scene that names a destination only works in a universe that has one -
-		// and `Playground.luau` is also what `scripts/demos/run-local-server.sh`
-		// hosts on its own. `PlaygroundPad.luau` carries the whole argument.
-		Universe->Enter(playground, [this](Store &store) {
-			InstallExampleScript(store, "Playground.luau", "PlaygroundScene");
-			InstallExampleScript(store, "PlaygroundPad.luau", "PlaygroundPadScript");
-		});
-
-		Universe->Enter(arena, [this](Store &store) {
-			InstallExampleScript(store, "Arena.luau", "ArenaScene");
-			InstallExampleScript(store, "ArenaPad.luau", "ArenaPadScript");
-		});
-
-		// **One script in both, and the world's own name is what it branches
-		// on.** Two files mirroring each other by hand drift; one file cannot
-		// disagree with itself. `Mirrors-4-worlds.luau` settled that argument
-		// and this is the same shape at a smaller count.
-		//
-		// Each lays its own floor, its own spawn and its own block, so neither
-		// wants the editor's baseplate under it for the reason the mirror world
-		// gives: two coplanar surfaces is z-fighting.
-		Universe->Enter(immersiveOne, [this](Store &store) {
-			InstallExampleScript(store, "ImmersivePortals.luau", "ImmersivePortalsScene");
-		});
-
-		Universe->Enter(immersiveTwo, [this](Store &store) {
-			InstallExampleScript(store, "ImmersivePortals.luau", "ImmersivePortalsScene");
-		});
-
-		// **A viewport each, pinned rather than left following the active
-		// world.** An extra viewport with no world of its own draws whatever is
-		// being edited, so two panels would show one scene twice and the
-		// template would demonstrate nothing.
+		// **A viewport each for the first two, pinned rather than left following
+		// the active world.** An extra viewport with no world of its own draws
+		// whatever is being edited, so two panels would show one scene twice and
+		// the template would demonstrate nothing. With one world open there is
+		// no second scene to show, so the panel stays shut.
 		if (ViewportState *second = ExtraAt(1); second != nullptr) {
-			second->World = mirrors;
-			second->Open = true;
+			if (opened.size() > 1) {
+				second->World = opened[1];
+				second->Open = true;
+			} else {
+				second->Open = false;
+			}
 		}
 		ShowViewport = true;
-
-		// Open in the tree, both of them, and the Worlds panel in front. A
-		// template whose second world is behind a collapsed arrow and an
-		// unselected tab is a template nobody finds.
-		ExpandWorldTree(grid);
-		ExpandWorldTree(mirrors);
-		ExpandWorldTree(assets);
-		ExpandWorldTree(slide);
-		ExpandWorldTree(portals);
-		ExpandWorldTree(tunnels);
-		ExpandWorldTree(playground);
-		ExpandWorldTree(arena);
 
 		// Enough frames to outlast a first-run layout rebuild. See
 		// `FocusWorlds`.
 		FocusWorlds = 4;
 
-		Say("new game: eight worlds - skygrid, mirrors, meshes, slide, portals, "
-			"tunnels, playground and arena - ticking in parallel");
+		std::string said = "new game: " + std::to_string(opened.size()) + " world(s) - ";
+		for (size_t index = 0; index < names.size(); index++) {
+			if (index > 0) {
+				said += index + 1 == names.size() ? " and " : ", ";
+			}
+			said += std::string(names[index]);
+		}
+		said += " - ticking in parallel";
+		Say(said);
+	}
+
+	bool Editor::DefaultWorldEnabled(std::string_view key) const {
+		// **The catalogue's own defaults until somebody has said otherwise**,
+		// which is what `Preferences::DefaultWorldsChosen` distinguishes: a
+		// config written before this preference existed has no array at all and
+		// must not read as "every world off".
+		if (!Prefs.DefaultWorldsChosen) {
+			for (const DefaultWorldEntry &entry : DefaultWorldCatalogue()) {
+				if (entry.Key == key) {
+					return entry.OnByDefault;
+				}
+			}
+			return false;
+		}
+
+		return std::find(Prefs.DefaultWorlds.begin(), Prefs.DefaultWorlds.end(), key) !=
+			   Prefs.DefaultWorlds.end();
+	}
+
+	void Editor::SetDefaultWorldEnabled(std::string_view key, bool enabled) {
+		// **The first tick writes the whole current set, not just the one row.**
+		// Until somebody touches this page the answer comes from the catalogue,
+		// so recording one change alone would drop every default that was on -
+		// unticking `Rings` would silently untick `MeshGrid` and `Hallway` too.
+		if (!Prefs.DefaultWorldsChosen) {
+			Prefs.DefaultWorlds.clear();
+			for (const DefaultWorldEntry &entry : DefaultWorldCatalogue()) {
+				if (entry.OnByDefault) {
+					Prefs.DefaultWorlds.emplace_back(entry.Key);
+				}
+			}
+			Prefs.DefaultWorldsChosen = true;
+		}
+
+		const auto found = std::find(Prefs.DefaultWorlds.begin(), Prefs.DefaultWorlds.end(), key);
+		if (enabled && found == Prefs.DefaultWorlds.end()) {
+			Prefs.DefaultWorlds.emplace_back(key);
+		} else if (!enabled && found != Prefs.DefaultWorlds.end()) {
+			Prefs.DefaultWorlds.erase(found);
+		}
 	}
 
 	bool Editor::OpenGame(const std::filesystem::path &path) {

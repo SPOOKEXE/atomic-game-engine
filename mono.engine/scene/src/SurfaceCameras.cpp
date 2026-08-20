@@ -2537,23 +2537,42 @@ namespace engine::scene {
 					// vector for a hole that shrinks to nothing.
 					const Vector3 turned = through.Rotate(facing);
 
+					// **The serial moves on every crossing and the turn only on
+					// some**, which is the split this used to get wrong by
+					// putting both inside the guard. A pair of panes facing each
+					// other head-on turns nothing, so `turned` and `facing` agree
+					// and the old code wrote nothing at all - and the serial is
+					// now what tells a *viewer* that a body jumped, which is true
+					// of a straight crossing exactly as much as of a corner. A
+					// straight-through portal was therefore the one case where a
+					// replica had no way to know, and it is the commonest kind.
+					PortalTransit went;
+					if (const PortalTransit *before_ = store.Get<PortalTransit>(entity)) {
+						went = *before_;
+					}
+					went.Serial++;
+					went.Turn = 0.0f;
+
 					if ((std::abs(turned.X) > 1e-6f || std::abs(turned.Z) > 1e-6f) &&
 						(std::abs(facing.X) > 1e-6f || std::abs(facing.Z) > 1e-6f)) {
-						PortalTransit went;
-						if (const PortalTransit *before_ = store.Get<PortalTransit>(entity)) {
-							went = *before_;
-						}
-
 						// Wrapped, so a quarter turn is reported as a quarter
 						// turn and never as seven quarters the other way - the
 						// camera it reaches adds it to an angle it already has.
 						float turn = std::atan2(-turned.X, -turned.Z) - std::atan2(-facing.X, -facing.Z);
-						turn = std::remainder(turn, 2.0f * PI);
-
-						went.Serial++;
-						went.Turn = turn;
-						store.Set(entity, went);
+						went.Turn = std::remainder(turn, 2.0f * PI);
 					}
+
+					store.Set(entity, went);
+
+					// **Taken here, so the snap below is a no-op on the machine
+					// that did the crossing.** This pass has just mapped
+					// `before.Frame` through the seam - which keeps the whole
+					// tick's motion, expressed in the room the body is now in -
+					// and a snap would throw that away and stand the body still
+					// for the rest of the tick. A replica never reaches this
+					// line, so its own counter stays behind and
+					// `SnapPortalTransit` fires there exactly once.
+					store.Set(entity, PortalTransitSeen{went.Serial});
 
 					crossed++;
 				}

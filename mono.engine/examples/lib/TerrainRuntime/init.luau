@@ -20,10 +20,14 @@
 --   * **No `Folder`.** A bare `Instance` is the container, which is all a
 --     `Folder` ever was.
 
-local TerrainCore = game:GetService("ReplicatedStorage"):FindFirstChild("TerrainCore")
-assert(TerrainCore ~= nil, "ReplicatedStorage.TerrainCore is required")
+-- **A sibling, not a service.** This module and `TerrainCore` are mounted
+-- together as children of whichever script uses them, so the way to reach one
+-- from the other is the relative path every module inside `TerrainCore` already
+-- uses. Naming `ReplicatedStorage` made this the one file in the pair that only
+-- worked while somebody was mirroring the libraries into every world.
+local Siblings = (script :: any).Parent
 
-local Terrain = require(TerrainCore :: any)
+local Terrain = require(Siblings.TerrainCore)
 
 local Chunker = Terrain.Chunker
 local HeightField = Terrain.HeightField

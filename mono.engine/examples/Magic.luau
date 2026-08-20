@@ -11,7 +11,8 @@
 --
 -- `MagicCore` and `TerrainCore` are byte-identical to the Rojo project they came
 -- from; `MagicRuntime` and `TerrainRuntime` are this engine's, because that is
--- the only layer that names an instance.
+-- the only layer that names an instance. All four are children of this script -
+-- see the mount below.
 --
 -- ## What terrain changes about the magic
 --
@@ -37,19 +38,27 @@
 -- mushroom -- has nothing to draw it. The count is printed at startup so the
 -- gap is in the log rather than a surprise. See `lib/MagicRuntime/init.luau`.
 
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
-local MagicCore = ReplicatedStorage:FindFirstChild("MagicCore")
-assert(MagicCore ~= nil, "ReplicatedStorage.MagicCore was not mounted - is assets/lib staged?")
+-- **The modules hang off this script, which is Rojo's arrangement and not the
+-- engine's.** They used to be mirrored into `ReplicatedStorage` from a single
+-- staged `assets/lib` tree, which made them a property of the *program*:
+-- `MagicCore` appeared under every world of every game, including a brand-new
+-- empty one, and this file asserted that somebody else had already put them
+-- there. Now they are staged under `assets/examples/Magic` and mounted as
+-- children of the `Script` that requires them, so a world that never opens this
+-- scene has no trace of any of it. Nothing inside the modules changed: every
+-- `require(script.Parent.X)` in them is relative and resolves the same either
+-- way.
+local Modules = script :: any
 
-local Compiler = require((MagicCore :: any):FindFirstChild("Compiler") :: any)
-local Presets = require((MagicCore :: any):FindFirstChild("Presets") :: any)
-local SpellSolver = require((MagicCore :: any):FindFirstChild("SpellSolver") :: any)
+local Compiler = require(Modules.MagicCore.Compiler)
+local Presets = require(Modules.MagicCore.Presets)
+local SpellSolver = require(Modules.MagicCore.SpellSolver)
 
-local Terrain = require(ReplicatedStorage:FindFirstChild("TerrainCore") :: any)
-local TerrainRuntime = require(ReplicatedStorage:FindFirstChild("TerrainRuntime") :: any)
-local MagicRuntime = require(ReplicatedStorage:FindFirstChild("MagicRuntime") :: any)
+local Terrain = require(Modules.TerrainCore)
+local TerrainRuntime = require(Modules.TerrainRuntime)
+local MagicRuntime = require(Modules.MagicRuntime)
 
 local SEED = 4242
 local CHUNK = 32

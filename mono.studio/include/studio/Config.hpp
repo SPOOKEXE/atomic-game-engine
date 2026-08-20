@@ -46,9 +46,10 @@
 //
 // @tier client
 
+#include <engine/ui/Theme.hpp>
+
 #include <cstddef>
 #include <cstdint>
-#include <engine/ui/Theme.hpp>
 #include <filesystem>
 #include <map>
 #include <nlohmann/json_fwd.hpp>
@@ -270,6 +271,37 @@ namespace studio {
 		bool ShowAssets = false;
 		bool ShowControl = false;
 		//@}
+
+		// Which of the shipped worlds a new game opens with, by key.
+		//
+		// **Keys rather than flags, and a list rather than a bitfield.** The
+		// catalogue is a table in `Editor.cpp` that gains a row whenever an
+		// example is worth opening with, so a fixed set of booleans here would
+		// have to be edited in step with it and a bit position would silently
+		// change meaning when a row was removed. A key that no longer exists is
+		// skipped on load and kept in the file, for `panelColours`' reason: a
+		// world renamed back should not have lost the tick somebody put on it.
+		//
+		// **Empty means "never asked", not "none".** A file written before this
+		// existed has no entry at all, and a new game with no worlds in it is an
+		// empty black frame - so `Editor::DefaultWorldKeys` falls back to the
+		// catalogue's own defaults rather than to nothing.
+		std::vector<std::string> DefaultWorlds;
+
+		// The frame ceiling and the four rates under it, in hertz. See
+		// `Editor::InterfaceActiveHz` for what each one bounds and why they
+		// combine as a minimum rather than as separate clocks.
+		//@{
+		float FrameCap = 120.0f;
+		float InterfaceActiveHz = 120.0f;
+		float InterfaceIdleHz = 20.0f;
+		float RendererFocusedHz = 120.0f;
+		float RendererUnfocusedHz = 10.0f;
+		//@}
+
+		// Whether `DefaultWorlds` came from a file rather than from nothing.
+		// See the load path for why absent and empty are different answers.
+		bool DefaultWorldsChosen = false;
 
 		// What a panel was coloured, keyed by the title imgui identifies it with.
 		//

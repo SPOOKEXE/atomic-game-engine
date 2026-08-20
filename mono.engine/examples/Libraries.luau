@@ -1,13 +1,21 @@
 --!strict
 -- The shipped Luau libraries, loaded and exercised.
 --
--- `MagicCore` and `TerrainCore` came from a Rojo project where they sat under
--- `ReplicatedStorage`, and they are here **unchanged** - not one line of either
--- library was edited to make it run in this engine. What makes that possible is
--- `script::MountModuleTree`: the staged `assets/lib/` directory is mirrored into
--- `ModuleScript` instances under `ReplicatedStorage` before any scene runs, so
--- `require(script.Parent.Compiler)` inside the library resolves exactly the way
--- it did in Studio.
+-- `MagicCore` and `TerrainCore` came from a Rojo project and they are here
+-- **unchanged** - not one line of either library was edited to make it run in
+-- this engine. What makes that possible is `script::MountModuleTree`: the
+-- staged directory is mirrored into `ModuleScript` instances following Rojo's
+-- own rule, so `require(script.Parent.Compiler)` inside the library resolves
+-- exactly the way it did in Studio.
+--
+-- **They hang off this script rather than off `ReplicatedStorage`**, which is
+-- the one thing about the port that is this engine's decision rather than
+-- Roblox's. In the Rojo project they were shared state a whole place could
+-- reach; here they are a scene's own modules, staged under
+-- `assets/examples/Libraries` and mounted as children of the `Script` that
+-- requires them - so a world that never opens this scene has no trace of them
+-- and a brand-new game's tree is empty. Every `require` *inside* the libraries
+-- is relative and could not tell the difference.
 --
 -- This scene is the proof of that and nothing else. `Magic.luau` is the one that
 -- builds a world out of them.
@@ -28,19 +36,16 @@
 -- `MagicCore.Vector3` is the library's own module and shadows nothing, and
 -- neither library ever touches an Instance. That is what "pure data core" bought.
 
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Modules = script :: any
 
-local MagicCore = ReplicatedStorage:FindFirstChild("MagicCore")
-assert(MagicCore ~= nil, "ReplicatedStorage.MagicCore was not mounted - is assets/lib staged?")
-
-local TerrainCore = ReplicatedStorage:FindFirstChild("TerrainCore")
-assert(TerrainCore ~= nil, "ReplicatedStorage.TerrainCore was not mounted")
+local MagicCore = Modules.MagicCore
+local TerrainCore = Modules.TerrainCore
 
 -- --- magic -----------------------------------------------------------------
 
-local Presets = require(MagicCore:FindFirstChild("Presets") :: any)
-local Compiler = require(MagicCore:FindFirstChild("Compiler") :: any)
-local Validator = require(MagicCore:FindFirstChild("Validator") :: any)
+local Presets = require(MagicCore.Presets)
+local Compiler = require(MagicCore.Compiler)
+local Validator = require(MagicCore.Validator)
 
 local compiled = 0
 local failed = 0
@@ -69,7 +74,7 @@ print(`libraries: {compiled} preset(s) compiled, {failed} failed`)
 
 -- --- terrain ---------------------------------------------------------------
 
-local Terrain = require(TerrainCore :: any)
+local Terrain = require(TerrainCore)
 
 local edits = Terrain.Edits.new()
 local field = Terrain.HeightField.new({ seed = 20260807 }, edits)

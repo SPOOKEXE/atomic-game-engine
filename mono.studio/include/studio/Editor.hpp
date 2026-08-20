@@ -32,6 +32,7 @@
 #include <engine/control/Server.hpp>
 #include <engine/control/Surface.hpp>
 #include <engine/core/Clock.hpp>
+#include <engine/core/FrameGraph.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/delivery/Client.hpp>
 #include <engine/delivery/IntakeBudget.hpp>
@@ -982,6 +983,61 @@ namespace studio {
 		// @param what What the tooltip calls the thing being zoomed.
 		// @since v0.13
 		void DrawZoomControl(float &zoom, const char *what);
+
+		// Moves whichever viewport shows `world` so that `instance` fills it.
+		//
+		// **The orientation is kept and only the position moves**, which is what
+		// every editor's "frame selection" does and is the behaviour that does
+		// not surprise: an author who has lined a shot up and then asks to see a
+		// part closer wants it centred from where they are standing, not a new
+		// angle chosen for them.
+		//
+		// The distance comes from the instance's own `scene::Bounds` and the
+		// viewport's field of view, so a baseplate and a stud both end up
+		// filling about the same fraction of the frame.
+		//
+		// @param world    The world the instance is in.
+		// @param instance What to frame. Needs a `scene::Transform`; anything
+		//        else is refused, because there is nowhere to point at.
+		void ZoomViewportTo(WorldId world, Entity instance);
+
+	  public:
+		// One row of the catalogue a new game's worlds are chosen from.
+		//
+		// **Public because the catalogue is a free function**, which is what
+		// keeps a table of thirteen rows out of a header nine thousand lines
+		// long. Nothing outside `Editor.cpp` and the Preferences page reads it.
+		struct DefaultWorldEntry {
+			// What lands in `studio.json`. Never changed once shipped - see the
+			// catalogue's own comment.
+			std::string_view Key;
+
+			// The world's name in the universe, and the row's label.
+			std::string_view World;
+
+			// The example scripts installed into it. `Second` is empty for the
+			// worlds that need only one.
+			//@{
+			std::string_view First;
+			std::string_view Second;
+			//@}
+
+			// Why it is worth opening with. Shown as the row's tooltip.
+			std::string_view Note;
+
+			// Whether a fresh install starts with it ticked.
+			bool OnByDefault = false;
+		};
+
+	  private:
+		// Whether `key` is in the set a new game opens with.
+		bool DefaultWorldEnabled(std::string_view key) const;
+
+		// Ticks or unticks one row, and remembers that somebody chose.
+		void SetDefaultWorldEnabled(std::string_view key, bool enabled);
+
+		// The Preferences page listing the catalogue.
+		void DrawDefaultWorldSettings();
 
 		// Applies Ctrl+wheel to a zoom, for the item just drawn.
 		//
@@ -4043,6 +4099,53 @@ namespace studio {
 		// display's refresh - being unpaced by the display is the point.
 		float FrameCap = 120.0f;
 
+		// The four rates the ceiling is actually made of, in hertz.
+		//
+		// **One number could not answer this, and the symptom was a laptop.**
+		// `FrameCap` is a single ceiling on the whole loop, so an editor sitting
+		// behind a browser with nobody touching it still drew a hundred and
+		// twenty identical pictures a second. What a person actually wants is
+		// four different answers to two different questions - how often the
+		// panels are rebuilt, and how often the world behind them is - and each
+		// of those has a busy case and a quiet one.
+		//
+		// **They combine as a minimum rather than independently, and that is a
+		// limit of the frame rather than of the preference.**
+		// `render::Renderer::Render` owns the swapchain, the interface and the
+		// present in one call, so a frame that redraws the panels also redraws
+		// the world; there is no arrangement today where the two run at
+		// different rates. The four knobs therefore set a ceiling each and the
+		// lowest one that applies is what the loop is paced at. Splitting them
+		// for real means `Render` taking the world and the chrome separately,
+		// which is a change to the shared renderer.
+		//
+		// Zero on any of them means "no ceiling from this one".
+		//@{
+		float InterfaceActiveHz = 120.0f;
+		float InterfaceIdleHz = 20.0f;
+		float RendererFocusedHz = 120.0f;
+		float RendererUnfocusedHz = 10.0f;
+		//@}
+
+		// `Clock::Seconds()` when the editor last saw a key or the mouse.
+		//
+		// **Any SDL input event, not imgui's idea of one.** imgui reports
+		// whether *it* wanted an event, which is false while somebody is flying
+		// the viewport - and a camera being flown is the last moment to drop to
+		// the idle rate.
+		double LastInputSeconds = 0.0;
+
+		// How long without input counts as idle, in seconds.
+		//
+		// Three, which is longer than a pause between keystrokes and shorter
+		// than a glance away. Below about two the rate flickers while somebody
+		// is reading their own scene.
+		static constexpr double IDLE_AFTER_SECONDS = 3.0;
+
+		// The ceiling that applies right now, from the four above and the
+		// window's focus. Zero for no ceiling.
+		float PacingCeiling() const;
+
 		// The script editor's find bar: whether it is up, and what is in it.
 		//
 		// **One bar for every tab rather than one per tab.** Somebody hunting a
@@ -4883,6 +4986,78 @@ namespace studio {
 		// it is opened rather than starting empty.
 		engine::render::FrameStatistics Statistics;
 
+		// One frame's spans, with the names copied.
+		//
+		// **`core::FrameSpan::Name` is a `std::string_view` that may point at a
+		// buffer the frame owns**, which its own header says outright - so it is
+		// safe to read during the frame that produced it and a dangling read
+		// afterwards. Every feature below holds spans across frames, so every
+		// one of them needs the string rather than the view.
+		struct HeldSpan {
+			std::string Name;
+			uint32_t Depth = 0;
+			uint32_t Parent = 0;
+			float StartMilliseconds = 0.0f;
+			float Milliseconds = 0.0f;
+			float SelfMilliseconds = 0.0f;
+			float IdleMilliseconds = 0.0f;
+			engine::core::ProfileCategory Category = engine::core::ProfileCategory::Engine;
+			bool Reported = false;
+		};
+
+		// What the frame-graph panel is showing, and when it changes.
+		//
+		// **A live flame graph is unreadable for the one job it has.** The
+		// spans redraw sixty times a second, so a bar worth looking at is gone
+		// before the pointer reaches it and a number worth reading has changed
+		// by the time it is read. Three controls fix that, and they are three
+		// rather than one because they answer different questions: freeze what
+		// is on screen now, look less often, or look at what is typical rather
+		// than at whichever frame happened to be last.
+		struct FrameGraphView {
+			// Nothing is sampled and nothing is published while this is set.
+			// The panel keeps drawing whatever it last published, which is the
+			// point: a frozen graph can be read.
+			bool Paused = false;
+
+			// Index into `FRAME_GRAPH_INTERVALS`. Zero means every frame.
+			int Interval = 0;
+
+			// Whether an interval publishes the mean of the frames it covered or
+			// simply whichever frame was current when it elapsed.
+			//
+			// **The two are genuinely different answers.** A mean says what a
+			// frame costs; a sample says what one frame cost, including the one
+			// where a shader compiled. Neither is the right default for the
+			// other's question, so this is a switch rather than a decision.
+			bool Average = false;
+
+			// `ImGui::GetTime()` at which the next publish is due.
+			double NextPublish = 0.0;
+
+			// The published snapshot - what is drawn.
+			//@{
+			std::vector<HeldSpan> Spans;
+			float FrameMilliseconds = 0.0f;
+			float IdleMilliseconds = 0.0f;
+			float UnmarkedMilliseconds = 0.0f;
+			size_t Dropped = 0;
+			//@}
+
+			// The running sum since the last publish, and how many frames are in
+			// it. Unused when `Average` is off.
+			//@{
+			std::vector<HeldSpan> Summed;
+			float SummedFrameMilliseconds = 0.0f;
+			float SummedIdleMilliseconds = 0.0f;
+			float SummedUnmarkedMilliseconds = 0.0f;
+			size_t SummedDropped = 0;
+			uint32_t Frames = 0;
+			//@}
+		};
+
+		FrameGraphView FrameGraphState;
+
 		// Whether the next frame rebuilds the default arrangement. Set from the
 		// View menu and acted on at the top of the frame, because rearranging a
 		// dockspace's nodes from inside a menu is rearranging the tree that is
@@ -4942,6 +5117,15 @@ namespace studio {
 		//@{
 		Entity PendingLookThrough;
 		bool PendingLookThroughSet = false;
+		//@}
+
+		// An instance a menu asked the viewport to frame, and the world it is
+		// in. Queued rather than acted on where it is asked, for every other
+		// pending action's reason: the menu is drawn inside a panel walk and
+		// moving a camera from there moves the eye the walk is already using.
+		//@{
+		WorldId PendingZoomWorld;
+		Entity PendingZoomTo;
 		//@}
 
 		// Whether the selection is to be duplicated or destroyed after the
@@ -5055,4 +5239,13 @@ namespace studio {
 		engine::render::FrameResult LastFrame;
 		//@}
 	};
+
+	// Every world a new game may open with, in the order the Preferences page
+	// lists them.
+	//
+	// **A free function over a table rather than thirteen members**, so the set
+	// grows by adding a row rather than by editing `Editor::NewGame`. See the
+	// definition in `Editor.cpp` for what a row means and why the keys are
+	// fixed.
+	const std::array<Editor::DefaultWorldEntry, 13> &DefaultWorldCatalogue();
 }

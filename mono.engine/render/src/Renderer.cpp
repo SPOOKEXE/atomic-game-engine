@@ -1476,13 +1476,16 @@ namespace engine::render {
 		// are separate strips, and a strip drawn as one primitive would connect
 		// the end of one to the start of the next.
 		//
+		// @param triangles Added to, rather than set - `DrawSlots` takes the
+		//        frame's running total the same way.
 		// @return How many draw calls were issued.
 		uint32_t DrawRibbons(
 			SDL_GPUCommandBuffer *command,
 			SDL_GPURenderPass *pass,
 			const glm::mat4 &viewProjection,
 			const core::CFrame &eye,
-			std::span<const effects::RibbonRun> runs
+			std::span<const effects::RibbonRun> runs,
+			uint64_t &triangles
 		);
 
 		// This frame's groups, and the batch order they were built from.
@@ -1514,13 +1517,16 @@ namespace engine::render {
 
 		// Draws what `PrepareParticles` packed.
 		//
+		// @param triangles Added to, rather than set - `DrawSlots` takes the
+		//        frame's running total the same way.
 		// @return How many draw calls were issued.
 		uint32_t DrawParticles(
 			SDL_GPUCommandBuffer *command,
 			SDL_GPURenderPass *pass,
 			const glm::mat4 &viewProjection,
 			const core::CFrame &eye,
-			std::span<const ParticleBatch> batches
+			std::span<const ParticleBatch> batches,
+			uint64_t &triangles
 		);
 
 		// Chosen once so pipelines and depth textures use one supported format.
@@ -4087,7 +4093,8 @@ namespace engine::render {
 		SDL_GPURenderPass *pass,
 		const glm::mat4 &viewProjection,
 		const core::CFrame &eye,
-		std::span<const render::ParticleBatch> batches
+		std::span<const render::ParticleBatch> batches,
+		uint64_t &triangles
 	) {
 		if (ParticlePipeline == nullptr || ParticleGroups.empty()) {
 			return 0;
@@ -4178,6 +4185,15 @@ namespace engine::render {
 			// group's slice of the shared buffer.
 			SDL_DrawGPUPrimitives(pass, 4, group.Count, 0, group.First);
 			draws++;
+
+			// **Two triangles a particle, counted here.** A four-vertex strip is
+			// two triangles and `group.Count` of them are drawn, so this is the
+			// whole arithmetic - but it was not being done at all, and the
+			// omission read as a broken renderer rather than as a missing sum. A
+			// frame drawing half a million particle quads reported "108
+			// triangle(s)", which is a number small enough to look like nothing
+			// had been submitted; the particles were on screen the whole time.
+			triangles += static_cast<uint64_t>(group.Count) * 2;
 		}
 
 		return draws;
@@ -4265,7 +4281,8 @@ namespace engine::render {
 		SDL_GPURenderPass *pass,
 		const glm::mat4 &viewProjection,
 		const core::CFrame &eye,
-		std::span<const effects::RibbonRun> runs
+		std::span<const effects::RibbonRun> runs,
+		uint64_t &triangles
 	) {
 		if (RibbonPipeline == nullptr || runs.empty()) {
 			return 0;
@@ -4329,6 +4346,11 @@ namespace engine::render {
 				// selects its slice. No instancing: one run is one ribbon.
 				SDL_DrawGPUPrimitives(pass, run.Count, 1, run.First, 0);
 				draws++;
+
+				// A strip of `n` vertices is `n - 2` triangles, and the `< 4`
+				// guard above means this is never negative. Counted for
+				// `DrawParticles`' reason.
+				triangles += static_cast<uint64_t>(run.Count) - 2;
 			}
 		}
 
@@ -11769,7 +11791,7 @@ namespace engine::render {
 				// backend operation, not another fixed pass label in this body.
 				if (particleCount > 0) {
 					result.DrawCalls += State->DrawParticles(
-						command, pass, frameUniforms.ViewProjection, cameraFrame, particles
+						command, pass, frameUniforms.ViewProjection, cameraFrame, particles, result.Triangles
 					);
 				}
 
@@ -11777,7 +11799,7 @@ namespace engine::render {
 				// why the order is fixed rather than sorted.
 				if (ribbonCount > 0) {
 					result.DrawCalls += State->DrawRibbons(
-						command, pass, frameUniforms.ViewProjection, cameraFrame, ribbonRuns
+						command, pass, frameUniforms.ViewProjection, cameraFrame, ribbonRuns, result.Triangles
 					);
 				}
 

@@ -1746,6 +1746,23 @@ namespace client {
 		// installed into one world, and the second wins silently every tick.
 		scheduler.Add("capture-previous", Phase::PreSimulation, engine::scene::CapturePreviousTransforms);
 
+		// **The other half of the same system, and it runs at the other end of
+		// the frame.** `capture-previous` records where a body was when the tick
+		// began; this cancels that record for anything that has been through a
+		// hole since the last frame was drawn, because blending across a
+		// teleport is a body streaking across the world. It has to be at
+		// `PreRender` rather than beside its partner: what it reads is a serial
+		// that arrives with a replication delta, and a delta lands after the
+		// tick's `PreSimulation` has already run.
+		//
+		// **On every world this program presents, replica or not.** The
+		// authority takes its own counter inside `CrossPortals`, so this is an
+		// integer compare that finds nothing there - and a client, which never
+		// runs `CrossPortals` at all, is exactly the case that needs it.
+		scheduler.Add("snap-portal-transit", Phase::PreRender, [](Store &world) {
+			(void)engine::scene::SnapPortalTransit(world);
+		});
+
 		// **Who a teleport brings in, and it must not depend on scripts.** A
 		// destination is chosen by a script in *another* world, so a world can be
 		// somebody's destination without containing a line of code - and

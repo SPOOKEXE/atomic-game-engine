@@ -57,6 +57,19 @@ part.Position = Vector3.new(0, 2.5, 0)
 part.TextureID = image.ContentId
 part.Parent = workspace
 
+-- **Somewhere to stand, because the target is two tenths of a stud thick.**
+-- With no camera the scene opened on the client's own starting eye, which looks
+-- along the floor - so a four-by-four painted panel seen edge-on was a red
+-- sliver a few pixels wide, and a picture of a red sliver reads as "the texture
+-- did not apply". It had applied the whole time. Square to the front face, close
+-- enough that the rings fill the frame.
+local eye = Instance.new("Camera")
+eye.Name = "Viewer"
+eye.FieldOfView = 55
+eye.CFrame = CFrame.lookAt(Vector3.new(0, 2.5, 7), Vector3.new(0, 2.5, 0))
+eye.Parent = workspace
+workspace.CurrentCamera = eye
+
 -- **Live editing.** A crosshair sweeps across the rings on
 -- `RunService.Heartbeat`, through `DrawLine` calls that bump `EditableImage.
 -- Revision` exactly as the rings' own `DrawCircle` calls did once - proving

@@ -19,6 +19,7 @@
 #include <engine/ui/Theme.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cinttypes>
 #include <cstdio>
 #include <imgui.h>
@@ -33,6 +34,19 @@ namespace studio {
 		using engine::core::FrameGraph;
 		using engine::core::FrameSpan;
 		using engine::core::ProfileCategory;
+
+		// How often the frame graph publishes, in seconds. Index 0 is every
+		// frame, which is what the panel did before it could be told otherwise.
+		//
+		// **Six, spanning two decades.** A quarter of a second is as slow as a
+		// reading can be and still feel live; five seconds is what somebody
+		// watching a load or a stall wants. Filling the gap between them with
+		// more entries would be a longer menu answering the same question.
+		constexpr std::array<float, 6> FRAME_GRAPH_INTERVALS{0.0f, 0.25f, 0.5f, 1.0f, 2.0f, 5.0f};
+
+		constexpr std::array<const char *, 6> FRAME_GRAPH_INTERVAL_NAMES{
+			"every frame", "250 ms", "500 ms", "1 s", "2 s", "5 s"
+		};
 
 		// A colour per category, so a flame graph is readable as shape rather
 		// than as a list of names.
@@ -223,13 +237,144 @@ namespace studio {
 			return;
 		}
 
+		// --- what is shown, and when it changes -----------------------------
+		//
 		// **Collected only while this panel is open.** Recording every span of
 		// every frame is real work, and the reason to open this panel is that
 		// work is scarce. The client's overlay makes the same trade.
-		const std::vector<FrameSpan> &spans = FrameGraph::Spans();
+		//
+		// What is *drawn* is a snapshot this function publishes rather than the
+		// live buffer, and every control below decides when that publish
+		// happens. Drawing the live buffer directly is what made the panel
+		// hard to use for its one job: at sixty frames a second a bar is gone
+		// before the pointer reaches it.
+		FrameGraphView &view = FrameGraphState;
+		const std::vector<FrameSpan> &live = FrameGraph::Spans();
+		const double now = ImGui::GetTime();
 
-		const float frameMs = FrameGraph::FrameMilliseconds();
-		const float idleMs = FrameGraph::CategoryMilliseconds(ProfileCategory::Idle);
+		const int chosen = std::clamp(view.Interval, 0, static_cast<int>(FRAME_GRAPH_INTERVALS.size()) - 1);
+		const float interval = FRAME_GRAPH_INTERVALS[static_cast<size_t>(chosen)];
+
+		// One frame's spans, names copied - see `Editor::HeldSpan`.
+		const auto snapshot = [&live](std::vector<HeldSpan> &into) {
+			into.clear();
+			into.reserve(live.size());
+			for (const FrameSpan &span : live) {
+				into.push_back(
+					HeldSpan{
+						std::string(span.Name),
+						span.Depth,
+						span.Parent,
+						span.StartMilliseconds,
+						span.Milliseconds,
+						span.SelfMilliseconds,
+						span.IdleMilliseconds,
+						span.Category,
+						span.Reported,
+					}
+				);
+			}
+		};
+
+		const auto readScalars = [&view]() {
+			view.FrameMilliseconds = FrameGraph::FrameMilliseconds();
+			view.IdleMilliseconds = FrameGraph::CategoryMilliseconds(ProfileCategory::Idle);
+			view.UnmarkedMilliseconds = FrameGraph::UnmarkedMilliseconds();
+			view.Dropped = FrameGraph::Dropped();
+		};
+
+		const auto forget = [&view]() {
+			view.Summed.clear();
+			view.SummedFrameMilliseconds = 0.0f;
+			view.SummedIdleMilliseconds = 0.0f;
+			view.SummedUnmarkedMilliseconds = 0.0f;
+			view.SummedDropped = 0;
+			view.Frames = 0;
+		};
+
+		if (!view.Paused) {
+			if (interval <= 0.0f) {
+				// Every frame, which is what this panel always did.
+				snapshot(view.Spans);
+				readScalars();
+				forget();
+			} else {
+				if (view.Average) {
+					// **Matched by name and depth rather than by position.** A
+					// frame that opens one fewer span shifts every later index,
+					// so summing by position would add a renderer's time to a
+					// script's for the rest of the interval. The lists are a
+					// few dozen entries, so a linear find per span is cheaper
+					// than the map that would avoid it.
+					for (const FrameSpan &span : live) {
+						HeldSpan *into = nullptr;
+						for (HeldSpan &candidate : view.Summed) {
+							if (candidate.Depth == span.Depth && candidate.Name == span.Name) {
+								into = &candidate;
+								break;
+							}
+						}
+						if (into == nullptr) {
+							view.Summed.push_back(
+								HeldSpan{
+									std::string(span.Name),
+									span.Depth,
+									span.Parent,
+									0.0f,
+									0.0f,
+									0.0f,
+									0.0f,
+									span.Category,
+									span.Reported,
+								}
+							);
+							into = &view.Summed.back();
+						}
+						into->StartMilliseconds += span.StartMilliseconds;
+						into->Milliseconds += span.Milliseconds;
+						into->SelfMilliseconds += span.SelfMilliseconds;
+						into->IdleMilliseconds += span.IdleMilliseconds;
+					}
+
+					view.SummedFrameMilliseconds += FrameGraph::FrameMilliseconds();
+					view.SummedIdleMilliseconds += FrameGraph::CategoryMilliseconds(ProfileCategory::Idle);
+					view.SummedUnmarkedMilliseconds += FrameGraph::UnmarkedMilliseconds();
+					view.SummedDropped += FrameGraph::Dropped();
+					view.Frames++;
+				}
+
+				// **Also on the first frame the panel is open**, whatever the
+				// interval says. Waiting five seconds to draw anything at all
+				// reads as a panel that does not work.
+				if (now >= view.NextPublish || view.Spans.empty()) {
+					if (view.Average && view.Frames > 0) {
+						const float frames = static_cast<float>(view.Frames);
+						view.Spans = view.Summed;
+						for (HeldSpan &span : view.Spans) {
+							span.StartMilliseconds /= frames;
+							span.Milliseconds /= frames;
+							span.SelfMilliseconds /= frames;
+							span.IdleMilliseconds /= frames;
+						}
+						view.FrameMilliseconds = view.SummedFrameMilliseconds / frames;
+						view.IdleMilliseconds = view.SummedIdleMilliseconds / frames;
+						view.UnmarkedMilliseconds = view.SummedUnmarkedMilliseconds / frames;
+						view.Dropped = view.SummedDropped / view.Frames;
+					} else {
+						snapshot(view.Spans);
+						readScalars();
+					}
+
+					view.NextPublish = now + static_cast<double>(interval);
+					forget();
+				}
+			}
+		}
+
+		const std::vector<HeldSpan> &spans = view.Spans;
+
+		const float frameMs = view.FrameMilliseconds;
+		const float idleMs = view.IdleMilliseconds;
 		const float busyMs = frameMs > idleMs ? frameMs - idleMs : frameMs;
 
 		ImGui::Text("%.2f ms", static_cast<double>(frameMs));
@@ -239,9 +384,77 @@ namespace studio {
 			"  busy %.2f   idle %.2f   unmarked %.2f",
 			static_cast<double>(busyMs),
 			static_cast<double>(idleMs),
-			static_cast<double>(FrameGraph::UnmarkedMilliseconds())
+			static_cast<double>(view.UnmarkedMilliseconds)
 		);
 		ImGui::PopStyleColor();
+
+		// --- the controls ----------------------------------------------------
+
+		if (ImGui::Button(view.Paused ? "Resume" : "Pause")) {
+			view.Paused = !view.Paused;
+
+			// Resuming starts the next interval from now rather than from
+			// whenever it was due when the pause began - otherwise a graph
+			// paused for a minute republishes on the frame it is resumed and
+			// the freeze appears not to have ended cleanly.
+			view.NextPublish = now + static_cast<double>(interval);
+			forget();
+		}
+
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip(
+				"Freeze what is on screen. Nothing is sampled while paused, so the\n"
+				"numbers below are exactly the ones that were there when it was pressed."
+			);
+		}
+
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(engine::ui::Scaled(120.0f));
+		if (ImGui::BeginCombo("update", FRAME_GRAPH_INTERVAL_NAMES[static_cast<size_t>(chosen)])) {
+			for (int index = 0; index < static_cast<int>(FRAME_GRAPH_INTERVALS.size()); index++) {
+				const bool selected = index == chosen;
+				if (ImGui::Selectable(FRAME_GRAPH_INTERVAL_NAMES[static_cast<size_t>(index)], selected)) {
+					view.Interval = index;
+					view.NextPublish =
+						now + static_cast<double>(FRAME_GRAPH_INTERVALS[static_cast<size_t>(index)]);
+					forget();
+				}
+				if (selected) {
+					ImGui::SetItemDefaultFocus();
+				}
+			}
+			ImGui::EndCombo();
+		}
+
+		ImGui::SameLine();
+
+		// **Disabled at "every frame", because there is nothing to average
+		// over.** Greyed rather than hidden: a control that disappears when a
+		// neighbouring one changes is a control nobody finds again.
+		ImGui::BeginDisabled(interval <= 0.0f);
+		ImGui::Checkbox("average", &view.Average);
+		ImGui::EndDisabled();
+
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip(
+				"On: every frame in the interval is summed and the mean is shown, so a\n"
+				"span's number is what it typically costs.\n"
+				"Off: the interval simply decides how often the panel takes a new sample,\n"
+				"and what is shown is one real frame - including the unlucky ones."
+			);
+		}
+
+		if (view.Paused) {
+			ImGui::SameLine();
+			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
+			ImGui::TextUnformatted("- paused");
+			ImGui::PopStyleColor();
+		} else if (interval > 0.0f && view.Average) {
+			ImGui::SameLine();
+			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+			ImGui::Text("- mean of %u frame(s)", view.Frames);
+			ImGui::PopStyleColor();
+		}
 
 		// **The share is of busy, not of the frame.** With vsync on, fifteen of
 		// a sixteen millisecond frame are a sleep - so a span measured against
@@ -255,7 +468,7 @@ namespace studio {
 		// ticking on workers open a span per phase and per system, and every one
 		// of them is refused. Reading "overflowed the buffer" sent at least one
 		// investigation at the span budget, which was 1% used.
-		if (const size_t dropped = FrameGraph::Dropped(); dropped > 0) {
+		if (const size_t dropped = view.Dropped; dropped > 0) {
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
 			ImGui::Text("%zu spans dropped - off-thread, too deep, or past the buffer", dropped);
 			ImGui::PopStyleColor();
@@ -308,7 +521,7 @@ namespace studio {
 		// the two axes.
 
 		uint32_t deepest = 0;
-		for (const FrameSpan &span : spans) {
+		for (const HeldSpan &span : spans) {
 			deepest = std::max(deepest, span.Depth);
 		}
 
@@ -320,9 +533,9 @@ namespace studio {
 		const float scale = frameMs > 0.0001f ? graphWidth / frameMs : 0.0f;
 
 		ImDrawList *draw = ImGui::GetWindowDrawList();
-		const FrameSpan *hovered = nullptr;
+		const HeldSpan *hovered = nullptr;
 
-		for (const FrameSpan &span : spans) {
+		for (const HeldSpan &span : spans) {
 			const float left = origin.x + span.StartMilliseconds * scale;
 			const float width = std::max(span.Milliseconds * scale, 1.0f);
 			const float top = origin.y + static_cast<float>(span.Depth) * rowHeight;
@@ -355,7 +568,7 @@ namespace studio {
 
 		if (hovered != nullptr) {
 			ImGui::BeginTooltip();
-			ImGui::TextUnformatted(std::string(hovered->Name).c_str());
+			ImGui::TextUnformatted(hovered->Name.c_str());
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
 			ImGui::Text(
 				"%.3f ms   self %.3f   idle %.3f",
@@ -387,7 +600,7 @@ namespace studio {
 			ImGui::TableSetupScrollFreeze(0, 1);
 			ImGui::TableHeadersRow();
 
-			for (const FrameSpan &span : spans) {
+			for (const HeldSpan &span : spans) {
 				ImGui::TableNextRow();
 
 				ImGui::TableSetColumnIndex(0);

@@ -223,6 +223,15 @@ end
 --     cdn --publish content --store store --signing-key HEX
 --     client --cdn dir:store --publisher-key PUB --script Particles.luau
 --
+-- `scripts/demos/bake-fox-flipbook.sh` is those three lines with the paths
+-- filled in, and it exists because this bay drew an untextured square on every
+-- machine that had the GIF. `contentimport` - which is how the local store gets
+-- filled - renames every file it takes to its own content hash, so the GIF was
+-- in the store as `67e91cae....atex` and no name in any scene could reach it.
+-- `assetc` is the half of the pipeline that keeps the tree, so the script stages
+-- the GIFs under the names the scenes use, bakes, and publishes a store of its
+-- own beside the library rather than over it.
+--
 -- `bake` decodes the GIF into **one flipbook sheet** - 48 frames of a 420x420
 -- animation laid out as an 8x8 grid - so by the time it reaches here it is an
 -- ordinary texture and nothing downstream knows it animates.
