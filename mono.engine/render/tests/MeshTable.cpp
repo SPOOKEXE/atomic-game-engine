@@ -125,6 +125,138 @@ TEST_CASE("replacing a mesh appends rather than rewriting", "[render][meshtable]
 	CHECK(table.PendingVertexCount() == cube.Vertices.size() * 2);
 }
 
+TEST_CASE("a replaced run is handed back once no frame can still read it", "[render][meshtable]") {
+	// **The whole of why the table stopped growing.** `Add` used to append every
+	// replacement and reclaim nothing, so an `EditableMesh` a script rewrote each
+	// frame walked towards `MAXIMUM_VERTICES` and was eventually refused - a mesh
+	// that silently stopped following its own instance.
+	MeshTable table;
+	const MeshData cube = MakeBuiltin(BuiltinMesh::Cube);
+
+	REQUIRE(table.Add(Name("test.Cube"), cube));
+	const int32_t first = table.Resolve(Name("test.Cube")).Whole.VertexOffset;
+
+	// The second write appends: the run it just replaced was freed this instant
+	// and a frame in flight may still be drawing from it.
+	REQUIRE(table.Add(Name("test.Cube"), cube));
+	const int32_t second = table.Resolve(Name("test.Cube")).Whole.VertexOffset;
+	CHECK(second != first);
+	CHECK(table.FreeVertexCount() == cube.Vertices.size());
+
+	// Three flushes is `MeshTable::DEFERRED_FRAMES`, which is the most frames
+	// this engine allows in flight - so the first run is now provably nobody's.
+	for (size_t frame = 0; frame < MeshTable::DEFERRED_FRAMES; frame++) {
+		table.Flush();
+	}
+
+	REQUIRE(table.Add(Name("test.Cube"), cube));
+	CHECK(table.Resolve(Name("test.Cube")).Whole.VertexOffset == first);
+
+	// The table is exactly two runs wide and stays there however long this goes
+	// on, which is the property that matters: bounded, not merely slower.
+	CHECK(table.PendingVertexCount() <= cube.Vertices.size() * 2);
+	CHECK(table.FreeVertexCount() == cube.Vertices.size());
+}
+
+TEST_CASE("a run freed this frame is not handed out again", "[render][meshtable]") {
+	// The half of the rule that keeps the picture correct. Reusing storage a
+	// frame in flight is reading is a mesh tearing into another mesh, and it
+	// would only show on the machines whose driver runs furthest ahead.
+	MeshTable table;
+	const MeshData cube = MakeBuiltin(BuiltinMesh::Cube);
+
+	REQUIRE(table.Add(Name("test.Cube"), cube));
+	const int32_t first = table.Resolve(Name("test.Cube")).Whole.VertexOffset;
+
+	// Two more writes with no flush between them. Both free a run and neither
+	// may take one back.
+	REQUIRE(table.Add(Name("test.Cube"), cube));
+	const int32_t second = table.Resolve(Name("test.Cube")).Whole.VertexOffset;
+	REQUIRE(table.Add(Name("test.Cube"), cube));
+	const int32_t third = table.Resolve(Name("test.Cube")).Whole.VertexOffset;
+
+	CHECK(second != first);
+	CHECK(third != first);
+	CHECK(third != second);
+
+	// One flush short of the rule still refuses.
+	for (size_t frame = 0; frame + 1 < MeshTable::DEFERRED_FRAMES; frame++) {
+		table.Flush();
+	}
+	REQUIRE(table.Add(Name("test.Cube"), cube));
+	CHECK(table.Resolve(Name("test.Cube")).Whole.VertexOffset != first);
+}
+
+TEST_CASE("runs freed beside each other become one run", "[render][meshtable]") {
+	// **Without this a mesh that shrinks and grows fragments its own hole into
+	// rubble.** Two eight-vertex runs side by side are unusable for a sixteen
+	// vertex mesh unless they are noticed to be adjacent.
+	MeshTable table;
+	const MeshData cube = MakeBuiltin(BuiltinMesh::Cube);
+	const MeshData plane = MakeBuiltin(BuiltinMesh::Plane);
+
+	// Two meshes, adjacent by construction: nothing has been freed yet, so the
+	// second lands immediately after the first.
+	REQUIRE(table.Add(Name("test.A"), cube));
+	REQUIRE(table.Add(Name("test.B"), cube));
+	const int32_t base = table.Resolve(Name("test.A")).Whole.VertexOffset;
+	REQUIRE(
+		table.Resolve(Name("test.B")).Whole.VertexOffset == base + static_cast<int32_t>(cube.Vertices.size())
+	);
+
+	// Replace both, which frees the two runs beside each other.
+	REQUIRE(table.Add(Name("test.A"), plane));
+	REQUIRE(table.Add(Name("test.B"), plane));
+	CHECK(table.FreeVertexCount() == cube.Vertices.size() * 2);
+
+	for (size_t frame = 0; frame < MeshTable::DEFERRED_FRAMES; frame++) {
+		table.Flush();
+	}
+
+	// A mesh needing more than either run alone, which only fits if the two were
+	// merged. It lands at the first of them.
+	MeshData wide = cube;
+	wide.Vertices.insert(wide.Vertices.end(), cube.Vertices.begin(), cube.Vertices.end());
+	for (const uint32_t index : cube.Indices) {
+		wide.Indices.push_back(index + static_cast<uint32_t>(cube.Vertices.size()));
+	}
+	wide.ComputeBounds();
+	REQUIRE(wide.Vertices.size() == cube.Vertices.size() * 2);
+
+	REQUIRE(table.Add(Name("test.Wide"), wide));
+	CHECK(table.Resolve(Name("test.Wide")).Whole.VertexOffset == base);
+	CHECK(table.FreeVertexCount() == 0);
+}
+
+TEST_CASE("a mesh rewritten forever stops growing the table", "[render][meshtable]") {
+	// **The property the whole change exists for, stated as a bound.** An
+	// `EditableMesh` a script rewrites every frame used to add a copy of itself
+	// to the table every frame - eight million vertices is about four thousand
+	// rewrites of a modest chunk, so a sculpting tool or a voxel terrain reached
+	// "mesh table: full, refusing" inside a minute and then silently stopped
+	// following its own instance.
+	//
+	// The bound is `DEFERRED_FRAMES + 1` copies: one live, and the runs freed on
+	// each of the frames that may still be reading them.
+	MeshTable table;
+	const MeshData cube = MakeBuiltin(BuiltinMesh::Cube);
+
+	for (int frame = 0; frame < 200; frame++) {
+		REQUIRE(table.Add(Name("test.Cube"), cube));
+		table.Flush();
+	}
+
+	CHECK(table.Count() == 1);
+	CHECK(table.HostVertexCount() <= cube.Vertices.size() * (MeshTable::DEFERRED_FRAMES + 1));
+	CHECK(table.HostIndexCount() <= cube.Indices.size() * (MeshTable::DEFERRED_FRAMES + 1));
+
+	// And the mesh still resolves to a run inside what the table holds, rather
+	// than to a stale range reclamation moved out from under it.
+	const MeshEntry &entry = table.Resolve(Name("test.Cube"));
+	CHECK(entry.VertexCount == cube.Vertices.size());
+	CHECK(static_cast<size_t>(entry.Whole.VertexOffset) + entry.VertexCount <= table.HostVertexCount());
+}
+
 TEST_CASE("an unknown name resolves to the fallback rather than nothing", "[render][meshtable]") {
 	// `Resolve` is on the draw loop's hot path and never returns null, so an
 	// unregistered mesh has to come back as something drawable. Without a device
