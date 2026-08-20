@@ -1867,6 +1867,11 @@ namespace client {
 		// because presentation is where the frame stops being about state.
 		PumpSounds();
 
+		// Beside the audio pump: neither is part of the tick, and a presence
+		// update that landed a frame later on a slower machine changes nothing
+		// a recorded run has to reproduce.
+		PumpDiscord(engine::core::Clock::Seconds());
+
 		// A hidden, minimised, or resizing window has no frame to consume. The
 		// simulation, replication, content delivery, and audio above continue,
 		// while PreRender and every GPU allocation below remain demand driven.
@@ -2842,6 +2847,11 @@ namespace client {
 		if (!Running) {
 			return 1;
 		}
+
+		// Once, and after startup rather than in the constructor: the game file
+		// and the connect address are settled by now, and they are what the
+		// first card says.
+		StartDiscord();
 
 		while (Running) {
 			Step();

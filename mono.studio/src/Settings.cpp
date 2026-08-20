@@ -1086,6 +1086,11 @@ namespace studio {
 				ImGui::EndTabItem();
 			}
 
+			if (ImGui::BeginTabItem("Discord Presence")) {
+				DrawDiscordSettings();
+				ImGui::EndTabItem();
+			}
+
 			if (ImGui::BeginTabItem("Keybinds")) {
 				DrawKeybindSettings();
 				ImGui::EndTabItem();

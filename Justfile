@@ -778,8 +778,8 @@ check-one-node-graph:
     set -euo pipefail
     found=$(grep -rlE 'namespace[[:space:]]+nodegraph[[:space:]]*\{' \
         --include='*.hpp' --include='*.cpp' \
-        mono.build mono.cdn mono.client mono.engine mono.network mono.server \
-        mono.studio mono.tools mono.unified_server_client || true)
+        mono.build mono.cdn mono.client mono.discord mono.engine mono.network \
+        mono.server mono.studio mono.tools mono.unified_server_client || true)
     if [ -n "$found" ]; then
         echo "FAIL: a second node graph implementation, in first-party code:"
         echo "$found" | sed 's/^/  /'
@@ -831,7 +831,7 @@ docs-check: (build "docgen") docs
 # Every first-party .cpp and .hpp. The directory list is explicit rather than
 # `find .` so that mono.vendor/ is never touched - reformatting a submodule
 # turns every future update into a conflict.
-mono_sources := "mono.engine mono.client mono.server mono.unified_server_client mono.cdn mono.network mono.tools mono.build"
+mono_sources := "mono.engine mono.client mono.server mono.unified_server_client mono.cdn mono.network mono.discord mono.tools mono.build"
 
 # Finding it is two problems, not one.
 #

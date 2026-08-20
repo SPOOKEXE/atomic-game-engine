@@ -1065,6 +1065,12 @@ namespace studio {
 			ENGINE_PROFILE_CAT("content", engine::core::ProfileCategory::Assets);
 			PumpContent(frameSeconds);
 
+			// Beside the other pumps and bounded the same way. Cheap when
+			// nothing is configured - one null check - and safe every frame,
+			// because `discord::Link` sends only what changed and only as often
+			// as the protocol allows.
+			PumpDiscord(engine::core::Clock::Seconds());
+
 			// **After the panels drew and before they draw again**, which is
 			// what makes "only rows imgui actually drew" the bound: a row asks
 			// for a picture while drawing, and this builds a couple of them in

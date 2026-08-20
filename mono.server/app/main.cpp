@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <csignal>
 #include <cstdio>
+#include <discord/Settings.hpp>
 #include <server/Server.hpp>
 #include <server/Settings.hpp>
 
@@ -43,6 +44,12 @@ int main(int argc, char **argv) {
 	engine::assets::DeclareContentFlags(engine::assets::ContentVerb::Handle);
 	engine::assets::DeclareContentFlags(engine::assets::ContentVerb::Publish);
 	server::DeclareFlags();
+
+	// The `discord.*` table, shared with the client and the origin. Declared
+	// rather than owned: the wording differs per program and lives in
+	// `DiscordPresence.cpp`, but the switches are one table so a config file
+	// spells them the same everywhere.
+	discord::DeclareFlags();
 
 	engine::core::Arguments arguments("server", "atomic - hosts a game.");
 	engine::core::Config::DeclareOptions(arguments);

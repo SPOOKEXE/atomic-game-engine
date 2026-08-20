@@ -57,6 +57,12 @@ mono_add_library(client
 		# single-player run opens no socket for either.
 		Mono::network
 
+		# `shared`. What a person's Discord profile says while this program is
+		# running. Named here rather than reached through anything else: the
+		# link is owned and pumped by `Client`, and a dependency a file
+		# includes is one its build file should say out loud.
+		Mono::discord
+
 		# L10, `shared`. `--script` builds the scene by running a Luau file
 		# instead of the C++ loop in Demo.cpp. The VM itself is private to that
 		# module - nothing here compiles against Luau - so this row says "the

@@ -37,6 +37,7 @@
 #include <client/Scene.hpp>
 #include <client/Sounds.hpp>
 #include <cstdint>
+#include <discord/Link.hpp>
 #include <filesystem>
 #include <memory>
 #include <network/Presence.hpp>
@@ -541,6 +542,31 @@ namespace client {
 		// with speakers.
 		void PumpSounds();
 
+		// Tells Discord what is being played, and keeps that connection alive.
+		//
+		// Beside `PumpSounds` and bounded the same way: cheap when nothing is
+		// configured, and safe every frame because `discord::Link` sends only
+		// what changed and only as often as the protocol allows.
+		//
+		// @param nowSeconds This process's monotonic clock.
+		// @since v0.17
+		void PumpDiscord(double nowSeconds);
+
+		// Makes the link, if the flags asked for one.
+		//
+		// Called once, from `Run`. Nothing is allocated and no socket is opened
+		// for a program nobody configured this for, which is every default
+		// install.
+		//
+		// @since v0.17
+		void StartDiscord();
+
+		// What the Discord templates can name, filled from this frame.
+		//
+		// @return The tokens and what they resolve to.
+		// @since v0.17
+		discord::Facts DiscordFacts() const;
+
 		// Opens the audio device and builds the mixer's routing.
 		//
 		// @return `false` only when a sound was asked for and cannot be played.
@@ -598,6 +624,19 @@ namespace client {
 		void ReportReplica();
 
 		Options Settings;
+
+		// The connection to Discord, or null when nothing is configured. See
+		// `client/Settings.hpp` for where the `discord` flags come from.
+		//
+		// @since v0.17
+		std::unique_ptr<discord::Link> DiscordLink;
+
+		// When this process started, as a unix epoch second, for the elapsed
+		// timer. Read once: `discord::Link` takes monotonic seconds and Discord
+		// wants epoch ones, and this is the one place the two meet.
+		//
+		// @since v0.17
+		int64_t DiscordStartedUnixSeconds = 0;
 
 		SDL_Window *Window = nullptr;
 		engine::render::Renderer Renderer;

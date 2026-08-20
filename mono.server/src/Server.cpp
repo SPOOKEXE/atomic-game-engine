@@ -2303,6 +2303,11 @@ namespace server {
 			}
 		}
 
+		// Once, and here rather than in the constructor: the game file is
+		// loaded and the socket is bound by now, and both are what the first
+		// card says.
+		StartDiscord();
+
 		while (Running && !StopRequested.load()) {
 			const uint64_t tickStarted = engine::core::Clock::Nanoseconds();
 
@@ -2314,6 +2319,12 @@ namespace server {
 			if (ControlServer.IsRunning()) {
 				ControlServer.Pump([this](const std::string &line) { return ControlSurface.Answer(line); });
 			}
+
+			// Beside the control surface and for its reason: telling Discord
+			// how many people are on changes nothing a recorded run has to
+			// reproduce, so it belongs where the frame is bookkept rather than
+			// where the world is simulated.
+			PumpDiscord(engine::core::Clock::Seconds());
 
 			// Beside the control surface, and for the same reason it is here:
 			// content delivery is not part of the tick. A fetch that completes

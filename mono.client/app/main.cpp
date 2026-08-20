@@ -14,6 +14,7 @@
 #include <client/Client.hpp>
 #include <client/Settings.hpp>
 #include <cstdio>
+#include <discord/Settings.hpp>
 #include <string>
 #include <vector>
 
@@ -48,6 +49,12 @@ int main(int argc, char **argv) {
 	engine::parallel::DeclareFlags();
 	engine::assets::DeclareContentFlags(engine::assets::ContentVerb::Handle);
 	client::DeclareFlags();
+
+	// The `discord.*` table, shared with the server and the origin. Declared
+	// rather than owned: what it says differs per program and the wording lives
+	// in `DiscordPresence.cpp`, but the switches are one table so a config file
+	// spells them the same everywhere.
+	discord::DeclareFlags();
 
 	engine::core::Arguments arguments("client", "atomic - runs a game.");
 	engine::core::Config::DeclareOptions(arguments);

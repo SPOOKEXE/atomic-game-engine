@@ -22,6 +22,7 @@
 #include <engine/world/Universe.hpp>
 
 #include <cstdint>
+#include <discord/Link.hpp>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -962,6 +963,42 @@ namespace server {
 		// from binding a port it has no use for.
 		std::unique_ptr<engine::net::Transport> Socket;
 		std::unique_ptr<engine::replication::Listener> Replication;
+
+		// What Discord is told this server is hosting, or null when nothing is
+		// configured. Off unless `discord.enabled` and `discord.app-id` are
+		// both set, which is every default install.
+		//
+		// @since v0.17
+		std::unique_ptr<discord::Link> DiscordLink;
+
+		// When this process started, as a unix epoch second, for the elapsed
+		// timer. Read once, because `discord::Link` takes monotonic seconds and
+		// Discord wants epoch ones.
+		//
+		// @since v0.17
+		int64_t DiscordStartedUnixSeconds = 0;
+
+		// Makes the link, if the flags asked for one. Called once, from `Run`.
+		//
+		// @since v0.17
+		void StartDiscord();
+
+		// Says what is being hosted, and keeps the connection alive.
+		//
+		// **Beside the control surface rather than in the tick.** A presence
+		// update is not part of the simulation and changes nothing a recorded
+		// run has to reproduce, which is the same argument `ContentService` is
+		// pumped here on.
+		//
+		// @param nowSeconds This process's monotonic clock.
+		// @since v0.17
+		void PumpDiscord(double nowSeconds);
+
+		// What the Discord templates can name, filled from this tick.
+		//
+		// @return The tokens and what they resolve to.
+		// @since v0.17
+		discord::Facts DiscordFacts();
 
 		// The identity `Replication` signs transcripts with, held here because
 		// `Listener::SetIdentity` borrows rather than copies: a `SigningKey` is

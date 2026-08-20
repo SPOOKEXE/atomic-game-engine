@@ -61,11 +61,12 @@
 
 #include <array>
 #include <cdn/LocalStore.hpp>
-#include <client/Scene.hpp>
 #include <client/EditableImages.hpp>
 #include <client/EditableMeshes.hpp>
+#include <client/Scene.hpp>
 #include <cstdint>
 #include <deque>
+#include <discord/Link.hpp>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -1117,6 +1118,17 @@ namespace studio {
 		// changed. See `studio::Keybinds` - this page edits that table
 		// directly, so it cannot drift from what the keys actually do.
 		void DrawKeybindSettings();
+
+		// The Preferences page that decides what Discord says this editor is
+		// doing.
+		//
+		// **Most of the page is the preview.** Discord does not draw a person
+		// their own card or their own buttons, so without something that
+		// renders what the templates produce, the only way to find out what
+		// friends are seeing is to ask one.
+		//
+		// @since v0.17
+		void DrawDiscordSettings();
 
 		// The Preferences page that says where content comes from.
 		//
@@ -2388,6 +2400,38 @@ namespace studio {
 		// @param frameSeconds How long the last frame took.
 		void PumpContent(double frameSeconds);
 
+		// Tells Discord what is being edited, and keeps that connection alive.
+		//
+		// Cheap when nothing is configured: one null check. Safe every frame -
+		// `discord::Link` sends only what changed and only as often as the
+		// protocol allows.
+		//
+		// @param nowSeconds The editor's monotonic clock.
+		// @since v0.17
+		void PumpDiscord(double nowSeconds);
+
+		// What the Discord templates can name, filled from this frame.
+		//
+		// **Rebuilt every pump rather than cached against a dirty flag.** It is
+		// five short strings, and the alternative is a sixth copy of facts the
+		// ECS already owns - which is the drift `AGENTS.md` rule 2 is about.
+		//
+		// @return The tokens and what they resolve to.
+		// @since v0.17
+		// Not `const`: `InstanceCountOf` recounts on a clock and caches what it
+		// found, which is a mutation this has no business hiding.
+		discord::Facts DiscordFacts();
+
+		// The activity `PumpDiscord` publishes, from `Prefs.Discord` and
+		// `DiscordFacts`.
+		//
+		// Separate from the pump so the Preferences page can render exactly
+		// what would be sent without sending it.
+		//
+		// @return The card.
+		// @since v0.17
+		discord::Activity DiscordActivity();
+
 		// Takes what the delivery client has finished and registers it.
 		//
 		// **The editor fetches content, which it did not before at all.** Its
@@ -2991,6 +3035,39 @@ namespace studio {
 		// left it at, which is why the panel toggles are read off the live flags
 		// rather than out of this - see `SaveConfiguration`.
 		Preferences Prefs;
+
+		// The connection to Discord, or null when nothing is configured.
+		//
+		// **Held even while it is reporting nothing**, because the Preferences
+		// page shows what it is doing and a null one has nothing to say. It is
+		// made and unmade by `PumpDiscord` from `Prefs.Discord`.
+		//
+		// @since v0.17
+		std::unique_ptr<discord::Link> DiscordLink;
+
+		// When this editor started, as a unix epoch second, for the elapsed
+		// timer Discord draws.
+		//
+		// **A wall clock read once at startup rather than per update.**
+		// `discord::Link` takes monotonic seconds and Discord wants epoch ones;
+		// this is the single place the two meet, and reading it repeatedly
+		// would make the timer jump whenever the system clock was corrected.
+		//
+		// @since v0.17
+		int64_t DiscordStartedUnixSeconds = 0;
+
+		// Whether an edit on the Discord Presence page has settled and the link
+		// has not been told yet.
+		//
+		// **Set when a field is left rather than when it changes**, and that
+		// distinction is the whole reason this flag exists. `Prefs.Discord` is
+		// also the preview's source, so it has to follow every keystroke; if
+		// the link followed it too, typing an eighteen-digit application id
+		// would open and fail seventeen connections on the way to the right
+		// one, and Discord would rate-limit the eighteenth.
+		//
+		// @since v0.17
+		bool DiscordSettled = false;
 
 		// The last five games opened, most recent first. See `Config.hpp`.
 		RecentProjects Recent;

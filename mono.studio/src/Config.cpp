@@ -94,6 +94,11 @@ namespace studio {
 			return found != document.end() && found->is_number_integer() ? found->get<int>() : fallback;
 		}
 
+		std::string Words(const json &document, const char *key, const std::string &fallback) {
+			const auto found = document.find(key);
+			return found != document.end() && found->is_string() ? found->get<std::string>() : fallback;
+		}
+
 		bool Flag(const json &document, const char *key, bool fallback) {
 			const auto found = document.find(key);
 			return found != document.end() && found->is_boolean() ? found->get<bool>() : fallback;
@@ -325,6 +330,25 @@ namespace studio {
 			}
 		}
 
+		// **Absent means "never configured", and every field falls back to the
+		// built-in.** An install that has never opened the Discord Presence
+		// page has no object here at all, and what that has to mean is "report
+		// nothing" rather than "report with an empty application id".
+		if (const auto presence = document.find("discord");
+			presence != document.end() && presence->is_object()) {
+			Discord.Enabled = Flag(*presence, "enabled", Discord.Enabled);
+			Discord.ApplicationId = Words(*presence, "applicationId", Discord.ApplicationId);
+			Discord.Details = Words(*presence, "details", Discord.Details);
+			Discord.State = Words(*presence, "state", Discord.State);
+			Discord.LargeImage = Words(*presence, "largeImage", Discord.LargeImage);
+			Discord.LargeText = Words(*presence, "largeText", Discord.LargeText);
+			Discord.ButtonLabel = Words(*presence, "buttonLabel", Discord.ButtonLabel);
+			Discord.ButtonUrl = Words(*presence, "buttonUrl", Discord.ButtonUrl);
+			Discord.ShowElapsed = Flag(*presence, "showElapsed", Discord.ShowElapsed);
+			Discord.HideNames = Flag(*presence, "hideNames", Discord.HideNames);
+			Discord.JoinSecrets = Flag(*presence, "joinSecrets", Discord.JoinSecrets);
+		}
+
 		// **A colour nobody recognises is skipped, not an error.** This document
 		// is one a person edits by hand and one an older build wrote, and the
 		// same rule holds for both: read what is understood, leave the rest, and
@@ -426,6 +450,20 @@ namespace studio {
 				 {"control", ShowControl},
 			 }},
 			{"panelColours", std::move(panelColours)},
+			{"discord",
+			 json{
+				 {"enabled", Discord.Enabled},
+				 {"applicationId", Discord.ApplicationId},
+				 {"details", Discord.Details},
+				 {"state", Discord.State},
+				 {"largeImage", Discord.LargeImage},
+				 {"largeText", Discord.LargeText},
+				 {"buttonLabel", Discord.ButtonLabel},
+				 {"buttonUrl", Discord.ButtonUrl},
+				 {"showElapsed", Discord.ShowElapsed},
+				 {"hideNames", Discord.HideNames},
+				 {"joinSecrets", Discord.JoinSecrets},
+			 }},
 			{"frameRates",
 			 json{
 				 {"cap", FrameCap},
@@ -487,6 +525,15 @@ namespace studio {
 	}
 
 	void Editor::LoadConfiguration() {
+		// **This program's presence wording, before the file is read over it.**
+		// `discord::Settings` cannot carry these: the four programs that report
+		// say different things, so a default written in the module would be one
+		// of them pretending to be all four. `Preferences::Load` leaves alone
+		// anything the document does not mention, which is what makes setting
+		// them here the same as declaring them.
+		Prefs.Discord.Details = "Editing {place}";
+		Prefs.Discord.State = "{instances} instances in {world}";
+
 		// Read before anything is applied, so a broken file leaves every default
 		// in place rather than half of them.
 		Prefs.Load();

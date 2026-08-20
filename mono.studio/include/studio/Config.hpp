@@ -50,6 +50,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <discord/Settings.hpp>
 #include <filesystem>
 #include <map>
 #include <nlohmann/json_fwd.hpp>
@@ -319,6 +320,24 @@ namespace studio {
 		//
 		// @since v0.13
 		std::map<std::string, engine::ui::ThemeColours> PanelColours;
+
+		// What Discord is told the editor is doing, and whether it is told
+		// anything at all.
+		//
+		// **Here rather than in the `discord` flag table, unlike the other
+		// three programs.** The header above says why: an editor persists what
+		// somebody configured in a document it owns, and the Discord Presence
+		// page is the interface for this one. The client, the server and the
+		// origin have no such page, so they read the same struct off flags -
+		// `discord::SettingsFromFlags` - and the studio deliberately does not
+		// declare that table. A command-line switch that the tab then
+		// contradicted would be worse than no switch.
+		//
+		// Off with no application id, so an install nobody configured opens no
+		// socket and publishes nothing.
+		//
+		// @since v0.17
+		discord::Settings Discord;
 
 		// Reads `preferences.json`, leaving anything it does not mention alone.
 		//

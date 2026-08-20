@@ -79,6 +79,12 @@ mono_add_library(studio
 		# what it deliberately is not yet.
 		Mono::network
 
+		# `shared`. What a person's Discord profile says while this program is
+		# running. Named here rather than reached through anything else: the
+		# link is owned and pumped by `Editor`, and a dependency a file
+		# includes is one its build file should say out loud.
+		Mono::discord
+
 		# L9, `shared`. Image decoding, for the asset previews.
 		#
 		# **A decoder in an editor is not the thing `assets::Texture` argues
