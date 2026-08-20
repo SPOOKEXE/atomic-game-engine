@@ -48,9 +48,7 @@ layout(set = 1, binding = 0) buffer Table { uint words[]; } table;
 
 layout(set = 2, binding = 0) uniform Scatter {
 	// x: how many records there are. y: how many words each one carries.
-	// z: how many rows the destination table holds. w: which record the run
-	// starts at, because the parameter and curve updates share one buffer from
-	// its two ends.
+	// z: how many rows the destination table holds. w: unused.
 	uvec4 Count;
 } scatter_;
 
@@ -61,7 +59,7 @@ void main() {
 	}
 
 	uint words = scatter_.Count.y;
-	uint base = (at + scatter_.Count.w) * (words + 1u);
+	uint base = at * (words + 1u);
 	uint row = records.words[base];
 	if (row >= scatter_.Count.z) {
 		// The host sized the table and the host chose the row, so this cannot

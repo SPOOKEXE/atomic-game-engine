@@ -1540,11 +1540,25 @@ namespace engine::render {
 			SDL_GPUBuffer *Curves = nullptr;
 			uint32_t TableRows = 0;
 
-			// The records that update them, staged and scattered. One pair for
-			// both tables, sized to the wider record.
-			SDL_GPUBuffer *Updates = nullptr;
-			SDL_GPUTransferBuffer *UpdateStaging = nullptr;
-			uint32_t UpdateCapacity = 0;
+			// The records that update them, staged and scattered.
+			//
+			// **One pair each, and they cannot share.** A scatter record is its
+			// destination row followed by the payload, so its stride *is* the
+			// payload width - twenty-five words for a parameter record and
+			// sixty-five for a curve one. The first version put both in one
+			// buffer from its two ends and told the shader one width, so every
+			// parameter update but the first landed at the wrong offset and the
+			// table filled with garbage capacities. It drew, which is why it took
+			// a side-by-side capture rather than a crash to find.
+			//@{
+			SDL_GPUBuffer *ParamUpdateBuffer = nullptr;
+			SDL_GPUTransferBuffer *ParamStaging = nullptr;
+			uint32_t ParamStagingRows = 0;
+
+			SDL_GPUBuffer *CurveUpdateBuffer = nullptr;
+			SDL_GPUTransferBuffer *CurveStaging = nullptr;
+			uint32_t CurveStagingRows = 0;
+			//@}
 			//@}
 
 			// What the device was last told about each block, indexed by block.
@@ -4457,19 +4471,27 @@ namespace engine::render {
 			return false;
 		}
 
-		// **A fixed size, and the one buffer here that never grows.** It is
-		// mapped with cycling every frame, so what it costs is its size rather
-		// than what is in it - see `PARTICLE_UPDATE_BUDGET`. Rows are counted in
-		// the wider of the two records it carries; parameters fill it from the
-		// front and curves from the back.
+		// **Fixed sizes, and the only buffers here that never grow.** They are
+		// mapped with cycling every frame, so what they cost is their size rather
+		// than what is in them - see `PARTICLE_UPDATE_BUDGET`. A record is its
+		// destination row and then the payload, so each has the stride of the
+		// table it feeds.
 		return grow(
-			Particles.Updates,
-			Particles.UpdateStaging,
-			Particles.UpdateCapacity,
-			PARTICLE_UPDATE_BUDGET,
-			(PARTICLE_CURVE_WORDS + 1) * word,
-			"table updates"
-		);
+				   Particles.ParamUpdateBuffer,
+				   Particles.ParamStaging,
+				   Particles.ParamStagingRows,
+				   PARTICLE_UPDATE_BUDGET,
+				   (PARTICLE_PARAM_WORDS + 1) * word,
+				   "parameter updates"
+			   ) &&
+			   grow(
+				   Particles.CurveUpdateBuffer,
+				   Particles.CurveStaging,
+				   Particles.CurveStagingRows,
+				   PARTICLE_UPDATE_BUDGET,
+				   (PARTICLE_CURVE_WORDS + 1) * word,
+				   "curve updates"
+			   );
 	}
 
 	void Renderer::Impl::ReleaseParticlePool() {
@@ -4478,7 +4500,8 @@ namespace engine::render {
 			  &Particles.Draws,
 			  &Particles.Params,
 			  &Particles.Curves,
-			  &Particles.Updates,
+			  &Particles.ParamUpdateBuffer,
+			  &Particles.CurveUpdateBuffer,
 			  &Particles.Births,
 			  &Particles.Seams}) {
 			if (*buffer != nullptr) {
@@ -4488,7 +4511,8 @@ namespace engine::render {
 		}
 		for (SDL_GPUTransferBuffer **staging :
 			 {&Particles.DrawStaging,
-			  &Particles.UpdateStaging,
+			  &Particles.ParamStaging,
+			  &Particles.CurveStaging,
 			  &Particles.BirthStaging,
 			  &Particles.SeamStaging}) {
 			if (*staging != nullptr) {
@@ -4505,7 +4529,8 @@ namespace engine::render {
 		Particles.Slots = 0;
 		Particles.TableRows = 0;
 		Particles.DrawCapacity = 0;
-		Particles.UpdateCapacity = 0;
+		Particles.ParamStagingRows = 0;
+		Particles.CurveStagingRows = 0;
 		Particles.BirthCapacity = 0;
 		Particles.SeamCapacity = 0;
 		Particles.ParamRevision.clear();
@@ -4526,7 +4551,6 @@ namespace engine::render {
 		}
 
 		const uint32_t word = static_cast<uint32_t>(sizeof(uint32_t));
-		const uint32_t updateStride = (PARTICLE_CURVE_WORDS + 1) * word;
 
 		// The frame's uploads, in one copy pass. All are cycled: this is each
 		// buffer's first touch of the frame, so the previous frame's dispatch
@@ -4584,13 +4608,19 @@ namespace engine::render {
 			// **Not cycled, because the two ends are two copies of one buffer**
 			// and cycling the second would give it a fresh version with the first
 			// copy's bytes missing.
-			send(Particles.UpdateStaging, Particles.Updates, 0, Particles.ParamUpdates * updateStride, false);
 			send(
-				Particles.UpdateStaging,
-				Particles.Updates,
-				(PARTICLE_UPDATE_BUDGET - Particles.CurveUpdates) * updateStride,
-				Particles.CurveUpdates * updateStride,
-				false
+				Particles.ParamStaging,
+				Particles.ParamUpdateBuffer,
+				0,
+				Particles.ParamUpdates * (PARTICLE_PARAM_WORDS + 1) * word,
+				true
+			);
+			send(
+				Particles.CurveStaging,
+				Particles.CurveUpdateBuffer,
+				0,
+				Particles.CurveUpdates * (PARTICLE_CURVE_WORDS + 1) * word,
+				true
 			);
 			SDL_EndGPUCopyPass(copy);
 		}
@@ -4602,7 +4632,6 @@ namespace engine::render {
 								 uint32_t count,
 								 uint32_t words,
 								 uint32_t rows,
-								 uint32_t offset,
 								 const char *what) {
 			if (Particles.Scatter == nullptr || count == 0) {
 				return true;
@@ -4621,10 +4650,11 @@ namespace engine::render {
 			SDL_GPUBuffer *const reads[1] = {from};
 			SDL_BindGPUComputeStorageBuffers(pass, 0, reads, 1);
 
-			// The offset is in records rather than bytes, because the shader
-			// indexes records - the curve updates live at the far end of the same
-			// buffer the parameter updates start in.
-			const uint32_t counts[4] = {count, words, rows, offset};
+			// A record is its destination row and then `words` of payload, so the
+			// width is both the stride and the amount to copy - see
+			// `ParticlePool::ParamUpdateBuffer` for what one width for two
+			// records cost.
+			const uint32_t counts[4] = {count, words, rows, 0};
 			SDL_PushGPUComputeUniformData(command, 0, counts, sizeof(counts));
 			SDL_DispatchGPUCompute(pass, (count + 63) / 64, 1, 1);
 			SDL_EndGPUComputePass(pass);
@@ -4642,20 +4672,18 @@ namespace engine::render {
 		// one frame of drift on a value that starts at zero.
 		const bool staged = scatter(
 								Particles.Params,
-								Particles.Updates,
+								Particles.ParamUpdateBuffer,
 								Particles.ParamUpdates,
 								PARTICLE_PARAM_WORDS,
 								Particles.TableRows,
-								0,
 								"parameter update"
 							) &&
 							scatter(
 								Particles.Curves,
-								Particles.Updates,
+								Particles.CurveUpdateBuffer,
 								Particles.CurveUpdates,
 								PARTICLE_CURVE_WORDS,
 								Particles.TableRows,
-								PARTICLE_UPDATE_BUDGET - Particles.CurveUpdates,
 								"curve update"
 							) &&
 							scatter(
@@ -4664,7 +4692,6 @@ namespace engine::render {
 								Particles.BirthCount,
 								PARTICLE_STATE_WORDS,
 								Particles.Slots,
-								0,
 								"spawn"
 							);
 		if (!staged) {
@@ -4857,14 +4884,19 @@ namespace engine::render {
 		}
 
 		auto *draws = static_cast<uint32_t *>(SDL_MapGPUTransferBuffer(Device, Particles.DrawStaging, true));
-		auto *updates =
-			static_cast<uint32_t *>(SDL_MapGPUTransferBuffer(Device, Particles.UpdateStaging, true));
-		if (draws == nullptr || updates == nullptr) {
-			if (draws != nullptr) {
-				SDL_UnmapGPUTransferBuffer(Device, Particles.DrawStaging);
-			}
-			if (updates != nullptr) {
-				SDL_UnmapGPUTransferBuffer(Device, Particles.UpdateStaging);
+		auto *changedParams =
+			static_cast<uint32_t *>(SDL_MapGPUTransferBuffer(Device, Particles.ParamStaging, true));
+		auto *changedCurves =
+			static_cast<uint32_t *>(SDL_MapGPUTransferBuffer(Device, Particles.CurveStaging, true));
+		if (draws == nullptr || changedParams == nullptr || changedCurves == nullptr) {
+			for (auto [mapped, buffer] : {
+					 std::pair{draws, Particles.DrawStaging},
+					 std::pair{changedParams, Particles.ParamStaging},
+					 std::pair{changedCurves, Particles.CurveStaging},
+				 }) {
+				if (mapped != nullptr) {
+					SDL_UnmapGPUTransferBuffer(Device, buffer);
+				}
 			}
 			return 0;
 		}
@@ -4888,7 +4920,6 @@ namespace engine::render {
 		uint32_t staged = 0;
 		uint32_t params = 0;
 		uint32_t curves = 0;
-		const uint32_t updateStride = PARTICLE_CURVE_WORDS + 1;
 		for (const uint32_t index : ParticleOrder) {
 			const render::ParticleBatch &batch = batches[index];
 			if (batch.Block == nullptr || batch.Block->Capacity == 0 || batch.Index >= Particles.TableRows) {
@@ -4907,23 +4938,23 @@ namespace engine::render {
 			const bool needParams = Particles.ParamRevision[batch.Index] != block.Revision;
 			const bool needCurves = Particles.CurveRevision[batch.Index] != block.CurveRevision;
 			if (needParams || needCurves) {
-				const uint32_t wanted = (needParams ? 1u : 0u) + (needCurves ? 1u : 0u);
-				if (params + curves + wanted > PARTICLE_UPDATE_BUDGET) {
+				if ((needParams && params >= PARTICLE_UPDATE_BUDGET) ||
+					(needCurves && curves >= PARTICLE_UPDATE_BUDGET)) {
 					continue;
 				}
 				if (needParams) {
-					uint32_t *const row = updates + params * updateStride;
+					uint32_t *const row = changedParams + params * (PARTICLE_PARAM_WORDS + 1);
 					row[0] = batch.Index;
 					WriteParticleParams(row + 1, block);
 					Particles.ParamRevision[batch.Index] = block.Revision;
 					params++;
 				}
 				if (needCurves) {
-					curves++;
-					uint32_t *const row = updates + (PARTICLE_UPDATE_BUDGET - curves) * updateStride;
+					uint32_t *const row = changedCurves + curves * (PARTICLE_CURVE_WORDS + 1);
 					row[0] = batch.Index;
 					WriteParticleCurves(row + 1, block.Curves);
 					Particles.CurveRevision[batch.Index] = block.CurveRevision;
+					curves++;
 				}
 			}
 
@@ -4941,7 +4972,8 @@ namespace engine::render {
 		}
 
 		SDL_UnmapGPUTransferBuffer(Device, Particles.DrawStaging);
-		SDL_UnmapGPUTransferBuffer(Device, Particles.UpdateStaging);
+		SDL_UnmapGPUTransferBuffer(Device, Particles.ParamStaging);
+		SDL_UnmapGPUTransferBuffer(Device, Particles.CurveStaging);
 		Particles.Records = staged;
 		Particles.ParamUpdates = params;
 		Particles.CurveUpdates = curves;
