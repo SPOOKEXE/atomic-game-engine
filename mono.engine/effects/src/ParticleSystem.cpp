@@ -90,13 +90,70 @@ namespace engine::effects {
 		// The half-extent is the parent's `Bounds`, so an emitter's volume is the
 		// part it is on - which is Roblox's arrangement and is the one that makes
 		// resizing a part resize its effect without touching the emitter.
-		Vector3 SpawnPoint(const ParticleEmitter &emitter, const Vector3 &half, uint32_t id, uint32_t index) {
+		// Everything one emitter's births need, copied off its row.
+		//
+		// **The spawn pass was serial because it read `ParticleEmitter`**, which
+		// is fifteen hundred bytes a row that a worker has no promise it may
+		// walk. That is a fact about the *column*, not about the work: what a
+		// birth actually needs is a shape, four ranges and a frame, and once
+		// those are copied out nothing in the loop touches the store at all.
+		//
+		// So the pass is two now. A serial walk fills one of these per emitter
+		// that owes a particle - which is the only thing that walk does, and it
+		// costs 0.145 ms over five thousand emitters - and the births themselves
+		// dispatch over the plans.
+		//
+		// **It is also the hoist.** The emission normal, the spread in radians
+		// and the inherited velocity were resolved once per *particle* inside
+		// the helpers; they are resolved once per emitter here, because that is
+		// where they were always constant.
+		//
+		// **Determinism is unaffected, and that is not luck.** Every draw is
+		// seeded from the emitter's own id and the block's own spawn counter -
+		// `SeedOf` - so a particle's value depends on nothing outside its
+		// emitter and the order emitters are visited in cannot reach it. Within
+		// one plan the loop stays serial, because the counter advances.
+		struct SpawnPlan {
+			uint32_t Block = 0;
+			uint32_t Id = 0;
+			uint32_t Owed = 0;
+			Vector3 Half;
+
+			ParticleShape Shape = ParticleShape::Box;
+			ParticleShapeStyle ShapeStyle = ParticleShapeStyle::Volume;
+			ParticleShapeDirection ShapeDirection = ParticleShapeDirection::Outward;
+			float ShapePartial = 0.0f;
+
+			// Resolved rather than carried as an enum and two degrees: the
+			// helpers wanted a normal and radians, and turning them into one was
+			// per-particle work.
+			Vector3 Emission;
+			float SpreadX = 0.0f;
+			float SpreadY = 0.0f;
+
+			core::NumberRange Speed;
+			core::NumberRange Lifetime;
+			core::NumberRange RotationSpeed;
+			core::NumberRange Rotation;
+
+			// The parent's motion times `VelocityInheritance`, or zero. Resolved
+			// here because it is a store lookup and the store is what the worker
+			// may not touch.
+			Vector3 Inherited;
+
+			// Written by whichever worker takes this plan, summed afterwards.
+			// Per plan rather than one shared counter, which is the reason the
+			// block counters are per block.
+			uint32_t Dropped = 0;
+		};
+
+		Vector3 SpawnPoint(const SpawnPlan &plan, const Vector3 &half, uint32_t id, uint32_t index) {
 			const float x = Unit(SeedOf(id, index, 1)) * 2.0f - 1.0f;
 			const float y = Unit(SeedOf(id, index, 2)) * 2.0f - 1.0f;
 			const float z = Unit(SeedOf(id, index, 3)) * 2.0f - 1.0f;
 
 			Vector3 point{x, y, z};
-			switch (emitter.Shape) {
+			switch (plan.Shape) {
 			case ParticleShape::Sphere:
 				// **Normalised then scaled by a cube root, not by a uniform
 				// draw.** A radius drawn uniformly concentrates particles at the
@@ -105,7 +162,7 @@ namespace engine::effects {
 				// cube root is the inverse of that and costs one `cbrt` per
 				// spawn, which is on the spawn path and not the step path.
 				point = point.Unit();
-				if (emitter.ShapeStyle == ParticleShapeStyle::Volume) {
+				if (plan.ShapeStyle == ParticleShapeStyle::Volume) {
 					point = point * std::cbrt(Unit(SeedOf(id, index, 4)));
 				}
 				point = point * half;
@@ -114,7 +171,7 @@ namespace engine::effects {
 				const float angle = Unit(SeedOf(id, index, 4)) * 2.0f * std::numbers::pi_v<float>;
 				// Square root for the same reason the cube root is there: area
 				// grows as r-squared.
-				const float radius = emitter.ShapeStyle == ParticleShapeStyle::Surface
+				const float radius = plan.ShapeStyle == ParticleShapeStyle::Surface
 										 ? 1.0f
 										 : std::sqrt(Unit(SeedOf(id, index, 5)));
 				point =
@@ -123,14 +180,14 @@ namespace engine::effects {
 			}
 			case ParticleShape::Disc: {
 				const float angle = Unit(SeedOf(id, index, 4)) * 2.0f * std::numbers::pi_v<float>;
-				const float radius = emitter.ShapeStyle == ParticleShapeStyle::Surface
+				const float radius = plan.ShapeStyle == ParticleShapeStyle::Surface
 										 ? 1.0f
 										 : std::sqrt(Unit(SeedOf(id, index, 5)));
 				point = Vector3{std::cos(angle) * radius * half.X, 0.0f, std::sin(angle) * radius * half.Z};
 				break;
 			}
 			case ParticleShape::Box:
-				if (emitter.ShapeStyle == ParticleShapeStyle::Surface) {
+				if (plan.ShapeStyle == ParticleShapeStyle::Surface) {
 					// Snap the largest component to the face it is nearest. Not
 					// an area-uniform draw over six faces, which would need a
 					// weighted pick; this is what Roblox's does and it reads the
@@ -152,21 +209,20 @@ namespace engine::effects {
 
 			// `ShapePartial` keeps the near half of the shape's own axis, which is
 			// how a half-ring or a hemisphere is authored without a second shape.
-			if (emitter.ShapePartial > 0.0f && Unit(SeedOf(id, index, 6)) < emitter.ShapePartial) {
+			if (plan.ShapePartial > 0.0f && Unit(SeedOf(id, index, 6)) < plan.ShapePartial) {
 				point.Y = std::abs(point.Y);
 			}
 			return point;
 		}
 
 		// Which way a new particle goes, in the parent's local space.
-		Vector3 SpawnDirection(
-			const ParticleEmitter &emitter, const Vector3 &localPoint, uint32_t id, uint32_t index
-		) {
-			Vector3 direction = scene::NormalOf(emitter.EmissionDirection);
+		Vector3
+		SpawnDirection(const SpawnPlan &plan, const Vector3 &localPoint, uint32_t id, uint32_t index) {
+			Vector3 direction = plan.Emission;
 
 			// A shaped emitter throws outward from its own centre rather than
 			// along a face, which is what makes a sphere an explosion.
-			if (emitter.Shape != ParticleShape::Box) {
+			if (plan.Shape != ParticleShape::Box) {
 				// **Squared, because the question is only whether it is
 				// non-zero.** `Vector3::Unit` already returns `Zero` for a
 				// directionless vector, so this guard is asking "did that
@@ -180,17 +236,17 @@ namespace engine::effects {
 				}
 			}
 
-			if (emitter.ShapeDirection == ParticleShapeDirection::Inward) {
+			if (plan.ShapeDirection == ParticleShapeDirection::Inward) {
 				direction = -direction;
-			} else if (emitter.ShapeDirection == ParticleShapeDirection::InAndOut &&
+			} else if (plan.ShapeDirection == ParticleShapeDirection::InAndOut &&
 					   Unit(SeedOf(id, index, 7)) < 0.5f) {
 				direction = -direction;
 			}
 
 			// The spread is two independent tilts, so a wide flat cone - a
 			// waterfall - is expressible where one angle could only give a circle.
-			const float spreadX = emitter.SpreadAngle.X * RADIANS_PER_DEGREE;
-			const float spreadY = emitter.SpreadAngle.Y * RADIANS_PER_DEGREE;
+			const float spreadX = plan.SpreadX;
+			const float spreadY = plan.SpreadY;
 			if (spreadX != 0.0f || spreadY != 0.0f) {
 				const float tiltX = (Unit(SeedOf(id, index, 8)) * 2.0f - 1.0f) * spreadX;
 				const float tiltY = (Unit(SeedOf(id, index, 9)) * 2.0f - 1.0f) * spreadY;
@@ -720,6 +776,19 @@ namespace engine::effects {
 		// where a scene stops being a handful of effects and starts being the
 		// thing this module was built for.
 		constexpr size_t BLOCK_MINIMUM = 256;
+
+		// The same two numbers for the spawn dispatch, and they are smaller
+		// because a plan is not a block.
+		//
+		// **A plan is one emitter that owes at least one particle**, so at a
+		// steady rate it is a fraction of the emitter count rather than all of
+		// it - `StressParticles.luau` has 5,120 emitters and about 1,700 plans a
+		// tick. The floor is therefore lower than `BLOCK_MINIMUM` or a scene
+		// that genuinely has thousands of births a tick would never dispatch;
+		// the grain is lower because a plan carries a whole birth and a block
+		// often carries none.
+		constexpr size_t SPAWN_GRAIN = 8;
+		constexpr size_t SPAWN_MINIMUM = 64;
 	}
 
 	ParticleStatistics StepParticles(ecs::Store &store, float delta) {
@@ -888,95 +957,169 @@ namespace engine::effects {
 		counted.Blocks = system->Statistics.Blocks;
 		counted.EmittersRefused = system->Statistics.EmittersRefused;
 
-		ENGINE_PROFILE_CAT("particles.spawn", core::ProfileCategory::Simulation);
+		// **Two phases, because what made this serial was the column and not the
+		// work.** Reading `ParticleEmitter` from a worker is what `Store::Each`
+		// makes no promise about; the births themselves touch nothing but their
+		// own block's slice of the pool. So the walk copies what a birth needs
+		// off each row that owes one - see `SpawnPlan` - and the births
+		// dispatch.
+		//
+		// Measured with every rate at zero, the walk alone is 0.145 ms over five
+		// thousand emitters, so phase one is not what this pass costs.
+		static thread_local std::vector<SpawnPlan> plans;
+		plans.clear();
 
-		store.Each<const ParticleEmitter, const EmitterSlot>(
-			[&](ecs::Entity entity, const ParticleEmitter &emitter, const EmitterSlot &slot) {
-				if (slot.Index == NO_SLOT || slot.Index >= blocks.size()) {
-					return;
-				}
-				EmitterBlock &block = blocks[slot.Index];
-				if (block.Capacity == 0 || !emitter.Enabled) {
-					return;
-				}
+		{
+			ENGINE_PROFILE_CAT("particles.plan", core::ProfileCategory::Simulation);
 
-				block.Pending += emitter.Rate * delta * std::max(emitter.TimeScale, 0.0f);
-				auto owed = static_cast<uint32_t>(block.Pending);
-				if (owed == 0) {
-					return;
-				}
-				block.Pending -= static_cast<float>(owed);
-
-				const Vector3 half = HalfExtentOf(store, entity);
-				const uint32_t id = entity.Id;
-
-				// **The emitter's own terms, out of the per-particle loop.**
-				// Each of these depends on the emitter and the block and on
-				// nothing the particle being born carries, so an emitter owing
-				// forty particles computed them forty times. `ParentMotion` is
-				// the one that matters most: it is a store lookup, and it was
-				// one per particle rather than one per emitter.
-				const scene::Motion *inherited =
-					emitter.VelocityInheritance != 0.0f ? ParentMotion(store, entity) : nullptr;
-
-				// A newborn particle is at the head of every curve, so its size
-				// and its colour are the block's first sample and the same for
-				// all of them.
-				const uint32_t bornSize = PackParticleSize(block.Curves.Size[0], block.Curves.Size[0]);
-				const uint32_t bornColour = WithAlpha(block.Curves.Colour[0], block.Curves.Alpha[0]);
-				const auto bornSlot = static_cast<uint16_t>(slot.Index);
-
-				for (uint32_t spawn = 0; spawn < owed; spawn++) {
-					if (block.Live >= block.Capacity) {
-						counted.SpawnsDropped += owed - spawn;
-						break;
+			store.Each<const ParticleEmitter, const EmitterSlot>(
+				[&](ecs::Entity entity, const ParticleEmitter &emitter, const EmitterSlot &slot) {
+					if (slot.Index == NO_SLOT || slot.Index >= blocks.size()) {
+						return;
+					}
+					EmitterBlock &block = blocks[slot.Index];
+					if (block.Capacity == 0 || !emitter.Enabled) {
+						return;
 					}
 
-					const uint32_t row = block.First + block.Live;
-					// **A per-particle index that keeps advancing rather than the
-					// slot number**, because the slot is reused the moment a
-					// particle dies - so seeding from it would make every
-					// replacement particle identical to the one it replaced, and a
-					// steady emitter would settle into a repeating loop of the
-					// same few particles.
-					const uint32_t index = block.Spawned++;
+					// **The accumulator stays here**, on the thread that owns the
+					// world. It is the emitter's own debt and it has to advance
+					// on every tick whether or not it comes due, so it is not
+					// part of what dispatches.
+					block.Pending += emitter.Rate * delta * std::max(emitter.TimeScale, 0.0f);
+					const auto owed = static_cast<uint32_t>(block.Pending);
+					if (owed == 0) {
+						return;
+					}
+					block.Pending -= static_cast<float>(owed);
 
-					const Vector3 local = SpawnPoint(emitter, half, id, index);
-					const Vector3 direction = SpawnDirection(emitter, local, id, index);
-					const float speed = Between(SeedOf(id, index, 10), emitter.Speed);
+					SpawnPlan plan;
+					plan.Block = slot.Index;
+					plan.Id = entity.Id;
+					plan.Owed = owed;
+					plan.Half = HalfExtentOf(store, entity);
 
-					ParticleState &state = states[row];
-					state.Age = 0.0f;
-					state.Lifetime = std::max(Between(SeedOf(id, index, 11), emitter.Lifetime), 1e-4f);
-					state.LocalOffset = local;
-					state.Seed = index;
-					state.Spin = Between(SeedOf(id, index, 13), emitter.RotationSpeed) * TURNS_PER_DEGREE;
-					state.Velocity = block.Frame.VectorToWorldSpace(direction) * speed;
+					plan.Shape = emitter.Shape;
+					plan.ShapeStyle = emitter.ShapeStyle;
+					plan.ShapeDirection = emitter.ShapeDirection;
+					plan.ShapePartial = emitter.ShapePartial;
 
-					// A new particle keeps some of what its parent was doing, so
-					// smoke from a moving vehicle trails behind it rather than
-					// being left in a neat line at the origin of each frame.
-					if (inherited != nullptr) {
-						state.Velocity = state.Velocity + inherited->Linear * emitter.VelocityInheritance;
+					plan.Emission = scene::NormalOf(emitter.EmissionDirection);
+					plan.SpreadX = emitter.SpreadAngle.X * RADIANS_PER_DEGREE;
+					plan.SpreadY = emitter.SpreadAngle.Y * RADIANS_PER_DEGREE;
+
+					plan.Speed = emitter.Speed;
+					plan.Lifetime = emitter.Lifetime;
+					plan.RotationSpeed = emitter.RotationSpeed;
+					plan.Rotation = emitter.Rotation;
+
+					// The one store lookup a birth used to make, made once here
+					// - and it is the reason a worker could not do this at all.
+					if (emitter.VelocityInheritance != 0.0f) {
+						if (const scene::Motion *motion = ParentMotion(store, entity)) {
+							plan.Inherited = motion->Linear * emitter.VelocityInheritance;
+						}
 					}
 
-					ParticleInstance &instance = instances[row];
-					instance.Position = block.Frame.PointToWorldSpace(local);
-					instance.Slot = bornSlot;
-
-					const float degrees = Between(SeedOf(id, index, 12), emitter.Rotation);
-					const auto turns =
-						static_cast<uint32_t>(std::fmod(degrees * TURNS_PER_DEGREE + 1.0f, 1.0f) * 65535.0f);
-					instance.RotationAndCell = turns & 0xFFFFu;
-
-					instance.Size = bornSize;
-					instance.Colour = bornColour;
-
-					block.Live++;
-					counted.Emitted++;
+					plans.push_back(plan);
 				}
-			}
-		);
+			);
+		}
+
+		{
+			ENGINE_PROFILE_CAT("particles.spawn", core::ProfileCategory::Simulation);
+
+			// **The buffer is taken by pointer, and naming it inside the body
+			// would have been a bug.** `plans` is `thread_local`, so a worker
+			// that named it would resolve its *own* copy - which is empty, and
+			// indexing it is a segmentation fault rather than a wrong answer.
+			// Resolved once here, on the thread that filled it.
+			SpawnPlan *const planned = plans.data();
+
+			parallel::Jobs::For(
+				plans.size(),
+				SPAWN_GRAIN,
+				[instances, states, &blocks, planned](size_t begin, size_t end) {
+					for (size_t at = begin; at < end; at++) {
+						SpawnPlan &plan = planned[at];
+						EmitterBlock &block = blocks[plan.Block];
+
+						const uint32_t id = plan.Id;
+						const Vector3 &half = plan.Half;
+
+						// A newborn particle is at the head of every curve, so
+						// its size and its colour are the block's first sample
+						// and the same for all of them.
+						const uint32_t bornSize =
+							PackParticleSize(block.Curves.Size[0], block.Curves.Size[0]);
+						const uint32_t bornColour = WithAlpha(block.Curves.Colour[0], block.Curves.Alpha[0]);
+						const auto bornSlot = static_cast<uint16_t>(plan.Block);
+
+						for (uint32_t spawn = 0; spawn < plan.Owed; spawn++) {
+							if (block.Live >= block.Capacity) {
+								plan.Dropped = plan.Owed - spawn;
+								break;
+							}
+
+							const uint32_t row = block.First + block.Live;
+
+							// **A per-particle index that keeps advancing rather
+							// than the slot number**, because the slot is reused
+							// the moment a particle dies - so seeding from it
+							// would make every replacement particle identical to
+							// the one it replaced, and a steady emitter would
+							// settle into a repeating loop of the same few
+							// particles.
+							const uint32_t index = block.Spawned++;
+
+							const Vector3 local = SpawnPoint(plan, half, id, index);
+							const Vector3 direction = SpawnDirection(plan, local, id, index);
+							const float speed = Between(SeedOf(id, index, 10), plan.Speed);
+
+							ParticleState &state = states[row];
+							state.Age = 0.0f;
+							state.Lifetime = std::max(Between(SeedOf(id, index, 11), plan.Lifetime), 1e-4f);
+							state.LocalOffset = local;
+							state.Seed = index;
+							state.Spin =
+								Between(SeedOf(id, index, 13), plan.RotationSpeed) * TURNS_PER_DEGREE;
+							state.Velocity = block.Frame.VectorToWorldSpace(direction) * speed;
+
+							// A new particle keeps some of what its parent was
+							// doing, so smoke from a moving vehicle trails behind
+							// it rather than being left in a neat line at the
+							// origin of each frame.
+							state.Velocity = state.Velocity + plan.Inherited;
+
+							ParticleInstance &instance = instances[row];
+							instance.Position = block.Frame.PointToWorldSpace(local);
+							instance.Slot = bornSlot;
+
+							const float degrees = Between(SeedOf(id, index, 12), plan.Rotation);
+							const auto turns = static_cast<uint32_t>(
+								std::fmod(degrees * TURNS_PER_DEGREE + 1.0f, 1.0f) * 65535.0f
+							);
+							instance.RotationAndCell = turns & 0xFFFFu;
+
+							instance.Size = bornSize;
+							instance.Colour = bornColour;
+
+							block.Live++;
+						}
+					}
+				},
+				SPAWN_MINIMUM
+			);
+		}
+
+		// Summed after the dispatch rather than during it, which is the reason
+		// the block counters are per block: an atomic incremented once a birth
+		// is a cache line every worker fights over, and the total is the same
+		// number either way.
+		for (const SpawnPlan &plan : plans) {
+			counted.Emitted += plan.Owed - plan.Dropped;
+			counted.SpawnsDropped += plan.Dropped;
+		}
 
 		for (const EmitterBlock &block : blocks) {
 			counted.Live += block.Live;
