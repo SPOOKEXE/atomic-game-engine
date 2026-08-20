@@ -409,7 +409,31 @@ namespace engine::scene {
 		// only when each side's layer is in the other's mask.
 		spatial::LayerMask Mask = spatial::LayerMask::All();
 
-		// Which shape `Extent` describes.
+		// Which baked shape this collides as, for `ShapeKind::Hull` and
+		// `ShapeKind::Mesh`. Invalid, and unread, for the other three.
+		//
+		// **A name and not a handle**, which is the rule `Visual::Mesh` states
+		// and this follows for the same reason: a `server`-tier host writes this
+		// and has no device, a save file has to survive being reopened, and rule
+		// 4 of the root `AGENTS.md` says anything crossing a boundary is
+		// identified by its string. Whoever loads content resolves it once,
+		// into `scene::CollisionShapes`.
+		//
+		// **A name nothing has baked collides as the part's bound**, which is
+		// the fallback `physics` applies and is stated here because it is the
+		// behaviour an author sees. The alternative - a part that silently stops
+		// colliding while a mesh streams in - is a floor that is not there for
+		// two seconds after a level loads.
+		//
+		// **Placed here rather than after `Shape` on purpose.** A `core::Name`
+		// needs four-byte alignment and the three bytes after `Shape` are a
+		// tail; put there it would have cost eight rather than four.
+		//
+		// @since v0.17
+		core::Name Geometry;
+
+		// Which shape `Extent` describes, or which kind of baked geometry
+		// `Geometry` names.
 		ShapeKind Shape = ShapeKind::Box;
 
 		// Whether contacts are reported without being solved. A trigger
@@ -547,16 +571,22 @@ namespace engine::scene {
 		// hidden parts cost a sort.
 		float Transparency = 0.0f;
 
-		// Whether this entity is submitted for drawing at all.
-		bool Visible = true;
-
 		// Which surface texture this entity shows, or -1 for none.
 		//
-		// **Fitted into the padding rather than growing the struct.** There were
-		// three named bytes after `Visible` and there are two now; the type is
-		// the same size it was. See `DrawInstance::Surface` for what the field
-		// means and why it is a mirror feature rather than a general one.
-		int8_t Surface = -1;
+		// **Sixteen bits since v0.17, and it is here rather than below `Visible`
+		// so the row did not grow.** It was an `int8_t` sitting in the named
+		// padding at the tail, which put a ceiling of a hundred and twenty-seven
+		// mirrors in the smallest field in the engine. Widened in place it would
+		// have needed two-byte alignment after a `bool` and cost four bytes;
+		// moved up against `Transparency` it is already aligned, and the two
+		// bytes come out of `Reserved` instead. `sizeof(Visual)` is what it was.
+		//
+		// See `DrawInstance::Surface` for what the field means and why it is a
+		// mirror feature rather than a general one.
+		int16_t Surface = -1;
+
+		// Whether this entity is submitted for drawing at all.
+		bool Visible = true;
 
 		// Whether this entity is drawn into the shadow map.
 		//
@@ -632,16 +662,22 @@ namespace engine::scene {
 		// @since v0.12
 		bool Locked = false;
 
-		// Room for the next four one-byte fields.
+		// Room for the next three one-byte fields.
+		//
+		// **Four until v0.17, and `Surface` took one of them when it widened to
+		// sixteen bits.** The other went to alignment: the field moved up beside
+		// `Transparency` to get its two-byte alignment for free, which shifted
+		// the three `bool`s down one and left three bytes here instead of four.
+		// Same total, and the row is the size it was.
 		//
 		// **Explicit, because padding is never initialised and this component
 		// reaches a snapshot.** `Visual` is registered with a written serialiser
 		// so these bytes do not cross today - they are named anyway, because the
-		// day somebody re-registers this type without one is the day four
+		// day somebody re-registers this type without one is the day three
 		// uninitialised bytes start ending up in a recording and every
 		// comparison of two worlds becomes unreliable. `ecs::WorldTime` learned
 		// that the expensive way and `just determinism` is what catches it.
-		uint8_t Reserved[4] = {};
+		uint8_t Reserved[3] = {};
 	};
 
 	// How much of `Visual` a *viewer* has decided to see through, never the
@@ -1101,6 +1137,17 @@ namespace engine::scene {
 		// @since v0.15
 		float FPS = 120.0f;
 
+		// Which surface index this camera writes.
+		//
+		// One today, and the field exists because the pipeline that replaces
+		// this one will have several - a stage list that had to be rewritten to
+		// add a second mirror would be a stage list that encoded the count.
+		//
+		// Negative is the scene pass's explicit "do not render": a disabled
+		// portal, an edge-on mirror, or a pane the per-world limit did not have
+		// room for this frame all clear their slot this way.
+		int16_t Surface = 0;
+
 		// What the image is put through before a pane shows it.
 		//
 		// **A grade on the way out, not a second render.** The surface pass is
@@ -1111,13 +1158,6 @@ namespace engine::scene {
 		//
 		// @since v0.13
 		SurfaceEffect Effect = SurfaceEffect::None;
-
-		// Which surface index this camera writes.
-		//
-		// One today, and the field exists because the pipeline that replaces
-		// this one will have several - a stage list that had to be rewritten to
-		// add a second mirror would be a stage list that encoded the count.
-		int8_t Surface = 0;
 
 		// Which face of the parent part this camera projects off.
 		//
@@ -1139,15 +1179,18 @@ namespace engine::scene {
 		// copyable and the row stays the size it was.
 		NormalId Face = NormalId::Front;
 
-		// Explicit padding, for the reason every other `Reserved` gives.
+		// **There is no `Reserved` here any more, and that is the reserve having
+		// done its job rather than the rule being dropped.** It held one byte;
+		// `Surface` widening to sixteen bits at v0.17 took it, and the field
+		// moved up above `Effect` so that its two-byte alignment came out of the
+		// order rather than out of a fourth word. The row is twenty bytes with
+		// no hole in it, which is what the reserve existed to guarantee - and
+		// `ecs::AuditComponents` is what will say so the moment that stops being
+		// true.
 		//
-		// **One byte where there were two, because `Effect` took the other.**
-		// That is what a named reserve is for: a byte-wide addition to a
-		// component every mirror in a world carries costs nothing rather than
-		// widening the row by four. `tests/Components.cpp` is what holds the
-		// sum, so the day the reserve runs out is a failing case rather than a
-		// hole full of uninitialised bytes in a snapshot.
-		uint8_t Reserved[1] = {};
+		// The next byte-wide field costs four. That is the honest price and it
+		// is better paid by whoever wants the field than pre-paid here by
+		// widening a row every mirror in a world carries.
 	};
 
 	// Where a surface camera sends the other end of its hole.

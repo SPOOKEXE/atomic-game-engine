@@ -1467,6 +1467,19 @@ namespace engine::scene {
 		return panes.size();
 	}
 
+	int32_t SurfaceLimitOf(const Store &store) {
+		const SurfaceLimit *authored = store.Resource<SurfaceLimit>();
+
+		// **Never below zero, whatever is in the resource.** The property setter
+		// refuses a negative, and a snapshot is hostile input that did not go
+		// through it - a negative here would reach a `size_t` comparison in the
+		// renderer as an enormous positive.
+		if (authored == nullptr) {
+			return DEFAULT_SURFACE_LIMIT;
+		}
+		return authored->Panes > 0 ? authored->Panes : 0;
+	}
+
 	int32_t SurfaceBouncesOf(const Store &store) {
 		const SurfaceBounces *authored = store.Resource<SurfaceBounces>();
 		return authored == nullptr ? AUTOMATIC_SURFACE_BOUNCES : authored->Levels;

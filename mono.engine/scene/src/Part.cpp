@@ -2137,6 +2137,20 @@ namespace engine::scene {
 			// Radius from X, half-height from Y - the axes `InverseInertiaOf`
 			// puts the barrel along.
 			return std::numbers::pi_v<float> * x * x * (2.0f * y);
+
+		case ShapeKind::Hull:
+		case ShapeKind::Mesh:
+			// **The part's bound, not the baked geometry's volume**, and the
+			// difference is deliberate. This module has no edge to `collision`
+			// and should not grow one to weigh a crate: a density times a volume
+			// is what a *part* weighs, `scene::Bounds` is the extent a part is
+			// drawn at, and a hull that is a good fit for its part differs from
+			// that box by a factor a designer will not notice and cannot be
+			// surprised by. A hull that is *not* a good fit for its part is a
+			// scene mistake this would only hide.
+			//
+			// Read as half-extents, exactly as the box case above.
+			return 8.0f * x * y * z;
 		}
 		return 0.0f;
 	}

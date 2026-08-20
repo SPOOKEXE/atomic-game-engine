@@ -97,6 +97,38 @@ namespace engine::physics {
 	// @param first  The collider on the smaller entity id.
 	// @param second The collider on the larger.
 	// @return The contact, or a solution marked not touching.
+	// Whether a shape kind carries baked geometry rather than an extent.
+	//
+	// The one place the two new kinds are named together, so a third one is a
+	// change here rather than a search for every `||`.
+	//
+	// @since v0.17
+	constexpr bool Baked(scene::ShapeKind kind) {
+		return kind == scene::ShapeKind::Hull || kind == scene::ShapeKind::Mesh;
+	}
+
+	// The contact between two shapes at least one of which is baked.
+	//
+	// **The general route, and it is one function rather than seven more arms.**
+	// Adding `Hull` and `Mesh` to the exact table would have cost a pair function
+	// against every existing kind and against each other - and every one of them
+	// would have had to be exact for a shape that is not centrally symmetric,
+	// which is the property the whole axis search rests on. GJK finds the axis
+	// and EPA the depth; `ManifoldBetween` then builds the points out of the same
+	// face clip every other pair uses, so a hull resting on a box gets the
+	// four-point manifold that keeps it still.
+	//
+	// **A mesh is solved triangle by triangle**, because a triangle soup is not
+	// convex and a soup's support point means nothing. Each triangle that the
+	// moving shape's bound reaches is a three-point hull, and the deepest
+	// contacts across them become the manifold.
+	//
+	// @param first  One shape, placed.
+	// @param second The other.
+	// @return The contact, normal pointing from `first` toward `second`.
+	// @since v0.17
+	ContactSolution ConvexContact(const ShapeInstance &first, const ShapeInstance &second);
+
 	ContactSolution ContactBetween(const ShapeInstance &first, const ShapeInstance &second);
 
 	// The six, in `scene::ShapeKind` order. Each obeys the convention above.

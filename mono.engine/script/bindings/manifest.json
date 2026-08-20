@@ -1780,6 +1780,7 @@
 			"properties": [
 				{"name": "CurrentCamera", "type": "Instance", "kind": "resource", "bytes": 8, "writable": true, "reads": ["scene.Camera"], "writes": ["scene.Camera"]},
 				{"name": "Fixture", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "reads": ["scene.Service"], "writes": []},
+				{"name": "MaxSurfaces", "type": "int32", "kind": "resource", "bytes": 4, "writable": true, "reads": ["scene.SurfaceLimit"], "writes": ["scene.SurfaceLimit"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "Scope", "type": "enum", "kind": "computed", "bytes": 4, "writable": true, "enum": "ServiceScope", "reads": ["scene.Service"], "writes": ["scene.Service"]},

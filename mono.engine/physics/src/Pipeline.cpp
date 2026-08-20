@@ -7,6 +7,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/physics/Broadphase.hpp>
 #include <engine/physics/Clock.hpp>
+#include <engine/physics/Continuous.hpp>
 #include <engine/physics/Integrate.hpp>
 #include <engine/physics/NarrowPhase.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
@@ -162,6 +163,14 @@ namespace engine::physics {
 			}
 
 			IntegrateMotion(store);
+
+			// **Between the two, and the order is the whole of why it works.**
+			// After the positions have been stepped, so there is a motion to
+			// sweep; before the index is rebuilt, so the index the sync produces
+			// describes where the bodies actually ended up rather than where the
+			// integrator would have put them. See `Continuous.hpp`.
+			SweepFastBodies(store);
+
 			SyncBroadphase(store);
 		});
 
@@ -198,6 +207,7 @@ namespace engine::physics {
 
 			while (BeginPhysicsStep(store)) {
 				IntegrateMotion(store);
+				SweepFastBodies(store);
 				SyncBroadphase(store);
 				BroadPhase(store);
 				NarrowPhase(store);

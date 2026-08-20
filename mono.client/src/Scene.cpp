@@ -578,7 +578,7 @@ namespace client {
 		// source store and used entirely outside it - `Universe::Enter` is not
 		// re-entrant, and the far world has to be entered to be read.
 		struct Wanted {
-			int8_t Surface = 0;
+			int16_t Surface = 0;
 			engine::core::Name World;
 		};
 
@@ -645,7 +645,7 @@ namespace client {
 		// before anything is cloned because `AppendPortalClones` walks the store
 		// itself, and a walk started inside another walk is a nesting the ECS
 		// does not owe anybody.
-		std::vector<int8_t> returning;
+		std::vector<int16_t> returning;
 
 		for (const Wanted &entry : wanted) {
 			// **The name resolved against the universe, every frame.** A world
@@ -798,7 +798,7 @@ namespace client {
 				// the same rows the copy above read - so what arrives in this
 				// room is the far half of exactly what the far world drew.
 				if (const auto *list = store.Resource<DrawList>()) {
-					for (const int8_t slot : returning) {
+					for (const int16_t slot : returning) {
 						(void)engine::scene::AppendPortalClones(store, slot, list->Instances, drawn);
 					}
 				}
@@ -941,7 +941,7 @@ namespace client {
 				// is the viewpoint error the pass exists to remove. Skipped here
 				// rather than refused in the renderer so the cost of aiming it is
 				// the only thing wasted.
-				const auto claimed = [&](int8_t slot) {
+				const auto claimed = [&](int16_t slot) {
 					for (const engine::render::PortalView &portal : portals) {
 						if (portal.Index == slot) {
 							return true;

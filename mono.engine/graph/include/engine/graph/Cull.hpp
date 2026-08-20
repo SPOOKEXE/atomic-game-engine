@@ -67,7 +67,11 @@ namespace engine::graph {
 
 		// The slot it renders into, matching `scene::DrawInstance::Surface` on
 		// whatever samples it.
-		int8_t Index = 0;
+		//
+		// Sixteen bits since v0.17, because the field it matches is - a world's
+		// pane count is a setting now and `scene::MAX_SURFACES` is a bound on an
+		// allocation rather than a design cap.
+		int16_t Index = 0;
 	};
 
 	// Which surface slots have a pane something can currently see.

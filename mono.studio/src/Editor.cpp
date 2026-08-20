@@ -1970,6 +1970,21 @@ namespace studio {
 											: engine::scene::SurfaceBouncesOf(store);
 				Renderer.SetSurfaceBounces(static_cast<uint32_t>(std::max(bounces, 0)));
 
+				// **And how many panes it draws at once**, which is the other half of
+				// what a hall of mirrors costs: the depth above says how deep a chain
+				// resolves and this says how many chains there are. Read from the
+				// world every frame for the bounce setting's reason - a script may
+				// change it at any time, and once at startup would let the first
+				// world drawn set it for every world after.
+				//
+				// **No session override beside it, deliberately.** `--surface-bounces`
+				// exists because somebody comparing two depths needs the world to stop
+				// arguing; there is no equivalent measurement for the count, and a
+				// flag with no use is a flag that goes stale.
+				Renderer.SetSurfaceLimit(
+					static_cast<uint32_t>(std::max(engine::scene::SurfaceLimitOf(store), 0))
+				);
+
 				// **The shaders this world's materials name, resolved before
 				// the frame that draws with them.** The same block
 				// `client::Client` runs, and the editor needs it more: this is

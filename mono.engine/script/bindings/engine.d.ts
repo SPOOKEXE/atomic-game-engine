@@ -1616,6 +1616,7 @@ declare interface Service extends Instance {
 
 declare interface Workspace extends Service {
 	CurrentCamera: Instance;
+	MaxSurfaces: number;
 	SurfaceBounces: number;
 	Raycast(origin: Vector3, direction: Vector3, params?: RaycastParams): RaycastResult | null;
 }

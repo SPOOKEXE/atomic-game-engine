@@ -291,7 +291,7 @@ namespace engine::scene {
 
 		// Which surface slot the pane samples, from `SurfaceCamera::Surface`.
 		// What lets a caller name one mirror out of several.
-		int8_t Surface = 0;
+		int16_t Surface = 0;
 
 		// Which tags an instance must carry to appear in this pane, or zero for
 		// all of them, from `SurfaceCamera::TagFilter`.
@@ -528,6 +528,73 @@ namespace engine::scene {
 		int32_t Levels = AUTOMATIC_SURFACE_BOUNCES;
 	};
 
+	// How many surface panes a world draws at once when it says nothing.
+	//
+	// **Fifty, and it is a budget rather than a ceiling.** A hall of mirrors is
+	// the scene this number exists for and it does not have a natural size; what
+	// it has is a frame time, and a pane costs a whole render of the world into
+	// a texture. Fifty is what a modern device draws without the frame falling
+	// over, at the sizes `render::SurfaceScale` picks for panes that are not
+	// filling the screen.
+	//
+	// **It was sixteen and it was not a setting**, which is the thing that
+	// changed at v0.17: `MAX_SURFACES` was a compile-time constant and a world
+	// with seventeen mirrors in it simply lost one, with a line in a log nobody
+	// reads. The count is authored now and the constant is a bound on an
+	// allocation.
+	//
+	// @since v0.17
+	inline constexpr int32_t DEFAULT_SURFACE_LIMIT = 50;
+
+	// How many surface panes this world draws at once.
+	//
+	// **A resource, for `SurfaceBounces`' reason exactly**: the number is a fact
+	// about what the scene is made of rather than about the process drawing it.
+	// A corridor of facing panes and a room with one mirror in it want different
+	// answers, and which of those a world *is* is not something a session picks.
+	//
+	// **It is a budget and the frame keeps the best of them.** When more panes
+	// are visible than the limit allows, the ones kept are the ones covering the
+	// most of the screen - see `client::CollectSurfaceViews`. That is a
+	// deliberate choice of failure: a mirror across the room going flat is a
+	// thing a player does not look at, and refusing to draw the seventeenth pane
+	// in scene order is a mirror that works or not depending on what order the
+	// level was built in.
+	//
+	// **Zero means no surfaces at all**, which is a legitimate thing to ask for
+	// - a low-detail mode, or a headless host that renders nothing - and is not
+	// the same as the automatic that `SurfaceBounces` has. There is nothing to
+	// measure here: the count is what the scene has, not what the frame found.
+	//
+	// **A script reaches it as `workspace.MaxSurfaces`**, which is
+	// `workspace.SurfaceBounces`' arrangement: the resource is the storage and
+	// the property is the only way in, so there is no second place the number
+	// lives.
+	//
+	// @since v0.17
+	struct SurfaceLimit {
+		// Panes drawn at once, from zero upward.
+		//
+		// **Clamped by whoever draws rather than here**, matching
+		// `SurfaceBounces::Levels`: the ceiling is how many slots the renderer
+		// has storage for, and this module sits five tiers below it. A world may
+		// state a number the device will not give it, and the frame is drawn at
+		// what it can rather than refused.
+		int32_t Panes = DEFAULT_SURFACE_LIMIT;
+	};
+
+	// The world's authored pane budget, or `DEFAULT_SURFACE_LIMIT`.
+	//
+	// **A free function rather than the resource at each call site**, for
+	// `SurfaceBouncesOf`'s reason: "no resource" and "the default" have to be
+	// one answer, and a caller that forgot the null check would draw no mirrors
+	// at all in every world that never set it.
+	//
+	// @param store The world.
+	// @return What it asked for, never below zero.
+	// @since v0.17
+	int32_t SurfaceLimitOf(const ecs::Store &store);
+
 	// The world's authored depth, or `AUTOMATIC_SURFACE_BOUNCES`.
 	//
 	// **A free function rather than the resource at each call site**, for
@@ -677,7 +744,7 @@ namespace engine::scene {
 
 		// Which surface slot the pane samples, from `SurfaceCamera::Surface`.
 		// What lets a host name one portal out of several.
-		int8_t Surface = 0;
+		int16_t Surface = 0;
 
 		// Whether this portal names another world.
 		//

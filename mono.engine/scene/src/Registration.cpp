@@ -4,6 +4,7 @@
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Audio.hpp>
 #include <engine/scene/Characters.hpp>
+#include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/EditableImage.hpp>
@@ -804,6 +805,20 @@ namespace engine::scene {
 		// aborting outright once the table is sealed.
 		ecs::Components::Register<SurfaceTable>("scene.SurfaceTable", WriteSurfaceTables, ReadSurfaceTables);
 		ecs::Components::Register<TagTable>("scene.TagTable", WriteTagTables, ReadTagTables);
+
+		// **The baked collision shapes, and they do not cross.** Registered with
+		// no writer at all, which is `PhysicsWorld`'s decision for its grids and
+		// holds here for a sharper version of the same reason: a hull is derived
+		// from content the receiving side already has, so putting it on the wire
+		// is sending a conclusion instead of its input - and the conclusion is
+		// the half an attacker gets to choose. A shape with a bound that does not
+		// match its points is a collider that stops things it is not touching.
+		//
+		// It is registered rather than left to be minted by the first
+		// `SetResource`, for the reason this block opens with: an unregistered
+		// resource takes the compiler's spelling of its type and aborts once the
+		// table is sealed.
+		ecs::Components::Register<CollisionShapes>("scene.CollisionShapes");
 		ecs::Components::Register<ActiveCamera>("scene.ActiveCamera");
 
 		// **`InputState` crosses and `CameraController` crosses**, which is worth
@@ -958,6 +973,11 @@ namespace engine::scene {
 		// an explicit name arrives keeps the compiler's spelling and aborts when
 		// the real one turns up. Appended, for this list's standing reason.
 		ecs::Components::Register<SurfaceBounces>("scene.SurfaceBounces");
+
+		// `workspace.MaxSurfaces`, beside the depth and for the same reason: a
+		// declared property has to resolve a component id, and a resource is
+		// keyed by one like anything else.
+		ecs::Components::Register<SurfaceLimit>("scene.SurfaceLimit");
 
 		// **The three the team pipeline added, appended for this list's
 		// standing reason**: a component id is registration order, an archetype

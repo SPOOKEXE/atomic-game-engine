@@ -96,13 +96,19 @@ TEST_CASE("no component carries unnamed padding", "[scene][components]") {
 	//
 	// **`Effect` widened nothing**, and that is the point of a named reserve: a
 	// byte-wide addition to a component every mirror carries came out of the two
-	// spare bytes rather than out of a fourth word. One is left, and the day it
-	// runs out this case fails rather than a hole appearing in a snapshot.
+	// spare bytes rather than out of a fourth word. One was left after it.
+	//
+	// **`Surface` widening to sixteen bits at v0.17 took that last byte, and the
+	// row did not grow.** The field moved up above `Effect` so its two-byte
+	// alignment came from the member order rather than from a fourth word, which
+	// is why the sum below is the same twenty it was. There is no `Reserved` any
+	// more because there is no padding to name - `AuditComponents` in
+	// `tests/Registration.cpp` is what proves that rather than this line, and it
+	// is what fails if a byte-wide field is appended without paying for it.
 	CHECK(
 		sizeof(SurfaceCamera) == 2 * sizeof(uint16_t) + 2 * sizeof(float) + sizeof(uint32_t) +
-									 sizeof(int8_t) + sizeof(NormalId) + sizeof(SurfaceEffect) + 1
+									 sizeof(int16_t) + sizeof(NormalId) + sizeof(SurfaceEffect)
 	);
-	CHECK(offsetof(SurfaceCamera, Reserved) + sizeof(SurfaceCamera::Reserved) == sizeof(SurfaceCamera));
 
 	// **A portal is a handle, a world, an activation byte and a reserve.** Which
 	// part the hole leads to decides where the camera stands; which world decides
@@ -133,14 +139,19 @@ TEST_CASE("no component carries unnamed padding", "[scene][components]") {
 	CHECK(sizeof(SurfaceEffect) == sizeof(uint8_t));
 
 	CHECK(sizeof(RigidBody) == 3 * sizeof(float) + sizeof(BodyKind) + 3);
+	// **`Geometry` widened this by exactly its own four bytes at v0.17**, and
+	// could not have been paid for out of the reserve: a `core::Name` needs
+	// four-byte alignment and the reserve is a two-byte tail after a pair of
+	// one-byte fields. Placed before `Shape` rather than after it, so the cost
+	// is four and not eight.
 	CHECK(
-		sizeof(Collider) ==
-		sizeof(Vector3) + 2 * sizeof(LayerMask) + sizeof(ShapeKind) + sizeof(bool) + sizeof(uint16_t)
+		sizeof(Collider) == sizeof(Vector3) + 2 * sizeof(LayerMask) + sizeof(Name) + sizeof(ShapeKind) +
+								sizeof(bool) + sizeof(uint16_t)
 	);
 	// **Three fields added since v0.6, and only one of them widened the
 	// struct.** `Transparency` is a float and needed four-byte alignment, so it
 	// could not live in the three named bytes after `Visible` and the row got
-	// wider. `Surface` is an `int8_t` and `CastShadow` is a `bool`, so each took
+	// wider. `Surface` is an `int16_t` since v0.17 and `CastShadow` is a `bool`, so each took
 	// one of those bytes and cost nothing - which is what named padding is
 	// *for*, and what this check is here to keep honest. One byte is left.
 	//
@@ -162,8 +173,8 @@ TEST_CASE("no component carries unnamed padding", "[scene][components]") {
 	// purpose. This line is what makes the *next* growth visible in a diff
 	// rather than discovered in a profile.
 	CHECK(
-		sizeof(Visual) == sizeof(Color3) + 2 * sizeof(Name) + sizeof(float) + sizeof(bool) + sizeof(int8_t) +
-							  sizeof(bool) + sizeof(bool) + sizeof(Visual::Reserved)
+		sizeof(Visual) == sizeof(Color3) + 2 * sizeof(Name) + sizeof(float) + sizeof(int16_t) +
+							  3 * sizeof(bool) + sizeof(Visual::Reserved)
 	);
 
 	CHECK(sizeof(Rendered) == sizeof(uint8_t) + 3);

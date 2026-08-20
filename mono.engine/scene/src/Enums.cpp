@@ -24,6 +24,10 @@ namespace engine::scene {
 			return "sphere";
 		case ShapeKind::Cylinder:
 			return "cylinder";
+		case ShapeKind::Hull:
+			return "hull";
+		case ShapeKind::Mesh:
+			return "mesh";
 		}
 		return "?";
 	}

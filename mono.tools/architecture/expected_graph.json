@@ -110,6 +110,7 @@
         "assets",
         "audio",
         "bakegraph",
+        "collision",
         "core",
         "delivery",
         "ecs",
@@ -133,6 +134,12 @@
         "world"
       ],
       "requires": "MONO_BUILD_CLIENT"
+    },
+    "collision": {
+      "tier": "shared",
+      "links": [
+        "core"
+      ]
     },
     "control": {
       "tier": "shared",
@@ -171,6 +178,7 @@
     "effects": {
       "tier": "shared",
       "links": [
+        "collision",
         "core",
         "ecs",
         "parallel",
@@ -181,6 +189,7 @@
     "examples": {
       "tier": "shared",
       "links": [
+        "collision",
         "core",
         "ecs",
         "gui",
@@ -196,6 +205,7 @@
       "tier": "shared",
       "links": [
         "bakegraph",
+        "collision",
         "core",
         "ecs",
         "graph",
@@ -211,6 +221,7 @@
     "graph": {
       "tier": "shared",
       "links": [
+        "collision",
         "core",
         "ecs",
         "parallel",
@@ -229,6 +240,7 @@
     "input": {
       "tier": "client",
       "links": [
+        "collision",
         "core",
         "ecs",
         "parallel",
@@ -248,6 +260,7 @@
       "links": [
         "assets",
         "bakegraph",
+        "collision",
         "core",
         "ecs",
         "game",
@@ -290,6 +303,7 @@
     "physics": {
       "tier": "shared",
       "links": [
+        "collision",
         "core",
         "ecs",
         "parallel",
@@ -301,6 +315,7 @@
       "tier": "client",
       "links": [
         "assets",
+        "collision",
         "core",
         "ecs",
         "effects",
@@ -335,6 +350,7 @@
     "scene": {
       "tier": "shared",
       "links": [
+        "collision",
         "core",
         "ecs",
         "parallel",
@@ -344,6 +360,7 @@
     "script": {
       "tier": "shared",
       "links": [
+        "collision",
         "core",
         "ecs",
         "gui",
@@ -360,6 +377,7 @@
         "assets",
         "bakegraph",
         "cdn",
+        "collision",
         "control",
         "core",
         "delivery",
@@ -400,6 +418,7 @@
         "bakegraph",
         "cdn",
         "client",
+        "collision",
         "control",
         "core",
         "delivery",
@@ -437,6 +456,7 @@
       "tier": "client",
       "links": [
         "assets",
+        "collision",
         "core",
         "ecs",
         "effects",
@@ -459,6 +479,7 @@
         "bakegraph",
         "cdn",
         "client",
+        "collision",
         "control",
         "core",
         "delivery",
@@ -514,6 +535,7 @@
         "audio",
         "bakegraph",
         "cdn",
+        "collision",
         "core",
         "delivery",
         "ecs",
@@ -544,6 +566,7 @@
         "assets",
         "bakegraph",
         "cdn",
+        "collision",
         "control",
         "core",
         "delivery",
@@ -574,6 +597,7 @@
         "bakegraph",
         "cdn",
         "client",
+        "collision",
         "control",
         "core",
         "delivery",
@@ -609,6 +633,7 @@
         "bakegraph",
         "cdn",
         "client",
+        "collision",
         "control",
         "core",
         "delivery",

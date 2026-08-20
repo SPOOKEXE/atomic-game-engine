@@ -565,6 +565,54 @@ namespace engine::scene {
 			return property;
 		}
 
+		// `workspace.MaxSurfaces`: how many surface panes this world draws at
+		// once, over the `SurfaceLimit` resource.
+		//
+		// **`SurfaceBouncesProperty`'s exact shape, and the two are a pair.**
+		// Bounces is how *deep* a chain of mirrors goes and this is how *many*
+		// panes are drawn at all; a world with a hall of mirrors in it turns
+		// both, and a world with one mirror turns neither.
+		//
+		// **On `Workspace` because it is a statement about the scene**, which is
+		// the argument the depth property makes at length one function up. The
+		// count of mirrors a world has is not something a session picks.
+		PropertyDescriptor MaxSurfacesProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("MaxSurfaces");
+			property.Type = PropertyType::Int32;
+			property.Size = sizeof(int32_t);
+			property.Kind = PropertyKind::Resource;
+
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<SurfaceLimit>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity, void *out) -> bool {
+				*static_cast<int32_t *>(out) = SurfaceLimitOf(store);
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity, const void *value) -> bool {
+				// **A negative is refused rather than clamped**, which is
+				// `SurfaceBounces`' rule and holds for the same reason: too
+				// large is a world asking for more than the device will
+				// allocate, which is drawn at what it can, and below zero is a
+				// world asking for something the word does not mean.
+				//
+				// **Zero is allowed and means none.** A world that wants its
+				// mirrors off has to be able to say so, and that is a different
+				// statement from "use the default".
+				const auto panes = *static_cast<const int32_t *>(value);
+				if (panes < 0) {
+					return false;
+				}
+
+				store.SetResource(SurfaceLimit{panes});
+				return true;
+			};
+
+			return property;
+		}
+
 		// **`Lighting`'s reach, and `SurfaceBouncesProperty`'s exact shape** -
 		// `scene::PostProcessing` is a resource for `ActiveCamera`'s reason,
 		// so `instance` is unread here too.
@@ -703,6 +751,7 @@ namespace engine::scene {
 			const ClassId workspace = Classes::Find(core::Name("Workspace"));
 			Classes::Computed(workspace, CurrentCameraProperty());
 			Classes::Computed(workspace, SurfaceBouncesProperty());
+			Classes::Computed(workspace, MaxSurfacesProperty());
 
 			const ClassId players = Classes::Find(core::Name("Players"));
 			Classes::Computed(players, LocalPlayerProperty());

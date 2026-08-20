@@ -11,34 +11,36 @@
 --
 -- ## The answer, up front, because it is the finding rather than a caveat
 --
--- **`scene::MAX_SURFACES` is sixteen.** A surface slot owns a ping-ponged
--- texture pair, `AimSurfaceCameras` hands them out in walk order, and a camera
--- that does not get one is aimed and renders nothing - its pane falls through to
--- the plain lit slab `opaque.frag` draws outside the projected rectangle. So a
--- ball of three hundred and twenty facets does not give three hundred and
--- twenty reflections however it is authored; sixteen of them reflect and the
--- rest are plain.
+-- **The number of mirrors is the world's, and it is `workspace.MaxSurfaces`.**
+-- A surface slot owns a ping-ponged texture pair and a whole render of the world
+-- into it, so the count is a budget rather than a free parameter - and until
+-- v0.17 it was not a parameter at all: `scene::MAX_SURFACES` was compiled in at
+-- sixteen and a scene with seventeen mirrors quietly lost one. The budget
+-- defaults to fifty now, this scene states its own below, and
+-- `scene::MAX_SURFACES` is a bound on an allocation rather than a design cap.
 --
 -- **Every facet asks anyway, and that is the stress.** A mirror ball is a ball
--- whose surface is mirror, not a ball with sixteen mirrors on it, so this scene
--- puts a `SurfaceCamera` on all of them and lets the ceiling do the refusing.
--- At the default three hundred and twenty facets, three hundred and four of
--- them are gathered, placed and reflected every frame and reach no screen at
--- all: that is the cost of a limit nobody can see, and this is the scene to
--- re-run if `MAX_SURFACES` is ever raised. `MIRROR_LIMIT` caps it at a number
+-- whose surface is mirror, not a ball with fifty mirrors on it, so this scene
+-- puts a `SurfaceCamera` on all three hundred and twenty and lets the budget do
+-- the refusing. The rest are gathered, placed and reflected every frame and
+-- reach no screen: that is the cost of asking for more panes than are drawn, and
+-- it is the reading this scene exists to produce. `MIRROR_LIMIT` caps the asking
 -- for the cheap version.
 --
--- **What that looks like is one dark patch, and the patch is the feature
--- working.** Slots are handed out in walk order, so the sixteen that resolve
--- are sixteen *adjacent* facets rather than sixteen spread over the ball - and
--- what they reflect, pointing up and out of a room with a black sky over it, is
--- black. So the ball reads as a mirror ball with a hole in one shoulder, and
--- the hole is the only part of it that is actually reflecting anything. Set
--- `MIRROR_LIMIT = 1` to see the ball underneath with nothing reflecting at all.
+-- **What that looks like changed at v0.17, and the change is the feature.**
+-- Slots used to be spent in walk order, so the sixteen that resolved were
+-- sixteen *adjacent* facets - the ball read as a mirror ball with one bright
+-- patch on it, wherever the walk happened to start, and turning the ball did not
+-- move the patch. The budget is spent on the panes covering the most screen now,
+-- so the facets that reflect are the ones pointing at the viewer and the patch
+-- follows the camera. That is the whole argument for ranking by coverage rather
+-- than by list order: a scene author cannot see walk order and can see where
+-- they are standing.
 --
--- The clustering is the ceiling's rather than this scene's: with a camera on
--- every facet there is no order this file can author that changes which sixteen
--- the walk reaches first.
+-- Set `MIRROR_LIMIT = 1` to see the ball underneath with nothing reflecting at
+-- all, or raise `workspace.MaxSurfaces` to watch the frame time climb - a pane
+-- is a whole scene render, so the curve is linear in the budget and this is the
+-- scene to read it off.
 --
 -- ## The ball is filled, not tiled
 --
@@ -56,18 +58,23 @@
 --
 -- ## Why the depth is stated
 --
+-- `workspace.SurfaceBounces = 1
+
 -- `workspace.SurfaceBounces = 1`, and without it this scene is a hang rather
 -- than a slow frame. Left alone the renderer measures the depth it reached and
 -- goes one level deeper next frame while any pane at the bottom still had
 -- somewhere to descend into - and on a ball *every* pane can see most of the
 -- others, so it says yes at every level and climbs to `MAX_SURFACE_DEPTH`. The
 -- cost of a level multiplies rather than adds: `Renderer.cpp` states it as
--- `panes x (panes - 1) ^ (levels - 1)`, which at sixteen panes is 16 passes at
--- one level, 240 at two and **3,600** at three.
+-- `panes x (panes - 1) ^ (levels - 1)`, which at the thirty-two panes this scene
+-- budgets for is 32 passes at one level, 992 at two and **30,752** at three.
 --
 -- One level is a mirror ball that reflects the room. Two is a mirror ball that
--- reflects the room and the other facets, at fifteen times the cost. Both are
+-- reflects the room and the other facets, at thirty-one times the cost. Both are
 -- worth looking at and only one of them is a default.
+--
+-- **`MaxSurfaces` and `SurfaceBounces` multiply**, which is why both are stated
+-- here and why raising one means re-reading the other.
 --
 -- ## Run it
 --
@@ -103,18 +110,22 @@ local SUBDIVISIONS = 2
 local RADIUS = 12
 
 -- How many facets get a camera. **Zero means every one of them**, which is what
--- this scene is for: a ball of mirrors asks for a camera per facet and the
--- engine can hand out sixteen slots, so every other camera is gathered, placed
--- and reflected every frame and reaches no screen. That is the cost of a
--- ceiling nobody can see, and it is the reading this scene exists to produce.
+-- this scene is for: a ball of mirrors asks for a camera per facet and the world
+-- draws `workspace.MaxSurfaces` of them, so every other camera is gathered,
+-- placed and reflected every frame and reaches no screen. That is the cost of
+-- asking for more panes than are drawn, and it is the reading this scene exists
+-- to produce.
 --
--- Set it to `16` for the cheap version, which is a ball whose every mirror
--- actually resolves and whose remaining facets are plain tiles.
+-- Set it to the same number as `MaxSurfaces` below for the cheap version, which
+-- is a ball whose every camera actually resolves and whose remaining facets are
+-- plain tiles.
 local MIRROR_LIMIT = 0
 
 -- The texture each mirror renders into. Square, because a facet is as tall as
--- it is wide, and 512 rather than 1024 because sixteen ping-ponged pairs at
--- 1024 is 64 MB of target for one ball.
+-- it is wide, and 512 rather than 1024 because a ping-ponged pair at 1024 is
+-- 4 MB of target and this scene asks for dozens of them at once. The renderer
+-- scales each one down further by how much of the screen its pane covers, so
+-- this is a ceiling rather than the size most of them get.
 local SURFACE_SIZE = Vector3.new(512, 512, 0)
 
 -- How high the ball hangs, measured to its centre, and how fast it turns.
@@ -127,6 +138,18 @@ local RunService = game:GetService("RunService")
 -- shape there is for the automatic rule: every pane can see most of the others,
 -- so the measurement says "deeper" at every level and the passes multiply.
 workspace.SurfaceBounces = 1
+
+-- **How many of the three hundred and twenty facets actually reflect.** Stated
+-- rather than left at `scene::DEFAULT_SURFACE_LIMIT` because this is the scene
+-- the number exists to be read off: a pane is a whole render of the world into a
+-- texture, so the frame time is linear in this and a ball is the scene that
+-- makes that visible. Thirty-two is a frame a machine draws while still showing
+-- the effect; the default of fifty is fine on a desktop and the interesting
+-- experiment is turning it up until it is not.
+--
+-- The budget is spent on the facets covering the most screen, so the ones that
+-- reflect are the ones facing the viewer however the ball is turned.
+workspace.MaxSurfaces = 32
 
 -- --- the ico-sphere ----------------------------------------------------------
 --
@@ -342,8 +365,8 @@ local tiles: { Tile } = {}
 
 -- Which facets get a camera, spread rather than taken from the front of the
 -- list. Subdivision emits a base triangle's four children together, so the
--- first sixteen faces of a subdivided ball are all children of the same few
--- base triangles - every mirror on one cap and the rest of the ball plain.
+-- first few faces of a subdivided ball are all children of the same few base
+-- triangles - every camera on one cap and the rest of the ball plain.
 --
 -- At the default `MIRROR_LIMIT` of zero this is every face and the stride is
 -- one; the spread only matters for the cheap version.
