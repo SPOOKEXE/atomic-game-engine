@@ -1,0 +1,208 @@
+# Builds the `release` preset on every platform and, for a v* tag, publishes
+# what it built.
+#
+# One file rather than a CI workflow and a release workflow, because the two
+# would differ only in their last job and the build half is the expensive half -
+# splitting it means either duplicating sixty lines or reaching for a reusable
+# workflow to avoid duplicating them. See docs/RELEASING.md.
+#
+# Deliberately not on pull_request. A full build from a cold clone is close to
+# an hour on a hosted runner - shaderc, SDL, Luau, QuickJS and Crypto++ all
+# compile from source - and `.githooks/pre-push` already builds the `ci` preset
+# before anything leaves a contributor's machine. Cheap checks belong in a
+# separate workflow that does not configure a client.
+
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+  workflow_dispatch:
+
+# A tag and the branch push that preceded it are different refs, so a tag build
+# is never cancelled by this.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # One place decides what the artifacts are called, so a mismatch between the
+  # tag and the version compiled into the binaries is caught before an hour of
+  # build time rather than after it.
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.pick.outputs.version }}
+      release: ${{ steps.pick.outputs.release }}
+      prerelease: ${{ steps.pick.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: pick
+        run: |
+          set -euo pipefail
+
+          # The declared version, from the one place it is declared. The
+          # `cmake_minimum_required(VERSION 3.24)` line does not match: this
+          # anchors VERSION to the start of the line, and that one has a
+          # function name in front of it.
+          declared=$(sed -nE 's/^[[:space:]]*VERSION[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' CMakeLists.txt | head -1)
+          if [ -z "$declared" ]; then
+            echo "no project(VERSION x.y.z) found in CMakeLists.txt" >&2
+            exit 1
+          fi
+
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            tagged=${GITHUB_REF_NAME#v}
+            if [ "$tagged" != "$declared" ]; then
+              echo "tag ${GITHUB_REF_NAME} does not match CMakeLists.txt, which says $declared." >&2
+              echo "  Bump project(VERSION) in the same commit the tag points at." >&2
+              exit 1
+            fi
+            version=$declared
+            release=true
+          else
+            # Not a release, and the name says so rather than colliding with
+            # the tagged artifact of the same version.
+            version="$declared+$(git rev-parse --short HEAD)"
+            release=false
+          fi
+
+          # Everything before 1.0.0 is a pre-release and GitHub should say so.
+          case $version in
+            0.*) prerelease=true ;;
+            *)   prerelease=false ;;
+          esac
+
+          echo "version=$version"       >> "$GITHUB_OUTPUT"
+          echo "release=$release"       >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "building $version (release=$release)"
+
+  build:
+    needs: version
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    # Linux is the platform this engine is developed on and its failure is a
+    # real failure. Windows compiles but has never shipped, and macOS has never
+    # been run at all - CMakeLists.txt warns as much when it configures. Neither
+    # gets to hold up a Linux release; both upload what they manage to build.
+    continue-on-error: ${{ matrix.optional }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x86_64
+            runner: ubuntu-24.04
+            optional: false
+          - platform: windows-x86_64
+            runner: windows-2022
+            optional: true
+          - platform: macos-arm64
+            runner: macos-14
+            optional: true
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      # shaderc pins glslang, SPIRV-Tools and SPIRV-Headers in its own DEPS file
+      # rather than as submodules, so the checkout above leaves its third_party/
+      # empty and the client configure stops in MonoVendor.cmake. Same step
+      # `just setup` runs, and for the same reason.
+      # `python3` is not a name that resolves on a Windows runner - the shim of
+      # that name is the Microsoft Store stub, which exits without doing
+      # anything and leaves third_party/ empty exactly as if the step had been
+      # skipped. `python` is the interpreter the runner image installs.
+      - name: Fetch shaderc dependencies
+        if: runner.os != 'Windows'
+        run: python3 mono.vendor/shaderc/utils/git-sync-deps
+
+      - name: Fetch shaderc dependencies
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: python mono.vendor\shaderc\utils\git-sync-deps
+
+      # SDL picks its backends at configure time from what it finds. A runner
+      # without these produces a client that builds and then opens no window,
+      # which is a failure a long way from its cause.
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
+            libxfixes-dev libxss-dev libxkbcommon-dev \
+            libwayland-dev wayland-protocols libdecor-0-dev \
+            libasound2-dev libpulse-dev libudev-dev libdbus-1-dev libibus-1.0-dev
+
+      - name: Install macOS dependencies
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
+      - name: Build
+        if: runner.os != 'Windows'
+        run: |
+          cmake --preset release
+          cmake --build --preset release
+
+      # The repository's own Windows entry point rather than a marketplace
+      # action that sets the same variables. Every preset generates for Ninja,
+      # Ninja has no per-command environment, and MSVC reads its include and
+      # library paths from INCLUDE and LIB - so the build needs vcvars64 to have
+      # run in the same shell. scripts/build-windows.bat finds Visual Studio and
+      # runs it, which is the path a contributor on Windows already uses.
+      - name: Build
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          set PRESET=release
+          scripts\build-windows.bat
+
+      - name: Package
+        shell: bash
+        run: scripts/package-release.sh .cache/build/release "${{ needs.version.outputs.version }}" "${{ matrix.platform }}" dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.platform }}
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    needs: [version, build]
+    if: needs.version.outputs.release == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      # Whatever the platforms managed to produce. `build` is allowed to fail on
+      # Windows and macOS, so this runs on their partial results rather than
+      # waiting for a green that a two-platform-unproven engine cannot give yet.
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: dist-*
+          merge-multiple: true
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ls -la dist
+          gh release create "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "${GITHUB_REF_NAME}" \
+            --verify-tag \
+            --generate-notes \
+            ${{ needs.version.outputs.prerelease == 'true' && '--prerelease' || '' }} \
+            dist/*
