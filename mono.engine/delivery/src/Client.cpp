@@ -557,18 +557,29 @@ namespace engine::delivery {
 			}
 
 			void DriveBundles() {
-				size_t active = 0;
+				// **What the cap counts is bundles admitted this pump, not
+				// sockets open.** A local store has no wire: `Start` reads it,
+				// verifies every member and writes them to the cache before it
+				// returns, and it used to report that as "nothing in flight" - so
+				// `active` never moved and the cap never bit. Every queued bundle
+				// was therefore read, hashed and cached in one pump, which on a
+				// `dir:` source is the whole working set in the frame that
+				// noticed it. That is the freeze a game shows while its meshes
+				// load, and it is the reason this counts work rather than
+				// sockets.
+				size_t admitted = 0;
 				for (BundleJob &job : Jobs) {
 					if (job.Active) {
-						++active;
+						++admitted;
 					}
 				}
 
 				for (BundleJob &job : Jobs) {
-					if (!job.Active && active < MAXIMUM_BUNDLES_IN_FLIGHT) {
-						if (Start(job)) {
-							++active;
-						}
+					if (job.Active || admitted >= MAXIMUM_BUNDLES_IN_FLIGHT) {
+						continue;
+					}
+					if (Start(job) != StartOutcome::Idle) {
+						++admitted;
 					}
 				}
 				Transfer->Pump();
@@ -585,8 +596,27 @@ namespace engine::delivery {
 				}
 			}
 
-			// @return Whether a fetch is now in flight for this job.
-			bool Start(BundleJob &job) {
+			// What one attempt to start a bundle job actually did.
+			//
+			// `Fetching` and `Completed` both count against
+			// `MAXIMUM_BUNDLES_IN_FLIGHT`, because both spent this pump's
+			// allowance - one on a socket and one on a synchronous read of the
+			// whole bundle. Only `Idle` is free.
+			enum class StartOutcome {
+				// A wire fetch is in flight and will be picked up by `Advance`.
+				Fetching,
+
+				// A local store answered inside this call: the bundle is already
+				// read, verified, cached and split.
+				Completed,
+
+				// Nothing happened - the transfer client is full, or every source
+				// has been walked and the job abandoned.
+				Idle,
+			};
+
+			// @return What the attempt did. See `StartOutcome`.
+			StartOutcome Start(BundleJob &job) {
 				while (job.SourceIndex < Sources.size()) {
 					Resolved &source = Sources[job.SourceIndex];
 
@@ -603,7 +633,7 @@ namespace engine::delivery {
 								Tally.ExpandedBytes += payload->size();
 								++Tally.Bundles;
 								Split(*bundle, *payload);
-								return false;
+								return StartOutcome::Completed;
 							}
 						}
 						++Tally.SourceFailures;
@@ -626,15 +656,15 @@ namespace engine::delivery {
 					job.Fetch = source.Fetcher->Submit(source.Address, request, source.Host);
 					if (job.Fetch.IsValid()) {
 						job.Active = true;
-						return true;
+						return StartOutcome::Fetching;
 					}
 					// The transfer client is full. Left for the next pump
 					// rather than skipping the source, which would burn a
 					// perfectly good origin because this end was busy.
-					return false;
+					return StartOutcome::Idle;
 				}
 				Abandon(job.Bundle);
-				return false;
+				return StartOutcome::Idle;
 			}
 
 			// @return Whether the job is finished and should be dropped.

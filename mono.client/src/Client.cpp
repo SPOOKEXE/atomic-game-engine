@@ -438,6 +438,16 @@ namespace client {
 			return;
 		}
 
+		// **Named in pieces rather than as one bar, because "content costs
+		// 3 seconds" is not an answer.** The three things under here are a
+		// delivery client resolving and verifying bundles, a demand scan over
+		// the worlds, and a decode-and-upload of whatever finished - and they
+		// stall for entirely different reasons. The whole of this used to have
+		// no span at all, so the frame a game finished loading in read as a
+		// three-second hole between `pump events` and `simulation`, which is
+		// exactly the shape a missing span has and exactly how it was reported.
+		ENGINE_PROFILE_CAT("content", engine::core::ProfileCategory::Assets);
+
 		if (!ContentRequested && Content->Ready()) {
 			ContentRequested = true;
 
@@ -467,11 +477,15 @@ namespace client {
 		// collected and everything already asked for is dropped. What survives is
 		// almost always nothing.
 		if (ContentRequested) {
+			ENGINE_PROFILE_CAT("content.demand", engine::core::ProfileCategory::Assets);
 			RequestWantedContent();
 		}
 
-		// Apply completions between frames, outside render passes.
-		Content->Pump();
+		{
+			// Apply completions between frames, outside render passes.
+			ENGINE_PROFILE_CAT("content.deliver", engine::core::ProfileCategory::Assets);
+			Content->Pump();
+		}
 
 		// **How much decoding and uploading one frame will do**, and the same
 		// allowance the studio's own intake uses for the same reason: content
@@ -481,6 +495,8 @@ namespace client {
 		// it is bytes rather than a count and why the first arrival is always
 		// admitted.
 		ContentBudget.Begin();
+
+		ENGINE_PROFILE_CAT("content.intake", engine::core::ProfileCategory::Assets);
 
 		size_t kept = 0;
 		for (const engine::delivery::RequestId id : ContentPending) {
@@ -529,9 +545,12 @@ namespace client {
 
 			if (asset->Kind == engine::assets::AssetKind::Mesh) {
 				engine::assets::MeshData mesh;
-				if (!engine::assets::Mesh::Read(reader, mesh)) {
-					ENGINE_WARN("content: {} is not a mesh this engine reads", asset->Name);
-					continue;
+				{
+					ENGINE_PROFILE_CAT("mesh decode", engine::core::ProfileCategory::Assets);
+					if (!engine::assets::Mesh::Read(reader, mesh)) {
+						ENGINE_WARN("content: {} is not a mesh this engine reads", asset->Name);
+						continue;
+					}
 				}
 				// **A mesh's own sheets, asked for at the one point their names
 				// are readable.** `Submesh::Texture` lives in the mesh file, so
@@ -573,7 +592,10 @@ namespace client {
 					// client and a server disagreeing about where a player is
 					// standing.
 					engine::scene::CollisionShapes arrived;
-					engine::game::AddCollisionShapes(arrived, name, mesh);
+					{
+						ENGINE_PROFILE_CAT("mesh collision", engine::core::ProfileCategory::Assets);
+						engine::game::AddCollisionShapes(arrived, name, mesh);
+					}
 
 					const auto record = [&name, triangles, &sheets, &arrived](engine::ecs::Store &store) {
 						engine::scene::RecordMesh(store, name, triangles, sheets);
@@ -589,12 +611,18 @@ namespace client {
 				}
 			} else if (asset->Kind == engine::assets::AssetKind::Texture) {
 				engine::assets::TextureData image;
-				if (!engine::assets::Texture::Read(reader, image)) {
-					ENGINE_WARN("content: {} is not a texture this engine reads", asset->Name);
-					continue;
+				{
+					ENGINE_PROFILE_CAT("texture decode", engine::core::ProfileCategory::Assets);
+					if (!engine::assets::Texture::Read(reader, image)) {
+						ENGINE_WARN("content: {} is not a texture this engine reads", asset->Name);
+						continue;
+					}
 				}
-				if (Renderer.AddTexture(name, image)) {
-					ContentTextures++;
+				{
+					ENGINE_PROFILE_CAT("texture upload", engine::core::ProfileCategory::Assets);
+					if (Renderer.AddTexture(name, image)) {
+						ContentTextures++;
+					}
 				}
 
 				// **Flipbook layout is world data, not renderer state**, exactly
@@ -677,6 +705,7 @@ namespace client {
 				// on the device thread, and a buffer converted per voice would pay
 				// for it again for every part playing a footstep. `DecodeAudio` picks
 				// its decoder from the bytes rather than from the name - Sounds.hpp.
+				ENGINE_PROFILE_CAT("audio decode", engine::core::ProfileCategory::Assets);
 				std::optional<engine::audio::SampleBuffer> samples = DecodeAudio(asset->Bytes);
 				if (!samples) {
 					ENGINE_WARN("content: {} is not audio this engine decodes", asset->Name);

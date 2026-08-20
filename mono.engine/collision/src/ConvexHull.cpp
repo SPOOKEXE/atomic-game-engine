@@ -4,6 +4,8 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <unordered_map>
+#include <vector>
 
 namespace engine::collision {
 
@@ -74,6 +76,42 @@ namespace engine::collision {
 			return facet;
 		}
 
+		// Which cell of the weld grid a coordinate falls in.
+		//
+		// **Clamped rather than trusted to fit.** The input is finite, which is
+		// not the same as small: a coordinate of 1e38 divided by a weld of 1e-4
+		// is 1e42, and converting that to an integer is undefined behaviour
+		// rather than a large number. The clamp is monotone, so two coordinates
+		// that were within one cell of each other still are - which is the only
+		// property the neighbour search needs.
+		int64_t CellOf(float value, double inverse) {
+			constexpr double LIMIT = 4.0e18;
+			const double scaled = std::floor(static_cast<double>(value) * inverse);
+			return static_cast<int64_t>(std::clamp(scaled, -LIMIT, LIMIT));
+		}
+
+		struct Cell {
+			int64_t X = 0;
+			int64_t Y = 0;
+			int64_t Z = 0;
+
+			bool operator==(const Cell &other) const {
+				return X == other.X && Y == other.Y && Z == other.Z;
+			}
+		};
+
+		struct CellHash {
+			size_t operator()(const Cell &cell) const noexcept {
+				// Three odd multipliers and a fold, which is enough separation
+				// for coordinates that are almost always small integers near
+				// each other - the case a plain xor collides hardest on.
+				const uint64_t mixed = static_cast<uint64_t>(cell.X) * 0x9E3779B97F4A7C15ull ^
+									   static_cast<uint64_t>(cell.Y) * 0xC2B2AE3D27D4EB4Full ^
+									   static_cast<uint64_t>(cell.Z) * 0x165667B19E3779F9ull;
+				return static_cast<size_t>(mixed ^ (mixed >> 29));
+			}
+		};
+
 		// The input with non-finite points dropped and coincident ones welded.
 		//
 		// **Welded first, because every count below is a count of *distinct*
@@ -82,26 +120,74 @@ namespace engine::collision {
 		// points would spend its whole degeneracy budget deciding they are the
 		// same one.
 		//
-		// Quadratic in the surviving count and bounded by it: the cap is applied
-		// to the welded set, so a million-vertex mesh welds against at most
-		// `MAXIMUM_HULL_POINTS * 4` survivors before the scan stops growing.
+		// **A grid rather than a scan, and the grid is the whole reason a game
+		// no longer freezes while a model loads.** This used to compare every
+		// point against every point already kept. The comment above it claimed
+		// the cap bounded that, which was never true - `MAXIMUM_HULL_POINTS`
+		// applies to the finished hull, not to the welded set - so a thirty
+		// thousand vertex character was four hundred and fifty million distance
+		// tests, measured at 111 ms in `release` inside the frame the mesh
+		// arrived in. Cells are exactly one weld across, so every point within
+		// the weld distance is in this point's cell or one of its twenty-six
+		// neighbours, and the answer is identical to the scan's: the test is an
+		// existence test, so which candidate matches first cannot change it.
 		std::vector<core::Vector3> Distinct(std::span<const core::Vector3> points, float weld) {
 			std::vector<core::Vector3> kept;
 			const float squared = weld * weld;
+
+			// A weld of zero has no grid - every cell would be a point - and
+			// welds only exactly-equal coordinates, so the scan is the answer.
+			// Nothing in the engine passes one; a caller's tolerance could.
+			if (!(weld > 0.0f)) {
+				for (const core::Vector3 &point : points) {
+					if (!Finite(point)) {
+						continue;
+					}
+					const bool duplicate = std::any_of(
+						kept.begin(),
+						kept.end(),
+						[&](const core::Vector3 &seen) {
+							return (seen - point).MagnitudeSquared() <= squared;
+						}
+					);
+					if (!duplicate) {
+						kept.push_back(point);
+					}
+				}
+				return kept;
+			}
+
+			const double inverse = 1.0 / static_cast<double>(weld);
+			std::unordered_map<Cell, std::vector<uint32_t>, CellHash> grid;
+			grid.reserve(points.size());
 
 			for (const core::Vector3 &point : points) {
 				if (!Finite(point)) {
 					continue;
 				}
 
+				const Cell home{CellOf(point.X, inverse), CellOf(point.Y, inverse), CellOf(point.Z, inverse)};
+
 				bool duplicate = false;
-				for (const core::Vector3 &seen : kept) {
-					if ((seen - point).MagnitudeSquared() <= squared) {
-						duplicate = true;
-						break;
+				for (int64_t x = -1; x <= 1 && !duplicate; x++) {
+					for (int64_t y = -1; y <= 1 && !duplicate; y++) {
+						for (int64_t z = -1; z <= 1 && !duplicate; z++) {
+							const auto found = grid.find(Cell{home.X + x, home.Y + y, home.Z + z});
+							if (found == grid.end()) {
+								continue;
+							}
+							for (const uint32_t index : found->second) {
+								if ((kept[index] - point).MagnitudeSquared() <= squared) {
+									duplicate = true;
+									break;
+								}
+							}
+						}
 					}
 				}
+
 				if (!duplicate) {
+					grid[home].push_back(static_cast<uint32_t>(kept.size()));
 					kept.push_back(point);
 				}
 			}
