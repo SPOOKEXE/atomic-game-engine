@@ -105,6 +105,8 @@ examples/Magic.luau:44```. Same with TerrainCore.
 - [_] particles are SUPER slow and they don't render visually either (refreshEmitters, stepParticles)
 - [_] add a PAUSE button to the flamegraph so i can pause it
 - [_] add a dropdown to add a update interval option to the flamegraph AND add a "average" checkbox that will average the results across the interval OR only shows on the update outputs
+- [_] add a preferences tab called "Default Worlds" that list all available default world items and add checkboxes to select them. Set "Rings", "MeshGrid" and "Hallway" worlds as the defaults and disable the rest. persists as well.
+- [_] separate interface update Hz (idle, active) with renderer Hz in studio (focused, unfocused) under preferences
 
 ### v0.18
 
