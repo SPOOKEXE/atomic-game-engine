@@ -20,6 +20,7 @@
 #include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/testing/Suite.hpp>
+#include <engine/world/Postbox.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -27,6 +28,7 @@
 
 #include <algorithm>
 #include <client/Scene.hpp>
+#include <cmath>
 #include <string_view>
 #include <vector>
 
@@ -1304,6 +1306,161 @@ TEST_CASE("a cross-world pane is handed every row of the world it names", "[clie
 	CHECK(views[0].Lighting.Ambient == expectedAmbient);
 	REQUIRE(views[0].Lights.size() == 1);
 	CHECK(views[0].Lights[0].Range == 42.0f);
+}
+
+TEST_CASE("a cross-world pane in a client's view leads to that client's rooms", "[client][presentation]") {
+	// **A pane names a world and a replica is not registered under that name.**
+	// A host that mirrors a universe for a viewer gives each copy a name of its
+	// own - the editor's is `"<world> (client 1)"` - because rule 4 makes a name
+	// the identity and two worlds may not share one. Everything a scene
+	// *authored* still says `"<world>"`: `Portal.DestinationWorld` is a string
+	// somebody typed and replication carries it across verbatim.
+	//
+	// So `Universe::NameOf` was the wrong question from inside a client's view,
+	// and asking it produced a chain of quiet wrongs rather than an error:
+	//
+	//   * the destination fell back to the *authority*, which is a room no
+	//     client's character is in;
+	//   * this world's own name never matched what the far pane named, so the
+	//     far pane was not recognised as leading home;
+	//   * and that match is what excludes the far pane from this pane's
+	//     picture and what brings the far world's straddlers back into this
+	//     room. Both went quiet together.
+	//
+	// The visible half is the second one. The far world's slab stands exactly
+	// where this pane's camera is aimed and is the same rectangle the frustum
+	// covers, so it fills the hole edge to edge in one flat colour - the room
+	// behind it is drawn and hidden, and a character standing in that room
+	// cannot be seen through the pane at all. That is the report.
+	Universe universe;
+
+	// Two rooms and one viewer's copy of each, named the way a play link names
+	// them.
+	const WorldId here = AddWorld(universe, "xworld.near");
+	const WorldId there = AddWorld(universe, "xworld.far");
+	const WorldId hereSeen = AddWorld(universe, "xworld.near (client 1)");
+	const WorldId thereSeen = AddWorld(universe, "xworld.far (client 1)");
+
+	const auto mirrors = [&universe](WorldId replica, std::string_view of) {
+		universe.Enter(replica, [of](Store &store) {
+			store.SetResource(engine::world::Replica{true, Name(of), Name("client 1")});
+		});
+	};
+	mirrors(hereSeen, "xworld.near");
+	mirrors(thereSeen, "xworld.far");
+
+	// One authored scene, built into all four. That is what a replica holds: a
+	// copy of what the author wrote, naming the worlds the author named.
+	//
+	// `markerX` is the one thing that differs, so a row in the picture says
+	// which of the four rooms produced it.
+	const auto furnish = [&universe](WorldId world, std::string_view other, float markerX) {
+		universe.Enter(world, [other, markerX](Store &store) {
+			const Entity workspace = engine::scene::InstallServices(store);
+
+			engine::scene::PartDesc slab;
+			slab.Size = Vector3{10.0f, 8.0f, 0.4f};
+			slab.Frame = engine::core::CFrame(Vector3{0.0f, 4.0f, 0.0f});
+			slab.Anchored = true;
+			const Entity block = engine::scene::MakePart(store, slab);
+			store.SetInstanceName(block, "PortalBlock");
+			store.SetParent(block, workspace);
+
+			engine::scene::PartDesc stand;
+			stand.Size = slab.Size;
+			stand.Frame = engine::core::CFrame(Vector3{0.0f, 4.0f, -0.6f});
+			stand.Anchored = true;
+			const Entity beyond = engine::scene::MakePart(store, stand);
+			store.SetParent(beyond, workspace);
+			if (auto *look = store.GetMutable<engine::scene::Visual>(beyond)) {
+				look->Transparency = 1.0f;
+			}
+
+			// Something standing in the room, well clear of the pane, which is
+			// what a character in the far world is and what the report says
+			// cannot be seen.
+			engine::scene::PartDesc body;
+			body.Size = Vector3{2.0f, 5.0f, 2.0f};
+			body.Frame = engine::core::CFrame(Vector3{markerX, 2.5f, -6.0f});
+			body.Anchored = true;
+			const Entity marker = engine::scene::MakePart(store, body);
+			store.SetInstanceName(marker, "Occupant");
+			store.SetParent(marker, workspace);
+
+			const Entity eye = store.CreateInstance(engine::ecs::Classes::Find(Name("Camera")), "Eye");
+			store.Set(eye, engine::scene::Transform{engine::core::CFrame(Vector3{0.0f, 5.0f, 16.0f})});
+			store.SetResource(engine::scene::ActiveCamera{eye, 16.0f / 9.0f});
+
+			const Entity hole =
+				store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "Hole");
+			store.Set(hole, engine::scene::SurfaceCamera{});
+
+			engine::scene::Portal portal;
+			portal.Destination = beyond;
+			portal.DestinationWorld = Name(other);
+			store.Set(hole, portal);
+			store.SetParent(hole, block);
+		});
+	};
+
+	// The authored names on both sides, which is the whole fixture: no world
+	// names a replica, because no author can.
+	furnish(here, "xworld.far", 10.0f);
+	furnish(there, "xworld.near", 20.0f);
+	furnish(hereSeen, "xworld.far", 30.0f);
+	furnish(thereSeen, "xworld.near", 40.0f);
+
+	for (const WorldId world : {here, there, hereSeen, thereSeen}) {
+		universe.Enter(world, [](Store &store) { (void)engine::scene::AimSurfaceCameras(store); });
+		universe.Present(world, 1.0f / 60.0f, 0.0f);
+	}
+
+	std::vector<engine::render::SurfaceView> views;
+	std::vector<engine::scene::DrawInstance> drawn;
+	universe.Enter(hereSeen, [&views, &drawn](Store &store) {
+		if (const auto *list = store.Resource<client::DrawList>()) {
+			drawn = list->Instances;
+		}
+		std::vector<engine::render::PortalView> portals;
+		(void)client::CollectPortalViews(store, portals);
+		(void)client::CollectSurfaceViews(store, views, portals);
+	});
+	REQUIRE(!views.empty());
+
+	std::vector<engine::scene::DrawInstance> foreign;
+	REQUIRE(client::AttachForeignSurfaces(universe, hereSeen, drawn, foreign, views) == 1);
+
+	// The occupant in the picture is the one from *this viewer's* copy of the
+	// far room, and never the authority's. Both rooms are live and both publish;
+	// only one of them is the room this client's character is standing in.
+	const auto occupants = [&foreign](float x) {
+		return std::count_if(foreign.begin(), foreign.end(), [x](const engine::scene::DrawInstance &row) {
+			return std::abs(row.Frame.Position.X - x) < 0.001f;
+		});
+	};
+	CHECK(occupants(40.0f) == 1);
+	CHECK(occupants(20.0f) == 0);
+
+	// **And the far pane is out of the picture, which is the half that is
+	// visible.** Nothing in a hole's image samples a surface: the far world's
+	// own slab is the one row that would, and it is the row that filled the hole
+	// with one flat colour and hid the room - and the occupant in it - behind
+	// itself.
+	for (const engine::scene::DrawInstance &instance : foreign) {
+		CHECK(instance.Surface < 0);
+	}
+
+	// Nothing invisible either, which is the stand-in: this range is one plain
+	// draw with no blended run, so a transparent row arrives at the opaque
+	// pipeline and draws solid.
+	for (const engine::scene::DrawInstance &instance : foreign) {
+		CHECK(instance.Transparency < 1.0f);
+	}
+
+	// The far room, less its pane and its stand-in, and no more: a resolution
+	// that found the authority instead would also pass every line above, so the
+	// count is checked against the world the occupant proves it read.
+	CHECK(foreign.size() + 2 == Drawn(universe, thereSeen));
 }
 
 TEST_CASE("a hole's picture leaves out the far pane and the stand-in", "[client][presentation]") {

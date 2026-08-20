@@ -331,8 +331,28 @@ local function placeAlong(route: { Leg }, distance: number): Vector3
 end
 
 local DRIFT_SPEED = 6 -- studs a second, about a walk
-local DRIFT_Y = HEIGHT / 2 -- eye height, so it passes in front of a watcher
+local DRIFT_Y = HEIGHT / 2 -- eye height, so it is seen without looking down
 local DRIFT_SIZE = Vector3.new(1.6, 1.6, 1.6)
+
+-- **How far off the middle the blocks run, and it is the whole of what a
+-- walker notices about them.** They used to travel the centre line at eye
+-- height: down each tunnel's axis, through each pane's middle, at exactly the
+-- height a head is. That put a solid block in the doorway of both illusions -
+-- it fills the mouth on the approach, and it is the first thing in the picture
+-- when the pane is looked through, so the one view this scene exists to show
+-- was the one view it obstructed.
+--
+-- Two studs to the east leaves the block wholly inside the tunnel and wholly
+-- out of the walked channel: a tunnel is `WIDTH` across, so the block occupies
+-- `x + 1.2` to `x + 2.8` and the four studs west of it are clear floor. It
+-- still crosses every pane, because a pane fills the cross-section, so the
+-- timing the blocks exist to show is unchanged.
+--
+-- **The offset survives every hop**, and that is a property of this scene
+-- rather than luck: each pair here is one pane facing +Z and its partner facing
+-- -Z with no rotation between them, so a crossing is a pure translation and an
+-- offset across the tunnel comes out the far side where it went in.
+local DRIFT_SIDE = 2
 
 -- **Ping-pong rather than a loop.** A block that restarted at the north end
 -- would only ever show the southbound crossing, and half the point of a pair of
@@ -364,20 +384,32 @@ end
 -- studs of tunnel and out. Twenty studs of travel, four of them inside a
 -- building thirty-two long.
 drifter("LongDrifter", LONG_MARK, {
-	leg(Vector3.new(LONG_X, DRIFT_Y, LONG / 2 + 6), Vector3.new(LONG_X, DRIFT_Y, SKIP)),
-	leg(Vector3.new(LONG_X, DRIFT_Y, -SKIP), Vector3.new(LONG_X, DRIFT_Y, -(LONG / 2 + 6))),
+	leg(
+		Vector3.new(LONG_X + DRIFT_SIDE, DRIFT_Y, LONG / 2 + 6),
+		Vector3.new(LONG_X + DRIFT_SIDE, DRIFT_Y, SKIP)
+	),
+	leg(
+		Vector3.new(LONG_X + DRIFT_SIDE, DRIFT_Y, -SKIP),
+		Vector3.new(LONG_X + DRIFT_SIDE, DRIFT_Y, -(LONG / 2 + 6))
+	),
 })
 
 -- The east walk: six studs of plain, one stud of box, twenty-six studs of its
 -- isolated interior, one stud of box and out. Forty studs of travel,
 -- twenty-eight of them inside a building four long.
 drifter("ShortDrifter", SHORT_MARK, {
-	leg(Vector3.new(SHORT_X, DRIFT_Y, SHORT / 2 + 6), Vector3.new(SHORT_X, DRIFT_Y, ENTRY)),
 	leg(
-		Vector3.new(SUBSPACE_X, DRIFT_Y, SPLICE),
-		Vector3.new(SUBSPACE_X, DRIFT_Y, -SPLICE)
+		Vector3.new(SHORT_X + DRIFT_SIDE, DRIFT_Y, SHORT / 2 + 6),
+		Vector3.new(SHORT_X + DRIFT_SIDE, DRIFT_Y, ENTRY)
 	),
-	leg(Vector3.new(SHORT_X, DRIFT_Y, -ENTRY), Vector3.new(SHORT_X, DRIFT_Y, -(SHORT / 2 + 6))),
+	leg(
+		Vector3.new(SUBSPACE_X + DRIFT_SIDE, DRIFT_Y, SPLICE),
+		Vector3.new(SUBSPACE_X + DRIFT_SIDE, DRIFT_Y, -SPLICE)
+	),
+	leg(
+		Vector3.new(SHORT_X + DRIFT_SIDE, DRIFT_Y, -ENTRY),
+		Vector3.new(SHORT_X + DRIFT_SIDE, DRIFT_Y, -(SHORT / 2 + 6))
+	),
 })
 
 -- --- where you start ------------------------------------------------------

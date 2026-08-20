@@ -57,6 +57,8 @@
 
 #include <array>
 #include <cdn/LocalStore.hpp>
+#include <client/EditableImages.hpp>
+#include <client/EditableMeshes.hpp>
 #include <cstdint>
 #include <deque>
 #include <filesystem>
@@ -2911,6 +2913,24 @@ namespace studio {
 		// caches over process-wide names, and `Refresh` takes whichever world
 		// the panel being drawn shows.
 		engine::render::ShaderLibrary Shaders;
+
+		// **What an `EditableMesh` a script built converts into and uploads.**
+		//
+		// The editor had neither of these and drew neither: a `MeshPart` naming
+		// `mesh.ContentId` resolved to a name nothing had ever registered, so
+		// the part drew nothing at all - in the editor's viewport, in a Play
+		// run and in the studio's own capture, while the same scene under
+		// `client --script` was correct. Every scene built out of geometry a
+		// script makes was invisible in the one program it is authored in, and
+		// `StressMirrors.luau` - whose solid core is an `EditableMesh` - was a
+		// shell of floating tiles there for the same reason.
+		//
+		// One per editor for `Shaders`' reason: the ledger of last-uploaded
+		// revisions is process-wide state rather than world state.
+		client::EditableMeshUploader EditableMeshes;
+
+		// The identical ledger, for `EditableImage`.
+		client::EditableImageUploader EditableImages;
 		engine::render::OverlayImage Overlay;
 		engine::render::InterfacePass GameInterface;
 		engine::ui::Interface Interface;

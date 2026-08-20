@@ -17,6 +17,7 @@
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
+#include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
@@ -719,6 +720,128 @@ TEST_CASE("the tunnels scene is shorter and longer inside than out", "[examples]
 	CHECK(InScene(store, "Viewer") == engine::ecs::NULL_ENTITY);
 }
 
+TEST_CASE("the tunnels scene leaves its walk paths clear", "[examples][scene]") {
+	// **A demonstration you cannot walk down demonstrates nothing**, and this
+	// one was blocked by its own props: the two drifting blocks travelled each
+	// tunnel's centre line at eye height, so a block stood in the mouth on the
+	// approach and was the first thing in the picture when a pane was looked
+	// through. The isolated corridor - the one space in the scene that only
+	// exists on the far side of a hole - had one running its whole length.
+	//
+	// So the claim is a *volume*: down the middle of every walked space, from
+	// above the floor markings to over a character's head, nothing stands.
+	// `DRIFT_SIDE` is what the scene answers with, and this is what stops the
+	// answer being quietly reverted.
+	//
+	// **The panes are the one exception and they are excluded by construction,
+	// not by name.** A portal fills its cross-section - that is what makes it a
+	// hole rather than a window with a frame - and it is authored
+	// `CanCollide = false` so a walker passes through it. Anything else in the
+	// channel is furniture in a doorway.
+	//
+	// What a headless run cannot decide is what the tunnel *looks* like, and
+	// `scripts/demos/capture-tunnels.sh` is the half that can: it photographs
+	// the three authored viewpoints and counts the blocking pixels.
+	const StagedAssets assets;
+
+	Store store("tunnels.walk");
+	Scheduler systems;
+
+	std::string error;
+	const bool loaded = LoadScene(store, systems, ExamplePath("Tunnels.luau"), error);
+	INFO(error);
+	REQUIRE(loaded);
+
+	// One tick, so the drifters have been placed by their own `Heartbeat` rather
+	// than left at the birthplace `block` gave them. A route's first leg starts
+	// out on the plain, so an unticked scene would be measured before the props
+	// had moved at all.
+	systems.Tick(store, 1.0f / 60.0f);
+
+	// The walked channel, in metres. Two studs across is a body's width with
+	// room either side; the floor stops at 0.5 so the painted stripes - which
+	// are 0.35 tall and are the floor - are not read as obstacles; the ceiling
+	// stops at `CHARACTER_HEIGHT` so the lamps hanging at 7.3 are not either.
+	constexpr float CHANNEL_HALF_WIDTH = 1.0f;
+	constexpr float CHANNEL_FLOOR = 0.5f;
+	constexpr float CHANNEL_CEILING = 5.0f;
+
+	struct Corridor {
+		const char *What;
+		float X;
+		float FromZ;
+		float ToZ;
+	};
+
+	// Every space in this scene a body is meant to walk, including the six studs
+	// of plain either side of each mouth - a prop parked outside a doorway
+	// blocks the approach as surely as one inside it.
+	const std::array<Corridor, 3> corridors{
+		Corridor{"the west tunnel", -20.0f, -22.0f, 22.0f},
+		Corridor{"the east tunnel", 20.0f, -8.0f, 8.0f},
+		Corridor{"the isolated interior", 256.0f, -13.0f, 13.0f},
+	};
+
+	// Whether this part is a portal pane. Asked of the part rather than of its
+	// name, because a pane is a part with a `Portal` on a child of it and that
+	// is what every one of the six is.
+	const auto isPane = [&store](Entity part) {
+		bool found = false;
+		store.EachChild(part, [&](Entity child) {
+			found = found || store.Get<engine::scene::Portal>(child) != nullptr;
+		});
+		return found;
+	};
+
+	size_t measured = 0;
+	store.Each<const engine::scene::Transform, const engine::scene::Bounds>(
+		[&](Entity part, const engine::scene::Transform &placement, const engine::scene::Bounds &bounds) {
+			if (isPane(part)) {
+				return;
+			}
+
+			// A conservative world box: the rotated half-extent along each
+			// world axis. Every part in this scene is either unrotated or
+			// turned half a lap about Y, so this is exact for all of them - and
+			// it stays honest if one is ever tilted.
+			const engine::core::Vector3 right = placement.Frame.RightVector() * bounds.HalfExtent.X;
+			const engine::core::Vector3 up = placement.Frame.UpVector() * bounds.HalfExtent.Y;
+			const engine::core::Vector3 ahead = placement.Frame.LookVector() * bounds.HalfExtent.Z;
+			const engine::core::Vector3 reach{
+				std::abs(right.X) + std::abs(up.X) + std::abs(ahead.X),
+				std::abs(right.Y) + std::abs(up.Y) + std::abs(ahead.Y),
+				std::abs(right.Z) + std::abs(up.Z) + std::abs(ahead.Z),
+			};
+			const engine::core::Vector3 at = placement.Frame.Position;
+
+			for (const Corridor &corridor : corridors) {
+				const bool acrossX = std::abs(at.X - corridor.X) < CHANNEL_HALF_WIDTH + reach.X;
+				const bool throughY = at.Y + reach.Y > CHANNEL_FLOOR && at.Y - reach.Y < CHANNEL_CEILING;
+				const bool alongZ = at.Z + reach.Z > corridor.FromZ && at.Z - reach.Z < corridor.ToZ;
+
+				if (acrossX && throughY && alongZ) {
+					INFO(
+						"'" << store.InstanceNameOf(part).Text() << "' stands in " << corridor.What << " at ("
+							<< at.X << ", " << at.Y << ", " << at.Z << ")"
+					);
+					CHECK(false);
+				}
+			}
+			measured++;
+		}
+	);
+
+	// A scene that loaded nothing would pass every line above. The floors,
+	// ceilings, walls, stripes, lamps, posts and drifters are forty-odd parts;
+	// this only has to be more than none.
+	CHECK(measured > 20);
+
+	// And the props are still there rather than deleted, which is the other way
+	// to make the channels clear and is not the fix.
+	CHECK(CountNamed(store, "LongDrifter") == 1);
+	CHECK(CountNamed(store, "ShortDrifter") == 1);
+}
+
 TEST_CASE("the interface scene builds and connects its buttons", "[examples][scene][gui]") {
 	const StagedAssets assets;
 
@@ -1323,7 +1446,19 @@ TEST_CASE("the portal lighting scenes author lamps a seam can carry", "[examples
 // where the passes go as `panes x (panes - 1) ^ (levels - 1)` - 3,600 of them at
 // sixteen panes. A change that dropped the `workspace.SurfaceBounces = 1` line
 // would turn this scene from slow into a hang.
-TEST_CASE("the mirror ball faces its facets out and asks for one bounce", "[examples][scene]") {
+TEST_CASE("the mirror ball mirrors every facet, faces them out and has no holes", "[examples][scene]") {
+	// **Two of these claims were false and both read as the mirrors being
+	// broken.** The scene authored sixteen cameras over eighty facets because
+	// sixteen is what `scene::MAX_SURFACES` can resolve - so five sixths of a
+	// *mirror ball* were not mirrors - and it cut each facet as a square 0.62 of
+	// an edge across, which is smaller than the triangle it sits on. A square
+	// cannot fill a triangle, so the tiles never met and the ball was a shell of
+	// loose plates with the dark core showing at every seam.
+	//
+	// The ceiling is the engine's and stands. Asking is the scene's, and every
+	// facet asks now: what the refused cameras cost is the whole point of a
+	// stress scene, so a change that quietly caps them again is a regression
+	// rather than a saving.
 	const StagedAssets assets;
 
 	Store store("mirrorball");
@@ -1334,24 +1469,60 @@ TEST_CASE("the mirror ball faces its facets out and asks for one bounce", "[exam
 	INFO(error);
 	REQUIRE(loaded);
 
-	// One subdivision of an icosahedron is eighty faces, and the count is
-	// checked rather than assumed because the midpoint cache is what makes it
-	// eighty - without the sharing every face would still be split into four and
-	// the vertex count would be wrong while this number stayed right.
+	// Two subdivisions of an icosahedron is three hundred and twenty faces, and
+	// the count is checked rather than assumed because the midpoint cache is
+	// what makes it that - without the sharing every face would still be split
+	// into four and the vertex count would be wrong while this number stayed
+	// right.
 	size_t facets = 0;
-	store.Each<const engine::scene::Transform>([&](Entity part, const engine::scene::Transform &) {
-		if (store.InstanceNameOf(part).Text().rfind("Facet_", 0) == 0) {
+	float tiled = 0.0f;
+	store.Each<const engine::scene::Transform, const engine::scene::Bounds>(
+		[&](Entity part, const engine::scene::Transform &, const engine::scene::Bounds &bounds) {
+			if (store.InstanceNameOf(part).Text().rfind("Facet_", 0) != 0) {
+				return;
+			}
 			facets++;
+
+			// The face of the tile that reflects, which is the one a mirror is
+			// projected onto. The third axis is the plate's thickness.
+			tiled += bounds.HalfExtent.X * 2.0f * bounds.HalfExtent.Y * 2.0f;
+		}
+	);
+	CHECK(facets == 320);
+
+	// **A camera on every one of them, which is what makes it a mirror ball.**
+	// `MAX_SURFACES` still resolves sixteen and the rest reach no screen; that
+	// cost is the finding this scene exists to produce, and capping the asking
+	// to hide it would be hiding the finding.
+	static thread_local std::vector<engine::scene::SurfacePane> panes;
+	REQUIRE(engine::scene::GatherSurfacePanes(store, panes) == facets);
+
+	// **And the tiles more than cover the ball, which is what closes the holes.**
+	// A rectangle circumscribing a triangle is twice the triangle's area, so a
+	// ball whose every facet is covered costs about twice its own surface in
+	// tile; the old squares came to four fifths of it, which is a shell that
+	// cannot close however the tiles are turned. The ratio separates the two
+	// arrangements without this test re-deriving the ico-sphere and disagreeing
+	// with the scene about what it built - the ball's own surface is measured
+	// from the core mesh the scene made, which is that ico-sphere scaled down a
+	// few per cent to sit under the plates.
+	float cored = 0.0f;
+	size_t meshes = 0;
+	store.Each<const engine::scene::EditableMesh>([&](Entity, const engine::scene::EditableMesh &mesh) {
+		meshes++;
+		for (size_t at = 0; at + 2 < mesh.Indices.size(); at += 3) {
+			const engine::core::Vector3 &a = mesh.Positions[mesh.Indices[at]];
+			const engine::core::Vector3 &b = mesh.Positions[mesh.Indices[at + 1]];
+			const engine::core::Vector3 &c = mesh.Positions[mesh.Indices[at + 2]];
+			cored += (b - a).Cross(c - a).Magnitude() * 0.5f;
 		}
 	});
-	CHECK(facets == 80);
 
-	// **Sixteen, which is `scene::MAX_SURFACES` and is the scene's whole
-	// point.** Authoring eighty cameras would leave sixty-four of them aimed
-	// every frame and reaching no screen; the scene spreads sixteen over the
-	// ball instead, and this is what says it still does.
-	static thread_local std::vector<engine::scene::SurfacePane> panes;
-	REQUIRE(engine::scene::GatherSurfacePanes(store, panes) == 16);
+	REQUIRE(meshes == 1);
+	REQUIRE(cored > 0.0f);
+
+	INFO(tiled << " of tile over " << cored << " of ball");
+	CHECK(tiled / cored > 1.8f);
 
 	// The ball's middle, taken from the core rather than from a literal - the
 	// scene's `RADIUS` and `HEIGHT` are free to change without this following

@@ -15,19 +15,44 @@
 -- texture pair, `AimSurfaceCameras` hands them out in walk order, and a camera
 -- that does not get one is aimed and renders nothing - its pane falls through to
 -- the plain lit slab `opaque.frag` draws outside the projected rectangle. So a
--- ball of eighty facets does not give eighty reflections however it is authored;
--- sixteen of them reflect and the rest are grey.
+-- ball of three hundred and twenty facets does not give three hundred and
+-- twenty reflections however it is authored; sixteen of them reflect and the
+-- rest are plain.
 --
--- This scene is therefore built the way the engine can actually draw it: a full
--- ico-sphere of facets, with `MIRRORS` of them - sixteen by default, spread
--- evenly over the ball rather than clustered - carrying a `SurfaceCamera`. The
--- rest are the same tiles without one, which is what a disco ball's unlit facets
--- look like anyway.
+-- **Every facet asks anyway, and that is the stress.** A mirror ball is a ball
+-- whose surface is mirror, not a ball with sixteen mirrors on it, so this scene
+-- puts a `SurfaceCamera` on all of them and lets the ceiling do the refusing.
+-- At the default three hundred and twenty facets, three hundred and four of
+-- them are gathered, placed and reflected every frame and reach no screen at
+-- all: that is the cost of a limit nobody can see, and this is the scene to
+-- re-run if `MAX_SURFACES` is ever raised. `MIRROR_LIMIT` caps it at a number
+-- for the cheap version.
 --
--- **Raising `MIRRORS` past sixteen is the stress**, and it is a deliberate knob
--- rather than an accident: the extra cameras are gathered, placed and reflected
--- every frame and reach no screen at all. That is the cost of a ceiling nobody
--- can see, and this is the scene to re-run if `MAX_SURFACES` is ever raised.
+-- **What that looks like is one dark patch, and the patch is the feature
+-- working.** Slots are handed out in walk order, so the sixteen that resolve
+-- are sixteen *adjacent* facets rather than sixteen spread over the ball - and
+-- what they reflect, pointing up and out of a room with a black sky over it, is
+-- black. So the ball reads as a mirror ball with a hole in one shoulder, and
+-- the hole is the only part of it that is actually reflecting anything. Set
+-- `MIRROR_LIMIT = 1` to see the ball underneath with nothing reflecting at all.
+--
+-- The clustering is the ceiling's rather than this scene's: with a camera on
+-- every facet there is no order this file can author that changes which sixteen
+-- the walk reaches first.
+--
+-- ## The ball is filled, not tiled
+--
+-- The facets used to be squares 0.62 of an edge across, dropped at each
+-- triangle's middle. A square cannot fill a triangle, so they never met: the
+-- ball came out as loose plates over a dark core with a hole at every seam. A
+-- reflection has to be read *across* a surface, and half of that surface being
+-- core is half the mirrors missing.
+--
+-- Each tile is now the triangle's own bounding box in the triangle's own plane,
+-- turned to the triangle's own axes. A `Part` is a box and cannot be a
+-- triangle, so neighbours overlap across the edge they share rather than
+-- leaving it open - two plates crossing at the dihedral angle, which is what a
+-- real ball of glued mirror tiles looks like at the seams anyway.
 --
 -- ## Why the depth is stated
 --
@@ -63,17 +88,29 @@
 -- quadruples the facet count *and* the core mesh's triangles, so it is the knob
 -- that stresses the `EditableMesh` upload as well as the mirrors.
 --
--- The radius scales the whole ball, and the facets with it - a tile is sized
--- from its own edge rather than from a constant, so a ball of any size has
--- facets that meet without overlapping.
+-- **Two is the default, and the reason is the tiles rather than the mesh.** A
+-- facet's mirror is a box circumscribing a triangle, so it is about twice the
+-- triangle's area whatever the level - and at level 0 that is a plate twelve
+-- studs across on a ball twelve studs in radius, which reads as a shattered
+-- crystal rather than as a ball. The overlap shrinks with the facet: at level 2
+-- the plates are three studs across and the ball is a mirror ball.
+--
+-- The radius scales the whole ball, and the facets with it - a tile is measured
+-- from its own triangle rather than from a constant, so a ball of any size and
+-- any subdivision comes out covered edge to edge.
 
-local SUBDIVISIONS = 1
+local SUBDIVISIONS = 2
 local RADIUS = 12
 
--- How many facets get a camera. Sixteen is `scene::MAX_SURFACES` and is the
--- most that can reflect; anything above it is the stress described in the
--- header, and anything below it is a cheaper scene.
-local MIRRORS = 16
+-- How many facets get a camera. **Zero means every one of them**, which is what
+-- this scene is for: a ball of mirrors asks for a camera per facet and the
+-- engine can hand out sixteen slots, so every other camera is gathered, placed
+-- and reflected every frame and reaches no screen. That is the cost of a
+-- ceiling nobody can see, and it is the reading this scene exists to produce.
+--
+-- Set it to `16` for the cheap version, which is a ball whose every mirror
+-- actually resolves and whose remaining facets are plain tiles.
+local MIRROR_LIMIT = 0
 
 -- The texture each mirror renders into. Square, because a facet is as tall as
 -- it is wide, and 512 rather than 1024 because sixteen ping-ponged pairs at
@@ -186,11 +223,11 @@ end
 
 -- --- the core mesh -----------------------------------------------------------
 --
--- **A dark ball behind the facets, and it is not decoration.** The tiles are
--- sized to sit inside their triangles with a gap, so a bare shell of them is
--- see-through: the far side's tile backs show through the near side's gaps and
--- the thing reads as a cloud rather than as a ball. A solid core is what makes
--- a reflection legible, because a reflection needs something to be *on*.
+-- **A solid ball behind the facets, and it is not decoration.** A shell of
+-- tiles alone is lit from one side and open at every seam, so the far side's
+-- tile backs show through and the thing reads as a cloud of plates. A solid
+-- core is also what makes a reflection legible, because a reflection needs
+-- something to be *on*.
 --
 -- It is also the second half of the subdivision knob. At three levels this is a
 -- 1,280 triangle mesh built vertex by vertex in Luau and re-uploaded by
@@ -199,10 +236,25 @@ end
 
 local mesh = Instance.new("EditableMesh")
 
--- Slightly inside the facets, so the core cannot poke through a tile and
--- z-fight with it. Four per cent of the radius is comfortably more than a
+-- How far in the core sits, as a fraction of the radius.
+--
+-- **Derived rather than typed, because the number it has to stay under moves
+-- with `SUBDIVISIONS`.** Each tile lies on its own triangle's *plane*, and that
+-- plane is nearer the centre than the vertices are - a chord is inside its own
+-- arc - so a core drawn at the full radius would stand proud of every facet.
+-- How much nearer depends on how big the triangles are: the bare icosahedron's
+-- faces sit at 0.795 of the radius and the numbers climb towards 1 with every
+-- level. A constant fitted to one level was wrong at the others.
+--
+-- Two per cent under the closest face plane, which is comfortably more than a
 -- tile's own half-thickness at every size this scene is usable at.
-local CORE_SCALE = 0.96
+local innermost = RADIUS
+for _, face in faces do
+	local centre = (vertices[face[1]] + vertices[face[2]] + vertices[face[3]]) * (1 / 3)
+	innermost = math.min(innermost, centre.Magnitude)
+end
+
+local CORE_SCALE = (innermost * 0.98) / RADIUS
 
 local coreIds: { number } = {}
 for _, at in vertices do
@@ -254,14 +306,35 @@ core.Parent = workspace
 
 -- --- the facets --------------------------------------------------------------
 --
--- One tile per triangle, lying on the sphere at that triangle's middle and
--- facing straight out of it.
+-- One tile per triangle, lying *on* that triangle's own plane and covering the
+-- whole of it.
+--
+-- **The ball is filled rather than tiled with gaps, and that is a change of
+-- kind.** These used to be squares 0.62 of an edge across, dropped at each
+-- triangle's middle with whatever roll `CFrame.lookAt` chose for them. A square
+-- is not a triangle, so they could not meet: the ball came out as loose plates
+-- over a dark core with a hole at every seam, which is exactly what a mirror
+-- ball must not look like - a reflection needs a continuous surface to be read
+-- across, and half the ball being core is half the mirrors missing.
+--
+-- A `Part` is a box and cannot be a triangle either, so the answer is the other
+-- one: each tile is the triangle's own *bounding box* in the triangle's own
+-- plane. Every point of the face is under a mirror, adjacent tiles overlap
+-- across the edge they share rather than leaving one open, and the overlap is
+-- two plates crossing at the dihedral angle rather than two coplanar surfaces
+-- fighting for a depth value.
 --
 -- **`Front` is -Z and a pane reflects along its own -Z**, which is what
--- `CFrame.lookAt(at, at + outward)` produces: the look direction is the frame's
+-- `CFrame.lookAt(at, at + normal)` produces: the look direction is the frame's
 -- -Z, so aiming it away from the centre points the reflecting face outward.
 -- Getting this backwards gives a ball whose facets reflect its own inside,
 -- which looks exactly like a ball whose facets reflect nothing.
+--
+-- **The roll is the face's own and no longer arbitrary.** `lookAt` picks a roll
+-- from a default up vector, so two neighbouring tiles used to be turned to
+-- unrelated angles - which is a second, quieter source of gaps, because two
+-- squares that meet at one rotation do not meet at another. Passing this face's
+-- own in-plane axis as `up` makes the box the one that was measured.
 
 type Tile = { Body: Part, Local: CFrame }
 
@@ -269,9 +342,13 @@ local tiles: { Tile } = {}
 
 -- Which facets get a camera, spread rather than taken from the front of the
 -- list. Subdivision emits a base triangle's four children together, so the
--- first sixteen faces of an eighty-face ball are four adjacent base triangles -
--- every mirror on one cap and the other five sixths grey.
-local stride = math.max(math.floor(#faces / MIRRORS), 1)
+-- first sixteen faces of a subdivided ball are all children of the same few
+-- base triangles - every mirror on one cap and the rest of the ball plain.
+--
+-- At the default `MIRROR_LIMIT` of zero this is every face and the stride is
+-- one; the spread only matters for the cheap version.
+local wanted = if MIRROR_LIMIT <= 0 then #faces else math.min(MIRROR_LIMIT, #faces)
+local stride = math.max(math.floor(#faces / wanted), 1)
 local mirrored = 0
 
 for index, face in faces do
@@ -280,29 +357,61 @@ for index, face in faces do
 	local c = vertices[face[3]]
 
 	local centre = (a + b + c) * (1 / 3)
-	local outward = centre.Unit
 
-	-- Sized from this facet's own edge, so `RADIUS` and `SUBDIVISIONS` both
-	-- scale the tiles without a second constant that has to be kept in step.
-	-- 0.62 of the edge is a square that fits inside an equilateral triangle
-	-- with a visible gap at every corner, which is what makes the ball read as
-	-- tiles rather than as a faceted sphere.
+	-- **The face's own normal rather than the direction of its middle.** The
+	-- two agree exactly only for an equilateral triangle, and a subdivided
+	-- icosphere's are not: the four children of a base face come out in two
+	-- shapes. Taking the middle's direction tilts a tile off its own plane by a
+	-- degree or so, which is enough to open a seam along one edge.
+	local normal = cross(b - a, c - a).Unit
+	if dot(normal, centre) < 0 then
+		normal = normal * -1
+	end
+
+	-- Two axes in that plane. The first is an edge, so the box is aligned to
+	-- the triangle rather than to the world.
+	local acrossX = (b - a).Unit
+	local acrossY = cross(normal, acrossX)
+
+	-- The triangle's extent along each of them, measured from the middle.
+	local leastX, mostX = math.huge, -math.huge
+	local leastY, mostY = math.huge, -math.huge
+	for _, corner in { a, b, c } do
+		local offset = corner - centre
+		local alongX = dot(offset, acrossX)
+		local alongY = dot(offset, acrossY)
+		leastX = math.min(leastX, alongX)
+		mostX = math.max(mostX, alongX)
+		leastY = math.min(leastY, alongY)
+		mostY = math.max(mostY, alongY)
+	end
+
+	-- Thin, because a plate that meets its neighbours at an angle shows its
+	-- edge and a thick one shows a lot of it. Scaled from the facet so
+	-- `RADIUS` and `SUBDIVISIONS` both carry the tiles without a second
+	-- constant to keep in step.
 	local edge = (b - a).Magnitude
-	local width = edge * 0.62
-	local thickness = math.max(edge * 0.06, 0.1)
+	local thickness = math.max(edge * 0.04, 0.05)
 
-	local at = outward * RADIUS
-	local frame = CFrame.lookAt(at, at + outward)
+	-- The box's own middle, which is not the triangle's - a triangle is not
+	-- symmetric about its centroid - lifted half a thickness so the tile's
+	-- inner face rests on the plane rather than straddling it.
+	local at = centre
+		+ acrossX * ((leastX + mostX) / 2)
+		+ acrossY * ((leastY + mostY) / 2)
+		+ normal * (thickness / 2)
+
+	local frame = CFrame.lookAt(at, at + normal, acrossY)
 
 	local tile = Instance.new("Part")
 	tile.Name = `Facet_{index}`
 	tile.Anchored = true
-	tile.Size = Vector3.new(width, width, thickness)
+	tile.Size = Vector3.new(mostX - leastX, mostY - leastY, thickness)
 	tile.CFrame = CFrame.new(Vector3.new(0, HEIGHT, 0)) * frame
 	tile.Color = Color3.new(0.88, 0.90, 0.94)
 	tile.Parent = workspace
 
-	if (index - 1) % stride == 0 and mirrored < MIRRORS then
+	if (index - 1) % stride == 0 and mirrored < wanted then
 		local eye = Instance.new("SurfaceCamera")
 		eye.Name = `FacetCamera_{index}`
 		eye.SurfaceSize = SURFACE_SIZE

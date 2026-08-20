@@ -1248,7 +1248,13 @@ namespace client {
 				// that published to a bus would be telling the universe
 				// something the server never said; the inbox still delivers,
 				// which is how it receives.
-				store.SetResource(engine::world::Replica{true});
+				// **The two names are left empty and that is the answer here.**
+				// A `--connect` client mirrors a world in another process, so
+				// there is no local world for `Of` to name and one view for
+				// `View` to tell apart - `client::SurveyWorlds` reads an empty
+				// pair as "this world's own name is the one its panes carry",
+				// which is what a single-replica process wants.
+				store.SetResource(engine::world::Replica{});
 
 				// **Said here rather than left to the first `Connector::Poll`,
 				// because something now builds instances between the two.**

@@ -30,6 +30,7 @@
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Visibility.hpp>
 #include <engine/script/Runtime.hpp>
+#include <engine/world/Postbox.hpp>
 
 #include <algorithm>
 #include <client/Scene.hpp>
@@ -466,6 +467,86 @@ namespace client {
 		}
 	}
 
+	size_t SurveyWorlds(engine::world::Universe &universe, std::vector<WorldIdentity> &worlds) {
+		worlds.clear();
+
+		for (const engine::world::WorldId candidate : universe.Worlds()) {
+			WorldIdentity found;
+			found.Id = candidate;
+			found.Authored = universe.NameOf(candidate);
+
+			universe.Enter(candidate, [&found](Store &store) {
+				const auto *replica = store.Resource<engine::world::Replica>();
+				if (replica == nullptr || !replica->Active) {
+					return;
+				}
+				found.IsReplica = true;
+				found.View = replica->View;
+
+				// **Only when it names one.** A `--connect` client's replica
+				// mirrors a world in another process, so there is nothing here
+				// for the name to mean and its own is the honest answer.
+				if (replica->Of.IsValid()) {
+					found.Authored = replica->Of;
+				}
+			});
+
+			worlds.push_back(found);
+		}
+
+		return worlds.size();
+	}
+
+	engine::world::WorldId ResolveDestinationWorld(
+		std::span<const WorldIdentity> worlds, engine::world::WorldId viewer, const engine::core::Name &wanted
+	) {
+		if (!wanted.IsValid()) {
+			return {};
+		}
+
+		// Whose view is asking, so a copy can prefer a copy. A world that is not
+		// a replica has an invalid `View`, and so does every authoritative
+		// world - which is what makes the same comparison do both jobs.
+		engine::core::Name view;
+		engine::core::Name mine;
+		for (const WorldIdentity &known : worlds) {
+			if (known.Id == viewer) {
+				view = known.View;
+				mine = known.Authored;
+				break;
+			}
+		}
+
+		// **A pane naming its own world is nobody's destination**, which is the
+		// rule this had before the survey and is worth keeping by name rather
+		// than by handle: the check used to be `found == world`, and from inside
+		// a replica the authority now answers to the same authored name and
+		// would be found instead. What such a pane shows is this world - a
+		// mirror, and visible as one.
+		if (mine.IsValid() && mine == wanted) {
+			return {};
+		}
+
+		engine::world::WorldId first;
+		for (const WorldIdentity &known : worlds) {
+			if (known.Id == viewer || known.Authored != wanted) {
+				continue;
+			}
+			if (known.View == view) {
+				return known.Id;
+			}
+			if (!first.IsValid()) {
+				first = known.Id;
+			}
+		}
+
+		// **The fallback is deliberate rather than a leftover.** A client whose
+		// universe holds one replica and the authority it mirrors has no second
+		// copy to find, and showing the authority is a live room rather than
+		// nothing.
+		return first;
+	}
+
 	size_t AttachForeignSurfaces(
 		engine::world::Universe &universe,
 		engine::world::WorldId world,
@@ -492,11 +573,6 @@ namespace client {
 		// clone - a body that walked in from the far room would be copied
 		// straight back into it. What crosses is what this world drew.
 		const auto ownRows = drawn.size();
-
-		// This world's name, which is how the far end recognises a pane that
-		// leads back here. Resolved once: `NameOf` is a registry lookup and the
-		// answer cannot change while the frame is being assembled.
-		const engine::core::Name here = universe.NameOf(world);
 
 		// Which surface index wants which world, gathered while inside the
 		// source store and used entirely outside it - `Universe::Enter` is not
@@ -527,6 +603,36 @@ namespace client {
 			return 0;
 		}
 
+		// Every world and the name its panes are addressed by.
+		//
+		// **After the gather above, because it enters every world in the
+		// universe** - a walk worth nothing to a scene whose panes are all
+		// mirrors, which is most of them.
+		//
+		// **`Universe::NameOf` is not that name once a host mirrors a world**,
+		// and using it was the whole of the bug this survey exists for: a
+		// replica is registered as `"<world> (client 1)"` while every string a
+		// scene authored still says `"<world>"`. So from inside a client's view
+		// the far world was found by falling back to the authority, `here` never
+		// matched what the far pane named, and the two rules below that turn on
+		// that match - the far pane being left out of this pane's picture, and
+		// the far world's straddlers coming back into this room - both went
+		// quiet. What that looks like is a hole filled edge to edge with the far
+		// world's own slab: the room behind it is drawn and hidden, so a
+		// character standing in it is invisible and the pane reads as flat.
+		static thread_local std::vector<WorldIdentity> surveyed;
+		(void)SurveyWorlds(universe, surveyed);
+
+		// This world's authored name, which is how the far end recognises a pane
+		// that leads back here.
+		engine::core::Name here;
+		for (const WorldIdentity &known : surveyed) {
+			if (known.Id == world) {
+				here = known.Authored;
+				break;
+			}
+		}
+
 		size_t attached = 0;
 
 		// Which far worlds have already had their own straddlers brought back
@@ -545,18 +651,16 @@ namespace client {
 			// **The name resolved against the universe, every frame.** A world
 			// created or destroyed between two frames is ordinary in an editor,
 			// and caching the handle would outlive one of those.
-			engine::world::WorldId found;
-			for (const engine::world::WorldId candidate : universe.Worlds()) {
-				if (universe.NameOf(candidate) == entry.World) {
-					found = candidate;
-					break;
-				}
-			}
+			//
+			// `ResolveDestinationWorld` prefers this viewer's own copy where the
+			// host holds several, which is what keeps one client's rooms joined
+			// to each other rather than to the authority nobody is standing in.
+			const engine::world::WorldId found = ResolveDestinationWorld(surveyed, world, entry.World);
 
-			// A name matching nothing, or naming the world we are already in,
-			// leaves the surface exactly as `CollectSurfaceViews` left it - this
-			// world's own image, which is a mirror and is visible as one.
-			if (!found.IsValid() || found == world) {
+			// A name matching nothing but the world we are already in leaves the
+			// surface exactly as `CollectSurfaceViews` left it - this world's own
+			// image, which is a mirror and is visible as one.
+			if (!found.IsValid()) {
 				continue;
 			}
 

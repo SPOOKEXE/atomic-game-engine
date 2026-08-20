@@ -700,7 +700,7 @@ TEST_CASE("a replica may not publish", "[world]") {
 
 	universe.Enter(server, [](Store &store) { Postbox(store).Subscribe("replica.topic"); });
 	universe.Enter(client, [](Store &store) {
-		store.SetResource<engine::world::Replica>({true});
+		store.SetResource<engine::world::Replica>({});
 		Postbox(store).Subscribe("replica.topic");
 	});
 	universe.Tick(1.0f / 60.0f);
@@ -724,7 +724,7 @@ TEST_CASE("a replica may not reach a datastore, a memorystore, or a teleport", "
 	const WorldId client = universe.Create(Named("bus.replica.writes"));
 
 	universe.Enter(client, [](Store &store) {
-		store.SetResource<engine::world::Replica>({true});
+		store.SetResource<engine::world::Replica>({});
 
 		Postbox box(store);
 		REQUIRE(box.IsReplica());
@@ -756,7 +756,7 @@ TEST_CASE("a replica still receives everything sent to it", "[world]") {
 	// and then handed authority over would be.
 	universe.Enter(client, [](Store &store) { Postbox(store).Subscribe("state"); });
 	universe.Tick(1.0f / 60.0f);
-	universe.Enter(client, [](Store &store) { store.SetResource<engine::world::Replica>({true}); });
+	universe.Enter(client, [](Store &store) { store.SetResource<engine::world::Replica>({}); });
 
 	universe.Enter(server, [](Store &store) { Postbox(store).Publish("state", Bytes("tick-1")); });
 	universe.Tick(1.0f / 60.0f);
@@ -779,13 +779,13 @@ TEST_CASE("clearing the replica flag restores the handle", "[world]") {
 	const WorldId world = universe.Create(Named("bus.replica.promote"));
 
 	universe.Enter(world, [](Store &store) {
-		store.SetResource<engine::world::Replica>({true});
+		store.SetResource<engine::world::Replica>({});
 		REQUIRE_FALSE(Postbox(store).Set(BusKind::MemoryStore, "k", Bytes("v")).Expected());
 	});
 	universe.Tick(1.0f / 60.0f);
 
 	universe.Enter(world, [](Store &store) {
-		store.SetResource<engine::world::Replica>({false});
+		store.SetResource<engine::world::Replica>({false, {}, {}});
 		REQUIRE_FALSE(Postbox(store).IsReplica());
 		REQUIRE(Postbox(store).Set(BusKind::MemoryStore, "k", Bytes("v")).Expected());
 	});
@@ -801,7 +801,7 @@ TEST_CASE("the replica flag survives a snapshot", "[world]") {
 	// with authority it never had.
 	Universe universe;
 	const WorldId client = universe.Create(Named("bus.replica.saved"));
-	universe.Enter(client, [](Store &store) { store.SetResource<engine::world::Replica>({true}); });
+	universe.Enter(client, [](Store &store) { store.SetResource<engine::world::Replica>({}); });
 
 	engine::core::ByteWriter writer;
 	REQUIRE(universe.Save(writer));

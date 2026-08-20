@@ -127,6 +127,70 @@ namespace client {
 	// @since v0.15
 	size_t CollectPortalViews(engine::ecs::Store &store, std::vector<engine::render::PortalView> &portals);
 
+	// One world, as the things that address worlds by name see it.
+	//
+	// @since v0.17
+	struct WorldIdentity {
+		// The world itself.
+		engine::world::WorldId Id;
+
+		// The name a scene authored against this world. Its own for a world the
+		// host owns, and the world it mirrors for a replica - see
+		// `world::Replica::Of`.
+		engine::core::Name Authored;
+
+		// Whose copy this is, from `world::Replica::View`. Invalid for a world
+		// that is not a replica.
+		engine::core::Name View;
+
+		// Whether this world is somebody's copy rather than the original.
+		bool IsReplica = false;
+	};
+
+	// Every world in the universe, with the name its panes are addressed by.
+	//
+	// **Because `Universe::NameOf` is not that name once a host mirrors a
+	// world.** A replica is registered apart from what it mirrors - rule 4 makes
+	// a name the identity, so two worlds cannot share one - and the editor's are
+	// `"<world> (client 1)"`. Everything a scene *authored* still says
+	// `"<world>"`: a `Portal.DestinationWorld` is a string somebody typed and
+	// replication carries it across verbatim. Comparing those two directly is
+	// what made a cross-world pane in a client's view show a flat slab, because
+	// nothing on either side of the pair recognised the other.
+	//
+	// **Enters every world, so it must be called from outside one.**
+	// `Universe::Enter` is not re-entrant and the resource this reads lives in
+	// each store.
+	//
+	// @param universe The worlds.
+	// @param worlds   Cleared and filled, keeping capacity.
+	// @return How many worlds were written.
+	// @since v0.17
+	size_t SurveyWorlds(engine::world::Universe &universe, std::vector<WorldIdentity> &worlds);
+
+	// Which world a pane in `viewer` means when it names `wanted`.
+	//
+	// **The same viewer's copy, or the original.** A host that mirrors a
+	// universe for two clients holds two copies of every world, and a hole in
+	// one client's copy of a room leads to that client's copy of the next -
+	// pointing it at the other client's would show one player another player's
+	// interpolated view, and pointing it at the authority would show a room
+	// nobody's character is in. So a replica prefers a replica of the same
+	// `View`, and everything else takes the first world of the authored name.
+	//
+	// Pure, and deliberately: `SurveyWorlds` does the entering once and this
+	// decides, so a pass resolving several names pays for one walk.
+	//
+	// @param worlds The survey.
+	// @param viewer The world being drawn.
+	// @param wanted The name the pane carries.
+	// @return The world to draw, or an invalid id where the name matches
+	//         nothing but the viewer itself.
+	// @since v0.17
+	engine::world::WorldId ResolveDestinationWorld(
+		std::span<const WorldIdentity> worlds, engine::world::WorldId viewer, const engine::core::Name &wanted
+	);
+
 	// Points a cross-world portal's surface at the world it names.
 	//
 	// **The half of a portal a store cannot do for itself.** `AimSurfaceCameras`

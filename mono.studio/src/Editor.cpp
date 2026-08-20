@@ -1269,29 +1269,42 @@ namespace studio {
 			);
 		});
 
+		if (wanted.empty()) {
+			return;
+		}
+
+		// **Resolved through the survey rather than by comparing names**, and it
+		// is the same correction `client::AttachForeignSurfaces` needed: a
+		// replica is registered as `"<world> (client 1)"` while the pane in it
+		// still names `"<world>"`, so a straight name comparison presented
+		// nothing and the attach that follows read a draw list nobody had built
+		// this frame. See `client::SurveyWorlds`.
+		//
+		// Outside every `Enter`, because it enters worlds - the same rule the
+		// gather above follows and for the same reason, and after the early
+		// return because it walks the whole universe to answer.
+		static thread_local std::vector<client::WorldIdentity> surveyed;
+		(void)client::SurveyWorlds(*Universe, surveyed);
+
 		std::vector<engine::world::Presentation> demand;
 		demand.reserve(wanted.size());
 		for (const Name &name : wanted) {
-			for (const WorldId candidate : Universe->Worlds()) {
-				if (candidate == shown || Universe->NameOf(candidate) != name) {
-					continue;
-				}
-
-				// **The same alpha rule as the panel's own world**, which is
-				// `PresentationAlpha`'s whole subject: a world nothing is
-				// advancing has no next tick to interpolate towards, and asking
-				// for its accumulator draws every part at its birthplace.
-				demand.push_back(
-					engine::world::Presentation{
-						candidate,
-						frameSeconds,
-						PresentationAlpha(
-							Advancing, Universe->StateOf(candidate), Universe->AlphaOf(candidate)
-						),
-					}
-				);
-				break;
+			const WorldId candidate = client::ResolveDestinationWorld(surveyed, shown, name);
+			if (!candidate.IsValid()) {
+				continue;
 			}
+
+			// **The same alpha rule as the panel's own world**, which is
+			// `PresentationAlpha`'s whole subject: a world nothing is
+			// advancing has no next tick to interpolate towards, and asking
+			// for its accumulator draws every part at its birthplace.
+			demand.push_back(
+				engine::world::Presentation{
+					candidate,
+					frameSeconds,
+					PresentationAlpha(Advancing, Universe->StateOf(candidate), Universe->AlphaOf(candidate)),
+				}
+			);
 		}
 
 		// Portal destinations are independent worlds. Preparing them as one
@@ -1683,6 +1696,27 @@ namespace studio {
 						(void)Renderer.AddShader(shader, module->SpirV);
 					}
 				}
+
+				// **The geometry and the pictures a script built, uploaded
+				// before the frame that draws them.** The same pair
+				// `client::Client` runs, beside the shader refresh above and
+				// for the identical reason - and the editor was running
+				// neither.
+				//
+				// What that looked like was not a degraded picture but no
+				// picture: `MeshPart.MeshId` was `editable-mesh://N`, nothing
+				// had ever registered that name, and the part drew nothing at
+				// all. So `EditableMesh.luau` and `EditableImage.luau` were
+				// blank in the one program they are authored in while being
+				// correct under `client --script`, and `StressMirrors.luau` -
+				// whose solid core is an `EditableMesh` - was a shell of
+				// floating tiles here and a ball there.
+				//
+				// `Refresh` is an integer compare per mesh on a world nobody is
+				// editing, which is `scene::EditableMesh::Revision`'s whole
+				// job.
+				(void)EditableMeshes.Refresh(store, Renderer);
+				(void)EditableImages.Refresh(store, Renderer);
 
 				if (PipelineSelected.find(shown.Index) == PipelineSelected.end()) {
 					PipelineSelected[shown.Index] = client::InstallRenderingProfiles(
