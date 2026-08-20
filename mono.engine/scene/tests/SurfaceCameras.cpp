@@ -711,6 +711,79 @@ TEST_CASE("a pane in the plane of the viewer draws nothing", "[scene][surfacecam
 	CHECK(pane->Surface == -1);
 }
 
+TEST_CASE("a pane whose camera is gone stops sampling its slot", "[scene][surfacecameras]") {
+	// **A mirror deleted in the editor leaves its pane behind.** The walk only
+	// visits live `SurfaceCamera` rows, so nothing would visit that pane again
+	// and the slot it was handed would be the last thing it was told - while the
+	// renderer's texture for that slot still holds the frame the camera drew.
+	// The result is a frozen reflection of a room the viewer has walked out of,
+	// standing exactly where the mirror was. Same failure as the edge-on band
+	// above, by a different route.
+	Mirror mirror;
+
+	REQUIRE(AimSurfaceCameras(mirror.World) == 1);
+	REQUIRE(mirror.World.Get<Visual>(mirror.Pane)->Surface == 0);
+
+	mirror.World.DestroyInstance(mirror.Reflection);
+
+	CHECK(AimSurfaceCameras(mirror.World) == 0);
+
+	const Visual *pane = mirror.World.Get<Visual>(mirror.Pane);
+	REQUIRE(pane != nullptr);
+	CHECK(pane->Surface == -1);
+}
+
+TEST_CASE("a pane whose camera component was removed stops sampling", "[scene][surfacecameras]") {
+	// The other route to the same state, and it is the one `Part.cpp` takes when
+	// a script drops `SurfaceSize` below a texel: the instance stays, the
+	// `SurfaceCamera` row goes. Nothing is destroyed, so a fix that hung off
+	// entity destruction would miss this entirely.
+	Mirror mirror;
+
+	REQUIRE(AimSurfaceCameras(mirror.World) == 1);
+	REQUIRE(mirror.World.Get<Visual>(mirror.Pane)->Surface == 0);
+
+	mirror.World.Remove<SurfaceCamera>(mirror.Reflection);
+
+	CHECK(AimSurfaceCameras(mirror.World) == 0);
+	CHECK(mirror.World.Get<Visual>(mirror.Pane)->Surface == -1);
+}
+
+TEST_CASE("a world that loses its viewer leaves its panes alone", "[scene][surfacecameras]") {
+	// **The deliberate hole in the sweep, asserted so it stays deliberate.**
+	// With no active camera the aim returns before it can hand anything out, and
+	// it does *not* release the panes: a world with no viewer draws nothing, so
+	// there is no picture for a pane to be stuck showing. A replica between
+	// connecting and spawning its camera sits in exactly this state while the
+	// authority is still sending it `Visual` rows carrying the slot, and a clear
+	// here would fight the wire once per snapshot for a frame nobody renders.
+	// `RenderView` will not sample a slot nothing claimed, which is what covers
+	// a world that never gets a viewer back.
+	Mirror mirror;
+
+	REQUIRE(AimSurfaceCameras(mirror.World) == 1);
+	REQUIRE(mirror.World.Get<Visual>(mirror.Pane)->Surface == 0);
+
+	mirror.World.DestroyInstance(mirror.Eye);
+
+	CHECK(AimSurfaceCameras(mirror.World) == 0);
+	CHECK(mirror.World.Get<Visual>(mirror.Pane)->Surface == 0);
+}
+
+TEST_CASE("a live mirror keeps its slot across repeated aims", "[scene][surfacecameras]") {
+	// The other half of the release, and the reason it is counted before it
+	// sweeps: a pane that is still aimed at must survive every frame. A sweep
+	// that cleared on the strength of "this pane holds a slot" alone would blank
+	// every working mirror in the engine on the frame after it started drawing.
+	Mirror mirror;
+
+	for (int frame = 0; frame < 4; frame++) {
+		REQUIRE(AimSurfaceCameras(mirror.World) == 1);
+		CHECK(mirror.World.Get<Visual>(mirror.Pane)->Surface == 0);
+		CHECK(mirror.World.Get<SurfaceCamera>(mirror.Reflection)->Surface == 0);
+	}
+}
+
 TEST_CASE("a pane just clear of the plane still fits a finite frustum", "[scene][surfacecameras]") {
 	// The other side of `EDGE_ON_MARGIN`, so the clamp that case used to test is
 	// still covered where it still applies. Just outside the band the viewer is

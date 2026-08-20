@@ -122,6 +122,72 @@ namespace engine::scene {
 			return pending;
 		}
 
+		// The parts this frame's aim put on a slot, sorted by entity id.
+		//
+		// Scratch beside `Pending()` and for the same reason: it is refilled
+		// once per aim and would otherwise be an allocation per world per frame.
+		std::vector<uint64_t> &AimedParts() {
+			static thread_local std::vector<uint64_t> aimed;
+			return aimed;
+		}
+
+		// Takes a pane off its surface slot when nothing aims at it any more.
+		//
+		// **The only place a deleted mirror can be noticed.** The walk in
+		// `AimSurfaceCameras` visits live `SurfaceCamera` rows, so a pane whose
+		// camera was destroyed - or whose `SurfaceCamera` was removed because
+		// its `SurfaceSize` fell below a texel, which `Part.cpp` does - is never
+		// visited again and keeps the slot it was last told. The renderer's
+		// texture for that slot still holds the frame the camera drew, so the
+		// pane goes on sampling it: a reflection of a room the viewer has walked
+		// out of. That is the same frozen picture `EDGE_ON_MARGIN` blanks a pane
+		// for, reached by a different route.
+		//
+		// **Counted first, cleared second, and the count is what makes this
+		// affordable.** `Visual` is on every drawn part, so finding the holders
+		// is a column scan. `EachBatch` reads that column with no per-row call
+		// and no entity handle, which is one compare per part; the second walk
+		// runs only when more panes hold a slot than this frame handed out, and
+		// that mismatch is a mirror having gone.
+		void ReleaseUnaimedSurfaces(Store &store, std::span<const Aim> aims) {
+			ENGINE_PROFILE("release unaimed surfaces");
+
+			// **Deduplicated, because two cameras aiming at one part hand out
+			// two slots and leave one holder.** Counting the slots instead would
+			// read that as a pane nobody claimed and run the sweep every frame.
+			std::vector<uint64_t> &aimed = AimedParts();
+			aimed.clear();
+			for (const Aim &aim : aims) {
+				if (aim.Surface >= 0) {
+					aimed.push_back(aim.Part.Id);
+				}
+			}
+			std::sort(aimed.begin(), aimed.end());
+			aimed.erase(std::unique(aimed.begin(), aimed.end()), aimed.end());
+
+			size_t holding = 0;
+			store.EachBatch<const Visual>([&](size_t rows, const Visual *visuals) {
+				for (size_t row = 0; row < rows; row++) {
+					holding += visuals[row].Surface >= 0 ? 1u : 0u;
+				}
+			});
+
+			if (holding <= aimed.size()) {
+				return;
+			}
+
+			store.Each<const Visual>([&](Entity part, const Visual &visual) {
+				if (visual.Surface < 0 || std::binary_search(aimed.begin(), aimed.end(), part.Id)) {
+					return;
+				}
+
+				// `GetMutable` rather than `Set`: the row is already there, and
+				// the guarded-write argument below applies here too - this is
+				// reached only for a pane that is actually changing.
+				store.GetMutable<Visual>(part)->Surface = -1;
+			});
+		}
+
 		// A little wider than the pane exactly needs.
 		//
 		// **Because the edge of a frustum is not a safe place to sample.** The
@@ -1504,6 +1570,15 @@ namespace engine::scene {
 		// Where the scene is watched from. Without one there is nothing to
 		// reflect: a mirror shows the viewer's world, so a world with no active
 		// camera has no reflection to compute rather than a default one.
+		//
+		// **These two returns deliberately leave the panes on their slots**,
+		// unlike the sweep at the end. A world with no viewer draws nothing, so
+		// there is no picture for a pane to be stuck showing - and a replica
+		// between connecting and spawning its camera is exactly this state while
+		// the authority is still sending it `Visual` rows carrying the slot. A
+		// clear here would fight the wire once per snapshot for a frame nobody
+		// renders. `RenderView` refuses to sample a slot nothing claimed, which
+		// is what covers a world that never gets a viewer back.
 		const ActiveCamera *active = store.Resource<ActiveCamera>();
 		if (active == nullptr || !store.Alive(active->Entity)) {
 			return 0;
@@ -1914,6 +1989,8 @@ namespace engine::scene {
 				store.GetMutable<Visual>(aim.Part)->Surface = aim.Surface;
 			}
 		}
+
+		ReleaseUnaimedSurfaces(store, pending);
 
 		// **What rendered, not what was walked.** A pane the viewer is level with
 		// has been visited and told to stop sampling, which is work - but the

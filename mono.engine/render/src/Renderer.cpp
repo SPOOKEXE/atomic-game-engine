@@ -12579,7 +12579,19 @@ namespace engine::render {
 						const Impl::SurfaceSlotState &shown = bank.Surfaces[index];
 						const LightingUniforms *paneLighting = &plainLighting;
 						SDL_GPUTexture *image = nullptr;
-						if (surfaceImagesEnabled && shown.Ready) {
+
+						// **`claimed` as well as `Ready`, which is what the
+						// recursive pass above already tests.** `Ready` says the
+						// slot has been drawn into at some point; `claimed` says
+						// something aimed at it *this* frame. A pane still naming
+						// a slot whose camera has gone passes the first and fails
+						// the second, and without the second it samples whatever
+						// that camera last drew - a mirror deleted in the editor
+						// leaving a frozen picture where it stood. Scene-side,
+						// `ReleaseUnaimedSurfaces` takes the pane off the slot;
+						// this makes the ghost impossible for every other reason
+						// a slot stops being drawn as well.
+						if (surfaceImagesEnabled && shown.Ready && claimed[index]) {
 							const FrameUniforms mirrorFrame{
 								viewProjection,
 								lightViewProjection,
