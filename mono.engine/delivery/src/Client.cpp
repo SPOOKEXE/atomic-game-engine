@@ -604,15 +604,15 @@ namespace engine::delivery {
 					// kind a job turns out to be is not knowable until `Start`
 					// has walked its sources.
 					switch (Start(job, read < MAXIMUM_STORE_BUNDLES_PER_PUMP)) {
-						case StartOutcome::Fetching:
-							++admitted;
-							break;
-						case StartOutcome::Completed:
-							++admitted;
-							++read;
-							break;
-						case StartOutcome::Idle:
-							break;
+					case StartOutcome::Fetching:
+						++admitted;
+						break;
+					case StartOutcome::Completed:
+						++admitted;
+						++read;
+						break;
+					case StartOutcome::Idle:
+						break;
 					}
 				}
 				Transfer->Pump();
@@ -801,9 +801,8 @@ namespace engine::delivery {
 			//                 fifth of a local bundle's cost, measured. It is
 			//                 false for anything off a wire, where this is the
 			//                 only check there is.
-			void Split(
-				const assets::BundleEntry &bundle, const std::vector<std::byte> &payload, bool verified
-			) {
+			void
+			Split(const assets::BundleEntry &bundle, const std::vector<std::byte> &payload, bool verified) {
 				ENGINE_PROFILE_CAT("delivery.split", core::ProfileCategory::Assets);
 
 				for (const assets::ContentHash &member : bundle.Assets) {

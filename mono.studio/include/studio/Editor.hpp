@@ -395,6 +395,15 @@ namespace studio {
 		// `ui::InterfaceSettings::Scale`.
 		float Scale = 1.0f;
 
+		// Whether `--scale` was given, rather than `Scale` merely holding a
+		// number.
+		//
+		// **A run that named a scale outranks the preferences file and the
+		// display both.** Without this there is no way to tell "the default" from
+		// "one point zero, deliberately", so either the flag would be ignored or
+		// the saved preference would be.
+		bool ScaleAuthored = false;
+
 		// -1 runs until the window is closed. A frame budget is what makes the
 		// editor usable from a test or a CI job - and what lets a capture be
 		// taken of a known frame rather than of whenever somebody looked.

@@ -1929,6 +1929,25 @@ namespace client {
 			SDL_GetWindowSizeInPixels(Window, &pixelWidth, &pixelHeight);
 		}
 
+		// **The window's logical size as well as its pixel one, because the
+		// interface needs the first and the attachment is the second.** SDL
+		// reports the pointer in logical units, so a canvas laid out in anything
+		// else hit-tests one place and draws another; the texture the interface
+		// lands in is pixels. On a display whose density is one they are the
+		// same number, which is exactly why the difference went unnoticed.
+		//
+		// **Read every frame rather than taken from `Options`.** `Settings.Width`
+		// is what the window was *asked* for at start-up and is never written
+		// again - so every `UDim2` offset in the game, and every hit test, was
+		// against the launch size for the rest of the session. The world has
+		// always been drawn at the live size, so resizing the window stretched
+		// the interface against a scene that had not stretched.
+		int windowWidth = Settings.Width;
+		int windowHeight = Settings.Height;
+		if (Window != nullptr) {
+			SDL_GetWindowSize(Window, &windowWidth, &windowHeight);
+		}
+
 		{
 			// Once per frame, and separate from the tick because a client draws
 			// one world while the rest keep simulating. This is the phase that
@@ -2372,8 +2391,8 @@ namespace client {
 			// see `CompileRequest::Seconds`.
 			request.Seconds = engine::core::Clock::Seconds();
 
-			request.Display.Width = static_cast<float>(Settings.Width);
-			request.Display.Height = static_cast<float>(Settings.Height);
+			request.Display.Width = static_cast<float>(windowWidth);
+			request.Display.Height = static_cast<float>(windowHeight);
 
 			// Fed back from the previous frame's routing, deliberately: the
 			// hover comes from the list a compile produced, so a compile
@@ -2532,6 +2551,9 @@ namespace client {
 					Interface.Submit(
 						InterfaceList.Commands(),
 						engine::core::Vector2{request.Display.Width, request.Display.Height},
+						engine::core::Vector2{
+							static_cast<float>(pixelWidth), static_cast<float>(pixelHeight)
+						},
 						store
 					);
 					hook = &Interface;
@@ -2597,8 +2619,10 @@ namespace client {
 		engine::render::SceneTarget target{};
 		const engine::render::SceneTarget *sceneTarget = nullptr;
 		if (!Settings.Capture.empty()) {
-			target.Width = static_cast<uint32_t>(Settings.Width);
-			target.Height = static_cast<uint32_t>(Settings.Height);
+			// The window's real size rather than the one it was asked for, so a
+			// capture taken after a resize is the picture on screen.
+			target.Width = static_cast<uint32_t>(pixelWidth);
+			target.Height = static_cast<uint32_t>(pixelHeight);
 			sceneTarget = &target;
 		}
 

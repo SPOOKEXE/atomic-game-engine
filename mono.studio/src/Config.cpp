@@ -1,6 +1,8 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
 
+#include <SDL3/SDL_video.h>
+
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -534,6 +536,19 @@ namespace studio {
 		Prefs.Discord.Details = "Editing {place}";
 		Prefs.Discord.State = "{instances} instances in {world}";
 
+		// **The display's own scale as the default, set the same way and for the
+		// same reason as the two lines above.** A high-density screen reports two
+		// or more, and an editor that came up at one drew every panel at
+		// framebuffer resolution with one-times metrics - which is the whole
+		// interface at half size, on the machine most likely to be somebody's
+		// main one. `Preferences::Load` leaves alone what the document mentions,
+		// so anybody who has moved the slider keeps their number.
+		if (Window != nullptr) {
+			if (const float displayScale = SDL_GetWindowDisplayScale(Window); displayScale > 0.0f) {
+				Prefs.Scale = displayScale;
+			}
+		}
+
 		// Read before anything is applied, so a broken file leaves every default
 		// in place rather than half of them.
 		Prefs.Load();
@@ -549,6 +564,15 @@ namespace studio {
 		ScaleSides = Prefs.Sides;
 		DragAligns = Prefs.DragAligns;
 		ShowFacing = Prefs.ShowFacing;
+
+		// **Read back, which it never was.** Every other field on this page is
+		// applied here and the scale was only ever *written* - so moving the
+		// slider changed the editor for that session, was saved, and was
+		// silently discarded on the next start. `--scale` still wins, in the
+		// same way and for the same reason the panel flags below do.
+		if (!Settings.ScaleAuthored) {
+			Settings.Scale = Prefs.Scale;
+		}
 
 		FrameCap = Prefs.FrameCap;
 		InterfaceActiveHz = Prefs.InterfaceActiveHz;

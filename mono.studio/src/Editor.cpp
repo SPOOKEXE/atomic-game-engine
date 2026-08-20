@@ -507,7 +507,6 @@ namespace studio {
 		}
 
 		engine::ui::InterfaceSettings interfaceSettings;
-		interfaceSettings.Scale = Settings.Scale;
 		interfaceSettings.Docking = true;
 		interfaceSettings.DisplayWidth = Settings.Width;
 		interfaceSettings.DisplayHeight = Settings.Height;
@@ -524,6 +523,14 @@ namespace studio {
 		// are the whole interface until somebody says otherwise. See
 		// `Keybinds::Load`.
 		LoadConfiguration();
+
+		// **After the configuration, because the scale lives in it.** The
+		// preferences page writes an interface scale and this is the only place
+		// it can be read back before the fonts are rasterised at it - taking it
+		// from `Options` alone was what made the slider forget itself between
+		// runs. `LoadConfiguration` has already reconciled `--scale` against the
+		// file; see `Options::ScaleAuthored`.
+		interfaceSettings.Scale = Settings.Scale;
 
 		// **Built here rather than lazily on the first fetch**, so a
 		// misconfigured source says so at start-up in the log rather than as a
@@ -1880,9 +1887,17 @@ namespace studio {
 					(void)ViewportImages.Render(
 						Renderer, store, GuiLists[DrawingViewport].Commands(), PreviewSlot() + 1
 					);
+					// **The canvas in points and the target in pixels, both
+					// stated.** They are the panel's logical size and the
+					// texture that panel was allocated at, and on a display
+					// whose density is not one they are different numbers. See
+					// `InterfacePass::Submit`.
 					GameInterface.Submit(
 						GuiLists[DrawingViewport].Commands(),
 						GuiLists[DrawingViewport].Commands().CanvasSize,
+						engine::core::Vector2{
+							static_cast<float>(target.Width), static_cast<float>(target.Height)
+						},
 						store
 					);
 				}

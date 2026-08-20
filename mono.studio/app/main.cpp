@@ -140,6 +140,7 @@ int main(int argc, char **argv) {
 	options.Width = static_cast<int>(arguments.GetInteger("width", options.Width));
 	options.Height = static_cast<int>(arguments.GetInteger("height", options.Height));
 	options.Scale = static_cast<float>(arguments.GetNumber("scale", options.Scale));
+	options.ScaleAuthored = arguments.Has("scale");
 	options.TickRate = arguments.GetNumber("tick-rate", options.TickRate);
 	options.MaximumFrames = arguments.GetInteger("frames", -1);
 	// **`Has` then `GetInteger`, and the two-step is the opt-in.** A bare

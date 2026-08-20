@@ -1233,6 +1233,75 @@ TEST_CASE("TextScaled on a grown label returns the size asked for", "[gui][layou
 	CHECK(world.Where(label).TextSize == 20);
 }
 
+TEST_CASE("UIScale grows the writing as well as the box", "[gui][layout]") {
+	// **What `gui::Scale` says it does, and did not.** The factor was applied to
+	// the rectangle in `Constrain` and to nothing else, so a scale of two gave a
+	// label at twice the size with its writing at the authored size - a caption
+	// that shrank relative to its own frame as the interface was scaled up.
+	//
+	// It hid because it is *right* with `TextScaled` on: the fit re-derives from
+	// the enlarged box and lands on roughly the scaled size anyway, and that is
+	// the case people test with.
+	World world("gui_layout.uiscale_text");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity label = world.Make("TextLabel", screen);
+
+	Element element;
+	element.Size = UDim2{0.0f, 200.0f, 0.0f, 60.0f};
+	world.Data.Set(label, element);
+
+	Label text;
+	text.Text = "Caption";
+	text.Size = 12;
+	world.Data.Set(label, text);
+
+	Layout(world.Data, world.Display);
+	REQUIRE(world.Where(label).TextSize == 12);
+	REQUIRE(world.Where(label).AbsoluteSize.X == Approx(200.0f));
+
+	const Entity scale = world.Make("UIScale", label);
+	world.Data.Set(scale, Scale{2.0f});
+
+	Layout(world.Data, world.Display);
+
+	CHECK(world.Where(label).AbsoluteSize.X == Approx(400.0f));
+	CHECK(world.Where(label).TextSize == 24);
+}
+
+TEST_CASE("a text size limit is in the pixels the text ends up at", "[gui][layout]") {
+	// **The limits are not scaled and the order is why.** A maximum of 16 means
+	// "never larger than 16 on screen"; applying `UIScale` after it would let a
+	// scaled label past its own ceiling, and applying the scale to the ceiling
+	// would turn it into a limit on the authored size instead - which is a
+	// number nobody can see.
+	World world("gui_layout.uiscale_text_limits");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity label = world.Make("TextLabel", screen);
+
+	Element element;
+	element.Size = UDim2{0.0f, 200.0f, 0.0f, 60.0f};
+	world.Data.Set(label, element);
+
+	Label text;
+	text.Text = "Caption";
+	text.Size = 12;
+	world.Data.Set(label, text);
+
+	const Entity limits = world.Make("UITextSizeConstraint", label);
+	TextSizeLimits bounds;
+	bounds.Min = 1;
+	bounds.Max = 16;
+	world.Data.Set(limits, bounds);
+
+	const Entity scale = world.Make("UIScale", label);
+	world.Data.Set(scale, Scale{4.0f});
+
+	Layout(world.Data, world.Display);
+
+	// 12 * 4 is 48, and the ceiling is 16.
+	CHECK(world.Where(label).TextSize == 16);
+}
+
 TEST_CASE("automatic sizing nests", "[gui][layout][automatic]") {
 	// **The property that makes this a second phase rather than a special
 	// case.** The outer container's height is a function of the inner one's,

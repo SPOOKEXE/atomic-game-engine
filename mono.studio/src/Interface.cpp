@@ -12,6 +12,7 @@
 #include <SDL3/SDL_video.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <imgui.h>
@@ -919,8 +920,15 @@ namespace studio {
 		const float reportedDensity = Window != nullptr ? SDL_GetWindowPixelDensity(Window) : 1.0f;
 		const float density = reportedDensity > 0.0f ? reportedDensity : 1.0f;
 
-		target.Width = static_cast<uint32_t>(std::max(size.x, 1.0f) * density);
-		target.Height = static_cast<uint32_t>(std::max(size.y, 1.0f) * density);
+		// **Rounded rather than truncated.** The image is drawn at the panel's
+		// float size and the target is an integer count of pixels, so truncating
+		// throws away up to a pixel on each axis independently - which is a
+		// slightly different aspect in the camera than in the rectangle the
+		// picture lands in, and therefore a slight stretch and a gizmo that does
+		// not sit on the thing it is drawn for. Rounding halves that error and
+		// costs nothing.
+		target.Width = static_cast<uint32_t>(std::lround(std::max(size.x, 1.0f) * density));
+		target.Height = static_cast<uint32_t>(std::lround(std::max(size.y, 1.0f) * density));
 
 		// **The texture the renderer holds now, and it is usually this frame's
 		// picture rather than the last one's.** imgui records its draw lists

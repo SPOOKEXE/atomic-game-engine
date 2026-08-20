@@ -8,6 +8,7 @@
 #include <SDL3/SDL_gpu.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <fstream>
 #include <vector>
@@ -335,9 +336,15 @@ namespace engine::render {
 		AtlasUploaded = false;
 	}
 
-	void InterfacePass::Submit(const gui::DrawList &list, const core::Vector2 &canvas, ecs::Store &store) {
+	void InterfacePass::Submit(
+		const gui::DrawList &list,
+		const core::Vector2 &canvas,
+		const core::Vector2 &targetPixels,
+		ecs::Store &store
+	) {
 		Pending = list;
 		Canvas = canvas;
+		TargetPixels = targetPixels;
 		SpatialCollectors.clear();
 		store.Each<const gui::SpatialCanvas>([&](ecs::Entity collector, const gui::SpatialCanvas &spatial) {
 			SpatialCollectors.push_back(SpatialCollector{collector, spatial});
@@ -800,17 +807,15 @@ namespace engine::render {
 				static_cast<SDL_GPUCommandBuffer *>(commandBuffer), 0, clip, sizeof(clip)
 			);
 
-			// The scissor, in pixels, clamped to the target - a negative origin
-			// or a width past the edge is a validation error on some backends
-			// and silently ignored on others, which is the worst pair.
-			SDL_Rect scissor{};
-			scissor.x = static_cast<int>(std::max(0.0f, batch.Clip.Min.X));
-			scissor.y = static_cast<int>(std::max(0.0f, batch.Clip.Min.Y));
-			scissor.w = static_cast<int>(std::max(0.0f, batch.Clip.Max.X - batch.Clip.Min.X));
-			scissor.h = static_cast<int>(std::max(0.0f, batch.Clip.Max.Y - batch.Clip.Min.Y));
-			if (scissor.w <= 0 || scissor.h <= 0) {
+			// **The scissor is in device pixels and `Clip` is in canvas units.**
+			// `ScissorFor` carries why those are not the same number and what
+			// clipping the interface to a fraction of the panel looked like.
+			const InterfaceScissor clipped = ScissorFor(batch.Clip, Canvas, TargetPixels);
+			if (clipped.Empty()) {
 				continue;
 			}
+
+			const SDL_Rect scissor{clipped.X, clipped.Y, clipped.Width, clipped.Height};
 			SDL_SetGPUScissor(pass, &scissor);
 
 			SDL_DrawGPUIndexedPrimitives(pass, batch.IndexCount, 1, batch.FirstIndex, 0, 0);
@@ -887,12 +892,23 @@ namespace engine::render {
 					viewProjection * glm::vec4{spatial.Origin.X, spatial.Origin.Y, spatial.Origin.Z, 1.0f};
 				const core::Vector3 oneUp = spatial.Origin + up;
 				const glm::vec4 projectedUp = viewProjection * glm::vec4{oneUp.X, oneUp.Y, oneUp.Z, 1.0f};
+				// **Against the canvas height, not the attachment's.** The
+				// number being divided by this is `BillboardPixels`, which came
+				// from a `UDim2` offset and is therefore in canvas units - and
+				// `ResolveSpatialCanvases` sized the same billboard's canvas
+				// with `PixelsPerStud(..., screen.Height)`, also canvas units.
+				// Using the attachment made the two disagree by the display's
+				// density: the canvas was laid out at one size and the quad it
+				// lands on was built at another, so the pixel half of a
+				// billboard's `Size` came out at a fraction of the studs asked
+				// for on a high-density display and nowhere else.
+				const float canvasHeight = Canvas.Y > 0.0f ? Canvas.Y : static_cast<float>(height);
 				const float pixelsPerStud =
 					std::abs(
 						projectedUp.y / std::max(std::abs(projectedUp.w), 1.0e-5f) -
 						projectedAnchor.y / std::max(std::abs(projectedAnchor.w), 1.0e-5f)
 					) *
-					static_cast<float>(height) * 0.5f;
+					canvasHeight * 0.5f;
 				const float usablePixelsPerStud = std::max(pixelsPerStud, 1.0e-5f);
 				const core::Vector2 worldSize{
 					spatial.BillboardStuds.X + spatial.BillboardPixels.X / usablePixelsPerStud,

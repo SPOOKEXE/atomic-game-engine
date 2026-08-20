@@ -282,10 +282,14 @@ namespace engine::ui {
 	}
 
 	void Interface::SubmitSpatial(
-		const gui::DrawList &list, const core::Vector2 &canvas, ecs::Store &store, double seconds
+		const gui::DrawList &list,
+		const core::Vector2 &canvas,
+		const core::Vector2 &targetPixels,
+		ecs::Store &store,
+		double seconds
 	) {
 		State->SpatialSeconds = seconds;
-		State->Spatial.Submit(list, canvas, store);
+		State->Spatial.Submit(list, canvas, targetPixels, store);
 	}
 
 	void Interface::SetSpatialViewportSource(std::function<render::InterfaceImage(ecs::Entity)> resolve) {
