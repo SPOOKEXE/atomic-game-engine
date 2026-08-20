@@ -167,8 +167,15 @@ namespace engine::effects {
 			// A shaped emitter throws outward from its own centre rather than
 			// along a face, which is what makes a sphere an explosion.
 			if (emitter.Shape != ParticleShape::Box) {
+				// **Squared, because the question is only whether it is
+				// non-zero.** `Vector3::Unit` already returns `Zero` for a
+				// directionless vector, so this guard is asking "did that
+				// succeed" - and asking it with `Magnitude` takes a second
+				// square root of a vector whose length is now one. Squared
+				// magnitude answers the same question with none, and `sqrt` is
+				// monotonic so the two can never disagree.
 				const Vector3 radial = localPoint.Unit();
-				if (radial.Magnitude() > 0.0f) {
+				if (radial.MagnitudeSquared() > 0.0f) {
 					direction = radial;
 				}
 			}
@@ -187,11 +194,21 @@ namespace engine::effects {
 			if (spreadX != 0.0f || spreadY != 0.0f) {
 				const float tiltX = (Unit(SeedOf(id, index, 8)) * 2.0f - 1.0f) * spreadX;
 				const float tiltY = (Unit(SeedOf(id, index, 9)) * 2.0f - 1.0f) * spreadY;
-				direction = (CFrame::Angles(tiltX, tiltY, 0.0f) * CFrame{direction}).Position;
+				// **Rotated rather than composed, and it is the same
+				// arithmetic.** `CFrame{direction}` is a translation with no
+				// turn in it, so `(A * B).Position` is `A.Rotation` applied to
+				// `B.Position` plus `A.Position`, and `A.Position` is zero -
+				// which is exactly what `VectorToWorldSpace` computes. The
+				// composed form built a second `CFrame`, multiplied two frames
+				// and threw the rotation half of the answer away, once per
+				// particle born.
+				direction = CFrame::Angles(tiltX, tiltY, 0.0f).VectorToWorldSpace(direction);
 			}
 
+			// The same pair, for the reason above: two square roots where the
+			// second one is asking whether the first produced anything.
 			const Vector3 unit = direction.Unit();
-			return unit.Magnitude() > 0.0f ? unit : Vector3{0.0f, 1.0f, 0.0f};
+			return unit.MagnitudeSquared() > 0.0f ? unit : Vector3{0.0f, 1.0f, 0.0f};
 		}
 
 		// --- flipbook --------------------------------------------------------
@@ -893,6 +910,22 @@ namespace engine::effects {
 				const Vector3 half = HalfExtentOf(store, entity);
 				const uint32_t id = entity.Id;
 
+				// **The emitter's own terms, out of the per-particle loop.**
+				// Each of these depends on the emitter and the block and on
+				// nothing the particle being born carries, so an emitter owing
+				// forty particles computed them forty times. `ParentMotion` is
+				// the one that matters most: it is a store lookup, and it was
+				// one per particle rather than one per emitter.
+				const scene::Motion *inherited =
+					emitter.VelocityInheritance != 0.0f ? ParentMotion(store, entity) : nullptr;
+
+				// A newborn particle is at the head of every curve, so its size
+				// and its colour are the block's first sample and the same for
+				// all of them.
+				const uint32_t bornSize = PackParticleSize(block.Curves.Size[0], block.Curves.Size[0]);
+				const uint32_t bornColour = WithAlpha(block.Curves.Colour[0], block.Curves.Alpha[0]);
+				const auto bornSlot = static_cast<uint16_t>(slot.Index);
+
 				for (uint32_t spawn = 0; spawn < owed; spawn++) {
 					if (block.Live >= block.Capacity) {
 						counted.SpawnsDropped += owed - spawn;
@@ -923,23 +956,21 @@ namespace engine::effects {
 					// A new particle keeps some of what its parent was doing, so
 					// smoke from a moving vehicle trails behind it rather than
 					// being left in a neat line at the origin of each frame.
-					if (emitter.VelocityInheritance != 0.0f) {
-						if (const scene::Motion *motion = ParentMotion(store, entity)) {
-							state.Velocity = state.Velocity + motion->Linear * emitter.VelocityInheritance;
-						}
+					if (inherited != nullptr) {
+						state.Velocity = state.Velocity + inherited->Linear * emitter.VelocityInheritance;
 					}
 
 					ParticleInstance &instance = instances[row];
 					instance.Position = block.Frame.PointToWorldSpace(local);
-					instance.Slot = static_cast<uint16_t>(slot.Index);
+					instance.Slot = bornSlot;
 
 					const float degrees = Between(SeedOf(id, index, 12), emitter.Rotation);
 					const auto turns =
 						static_cast<uint32_t>(std::fmod(degrees * TURNS_PER_DEGREE + 1.0f, 1.0f) * 65535.0f);
 					instance.RotationAndCell = turns & 0xFFFFu;
 
-					instance.Size = PackParticleSize(block.Curves.Size[0], block.Curves.Size[0]);
-					instance.Colour = WithAlpha(block.Curves.Colour[0], block.Curves.Alpha[0]);
+					instance.Size = bornSize;
+					instance.Colour = bornColour;
 
 					block.Live++;
 					counted.Emitted++;
