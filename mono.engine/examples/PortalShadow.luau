@@ -65,13 +65,19 @@ local function block(name: string, size: Vector3, at: CFrame, colour: Color3): P
 	return part
 end
 
+-- Clear of a baseplate's top face at y = 0: coplanar surfaces do not flicker in
+-- this engine, they resolve stably to whichever one the draw order happens to
+-- favour. `scripts/demos/zfight-scan.sh` holds the control for that.
+local GROUND_LIFT = 0.01
+
 -- A checker, because a shadow's direction is only readable against something
 -- with a grid in it.
 local function floor(name: string, centre: Vector3, first: Color3, second: Color3)
 	local count = math.floor(ROOM * 2 / TILE)
 	for x = 0, count - 1 do
 		for z = 0, count - 1 do
-			local at = centre + Vector3.new((x + 0.5) * TILE - ROOM, -0.5, (z + 0.5) * TILE - ROOM)
+			local at =
+				centre + Vector3.new((x + 0.5) * TILE - ROOM, -0.5 + GROUND_LIFT, (z + 0.5) * TILE - ROOM)
 			local shade = if (x + z) % 2 == 0 then first else second
 			block(name .. x .. "_" .. z, Vector3.new(TILE, 1, TILE), CFrame.new(at), shade)
 		end

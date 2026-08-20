@@ -146,10 +146,15 @@ local function piece(name: string, size: Vector3, at: Vector3, colour: Color3)
 	table.insert(pieces, { Body = part, Local = CFrame.new(at) })
 end
 
+-- Clear of a baseplate's top face at y = 0: coplanar surfaces do not flicker in
+-- this engine, they resolve stably to whichever one the draw order happens to
+-- favour. `scripts/demos/zfight-scan.sh` holds the control for that.
+local GROUND_LIFT = 0.01
+
 piece(
 	"Floor",
 	Vector3.new(TRAY, FLOOR_THICKNESS, TRAY),
-	Vector3.new(0, -FLOOR_THICKNESS / 2, 0),
+	Vector3.new(0, -FLOOR_THICKNESS / 2 + GROUND_LIFT, 0),
 	Color3.fromRGB(118, 120, 126)
 )
 

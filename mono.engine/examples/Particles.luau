@@ -87,11 +87,16 @@ local POOL_RESERVE = GRID * GRID * 6
 
 -- --- the floor ---------------------------------------------------------------
 
+-- Clear of a baseplate's top face at y = 0: coplanar surfaces do not flicker in
+-- this engine, they resolve stably to whichever one the draw order happens to
+-- favour. `scripts/demos/zfight-scan.sh` holds the control for that.
+local GROUND_LIFT = 0.01
+
 local plate = Instance.new("Part")
 plate.Name = "Baseplate"
 plate.Anchored = true
 plate.Size = Vector3.new(GRID * SPACING + 40, 1, GRID * SPACING + 40)
-plate.CFrame = CFrame.new(Vector3.new(0, -0.5, 0))
+plate.CFrame = CFrame.new(Vector3.new(0, -0.5 + GROUND_LIFT, 0))
 plate.Color = Color3.new(0.10, 0.11, 0.14)
 plate.Parent = workspace
 

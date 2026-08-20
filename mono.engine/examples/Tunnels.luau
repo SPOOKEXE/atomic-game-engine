@@ -107,9 +107,27 @@ local function block(name: string, size: Vector3, at: Vector3, colour: Color3): 
 	return part
 end
 
+-- **Two lifts rather than one, because this scene stacks floors.** A world may
+-- already hold a baseplate whose top face is exactly y = 0, so the ground below
+-- clears that by a hundredth of a stud - and each corridor floor is laid inside
+-- the ground's own footprint, so it has to clear the ground by the same again or
+-- the two of them are the coplanar pair rather than the ground and the
+-- baseplate. Coplanar surfaces do not flicker in this engine: the depth tie
+-- resolves the same way every frame and one of them simply wins every pixel,
+-- which is why this reads as the wrong floor rather than as a fight.
+-- `scripts/demos/zfight-scan.sh` holds the control for it.
+local GROUND_LIFT = 0.01
+
+-- **How high a corridor's own floor sits above the plain outside it, and the
+-- reason the whole shell moves rather than only the floor.** The panes fill the
+-- cross-section exactly - that is what the shell build is for - so a floor
+-- lifted on its own opens a crack along the bottom of every pane, which is the
+-- lip this scene is arranged not to have.
+local INSIDE = GROUND_LIFT * 2
+
 -- The plain everything stands on. **Black**, so the only bright things in the
 -- picture are the ones placed to be recognised.
-block("Ground", Vector3.new(200, 1, 200), Vector3.new(0, -0.5, 0), DARK)
+block("Ground", Vector3.new(200, 1, 200), Vector3.new(0, -0.5 + GROUND_LIFT, 0), DARK)
 
 -- A tunnel: floor, ceiling and two side walls, open at both ends along Z.
 --
@@ -122,23 +140,23 @@ block("Ground", Vector3.new(200, 1, 200), Vector3.new(0, -0.5, 0), DARK)
 local function tunnel(name: string, x: number, half: number)
 	local span = half * 2
 
-	block(name .. "Floor", Vector3.new(WIDTH + WALL * 2, WALL, span), Vector3.new(x, -WALL / 2, 0), FLOOR)
+	block(name .. "Floor", Vector3.new(WIDTH + WALL * 2, WALL, span), Vector3.new(x, -WALL / 2 + INSIDE, 0), FLOOR)
 	block(
 		name .. "Ceiling",
 		Vector3.new(WIDTH + WALL * 2, WALL, span),
-		Vector3.new(x, HEIGHT + WALL / 2, 0),
+		Vector3.new(x, HEIGHT + WALL / 2 + INSIDE, 0),
 		SHELL
 	)
 	block(
 		name .. "WestWall",
 		Vector3.new(WALL, HEIGHT, span),
-		Vector3.new(x - WIDTH / 2 - WALL / 2, HEIGHT / 2, 0),
+		Vector3.new(x - WIDTH / 2 - WALL / 2, HEIGHT / 2 + INSIDE, 0),
 		SHELL
 	)
 	block(
 		name .. "EastWall",
 		Vector3.new(WALL, HEIGHT, span),
-		Vector3.new(x + WIDTH / 2 + WALL / 2, HEIGHT / 2, 0),
+		Vector3.new(x + WIDTH / 2 + WALL / 2, HEIGHT / 2 + INSIDE, 0),
 		SHELL
 	)
 end
@@ -160,7 +178,12 @@ tunnel("ShortInterior", SUBSPACE_X, SPLICE)
 -- `turned` is the whole aim: `Front` is local -Z, so an unrotated pane faces -Z
 -- and a pane turned half a lap faces +Z.
 local function pane(name: string, x: number, z: number, turned: boolean): Part
-	local part = block(name, Vector3.new(WIDTH, HEIGHT, PANE_THICKNESS), Vector3.new(x, HEIGHT / 2, z), PANE)
+	local part = block(
+		name,
+		Vector3.new(WIDTH, HEIGHT, PANE_THICKNESS),
+		Vector3.new(x, HEIGHT / 2 + INSIDE, z),
+		PANE
+	)
 	part.CanCollide = false
 	if turned then
 		part.CFrame = CFrame.new(part.Position) * CFrame.Angles(0, math.pi, 0)

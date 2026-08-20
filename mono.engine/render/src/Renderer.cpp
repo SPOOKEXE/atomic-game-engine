@@ -11227,11 +11227,31 @@ namespace engine::render {
 					}
 					const PortalView &portal = *portalOf[slot];
 
-					// The lit side is the viewer's side of this mouth: spill
-					// onto the room the camera is in, and the partner mouth
-					// serves the far room the same way.
-					const float side = (cameraFrame.Position - portal.Centre).Dot(portal.Normal);
-					const core::Vector3 outward = portal.Normal * (side >= 0.0f ? 1.0f : -1.0f);
+					// **The mouth's own face, and nothing about where anybody
+					// is standing.** A doorway throws its light into the room it
+					// opens onto, which is a fact about the doorway; the partner
+					// mouth faces the other room and serves that one the same
+					// way. `PortalView::Normal` is that face's normal.
+					//
+					// This used to derive the side from the viewer, the way
+					// `subCameraFor` does. There it is right - that sub-camera is
+					// genuinely placed from the eye, so its clip plane has to
+					// face the way *it* looks. Here the eye is a stand-in built
+					// out of `outward` a few lines down, so taking the sign from
+					// the viewer made a light probe move when a player walked:
+					// crossing the pane's plane flipped the whole spill
+					// half-space in one frame, and `SeamSpill`'s `depth <= 0.0`
+					// test then dropped the pool on one side of the pane and
+					// painted it on the other. Measured on `PortalLightMix` from
+					// a side-on eye, that snap moved about nine thousand lit
+					// pixels for less than half a stud of travel.
+					//
+					// The other half of the same mistake was quieter: a mouth
+					// the viewer is nowhere near took its side from the viewer
+					// too, so the far room's own doorway projected into the void
+					// behind itself for as long as somebody stood in the near
+					// room.
+					const core::Vector3 outward = portal.Normal;
 
 					// Far enough off the plane that the oblique clip below stays
 					// in front of the eye: the bias is derived from this same

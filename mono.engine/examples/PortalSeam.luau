@@ -69,8 +69,13 @@ end
 -- Flat and plain. A checker would read the shadow's direction, which is what
 -- `PortalShadow.luau` is for; what this scene needs is a background that makes
 -- a yellow bar countable.
-block("NearFloor", Vector3.new(ROOM * 2, 1, ROOM * 2), CFrame.new(0, -0.5, 0), NEAR_FLOOR)
-block("FarFloor", Vector3.new(ROOM * 2, 1, ROOM * 2), CFrame.new(GAP, -0.5, 0), FAR_FLOOR)
+-- Clear of a baseplate's top face at y = 0: coplanar surfaces do not flicker in
+-- this engine, they resolve stably to whichever one the draw order happens to
+-- favour. `scripts/demos/zfight-scan.sh` holds the control for that.
+local GROUND_LIFT = 0.01
+
+block("NearFloor", Vector3.new(ROOM * 2, 1, ROOM * 2), CFrame.new(0, -0.5 + GROUND_LIFT, 0), NEAR_FLOOR)
+block("FarFloor", Vector3.new(ROOM * 2, 1, ROOM * 2), CFrame.new(GAP, -0.5 + GROUND_LIFT, 0), FAR_FLOOR)
 
 -- --- the hole ----------------------------------------------------------------
 --

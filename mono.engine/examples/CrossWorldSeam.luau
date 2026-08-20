@@ -126,7 +126,12 @@ local function block(name: string, size: Vector3, at: CFrame, colour: Color3): P
 	return part
 end
 
-block("Floor", Vector3.new(80, 2, 80), CFrame.new(0, -1, 0), FLOOR_TONE)
+-- Clear of a baseplate's top face at y = 0: coplanar surfaces do not flicker in
+-- this engine, they resolve stably to whichever one the draw order happens to
+-- favour. `scripts/demos/zfight-scan.sh` holds the control for that.
+local GROUND_LIFT = 0.01
+
+block("Floor", Vector3.new(80, 2, 80), CFrame.new(0, -1 + GROUND_LIFT, 0), FLOOR_TONE)
 
 -- **The pad, on the pane's back side**, which is where a player spawns and
 -- therefore where the camera stands. It is also the thing that was missing from

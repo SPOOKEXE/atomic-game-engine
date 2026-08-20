@@ -61,8 +61,13 @@ local function block(name: string, size: Vector3, at: CFrame, colour: Color3): P
 	return part
 end
 
-block("NearFloor", Vector3.new(ROOM * 2, 1, ROOM * 2), CFrame.new(0, -0.5, 0), FLOOR)
-block("FarFloor", Vector3.new(ROOM * 2, 1, ROOM * 2), CFrame.new(GAP, -0.5, 0), FLOOR)
+-- Clear of a baseplate's top face at y = 0: coplanar surfaces do not flicker in
+-- this engine, they resolve stably to whichever one the draw order happens to
+-- favour. `scripts/demos/zfight-scan.sh` holds the control for that.
+local GROUND_LIFT = 0.01
+
+block("NearFloor", Vector3.new(ROOM * 2, 1, ROOM * 2), CFrame.new(0, -0.5 + GROUND_LIFT, 0), FLOOR)
+block("FarFloor", Vector3.new(ROOM * 2, 1, ROOM * 2), CFrame.new(GAP, -0.5 + GROUND_LIFT, 0), FLOOR)
 
 -- The pane pair `PortalSeam.luau` proves out: near front faces -Z where the
 -- viewer stands, far pane turned a quarter so its front points +X into its

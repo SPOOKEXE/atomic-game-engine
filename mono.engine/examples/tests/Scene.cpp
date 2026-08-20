@@ -709,10 +709,32 @@ TEST_CASE("the tunnels scene is shorter and longer inside than out", "[examples]
 	REQUIRE(ceilingBounds != nullptr);
 	REQUIRE(panePlacement != nullptr);
 	REQUIRE(paneBounds != nullptr);
-	CHECK(floorPlacement->Frame.Position.Y + floorBounds->HalfExtent.Y == Approx(0.0f));
-	CHECK(ceilingPlacement->Frame.Position.Y - ceilingBounds->HalfExtent.Y == Approx(8.0f));
-	CHECK(panePlacement->Frame.Position.Y - paneBounds->HalfExtent.Y == Approx(0.0f));
-	CHECK(panePlacement->Frame.Position.Y + paneBounds->HalfExtent.Y == Approx(8.0f));
+	// **The pane fills the cross-section exactly**, which is the whole reason
+	// the tunnel is built as a shell rather than as a box with its ends taken
+	// off - see the scene's own note.
+	//
+	// **Measured against the floor and the ceiling rather than against 0 and
+	// 8.** The shell stands `INSIDE` above the plain outside it so that its
+	// floor is not coplanar with a baseplate, and heights pinned to absolutes
+	// would call that lift a regression while a crack along the bottom of every
+	// pane - the exact fault the shell exists to avoid - still passed.
+	const float floorTop = floorPlacement->Frame.Position.Y + floorBounds->HalfExtent.Y;
+	const float ceilingBottom = ceilingPlacement->Frame.Position.Y - ceilingBounds->HalfExtent.Y;
+	CHECK(panePlacement->Frame.Position.Y - paneBounds->HalfExtent.Y == Approx(floorTop).margin(1.0e-4f));
+	CHECK(
+		panePlacement->Frame.Position.Y + paneBounds->HalfExtent.Y == Approx(ceilingBottom).margin(1.0e-4f)
+	);
+	CHECK(ceilingBottom - floorTop == Approx(8.0f).margin(1.0e-4f));
+
+	// And the shell stands clear of the plain it is set into, or those two are
+	// the coplanar pair instead of the plain and a baseplate.
+	const Entity plain = InScene(store, "Ground");
+	REQUIRE(plain != engine::ecs::NULL_ENTITY);
+	const auto *plainPlacement = store.Get<engine::scene::Transform>(plain);
+	const auto *plainBounds = store.Get<engine::scene::Bounds>(plain);
+	REQUIRE(plainPlacement != nullptr);
+	REQUIRE(plainBounds != nullptr);
+	CHECK(floorTop > plainPlacement->Frame.Position.Y + plainBounds->HalfExtent.Y);
 
 	// **Nothing is set as the world's camera**, which is what makes this one
 	// walkable where `Hallway.luau` is a capture: a `CurrentCamera` standing in

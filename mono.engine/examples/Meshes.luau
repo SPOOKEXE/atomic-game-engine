@@ -41,11 +41,16 @@ local BUILTINS = {
 	"engine.Plane",
 }
 
+-- Clear of a baseplate's top face at y = 0: coplanar surfaces do not flicker in
+-- this engine, they resolve stably to whichever one the draw order happens to
+-- favour. `scripts/demos/zfight-scan.sh` holds the control for that.
+local GROUND_LIFT = 0.01
+
 local floor = Instance.new("Part")
 floor.Name = "Baseplate"
 floor.Anchored = true
 floor.Size = Vector3.new(PLATE, 0.5, PLATE)
-floor.CFrame = CFrame.new(Vector3.new(0, -0.25, 0))
+floor.CFrame = CFrame.new(Vector3.new(0, -0.25 + GROUND_LIFT, 0))
 floor.Color = Color3.new(0.30, 0.32, 0.36)
 floor.Parent = workspace
 
