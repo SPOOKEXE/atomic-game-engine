@@ -25,7 +25,24 @@ declare interface Vector3 {
 	add(other: Vector3): Vector3;
 	sub(other: Vector3): Vector3;
 	mul(other: Vector3 | number): Vector3;
+	div(other: Vector3 | number): Vector3;
+	// `//` in Luau: each quotient floored.
+	idiv(other: Vector3 | number): Vector3;
+	// Unary minus, which is an operator in Luau and has no method form there.
+	neg(): Vector3;
 	Equals(other: Vector3): boolean;
+	Abs(): Vector3;
+	Ceil(): Vector3;
+	Floor(): Vector3;
+	Sign(): Vector3;
+	Cross(other: Vector3): Vector3;
+	Dot(other: Vector3): number;
+	// Unsigned without an axis, signed by which side of `axis` the turn goes with one.
+	Angle(other: Vector3, axis?: Vector3): number;
+	FuzzyEq(other: Vector3, epsilon?: number): boolean;
+	Lerp(goal: Vector3, alpha: number): Vector3;
+	Max(vector: Vector3): Vector3;
+	Min(vector: Vector3): Vector3;
 }
 
 declare interface Color3 {
@@ -86,9 +103,17 @@ declare interface CFrame {
 declare const Vector3: {
 	new: (x?: number, y?: number, z?: number) => Vector3;
 
+	// Capitalised, because Roblox capitalises these two. The Luau half carries
+	// the argument.
+	FromNormalId: (normal: Enum.NormalId) => Vector3;
+	FromAxis: (axis: Enum.Axis) => Vector3;
+
 	// Lowercase, because Roblox's are. The Luau half carries the argument.
 	readonly zero: Vector3;
 	readonly one: Vector3;
+	readonly xAxis: Vector3;
+	readonly yAxis: Vector3;
+	readonly zAxis: Vector3;
 };
 
 declare const Color3: {
@@ -423,6 +448,7 @@ declare namespace Enum {
 	interface ApplyStrokeMode extends EnumItem { readonly __enum: "ApplyStrokeMode"; }
 	interface AspectType extends EnumItem { readonly __enum: "AspectType"; }
 	interface AutomaticSize extends EnumItem { readonly __enum: "AutomaticSize"; }
+	interface Axis extends EnumItem { readonly __enum: "Axis"; }
 	interface BorderMode extends EnumItem { readonly __enum: "BorderMode"; }
 	interface CameraType extends EnumItem { readonly __enum: "CameraType"; }
 	interface ContextActionResult extends EnumItem { readonly __enum: "ContextActionResult"; }
@@ -489,6 +515,11 @@ declare namespace Enum {
 		readonly X: AutomaticSize;
 		readonly Y: AutomaticSize;
 		readonly XY: AutomaticSize;
+	};
+	const Axis: {
+		readonly X: Axis;
+		readonly Y: Axis;
+		readonly Z: Axis;
 	};
 	const BorderMode: {
 		readonly Outline: BorderMode;

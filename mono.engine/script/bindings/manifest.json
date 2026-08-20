@@ -2002,6 +2002,7 @@
 		{"name": "ApplyStrokeMode", "members": ["Contextual", "Border"]},
 		{"name": "AspectType", "members": ["FitWithinMaxSize", "ScaleWithParentSize"]},
 		{"name": "AutomaticSize", "members": ["None", "X", "Y", "XY"]},
+		{"name": "Axis", "members": ["X", "Y", "Z"]},
 		{"name": "BorderMode", "members": ["Outline", "Middle", "Inset"]},
 		{"name": "CameraType", "members": ["Classic", "LockFirstPerson", "ShiftLock", "Scriptable"]},
 		{"name": "ContextActionResult", "members": ["Sink", "Pass"]},
