@@ -4023,31 +4023,40 @@ namespace engine::render {
 		// Blended before additive, so the pipeline is bound twice rather than
 		// alternating. Within each half the key is arbitrary but must be *total*,
 		// or equal states would not end up adjacent.
-		std::stable_sort(
-			ParticleOrder.begin(), ParticleOrder.end(), [batches](uint32_t left, uint32_t right) {
-				const render::ParticleBatch &a = batches[left];
-				const render::ParticleBatch &b = batches[right];
-				if (a.Additive != b.Additive) {
-					return !a.Additive;
+		//
+		// **Timed apart from the copy below**, because the two scale with
+		// different things and one bar could not say which had grown: this is
+		// proportional to the number of *emitters* and the copy is proportional
+		// to the number of *particles*, and a scene can move a long way in one
+		// without moving in the other.
+		{
+			ENGINE_PROFILE_CAT("particles.sort", core::ProfileCategory::Render);
+			std::stable_sort(
+				ParticleOrder.begin(), ParticleOrder.end(), [batches](uint32_t left, uint32_t right) {
+					const render::ParticleBatch &a = batches[left];
+					const render::ParticleBatch &b = batches[right];
+					if (a.Additive != b.Additive) {
+						return !a.Additive;
+					}
+					if (a.Texture.Id() != b.Texture.Id()) {
+						return a.Texture.Id() < b.Texture.Id();
+					}
+					if (a.FlipbookSide != b.FlipbookSide) {
+						return a.FlipbookSide < b.FlipbookSide;
+					}
+					if (a.ZOffset != b.ZOffset) {
+						return a.ZOffset < b.ZOffset;
+					}
+					if (a.LightEmission != b.LightEmission) {
+						return a.LightEmission < b.LightEmission;
+					}
+					if (a.LightInfluence != b.LightInfluence) {
+						return a.LightInfluence < b.LightInfluence;
+					}
+					return static_cast<int>(a.WorldUp) < static_cast<int>(b.WorldUp);
 				}
-				if (a.Texture.Id() != b.Texture.Id()) {
-					return a.Texture.Id() < b.Texture.Id();
-				}
-				if (a.FlipbookSide != b.FlipbookSide) {
-					return a.FlipbookSide < b.FlipbookSide;
-				}
-				if (a.ZOffset != b.ZOffset) {
-					return a.ZOffset < b.ZOffset;
-				}
-				if (a.LightEmission != b.LightEmission) {
-					return a.LightEmission < b.LightEmission;
-				}
-				if (a.LightInfluence != b.LightInfluence) {
-					return a.LightInfluence < b.LightInfluence;
-				}
-				return static_cast<int>(a.WorldUp) < static_cast<int>(b.WorldUp);
-			}
-		);
+			);
+		}
 
 		uint32_t total = 0;
 		for (const render::ParticleBatch &batch : batches) {
@@ -4067,6 +4076,15 @@ namespace engine::render {
 		// One walk that both packs the buffer and records where each group lands.
 		// After this the order is a buffer offset and the batch it came from is
 		// gone, which is the same arrangement `SlotMesh` has for the mesh path.
+		//
+		// **This is a copy of every live particle, every frame**, and at half a
+		// million of them it is the largest single thing the frame does. It is
+		// the price of simulating on the CPU: the pool lives in host memory, so
+		// the bytes have to cross. Nothing here can make it smaller - only
+		// moving the simulation to the device would, which is what the
+		// five-million-particle line is about.
+		ENGINE_PROFILE_CAT("particles.pack", core::ProfileCategory::Render);
+
 		uint32_t written = 0;
 		for (const uint32_t index : ParticleOrder) {
 			const render::ParticleBatch &batch = batches[index];
