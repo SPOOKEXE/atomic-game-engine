@@ -58,14 +58,84 @@ declare Color3: {
 -- overload alone.
 declare extern type CFrame with
 	Position: Vector3
+	-- Roblox's alias for `Position`, kept because a long Roblox habit types it.
+	p: Vector3
+	X: number
+	Y: number
+	Z: number
+
+	-- This frame's rotation at the world origin.
+	Rotation: CFrame
+
+	-- The three basis columns. `XVector`/`YVector` are the same directions as
+	-- `RightVector`/`UpVector`; `ZVector` is the negation of `LookVector`, which
+	-- is the one pair that differ.
+	RightVector: Vector3
+	UpVector: Vector3
+	LookVector: Vector3
+	XVector: Vector3
+	YVector: Vector3
+	ZVector: Vector3
+
 	function __mul(self, other: CFrame): CFrame
+	function __add(self, offset: Vector3): CFrame
+	function __sub(self, offset: Vector3): CFrame
+
+	function Inverse(self): CFrame
+	function Orthonormalize(self): CFrame
+	function Lerp(self, goal: CFrame, alpha: number): CFrame
+	function ToWorldSpace(self, other: CFrame): CFrame
+	function ToObjectSpace(self, other: CFrame): CFrame
+	function PointToWorldSpace(self, point: Vector3): Vector3
+	function PointToObjectSpace(self, point: Vector3): Vector3
+	function VectorToWorldSpace(self, direction: Vector3): Vector3
+	function VectorToObjectSpace(self, direction: Vector3): Vector3
+	function AngleBetween(self, other: CFrame): number
+	function FuzzyEq(self, other: CFrame, epsilon: number?): boolean
+
+	-- Twelve values: the position, then the rotation matrix row by row. That is
+	-- the order the twelve-argument `CFrame.new` takes them back in.
+	function GetComponents(self): (number, number, number, number, number, number, number, number, number, number, number, number)
+	function components(self): (number, number, number, number, number, number, number, number, number, number, number, number)
+
+	function ToEulerAnglesXYZ(self): (number, number, number)
+	function ToEulerAnglesYXZ(self): (number, number, number)
+	function ToOrientation(self): (number, number, number)
+	function ToAxisAngle(self): (Vector3, number)
 end
 
 declare CFrame: {
-	new: ((x: number?, y: number?, z: number?) -> CFrame) & ((position: Vector3) -> CFrame),
+	new: ((x: number?, y: number?, z: number?) -> CFrame)
+		& ((position: Vector3) -> CFrame)
+		& ((x: number, y: number, z: number, qX: number, qY: number, qZ: number, qW: number) -> CFrame)
+		& ((x: number, y: number, z: number, r00: number, r01: number, r02: number, r10: number, r11: number, r12: number, r20: number, r21: number, r22: number) -> CFrame),
+
+	-- The identity: no turn, at the origin.
+	identity: CFrame,
+
 	-- Radians, because Roblox's is radians - while `Orientation` is degrees.
-	Angles: (pitch: number, yaw: number, roll: number) -> CFrame,
+	--
+	-- **X, then Y, then Z**, which is what Roblox means by `Angles` and by
+	-- `fromEulerAnglesXYZ`; the two are one function. Until v0.18 this name was
+	-- bound to the Y-X-Z composition, so a script pasted from Roblox turned the
+	-- wrong way whenever it named two axes at once.
+	Angles: (rx: number, ry: number, rz: number) -> CFrame,
+	fromEulerAnglesXYZ: (rx: number, ry: number, rz: number) -> CFrame,
+
+	-- Y, then X, then Z. The order `BasePart.Orientation` round-trips through,
+	-- here and in Roblox. Two names for one function, as Roblox has.
+	fromEulerAnglesYXZ: (rx: number, ry: number, rz: number) -> CFrame,
+	fromOrientation: (rx: number, ry: number, rz: number) -> CFrame,
+
 	lookAt: (from: Vector3, to: Vector3, up: Vector3?) -> CFrame,
+	lookAlong: (at: Vector3, direction: Vector3, up: Vector3?) -> CFrame,
+	fromAxisAngle: (axis: Vector3, angle: number) -> CFrame,
+
+	-- The third basis vector is determined by the first two, so a fourth
+	-- argument is accepted and ignored rather than honoured into a basis that is
+	-- not a rotation.
+	fromMatrix: (position: Vector3, vX: Vector3, vY: Vector3, vZ: Vector3?) -> CFrame,
+	fromRotationBetweenVectors: (from: Vector3, to: Vector3) -> CFrame,
 }
 
 -- --- signals ---------------------------------------------------------------

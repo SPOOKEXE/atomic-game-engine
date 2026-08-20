@@ -5551,3 +5551,167 @@ TEST_CASE("javascript keeps its world awake too", "[scripting]") {
 		if (npc.IsKeepingWorldAwake()) { throw new Error('withdrawing should release it'); }
 	)");
 }
+
+// --- CFrame parity ----------------------------------------------------------
+//
+// v0.18 brought the script-facing CFrame up to Roblox's surface. The cases here
+// are the ones a wrong answer still looks reasonable in - a rotation that turns
+// the wrong way is not a crash, it is a scene that is subtly not what the author
+// drew, and nothing reports it.
+
+TEST_CASE("CFrame.Angles is Roblox's XYZ order", "[scripting][cframe]") {
+	// **The defect this test exists for.** `CFrame.Angles` was bound to
+	// `core::CFrame::Angles`, which composes Y-X-Z - Roblox's `fromOrientation`
+	// - while Roblox's `Angles` is an alias for `fromEulerAnglesXYZ` and
+	// composes X-Y-Z. A single-axis turn is identical under either, which is why
+	// eighteen versions of the engine did not notice.
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		-- Two axes at once, which is where the orders must disagree.
+		local xyz = CFrame.Angles(0.5, 0.9, 0)
+		local yxz = CFrame.fromOrientation(0.5, 0.9, 0)
+		assert(xyz:AngleBetween(yxz) > 0.1, 'the two orders agree - Angles is still YXZ')
+
+		-- And each name reaches the composition it claims.
+		assert(CFrame.fromEulerAnglesXYZ(0.5, 0.9, 0):AngleBetween(xyz) < 1e-5, 'Angles is not XYZ')
+		assert(CFrame.fromEulerAnglesYXZ(0.5, 0.9, 0):AngleBetween(yxz) < 1e-5, 'fromOrientation is not YXZ')
+
+		-- One axis at a time is the same either way, which is the other half of
+		-- the claim: a port that only ever turned about Y was never affected.
+		assert(CFrame.Angles(0, 0.7, 0):AngleBetween(CFrame.fromOrientation(0, 0.7, 0)) < 1e-5)
+	)");
+}
+
+TEST_CASE("a script reads every CFrame member", "[scripting][cframe]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local function near(a, b, what)
+			assert(math.abs(a - b) < 1e-4, what .. ': ' .. tostring(a) .. ' vs ' .. tostring(b))
+		end
+		local function dot(a, b) return a.X * b.X + a.Y * b.Y + a.Z * b.Z end
+
+		local f = CFrame.new(3, -1, 8) * CFrame.Angles(0.3, -0.8, 1.2)
+
+		near(f.X, 3, 'X') near(f.Y, -1, 'Y') near(f.Z, 8, 'Z')
+		near(f.p.X, 3, 'p')
+		near(f.Rotation.Position.Magnitude, 0, 'Rotation keeps a position')
+
+		-- The basis is a rotation, so the columns are unit and perpendicular.
+		near(dot(f.RightVector, f.UpVector), 0, 'basis not perpendicular')
+		near(dot(f.XVector, f.RightVector), 1, 'XVector is not RightVector')
+		near(dot(f.YVector, f.UpVector), 1, 'YVector is not UpVector')
+
+		-- The one pair that differ: Roblox's ZVector is +Z, LookVector is -Z.
+		near(dot(f.ZVector, f.LookVector), -1, 'ZVector is not the negation of LookVector')
+
+		local p = Vector3.new(2, 5, -4)
+		near(f:PointToObjectSpace(f:PointToWorldSpace(p)).X, p.X, 'point round trip')
+		near(f:VectorToObjectSpace(f:VectorToWorldSpace(p)).Y, p.Y, 'vector round trip')
+
+		local other = CFrame.new(1, 2, 3) * CFrame.Angles(1, 0.2, -0.4)
+		near(f:ToObjectSpace(f:ToWorldSpace(other)):AngleBetween(other), 0, 'frame round trip')
+
+		near(f:Inverse():AngleBetween(f.Rotation:Inverse()), 0, 'Inverse')
+		near(f:Lerp(f, 0.5):AngleBetween(f), 0, 'Lerp to itself')
+		near(f:Orthonormalize():AngleBetween(f), 0, 'Orthonormalize')
+		assert(f:FuzzyEq(f, 1e-5), 'FuzzyEq on itself')
+		assert(not f:FuzzyEq(other, 1e-5), 'FuzzyEq on a different frame')
+
+		local rx, ry, rz = f:ToEulerAnglesXYZ()
+		near(CFrame.fromEulerAnglesXYZ(rx, ry, rz):AngleBetween(f.Rotation), 0, 'ToEulerAnglesXYZ')
+		local ox, oy, oz = f:ToOrientation()
+		near(CFrame.fromOrientation(ox, oy, oz):AngleBetween(f.Rotation), 0, 'ToOrientation')
+		local axis, angle = f:ToAxisAngle()
+		near(CFrame.fromAxisAngle(axis, angle):AngleBetween(f.Rotation), 0, 'ToAxisAngle')
+
+		-- Twelve values, and the twelve-argument `new` takes them straight back.
+		near(select('#', f:GetComponents()), 12, 'GetComponents count')
+		near(CFrame.new(f:GetComponents()):AngleBetween(f), 0, 'twelve-argument new')
+		near(select('#', f:components()), 12, 'components alias')
+
+		-- Translation only, which is the whole difference from `*`.
+		near((f + Vector3.new(1, 0, 0)).X, 4, 'add')
+		near((f - Vector3.new(1, 0, 0)).X, 2, 'subtract')
+
+		near(CFrame.identity.Position.Magnitude, 0, 'identity')
+		near(CFrame.lookAlong(Vector3.new(0, 0, 0), Vector3.new(0, 0, -1)).LookVector.Z, -1, 'lookAlong')
+		near(CFrame.fromRotationBetweenVectors(Vector3.new(1, 0, 0), Vector3.new(0, 1, 0))
+			:VectorToWorldSpace(Vector3.new(1, 0, 0)).Y, 1, 'fromRotationBetweenVectors')
+
+		-- A skewed basis is orthonormalised rather than trusted, or the result
+		-- is a rotation that also scales.
+		near(CFrame.fromMatrix(Vector3.new(0, 0, 0), Vector3.new(2, 0, 0), Vector3.new(0.3, 4, 0))
+			.RightVector.Magnitude, 1, 'fromMatrix')
+
+		-- The quaternion arity, normalised on the way in.
+		near(CFrame.new(0, 0, 0, 0, 0, 0, 5):AngleBetween(CFrame.identity), 0, 'quaternion new')
+	)");
+
+	// A misspelled member is a named error rather than a nil that fails one line
+	// later as "attempt to call a nil value".
+	CHECK_FALSE(runtime->Run("local _ = CFrame.new().Inverze"));
+}
+
+TEST_CASE("javascript reads the same CFrame members", "[scripting][cframe][js]") {
+	// The two runtimes carry one surface. Where the languages differ - operators
+	// and multiple return - JavaScript gets the honest spelling rather than a
+	// pretence: `add`/`sub` for `+`/`-`, and arrays for the several-value
+	// returns.
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	MustRun(*runtime, R"(
+		function near(a, b, what) {
+			if (Math.abs(a - b) > 1e-4) throw new Error(what + ': ' + a + ' vs ' + b);
+		}
+		function dot(a, b) { return a.X * b.X + a.Y * b.Y + a.Z * b.Z; }
+
+		const xyz = CFrame.Angles(0.5, 0.9, 0);
+		const yxz = CFrame.fromOrientation(0.5, 0.9, 0);
+		if (xyz.AngleBetween(yxz) < 0.1) throw new Error('the two orders agree');
+		near(CFrame.fromEulerAnglesXYZ(0.5, 0.9, 0).AngleBetween(xyz), 0, 'Angles is not XYZ');
+
+		const f = CFrame.new(3, -1, 8).mul(CFrame.Angles(0.3, -0.8, 1.2));
+		near(f.X, 3, 'X');
+		near(f.Rotation.Position.Magnitude, 0, 'Rotation keeps a position');
+		near(dot(f.RightVector, f.UpVector), 0, 'basis not perpendicular');
+		near(dot(f.ZVector, f.LookVector), -1, 'ZVector');
+
+		const p = Vector3.new(2, 5, -4);
+		near(f.PointToObjectSpace(f.PointToWorldSpace(p)).X, p.X, 'point round trip');
+		near(f.VectorToObjectSpace(f.VectorToWorldSpace(p)).Y, p.Y, 'vector round trip');
+
+		const other = CFrame.new(1, 2, 3).mul(CFrame.Angles(1, 0.2, -0.4));
+		near(f.ToObjectSpace(f.ToWorldSpace(other)).AngleBetween(other), 0, 'frame round trip');
+		near(f.Lerp(f, 0.5).AngleBetween(f), 0, 'Lerp');
+		near(f.Orthonormalize().AngleBetween(f), 0, 'Orthonormalize');
+		if (!f.FuzzyEq(f, 1e-5)) throw new Error('FuzzyEq on itself');
+		if (f.FuzzyEq(other, 1e-5)) throw new Error('FuzzyEq on a different frame');
+
+		const parts = f.GetComponents();
+		if (parts.length !== 12) throw new Error('GetComponents length ' + parts.length);
+		near(parts[0], 3, 'GetComponents x');
+		near(CFrame.new.apply(null, parts).AngleBetween(f), 0, 'twelve-argument new');
+
+		const angles = f.ToEulerAnglesXYZ();
+		if (angles.length !== 3) throw new Error('ToEulerAnglesXYZ length');
+		near(CFrame.fromEulerAnglesXYZ(angles[0], angles[1], angles[2]).AngleBetween(f.Rotation), 0, 'XYZ');
+
+		const pair = f.ToAxisAngle();
+		near(CFrame.fromAxisAngle(pair[0], pair[1]).AngleBetween(f.Rotation), 0, 'ToAxisAngle');
+
+		near(f.add(Vector3.new(1, 0, 0)).X, 4, 'add');
+		near(f.sub(Vector3.new(1, 0, 0)).X, 2, 'sub');
+		near(CFrame.identity.Position.Magnitude, 0, 'identity');
+		near(CFrame.lookAlong(Vector3.new(0, 0, 0), Vector3.new(0, 0, -1)).LookVector.Z, -1, 'lookAlong');
+		near(CFrame.fromMatrix(Vector3.new(0, 0, 0), Vector3.new(2, 0, 0), Vector3.new(0.3, 4, 0))
+			.RightVector.Magnitude, 1, 'fromMatrix');
+	)");
+}

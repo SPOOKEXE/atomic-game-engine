@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <cstring>
 #include <limits>
 #include <span>
 #include <utility>
@@ -34,53 +33,16 @@ namespace engine::replication {
 			return {writer.Bytes().begin(), writer.Bytes().end()};
 		}
 
-		// FNV-1a's mixing step, taken eight bytes at a time.
-		//
-		// **A byte at a time was most of what `Resign` cost on a wide
-		// component.** Every step of this chain waits on the multiply in the one
-		// before it, so the length of the input is a latency in cycles rather
-		// than a throughput: a 64-byte component was 64 dependent multiplies per
-		// carrier per tick, and `Resign` signs every carrier of every signed
-		// slot every tick. A word at a time is the same chain eight times
-		// shorter.
-		//
-		// **Still exact for equal-length inputs, which is the only property this
-		// caller needs.** Each step is a xor followed by a multiply by an odd
-		// constant, and both are invertible modulo 2^64 - so two inputs of the
-		// same size that differ anywhere produce different hashes, and a signed
-		// component's size is fixed. There is no collision rate to reason about.
-		//
-		// The value is process-local: it is compared against last tick's hash of
-		// the same component and against nothing else. Nothing here is written
-		// to a file or put on a wire, so this may change whenever it is worth
-		// changing - unlike `Audit`'s digest, which two machines have to agree
-		// on.
 		uint64_t HashBytes(const void *bytes, size_t count) {
 			constexpr uint64_t OFFSET = 1469598103934665603ull;
 			constexpr uint64_t PRIME = 1099511628211ull;
 
 			const auto *cursor = static_cast<const unsigned char *>(bytes);
 			uint64_t hash = OFFSET;
-
-			// `memcpy` rather than a cast through `uint64_t *`: a column is
-			// aligned to its component and not to eight, and an unaligned load
-			// through a pointer of the wrong type is undefined rather than
-			// merely slow. A fixed-size copy compiles to one load.
-			size_t index = 0;
-			for (; index + sizeof(uint64_t) <= count; index += sizeof(uint64_t)) {
-				uint64_t word = 0;
-				std::memcpy(&word, cursor + index, sizeof(word));
-				hash = (hash ^ word) * PRIME;
+			for (size_t index = 0; index < count; index++) {
+				hash ^= cursor[index];
+				hash *= PRIME;
 			}
-
-			// At most seven bytes, gathered into one zero-padded word so the
-			// tail costs one more step rather than one per byte.
-			if (index < count) {
-				uint64_t word = 0;
-				std::memcpy(&word, cursor + index, count - index);
-				hash = (hash ^ word) * PRIME;
-			}
-
 			return hash;
 		}
 
@@ -385,23 +347,12 @@ namespace engine::replication {
 			// to. See `Audit.hpp`.
 			Resolved.clear();
 			ResolvedNames.clear();
-
-			// **The same ids a third time, indexed by slot rather than
-			// compacted.** `Detection`, `Signatures` and `Suppressors` are all
-			// keyed by slot, so a pass over them cannot use `Resolved`'s indices
-			// - and `Resign` was calling `Components::Find` again to get back
-			// what this loop already has. That call takes the component
-			// registry's process-wide mutex, once per signed slot per tick, on
-			// the thread every other world is also publishing from.
-			ResolvedSlots.assign(Components.size(), ecs::ComponentId{});
-
 			for (size_t slot = 0; slot < Components.size(); slot++) {
 				const ecs::ComponentId id = ecs::Components::Find(Components[slot]);
 				if (!id.IsValid()) {
 					continue;
 				}
 
-				ResolvedSlots[slot] = id;
 				Resolved.push_back(id);
 				ResolvedNames.push_back(Components[slot]);
 
@@ -441,42 +392,16 @@ namespace engine::replication {
 
 		{
 			ENGINE_PROFILE_CAT("Authority::FindBearing", core::ProfileCategory::Network);
-
-			// **One pass over the archetype tables, not a test per entity.**
-			// `EachEntity` walks the directory - every live slot of both regions -
-			// and `HasComponent` is a directory lookup, an archetype fetch and a
-			// binary search over that archetype's set. An entity carrying a
-			// replicated component paid for one of those and an entity carrying none
-			// paid for one *per declared slot*, which is the case that hurts: a
-			// world's parts are replicated and its folders, scripts, values and
-			// services are not, and every one of them was tested against the whole
-			// table before being dropped.
-			//
-			// Whether a component is present is a property of the archetype, so
-			// `EachMatchingAny` answers it once per table per slot and hands back
-			// whole id arrays. Measured on `bench_replication`'s survey ladder at ten
-			// thousand entities: a scene where nothing carries a replicated component
-			// went from 151 ns an entity to nothing measurable, and one where
-			// everything does went from 18 to about 5.
-			//
-			// **The union and not a merge, which is why this is an `ecs` call rather
-			// than a loop over `EachRuns` here.** Asking per component visits an
-			// entity once for each replicated component it carries, so the sort below
-			// would be over carrier rows instead of entities and would need a
-			// `unique` after it - four replicated components on every entity is four
-			// times the sort, which measured *worse* than the per-entity test it
-			// replaced. A table carries an entity once however many of the components
-			// it holds.
 			Bearing.clear();
-			store.EachMatchingAny(Resolved, [this](const ecs::Entity *entities, size_t rows) {
-				for (size_t row = 0; row < rows; row++) {
-					Bearing.push_back(entities[row].Id);
+			store.EachEntity([this, &store](ecs::Entity entity) {
+				for (const ecs::ComponentId id : Resolved) {
+					if (store.HasComponent(entity, id)) {
+						Bearing.push_back(entity.Id);
+						return;
+					}
 				}
 			});
 
-			// Tables are filled as entities arrive in them, so this comes out in
-			// table order and not id order. `Prioritise` and `Refine` index into it
-			// with `std::lower_bound`.
 			std::sort(Bearing.begin(), Bearing.end());
 		}
 
@@ -495,10 +420,7 @@ namespace engine::replication {
 			Signature &signature = Signatures[slot];
 			signature.Changed.clear();
 
-			// Resolved by `Survey` a moment ago rather than looked up again
-			// here: `Components::Find` takes the registry's process-wide mutex,
-			// and this loop runs once per signed slot per tick.
-			const ecs::ComponentId id = ResolvedSlots[slot];
+			const ecs::ComponentId id = ecs::Components::Find(Components[slot]);
 			if (!id.IsValid()) {
 				continue;
 			}
@@ -550,31 +472,15 @@ namespace engine::replication {
 			});
 			// `EachRuns` visits table by table, not id order, and the merge
 			// below needs id order to walk `signature.Hashes` alongside it.
-			//
-			// On the entity id alone rather than on the whole pair. Ids are
-			// unique within this list, so the hash beside one is never reached
-			// as a tie-break - and the default comparison for a pair loads and
-			// compares it anyway, on every comparison of the sort.
-			std::sort(
-				ResignHashed.begin(),
-				ResignHashed.end(),
-				[](const std::pair<uint64_t, uint64_t> &left, const std::pair<uint64_t, uint64_t> &right) {
-					return left.first < right.first;
-				}
-			);
+			std::sort(ResignHashed.begin(), ResignHashed.end());
 
 			// A merge against `ResignHashed`, which is now sorted the same way
 			// `signature.Hashes` already is. `previous` only ever moves forward,
 			// so an entity the candidate set skipped past - it departed since
 			// last tick - is left behind rather than copied into `next`, which
 			// is what used to need a second pass over the whole map to find.
-			// **A member rather than a local, for the reason `ResignHashed` is
-			// one.** This is built and swapped in once per signed slot per tick,
-			// so a local was an allocation and a free per component per tick for
-			// a vector whose size barely moves. The swap leaves last tick's
-			// buffer here, which the next slot clears and fills again.
-			ResignNext.clear();
-			ResignNext.reserve(ResignHashed.size());
+			std::vector<std::pair<uint64_t, uint64_t>> next;
+			next.reserve(signature.Hashes.size());
 			size_t previous = 0;
 			for (const auto &[id64, hash] : ResignHashed) {
 				while (previous < signature.Hashes.size() && signature.Hashes[previous].first < id64) {
@@ -586,9 +492,9 @@ namespace engine::replication {
 				if (!known || signature.Hashes[previous].second != hash) {
 					signature.Changed.push_back(id64);
 				}
-				ResignNext.emplace_back(id64, hash);
+				next.emplace_back(id64, hash);
 			}
-			signature.Hashes.swap(ResignNext);
+			signature.Hashes.swap(next);
 		}
 	}
 

@@ -12,6 +12,7 @@
 #include <engine/world/Postbox.hpp>
 
 #include <algorithm>
+#include <array>
 #include <span>
 #include <string>
 #include <string_view>
@@ -804,6 +805,17 @@ namespace engine::script {
 			);
 		}
 
+		// A number argument, or a default. Every constructor below reads its
+		// arguments this way, so a missing one is a zero rather than a throw -
+		// which is what `CFrame.new()` with nothing at all already relied on.
+		float NumberAt(JSContext *context, int argc, JSValueConst *argv, int index, double fallback = 0.0) {
+			double value = fallback;
+			if (argc > index) {
+				JS_ToFloat64(context, &value, argv[index]);
+			}
+			return static_cast<float>(value);
+		}
+
 		JSValue CFrameNew(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
 			// A `Vector3` or three numbers, for the reason the Luau side gives.
 			if (argc > 0) {
@@ -824,33 +836,112 @@ namespace engine::script {
 			if (argc > 2) {
 				JS_ToFloat64(context, &z, argv[2]);
 			}
+			const core::Vector3 position{static_cast<float>(x), static_cast<float>(y), static_cast<float>(z)};
+
+			// **Twelve tested before seven**, because `>= 7` matches a
+			// twelve-argument call too: the rotation matrix form would otherwise
+			// read its first four numbers as a quaternion and produce a frame
+			// nothing complained about. Same ordering as the Luau half.
+			if (argc >= 12) {
+				const auto at = [&](int index) {
+					double value = 0.0;
+					JS_ToFloat64(context, &value, argv[index]);
+					return static_cast<float>(value);
+				};
+				// Row-major, as `GetComponents` reports them, so the columns
+				// `FromMatrix` wants are the strided reads here.
+				return MakeCFrame(
+					context,
+					core::CFrame::FromMatrix(
+						position, core::Vector3{at(3), at(6), at(9)}, core::Vector3{at(4), at(7), at(10)}
+					)
+				);
+			}
+
+			if (argc >= 7) {
+				core::CFrame frame;
+				frame.Position = position;
+				frame.QuaternionX = NumberAt(context, argc, argv, 3);
+				frame.QuaternionY = NumberAt(context, argc, argv, 4);
+				frame.QuaternionZ = NumberAt(context, argc, argv, 5);
+				frame.QuaternionW = NumberAt(context, argc, argv, 6, 1.0);
+
+				// Normalised on the way in: a caller writing four numbers by hand
+				// almost never writes a unit quaternion, and every function on
+				// this type expects one.
+				return MakeCFrame(context, frame.Orthonormalize());
+			}
+
+			return MakeCFrame(context, core::CFrame{position});
+		}
+		// `CFrame.Angles` and `CFrame.fromEulerAnglesXYZ`, which are one Roblox
+		// function. **X, then Y, then Z** - see `core::CFrame::Angles` for the
+		// v0.18 correction and what the wrong order cost.
+		JSValue CFrameEulerXYZ(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
 			return MakeCFrame(
 				context,
-				core::CFrame{
-					core::Vector3{static_cast<float>(x), static_cast<float>(y), static_cast<float>(z)}
-				}
+				core::CFrame::FromEulerAnglesXYZ(
+					NumberAt(context, argc, argv, 0),
+					NumberAt(context, argc, argv, 1),
+					NumberAt(context, argc, argv, 2)
+				)
 			);
 		}
 
-		// Radians, matching Roblox and matching the Luau binding.
-		JSValue CFrameAngles(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
-			double pitch = 0.0;
-			double yaw = 0.0;
-			double roll = 0.0;
-			if (argc > 0) {
-				JS_ToFloat64(context, &pitch, argv[0]);
-			}
-			if (argc > 1) {
-				JS_ToFloat64(context, &yaw, argv[1]);
-			}
-			if (argc > 2) {
-				JS_ToFloat64(context, &roll, argv[2]);
-			}
+		// `CFrame.fromEulerAnglesYXZ` and `CFrame.fromOrientation`, the order
+		// `BasePart.Orientation` round-trips through.
+		JSValue CFrameEulerYXZ(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
 			return MakeCFrame(
 				context,
 				core::CFrame::Angles(
-					static_cast<float>(pitch), static_cast<float>(yaw), static_cast<float>(roll)
+					NumberAt(context, argc, argv, 0),
+					NumberAt(context, argc, argv, 1),
+					NumberAt(context, argc, argv, 2)
 				)
+			);
+		}
+
+		JSValue CFrameFromAxisAngle(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
+			const core::Vector3 *axis = argc > 0 ? AsVector3(context, argv[0]) : nullptr;
+			if (axis == nullptr) {
+				return JS_ThrowTypeError(context, "fromAxisAngle needs a Vector3 axis");
+			}
+			return MakeCFrame(context, core::CFrame::FromAxisAngle(*axis, NumberAt(context, argc, argv, 1)));
+		}
+
+		// The fourth argument is accepted and ignored, as Roblox's is optional:
+		// the third basis vector is determined by the first two, and honouring a
+		// caller's disagreeing one would be honouring a basis that is not a
+		// rotation.
+		JSValue CFrameFromMatrix(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
+			const core::Vector3 *position = argc > 0 ? AsVector3(context, argv[0]) : nullptr;
+			const core::Vector3 *right = argc > 1 ? AsVector3(context, argv[1]) : nullptr;
+			const core::Vector3 *up = argc > 2 ? AsVector3(context, argv[2]) : nullptr;
+			if (position == nullptr || right == nullptr || up == nullptr) {
+				return JS_ThrowTypeError(context, "fromMatrix needs three Vector3s");
+			}
+			return MakeCFrame(context, core::CFrame::FromMatrix(*position, *right, *up));
+		}
+
+		JSValue CFrameFromRotationBetween(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
+			const core::Vector3 *from = argc > 0 ? AsVector3(context, argv[0]) : nullptr;
+			const core::Vector3 *to = argc > 1 ? AsVector3(context, argv[1]) : nullptr;
+			if (from == nullptr || to == nullptr) {
+				return JS_ThrowTypeError(context, "fromRotationBetweenVectors needs two Vector3s");
+			}
+			return MakeCFrame(context, core::CFrame::FromRotationBetweenVectors(*from, *to));
+		}
+
+		JSValue CFrameLookAlong(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
+			const core::Vector3 *at = argc > 0 ? AsVector3(context, argv[0]) : nullptr;
+			const core::Vector3 *direction = argc > 1 ? AsVector3(context, argv[1]) : nullptr;
+			if (at == nullptr || direction == nullptr) {
+				return JS_ThrowTypeError(context, "lookAlong needs an at and a direction");
+			}
+			const core::Vector3 *up = argc > 2 ? AsVector3(context, argv[2]) : nullptr;
+			return MakeCFrame(
+				context,
+				core::CFrame::LookAt(*at, *at + *direction, up != nullptr ? *up : core::Vector3::YAxis)
 			);
 		}
 
@@ -900,6 +991,182 @@ namespace engine::script {
 				return JS_ThrowTypeError(context, "not a CFrame");
 			}
 			return MakeVector3(context, value->Position);
+		}
+
+		// `CFrame.add(v)` and `CFrame.sub(v)`, which Luau spells `+` and `-`.
+		//
+		// **Translation only, and that is the distinction from `mul`.**
+		// `frame.mul(CFrame.new(offset))` moves by the offset expressed in the
+		// frame's own space; this moves by it in world space. The two agree only
+		// for an unrotated frame.
+		JSValue CFrameOffset(JSContext *context, JSValueConst self, int argc, JSValueConst *argv, int sign) {
+			const core::CFrame *frame = AsCFrame(context, self);
+			const core::Vector3 *offset = argc > 0 ? AsVector3(context, argv[0]) : nullptr;
+			if (frame == nullptr || offset == nullptr) {
+				return JS_ThrowTypeError(context, "expected a Vector3");
+			}
+
+			core::CFrame moved = *frame;
+			moved.Position = sign > 0 ? frame->Position + *offset : frame->Position - *offset;
+			return MakeCFrame(context, moved);
+		}
+
+		JSValue CFrameAdd(JSContext *context, JSValueConst self, int argc, JSValueConst *argv) {
+			return CFrameOffset(context, self, argc, argv, 1);
+		}
+
+		JSValue CFrameSub(JSContext *context, JSValueConst self, int argc, JSValueConst *argv) {
+			return CFrameOffset(context, self, argc, argv, -1);
+		}
+
+		// The read-only members, told apart by the magic tag rather than by
+		// eleven near-identical getters.
+		JSValue CFrameGet(JSContext *context, JSValueConst self, int magic) {
+			const core::CFrame *value = AsCFrame(context, self);
+			if (value == nullptr) {
+				return JS_ThrowTypeError(context, "not a CFrame");
+			}
+
+			switch (magic) {
+			case 0:
+				return MakeVector3(context, value->Position);
+			case 1:
+				return JS_NewFloat64(context, value->Position.X);
+			case 2:
+				return JS_NewFloat64(context, value->Position.Y);
+			case 3:
+				return JS_NewFloat64(context, value->Position.Z);
+			case 4:
+				return MakeCFrame(context, value->RotationOnly());
+			case 5:
+				return MakeVector3(context, value->RightVector());
+			case 6:
+				return MakeVector3(context, value->UpVector());
+			case 7:
+				return MakeVector3(context, value->LookVector());
+			case 8:
+				// Roblox's `ZVector` is +Z where `LookVector` is -Z. Both are
+				// offered so a script reading all three basis columns does not
+				// have to know which one to negate.
+				return MakeVector3(context, value->ZVector());
+			default:
+				return JS_UNDEFINED;
+			}
+		}
+
+		// A frame-in, frame-out method, chosen by magic for the same reason.
+		JSValue
+		CFrameFrameOp(JSContext *context, JSValueConst self, int argc, JSValueConst *argv, int magic) {
+			const core::CFrame *frame = AsCFrame(context, self);
+			if (frame == nullptr) {
+				return JS_ThrowTypeError(context, "not a CFrame");
+			}
+
+			switch (magic) {
+			case 0:
+				return MakeCFrame(context, frame->Inverse());
+			case 1:
+				return MakeCFrame(context, frame->Orthonormalize());
+			default:
+				break;
+			}
+
+			const core::CFrame *other = argc > 0 ? AsCFrame(context, argv[0]) : nullptr;
+			if (other == nullptr) {
+				return JS_ThrowTypeError(context, "expected a CFrame");
+			}
+
+			switch (magic) {
+			case 2:
+				return MakeCFrame(context, frame->ToWorldSpace(*other));
+			case 3:
+				return MakeCFrame(context, frame->ToObjectSpace(*other));
+			case 4:
+				// Roblox's `Lerp` is constant angular speed, so this is `Lerp`
+				// and not the cheaper `NLerp` the C++ interpolator uses.
+				return MakeCFrame(context, frame->Lerp(*other, NumberAt(context, argc, argv, 1)));
+			case 5:
+				return JS_NewFloat64(context, frame->AngleBetween(*other));
+			case 6: {
+				// Roblox's default epsilon, named on both sides so the two
+				// runtimes cannot drift apart on it.
+				constexpr double DEFAULT_EPSILON = 1.0e-5;
+				const float epsilon = NumberAt(context, argc, argv, 1, DEFAULT_EPSILON);
+				return JS_NewBool(context, frame->FuzzyEq(*other, epsilon) ? 1 : 0);
+			}
+			default:
+				return JS_UNDEFINED;
+			}
+		}
+
+		// A point-or-vector conversion, chosen by magic.
+		JSValue
+		CFramePointOp(JSContext *context, JSValueConst self, int argc, JSValueConst *argv, int magic) {
+			const core::CFrame *frame = AsCFrame(context, self);
+			const core::Vector3 *point = argc > 0 ? AsVector3(context, argv[0]) : nullptr;
+			if (frame == nullptr || point == nullptr) {
+				return JS_ThrowTypeError(context, "expected a Vector3");
+			}
+
+			switch (magic) {
+			case 0:
+				return MakeVector3(context, frame->PointToWorldSpace(*point));
+			case 1:
+				return MakeVector3(context, frame->PointToObjectSpace(*point));
+			case 2:
+				return MakeVector3(context, frame->VectorToWorldSpace(*point));
+			default:
+				return MakeVector3(context, frame->VectorToObjectSpace(*point));
+			}
+		}
+
+		// **An array, where Luau returns twelve values.** JavaScript has no
+		// multiple return, so the honest spelling is the one the language has -
+		// the same choice `mul` makes against Luau's `*`.
+		JSValue CFrameComponents(JSContext *context, JSValueConst self, int, JSValueConst *) {
+			const core::CFrame *frame = AsCFrame(context, self);
+			if (frame == nullptr) {
+				return JS_ThrowTypeError(context, "not a CFrame");
+			}
+
+			const std::array<float, 12> parts = frame->GetComponents();
+			JSValue array = JS_NewArray(context);
+			for (uint32_t index = 0; index < parts.size(); index++) {
+				JS_SetPropertyUint32(context, array, index, JS_NewFloat64(context, parts[index]));
+			}
+			return array;
+		}
+
+		// The three-angle decompositions, likewise as arrays.
+		JSValue CFrameToAngles(JSContext *context, JSValueConst self, int, JSValueConst *, int magic) {
+			const core::CFrame *frame = AsCFrame(context, self);
+			if (frame == nullptr) {
+				return JS_ThrowTypeError(context, "not a CFrame");
+			}
+
+			const core::Vector3 angles = magic == 0 ? frame->ToEulerAnglesXYZ() : frame->ToAngles();
+			JSValue array = JS_NewArray(context);
+			JS_SetPropertyUint32(context, array, 0, JS_NewFloat64(context, angles.X));
+			JS_SetPropertyUint32(context, array, 1, JS_NewFloat64(context, angles.Y));
+			JS_SetPropertyUint32(context, array, 2, JS_NewFloat64(context, angles.Z));
+			return array;
+		}
+
+		// `[axis, angle]`, for the reason the two above are arrays.
+		JSValue CFrameToAxisAngle(JSContext *context, JSValueConst self, int, JSValueConst *) {
+			const core::CFrame *frame = AsCFrame(context, self);
+			if (frame == nullptr) {
+				return JS_ThrowTypeError(context, "not a CFrame");
+			}
+
+			core::Vector3 axis;
+			float angle = 0.0f;
+			frame->ToAxisAngle(axis, angle);
+
+			JSValue array = JS_NewArray(context);
+			JS_SetPropertyUint32(context, array, 0, MakeVector3(context, axis));
+			JS_SetPropertyUint32(context, array, 1, JS_NewFloat64(context, angle));
+			return array;
 		}
 
 		JSValue GetService(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
@@ -1404,16 +1671,88 @@ namespace engine::script {
 		{
 			JSValue proto = JS_NewObject(context);
 			JS_SetPropertyStr(context, proto, "mul", JS_NewCFunction(context, CFrameMul, "mul", 1));
+
+			// The magic numbers here are the switch labels in `CFrameGet`,
+			// `CFrameFrameOp` and `CFramePointOp`. Kept beside the names rather
+			// than in a table of their own, because the only thing that reads
+			// them is the switch and a second table would be a second thing to
+			// keep in step.
 			static const JSCFunctionListEntry fields[] = {
-				JS_CGETSET_MAGIC_DEF("Position", CFramePosition, nullptr, 0),
+				JS_CGETSET_MAGIC_DEF("Position", CFrameGet, nullptr, 0),
+				JS_CGETSET_MAGIC_DEF("X", CFrameGet, nullptr, 1),
+				JS_CGETSET_MAGIC_DEF("Y", CFrameGet, nullptr, 2),
+				JS_CGETSET_MAGIC_DEF("Z", CFrameGet, nullptr, 3),
+				JS_CGETSET_MAGIC_DEF("Rotation", CFrameGet, nullptr, 4),
+				JS_CGETSET_MAGIC_DEF("RightVector", CFrameGet, nullptr, 5),
+				JS_CGETSET_MAGIC_DEF("XVector", CFrameGet, nullptr, 5),
+				JS_CGETSET_MAGIC_DEF("UpVector", CFrameGet, nullptr, 6),
+				JS_CGETSET_MAGIC_DEF("YVector", CFrameGet, nullptr, 6),
+				JS_CGETSET_MAGIC_DEF("LookVector", CFrameGet, nullptr, 7),
+				JS_CGETSET_MAGIC_DEF("ZVector", CFrameGet, nullptr, 8),
+
+				JS_CFUNC_MAGIC_DEF("Inverse", 0, CFrameFrameOp, 0),
+				JS_CFUNC_MAGIC_DEF("Orthonormalize", 0, CFrameFrameOp, 1),
+				JS_CFUNC_MAGIC_DEF("ToWorldSpace", 1, CFrameFrameOp, 2),
+				JS_CFUNC_MAGIC_DEF("ToObjectSpace", 1, CFrameFrameOp, 3),
+				JS_CFUNC_MAGIC_DEF("Lerp", 2, CFrameFrameOp, 4),
+				JS_CFUNC_MAGIC_DEF("AngleBetween", 1, CFrameFrameOp, 5),
+				JS_CFUNC_MAGIC_DEF("FuzzyEq", 2, CFrameFrameOp, 6),
+
+				JS_CFUNC_MAGIC_DEF("PointToWorldSpace", 1, CFramePointOp, 0),
+				JS_CFUNC_MAGIC_DEF("PointToObjectSpace", 1, CFramePointOp, 1),
+				JS_CFUNC_MAGIC_DEF("VectorToWorldSpace", 1, CFramePointOp, 2),
+				JS_CFUNC_MAGIC_DEF("VectorToObjectSpace", 1, CFramePointOp, 3),
+
+				JS_CFUNC_MAGIC_DEF("ToEulerAnglesXYZ", 0, CFrameToAngles, 0),
+				JS_CFUNC_MAGIC_DEF("ToEulerAnglesYXZ", 0, CFrameToAngles, 1),
+				JS_CFUNC_MAGIC_DEF("ToOrientation", 0, CFrameToAngles, 1),
+
+				JS_CFUNC_DEF("GetComponents", 0, CFrameComponents),
+				JS_CFUNC_DEF("components", 0, CFrameComponents),
+				JS_CFUNC_DEF("ToAxisAngle", 0, CFrameToAxisAngle),
+				JS_CFUNC_DEF("add", 1, CFrameAdd),
+				JS_CFUNC_DEF("sub", 1, CFrameSub),
 			};
-			JS_SetPropertyFunctionList(context, proto, fields, 1);
+			JS_SetPropertyFunctionList(context, proto, fields, static_cast<int>(std::size(fields)));
 			JS_SetClassProto(context, bound->CFrameClass, proto);
 
 			JSValue table = JS_NewObject(context);
-			JS_SetPropertyStr(context, table, "new", JS_NewCFunction(context, CFrameNew, "new", 3));
-			JS_SetPropertyStr(context, table, "Angles", JS_NewCFunction(context, CFrameAngles, "Angles", 3));
-			JS_SetPropertyStr(context, table, "lookAt", JS_NewCFunction(context, CFrameLookAt, "lookAt", 3));
+			const struct {
+				const char *Name;
+				JSCFunction *Function;
+				int Arity;
+			} constructors[] = {
+				{"new", CFrameNew, 3},
+
+				// **`Angles` is X-Y-Z from v0.18**, which is what Roblox means
+				// by it. It was bound to the Y-X-Z composition, so a pasted
+				// script turned the wrong way whenever it named two axes at
+				// once. That one is still here under Roblox's two names for it.
+				{"Angles", CFrameEulerXYZ, 3},
+				{"fromEulerAnglesXYZ", CFrameEulerXYZ, 3},
+				{"fromEulerAnglesYXZ", CFrameEulerYXZ, 3},
+				{"fromOrientation", CFrameEulerYXZ, 3},
+
+				{"lookAt", CFrameLookAt, 3},
+				{"lookAlong", CFrameLookAlong, 3},
+				{"fromAxisAngle", CFrameFromAxisAngle, 2},
+				{"fromMatrix", CFrameFromMatrix, 4},
+				{"fromRotationBetweenVectors", CFrameFromRotationBetween, 2},
+			};
+			for (const auto &entry : constructors) {
+				JS_SetPropertyStr(
+					context,
+					table,
+					entry.Name,
+					JS_NewCFunction(context, entry.Function, entry.Name, entry.Arity)
+				);
+			}
+
+			// `CFrame.identity`, a value rather than a function. Roblox has it,
+			// and it does not read the same as `CFrame.new()`: one says "no
+			// transform", the other says "one I am about to fill in".
+			JS_SetPropertyStr(context, table, "identity", MakeCFrame(context, core::CFrame()));
+
 			JS_SetPropertyStr(context, global, "CFrame", table);
 		}
 
