@@ -289,13 +289,21 @@ namespace client {
 		std::vector<engine::render::ParticleBatch> Batches;
 
 		// What was spawned on the tick that just ran.
-		std::vector<engine::render::ParticleBirth> Births;
+		//
+		// **Copied out of the world rather than spanned into it**, so a caller
+		// that renders outside the tick has something that outlives it. A birth
+		// is sixty-four bytes and a busy scene has a couple of thousand a tick.
+		std::vector<engine::effects::ParticleBirth> Births;
 
 		// The portal panes, if the world has any.
 		std::vector<engine::render::ParticleSeam> Seams;
 
 		// How many slots the device pool must hold, from the world's own.
 		uint32_t Pool = 0;
+
+		// How many blocks the world has ever handed out, which is what sizes the
+		// renderer's per-block tables. See `render::View::ParticleBlocks`.
+		uint32_t BlockCount = 0;
 
 		// Where `Batches` point when they have been detached from the world.
 		//

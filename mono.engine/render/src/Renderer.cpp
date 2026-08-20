@@ -1520,12 +1520,44 @@ namespace engine::render {
 			SDL_GPUBuffer *States = nullptr;
 			uint32_t Slots = 0;
 
-			// This frame's block records, in the sorted batch order, so a
-			// workgroup index is a record index and no live list is needed.
+			// This frame's draw list: two words an emitter, in the sorted batch
+			// order, so a workgroup index is an entry index and no live list is
+			// needed. The only per-emitter thing that crosses per frame.
 			//@{
-			SDL_GPUBuffer *Blocks = nullptr;
-			SDL_GPUTransferBuffer *BlockStaging = nullptr;
-			uint32_t BlockCapacity = 0;
+			SDL_GPUBuffer *Draws = nullptr;
+			SDL_GPUTransferBuffer *DrawStaging = nullptr;
+			uint32_t DrawCapacity = 0;
+			//@}
+
+			// The two tables the step reads by block index, and the one staging
+			// pair that feeds both.
+			//
+			// **Persistent, and written only where they disagree with the host.**
+			// See `PARTICLE_DRAW_WORDS` for why: staging every block every frame
+			// is more traffic than the pool itself used to cost.
+			//@{
+			SDL_GPUBuffer *Params = nullptr;
+			SDL_GPUBuffer *Curves = nullptr;
+			uint32_t TableRows = 0;
+
+			// The records that update them, staged and scattered. One pair for
+			// both tables, sized to the wider record.
+			SDL_GPUBuffer *Updates = nullptr;
+			SDL_GPUTransferBuffer *UpdateStaging = nullptr;
+			uint32_t UpdateCapacity = 0;
+			//@}
+
+			// What the device was last told about each block, indexed by block.
+			//
+			// **Compared against `EmitterBlock::Revision` rather than against the
+			// record itself**, because comparing the record means reading both
+			// copies of ninety-six bytes for every emitter every frame - which at
+			// a hundred thousand of them is most of the traffic the counter exists
+			// to avoid. Zero means "never told", which is what a block index
+			// nobody has claimed yet reads as.
+			//@{
+			std::vector<uint32_t> ParamRevision;
+			std::vector<uint32_t> CurveRevision;
 			//@}
 
 			// This frame's births, each a slot and the state to put in it.
@@ -1543,13 +1575,15 @@ namespace engine::render {
 			//@}
 
 			SDL_GPUComputePipeline *Step = nullptr;
-			SDL_GPUComputePipeline *Spawn = nullptr;
+			SDL_GPUComputePipeline *Scatter = nullptr;
 
 			// What was staged this frame, for the dispatch that follows.
 			//@{
 			uint32_t Records = 0;
 			uint32_t BirthCount = 0;
 			uint32_t SeamCount = 0;
+			uint32_t ParamUpdates = 0;
+			uint32_t CurveUpdates = 0;
 			float Delta = 0.0f;
 			//@}
 
@@ -1581,7 +1615,8 @@ namespace engine::render {
 		// frame.
 		//@{
 		bool ReserveParticlePool(uint32_t slots);
-		bool ReserveParticleStaging(uint32_t records, uint32_t births, uint32_t seams);
+		bool ReserveParticleTables(uint32_t blocks);
+		bool ReserveParticleStaging(uint32_t draws, uint32_t births, uint32_t seams);
 		//@}
 
 		// Runs the spawn scatter and then the step, on their own command buffer.
@@ -3034,8 +3069,13 @@ namespace engine::render {
 		// stream it writes the frame into); the spawn scatter reads one and
 		// writes one. Sixty-four threads a group, which for the step is the
 		// stride it walks a block's capacity in.
-		Particles.Step = LoadComputePipeline("particle-step.comp", 0, 2, 0, 2, 64, 1);
-		Particles.Spawn = LoadComputePipeline("particle-spawn.comp", 0, 1, 0, 1, 64, 1);
+		// The particle simulation. The step reads four buffers - the frame's draw
+		// list, the two block tables and the panes - and writes two, the state
+		// pool and the instance stream it fills. The scatter reads one and writes
+		// one, and is dispatched three times a frame at most: births, changed
+		// parameters, changed curves.
+		Particles.Step = LoadComputePipeline("particle-step.comp", 0, 4, 0, 2, 64, 1);
+		Particles.Scatter = LoadComputePipeline("particle-scatter.comp", 0, 1, 0, 1, 64, 1);
 
 		// **The particle pipelines are deliberately not in this conjunction.** A
 		// build whose particle shaders failed to compile still draws a world, and
@@ -4009,7 +4049,7 @@ namespace engine::render {
 		// --- the device layouts -----------------------------------------------
 		//
 		// **These numbers are also written in `particle-step.comp` and
-		// `particle-spawn.comp`, and a disagreement between the two is a scene of
+		// `particle-scatter.comp`, and a disagreement between the two is a scene of
 		// garbage rather than a compile error.** `vec3` takes sixteen-byte
 		// alignment in std430 and none of these structs is laid out that way, so
 		// both sides index a flat `uint` array by hand - the same arrangement
@@ -4020,39 +4060,84 @@ namespace engine::render {
 		constexpr uint32_t PARTICLE_BIRTH_WORDS = PARTICLE_STATE_WORDS + 1;
 		constexpr uint32_t PARTICLE_SEAM_WORDS = 20;
 
-		// The block record: eighteen words of parameters, fourteen spare, then
-		// the four sixteen-sample curves. The spare run is deliberate - a field
-		// added in front of the curves would otherwise shift all sixty-four of
-		// them and every one would be silently reinterpreted.
-		constexpr uint32_t PARTICLE_BLOCK_WORDS = 96;
-		constexpr uint32_t PARTICLE_BLOCK_ROTATION = 0;
-		constexpr uint32_t PARTICLE_BLOCK_POSITION = 4;
-		constexpr uint32_t PARTICLE_BLOCK_ACCELERATION = 7;
-		constexpr uint32_t PARTICLE_BLOCK_DRAG = 10;
-		constexpr uint32_t PARTICLE_BLOCK_FIRST = 11;
-		constexpr uint32_t PARTICLE_BLOCK_CAPACITY = 12;
-		constexpr uint32_t PARTICLE_BLOCK_FLAGS = 13;
-		constexpr uint32_t PARTICLE_BLOCK_CELLS = 14;
-		constexpr uint32_t PARTICLE_BLOCK_PLAYBACK = 15;
-		constexpr uint32_t PARTICLE_BLOCK_RATE = 16;
-		constexpr uint32_t PARTICLE_BLOCK_DESTINATION = 17;
-		constexpr uint32_t PARTICLE_BLOCK_GENERATION = 18;
-		constexpr uint32_t PARTICLE_BLOCK_CURVE_SIZE = 32;
-		constexpr uint32_t PARTICLE_BLOCK_CURVE_ALPHA = 48;
-		constexpr uint32_t PARTICLE_BLOCK_CURVE_SQUASH = 64;
-		constexpr uint32_t PARTICLE_BLOCK_CURVE_COLOUR = 80;
+		// The block's parameters, in a table indexed by block. Eighteen words used
+		// and six spare, deliberately: a field added here would otherwise change
+		// the stride and silently reinterpret every record already on the device.
+		constexpr uint32_t PARTICLE_PARAM_WORDS = 24;
+		constexpr uint32_t PARTICLE_PARAM_ROTATION = 0;
+		constexpr uint32_t PARTICLE_PARAM_POSITION = 4;
+		constexpr uint32_t PARTICLE_PARAM_ACCELERATION = 7;
+		constexpr uint32_t PARTICLE_PARAM_DRAG = 10;
+		constexpr uint32_t PARTICLE_PARAM_FIRST = 11;
+		constexpr uint32_t PARTICLE_PARAM_CAPACITY = 12;
+		constexpr uint32_t PARTICLE_PARAM_FLAGS = 13;
+		constexpr uint32_t PARTICLE_PARAM_CELLS = 14;
+		constexpr uint32_t PARTICLE_PARAM_PLAYBACK = 15;
+		constexpr uint32_t PARTICLE_PARAM_RATE = 16;
+		constexpr uint32_t PARTICLE_PARAM_GENERATION = 17;
+
+		// The four curves, in a second table indexed by block. Words rather than
+		// floats because the colour curve is packed RGB and the other three are
+		// floats; one table with one stride beats two of each.
+		constexpr uint32_t PARTICLE_CURVE_WORDS = 64;
+		constexpr uint32_t PARTICLE_CURVE_OF_SIZE = 0;
+		constexpr uint32_t PARTICLE_CURVE_OF_ALPHA = 16;
+		constexpr uint32_t PARTICLE_CURVE_OF_SQUASH = 32;
+		constexpr uint32_t PARTICLE_CURVE_OF_COLOUR = 48;
+
+		// One entry of the per-frame draw list: which block, and where its run of
+		// the instance stream starts.
+		//
+		// **The only thing that crosses per emitter per frame, and getting it down
+		// to two words is what makes the device-resident pool a win at the scale
+		// it exists for.** The first version staged the whole three-hundred-and-
+		// eighty-four-byte record for every emitter every frame: at the roadmap's
+		// hundred thousand emitters that is thirty-nine megabytes of writes into a
+		// mapped transfer buffer, *more* than the sixteen the entire pool cost
+		// before it moved to the device. Measured at 102,400 emitters,
+		// `prepare particles` was 2.81 ms of a 12.4 ms frame.
+		//
+		// Almost none of a record changes between frames. `EmitterBlock::Revision`
+		// says when it has, `ParticlePool::ParamRevision` is what the device was
+		// last told, and `particle-scatter.comp` sends the difference - nothing at
+		// all for a static scene. What is left is this, because the sort that
+		// decides where a block draws is genuinely per frame.
+		constexpr uint32_t PARTICLE_DRAW_WORDS = 2;
+
+		// How many block tables may be brought up to date in one frame.
+		//
+		// **A fixed budget rather than "however many changed", and the first
+		// version without one was unusable.** The staging buffer is mapped with
+		// cycling every frame, so its *size* is what a frame costs whether or not
+		// anything is in it - and sizing it to the emitter count made it thirty-
+		// four megabytes at a hundred thousand emitters, re-versioned sixty times
+		// a second. That is the allocator, not the bus: 102,400 emitters ran at
+		// **4 fps** and the process held hundreds of megabytes of transfer buffer
+		// versions waiting on fences.
+		//
+		// Two thousand rows is half a megabyte, which is nothing to re-version.
+		// In a settled scene almost nothing changes and the budget is never
+		// reached; the one time it is, is the frame a scene loads, and a block
+		// whose turn has not come is simply left out of the draw list until it
+		// has - so a hundred thousand emitters fade in over a second rather than
+		// drawing from a table that does not describe them yet.
+		constexpr uint32_t PARTICLE_UPDATE_BUDGET = 2048;
 
 		static_assert(
 			sizeof(effects::ParticleState) == PARTICLE_STATE_WORDS * sizeof(uint32_t),
 			"the state's width is the shader's stride"
 		);
-		static_assert(effects::CURVE_SAMPLES == 16, "the block record reserves sixteen words a curve");
+		static_assert(effects::CURVE_SAMPLES == 16, "the curve table reserves sixteen words a curve");
 		static_assert(
-			PARTICLE_BLOCK_CURVE_COLOUR + effects::CURVE_SAMPLES <= PARTICLE_BLOCK_WORDS,
-			"the curves must fit inside the record"
+			PARTICLE_CURVE_OF_COLOUR + effects::CURVE_SAMPLES <= PARTICLE_CURVE_WORDS,
+			"the four curves must fit inside one row of the table"
+		);
+		static_assert(
+			PARTICLE_PARAM_GENERATION < PARTICLE_PARAM_WORDS,
+			"the parameters must fit inside one row of the table"
 		);
 
-		// One float, into a word of the record.
+		// One float, into a word of a record.
 		void PutFloat(uint32_t *words, uint32_t at, float value) {
 			std::memcpy(words + at, &value, sizeof(float));
 		}
@@ -4063,23 +4148,20 @@ namespace engine::render {
 			PutFloat(words, at + 2, value.Z);
 		}
 
-		// Fills one block record for `particle-step.comp`.
-		//
-		// @param destination Where this block's run starts in the draw stream.
-		void WriteParticleBlock(uint32_t *words, const effects::EmitterBlock &block, uint32_t destination) {
+		// Fills one row of the parameter table.
+		void WriteParticleParams(uint32_t *words, const effects::EmitterBlock &block) {
 			const glm::quat turn = block.Frame.Rotation();
-			PutFloat(words, PARTICLE_BLOCK_ROTATION, turn.x);
-			PutFloat(words, PARTICLE_BLOCK_ROTATION + 1, turn.y);
-			PutFloat(words, PARTICLE_BLOCK_ROTATION + 2, turn.z);
-			PutFloat(words, PARTICLE_BLOCK_ROTATION + 3, turn.w);
-			PutVector(words, PARTICLE_BLOCK_POSITION, block.Frame.Position);
-			PutVector(words, PARTICLE_BLOCK_ACCELERATION, block.Acceleration);
-			PutFloat(words, PARTICLE_BLOCK_DRAG, block.Drag);
+			PutFloat(words, PARTICLE_PARAM_ROTATION, turn.x);
+			PutFloat(words, PARTICLE_PARAM_ROTATION + 1, turn.y);
+			PutFloat(words, PARTICLE_PARAM_ROTATION + 2, turn.z);
+			PutFloat(words, PARTICLE_PARAM_ROTATION + 3, turn.w);
+			PutVector(words, PARTICLE_PARAM_POSITION, block.Frame.Position);
+			PutVector(words, PARTICLE_PARAM_ACCELERATION, block.Acceleration);
+			PutFloat(words, PARTICLE_PARAM_DRAG, block.Drag);
 
-			words[PARTICLE_BLOCK_FIRST] = block.First;
-			words[PARTICLE_BLOCK_CAPACITY] = block.Capacity;
-			words[PARTICLE_BLOCK_DESTINATION] = destination;
-			words[PARTICLE_BLOCK_GENERATION] = block.Generation;
+			words[PARTICLE_PARAM_FIRST] = block.First;
+			words[PARTICLE_PARAM_CAPACITY] = block.Capacity;
+			words[PARTICLE_PARAM_GENERATION] = block.Generation;
 
 			// **The random flipbook mode is decided at spawn and not here**, and
 			// that is what keeps a sixty-four-bit hash out of a shader with no
@@ -4089,16 +4171,19 @@ namespace engine::render {
 			// other mode is a function of age and the shader works it out.
 			const uint32_t cells = std::min<uint32_t>(block.Frames, effects::FlipbookCells(block.Flipbook));
 			const bool fixed = block.FlipbookPlayback == effects::FlipbookMode::Random;
-			words[PARTICLE_BLOCK_FLAGS] = (block.Locked ? 1u : 0u) | (fixed ? 2u : 0u);
-			words[PARTICLE_BLOCK_CELLS] = cells;
-			words[PARTICLE_BLOCK_PLAYBACK] = static_cast<uint32_t>(block.FlipbookPlayback);
-			PutFloat(words, PARTICLE_BLOCK_RATE, block.FlipbookRate);
+			words[PARTICLE_PARAM_FLAGS] = (block.Locked ? 1u : 0u) | (fixed ? 2u : 0u);
+			words[PARTICLE_PARAM_CELLS] = cells;
+			words[PARTICLE_PARAM_PLAYBACK] = static_cast<uint32_t>(block.FlipbookPlayback);
+			PutFloat(words, PARTICLE_PARAM_RATE, block.FlipbookRate);
+		}
 
+		// Fills one row of the curve table.
+		void WriteParticleCurves(uint32_t *words, const effects::ParticleCurves &curves) {
 			for (uint32_t at = 0; at < effects::CURVE_SAMPLES; at++) {
-				PutFloat(words, PARTICLE_BLOCK_CURVE_SIZE + at, block.Curves.Size[at]);
-				PutFloat(words, PARTICLE_BLOCK_CURVE_ALPHA + at, block.Curves.Alpha[at]);
-				PutFloat(words, PARTICLE_BLOCK_CURVE_SQUASH + at, block.Curves.Squash[at]);
-				words[PARTICLE_BLOCK_CURVE_COLOUR + at] = block.Curves.Colour[at];
+				PutFloat(words, PARTICLE_CURVE_OF_SIZE + at, curves.Size[at]);
+				PutFloat(words, PARTICLE_CURVE_OF_ALPHA + at, curves.Alpha[at]);
+				PutFloat(words, PARTICLE_CURVE_OF_SQUASH + at, curves.Squash[at]);
+				words[PARTICLE_CURVE_OF_COLOUR + at] = curves.Colour[at];
 			}
 		}
 
@@ -4247,7 +4332,51 @@ namespace engine::render {
 		return true;
 	}
 
-	bool Renderer::Impl::ReserveParticleStaging(uint32_t records, uint32_t births, uint32_t seams) {
+	bool Renderer::Impl::ReserveParticleTables(uint32_t blocks) {
+		if (blocks <= Particles.TableRows) {
+			return true;
+		}
+
+		// **Grown and never shrunk, and what is in them is kept.** These are what
+		// the device knows about every block, written only where the host says it
+		// has changed - so a grow that dropped the contents would leave every
+		// unchanged block describing whatever was in that memory. The revisions
+		// are reset alongside, which is what makes the next frame re-send
+		// everything rather than trusting a buffer that no longer holds it.
+		uint32_t rows = Particles.TableRows == 0 ? 1024 : Particles.TableRows;
+		while (rows < blocks) {
+			rows *= 2;
+		}
+
+		for (SDL_GPUBuffer **buffer : {&Particles.Params, &Particles.Curves}) {
+			if (*buffer != nullptr) {
+				SDL_ReleaseGPUBuffer(Device, *buffer);
+				*buffer = nullptr;
+			}
+		}
+
+		SDL_GPUBufferCreateInfo info{};
+		info.usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
+
+		info.size = rows * PARTICLE_PARAM_WORDS * static_cast<uint32_t>(sizeof(uint32_t));
+		Particles.Params = SDL_CreateGPUBuffer(Device, &info);
+
+		info.size = rows * PARTICLE_CURVE_WORDS * static_cast<uint32_t>(sizeof(uint32_t));
+		Particles.Curves = SDL_CreateGPUBuffer(Device, &info);
+
+		if (Particles.Params == nullptr || Particles.Curves == nullptr) {
+			ENGINE_ERROR("particle tables of {} blocks: {}", rows, SDL_GetError());
+			Particles.TableRows = 0;
+			return false;
+		}
+
+		Particles.TableRows = rows;
+		Particles.ParamRevision.assign(rows, 0);
+		Particles.CurveRevision.assign(rows, 0);
+		return true;
+	}
+
+	bool Renderer::Impl::ReserveParticleStaging(uint32_t draws, uint32_t births, uint32_t seams) {
 		// One shape three times over: a read-only storage buffer and the upload
 		// transfer beside it, grown in powers of two and never shrunk.
 		const auto grow = [this](
@@ -4301,59 +4430,86 @@ namespace engine::render {
 		// one of them has to be bound; leaving a declared binding empty is a
 		// validation error on some drivers and a read of whatever was there on
 		// others - the same rule `DrawParticles` follows for its sampler.
+		if (!grow(
+				Particles.Draws,
+				Particles.DrawStaging,
+				Particles.DrawCapacity,
+				std::max(draws, 1u),
+				PARTICLE_DRAW_WORDS * word,
+				"draw list"
+			) ||
+			!grow(
+				Particles.Births,
+				Particles.BirthStaging,
+				Particles.BirthCapacity,
+				std::max(births, 1u),
+				PARTICLE_BIRTH_WORDS * word,
+				"births"
+			) ||
+			!grow(
+				Particles.Seams,
+				Particles.SeamStaging,
+				Particles.SeamCapacity,
+				std::max(seams, 1u),
+				PARTICLE_SEAM_WORDS * word,
+				"seams"
+			)) {
+			return false;
+		}
+
+		// **A fixed size, and the one buffer here that never grows.** It is
+		// mapped with cycling every frame, so what it costs is its size rather
+		// than what is in it - see `PARTICLE_UPDATE_BUDGET`. Rows are counted in
+		// the wider of the two records it carries; parameters fill it from the
+		// front and curves from the back.
 		return grow(
-				   Particles.Blocks,
-				   Particles.BlockStaging,
-				   Particles.BlockCapacity,
-				   std::max(records, 1u),
-				   PARTICLE_BLOCK_WORDS * word,
-				   "block records"
-			   ) &&
-			   grow(
-				   Particles.Births,
-				   Particles.BirthStaging,
-				   Particles.BirthCapacity,
-				   std::max(births, 1u),
-				   PARTICLE_BIRTH_WORDS * word,
-				   "births"
-			   ) &&
-			   grow(
-				   Particles.Seams,
-				   Particles.SeamStaging,
-				   Particles.SeamCapacity,
-				   std::max(seams, 1u),
-				   PARTICLE_SEAM_WORDS * word,
-				   "seams"
-			   );
+			Particles.Updates,
+			Particles.UpdateStaging,
+			Particles.UpdateCapacity,
+			PARTICLE_UPDATE_BUDGET,
+			(PARTICLE_CURVE_WORDS + 1) * word,
+			"table updates"
+		);
 	}
 
 	void Renderer::Impl::ReleaseParticlePool() {
 		for (SDL_GPUBuffer **buffer :
-			 {&Particles.States, &Particles.Blocks, &Particles.Births, &Particles.Seams}) {
+			 {&Particles.States,
+			  &Particles.Draws,
+			  &Particles.Params,
+			  &Particles.Curves,
+			  &Particles.Updates,
+			  &Particles.Births,
+			  &Particles.Seams}) {
 			if (*buffer != nullptr) {
 				SDL_ReleaseGPUBuffer(Device, *buffer);
 				*buffer = nullptr;
 			}
 		}
 		for (SDL_GPUTransferBuffer **staging :
-			 {&Particles.BlockStaging, &Particles.BirthStaging, &Particles.SeamStaging}) {
+			 {&Particles.DrawStaging,
+			  &Particles.UpdateStaging,
+			  &Particles.BirthStaging,
+			  &Particles.SeamStaging}) {
 			if (*staging != nullptr) {
 				SDL_ReleaseGPUTransferBuffer(Device, *staging);
 				*staging = nullptr;
 			}
 		}
-		if (Particles.Step != nullptr) {
-			SDL_ReleaseGPUComputePipeline(Device, Particles.Step);
-			Particles.Step = nullptr;
-		}
-		if (Particles.Spawn != nullptr) {
-			SDL_ReleaseGPUComputePipeline(Device, Particles.Spawn);
-			Particles.Spawn = nullptr;
+		for (SDL_GPUComputePipeline **pipeline : {&Particles.Step, &Particles.Scatter}) {
+			if (*pipeline != nullptr) {
+				SDL_ReleaseGPUComputePipeline(Device, *pipeline);
+				*pipeline = nullptr;
+			}
 		}
 		Particles.Slots = 0;
-		Particles.BlockCapacity = 0;
+		Particles.TableRows = 0;
+		Particles.DrawCapacity = 0;
+		Particles.UpdateCapacity = 0;
 		Particles.BirthCapacity = 0;
 		Particles.SeamCapacity = 0;
+		Particles.ParamRevision.clear();
+		Particles.CurveRevision.clear();
 	}
 
 	bool Renderer::Impl::DispatchParticles() {
@@ -4369,9 +4525,17 @@ namespace engine::render {
 			return false;
 		}
 
-		// The frame's three uploads, in one copy pass. All three are cycled: this
-		// is each buffer's first touch of the frame, so the previous frame's
-		// dispatch keeps the version it bound.
+		const uint32_t word = static_cast<uint32_t>(sizeof(uint32_t));
+		const uint32_t updateStride = (PARTICLE_CURVE_WORDS + 1) * word;
+
+		// The frame's uploads, in one copy pass. All are cycled: this is each
+		// buffer's first touch of the frame, so the previous frame's dispatch
+		// keeps the version it bound.
+		//
+		// **The table updates are two regions of one buffer, from its two ends.**
+		// `PrepareParticles` fills parameters from the front and curves from the
+		// back, so a frame that changed neither uploads nothing rather than a
+		// zero-length copy the driver still has to look at.
 		{
 			SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(command);
 			if (copy == nullptr) {
@@ -4380,52 +4544,132 @@ namespace engine::render {
 				return false;
 			}
 
-			const auto send = [copy](SDL_GPUTransferBuffer *from, SDL_GPUBuffer *to, uint32_t bytes) {
+			const auto send = [copy](
+								  SDL_GPUTransferBuffer *from,
+								  SDL_GPUBuffer *to,
+								  uint32_t offset,
+								  uint32_t bytes,
+								  bool cycle
+							  ) {
 				if (bytes == 0) {
 					return;
 				}
-				const SDL_GPUTransferBufferLocation source{from, 0};
-				const SDL_GPUBufferRegion destination{to, 0, bytes};
-				SDL_UploadToGPUBuffer(copy, &source, &destination, true);
+				const SDL_GPUTransferBufferLocation source{from, offset};
+				const SDL_GPUBufferRegion destination{to, offset, bytes};
+				SDL_UploadToGPUBuffer(copy, &source, &destination, cycle);
 			};
 
-			const uint32_t word = static_cast<uint32_t>(sizeof(uint32_t));
-			send(Particles.BlockStaging, Particles.Blocks, Particles.Records * PARTICLE_BLOCK_WORDS * word);
 			send(
-				Particles.BirthStaging, Particles.Births, Particles.BirthCount * PARTICLE_BIRTH_WORDS * word
+				Particles.DrawStaging,
+				Particles.Draws,
+				0,
+				Particles.Records * PARTICLE_DRAW_WORDS * word,
+				true
 			);
-			send(Particles.SeamStaging, Particles.Seams, Particles.SeamCount * PARTICLE_SEAM_WORDS * word);
+			send(
+				Particles.BirthStaging,
+				Particles.Births,
+				0,
+				Particles.BirthCount * PARTICLE_BIRTH_WORDS * word,
+				true
+			);
+			send(
+				Particles.SeamStaging,
+				Particles.Seams,
+				0,
+				Particles.SeamCount * PARTICLE_SEAM_WORDS * word,
+				true
+			);
+
+			// **Not cycled, because the two ends are two copies of one buffer**
+			// and cycling the second would give it a fresh version with the first
+			// copy's bytes missing.
+			send(Particles.UpdateStaging, Particles.Updates, 0, Particles.ParamUpdates * updateStride, false);
+			send(
+				Particles.UpdateStaging,
+				Particles.Updates,
+				(PARTICLE_UPDATE_BUDGET - Particles.CurveUpdates) * updateStride,
+				Particles.CurveUpdates * updateStride,
+				false
+			);
 			SDL_EndGPUCopyPass(copy);
 		}
 
-		// **Spawn first, then step, and in two passes rather than one.** A
-		// newborn has to be in the pool before the pass that shades it runs, or
-		// its slot draws whatever the ring last left there and the particle is
-		// invisible for a frame. Two passes because there is no barrier inside
-		// one: the step reads the states the spawn writes.
+		// One pass per scatter, because there is no barrier inside a compute pass
+		// and each writes a table the step then reads.
+		const auto scatter = [&](SDL_GPUBuffer *table,
+								 SDL_GPUBuffer *from,
+								 uint32_t count,
+								 uint32_t words,
+								 uint32_t rows,
+								 uint32_t offset,
+								 const char *what) {
+			if (Particles.Scatter == nullptr || count == 0) {
+				return true;
+			}
+
+			SDL_GPUStorageBufferReadWriteBinding output{};
+			output.buffer = table;
+
+			SDL_GPUComputePass *pass = SDL_BeginGPUComputePass(command, nullptr, 0, &output, 1);
+			if (pass == nullptr) {
+				ENGINE_ERROR("particle {}: SDL_BeginGPUComputePass: {}", what, SDL_GetError());
+				return false;
+			}
+
+			SDL_BindGPUComputePipeline(pass, Particles.Scatter);
+			SDL_GPUBuffer *const reads[1] = {from};
+			SDL_BindGPUComputeStorageBuffers(pass, 0, reads, 1);
+
+			// The offset is in records rather than bytes, because the shader
+			// indexes records - the curve updates live at the far end of the same
+			// buffer the parameter updates start in.
+			const uint32_t counts[4] = {count, words, rows, offset};
+			SDL_PushGPUComputeUniformData(command, 0, counts, sizeof(counts));
+			SDL_DispatchGPUCompute(pass, (count + 63) / 64, 1, 1);
+			SDL_EndGPUComputePass(pass);
+			return true;
+		};
+
+		// **The block tables first, then the births, then the step**, which is
+		// the order the step reads them in: a block whose curves changed this
+		// frame has to have them before anything is shaded with them, and a
+		// newborn has to be in the pool before the pass that shades it runs or its
+		// slot draws whatever the ring last left there.
 		//
 		// Ageing a newborn by one step on the tick it is born is the one place
 		// this differs from the host-side pass, which spawns after ageing. It is
 		// one frame of drift on a value that starts at zero.
-		if (Particles.Spawn != nullptr && Particles.BirthCount > 0) {
-			SDL_GPUStorageBufferReadWriteBinding output{};
-			output.buffer = Particles.States;
-
-			SDL_GPUComputePass *pass = SDL_BeginGPUComputePass(command, nullptr, 0, &output, 1);
-			if (pass == nullptr) {
-				ENGINE_ERROR("particle spawn: SDL_BeginGPUComputePass: {}", SDL_GetError());
-				SDL_CancelGPUCommandBuffer(command);
-				return false;
-			}
-
-			SDL_BindGPUComputePipeline(pass, Particles.Spawn);
-			SDL_GPUBuffer *const reads[1] = {Particles.Births};
-			SDL_BindGPUComputeStorageBuffers(pass, 0, reads, 1);
-
-			const uint32_t counts[4] = {Particles.BirthCount, Particles.Slots, 0, 0};
-			SDL_PushGPUComputeUniformData(command, 0, counts, sizeof(counts));
-			SDL_DispatchGPUCompute(pass, (Particles.BirthCount + 63) / 64, 1, 1);
-			SDL_EndGPUComputePass(pass);
+		const bool staged = scatter(
+								Particles.Params,
+								Particles.Updates,
+								Particles.ParamUpdates,
+								PARTICLE_PARAM_WORDS,
+								Particles.TableRows,
+								0,
+								"parameter update"
+							) &&
+							scatter(
+								Particles.Curves,
+								Particles.Updates,
+								Particles.CurveUpdates,
+								PARTICLE_CURVE_WORDS,
+								Particles.TableRows,
+								PARTICLE_UPDATE_BUDGET - Particles.CurveUpdates,
+								"curve update"
+							) &&
+							scatter(
+								Particles.States,
+								Particles.Births,
+								Particles.BirthCount,
+								PARTICLE_STATE_WORDS,
+								Particles.Slots,
+								0,
+								"spawn"
+							);
+		if (!staged) {
+			SDL_CancelGPUCommandBuffer(command);
+			return false;
 		}
 
 		{
@@ -4441,8 +4685,10 @@ namespace engine::render {
 			}
 
 			SDL_BindGPUComputePipeline(pass, Particles.Step);
-			SDL_GPUBuffer *const reads[2] = {Particles.Blocks, Particles.Seams};
-			SDL_BindGPUComputeStorageBuffers(pass, 0, reads, 2);
+			SDL_GPUBuffer *const reads[4] = {
+				Particles.Draws, Particles.Params, Particles.Curves, Particles.Seams
+			};
+			SDL_BindGPUComputeStorageBuffers(pass, 0, reads, 4);
 
 			const float step[4] = {
 				Particles.Delta,
@@ -4599,7 +4845,7 @@ namespace engine::render {
 		if (total == 0 || !ReserveParticles(total)) {
 			return 0;
 		}
-		if (!ReserveParticlePool(view.ParticlePool)) {
+		if (!ReserveParticlePool(view.ParticlePool) || !ReserveParticleTables(view.ParticleBlocks)) {
 			return 0;
 		}
 		if (!ReserveParticleStaging(
@@ -4610,45 +4856,95 @@ namespace engine::render {
 			return 0;
 		}
 
-		auto *records =
-			static_cast<uint32_t *>(SDL_MapGPUTransferBuffer(Device, Particles.BlockStaging, true));
-		if (records == nullptr) {
+		auto *draws = static_cast<uint32_t *>(SDL_MapGPUTransferBuffer(Device, Particles.DrawStaging, true));
+		auto *updates =
+			static_cast<uint32_t *>(SDL_MapGPUTransferBuffer(Device, Particles.UpdateStaging, true));
+		if (draws == nullptr || updates == nullptr) {
+			if (draws != nullptr) {
+				SDL_UnmapGPUTransferBuffer(Device, Particles.DrawStaging);
+			}
+			if (updates != nullptr) {
+				SDL_UnmapGPUTransferBuffer(Device, Particles.UpdateStaging);
+			}
 			return 0;
 		}
 
-		// One walk that both stages the block records and records where each
-		// group lands. After this the order is a buffer offset and the batch it
-		// came from is gone, which is the same arrangement `SlotMesh` has for the
-		// mesh path.
+		// One walk that stages the draw list, notices which blocks the device is
+		// out of date about, and records where each group lands. After this the
+		// order is a buffer offset and the batch it came from is gone, which is
+		// the same arrangement `SlotMesh` has for the mesh path.
 		//
-		// **A record per batch in the sorted order**, which is what lets the step
-		// dispatch one workgroup per record with no live list: the workgroup
-		// index *is* the record index, and the record carries both where its
-		// block sits in the pool and where its run lands in the draw stream.
+		// **Two words a batch and nothing else, unless something changed.** The
+		// workgroup index is a draw-list index, the entry says which block and
+		// where its run lands, and the step looks the rest up by block. See
+		// `PARTICLE_DRAW_WORDS` for what staging the whole record instead cost.
+		//
+		// The parameter and curve updates share one staging buffer, filled from
+		// the front for parameters and from the back for curves, so a frame that
+		// changed neither writes nothing at all.
 		ParticleGroups.clear();
 
 		uint32_t written = 0;
 		uint32_t staged = 0;
+		uint32_t params = 0;
+		uint32_t curves = 0;
+		const uint32_t updateStride = PARTICLE_CURVE_WORDS + 1;
 		for (const uint32_t index : ParticleOrder) {
 			const render::ParticleBatch &batch = batches[index];
-			if (batch.Block == nullptr || batch.Block->Capacity == 0) {
+			if (batch.Block == nullptr || batch.Block->Capacity == 0 || batch.Index >= Particles.TableRows) {
 				continue;
 			}
 			const effects::EmitterBlock &block = *batch.Block;
+
+			// **Brought up to date first, and left out of the frame if it cannot
+			// be.** The step reads a block's capacity out of the parameter table,
+			// so a block the device has not been told about yet would return from
+			// its workgroup without writing anything - while this walk had
+			// already reserved its run of the instance stream. That run would
+			// then draw whatever was in it, which is the previous frame's
+			// particles at this frame's positions. Skipping it instead costs the
+			// block a frame and leaves the stream exact.
+			const bool needParams = Particles.ParamRevision[batch.Index] != block.Revision;
+			const bool needCurves = Particles.CurveRevision[batch.Index] != block.CurveRevision;
+			if (needParams || needCurves) {
+				const uint32_t wanted = (needParams ? 1u : 0u) + (needCurves ? 1u : 0u);
+				if (params + curves + wanted > PARTICLE_UPDATE_BUDGET) {
+					continue;
+				}
+				if (needParams) {
+					uint32_t *const row = updates + params * updateStride;
+					row[0] = batch.Index;
+					WriteParticleParams(row + 1, block);
+					Particles.ParamRevision[batch.Index] = block.Revision;
+					params++;
+				}
+				if (needCurves) {
+					curves++;
+					uint32_t *const row = updates + (PARTICLE_UPDATE_BUDGET - curves) * updateStride;
+					row[0] = batch.Index;
+					WriteParticleCurves(row + 1, block.Curves);
+					Particles.CurveRevision[batch.Index] = block.CurveRevision;
+				}
+			}
 
 			if (ParticleGroups.empty() || !SameParticleState(batches[ParticleGroups.back().Batch], batch)) {
 				ParticleGroups.push_back(ParticleGroup{index, written, 0});
 			}
 
-			WriteParticleBlock(records + staged * PARTICLE_BLOCK_WORDS, block, written);
+			uint32_t *const entry = draws + staged * PARTICLE_DRAW_WORDS;
+			entry[0] = batch.Index;
+			entry[1] = written;
 			staged++;
 
 			written += block.Capacity;
 			ParticleGroups.back().Count += block.Capacity;
 		}
 
-		SDL_UnmapGPUTransferBuffer(Device, Particles.BlockStaging);
+		SDL_UnmapGPUTransferBuffer(Device, Particles.DrawStaging);
+		SDL_UnmapGPUTransferBuffer(Device, Particles.UpdateStaging);
 		Particles.Records = staged;
+		Particles.ParamUpdates = params;
+		Particles.CurveUpdates = curves;
 		Particles.Delta = view.ParticleDelta;
 
 		// The births and the panes, both small and both straight copies - a birth
@@ -4660,7 +4956,7 @@ namespace engine::render {
 				static_cast<uint32_t *>(SDL_MapGPUTransferBuffer(Device, Particles.BirthStaging, true));
 			if (births != nullptr) {
 				for (size_t at = 0; at < view.ParticleBirths.size(); at++) {
-					const render::ParticleBirth &birth = view.ParticleBirths[at];
+					const effects::ParticleBirth &birth = view.ParticleBirths[at];
 					uint32_t *const row = births + at * PARTICLE_BIRTH_WORDS;
 					row[0] = birth.Row;
 					std::memcpy(row + 1, &birth.State, sizeof(effects::ParticleState));

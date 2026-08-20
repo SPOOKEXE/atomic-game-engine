@@ -2730,6 +2730,7 @@ namespace client {
 		view.ParticleBirths = Particles.Births;
 		view.ParticleSeams = Particles.Seams;
 		view.ParticlePool = Particles.Pool;
+		view.ParticleBlocks = Particles.BlockCount;
 
 		// **The frame's step and not the tick's**, because the device steps once
 		// per rendered frame - see `View::ParticleDelta`. Spawning is still on

@@ -292,6 +292,29 @@ namespace engine::effects {
 		// arithmetic rather than by observation.
 		float Idle = 0.0f;
 
+		// How many times the device-visible half of this block has changed.
+		//
+		// **Because a block record is three hundred and eighty-four bytes and a
+		// scene may have a hundred thousand of them.** Staging every block every
+		// frame is thirty-nine megabytes of writes into a mapped transfer buffer -
+		// more than the sixteen the whole particle pool used to cost, which would
+		// make the device-resident pool a loss at the scale it exists for.
+		//
+		// Almost none of it changes. The curves change when a script writes the
+		// emitter, the frame changes when the emitter moves, and everything else
+		// changes when the block is claimed. So the renderer keeps its own copy
+		// of the numbers it last uploaded, indexed by block, and re-sends one only
+		// when this disagrees - which for a static scene is never.
+		//
+		// **Two counters and not one**, because the two halves change on
+		// different occasions: a moving emitter rewrites its frame every tick and
+		// its curves never, and one counter would re-send the two hundred and
+		// fifty-six bytes of curves along with the forty-four bytes that moved.
+		//@{
+		uint32_t Revision = 1;
+		uint32_t CurveRevision = 1;
+		//@}
+
 		// The longest a particle of this emitter can live, in seconds. Read with
 		// `Idle` and set from `ParticleEmitter::Lifetime`.
 		float Longest = 0.0f;
@@ -422,6 +445,24 @@ namespace engine::effects {
 		uint32_t Rotation = 0;
 	};
 
+	// One particle that was born this tick, and the pool row it belongs in.
+	//
+	// **The unit that crosses to a device-resident pool.** The host decides every
+	// birth - where a particle starts reads the emitter's shape, its half-extent,
+	// its parent's motion and a draw seeded from the emitter's entity, none of
+	// which is going to the device - and this is what comes back: about seventeen
+	// hundred of these a tick in a scene of five thousand emitters, against the
+	// half million particles the device ages without being told anything.
+	//
+	// @since v0.17
+	struct ParticleBirth {
+		// Which slot of the pool this particle occupies.
+		uint32_t Row = 0;
+
+		// Its whole simulation half, as the host worked it out at spawn.
+		ParticleState State;
+	};
+
 	// What one step did, for the panel and for a test.
 	//
 	// @since v0.10
@@ -460,6 +501,12 @@ namespace engine::effects {
 	// @since v0.10
 	struct ParticleSystem {
 		// What a GPU reads. Indexed identically with `States`.
+		//
+		// **Empty when `DeviceStepped`**, along with `States`: the device owns the
+		// pool and nothing on this side ever reads a particle, so allocating
+		// either would be fifty-four megabytes at the default capacity that
+		// nothing ever looks at. `StepParticles` releases them on its first
+		// device-stepped tick.
 		std::vector<ParticleInstance> Instances;
 
 		// What the step reads and writes.
@@ -505,16 +552,19 @@ namespace engine::effects {
 		// both; `particle-step.comp` says so at each point where it matters.
 		bool DeviceStepped = false;
 
-		// Which pool rows were spawned into this tick.
+		// What was spawned this tick, and which pool row each one belongs in.
 		//
-		// **Rows and not states**, because the state is already in `States` and
-		// the renderer is going to read it there. A birth is four bytes here and
-		// fifty-six in the array it points at, and the array is written by the
-		// same worker that decides the birth - so nothing is copied twice.
+		// **The whole state and not a row into `States`, which is what lets both
+		// host arrays go.** When the device owns the pool nothing on this side
+		// ever reads a particle again: `Instances` is written by the step, and
+		// `States` is read and written by it. Carrying the newborn state here
+		// rather than pointing at an array is the difference between allocating
+		// fifty-four megabytes the host never looks at and allocating none - at
+		// the pool's default capacity, on every client.
 		//
-		// Empty unless `DeviceStepped`. The host-side pass has no need of it:
-		// it spawns into the array it also ages.
-		std::vector<uint32_t> Births;
+		// Empty unless `DeviceStepped`. The host-side pass has no need of it: it
+		// spawns into the arrays it also ages.
+		std::vector<ParticleBirth> Births;
 
 		// How many slots the pool holds in total.
 		//

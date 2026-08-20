@@ -336,16 +336,47 @@ namespace engine::effects {
 		// the block being reused and the block being created - and a field added
 		// to one and not the other is a difference that only shows on the frame
 		// an emitter is first enabled.
-		void ApplyPlayback(const ecs::Store &store, const ParticleEmitter &emitter, EmitterBlock &block) {
+		// **Compared before it is written, and the comparison is the point.**
+		// Every one of these seven is a word the device reads, and this runs for
+		// every emitter every tick - so writing them unconditionally would make
+		// `EmitterBlock::Revision` advance every frame and the renderer re-upload
+		// a hundred thousand records that had not moved. Seven compares against
+		// ninety-six bytes staged is not a close call.
+		//
+		// @return Whether anything the device reads actually changed.
+		bool ApplyPlayback(const ecs::Store &store, const ParticleEmitter &emitter, EmitterBlock &block) {
 			const scene::FlipbookFacts facts = scene::FlipbookOf(store, emitter.Texture);
+			const float rate = ResolvedRate(emitter, facts);
+			const uint8_t frames = ResolvedFrames(emitter, facts);
+
+			if (block.Acceleration == emitter.Acceleration && block.Drag == emitter.Drag &&
+				block.Locked == emitter.LockedToPart && block.Flipbook == emitter.Flipbook &&
+				block.FlipbookPlayback == emitter.FlipbookPlayback && block.FlipbookRate == rate &&
+				block.Frames == frames) {
+				return false;
+			}
 
 			block.Acceleration = emitter.Acceleration;
 			block.Drag = emitter.Drag;
 			block.Locked = emitter.LockedToPart;
 			block.Flipbook = emitter.Flipbook;
 			block.FlipbookPlayback = emitter.FlipbookPlayback;
-			block.FlipbookRate = ResolvedRate(emitter, facts);
-			block.Frames = ResolvedFrames(emitter, facts);
+			block.FlipbookRate = rate;
+			block.Frames = frames;
+			return true;
+		}
+
+		// Whether two frames are the same to the bit.
+		//
+		// **Bitwise and not approximate**, because the question is "does the
+		// device already have this", not "is this close enough to draw". An
+		// emitter that has not moved writes the same seven floats it wrote last
+		// tick, and one that has moved by a millionth of a stud is worth the
+		// ninety-six bytes.
+		bool SameFrame(const core::CFrame &left, const core::CFrame &right) {
+			return left.Position == right.Position && left.QuaternionX == right.QuaternionX &&
+				   left.QuaternionY == right.QuaternionY && left.QuaternionZ == right.QuaternionZ &&
+				   left.QuaternionW == right.QuaternionW;
 		}
 
 		uint32_t FlipbookCell(const EmitterBlock &block, float age, float lifetime, uint32_t seed) {
@@ -663,14 +694,21 @@ namespace engine::effects {
 						if (store.Changed<ParticleEmitter>(entity)) {
 							SampleCurves(emitter, block.Curves);
 							block.Longest = std::max(emitter.Lifetime.Maximum, 0.0f);
+							block.CurveRevision++;
 						}
-						ApplyPlayback(store, emitter, block);
+						if (ApplyPlayback(store, emitter, block)) {
+							block.Revision++;
+						}
 
 						// Where the emitter is now. An emitter on an `Attachment`
 						// takes the attachment's resolved world frame; one on a part
 						// takes the part's. Neither is a walk - both are one column
 						// read on the parent, and `ResolveAttachments` has already run.
-						block.Frame = EmitterFrame(store, entity);
+						const core::CFrame frame = EmitterFrame(store, entity);
+						if (!SameFrame(frame, block.Frame)) {
+							block.Frame = frame;
+							block.Revision++;
+						}
 						return;
 					}
 
@@ -724,7 +762,15 @@ namespace engine::effects {
 					if (recycling) {
 						const uint32_t reused = system->FreeSlots.back();
 						system->FreeSlots.pop_back();
-						block.Generation = system->Blocks[reused].Generation + 1;
+						const EmitterBlock &previous = system->Blocks[reused];
+						block.Generation = previous.Generation + 1;
+
+						// Carried over for `Generation`'s reason and one more: the
+						// renderer's copy of what it uploaded is indexed by block,
+						// so a recycled row that started its count again would
+						// agree with a record describing the emitter that has gone.
+						block.Revision = previous.Revision + 1;
+						block.CurveRevision = previous.CurveRevision + 1;
 						slot.Index = static_cast<uint16_t>(reused);
 						system->Blocks[reused] = block;
 					} else {
@@ -813,6 +859,18 @@ namespace engine::effects {
 		auto *system = store.ResourceMutable<ParticleSystem>();
 		if (system == nullptr) {
 			return {};
+		}
+
+		// **Released on the first device-stepped tick.** The device owns the pool
+		// and neither array is read on this side again: at the client's default
+		// capacity they are fifty-four megabytes nothing ever looks at. Freed
+		// here rather than never allocated because `InstallParticles` runs before
+		// whoever has a renderer says so - see `ParticleSystem::DeviceStepped`.
+		if (system->DeviceStepped && !system->States.empty()) {
+			system->Instances.clear();
+			system->Instances.shrink_to_fit();
+			system->States.clear();
+			system->States.shrink_to_fit();
 		}
 
 		ParticleInstance *const instances = system->Instances.data();
@@ -1123,7 +1181,7 @@ namespace engine::effects {
 			// The same reasoning as `planned`: resolved on the thread that owns
 			// them, not named from inside a worker.
 			const bool ring = system->DeviceStepped;
-			uint32_t *const births = system->Births.empty() ? nullptr : system->Births.data();
+			ParticleBirth *const births = system->Births.empty() ? nullptr : system->Births.data();
 
 			parallel::Jobs::For(
 				plans.size(),
@@ -1172,9 +1230,14 @@ namespace engine::effects {
 
 							const uint32_t row = ring ? block.First + block.Spawned % block.Capacity
 													  : block.First + block.Live;
-							if (births != nullptr) {
-								births[plan.BirthAt + spawn] = row;
-							}
+
+							// **Written into whichever of the two the pool lives
+							// in.** The host-side pass ages an array, so a birth
+							// goes straight into it; the device's pass owns the
+							// pool and there is no array on this side at all, so
+							// the birth is the record that crosses.
+							ParticleState born;
+							ParticleState &state = ring ? born : states[row];
 
 							// **A per-particle index that keeps advancing rather
 							// than the slot number**, because the slot is reused
@@ -1189,7 +1252,6 @@ namespace engine::effects {
 							const Vector3 direction = SpawnDirection(plan, local, id, index);
 							const float speed = Between(SeedOf(id, index, 10), plan.Speed);
 
-							ParticleState &state = states[row];
 							state.Age = 0.0f;
 							state.Lifetime = std::max(Between(SeedOf(id, index, 11), plan.Lifetime), 1e-4f);
 							state.LocalOffset = local;
@@ -1213,13 +1275,20 @@ namespace engine::effects {
 							);
 							state.Rotation = turns & 0xFFFFu;
 
-							ParticleInstance &instance = instances[row];
-							instance.Position = state.Position;
-							instance.Slot = bornSlot;
-							instance.RotationAndCell = state.Rotation;
-
-							instance.Size = bornSize;
-							instance.Colour = bornColour;
+							if (ring) {
+								births[plan.BirthAt + spawn] = ParticleBirth{row, state};
+							} else {
+								// The instance is the step's output everywhere
+								// else; on this path the ageing pass has not seen
+								// this particle yet, so its first frame has to be
+								// written here or the slot draws whatever it held.
+								ParticleInstance &instance = instances[row];
+								instance.Position = state.Position;
+								instance.Slot = bornSlot;
+								instance.RotationAndCell = state.Rotation;
+								instance.Size = bornSize;
+								instance.Colour = bornColour;
+							}
 
 							// A statistic either way, but in the ring it is only
 							// a count of what has ever been born: the device

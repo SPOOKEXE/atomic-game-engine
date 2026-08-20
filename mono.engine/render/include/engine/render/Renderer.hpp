@@ -430,21 +430,6 @@ namespace engine::render {
 		float ConeCosine = -1.0f;
 	};
 
-	// One particle that was born this tick, and the pool row it belongs in.
-	//
-	// **Gathered by the caller rather than pointed at**, so the studio - which
-	// renders outside the tick that spawned - can copy a few thousand of these
-	// instead of the whole state pool.
-	//
-	// @since v0.17
-	struct ParticleBirth {
-		// Which slot of the device pool this particle occupies.
-		uint32_t Row = 0;
-
-		// Its whole simulation half, as the host worked it out at spawn.
-		effects::ParticleState State;
-	};
-
 	// One portal pane a particle can be drawn through.
 	//
 	// **Flattened out of `scene::PortalSeam` and `scene::SeamTransform` rather
@@ -507,6 +492,15 @@ namespace engine::render {
 		// `Acceleration`, `Drag`, `Locked`, the flipbook fields and all four
 		// curves out of it, and reads nothing else.
 		const effects::EmitterBlock *Block = nullptr;
+
+		// Which block this is, from `effects::EmitterSlot::Index`.
+		//
+		// **The index and not only the pointer**, because the renderer keeps two
+		// device tables indexed by block and a note of what it last told each
+		// row - see `PARTICLE_DRAW_WORDS` in `Renderer.cpp`. A pointer says where
+		// the block is in this frame's list; the index says which block it *is*,
+		// which is what survives a frame.
+		uint32_t Index = 0;
 
 		// Which texture, by name. Invalid draws an untextured quad, which is a
 		// visible flat square rather than nothing.
@@ -627,7 +621,7 @@ namespace engine::render {
 		// device. So the one thing that crosses per frame besides the blocks is
 		// this: a few thousand rows of sixty bytes, scattered into the device's
 		// state pool by a compute pass before the step runs.
-		std::span<const ParticleBirth> ParticleBirths;
+		std::span<const effects::ParticleBirth> ParticleBirths;
 
 		// The panes a particle can be drawn through, already flattened.
 		//
@@ -649,6 +643,15 @@ namespace engine::render {
 		// which for a repeat view is exactly right, and it is also what a paused
 		// view wants.
 		float ParticleDelta = 0.0f;
+
+		// How many blocks the world's pool has ever handed out, from
+		// `effects::ParticleSystem::Blocks`.
+		//
+		// **The whole list and not this frame's batches**, because the tables the
+		// renderer keeps are indexed by block: sizing them to the highest block
+		// drawn would re-create them - and lose what every other row held - the
+		// first time a further emitter claimed a later one.
+		uint32_t ParticleBlocks = 0;
 
 		// How many slots the device pool must hold, from
 		// `effects::ParticleSystem::Capacity`.

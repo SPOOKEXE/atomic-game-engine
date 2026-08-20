@@ -690,14 +690,20 @@ TEST_CASE("a device-stepped pool reports every birth and the row it went to", "[
 	REQUIRE(stats.Emitted > 0);
 	REQUIRE(system->Births.size() == stats.Emitted);
 
+	// **And the host pool is gone.** Neither array is read on this side once the
+	// device owns it, so `StepParticles` releases both - fifty-four megabytes at
+	// the client's default capacity that nothing would ever look at.
+	CHECK(system->States.empty());
+	CHECK(system->Instances.empty());
+
 	const engine::effects::EmitterBlock &block = system->Blocks[0];
-	for (const uint32_t row : system->Births) {
-		// In the block, and holding the particle the host just wrote - which is
-		// what the renderer uploads from.
-		CHECK(row >= block.First);
-		CHECK(row < block.First + block.Capacity);
-		CHECK(system->States[row].Lifetime > 0.0f);
-		CHECK(system->States[row].Generation == block.Generation);
+	for (const engine::effects::ParticleBirth &birth : system->Births) {
+		// In the block, and carrying the particle the host just worked out -
+		// which is the whole of what the renderer scatters into the device pool.
+		CHECK(birth.Row >= block.First);
+		CHECK(birth.Row < block.First + block.Capacity);
+		CHECK(birth.State.Lifetime > 0.0f);
+		CHECK(birth.State.Generation == block.Generation);
 	}
 }
 
@@ -748,8 +754,12 @@ TEST_CASE("a recycled device block disagrees with what it inherited", "[effects]
 	auto *system = store.ResourceMutable<engine::effects::ParticleSystem>();
 	const uint32_t generation = system->Blocks[0].Generation;
 	const uint32_t row = system->Blocks[0].First;
-	REQUIRE(system->States[row].Lifetime > 0.0f);
-	REQUIRE(system->States[row].Generation == generation);
+	REQUIRE(!system->Births.empty());
+	const engine::effects::ParticleBirth born = system->Births[0];
+	REQUIRE(born.Row >= row);
+	REQUIRE(born.Row < row + system->Blocks[0].Capacity);
+	REQUIRE(born.State.Lifetime > 0.0f);
+	REQUIRE(born.State.Generation == generation);
 
 	// The emitter goes and another takes its rows. Nothing clears them: the
 	// particle written above is still in the array with four seconds left.
@@ -771,7 +781,8 @@ TEST_CASE("a recycled device block disagrees with what it inherited", "[effects]
 
 	// **The same rows and a different number**, which is what the step compares.
 	// Without this the new emitter would draw the old one's particles, with its
-	// own curves, for the four seconds they had left.
+	// own curves, for the four seconds they had left - the device still holds
+	// them, because nothing was cleared.
 	CHECK(system->Blocks[slot].First == row);
 	CHECK(system->Blocks[slot].Generation != generation);
 }

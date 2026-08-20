@@ -208,10 +208,10 @@ namespace studio {
 			 "Particles",
 			 "Particles.luau",
 			 "",
-			 "One bay per emitter shape, orientation and flipbook mode, which is where an "
-			 "effect is authored and therefore where a particle change has to be looked at. "
-			 "Cheap: a few dozen emitters against the stress scene's five thousand.",
-			 true},
+			 "One bay per emitter shape, orientation and flipbook mode, behind a grid of "
+			 "102,400 emitters - the roadmap's particle target, on screen rather than in a "
+			 "benchmark. Off by default: the grid is the point and it is not cheap.",
+			 false},
 			{"magic",
 			 "Magic",
 			 "Magic.luau",
@@ -2112,6 +2112,7 @@ namespace studio {
 		view.ParticleBirths = Particles.Births;
 		view.ParticleSeams = Particles.Seams;
 		view.ParticlePool = Particles.Pool;
+		view.ParticleBlocks = Particles.BlockCount;
 		// **Once a frame and not once a viewport.** The editor draws each open
 		// viewport with its own `Render`, and the pool is the world's rather than
 		// a camera's - passing the step to each would age every particle as many

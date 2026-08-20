@@ -1120,6 +1120,7 @@ namespace client {
 			return 0;
 		}
 		frame.Pool = system->Capacity;
+		frame.BlockCount = static_cast<uint32_t>(system->Blocks.size());
 
 		// **The holes, so a spark that has gone through one is drawn in the room
 		// it went into.** A particle is a point rather than a body: it is on one
@@ -1154,14 +1155,11 @@ namespace client {
 			}
 		}
 
-		// This tick's births, gathered rather than pointed at, so a caller that
-		// renders outside the tick has something that outlives it.
-		frame.Births.reserve(system->Births.size());
-		for (const uint32_t row : system->Births) {
-			if (row < system->States.size()) {
-				frame.Births.push_back(engine::render::ParticleBirth{row, system->States[row]});
-			}
-		}
+		// This tick's births, copied so a caller that renders outside the tick has
+		// something that outlives it. Already exactly what the renderer wants -
+		// the device-stepped spawn writes the whole state into the record rather
+		// than into an array, which is what lets the host arrays go entirely.
+		frame.Births.assign(system->Births.begin(), system->Births.end());
 
 		// **Walked from the emitter column rather than from the block list**, and
 		// the direction matters: a block knows how many particles it has and
@@ -1198,6 +1196,7 @@ namespace client {
 
 				engine::render::ParticleBatch batch;
 				batch.Block = &block;
+				batch.Index = slot.Index;
 				batch.Texture = emitter.Texture;
 				batch.FlipbookSide = static_cast<float>(engine::effects::FlipbookSide(emitter.Flipbook));
 				batch.ZOffset = emitter.ZOffset;

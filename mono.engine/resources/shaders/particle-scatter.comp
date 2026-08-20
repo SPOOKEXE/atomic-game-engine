@@ -1,0 +1,78 @@
+#version 450
+
+// Writes a scattered set of fixed-width records into one of the particle
+// system's device-resident tables.
+//
+// **Three callers, one shader, because they are the same problem.** Every frame
+// the host has a handful of rows to place in a table it does not otherwise
+// touch: the tick's newborn particles into the state pool, and - only when a
+// script or a moving emitter changed something - a block's parameters or its
+// curves into the tables the step reads. All three are "here is an index and
+// here are N words", so all three are this, with the width in a uniform and the
+// destination decided by what is bound.
+//
+// ## Why the block tables are scattered rather than restaged
+//
+// A block record is three hundred and eighty-four bytes and the roadmap's scene
+// has a hundred thousand emitters. Staging all of them every frame is thirty-
+// nine megabytes of writes into a mapped transfer buffer - *more* than the
+// sixteen the whole particle pool cost before it moved to the device, which
+// would make the move a loss at exactly the scale it exists for.
+//
+// Almost none of it changes from frame to frame. `EmitterBlock::Revision` says
+// when it has, the renderer keeps its own copy of what it last sent, and what
+// crosses is the difference: nothing at all for a static scene, and one record
+// per emitter that a script wrote or that moved. What is left per frame is the
+// two words a draw needs - which block and where its run lands - and those do
+// have to be sent every frame, because the sort that decides them is per frame.
+//
+// ## Why the spawn is here too
+//
+// A birth goes to whichever slot its block's ring is pointing at, and those are
+// as scattered as the emitters are. It was this shader before the block tables
+// existed and the generalisation cost it a uniform.
+//
+// **The host still decides every birth**, and that is not laziness: working out
+// where a particle starts reads the emitter's shape, its half-extent, its
+// parent's motion and a draw seeded from the emitter's entity. None of that is
+// going to the device, and none of it needs to - a steady scene of five thousand
+// emitters births about seventeen hundred particles a tick against the half
+// million it *ages*.
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+// Each record is its destination index and then `Words` payload words.
+layout(set = 0, binding = 0) readonly buffer Records { uint words[]; } records;
+
+layout(set = 1, binding = 0) buffer Table { uint words[]; } table;
+
+layout(set = 2, binding = 0) uniform Scatter {
+	// x: how many records there are. y: how many words each one carries.
+	// z: how many rows the destination table holds. w: which record the run
+	// starts at, because the parameter and curve updates share one buffer from
+	// its two ends.
+	uvec4 Count;
+} scatter_;
+
+void main() {
+	uint at = gl_GlobalInvocationID.x;
+	if (at >= scatter_.Count.x) {
+		return;
+	}
+
+	uint words = scatter_.Count.y;
+	uint base = (at + scatter_.Count.w) * (words + 1u);
+	uint row = records.words[base];
+	if (row >= scatter_.Count.z) {
+		// The host sized the table and the host chose the row, so this cannot
+		// happen - but a compute shader that walks off a storage buffer corrupts
+		// whatever is next in memory rather than faulting, and the guard is one
+		// compare against a value already in a register.
+		return;
+	}
+
+	uint destination = row * words;
+	for (uint word = 0u; word < words; word++) {
+		table.words[destination + word] = records.words[base + 1u + word];
+	}
+}
