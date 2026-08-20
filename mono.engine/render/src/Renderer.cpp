@@ -1219,6 +1219,16 @@ namespace engine::render {
 		// author who has typed a number is not asking for a negotiation.
 		uint32_t SurfaceBounces = 0;
 
+		// How many surface panes a viewport may draw in one frame.
+		//
+		// **Held rather than taken per frame, for `SurfaceBounces`' reason**: it
+		// is a property of the world being drawn rather than of this frame, and
+		// a host writes it from `scene::SurfaceLimitOf` before each world's
+		// render. See `Renderer::SetSurfaceLimit` for why the budget is spent on
+		// the panes covering the most screen rather than on the first ones in
+		// the list.
+		uint32_t SurfaceLimit = static_cast<uint32_t>(scene::DEFAULT_SURFACE_LIMIT);
+
 		// How many levels the recursive portal pass goes to.
 		//
 		// **One, and it is a backend limit rather than a taste.** Two is what the
@@ -2271,7 +2281,7 @@ namespace engine::render {
 		// of a pane wrapping to the far side of the picture.
 		bool EnsureSurfaceSampler();
 
-		bool EnsureSurface(size_t viewport, uint8_t index, uint32_t width, uint32_t height);
+		bool EnsureSurface(size_t viewport, size_t index, uint32_t width, uint32_t height);
 
 		// One portal level's colour and depth, at the size of the attachment the
 		// level above draws into.
@@ -2286,7 +2296,7 @@ namespace engine::render {
 		// @return `false` when either texture could not be made, which drops that
 		//         hole to a flat pane for the frame rather than the frame.
 		PortalTarget *
-		EnsurePortal(size_t viewport, uint32_t level, uint8_t index, uint32_t width, uint32_t height);
+		EnsurePortal(size_t viewport, uint32_t level, size_t index, uint32_t width, uint32_t height);
 
 		// One mirror level's colour and depth, at the pane's own size.
 		//
@@ -2300,13 +2310,13 @@ namespace engine::render {
 		// @return `null` when either texture could not be made, which drops that
 		//         level to a flat pane for the frame rather than the frame.
 		MirrorTarget *
-		EnsureMirror(size_t viewport, uint32_t level, uint8_t index, uint32_t width, uint32_t height);
+		EnsureMirror(size_t viewport, uint32_t level, size_t index, uint32_t width, uint32_t height);
 
 		// One mouth's light-field capture pair, at `SEAM_LIGHT_RESOLUTION`.
 		//
 		// @return `null` when either texture could not be made, which loses the
 		//         mouth's spill for the frame rather than the frame.
-		SeamLightTarget *EnsureSeamLight(size_t viewport, uint8_t index);
+		SeamLightTarget *EnsureSeamLight(size_t viewport, size_t index);
 
 		// One opaque white texel, bound wherever a real texture is missing.
 		//
@@ -5956,7 +5966,7 @@ namespace engine::render {
 		return true;
 	}
 
-	bool Renderer::Impl::EnsureSurface(size_t viewport, uint8_t index, uint32_t width, uint32_t height) {
+	bool Renderer::Impl::EnsureSurface(size_t viewport, size_t index, uint32_t width, uint32_t height) {
 		if (index >= scene::MAX_SURFACES) {
 			return false;
 		}
@@ -6063,7 +6073,7 @@ namespace engine::render {
 	}
 
 	Renderer::Impl::PortalTarget *Renderer::Impl::EnsurePortal(
-		size_t viewport, uint32_t level, uint8_t index, uint32_t width, uint32_t height
+		size_t viewport, uint32_t level, size_t index, uint32_t width, uint32_t height
 	) {
 		if (index >= scene::MAX_SURFACES || level >= MAX_PORTAL_DEPTH || width == 0 || height == 0) {
 			return nullptr;
@@ -6181,7 +6191,7 @@ namespace engine::render {
 	}
 
 	Renderer::Impl::MirrorTarget *Renderer::Impl::EnsureMirror(
-		size_t viewport, uint32_t level, uint8_t index, uint32_t width, uint32_t height
+		size_t viewport, uint32_t level, size_t index, uint32_t width, uint32_t height
 	) {
 		if (index >= scene::MAX_SURFACES || level >= MAX_SURFACE_DEPTH || width == 0 || height == 0) {
 			return nullptr;
@@ -6270,7 +6280,7 @@ namespace engine::render {
 		return &target;
 	}
 
-	Renderer::Impl::SeamLightTarget *Renderer::Impl::EnsureSeamLight(size_t viewport, uint8_t index) {
+	Renderer::Impl::SeamLightTarget *Renderer::Impl::EnsureSeamLight(size_t viewport, size_t index) {
 		if (index >= scene::MAX_SURFACES) {
 			return nullptr;
 		}
@@ -7156,6 +7166,21 @@ namespace engine::render {
 
 	uint32_t Renderer::SurfaceBounces() const {
 		return State == nullptr ? 0u : State->SurfaceBounces;
+	}
+
+	void Renderer::SetSurfaceLimit(uint32_t panes) {
+		if (State != nullptr) {
+			// **Clamped here rather than at every use.** `scene::MAX_SURFACES`
+			// is how far the per-viewport slot arrays reach, and a world may
+			// state a larger number - `scene::SurfaceLimit` says in as many
+			// words that the ceiling belongs to whoever draws. Zero is kept: a
+			// world that wants its mirrors off has to be able to say so.
+			State->SurfaceLimit = std::min<uint32_t>(panes, scene::MAX_SURFACES);
+		}
+	}
+
+	uint32_t Renderer::SurfaceLimit() const {
+		return State == nullptr ? static_cast<uint32_t>(scene::DEFAULT_SURFACE_LIMIT) : State->SurfaceLimit;
 	}
 
 	void Renderer::SetWireframe(bool enabled) {
@@ -8271,7 +8296,7 @@ namespace engine::render {
 		// case worth refusing outright: two views writing one texture would race
 		// for the pair and neither would be the frame the screen then samples.
 		struct AcceptedView {
-			uint8_t Index = 0;
+			size_t Index = 0;
 			const SurfaceView *View = nullptr;
 
 			// **Held here rather than written straight to the slot**, because
@@ -8317,7 +8342,7 @@ namespace engine::render {
 		const PortalView *portalOf[scene::MAX_SURFACES] = {};
 		bool havePortals = false;
 		for (const PortalView &portal : portals) {
-			if (portal.Index < 0 || static_cast<uint8_t>(portal.Index) >= scene::MAX_SURFACES) {
+			if (portal.Index < 0 || static_cast<size_t>(portal.Index) >= scene::MAX_SURFACES) {
 				ENGINE_WARN(
 					"portal index {} is outside 0..{}, so it draws flat",
 					portal.Index,
@@ -8326,7 +8351,7 @@ namespace engine::render {
 				continue;
 			}
 
-			const auto index = static_cast<uint8_t>(portal.Index);
+			const auto index = static_cast<size_t>(portal.Index);
 			if (portalOf[index] != nullptr) {
 				ENGINE_WARN("two portals claim index {}; the second is ignored", portal.Index);
 				continue;
@@ -8344,7 +8369,7 @@ namespace engine::render {
 		const uint32_t portalLevels = std::min(State->PortalDepth, MAX_PORTAL_DEPTH);
 
 		for (const SurfaceView &view : surfaces) {
-			if (view.Index < 0 || static_cast<uint8_t>(view.Index) >= scene::MAX_SURFACES) {
+			if (view.Index < 0 || static_cast<size_t>(view.Index) >= scene::MAX_SURFACES) {
 				ENGINE_WARN(
 					"surface camera index {} is outside 0..{}, so it renders nothing",
 					view.Index,
@@ -8353,7 +8378,7 @@ namespace engine::render {
 				continue;
 			}
 
-			const auto index = static_cast<uint8_t>(view.Index);
+			const auto index = static_cast<size_t>(view.Index);
 			if (portalOf[index] != nullptr) {
 				ENGINE_WARN(
 					"surface camera {} names a slot a portal already draws; the recursive pass keeps it",
@@ -8651,7 +8676,7 @@ namespace engine::render {
 			graph::SurfaceEye eyes[scene::MAX_SURFACES];
 			for (size_t index = 0; index < acceptedCount; index++) {
 				eyes[index].ViewProjection = accepted[index].ViewProjection;
-				eyes[index].Index = static_cast<int8_t>(accepted[index].Index);
+				eyes[index].Index = static_cast<int16_t>(accepted[index].Index);
 			}
 
 			// **In `graph` rather than here, and that is the seam rather than
@@ -8681,6 +8706,59 @@ namespace engine::render {
 				std::span<float>(surfaceCoverage, scene::MAX_SURFACES),
 				cullRounds
 			);
+		}
+
+		// **The world's pane budget, spent on the panes covering the most
+		// screen.** A pane is a whole render of the world into a texture, so the
+		// count is what a hall of mirrors costs after the depth - see
+		// `Renderer::SetSurfaceLimit`, and `scene::SurfaceLimit` for why the
+		// number belongs to the world rather than to the session.
+		//
+		// **Ranked and then compacted *in place*, so the survivors keep their
+		// original order.** Sorting `accepted` outright would be simpler and
+		// would also move whichever view lands at slot zero, which is the one
+		// the blended tail is sorted for a few lines below - so a mirror
+		// becoming slightly more visible would silently re-sort every
+		// transparent thing in the frame.
+		//
+		// **A view that loses its budget is not cleared.** It keeps whatever
+		// texture it last drew, exactly as one skipped for its refresh rate
+		// does, so a mirror the player has turned away from goes stale rather
+		// than blank - which is the failure nobody notices, and the point of
+		// ranking by coverage in the first place.
+		if (acceptedCount > State->SurfaceLimit) {
+			size_t ranked[scene::MAX_SURFACES];
+			for (size_t index = 0; index < acceptedCount; index++) {
+				ranked[index] = index;
+			}
+
+			// Largest coverage first, and the slot number breaks a tie - so two
+			// panes a frustum measured identically are dropped in a stated
+			// order rather than in whichever order the sort happened to leave
+			// them, which is what would make a frame differ from itself.
+			std::stable_sort(
+				ranked, ranked + acceptedCount, [&accepted, &surfaceCoverage](size_t left, size_t right) {
+					const float first = surfaceCoverage[accepted[left].Index];
+					const float second = surfaceCoverage[accepted[right].Index];
+					if (first != second) {
+						return first > second;
+					}
+					return accepted[left].Index < accepted[right].Index;
+				}
+			);
+
+			bool afford[scene::MAX_SURFACES] = {};
+			for (size_t rank = 0; rank < State->SurfaceLimit; rank++) {
+				afford[ranked[rank]] = true;
+			}
+
+			size_t kept = 0;
+			for (size_t index = 0; index < acceptedCount; index++) {
+				if (afford[index]) {
+					accepted[kept++] = accepted[index];
+				}
+			}
+			acceptedCount = kept;
 		}
 
 		size_t liveCount = 0;
@@ -9679,7 +9757,7 @@ namespace engine::render {
 				Beam ordered[scene::MAX_SURFACES];
 				size_t candidates = 0;
 
-				for (uint8_t slot = 0; slot < scene::MAX_SURFACES; slot++) {
+				for (size_t slot = 0; slot < scene::MAX_SURFACES; slot++) {
 					const PortalView *const portal = portalOf[slot];
 					if (portal == nullptr || portal->Partner < 0) {
 						continue;
@@ -10107,7 +10185,7 @@ namespace engine::render {
 		// Up to sixteen frustum tests and a reflection, once per pane at the
 		// bottom level only, beside a scene render each.
 		const auto wouldDescend = [&](const glm::mat4 &from, const core::CFrame &frame, int8_t skip) {
-			for (uint8_t slot = 0; slot < scene::MAX_SURFACES; slot++) {
+			for (size_t slot = 0; slot < scene::MAX_SURFACES; slot++) {
 				if (!havePanes[slot] || static_cast<int8_t>(slot) == skip) {
 					continue;
 				}
@@ -10141,7 +10219,7 @@ namespace engine::render {
 		std::function<void(const glm::mat4 &, const core::CFrame &, uint32_t, int8_t)> fillMirror;
 
 		fillMirror = [&](const glm::mat4 &from, const core::CFrame &frame, uint32_t level, int8_t skip) {
-			for (uint8_t slot = 0; slot < scene::MAX_SURFACES; slot++) {
+			for (size_t slot = 0; slot < scene::MAX_SURFACES; slot++) {
 				if (!havePanes[slot] || static_cast<int8_t>(slot) == skip) {
 					continue;
 				}
@@ -10238,7 +10316,7 @@ namespace engine::render {
 				// bounce of a pane somebody has faded is not a trade this makes.
 				const ShadowBinding shadow = shadowBinding();
 
-				for (uint8_t seen = 0; seen < scene::MAX_SURFACES; seen++) {
+				for (size_t seen = 0; seen < scene::MAX_SURFACES; seen++) {
 					if (seen == slot) {
 						continue;
 					}
@@ -10444,7 +10522,7 @@ namespace engine::render {
 							continue;
 						}
 
-						const uint8_t self = accepted[index].Index;
+						const size_t self = accepted[index].Index;
 
 						// **Taken here rather than at each draw**, because `drawMirrors`
 						// below shadows `index` with its own loop over surfaces - so
@@ -10607,7 +10685,7 @@ namespace engine::render {
 						// reflection of a reflection is a better answer than a blank
 						// one.
 						const auto drawMirrors = [&](bool blended) {
-							for (uint8_t index = 0; index < scene::MAX_SURFACES; index++) {
+							for (size_t index = 0; index < scene::MAX_SURFACES; index++) {
 								if (index == self) {
 									continue;
 								}
@@ -10941,7 +11019,7 @@ namespace engine::render {
 								const core::CFrame &fromFrame,
 								uint32_t level,
 								int8_t skip) {
-					for (uint8_t slot = 0; slot < scene::MAX_SURFACES; slot++) {
+					for (size_t slot = 0; slot < scene::MAX_SURFACES; slot++) {
 						if (portalOf[slot] == nullptr) {
 							continue;
 						}
@@ -11017,7 +11095,7 @@ namespace engine::render {
 						// The holes this level can see, put back one at a time. Their
 						// targets are `level - 1`, filled by the call above and still
 						// untouched - which is why the pool is per level per slot.
-						for (uint8_t seenSlot = 0; seenSlot < scene::MAX_SURFACES; seenSlot++) {
+						for (size_t seenSlot = 0; seenSlot < scene::MAX_SURFACES; seenSlot++) {
 							if (portalOf[seenSlot] == nullptr ||
 								portalOf[seenSlot]->Index == portal.Partner) {
 								continue;
@@ -11143,7 +11221,7 @@ namespace engine::render {
 				// the pane, so this does not test `VisiblePane` - a pair costs
 				// two 128x128 forward passes per frame while its mouths are
 				// enabled, and a disabled mouth never reaches this loop.
-				for (uint8_t slot = 0; slot < scene::MAX_SURFACES; slot++) {
+				for (size_t slot = 0; slot < scene::MAX_SURFACES; slot++) {
 					if (portalOf[slot] == nullptr) {
 						continue;
 					}
@@ -12233,7 +12311,7 @@ namespace engine::render {
 			}
 
 			Impl::PortalLevel &top = bank.Portals[portalLevels - 1];
-			for (uint8_t index = 0; index < scene::MAX_SURFACES; index++) {
+			for (size_t index = 0; index < scene::MAX_SURFACES; index++) {
 				Impl::PortalTarget &portal = top.Targets[index];
 				if (portalOf[index] == nullptr || portal.Colour == nullptr || portal.Display == nullptr) {
 					continue;
@@ -12350,7 +12428,7 @@ namespace engine::render {
 							pass, State->TransparentPipeline, Impl::PipelineFamily::Transparent
 						);
 					}
-					for (uint8_t index = 0; index < scene::MAX_SURFACES; index++) {
+					for (size_t index = 0; index < scene::MAX_SURFACES; index++) {
 						if (portalOf[index] == nullptr) {
 							continue;
 						}
@@ -12467,7 +12545,7 @@ namespace engine::render {
 				LightingUniforms mirroredUniforms{};
 
 				const auto drawMirrors = [&](bool blended) {
-					for (uint8_t index = 0; index < scene::MAX_SURFACES; index++) {
+					for (size_t index = 0; index < scene::MAX_SURFACES; index++) {
 						if (portalOf[index] != nullptr) {
 							continue;
 						}

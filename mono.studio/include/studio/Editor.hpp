@@ -4132,6 +4132,26 @@ namespace studio {
 		//         would otherwise pick is swallowed.
 		bool DrawGizmo(size_t viewport, const PanelProjection &panel);
 
+		// Outlines what every nearby part actually collides as.
+		//
+		// **The one thing a collider has that nothing else on screen shows.** A
+		// part is drawn at its `scene::Bounds` and collides at its
+		// `scene::Collider`, and those are the same number for a `MakePart` box
+		// and nothing keeps them so. A mesh part whose hull was baked from the
+		// wrong model, a rock still wearing the crate collider it was copied
+		// from, a terrain tile whose triangles stop short of its edge - every
+		// one of those reads as "the physics is wrong" and every one is obvious
+		// in a second with an outline on it.
+		//
+		// A colour per face, stable across frames; see `ColliderView.cpp` for
+		// why that is what makes a hull legible and why the colour is a hash
+		// rather than a counter.
+		//
+		// @param viewport Which panel.
+		// @param panel    Its projection, already resolved.
+		// @since v0.17
+		void DrawColliderOutlines(size_t viewport, const PanelProjection &panel);
+
 		// Where the selection is, as a gizmo needs it.
 		//
 		// @param world  The scene.
@@ -4252,6 +4272,18 @@ namespace studio {
 		// grid is a black rectangle: no scale, no horizon, and no way to tell
 		// where the origin is or which way is up.
 		bool ShowGrid = true;
+
+		// Whether every nearby part's collider is outlined.
+		//
+		// **Off by default, which the grid is not**, and the difference is what
+		// each is for: the grid is how you tell where the origin is in an empty
+		// world, and this is how you answer a question about a scene that is
+		// already built. It draws a segment per collider face over everything in
+		// reach, so it is a thing to turn on while looking rather than a thing
+		// to leave on while building.
+		//
+		// @since v0.17
+		bool ShowColliders = false;
 
 		// Which viewport a panel index refers to, or null for the main one.
 		//

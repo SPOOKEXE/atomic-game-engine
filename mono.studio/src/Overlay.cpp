@@ -223,6 +223,13 @@ namespace studio {
 			// write placements, and two of them running against one selection
 			// is two answers to where it is.
 			DragOnSurface(index, panel);
+
+			// **After both, because it is the only one that draws nothing
+			// interactive.** The gizmo has to adjudicate the pending pick and
+			// the surface drag has to see the gizmo's answer; an outline reads
+			// the world and writes lines, so it goes last and cannot be in
+			// either one's way.
+			DrawColliderOutlines(index, panel);
 		}
 
 		if (PendingPick.Wanted) {

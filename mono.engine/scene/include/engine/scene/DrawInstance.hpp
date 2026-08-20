@@ -143,7 +143,14 @@ namespace engine::scene {
 		// exactly right for a flat pane and exactly wrong for anything curved.
 		// The narrowness is the design: a general reflection needs a cube map
 		// or a screen-space trace, and neither belongs in a pipeline this size.
-		int8_t Surface = -1;
+		//
+		// **Sixteen bits since v0.17, and it cost nothing.** It was `int8_t`,
+		// which put a hard ceiling of a hundred and twenty-seven mirrors in the
+		// smallest field in the engine - a design limit hiding in a type. The
+		// three bytes here were followed by one of padding before `SeamNormal`,
+		// so widening it fills the hole and `sizeof(DrawInstance)` is unchanged;
+		// the `static_assert` below is what keeps that true.
+		int16_t Surface = -1;
 
 		// Whether this instance is drawn into the shadow map.
 		//
@@ -476,22 +483,39 @@ namespace engine::scene {
 	// @return How many at the *back* of `order` show a surface.
 	size_t PartitionSurfaces(std::span<const DrawInstance> instances, std::span<uint32_t> order);
 
-	// How many surfaces may be live at once.
+	// How many surface slots anything here has storage for.
 	//
-	// **A cap rather than a growable set, because each index costs a texture
-	// pair on the device.** A surface is ping-ponged - written this frame,
-	// sampled next - so an index in use is two colour targets and a depth
-	// buffer, and at the wide targets a wall wants that is megabytes each. A
-	// scene may name any index it likes; one at or above this is dropped from
+	// **A bound on an allocation, not a statement about how many mirrors a world
+	// should have.** That second question is the world's, through
+	// `workspace.MaxSurfaces` and `scene::SurfaceLimitOf` - which defaults to
+	// fifty and is what an author actually turns. This number only says how far
+	// the arrays sized by it reach, and it exists for the reason
+	// `spatial::HashGrid::MAXIMUM_CELLS_PER_PROXY` does: a save file is hostile
+	// input, and a world asking for a million mirrors must reach a bound rather
+	// than an allocator.
+	//
+	// **It was sixteen until v0.17 and the reason it moved is that it was being
+	// read as the design.** Sixteen was chosen because a room has four walls;
+	// what it meant in practice was that a hall of mirrors stopped at sixteen
+	// however much memory the device had. The per-world limit is the knob now,
+	// and this is headroom above its default.
+	//
+	// **What raising it costs, so the next person does not have to find out.**
+	// Every index in use is two colour targets and a depth buffer, and the
+	// descriptors for them are member arrays on the renderer's per-viewport
+	// bank - about three hundred bytes a slot, which is why a hundred and
+	// twenty-eight is comfortable. Going much past that wants `Renderer.cpp`'s
+	// per-frame arrays off the stack first: the surface pass builds a handful of
+	// `scene::SurfacePane`-sized arrays this long as locals, and those are the
+	// things that would grow, not the textures - which are made on demand and
+	// only for the slots a frame actually uses.
+	//
+	// A scene may name any index it likes; one at or above this is dropped from
 	// the view list with a line in the log rather than silently rendering
 	// nothing, which is the failure that reads as a broken mirror.
 	//
-	// Sixteen because a room has four walls and a hall of them has more, and
-	// because the arrays this sizes are indexed by `int8_t` - the type
-	// `Visual::Surface` already is.
-	//
 	// @since v0.8
-	constexpr uint8_t MAX_SURFACES = 16;
+	constexpr uint16_t MAX_SURFACES = 128;
 
 	// Where one surface's instances sit in an ordered draw list.
 	//

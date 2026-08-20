@@ -437,7 +437,7 @@ TEST_CASE("mirrors are grouped by the surface they show", "[scene][drawinstance]
 		INFO("surface " << static_cast<int>(surface));
 
 		for (uint32_t step = 0; step < run.OpaqueCount; step++) {
-			CHECK(instances[order[run.OpaqueFirst + step]].Surface == static_cast<int8_t>(surface));
+			CHECK(instances[order[run.OpaqueFirst + step]].Surface == static_cast<int16_t>(surface));
 		}
 	}
 
@@ -490,7 +490,7 @@ TEST_CASE("shadow casters are partitioned inside each surface run", "[scene][dra
 // renderer's texture budget, not by what a script can express.
 TEST_CASE("a surface index past the cap is dropped", "[scene][drawinstance]") {
 	std::vector<DrawInstance> instances(2);
-	instances[0].Surface = static_cast<int8_t>(MAX_SURFACES);
+	instances[0].Surface = static_cast<int16_t>(MAX_SURFACES);
 	instances[1].Surface = 0;
 
 	std::vector<uint32_t> order;

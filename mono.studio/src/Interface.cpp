@@ -1182,6 +1182,11 @@ namespace studio {
 		// turn back on, which is the rule this menu exists for.
 		ImGui::MenuItem("Ground Grid", nullptr, &ShowGrid);
 
+		// **Beside the grid, because it is the same kind of thing**: furniture
+		// that says something about the world rather than part of it. Off by
+		// default - see `ShowColliders`.
+		ImGui::MenuItem("Collider Outlines", nullptr, &ShowColliders);
+
 		ImGui::Separator();
 
 		if (ImGui::MenuItem("Show Every Panel")) {

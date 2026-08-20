@@ -235,7 +235,7 @@ TEST_CASE("the mirrors scene builds what the render passes need", "[examples][sc
 		const Entity reflection = store.FindFirstChild(pane, "Reflection");
 		REQUIRE(reflection != engine::ecs::NULL_ENTITY);
 
-		const int8_t index = store.Get<SurfaceCamera>(reflection)->Surface;
+		const int16_t index = store.Get<SurfaceCamera>(reflection)->Surface;
 		REQUIRE(index >= 0);
 		REQUIRE(static_cast<size_t>(index) < engine::scene::MAX_SURFACES);
 
@@ -418,7 +418,7 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 		const Entity portal = portalOn(pane);
 
 		// A target each, as `MAX_SURFACES` allows sixteen of.
-		const int8_t index = store.Get<SurfaceCamera>(portal)->Surface;
+		const int16_t index = store.Get<SurfaceCamera>(portal)->Surface;
 		REQUIRE(index >= 0);
 		REQUIRE(static_cast<size_t>(index) < engine::scene::MAX_SURFACES);
 		CHECK(store.Get<Visual>(pane)->Surface == index);
@@ -1540,16 +1540,16 @@ TEST_CASE("the portal lighting scenes author lamps a seam can carry", "[examples
 TEST_CASE("the mirror ball mirrors every facet, faces them out and has no holes", "[examples][scene]") {
 	// **Two of these claims were false and both read as the mirrors being
 	// broken.** The scene authored sixteen cameras over eighty facets because
-	// sixteen is what `scene::MAX_SURFACES` can resolve - so five sixths of a
-	// *mirror ball* were not mirrors - and it cut each facet as a square 0.62 of
-	// an edge across, which is smaller than the triangle it sits on. A square
-	// cannot fill a triangle, so the tiles never met and the ball was a shell of
-	// loose plates with the dark core showing at every seam.
+	// sixteen is what `scene::MAX_SURFACES` used to compile in - so five sixths
+	// of a *mirror ball* were not mirrors - and it cut each facet as a square
+	// 0.62 of an edge across, which is smaller than the triangle it sits on. A
+	// square cannot fill a triangle, so the tiles never met and the ball was a
+	// shell of loose plates with the dark core showing at every seam.
 	//
-	// The ceiling is the engine's and stands. Asking is the scene's, and every
-	// facet asks now: what the refused cameras cost is the whole point of a
-	// stress scene, so a change that quietly caps them again is a regression
-	// rather than a saving.
+	// The budget is the world's since v0.17 and the scene states it. Asking is
+	// still the scene's, and every facet asks: what the panes over budget cost
+	// is the whole point of a stress scene, so a change that quietly caps the
+	// asking again is a regression rather than a saving.
 	const StagedAssets assets;
 
 	Store store("mirrorball");
@@ -1582,9 +1582,10 @@ TEST_CASE("the mirror ball mirrors every facet, faces them out and has no holes"
 	CHECK(facets == 320);
 
 	// **A camera on every one of them, which is what makes it a mirror ball.**
-	// `MAX_SURFACES` still resolves sixteen and the rest reach no screen; that
-	// cost is the finding this scene exists to produce, and capping the asking
-	// to hide it would be hiding the finding.
+	// The world draws `workspace.MaxSurfaces` of them - the ones covering the
+	// most screen - and the rest reach no screen at all; that cost is the finding
+	// this scene exists to produce, and capping the asking to hide it would be
+	// hiding the finding.
 	static thread_local std::vector<engine::scene::SurfacePane> panes;
 	REQUIRE(engine::scene::GatherSurfacePanes(store, panes) == facets);
 

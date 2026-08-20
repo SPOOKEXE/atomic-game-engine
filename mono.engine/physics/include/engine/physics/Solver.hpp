@@ -134,6 +134,126 @@ namespace engine::physics {
 	// short enough that a settled scene is quiet before anybody notices.
 	inline constexpr float SLEEP_SETTLE_SECONDS = 0.5f;
 
+	// The fewest contact rows a solve will cut into groups.
+	//
+	// **Below this the solve is one run in manifold order, which is what it was
+	// before v0.17 and is bit-for-bit the same answer.** Partitioning costs a
+	// pass over the bodies, a sort and a counting pass, and it buys nothing at
+	// all when there is one group to be had; a scene of a dozen crates is every
+	// scene in every suite in this module, and none of them should pay for a
+	// machine they cannot use.
+	//
+	// **It is a row count and not a worker count, and that is the load-bearing
+	// half.** Choosing the path from `Jobs::WorkerCount()` would make the
+	// trajectory of a scene a function of the machine it ran on: a recording
+	// taken with a pool and replayed without one would take the other path and
+	// diverge, and nothing would say so. A row count is a property of the scene,
+	// so the two runs agree.
+	//
+	// Two thousand is where `engine.physics.bench.solver` puts the crossover:
+	// the partition costs about as much as one sweep of the rows it partitions,
+	// and there are sixteen sweeps to win it back from.
+	//
+	// @since v0.17
+	inline constexpr size_t PARALLEL_SOLVE_ROWS = 2048;
+
+	// How many groups a partitioned solve aims to produce.
+	//
+	// **A constant rather than a multiple of the worker count**, for
+	// `PARALLEL_SOLVE_ROWS`' reason: the chunk size is derived from this, the
+	// groups are derived from the chunk size, and the row order is derived from
+	// the groups - so a number that moved with the machine would move the
+	// answer with it.
+	//
+	// Comfortably more than the widest pool this engine expects, because groups
+	// are not the same size as each other: a chunk holding a pile has many times
+	// the rows of one holding a wall, and a dispatch with one group per worker
+	// finishes when the largest finishes. Several per worker is what lets the
+	// short ones fill in around the long ones.
+	//
+	// @since v0.17
+	inline constexpr size_t SOLVE_GROUP_TARGET = 64;
+
+	// How many sweeps a worker does over its own group before rejoining.
+	//
+	// **A handover costs about as much as a sweep, so sixteen of them would
+	// spend half the solve starting.** Measured on ten thousand boxes in
+	// `engine.physics.bench.solver`, one dispatch of the groups is 2.9 ms of
+	// worker time finished in 376 us of wall - of which roughly 190 us is
+	// waking twenty-three threads and joining them again. Sixteen dispatches is
+	// three milliseconds of that, against a solve that is eight.
+	//
+	// **It is sound because the groups are independent, not because it is
+	// approximately sound.** No two groups name a body the solver may write, so
+	// a worker sweeping its own group has nothing to hear from any other worker
+	// between one sweep and the next. The only rows that couple two groups are
+	// the border ones, and the barrier before those is the one that is kept.
+	//
+	// What it costs is how fast news crosses a chunk face: with four sweeps per
+	// round there are four rounds rather than sixteen, so a stack straddling a
+	// chunk boundary hears about the load above it four times instead of
+	// sixteen. Every row still gets `SOLVER_ITERATIONS` sweeps.
+	//
+	// **Four, and both quality columns are what chose it.** Cost is
+	// `engine.physics.bench.solver`'s tallest row in the `bench` preset - ten
+	// thousand boxes in five hundred stacks of twenty, about fifty thousand
+	// contact rows. Accuracy is `tests/SolverGroups.cpp`'s "a partitioned stack
+	// still stands up" in the `ci` preset: a hundred and twenty-eight towers of
+	// eight, two simulated seconds, drift being the furthest any box ends up
+	// from the column it started in and sink being the furthest any box ends up
+	// below where it started.
+	//
+	// | Sweeps | Rounds | Solve, 10k boxes | Drift | Sink |
+	// |---|---|---|---|---|
+	// | 1 | 16 | 8.45 ms | 142 mm | 0 mm |
+	// | 2 | 8 | 7.72 ms | 110 mm | 0 mm |
+	// | **4** | **4** | **7.57 ms** | **206 mm** | **0 mm** |
+	// | 8 | 2 | 7.10 ms | 438 mm | 28 mm |
+	//
+	// **Sink is the column that decides it and drift is the one that looks like
+	// it should.** A toppling tower is chaotic, so drift moves in both
+	// directions for reasons that are not the solver - 110 mm at two sweeps is
+	// below the sixteen-round figure and means nothing. Sink is convergence: it
+	// is zero for as long as the contacts are being solved enough, and at eight
+	// sweeps per round it is not. Eight is also where drift leaves the band the
+	// other three sit in.
+	//
+	// Above four the curve is flat anyway - 7.10 ms against 7.57 is six per cent
+	// for a stack that has started to sag.
+	//
+	// **Must divide `SOLVER_ITERATIONS`**, which a `static_assert` in `Solve`
+	// enforces: it would otherwise silently give every row fewer sweeps than the
+	// constant beside it promises.
+	//
+	// @since v0.17
+	inline constexpr size_t SOLVE_SWEEPS_PER_BATCH = 4;
+
+	// How many manifolds one worker takes at a time while their bodies are
+	// located.
+	//
+	// Two binary searches over an array that has outgrown the cache, which is
+	// two chains of dependent loads and almost no arithmetic. Wider than
+	// `GATHER_GRAIN` because each index is cheaper.
+	//
+	// @since v0.17
+	inline constexpr size_t LOCATE_GRAIN = 256;
+
+	// How many manifolds one worker takes at a time while setting rows up.
+	//
+	// **Chosen against the shape of the body rather than measured to the row**,
+	// which `parallel/AGENTS.md` allows for a body this size: setting up one
+	// manifold is up to four contacts, each three prepared axes - six angular
+	// responses and two cross products apiece - and a binary search over the
+	// impulse cache. That is hundreds of nanoseconds, so the handover pays at a
+	// few dozen and the default 4096 would refuse to dispatch a scene of ten
+	// thousand contacts at all.
+	//
+	// Sixty-four rather than one because a range claim is an atomic and a
+	// manifold is not expensive enough to be worth one each.
+	//
+	// @since v0.17
+	inline constexpr size_t SETUP_GRAIN = 64;
+
 	// How fast a neighbour has to be moving to wake a sleeping body.
 	//
 	// Deliberately above `SLEEP_LINEAR_SPEED`: a body that is itself about to

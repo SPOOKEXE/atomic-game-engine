@@ -415,6 +415,17 @@ namespace engine::physics {
 
 	ContactSolution ContactBetween(const ShapeInstance &first, const ShapeInstance &second) {
 		// Ordered by `ShapeKind` so that six functions cover six unordered
+		// **A pair naming a hull or a mesh leaves before any of this**, because
+		// the separating-axis machinery below is exact only for centrally
+		// symmetric shapes - `ShapeSupport.hpp` states it and
+		// `ProjectionRadius` restates it. Six exact pairs cover the three
+		// analytic shapes; everything else goes through the general convex
+		// search, which is one route rather than the seven more arms adding two
+		// kinds to the table below would need.
+		if (Baked(first.Shape) || Baked(second.Shape)) {
+			return ConvexContact(first, second);
+		}
+
 		// pairs instead of nine covering the ordered ones. The flip below is
 		// the whole cost of that, and it is in one place.
 		const bool ordered = static_cast<int>(first.Shape) <= static_cast<int>(second.Shape);
@@ -447,6 +458,14 @@ namespace engine::physics {
 
 		case scene::ShapeKind::Cylinder:
 			solution = CylinderCylinder(low, high);
+			break;
+
+		case scene::ShapeKind::Hull:
+		case scene::ShapeKind::Mesh:
+			// Unreachable: the guard at the top of this function sends both to
+			// the general search. The arms exist so the compiler still checks
+			// this switch is exhaustive, which is what caught every other site
+			// when the two kinds were added.
 			break;
 		}
 

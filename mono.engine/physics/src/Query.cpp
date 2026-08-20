@@ -14,6 +14,7 @@
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Query.hpp>
 #include <engine/physics/Shapes.hpp>
+#include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/spatial/HashGrid.hpp>
@@ -58,7 +59,38 @@ namespace engine::physics {
 			if (transform == nullptr || collider == nullptr) {
 				return Candidate{};
 			}
-			return Candidate{owner, ShapeInstance{transform->Frame, collider->Extent, collider->Shape}, true};
+
+			// **The baked geometry, resolved here as well as in the narrow
+			// phase.** A query and a contact are two different switches on
+			// `ShapeKind`, so they are two different ways to have forgotten the
+			// kinds that carry their shape by name - and the failure is silent
+			// and asymmetric: a raycast would report the *part's* bound where a
+			// contact reported the hull, so a ray and a body would disagree
+			// about where a rock is.
+			//
+			// **The table is fetched per candidate rather than once**, unlike
+			// the narrow phase's, because a query has no per-step scope to hang
+			// it on and takes a `const ecs::Store &` by design - see the header,
+			// which explains why that is what lets several workers raycast one
+			// world at a time. A resource lookup is a subscript, and a query
+			// examines a handful of candidates where the narrow phase examines
+			// every pair.
+			const scene::CollisionShapes *shapes = scene::CollisionShapesOf(store);
+			const collision::ConvexHull *hull = nullptr;
+			const collision::TriangleMesh *mesh = nullptr;
+			if (shapes != nullptr) {
+				if (collider->Shape == scene::ShapeKind::Hull) {
+					hull = shapes->FindHull(collider->Geometry);
+				} else if (collider->Shape == scene::ShapeKind::Mesh) {
+					mesh = shapes->FindMesh(collider->Geometry);
+				}
+			}
+
+			return Candidate{
+				owner,
+				ShapeInstance{transform->Frame, collider->Extent, collider->Shape, hull, mesh},
+				true,
+			};
 		}
 
 		bool Append(std::span<ecs::Entity> found, ecs::Entity entity, spatial::QueryResult &result) {

@@ -372,7 +372,7 @@ that are in fact a fraction of a millimetre apart. **Widening the set is a
 change with a case attached**, and narrowing it needs an argument about which
 resting configuration stops working.
 
-## The solver is serial, and a reviewer should refuse `Jobs::For` in it
+## The solver is serial inside a group, and the groups are the colouring
 
 Sequential impulse works by letting each contact see the velocities the previous
 ones left behind - that is the method, not an implementation detail. Two threads
@@ -384,12 +384,80 @@ This was mutation-tested rather than assumed: replacing the sweep loop with two
 threads over halves of the row list turns "two runs of one scene agree byte for
 byte" red. **The same mutation written with `parallel::Jobs::For` does not**,
 because a test binary has no worker pool running and `For` degrades to inline -
-so a reviewer must not read a green suite as evidence that a `Jobs::For` in
+so a reviewer must not read a green suite as evidence that a bare `Jobs::For` in
 there is safe.
 
-If contact solving ever has to be parallel, the change is graph colouring into
-independent batches with a fixed batch order. That is a different algorithm and
-it needs its own measurement.
+Until v0.17 this file said that if contact solving ever had to be parallel, the
+change would be graph colouring into independent batches with a fixed batch
+order, and that it needed its own measurement. **That is what v0.17 did**, and
+the rest of this section is what a reviewer should hold the result to.
+
+**The colours are read off a spatial partition rather than searched for.**
+`spatial::ChunkMap` bins every solver body into one chunk by the centre of its
+bounds. A contact whose two *movable* bodies land in one chunk goes in that
+chunk's `SolverGroup`; one whose two movable bodies land in two goes in the
+border run. No two groups therefore name a body the solver may write, which is
+the whole of the correctness argument - and `tests/SolverGroups.cpp` asserts it
+directly rather than leaving it implied by a suite that happens to pass.
+
+**Movable, not all bodies, and that distinction is what makes the scheme work at
+all.** Every contact in a scene with a floor names that floor, so a rule about
+all bodies would put every contact in one group. An immovable body's inverse
+mass and inverse inertia are zero, so every impulse applied to it was already
+adding zero - `ApplyImpulse` now skips the write outright, which changes no
+number and turns two workers sharing a floor into two readers. Refuse a change
+that removes that branch: it looks like a redundant test and it is the only
+thing keeping the sweeps race-free.
+
+Four more properties a reviewer should hold to:
+
+- **The path is chosen by row count, never by worker count.**
+  `PARALLEL_SOLVE_ROWS` is a property of the scene. Choosing it from
+  `Jobs::WorkerCount()` would make a trajectory a function of the machine, so a
+  recording taken with a pool and replayed without one would diverge and nothing
+  would say so. `SOLVE_GROUP_TARGET` is a constant for the same reason.
+- **Below the threshold nothing changed.** One group, filled in manifold order,
+  no border rows - which is bit-for-bit the pre-v0.17 solve and is why every
+  other suite in this module still passes unaltered.
+- **`SOLVE_SWEEPS_PER_BATCH` is a quality decision with a table beside it.** A
+  handover costs about as much as a sweep, so the sweeps are done several per
+  dispatch; the groups are independent, so a worker has nothing to hear between
+  them. What it costs is how fast news crosses a chunk face, and the constant's
+  comment carries the drift and sink measurements that chose four.
+- **The groups are ordered longest-first and that is scheduling, not ordering.**
+  `Jobs::For` hands out ranges in index order, so the largest group has to start
+  first or it is the whole critical path. Reordering groups changes no
+  arithmetic *because* they are disjoint; reordering rows inside one would.
+
+## `Store::Get` does not scale, and two steps here have the measurement
+
+**Dispatching a loop of component lookups makes it slower, and it is not
+marginal.** Both large read passes in this module were tried both ways on a
+twenty-four thread machine, against ten thousand boxes:
+
+| Pass | Serial | Dispatched |
+|---|---|---|
+| `Solve`'s body gather, seven lookups per body | 1375 us | 2977 us |
+| `NarrowPhase`, two lookups per pair | 4.19 ms | 4.07 ms wall, **89.5 ms busy** |
+
+The narrow-phase row is the one that says what is happening: twenty-four workers
+each did twenty-one times the per-pair work a single thread does. Hoisting the
+two lookups out of the dispatched body - changing nothing else - dropped worker
+time to 3.67 ms and wall time to 349 us. Threads chasing the entity directory
+into columns that are not the one before them contend rather than share.
+
+Two consequences:
+
+- **A reviewer should refuse a `Jobs::For` over a loop of `Store::Get` here**
+  without a measurement attached, however obviously parallel the loop looks.
+  The passes that *are* dispatched - the manifold set-up, the body location
+  search, the impulse write-back - touch arrays this module owns and nothing
+  else, and each of them won by an order of magnitude.
+- **The way to make the narrow phase parallel is to stop it looking things
+  up.** It resolves a collider once per pair it appears in, about twenty-five
+  thousand times for ten thousand colliders, where `SyncBroadphase` has already
+  read the same two components for every one of them. `NarrowPhase.cpp` carries
+  the sketch.
 
 ## The position correction is a second velocity that only moves positions
 
@@ -519,6 +587,40 @@ jumping at once.
 Refuse a change that puts a sleeping flag back on a component, and refuse one
 that wakes bodies by walking a set rather than the sorted manifold list.
 
+## The general convex pair is GJK and EPA, and it does not replace the six
+
+`src/ConvexQuery.hpp` is the distance function this file listed as absent until
+v0.17, and it is what `SweepFastBodies` and any shape without an analytic pair
+are built on. Four things a reviewer should hold to.
+
+**It is not a replacement for box-box.** The six exact pairs are closed form,
+cheap, and give a four-point manifold out of their own face clip. A change that
+routes them through the general search "for consistency" is slower and less
+accurate at once.
+
+**`ProjectionRadius` is exact only because all three analytic shapes are
+centrally symmetric**, which `ShapeSupport.hpp` states from the other side. A
+convex hull is not, so feeding one to the separating-axis expression is a wrong
+answer rather than a conservative one - and that is why a general shape has to
+go through GJK instead of widening the axis search.
+
+**Three of its four decisions are there because a plausible version was wrong,
+and each is named in the code**: the search direction is normalised before it
+reaches `SupportPoint`, because a sphere's support scales with the direction's
+length; the distance search terminates against its own closest point rather than
+against zero, because the zero test is the *intersection* form and returns the
+furthest pair of features; and `MakeFace` refuses to reorder its vertices,
+because the horizon walk depends on adjacent faces naming their shared edge in
+opposite directions. `tests/ConvexQuery.cpp` checks the general answer against
+the exact box-box pair over a sweep of placements, which is what found all
+three.
+
+**A minimum translation is not unique and the tests say so.** Two shapes
+overlapping equally on two axes have two answers, and a pair overlapping
+completely on one axis separates by pushing either way along it. A case that
+demands one sign, or one axis where two are tied, is a case that will fail for
+the wrong reason.
+
 ## The queries are reads, and that is what lets a system raycast per entity
 
 `physics::Raycast`, `OverlapBox`, `OverlapSphere` and `ShapeCast` take a
@@ -558,17 +660,21 @@ What is still absent:
   game - should not have to switch one off. A host applies weight in its own
   `PreSimulation` system, which is what `tests/Behaviour.cpp` does. Adding a
   gravity term here is a change to the design note first.
-- **A distance function between two convex shapes**, and therefore a
-  time-of-impact sweep and continuous collision. `ShapeCast` is conservative
-  instead and says so in its own comment. Adding one is where speculative
-  contacts would come from too, and both want the same measurement.
+- **Speculative contacts.** The distance function they would be built on
+  arrived at v0.17 - see below - and the rest did not: a speculative contact is
+  a solver *row* for a pair that is not touching yet, with a bias that stops it
+  before it does, and that is a change to the row type and to the set-up pass
+  rather than to the narrow phase.
 - **Joints and constraints of any other kind.** The solver's row is a contact:
   a normal, two friction directions and a correction. A distance joint or a
   motor is a different row type and a different setup pass, and half of one is
   worse than none.
-- **Continuous collision for fast bodies.** A body moving further than its own
-  extent in a tick passes through a thin wall. `MAXIMUM_CORRECTION_SPEED`
-  bounds the correction and not the motion, so it does not help here.
+- **Continuous collision between two *moving* bodies.** `SweepFastBodies`
+  closed the case that matters at v0.17 - a fast body against static geometry -
+  and deliberately stopped there. Two bodies both moving fast enough to pass
+  through each other have a relative motion that is not a straight line in
+  either's frame, so sweeping one against the other's start pose is not
+  conservative and would miss exactly the cases it was added for.
 - **Island-based sleeping.** Waking propagates one contact layer per tick
   rather than flooding an island at once. That is bounded and deterministic;
   what it is not is instant, and a tall stack takes as many ticks to wake as it

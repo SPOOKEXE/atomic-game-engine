@@ -66,7 +66,7 @@ namespace engine::render {
 		//
 		// At or above `scene::MAX_SURFACES` the view is dropped with a line in
 		// the log, rather than silently rendering nothing.
-		int8_t Index = 0;
+		int16_t Index = 0;
 
 		// Where the surface camera is, in world space.
 		core::CFrame Frame;
@@ -289,7 +289,7 @@ namespace engine::render {
 		// `scene::PartitionSurfaces` has already grouped into a run of its own -
 		// so there is no second mesh, no vertex buffer, and nothing coplanar with
 		// the pane to fight it for depth.
-		int8_t Index = 0;
+		int16_t Index = 0;
 
 		// The slot of the hole at the far end of this one, or -1 for none.
 		//
@@ -1199,6 +1199,50 @@ namespace engine::render {
 		// @param bounces How many levels to resolve, or zero to measure it.
 		// @since v0.15
 		void SetSurfaceBounces(uint32_t bounces);
+
+		// How many surface panes a viewport draws at once.
+		//
+		// **A budget, and the frame keeps the panes covering the most screen.**
+		// A pane costs a whole render of the world into a texture, so the count
+		// is the second thing after the depth that decides what a hall of
+		// mirrors costs - `SetSurfaceBounces` is how *deep* and this is how
+		// *many*. When more panes are visible than this allows, the ones drawn
+		// are the ones with the largest share of the screen, as
+		// `graph::VisibleSurfaces` measured it; the rest keep whatever texture
+		// they last drew, so a mirror that drops out of the budget goes stale
+		// rather than blank.
+		//
+		// **Ranked rather than taken in list order**, and that is the whole
+		// design. Dropping the last few views in the order they arrived makes
+		// which mirrors work a property of what order the level was built in,
+		// which is invisible to the author and changes when they move something.
+		// Coverage is a property of where the player is standing, which is the
+		// thing they are actually judging.
+		//
+		// **Clamped to what there is storage for.** `scene::MAX_SURFACES` bounds
+		// the slot arrays; a world asking for more is drawn at what the renderer
+		// has, exactly as an over-ambitious `SetSurfaceBounces` is.
+		//
+		// **Zero draws no surfaces at all**, which is a legitimate low-detail
+		// setting and is not a special value meaning anything else.
+		//
+		// The world states it as `workspace.MaxSurfaces` and
+		// `scene::SurfaceLimitOf` reads it; a host passes that through here, the
+		// same path `SurfaceBounces` takes.
+		//
+		// @param panes How many surface panes to draw per frame.
+		// @since v0.17
+		void SetSurfaceLimit(uint32_t panes);
+
+		// What it is set to, which is `scene::DEFAULT_SURFACE_LIMIT` before a
+		// host says otherwise.
+		//
+		// **Not how many drew last frame** - that is per viewport and a function
+		// of what was on screen. This is the setting, for `SurfaceBounces`'
+		// reason.
+		//
+		// @since v0.17
+		uint32_t SurfaceLimit() const;
 
 		// Draws every opaque and blended instance as lines rather than filled
 		// triangles.

@@ -1802,6 +1802,7 @@ end
 
 declare extern type Workspace extends Service with
 	CurrentCamera: Instance
+	MaxSurfaces: number
 	SurfaceBounces: number
 	function Raycast(self, origin: Vector3, direction: Vector3, params: RaycastParams?): {
 		Instance: Instance,

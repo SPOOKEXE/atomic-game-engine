@@ -102,7 +102,7 @@ namespace ordering_bench {
 
 			const uint32_t surfaceRoll = Random::Bits(index, 13) % 100u;
 			instance.Surface = surfaceRoll < surfacePercent
-								   ? static_cast<int8_t>(Random::Bits(index, 17) % MAX_SURFACES)
+								   ? static_cast<int16_t>(Random::Bits(index, 17) % MAX_SURFACES)
 								   : static_cast<int8_t>(-1);
 
 			// Three casters in four, which is what a scene with some decoration
