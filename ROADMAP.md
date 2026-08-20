@@ -39,6 +39,7 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### v0.18
 
+- [_] add release builds for linux (windows and mac, if builds)
 - [_] build out proper code architecture documents (AGENTS.md, docs/CODE_FORMAT.md, docs/CODE_QUALITY.md) => CODE_ARCH.md
 - [_] DOMAIN DRIVEN DESIGN & HEXAGONAL ARCHITECTURE
 - [_] check if we need to move files / classes / structures around in the codebase to properly fit (mainly focus on engine)
