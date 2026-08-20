@@ -107,6 +107,8 @@ examples/Magic.luau:44```. Same with TerrainCore.
 - [_] add a dropdown to add a update interval option to the flamegraph AND add a "average" checkbox that will average the results across the interval OR only shows on the update outputs
 - [_] add a preferences tab called "Default Worlds" that list all available default world items and add checkboxes to select them. Set "Rings", "MeshGrid" and "Hallway" worlds as the defaults and disable the rest. persists as well.
 - [_] separate interface update Hz (idle, active) with renderer Hz in studio (focused, unfocused) under preferences
+- [_] content is 0.1ms in idle studio as well for some reason with only flamegraph open (content). flamegraph is not granular enough and misses a bunch of stuff (only pump is visible).
+- [_] there are also gaps between "build interface" and "ecs.systems", "ecs.systems" and "Renderer::render", etc.
 
 ### v0.18
 
