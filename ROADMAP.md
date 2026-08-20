@@ -89,6 +89,22 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] fix cross-world portal rendering (cannot see character on other side) - ensure test
 - [_] editablemesh has no transform component (does not render)
 - [_] mirror stress test needs ALL faces to have mirrors, also should be a filled icosphere instead of a sphere with holes
+- [_] terrain demo, color them, also only do a 512x512 area with perlin noise 1 unit vertex interval.
+- [_] a few of the portal scenes (in all the various worlds) have z-index fighting issues
+- [_] mirrors-4-worlds demo, the reflection is super dark. this is for ALL mirrors.
+- [_] add a right-click zoom-to in studio for objects with transforms
+- [_] magic demo is broken (script error) - ```script error: examples/Magic.luau:44: ReplicatedStorage.MagicCore was not mounted - is assets/lib staged?
+[C] function assert
+examples/Magic.luau:44```. Same with TerrainCore.
+- [_] the custom terrain system should be: 1. a underlying EditableMesh 2. pure luau code
+- [_] move magic core system INTO the scene demo, it should NOT be a studio library, move to pure script
+- [_] when you enter a portal, the (replication) interpolation makes it jump through space visibly. should we have a "portal move" packet or a "instant move" or a "full component sync" for it?
+- [_] PortalLightMix, when you're on the side view of the mirror, you move left the light shows up only on left side, you move right left side hides and right sides hows up, lighting culling with portals
+- [_] PortalLightMix Lighting service brightness is set to 0 and no lights emit when brightness is 0.
+- [_] EditableImage demo does nothing its just purple-black checker? was it meant to make a editableimage then set the meshpart's texture to it? if so, we'll probably need to setup something proper for the texture component where we have a underlying asset delivery for pulling cdn items or in-memory items from luau / ecs engine like EditableImage objects and their buffered data.
+- [_] particles are SUPER slow and they don't render visually either (refreshEmitters, stepParticles)
+- [_] add a PAUSE button to the flamegraph so i can pause it
+- [_] add a dropdown to add a update interval option to the flamegraph AND add a "average" checkbox that will average the results across the interval OR only shows on the update outputs
 
 ### v0.18
 
@@ -104,12 +120,15 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] improve build times (flamegraph => optimise)
 - [_] mono.launcher (run singleplayer game, host game on server, join server, run studio, run cdn, etc)
 
+- [_] optimise full particles (try reach 5 million rendering particles)
+- [_] optimise physics (physics demo, -O0 and in studio)
+- [_] optimise mirrors (try varying bounce levels to see bottlenecks in demo scene)
+
 ### v0.19
 
 - [x] thoroughly implement every user-interface element, including `SurfaceGui` and `BillboardGui` - `SurfaceGui` gains `ZOffset`, `MaxDistance`, `ClipsDescendants` and `Active`, and `BillboardGui` gains `Active`, `Brightness`, `ClipsDescendants`, `CurrentDistance`, `DistanceStep`, `ExtentsOffsetWorldSpace`, `SizeOffset` and `PlayerToHideFrom`; new classes `UIGradient`, `UITableLayout`, `UIPageLayout` and `UIDragDetector`; `ScrollingFrame` completed with `ScrollingEnabled`, `AutomaticCanvasSize`, the two `ScrollBarInset`s, `VerticalScrollBarPosition`, `ElasticBehavior`, the three bar images and `AbsoluteCanvasSize`/`AbsoluteWindowSize`, plus wheel and thumb-drag input; `RichText`, `MaxVisibleGraphemes`, `ContentText`, `TextBounds` and `TextFits` on every text class; `Interactable`, the four `NextSelection*`, `SelectionOrder` and `SelectionImageObject` on `GuiObject`; `HoverImage`, `PressedImage` and `ResampleMode` on the image classes; `Enabled` and `ApplyStrokeMode` on `UIStroke`. Laid out, drawn by both backends, saved, replicated, bound and in the Properties panel. `D00120` carries the members that need a subsystem this engine has not got
 - [_] build out all remaining roblox surfaces with available underlying surface
 - [_] port many particle features from unity to here (https://docs.unity3d.com/6000.5/Documentation/ScriptReference/ParticleSystem.html)
-- [_] full particle demo (try reach 5 million rendering particles)
 
 ### v0.20
 
