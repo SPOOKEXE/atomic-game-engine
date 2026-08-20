@@ -674,7 +674,7 @@ namespace engine::delivery {
 								Tally.TransferredBytes += payload->size();
 								Tally.ExpandedBytes += payload->size();
 								++Tally.Bundles;
-								Split(*bundle, *payload);
+								Split(*bundle, *payload, true);
 								return StartOutcome::Completed;
 							}
 						}
@@ -759,7 +759,7 @@ namespace engine::delivery {
 
 				Tally.ExpandedBytes += payload->size();
 				++Tally.Bundles;
-				Split(*bundle, *payload);
+				Split(*bundle, *payload, false);
 				return true;
 			}
 
@@ -791,7 +791,21 @@ namespace engine::delivery {
 			// The other members land in the cache as a consequence of one being
 			// asked for, which is the whole of "the game progressively builds"
 			// seen from this end.
-			void Split(const assets::BundleEntry &bundle, const std::vector<std::byte> &payload) {
+			//
+			// @param verified Whether the payload has already been checked
+			//                 against the signed manifest member by member.
+			//                 `ChunkStore::ReadAsset` does exactly that on the
+			//                 way out of a local store, over the same slices in
+			//                 the same order, so hashing them a second time here
+			//                 is the same answer for the same bytes - about a
+			//                 fifth of a local bundle's cost, measured. It is
+			//                 false for anything off a wire, where this is the
+			//                 only check there is.
+			void Split(
+				const assets::BundleEntry &bundle, const std::vector<std::byte> &payload, bool verified
+			) {
+				ENGINE_PROFILE_CAT("delivery.split", core::ProfileCategory::Assets);
+
 				for (const assets::ContentHash &member : bundle.Assets) {
 					const assets::AssetEntry *const asset = Known->FindByRoot(member);
 					if (asset == nullptr) {
@@ -805,14 +819,20 @@ namespace engine::delivery {
 					const std::span<const std::byte> bytes(
 						payload.data() + slice->Offset, static_cast<size_t>(slice->Bytes)
 					);
-					if (!assets::VerifyAsset(*asset, bytes)) {
-						++Tally.VerificationFailures;
-						ENGINE_WARN("delivery: '{}' did not verify against the signed manifest", asset->Name);
-						continue;
+					if (!verified) {
+						ENGINE_PROFILE_CAT("delivery.verify", core::ProfileCategory::Assets);
+						if (!assets::VerifyAsset(*asset, bytes)) {
+							++Tally.VerificationFailures;
+							ENGINE_WARN(
+								"delivery: '{}' did not verify against the signed manifest", asset->Name
+							);
+							continue;
+						}
 					}
 
 					Delivered.emplace_back(member, std::vector<std::byte>(bytes.begin(), bytes.end()));
 					if (Cached) {
+						ENGINE_PROFILE_CAT("delivery.cache", core::ProfileCategory::Assets);
 						Cached->Store(*asset, bytes);
 					}
 				}
