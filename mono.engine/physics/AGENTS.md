@@ -429,7 +429,7 @@ Four more properties a reviewer should hold to:
   first or it is the whole critical path. Reordering groups changes no
   arithmetic *because* they are disjoint; reordering rows inside one would.
 
-## `Store::Get` does not scale, and two steps here have the measurement
+## `Store::Get` does not scale, and the narrow phase is what proved it
 
 **Dispatching a loop of component lookups makes it slower, and it is not
 marginal.** Both large read passes in this module were tried both ways on a
@@ -446,18 +446,26 @@ two lookups out of the dispatched body - changing nothing else - dropped worker
 time to 3.67 ms and wall time to 349 us. Threads chasing the entity directory
 into columns that are not the one before them contend rather than share.
 
-Two consequences:
+**So the narrow phase stopped looking things up**, and that is the change rather
+than the dispatch. It resolved a collider once per *pair* it appeared in - about
+twenty-five thousand times for ten thousand colliders - where `SyncBroadphase`
+had already read the same `Transform` and `Collider` for every one of them a few
+lines earlier. `SyncBroadphase` keeps the placed shape beside each proxy now and
+`BroadPhase` carries the proxy indices alongside the entities it emits, so a pair
+is two array subscripts and the step touches no store at all.
 
-- **A reviewer should refuse a `Jobs::For` over a loop of `Store::Get` here**
-  without a measurement attached, however obviously parallel the loop looks.
-  The passes that *are* dispatched - the manifold set-up, the body location
-  search, the impulse write-back - touch arrays this module owns and nothing
-  else, and each of them won by an order of magnitude.
-- **The way to make the narrow phase parallel is to stop it looking things
-  up.** It resolves a collider once per pair it appears in, about twenty-five
-  thousand times for ten thousand colliders, where `SyncBroadphase` has already
-  read the same two components for every one of them. `NarrowPhase.cpp` carries
-  the sketch.
+The result, on the same scene: **4.19 ms to 0.34 ms**, with `SyncBroadphase`
+going from 272 us to 350 us to carry the shapes. Most of that is the lookups
+rather than the threads; the dispatch only started paying once they were gone.
+
+**A reviewer should refuse a `Jobs::For` over a loop of `Store::Get` here**
+without a measurement attached, however obviously parallel the loop looks. The
+passes that are dispatched - the narrow phase, the manifold set-up, the body
+location search, the impulse write-back - touch arrays this module owns and
+nothing else.
+
+**And refuse a change that resolves an entity in the narrow phase again.** It
+would build, it would pass, and it would put the 89.5 ms back.
 
 ## The position correction is a second velocity that only moves positions
 

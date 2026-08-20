@@ -27,6 +27,7 @@
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/physics/Contacts.hpp>
+#include <engine/physics/Shapes.hpp>
 #include <engine/spatial/ChunkMap.hpp>
 #include <engine/spatial/HashGrid.hpp>
 #include <engine/spatial/LayerMask.hpp>
@@ -101,6 +102,85 @@ namespace engine::physics {
 			}
 			return B.Id < other.B.Id;
 		}
+	};
+
+	// Which proxy each half of a candidate pair came from.
+	//
+	// **The broad phase already knows this and used to throw it away.** It
+	// generates a pair from two *record indices* and then names the pair by
+	// entity, because an entity is what a manifold and a contact event carry.
+	// The narrow phase then resolved those entities back into shapes through the
+	// store - twenty-five thousand `Store::Get` calls for ten thousand
+	// colliders, every one of them re-reading a `Transform` the sync had already
+	// read. Carrying the indices forward makes that step two array subscripts.
+	//
+	// **Private, and it must stay so.** These are indices into `PhysicsWorld`'s
+	// own arrays, exactly as `spatial::Proxy::Id` is - `AGENTS.md` explains why
+	// publishing one hands a caller a number that is plausible and wrong.
+	//
+	// **The high bit says which array.** A world has two indexes, and a pair may
+	// name one collider in each; a separate flag byte would be two more bytes on
+	// a row that is sorted, and a second parallel array would be a third thing
+	// to keep in step through that sort.
+	//
+	// @since v0.17
+	struct CandidateSource {
+		// The first collider's proxy index, with `STATIC` set when it is in the
+		// static index.
+		uint32_t First = 0;
+
+		// The second's, the same way.
+		uint32_t Second = 0;
+
+		// Set on an index that refers to the static arrays.
+		static constexpr uint32_t STATIC = 0x80000000u;
+
+		constexpr bool FirstIsStatic() const {
+			return (First & STATIC) != 0;
+		}
+
+		constexpr bool SecondIsStatic() const {
+			return (Second & STATIC) != 0;
+		}
+
+		constexpr size_t FirstIndex() const {
+			return static_cast<size_t>(First & ~STATIC);
+		}
+
+		constexpr size_t SecondIndex() const {
+			return static_cast<size_t>(Second & ~STATIC);
+		}
+	};
+
+	// A candidate pair with the proxies it came from, as the broad phase sorts
+	// it.
+	//
+	// **One row rather than two parallel arrays, and only while sorting.** The
+	// pair list has to come out in entity order and the indices have to stay
+	// with the pair they belong to; two arrays sorted separately is two chances
+	// for them to disagree, and the disagreement is silent - the narrow phase
+	// would test two real shapes that are not the ones the pair names.
+	//
+	// Split into `PairList` and `PairSourceList` once the sort is done, because
+	// the first of those is what every consumer outside this module reads and
+	// the second is nobody else's business.
+	//
+	// @since v0.17
+	struct SourcedPair {
+		CandidatePair Pair;
+		CandidateSource Source;
+
+		// Ordered and compared by the pair alone. Two rows naming one pair are
+		// one candidate however they were found.
+		//@{
+		constexpr bool operator<(const SourcedPair &other) const {
+			return Pair < other.Pair;
+		}
+
+		constexpr bool operator==(const SourcedPair &other) const {
+			return Pair == other.Pair;
+		}
+		//@}
 	};
 
 	// One body the solver may push, gathered once per tick.
@@ -704,7 +784,29 @@ namespace engine::physics {
 		std::vector<spatial::Proxy> StaticProxies;
 		std::vector<ColliderRecord> StaticRecords;
 
+		// The placed shape of every collider, parallel to the records.
+		//
+		// **Filled by `SyncBroadphase`, which is already holding the two
+		// components it needs.** See `PlacedCollider`: this exists so the narrow
+		// phase never touches the store, which is what lets it be dispatched.
+		//
+		// **Rebuilt on the same schedule as the index beside it**, so a stale
+		// static index and a stale static shape go stale together. That is the
+		// stronger of the two arrangements: the alternative was a stale index
+		// and a *fresh* transform read per pair, which is two descriptions of
+		// where a wall is disagreeing inside one step.
+		std::vector<PlacedCollider> DynamicShapes;
+		std::vector<PlacedCollider> StaticShapes;
+
 		std::vector<CandidatePair> PairList;
+
+		// Which proxy each pair came from, parallel to `PairList` and sorted
+		// with it. See `CandidateSource`.
+		std::vector<CandidateSource> PairSourceList;
+
+		// Where the two are sorted together before being split. Cleared and
+		// refilled, never freed, like every other list here.
+		std::vector<SourcedPair> SourcedPairList;
 		std::vector<ContactManifold> ManifoldList;
 		std::vector<ContactEvent> EventList;
 

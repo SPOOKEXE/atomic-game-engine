@@ -75,6 +75,27 @@ namespace engine::physics {
 			return world.PairList;
 		}
 
+		// Which proxy each pair came from, parallel to the pair list.
+		static std::vector<CandidateSource> &PairSources(PhysicsWorld &world) {
+			return world.PairSourceList;
+		}
+
+		// Where the broad phase sorts the two together before splitting them.
+		static std::vector<SourcedPair> &SourcedPairs(PhysicsWorld &world) {
+			return world.SourcedPairList;
+		}
+
+		// The placed shape of every collider, parallel to the records.
+		//@{
+		static std::vector<PlacedCollider> &DynamicShapes(PhysicsWorld &world) {
+			return world.DynamicShapes;
+		}
+
+		static std::vector<PlacedCollider> &StaticShapes(PhysicsWorld &world) {
+			return world.StaticShapes;
+		}
+		//@}
+
 		// The manifold list, cleared and refilled by `NarrowPhase`.
 		static std::vector<ContactManifold> &Manifolds(PhysicsWorld &world) {
 			return world.ManifoldList;

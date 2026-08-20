@@ -19,10 +19,9 @@
 // name, and one expression for all six pairs. It is why the cylinder cases are
 // additions to the box-box machinery rather than a second approach.
 
-#include <engine/collision/ConvexHull.hpp>
-#include <engine/collision/TriangleMesh.hpp>
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/physics/Shapes.hpp>
 #include <engine/scene/Enums.hpp>
 
 #include <cmath>
@@ -31,75 +30,12 @@
 
 namespace engine::physics {
 
-	// One collider, placed in the world.
-	//
-	// Copied out of `scene::Collider` and `scene::Transform` once per pair
-	// rather than held by reference, because a pair function reads the frame
-	// eight or ten times and a store lookup per read is the cost an index
-	// exists to remove.
-	struct ShapeInstance {
-		ShapeInstance() = default;
-
-		// The only way in, and deliberately not an aggregate: `Axis` is derived
-		// from `Frame` and the two must not be able to disagree.
-		ShapeInstance(const core::CFrame &frame, const core::Vector3 &extent, scene::ShapeKind shape);
-
-		// The same, for a shape whose geometry is baked rather than described by
-		// an extent.
-		//
-		// **The kind and the pointer are given together and are checked against
-		// each other**, because the failure of getting them apart is silent: a
-		// `Hull` with no hull collides as its extent, which is a crate-sized box
-		// where a rock should be. The constructor demotes a baked kind with no
-		// geometry to `Box`, so a shape whose name did not resolve collides as
-		// its bound - see `scene::Collider::Geometry`, which states that as the
-		// behaviour rather than as a fallback.
-		ShapeInstance(
-			const core::CFrame &frame,
-			const core::Vector3 &extent,
-			scene::ShapeKind shape,
-			const collision::ConvexHull *hull,
-			const collision::TriangleMesh *mesh
-		);
-
-		// Where it is and how it is turned, in world space.
-		//
-		// **Read-only once built.** Assigning to it leaves `Axis` describing the
-		// old rotation; build a new instance instead.
-		core::CFrame Frame;
-
-		// Its extent, read according to `Shape`. The table at the top of
-		// `Shapes.hpp` is the one definition of what each component means.
-		core::Vector3 Extent;
-
-		// The frame's X, Y and Z as world directions, resolved once here.
-		//
-		// **The whole reason this type is not three plain fields.** `CFrame`
-		// holds a quaternion, so every one of these costs a rotation to derive
-		// - and every question this header answers is a dot product against one
-		// of them. A pair function asks fifteen to twenty-three times over the
-		// same two shapes, and deriving them per question made box-box re-rotate
-		// the same six vectors ninety times.
-		core::Vector3 Axis[3];
-
-		// Which shape `Extent` describes.
-		scene::ShapeKind Shape = scene::ShapeKind::Box;
-
-		// The baked geometry, for `ShapeKind::Hull` and `ShapeKind::Mesh`.
-		//
-		// **Borrowed and never owned.** It points into the world's
-		// `scene::CollisionShapes`, which outlives every pair function by a wide
-		// margin - a `ShapeInstance` is built inside one step and read inside
-		// the same one. A copy would be a hull copied per pair per tick, which
-		// is exactly the cost this whole type exists to avoid.
-		//
-		// **Never both, and never set for the other three kinds.** The
-		// constructor is what holds that; a switch on `Shape` is what reads it.
-		//@{
-		const collision::ConvexHull *Hull = nullptr;
-		const collision::TriangleMesh *Mesh = nullptr;
-		//@}
-	};
+	// **`ShapeInstance` moved to the public `Shapes.hpp` at v0.17**, and the
+	// support functions below stayed here. The type is what a collider *is*
+	// once it is somewhere, which is that header's subject; what is private is
+	// the machinery that asks it questions. The move happened because
+	// `PhysicsWorld` has to hold an array of them - see `SyncBroadphase`, which
+	// fills one - and a resource in a public header cannot name a private type.
 
 	// How many points one support feature may hold.
 	//

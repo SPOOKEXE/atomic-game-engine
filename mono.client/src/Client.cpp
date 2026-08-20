@@ -2,6 +2,8 @@
 #include <engine/assets/Manifest.hpp>
 #include <engine/assets/Material.hpp>
 #include <engine/audio/Wav.hpp>
+#include <engine/collision/ConvexHull.hpp>
+#include <engine/collision/TriangleMesh.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Paths.hpp>
@@ -21,6 +23,7 @@
 #include <engine/parallel/Settings.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Characters.hpp>
+#include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/Materials.hpp>
@@ -556,17 +559,57 @@ namespace client {
 						sheets.emplace_back(submesh.Texture);
 					}
 
+					// **The collision geometry, baked once here rather than per
+					// world.** A hull and a triangle soup are a function of the
+					// mesh alone, so building them per world would be the same
+					// quickhull run four times for four viewports on one model.
+					//
+					// **Both, and the part chooses.** Which of the two a part
+					// wants is authoring - `BasePart.CollisionShape` - and it
+					// can change after the mesh has arrived, so baking only the
+					// kind that happens to be in use when the bytes land would
+					// leave the other unreachable until a reload. A hull is tens
+					// of points and the soup is the vertices the renderer
+					// already holds, so carrying both is cheap next to the mesh
+					// itself.
+					std::vector<engine::core::Vector3> points;
+					points.reserve(mesh.Vertices.size());
+					for (const engine::assets::MeshVertex &vertex : mesh.Vertices) {
+						points.push_back(
+							engine::core::Vector3{vertex.Position[0], vertex.Position[1], vertex.Position[2]}
+						);
+					}
+
+					const engine::collision::ConvexHull hull = engine::collision::BuildConvexHull(points);
+					const engine::collision::TriangleMesh soup =
+						engine::collision::BuildTriangleMesh(points, mesh.Indices);
+
 					// Mesh metadata is world data, not renderer state.
 					const auto triangles = static_cast<uint32_t>(mesh.Indices.size() / 3);
+					const auto record = [&name, triangles, &sheets, &hull, &soup](engine::ecs::Store &store) {
+						engine::scene::RecordMesh(store, name, triangles, sheets);
+
+						// **Read-modify-write, because the resource holds every
+						// shape the world knows.** `SetResource` replaces, so
+						// taking a copy, adding to it and putting it back is the
+						// only way to add one without dropping the rest - and a
+						// world that lost its terrain the moment a crate
+						// streamed in would read as the terrain having no
+						// collision at all.
+						engine::scene::CollisionShapes shapes;
+						if (const auto *held = engine::scene::CollisionShapesOf(store)) {
+							shapes = *held;
+						}
+						shapes.SetHull(name, hull);
+						shapes.SetMesh(name, soup);
+						store.SetResource(shapes);
+					};
+
 					for (const engine::world::WorldId id : Simulated) {
-						Universe_->Enter(id, [&name, triangles, &sheets](engine::ecs::Store &store) {
-							engine::scene::RecordMesh(store, name, triangles, sheets);
-						});
+						Universe_->Enter(id, record);
 					}
 					if (ReportedJoin) {
-						Universe_->Enter(Replicated, [&name, triangles, &sheets](engine::ecs::Store &store) {
-							engine::scene::RecordMesh(store, name, triangles, sheets);
-						});
+						Universe_->Enter(Replicated, record);
 					}
 				}
 			} else if (asset->Kind == engine::assets::AssetKind::Texture) {
