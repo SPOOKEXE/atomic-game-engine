@@ -323,6 +323,13 @@ declare interface FocusLostSignal {
 
 declare interface RaycastParams {
 	CollisionGroup: string;
+
+	// The most entities an overlap or a cast will report. Ignored by `Raycast`,
+	// which reports one hit or none.
+	//
+	// A result exactly this long may have been truncated, which is the author's
+	// own instruction rather than a silent loss. Clamped to 65536.
+	MaxParts: number;
 }
 
 declare const RaycastParams: {
@@ -1652,6 +1659,11 @@ declare interface Workspace extends Service {
 	MaxSurfaces: number;
 	SurfaceBounces: number;
 	Raycast(origin: Vector3, direction: Vector3, params?: RaycastParams): RaycastResult | null;
+	RaycastThroughPortals(origin: Vector3, direction: Vector3, params?: RaycastParams): RaycastResult | null;
+	OverlapBox(centre: Vector3, size: Vector3, params?: RaycastParams): Instance[];
+	OverlapSphere(centre: Vector3, radius: number, params?: RaycastParams): Instance[];
+	BlockCast(from: CFrame, size: Vector3, motion: Vector3, params?: RaycastParams): Instance[];
+	SphereCast(from: Vector3, radius: number, motion: Vector3, params?: RaycastParams): Instance[];
 }
 
 declare interface Lighting extends Service {

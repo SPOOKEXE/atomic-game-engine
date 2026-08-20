@@ -3529,6 +3529,212 @@ TEST_CASE("javascript casts the same ray", "[scripting][raycast][js]") {
 	)");
 }
 
+// --- volume queries ---------------------------------------------------------
+
+TEST_CASE("a script asks what is inside a volume", "[scripting][raycast]") {
+	// **Against the exact shapes, as the raycast is.** `physics::OverlapSphere`
+	// is the one that tests the shape rather than its bound, which is the whole
+	// difference from the `spatial::` function of the same name - a cylinder
+	// standing in the corner of its own box is reported by that one from a metre
+	// away and by this one only when the sphere really reaches it.
+	RegisterClasses();
+	Store store("script_test");
+	engine::physics::RegisterPhysicsComponents();
+	engine::physics::PreparePhysicsWorld(store);
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local function block(name, at)
+			local part = Instance.new('Part')
+			part.Name = name
+			part.Anchored = true
+			part.Size = Vector3.new(2, 2, 2)
+			part.Position = at
+			part.Parent = workspace
+			return part
+		end
+
+		block('Near', Vector3.new(0, 0, 0))
+		block('AlsoNear', Vector3.new(3, 0, 0))
+		block('Far', Vector3.new(60, 0, 0))
+	)");
+
+	// The broad-phase index is rebuilt by a system and this test runs no
+	// scheduler, so it is synced directly - a query against a stale index finds
+	// nothing, which reads as the binding failing rather than the index being
+	// empty.
+	engine::physics::SyncBroadphase(store);
+
+	MustRun(*runtime, R"(
+		local function names(found)
+			local out = {}
+			for _, part in found do
+				table.insert(out, part.Name)
+			end
+			table.sort(out)
+			return table.concat(out, ',')
+		end
+
+		-- `size` is the full extent, as a part's `Size` is, so this box reaches
+		-- five studs each way and not ten.
+		local box = workspace:OverlapBox(Vector3.new(0, 0, 0), Vector3.new(10, 10, 10))
+		assert(names(box) == 'AlsoNear,Near', 'box found ' .. names(box))
+
+		local sphere = workspace:OverlapSphere(Vector3.new(0, 0, 0), 5)
+		assert(names(sphere) == 'AlsoNear,Near', 'sphere found ' .. names(sphere))
+
+		-- Nothing out there, and an empty array rather than nil: "no parts" is
+		-- an answer, where a raycast's nil means "no hit".
+		local empty = workspace:OverlapSphere(Vector3.new(0, 500, 0), 1)
+		assert(#empty == 0, 'a sphere in open air found ' .. #empty)
+
+		-- A cast reaches what a stationary overlap at the same place does not.
+		-- `Far` is 60 studs away and the sweep travels 70.
+		local swept = workspace:SphereCast(Vector3.new(0, 0, 0), 1, Vector3.new(70, 0, 0))
+		assert(string.find(names(swept), 'Far') ~= nil, 'the sweep missed Far: ' .. names(swept))
+
+		local blocks = workspace:BlockCast(CFrame.new(0, 0, 0), Vector3.new(2, 2, 2), Vector3.new(70, 0, 0))
+		assert(string.find(names(blocks), 'Far') ~= nil, 'the block sweep missed Far: ' .. names(blocks))
+	)");
+}
+
+TEST_CASE("MaxParts caps a volume query", "[scripting][raycast]") {
+	// **A cap is not optional, unlike in Roblox.** The engine writes into a span
+	// the caller owns, so somebody has to choose its size and it cannot be the
+	// script - an uncapped `OverlapSphere` over a stress scene would build a
+	// table of half a million entries inside a tick.
+	RegisterClasses();
+	Store store("script_test");
+	engine::physics::RegisterPhysicsComponents();
+	engine::physics::PreparePhysicsWorld(store);
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		for index = 1, 8 do
+			local part = Instance.new('Part')
+			part.Anchored = true
+			part.Size = Vector3.new(1, 1, 1)
+			part.Position = Vector3.new(index * 1.5, 0, 0)
+			part.Parent = workspace
+		end
+	)");
+
+	engine::physics::SyncBroadphase(store);
+
+	MustRun(*runtime, R"(
+		local all = workspace:OverlapSphere(Vector3.new(6, 0, 0), 20)
+		assert(#all == 8, 'expected all eight, got ' .. #all)
+
+		local params = RaycastParams.new()
+		params.MaxParts = 3
+		assert(params.MaxParts == 3, 'MaxParts did not round-trip')
+
+		local capped = workspace:OverlapSphere(Vector3.new(6, 0, 0), 20, params)
+		assert(#capped == 3, 'the cap did not take: ' .. #capped)
+	)");
+
+	// Refused rather than clamped to one. Zero is not a smaller query, it is one
+	// that can never report anything, and a script that computed one has a bug
+	// that a silently empty result would hide behind an ordinary miss.
+	CHECK_FALSE(runtime->Run("RaycastParams.new().MaxParts = 0"));
+}
+
+TEST_CASE("javascript asks the same volume questions", "[scripting][raycast][js]") {
+	// The two runtimes answer the same six methods with the same shapes. This is
+	// the half that used to be missing entirely.
+	RegisterClasses();
+	Store store("script_test");
+	engine::physics::RegisterPhysicsComponents();
+	engine::physics::PreparePhysicsWorld(store);
+
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	MustRun(*runtime, R"(
+		function block(name, x) {
+			const part = Instance.new('Part');
+			part.Name = name;
+			part.Anchored = true;
+			part.Size = Vector3.new(2, 2, 2);
+			part.Position = Vector3.new(x, 0, 0);
+			part.Parent = workspace;
+		}
+
+		block('Near', 0);
+		block('AlsoNear', 3);
+		block('Far', 60);
+	)");
+
+	engine::physics::SyncBroadphase(store);
+
+	MustRun(*runtime, R"(
+		function names(found) {
+			return found.map(function (part) { return part.Name; }).sort().join(',');
+		}
+
+		const box = workspace.OverlapBox(Vector3.new(0, 0, 0), Vector3.new(10, 10, 10));
+		if (names(box) !== 'AlsoNear,Near') throw new Error('box found ' + names(box));
+
+		const sphere = workspace.OverlapSphere(Vector3.new(0, 0, 0), 5);
+		if (names(sphere) !== 'AlsoNear,Near') throw new Error('sphere found ' + names(sphere));
+
+		if (workspace.OverlapSphere(Vector3.new(0, 500, 0), 1).length !== 0) {
+			throw new Error('a sphere in open air found something');
+		}
+
+		const swept = workspace.SphereCast(Vector3.new(0, 0, 0), 1, Vector3.new(70, 0, 0));
+		if (names(swept).indexOf('Far') < 0) throw new Error('the sweep missed Far: ' + names(swept));
+
+		const blocks = workspace.BlockCast(
+			CFrame.new(0, 0, 0), Vector3.new(2, 2, 2), Vector3.new(70, 0, 0)
+		);
+		if (names(blocks).indexOf('Far') < 0) throw new Error('the block sweep missed Far');
+
+		const params = RaycastParams.new();
+		params.MaxParts = 1;
+		if (params.MaxParts !== 1) throw new Error('MaxParts did not round-trip');
+		const capped = workspace.OverlapSphere(Vector3.new(0, 0, 0), 5, params);
+		if (capped.length !== 1) throw new Error('the cap did not take: ' + capped.length);
+	)");
+
+	// Refused rather than clamped, exactly as the Luau half refuses it.
+	CHECK_FALSE(runtime->Run("RaycastParams.new().MaxParts = 0;"));
+}
+
+TEST_CASE("a javascript hit reports the surface it touched", "[scripting][raycast][js]") {
+	// **`engine.d.ts` has declared `RaycastResult.Material` since the file
+	// existed and this half never set it**, so a TypeScript author reading it
+	// typechecked and got `undefined` with nothing anywhere saying the two
+	// disagreed. The Luau half has always set it; this holds them together.
+	RegisterClasses();
+	Store store("script_test");
+	engine::physics::RegisterPhysicsComponents();
+	engine::physics::PreparePhysicsWorld(store);
+
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	MustRun(*runtime, R"(
+		const wall = Instance.new('Part');
+		wall.Anchored = true;
+		wall.Size = Vector3.new(10, 10, 1);
+		wall.Position = Vector3.new(0, 0, -10);
+		wall.Parent = workspace;
+	)");
+
+	engine::physics::SyncBroadphase(store);
+
+	MustRun(*runtime, R"(
+		const hit = workspace.Raycast(Vector3.new(0, 0, 0), Vector3.new(0, 0, -50));
+		if (hit === null) throw new Error('the ray found nothing');
+
+		// A part nobody gave a surface reads back an empty string, which is the
+		// same nothing an unregistered name has always meant. The field being
+		// present at all is what this case is for.
+		if (typeof hit.Material !== 'string') throw new Error('Material was ' + typeof hit.Material);
+	)");
+}
+
 // --- the surface camera -----------------------------------------------------
 
 TEST_CASE("SurfaceSize turns a camera into one that renders to a texture", "[scripting][surface]") {

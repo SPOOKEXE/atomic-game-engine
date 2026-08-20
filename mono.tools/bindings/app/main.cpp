@@ -994,6 +994,13 @@ end
 
 declare extern type RaycastParams with
 	CollisionGroup: string
+
+	-- The most entities an overlap or a cast will report. Ignored by `Raycast`,
+	-- which reports one hit or none.
+	--
+	-- A result exactly this long may have been truncated, which is the author's
+	-- own instruction rather than a silent loss. Clamped to 65536.
+	MaxParts: number
 end
 
 declare RaycastParams: {
@@ -2159,6 +2166,36 @@ declare task: {
 			// `PropertyDescriptor` to carry which class a reference points at,
 			// which is a change to `ecs` rather than to this generator.
 			if (name == "Workspace") {
+				// **Emitted here rather than in the hand-written block above
+				// because they hang off a *class*.** `RaycastParams` is a global
+				// and lives in the literal; these are methods on `Workspace`,
+				// and the loop that writes a class's members is this one.
+				//
+				// The volume queries answer with an array of instances and no
+				// hit information, which is what `physics::OverlapBox` and the
+				// two casts return: there is no contact point for a volume test,
+				// so a result carrying `Position` would carry an invented one.
+				out << "\tfunction OverlapBox(self, centre: Vector3, size: Vector3, "
+					   "params: RaycastParams?): { Instance }\n";
+				out << "\tfunction OverlapSphere(self, centre: Vector3, radius: number, "
+					   "params: RaycastParams?): { Instance }\n";
+				out << "\tfunction BlockCast(self, from: CFrame, size: Vector3, motion: Vector3, "
+					   "params: RaycastParams?): { Instance }\n";
+				out << "\tfunction SphereCast(self, from: Vector3, radius: number, motion: Vector3, "
+					   "params: RaycastParams?): { Instance }\n";
+
+				// The portal cast has the same result shape as `Raycast`, and
+				// the two are written out separately because Luau has no way to
+				// name an anonymous table type once.
+				out << "\tfunction RaycastThroughPortals(self, origin: Vector3, direction: Vector3, "
+					   "params: RaycastParams?): {\n";
+				out << "\t\tInstance: Instance,\n";
+				out << "\t\tPosition: Vector3,\n";
+				out << "\t\tNormal: Vector3,\n";
+				out << "\t\tDistance: number,\n";
+				out << "\t\tMaterial: string,\n";
+				out << "\t}?\n";
+
 				out << "\tfunction Raycast(self, origin: Vector3, direction: Vector3, "
 					   "params: RaycastParams?): {\n";
 				out << "\t\tInstance: Instance,\n";
@@ -2600,6 +2637,13 @@ declare interface FocusLostSignal {
 
 declare interface RaycastParams {
 	CollisionGroup: string;
+
+	// The most entities an overlap or a cast will report. Ignored by `Raycast`,
+	// which reports one hit or none.
+	//
+	// A result exactly this long may have been truncated, which is the author's
+	// own instruction rather than a silent loss. Clamped to 65536.
+	MaxParts: number;
 }
 
 declare const RaycastParams: {
@@ -3434,6 +3478,16 @@ declare const task: {
 			if (name == "Workspace") {
 				out << "\tRaycast(origin: Vector3, direction: Vector3, params?: RaycastParams): "
 					   "RaycastResult | null;\n";
+				out << "\tRaycastThroughPortals(origin: Vector3, direction: Vector3, "
+					   "params?: RaycastParams): RaycastResult | null;\n";
+				out << "\tOverlapBox(centre: Vector3, size: Vector3, params?: RaycastParams): "
+					   "Instance[];\n";
+				out << "\tOverlapSphere(centre: Vector3, radius: number, params?: RaycastParams): "
+					   "Instance[];\n";
+				out << "\tBlockCast(from: CFrame, size: Vector3, motion: Vector3, "
+					   "params?: RaycastParams): Instance[];\n";
+				out << "\tSphereCast(from: Vector3, radius: number, motion: Vector3, "
+					   "params?: RaycastParams): Instance[];\n";
 			}
 
 			out << "}\n\n";

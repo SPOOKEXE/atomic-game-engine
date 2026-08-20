@@ -397,6 +397,13 @@ end
 
 declare extern type RaycastParams with
 	CollisionGroup: string
+
+	-- The most entities an overlap or a cast will report. Ignored by `Raycast`,
+	-- which reports one hit or none.
+	--
+	-- A result exactly this long may have been truncated, which is the author's
+	-- own instruction rather than a silent loss. Clamped to 65536.
+	MaxParts: number
 end
 
 declare RaycastParams: {
@@ -1843,6 +1850,17 @@ declare extern type Workspace extends Service with
 	CurrentCamera: Instance
 	MaxSurfaces: number
 	SurfaceBounces: number
+	function OverlapBox(self, centre: Vector3, size: Vector3, params: RaycastParams?): { Instance }
+	function OverlapSphere(self, centre: Vector3, radius: number, params: RaycastParams?): { Instance }
+	function BlockCast(self, from: CFrame, size: Vector3, motion: Vector3, params: RaycastParams?): { Instance }
+	function SphereCast(self, from: Vector3, radius: number, motion: Vector3, params: RaycastParams?): { Instance }
+	function RaycastThroughPortals(self, origin: Vector3, direction: Vector3, params: RaycastParams?): {
+		Instance: Instance,
+		Position: Vector3,
+		Normal: Vector3,
+		Distance: number,
+		Material: string,
+	}?
 	function Raycast(self, origin: Vector3, direction: Vector3, params: RaycastParams?): {
 		Instance: Instance,
 		Position: Vector3,
