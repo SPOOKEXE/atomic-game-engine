@@ -22,6 +22,7 @@
 #include <engine/world/Universe.hpp>
 
 #include <cstdint>
+#include <discord/Link.hpp>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -40,6 +41,10 @@ namespace cdn {
 
 namespace engine::assets {
 	class GrantKey;
+}
+
+namespace engine::scene {
+	struct CollisionShapes;
 }
 
 namespace server {
@@ -96,6 +101,17 @@ namespace server {
 		// Ticks per second. A world ticks at its own rate; this is the rate the
 		// one world this version hosts runs at.
 		double TickRate = 30.0;
+
+		// Physics steps per second, and snapshots published per second, for the
+		// worlds this program creates itself. Zero follows `TickRate`.
+		//
+		// **Only for the worlds this program creates.** A `.agame` carries a
+		// rate per world and those win, for the reason `TickRate` does not
+		// overwrite them either: a scene authored to solve at 30 should solve
+		// at 30 whoever hosts it. `world::WorldSettings` documents what the two
+		// numbers mean.
+		double PhysicsTickRate = 0.0;
+		double ReplicationTickRate = 0.0;
 
 		// Entities in the placeholder world, until there is a game file to load
 		// one from.
@@ -188,6 +204,22 @@ namespace server {
 		//
 		// @since v0.16
 		std::filesystem::path ProfilePath;
+
+		// Ticks between windowed snapshots of `ProfilePath`, each written beside it
+		// as `<stem>.window<NNNNN><extension>`. Zero writes none.
+		//
+		// **A cumulative writer sampled periodically, not a second collector.**
+		// `FrameGraph::WriteFolded` reads the running total without clearing it, so
+		// two snapshots N ticks apart subtract into exactly that window's folded
+		// stacks - `scripts/flamegraph.py --average` does the subtracting. Nothing
+		// here has to know that; it only has to sample on a schedule.
+		//
+		// Ignored when `ProfilePath` is empty, for the same reason `ProfilePath`
+		// alone turns collection on: a window of a profile nobody asked for is
+		// still a cost with nothing measuring it.
+		//
+		// @since v0.18
+		uint64_t ProfileWindowTicks = 0;
 
 		// Host the world in a universe that permits several. Named worlds are
 		// the unit a supervisor grants and revokes; one is simply the common
@@ -720,6 +752,15 @@ namespace server {
 		// @return `false` when a store was asked for and cannot be served.
 		bool BeginServingContent();
 
+		// Gives one world the collision geometry its colliders name.
+		//
+		// The built-in shapes always, because a `MeshPart` set to `Cube` needs
+		// one before any content exists, and `ContentShapes` when the store has
+		// been read. Called beside `PrepareSimulation`, so every world this
+		// process simulates gets it and the placeholder benchmark world - which
+		// has no physics at all - does not.
+		void InstallCollisionShapes(engine::ecs::Store &store);
+
 		// Builds the relay that answers clients' content routes.
 		//
 		// @return `false` when relay mode was asked for and could not be set up,
@@ -881,6 +922,30 @@ namespace server {
 		// deployed one, which is exactly what §16.6 forbids for the transport.
 		std::unique_ptr<engine::assets::GrantKey> ContentGrantSecret;
 
+		// The collision geometry of every mesh in the content store.
+		//
+		// **Because a headless server has to agree with a client about what a
+		// mesh collides as.** A `Collider` naming a hull resolves through
+		// `scene::CollisionShapes`, and until v0.17 the only thing that ever
+		// filled that table was the client, on the frame an asset arrived. A
+		// server therefore had mesh colliders it could not resolve and every one
+		// of them silently fell back to the part's bound - which reads as a
+		// client and a server disagreeing about where a player is standing.
+		//
+		// **Baked once and merged into each world**, rather than per world: the
+		// hull is quickhull over the model and the table is copied whole by
+		// `SetResource`, so a host of eight worlds would otherwise read its
+		// store eight times. `game::AddCollisionShapesFrom` fills this;
+		// `InstallCollisionShapes` puts it on a world.
+		//
+		// Held by pointer for the reason the origin is - the header stays free
+		// of the geometry types. Null until `BeginServingContent` runs, and null
+		// for ever on a server with no `--content-store`, which then has the
+		// built-in shapes and nothing else.
+		//
+		// @since v0.17
+		std::unique_ptr<engine::scene::CollisionShapes> ContentShapes;
+
 		// One VM per world, while a game file is being hosted.
 		//
 		// **Held here as well as by each world's scheduler**, because the
@@ -898,6 +963,42 @@ namespace server {
 		// from binding a port it has no use for.
 		std::unique_ptr<engine::net::Transport> Socket;
 		std::unique_ptr<engine::replication::Listener> Replication;
+
+		// What Discord is told this server is hosting, or null when nothing is
+		// configured. Off unless `discord.enabled` and `discord.app-id` are
+		// both set, which is every default install.
+		//
+		// @since v0.17
+		std::unique_ptr<discord::Link> DiscordLink;
+
+		// When this process started, as a unix epoch second, for the elapsed
+		// timer. Read once, because `discord::Link` takes monotonic seconds and
+		// Discord wants epoch ones.
+		//
+		// @since v0.17
+		int64_t DiscordStartedUnixSeconds = 0;
+
+		// Makes the link, if the flags asked for one. Called once, from `Run`.
+		//
+		// @since v0.17
+		void StartDiscord();
+
+		// Says what is being hosted, and keeps the connection alive.
+		//
+		// **Beside the control surface rather than in the tick.** A presence
+		// update is not part of the simulation and changes nothing a recorded
+		// run has to reproduce, which is the same argument `ContentService` is
+		// pumped here on.
+		//
+		// @param nowSeconds This process's monotonic clock.
+		// @since v0.17
+		void PumpDiscord(double nowSeconds);
+
+		// What the Discord templates can name, filled from this tick.
+		//
+		// @return The tokens and what they resolve to.
+		// @since v0.17
+		discord::Facts DiscordFacts();
 
 		// The identity `Replication` signs transcripts with, held here because
 		// `Listener::SetIdentity` borrows rather than copies: a `SigningKey` is

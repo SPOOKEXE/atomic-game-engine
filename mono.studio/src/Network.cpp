@@ -30,9 +30,12 @@
 #include <engine/assets/Mesh.hpp>
 #include <engine/assets/Texture.hpp>
 #include <engine/core/Bytes.hpp>
+#include <engine/core/FrameGraph.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/delivery/Client.hpp>
 #include <engine/delivery/Uploader.hpp>
+#include <engine/game/CollisionContent.hpp>
 #include <engine/scene/Materials.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/PublishedCatalogue.hpp>
@@ -190,7 +193,16 @@ namespace studio {
 	void Editor::PumpContent(double frameSeconds) {
 		ContentSeconds += frameSeconds;
 
+		// **Three spans rather than one, because "content costs 0.1 ms in an
+		// idle editor" is not an answer.** The three things under here are a
+		// delivery client polling a socket, a walk over parts waiting for a mesh
+		// to size them against, and an upload queue - and in an editor with
+		// nothing downloading they cost very different amounts for very
+		// different reasons. One bar labelled `content` could only say that the
+		// total was small and non-zero, which is exactly the reading that
+		// prompts somebody to go looking and find nothing.
 		if (ContentClient) {
+			ENGINE_PROFILE_CAT("content.deliver", engine::core::ProfileCategory::Assets);
 			ContentClient->Pump();
 			DrainContent();
 		}
@@ -199,9 +211,13 @@ namespace studio {
 		// already-loaded mesh in a process with no delivery client at all - a
 		// built-in, a duplicate, an undo - and those are exactly the cases the
 		// arrival-driven fit never saw.
-		FitPendingParts();
+		{
+			ENGINE_PROFILE_CAT("content.fit", engine::core::ProfileCategory::Assets);
+			FitPendingParts();
+		}
 
 		if (ContentUploads) {
+			ENGINE_PROFILE_CAT("content.upload", engine::core::ProfileCategory::Assets);
 			ContentUploads->Pump();
 			for (const engine::delivery::UploadOutcome &outcome : ContentUploads->Take()) {
 				if (!outcome.Delivered) {
@@ -369,8 +385,23 @@ namespace studio {
 					// `MeshPart.TrianglesCount` answers in an edited world too -
 					// which is how somebody checks a mesh actually arrived.
 					const auto triangles = static_cast<uint32_t>(mesh.Indices.size() / 3);
-					EachOpenWorld([&name, triangles, &sheets](engine::ecs::Store &store) {
+
+					// **The hull and the soup, baked once here rather than once
+					// per world.** Quickhull over a model is not free and the
+					// answer is a function of the mesh alone, so four viewports
+					// on four worlds would otherwise run it four times for one
+					// arrival.
+					engine::scene::CollisionShapes arrived;
+					engine::game::AddCollisionShapes(arrived, name, mesh);
+
+					// **Kept as well as given out, because a world can arrive
+					// after a mesh does** - the same argument the mesh facts
+					// above make, and `PrepareWorld` is where it is spent.
+					engine::game::MergeCollisionShapes(ContentShapes, arrived);
+
+					EachOpenWorld([&name, triangles, &sheets, &arrived](engine::ecs::Store &store) {
 						engine::scene::RecordMesh(store, name, triangles, sheets);
+						engine::game::MergeCollisionShapes(store, arrived);
 					});
 
 					// **Kept, because a world can arrive after a mesh does.**
@@ -395,12 +426,10 @@ namespace studio {
 				// **Only what a runtime can read.** GLSL routes to this kind too
 				// - what somebody publishes is what they wrote - and
 				// `IsRuntimeReadable` is what says it has not been baked yet.
-				// TODO(render-pipeline): `Renderer.AddShader(name, asset->Bytes)`
-				// went here, inside this condition. The delivery is kept and
-				// still counted, because `AssetKind::Shader` is part of the asset
-				// pipeline rather than the render one - shaders publish, fetch
-				// and arrive exactly as before. What is missing is the renderer
-				// end: something has to take the bytes and let a node name them.
+				// TODO(shader-assets): register baked modules in the graph shader
+				// store with their stage metadata. `Renderer::AddShader` is only the
+				// material fragment-variant path and cannot safely accept compute or
+				// vertex modules routed through this common asset kind.
 				if (engine::assets::IsRuntimeReadable(asset->Name)) {
 					ContentShaders++;
 				}

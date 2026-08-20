@@ -28,6 +28,8 @@
 
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
+#include <functional>
 #include <imgui.h>
 #include <nodegraph/Demo.hpp>
 #include <nodegraph/Evaluate.hpp>
@@ -37,6 +39,7 @@
 #include <nodegraph/Types.hpp>
 #include <string>
 #include <studio/Editor.hpp>
+#include <studio/RenderPipelineGraph.hpp>
 #include <thread>
 #include <vector>
 
@@ -54,6 +57,8 @@ namespace {
 
 			ImGuiIO &io = ImGui::GetIO();
 			io.DisplaySize = ImVec2(1280.0f, 720.0f);
+			io.DisplayFramebufferScale = ImVec2(1.0f, 1.0f);
+			io.DeltaTime = 1.0f / 60.0f;
 			io.IniFilename = nullptr;
 			io.LogFilename = nullptr;
 			io.Fonts->AddFontDefault();
@@ -125,6 +130,62 @@ namespace {
 		}
 		return false;
 	}
+}
+
+TEST_CASE("a hovered render node submits its retained preview texture", "[studio][nodegraph][preview]") {
+	Context context;
+	studio::RegisterRenderPipelineNodeTypes();
+
+	nodegraph::Graph graph;
+	const nodegraph::NodeId shadow = graph.Add("render.pass.shadow", 60.0f, 60.0f);
+	REQUIRE(shadow != nodegraph::NO_NODE);
+
+	nodegraph::Evaluator evaluator;
+	evaluator.Run(graph);
+	nodegraph::Canvas canvas;
+	canvas.Observe(&evaluator);
+	void *const retainedTexture = reinterpret_cast<void *>(uintptr_t{0x1234});
+	size_t previewRequests = 0;
+	canvas.Images([&](uint64_t, const std::function<bool(nodegraph::PreviewImage &)> &) {
+		previewRequests++;
+		return retainedTexture;
+	});
+
+	for (int frame = 0; frame < 3; frame++) {
+		ImGuiIO &io = ImGui::GetIO();
+		// The point is inside the shadow node's preview rectangle. The first
+		// frame establishes the window; the following frames exercise hover.
+		io.AddMousePosEvent(180.0f, 210.0f);
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos(ImVec2(20.0f, 20.0f));
+		ImGui::SetNextWindowSize(ImVec2(900.0f, 600.0f));
+		if (ImGui::Begin(
+				"render preview canvas",
+				nullptr,
+				ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings |
+					ImGuiWindowFlags_NoScrollbar
+			)) {
+			canvas.Draw(graph);
+		}
+		ImGui::End();
+		ImGui::Render();
+	}
+
+	CHECK(previewRequests >= 2);
+	bool submitted = false;
+	const ImTextureID expected = reinterpret_cast<ImTextureID>(retainedTexture);
+	const ImDrawData *drawData = ImGui::GetDrawData();
+	REQUIRE(drawData != nullptr);
+	for (int list = 0; list < drawData->CmdListsCount; list++) {
+		for (const ImDrawCmd &command : drawData->CmdLists[list]->CmdBuffer) {
+			// Font commands carry an ImTextureData that a device backend has not
+			// uploaded in this device-free suite. Read only user texture commands,
+			// whose direct id is exactly what the SDL GPU backend later receives.
+			submitted =
+				submitted || (command.TexRef._TexData == nullptr && command.TexRef._TexID == expected);
+		}
+	}
+	CHECK(submitted);
 }
 
 // --- pixels -------------------------------------------------------------------

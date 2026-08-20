@@ -1,6 +1,7 @@
 #include <engine/core/Flags.hpp>
 #include <engine/core/Log.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <optional>
 #include <server/Settings.hpp>
@@ -17,6 +18,16 @@ namespace server {
 				engine::core::FlagTableBuilder built;
 
 				built.Number("server.tick-rate", defaults.TickRate, "Ticks per second");
+				built.Number(
+					"server.physics-tick-rate",
+					defaults.PhysicsTickRate,
+					"Physics steps per second, or 0 to follow the tick rate"
+				);
+				built.Number(
+					"server.replication-tick-rate",
+					defaults.ReplicationTickRate,
+					"Snapshots published per second, or 0 to publish every tick"
+				);
 				built.Integer("server.entities", defaults.Entities, "Entities in the placeholder world");
 				built.Boolean(
 					"server.unpaced", defaults.Unpaced, "Tick back to back instead of pacing to the tick rate"
@@ -82,6 +93,11 @@ namespace server {
 					"server.profile-out",
 					defaults.ProfilePath.string(),
 					"Fold this run's frame graph into a .folded file for scripts/flamegraph.py"
+				);
+				built.Integer(
+					"server.profile-window",
+					static_cast<int64_t>(defaults.ProfileWindowTicks),
+					"With server.profile-out, also snapshot every N ticks for flamegraph.py --average"
 				);
 
 				built.Integer(
@@ -160,6 +176,8 @@ namespace server {
 		using engine::core::Flag;
 
 		options.TickRate = Flag("server.tick-rate").Number();
+		options.PhysicsTickRate = Flag("server.physics-tick-rate").Number();
+		options.ReplicationTickRate = Flag("server.replication-tick-rate").Number();
 		options.Entities = static_cast<uint32_t>(Flag("server.entities").Integer());
 		options.Unpaced = Flag("server.unpaced").Boolean();
 		options.Chatter = Flag("server.chatter").Boolean();
@@ -190,6 +208,8 @@ namespace server {
 		options.IdentityKey = std::string(Flag("server.identity-key").Text());
 
 		options.ProfilePath = std::filesystem::path(Flag("server.profile-out").Text());
+		options.ProfileWindowTicks =
+			static_cast<uint64_t>(std::max<int64_t>(0, Flag("server.profile-window").Integer()));
 
 		options.ControlPort = static_cast<int>(Flag("server.control-port").Integer());
 

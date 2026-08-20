@@ -4,6 +4,7 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/gui/Services.hpp>
 #include <engine/physics/Characters.hpp>
+#include <engine/physics/Clock.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
@@ -160,12 +161,20 @@ namespace server {
 		}
 	}
 
-	void PrepareSimulation(Store &store, Scheduler &scheduler) {
+	void PrepareSimulation(Store &store, Scheduler &scheduler, double physicsTickRate) {
 		// The cell size is measured rather than authored, for the reason the
 		// studio gives: `PreparePhysicsWorld` with no size means "measure it",
 		// and a constant tuned now against a synthetic slab would be the wrong
 		// number for whichever world actually gains a tick.
 		engine::physics::PreparePhysicsWorld(store);
+
+		// **The world's rate, pushed down rather than read up.** `physics` sits
+		// above `world` and could name `WorldSettings`, but a physics library
+		// that knows what a universe world is has stopped being a physics
+		// library - so the host that owns both hands the number over, exactly
+		// as it does for the cell size.
+		engine::physics::SetPhysicsTickRate(store, physicsTickRate);
+
 		engine::physics::RegisterPhysicsSystems(scheduler);
 
 		// Non-overwriting, so a world that authored its own vector - under

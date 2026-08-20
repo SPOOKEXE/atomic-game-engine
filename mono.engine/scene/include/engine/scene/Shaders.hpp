@@ -147,4 +147,44 @@ namespace engine::scene {
 	// @param out   Filled with the names, sorted by id. Cleared first.
 	// @return How many distinct shaders are named.
 	size_t DemandedShaders(ecs::Store &store, std::vector<core::Name> &out);
+
+	// Which fragment shader draws the final frame, replacing the engine's
+	// own tonemap.
+	//
+	// **A resource, because there is one screen per world** - `ActiveCamera`'s
+	// reason. `render::Renderer` resolves the name the same two ways any
+	// other shader here is resolved: a `ShaderScript` in the world, else a
+	// built-in, else the engine's own ACES tonemap is left running.
+	//
+	// **Written against `tonemap.frag`'s contract, not `opaque.frag`'s**: one
+	// sampler holding the scene's still-linear, still-HDR colour, no bound
+	// uniform buffer, one `vec4` out. A shader here decides the whole look of
+	// the frame - grading, a vignette, a pixelation, or simply a different
+	// tonemap curve - because it *is* what turns the lit scene into the
+	// image a player sees, not an effect composited over one already
+	// finished.
+	//
+	// @since v0.18
+	struct PostProcessing {
+		// Invalid leaves the engine's own tonemap running.
+		core::Name Shader;
+	};
+
+	// The name `PostProcessing::Shader` holds, or an invalid one.
+	//
+	// @param store The world.
+	// @return The name.
+	// @since v0.18
+	core::Name PostProcessShaderOf(const ecs::Store &store);
+
+	// Sets which shader draws the final frame.
+	//
+	// **Creates the resource on first use**, `MaterialsOf`'s own reason: a
+	// world that has never called this has nothing to create it in advance.
+	//
+	// @param store The world.
+	// @param name  The shader's name, or an invalid one to go back to the
+	//        engine's own tonemap.
+	// @since v0.18
+	void SetPostProcessShader(ecs::Store &store, const core::Name &name);
 }

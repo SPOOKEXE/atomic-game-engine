@@ -35,6 +35,7 @@ namespace client {
 	using engine::scene::AlphaMode;
 	using engine::scene::Bounds;
 	using engine::scene::DrawInstance;
+	using engine::scene::LocalTransparency;
 	using engine::scene::SurfaceAppearance;
 	using engine::scene::Tags;
 	using engine::scene::Transform;
@@ -145,6 +146,16 @@ namespace client {
 					const SurfaceAppearance *appearance = store.Get<SurfaceAppearance>(entity);
 					const Tags *tags = store.Get<Tags>(entity);
 
+					// **Local, and never over the wire.** A replica's own copy
+					// of `scene::LocalTransparency` is this machine's alone -
+					// nothing arrived to fill the row, and nothing sends what a
+					// script or a camera pass writes into it later. `Get`
+					// rather than a required column, for the reason `appearance`
+					// and `tags` already are here: an optional join is exactly
+					// what a plain `Each` can express and a batched parallel
+					// walk cannot.
+					const LocalTransparency *local = store.Get<LocalTransparency>(entity);
+
 					// Every replicated visual field, through the builder both
 					// collectors share - see `scene::MakeDrawInstance`. The
 					// optional components stay optional here: a replicated row
@@ -152,7 +163,7 @@ namespace client {
 					// from the local collector that made these two drift.
 					drawList->Instances.push_back(
 						engine::scene::MakeDrawInstance(
-							interpolated.value_or(transform.Frame), bounds, visual, appearance, tags
+							interpolated.value_or(transform.Frame), bounds, visual, appearance, tags, local
 						)
 					);
 				}

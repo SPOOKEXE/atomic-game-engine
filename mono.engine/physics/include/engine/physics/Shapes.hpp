@@ -36,13 +36,110 @@
 //
 // @tier L8 · shared
 
+#include <engine/collision/ConvexHull.hpp>
+#include <engine/collision/TriangleMesh.hpp>
 #include <engine/core/types/AABB.hpp>
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/ecs/Entity.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Enums.hpp>
 
 namespace engine::physics {
+
+	// One collider, placed in the world.
+	//
+	// Copied out of `scene::Collider` and `scene::Transform` once per pair
+	// rather than held by reference, because a pair function reads the frame
+	// eight or ten times and a store lookup per read is the cost an index
+	// exists to remove.
+	struct ShapeInstance {
+		ShapeInstance() = default;
+
+		// The only way in, and deliberately not an aggregate: `Axis` is derived
+		// from `Frame` and the two must not be able to disagree.
+		ShapeInstance(const core::CFrame &frame, const core::Vector3 &extent, scene::ShapeKind shape);
+
+		// The same, for a shape whose geometry is baked rather than described by
+		// an extent.
+		//
+		// **The kind and the pointer are given together and are checked against
+		// each other**, because the failure of getting them apart is silent: a
+		// `Hull` with no hull collides as its extent, which is a crate-sized box
+		// where a rock should be. The constructor demotes a baked kind with no
+		// geometry to `Box`, so a shape whose name did not resolve collides as
+		// its bound - see `scene::Collider::Geometry`, which states that as the
+		// behaviour rather than as a fallback.
+		ShapeInstance(
+			const core::CFrame &frame,
+			const core::Vector3 &extent,
+			scene::ShapeKind shape,
+			const collision::ConvexHull *hull,
+			const collision::TriangleMesh *mesh
+		);
+
+		// Where it is and how it is turned, in world space.
+		//
+		// **Read-only once built.** Assigning to it leaves `Axis` describing the
+		// old rotation; build a new instance instead.
+		core::CFrame Frame;
+
+		// Its extent, read according to `Shape`. The table at the top of
+		// `Shapes.hpp` is the one definition of what each component means.
+		core::Vector3 Extent;
+
+		// The frame's X, Y and Z as world directions, resolved once here.
+		//
+		// **The whole reason this type is not three plain fields.** `CFrame`
+		// holds a quaternion, so every one of these costs a rotation to derive
+		// - and every question this header answers is a dot product against one
+		// of them. A pair function asks fifteen to twenty-three times over the
+		// same two shapes, and deriving them per question made box-box re-rotate
+		// the same six vectors ninety times.
+		core::Vector3 Axis[3];
+
+		// Which shape `Extent` describes.
+		scene::ShapeKind Shape = scene::ShapeKind::Box;
+
+		// The baked geometry, for `ShapeKind::Hull` and `ShapeKind::Mesh`.
+		//
+		// **Borrowed and never owned.** It points into the world's
+		// `scene::CollisionShapes`, which outlives every pair function by a wide
+		// margin - a `ShapeInstance` is built inside one step and read inside
+		// the same one. A copy would be a hull copied per pair per tick, which
+		// is exactly the cost this whole type exists to avoid.
+		//
+		// **Never both, and never set for the other three kinds.** The
+		// constructor is what holds that; a switch on `Shape` is what reads it.
+		//@{
+		const collision::ConvexHull *Hull = nullptr;
+		const collision::TriangleMesh *Mesh = nullptr;
+		//@}
+	};
+
+	// One collider of a world, placed and resolved, as the broad phase left it.
+	//
+	// **Filled by `SyncBroadphase` beside the proxy it indexes, and read by the
+	// narrow phase by that proxy's own index.** The narrow phase used to resolve
+	// a collider once per *pair* it appeared in - about twenty-five thousand
+	// `Store::Get` calls for ten thousand colliders - when the sync had already
+	// read the same `Transform` and `Collider` for every one of them a few lines
+	// earlier. Carrying the answer forward removes every store lookup from the
+	// step, which is what lets it be dispatched: measured on ten thousand boxes,
+	// the same pair loop went from 89.5 ms of worker time to 3.67 ms once the
+	// lookups were out of it.
+	//
+	// @since v0.17
+	struct PlacedCollider {
+		// The collider, in world space as of the last sync.
+		ShapeInstance Shape;
+
+		// Whether it reports without pushing.
+		//
+		// Here rather than looked up again, because it is one byte the sync had
+		// in hand and a lookup the narrow phase would otherwise have to make.
+		bool Trigger = false;
+	};
 
 	// The local half-extent of the smallest axis-aligned box containing a shape.
 	//

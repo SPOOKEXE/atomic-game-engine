@@ -16,6 +16,7 @@
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
+#include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/Enums.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
@@ -1129,9 +1130,16 @@ TEST_CASE("a disabled portal is a solid pane and retains its link", "[scene][sur
 		portal.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
 	portal.World.Set<Transform>(far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f})});
 	portal.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
-	portal.World.Set<engine::scene::Collider>(
-		portal.Pane, engine::scene::Collider{Vector3{8.0f, 4.5f, 0.2f}}
-	);
+	// **Built and then written to, rather than brace-initialised.** A
+	// `Collider` grew a `Geometry` field at v0.17, and an aggregate initialiser
+	// naming only the extent is a `-Wmissing-field-initializers` error - while
+	// filling the rest with `{}` would replace `Layer` and `Mask` with
+	// default-constructed masks, which `spatial::LayerMask` documents as *empty
+	// and matching nothing*. That compiles, passes, and quietly stops the pane
+	// colliding.
+	engine::scene::Collider pane;
+	pane.Extent = Vector3{8.0f, 4.5f, 0.2f};
+	portal.World.Set<engine::scene::Collider>(portal.Pane, pane);
 
 	portal.World.Set<engine::scene::Portal>(portal.Reflection, engine::scene::Portal{far});
 	REQUIRE(AimSurfaceCameras(portal.World) == 1);
@@ -1381,7 +1389,7 @@ TEST_CASE("a body standing in a portal is cut and drawn on the far side", "[scen
 	// list walk holds the row the original is in, which is what lets it cut the
 	// body as well as copy it - see `CutAndCloneSeams`. A row is a frame and a
 	// box, so a test builds one directly.
-	const auto row = [](const Vector3 &at, const Vector3 &half, int8_t surface) {
+	const auto row = [](const Vector3 &at, const Vector3 &half, int16_t surface) {
 		engine::scene::DrawInstance instance;
 		instance.Frame = CFrame(at);
 		instance.HalfExtent = half;
@@ -1582,9 +1590,9 @@ TEST_CASE("a portal's pane stops solving contacts, so a body can be in it", "[sc
 	mirror.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
 
 	// The pane collides, which is what a part built by `MakePart` does.
-	mirror.World.Set<engine::scene::Collider>(
-		mirror.Pane, engine::scene::Collider{Vector3{8.0f, 4.5f, 0.2f}}
-	);
+	engine::scene::Collider pane;
+	pane.Extent = Vector3{8.0f, 4.5f, 0.2f};
+	mirror.World.Set<engine::scene::Collider>(mirror.Pane, pane);
 	REQUIRE_FALSE(mirror.World.Get<engine::scene::Collider>(mirror.Pane)->Trigger);
 
 	// Not a portal yet, so it is a mirror - and a mirror is a wall. Nothing is
@@ -1623,7 +1631,8 @@ TEST_CASE("a pane already authored passable is left alone", "[scene][surfacecame
 	mirror.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
 	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
 
-	engine::scene::Collider passable{Vector3{8.0f, 4.5f, 0.2f}};
+	engine::scene::Collider passable;
+	passable.Extent = Vector3{8.0f, 4.5f, 0.2f};
 	passable.Trigger = true;
 	mirror.World.Set<engine::scene::Collider>(mirror.Pane, passable);
 
@@ -2172,6 +2181,20 @@ TEST_CASE("nothing larger than a hole is drawn through it", "[scene][surfacecame
 		narrow, through, CFrame(Vector3{0.0f, 0.0f, -0.2f}), Vector3{1.0f, 2.0f, 1.0f}
 	);
 	CHECK(cut.Fits);
+
+	// Contact with the rim is still inside the aperture. The character fixture
+	// below puts its feet exactly here, and rejecting equality drops only those
+	// limbs while the rest of the rig crosses normally.
+	const engine::scene::SeamCut touching = engine::scene::CutOfSeam(
+		narrow, through, CFrame(Vector3{0.0f, -0.5f, -0.2f}), Vector3{1.0f, 2.0f, 1.0f}
+	);
+	CHECK(touching.Fits);
+
+	// Tolerance at the rim must not turn an actual overhang into a valid cut.
+	const engine::scene::SeamCut overhanging = engine::scene::CutOfSeam(
+		narrow, through, CFrame(Vector3{0.0f, -0.51f, -0.2f}), Vector3{1.0f, 2.0f, 1.0f}
+	);
+	CHECK_FALSE(overhanging.Fits);
 }
 
 TEST_CASE("the near plane and the clip follow the eye into a hole", "[scene][surfacecameras]") {
@@ -3407,7 +3430,7 @@ namespace {
 
 	// `Renderer.cpp`'s `wouldDescend`: whether one more level would draw
 	// anything at all.
-	bool WouldDescend(std::span<const engine::scene::SurfacePane> panes, const CFrame &viewer, int8_t skip) {
+	bool WouldDescend(std::span<const engine::scene::SurfacePane> panes, const CFrame &viewer, int16_t skip) {
 		for (const engine::scene::SurfacePane &pane : panes) {
 			if (pane.Surface == skip) {
 				continue;
@@ -3633,4 +3656,87 @@ TEST_CASE("a world carries its own mirror depth, and a script sets it", "[scene]
 		store.SetProperty(workspace, engine::core::Name("SurfaceBounces"), &backwards, sizeof(int32_t))
 	);
 	CHECK(engine::scene::SurfaceBouncesOf(store) == ambitious);
+}
+
+TEST_CASE("a world states how many surface panes it draws", "[surfacecameras]") {
+	// **The count, beside the depth, and they answer different questions.**
+	// `SurfaceBounces` is how deep a chain of mirrors resolves; this is how many
+	// panes are drawn at all. A hall of mirrors turns both and a room with one
+	// mirror in it turns neither.
+	//
+	// **Per world rather than per process**, which is `SurfaceBounces`' argument
+	// unchanged: how many mirrors a scene has is a fact about what it was built
+	// out of, and a session-wide knob cannot express it for two worlds at once.
+	Store store("surface_limit_authored");
+	engine::scene::RegisterSceneComponents();
+	engine::scene::RegisterSceneClasses();
+
+	const Entity workspace = engine::scene::InstallServices(store);
+	REQUIRE(workspace != engine::ecs::NULL_ENTITY);
+
+	// A world that has never said anything gets the default, which is what makes
+	// every scene authored before this go on drawing - and it is fifty rather
+	// than the sixteen that used to be compiled in.
+	CHECK(engine::scene::SurfaceLimitOf(store) == engine::scene::DEFAULT_SURFACE_LIMIT);
+	CHECK(engine::scene::DEFAULT_SURFACE_LIMIT == 50);
+
+	// The declared type is checked and not only the round-trip, for
+	// `SurfaceBounces`' reason: raw bytes through `SetProperty` succeed whatever
+	// the descriptor claims, so a wrongly declared property passes every test
+	// until the first script assigns to it.
+	bool declared = false;
+	for (const engine::ecs::PropertyDescriptor &property : store.PropertiesOf(workspace)) {
+		if (property.Name == engine::core::Name("MaxSurfaces")) {
+			declared = true;
+			CHECK(property.Type == engine::ecs::PropertyType::Int32);
+		}
+	}
+	CHECK(declared);
+
+	int32_t read = -1;
+	REQUIRE(store.GetProperty(workspace, engine::core::Name("MaxSurfaces"), &read, sizeof(read)));
+	CHECK(read == engine::scene::DEFAULT_SURFACE_LIMIT);
+
+	const int32_t eight = 8;
+	REQUIRE(store.SetProperty(workspace, engine::core::Name("MaxSurfaces"), &eight, sizeof(eight)));
+	CHECK(engine::scene::SurfaceLimitOf(store) == eight);
+
+	REQUIRE(store.GetProperty(workspace, engine::core::Name("MaxSurfaces"), &read, sizeof(read)));
+	CHECK(read == eight);
+
+	// **Zero is allowed and means none**, which is not the same statement as
+	// "use the default" - a low-detail mode has to be able to switch mirrors off
+	// without the world reading as though it never had an opinion.
+	const int32_t none = 0;
+	REQUIRE(store.SetProperty(workspace, engine::core::Name("MaxSurfaces"), &none, sizeof(none)));
+	CHECK(engine::scene::SurfaceLimitOf(store) == 0);
+
+	// **A number above what the renderer has storage for is accepted here and
+	// clamped there**, matching the depth: this module cannot name
+	// `scene::MAX_SURFACES` as a *policy* limit, only as the bound on its own
+	// arrays, and a world that asks for more than a device will allocate is
+	// drawn at what it can rather than refused.
+	const int32_t ambitious = 4096;
+	REQUIRE(store.SetProperty(workspace, engine::core::Name("MaxSurfaces"), &ambitious, sizeof(int32_t)));
+	CHECK(engine::scene::SurfaceLimitOf(store) == ambitious);
+
+	// Below zero is the one value refused, because it cannot be a mistake about
+	// the ceiling - it is a mistake about what the word means.
+	const int32_t backwards = -1;
+	CHECK_FALSE(store.SetProperty(workspace, engine::core::Name("MaxSurfaces"), &backwards, sizeof(int32_t)));
+	CHECK(engine::scene::SurfaceLimitOf(store) == ambitious);
+}
+
+TEST_CASE("a surface index is wide enough for the pane budget", "[surfacecameras]") {
+	// **The ceiling used to live in the smallest field in the engine**, which is
+	// the thing v0.17 changed: `Visual::Surface` was an `int8_t`, so a hundred
+	// and twenty-seven was a hard limit nothing in the API said anything about.
+	// This case is what stops it going back.
+	CHECK(sizeof(engine::scene::Visual::Surface) >= sizeof(int16_t));
+	CHECK(sizeof(engine::scene::DrawInstance::Surface) >= sizeof(int16_t));
+	CHECK(sizeof(engine::scene::SurfaceCamera::Surface) >= sizeof(int16_t));
+
+	// And the storage bound is comfortably above the default, so a world that
+	// says nothing is never clamped.
+	CHECK(engine::scene::MAX_SURFACES > engine::scene::DEFAULT_SURFACE_LIMIT);
 }

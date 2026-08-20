@@ -172,6 +172,18 @@ namespace engine::script {
 		// `guiObject.MouseMoved` - it moved while over the element.
 		GuiMouseMoved,
 
+		// `uiDragDetector.DragStart`, `.DragContinue` and `.DragEnd`.
+		//
+		// **The subject is the *detector* and not the element it moves**, which
+		// is Roblox's arrangement and is what lets two detectors on one panel
+		// mean two gestures. A script connects to the modifier it authored, and
+		// the element it drags is that modifier's parent.
+		//
+		// @since v0.18
+		GuiDragBegan,
+		GuiDragContinue,
+		GuiDragEnded,
+
 		// `textBox.Focused` - a press landed on it and the keyboard is now its.
 		//
 		// **The only pair here that is about the keyboard rather than the

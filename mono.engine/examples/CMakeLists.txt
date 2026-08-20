@@ -143,28 +143,66 @@ foreach(scene IN LISTS example_scenes)
 	list(APPEND staged_scenes "${MONO_STAGE_ROOT}/assets/examples/${scene_name}")
 endforeach()
 
-# The Luau *libraries*, staged with their directory structure intact.
+# The Luau modules a scene owns, staged under that scene's own name.
+#
+# **One copy in the repository and a copy per scene in the stage**, which is the
+# split that keeps both halves honest. `MagicCore` is byte-identical to the Rojo
+# project it came from and three scenes use it, so three directories in `lib/`
+# would be three things to keep in step and they would stop agreeing the first
+# time one was edited in a hurry. What the *runtime* wants is the opposite: a
+# scene's modules under that scene's `Script`, so a world that never opens
+# `Magic.luau` has no trace of `MagicCore` in it and a brand-new game's tree is
+# empty rather than carrying a demo's.
+#
+# These used to stage into one `assets/lib` mirrored into every world's
+# `ReplicatedStorage`, which made them a property of the host rather than of the
+# scene - see `examples::MountSceneLibraries`.
 #
 # **Recursive, and the tree shape is the point.** `script::MountModuleTree`
-# mirrors a directory into ModuleScript instances following Rojo's rule, so
-# `lib/MagicCore/Presets/init.luau` has to still be inside `Presets` when it
-# lands - flattening the way the scene glob does would leave `require` unable to
-# find a single sibling.
-file(GLOB_RECURSE example_libraries CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/lib/*.luau")
+# mirrors a directory into `ModuleScript` instances following Rojo's rule, so
+# `MagicCore/Presets/init.luau` has to still be inside `Presets` when it lands -
+# flattening the way the scene glob does would leave `require` unable to find a
+# single sibling.
+#
+# `<scene>/<library>`, one pair per line. A scene that needs no modules is
+# absent, which is every scene but three.
+set(scene_libraries
+	Magic/MagicCore
+	Magic/MagicRuntime
+	Magic/TerrainCore
+	Magic/TerrainRuntime
+	MagicTests/MagicCore
+	MagicTests/MagicTests
+	MagicTests/TerrainCore
+	Libraries/MagicCore
+	Libraries/TerrainCore)
 
-foreach(library IN LISTS example_libraries)
-	file(RELATIVE_PATH library_relative "${CMAKE_CURRENT_SOURCE_DIR}/lib" "${library}")
-	set(library_staged "${MONO_STAGE_ROOT}/assets/lib/${library_relative}")
-	get_filename_component(library_directory "${library_staged}" DIRECTORY)
+foreach(pair IN LISTS scene_libraries)
+	string(REPLACE "/" ";" parts "${pair}")
+	list(GET parts 0 scene_name)
+	list(GET parts 1 library_name)
 
-	add_custom_command(
-		OUTPUT "${library_staged}"
-		COMMAND ${CMAKE_COMMAND} -E make_directory "${library_directory}"
-		COMMAND ${CMAKE_COMMAND} -E copy_if_different "${library}" "${library_staged}"
-		DEPENDS "${library}"
-		COMMENT "Staging example library ${library_relative}"
-		VERBATIM)
-	list(APPEND staged_scenes "${library_staged}")
+	file(GLOB_RECURSE library_files CONFIGURE_DEPENDS
+		"${CMAKE_CURRENT_SOURCE_DIR}/lib/${library_name}/*.luau")
+
+	if(NOT library_files)
+		message(FATAL_ERROR "examples: ${scene_name} names lib/${library_name}, which holds no .luau files")
+	endif()
+
+	foreach(library IN LISTS library_files)
+		file(RELATIVE_PATH library_relative "${CMAKE_CURRENT_SOURCE_DIR}/lib" "${library}")
+		set(library_staged "${MONO_STAGE_ROOT}/assets/examples/${scene_name}/${library_relative}")
+		get_filename_component(library_directory "${library_staged}" DIRECTORY)
+
+		add_custom_command(
+			OUTPUT "${library_staged}"
+			COMMAND ${CMAKE_COMMAND} -E make_directory "${library_directory}"
+			COMMAND ${CMAKE_COMMAND} -E copy_if_different "${library}" "${library_staged}"
+			DEPENDS "${library}"
+			COMMENT "Staging ${scene_name} module ${library_relative}"
+			VERBATIM)
+		list(APPEND staged_scenes "${library_staged}")
+	endforeach()
 endforeach()
 
 if(staged_scenes)

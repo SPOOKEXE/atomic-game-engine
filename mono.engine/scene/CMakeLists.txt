@@ -18,6 +18,13 @@
 # a named type there. L6 is below L7, so the edge goes downward; it buys nothing
 # else and must not start to.
 #
+# `collision` is here for `CollisionShapes`, which is the table a
+# `Collider::Geometry` name resolves through. L5 is below L7, so the edge goes
+# downward, and it is the shortest way geometry can reach a component: the
+# alternative would be `physics` at L8 owning the table, which would put a
+# `server`-tier host that merely wants to *fill* it at L8 too. It buys nothing
+# else - no file reading, no hull building at load time - and must not start to.
+#
 # Deliberately does not depend on: physics, render or world. AGENTS.md in this
 # directory gives the reason for each, and each of them is a convention the tier
 # check cannot catch because they are all `shared` too.
@@ -25,6 +32,7 @@ mono_add_library(scene
 	TIER shared
 	DEPS
 		Engine::core
+		Engine::collision
 		Engine::ecs
 		Engine::spatial
 )

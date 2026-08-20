@@ -34,6 +34,23 @@ namespace engine::ecs {
 
 namespace engine::physics {
 
+	// How many candidate pairs one worker takes at a time.
+	//
+	// **Chosen against the shape of the body**, which `parallel/AGENTS.md`
+	// allows when the work is plainly one side of the crossover: one pair is two
+	// array subscripts and an exact shape test, and the most expensive of the
+	// six pairs - box against cylinder - is 375 nanoseconds on its own. That is
+	// hundreds of times `Jobs::DEFAULT_GRAIN`'s assumption about a cheap index.
+	//
+	// **It could not be dispatched at all until the lookups left.** The body was
+	// two `Store::Get` calls per pair before v0.17, and twenty-four workers
+	// doing that contend rather than share - see the note in `NarrowPhase.cpp`,
+	// which carries the two measurements that led to the pairs carrying their
+	// proxy indices instead.
+	//
+	// @since v0.17
+	inline constexpr size_t NARROW_GRAIN = 256;
+
 	// Intersects every candidate pair and writes the manifolds.
 	//
 	// `Phase::PostSimulation`, after `BroadPhase` and before `Solve`. Clears

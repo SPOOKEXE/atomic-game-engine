@@ -43,6 +43,22 @@ TEST_CASE("the layout sets keep Roblox's order", "[gui][enums]") {
 	Expect<DominantAxis, 2>({"Width", "Height"});
 }
 
+TEST_CASE("the flex sets keep Roblox's order", "[gui][enums]") {
+	// Roblox's `UIFlexAlignment`, `ItemLineAlignment` and `UIFlexMode`, from
+	// the engine reference. All three ride in trivially-copied components, so
+	// the ordinal is the format - the file comment's argument, three more
+	// times.
+	Expect<FlexAlignment, 5>({"None", "Fill", "SpaceAround", "SpaceBetween", "SpaceEvenly"});
+	Expect<ItemLineAlignment, 5>({"Automatic", "Start", "Center", "End", "Stretch"});
+	Expect<FlexMode, 5>({"None", "Grow", "Shrink", "Fill", "Custom"});
+
+	// `Automatic` at zero is what `LineAlignmentFor` leans on when it maps an
+	// alignment ordinal one past it - pinned so a reorder fails here rather
+	// than as every child of every list sliding one alignment over.
+	CHECK(static_cast<int>(ItemLineAlignment::Automatic) == 0);
+	CHECK(static_cast<int>(ItemLineAlignment::Start) == 1);
+}
+
 TEST_CASE("the text sets keep Roblox's order", "[gui][enums]") {
 	Expect<TextXAlignment, 3>({"Left", "Center", "Right"});
 

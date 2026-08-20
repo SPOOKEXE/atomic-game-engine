@@ -22,6 +22,8 @@ using engine::core::Name;
 using engine::core::Vector3;
 using engine::scene::Bounds;
 using engine::scene::DrawInstance;
+using engine::scene::LocalTransparency;
+using engine::scene::MakeDrawInstance;
 using engine::scene::MAX_SURFACES;
 using engine::scene::OrderScene;
 using engine::scene::ScenePlan;
@@ -95,6 +97,34 @@ TEST_CASE("a draw instance is built from scene components without conversion", "
 	CHECK(instance.HalfExtent == bounds.HalfExtent);
 	CHECK(instance.Tint.G == 0.5f);
 	CHECK(instance.Mesh == visual.Mesh);
+}
+
+TEST_CASE("a local override wins over the authored transparency", "[scene][drawinstance]") {
+	Transform transform;
+	Bounds bounds;
+	Visual visual;
+	visual.Transparency = 0.2f;
+
+	SECTION("zero leaves the authored value alone") {
+		LocalTransparency local;
+		local.Value = 0.0f;
+		const DrawInstance instance =
+			MakeDrawInstance(transform.Frame, bounds, visual, nullptr, nullptr, &local);
+		CHECK(instance.Transparency == 0.2f);
+	}
+
+	SECTION("anything else replaces it") {
+		LocalTransparency local;
+		local.Value = 0.9f;
+		const DrawInstance instance =
+			MakeDrawInstance(transform.Frame, bounds, visual, nullptr, nullptr, &local);
+		CHECK(instance.Transparency == 0.9f);
+	}
+
+	SECTION("no row at all is the same as zero") {
+		const DrawInstance instance = MakeDrawInstance(transform.Frame, bounds, visual, nullptr, nullptr);
+		CHECK(instance.Transparency == 0.2f);
+	}
 }
 
 // --- ordering for the transparent pass --------------------------------------
@@ -407,7 +437,7 @@ TEST_CASE("mirrors are grouped by the surface they show", "[scene][drawinstance]
 		INFO("surface " << static_cast<int>(surface));
 
 		for (uint32_t step = 0; step < run.OpaqueCount; step++) {
-			CHECK(instances[order[run.OpaqueFirst + step]].Surface == static_cast<int8_t>(surface));
+			CHECK(instances[order[run.OpaqueFirst + step]].Surface == static_cast<int16_t>(surface));
 		}
 	}
 
@@ -460,7 +490,7 @@ TEST_CASE("shadow casters are partitioned inside each surface run", "[scene][dra
 // renderer's texture budget, not by what a script can express.
 TEST_CASE("a surface index past the cap is dropped", "[scene][drawinstance]") {
 	std::vector<DrawInstance> instances(2);
-	instances[0].Surface = static_cast<int8_t>(MAX_SURFACES);
+	instances[0].Surface = static_cast<int16_t>(MAX_SURFACES);
 	instances[1].Surface = 0;
 
 	std::vector<uint32_t> order;
@@ -567,6 +597,12 @@ TEST_CASE("every field a surface can see moves the signature", "[scene][drawinst
 	CHECK(moved([](DrawInstance &i) { i.Transparency = 0.5f; }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.Mesh = Name("drawinstance_test.Other"); }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.Texture = Name("drawinstance_test.Steel"); }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.NormalMap = Name("drawinstance_test.Normal"); }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.RoughnessMap = Name("drawinstance_test.Roughness"); }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.OcclusionMap = Name("drawinstance_test.Occlusion"); }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.HeightMap = Name("drawinstance_test.Height"); }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.EmissiveMap = Name("drawinstance_test.Emissive"); }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.Shader = Name("drawinstance_test.Shader"); }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.Surface = 0; }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.CastShadow = false; }) != unchanged);
 
@@ -574,6 +610,27 @@ TEST_CASE("every field a surface can see moves the signature", "[scene][drawinst
 	// that a position-only hash would miss entirely - and a mirror on a
 	// turntable is exactly the case that would expose it.
 	CHECK(moved([](DrawInstance &i) { i.Frame = CFrame::Angles(0.0f, 1.0f, 0.0f); }) != unchanged);
+}
+
+TEST_CASE("a draw instance carries every authored material map", "[scene][drawinstance]") {
+	engine::scene::SurfaceAppearance appearance;
+	appearance.ColourMap = Name("drawinstance_test.Colour");
+	appearance.NormalMap = Name("drawinstance_test.Normal");
+	appearance.RoughnessMap = Name("drawinstance_test.Roughness");
+	appearance.OcclusionMap = Name("drawinstance_test.Occlusion");
+	appearance.HeightMap = Name("drawinstance_test.Height");
+	appearance.EmissiveMap = Name("drawinstance_test.Emissive");
+	appearance.Shader = Name("drawinstance_test.Shader");
+
+	const DrawInstance instance =
+		engine::scene::MakeDrawInstance(CFrame{}, Bounds{}, Visual{}, &appearance, nullptr);
+	CHECK(instance.Texture == appearance.ColourMap);
+	CHECK(instance.NormalMap == appearance.NormalMap);
+	CHECK(instance.RoughnessMap == appearance.RoughnessMap);
+	CHECK(instance.OcclusionMap == appearance.OcclusionMap);
+	CHECK(instance.HeightMap == appearance.HeightMap);
+	CHECK(instance.EmissiveMap == appearance.EmissiveMap);
+	CHECK(instance.Shader == appearance.Shader);
 }
 
 TEST_CASE("a signature depends on how many instances there are and their order", "[scene][drawinstance]") {

@@ -159,7 +159,7 @@ namespace studio {
 			});
 		});
 
-		UniverseSelected = false;
+		ClearRootSelection();
 		SelectionWorld = entry.World;
 		Selection = std::move(found);
 	}

@@ -21,6 +21,7 @@
 
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/physics/Shapes.hpp>
 #include <engine/scene/Enums.hpp>
 
 #include <cmath>
@@ -29,42 +30,12 @@
 
 namespace engine::physics {
 
-	// One collider, placed in the world.
-	//
-	// Copied out of `scene::Collider` and `scene::Transform` once per pair
-	// rather than held by reference, because a pair function reads the frame
-	// eight or ten times and a store lookup per read is the cost an index
-	// exists to remove.
-	struct ShapeInstance {
-		ShapeInstance() = default;
-
-		// The only way in, and deliberately not an aggregate: `Axis` is derived
-		// from `Frame` and the two must not be able to disagree.
-		ShapeInstance(const core::CFrame &frame, const core::Vector3 &extent, scene::ShapeKind shape);
-
-		// Where it is and how it is turned, in world space.
-		//
-		// **Read-only once built.** Assigning to it leaves `Axis` describing the
-		// old rotation; build a new instance instead.
-		core::CFrame Frame;
-
-		// Its extent, read according to `Shape`. The table at the top of
-		// `Shapes.hpp` is the one definition of what each component means.
-		core::Vector3 Extent;
-
-		// The frame's X, Y and Z as world directions, resolved once here.
-		//
-		// **The whole reason this type is not three plain fields.** `CFrame`
-		// holds a quaternion, so every one of these costs a rotation to derive
-		// - and every question this header answers is a dot product against one
-		// of them. A pair function asks fifteen to twenty-three times over the
-		// same two shapes, and deriving them per question made box-box re-rotate
-		// the same six vectors ninety times.
-		core::Vector3 Axis[3];
-
-		// Which shape `Extent` describes.
-		scene::ShapeKind Shape = scene::ShapeKind::Box;
-	};
+	// **`ShapeInstance` moved to the public `Shapes.hpp` at v0.17**, and the
+	// support functions below stayed here. The type is what a collider *is*
+	// once it is somewhere, which is that header's subject; what is private is
+	// the machinery that asks it questions. The move happened because
+	// `PhysicsWorld` has to hold an array of them - see `SyncBroadphase`, which
+	// fills one - and a resource in a public header cannot name a private type.
 
 	// How many points one support feature may hold.
 	//

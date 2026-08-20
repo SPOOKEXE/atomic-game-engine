@@ -372,6 +372,7 @@ TEST_CASE("a window pointer projects onto an interactive surface canvas", "[rend
 	engine::gui::Surface state;
 	state.On = engine::gui::Face::Back;
 	state.CanvasSize = Vector2{400.0f, 200.0f};
+	state.Active = true;
 	world.Data.Set(surface, state);
 
 	const Entity button = world.Data.CreateInstance(engine::gui::GuiClass("TextButton"), "Press");
@@ -400,4 +401,125 @@ TEST_CASE("a window pointer projects onto an interactive surface canvas", "[rend
 	CHECK(pointer.Collector == surface);
 	CHECK(pointer.Position.X == Approx(200.0f).margin(0.1f));
 	CHECK(pointer.Position.Y == Approx(100.0f).margin(0.1f));
+
+	// **And the same click misses once the surface stops taking input**, which
+	// is Roblox's default and the reason `Active` is a property rather than an
+	// assumption: a decorative sign must not intercept the shot aimed at what is
+	// behind it.
+	state.Active = false;
+	world.Data.Set(surface, state);
+	REQUIRE(ResolveSpatialCanvases(world.Data, world.Display) == 1);
+	CHECK_FALSE(
+		engine::render::ResolveSpatialPointer(
+			world.Data,
+			list,
+			world.Display,
+			Vector2{world.Display.Width * 0.5f, world.Display.Height * 0.5f},
+			pointer
+		)
+	);
+}
+
+TEST_CASE("a surface gui past its maximum distance stops resolving a canvas", "[render][canvas]") {
+	// `MaxDistance` measured to the *canvas centre* rather than to the part's
+	// origin, which is what a long wall with a sign on one end depends on. The
+	// component is still written - the collector is measurable - and it is
+	// `Visible` that goes false, which is what `gui::CanvasFor` reads to stop
+	// laying anything out under it.
+	World world("render_canvas.surfacerange");
+	constexpr float RIGHT_ANGLE = 1.57079632679f;
+	world.Camera(Vector3::Zero, RIGHT_ANGLE);
+
+	const Entity part = world.Part(Vector3{0.0f, 0.0f, -60.0f}, Vector3{2.0f, 1.0f, 0.5f});
+	const Entity surface = world.Collector("SurfaceGui", part);
+
+	engine::gui::Surface state;
+	state.On = engine::gui::Face::Back;
+	state.MaxDistance = 100.0f;
+	world.Data.Set(surface, state);
+
+	REQUIRE(ResolveSpatialCanvases(world.Data, world.Display) == 1);
+	REQUIRE(world.Resolved(surface) != nullptr);
+	CHECK(world.Resolved(surface)->Visible);
+	CHECK(world.Resolved(surface)->CurrentDistance == Approx(59.5f).margin(0.01f));
+
+	state.MaxDistance = 50.0f;
+	world.Data.Set(surface, state);
+	REQUIRE(ResolveSpatialCanvases(world.Data, world.Display) == 1);
+	CHECK_FALSE(world.Resolved(surface)->Visible);
+
+	// And nothing under it is laid out, which is the half a player sees.
+	const Entity frame = world.Data.CreateInstance(engine::gui::GuiClass("Frame"), "Panel");
+	world.Data.SetParent(frame, surface);
+	world.Data.Set(frame, engine::gui::Element{});
+	engine::gui::Layout(world.Data, world.Display);
+
+	const engine::gui::Resolved *resolved = world.Data.Get<engine::gui::Resolved>(frame);
+	CHECK((resolved == nullptr || !resolved->Rendered));
+}
+
+TEST_CASE("a surface gui floats off its face by its own offset", "[render][canvas]") {
+	// `ZOffset` adds to the hairline bias rather than replacing it, so stacking
+	// two surfaces on one face is one number apart and neither is coplanar with
+	// the part.
+	World world("render_canvas.zoffset");
+
+	const Entity part = world.Part(Vector3::Zero, Vector3{2.0f, 1.0f, 0.5f});
+	const Entity plain = world.Collector("SurfaceGui", part);
+	const Entity lifted = world.Collector("SurfaceGui", part);
+
+	engine::gui::Surface state;
+	state.On = engine::gui::Face::Front;
+	world.Data.Set(plain, state);
+	state.ZOffset = 0.25f;
+	world.Data.Set(lifted, state);
+
+	REQUIRE(ResolveSpatialCanvases(world.Data, world.Display) == 2);
+
+	// Front looks down -Z, so a positive offset moves the canvas further along it.
+	const float apart = world.Resolved(plain)->Origin.Z - world.Resolved(lifted)->Origin.Z;
+	CHECK(apart == Approx(0.25f).margin(0.001f));
+}
+
+TEST_CASE("a billboard steps its distance and offsets its anchor", "[render][canvas]") {
+	// Three properties that all move one number, checked together because that
+	// is where they would disagree: `DistanceStep` quantises what the size is
+	// computed from, `SizeOffset` moves the anchor by a fraction of that size,
+	// and `CurrentDistance` is what a script reads back.
+	World world("render_canvas.billboardoffsets");
+	constexpr float RIGHT_ANGLE = 1.57079632679f;
+	world.Camera(Vector3::Zero, RIGHT_ANGLE);
+
+	const Entity part = world.Part(Vector3{0.0f, 0.0f, -22.0f}, Vector3{1.0f, 1.0f, 1.0f});
+	const Entity billboard = world.Collector("BillboardGui", part);
+
+	engine::gui::Billboard state;
+	state.Size = UDim2{4.0f, 0.0f, 2.0f, 0.0f};
+	state.DistanceStep = 10.0f;
+	world.Data.Set(billboard, state);
+
+	REQUIRE(ResolveSpatialCanvases(world.Data, world.Display) == 1);
+
+	// Twenty-two studs away, stepped to twenty. The pixel size is what that
+	// distance produces, so the step is visible in the canvas rather than only
+	// in the number.
+	CHECK(world.Resolved(billboard)->CurrentDistance == Approx(20.0f));
+	const Vector2 stepped = world.Resolved(billboard)->Size;
+
+	state.DistanceStep = 0.0f;
+	world.Data.Set(billboard, state);
+	REQUIRE(ResolveSpatialCanvases(world.Data, world.Display) == 1);
+	CHECK(world.Resolved(billboard)->CurrentDistance == Approx(22.0f));
+	CHECK(world.Resolved(billboard)->Size.X < stepped.X);
+
+	// `SizeOffset` moves the anchor towards the bottom left, so the quad moves
+	// right and down by half its own size.
+	const Vector3 centred = world.Resolved(billboard)->Origin;
+	state.SizeOffset = Vector2{0.5f, 0.5f};
+	world.Data.Set(billboard, state);
+	REQUIRE(ResolveSpatialCanvases(world.Data, world.Display) == 1);
+
+	const engine::gui::SpatialCanvas *shifted = world.Resolved(billboard);
+	CHECK(shifted->Origin.X == Approx(centred.X - shifted->WorldSize.X * 0.5f).margin(0.001f));
+	CHECK(shifted->Origin.Y == Approx(centred.Y + shifted->WorldSize.Y * 0.5f).margin(0.001f));
 }

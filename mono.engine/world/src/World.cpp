@@ -67,7 +67,18 @@ namespace engine::world {
 				// render invalidation runs in `PreRender`, which is a separate
 				// call after this one. Clearing at the end would hand the
 				// renderer an empty set every frame.
-				Store_.ClearChanges();
+				//
+				// **Skipped while the bits are being held for a publish that
+				// has not come round yet.** A world replicating at 20 Hz while
+				// ticking at 60 spends two ticks in three not publishing, and
+				// clearing after each of them would send whatever moved on the
+				// third and nothing else - a script that set a colour on either
+				// of the other two would have written it into a bitmap nobody
+				// ever read. A world with no replication rate never holds, so
+				// this costs it one branch and nothing else.
+				if (!HoldingChanges) {
+					Store_.ClearChanges();
+				}
 
 				// **Catch-up ticks after the first see an empty inbox, and that
 				// is exactly-once delivery.** A barrier fills this world's inbox
@@ -99,6 +110,16 @@ namespace engine::world {
 				// never inside a batch, where a listener could mutate the world
 				// in the middle of a loop over it.
 				Store_.FlushSignals();
+
+				// Charged after the tick rather than before it, so the tick a
+				// publish covers is one that has actually run.
+				if (AdvanceReplication()) {
+					ReplicationPending = true;
+					HoldingChanges = false;
+					Stats.ReplicationTicks++;
+				} else {
+					HoldingChanges = true;
+				}
 			}
 			ConsecutiveFaults = 0;
 		} catch (const std::exception &failure) {
@@ -123,6 +144,42 @@ namespace engine::world {
 			static_cast<float>(static_cast<double>(core::Clock::Nanoseconds() - started) / 1'000'000.0);
 		Stats.LastTickMilliseconds = elapsed;
 		Stats.SlowestTickMilliseconds = std::max(Stats.SlowestTickMilliseconds, elapsed);
+	}
+
+	bool World::AdvanceReplication() {
+		if (!(Settings_.ReplicationTickRate > 0.0)) {
+			// Every tick, which is what a world that said nothing about
+			// replication has always done.
+			//
+			// **A positive test rather than `<= 0`, so a NaN lands here.** The
+			// rate arrives from a game file and from a universe snapshot, and
+			// `1.0 / NaN` compared against an accumulator would hold the world
+			// on this path anyway with a NaN accumulated behind it.
+			return true;
+		}
+
+		ReplicationAccumulator += static_cast<double>(Timestep.Delta());
+
+		const double interval = 1.0 / Settings_.ReplicationTickRate;
+		if (ReplicationAccumulator < interval) {
+			return false;
+		}
+
+		// **The remainder is capped at one interval rather than carried in
+		// full.** A rate above the world's tick rate owes more than one publish
+		// per tick and can never pay it, so an uncapped accumulator would climb
+		// for ever and the world would publish on every tick anyway - the same
+		// behaviour with a number that grows without bound behind it. Capped,
+		// asking for more publishes than there are ticks quietly means "every
+		// tick", which is the only honest answer a world can give.
+		ReplicationAccumulator = std::min(ReplicationAccumulator - interval, interval);
+		return true;
+	}
+
+	bool World::TakeReplicationTick() {
+		const bool due = ReplicationPending;
+		ReplicationPending = false;
+		return due;
 	}
 
 	void World::Present(float frameSeconds, float alpha) {

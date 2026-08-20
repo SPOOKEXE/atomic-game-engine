@@ -192,6 +192,18 @@ add_subdirectory(mono.engine)
 # socket and an HMAC and nothing that wants a window.
 add_subdirectory(mono.network)
 
+# What a person's Discord profile says while an Atomic program is running. Above
+# `Engine::core` and below every program: the studio, the client, the server and
+# the content origin each own one, and none of them is a layer of the engine -
+# which is why it is a member beside them rather than a module inside
+# `mono.engine`.
+#
+# Unconditional, for `mono.network`'s reason. It is `shared` tier and links
+# `core` and a header-only JSON parser, so a `server` or `cdn` preset pays a
+# static library holding a unix socket and a string formatter and nothing that
+# wants a window.
+add_subdirectory(mono.discord)
+
 if(MONO_BUILD_CLIENT)
 	add_subdirectory(mono.client)
 endif()

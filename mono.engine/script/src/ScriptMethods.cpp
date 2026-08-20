@@ -59,6 +59,8 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/scene/Awake.hpp>
 #include <engine/scene/Characters.hpp>
+#include <engine/scene/EditableImage.hpp>
+#include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Ownership.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
@@ -718,15 +720,228 @@ namespace engine::script {
 			call.ReturnInstance(scene::NetworkOwnerOf(call.World(), call.Subject()));
 		}
 
+		// A `Vector3` argument, raising with `method`'s own name when the
+		// value is not one - `AttributeValue` carries every datatype
+		// `ScriptCall::AsCFrame` and its siblings do not, and this is the
+		// door onto it for the one that `AddVertex` and its neighbours need.
+		core::Vector3 AsVector3(ScriptCall &call, size_t index, const char *method) {
+			ecs::AttributeValue value;
+			call.ReadAttribute(index, value);
+			if (value.Type != ecs::PropertyType::Vector3) {
+				call.Raise((std::string(method) + " needs a Vector3").c_str());
+			}
+			return value.Vector3;
+		}
+
+		// The same, for `Vector2`.
+		core::Vector2 AsVector2(ScriptCall &call, size_t index, const char *method) {
+			ecs::AttributeValue value;
+			call.ReadAttribute(index, value);
+			if (value.Type != ecs::PropertyType::Vector2) {
+				call.Raise((std::string(method) + " needs a Vector2").c_str());
+			}
+			return value.Vector2;
+		}
+
+		// The same, for `Color3`.
+		core::Color3 AsColor3(ScriptCall &call, size_t index, const char *method) {
+			ecs::AttributeValue value;
+			call.ReadAttribute(index, value);
+			if (value.Type != ecs::PropertyType::Color3) {
+				call.Raise((std::string(method) + " needs a Color3").c_str());
+			}
+			return value.Color3;
+		}
+
+		// `editableMesh:AddVertex(position, normal?, uv?)`
+		void EditableMeshAddVertex(ScriptCall &call) {
+			const core::Vector3 position = AsVector3(call, 0, "AddVertex");
+			const core::Vector3 normal = call.Arguments() > 1 && !call.IsNil(1)
+											 ? AsVector3(call, 1, "AddVertex")
+											 : core::Vector3{0.0f, 1.0f, 0.0f};
+			const core::Vector2 uv =
+				call.Arguments() > 2 && !call.IsNil(2) ? AsVector2(call, 2, "AddVertex") : core::Vector2{};
+
+			const auto id = scene::AddVertex(call.World(), call.Subject(), position, normal, uv);
+			if (!id.has_value()) {
+				call.Raise("AddVertex needs an EditableMesh");
+			}
+			call.ReturnNumber(static_cast<double>(*id));
+		}
+
+		// `editableMesh:AddTriangle(a, b, c)`
+		//
+		// **Raises for the wrong instance and returns `nil` for a bad
+		// vertex id, and the two are told apart rather than folded
+		// together.** The first is a script calling this on something that
+		// was never going to work; the second is the ordinary shape of
+		// building a mesh from computed indices, where asking "did that
+		// work" is ordinary control flow and not a bug to stop the script
+		// over.
+		void EditableMeshAddTriangle(ScriptCall &call) {
+			if (call.World().Get<scene::EditableMesh>(call.Subject()) == nullptr) {
+				call.Raise("AddTriangle needs an EditableMesh");
+			}
+
+			const auto a = static_cast<uint32_t>(call.AsNumber(0));
+			const auto b = static_cast<uint32_t>(call.AsNumber(1));
+			const auto c = static_cast<uint32_t>(call.AsNumber(2));
+
+			const auto id = scene::AddTriangle(call.World(), call.Subject(), a, b, c);
+			if (!id.has_value()) {
+				call.ReturnNil();
+				return;
+			}
+			call.ReturnNumber(static_cast<double>(*id));
+		}
+
+		// `editableMesh:RemoveTriangle(id)`
+		//
+		// **Returns whether it removed one, and does not raise on a
+		// range failure** - `RemoveTriangle`'s own header explains the
+		// swap-and-pop this can otherwise silently walk into, and a script
+		// asking "did that work" is the ordinary way to stay clear of it.
+		void EditableMeshRemoveTriangle(ScriptCall &call) {
+			const auto id = static_cast<uint32_t>(call.AsNumber(0));
+			call.ReturnBoolean(scene::RemoveTriangle(call.World(), call.Subject(), id));
+		}
+
+		// `editableMesh:SetVertexPosition(id, position)`
+		void EditableMeshSetVertexPosition(ScriptCall &call) {
+			const auto id = static_cast<uint32_t>(call.AsNumber(0));
+			const core::Vector3 position = AsVector3(call, 1, "SetVertexPosition");
+			call.ReturnBoolean(scene::SetVertexPosition(call.World(), call.Subject(), id, position));
+		}
+
+		// `editableMesh:SetVertexNormal(id, normal)`
+		void EditableMeshSetVertexNormal(ScriptCall &call) {
+			const auto id = static_cast<uint32_t>(call.AsNumber(0));
+			const core::Vector3 normal = AsVector3(call, 1, "SetVertexNormal");
+			call.ReturnBoolean(scene::SetVertexNormal(call.World(), call.Subject(), id, normal));
+		}
+
+		// `editableMesh:SetVertexUV(id, uv)`
+		void EditableMeshSetVertexUV(ScriptCall &call) {
+			const auto id = static_cast<uint32_t>(call.AsNumber(0));
+			const core::Vector2 uv = AsVector2(call, 1, "SetVertexUV");
+			call.ReturnBoolean(scene::SetVertexUV(call.World(), call.Subject(), id, uv));
+		}
+
+		// `editableMesh:SetVertexColor(id, colour, alpha?)`
+		void EditableMeshSetVertexColor(ScriptCall &call) {
+			const auto id = static_cast<uint32_t>(call.AsNumber(0));
+			const core::Color3 colour = AsColor3(call, 1, "SetVertexColor");
+			const float alpha =
+				call.Arguments() > 2 && !call.IsNil(2) ? static_cast<float>(call.AsNumber(2)) : 0.0f;
+			call.ReturnBoolean(scene::SetVertexColor(call.World(), call.Subject(), id, colour, alpha));
+		}
+
+		// `editableMesh:Clear()`
+		void EditableMeshClear(ScriptCall &call) {
+			call.ReturnBoolean(scene::ClearEditableMesh(call.World(), call.Subject()));
+		}
+
+		// Raises unless the subject is an `EditableImage` - the four methods
+		// below share this guard rather than each spelling it, because
+		// their own return value is already spoken for: `false` means "this
+		// EditableImage refused the call" - an absurd `Resize`, mainly -
+		// and folding "the wrong kind of instance entirely" into the same
+		// boolean would make the two indistinguishable from a script that
+		// only checked the result.
+		void RequireEditableImage(ScriptCall &call, const char *method) {
+			if (call.World().Get<scene::EditableImage>(call.Subject()) == nullptr) {
+				call.Raise((std::string(method) + " needs an EditableImage").c_str());
+			}
+		}
+
+		// `editableImage:Resize(width, height)`
+		void EditableImageResize(ScriptCall &call) {
+			RequireEditableImage(call, "Resize");
+			const auto width = static_cast<uint32_t>(call.AsNumber(0));
+			const auto height = static_cast<uint32_t>(call.AsNumber(1));
+			call.ReturnBoolean(scene::ResizeEditableImage(call.World(), call.Subject(), width, height));
+		}
+
+		// `editableImage:DrawRectangle(position, size, colour, transparency?)`
+		void EditableImageDrawRectangle(ScriptCall &call) {
+			RequireEditableImage(call, "DrawRectangle");
+			const core::Vector2 position = AsVector2(call, 0, "DrawRectangle");
+			const core::Vector2 size = AsVector2(call, 1, "DrawRectangle");
+			const core::Color3 colour = AsColor3(call, 2, "DrawRectangle");
+			const float transparency =
+				call.Arguments() > 3 && !call.IsNil(3) ? static_cast<float>(call.AsNumber(3)) : 0.0f;
+			call.ReturnBoolean(
+				scene::DrawRectangle(call.World(), call.Subject(), position, size, colour, transparency)
+			);
+		}
+
+		// `editableImage:DrawLine(from, to, colour, transparency?)`
+		void EditableImageDrawLine(ScriptCall &call) {
+			RequireEditableImage(call, "DrawLine");
+			const core::Vector2 from = AsVector2(call, 0, "DrawLine");
+			const core::Vector2 to = AsVector2(call, 1, "DrawLine");
+			const core::Color3 colour = AsColor3(call, 2, "DrawLine");
+			const float transparency =
+				call.Arguments() > 3 && !call.IsNil(3) ? static_cast<float>(call.AsNumber(3)) : 0.0f;
+			call.ReturnBoolean(scene::DrawLine(call.World(), call.Subject(), from, to, colour, transparency));
+		}
+
+		// `editableImage:DrawCircle(centre, radius, colour, transparency?)`
+		void EditableImageDrawCircle(ScriptCall &call) {
+			RequireEditableImage(call, "DrawCircle");
+			const core::Vector2 centre = AsVector2(call, 0, "DrawCircle");
+			const auto radius = static_cast<float>(call.AsNumber(1));
+			const core::Color3 colour = AsColor3(call, 2, "DrawCircle");
+			const float transparency =
+				call.Arguments() > 3 && !call.IsNil(3) ? static_cast<float>(call.AsNumber(3)) : 0.0f;
+			call.ReturnBoolean(
+				scene::DrawCircle(call.World(), call.Subject(), centre, radius, colour, transparency)
+			);
+		}
+
+		// `part:SetLocalTransparency(value)`
+		//
+		// **The one door onto `scene::LocalTransparency`, and it is a method
+		// rather than a property write for the reason its own header gives:**
+		// `part.LocalTransparency = x` would go through `Store::SetProperty`,
+		// which refuses every write on a replica regardless of which property -
+		// and a viewer fading their own character, standing in a world they do
+		// not own, is exactly the case this exists for. `Instance:SetAttribute`
+		// already asks an author to accept a method for the same reason.
+		//
+		// Reading is the ordinary property table: `part.LocalTransparency`
+		// works everywhere, because a read is never refused.
+		void SetLocalTransparency(ScriptCall &call) {
+			const float value = static_cast<float>(call.AsNumber(0));
+			if (!scene::SetLocalTransparency(call.World(), call.Subject(), value)) {
+				call.Raise("SetLocalTransparency needs a BasePart");
+			}
+		}
+
 		// The table both VMs install.
 		//
 		// **Order is install order and nothing depends on it**, unlike the service
 		// catalogue: a method table is a map from a name to a callable and no
 		// entry can be reached before another. Grouped by what they do, so a
 		// reader can see that the four attribute calls arrived together.
-		constexpr std::array<InstanceMethod, 37> METHODS{{
+		constexpr std::array<InstanceMethod, 50> METHODS{{
 			{"GetPivot", GetPivot},
 			{"PivotTo", PivotTo},
+			{"SetLocalTransparency", SetLocalTransparency},
+
+			{"AddVertex", EditableMeshAddVertex},
+			{"AddTriangle", EditableMeshAddTriangle},
+			{"RemoveTriangle", EditableMeshRemoveTriangle},
+			{"SetVertexPosition", EditableMeshSetVertexPosition},
+			{"SetVertexNormal", EditableMeshSetVertexNormal},
+			{"SetVertexUV", EditableMeshSetVertexUV},
+			{"SetVertexColor", EditableMeshSetVertexColor},
+			{"Clear", EditableMeshClear},
+
+			{"Resize", EditableImageResize},
+			{"DrawRectangle", EditableImageDrawRectangle},
+			{"DrawLine", EditableImageDrawLine},
+			{"DrawCircle", EditableImageDrawCircle},
 
 			{"AddTag", AddTag},
 			{"RemoveTag", RemoveTag},

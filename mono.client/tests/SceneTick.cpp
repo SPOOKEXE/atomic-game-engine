@@ -488,7 +488,16 @@ TEST_CASE("the panels render a real tick's data", "[demo]") {
 	// them away again in `PostSimulation`, because a proxy that outlived its tick
 	// is a piece of another room standing invisibly in this one. Both are a query
 	// that returns at its first line in a world with no portal in it.
-	REQUIRE(timings.size() == 21);
+	//
+	// **And twenty-two for `snap-portal-transit`**, which is the render half of
+	// a crossing rather than the simulation half. `capture-previous` records
+	// where a body was when the tick began and the renderer blends the two;
+	// across a teleport that blend spans the gap between two rooms, and on a
+	// client - which never runs `CrossPortals` and so never gets the mapped
+	// previous frame the authority computes - the body is drawn once or twice
+	// somewhere in between. `PreRender`, because the serial it reads arrives
+	// with a replication delta and a delta lands after `PreSimulation` has run.
+	REQUIRE(timings.size() == 22);
 
 	engine::render::OverlayImage image;
 	image.Resize(1280, 720);

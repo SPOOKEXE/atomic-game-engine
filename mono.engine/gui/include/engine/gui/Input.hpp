@@ -27,6 +27,7 @@
 //
 // @tier L7 · shared
 
+#include <engine/core/types/UDim.hpp>
 #include <engine/core/types/Vector2.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/gui/DrawList.hpp>
@@ -70,6 +71,23 @@ namespace engine::gui {
 
 		// Ignores spatial collectors while testing ordinary window pixels.
 		bool ScreenOnly = false;
+
+		// How far the wheel turned this frame, in notches.
+		//
+		// **Positive is a turn away from the person, which moves the canvas
+		// *back* towards its start.** That is SDL's sign and Dear ImGui's, and
+		// it is the one a person's hand expects - pushing the wheel away pushes
+		// the page up. A router that added it instead would scroll every list
+		// the wrong way, which is the kind of thing nobody writes a test for
+		// until it has shipped.
+		//
+		// **Notches rather than pixels**, because how many pixels a notch is
+		// worth is this module's decision and not the window's: the same wheel
+		// event has to move a list by the same amount whether it arrived through
+		// SDL, through the editor's viewport panel or through a test.
+		//
+		// @since v0.18
+		float Wheel = 0.0f;
 	};
 
 	// What happened, in Roblox's vocabulary.
@@ -120,6 +138,23 @@ namespace engine::gui {
 		//
 		// @since v0.15
 		FocusReleased,
+
+		// A press landed on an element a `UIDragDetector` is attached to.
+		//
+		// **The three below name the *detector* and not the element**, which is
+		// Roblox's arrangement and the one that lets two detectors on one panel
+		// mean two different gestures. `GuiEvent::Position` is where the pointer
+		// is and `GuiEvent::Local` is how far it has moved since the press,
+		// which is the number a `Scriptable` drag is for.
+		//
+		// @since v0.18
+		DragBegan,
+
+		// The pointer moved while a drag was held.
+		DragContinue,
+
+		// The pointer was released and the drag ended.
+		DragEnded,
 	};
 
 	// One thing that happened to one element.
@@ -262,12 +297,139 @@ namespace engine::gui {
 		void Forget() {
 			Over = ecs::NULL_ENTITY;
 			Holding = ecs::NULL_ENTITY;
+			Dragging = ecs::NULL_ENTITY;
+			Detector = ecs::NULL_ENTITY;
+			Dragged = ecs::NULL_ENTITY;
+
+			// **The handle only.** A canvas the router forgets keeps whatever
+			// `ScrollMotion` it had, so the rubber band still comes back - this
+			// object is dropping a gesture, not undoing what the gesture did.
+			Canvas = ecs::NULL_ENTITY;
+		}
+
+		// The `ScrollingFrame` whose bar is being dragged, or null.
+		//
+		// **A grabbed bar is not a pressed element and does not become one.** It
+		// emits no `InputBegan` and no `Activated`, because nothing in the tree
+		// was pressed - a scroll bar is chrome the frame draws rather than an
+		// instance a script can connect to. Exposed so a host can tell "the
+		// pointer is busy" from "the pointer is over nothing".
+		//
+		// @since v0.18
+		ecs::Entity ScrollBarHeld() const {
+			return Dragging;
+		}
+
+		// The frame whose content a drag is holding, or null.
+		//
+		// Beside `ScrollBarHeld` because it is the same question one gesture
+		// along: a caller asking "is this pointer already busy" has to ask both.
+		//
+		// @return The frame, or null.
+		// @since v0.17
+		ecs::Entity CanvasHeld() const {
+			return Canvas;
+		}
+
+		// The `UIDragDetector` a gesture is running through, or null.
+		//
+		// @since v0.18
+		ecs::Entity DragHeld() const {
+			return Detector;
 		}
 
 	  private:
+		// Starts a drag if the press landed on something with a detector.
+		//
+		// @return Whether one began.
+		bool BeginDrag(ecs::Store &store, const DrawList &list, const core::Vector2 &point);
+
+		// Moves the dragged element to follow the pointer.
+		void ContinueDrag(ecs::Store &store, const core::Vector2 &point);
+
+		// Applies a wheel turn to whatever under the pointer can take it.
+		//
+		// @return The frame that scrolled, or null.
+		ecs::Entity Wheel(ecs::Store &store, const core::Vector2 &point, float notches);
+
+		// Moves a held bar's canvas to follow the pointer.
+		void DragBar(ecs::Store &store, const core::Vector2 &point);
+
+		// Takes hold of a scrolling frame's content, so a drag moves the canvas.
+		//
+		// **Only when the pick found nothing active**, which is the rule that
+		// keeps a button inside a scrolling list clickable: a press that landed
+		// on something a script can react to belongs to that thing, and only a
+		// press on the frame's own background is a scroll gesture.
+		//
+		// @param store   The world.
+		// @param list    What was drawn, for the frame's clip rectangle.
+		// @param point   Where the pointer went down.
+		// @return `true` when a frame took the press.
+		// @since v0.17
+		bool BeginCanvasDrag(ecs::Store &store, const DrawList &list, const core::Vector2 &point);
+
+		// Moves the held canvas to follow the pointer.
+		//
+		// Past the end the movement is resisted rather than refused, and how far
+		// it may go is `Scrolling::Elastic`. See `gui::ScrollMotion`.
+		//
+		// @param store The world.
+		// @param point Where the pointer is now.
+		// @since v0.17
+		void DragCanvas(ecs::Store &store, const core::Vector2 &point);
+
+		// Lets go of the held canvas, so the rubber band starts coming back.
+		//
+		// @param store The world.
+		// @since v0.17
+		void ReleaseCanvas(ecs::Store &store);
+
 		std::vector<GuiEvent> Events;
 		ecs::Entity Over;
 		ecs::Entity Holding;
+
+		// --- the scroll bar drag ---------------------------------------------
+		//
+		// **Held here for the reason the hover and the press are**: where a
+		// pointer is part-way through a gesture is this object's state and
+		// nobody replicates it. What the drag *produces* is
+		// `Scrolling::CanvasPosition`, which is authored and does cross.
+		ecs::Entity Dragging;
+		bool DragVertical = false;
+
+		// Where inside the thumb the pointer took hold, along the dragged axis.
+		// Without it a bar jumps so its top-left corner is under the cursor the
+		// moment it is grabbed.
+		float DragGrab = 0.0f;
+
+		// --- the element drag ------------------------------------------------
+		//
+		// **Held here rather than on the component**, which is the same rule the
+		// scroll bar above follows: where a gesture is part-way through is this
+		// object's, and what it *produces* - `Element::Position` - is the world's.
+		// A `UIDragDetector` carrying its own "being dragged" flag would be one
+		// two clients writing one replicated row.
+		//@{
+		ecs::Entity Detector;
+		ecs::Entity Dragged;
+		core::Vector2 DragFrom;
+		core::UDim2 DragStart;
+		float DragAngle = 0.0f;
+		//@}
+
+		// --- the canvas drag -------------------------------------------------
+		//
+		// **The gesture `ElasticBehavior` was always about, and until v0.17 it
+		// did not exist.** The only thing that ever moved a canvas was the
+		// wheel, and a wheel does not overscroll - so the property was authored,
+		// replicated and unobservable. This is the frame a hand is holding;
+		// where it has been pulled to lives in `gui::ScrollMotion`, because
+		// that is a rectangle the layout has to read.
+		//
+		// @since v0.17
+		ecs::Entity Canvas;
+
 		core::Vector2 Last;
 		bool WasDown = false;
 		bool Started = false;

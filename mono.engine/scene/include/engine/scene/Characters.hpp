@@ -182,7 +182,7 @@ namespace engine::scene {
 		// Roblox's guarantee that the handler runs
 		// while the body is still there needs a synchronous fire from inside a
 		// store write, which `script/Changes.hpp` refuses for every signal but
-		// `DescendantRemoving`. `docs/DEFERRED.md` D00120 carries what closing it
+		// `DescendantRemoving`. `docs/retired/DEFERRED.md` D00120 carries what closing it
 		// would take.
 		ecs::Entity Character;
 

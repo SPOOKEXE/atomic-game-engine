@@ -1,0 +1,33 @@
+#version 450
+
+// One pyramid level from the level above it: the farthest depth over the
+// source texels each destination texel covers. An odd source size folds its
+// last row and column into the edge texel, so no source texel escapes the
+// pyramid - a texel the reduction missed could hide geometry behind it,
+// which is the one error conservative culling may never make.
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform sampler2D source;
+layout(set = 1, binding = 0, r32f) uniform writeonly image2D destination;
+
+layout(set = 2, binding = 0) uniform Reduce {
+	ivec4 Size; // xy: source texels. zw: destination texels.
+} reduce;
+
+void main() {
+	ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+	if (texel.x >= reduce.Size.z || texel.y >= reduce.Size.w) {
+		return;
+	}
+	ivec2 base = texel * 2;
+	int spanX = (texel.x == reduce.Size.z - 1 && (reduce.Size.x & 1) != 0) ? 3 : 2;
+	int spanY = (texel.y == reduce.Size.w - 1 && (reduce.Size.y & 1) != 0) ? 3 : 2;
+	float farthest = 0.0;
+	for (int y = 0; y < spanY; y++) {
+		for (int x = 0; x < spanX; x++) {
+			ivec2 at = min(base + ivec2(x, y), reduce.Size.xy - 1);
+			farthest = max(farthest, texelFetch(source, at, 0).r);
+		}
+	}
+	imageStore(destination, texel, vec4(farthest));
+}

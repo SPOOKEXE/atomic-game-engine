@@ -54,6 +54,46 @@ namespace engine::world {
 		return WorldDirectory{Registry, Hosts}.Reach(id);
 	}
 
+	void Universe::RefreshLanes(unsigned laneCount) {
+		if (laneCount != LaneCount) {
+			LaneCount = laneCount;
+			LaneByWorld.assign(Registry.size(), INVALID_LANE);
+		} else {
+			LaneByWorld.resize(Registry.size(), INVALID_LANE);
+		}
+
+		if (laneCount == 0) {
+			std::fill(LaneByWorld.begin(), LaneByWorld.end(), INVALID_LANE);
+			return;
+		}
+
+		std::vector<size_t> laneLoads(laneCount, 0);
+		for (size_t index = 0; index < Registry.size(); index++) {
+			const bool local =
+				Registry[index] != nullptr && (index >= Hosts.size() || !Hosts[index].IsValid());
+			if (!local) {
+				LaneByWorld[index] = INVALID_LANE;
+				continue;
+			}
+			if (LaneByWorld[index] < laneCount) {
+				laneLoads[LaneByWorld[index]]++;
+			}
+		}
+
+		for (size_t index = 0; index < Registry.size(); index++) {
+			const bool local =
+				Registry[index] != nullptr && (index >= Hosts.size() || !Hosts[index].IsValid());
+			if (!local || LaneByWorld[index] < laneCount) {
+				continue;
+			}
+
+			const auto lightest = std::min_element(laneLoads.begin(), laneLoads.end());
+			const unsigned lane = static_cast<unsigned>(std::distance(laneLoads.begin(), lightest));
+			LaneByWorld[index] = lane;
+			(*lightest)++;
+		}
+	}
+
 	WorldId Universe::Adopt(const WorldSettings &settings, core::Name host) {
 		// A hole from a destroyed world is reused, so a universe that creates
 		// and destroys instanced subareas all day does not grow its registry
@@ -70,6 +110,7 @@ namespace engine::world {
 				// exists.
 				Registry[index]->SetState(WorldState::Remote);
 			}
+			RefreshLanes(parallel::Jobs::PinnedWorkerCount());
 			return id;
 		};
 
@@ -187,6 +228,9 @@ namespace engine::world {
 		}
 
 		Registry[id.Index].reset();
+		if (id.Index < LaneByWorld.size()) {
+			LaneByWorld[id.Index] = INVALID_LANE;
+		}
 		if (id.Index < Hosts.size()) {
 			Hosts[id.Index] = core::Name{};
 		}
@@ -245,6 +289,9 @@ namespace engine::world {
 		case Control::Kind::Destroy:
 			if (control.Target.IsValid() && control.Target.Index < Registry.size()) {
 				Registry[control.Target.Index].reset();
+				if (control.Target.Index < LaneByWorld.size()) {
+					LaneByWorld[control.Target.Index] = INVALID_LANE;
+				}
 				if (control.Target.Index < Hosts.size()) {
 					Hosts[control.Target.Index] = core::Name{};
 				}
@@ -325,6 +372,32 @@ namespace engine::world {
 		return world == nullptr ? WorldSettings{} : world->Settings();
 	}
 
+	WorldStatus Universe::Reconfigure(WorldId id, const WorldSettings &settings) {
+		RequireDriverThread("Reconfigure");
+		World *world = Reach(id);
+		if (world == nullptr) {
+			return WorldStatus::NoSuchWorld;
+		}
+		world->Reconfigure(settings);
+		return WorldStatus::Ok;
+	}
+
+	bool Universe::TakeReplicationTick(WorldId id) {
+		RequireDriverThread("TakeReplicationTick");
+		World *world = Reach(id);
+		return world != nullptr && world->TakeReplicationTick();
+	}
+
+	WorldStatus Universe::SetRenderingProfile(WorldId id, core::Name profile) {
+		RequireDriverThread("SetRenderingProfile");
+		World *world = Reach(id);
+		if (world == nullptr) {
+			return WorldStatus::NoSuchWorld;
+		}
+		world->SetRenderingProfile(profile);
+		return WorldStatus::Ok;
+	}
+
 	WorldState Universe::StateOf(WorldId id) const {
 		const World *world = Reach(id);
 		return world == nullptr ? WorldState::Suspended : world->State();
@@ -353,6 +426,16 @@ namespace engine::world {
 	void Universe::SetBusBudgetPerTick(uint32_t budget) {
 		RequireDriverThread("SetBusBudgetPerTick");
 		Settings_.BusBudgetPerTick = budget;
+	}
+
+	void Universe::SetChannelQueueLimit(uint32_t limit) {
+		RequireDriverThread("SetChannelQueueLimit");
+		Settings_.ChannelQueueLimit = limit;
+	}
+
+	void Universe::SetChannelsPerWorld(uint32_t channels) {
+		RequireDriverThread("SetChannelsPerWorld");
+		Settings_.ChannelsPerWorld = channels;
 	}
 
 	// --- the buses, which BusRouter owns -----------------------------------
@@ -424,8 +507,12 @@ namespace engine::world {
 			writer.WriteName(world->Name());
 			writer.WriteDouble(world->Settings().TickRate);
 			writer.WriteDouble(world->Settings().IdleTickRate);
+			writer.WriteDouble(world->Settings().PhysicsTickRate);
+			writer.WriteDouble(world->Settings().ReplicationTickRate);
+			writer.WriteDouble(world->Settings().GlobalSimulatedNetworkLatency);
 			writer.WriteUInt8(static_cast<uint8_t>(world->Settings().IsolationLevel));
 			writer.WriteUInt32(world->Settings().FaultLimit);
+			writer.WriteName(world->Settings().RenderingProfile);
 			writer.WriteUInt8(static_cast<uint8_t>(world->State()));
 
 			// The host holding it, or an invalid Name for a world this process
@@ -456,6 +543,7 @@ namespace engine::world {
 		const auto abandon = [this] {
 			Registry.clear();
 			Hosts.clear();
+			LaneByWorld.clear();
 			Pending.clear();
 			Router->Reset();
 			return false;
@@ -484,8 +572,12 @@ namespace engine::world {
 			settings.Name = reader.ReadName();
 			settings.TickRate = reader.ReadDouble();
 			settings.IdleTickRate = reader.ReadDouble();
+			settings.PhysicsTickRate = reader.ReadDouble();
+			settings.ReplicationTickRate = reader.ReadDouble();
+			settings.GlobalSimulatedNetworkLatency = reader.ReadDouble();
 			settings.IsolationLevel = static_cast<Isolation>(reader.ReadUInt8());
 			settings.FaultLimit = reader.ReadUInt32();
+			settings.RenderingProfile = reader.ReadName();
 
 			const auto state = static_cast<WorldState>(reader.ReadUInt8());
 			const core::Name host = reader.ReadName();
@@ -547,10 +639,13 @@ namespace engine::world {
 		}
 
 		// --- 2. who owes a tick ---
+		RefreshLanes(parallel::Jobs::PinnedWorkerCount());
 		ActiveList.clear();
 		OwedList.clear();
+		ActiveLanes.clear();
 
-		for (const auto &world : Registry) {
+		for (size_t index = 0; index < Registry.size(); index++) {
+			const auto &world = Registry[index];
 			if (world == nullptr) {
 				continue;
 			}
@@ -570,12 +665,12 @@ namespace engine::world {
 
 			ActiveList.push_back(world.get());
 			OwedList.push_back(owed);
+			ActiveLanes.push_back(LaneByWorld[index]);
 		}
 
-		// Longest first, by what the world's last tick cost. `Jobs::For` claims
-		// ranges in order, so starting with the expensive ones keeps the tail
-		// of the batch short - the cheap worlds fill in behind them rather than
-		// one long world finishing alone.
+		// Longest first, by what the world's last tick cost. Each lane handles its
+		// assigned worlds in this order, so the expensive work begins before the
+		// cheap worlds waiting behind it.
 		std::vector<size_t> order(ActiveList.size());
 		for (size_t index = 0; index < order.size(); index++) {
 			order[index] = index;
@@ -591,38 +686,59 @@ namespace engine::world {
 			return left < right;
 		});
 
+		DispatchLanes.resize(order.size());
+		for (size_t at = 0; at < order.size(); at++) {
+			DispatchLanes[at] = ActiveLanes[order[at]];
+		}
+
 		// --- 3. the only parallel step ---
 		Ticking = true;
 
-		// **The flag is read here as well as inside `Jobs::For`, and one is not
+		// **The flag is read here as well as inside `Jobs::ForWorkers`, and one is not
 		// enough.** Forcing the dispatch inline would already put every world on
 		// this thread - but this branch would still report an aggregate
-		// `worlds (workers)` bar *beside* the real spans that are now being
+		// `worlds (pinned workers)` bar *beside* the real spans that are now being
 		// kept, and the flame graph would count the tick twice. A measurement
 		// instrument that makes the picture wrong in a new way is worse than no
 		// instrument, so the shape goes serial with the execution.
-		const bool parallel =
-			Settings_.Mode == ExecutionMode::WorldParallel && !parallel::ForceSerialCompute();
+		// **And a universe of one world ticks here rather than on a lane, which
+		// is a performance decision rather than a tidiness one.**
+		//
+		// `Jobs::ForWorkers` owns the process-wide pool for the length of its
+		// batch, and `Jobs.hpp` is explicit that a nested `For` from an assigned
+		// task therefore runs inline. Every parallel loop a world contains is
+		// nested inside this dispatch - `StepParticles` over its blocks,
+		// `CapturePreviousTransforms` over its transforms, the physics integrate
+		// - so handing one world to a lane does not make it parallel, it makes
+		// everything *inside* it serial while twenty-two workers watch.
+		//
+		// With two or more worlds that is the right trade: the lanes overlap the
+		// worlds themselves, which is the coarser and better-balanced split. With
+		// one there is nothing to overlap it with, so the dispatch buys no
+		// concurrency at all and spends the pool to get it. Ticking here leaves
+		// the pool free for whatever the world dispatches, and measured on
+		// `StressParticles.luau` - one world, 5,120 emitters, 512,000 particles -
+		// that is the difference between `particles.age` having twenty-three
+		// workers and having one.
+		//
+		// It also makes the frame graph better rather than worse, which the
+		// paragraph above worries about for the flag: the world's spans are now
+		// on the frame's owning thread and are kept, instead of arriving as one
+		// aggregate bar with everything it contained refused.
+		const bool parallel = Settings_.Mode == ExecutionMode::WorldParallel &&
+							  !parallel::ForceSerialCompute() && order.size() > 1;
 
-		if (parallel && ActiveList.size() > 1) {
-			// Grain of one: a world is the unit of work, and there is no
-			// smaller division of it. Whichever worker claims a world runs it,
-			// which is why the store rebinds every tick.
-			// Two, explicitly: a world tick is tens of microseconds, so the
-			// pool repays its wake cost at the second one. The grain-derived
-			// default assumes an index is a row and would refuse to dispatch
-			// below eight worlds - measured, that costs 1.9x at four.
-			parallel::Jobs::For(
-				order.size(),
-				1,
-				[this, &order](size_t begin, size_t end) {
-					for (size_t at = begin; at < end; at++) {
-						const size_t index = order[at];
-						ActiveList[index]->Tick(OwedList[index]);
-					}
-				},
-				2
-			);
+		if (parallel && !ActiveList.empty() && LaneCount > 0) {
+			// A world keeps its lane while the pinned worker prefix is unchanged.
+			// Excess worlds share a lane and run there in deterministic index
+			// order, which preserves the distinct-core guarantee for work
+			// that is actually simultaneous without inventing processors.
+			parallel::Jobs::ForWorkers(DispatchLanes, [this, &order](size_t begin, size_t end) {
+				for (size_t at = begin; at < end; at++) {
+					const size_t index = order[at];
+					ActiveList[index]->Tick(OwedList[index]);
+				}
+			});
 
 			// **The workers' time, reported rather than timed from here.**
 			// Every span a world opened ran on a worker thread, and the frame
@@ -636,7 +752,9 @@ namespace engine::world {
 			// around it says how long it took to do. `FrameGraph::Report`
 			// keeps the two from being subtracted from each other.
 			const parallel::BatchTiming batch = parallel::Jobs::LastBatch();
-			core::FrameGraph::Report("worlds (workers)", core::ProfileCategory::ECS, batch.BusyMilliseconds);
+			core::FrameGraph::Report(
+				"worlds (pinned workers)", core::ProfileCategory::ECS, batch.BusyMilliseconds
+			);
 		} else {
 			ENGINE_PROFILE_CAT("worlds (serial)", engine::core::ProfileCategory::ECS);
 			for (const size_t index : order) {
@@ -647,6 +765,9 @@ namespace engine::world {
 		Ticking = false;
 
 		// --- 4. diagnostics, and anything the tick queued ---
+		// Every worker has joined before the router can touch an outbox. Bus and
+		// service traffic therefore crosses cores as copied envelopes at the next
+		// driver barrier, never as shared world storage.
 		DrainControls();
 
 		Stats.ActiveWorlds = ActiveList.size();
@@ -678,13 +799,81 @@ namespace engine::world {
 	WorldStatus Universe::Present(WorldId id, float frameSeconds, float alpha) {
 		RequireDriverThread("Present");
 
-		World *world = Reach(id);
-		if (world == nullptr) {
+		if (Reach(id) == nullptr) {
 			return WorldStatus::NoSuchWorld;
 		}
+		if (IsRemote(id)) {
+			return WorldStatus::Ok;
+		}
 
-		world->Present(frameSeconds, alpha);
+		const Presentation request{id, frameSeconds, alpha};
+		(void)PresentMany(std::span<const Presentation>(&request, 1));
 		return WorldStatus::Ok;
+	}
+
+	size_t Universe::PresentMany(std::span<const Presentation> requests) {
+		RequireDriverThread("PresentMany");
+
+		if (Ticking) {
+			ENGINE_ERROR("universe: PresentMany called while a tick batch is in flight.");
+			std::abort();
+		}
+
+		RefreshLanes(parallel::Jobs::PinnedWorkerCount());
+		PresentationList.clear();
+		PresentationRequests.clear();
+		PresentationLanes.clear();
+		PresentationList.reserve(requests.size());
+		PresentationRequests.reserve(requests.size());
+		PresentationLanes.reserve(requests.size());
+		PresentationQueued.resize(Registry.size());
+		std::fill(PresentationQueued.begin(), PresentationQueued.end(), uint8_t{0});
+
+		for (const Presentation &request : requests) {
+			World *world = Reach(request.World);
+			if (world == nullptr || IsRemote(request.World)) {
+				continue;
+			}
+
+			if (PresentationQueued[request.World.Index] != 0) {
+				continue;
+			}
+			PresentationQueued[request.World.Index] = 1;
+
+			PresentationList.push_back(world);
+			PresentationRequests.push_back(request);
+			PresentationLanes.push_back(
+				request.World.Index < LaneByWorld.size() ? LaneByWorld[request.World.Index] : INVALID_LANE
+			);
+		}
+
+		// **One world presents here rather than on a lane**, for the reason the
+		// tick's own dispatch gives in full: a batch owns the process-wide pool,
+		// so every parallel loop inside `World::Present` - the draw-list build,
+		// the attachment resolve - runs inline while the rest of the pool waits
+		// for a batch of one to finish.
+		const bool parallel =
+			Settings_.Mode == ExecutionMode::WorldParallel && !parallel::ForceSerialCompute() &&
+			LaneCount > 0 && PresentationList.size() > 1 &&
+			std::all_of(PresentationLanes.begin(), PresentationLanes.end(), [this](unsigned lane) {
+				return lane < LaneCount;
+			});
+
+		if (parallel && !PresentationList.empty()) {
+			parallel::Jobs::ForWorkers(PresentationLanes, [this](size_t begin, size_t end) {
+				for (size_t index = begin; index < end; index++) {
+					const Presentation &request = PresentationRequests[index];
+					PresentationList[index]->Present(request.FrameSeconds, request.Alpha);
+				}
+			});
+		} else {
+			for (size_t index = 0; index < PresentationList.size(); index++) {
+				const Presentation &request = PresentationRequests[index];
+				PresentationList[index]->Present(request.FrameSeconds, request.Alpha);
+			}
+		}
+
+		return PresentationList.size();
 	}
 
 	WorldStatus Universe::Enter(WorldId id, const std::function<void(ecs::Store &, ecs::Scheduler &)> &body) {

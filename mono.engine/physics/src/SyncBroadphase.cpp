@@ -9,6 +9,7 @@
 #include <engine/physics/Broadphase.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Shapes.hpp>
+#include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/spatial/HashGrid.hpp>
 
@@ -28,6 +29,8 @@ namespace engine::physics {
 		void Append(
 			std::vector<spatial::Proxy> &proxies,
 			std::vector<ColliderRecord> &records,
+			std::vector<PlacedCollider> &shapes,
+			const scene::CollisionShapes *baked,
 			ecs::Entity entity,
 			const scene::Transform &transform,
 			const scene::Collider &collider
@@ -40,6 +43,32 @@ namespace engine::physics {
 				}
 			);
 			records.push_back(ColliderRecord{entity, collider.Layer, collider.Mask});
+
+			// **The placed shape, resolved here because this is where the two
+			// components are already in hand.** The narrow phase used to do this
+			// once per *pair* - twenty-five thousand times for ten thousand
+			// colliders - and every one of those was a re-read of the
+			// `Transform` this loop has just read. See `PlacedCollider`, which
+			// carries the measurement.
+			//
+			// The table is looked up only for the kinds that name one, so a
+			// world of boxes pays nothing for a feature it does not use.
+			const collision::ConvexHull *hull = nullptr;
+			const collision::TriangleMesh *mesh = nullptr;
+			if (baked != nullptr) {
+				if (collider.Shape == scene::ShapeKind::Hull) {
+					hull = baked->FindHull(collider.Geometry);
+				} else if (collider.Shape == scene::ShapeKind::Mesh) {
+					mesh = baked->FindMesh(collider.Geometry);
+				}
+			}
+
+			shapes.push_back(
+				PlacedCollider{
+					ShapeInstance{transform.Frame, collider.Extent, collider.Shape, hull, mesh},
+					collider.Trigger,
+				}
+			);
 		}
 
 		// Whether a collider that cannot move has been created, destroyed or
@@ -100,16 +129,22 @@ namespace engine::physics {
 		// about which set to hand to `Rebuild`, and this is the set that moved.
 		std::vector<spatial::Proxy> &dynamicProxies = PipelineInternals::DynamicProxies(*world);
 		std::vector<ColliderRecord> &dynamicRecords = PipelineInternals::DynamicRecords(*world);
+		std::vector<PlacedCollider> &dynamicShapes = PipelineInternals::DynamicShapes(*world);
 		dynamicProxies.clear();
 		dynamicRecords.clear();
+		dynamicShapes.clear();
+
+		// Resolved once for the walk rather than per collider, which is the same
+		// decision the solver makes about `scene::SurfaceTable`.
+		const scene::CollisionShapes *baked = scene::CollisionShapesOf(store);
 
 		store.Each<const scene::Transform, const scene::Collider, const scene::Motion>(
-			[&dynamicProxies, &dynamicRecords](
+			[&dynamicProxies, &dynamicRecords, &dynamicShapes, baked](
 				ecs::Entity entity,
 				const scene::Transform &transform,
 				const scene::Collider &collider,
 				const scene::Motion &
-			) { Append(dynamicProxies, dynamicRecords, entity, transform, collider); }
+			) { Append(dynamicProxies, dynamicRecords, dynamicShapes, baked, entity, transform, collider); }
 		);
 
 		{
@@ -158,11 +193,13 @@ namespace engine::physics {
 
 		std::vector<spatial::Proxy> &staticProxies = PipelineInternals::StaticProxies(*world);
 		std::vector<ColliderRecord> &staticRecords = PipelineInternals::StaticRecords(*world);
+		std::vector<PlacedCollider> &staticShapes = PipelineInternals::StaticShapes(*world);
 		staticProxies.clear();
 		staticRecords.clear();
+		staticShapes.clear();
 
 		store.Each<const scene::Transform, const scene::Collider>(
-			[&store, &staticProxies, &staticRecords](
+			[&store, &staticProxies, &staticRecords, &staticShapes, baked](
 				ecs::Entity entity, const scene::Transform &transform, const scene::Collider &collider
 			) {
 				// The per-row question the ECS cannot express as a query term.
@@ -171,7 +208,7 @@ namespace engine::physics {
 				if (store.Has<scene::Motion>(entity)) {
 					return;
 				}
-				Append(staticProxies, staticRecords, entity, transform, collider);
+				Append(staticProxies, staticRecords, staticShapes, baked, entity, transform, collider);
 			}
 		);
 

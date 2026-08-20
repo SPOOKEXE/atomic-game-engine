@@ -39,18 +39,14 @@
 -- Instances. Nothing it covered is about whether the data is right, and that is
 -- the whole of what runs here.
 
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+-- The modules are children of this script rather than of `ReplicatedStorage` -
+-- see `Magic.luau` for the whole of why.
+local Modules = script :: any
 
-local MagicCore = ReplicatedStorage:FindFirstChild("MagicCore")
-assert(MagicCore ~= nil, "ReplicatedStorage.MagicCore was not mounted - is assets/lib staged?")
+local MagicCore = Modules.MagicCore
+local TerrainCore = Modules.TerrainCore
 
-local TerrainCore = ReplicatedStorage:FindFirstChild("TerrainCore")
-assert(TerrainCore ~= nil, "ReplicatedStorage.TerrainCore was not mounted")
-
-local MagicTests = ReplicatedStorage:FindFirstChild("MagicTests")
-assert(MagicTests ~= nil, "ReplicatedStorage.MagicTests was not mounted")
-
-local Run = require((MagicTests :: any):FindFirstChild("Run") :: any)
+local Run = require(Modules.MagicTests.Run)
 
 local report = Run.data(MagicCore, TerrainCore)
 

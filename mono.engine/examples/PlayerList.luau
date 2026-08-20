@@ -93,7 +93,12 @@ local function block(name: string, size: Vector3, at: Vector3, colour: Color3): 
 	return part
 end
 
-block("Ground", Vector3.new(160, 4, 160), Vector3.new(0, -2, 0), GROUND)
+-- Clear of a baseplate's top face at y = 0: coplanar surfaces do not flicker in
+-- this engine, they resolve stably to whichever one the draw order happens to
+-- favour. `scripts/demos/zfight-scan.sh` holds the control for that.
+local GROUND_LIFT = 0.01
+
+block("Ground", Vector3.new(160, 4, 160), Vector3.new(0, -2 + GROUND_LIFT, 0), GROUND)
 
 -- The name is the contract: `scene::FindSpawn` looks for exactly this under
 -- `Workspace`, and without it every character arrives at the origin inside the

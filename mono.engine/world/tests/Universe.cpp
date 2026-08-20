@@ -1,3 +1,4 @@
+#include <engine/core/FrameGraph.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/core/Random.hpp>
 #include <engine/parallel/Jobs.hpp>
@@ -7,8 +8,14 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
+#include <atomic>
+#include <cstdint>
+#include <limits>
+#include <set>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 TEST_SUITE_ID("engine.world.universe")
@@ -22,6 +29,7 @@ using engine::ecs::Store;
 using engine::parallel::Jobs;
 using engine::world::ExecutionMode;
 using engine::world::Isolation;
+using engine::world::Presentation;
 using engine::world::Universe;
 using engine::world::UniverseSettings;
 using engine::world::WorldId;
@@ -107,6 +115,16 @@ TEST_CASE("a world is created and found by name", "[world]") {
 	REQUIRE(universe.Find(Name("world.lobby")) == id);
 	REQUIRE(universe.NameOf(id) == Name("world.lobby"));
 	REQUIRE(universe.StateOf(id) == WorldState::Active);
+}
+
+TEST_CASE("a world selects a rendering profile by stable name", "[world]") {
+	Universe universe;
+	const WorldId id = universe.Create(Named("world.lit"));
+
+	CHECK(universe.SettingsOf(id).RenderingProfile == Name("Default PBR"));
+	CHECK(universe.SetRenderingProfile(id, Name("Cinematic")) == WorldStatus::Ok);
+	CHECK(universe.SettingsOf(id).RenderingProfile == Name("Cinematic"));
+	CHECK(universe.SetRenderingProfile(WorldId{999}, Name("Missing")) == WorldStatus::NoSuchWorld);
 }
 
 TEST_CASE("a world with no name is refused", "[world]") {
@@ -286,10 +304,14 @@ TEST_CASE("universe tuning can change between driver ticks", "[world]") {
 	universe.SetMode(ExecutionMode::WorldSerial);
 	universe.SetMaximumCatchUpTicks(2);
 	universe.SetBusBudgetPerTick(17);
+	universe.SetChannelQueueLimit(5);
+	universe.SetChannelsPerWorld(3);
 
 	CHECK(universe.Settings().Mode == ExecutionMode::WorldSerial);
 	CHECK(universe.Settings().MaximumCatchUpTicks == 2);
 	CHECK(universe.Settings().BusBudgetPerTick == 17);
+	CHECK(universe.Settings().ChannelQueueLimit == 5);
+	CHECK(universe.Settings().ChannelsPerWorld == 3);
 
 	universe.Tick(10.0f);
 	CHECK(universe.StatisticsOf(id).Ticks == 2);
@@ -351,34 +373,102 @@ TEST_CASE("parallel and serial execution produce the same result", "[world]") {
 	REQUIRE(run(ExecutionMode::WorldParallel) == run(ExecutionMode::WorldSerial));
 }
 
-TEST_CASE("a world tick really reaches another thread", "[world]") {
-	// Otherwise the parallel-equals-serial case above would be comparing two
-	// serial runs and proving nothing.
+// **Which branch a tick takes, and it turns on the world count.**
+//
+// A `Jobs::ForWorkers` batch owns the process-wide pool, so a nested `Jobs::For`
+// from an assigned task runs inline - which means handing a *lone* world to a
+// lane buys no concurrency and spends the pool that everything inside the world
+// would otherwise have dispatched to. `Universe::Tick` carries the argument. The
+// visible half is the span it names, and that is what this pins: a name is the
+// only thing a caller can see the decision through.
+TEST_CASE("a lone world ticks on the driver and a pair goes to lanes", "[world]") {
 	Pool pool{4};
+	if (Jobs::PinnedWorkerCount() < 2) {
+		SUCCEED("this platform or process affinity exposes fewer than two pinned workers");
+		return;
+	}
+
+	const auto tickWith = [](size_t worlds) {
+		Universe universe;
+		for (size_t index = 0; index < worlds; index++) {
+			const WorldId id = universe.Create(Named(("world.branch." + std::to_string(index)).c_str()));
+			universe.Enter(id, [](Store &store, Scheduler &) {
+				store.Set<Counter>(store.Create(), Counter{});
+			});
+		}
+
+		engine::core::FrameGraph::SetEnabled(true);
+		engine::core::FrameGraph::BeginFrame();
+		universe.Tick(1.0f / 60.0f);
+		engine::core::FrameGraph::EndFrame();
+
+		std::vector<std::string> names;
+		for (const auto &span : engine::core::FrameGraph::Spans()) {
+			names.emplace_back(span.Name);
+		}
+		engine::core::FrameGraph::SetEnabled(false);
+		return names;
+	};
+
+	const auto has = [](const std::vector<std::string> &names, std::string_view wanted) {
+		return std::find(names.begin(), names.end(), wanted) != names.end();
+	};
+
+	// One world: on this thread, so everything it contains keeps its spans and
+	// the pool is free for whatever it dispatches.
+	const std::vector<std::string> alone = tickWith(1);
+	CHECK(has(alone, "worlds (serial)"));
+	CHECK_FALSE(has(alone, "worlds (pinned workers)"));
+
+	// Two: the lanes now have something to overlap, which is the case they are
+	// for. Their spans arrive as one reported total, because a worker cannot
+	// enter the driver's frame graph.
+	const std::vector<std::string> pair = tickWith(2);
+	CHECK(has(pair, "worlds (pinned workers)"));
+	CHECK_FALSE(has(pair, "worlds (serial)"));
+}
+
+TEST_CASE("world ticks keep stable assigned workers", "[world]") {
+	Pool pool{4};
+	const unsigned pinned = Jobs::PinnedWorkerCount();
+	if (pinned < 2) {
+		SUCCEED("this platform or process affinity exposes fewer than two pinned workers");
+		return;
+	}
+
 	Universe universe;
 
-	std::atomic<size_t> elsewhere{0};
 	const std::thread::id driver = std::this_thread::get_id();
+	const size_t worldCount = pinned * 2 + 1;
+	std::vector<std::thread::id> owners(worldCount);
+	std::vector<uint8_t> moved(worldCount, 0);
 
-	for (int index = 0; index < 32; index++) {
+	for (size_t index = 0; index < worldCount; index++) {
 		const WorldId id = universe.Create(Named(("world.thread." + std::to_string(index)).c_str()));
-		universe.Enter(id, [&elsewhere, driver](Store &store, Scheduler &systems) {
+		universe.Enter(id, [&owners, &moved, index](Store &store, Scheduler &systems) {
 			store.Set<Counter>(store.Create(), Counter{});
-			systems.Add("observe", Phase::Simulation, [&elsewhere, driver](Store &) {
-				if (std::this_thread::get_id() != driver) {
-					elsewhere.fetch_add(1, std::memory_order_relaxed);
+			systems.Add("observe", Phase::Simulation, [&owners, &moved, index](Store &) {
+				const std::thread::id current = std::this_thread::get_id();
+				if (owners[index] == std::thread::id{}) {
+					owners[index] = current;
+				} else if (owners[index] != current) {
+					moved[index] = 1;
 				}
 			});
 		});
 	}
 
-	// Retried, because one dispatch is allowed to stay on the calling thread -
-	// the driver drains ranges too.
-	for (int attempt = 0; attempt < 25 && elsewhere.load() == 0; attempt++) {
+	for (int frame = 0; frame < 10; frame++) {
 		universe.Tick(1.0f / 60.0f);
 	}
 
-	REQUIRE(elsewhere.load() > 0);
+	std::set<std::thread::id> distinct;
+	for (size_t index = 0; index < worldCount; index++) {
+		CHECK(moved[index] == 0);
+		CHECK(owners[index] != driver);
+		distinct.insert(owners[index]);
+	}
+	CHECK(distinct.size() == pinned);
 }
 
 // --- structural changes from inside a tick --------------------------------
@@ -558,6 +648,86 @@ TEST_CASE("presenting a world that does not exist is reported", "[world]") {
 	REQUIRE(universe.Present(WorldId{7}, 0.016f, 0.0f) == WorldStatus::NoSuchWorld);
 }
 
+TEST_CASE("presentation keeps each world on its physical-core lane", "[world][parallel]") {
+	Pool pool{4};
+	if (Jobs::PinnedWorkerCount() < 2 || engine::parallel::ForceSerialCompute()) {
+		SKIP("this platform could not pin two job workers to distinct physical cores");
+	}
+
+	Universe universe;
+	const WorldId first = universe.Create(Named("world.present.first"));
+	const WorldId second = universe.Create(Named("world.present.second"));
+
+	std::thread::id firstTickThread;
+	std::thread::id secondTickThread;
+	std::thread::id firstPresentationThread;
+	std::thread::id secondPresentationThread;
+	std::atomic<unsigned> arrived{0};
+	std::atomic<bool> release{false};
+
+	const auto install =
+		[&](WorldId world, std::thread::id &tickThread, std::thread::id &presentationThread) {
+			universe.Enter(world, [&](Store &, Scheduler &systems) {
+				systems.Add("record-tick-lane", Phase::Simulation, [&tickThread](Store &) {
+					tickThread = std::this_thread::get_id();
+				});
+				systems.Add(
+					"record-presentation-lane",
+					Phase::PreRender,
+					[&presentationThread, &arrived, &release](Store &) {
+						presentationThread = std::this_thread::get_id();
+						arrived.fetch_add(1, std::memory_order_release);
+						while (!release.load(std::memory_order_acquire)) {
+							if (arrived.load(std::memory_order_acquire) == 2) {
+								release.store(true, std::memory_order_release);
+							}
+							std::this_thread::yield();
+						}
+					}
+				);
+			});
+		};
+	install(first, firstTickThread, firstPresentationThread);
+	install(second, secondTickThread, secondPresentationThread);
+	universe.Tick(1.0f / 60.0f);
+
+	const std::array requests{
+		Presentation{first, 1.0f / 60.0f, 0.25f},
+		Presentation{second, 1.0f / 60.0f, 0.75f},
+	};
+	REQUIRE(universe.PresentMany(requests) == 2);
+	CHECK(firstPresentationThread == firstTickThread);
+	CHECK(secondPresentationThread == secondTickThread);
+	CHECK(firstPresentationThread != std::this_thread::get_id());
+	CHECK(secondPresentationThread != std::this_thread::get_id());
+	CHECK(firstPresentationThread != secondPresentationThread);
+
+	universe.Enter(first, [](Store &store) { CHECK(store.Time().Alpha == 0.25f); });
+	universe.Enter(second, [](Store &store) { CHECK(store.Time().Alpha == 0.75f); });
+}
+
+TEST_CASE("presentation demand ignores absent, remote, and duplicate worlds", "[world]") {
+	Universe universe;
+	const WorldId local = universe.Create(Named("world.present.local"));
+	const WorldId remote = universe.CreateRemote(Named("world.present.remote"), Name("host.present.remote"));
+	CHECK(universe.Present(remote, 0.016f, 0.5f) == WorldStatus::Ok);
+
+	size_t presented = 0;
+	universe.Enter(local, [&](Store &, Scheduler &systems) {
+		systems.Add("count-presentation", Phase::PreRender, [&](Store &) { presented++; });
+	});
+
+	const std::array requests{
+		Presentation{local, 0.016f, 0.5f},
+		Presentation{local, 0.032f, 1.0f},
+		Presentation{remote, 0.016f, 0.5f},
+		Presentation{WorldId{999}, 0.016f, 0.5f},
+	};
+	CHECK(universe.PresentMany(requests) == 1);
+	CHECK(presented == 1);
+	universe.Enter(local, [](Store &store) { CHECK(store.Time().Alpha == 0.5f); });
+}
+
 // --- churn ----------------------------------------------------------------
 
 TEST_CASE("a universe survives random creation, destruction and suspension", "[world][fuzz]") {
@@ -673,4 +843,233 @@ TEST_CASE("presentation still sees what the tick changed", "[world]") {
 	universe.Present(id, 1.0f / 60.0f, 0.0f);
 
 	REQUIRE(seenWhileDrawing == 1);
+}
+
+TEST_CASE("a world with no replication rate publishes on every tick", "[world]") {
+	// The behaviour every host had before rates existed, and the one every
+	// world in this repository still has.
+	Universe universe;
+	const WorldId id = universe.Create(Named("replication.default"));
+	Populate(universe, id, 1);
+
+	for (int frame = 0; frame < 5; frame++) {
+		universe.Tick(1.0f / 60.0f);
+		CHECK(universe.TakeReplicationTick(id));
+	}
+
+	CHECK(universe.StatisticsOf(id).ReplicationTicks == 5);
+}
+
+TEST_CASE("asking twice publishes once", "[world]") {
+	// It is consumed, so a host that asks again in the same frame does not
+	// build a second delta out of a world that has not moved.
+	Universe universe;
+	const WorldId id = universe.Create(Named("replication.consumed"));
+	Populate(universe, id, 1);
+
+	universe.Tick(1.0f / 60.0f);
+	CHECK(universe.TakeReplicationTick(id));
+	CHECK_FALSE(universe.TakeReplicationTick(id));
+}
+
+TEST_CASE("a world that has not ticked publishes nothing", "[world]") {
+	Universe universe;
+	const WorldId id = universe.Create(Named("replication.untouched"));
+	Populate(universe, id, 1);
+
+	CHECK_FALSE(universe.TakeReplicationTick(id));
+
+	// And an unknown world answers the same way rather than inventing a tick.
+	CHECK_FALSE(universe.TakeReplicationTick(WorldId{}));
+}
+
+TEST_CASE("a replication rate publishes on some ticks and not others", "[world]") {
+	Universe universe;
+	WorldSettings settings = Named("replication.slower", 60.0);
+	settings.ReplicationTickRate = 20.0;
+	const WorldId id = universe.Create(settings);
+	Populate(universe, id, 1);
+
+	int published = 0;
+	for (int frame = 0; frame < 60; frame++) {
+		universe.Tick(1.0f / 60.0f);
+		published += universe.TakeReplicationTick(id) ? 1 : 0;
+	}
+
+	// A second of ticks at 60 buys twenty snapshots, and the world ran all
+	// sixty ticks while doing it.
+	CHECK(published == 20);
+	CHECK(universe.StatisticsOf(id).Ticks == 60);
+	CHECK(universe.StatisticsOf(id).ReplicationTicks == 20);
+}
+
+TEST_CASE("a replication rate above the tick rate publishes every tick", "[world]") {
+	// **A world cannot publish a tick it has not run.** Asking for more is not
+	// an error, and it must not build a debt the world can never pay - an
+	// uncapped accumulator would climb for ever and produce this same answer
+	// with a number growing behind it.
+	Universe universe;
+	WorldSettings settings = Named("replication.faster", 60.0);
+	settings.ReplicationTickRate = 240.0;
+	const WorldId id = universe.Create(settings);
+	Populate(universe, id, 1);
+
+	for (int frame = 0; frame < 30; frame++) {
+		universe.Tick(1.0f / 60.0f);
+		CHECK(universe.TakeReplicationTick(id));
+	}
+	CHECK(universe.StatisticsOf(id).ReplicationTicks == 30);
+}
+
+TEST_CASE("an idle world publishes at its idle rate", "[world]") {
+	// The clock is charged in simulated seconds, so a world ticking at 6 Hz
+	// cannot publish twenty times a second however loudly it was asked to. A
+	// wall clock here would have published twenty snapshots of six ticks.
+	Universe universe;
+	WorldSettings settings = Named("replication.idle", 60.0);
+	settings.IdleTickRate = 6.0;
+	settings.ReplicationTickRate = 20.0;
+	const WorldId id = universe.Create(settings);
+	Populate(universe, id, 1);
+
+	universe.SetState(id, WorldState::Idle);
+
+	int published = 0;
+	for (int frame = 0; frame < 60; frame++) {
+		universe.Tick(1.0f / 60.0f);
+		published += universe.TakeReplicationTick(id) ? 1 : 0;
+	}
+
+	CHECK(universe.StatisticsOf(id).Ticks == 6);
+	CHECK(published == 6);
+}
+
+TEST_CASE("change bits survive the ticks between two published ones", "[world]") {
+	// **The reason `World::Tick` does not clear on every tick once a rate is
+	// set.** A property written on a tick that is not published would otherwise
+	// go into a bitmap nobody ever reads, and the delta built on the next
+	// published tick would carry whatever happened to move on that one tick
+	// alone.
+	Universe universe;
+	WorldSettings settings = Named("replication.held", 60.0);
+	settings.ReplicationTickRate = 20.0;
+	const WorldId id = universe.Create(settings);
+
+	Entity subject = engine::ecs::NULL_ENTITY;
+	universe.Enter(id, [&subject](Store &store, Scheduler &systems) {
+		store.Observe<universe_test::Tracked>();
+		subject = store.Create();
+		store.Set<universe_test::Tracked>(subject, universe_test::Tracked{0});
+
+		// Writes on the first tick and never again, which is the shape of a
+		// script setting a property once.
+		systems.Add("bump-once", Phase::Simulation, [subject](Store &world) {
+			if (world.Time().Tick == 1) {
+				world.GetMutable<universe_test::Tracked>(subject)->Value++;
+			}
+		});
+	});
+
+	// Three ticks: the write lands on the first and the publish comes round on
+	// the third.
+	size_t changed = 0;
+	for (int frame = 0; frame < 3; frame++) {
+		universe.Tick(1.0f / 60.0f);
+		if (universe.TakeReplicationTick(id)) {
+			universe.Enter(id, [&changed](Store &store) {
+				store.EachChanged<universe_test::Tracked>([&changed](Entity, universe_test::Tracked &) {
+					changed++;
+				});
+			});
+		}
+	}
+
+	CHECK(changed == 1);
+}
+
+TEST_CASE("a replication rate that is not a number publishes every tick", "[world]") {
+	// The rate arrives from a game file and from a universe snapshot, and
+	// `docs/CODE_QUALITY.md` §7 calls both hostile. `1.0 / NaN` compared
+	// against an accumulator holds the world on the every-tick path anyway, so
+	// the guard is a positive test and the accumulator never sees a NaN.
+	Universe universe;
+	WorldSettings settings = Named("replication.nan", 60.0);
+	settings.ReplicationTickRate = std::numeric_limits<double>::quiet_NaN();
+	const WorldId id = universe.Create(settings);
+	Populate(universe, id, 1);
+
+	for (int frame = 0; frame < 5; frame++) {
+		universe.Tick(1.0f / 60.0f);
+		CHECK(universe.TakeReplicationTick(id));
+	}
+}
+
+TEST_CASE("an unbounded replication rate publishes every tick", "[world]") {
+	Universe universe;
+	WorldSettings settings = Named("replication.infinite", 60.0);
+	settings.ReplicationTickRate = std::numeric_limits<double>::infinity();
+	const WorldId id = universe.Create(settings);
+	Populate(universe, id, 1);
+
+	for (int frame = 0; frame < 5; frame++) {
+		universe.Tick(1.0f / 60.0f);
+		CHECK(universe.TakeReplicationTick(id));
+	}
+	CHECK(universe.StatisticsOf(id).ReplicationTicks == 5);
+}
+
+TEST_CASE("reconfiguring a world changes its rates and never its name", "[world]") {
+	// **The name is the one field that cannot move.** The registry is keyed on
+	// it, `Find` is what everything crossing a boundary uses, and a world whose
+	// settings say one thing while the registry says another is reachable under
+	// a name nobody can read off it. So `Reconfigure` takes a whole
+	// `WorldSettings` and quietly keeps the name it already had.
+	Universe universe;
+	const WorldId id = universe.Create(Named("world.tuned", 60.0));
+	REQUIRE(id.IsValid());
+
+	WorldSettings wanted = universe.SettingsOf(id);
+	wanted.Name = Name("world.renamed");
+	wanted.TickRate = 30.0;
+	wanted.PhysicsTickRate = 10.0;
+	wanted.ReplicationTickRate = 20.0;
+	wanted.FaultLimit = 9;
+
+	REQUIRE(universe.Reconfigure(id, wanted) == WorldStatus::Ok);
+
+	const WorldSettings applied = universe.SettingsOf(id);
+	CHECK(applied.Name == Name("world.tuned"));
+	CHECK(applied.TickRate == 30.0);
+	CHECK(applied.PhysicsTickRate == 10.0);
+	CHECK(applied.ReplicationTickRate == 20.0);
+	CHECK(applied.FaultLimit == 9u);
+
+	// Still reachable under the name it was created with, and not under the one
+	// that was asked for.
+	CHECK(universe.Find(Name("world.tuned")) == id);
+	CHECK(!universe.Find(Name("world.renamed")).IsValid());
+
+	CHECK(universe.Reconfigure(WorldId{999}, wanted) == WorldStatus::NoSuchWorld);
+}
+
+TEST_CASE("a rate changed between frames takes effect on the next one", "[world]") {
+	// **The accumulator is kept rather than rebuilt**, which is what makes this
+	// a change of rate and not a skip forward. `World::Owed` re-reads the rate
+	// from the settings every frame, so `Reconfigure` writes a number and the
+	// next frame is owed against it.
+	Universe universe;
+	const WorldId id = universe.Create(Named("world.rate", 60.0));
+	Populate(universe, id, 1);
+
+	// A tenth of a second at 60 Hz is six ticks.
+	universe.Tick(1.0f / 10.0f);
+	CHECK(universe.StatisticsOf(id).Ticks == 6);
+
+	WorldSettings slower = universe.SettingsOf(id);
+	slower.TickRate = 10.0;
+	REQUIRE(universe.Reconfigure(id, slower) == WorldStatus::Ok);
+
+	// The same tenth of a second at 10 Hz is one.
+	universe.Tick(1.0f / 10.0f);
+	CHECK(universe.StatisticsOf(id).Ticks == 7);
 }

@@ -27,6 +27,8 @@
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/physics/Contacts.hpp>
+#include <engine/physics/Shapes.hpp>
+#include <engine/spatial/ChunkMap.hpp>
 #include <engine/spatial/HashGrid.hpp>
 #include <engine/spatial/LayerMask.hpp>
 
@@ -102,6 +104,85 @@ namespace engine::physics {
 		}
 	};
 
+	// Which proxy each half of a candidate pair came from.
+	//
+	// **The broad phase already knows this and used to throw it away.** It
+	// generates a pair from two *record indices* and then names the pair by
+	// entity, because an entity is what a manifold and a contact event carry.
+	// The narrow phase then resolved those entities back into shapes through the
+	// store - twenty-five thousand `Store::Get` calls for ten thousand
+	// colliders, every one of them re-reading a `Transform` the sync had already
+	// read. Carrying the indices forward makes that step two array subscripts.
+	//
+	// **Private, and it must stay so.** These are indices into `PhysicsWorld`'s
+	// own arrays, exactly as `spatial::Proxy::Id` is - `AGENTS.md` explains why
+	// publishing one hands a caller a number that is plausible and wrong.
+	//
+	// **The high bit says which array.** A world has two indexes, and a pair may
+	// name one collider in each; a separate flag byte would be two more bytes on
+	// a row that is sorted, and a second parallel array would be a third thing
+	// to keep in step through that sort.
+	//
+	// @since v0.17
+	struct CandidateSource {
+		// The first collider's proxy index, with `STATIC` set when it is in the
+		// static index.
+		uint32_t First = 0;
+
+		// The second's, the same way.
+		uint32_t Second = 0;
+
+		// Set on an index that refers to the static arrays.
+		static constexpr uint32_t STATIC = 0x80000000u;
+
+		constexpr bool FirstIsStatic() const {
+			return (First & STATIC) != 0;
+		}
+
+		constexpr bool SecondIsStatic() const {
+			return (Second & STATIC) != 0;
+		}
+
+		constexpr size_t FirstIndex() const {
+			return static_cast<size_t>(First & ~STATIC);
+		}
+
+		constexpr size_t SecondIndex() const {
+			return static_cast<size_t>(Second & ~STATIC);
+		}
+	};
+
+	// A candidate pair with the proxies it came from, as the broad phase sorts
+	// it.
+	//
+	// **One row rather than two parallel arrays, and only while sorting.** The
+	// pair list has to come out in entity order and the indices have to stay
+	// with the pair they belong to; two arrays sorted separately is two chances
+	// for them to disagree, and the disagreement is silent - the narrow phase
+	// would test two real shapes that are not the ones the pair names.
+	//
+	// Split into `PairList` and `PairSourceList` once the sort is done, because
+	// the first of those is what every consumer outside this module reads and
+	// the second is nobody else's business.
+	//
+	// @since v0.17
+	struct SourcedPair {
+		CandidatePair Pair;
+		CandidateSource Source;
+
+		// Ordered and compared by the pair alone. Two rows naming one pair are
+		// one candidate however they were found.
+		//@{
+		constexpr bool operator<(const SourcedPair &other) const {
+			return Pair < other.Pair;
+		}
+
+		constexpr bool operator==(const SourcedPair &other) const {
+			return Pair == other.Pair;
+		}
+		//@}
+	};
+
 	// One body the solver may push, gathered once per tick.
 	//
 	// **A compact array and not the components themselves.** A sequential
@@ -113,14 +194,15 @@ namespace engine::physics {
 	// that puts the answers back - which is exactly what the pipeline table
 	// means by a `Publish` step that writes back velocities.
 	//
-	// **The first four fields are the ones a sweep touches, and they are first
+	// **The first five fields are the ones a sweep touches, and they are first
 	// on purpose.** The iteration reads and writes two bodies per row at random
 	// offsets, `SOLVER_ITERATIONS` times over, so what decides whether that hits
-	// cache is how many lines a body's *hot* half spans. Velocities, correction
-	// and inverse mass are forty bytes; the sixty-four-byte alignment below puts
-	// all of them in one line and everything the sweeps never look at in the
-	// next. Scattered - inverse mass sat ninety-six bytes after the velocities -
-	// it was two lines per body per access.
+	// cache is how many lines a body's *hot* half spans. The three velocities,
+	// the inverse mass and the movable flag are forty-one bytes; the
+	// sixty-four-byte alignment below puts all of them in one line and
+	// everything the sweeps never look at in the next. Scattered - inverse mass
+	// sat ninety-six bytes after the velocities - it was two lines per body per
+	// access.
 	//
 	// @since v0.4
 	struct alignas(64) SolverBody {
@@ -157,6 +239,20 @@ namespace engine::physics {
 		// it, so it belongs in the hot line with the velocities it scales.
 		float InverseMass = 0.0f;
 
+		// Whether the solver is allowed to change its velocity at all.
+		//
+		// **In the hot line for `InverseMass`' reason, and it moved here in
+		// v0.17.** `ApplyImpulse` reads it once per body per row per sweep to
+		// decide whether to write at all - see the branch there, which is what
+		// lets two workers share a floor - so a flag left down among the setup
+		// fields would pull a second cache line per body on every access and
+		// cost more than the writes it was added to avoid.
+		//
+		// It is always `InverseMass > 0`, and the redundancy is deliberate: a
+		// sweep asking "may I write this" should not have to know that the
+		// answer happens to be encoded in a reciprocal mass.
+		bool Movable = false;
+
 		// --- everything below is set up once and never read by a sweep -------
 
 		// Which entity this is.
@@ -188,10 +284,12 @@ namespace engine::physics {
 		float Restitution = 0.0f;
 
 		// Whether the body is at rest and out of the dynamic archetype.
+		//
+		// Read by the gather and by the resting merge, never by a sweep - which
+		// is why it stayed here when `Movable` moved up. A sleeping body is
+		// immovable for the tick, so a sweep asks `Movable` and gets the answer
+		// without a second question.
 		bool Asleep = false;
-
-		// Whether the solver is allowed to change its velocity at all.
-		bool Movable = false;
 	};
 
 	// One contact point's accumulated impulse, kept for the next tick.
@@ -352,6 +450,35 @@ namespace engine::physics {
 		static constexpr size_t NORMAL = 0;
 		static constexpr size_t TANGENT = 1;
 		//@}
+	};
+
+	// A run of contact rows no other run shares a movable body with.
+	//
+	// **This is what makes a sequential-impulse solve parallel without making it
+	// approximate.** Two groups name disjoint sets of bodies the solver may
+	// write, so a worker sweeping one group and a worker sweeping another cannot
+	// see each other's arithmetic - and the answer is therefore the same however
+	// the two were scheduled, which is the property `Solver.hpp` says a parallel
+	// solve would have to have. It is the graph colouring that file names, with
+	// the colours read off a spatial partition rather than searched for.
+	//
+	// **Disjoint in *movable* bodies and not in all of them**, which is the
+	// distinction that makes the scheme work at all. Every contact in a scene
+	// with a floor names that floor, so a rule about all bodies would put every
+	// contact in one group. An immovable body is only ever read during a sweep -
+	// its inverse mass and inverse inertia are zero, so every impulse applied to
+	// it is a no-op - and `ApplyImpulse` skips the write outright, so two workers
+	// touching one floor is two reads.
+	//
+	// @since v0.17
+	struct SolverGroup {
+		// Where this group's rows start, as an index into `PhysicsWorld::Rows`.
+		uint32_t FirstRow = 0;
+
+		// How many there are. The rows are contiguous, which is the point: a
+		// sweep over a group is a walk rather than a filtered pass over the
+		// whole list.
+		uint32_t RowCount = 0;
 	};
 
 	// How long one body has been still, and whether it has been put to sleep.
@@ -576,6 +703,70 @@ namespace engine::physics {
 			return StaticRebuildCount;
 		}
 
+		// How many contact rows the last solve built.
+		//
+		// **The length of `Rows()`, which is not `Rows().size()`.** The row
+		// array is grown and never shrunk, so its size is the largest this world
+		// has ever needed and its tail is whatever a busier tick left there.
+		//
+		// @return Rows as of the last `Solve`.
+		size_t RowCount() const {
+			return SolverRowCount;
+		}
+
+		// How many bodies have been stopped at a surface they would otherwise
+		// have passed through.
+		//
+		// **The number that says whether continuous collision is doing anything
+		// in a given scene**, and the one to read when a world is suspiciously
+		// slow: a sweep is a distance query per candidate per fast body, so a
+		// scene where this climbs every tick is a scene whose bodies are moving
+		// further than their own thickness every tick.
+		//
+		// @return A counter that only increases.
+		uint64_t SweptBodies() const {
+			return SweptBodyCount;
+		}
+
+		// How many independent groups the last solve split its rows into.
+		//
+		// **The number that says whether a scene can use the machine.** One
+		// group is a solve that runs on one thread whatever the pool holds; a
+		// scene wanting every worker busy needs several groups per worker,
+		// because they are not the same size. Zero means the solve took the
+		// serial path, which it does below `PARALLEL_SOLVE_ROWS`.
+		//
+		// @return Groups as of the last `Solve`.
+		size_t SolverGroupCount() const {
+			return SolverGroups.size();
+		}
+
+		// How many contact rows the last solve could not put in a group.
+		//
+		// **The Amdahl term, and the reason it is worth publishing.** These are
+		// the contacts whose two movable bodies landed in different chunks, and
+		// they are solved on one thread after every group has finished - so a
+		// scene where this is a large fraction of `Rows().size()` is a scene
+		// whose chunks are too small for what is in them.
+		//
+		// @return Border rows as of the last `Solve`.
+		size_t BorderRowCount() const {
+			return BorderRows.RowCount;
+		}
+
+		// The chunk edge the last solve partitioned its bodies with, in metres.
+		//
+		// **Zero means the solve took the serial path**, which it does below
+		// `PARALLEL_SOLVE_ROWS`. Reading the map's own size instead would report
+		// whatever edge it was last set to - or its default on a world that has
+		// never partitioned at all - and a number that looks like an answer is
+		// worse than one that says there is none.
+		//
+		// @return A size in metres, or zero when the solve took the serial path.
+		float SolverChunkSize() const {
+			return SolverChunkEdge;
+		}
+
 	  private:
 		// The two indexes and the arrays behind them.
 		//
@@ -593,13 +784,58 @@ namespace engine::physics {
 		std::vector<spatial::Proxy> StaticProxies;
 		std::vector<ColliderRecord> StaticRecords;
 
+		// The placed shape of every collider, parallel to the records.
+		//
+		// **Filled by `SyncBroadphase`, which is already holding the two
+		// components it needs.** See `PlacedCollider`: this exists so the narrow
+		// phase never touches the store, which is what lets it be dispatched.
+		//
+		// **Rebuilt on the same schedule as the index beside it**, so a stale
+		// static index and a stale static shape go stale together. That is the
+		// stronger of the two arrangements: the alternative was a stale index
+		// and a *fresh* transform read per pair, which is two descriptions of
+		// where a wall is disagreeing inside one step.
+		std::vector<PlacedCollider> DynamicShapes;
+		std::vector<PlacedCollider> StaticShapes;
+
 		std::vector<CandidatePair> PairList;
+
+		// Which proxy each pair came from, parallel to `PairList` and sorted
+		// with it. See `CandidateSource`.
+		std::vector<CandidateSource> PairSourceList;
+
+		// Where the two are sorted together before being split. Cleared and
+		// refilled, never freed, like every other list here.
+		std::vector<SourcedPair> SourcedPairList;
 		std::vector<ContactManifold> ManifoldList;
 		std::vector<ContactEvent> EventList;
 
+		// One slot per candidate pair, and whether that pair turned out to touch.
+		//
+		// **What lets the narrow phase be dispatched without a shared cursor.**
+		// Workers write the slot their own pair owns and nothing else, and the
+		// compaction that follows walks the flags in pair order - so the
+		// manifold list is a function of the pair list rather than of which
+		// worker finished first, which is what the solver's order-dependence
+		// requires.
+		//
+		// `ManifoldSlots.size()` is a high-water mark, like `RowList`'s: only
+		// the slots a flag points at are ever read.
+		std::vector<ContactManifold> ManifoldSlots;
+		std::vector<uint8_t> ManifoldTouching;
+
 		// What the solver works on, refilled every tick from the manifolds.
+		//
+		// **`RowList.size()` is a high-water mark and not this tick's row
+		// count.** Every byte of every row is written by the set-up pass, so
+		// resizing to the exact count would memset megabytes a tick to produce
+		// zeroes nothing reads. The vector therefore only ever grows, and
+		// `SolverRowCount` is the length anything walking it must take. Reading
+		// `size()` instead is a walk over last tick's tail, and a stale row is a
+		// contact between two bodies that are no longer touching.
 		std::vector<SolverBody> BodyList;
 		std::vector<ContactRow> RowList;
+		size_t SolverRowCount = 0;
 
 		// The scratch the solver's gather sorts, and where it puts the body
 		// indices it resolves per manifold.
@@ -612,6 +848,68 @@ namespace engine::physics {
 		// Cleared and refilled, never freed, like every other list here.
 		std::vector<ecs::Entity> BodyOwners;
 		std::vector<std::pair<uint32_t, uint32_t>> ManifoldBodies;
+
+		// The spatial partition the solve is batched by, and the points it is
+		// built from.
+		//
+		// **Over the solver's bodies rather than over the broad phase's
+		// proxies**, and they are not the same set: the bodies are the ones a
+		// manifold named, which is a fraction of the colliders in a busy world
+		// and includes anchored geometry the dynamic index never held. Reusing
+		// the dynamic proxies would put a resting body in no chunk and a body
+		// touching a wall in a chunk that does not contain the wall.
+		//
+		// A point per body rather than its box, because the partition wants one
+		// answer per body - see `spatial::ChunkMap`, which explains why binning
+		// a box gives a set and a set cannot be split across workers.
+		spatial::ChunkMap SolverChunks;
+		std::vector<spatial::Proxy> SolverPoints;
+
+		// Which group each manifold's rows went into, and the groups themselves.
+		//
+		// `GroupOfManifold` is the counting pass's answer and the filling pass's
+		// input, kept between them rather than recomputed - the alternative is
+		// asking each manifold's two bodies for their chunks twice, which is two
+		// random accesses per manifold for a number that is already known.
+		//
+		// `SolverGroups` holds only the groups that ended up with rows in them,
+		// so a dispatch over it never hands a worker an empty range.
+		// The chunk edge the last partitioned solve used, or zero for a solve
+		// that did not partition. See `SolverChunkSize`.
+		float SolverChunkEdge = 0.0f;
+
+		std::vector<uint32_t> GroupOfManifold;
+		std::vector<uint32_t> GroupRowStart;
+		std::vector<uint32_t> GroupRowCursor;
+
+		// Where each manifold's rows begin, as an index into `RowList`.
+		//
+		// **Handed out before any row is built, which is what lets the set-up
+		// pass be dispatched.** A cursor advanced while the rows are built is a
+		// shared write and would have pinned the expensive half of the solve to
+		// one thread; this is the cheap walk that turns it into an address per
+		// manifold nobody else writes to.
+		std::vector<uint32_t> RowStartOfManifold;
+
+		// Where each manifold's impulses begin, as an index into `ImpulseNext`.
+		//
+		// **Not the same offset as `RowStartOfManifold`, and the difference is
+		// the reason both exist.** The rows are grouped by chunk so a sweep can
+		// walk one group; the impulse cache is a sorted array a binary search
+		// answers, so it has to come out in pair order. The manifolds are
+		// already sorted on the pair, so this is a running total over them.
+		std::vector<uint32_t> ImpulseStartOfManifold;
+		std::vector<SolverGroup> SolverGroups;
+
+		// The rows whose two movable bodies landed in different chunks.
+		//
+		// **Solved after every group and on one thread**, because they are what
+		// the groups are disjoint *despite*: a contact straddling a chunk face
+		// names a body in each, so it conflicts with both chunks' interiors. It
+		// is a surface-area effect - the fraction of contacts that straddle
+		// falls as a chunk holds more bodies - and `PhysicsWorld::BorderRows` is
+		// what says whether it has stopped being one in a given scene.
+		SolverGroup BorderRows;
 
 		// The impulses, double-buffered: `ImpulseCache` is what this tick's
 		// warm start reads and `ImpulseNext` is what it writes for the tick
@@ -661,6 +959,9 @@ namespace engine::physics {
 
 		uint64_t DynamicRebuildCount = 0;
 		uint64_t StaticRebuildCount = 0;
+
+		// How many bodies the continuous step has clamped short of a surface.
+		uint64_t SweptBodyCount = 0;
 
 		// The systems, the suites and the benchmarks all read the arrays above,
 		// and not one of them is another module. Publishing the storage to reach

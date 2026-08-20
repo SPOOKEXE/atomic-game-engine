@@ -8,8 +8,10 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/effects/Ribbon.hpp>
 #include <engine/examples/Shooting.hpp>
+#include <engine/game/CollisionContent.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Play.hpp>
+#include <engine/gui/Compile.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Layout.hpp>
 #include <engine/gui/Services.hpp>
@@ -20,12 +22,14 @@
 #include <engine/parallel/Settings.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Characters.hpp>
+#include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/Materials.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/PublishedCatalogue.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/Shaders.hpp>
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/TextureCatalogue.hpp>
@@ -162,7 +166,11 @@ namespace client {
 			ENGINE_INFO("compositing {} worlds, {:.0f} units apart", Simulated.size(), Settings.ViewSpacing);
 		}
 
-		FrameGraph::SetEnabled(Settings.ShowFrameGraph);
+		// **A snapshot asks for the recording too.** Collecting every span is real
+		// work, so it is off unless something wants it - and a run given
+		// `--profile-snapshot` and nothing else recorded nothing, then reported
+		// that it could not write the document.
+		FrameGraph::SetEnabled(Settings.ShowFrameGraph || !Settings.ProfileSnapshot.empty());
 		return FinishStartup();
 	}
 
@@ -174,6 +182,7 @@ namespace client {
 			ENGINE_ERROR("--game '{}' failed: {}", Settings.GameFile.string(), error);
 			return false;
 		}
+		RenderingProfiles = std::move(info.RenderingProfiles);
 
 		const auto worlds = Universe_->Worlds();
 		if (worlds.empty()) {
@@ -551,15 +560,31 @@ namespace client {
 
 					// Mesh metadata is world data, not renderer state.
 					const auto triangles = static_cast<uint32_t>(mesh.Indices.size() / 3);
+
+					// **The collision geometry, baked once here rather than per
+					// world.** A hull and a triangle soup are a function of the
+					// mesh alone, so building them inside the loop below would
+					// be the same quickhull run four times for four worlds.
+					//
+					// **Through `game` rather than inline**, because a headless
+					// server bakes the same two shapes out of the store it
+					// serves: a second copy of the conversion here is how the
+					// two would come to disagree about a hull, which reads as a
+					// client and a server disagreeing about where a player is
+					// standing.
+					engine::scene::CollisionShapes arrived;
+					engine::game::AddCollisionShapes(arrived, name, mesh);
+
+					const auto record = [&name, triangles, &sheets, &arrived](engine::ecs::Store &store) {
+						engine::scene::RecordMesh(store, name, triangles, sheets);
+						engine::game::MergeCollisionShapes(store, arrived);
+					};
+
 					for (const engine::world::WorldId id : Simulated) {
-						Universe_->Enter(id, [&name, triangles, &sheets](engine::ecs::Store &store) {
-							engine::scene::RecordMesh(store, name, triangles, sheets);
-						});
+						Universe_->Enter(id, record);
 					}
 					if (ReportedJoin) {
-						Universe_->Enter(Replicated, [&name, triangles, &sheets](engine::ecs::Store &store) {
-							engine::scene::RecordMesh(store, name, triangles, sheets);
-						});
+						Universe_->Enter(Replicated, record);
 					}
 				}
 			} else if (asset->Kind == engine::assets::AssetKind::Texture) {
@@ -1245,7 +1270,13 @@ namespace client {
 				// that published to a bus would be telling the universe
 				// something the server never said; the inbox still delivers,
 				// which is how it receives.
-				store.SetResource(engine::world::Replica{true});
+				// **The two names are left empty and that is the answer here.**
+				// A `--connect` client mirrors a world in another process, so
+				// there is no local world for `Of` to name and one view for
+				// `View` to tell apart - `client::SurveyWorlds` reads an empty
+				// pair as "this world's own name is the one its panes carry",
+				// which is what a single-replica process wants.
+				store.SetResource(engine::world::Replica{});
 
 				// **Said here rather than left to the first `Connector::Poll`,
 				// because something now builds instances between the two.**
@@ -1675,6 +1706,14 @@ namespace client {
 			ProfilerScroll = 0;
 		}
 
+		if (Actions.Fired(Action::ToggleWireframe)) {
+			// **The renderer holds the one bit of state**, not `Settings` -
+			// `Renderer::Wireframe()` is what the next `Render` call actually
+			// reads, so asking it back here rather than keeping a second flag
+			// in step is what keeps a panel that showed one from ever lying.
+			Renderer.SetWireframe(!Renderer.Wireframe());
+		}
+
 		const auto tabCount = static_cast<int>(ProfilerTab::Count);
 		if (Actions.Fired(Action::NextProfilerTab)) {
 			Settings.Tab = static_cast<ProfilerTab>((static_cast<int>(Settings.Tab) + 1) % tabCount);
@@ -1770,9 +1809,9 @@ namespace client {
 		// drawn from input that is already a frame old. The client has the same
 		// shape as the studio and had the same frame of delay in it.
 		//
-		// It costs a frame of nothing when it fails - minimised, or mid-resize -
-		// and `Render` reaches the same conclusion for itself below.
-		Renderer.WaitForFrame();
+		// A failure means minimised or mid-resize. The result gates presentation
+		// below after simulation and external services have continued.
+		const bool renderingActive = Renderer.WaitForFrame();
 
 		const float delta = Clock.Tick();
 
@@ -1828,6 +1867,23 @@ namespace client {
 		// because presentation is where the frame stops being about state.
 		PumpSounds();
 
+		// Beside the audio pump: neither is part of the tick, and a presence
+		// update that landed a frame later on a slower machine changes nothing
+		// a recorded run has to reproduce.
+		PumpDiscord(engine::core::Clock::Seconds());
+
+		// A hidden, minimised, or resizing window has no frame to consume. The
+		// simulation, replication, content delivery, and audio above continue,
+		// while PreRender and every GPU allocation below remain demand driven.
+		// Headless rendering still returns true so captures and bounded runs keep
+		// their existing behaviour.
+		if (!renderingActive) {
+			FrameGraph::EndFrame();
+			ENGINE_PROFILE_FRAME();
+			Metrics::Clear();
+			return;
+		}
+
 		// **The requested size when there is no window to ask.** A headless run
 		// still lays the panels out and still renders into an offscreen target
 		// of this size, so the numbers have to come from somewhere - and
@@ -1864,14 +1920,16 @@ namespace client {
 
 			// **Cleared with the surfaces and for a sharper version of the same
 			// reason.** A stale `SurfaceView` renders a camera that has gone; a
-			// stale `ParticleBatch` is a span into a pool that has been stepped
-			// since, so its `Live` prefix may now be shorter than the span says.
-			// That is a read past the live particles rather than a wrong picture.
-			Particles.clear();
+			// stale `ParticleBatch` points at a block that may since have been
+			// reclaimed and handed to another emitter, so its run of the pool
+			// would be stepped with somebody else's curves.
+			Particles.Clear();
 			Lights.clear();
 			RibbonVertices = {};
 			RibbonRuns = {};
 
+			std::vector<engine::world::Presentation> presentationDemand;
+			presentationDemand.reserve(Simulated.size());
 			for (const engine::world::WorldId id : Simulated) {
 				// **Written before `Present`, so this frame's `PreRender` sees
 				// this frame's input.** A camera controller reads the state and
@@ -1902,14 +1960,22 @@ namespace client {
 						store, static_cast<uint32_t>(pixelWidth), static_cast<uint32_t>(pixelHeight)
 					);
 				});
+				presentationDemand.push_back(engine::world::Presentation{id, delta, Universe_->AlphaOf(id)});
+			}
 
-				Universe_->Present(id, delta, Universe_->AlphaOf(id));
+			// All demanded worlds prepare their draw packets together. Each
+			// PreRender pass stays on the world's stable physical-core lane and
+			// the joined result below is still copied through ViewChannel before
+			// the renderer sees it.
+			(void)Universe_->PresentMany(presentationDemand);
 
+			for (const engine::world::WorldId id : Simulated) {
+				const engine::core::Name selectedProfile = Universe_->SettingsOf(id).RenderingProfile;
 				// Published from inside the world, straight after its PreRender
 				// phase filled the draw list. The camera and the list stay
 				// where they were produced; what leaves is a copy in a buffer
 				// the renderer owns the other end of.
-				Universe_->Enter(id, [this, id](engine::ecs::Store &store) {
+				Universe_->Enter(id, [this, id, selectedProfile](engine::ecs::Store &store) {
 					const auto *active = store.Resource<engine::scene::ActiveCamera>();
 					const auto *list = store.Resource<DrawList>();
 					if (active == nullptr || list == nullptr) {
@@ -1956,12 +2022,13 @@ namespace client {
 							}
 						);
 
-						// TODO(render-pipeline): the world's own pipeline was
-						// installed here, on a world change rather than per
-						// frame. `PipelinesInstalledFor` guarded that and
-						// `PipelineSelected` carried the answer to the render
-						// call below - both members are still declared and both
-						// are marked. See `client::InstallWorldPipelines`.
+						if (ProfilesInstalledFor != id || ProfileInstalledSelection != selectedProfile) {
+							ProfilesInstalledFor = id;
+							ProfileInstalledSelection = selectedProfile;
+							PipelineSelected = InstallRenderingProfiles(
+								RenderingProfiles, Renderer, id.Index, selectedProfile
+							);
+						}
 
 						// **The particles, from the world being drawn and only
 						// that one.** A batch is a span into this world's pool;
@@ -2270,6 +2337,12 @@ namespace client {
 			// however the focus went away.
 			std::vector<engine::gui::GuiEvent> typedEvents;
 
+			// **The clock a page slide and a rubber band are measured against.**
+			// Passed in rather than read inside `gui`, which is the standing
+			// rule `render::FlipbookFrameAt` and `assets::Grant` both keep -
+			// see `CompileRequest::Seconds`.
+			request.Seconds = engine::core::Clock::Seconds();
+
 			request.Display.Width = static_cast<float>(Settings.Width);
 			request.Display.Height = static_cast<float>(Settings.Height);
 
@@ -2291,6 +2364,17 @@ namespace client {
 				// everything inside it.
 				engine::render::ResolveSpatialCanvases(store, request.Display);
 				engine::gui::Layout(store, request.Display);
+
+				// **Whose eyes this list is for**, which only
+				// `BillboardGui.PlayerToHideFrom` reads and which only this
+				// caller can answer: a world is compiled once per viewer and the
+				// viewer is a resource in the world being drawn. A studio or a
+				// test leaves it null and hides nothing, which is right - there
+				// is nobody for a billboard to be hidden from.
+				if (const auto *local = store.Resource<engine::scene::LocalPlayer>()) {
+					request.Viewer = local->Instance;
+				}
+
 				InterfaceList.Rebuild(store, request);
 
 				// **This frame's characters, and before the press that may move
@@ -2370,6 +2454,13 @@ namespace client {
 				// which is what this flag is for.
 				pointer.Inside = Input.State().Focused;
 				pointer.ScreenOnly = true;
+
+				// **The wheel, in notches, straight from the translator.** How
+				// many pixels a notch moves a canvas is `gui::Router`'s decision
+				// and not this one - a list has to move the same distance in the
+				// client and in the editor, and scaling here would be the second
+				// answer.
+				pointer.Wheel = Input.State().WheelDelta;
 
 				// **Before the router reads the pointer, so the press is this
 				// frame's.** Synthesising after would put the click one frame
@@ -2541,6 +2632,19 @@ namespace client {
 										? static_cast<int32_t>(Settings.SurfaceBounces)
 										: engine::scene::SurfaceBouncesOf(lit);
 			Renderer.SetSurfaceBounces(static_cast<uint32_t>(std::max(bounces, 0)));
+
+			// **And how many panes it draws at once**, which is the other half of
+			// what a hall of mirrors costs: the depth above says how deep a chain
+			// resolves and this says how many chains there are. Read from the
+			// world every frame for the bounce setting's reason - a script may
+			// change it at any time, and once at startup would let the first
+			// world drawn set it for every world after.
+			//
+			// **No session override beside it, deliberately.** `--surface-bounces`
+			// exists because somebody comparing two depths needs the world to stop
+			// arguing; there is no equivalent measurement for the count, and a
+			// flag with no use is a flag that goes stale.
+			Renderer.SetSurfaceLimit(static_cast<uint32_t>(std::max(engine::scene::SurfaceLimitOf(lit), 0)));
 		});
 
 		// **The shaders this world's materials name, resolved before the frame
@@ -2554,67 +2658,134 @@ namespace client {
 		// pipeline built for a world nothing is presenting is video memory held
 		// for a frame that is not being rendered.
 		Universe_->Enter(Rendered, [this](engine::ecs::Store &shaded, engine::ecs::Scheduler &) {
-			if (Shaders.Refresh(shaded) == 0) {
-				return;
+			const size_t changed = Shaders.Refresh(shaded);
+			const engine::core::Name wantedPostProcess = engine::scene::PostProcessShaderOf(shaded);
+
+			if (changed > 0) {
+				// **Which of the changed names an `ImageLabel` actually asked
+				// for**, and it is worth the second walk: `opaque.frag` and
+				// `interface.frag` declare different binding counts, so a
+				// `ShaderScript` a `Material` alone selected would fail to
+				// build an interface pipeline every time it changed - a real
+				// failure logged for a shader nobody meant to put on a
+				// picture. Only names this set actually holds are offered to
+				// `Interface`, and only `wantedPostProcess` itself is offered
+				// to the postprocess slot, for the identical reason.
+				std::vector<engine::core::Name> guiShaders;
+				engine::gui::DemandedShaders(shaded, guiShaders);
+
+				// **Only what moved.** `Changed` is the whole reason a
+				// refresh returns a count rather than a bool: rebuilding
+				// every pipeline every frame is what this loop exists not to
+				// do.
+				for (const engine::core::Name &name : Shaders.Changed()) {
+					const engine::render::ShaderModule *module = Shaders.Find(name);
+					const bool wantedByGui =
+						std::find(guiShaders.begin(), guiShaders.end(), name) != guiShaders.end();
+					const bool wantedByPostProcess = wantedPostProcess.IsValid() && name == wantedPostProcess;
+
+					// Null is a name nothing asks for any more, so whatever
+					// was built for it is released. The instances that named
+					// it are already gone or already name something else.
+					if (module == nullptr) {
+						(void)Renderer.DropShader(name);
+						if (wantedByGui) {
+							(void)Interface.DropShaderVariant(name);
+						}
+						if (wantedByPostProcess) {
+							Renderer.ClearPostProcessShader();
+							LastPostProcessShader = {};
+						}
+						continue;
+					}
+
+					// **A warning and not a fatal, and the part goes on drawing with
+					// the engine's own shader.** `render/AGENTS.md` is explicit that
+					// a user shader failing is a diagnostic string - the built-in
+					// ones fail the build instead, which is where that belongs.
+					if (!module->Error.empty()) {
+						ENGINE_WARN("shader '{}': {}", name.Text(), module->Error);
+						continue;
+					}
+
+					(void)Renderer.AddShader(name, module->SpirV);
+
+					// **The same words, into the interface pass too, and only
+					// when an `ImageLabel` actually named this shader.** See
+					// `InterfacePass::AddShaderVariant`'s own header for the
+					// binding-count reason a `Material`-only shader must not
+					// be offered here.
+					if (wantedByGui) {
+						(void)Interface.AddShaderVariant(name, module->SpirV);
+					}
+
+					// **And into the postprocess slot, only when this is the
+					// name the world currently wants there.** An author
+					// editing the shader mid-session sees the frame update
+					// through this branch; picking it for the first time or
+					// switching between two already-compiled shaders goes
+					// through the check below instead, because neither of
+					// those moves anything `Changed` reports.
+					if (wantedByPostProcess) {
+						if (Renderer.SetPostProcessShader(name, module->SpirV)) {
+							LastPostProcessShader = name;
+						}
+					}
+				}
 			}
 
-			// **Only what moved.** `Changed` is the whole reason a refresh
-			// returns a count rather than a bool: rebuilding every pipeline
-			// every frame is what this loop exists not to do.
-			for (const engine::core::Name &name : Shaders.Changed()) {
-				const engine::render::ShaderModule *module = Shaders.Find(name);
-
-				// Null is a name nothing asks for any more, so whatever was
-				// built for it is released. The instances that named it are
-				// already gone or already name something else.
-				if (module == nullptr) {
-					(void)Renderer.DropShader(name);
-					continue;
+			// **The selection itself, independent of whether anything
+			// recompiled.** Switching from one already-known postprocess
+			// shader to another - or to none - moves neither `Changed` nor
+			// takes the branch above, so this is the other half of keeping
+			// `Renderer`'s active pipeline in step with what the world
+			// currently names.
+			if (wantedPostProcess != LastPostProcessShader) {
+				if (!wantedPostProcess.IsValid()) {
+					Renderer.ClearPostProcessShader();
+				} else if (const engine::render::ShaderModule *module = Shaders.Find(wantedPostProcess);
+						   module != nullptr && module->Error.empty()) {
+					if (Renderer.SetPostProcessShader(wantedPostProcess, module->SpirV)) {
+						LastPostProcessShader = wantedPostProcess;
+					}
 				}
-
-				// **A warning and not a fatal, and the part goes on drawing with
-				// the engine's own shader.** `render/AGENTS.md` is explicit that
-				// a user shader failing is a diagnostic string - the built-in
-				// ones fail the build instead, which is where that belongs.
-				if (!module->Error.empty()) {
-					ENGINE_WARN("shader '{}': {}", name.Text(), module->Error);
-					continue;
-				}
-
-				(void)Renderer.AddShader(name, module->SpirV);
 			}
 		});
 
-		// TODO(render-pipeline): this call took a `render::View` per camera.
-		//
-		// The old system's `Render` takes one camera's worth of arguments
-		// positionally; the one being replaced took `std::span<const View>`, so a
-		// frame could carry several cameras and each could name **its own
-		// pipeline** - `view.World` and `view.Pipeline` were set together here,
-		// because the pipeline key a world installs is qualified by the world id
-		// and a view naming one without the other asks for a pipeline nothing
-		// installed.
-		//
-		// **The two members that fed it are still on this class**, unused, and
-		// marked: `PipelinesInstalledFor` and `PipelineSelected`. They are where
-		// a world's saved pipelines were installed and which one this view
-		// selected. See `client::InstallWorldPipelines` in `Scene.hpp`.
-		LastFrame = Renderer.Render(
-			Views.CameraFrame(),
-			Views.Camera(),
-			drawn,
-			Overlay,
-			Surfaces,
-			hook,
-			sceneTarget,
-			0,
-			Particles,
-			RibbonVertices,
-			RibbonRuns,
-			Lights,
-			Foreign,
-			Portals
-		);
+		// **The other half of a world's content that only exists once the
+		// engine is running**, beside the shader refresh above and for the
+		// identical reason: only the world actually being drawn pays for an
+		// upload, and a steady scene - nothing mid-edit - costs one walk and
+		// an integer compare per `EditableMesh`.
+		Universe_->Enter(Rendered, [this](engine::ecs::Store &shaded, engine::ecs::Scheduler &) {
+			(void)EditableMeshes.Refresh(shaded, Renderer);
+			(void)EditableImages.Refresh(shaded, Renderer);
+		});
+
+		engine::render::View view;
+		view.CameraFrame = Views.CameraFrame();
+		view.Camera = Views.Camera();
+		view.Instances = drawn;
+		view.Surfaces = Surfaces;
+		view.Target = sceneTarget;
+		view.Particles = Particles.Batches;
+		view.ParticleBirths = Particles.Births;
+		view.ParticleSeams = Particles.Seams;
+		view.ParticlePool = Particles.Pool;
+		view.ParticleBlocks = Particles.BlockCount;
+
+		// **The frame's step and not the tick's**, because the device steps once
+		// per rendered frame - see `View::ParticleDelta`. Spawning is still on
+		// the tick and the two agree, both being rates per second.
+		view.ParticleDelta = delta;
+		view.RibbonVertices = RibbonVertices;
+		view.RibbonRuns = RibbonRuns;
+		view.Lights = Lights;
+		view.Foreign = Foreign;
+		view.Portals = Portals;
+		view.Pipeline = PipelineSelected;
+		view.World = Rendered.IsValid() ? Rendered.Index : 0;
+		LastFrame = Renderer.Render(std::span<const engine::render::View>(&view, 1), Overlay, hook);
 
 		// **After the frame rather than before it**, so the capture is of a
 		// frame whose scene texture exists - the studio's own capture states
@@ -2646,6 +2817,18 @@ namespace client {
 		using engine::core::Metrics;
 		Metrics::Count("render.triangles", static_cast<double>(LastFrame.Triangles));
 		Metrics::Count("render.draw-calls", static_cast<double>(LastFrame.DrawCalls));
+		Metrics::Count("render.upload-bytes", static_cast<double>(LastFrame.UploadedBytes));
+		Metrics::Count("render.upload-command-buffers", static_cast<double>(LastFrame.UploadCommandBuffers));
+		Metrics::Count("render.compute-dispatches", static_cast<double>(LastFrame.ComputeDispatches));
+		Metrics::Count(
+			"render.async-compute-command-buffers", static_cast<double>(LastFrame.AsyncComputeCommandBuffers)
+		);
+		Metrics::Count(
+			"render.download-command-buffers", static_cast<double>(LastFrame.DownloadCommandBuffers)
+		);
+		Metrics::Count(
+			"render.traffic-command-buffers", static_cast<double>(LastFrame.TrafficCommandBuffers)
+		);
 
 		// **The three that only mean anything as a series.** A batch count says
 		// whether the interface is being rebuilt into more draws than it needs;
@@ -2670,6 +2853,11 @@ namespace client {
 		if (!Running) {
 			return 1;
 		}
+
+		// Once, and after startup rather than in the constructor: the game file
+		// and the connect address are settled by now, and they are what the
+		// first card says.
+		StartDiscord();
 
 		while (Running) {
 			Step();
@@ -2730,6 +2918,19 @@ namespace client {
 		}
 
 		ReportReplica();
+
+		// **Before anything is torn down**, for the reason the editor's own
+		// call gives: the graph's history is what is being written, and a
+		// snapshot taken after the world has gone is a snapshot of the
+		// shutdown.
+		if (!Settings.ProfileSnapshot.empty()) {
+			if (FrameGraph::WriteSnapshot(Settings.ProfileSnapshot)) {
+				ENGINE_INFO("frame graph written to {}", Settings.ProfileSnapshot.string());
+			} else {
+				ENGINE_ERROR("could not write {}", Settings.ProfileSnapshot.string());
+			}
+		}
+
 		return 0;
 	}
 

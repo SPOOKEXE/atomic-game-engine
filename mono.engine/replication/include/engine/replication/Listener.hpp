@@ -97,6 +97,12 @@ namespace engine::replication {
 		// @since v0.13
 		bool SendTo(ClientId client, std::span<const std::byte> message, double nowSeconds);
 
+		// Sets the added one-way delay for one admitted client's outgoing stream.
+		//
+		// @return `false` when the handle is unknown or stale.
+		// @since v0.18
+		bool SetSimulatedLatency(ClientId client, double milliseconds);
+
 		// Sends a message to every admitted client except one.
 		//
 		// **The relay a shared document needs, and the exception is the point.**

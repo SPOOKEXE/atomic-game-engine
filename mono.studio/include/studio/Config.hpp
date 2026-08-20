@@ -10,6 +10,7 @@
 //       cdn.json           the content origins and the order they are tried
 //       recent.json        the last five projects opened
 //       keybinds.json      what every action is bound to
+//       layout.ini         where panels are docked
 //
 // Three decisions, and each replaced something worse:
 //
@@ -45,9 +46,11 @@
 //
 // @tier client
 
+#include <engine/ui/Theme.hpp>
+
 #include <cstddef>
 #include <cstdint>
-#include <engine/ui/Theme.hpp>
+#include <discord/Settings.hpp>
 #include <filesystem>
 #include <map>
 #include <nlohmann/json_fwd.hpp>
@@ -270,6 +273,37 @@ namespace studio {
 		bool ShowControl = false;
 		//@}
 
+		// Which of the shipped worlds a new game opens with, by key.
+		//
+		// **Keys rather than flags, and a list rather than a bitfield.** The
+		// catalogue is a table in `Editor.cpp` that gains a row whenever an
+		// example is worth opening with, so a fixed set of booleans here would
+		// have to be edited in step with it and a bit position would silently
+		// change meaning when a row was removed. A key that no longer exists is
+		// skipped on load and kept in the file, for `panelColours`' reason: a
+		// world renamed back should not have lost the tick somebody put on it.
+		//
+		// **Empty means "never asked", not "none".** A file written before this
+		// existed has no entry at all, and a new game with no worlds in it is an
+		// empty black frame - so `Editor::DefaultWorldKeys` falls back to the
+		// catalogue's own defaults rather than to nothing.
+		std::vector<std::string> DefaultWorlds;
+
+		// The frame ceiling and the four rates under it, in hertz. See
+		// `Editor::InterfaceActiveHz` for what each one bounds and why they
+		// combine as a minimum rather than as separate clocks.
+		//@{
+		float FrameCap = 120.0f;
+		float InterfaceActiveHz = 120.0f;
+		float InterfaceIdleHz = 20.0f;
+		float RendererFocusedHz = 120.0f;
+		float RendererUnfocusedHz = 10.0f;
+		//@}
+
+		// Whether `DefaultWorlds` came from a file rather than from nothing.
+		// See the load path for why absent and empty are different answers.
+		bool DefaultWorldsChosen = false;
+
 		// What a panel was coloured, keyed by the title imgui identifies it with.
 		//
 		// **Here rather than in the layout ini, unlike the global theme.** The
@@ -286,6 +320,24 @@ namespace studio {
 		//
 		// @since v0.13
 		std::map<std::string, engine::ui::ThemeColours> PanelColours;
+
+		// What Discord is told the editor is doing, and whether it is told
+		// anything at all.
+		//
+		// **Here rather than in the `discord` flag table, unlike the other
+		// three programs.** The header above says why: an editor persists what
+		// somebody configured in a document it owns, and the Discord Presence
+		// page is the interface for this one. The client, the server and the
+		// origin have no such page, so they read the same struct off flags -
+		// `discord::SettingsFromFlags` - and the studio deliberately does not
+		// declare that table. A command-line switch that the tab then
+		// contradicted would be worse than no switch.
+		//
+		// Off with no application id, so an install nobody configured opens no
+		// socket and publishes nothing.
+		//
+		// @since v0.17
+		discord::Settings Discord;
 
 		// Reads `preferences.json`, leaving anything it does not mention alone.
 		//

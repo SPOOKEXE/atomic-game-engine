@@ -209,20 +209,51 @@ namespace engine::gui {
 
 		if (current == ecs::NULL_ENTITY || !Selectable(store, current)) {
 			// Nothing selected, or what was selected has gone. Seed from the
-			// first selectable element in paint order.
+			// lowest `SelectionOrder`, and from paint order within it.
 			if (!state->AutoSelectGuiEnabled) {
 				return false;
 			}
+
+			Entity seed = ecs::NULL_ENTITY;
+			int32_t seedOrder = 0;
 
 			for (const DrawCommand &command : list.Commands) {
 				if (!seen.insert(command.Source.Id).second) {
 					continue;
 				}
-				if (Selectable(store, command.Source)) {
-					return Select(store, command.Source);
+				if (!Selectable(store, command.Source)) {
+					continue;
+				}
+
+				// **Lower goes first, which is Roblox's sense**, and paint order
+				// breaks a tie because that is the order the list already
+				// carries - an author who set no orders gets exactly what this
+				// did before the property existed.
+				const Selection *selection = store.Get<Selection>(command.Source);
+				const int32_t order = selection != nullptr ? selection->Order : 0;
+				if (seed == ecs::NULL_ENTITY || order < seedOrder) {
+					seed = command.Source;
+					seedOrder = order;
 				}
 			}
-			return false;
+
+			return seed != ecs::NULL_ENTITY && Select(store, seed);
+		}
+
+		// **An authored answer wins outright, before anything is scored.** That
+		// is what `NextSelectionUp` and its three siblings are for: geometry gets
+		// the common case right and an author gets the last word on a menu whose
+		// layout does not read the way it looks. A handle naming something that
+		// is gone or not selectable falls through to the scoring rather than
+		// stopping the move, because a dead override should not trap a player.
+		if (const Selection *selection = store.Get<Selection>(current)) {
+			const Entity named = move == SelectionMove::Up	   ? selection->NextUp
+								 : move == SelectionMove::Down ? selection->NextDown
+								 : move == SelectionMove::Left ? selection->NextLeft
+															   : selection->NextRight;
+			if (named != ecs::NULL_ENTITY && Selectable(store, named)) {
+				return Select(store, named);
+			}
 		}
 
 		Vector2 from;

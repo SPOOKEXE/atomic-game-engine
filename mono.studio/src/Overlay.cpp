@@ -15,7 +15,6 @@
 #include <engine/scene/Part.hpp>
 #include <engine/spatial/HashGrid.hpp>
 #include <engine/spatial/Query.hpp>
-#include <engine/ui/GuiPainter.hpp>
 #include <engine/ui/Theme.hpp>
 
 #include <glm/gtc/quaternion.hpp>
@@ -26,6 +25,7 @@
 #include <imgui.h>
 #include <optional>
 #include <studio/Editor.hpp>
+#include <studio/Viewports.hpp>
 #include <vector>
 
 namespace studio {
@@ -223,6 +223,19 @@ namespace studio {
 			// write placements, and two of them running against one selection
 			// is two answers to where it is.
 			DragOnSurface(index, panel);
+
+			// **After both, because it is the only one that draws nothing
+			// interactive.** The gizmo has to adjudicate the pending pick and
+			// the surface drag has to see the gizmo's answer; an outline reads
+			// the world and writes lines, so it goes last and cannot be in
+			// either one's way.
+			DrawColliderOutlines(index, panel);
+
+			// Last of all, and for the same reason the outlines are late: an
+			// adornment reads the world and writes lines, so it can be in
+			// nothing's way. It is drawn *after* the collider outlines because
+			// a selection somebody made is the thing they are looking at.
+			DrawAdornments(index, panel);
 		}
 
 		if (PendingPick.Wanted) {
@@ -913,7 +926,7 @@ namespace studio {
 											 CFrame(was.Position).Inverse() * was;
 								}
 
-								(void)store.SetProperty(
+								(void)store.SetPropertyAuthored(
 									instance, engine::core::Name("PivotOffset"), &offset, sizeof(offset)
 								);
 								continue;
@@ -1048,7 +1061,7 @@ namespace studio {
 								// below makes - and making both go through the
 								// property is what keeps them one answer.
 								const Vector3 full = grown * 2.0f;
-								(void)store.SetProperty(
+								(void)store.SetPropertyAuthored(
 									instance, engine::core::Name("Size"), &full, sizeof(full)
 								);
 								break;
@@ -1517,9 +1530,17 @@ namespace studio {
 			return;
 		}
 
+		const ViewportState *viewport = ExtraAt(index);
+		const ImVec2 mouse = ImGui::GetIO().MousePos;
+		const ViewportCanvas canvas =
+			CanvasForViewport(slot.X, slot.Y, slot.Width, slot.Height, mouse.x, mouse.y);
 		engine::gui::CompileRequest request;
-		request.Display.Width = slot.Width;
-		request.Display.Height = slot.Height;
+		request.Display.Width = canvas.Width;
+		request.Display.Height = canvas.Height;
+
+		// The clock a page slide and a rubber band are measured against. See
+		// `CompileRequest::Seconds` for why it is handed in.
+		request.Seconds = engine::core::Clock::Seconds();
 
 		// **Fed back from the previous frame's routing, deliberately.** The
 		// hover is computed from the list a compile produced, so a compile that
@@ -1532,11 +1553,18 @@ namespace studio {
 		// The pointer in canvas space, which is the panel's own corner as the
 		// origin. A `ScreenGui` inside a panel is laid out from that corner, so
 		// anything else would hit-test against a canvas nobody drew.
-		const ImVec2 mouse = ImGui::GetIO().MousePos;
 		engine::gui::Pointer pointer;
-		pointer.Position = engine::core::Vector2{mouse.x - slot.X, mouse.y - slot.Y};
+		pointer.Position = engine::core::Vector2{
+			canvas.PointerX,
+			canvas.PointerY,
+		};
 		pointer.Down = ImGui::IsMouseDown(ImGuiMouseButton_Left);
 		pointer.ScreenOnly = true;
+
+		// The same notches the client hands over, so a `ScrollingFrame` moves by
+		// the same amount in the editor as in the game. `pointer.Inside` below
+		// is what stops a wheel meant for a docked panel reaching the world.
+		pointer.Wheel = ImGui::GetIO().MouseWheel;
 
 		// **imgui owns the mouse whenever it is over its own chrome**, and a
 		// panel docked over the viewport is exactly that. Without this the
@@ -1557,15 +1585,13 @@ namespace studio {
 		// see through all of them - a slider being dragged in the properties
 		// panel is imgui's mouse and the game's UI should not light up under it
 		// on the way past.
-		const ViewportState *held = ExtraAt(index);
-		const bool driving = held != nullptr ? held->Active : ViewportActive;
+		const bool driving = viewport != nullptr ? viewport->Active : ViewportActive;
 
 		pointer.Inside = (ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow) || driving) &&
 						 ImGui::IsMouseHoveringRect(
 							 ImVec2(slot.X, slot.Y), ImVec2(slot.X + slot.Width, slot.Y + slot.Height), false
 						 );
 
-		size_t commands = 0;
 		std::vector<engine::gui::GuiEvent> events;
 		Universe->Enter(shown, [&](Store &store) {
 			// **Per panel, because a panel is a canvas with its own camera.**
@@ -1577,12 +1603,7 @@ namespace studio {
 			// Before `Rebuild`, which runs the layout inside itself.
 			engine::render::ResolveSpatialCanvases(store, request.Display);
 			GuiLists[index].Rebuild(store, request);
-			(void)ViewportImages.Render(
-				Renderer,
-				store,
-				GuiLists[index].Commands(),
-				PreviewSlot() + 1
-			);
+			(void)ViewportImages.Render(Renderer, store, GuiLists[index].Commands(), PreviewSlot() + 1);
 			if (engine::gui::PickScreen(store, GuiLists[index].Commands(), pointer.Position) == NULL_ENTITY) {
 				engine::render::SpatialPointer spatial;
 				if (engine::render::ResolveSpatialPointer(
@@ -1601,8 +1622,6 @@ namespace studio {
 			const std::span<const engine::gui::GuiEvent> produced =
 				GuiRouters[index].Update(store, GuiLists[index].Commands(), pointer);
 			events.assign(produced.begin(), produced.end());
-
-			commands = GuiLists[index].Commands().Commands.size();
 		});
 
 		// **Handed to the VM, which is what turns a click into a `.Activated`.**
@@ -1625,56 +1644,5 @@ namespace studio {
 				break;
 			}
 		}
-
-		if (commands == 0) {
-			return;
-		}
-
-		engine::ui::PaintTarget target;
-		target.Origin = ImVec2(slot.X, slot.Y);
-
-		// **The hook `ui::ImageSource` exists for, connected.** `engine::ui` is
-		// the editor's toolkit and has no business resolving a game's content
-		// names - so it takes this, and until v0.10 nothing supplied one and
-		// every `ImageLabel` in a viewport panel drew the missing-image marker
-		// whatever had loaded. The seam was right and one end of it was never
-		// connected; `client::Client` had the same gap on its own pass.
-		//
-		// **The size travels with the handle** because a nine-sliced or tiled
-		// image is laid out in source pixels - `Renderer::TextureSize` says why.
-		engine::ui::ImageSource images;
-		images.Resolve = [this](const engine::core::Name &name) -> engine::ui::ImageSource::Resolved {
-			engine::ui::ImageSource::Resolved resolved;
-
-			void *const handle = Renderer.TextureHandle(name);
-			if (handle == nullptr) {
-				return resolved;
-			}
-			resolved.Texture = reinterpret_cast<ImTextureID>(handle);
-
-			uint32_t width = 0;
-			uint32_t height = 0;
-			if (Renderer.TextureSize(name, width, height)) {
-				resolved.Size = ImVec2(static_cast<float>(width), static_cast<float>(height));
-			}
-
-			// **The editor's own clock, not the world's.** A world paused in the
-			// editor is still a world somebody is looking at, and its interface
-			// should go on animating - the same reason a paused game's menus do.
-			const engine::render::FlipbookCell cell = Renderer.TextureCell(name, AnimationSeconds);
-			resolved.CellMin = ImVec2(cell.OffsetU, cell.OffsetV);
-			resolved.CellMax = ImVec2(cell.OffsetU + cell.Scale, cell.OffsetV + cell.Scale);
-			return resolved;
-		};
-		images.ResolveViewport = [this](engine::ecs::Entity instance) {
-			engine::ui::ImageSource::Resolved resolved;
-			const engine::render::InterfaceImage image = ViewportImages.Resolve(instance);
-			resolved.Texture = reinterpret_cast<ImTextureID>(image.Texture);
-			resolved.Size = ImVec2(static_cast<float>(image.Width), static_cast<float>(image.Height));
-			resolved.CellMax = ImVec2(image.UVMax.X, image.UVMax.Y);
-			return resolved;
-		};
-
-		engine::ui::PaintGui(GuiLists[index].Commands(), slot.List, target, images);
 	}
 }

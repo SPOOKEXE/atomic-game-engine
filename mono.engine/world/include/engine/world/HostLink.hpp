@@ -147,6 +147,13 @@ namespace engine::world {
 		// that timed the link instead would be graphing its own poll interval.
 		float Milliseconds = 0.0f;
 
+		// The UDP replication port this host bound, for `Ready`.
+		//
+		// Zero means the host is not serving clients. The actual bound port is
+		// sent rather than the requested one because an ephemeral request is the
+		// normal way supervised hosts avoid racing over a configured range.
+		uint16_t Port = 0;
+
 		// The envelopes a `Traffic` frame carries.
 		std::vector<Envelope> Traffic;
 

@@ -21,6 +21,47 @@ namespace engine::scene {
 		using core::Vector2;
 		using core::Vector3;
 
+		// How fast a body may turn to face where it is walking, in radians per
+		// second.
+		//
+		// **A rate rather than a snap, and Roblox's own is not stated as a
+		// number - this is chosen to read as "immediate" without literally
+		// being one.** A snap turn is a single frame of a character facing
+		// backwards then instantly forwards, which reads as a popping model
+		// more than as a turn; a rate this high still resolves a hundred-and-
+		// eighty-degree reversal in a sixth of a second; a real turn takes the
+		// remaining ticks to visibly and cheaply catch up rather than lurch.
+		constexpr float CHARACTER_TURN_SPEED = 18.0f;
+
+		// The world yaw a forward vector points along, in this module's
+		// convention: zero faces `-Z`, and it grows the same direction
+		// `CameraController::Angles.Y` does. `PlaceCamera` builds the inverse
+		// of this from an angle; this is what recovers the angle from a
+		// direction, which `StepCharacters` needs to compare a current facing
+		// against a wanted one.
+		float YawOf(const Vector3 &forward) {
+			return std::atan2(-forward.X, -forward.Z);
+		}
+
+		// The signed turn from `from` to `to`, in (-pi, pi].
+		//
+		// **Wrapped rather than subtracted plainly**, because two angles either
+		// side of the branch cut - one at 179 degrees and one at -179 - are one
+		// degree apart and a plain subtraction says they are next to a full
+		// turn apart. `StepCharacters` would then spin a character the long
+		// way round for the most ordinary case there is: walking almost due
+		// south while already facing almost due south.
+		float ShortestTurn(float from, float to) {
+			constexpr float TAU = 2.0f * std::numbers::pi_v<float>;
+			float delta = std::fmod(to - from, TAU);
+			if (delta > std::numbers::pi_v<float>) {
+				delta -= TAU;
+			} else if (delta <= -std::numbers::pi_v<float>) {
+				delta += TAU;
+			}
+			return delta;
+		}
+
 		// How far the camera may look up or down.
 		//
 		// **Just under a right angle, and the gap is the whole reason for the
@@ -106,6 +147,32 @@ namespace engine::scene {
 			moved = true;
 		}
 
+		// **`I`/`O`, held rather than tapped, and gated the same way the wheel
+		// is not.** A wheel notch cannot fire while the window is unfocused -
+		// there is nothing to receive it from - but a held key latched before
+		// a focus loss keeps reading as down in whatever last wrote
+		// `InputState::Down` unless something clears it, and `UpdateCameraControl`
+		// runs from `PreSimulation` regardless of focus. `input->Focused` is
+		// the same guard `ReadMoveIntent` applies to WASD, for the identical
+		// reason: alt-tabbing away while holding a key must not leave the
+		// camera creeping for as long as the window stays unfocused.
+		if (input->Focused) {
+			const float rate = controller->KeyZoomSpeed * store.Time().Delta;
+			float requested = 0.0f;
+			if (input->IsKeyDown(KeyCode::I)) {
+				requested -= rate;
+			}
+			if (input->IsKeyDown(KeyCode::O)) {
+				requested += rate;
+			}
+			if (requested != 0.0f) {
+				controller->Distance = std::clamp(
+					controller->Distance + requested, controller->MinimumDistance, controller->MaximumDistance
+				);
+				moved = true;
+			}
+		}
+
 		// **Zooming all the way in *is* first person**, rather than a separate
 		// key. Roblox's behaviour, and the reason is that the transition is
 		// continuous: a player scrolls in until the character disappears, which is
@@ -158,9 +225,15 @@ namespace engine::scene {
 			-std::cos(yaw) * std::cos(pitch),
 		};
 
+		// **The occluded distance wins when a poppercam has set one.** See
+		// `CameraController::OccludedDistance` for why this is a second field
+		// rather than a write to `Distance` itself.
+		const float distance =
+			controller->OccludedDistance >= 0.0f ? controller->OccludedDistance : controller->Distance;
+
 		Vector3 eye = head;
 		if (controller->Mode != CameraMode::LockFirstPerson) {
-			eye = head - forward * controller->Distance;
+			eye = head - forward * distance;
 
 			if (controller->Mode == CameraMode::ShiftLock) {
 				// Over the shoulder. The side vector is the forward turned a
@@ -385,7 +458,12 @@ namespace engine::scene {
 	}
 
 	size_t StepCharacters(ecs::Store &store, float delta) {
-		(void)delta;
+		// **Read once, outside the per-row walk.** Which body a shift-locked
+		// camera is following is one fact for the whole tick, not one lookup
+		// per humanoid - and every humanoid but the one owning the camera
+		// still turns to face its own movement, so this is consulted rather
+		// than branched on up front.
+		const CameraController *camera = store.Resource<CameraController>();
 
 		size_t moved = 0;
 		store.Each<Humanoid>([&](ecs::Entity entity, Humanoid &humanoid) {
@@ -428,14 +506,55 @@ namespace engine::scene {
 				humanoid.Grounded = false;
 			}
 
-			// **Upright, and this is the line that stops a character lying
-			// down.** Nothing here runs a balance controller, so a body free to
-			// spin tips over the first time a corner catches it - and a
-			// character face-down on the floor still walks, which reads as a
-			// physics bug rather than a missing feature. Zeroing the rate is
-			// enough: a box that is never given angular velocity never acquires
-			// an angle, so there is no orientation to correct afterwards.
-			motion.Angular = Vector3{};
+			// **Upright on two axes always, for the reason this line always
+			// gave.** Nothing here runs a balance controller, so a body free to
+			// spin about X or Z tips over the first time a corner catches it.
+			// Y is the exception: that is the turn a facing character makes,
+			// and it is computed below rather than zeroed here.
+			motion.Angular.X = 0.0f;
+			motion.Angular.Z = 0.0f;
+			motion.Angular.Y = 0.0f;
+
+			// **Which way this body should be facing, and it is not always the
+			// direction it is walking.** A shift-locked *viewer*'s own body
+			// faces the camera - the mode `CameraController::Mode` names for
+			// exactly this - so that a strafe reads as a strafe rather than as
+			// the character spinning to keep facing forward. Every other
+			// humanoid, including a shift-locked viewer's before the camera
+			// exists, faces where it was told to walk.
+			bool haveTarget = false;
+			float targetYaw = 0.0f;
+			if (camera != nullptr && camera->Mode == CameraMode::ShiftLock && camera->Subject == body) {
+				targetYaw = camera->Angles.Y;
+				haveTarget = true;
+			} else if (humanoid.MoveDirection.Magnitude() > 0.0f) {
+				targetYaw = YawOf(humanoid.MoveDirection);
+				haveTarget = true;
+			}
+
+			// **A body with nothing to face keeps whatever it last faced.**
+			// Roblox does the same: letting go of every key does not spin a
+			// character back to face `-Z`, and a shift-locked viewer with no
+			// camera yet - the first tick after `LoadCharacter` - has nothing
+			// to turn towards either.
+			if (humanoid.AutoRotate && haveTarget) {
+				const Transform *facing = store.Get<Transform>(body);
+				if (facing != nullptr && delta > 0.0f) {
+					const float current = YawOf(facing->Frame.LookVector());
+					const float turn = ShortestTurn(current, targetYaw);
+
+					// **The rate that exactly lands on the target this tick,
+					// capped rather than replaced.** `turn / delta` is the
+					// speed that closes the whole gap in one step; clamping it
+					// rather than swapping to a fixed rate when it is small is
+					// what stops a character overshooting and turning the
+					// other way next tick - the character would otherwise
+					// oscillate a few degrees either side of the direction it
+					// is walking, which reads as a jitter rather than as a
+					// turn settling.
+					motion.Angular.Y = std::clamp(turn / delta, -CHARACTER_TURN_SPEED, CHARACTER_TURN_SPEED);
+				}
+			}
 
 			// **Cleared whether or not it was used.** A request that survived
 			// being on the ground would fire the moment the character landed,

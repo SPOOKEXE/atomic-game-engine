@@ -419,3 +419,140 @@ TEST_CASE("the list is ranked and stable", "[studio][complete]") {
 		return a.Score > b.Score || (a.Score == b.Score && a.Text < b.Text);
 	}));
 }
+
+namespace {
+
+	// The hover position is marked `|` before the character it rests on, the
+	// same convention `Scan` uses for the caret.
+	std::string HoverAt(
+		const std::string &marked,
+		const std::vector<std::string> &children = {},
+		const Language language = Language::Luau
+	) {
+		const size_t offset = marked.find('|');
+		REQUIRE(offset != std::string::npos);
+
+		std::string text = marked;
+		text.erase(offset, 1);
+
+		static ScriptSurface surface;
+		surface = Surface();
+
+		CompletionSources sources;
+		sources.Language = language;
+		sources.Surface = &surface;
+		sources.Children = children;
+
+		return studio::HoverText(text, offset, sources);
+	}
+
+}
+
+TEST_CASE("a word is read off any byte inside it", "[studio][complete]") {
+	using studio::WordAt;
+
+	const std::string_view text = "local part = 1";
+
+	SECTION("first byte, middle byte, last byte are one word") {
+		CHECK(WordAt(text, 6) == "part");
+		CHECK(WordAt(text, 8) == "part");
+		CHECK(WordAt(text, 9) == "part");
+	}
+
+	SECTION("whitespace and punctuation are no word") {
+		CHECK(WordAt(text, 5).empty());
+		CHECK(WordAt("a.b", 1).empty());
+	}
+
+	SECTION("past the end is no word") {
+		CHECK(WordAt(text, text.size()).empty());
+		CHECK(WordAt(text, 999).empty());
+	}
+}
+
+TEST_CASE("every keyword either language offers carries a doc line", "[studio][complete]") {
+	// The doc table and `script::Keywords` are two lists of one thing, and
+	// this is what holds them together: a keyword added upstream without a
+	// sentence here fails by name instead of hovering silent.
+	for (const Language language : {Language::Luau, Language::JavaScript}) {
+		for (const std::string_view keyword : engine::script::Keywords(language)) {
+			INFO("keyword: " << keyword);
+			CHECK_FALSE(studio::KeywordDoc(language, keyword).empty());
+		}
+	}
+
+	SECTION("a word that is not a keyword of that language answers nothing") {
+		CHECK(studio::KeywordDoc(Language::Luau, "let").empty());
+		CHECK(studio::KeywordDoc(Language::JavaScript, "elseif").empty());
+		CHECK(studio::KeywordDoc(Language::Luau, "banana").empty());
+	}
+}
+
+TEST_CASE("every completion kind describes itself", "[studio][complete]") {
+	for (const CompletionKind kind :
+		 {CompletionKind::Class,
+		  CompletionKind::Property,
+		  CompletionKind::Member,
+		  CompletionKind::Enum,
+		  CompletionKind::Global,
+		  CompletionKind::Keyword,
+		  CompletionKind::Local,
+		  CompletionKind::Child}) {
+		CHECK_FALSE(studio::Describe(kind).empty());
+	}
+}
+
+TEST_CASE("hover says what the editor knows and stays quiet otherwise", "[studio][complete]") {
+	const Fixture fixture;
+
+	SECTION("a keyword gets its doc line") {
+		const std::string text = HoverAt("wh|ile true do end");
+		CHECK(text.rfind("keyword", 0) == 0);
+		CHECK(text.find('\n') != std::string::npos);
+	}
+
+	SECTION("the language decides whose keywords count") {
+		CHECK_FALSE(HoverAt("l|et x = 1", {}, Language::JavaScript).empty());
+		CHECK(HoverAt("l|et x = 1", {}, Language::Luau).empty());
+	}
+
+	SECTION("a walked global says what it is") {
+		CHECK(HoverAt("pri|nt(1)") == "global function");
+		CHECK(HoverAt("ta|sk.wait()").rfind("global with 3 member(s)", 0) == 0);
+	}
+
+	SECTION("an instance member is named as one") {
+		CHECK_FALSE(HoverAt("part:Dest|roy()").empty());
+	}
+
+	SECTION("a class names its parent") {
+		const std::string text = HoverAt("local p = Instance.new(Pa|rt)");
+		CHECK(text.rfind("class", 0) == 0);
+	}
+
+	SECTION("an instance beside the script is recognised") {
+		CHECK(HoverAt("Doo|r.Name = 1", {"Door"}) == "an instance beside this script");
+	}
+
+	SECTION("a narrowed local names the class its assignment wrote") {
+		const std::string text = HoverAt("local part = Instance.new(\"Part\")\npa|rt.Anchored = true");
+		CHECK(text.find("Part") != std::string::npos);
+		CHECK(text.find("assignment") != std::string::npos);
+	}
+
+	SECTION("a property is attributed to the class that declares it") {
+		const std::string text = HoverAt("part.Ancho|red = true");
+		CHECK(text.find(" on ") != std::string::npos);
+	}
+
+	SECTION("prose is prose: strings and comments hover nothing") {
+		CHECK(HoverAt("print(\"wh|ile\")").empty());
+		CHECK(HoverAt("-- wh|ile this is a comment").empty());
+		CHECK(HoverAt("// le|t in a comment", {}, Language::JavaScript).empty());
+	}
+
+	SECTION("a number and an unknown word hover nothing") {
+		CHECK(HoverAt("x = 12|34").empty());
+		CHECK(HoverAt("local zorble = ZZunknownZZ|name").empty());
+	}
+}

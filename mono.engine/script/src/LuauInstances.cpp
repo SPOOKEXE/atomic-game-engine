@@ -259,6 +259,23 @@ namespace engine::script {
 				return 1;
 			}
 
+			// A `UIDragDetector`'s three, offered on every instance for the
+			// reason the six above are: only a detector is ever the subject of
+			// one - `gui::Router` names the modifier it found - so a connection
+			// on anything else is inert by construction.
+			if (name == "DragStart") {
+				PushSignal(state, SignalKind::GuiDragBegan, instance);
+				return 1;
+			}
+			if (name == "DragContinue") {
+				PushSignal(state, SignalKind::GuiDragContinue, instance);
+				return 1;
+			}
+			if (name == "DragEnd") {
+				PushSignal(state, SignalKind::GuiDragEnded, instance);
+				return 1;
+			}
+
 			// **A `TextBox`'s pair, offered on every instance for the reason the
 			// six above it are.** Only a `TextBox` can take the keyboard -
 			// `gui::Focus` refuses anything with no `Entry` component - so a
@@ -1040,6 +1057,26 @@ namespace engine::script {
 			case gui::EventKind::Focused:
 				note(FireSignal(state, SignalKind::GuiFocused, event.Instance, 0));
 				break;
+
+			case gui::EventKind::DragBegan:
+			case gui::EventKind::DragContinue:
+			case gui::EventKind::DragEnded: {
+				// **`(x, y)` of the pointer, then how far it has come.** Roblox
+				// hands a drag handler an input object; this engine has no such
+				// type, and four numbers is what a handler actually reads off
+				// one - where the pointer is and what the gesture has amounted
+				// to. `gui::EventKind::DragBegan` says the same at the source.
+				const SignalKind kind = event.Kind == gui::EventKind::DragBegan ? SignalKind::GuiDragBegan
+										: event.Kind == gui::EventKind::DragContinue
+											? SignalKind::GuiDragContinue
+											: SignalKind::GuiDragEnded;
+				lua_pushnumber(state, event.Position.X);
+				lua_pushnumber(state, event.Position.Y);
+				lua_pushnumber(state, event.Local.X);
+				lua_pushnumber(state, event.Local.Y);
+				note(FireSignal(state, kind, event.Instance, 4));
+				break;
+			}
 
 			case gui::EventKind::FocusReleased:
 				// **`enterPressed`, read off the event rather than assumed.**

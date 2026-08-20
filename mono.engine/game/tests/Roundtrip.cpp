@@ -129,16 +129,22 @@ TEST_CASE("a world's settings are an element and survive the trip", "[game][roun
 	// half; writing the world's real numbers is the half that was a bug.
 	RegisterEverything();
 
-	Universe source;
-	AddWorld(source, "Slow", 30.0);
+	WorldSettings slowSettings;
+	slowSettings.Name = Name("Slow");
+	slowSettings.TickRate = 30.0;
+	slowSettings.PhysicsTickRate = 15.0;
+	slowSettings.ReplicationTickRate = 10.0;
+	slowSettings.GlobalSimulatedNetworkLatency = 42.5;
+	Universe configured;
+	REQUIRE(configured.Create(slowSettings).IsValid());
 
-	const std::string document = WriteGame(source, Name("Settings"));
+	const std::string document = WriteGame(configured, Name("Settings"));
 
 	// The element exists and the numbers are in it, not on `<World>`.
 	XmlDocument parsed;
 	REQUIRE(ParseXml(document, parsed) == XmlStatus::Ok);
 	REQUIRE(parsed.Root() != nullptr);
-	CHECK(parsed.Root()->Attribute("format") == "2");
+	CHECK(parsed.Root()->Attribute("format") == "3");
 
 	const engine::game::XmlElement *world = nullptr;
 	for (const uint32_t index : parsed.Root()->Children) {
@@ -161,7 +167,11 @@ TEST_CASE("a world's settings are an element and survive the trip", "[game][roun
 	REQUIRE(properties != nullptr);
 	CHECK(properties->Attribute("tickRate") == "30");
 	CHECK(properties->Attribute("idleTickRate") == "2");
+	CHECK(properties->Attribute("physicsTickRate") == "15");
+	CHECK(properties->Attribute("replicationTickRate") == "10");
+	CHECK(properties->Attribute("globalSimulatedNetworkLatency") == "42.5");
 	CHECK(properties->Attribute("faultLimit") == "3");
+	CHECK(properties->Attribute("renderingProfile") == "Default PBR");
 
 	// **The exported world document has the same section**, spelled out as
 	// text rather than re-parsed. `scripts/Lobby.aworld` is checked in as the
@@ -178,7 +188,7 @@ TEST_CASE("a world's settings are an element and survive the trip", "[game][roun
 
 	const std::string exported = engine::game::WriteWorldDocument(plain, plain.Find(Name("Lobby")), error);
 
-	CHECK(exported.find(R"(<World format="2" name="Lobby">)") != std::string::npos);
+	CHECK(exported.find(R"(<World format="3" name="Lobby">)") != std::string::npos);
 
 	// **No camera in the example either.** `scripts/Lobby.aworld` is the worked
 	// example of this format and it carried one until the viewer's camera
@@ -187,14 +197,18 @@ TEST_CASE("a world's settings are an element and survive the trip", "[game][roun
 	CHECK(exported.find(R"(class="Camera")") == std::string::npos);
 	CHECK(exported.find(R"(class="Workspace")") != std::string::npos);
 	CHECK(
-		exported.find("\t<WorldProperties tickRate=\"60\" idleTickRate=\"2\" faultLimit=\"3\" />") !=
-		std::string::npos
+		exported.find(
+			"\t<WorldProperties tickRate=\"60\" idleTickRate=\"2\" "
+			"physicsTickRate=\"0\" replicationTickRate=\"0\" "
+			"globalSimulatedNetworkLatency=\"0\" faultLimit=\"3\" "
+			"renderingProfile=\"Default PBR\" />"
+		) != std::string::npos
 	);
 
 	// And it reads back as 30 rather than as the default, which is the whole
 	// point of writing it.
 	const auto path = ScratchFile("engine-game-settings.agame");
-	REQUIRE(SaveGame(source, Name("Settings"), path, error));
+	REQUIRE(SaveGame(configured, Name("Settings"), path, error));
 
 	Universe loaded;
 	GameInfo info;
@@ -203,6 +217,9 @@ TEST_CASE("a world's settings are an element and survive the trip", "[game][roun
 	const WorldId restored = loaded.Find(Name("Slow"));
 	REQUIRE(restored.IsValid());
 	CHECK(loaded.SettingsOf(restored).TickRate == 30.0);
+	CHECK(loaded.SettingsOf(restored).PhysicsTickRate == 15.0);
+	CHECK(loaded.SettingsOf(restored).ReplicationTickRate == 10.0);
+	CHECK(loaded.SettingsOf(restored).GlobalSimulatedNetworkLatency == 42.5);
 
 	std::filesystem::remove(path);
 }
@@ -214,6 +231,8 @@ TEST_CASE("authored universe tuning survives the game-file trip", "[game][roundt
 	settings.Mode = engine::world::ExecutionMode::WorldSerial;
 	settings.MaximumCatchUpTicks = 3;
 	settings.BusBudgetPerTick = 19;
+	settings.ChannelQueueLimit = 7;
+	settings.ChannelsPerWorld = 9;
 
 	Universe source(settings);
 	AddWorld(source, "Lobby");
@@ -229,9 +248,13 @@ TEST_CASE("authored universe tuning survives the game-file trip", "[game][roundt
 	CHECK(loaded.Settings().Mode == engine::world::ExecutionMode::WorldSerial);
 	CHECK(loaded.Settings().MaximumCatchUpTicks == 3);
 	CHECK(loaded.Settings().BusBudgetPerTick == 19);
+	CHECK(loaded.Settings().ChannelQueueLimit == 7);
+	CHECK(loaded.Settings().ChannelsPerWorld == 9);
 	CHECK(info.Universe.Mode == engine::world::ExecutionMode::WorldSerial);
 	CHECK(info.Universe.MaximumCatchUpTicks == 3);
 	CHECK(info.Universe.BusBudgetPerTick == 19);
+	CHECK(info.Universe.ChannelQueueLimit == 7);
+	CHECK(info.Universe.ChannelsPerWorld == 9);
 
 	std::filesystem::remove(path);
 }
@@ -250,6 +273,10 @@ TEST_CASE("a world's services are in the file like anything else", "[game][round
 	source.Enter(world, [](Store &store) {
 		const Entity workspace = engine::scene::InstallServices(store);
 		store.SetParent(store.CreateInstance(engine::scene::PartClass(), "Baseplate"), workspace);
+
+		const Entity storage = store.FindFirstRoot("ServerStorage");
+		const Name shared("Shared");
+		REQUIRE(store.SetProperty(storage, Name("Scope"), &shared, sizeof(shared)));
 	});
 
 	const auto path = ScratchFile("engine-game-services.agame");
@@ -274,16 +301,20 @@ TEST_CASE("a world's services are in the file like anything else", "[game][round
 		REQUIRE(starter != NULL_ENTITY);
 		CHECK(ChildNamed(store, starter, "StarterPlayerScripts") != NULL_ENTITY);
 
-		// **The scope survives, and it is the one that would not have.** It is
+		// **An authored scope survives, and it is the one that would not have.** It is
 		// a computed property over a `uint8_t`, so it is written as a word and
-		// read back through a setter - the path a plain field never takes. A
-		// `ServerStorage` that loaded as `Shared` is a container that stops
-		// being server-only, which is the kind of thing nobody checks.
+		// read back through a setter, the path a plain field never takes.
 		const Entity storage = store.FindFirstRoot("ServerStorage");
 		REQUIRE(storage != NULL_ENTITY);
 		const auto *service = store.Get<engine::scene::ServiceComponent>(storage);
 		REQUIRE(service != nullptr);
-		CHECK(service->Scope == engine::scene::ServiceScope::Server);
+		CHECK(service->Scope == engine::scene::ServiceScope::Shared);
+
+		const Entity scripts = store.FindFirstRoot("ServerScriptService");
+		REQUIRE(scripts != NULL_ENTITY);
+		CHECK(
+			store.Get<engine::scene::ServiceComponent>(scripts)->Scope == engine::scene::ServiceScope::Server
+		);
 	});
 
 	std::filesystem::remove(path);
@@ -460,6 +491,12 @@ TEST_CASE("a format 1 file keeps its own settings", "[game][roundtrip]") {
 	CHECK(settings.TickRate == 15.0);
 	CHECK(settings.IdleTickRate == 5.0);
 	CHECK(settings.FaultLimit == 9);
+
+	// A file written before the two rates existed says nothing about them, and
+	// zero is "follow the tick rate" and "publish every tick" - which is what
+	// such a file meant.
+	CHECK(settings.PhysicsTickRate == 0.0);
+	CHECK(settings.ReplicationTickRate == 0.0);
 
 	loaded.Enter(world, [](Store &store) { CHECK(store.FindFirstRoot("Survivor") != NULL_ENTITY); });
 

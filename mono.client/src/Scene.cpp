@@ -11,6 +11,9 @@
 #include <engine/effects/Registration.hpp>
 #include <engine/effects/Ribbon.hpp>
 #include <engine/examples/Scene.hpp>
+#include <engine/game/CollisionContent.hpp>
+#include <engine/graph/PipelineCatalogue.hpp>
+#include <engine/graph/PipelineDocument.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/physics/Characters.hpp>
 #include <engine/physics/Query.hpp>
@@ -28,6 +31,7 @@
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Visibility.hpp>
 #include <engine/script/Runtime.hpp>
+#include <engine/world/Postbox.hpp>
 
 #include <algorithm>
 #include <client/Scene.hpp>
@@ -49,6 +53,7 @@ namespace client {
 	using engine::scene::ActiveCamera;
 	using engine::scene::Bounds;
 	using engine::scene::DrawInstance;
+	using engine::scene::LocalTransparency;
 	using engine::scene::PreviousTransform;
 	using engine::scene::Rendered;
 	using engine::scene::SurfaceAppearance;
@@ -216,6 +221,7 @@ namespace client {
 					Visual,
 					SurfaceAppearance,
 					Tags,
+					LocalTransparency,
 					Rendered>();
 			}
 
@@ -281,6 +287,7 @@ namespace client {
 					const Visual,
 					const SurfaceAppearance,
 					const Tags,
+					const LocalTransparency,
 					const Rendered>(
 					[out, capacity, alpha](
 						size_t first,
@@ -291,6 +298,7 @@ namespace client {
 						const Visual *visuals,
 						const SurfaceAppearance *appearances,
 						const Tags *tags,
+						const LocalTransparency *locals,
 						const Rendered *
 					) {
 						// The count came from a different query than the one
@@ -330,7 +338,8 @@ namespace client {
 								bounds[row],
 								visuals[row],
 								&appearances[row],
-								&tags[row]
+								&tags[row],
+								&locals[row]
 							);
 						}
 					},
@@ -430,6 +439,14 @@ namespace client {
 			for (const Counted &builtin : BUILTINS) {
 				engine::scene::RecordMesh(store, builtin.Name, builtin.Triangles);
 			}
+
+			// **And what they collide as, which nothing else was ever going to
+			// do.** `MakeBuiltin` generates the six rather than shipping files,
+			// so they never travel the content path that bakes a hull for an
+			// arriving mesh - a `MeshPart` set to `Cube` with a hull collider
+			// resolved to nothing and fell back to its bound. The same six
+			// shapes on every host, out of `game::AddBuiltinCollisionShapes`.
+			engine::game::RecordBuiltinCollisionShapes(store);
 		}
 
 		void InstallResources(Store &store, Entity camera, float extent, uint32_t reserve) {
@@ -459,6 +476,86 @@ namespace client {
 		}
 	}
 
+	size_t SurveyWorlds(engine::world::Universe &universe, std::vector<WorldIdentity> &worlds) {
+		worlds.clear();
+
+		for (const engine::world::WorldId candidate : universe.Worlds()) {
+			WorldIdentity found;
+			found.Id = candidate;
+			found.Authored = universe.NameOf(candidate);
+
+			universe.Enter(candidate, [&found](Store &store) {
+				const auto *replica = store.Resource<engine::world::Replica>();
+				if (replica == nullptr || !replica->Active) {
+					return;
+				}
+				found.IsReplica = true;
+				found.View = replica->View;
+
+				// **Only when it names one.** A `--connect` client's replica
+				// mirrors a world in another process, so there is nothing here
+				// for the name to mean and its own is the honest answer.
+				if (replica->Of.IsValid()) {
+					found.Authored = replica->Of;
+				}
+			});
+
+			worlds.push_back(found);
+		}
+
+		return worlds.size();
+	}
+
+	engine::world::WorldId ResolveDestinationWorld(
+		std::span<const WorldIdentity> worlds, engine::world::WorldId viewer, const engine::core::Name &wanted
+	) {
+		if (!wanted.IsValid()) {
+			return {};
+		}
+
+		// Whose view is asking, so a copy can prefer a copy. A world that is not
+		// a replica has an invalid `View`, and so does every authoritative
+		// world - which is what makes the same comparison do both jobs.
+		engine::core::Name view;
+		engine::core::Name mine;
+		for (const WorldIdentity &known : worlds) {
+			if (known.Id == viewer) {
+				view = known.View;
+				mine = known.Authored;
+				break;
+			}
+		}
+
+		// **A pane naming its own world is nobody's destination**, which is the
+		// rule this had before the survey and is worth keeping by name rather
+		// than by handle: the check used to be `found == world`, and from inside
+		// a replica the authority now answers to the same authored name and
+		// would be found instead. What such a pane shows is this world - a
+		// mirror, and visible as one.
+		if (mine.IsValid() && mine == wanted) {
+			return {};
+		}
+
+		engine::world::WorldId first;
+		for (const WorldIdentity &known : worlds) {
+			if (known.Id == viewer || known.Authored != wanted) {
+				continue;
+			}
+			if (known.View == view) {
+				return known.Id;
+			}
+			if (!first.IsValid()) {
+				first = known.Id;
+			}
+		}
+
+		// **The fallback is deliberate rather than a leftover.** A client whose
+		// universe holds one replica and the authority it mirrors has no second
+		// copy to find, and showing the authority is a live room rather than
+		// nothing.
+		return first;
+	}
+
 	size_t AttachForeignSurfaces(
 		engine::world::Universe &universe,
 		engine::world::WorldId world,
@@ -486,16 +583,11 @@ namespace client {
 		// straight back into it. What crosses is what this world drew.
 		const auto ownRows = drawn.size();
 
-		// This world's name, which is how the far end recognises a pane that
-		// leads back here. Resolved once: `NameOf` is a registry lookup and the
-		// answer cannot change while the frame is being assembled.
-		const engine::core::Name here = universe.NameOf(world);
-
 		// Which surface index wants which world, gathered while inside the
 		// source store and used entirely outside it - `Universe::Enter` is not
 		// re-entrant, and the far world has to be entered to be read.
 		struct Wanted {
-			int8_t Surface = 0;
+			int16_t Surface = 0;
 			engine::core::Name World;
 		};
 
@@ -520,6 +612,36 @@ namespace client {
 			return 0;
 		}
 
+		// Every world and the name its panes are addressed by.
+		//
+		// **After the gather above, because it enters every world in the
+		// universe** - a walk worth nothing to a scene whose panes are all
+		// mirrors, which is most of them.
+		//
+		// **`Universe::NameOf` is not that name once a host mirrors a world**,
+		// and using it was the whole of the bug this survey exists for: a
+		// replica is registered as `"<world> (client 1)"` while every string a
+		// scene authored still says `"<world>"`. So from inside a client's view
+		// the far world was found by falling back to the authority, `here` never
+		// matched what the far pane named, and the two rules below that turn on
+		// that match - the far pane being left out of this pane's picture, and
+		// the far world's straddlers coming back into this room - both went
+		// quiet. What that looks like is a hole filled edge to edge with the far
+		// world's own slab: the room behind it is drawn and hidden, so a
+		// character standing in it is invisible and the pane reads as flat.
+		static thread_local std::vector<WorldIdentity> surveyed;
+		(void)SurveyWorlds(universe, surveyed);
+
+		// This world's authored name, which is how the far end recognises a pane
+		// that leads back here.
+		engine::core::Name here;
+		for (const WorldIdentity &known : surveyed) {
+			if (known.Id == world) {
+				here = known.Authored;
+				break;
+			}
+		}
+
 		size_t attached = 0;
 
 		// Which far worlds have already had their own straddlers brought back
@@ -532,26 +654,35 @@ namespace client {
 		// before anything is cloned because `AppendPortalClones` walks the store
 		// itself, and a walk started inside another walk is a nesting the ECS
 		// does not owe anybody.
-		std::vector<int8_t> returning;
+		std::vector<int16_t> returning;
 
 		for (const Wanted &entry : wanted) {
 			// **The name resolved against the universe, every frame.** A world
 			// created or destroyed between two frames is ordinary in an editor,
 			// and caching the handle would outlive one of those.
-			engine::world::WorldId found;
-			for (const engine::world::WorldId candidate : universe.Worlds()) {
-				if (universe.NameOf(candidate) == entry.World) {
-					found = candidate;
-					break;
-				}
-			}
+			//
+			// `ResolveDestinationWorld` prefers this viewer's own copy where the
+			// host holds several, which is what keeps one client's rooms joined
+			// to each other rather than to the authority nobody is standing in.
+			const engine::world::WorldId found = ResolveDestinationWorld(surveyed, world, entry.World);
 
-			// A name matching nothing, or naming the world we are already in,
-			// leaves the surface exactly as `CollectSurfaceViews` left it - this
-			// world's own image, which is a mirror and is visible as one.
-			if (!found.IsValid() || found == world) {
+			// A name matching nothing but the world we are already in leaves the
+			// surface exactly as `CollectSurfaceViews` left it - this world's own
+			// image, which is a mirror and is visible as one.
+			if (!found.IsValid()) {
 				continue;
 			}
+
+			const auto viewAt =
+				std::find_if(views.begin(), views.end(), [&](const engine::render::SurfaceView &view) {
+					return view.Index == entry.Surface;
+				});
+			if (viewAt == views.end()) {
+				continue;
+			}
+
+			engine::scene::WorldLighting destinationLighting;
+			std::vector<engine::render::SceneLight> destinationLights;
 
 			// **Whether the far end still owes this one its own straddlers.** A
 			// hole has two mouths and a body may be standing in either, so the
@@ -564,7 +695,10 @@ namespace client {
 			}
 
 			const auto first = static_cast<uint32_t>(foreign.size());
-			universe.Enter(found, [&foreign, &drawn, &returning, here, returns](Store &store) {
+			universe.Enter(found, [&](Store &store) {
+				destinationLighting = engine::scene::LightingOf(store);
+				(void)CollectLights(store, viewAt->Frame.Position, destinationLights);
+
 				// **The far world's own panes back to here, gathered before its
 				// rows are copied**, because they decide which of those rows may
 				// be copied at all.
@@ -673,7 +807,7 @@ namespace client {
 				// the same rows the copy above read - so what arrives in this
 				// room is the far half of exactly what the far world drew.
 				if (const auto *list = store.Resource<DrawList>()) {
-					for (const int8_t slot : returning) {
+					for (const int16_t slot : returning) {
 						(void)engine::scene::AppendPortalClones(store, slot, list->Instances, drawn);
 					}
 				}
@@ -711,6 +845,9 @@ namespace client {
 				}
 				view.InstanceFirst = first;
 				view.InstanceCount = count;
+				view.Lighting = destinationLighting;
+				view.Lights = destinationLights;
+				view.OverrideLighting = true;
 				attached++;
 			}
 		}
@@ -813,7 +950,7 @@ namespace client {
 				// is the viewpoint error the pass exists to remove. Skipped here
 				// rather than refused in the renderer so the cost of aiming it is
 				// the only thing wasted.
-				const auto claimed = [&](int8_t slot) {
+				const auto claimed = [&](int16_t slot) {
 					for (const engine::render::PortalView &portal : portals) {
 						if (portal.Index == slot) {
 							return true;
@@ -956,85 +1093,43 @@ namespace client {
 		return views.size();
 	}
 
-	namespace {
-		// Where a moved particle lives for the rest of the frame.
-		//
-		// **One buffer for every batch, and each batch takes a range of it.** The
-		// spans handed to the renderer have to survive until it has drawn them, so
-		// they cannot point at anything a loop iteration owns - and they cannot be
-		// appended to while an earlier span is outstanding unless the buffer is
-		// reserved. It is cleared once a frame and reserved to the pool's own size
-		// the first time anything crosses, so no batch's span is ever invalidated
-		// by a later batch's copy.
-		std::vector<engine::effects::ParticleInstance> &Carried() {
-			static thread_local std::vector<engine::effects::ParticleInstance> carried;
-			return carried;
+	void ParticleFrame::Detach() {
+		Blocks.clear();
+		Blocks.reserve(Batches.size());
+		for (const engine::render::ParticleBatch &batch : Batches) {
+			if (batch.Block != nullptr) {
+				Blocks.push_back(*batch.Block);
+			}
 		}
 
-		// Moves every particle in a batch that has gone through a hole.
-		//
-		// **Moved and not copied**, which is the whole difference from what a
-		// straddling body needs. A body has a size and is cut by the plane; a
-		// particle is a point, wholly on one side or the other, and drawing it in
-		// both places would be two sparks where the author authored one.
-		//
-		// Returns the batch's own span when nothing crossed, so a scene with a
-		// hole in it and no particles near it copies nothing at all.
-		std::span<const engine::effects::ParticleInstance> CarryThroughSeams(
-			const std::vector<engine::scene::PortalSeam> &seams,
-			const std::vector<engine::scene::SeamTransform> &maps,
-			std::span<const engine::effects::ParticleInstance> particles
-		) {
-			bool any = false;
-			for (const engine::effects::ParticleInstance &particle : particles) {
-				for (const engine::scene::PortalSeam &seam : seams) {
-					if (!seam.Crosses && engine::scene::SeamCarries(seam, particle.Position)) {
-						any = true;
-						break;
-					}
-				}
-				if (any) {
-					break;
-				}
+		// **Reserved before anything is written**, so no later push can move the
+		// vector an earlier batch already points into. The same rule the carry
+		// buffer this replaced followed, and for the same reason.
+		size_t at = 0;
+		for (engine::render::ParticleBatch &batch : Batches) {
+			if (batch.Block != nullptr) {
+				batch.Block = Blocks.data() + at;
+				at++;
 			}
-
-			if (!any) {
-				return particles;
-			}
-
-			std::vector<engine::effects::ParticleInstance> &carried = Carried();
-			const size_t first = carried.size();
-
-			for (const engine::effects::ParticleInstance &particle : particles) {
-				engine::effects::ParticleInstance moved = particle;
-				for (size_t index = 0; index < seams.size(); index++) {
-					if (seams[index].Crosses ||
-						!engine::scene::SeamCarries(seams[index], particle.Position)) {
-						continue;
-					}
-
-					// `Point`, because a position moves and scales. The packed
-					// size is left alone: it is an unsigned normalised pair over a
-					// sixty-four metre ceiling, and unpacking and repacking it per
-					// particle to serve a mismatched pair of panes is a cost every
-					// matched pair would also pay for nothing.
-					moved.Position = maps[index].Point(particle.Position);
-					break;
-				}
-				carried.push_back(moved);
-			}
-
-			return {carried.data() + first, particles.size()};
 		}
 	}
 
-	size_t CollectParticleBatches(Store &store, std::vector<engine::render::ParticleBatch> &batches) {
-		batches.clear();
+	void ParticleFrame::Clear() {
+		Batches.clear();
+		Births.clear();
+		Seams.clear();
+		Blocks.clear();
+	}
+
+	size_t CollectParticleBatches(Store &store, ParticleFrame &frame) {
+		frame.Clear();
 
 		const auto *system = store.Resource<engine::effects::ParticleSystem>();
 		if (system == nullptr || system->Blocks.empty()) {
 			return 0;
 		}
+		frame.Pool = system->Capacity;
+		frame.BlockCount = static_cast<uint32_t>(system->Blocks.size());
 
 		// **The holes, so a spark that has gone through one is drawn in the room
 		// it went into.** A particle is a point rather than a body: it is on one
@@ -1044,30 +1139,36 @@ namespace client {
 		// ones past it arrive in the far room, which is what stops a flame dying
 		// at the seam while the torch holding it does not.
 		//
-		// **A scratch copy, because the pool is the effects system's.** A batch is
-		// normally a span straight into `ParticleSystem::Instances` and nothing is
-		// copied at all; only an emitter with a particle actually through a hole
-		// pays for one, and it pays once per frame.
-		//
-		// **Reserved to the whole pool before anything is written, and that is
-		// load-bearing rather than tidy.** Every batch's span points into this
-		// buffer and every span has to survive until the renderer has drawn it, so
-		// a later batch that grew it would leave an earlier one pointing at freed
-		// memory. The pool is the ceiling on how much can ever be carried, so one
-		// reserve makes reallocation impossible rather than unlikely.
+		// **Flattened here and applied in the step shader**, which is where the
+		// positions are. What crosses is a pane, not a particle: a scene with a
+		// doorway in it uploads eighty bytes and the decision is taken per
+		// particle on the device, where it costs a dot product.
 		static thread_local std::vector<engine::scene::PortalSeam> seams;
-		const bool holed = engine::scene::GatherPortalSeams(store, seams) > 0;
-
-		static thread_local std::vector<engine::scene::SeamTransform> maps;
-		maps.clear();
-
-		Carried().clear();
-		if (holed) {
-			Carried().reserve(system->Instances.size());
+		if (engine::scene::GatherPortalSeams(store, seams) > 0) {
 			for (const engine::scene::PortalSeam &seam : seams) {
-				maps.push_back(engine::scene::SeamMapping(seam));
+				if (seam.Crosses) {
+					// A pane straddles its own plane by definition, so carrying
+					// through it is a portal inside a portal.
+					continue;
+				}
+
+				const engine::scene::SeamTransform map = engine::scene::SeamMapping(seam);
+				engine::render::ParticleSeam flat;
+				flat.Centre = seam.Centre;
+				flat.Normal = seam.Normal;
+				flat.First = seam.First;
+				flat.Second = seam.Second;
+				flat.Mapping = map.Frame;
+				flat.Scale = map.Scale;
+				frame.Seams.push_back(flat);
 			}
 		}
+
+		// This tick's births, copied so a caller that renders outside the tick has
+		// something that outlives it. Already exactly what the renderer wants -
+		// the device-stepped spawn writes the whole state into the record rather
+		// than into an array, which is what lets the host arrays go entirely.
+		frame.Births.assign(system->Births.begin(), system->Births.end());
 
 		// **Walked from the emitter column rather than from the block list**, and
 		// the direction matters: a block knows how many particles it has and
@@ -1088,21 +1189,23 @@ namespace client {
 				}
 
 				const engine::effects::EmitterBlock &block = system->Blocks[slot.Index];
-				if (block.Live == 0) {
+				if (block.Capacity == 0 || block.Live == 0) {
 					// **Skipped rather than emitted as an empty batch.** An empty
 					// batch is a uniform push and a pipeline bind for zero
 					// vertices, and in a scene of a hundred thousand emitters most
 					// of them are empty at any moment.
+					//
+					// **`Live` still means "worth drawing" when the device owns
+					// the pool**, but it is arithmetic rather than a count: it is
+					// what the block has ever been given until nothing more is
+					// born for longer than the longest lifetime, at which point
+					// it falls to zero. See `EmitterBlock::Idle`.
 					return;
 				}
 
 				engine::render::ParticleBatch batch;
-				batch.Particles = {system->Instances.data() + block.First, block.Live};
-
-				if (holed) {
-					batch.Particles = CarryThroughSeams(seams, maps, batch.Particles);
-				}
-
+				batch.Block = &block;
+				batch.Index = slot.Index;
 				batch.Texture = emitter.Texture;
 				batch.FlipbookSide = static_cast<float>(engine::effects::FlipbookSide(emitter.Flipbook));
 				batch.ZOffset = emitter.ZOffset;
@@ -1111,11 +1214,11 @@ namespace client {
 				batch.Additive = emitter.Additive;
 				batch.WorldUp =
 					emitter.Orientation == engine::effects::ParticleOrientation::FacingCameraWorldUp;
-				batches.push_back(batch);
+				frame.Batches.push_back(batch);
 			}
 		);
 
-		return batches.size();
+		return frame.Batches.size();
 	}
 
 	size_t CollectLights(Store &store, const Vector3 &eye, std::vector<engine::render::SceneLight> &lights) {
@@ -1281,6 +1384,20 @@ namespace client {
 			if (!store.HasResource<engine::effects::ParticleSystem>()) {
 				engine::effects::InstallParticles(store, poolCapacity);
 			}
+
+			// **Every world a client installs is stepped on the device**, which
+			// is what turns the ageing half of `StepParticles` off. A client has
+			// a renderer by definition, and `render::Renderer` owns the pool: it
+			// integrates and shades in `particle-step.comp` and writes the
+			// instances straight into the draw stream, so nothing crosses the bus
+			// but the block records and the tick's births.
+			//
+			// The host-side pass is what a test asserts against and what a build
+			// with no compute device would fall back on; it is not what a client
+			// runs. See `ParticleSystem::DeviceStepped`.
+			if (auto *particles = store.ResourceMutable<engine::effects::ParticleSystem>()) {
+				particles->DeviceStepped = true;
+			}
 			if (!store.HasResource<engine::effects::RibbonBuffer>()) {
 				store.SetResource(engine::effects::RibbonBuffer{});
 			}
@@ -1368,6 +1485,16 @@ namespace client {
 			// speeds.
 			scheduler.Add("camera-control", Phase::PreRender, [](Store &world) {
 				(void)engine::scene::UpdateCameraControl(world);
+
+				// **Between the two, and that is the whole reason it is not a
+				// separate scheduler entry.** It has to run after
+				// `UpdateCameraControl` has settled the player's own distance
+				// for this frame and before `PlaceCamera` reads
+				// `CameraController::OccludedDistance` - two scheduler
+				// entries in one phase have no ordering promise, and a lambda
+				// does.
+				(void)engine::physics::UpdatePoppercam(world);
+
 				(void)engine::scene::PlaceCamera(world);
 			});
 
@@ -1491,31 +1618,66 @@ namespace client {
 		return true;
 	}
 
-	// TODO(render-pipeline): `InstallWorldPipelines` lived here.
-	//
-	// It was the join between a world and the renderer, and **it was the last
-	// link to be built** - the catalogue, the document, the editor panel, the
-	// `PipelineSet` on the world and `Renderer::SetPipeline` all existed while
-	// nothing connected the last two, so "Save to world" wrote a document that
-	// round-tripped perfectly and never drew a pixel. Whatever replaces it, this
-	// is the seam to check first.
-	//
-	// Three decisions in it are worth carrying over:
-	//
-	// - **Here rather than in `render`, for `CollectSurfaceViews`'s reason.** A
-	//   world's pipelines live on an `ecs::Store` and `render` is L12, which does
-	//   not know what a store is. The renderer took a compiled graph and knew
-	//   nothing about worlds; this is where the two met.
-	// - **The installed key was qualified by world id**, because pipelines are
-	//   global to the renderer by name while a world's names are its own. Two
-	//   worlds each calling theirs `main` is ordinary, and with a second viewport
-	//   open both draw in one frame - an unqualified key meant whichever world
-	//   installed last drew both.
-	// - **Installed on a world change, not per frame.** Installing compiles the
-	//   graph and reports what is wrong with it, so per frame that is a compile
-	//   per pipeline per frame and every complaint about a half-wired one
-	//   repeated sixty times a second. Saving dropped the cache entry, which is
-	//   what made a save visible in the viewport rather than only in the file.
+	engine::core::Name InstallRenderingProfiles(
+		const engine::graph::PipelineSet &profiles,
+		engine::render::Renderer &renderer,
+		uint64_t world,
+		engine::core::Name selectedProfile
+	) {
+		engine::graph::RegisterRenderNodeKinds();
+
+		const std::string suffix = "#" + std::to_string(world);
+		for (const engine::core::Name key : renderer.Pipelines()) {
+			if (key.Text().ends_with(suffix)) {
+				(void)renderer.RemovePipeline(key);
+			}
+		}
+
+		engine::graph::PipelineSet defaults;
+		const engine::graph::PipelineSet *set = &profiles;
+		if (profiles.Count() == 0) {
+			defaults.Set(engine::core::Name("Default PBR"), engine::graph::DefaultPbrDocument());
+			set = &defaults;
+		}
+
+		std::vector<engine::core::Name> candidates;
+		const auto addCandidate = [&](engine::core::Name name) {
+			if (name.IsValid() && set->Find(name) != nullptr &&
+				std::find(candidates.begin(), candidates.end(), name) == candidates.end()) {
+				candidates.push_back(name);
+			}
+		};
+		addCandidate(selectedProfile);
+		addCandidate(engine::core::Name("Default PBR"));
+		for (const engine::core::Name name : set->Names()) {
+			addCandidate(name);
+		}
+
+		for (const engine::core::Name name : candidates) {
+			const engine::graph::PipelineDocument *document = set->Find(name);
+			assert(document != nullptr);
+
+			engine::graph::RenderGraph graph;
+			engine::core::Name offender;
+			const engine::graph::PipelineDocumentStatus status =
+				engine::graph::Build(*document, graph, offender);
+			if (status != engine::graph::PipelineDocumentStatus::Ok) {
+				ENGINE_ERROR(
+					"pipeline '{}' does not build: {} at '{}'",
+					name.Text(),
+					engine::graph::Describe(status),
+					offender.Text()
+				);
+				continue;
+			}
+
+			const engine::core::Name key(std::format("{}#{}", name.Text(), world));
+			if (renderer.SetPipeline(key, graph)) {
+				return key;
+			}
+		}
+		return {};
+	}
 
 	void RegisterClientComponents() {
 		// **A `DrawList` is derived state, and its serialisation says so by
@@ -1572,6 +1734,23 @@ namespace client {
 		// two copies of a system that writes `PreviousTransform` can both be
 		// installed into one world, and the second wins silently every tick.
 		scheduler.Add("capture-previous", Phase::PreSimulation, engine::scene::CapturePreviousTransforms);
+
+		// **The other half of the same system, and it runs at the other end of
+		// the frame.** `capture-previous` records where a body was when the tick
+		// began; this cancels that record for anything that has been through a
+		// hole since the last frame was drawn, because blending across a
+		// teleport is a body streaking across the world. It has to be at
+		// `PreRender` rather than beside its partner: what it reads is a serial
+		// that arrives with a replication delta, and a delta lands after the
+		// tick's `PreSimulation` has already run.
+		//
+		// **On every world this program presents, replica or not.** The
+		// authority takes its own counter inside `CrossPortals`, so this is an
+		// integer compare that finds nothing there - and a client, which never
+		// runs `CrossPortals` at all, is exactly the case that needs it.
+		scheduler.Add("snap-portal-transit", Phase::PreRender, [](Store &world) {
+			(void)engine::scene::SnapPortalTransit(world);
+		});
 
 		// **Who a teleport brings in, and it must not depend on scripts.** A
 		// destination is chosen by a script in *another* world, so a world can be

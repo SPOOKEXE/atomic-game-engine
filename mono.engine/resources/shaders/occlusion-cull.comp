@@ -1,0 +1,139 @@
+#version 450
+
+// Conservative occlusion culling. Each candidate is a world-space box; the
+// test asks whether geometry already drawn this frame provably covers every
+// pixel it could touch. Anything uncertain stays visible - a wrong "visible"
+// costs a draw call, a wrong "hidden" is a hole in the world, and the two are
+// not the same kind of mistake.
+//
+// A survivor's instance row is copied, compacted, into the late buffer at its
+// run's own range, so the late draw binds the copy with the vertex layout the
+// early draw used and the vertex shader never learns culling happened.
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+// The pyramid is separate textures rather than one texture's mips, because a
+// compute pass cannot bind one mip for writing while sampling another of the
+// same texture. Twelve levels cover a rectangle up to 2048 texels wide;
+// anything wider is declared visible, and an object that big on screen was
+// never worth culling.
+layout(set = 0, binding = 0) uniform sampler2D pyramid00;
+layout(set = 0, binding = 1) uniform sampler2D pyramid01;
+layout(set = 0, binding = 2) uniform sampler2D pyramid02;
+layout(set = 0, binding = 3) uniform sampler2D pyramid03;
+layout(set = 0, binding = 4) uniform sampler2D pyramid04;
+layout(set = 0, binding = 5) uniform sampler2D pyramid05;
+layout(set = 0, binding = 6) uniform sampler2D pyramid06;
+layout(set = 0, binding = 7) uniform sampler2D pyramid07;
+layout(set = 0, binding = 8) uniform sampler2D pyramid08;
+layout(set = 0, binding = 9) uniform sampler2D pyramid09;
+layout(set = 0, binding = 10) uniform sampler2D pyramid10;
+layout(set = 0, binding = 11) uniform sampler2D pyramid11;
+
+// Pairs per candidate: [centre.xyz | run index], [extent.xyz | source slot].
+layout(set = 0, binding = 12) readonly buffer Candidates { vec4 data[]; } candidates;
+
+// The uploaded instance rows, six vec4 each - see `GpuInstance`.
+layout(set = 0, binding = 13) readonly buffer Instances { vec4 rows[]; } instances;
+
+// Per slot-run: the first late slot, where its survivors compact to.
+layout(set = 0, binding = 14) readonly buffer Runs { uint first[]; } runs;
+
+layout(set = 1, binding = 0) buffer Counts { uint survivors[]; } counts;
+layout(set = 1, binding = 1) writeonly buffer Late { vec4 rows[]; } late;
+
+layout(set = 2, binding = 0) uniform Cull {
+	mat4 ViewProjection;
+	uvec4 Counts; // x: candidates. y: pyramid levels built.
+	vec4 Level0;  // xy: level-zero size in texels.
+} cull;
+
+const uint INSTANCE_VECS = 6u;
+
+float FarthestAt(int lod, ivec2 texel) {
+	switch (lod) {
+	case 0: return texelFetch(pyramid00, texel, 0).r;
+	case 1: return texelFetch(pyramid01, texel, 0).r;
+	case 2: return texelFetch(pyramid02, texel, 0).r;
+	case 3: return texelFetch(pyramid03, texel, 0).r;
+	case 4: return texelFetch(pyramid04, texel, 0).r;
+	case 5: return texelFetch(pyramid05, texel, 0).r;
+	case 6: return texelFetch(pyramid06, texel, 0).r;
+	case 7: return texelFetch(pyramid07, texel, 0).r;
+	case 8: return texelFetch(pyramid08, texel, 0).r;
+	case 9: return texelFetch(pyramid09, texel, 0).r;
+	case 10: return texelFetch(pyramid10, texel, 0).r;
+	case 11: return texelFetch(pyramid11, texel, 0).r;
+	}
+	return 1.0;
+}
+
+void main() {
+	uint index = gl_GlobalInvocationID.x;
+	if (index >= cull.Counts.x) {
+		return;
+	}
+	vec4 first = candidates.data[index * 2u];
+	vec4 second = candidates.data[index * 2u + 1u];
+	vec3 centre = first.xyz;
+	uint run = floatBitsToUint(first.w);
+	vec3 extent = second.xyz;
+	uint source = floatBitsToUint(second.w);
+
+	bool visible = false;
+	vec2 low = vec2(1.0);
+	vec2 high = vec2(0.0);
+	float nearest = 1.0;
+	for (int corner = 0; corner < 8; corner++) {
+		vec3 at = centre + extent * vec3(
+			(corner & 1) != 0 ? 1.0 : -1.0,
+			(corner & 2) != 0 ? 1.0 : -1.0,
+			(corner & 4) != 0 ? 1.0 : -1.0);
+		vec4 clip = cull.ViewProjection * vec4(at, 1.0);
+		// A corner at or behind the camera plane has no screen rectangle to
+		// test; the box straddles the near plane and stays visible.
+		if (clip.w <= 1e-4) {
+			visible = true;
+			break;
+		}
+		vec3 ndc = clip.xyz / clip.w;
+		// SDL clip Y points up while texel V grows down - the same mapping
+		// ssao.frag makes in reverse.
+		vec2 uv = vec2(0.5 + 0.5 * ndc.x, 0.5 - 0.5 * ndc.y);
+		low = min(low, uv);
+		high = max(high, uv);
+		nearest = min(nearest, ndc.z);
+	}
+
+	if (!visible) {
+		low = clamp(low, vec2(0.0), vec2(1.0));
+		high = clamp(high, vec2(0.0), vec2(1.0));
+		nearest = clamp(nearest, 0.0, 1.0);
+		// The level where the rectangle spans at most one texel, so four taps
+		// at its corners cover it entirely.
+		vec2 rect = (high - low) * cull.Level0.xy;
+		float widest = max(max(rect.x, rect.y), 1.0);
+		int lod = int(ceil(log2(widest)));
+		if (lod >= int(cull.Counts.y)) {
+			visible = true;
+		} else {
+			ivec2 size = max(ivec2(cull.Level0.xy) >> lod, ivec2(1));
+			ivec2 texelLow = clamp(ivec2(low * vec2(size)), ivec2(0), size - 1);
+			ivec2 texelHigh = clamp(ivec2(high * vec2(size)), ivec2(0), size - 1);
+			float farthest = max(
+				max(FarthestAt(lod, texelLow), FarthestAt(lod, ivec2(texelHigh.x, texelLow.y))),
+				max(FarthestAt(lod, ivec2(texelLow.x, texelHigh.y)), FarthestAt(lod, texelHigh)));
+			// Hidden only when the box's nearest point sits strictly behind
+			// the farthest drawn depth under it. Ties stay visible.
+			visible = nearest <= farthest;
+		}
+	}
+
+	if (!visible) {
+		return;
+	}
+	uint offset = atomicAdd(counts.survivors[run], 1u);
+	uint destination = runs.first[run] + offset;
+	for (uint part = 0u; part < INSTANCE_VECS; part++) {
+		late.rows[destination * INSTANCE_VECS + part] = instances.rows[source * INSTANCE_VECS + part];
+	}
+}

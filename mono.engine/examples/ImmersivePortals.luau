@@ -134,10 +134,15 @@ local THROUGH = 1.5
 -- and is not mistaken for going through.
 local WITHIN = BLOCK_SIZE.X / 2
 
+-- Clear of a baseplate's top face at y = 0: coplanar surfaces do not flicker in
+-- this engine, they resolve stably to whichever one the draw order happens to
+-- favour. `scripts/demos/zfight-scan.sh` holds the control for that.
+local GROUND_LIFT = 0.01
+
 local floor = Instance.new("Part")
 floor.Name = "Floor"
 floor.Size = Vector3.new(FLOOR_SIZE, FLOOR_THICKNESS, FLOOR_SIZE)
-floor.Position = Vector3.new(0, -FLOOR_THICKNESS / 2, 0)
+floor.Position = Vector3.new(0, -FLOOR_THICKNESS / 2 + GROUND_LIFT, 0)
 floor.Color = IS_SECOND and Color3.new(0.16, 0.18, 0.22) or Color3.new(0.22, 0.20, 0.17)
 floor.Anchored = true
 floor.Parent = workspace

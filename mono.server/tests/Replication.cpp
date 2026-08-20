@@ -142,7 +142,12 @@ namespace server_replication_test {
 		// as a per-client message, which is the whole point of `game/Play.hpp`.
 		Entity Mine;
 
-		bool Start(uint32_t entities, const std::string &game = {}) {
+		// @param entities How many the placeholder world holds.
+		// @param game     A scene to host instead, or empty for the placeholder.
+		// @param extra    Further arguments for the child, for a case that is
+		//                 about a setting rather than about a world.
+		bool
+		Start(uint32_t entities, const std::string &game = {}, const std::vector<std::string> &extra = {}) {
 			RegisterTypes();
 
 			for (int attempt = 0; attempt < 4 && !Child.Started(); attempt++) {
@@ -165,6 +170,8 @@ namespace server_replication_test {
 					arguments.emplace_back("--game");
 					arguments.push_back(game);
 				}
+
+				arguments.insert(arguments.end(), extra.begin(), extra.end());
 
 				if (!Child.Start(ServerProgram(), arguments)) {
 					continue;
@@ -557,6 +564,65 @@ TEST_CASE("the world keeps moving after the join", "[server][replication]") {
 				   << " recv=" << remote.Link->Link().Stats().PacketsReceived
 	);
 	REQUIRE(remote.Link->Applied() > joinedAt);
+}
+
+TEST_CASE("a replication rate thins the stream without slowing the world", "[server][replication]") {
+	if (!ServerAvailable()) {
+		SKIP("the server program is not built into this preset");
+	}
+
+	// **The one thing only a real server proves: that the rate reaches the
+	// wire.** `engine.world.universe` proves the clock and `server.host` proves
+	// the option reaches the world's settings; what neither can see is
+	// `Server::ServeClients` skipping the publish and pumping the link instead.
+	//
+	// **Measured as the gap between applied ticks, never as snapshots per
+	// wall-second.** A count over a wall-clock window is a test that fails on a
+	// busy machine. The gap is the ratio between the two rates and does not
+	// depend on how long anything took: at 60 Hz simulating and 5 Hz
+	// publishing, each snapshot carries about twelve ticks of movement where an
+	// ungated stream carries one.
+	Remote remote;
+	REQUIRE(remote.Start(32, {}, {"--replication-tick-rate", "5"}));
+
+	// The join is the first half of the claim. Every message the server queues
+	// waits for a published tick, so a client joining through a throttled
+	// stream is exactly the case the `Flush`-instead-of-`Publish` split could
+	// have broken - it would hang here rather than fail an assertion below.
+	REQUIRE(remote.Join(600));
+
+	uint64_t previous = remote.Link->Applied();
+	uint64_t advanced = 0;
+	int snapshots = 0;
+
+	for (int tick = 0; tick < 900 && snapshots < 6; tick++) {
+		remote.Tick();
+		std::this_thread::sleep_for(std::chrono::milliseconds(4));
+
+		const uint64_t applied = remote.Link->Applied();
+		if (applied > previous) {
+			advanced += applied - previous;
+			previous = applied;
+			snapshots++;
+		}
+	}
+
+	REQUIRE(snapshots >= 3);
+
+	const double ticksPerSnapshot = static_cast<double>(advanced) / snapshots;
+	INFO("advanced=" << advanced << " snapshots=" << snapshots << " ratio=" << ticksPerSnapshot);
+
+	// **A floor of six against an expected twelve, and the slack only ever
+	// helps.** A snapshot lost to the loopback widens the gap rather than
+	// narrowing it, so the failures this can have are the ones worth having: an
+	// ungated stream sits at one tick per snapshot and misses by a factor of
+	// six.
+	CHECK(ticksPerSnapshot >= 6.0);
+
+	// And the world did not slow down with the stream. Sixty ticks a second
+	// against three snapshots means the simulation is still ahead of what is
+	// being sent, which is the whole point of separating the two rates.
+	CHECK(advanced >= 24);
 }
 
 TEST_CASE("a client announces itself without being told to", "[server][replication]") {

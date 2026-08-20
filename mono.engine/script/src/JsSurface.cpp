@@ -1050,6 +1050,23 @@ namespace engine::script {
 				note(FireJsSignal(context, SignalKind::GuiFocused, event.Instance, 0, nullptr));
 				break;
 
+			case gui::EventKind::DragBegan:
+			case gui::EventKind::DragContinue:
+			case gui::EventKind::DragEnded: {
+				const SignalKind kind = event.Kind == gui::EventKind::DragBegan ? SignalKind::GuiDragBegan
+										: event.Kind == gui::EventKind::DragContinue
+											? SignalKind::GuiDragContinue
+											: SignalKind::GuiDragEnded;
+				JSValue arguments[4]{
+					JS_NewFloat64(context, event.Position.X),
+					JS_NewFloat64(context, event.Position.Y),
+					JS_NewFloat64(context, event.Local.X),
+					JS_NewFloat64(context, event.Local.Y),
+				};
+				note(FireJsSignal(context, kind, event.Instance, 4, arguments));
+				break;
+			}
+
 			case gui::EventKind::FocusReleased: {
 				// The Luau pump's `enterPressed`, off the event for the reason
 				// `SignalKind::GuiFocusLost` gives.
@@ -1183,6 +1200,12 @@ namespace engine::script {
 			JS_CGETSET_DEF("MouseEnter", InstanceTreeSignal<SignalKind::GuiMouseEnter>, nullptr),
 			JS_CGETSET_DEF("MouseLeave", InstanceTreeSignal<SignalKind::GuiMouseLeave>, nullptr),
 			JS_CGETSET_DEF("MouseMoved", InstanceTreeSignal<SignalKind::GuiMouseMoved>, nullptr),
+
+			// A `UIDragDetector`'s three. `LuauInstances.cpp` says why they sit
+			// on every instance rather than on one class.
+			JS_CGETSET_DEF("DragStart", InstanceTreeSignal<SignalKind::GuiDragBegan>, nullptr),
+			JS_CGETSET_DEF("DragContinue", InstanceTreeSignal<SignalKind::GuiDragContinue>, nullptr),
+			JS_CGETSET_DEF("DragEnd", InstanceTreeSignal<SignalKind::GuiDragEnded>, nullptr),
 
 			// A `TextBox`'s pair. On every instance and inert anywhere else, for
 			// the reason the six above are - `LuauInstances.cpp` says the same

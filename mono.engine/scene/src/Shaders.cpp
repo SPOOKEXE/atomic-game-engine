@@ -65,8 +65,17 @@ namespace engine::scene {
 			property.Type = ecs::PropertyType::Int32;
 			property.Size = sizeof(int32_t);
 			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<ShaderSource>()});
-			property.Writes = property.Reads;
 			property.Writable = false;
+
+			// **Empty, and deliberately not `Reads`.** `Writes` reaches the
+			// bindings manifest, so a read-only property naming a component
+			// there would tell every script author that setting it moves
+			// storage it cannot even be given a value for -
+			// `TrianglesCountProperty`'s own comment carries the argument.
+			// Caught by `mono.tools/bindings` only once something finally
+			// called `ShaderScriptClass()` from that tool's own bootstrap -
+			// see `main.cpp`'s own comment on why nothing had, until now.
+			property.Writes = &ecs::ComponentSet::Intern({});
 
 			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
 				const ShaderSource *held = store.Get<ShaderSource>(instance);
@@ -174,6 +183,13 @@ namespace engine::scene {
 			}
 		});
 
+		// The screen's own shader, asked for the identical way - a resource
+		// rather than a row, so it is a plain read rather than a walk.
+		const core::Name postProcess = PostProcessShaderOf(store);
+		if (postProcess.IsValid()) {
+			out.push_back(postProcess);
+		}
+
 		// By id rather than by text: a `core::Name` is already an integer in
 		// this process, and the order only has to be stable rather than
 		// alphabetical.
@@ -182,5 +198,19 @@ namespace engine::scene {
 		});
 		out.erase(std::unique(out.begin(), out.end()), out.end());
 		return out.size();
+	}
+
+	core::Name PostProcessShaderOf(const ecs::Store &store) {
+		const PostProcessing *held = store.Resource<PostProcessing>();
+		return held == nullptr ? core::Name{} : held->Shader;
+	}
+
+	void SetPostProcessShader(ecs::Store &store, const core::Name &name) {
+		PostProcessing *held = store.ResourceMutable<PostProcessing>();
+		if (held == nullptr) {
+			store.SetResource(PostProcessing{name});
+			return;
+		}
+		held->Shader = name;
 	}
 }

@@ -991,6 +991,17 @@ namespace engine::ecs {
 		//         NULL_ENTITY in an adopt-only store.
 		Entity CreateInstance(ClassId id, std::string_view name = {});
 
+		// Creates a locally predicted instance from a class prototype.
+		//
+		// The predicted range is the only range a replica owns. This is the
+		// instance-shaped counterpart of `CreatePredicted`, for an editor or a
+		// prediction system making a row that must not collide with authority.
+		//
+		// @param id   The class to instantiate.
+		// @param name The instance's name, which need not be unique.
+		// @return The new predicted instance, or NULL_ENTITY for an invalid class.
+		Entity CreatePredictedInstance(ClassId id, std::string_view name = {});
+
 		// Copies one instance, its components and its whole subtree.
 		//
 		// Mints an authoritative entity, so an adopt-only store refuses it for
@@ -1007,6 +1018,13 @@ namespace engine::ecs {
 		// @param source The instance to copy.
 		// @return The copy, or NULL_ENTITY when the source is not an instance.
 		Entity CloneInstance(Entity source);
+
+		// Copies an instance and its subtree into the predicted entity range.
+		//
+		// @param source The instance to copy.
+		// @return The predicted copy, parented nowhere, or NULL_ENTITY when the
+		//         source is not an archivable instance.
+		Entity ClonePredictedInstance(Entity source);
 
 		// Destroys an instance and everything under it.
 		//
@@ -1096,6 +1114,15 @@ namespace engine::ecs {
 		//         instance does not carry what the conversion writes.
 		bool SetProperty(Entity instance, core::Name property, const void *value, size_t bytes);
 
+		// The named form of `SetPropertyAuthored`.
+		//
+		// @param instance The instance to write.
+		// @param property The property name.
+		// @param value    The value to write.
+		// @param bytes    The size of `value`.
+		// @return `false` on the ordinary lookup or validation failures.
+		bool SetPropertyAuthored(Entity instance, core::Name property, const void *value, size_t bytes);
+
 		// The properties an instance's class exposes, merged with its bases'.
 		//
 		// @param instance The instance to describe.
@@ -1149,6 +1176,22 @@ namespace engine::ecs {
 		// @since v0.8
 		bool
 		SetProperty(Entity instance, const PropertyDescriptor &descriptor, const void *value, size_t bytes);
+
+		// Writes a property on behalf of an editor authoring this exact store.
+		//
+		// Unlike the runtime path, this may write an authority-owned row in an
+		// adopt-only store. It is deliberately explicit: a client script still
+		// receives the ordinary refusal, while an editor inspecting a client view
+		// can make a local change that the next authoritative delta may replace.
+		//
+		// @param instance   The instance to write.
+		// @param descriptor One of this instance's property descriptors.
+		// @param value      The value to write.
+		// @param bytes      The size of `value`.
+		// @return `false` on the ordinary validation failures.
+		bool SetPropertyAuthored(
+			Entity instance, const PropertyDescriptor &descriptor, const void *value, size_t bytes
+		);
 
 		// Moves an instance under a new parent, or to no parent.
 		//
@@ -1694,6 +1737,32 @@ namespace engine::ecs {
 			ComponentId component, const std::function<void(const Entity *, void *, size_t)> &body
 		);
 
+		// `EachMatching`, batched by chunk and with the value column in hand -
+		// for a caller that would otherwise call `GetComponent` once per entity
+		// `EachMatching` visits.
+		//
+		// **The runtime-named counterpart of `VisitBatch`.** A templated
+		// `Each<T>` resolves its column once per table because the type is
+		// known at compile time; a caller naming a component by id used to have
+		// no equivalent and paid a full `GetComponent` - a directory lookup, an
+		// archetype fetch, a binary search in its component set - per entity
+		// even though `EachMatching` had already found the right table. This is
+		// that lookup hoisted to once per chunk instead of once per row, the
+		// same trade `EachChangedRuns` already makes for a component with
+		// `DirtyBits` - this is for one that does not carry them, because it
+		// visits every row of a matching table rather than only the changed
+		// ones.
+		//
+		// @param component The component to walk. Every table carrying it is
+		//                   visited; a component nothing carries costs one
+		//                   query-plan lookup and calls `body` zero times.
+		// @param body      Called as `body(const Entity *, void *, size_t rows)`
+		//                  once per chunk-bounded run, with `rows` always
+		//                  non-zero. `void*` is null for a tag component, which
+		//                  has no bytes to point at.
+		// @since v0.18
+		void EachRuns(ComponentId component, const std::function<void(const Entity *, void *, size_t)> &body);
+
 		// --- change signals --------------------------------------------------
 
 		// A registered change signal, so it can be taken back.
@@ -2162,6 +2231,17 @@ namespace engine::ecs {
 			const std::function<void(const Entity *, void *, size_t)> &body
 		);
 
+		// `EachRuns`'s worker. `subject` is `terms[0]` - the caller names one
+		// term and `VisitTables` resolves `Columns` in the caller's order, so
+		// there is no `SubjectPosition` search to do here the way
+		// `VisitChangedRuns` needs one for a subject that rides alongside a
+		// second, unrelated term.
+		void VisitRuns(
+			std::span<const ComponentId> terms,
+			ComponentId subject,
+			const std::function<void(const Entity *, void *, size_t)> &body
+		);
+
 		// Where `subject` sits in a slice's table, which is also its dirty bit.
 		size_t SubjectPosition(const TableSlice &slice, ComponentId subject) const;
 
@@ -2176,6 +2256,16 @@ namespace engine::ecs {
 		// this that lived inside `Create` alone is why `CreateInstance` walked
 		// past the rule for a whole version.
 		bool MayMintAuthoritative(const char *what);
+
+		Entity CloneInstanceInRange(Entity source, bool predicted);
+
+		bool SetPropertyValue(
+			Entity instance,
+			const PropertyDescriptor &descriptor,
+			const void *value,
+			size_t bytes,
+			bool authored
+		);
 
 		// The body of both named-create paths.
 		//

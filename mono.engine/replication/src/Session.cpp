@@ -4,6 +4,7 @@
 #include <engine/replication/Session.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 namespace engine::replication {
@@ -58,7 +59,13 @@ namespace engine::replication {
 		return true;
 	}
 
-	bool Session::Transmit(net::PacketHeader header, std::span<const std::byte> payload) {
+	void Session::SetSimulatedLatency(double milliseconds) {
+		constexpr double MAXIMUM_MILLISECONDS = 60'000.0;
+		const double finite = std::isfinite(milliseconds) ? milliseconds : 0.0;
+		SimulatedLatencySeconds = std::clamp(finite, 0.0, MAXIMUM_MILLISECONDS) / 1000.0;
+	}
+
+	bool Session::Transmit(net::PacketHeader header, std::span<const std::byte> payload, double nowSeconds) {
 		if (!Sealer_.has_value()) {
 			return false;
 		}
@@ -78,6 +85,17 @@ namespace engine::replication {
 
 		Framing.WriteRaw(sealed->Bytes.data(), sealed->Bytes.size());
 
+		if (SimulatedLatencySeconds > 0.0) {
+			Delayed.push_back(
+				DelayedDatagram{
+					nowSeconds + SimulatedLatencySeconds,
+					std::vector<std::byte>(Framing.Bytes().begin(), Framing.Bytes().end()),
+				}
+			);
+			Stats_.Sent++;
+			return true;
+		}
+
 		if (Transport_->Send(Peer_, Framing.Bytes()) != net::TransportStatus::Ok) {
 			Stats_.Undeliverable++;
 			return false;
@@ -85,6 +103,20 @@ namespace engine::replication {
 
 		Stats_.Sent++;
 		return true;
+	}
+
+	size_t Session::FlushDelayed(double nowSeconds) {
+		size_t sent = 0;
+		while (!Delayed.empty() && Delayed.front().ReadyAtSeconds <= nowSeconds) {
+			DelayedDatagram datagram = std::move(Delayed.front());
+			Delayed.pop_front();
+			if (Transport_->Send(Peer_, datagram.Bytes) != net::TransportStatus::Ok) {
+				Stats_.Undeliverable++;
+				continue;
+			}
+			sent++;
+		}
+		return sent;
 	}
 
 	bool Session::Emit(net::ChannelKind channel, std::span<const std::byte> payload, double nowSeconds) {
@@ -100,7 +132,7 @@ namespace engine::replication {
 
 		header = Receiver.Acknowledging(header);
 
-		if (!Transmit(header, payload)) {
+		if (!Transmit(header, payload, nowSeconds)) {
 			return false;
 		}
 
@@ -134,7 +166,7 @@ namespace engine::replication {
 	size_t Session::Flush(double nowSeconds) {
 		ENGINE_PROFILE_CAT("replica.flush", core::ProfileCategory::Network);
 
-		size_t sent = 0;
+		size_t sent = FlushDelayed(nowSeconds);
 
 		for (const net::ReliableSender::Unacknowledged &waiting : Sender.Due(nowSeconds)) {
 			if (!Link_.Reserve(waiting.Payload.size())) {
@@ -146,7 +178,7 @@ namespace engine::replication {
 			header.Sequence = waiting.Sequence;
 			header = Receiver.Acknowledging(header);
 
-			if (!Transmit(header, waiting.Payload)) {
+			if (!Transmit(header, waiting.Payload, nowSeconds)) {
 				continue;
 			}
 
@@ -198,7 +230,7 @@ namespace engine::replication {
 
 				net::PacketHeader header = Link_.NextHeader(net::ChannelKind::Unreliable);
 				header = Receiver.Acknowledging(header);
-				if (Transmit(header, {})) {
+				if (Transmit(header, {}, nowSeconds)) {
 					Link_.OnSent(0, nowSeconds);
 					Stats_.KeepAlives++;
 					Owed = false;
@@ -206,7 +238,7 @@ namespace engine::replication {
 			}
 		}
 
-		return sent;
+		return sent + FlushDelayed(nowSeconds);
 	}
 
 	bool Session::Receive(std::span<const std::byte> datagram, double nowSeconds) {

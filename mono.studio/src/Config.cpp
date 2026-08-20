@@ -1,9 +1,5 @@
-#include <studio/Config.hpp>
-
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
-#include <studio/Editor.hpp>
-#include <studio/Keybinds.hpp>
 
 #include <algorithm>
 #include <cstdio>
@@ -12,6 +8,9 @@
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <sstream>
+#include <studio/Config.hpp>
+#include <studio/Editor.hpp>
+#include <studio/Keybinds.hpp>
 
 namespace studio {
 
@@ -52,6 +51,11 @@ namespace studio {
 			return root;
 		}
 
+		bool &RootOverridden() {
+			static bool overridden = false;
+			return overridden;
+		}
+
 		// Reads a whole file, or reports that there was none.
 		bool ReadFile(const std::filesystem::path &path, std::string &out, std::string &error) {
 			std::error_code failed;
@@ -90,6 +94,11 @@ namespace studio {
 			return found != document.end() && found->is_number_integer() ? found->get<int>() : fallback;
 		}
 
+		std::string Words(const json &document, const char *key, const std::string &fallback) {
+			const auto found = document.find(key);
+			return found != document.end() && found->is_string() ? found->get<std::string>() : fallback;
+		}
+
 		bool Flag(const json &document, const char *key, bool fallback) {
 			const auto found = document.find(key);
 			return found != document.end() && found->is_boolean() ? found->get<bool>() : fallback;
@@ -101,6 +110,7 @@ namespace studio {
 	}
 
 	void SetConfigRoot(const std::filesystem::path &root) {
+		RootOverridden() = !root.empty();
 		Root() = root.empty() ? HomeDirectory() / "Documents" / "atomic-game-engine" / "studio" : root;
 	}
 
@@ -276,8 +286,7 @@ namespace studio {
 		// **Written as its name rather than its index.** An index would make
 		// reordering `ScaleSide` a silent change to how everybody's scale drag
 		// behaves, and this is a file a person reads.
-		if (const auto sides = document.find("scaleSides");
-			sides != document.end() && sides->is_string()) {
+		if (const auto sides = document.find("scaleSides"); sides != document.end() && sides->is_string()) {
 			const std::string wanted = sides->get<std::string>();
 			for (size_t index = 0; index < SCALE_SIDE_COUNT; index++) {
 				const auto side = static_cast<ScaleSide>(index);
@@ -289,12 +298,55 @@ namespace studio {
 		}
 		ControlPort = Integer(document, "controlPort", ControlPort);
 
-		if (const auto panels = document.find("panels");
-			panels != document.end() && panels->is_object()) {
+		if (const auto rates = document.find("frameRates"); rates != document.end() && rates->is_object()) {
+			FrameCap = Number(*rates, "cap", FrameCap);
+			InterfaceActiveHz = Number(*rates, "interfaceActive", InterfaceActiveHz);
+			InterfaceIdleHz = Number(*rates, "interfaceIdle", InterfaceIdleHz);
+			RendererFocusedHz = Number(*rates, "rendererFocused", RendererFocusedHz);
+			RendererUnfocusedHz = Number(*rates, "rendererUnfocused", RendererUnfocusedHz);
+		}
+
+		if (const auto panels = document.find("panels"); panels != document.end() && panels->is_object()) {
 			ShowStatistics = Flag(*panels, "statistics", ShowStatistics);
 			ShowFrameGraph = Flag(*panels, "frameGraph", ShowFrameGraph);
 			ShowAssets = Flag(*panels, "assets", ShowAssets);
 			ShowControl = Flag(*panels, "control", ShowControl);
+		}
+
+		// **A missing array and an empty one are different answers.** Absent is
+		// a file written before the preference existed and means "use the
+		// catalogue's defaults"; present and empty is somebody who unticked
+		// every row and means an empty new game, which is a thing they are
+		// allowed to want. `DefaultWorlds` stays empty in the first case and the
+		// editor decides; the flag below is what tells the two apart.
+		if (const auto worlds = document.find("defaultWorlds");
+			worlds != document.end() && worlds->is_array()) {
+			DefaultWorldsChosen = true;
+			DefaultWorlds.clear();
+			for (const auto &entry : *worlds) {
+				if (entry.is_string()) {
+					DefaultWorlds.push_back(entry.get<std::string>());
+				}
+			}
+		}
+
+		// **Absent means "never configured", and every field falls back to the
+		// built-in.** An install that has never opened the Discord Presence
+		// page has no object here at all, and what that has to mean is "report
+		// nothing" rather than "report with an empty application id".
+		if (const auto presence = document.find("discord");
+			presence != document.end() && presence->is_object()) {
+			Discord.Enabled = Flag(*presence, "enabled", Discord.Enabled);
+			Discord.ApplicationId = Words(*presence, "applicationId", Discord.ApplicationId);
+			Discord.Details = Words(*presence, "details", Discord.Details);
+			Discord.State = Words(*presence, "state", Discord.State);
+			Discord.LargeImage = Words(*presence, "largeImage", Discord.LargeImage);
+			Discord.LargeText = Words(*presence, "largeText", Discord.LargeText);
+			Discord.ButtonLabel = Words(*presence, "buttonLabel", Discord.ButtonLabel);
+			Discord.ButtonUrl = Words(*presence, "buttonUrl", Discord.ButtonUrl);
+			Discord.ShowElapsed = Flag(*presence, "showElapsed", Discord.ShowElapsed);
+			Discord.HideNames = Flag(*presence, "hideNames", Discord.HideNames);
+			Discord.JoinSecrets = Flag(*presence, "joinSecrets", Discord.JoinSecrets);
 		}
 
 		// **A colour nobody recognises is skipped, not an error.** This document
@@ -312,8 +364,7 @@ namespace studio {
 
 				engine::ui::ThemeColours entry;
 				for (const auto &[name, value] : chosen.items()) {
-					const std::optional<engine::ui::ThemeColour> which =
-						engine::ui::ParseThemeColour(name);
+					const std::optional<engine::ui::ThemeColour> which = engine::ui::ParseThemeColour(name);
 					if (!which || !value.is_string()) {
 						continue;
 					}
@@ -346,6 +397,16 @@ namespace studio {
 		SnapDistance = std::max(0.001f, SnapDistance);
 		SnapDegrees = std::max(0.001f, SnapDegrees);
 		ControlPort = std::clamp(ControlPort, 0, 65535);
+
+		// **Clamped rather than refused, and zero survives.** Zero means "this
+		// one imposes no ceiling", which is a real answer for every one of them
+		// - a negative is not, and a file with one in it is a typo rather than a
+		// document to reject.
+		FrameCap = std::clamp(FrameCap, 0.0f, 1000.0f);
+		InterfaceActiveHz = std::clamp(InterfaceActiveHz, 0.0f, 1000.0f);
+		InterfaceIdleHz = std::clamp(InterfaceIdleHz, 0.0f, 1000.0f);
+		RendererFocusedHz = std::clamp(RendererFocusedHz, 0.0f, 1000.0f);
+		RendererUnfocusedHz = std::clamp(RendererUnfocusedHz, 0.0f, 1000.0f);
 		return true;
 	}
 
@@ -370,7 +431,7 @@ namespace studio {
 			}
 		}
 
-		const json document{
+		json document{
 			{"scale", Scale},
 			{"showGrid", ShowGrid},
 			{"snap", SnapEnabled},
@@ -389,7 +450,33 @@ namespace studio {
 				 {"control", ShowControl},
 			 }},
 			{"panelColours", std::move(panelColours)},
+			{"discord",
+			 json{
+				 {"enabled", Discord.Enabled},
+				 {"applicationId", Discord.ApplicationId},
+				 {"details", Discord.Details},
+				 {"state", Discord.State},
+				 {"largeImage", Discord.LargeImage},
+				 {"largeText", Discord.LargeText},
+				 {"buttonLabel", Discord.ButtonLabel},
+				 {"buttonUrl", Discord.ButtonUrl},
+				 {"showElapsed", Discord.ShowElapsed},
+				 {"hideNames", Discord.HideNames},
+				 {"joinSecrets", Discord.JoinSecrets},
+			 }},
+			{"frameRates",
+			 json{
+				 {"cap", FrameCap},
+				 {"interfaceActive", InterfaceActiveHz},
+				 {"interfaceIdle", InterfaceIdleHz},
+				 {"rendererFocused", RendererFocusedHz},
+				 {"rendererUnfocused", RendererUnfocusedHz},
+			 }},
 		};
+
+		if (DefaultWorldsChosen) {
+			document["defaultWorlds"] = DefaultWorlds;
+		}
 
 		std::string error;
 		if (!WriteConfigDocument("preferences.json", document, error)) {
@@ -410,11 +497,17 @@ namespace studio {
 		// folder - so the first run after this change reads the old file and
 		// every run after it reads the new one.
 		template <class Load>
-		bool LoadWithLegacy(
-			const std::filesystem::path &wanted, const std::filesystem::path &legacy, Load load
-		) {
+		bool
+		LoadWithLegacy(const std::filesystem::path &wanted, const std::filesystem::path &legacy, Load load) {
 			if (load(wanted)) {
 				return true;
+			}
+
+			// An explicit root is an isolation boundary. Falling back to files
+			// beside the installed binary would make a test run read a person's
+			// keybinds and content origins despite being pointed at a scratch root.
+			if (RootOverridden()) {
+				return false;
 			}
 
 			std::error_code failed;
@@ -432,6 +525,15 @@ namespace studio {
 	}
 
 	void Editor::LoadConfiguration() {
+		// **This program's presence wording, before the file is read over it.**
+		// `discord::Settings` cannot carry these: the four programs that report
+		// say different things, so a default written in the module would be one
+		// of them pretending to be all four. `Preferences::Load` leaves alone
+		// anything the document does not mention, which is what makes setting
+		// them here the same as declaring them.
+		Prefs.Discord.Details = "Editing {place}";
+		Prefs.Discord.State = "{instances} instances in {world}";
+
 		// Read before anything is applied, so a broken file leaves every default
 		// in place rather than half of them.
 		Prefs.Load();
@@ -447,6 +549,12 @@ namespace studio {
 		ScaleSides = Prefs.Sides;
 		DragAligns = Prefs.DragAligns;
 		ShowFacing = Prefs.ShowFacing;
+
+		FrameCap = Prefs.FrameCap;
+		InterfaceActiveHz = Prefs.InterfaceActiveHz;
+		InterfaceIdleHz = Prefs.InterfaceIdleHz;
+		RendererFocusedHz = Prefs.RendererFocusedHz;
+		RendererUnfocusedHz = Prefs.RendererUnfocusedHz;
 
 		// **The panel flags are ORed rather than assigned**, because `Options`
 		// has already reconciled a command-line flag against this same file -
@@ -498,6 +606,11 @@ namespace studio {
 		Prefs.DragAligns = DragAligns;
 		Prefs.ShowFacing = ShowFacing;
 		Prefs.Scale = Settings.Scale;
+		Prefs.FrameCap = FrameCap;
+		Prefs.InterfaceActiveHz = InterfaceActiveHz;
+		Prefs.InterfaceIdleHz = InterfaceIdleHz;
+		Prefs.RendererFocusedHz = RendererFocusedHz;
+		Prefs.RendererUnfocusedHz = RendererUnfocusedHz;
 
 		Prefs.Save();
 		Recent.Save();

@@ -640,6 +640,12 @@ namespace engine::ecs {
 		return engine::ecs::CreateInstance(*State, id, name);
 	}
 
+	Entity Store::CreatePredictedInstance(ClassId id, std::string_view name) {
+		RequireOwningThread("CreatePredictedInstance");
+
+		return engine::ecs::CreateInstance(*State, id, name, EntityRange::Predicted);
+	}
+
 	ClassId Store::ClassOf(Entity instance) const {
 		return engine::ecs::ClassOf(*State, instance);
 	}
@@ -704,8 +710,28 @@ namespace engine::ecs {
 		return SetProperty(instance, *descriptor, value, bytes);
 	}
 
+	bool Store::SetPropertyAuthored(Entity instance, core::Name property, const void *value, size_t bytes) {
+		const PropertyDescriptor *descriptor = FindProperty(*this, instance, property);
+		if (descriptor == nullptr) {
+			return false;
+		}
+		return SetPropertyAuthored(instance, *descriptor, value, bytes);
+	}
+
 	bool Store::SetProperty(
 		Entity instance, const PropertyDescriptor &descriptor, const void *value, size_t bytes
+	) {
+		return SetPropertyValue(instance, descriptor, value, bytes, false);
+	}
+
+	bool Store::SetPropertyAuthored(
+		Entity instance, const PropertyDescriptor &descriptor, const void *value, size_t bytes
+	) {
+		return SetPropertyValue(instance, descriptor, value, bytes, true);
+	}
+
+	bool Store::SetPropertyValue(
+		Entity instance, const PropertyDescriptor &descriptor, const void *value, size_t bytes, bool authored
 	) {
 		RequireOwningThread("SetProperty");
 
@@ -725,7 +751,7 @@ namespace engine::ecs {
 		// Refused loudly rather than quietly, because a script author cannot
 		// see the difference between a write that was rejected and one that
 		// was applied and then replaced.
-		if (AdoptOnly()) {
+		if (AdoptOnly() && !authored) {
 			ENGINE_ERROR(
 				"store '{}': refusing to set '{}' in a replica. The authority owns this row, and "
 				"a value written here survives until its next delta and no longer.",
@@ -895,8 +921,20 @@ namespace engine::ecs {
 			return NULL_ENTITY;
 		}
 
+		return CloneInstanceInRange(source, false);
+	}
+
+	Entity Store::ClonePredictedInstance(Entity source) {
+		RequireOwningThread("ClonePredictedInstance");
+
+		return CloneInstanceInRange(source, true);
+	}
+
+	Entity Store::CloneInstanceInRange(Entity source, bool predicted) {
 		std::vector<engine::ecs::ClonedPair> made;
-		const Entity copy = engine::ecs::CloneInstance(*State, source, made);
+		const Entity copy = engine::ecs::CloneInstance(
+			*State, source, made, predicted ? EntityRange::Predicted : EntityRange::Authoritative
+		);
 		if (copy == NULL_ENTITY) {
 			return NULL_ENTITY;
 		}
@@ -1094,6 +1132,53 @@ namespace engine::ecs {
 		const ComponentId terms[] = {component, Components::Of<DirtyBits>()};
 		const DeferScope defer(*this);
 		VisitChangedRuns(terms, component, body);
+	}
+
+	void
+	Store::EachRuns(ComponentId component, const std::function<void(const Entity *, void *, size_t)> &body) {
+		RequireOwningThread("EachRuns");
+		if (!component.IsValid()) {
+			return;
+		}
+
+		const ComponentId terms[] = {component};
+		const DeferScope defer(*this);
+		VisitRuns(terms, component, body);
+	}
+
+	void Store::VisitRuns(
+		std::span<const ComponentId> terms,
+		ComponentId subject,
+		const std::function<void(const Entity *, void *, size_t)> &body
+	) {
+		VisitTables(terms, [&](const TableSlice &slice) {
+			void *const *valueChunks = slice.Columns[0];
+			const size_t stride = Components::Describe(subject).Size;
+
+			// One call per chunk - `VisitBatch`'s shape, for a component named at
+			// runtime rather than one of `Each`'s template arguments. Every row in
+			// range matters here, unlike `VisitChangedRuns`, so a chunk is one run
+			// with no bit-testing inside it.
+			size_t row = 0;
+			while (row < slice.Rows) {
+				const size_t chunk = Column::ChunkOf(row);
+				const size_t base = Column::ChunkStart(chunk);
+				const size_t end = ChunkEnd(row, slice.Rows);
+
+				// A tag has no column - see `VisitChanged` on why `Columns` is
+				// null for one - so there are no bytes to hand back, only entities.
+				auto *values = stride == 0 || valueChunks == nullptr
+								   ? nullptr
+								   : static_cast<std::byte *>(valueChunks[chunk]);
+
+				body(
+					slice.Entities + row,
+					values == nullptr ? nullptr : values + (row - base) * stride,
+					end - row
+				);
+				row = end;
+			}
+		});
 	}
 
 	void Store::VisitChangedRuns(

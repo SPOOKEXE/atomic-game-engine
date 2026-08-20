@@ -1,3 +1,5 @@
+#include "ThreadAffinity.hpp"
+
 #include <engine/core/Clock.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
@@ -18,6 +20,7 @@ namespace engine::parallel {
 		// One batch may use the pool; competing dispatches run inline.
 		struct Batch {
 			const std::function<void(size_t, size_t)> *Body = nullptr;
+			const unsigned *AssignedWorkers = nullptr;
 			size_t Count = 0;
 			size_t Grain = 0;
 			std::atomic<size_t> Next{0};
@@ -45,9 +48,12 @@ namespace engine::parallel {
 
 		struct Pool {
 			std::vector<std::thread> Workers;
+			std::vector<platform::Processor> WorkerProcessors;
+			std::vector<uint8_t> WorkerPinned;
 			std::mutex Guard;
 			std::condition_variable Available;
 			std::condition_variable Finished;
+			std::condition_variable ReadyCondition;
 
 			// The slot cannot be reused while a worker still holds it.
 			std::condition_variable Drained;
@@ -63,6 +69,8 @@ namespace engine::parallel {
 
 			Batch *Current = nullptr;
 			uint64_t Generation = 0;
+			unsigned Ready = 0;
+			unsigned PinnedWorkers = 0;
 			bool Stopping = false;
 		};
 
@@ -133,9 +141,48 @@ namespace engine::parallel {
 			}
 		}
 
-		void WorkerLoop() {
+		void DrainAssigned(Batch &batch, unsigned workerIndex) {
+			uint64_t busy = 0;
+			bool took = false;
+			bool pending = false;
+
+			for (size_t index = 0; index < batch.Count; index++) {
+				if (batch.AssignedWorkers[index] != workerIndex) {
+					continue;
+				}
+
+				// Keep one completion private until this worker has published its
+				// timing. Otherwise the caller can observe the join before the last
+				// worker contributes to the batch totals.
+				if (pending) {
+					Retire(batch);
+				}
+				RunBody(batch, index, busy);
+				took = true;
+				pending = true;
+			}
+
+			if (took) {
+				batch.BusyNanoseconds.fetch_add(busy, std::memory_order_relaxed);
+				batch.Participants.fetch_add(1, std::memory_order_relaxed);
+			}
+
+			if (pending) {
+				Retire(batch);
+			}
+		}
+
+		void WorkerLoop(unsigned workerIndex) {
 			auto &pool = Get();
 			uint64_t seen = 0;
+
+			const bool pinned = platform::PinCurrentThread(pool.WorkerProcessors[workerIndex]);
+			{
+				std::lock_guard lock(pool.Guard);
+				pool.WorkerPinned[workerIndex] = pinned ? 1 : 0;
+				pool.Ready++;
+				pool.ReadyCondition.notify_one();
+			}
 
 			for (;;) {
 				Batch *batch = nullptr;
@@ -155,7 +202,11 @@ namespace engine::parallel {
 				}
 
 				if (batch != nullptr) {
-					Drain(*batch);
+					if (batch->AssignedWorkers == nullptr) {
+						Drain(*batch);
+					} else {
+						DrainAssigned(*batch, workerIndex);
+					}
 
 					std::lock_guard lock(pool.Guard);
 					if (--pool.Inside == 0) {
@@ -168,25 +219,55 @@ namespace engine::parallel {
 
 	void Jobs::Start(unsigned workers) {
 		auto &pool = Get();
-		std::lock_guard lock(pool.Guard);
+		std::unique_lock lock(pool.Guard);
 
 		if (!pool.Workers.empty()) {
 			return;
 		}
 
+		const std::vector<platform::Processor> available = platform::AvailableProcessors();
+		const std::vector<platform::Processor> distinctCores = platform::DistinctCoreProcessors();
 		if (workers == 0) {
-			const unsigned available = std::thread::hardware_concurrency();
-			// Leave one core for the participating caller.
-			workers = available > 1 ? available - 1 : 0;
+			// Leave one logical processor for the participating caller.
+			workers = available.size() > 1 ? static_cast<unsigned>(available.size() - 1) : 0;
 		}
 
 		pool.Stopping = false;
+		pool.Ready = 0;
+		pool.PinnedWorkers = 0;
 		pool.Workers.reserve(workers);
+		pool.WorkerProcessors.resize(workers);
+		pool.WorkerPinned.assign(workers, 0);
+		for (unsigned index = 0; index < workers && index < distinctCores.size(); index++) {
+			pool.WorkerProcessors[index] = distinctCores[index];
+		}
 		for (unsigned index = 0; index < workers; index++) {
-			pool.Workers.emplace_back(WorkerLoop);
+			pool.Workers.emplace_back(WorkerLoop, index);
 		}
 
-		ENGINE_INFO("job system started with {} worker(s)", workers);
+		pool.ReadyCondition.wait(lock, [&] { return pool.Ready == workers; });
+		while (pool.PinnedWorkers < pool.WorkerPinned.size() && pool.WorkerPinned[pool.PinnedWorkers] != 0) {
+			pool.PinnedWorkers++;
+		}
+
+		const size_t expectedPinned = std::min<size_t>(workers, distinctCores.size());
+		if (workers > 0 && distinctCores.empty()) {
+			ENGINE_WARN(
+				"job system could not identify bindable physical cores; assigned-worker dispatch will run "
+				"inline"
+			);
+		} else if (pool.PinnedWorkers < expectedPinned) {
+			ENGINE_WARN(
+				"job system pinned only {} of {} physical-core worker(s); assigned-worker dispatch will use "
+				"that prefix",
+				pool.PinnedWorkers,
+				expectedPinned
+			);
+		}
+
+		ENGINE_INFO(
+			"job system started with {} worker(s), {} physical-core pinned", workers, pool.PinnedWorkers
+		);
 	}
 
 	void Jobs::Stop() {
@@ -204,12 +285,22 @@ namespace engine::parallel {
 			worker.join();
 		}
 		pool.Workers.clear();
+		pool.WorkerProcessors.clear();
+		pool.WorkerPinned.clear();
+		pool.Ready = 0;
+		pool.PinnedWorkers = 0;
 	}
 
 	unsigned Jobs::WorkerCount() {
 		auto &pool = Get();
 		std::lock_guard lock(pool.Guard);
 		return static_cast<unsigned>(pool.Workers.size());
+	}
+
+	unsigned Jobs::PinnedWorkerCount() {
+		auto &pool = Get();
+		std::lock_guard lock(pool.Guard);
+		return pool.PinnedWorkers;
 	}
 
 	void
@@ -272,6 +363,7 @@ namespace engine::parallel {
 			pool.Drained.wait(lock, [&] { return pool.Inside == 0; });
 
 			batch.Body = &body;
+			batch.AssignedWorkers = nullptr;
 			batch.Count = count;
 			batch.Grain = grain;
 			batch.Outstanding.store(ranges, std::memory_order_relaxed);
@@ -310,6 +402,93 @@ namespace engine::parallel {
 			pool.Current = nullptr;
 		}
 
+		LastTiming.BusyMilliseconds = static_cast<float>(
+			static_cast<double>(batch.BusyNanoseconds.load(std::memory_order_relaxed)) / 1e6
+		);
+		LastTiming.WallMilliseconds =
+			static_cast<float>(static_cast<double>(core::Clock::Nanoseconds() - dispatched) / 1e6);
+		LastTiming.Participants = batch.Participants.load(std::memory_order_relaxed);
+
+		if (batch.Failure) {
+			std::rethrow_exception(batch.Failure);
+		}
+	}
+
+	void Jobs::ForWorkers(
+		std::span<const unsigned> workerByIndex, const std::function<void(size_t, size_t)> &body
+	) {
+		if (workerByIndex.empty()) {
+			return;
+		}
+
+		auto &pool = Get();
+		unsigned pinnedWorkers = 0;
+		{
+			std::lock_guard lock(pool.Guard);
+			pinnedWorkers = pool.PinnedWorkers;
+		}
+
+		const bool validMapping =
+			pinnedWorkers > 0 &&
+			std::all_of(workerByIndex.begin(), workerByIndex.end(), [pinnedWorkers](unsigned worker) {
+				return worker < pinnedWorkers;
+			});
+		if (Forced.load(std::memory_order_relaxed) || !validMapping) {
+			const uint64_t started = core::Clock::Nanoseconds();
+			body(0, workerByIndex.size());
+			LastTiming = Inline(core::Clock::Nanoseconds() - started);
+			return;
+		}
+
+		if (pool.Claimed.exchange(true, std::memory_order_acquire)) {
+			const uint64_t started = core::Clock::Nanoseconds();
+			body(0, workerByIndex.size());
+			LastTiming = Inline(core::Clock::Nanoseconds() - started);
+			return;
+		}
+
+		struct ClaimGuard {
+			Pool &Owner;
+			~ClaimGuard() {
+				Owner.Claimed.store(false, std::memory_order_release);
+			}
+		} claim{pool};
+
+		const uint64_t dispatched = core::Clock::Nanoseconds();
+		Batch &batch = pool.Slot;
+
+		{
+			std::unique_lock lock(pool.Guard);
+			pool.Drained.wait(lock, [&] { return pool.Inside == 0; });
+
+			batch.Body = &body;
+			batch.AssignedWorkers = workerByIndex.data();
+			batch.Count = workerByIndex.size();
+			batch.Grain = 1;
+			batch.Outstanding.store(workerByIndex.size(), std::memory_order_relaxed);
+			batch.BusyNanoseconds.store(0, std::memory_order_relaxed);
+			batch.Participants.store(0, std::memory_order_relaxed);
+			batch.Failure = nullptr;
+
+			pool.Current = &batch;
+			pool.Generation++;
+		}
+
+		pool.Available.notify_all();
+
+		{
+			ENGINE_PROFILE_CAT("jobs.join.assigned", core::ProfileCategory::Idle);
+			std::unique_lock lock(pool.Guard);
+			pool.Finished.wait(lock, [&] { return batch.Outstanding.load(std::memory_order_acquire) == 0; });
+
+			// Clear the shared pointer before waiting for workers that woke after
+			// the last task finished. They then observe an empty batch rather than
+			// a mapping whose caller is about to return.
+			pool.Current = nullptr;
+			pool.Drained.wait(lock, [&] { return pool.Inside == 0; });
+		}
+
+		batch.AssignedWorkers = nullptr;
 		LastTiming.BusyMilliseconds = static_cast<float>(
 			static_cast<double>(batch.BusyNanoseconds.load(std::memory_order_relaxed)) / 1e6
 		);

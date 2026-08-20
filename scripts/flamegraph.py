@@ -25,12 +25,25 @@ Usage:
 
 The colour of a frame is a hash of its name, so the same span is the same
 colour in two captures and a diff by eye is possible at all.
+
+Averaging mode reads several `<label>.window<TICKS>.folded` snapshots -
+written periodically by `server.profile-window` alongside the usual whole-run
+capture - and draws each frame's *mean* self time per frame across them,
+instead of one run's raw total:
+
+    scripts/flamegraph.py --average out.window*.folded --svg avg.svg --top avg_top.txt
+
+`--top` in this mode also lists each frame's min/max/avg/median self time per
+frame, which a single capture cannot show: it is one number, with no
+distribution behind it to describe.
 """
 
 from __future__ import annotations
 
 import argparse
 import html
+import re
+import statistics
 import sys
 from pathlib import Path
 
@@ -72,13 +85,15 @@ class Node:
 		return found
 
 
-def ReadFolded(path: Path) -> Node:
-	"""Builds the tree a folded file describes.
+def ReadFlat(path: Path) -> dict[str, float]:
+	"""Reads a folded file into stack -> self-microseconds, with no tree built.
 
 	A malformed line is skipped rather than fatal: a capture truncated by a
 	killed process is still worth drawing, and refusing it would lose the run.
+	A stack seen twice - one capture concatenated onto another - adds, which is
+	the same addition `AccumulateFoldedStacks` does in the engine.
 	"""
-	root = Node("all")
+	flat: dict[str, float] = {}
 	for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
 		line = line.strip()
 		if not line or line.startswith("#"):
@@ -90,13 +105,26 @@ def ReadFolded(path: Path) -> Node:
 			value = float(line[cut + 1 :])
 		except ValueError:
 			continue
+		stack = line[:cut]
+		flat[stack] = flat.get(stack, 0.0) + value
+	return flat
 
+
+def BuildTree(flat: dict[str, float]) -> Node:
+	"""Builds the merged call tree a flat stack -> self-microseconds map describes."""
+	root = Node("all")
+	for stack, value in flat.items():
 		node = root
-		for frame in line[:cut].split(";"):
+		for frame in stack.split(";"):
 			if frame:
 				node = node.Child(frame)
 		node.SelfMicroseconds += value
 	return root
+
+
+def ReadFolded(path: Path) -> Node:
+	"""Builds the tree a folded file describes."""
+	return BuildTree(ReadFlat(path))
 
 
 def Total(node: Node) -> float:
@@ -235,15 +263,150 @@ def WriteTop(root: Node, path: Path, count: int, title: str) -> None:
 	path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+# Matches what `server.profile-window` names a snapshot - the tick count it was
+# written at, so two snapshots subtract into the window between them with no
+# window tracking on the server's side.
+WINDOW_PATTERN = re.compile(r"\.window(\d+)\.folded$")
+
+
+def WindowTicks(path: Path) -> int:
+	"""The absolute tick a window snapshot was written at, from its filename."""
+	match = WINDOW_PATTERN.search(path.name)
+	if not match:
+		raise SystemExit(f"{path}: not a '<label>.window<TICKS>.folded' snapshot")
+	return int(match.group(1))
+
+
+def Mean(values: list[float]) -> float:
+	return sum(values) / len(values) if values else 0.0
+
+
+def PerFrameAverages(paths: list[Path]) -> tuple[dict[str, list[float]], list[int]]:
+	"""Every stack's self time *per frame*, one reading per window, in microseconds.
+
+	Each snapshot is cumulative since folding turned on - `FrameGraph::
+	WriteFolded` reads the running total without resetting it - so two
+	snapshots N ticks apart subtract into exactly that window's folded stacks.
+	Dividing by the tick count between them turns a window's total into a
+	per-frame figure, which is what makes windows of different sizes (the last
+	one is usually short) comparable and averageable at all.
+
+	A stack absent from a window reads zero for it rather than being left out:
+	it really did cost nothing that window, and skipping it would bias the
+	average toward the windows it happened to appear in.
+
+	@return (stack -> one reading per window, oldest first), and the tick
+	        count of each window in the same order.
+	"""
+	ordered = sorted(paths, key=WindowTicks)
+	previousTicks = 0
+	previousFlat: dict[str, float] = {}
+	perWindow: list[dict[str, float]] = []
+	windowSizes: list[int] = []
+	for path in ordered:
+		ticks = WindowTicks(path)
+		frames = ticks - previousTicks
+		if frames <= 0:
+			raise SystemExit(f"{path}: window ticks did not advance past {previousTicks}")
+		current = ReadFlat(path)
+		stacks = current.keys() | previousFlat.keys()
+		perWindow.append(
+			{stack: (current.get(stack, 0.0) - previousFlat.get(stack, 0.0)) / frames for stack in stacks}
+		)
+		windowSizes.append(frames)
+		previousTicks, previousFlat = ticks, current
+
+	readings: dict[str, list[float]] = {}
+	for index, window in enumerate(perWindow):
+		for stack, value in window.items():
+			readings.setdefault(stack, [0.0] * len(perWindow))[index] = value
+	return readings, windowSizes
+
+
+def WriteAverageTop(
+	readings: dict[str, list[float]], windowSizes: list[int], path: Path, count: int, title: str
+) -> None:
+	"""The averaging mode's greppable half: min/max/avg/median self time per frame.
+
+	Merged by frame *name* rather than by full stack, the same cut `WriteTop`
+	makes for `bySelf` - a leaf like `Authority::Score` reached through more
+	than one parent should read as one row, not split across its callers.
+	"""
+	byName: dict[str, list[float]] = {}
+	for stack, values in readings.items():
+		name = stack.rsplit(";", 1)[-1]
+		series = byName.setdefault(name, [0.0] * len(windowSizes))
+		for index, value in enumerate(values):
+			series[index] += value
+
+	grand = sum(Mean(series) for series in byName.values())
+	sizes = sorted(set(windowSizes))
+	sizeText = f"{sizes[0]} tick(s)" if len(sizes) == 1 else f"{sizes[0]}-{sizes[-1]} tick(s)"
+
+	lines = [
+		title,
+		f"{len(windowSizes)} window(s) of {sizeText} each - readings are self time per frame",
+		f"average self time per frame across every window  {grand / 1000.0:.3f} ms",
+		"",
+	]
+
+	lines.append(f"top {count} frames by average self time per frame")
+	lines.append(f"{'frame':<48} {'avg ms':>10} {'min ms':>10} {'max ms':>10} {'median ms':>10} {'share':>8}")
+	for name, series in sorted(byName.items(), key=lambda entry: -Mean(entry[1]))[:count]:
+		avg = Mean(series)
+		share = 100.0 * avg / grand if grand > 0 else 0.0
+		lines.append(
+			f"{name:<48} {avg / 1000.0:>10.4f} {min(series) / 1000.0:>10.4f} "
+			f"{max(series) / 1000.0:>10.4f} {statistics.median(series) / 1000.0:>10.4f} {share:>7.2f}%"
+		)
+
+	path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def main() -> int:
 	parser = argparse.ArgumentParser(description="Render a folded-stack capture as an SVG flamegraph.")
-	parser.add_argument("folded", type=Path, help="the .folded file to read")
+	parser.add_argument("folded", type=Path, nargs="?", help="the .folded file to read")
+	parser.add_argument(
+		"--average",
+		type=Path,
+		nargs="+",
+		metavar="WINDOW",
+		help=(
+			"average mode: one or more '<label>.window<TICKS>.folded' snapshots written by "
+			"server.profile-window, in place of FOLDED. The bar is each frame's mean self time "
+			"per frame across the windows; --top also gets a min/max/avg/median table."
+		),
+	)
 	parser.add_argument("--svg", type=Path, help="where to write the graph (default: alongside, .svg)")
 	parser.add_argument("--top", type=Path, help="where to write the text summary")
 	parser.add_argument("--count", type=int, default=20, help="how many rows the summary lists")
 	parser.add_argument("--title", default="", help="the heading drawn on the graph")
 	arguments = parser.parse_args()
 
+	if arguments.average:
+		missing = [path for path in arguments.average if not path.is_file()]
+		if missing:
+			print(f"no such window snapshot(s): {', '.join(str(path) for path in missing)}", file=sys.stderr)
+			return 2
+
+		readings, windowSizes = PerFrameAverages(arguments.average)
+		root = BuildTree({stack: Mean(values) for stack, values in readings.items()})
+		Total(root)
+
+		title = arguments.title or arguments.average[0].name.split(".window")[0]
+		svg = arguments.svg or arguments.average[0].with_suffix(".svg")
+		WriteSvg(root, svg, f"{title} - {len(windowSizes)}-window average")
+		print(f"wrote {svg}")
+
+		if arguments.top:
+			WriteAverageTop(readings, windowSizes, arguments.top, arguments.count, title)
+			print(f"wrote {arguments.top}")
+
+		return 0
+
+	if arguments.folded is None:
+		print("either FOLDED or --average is required", file=sys.stderr)
+		return 2
 	if not arguments.folded.is_file():
 		print(f"no such capture: {arguments.folded}", file=sys.stderr)
 		return 2

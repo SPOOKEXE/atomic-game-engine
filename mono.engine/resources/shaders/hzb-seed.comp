@@ -1,0 +1,21 @@
+#version 450
+
+// Level zero of the depth pyramid: one texel per drawn scene texel, copied
+// straight from the hardware depth target. Depth clears to one, so a texel
+// nothing drew can never occlude anything.
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform sampler2D depthImage;
+layout(set = 1, binding = 0, r32f) uniform writeonly image2D pyramidBase;
+
+layout(set = 2, binding = 0) uniform Seed {
+	ivec4 Size; // xy: level-zero texels. zw: unused.
+} seed;
+
+void main() {
+	ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+	if (texel.x >= seed.Size.x || texel.y >= seed.Size.y) {
+		return;
+	}
+	imageStore(pyramidBase, texel, vec4(texelFetch(depthImage, texel, 0).r));
+}

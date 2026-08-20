@@ -52,8 +52,11 @@ for view in "${views[@]}"; do
 	# **The line is rewritten rather than a global set.** `_G` is readonly in
 	# the script sandbox, so a scene cannot be told anything from outside except
 	# by editing it - see the note beside `VIEW` in `PortalSeam.luau`.
+	#
+	# **Whatever the scene's own default is, not only an empty one** - see the
+	# same note in `capture-portal-lighting.sh`.
 	staged="$out/PortalSeam-$view.luau"
-	sed "s/^local VIEW = \"\"$/local VIEW = \"$view\"/" "$scene" > "$staged"
+	sed "s/^local VIEW = \"[^\"]*\"$/local VIEW = \"$view\"/" "$scene" > "$staged"
 
 	if ! grep -q "^local VIEW = \"$view\"$" "$staged"; then
 		echo "  the view line in PortalSeam.luau moved; this script did not follow" >&2

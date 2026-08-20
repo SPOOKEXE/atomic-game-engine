@@ -75,57 +75,63 @@ namespace engine::examples {
 	}
 
 	namespace {
-		// Where the staged Luau libraries are, resolved the same two ways
-		// `ExamplePath` resolves a scene - and for the same layout mismatch,
-		// which is written out in full there.
-		std::filesystem::path LibraryRoot() {
-			const std::filesystem::path preferred = core::Paths::Assets() / "lib";
+		// Where a scene's own Luau modules are staged, resolved the same two
+		// ways `ExamplePath` resolves the scene itself - and for the same layout
+		// mismatch, which is written out in full there.
+		//
+		// `Magic.luau` and `Magic` both answer `.../assets/examples/Magic`, so a
+		// caller holding either spelling needs no rule of its own.
+		std::filesystem::path SceneLibraryRoot(std::string_view scene) {
+			std::string stem(scene);
+			if (const size_t dot = stem.rfind('.'); dot != std::string::npos && dot > 0) {
+				stem.erase(dot);
+			}
+
+			const std::filesystem::path preferred = core::Paths::Assets() / "examples" / stem;
 			if (std::filesystem::exists(preferred)) {
 				return preferred;
 			}
-			return core::Paths::Base().parent_path() / "assets" / "lib";
+			return core::Paths::Base().parent_path() / "assets" / "examples" / stem;
+		}
+	}
+
+	size_t MountSceneLibraries(Store &store, ecs::Entity script, std::string_view scene) {
+		if (script == ecs::NULL_ENTITY || !store.Alive(script)) {
+			return 0;
 		}
 
-		// Mirrors every staged library into `ReplicatedStorage`.
-		//
-		// **Idempotent by name.** A world that came out of a file already has
-		// its tree, and mounting a second one beside it would give `require` two
-		// copies of every module - which is worse than either, because a module
-		// is cached per instance and two instances share no state.
-		void MountSharedLibraries(Store &store) {
-			const Entity replicated = store.FindFirstRoot("ReplicatedStorage");
-			if (replicated == ecs::NULL_ENTITY) {
-				return;
-			}
+		const std::filesystem::path root = SceneLibraryRoot(scene);
 
-			const std::filesystem::path root = LibraryRoot();
+		std::error_code failure;
+		if (!std::filesystem::is_directory(root, failure)) {
+			// Not an error, and it is the ordinary case: three scenes have a
+			// directory and every other one does not.
+			return 0;
+		}
 
-			std::error_code failure;
-			if (!std::filesystem::is_directory(root, failure)) {
-				// Not an error: a program staged without the libraries still
-				// runs every scene that does not require one.
-				return;
-			}
-
-			std::vector<std::filesystem::path> directories;
-			for (const auto &entry : std::filesystem::directory_iterator(root, failure)) {
-				if (entry.is_directory()) {
-					directories.push_back(entry.path());
-				}
-			}
-
-			// Sorted, so two runs mint the same instance ids. `MountModuleTree`
-			// sorts within a directory for the same reason.
-			std::sort(directories.begin(), directories.end());
-
-			for (const std::filesystem::path &directory : directories) {
-				const std::string name = directory.filename().string();
-				if (store.FindFirstChild(replicated, name) != ecs::NULL_ENTITY) {
-					continue;
-				}
-				script::MountModuleTree(store, directory, name, replicated);
+		std::vector<std::filesystem::path> directories;
+		for (const auto &entry : std::filesystem::directory_iterator(root, failure)) {
+			if (entry.is_directory()) {
+				directories.push_back(entry.path());
 			}
 		}
+
+		// Sorted, so two runs mint the same instance ids. `MountModuleTree`
+		// sorts within a directory for the same reason.
+		std::sort(directories.begin(), directories.end());
+
+		size_t mounted = 0;
+		for (const std::filesystem::path &directory : directories) {
+			const std::string name = directory.filename().string();
+			if (store.FindFirstChild(script, name) != ecs::NULL_ENTITY) {
+				continue;
+			}
+			if (script::MountModuleTree(store, directory, name, script) != ecs::NULL_ENTITY) {
+				mounted++;
+			}
+		}
+
+		return mounted;
 	}
 
 	void RegisterExampleComponents() {
@@ -140,6 +146,14 @@ namespace engine::examples {
 
 	void InstallMotionSystems(Scheduler &scheduler) {
 		scheduler.Add("capture-previous", Phase::PreSimulation, scene::CapturePreviousTransforms);
+
+		// **And the snap that cancels it across a hole** - see
+		// `scene::SnapPortalTransit`. `PreRender`, because the serial it reads
+		// arrives with a replication delta and a delta lands after the tick's
+		// `PreSimulation` has run.
+		scheduler.Add("snap-portal-transit", Phase::PreRender, [](Store &world) {
+			(void)scene::SnapPortalTransit(world);
+		});
 		scheduler.Add("orbit", Phase::Simulation, MoveOrbits);
 		scheduler.Add("spin", Phase::Simulation, ApplySpin);
 	}
@@ -154,7 +168,17 @@ namespace engine::examples {
 		// The class trees a script names, and this module's own components for
 		// the C++ path. A script builds out of `Part`; nothing it touches is
 		// registered here.
-		scene::EnsureClassTree();
+		//
+		// **`RegisterSceneClasses`, not `EnsureClassTree` alone - found the
+		// same way the `gui` gap below was.** `ShaderScript` and
+		// `EditableMesh` register through their own accessors, which
+		// `RegisterSceneClasses` calls and `EnsureClassTree` does not; a
+		// scene loaded through this one entry point got "'EditableMesh' is
+		// not a registered class" from `Instance.new`, while the same class
+		// worked from `Game.cpp`'s path and from the studio's - exactly the
+		// "works everywhere somebody looked" shape the comment two lines
+		// down already names.
+		scene::RegisterSceneClasses();
 
 		// **Both trees, because there are two and a scene may use either.**
 		// `Interface.luau` is built entirely out of `ScreenGui` and `Frame` and
@@ -209,7 +233,6 @@ namespace engine::examples {
 		//
 		// Before `RunWorldScripts`, because a scene's first line is a `require`.
 		// Idempotent by name - a world that already has the tree keeps it.
-		MountSharedLibraries(store);
 
 		// The extension picks the VM. `Rings.luau` and `Rings.js` build the
 		// same world through the same bindings, and this loader never learns
@@ -255,6 +278,12 @@ namespace engine::examples {
 			return false;
 		}
 
+		// **The scene's own modules, under the scene's own script, before it
+		// runs.** A scene's first line is a `require` and what it requires is
+		// `script.MagicCore` - see `MountSceneLibraries` for why they hang off
+		// the script rather than off `ReplicatedStorage`.
+		(void)MountSceneLibraries(store, program, absolute.filename().string());
+
 		if (runtime->RunWorldScripts() == 0) {
 			error = runtime->LastError().empty() ? "the scene script did not run" : runtime->LastError();
 			return false;
@@ -299,6 +328,14 @@ namespace engine::examples {
 		// beside it would be two things driving one `Transform` - the second
 		// one winning, silently, on whichever ran last.
 		scheduler.Add("capture-previous", Phase::PreSimulation, scene::CapturePreviousTransforms);
+
+		// **And the snap that cancels it across a hole** - see
+		// `scene::SnapPortalTransit`. `PreRender`, because the serial it reads
+		// arrives with a replication delta and a delta lands after the tick's
+		// `PreSimulation` has run.
+		scheduler.Add("snap-portal-transit", Phase::PreRender, [](Store &world) {
+			(void)scene::SnapPortalTransit(world);
+		});
 
 		scheduler.Add("script-heartbeat", Phase::Simulation, [runtime](Store &world) {
 			// **The fixed tick delta, never a frame time.** A script
@@ -353,5 +390,33 @@ namespace engine::examples {
 		// Neither exists. The preferred one is returned so the error names the
 		// path somebody meant rather than the fallback they have never heard of.
 		return preferred.string();
+	}
+
+	std::vector<std::string> ExampleScenes() {
+		// **`ExamplePath("")` rather than the two branches written out again.**
+		// The layout mismatch it bridges is the same one - the scenes stage into
+		// a sibling of `Paths::Assets()` rather than into it - and two copies of
+		// that rule would disagree the first time either moved. An empty name
+		// resolves to the directory itself.
+		const std::filesystem::path root = std::filesystem::path(ExamplePath("")).parent_path();
+
+		std::vector<std::string> found;
+
+		// The error-code overload, so a missing directory yields nothing rather
+		// than throwing. A program built without the example target is a real
+		// situation and not an error - see the header.
+		std::error_code failure;
+		for (const auto &entry : std::filesystem::directory_iterator(root, failure)) {
+			if (!entry.is_regular_file(failure)) {
+				continue;
+			}
+			if (entry.path().extension() != ".luau") {
+				continue;
+			}
+			found.push_back(entry.path().filename().string());
+		}
+
+		std::sort(found.begin(), found.end());
+		return found;
 	}
 }

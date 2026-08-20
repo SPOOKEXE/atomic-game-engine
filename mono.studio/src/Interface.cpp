@@ -9,6 +9,8 @@
 #include <engine/ui/Metrics.hpp>
 #include <engine/ui/Theme.hpp>
 
+#include <SDL3/SDL_video.h>
+
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
@@ -48,10 +50,10 @@ namespace studio {
 		// corner. Bumping costs everybody the arrangement they dragged into
 		// place, which is why `mono.studio/AGENTS.md` says to do it when a
 		// panel is added and not otherwise.
-		// **v8 because Live Instances is a panel the saved layout has never
+		// **v9 because Render Pipeline is a panel the saved layout has never
 		// heard of**, and a panel a layout does not know about opens floating in
 		// a corner - which is exactly the failure it exists to fix.
-		constexpr const char *DOCKSPACE = "StudioDockSpace.v8";
+		constexpr const char *DOCKSPACE = "StudioDockSpace.v10";
 
 		constexpr const char *VIEWPORT = "Viewport";
 		constexpr const char *VIEWPORT2 = "Viewport 2";
@@ -77,10 +79,13 @@ namespace studio {
 		// hoisted into a dozen more constants: a name used twice in one file is
 		// not the drift a constant prevents.
 		constexpr const char *SKINNABLE[]{
-			VIEWPORT,  VIEWPORT2,		 EXPLORER,		   WORLDS,		  INSTANCES,	   PROPERTIES,
-			SCRIPTS,   OUTPUT,			 "Command Bar",	   SETTINGS,	  STATISTICS,	   FRAMEGRAPH,
-			"History", "Assets",		 "Network",		   "Team Create", "Control (MCP)", "Plugins",
-			"Bus",	   "Find Instances", "Script Profile", "Changes",	  "Debugger",
+			VIEWPORT,	   VIEWPORT2,		 EXPLORER,			WORLDS,
+			INSTANCES,	   PROPERTIES,		 SCRIPTS,			OUTPUT,
+			"Command Bar", SETTINGS,		 STATISTICS,		FRAMEGRAPH,
+			"History",	   "Assets",		 "Render Pipeline", "World Lighting",
+			"Network",	   "Team Create",	 "Control (MCP)",	"Plugins",
+			"Bus",		   "Find Instances", "Script Profile",	"Changes",
+			"Debugger",
 		};
 
 		// The first-run layout, built once and then owned by the ini file.
@@ -143,6 +148,7 @@ namespace studio {
 			// question: what this game *has*, and what of it is *running*.
 			ImGui::DockBuilderDockWindow(INSTANCES, rightUpper);
 			ImGui::DockBuilderDockWindow(PROPERTIES, rightLower);
+			ImGui::DockBuilderDockWindow("World Lighting", rightLower);
 			ImGui::DockBuilderDockWindow(SCRIPTS, bottom);
 			ImGui::DockBuilderDockWindow(OUTPUT, bottom);
 
@@ -152,6 +158,7 @@ namespace studio {
 			ImGui::DockBuilderDockWindow(SETTINGS, rightLower);
 			ImGui::DockBuilderDockWindow(STATISTICS, rightLower);
 			ImGui::DockBuilderDockWindow(FRAMEGRAPH, bottom);
+			ImGui::DockBuilderDockWindow("Render Pipeline", bottom);
 
 			ImGui::DockBuilderFinish(dockspace);
 		}
@@ -346,8 +353,10 @@ namespace studio {
 			ENGINE_PROFILE_CAT("tools", engine::core::ProfileCategory::Render);
 			Skinned("History", [&] { DrawHistory(); });
 			Skinned("Assets", [&] { DrawAssets(); });
-			// TODO(render-pipeline): `DrawRenderPipeline()`, `DrawAssetsPipeline()`
-			// and `DrawPipelineProfile()` were drawn here.
+			Skinned("Render Pipeline", [&] { DrawRenderPipeline(); });
+			Skinned("World Lighting", [&] { DrawWorldLighting(); });
+			Skinned("Pipeline Profile", [&] { DrawPipelineProfile(); });
+			// TODO(asset-pipeline): draw the asset processing graph beside its catalogue.
 			Skinned("Network", [&] { DrawNetwork(); });
 			Skinned("Team Create", [&] { DrawTeamCreate(); });
 			Skinned("Control (MCP)", [&] { DrawControl(); });
@@ -896,12 +905,18 @@ namespace studio {
 		// image stretched back up, which reads as a blurry renderer.
 		const ImVec2 origin = ImGui::GetCursorScreenPos();
 		const ImVec2 size = ImGui::GetContentRegionAvail();
-		const ImVec2 scale = ImGui::GetIO().DisplayFramebufferScale;
-		const float horizontal = scale.x > 0.0f ? scale.x : 1.0f;
-		const float vertical = scale.y > 0.0f ? scale.y : 1.0f;
 
-		target.Width = static_cast<uint32_t>(std::max(size.x, 1.0f) * horizontal);
-		target.Height = static_cast<uint32_t>(std::max(size.y, 1.0f) * vertical);
+		// Pixel density is scalar because display pixels are square. The imgui
+		// backend derives X and Y independently from two window-size queries;
+		// during a compositor resize those queries can briefly describe different
+		// window generations. Feeding that mismatched pair into the camera target
+		// changes its aspect while the panel's aspect has not changed, stretching
+		// both the world and game UI along one axis.
+		const float reportedDensity = Window != nullptr ? SDL_GetWindowPixelDensity(Window) : 1.0f;
+		const float density = reportedDensity > 0.0f ? reportedDensity : 1.0f;
+
+		target.Width = static_cast<uint32_t>(std::max(size.x, 1.0f) * density);
+		target.Height = static_cast<uint32_t>(std::max(size.y, 1.0f) * density);
 
 		// **The texture the renderer holds now, and it is usually this frame's
 		// picture rather than the last one's.** imgui records its draw lists
@@ -915,15 +930,35 @@ namespace studio {
 		// **Sampled to its extent rather than whole.** The texture is rounded up
 		// to a block and the world fills the corner, so drawing all of it would
 		// show the unwritten border down two edges.
-		if (void *texture = Renderer.SceneTexture(index); texture != nullptr) {
-			const engine::render::SceneExtent extent = Renderer.SceneTextureExtent(index);
+		const engine::render::SceneExtent extent = Renderer.SceneTextureExtent(index);
+		void *texture = Renderer.SceneTexture(index);
+		const bool textureMatchesPanel =
+			extent.DrawnWidth == target.Width && extent.DrawnHeight == target.Height;
+		if (texture != nullptr && textureMatchesPanel) {
 			ImGui::Image(
 				reinterpret_cast<ImTextureID>(texture), size, ImVec2(0.0f, 0.0f), ImVec2(extent.U, extent.V)
 			);
+		} else if (texture != nullptr && extent.DrawnWidth > 0 && extent.DrawnHeight > 0) {
+			// Keep the last complete frame visible while the new target is being
+			// allocated. It is fitted uniformly inside the panel, so a resize can
+			// letterbox for one frame but cannot stretch either the world or its UI.
+			const float oldWidth = static_cast<float>(extent.DrawnWidth) / density;
+			const float oldHeight = static_cast<float>(extent.DrawnHeight) / density;
+			const float scale = std::min(size.x / oldWidth, size.y / oldHeight);
+			const ImVec2 fitted{oldWidth * scale, oldHeight * scale};
+			const ImVec2 inset{(size.x - fitted.x) * 0.5f, (size.y - fitted.y) * 0.5f};
+			const ImVec2 minimum{origin.x + inset.x, origin.y + inset.y};
+			const ImVec2 maximum{minimum.x + fitted.x, minimum.y + fitted.y};
+			ImGui::GetWindowDrawList()->AddImage(
+				reinterpret_cast<ImTextureID>(texture),
+				minimum,
+				maximum,
+				ImVec2(0.0f, 0.0f),
+				ImVec2(extent.U, extent.V)
+			);
+			ImGui::Dummy(size);
 		} else {
-			// The first frame, and any frame after a resize the renderer has not
-			// caught up with. Nothing to show yet; the button below still makes
-			// the panel drivable.
+			// Only the first frame has no complete image to retain.
 			ImGui::Dummy(size);
 		}
 
@@ -1010,7 +1045,7 @@ namespace studio {
 		if (hovered &&
 			(ImGui::IsMouseClicked(ImGuiMouseButton_Right) || ImGui::IsMouseClicked(ImGuiMouseButton_Left))) {
 			ImGui::SetWindowFocus();
-			FocusedViewport = index;
+			EditThroughViewport(index);
 
 			// Held for the rest of the frame so a later panel's stale
 			// `IsWindowFocused` cannot take it back. See the note above.
@@ -1126,7 +1161,10 @@ namespace studio {
 		// question and closed again.
 		ImGui::MenuItem("History", nullptr, &ShowHistory);
 		ImGui::MenuItem("Assets", nullptr, &ShowAssets);
-		// TODO(render-pipeline): the three pipeline panels were opened from here.
+		ImGui::MenuItem("Render Pipeline", nullptr, &ShowRenderPipeline);
+		ImGui::MenuItem("World Lighting", nullptr, &ShowWorldLighting);
+		ImGui::MenuItem("Pipeline Profile", nullptr, &ShowPipelineProfile);
+		// TODO(asset-pipeline): expose the asset processing graph from this menu.
 		ImGui::MenuItem("Network", nullptr, &ShowNetwork);
 		ImGui::MenuItem("Team Create", nullptr, &ShowTeamCreate);
 		ImGui::MenuItem("Control (MCP)", nullptr, &ShowControl);
@@ -1143,6 +1181,11 @@ namespace studio {
 		// them - but it is a thing somebody turns off and has to be able to
 		// turn back on, which is the rule this menu exists for.
 		ImGui::MenuItem("Ground Grid", nullptr, &ShowGrid);
+
+		// **Beside the grid, because it is the same kind of thing**: furniture
+		// that says something about the world rather than part of it. Off by
+		// default - see `ShowColliders`.
+		ImGui::MenuItem("Collider Outlines", nullptr, &ShowColliders);
 
 		ImGui::Separator();
 
@@ -1368,13 +1411,14 @@ namespace studio {
 			ImGui::EndMenu();
 		}
 
-		if (ImGui::BeginMenu("Insert", Active.IsValid())) {
+		const WorldId editingWorld = ViewportWorld(FocusedViewport);
+		if (ImGui::BeginMenu("Insert", editingWorld.IsValid())) {
 			ImGui::TextDisabled("into %s", Selection.empty() ? "the world" : "the selection");
 			ImGui::Separator();
 
 			if (const engine::ecs::ClassId chosen = DrawClassPicker("insert-menu"); chosen.IsValid()) {
 				InsertInstance(
-					Active, chosen, Selection.empty() ? engine::ecs::NULL_ENTITY : Selection.front()
+					editingWorld, chosen, Selection.empty() ? engine::ecs::NULL_ENTITY : Selection.front()
 				);
 				ImGui::CloseCurrentPopup();
 			}
@@ -1386,6 +1430,17 @@ namespace studio {
 				AskingNewWorld = true;
 				NameBuffer = "World " + std::to_string(Universe->Count() + 1);
 			}
+
+			// **Every shipped scene, read off the staging directory rather than
+			// listed here.** Ten of them are named by hand in
+			// `RecreateDefaultWorlds` because a new place opens with them; the
+			// rest - the stress scenes, the portal probes, the mirror
+			// measurements - existed only behind `client --script` and could not
+			// be opened in the editor at all. A hardcoded menu would be a second
+			// list to keep in step with the directory, so
+			// `examples::ExampleScenes` walks it.
+			DrawExampleSceneMenu();
+
 			if (ImGui::MenuItem("Remove Active World", nullptr, false, Universe->Count() > 1)) {
 				RemoveWorld(Active);
 			}
@@ -1641,7 +1696,7 @@ namespace studio {
 			}
 
 			if (window == focused || window == context->NavWindow) {
-				FocusedViewport = index;
+				EditThroughViewport(index);
 				FocusedIsViewport = true;
 				return;
 			}
@@ -1806,7 +1861,6 @@ namespace studio {
 		// mirror and reading the skygrid's state. See `FocusedViewport`.
 		const size_t reporting = FocusedViewport;
 		const WorldId shown = ViewportWorld(reporting);
-		ViewportState *reported = ExtraAt(reporting);
 
 		// Which panel is being described, so the readout is never ambiguous
 		// about *whose* state it is showing.
@@ -1828,13 +1882,7 @@ namespace studio {
 			for (const WorldId id : Universe->Worlds()) {
 				const Name name = Universe->NameOf(id);
 				if (ImGui::Selectable(name.IsValid() ? Label(name) : "?", id == shown)) {
-					if (reported != nullptr) {
-						reported->World = id;
-					} else {
-						Active = id;
-						SelectionWorld = id;
-						ClearSelection();
-					}
+					RetargetEditingViewport(reporting, id);
 				}
 			}
 			ImGui::EndCombo();

@@ -2,11 +2,13 @@
 
 #include <engine/ecs/Classes.hpp>
 #include <engine/game/Values.hpp>
+#include <engine/scene/Components.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/ui/Fonts.hpp>
 #include <engine/ui/Theme.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <imgui.h>
 #include <studio/Complete.hpp>
 #include <studio/Editor.hpp>
@@ -203,6 +205,17 @@ namespace studio {
 				}
 			}
 
+			// **Only for something with a place.** An `EditableMesh`, a
+			// `ModuleScript` or a service has no `Transform`, so there is
+			// nowhere to point a camera at - the item is greyed rather than
+			// hidden, because a menu whose length changes per row is one nobody
+			// learns the shape of.
+			const bool placed = store.Get<engine::scene::Transform>(instance) != nullptr;
+			if (ImGui::MenuItem("Zoom To", nullptr, false, placed)) {
+				PendingZoomWorld = world;
+				PendingZoomTo = instance;
+			}
+
 			if (ImGui::MenuItem("Unparent")) {
 				PendingReparent.World = world;
 				PendingReparent.Parent = NULL_ENTITY;
@@ -217,6 +230,149 @@ namespace studio {
 				}
 			}
 		}
+	}
+
+	void Editor::FrameViewportOn(WorldId world, const engine::core::Vector3 &centre, float radius) {
+		// A part may be authored flat on an axis - a pane is - and one flat on
+		// all three would put the camera inside it.
+		radius = std::max(radius, 0.5f);
+
+		// The viewport this applies to: the focused one when it is showing the
+		// world, and the main one otherwise.
+		//
+		// **One panel rather than every panel showing the world.** Two viewports
+		// both jumping because a row was right-clicked once is the surprise; the
+		// second panel is usually the one being kept still on purpose.
+		size_t panel = 0;
+		if (FocusedIsViewport && ViewportWorld(FocusedViewport) == world) {
+			panel = FocusedViewport;
+		} else if (Active != world) {
+			for (size_t index = 1; index <= Extras.size(); index++) {
+				if (Extras[index - 1].Open && ViewportWorld(index) == world) {
+					panel = index;
+					break;
+				}
+			}
+		}
+
+		ViewportState *view = ExtraAt(panel);
+		engine::core::CFrame &frame = view != nullptr ? view->Frame : CameraFrame;
+		const float yaw = view != nullptr ? view->Yaw : CameraYaw;
+		const float pitch = view != nullptr ? view->Pitch : CameraPitch;
+
+		// **The same framing arithmetic `MeshPreview` uses**, and for the same
+		// reason: the distance at which a sphere of this radius subtends the
+		// whole of a vertical field of view is `radius / tan(fov / 2)`, and the
+		// padding is what stops it touching the edges.
+		//
+		// A quarter rather than the four fifths a first attempt used. The radius
+		// is already the *sphere* around the box, so rotation is covered before
+		// the padding is applied at all - and doubling on top of that puts a
+		// wide flat thing, which a terrain arena is, in the middle of a mostly
+		// empty frame.
+		constexpr float PADDING = 1.25f;
+		const float halfFov = engine::scene::Camera{}.FieldOfViewRadians * 0.5f;
+		const float distance = (radius / std::tan(halfFov)) * PADDING;
+
+		const engine::core::Vector3 forward =
+			engine::core::CFrame::Angles(pitch, yaw, 0.0f)
+				.VectorToWorldSpace(engine::core::Vector3{0.0f, 0.0f, -1.0f});
+
+		frame = engine::core::CFrame(centre - forward * distance, frame.Rotation());
+	}
+
+	bool Editor::FrameWorldContents(WorldId world) {
+		if (!world.IsValid()) {
+			return false;
+		}
+
+		engine::core::Vector3 lowest{};
+		engine::core::Vector3 highest{};
+		bool found = false;
+
+		Universe->Enter(world, [&](Store &store) {
+			// **Drawable rows only.** A world's services, its scripts and its
+			// modules have no place, and an invisible part is one the author
+			// does not want looked at - framing on either would aim the camera
+			// at somewhere nothing is.
+			store.Each<
+				const engine::scene::Transform,
+				const engine::scene::Bounds,
+				const engine::scene::Visual>([&](Entity,
+												 const engine::scene::Transform &placement,
+												 const engine::scene::Bounds &bounds,
+												 const engine::scene::Visual &visual) {
+				if (!visual.Visible) {
+					return;
+				}
+
+				const engine::core::Vector3 at = placement.Frame.Position;
+				const engine::core::Vector3 half = bounds.HalfExtent;
+
+				if (!found) {
+					lowest = at - half;
+					highest = at + half;
+					found = true;
+					return;
+				}
+
+				lowest = engine::core::Vector3{
+					std::min(lowest.X, at.X - half.X),
+					std::min(lowest.Y, at.Y - half.Y),
+					std::min(lowest.Z, at.Z - half.Z),
+				};
+				highest = engine::core::Vector3{
+					std::max(highest.X, at.X + half.X),
+					std::max(highest.Y, at.Y + half.Y),
+					std::max(highest.Z, at.Z + half.Z),
+				};
+			});
+		});
+
+		if (!found) {
+			return false;
+		}
+
+		const engine::core::Vector3 centre = (lowest + highest) * 0.5f;
+		FrameViewportOn(world, centre, ((highest - lowest) * 0.5f).Magnitude());
+		return true;
+	}
+
+	void Editor::ZoomViewportTo(WorldId world, Entity instance) {
+		if (!world.IsValid() || instance == NULL_ENTITY) {
+			return;
+		}
+
+		engine::core::CFrame placement;
+		float radius = 0.0f;
+		bool found = false;
+
+		Universe->Enter(world, [&](Store &store) {
+			const auto *transform = store.Get<engine::scene::Transform>(instance);
+			if (transform == nullptr) {
+				return;
+			}
+
+			placement = transform->Frame;
+			found = true;
+
+			// **The bounding sphere of the box, not the box.** A camera pulled
+			// back far enough for the half-extent alone leaves a part's corners
+			// outside the frame whenever it is turned, and a part somebody has
+			// just asked to look at is usually turned.
+			const auto *bounds = store.Get<engine::scene::Bounds>(instance);
+			const engine::core::Vector3 half =
+				bounds != nullptr ? bounds->HalfExtent : engine::core::Vector3{0.5f, 0.5f, 0.5f};
+			radius = half.Magnitude();
+		});
+
+		if (!found) {
+			Say("that instance has no place in the world to look at");
+			return;
+		}
+
+		FrameViewportOn(world, placement.Position, radius);
+		Say("framed the selection");
 	}
 
 	Editor::WorldTree &Editor::TreeFor(WorldId world) {
@@ -276,7 +432,11 @@ namespace studio {
 	void Editor::SelectRange(
 		WorldId world, const HierarchyView &view, engine::ecs::Entity anchor, engine::ecs::Entity to, bool add
 	) {
-		UniverseSelected = false;
+		if (ViewportWorld(FocusedViewport) != world) {
+			RetargetEditingViewport(FocusedViewport, world);
+		}
+
+		ClearRootSelection();
 
 		// **The range itself is `RowsBetween`, which is a free function over the
 		// compiled tree and is tested as one.** What is left here is the part
@@ -562,6 +722,7 @@ namespace studio {
 		TextField("##explorer-filter", ExplorerFilter, "filter by name");
 
 		ImGui::Separator();
+		const WorldId editingWorld = ViewportWorld(FocusedViewport);
 
 		// **The universe is the root, and it is `game`.** `script`'s bindings
 		// already map `game` to `world::Universe` and `workspace` to the world a
@@ -580,9 +741,22 @@ namespace studio {
 		const std::string universeLabel =
 			std::string(GameName.IsValid() ? Label(GameName) : "Game") + "  (universe)";
 
+		// **`OpenOnArrow`, and without it this row could not be selected at
+		// all.** A tree node with no such flag toggles open on a click anywhere
+		// along it, which sets imgui's `IsItemToggledOpen` for that frame - and
+		// the guard below refuses a click that toggled, because a person opening
+		// a node is not choosing it. The two together meant every click on the
+		// universe row opened or closed it and none of them ever reached the
+		// selection, so `UniverseSelected` was false for the life of the session
+		// and the Properties panel showed "nothing selected" for a root whose
+		// editable settings were sitting behind it.
+		//
+		// The world rows below have always had the flag, which is why they
+		// select and this did not.
 		const bool universeOpen = ImGui::TreeNodeEx(
 			"##universe",
 			ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth |
+				ImGuiTreeNodeFlags_OpenOnArrow |
 				(UniverseSelected ? ImGuiTreeNodeFlags_Selected : ImGuiTreeNodeFlags_None),
 			"%s",
 			universeLabel.c_str()
@@ -601,7 +775,7 @@ namespace studio {
 			// Insert lands in the active world, because a universe holds worlds
 			// and not instances - there is no other honest answer, and refusing
 			// outright would make the root the one row with no menu.
-			DrawInsertMenu("insert-universe", Active, NULL_ENTITY);
+			DrawInsertMenu("insert-universe", editingWorld, NULL_ENTITY);
 
 			ImGui::Separator();
 
@@ -613,6 +787,12 @@ namespace studio {
 				AskingImport = true;
 				PathBuffer.clear();
 			}
+
+			// Beside the other two ways of getting a scene, because this menu is
+			// already the universe's own answer to "add a world" and a person who
+			// found New World here should not have to go to the menu bar for the
+			// shipped ones. Same function as the menu bar and the Worlds panel.
+			DrawExampleSceneMenu();
 
 			ImGui::Separator();
 
@@ -629,7 +809,7 @@ namespace studio {
 				const Name worldName = Universe->NameOf(world);
 
 				ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnArrow;
-				if (world == Active && !UniverseSelected) {
+				if (world == editingWorld && !UniverseSelected) {
 					flags |= ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_Selected;
 				}
 
@@ -658,9 +838,23 @@ namespace studio {
 				const bool open = ImGui::TreeNodeEx("##world", flags, "%s", label.c_str());
 
 				if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
-					Active = world;
-					SelectionWorld = world;
+					RetargetEditingViewport(FocusedViewport, world);
+
+					// **Selecting the row as well as retargeting the viewport**,
+					// which is the rule the universe row above already follows:
+					// clicking a row in this tree selects that row. Until v0.17
+					// a world row was the one exception - it moved the viewport
+					// and left the Properties panel showing whichever instance
+					// was selected before, so the world's own tick rates had
+					// nowhere to be shown even after they became editable.
+					//
+					// `ClearSelection` first, so the instance selection goes
+					// with it: an explorer highlighting an instance while
+					// Properties describes a world is two answers to "what am I
+					// looking at".
 					ClearSelection();
+					SelectionWorld = {};
+					SelectedWorldRow = world;
 				}
 
 				// **A world row takes a drop too**, and it means "a root of
@@ -704,10 +898,8 @@ namespace studio {
 
 					ImGui::Separator();
 
-					if (ImGui::MenuItem("Set Active")) {
-						Active = world;
-						SelectionWorld = world;
-						ClearSelection();
+					if (ImGui::MenuItem("Show in Editing Viewport")) {
+						RetargetEditingViewport(FocusedViewport, world);
 					}
 					if (ImGui::MenuItem("Export World...")) {
 						Active = world;
@@ -916,6 +1108,7 @@ namespace studio {
 
 		if (PendingReparent.World.IsValid()) {
 			const WorldId world = PendingReparent.World;
+			const bool authoritative = AuthorityOf(world) == EditAuthority::Authoritative;
 			const engine::ecs::Entity parent = PendingReparent.Parent;
 			const std::vector<engine::ecs::Entity> moving = PendingReparent.Instances;
 			PendingReparent = PendingReparentAction{};
@@ -970,7 +1163,7 @@ namespace studio {
 			// **Recorded only for the ones that landed.** A refused reparent is
 			// not an edit, and logging one would put an entry on the stack
 			// whose undo restores the parent it never left.
-			if (Commands != nullptr) {
+			if (authoritative && Commands != nullptr) {
 				for (const Applied &entry : applied) {
 					Commands->RecordReparent(world, entry.Instance, entry.Was, parent, "Move " + entry.Named);
 				}
@@ -978,7 +1171,9 @@ namespace studio {
 
 			if (!applied.empty()) {
 				OpenPathTo(world, applied.front().Instance);
-				MarkModified();
+				if (authoritative) {
+					MarkModified();
+				}
 			}
 
 			if (refused > 0) {
@@ -995,6 +1190,7 @@ namespace studio {
 		if (PendingRenameInstance.World.IsValid()) {
 			const PendingRenameInstanceAction rename = PendingRenameInstance;
 			PendingRenameInstance = PendingRenameInstanceAction{};
+			const bool authoritative = AuthorityOf(rename.World) == EditAuthority::Authoritative;
 
 			bool renamed = false;
 			engine::game::PropertyValue before;
@@ -1025,12 +1221,14 @@ namespace studio {
 			});
 
 			if (renamed) {
-				if (Commands != nullptr) {
+				if (authoritative && Commands != nullptr) {
 					Commands->RecordProperty(
 						rename.World, rename.Instance, Name("Name"), before, after, "Rename to " + rename.To
 					);
 				}
-				MarkModified();
+				if (authoritative) {
+					MarkModified();
+				}
 			}
 		}
 
@@ -1047,6 +1245,14 @@ namespace studio {
 
 			Say(FollowCamera == NULL_ENTITY ? "back to the editor camera"
 											: "looking through the scene's camera - right-drag to fly");
+		}
+
+		if (PendingZoomWorld.IsValid()) {
+			const WorldId world = PendingZoomWorld;
+			const Entity instance = PendingZoomTo;
+			PendingZoomWorld = WorldId{};
+			PendingZoomTo = NULL_ENTITY;
+			ZoomViewportTo(world, instance);
 		}
 
 		if (PendingOpenScript.World.IsValid()) {

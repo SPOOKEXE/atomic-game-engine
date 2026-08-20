@@ -694,6 +694,8 @@ namespace engine::control {
 							{"remote", worlds->IsRemote(id)},
 							{"state", DescribeState(worlds->StateOf(id))},
 							{"tickRate", worlds->SettingsOf(id).TickRate},
+							{"physicsTickRate", worlds->SettingsOf(id).PhysicsTickRate},
+							{"replicationTickRate", worlds->SettingsOf(id).ReplicationTickRate},
 							{"instances", instances},
 							{"statistics",
 							 json{
@@ -702,6 +704,7 @@ namespace engine::control {
 								 {"slowestTickMs", statistics.SlowestTickMilliseconds},
 								 {"faults", statistics.Faults},
 								 {"droppedTicks", statistics.DroppedTicks},
+								 {"replicationTicks", statistics.ReplicationTicks},
 							 }},
 						}
 					);

@@ -8,6 +8,7 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/Shaders.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Teams.hpp>
 
@@ -564,6 +565,79 @@ namespace engine::scene {
 			return property;
 		}
 
+		// `workspace.MaxSurfaces`: how many surface panes this world draws at
+		// once, over the `SurfaceLimit` resource.
+		//
+		// **`SurfaceBouncesProperty`'s exact shape, and the two are a pair.**
+		// Bounces is how *deep* a chain of mirrors goes and this is how *many*
+		// panes are drawn at all; a world with a hall of mirrors in it turns
+		// both, and a world with one mirror turns neither.
+		//
+		// **On `Workspace` because it is a statement about the scene**, which is
+		// the argument the depth property makes at length one function up. The
+		// count of mirrors a world has is not something a session picks.
+		PropertyDescriptor MaxSurfacesProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("MaxSurfaces");
+			property.Type = PropertyType::Int32;
+			property.Size = sizeof(int32_t);
+			property.Kind = PropertyKind::Resource;
+
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<SurfaceLimit>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity, void *out) -> bool {
+				*static_cast<int32_t *>(out) = SurfaceLimitOf(store);
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity, const void *value) -> bool {
+				// **A negative is refused rather than clamped**, which is
+				// `SurfaceBounces`' rule and holds for the same reason: too
+				// large is a world asking for more than the device will
+				// allocate, which is drawn at what it can, and below zero is a
+				// world asking for something the word does not mean.
+				//
+				// **Zero is allowed and means none.** A world that wants its
+				// mirrors off has to be able to say so, and that is a different
+				// statement from "use the default".
+				const auto panes = *static_cast<const int32_t *>(value);
+				if (panes < 0) {
+					return false;
+				}
+
+				store.SetResource(SurfaceLimit{panes});
+				return true;
+			};
+
+			return property;
+		}
+
+		// **`Lighting`'s reach, and `SurfaceBouncesProperty`'s exact shape** -
+		// `scene::PostProcessing` is a resource for `ActiveCamera`'s reason,
+		// so `instance` is unread here too.
+		PropertyDescriptor PostProcessShaderProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("PostProcessShader");
+			property.Type = PropertyType::Name;
+			property.Size = sizeof(core::Name);
+			property.Kind = PropertyKind::Resource;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<PostProcessing>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity, void *out) -> bool {
+				*static_cast<core::Name *>(out) = PostProcessShaderOf(store);
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity, const void *value) -> bool {
+				SetPostProcessShader(store, *static_cast<const core::Name *>(value));
+				return true;
+			};
+
+			return property;
+		}
+
 		ClassId RegisterServiceTree() {
 			// The root of everything, and the components these classes are sets
 			// of, both through `PartClass`. A service derives from `Instance`,
@@ -597,15 +671,21 @@ namespace engine::scene {
 			};
 
 			for (const ServiceDesc &desc : SERVICES) {
+				ClassId registered;
 				if (desc.Name == "Lighting") {
-					Classes::Register(desc.Name, service, lightingSet);
-					continue;
+					registered = Classes::Register(desc.Name, service, lightingSet);
+				} else if (desc.Name == "Players") {
+					registered = Classes::Register(desc.Name, service, playersSet);
+				} else {
+					registered = Classes::Register(desc.Name, service, {});
 				}
-				if (desc.Name == "Players") {
-					Classes::Register(desc.Name, service, playersSet);
-					continue;
-				}
-				Classes::Register(desc.Name, service, {});
+
+				// The class default, not a repair after creation. This makes an
+				// authored `Shared` on `ServerStorage` differ from its Server
+				// default in a game file and survive the next `InstallServices`.
+				ServiceComponent defaults;
+				defaults.Scope = desc.Scope;
+				Classes::Default(registered, defaults);
 			}
 
 			// **A `Player` is an instance, not a service.** There are many of
@@ -614,7 +694,10 @@ namespace engine::scene {
 			// has. Derived from `Instance` rather than from `Service` so the
 			// class picker's service exclusion does not hide it, and so a world
 			// can hold as many as it has occupants.
-			const std::array playerSet{ecs::Components::Of<PlayerIdentity>()};
+			const std::array playerSet{
+				ecs::Components::Of<PlayerIdentity>(),
+				ecs::Components::Of<PlayerNetworkComponent>(),
+			};
 			const ClassId player = Classes::Register("Player", instance, playerSet);
 
 			// **A `Team` is an instance for `Player`'s reason**, one line up: a
@@ -646,6 +729,9 @@ namespace engine::scene {
 			// waits, so a game can hold one person out of a round without
 			// changing the rule for everybody.
 			Classes::Property<&PlayerIdentity::RespawnTime>(player, "RespawnTime");
+			Classes::ClampedProperty<&PlayerNetworkComponent::LocalSimulatedNetworkLatency, 0.0f, 60'000.0f>(
+				player, "LocalSimulatedNetworkLatency"
+			);
 
 			// **The side, and it is what decides where a respawn puts them.**
 			// `FindSpawn` reads this against every `SpawnLocation` in the
@@ -665,6 +751,7 @@ namespace engine::scene {
 			const ClassId workspace = Classes::Find(core::Name("Workspace"));
 			Classes::Computed(workspace, CurrentCameraProperty());
 			Classes::Computed(workspace, SurfaceBouncesProperty());
+			Classes::Computed(workspace, MaxSurfacesProperty());
 
 			const ClassId players = Classes::Find(core::Name("Players"));
 			Classes::Computed(players, LocalPlayerProperty());
@@ -689,6 +776,7 @@ namespace engine::scene {
 			Classes::ClampedProperty<&LightingServiceComponent::GeographicLatitude, -90.0f, 90.0f>(
 				lighting, "GeographicLatitude"
 			);
+			Classes::Computed(lighting, PostProcessShaderProperty());
 
 			return service;
 		}
@@ -1015,14 +1103,8 @@ namespace engine::scene {
 				}
 			}
 
-			// Set every time rather than only on creation. A world from an old
-			// file has the class but not the scope, and a service whose
-			// audience defaulted to `Shared` is a `ServerStorage` that is not
-			// one.
 			if (ServiceComponent *component = store.GetMutable<ServiceComponent>(existing);
 				component != nullptr) {
-				component->Scope = desc.Scope;
-
 				// **`Fixture` finally refuses something.** The field has said
 				// since v0.7 that an author may not delete or reparent a
 				// service, and nothing read it - a script could `Destroy()`

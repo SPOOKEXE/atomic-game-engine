@@ -1,4 +1,5 @@
 #include <engine/core/Profiling.hpp>
+#include <engine/examples/Scene.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/scene/Awake.hpp>
 #include <engine/ui/Theme.hpp>
@@ -10,14 +11,62 @@
 #include <client/Scene.hpp>
 #include <cstdio>
 #include <imgui.h>
+#include <string>
 #include <studio/Editor.hpp>
 #include <studio/Widgets.hpp>
+#include <vector>
 
 namespace studio {
 
 	using engine::core::Name;
 	using engine::ecs::Store;
 	using engine::world::WorldId;
+
+	namespace {
+		// The popup the Worlds panel's button opens. A plain string because
+		// `OpenPopup` and `BeginPopup` have to agree on it and two spellings of
+		// one id is a button that does nothing.
+		constexpr const char *EXAMPLE_POPUP = "##example-scenes";
+
+		// How tall the list is allowed to get before it scrolls.
+		//
+		// **There are more than forty staged scenes**, which at a menu row each
+		// is taller than most windows this editor is opened in - and an imgui
+		// menu that does not fit is clamped rather than scrolled, so the last
+		// entries are simply unreachable. A child with its own scrollbar
+		// behaves the same inside a menu and inside a popup, which is what lets
+		// the three places that offer this share one function.
+		constexpr float EXAMPLE_LIST_WIDTH = 240.0f;
+		constexpr float EXAMPLE_LIST_HEIGHT = 360.0f;
+	}
+
+	void Editor::DrawExampleSceneItems() {
+		const std::vector<std::string> scenes = engine::examples::ExampleScenes();
+		if (scenes.empty()) {
+			// A build staged without the examples is a real situation. Saying so
+			// beats an empty list, which reads as the editor being broken.
+			ImGui::TextDisabled("no staged examples");
+			return;
+		}
+
+		ImGui::BeginChild("##example-list", ImVec2(EXAMPLE_LIST_WIDTH, EXAMPLE_LIST_HEIGHT));
+		for (const std::string &scene : scenes) {
+			if (ImGui::MenuItem(scene.c_str())) {
+				AddExampleWorld(scene);
+			}
+		}
+		ImGui::EndChild();
+	}
+
+	void Editor::DrawExampleSceneMenu() {
+		// **Refused while anything is running**, for the reason New World and
+		// Import are: the snapshot Stop restores was taken before the run began,
+		// so a world added during Play would vanish on Stop.
+		if (ImGui::BeginMenu("New Scene from Example", !AnyRunning())) {
+			DrawExampleSceneItems();
+			ImGui::EndMenu();
+		}
+	}
 
 	void Editor::DrawWorlds() {
 		if (!ShowWorlds) {
@@ -61,7 +110,26 @@ namespace studio {
 			AskingImport = true;
 			PathBuffer.clear();
 		}
+
+		// **The third way in, beside the two that were already here.** `World ->
+		// New Scene from Example` in the menu bar and the universe's own context
+		// menu in the explorer offer the same list; this panel is the one an
+		// author is looking at when they want another scene, so leaving it out
+		// would mean knowing to go somewhere else. One function behind all
+		// three - see `DrawExampleSceneItems`.
+		ImGui::SameLine();
+		if (ImGui::Button("Example...")) {
+			ImGui::OpenPopup(EXAMPLE_POPUP);
+		}
 		ImGui::EndDisabled();
+
+		// **Outside the disabled block**, because a popup has to be submitted
+		// every frame to stay open and a disabled scope would swallow the clicks
+		// inside it. The button that opens it is what carries the refusal.
+		if (ImGui::BeginPopup(EXAMPLE_POPUP)) {
+			DrawExampleSceneItems();
+			ImGui::EndPopup();
+		}
 
 		if (!editing) {
 			ImGui::SameLine();

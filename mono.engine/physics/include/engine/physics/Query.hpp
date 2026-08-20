@@ -220,11 +220,17 @@ namespace engine::physics {
 	// Finds every collider a moving shape could meet on its way.
 	//
 	// **Conservative, and it says so rather than pretending to a time of
-	// impact.** The volume tested is the box swept by the moving shape's own
-	// world bound, and every candidate's exact shape is intersected with it -
-	// so nothing on the path is ever missed, and a shape whose bound is much
-	// larger than itself, a thin cylinder lying diagonally for instance, can
-	// report a collider it would have passed beside.
+	// impact.** The volume tested is the moving shape's own world bound, swept:
+	// candidates come from a grid walk along the sweep itself rather than the
+	// start-to-end union box, a candidate is kept only while that bound really
+	// meets its bound somewhere along the motion, and its exact shape is then
+	// intersected with the bound's envelope over just that stretch. So nothing
+	// on the path is ever missed; what can still be over-reported is a collider
+	// the bound covers and the shape does not - a thin cylinder lying
+	// diagonally, for instance, whose bound is much larger than itself - and,
+	// on a diagonal sweep, one tucked into a corner of a candidate's own
+	// envelope window. A collider inside the old union box but away from the
+	// sweep is no longer returned.
 	//
 	// A first-time-of-impact sweep needs a distance function between two convex
 	// shapes, which this module does not have and which `AGENTS.md` records as

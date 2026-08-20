@@ -17,6 +17,7 @@
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
+#include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
@@ -31,6 +32,7 @@
 #include <array>
 #include <cmath>
 #include <filesystem>
+#include <limits>
 #include <numbers>
 #include <string>
 #include <string_view>
@@ -233,7 +235,7 @@ TEST_CASE("the mirrors scene builds what the render passes need", "[examples][sc
 		const Entity reflection = store.FindFirstChild(pane, "Reflection");
 		REQUIRE(reflection != engine::ecs::NULL_ENTITY);
 
-		const int8_t index = store.Get<SurfaceCamera>(reflection)->Surface;
+		const int16_t index = store.Get<SurfaceCamera>(reflection)->Surface;
 		REQUIRE(index >= 0);
 		REQUIRE(static_cast<size_t>(index) < engine::scene::MAX_SURFACES);
 
@@ -416,7 +418,7 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 		const Entity portal = portalOn(pane);
 
 		// A target each, as `MAX_SURFACES` allows sixteen of.
-		const int8_t index = store.Get<SurfaceCamera>(portal)->Surface;
+		const int16_t index = store.Get<SurfaceCamera>(portal)->Surface;
 		REQUIRE(index >= 0);
 		REQUIRE(static_cast<size_t>(index) < engine::scene::MAX_SURFACES);
 		CHECK(store.Get<Visual>(pane)->Surface == index);
@@ -570,8 +572,8 @@ TEST_CASE("the tunnels scene is shorter and longer inside than out", "[examples]
 	//
 	// It is also the one arrangement the other portal scenes do not have: panes
 	// part-way *down* a corridor rather than filling a doorway, two of them back
-	// to back a stud apart, and a middle that belongs to a different building
-	// from the shell around it.
+	// to back a stud apart, and a long interior isolated from both visible
+	// shells.
 	const StagedAssets assets;
 
 	Store store("tunnels");
@@ -593,10 +595,10 @@ TEST_CASE("the tunnels scene is shorter and longer inside than out", "[examples]
 	CHECK(store.Get<engine::scene::Bounds>(InScene(store, "ShortFloor"))->HalfExtent.Z == Approx(2.0f));
 
 	// And the panes, which are what a body measures. The west tunnel's walk is
-	// its two stubs; the east tunnel's is its two studs plus the west tunnel's
-	// whole middle.
+	// its two stubs; the east tunnel's is its two studs plus its isolated
+	// interior.
 	const float westWalk = (16.0f - zOf("LongSkipNorth")) * 2.0f;
-	const float eastWalk = (2.0f - zOf("ShortNorth")) * 2.0f + zOf("MiddleNorth") * 2.0f;
+	const float eastWalk = (2.0f - zOf("ShortNorth")) * 2.0f + zOf("ShortInteriorNorth") * 2.0f;
 
 	INFO("west walk " << westWalk << ", east walk " << eastWalk);
 	CHECK(westWalk == Approx(4.0f));
@@ -630,8 +632,8 @@ TEST_CASE("the tunnels scene is shorter and longer inside than out", "[examples]
 
 	const char *const pairs[][2] = {
 		{"LongSkipNorth", "LongSkipSouth"},
-		{"ShortNorth", "MiddleNorth"},
-		{"ShortSouth", "MiddleSouth"},
+		{"ShortNorth", "ShortInteriorNorth"},
+		{"ShortSouth", "ShortInteriorSouth"},
 	};
 
 	for (const auto &pair : pairs) {
@@ -653,15 +655,13 @@ TEST_CASE("the tunnels scene is shorter and longer inside than out", "[examples]
 	// no transverse offset to flip and the landing is a pure translation.
 	const Entity walker = store.CreateInstance(engine::ecs::Classes::Find(Name("Part")), "Walker");
 
-	const auto step = [&store, walker](float fromX, float fromZ, float toX, float toZ) {
+	const auto step = [&store, walker](engine::core::Vector3 from, engine::core::Vector3 to) {
 		store.Set<engine::scene::PreviousTransform>(
-			walker, engine::scene::PreviousTransform{engine::core::CFrame({fromX, 4.0f, fromZ})}
+			walker, engine::scene::PreviousTransform{engine::core::CFrame(from)}
 		);
-		store.Set<engine::scene::Transform>(
-			walker, engine::scene::Transform{engine::core::CFrame({toX, 4.0f, toZ})}
-		);
+		store.Set<engine::scene::Transform>(walker, engine::scene::Transform{engine::core::CFrame(to)});
 		store.Set<engine::scene::Motion>(
-			walker, engine::scene::Motion{{0.0f, 0.0f, toZ - fromZ}, engine::core::Vector3::Zero}
+			walker, engine::scene::Motion{to - from, engine::core::Vector3::Zero}
 		);
 
 		REQUIRE(engine::scene::CrossPortals(store) == 1);
@@ -670,27 +670,198 @@ TEST_CASE("the tunnels scene is shorter and longer inside than out", "[examples]
 
 	// **Long outside, short inside.** Two studs into a thirty-two stud building
 	// and the walk is already at the far end's last two studs.
-	const engine::core::Vector3 skipped = step(-20.0f, 14.5f, -20.0f, 13.5f);
+	const engine::core::Vector3 skipped = step({-20.0f, 4.0f, 14.5f}, {-20.0f, 4.0f, 13.5f});
 	CHECK(skipped.X == Approx(-20.0f).margin(1e-3f));
 	CHECK(skipped.Y == Approx(4.0f).margin(1e-3f));
 	CHECK(skipped.Z == Approx(-14.75f).margin(1e-3f));
 
-	// **Short outside, long inside, and it lands in the other building.** One
-	// stud into a four stud box, and the arrival is twenty-six studs of corridor
-	// inside the west tunnel's middle - the space the walk above stepped over.
-	const engine::core::Vector3 entered = step(20.0f, 1.5f, 20.0f, 0.5f);
-	CHECK(entered.X == Approx(-20.0f).margin(1e-3f));
+	// **Short outside, long inside, and it lands in its own subspace.** One stud
+	// into a four stud box arrives in twenty-six studs of isolated corridor.
+	const engine::core::Vector3 entered = step({20.0f, 4.0f, 1.5f}, {20.0f, 4.0f, 0.5f});
+	CHECK(entered.X == Approx(256.0f).margin(1e-3f));
+	CHECK(entered.Y == Approx(4.0f).margin(1e-3f));
 	CHECK(entered.Z == Approx(12.25f).margin(1e-3f));
 
 	// And out the far end of the box it never left.
-	const engine::core::Vector3 left = step(-20.0f, -12.5f, -20.0f, -13.5f);
+	const engine::core::Vector3 left = step({256.0f, 4.0f, -12.5f}, {256.0f, 4.0f, -13.5f});
 	CHECK(left.X == Approx(20.0f).margin(1e-3f));
+	CHECK(left.Y == Approx(4.0f).margin(1e-3f));
 	CHECK(left.Z == Approx(-1.75f).margin(1e-3f));
+
+	// The long tunnel no longer lends physical space to the short one.
+	CHECK(InScene(store, "MiddleNorth") == engine::ecs::NULL_ENTITY);
+	CHECK(InScene(store, "MiddleSouth") == engine::ecs::NULL_ENTITY);
+	const Entity interiorFloor = InScene(store, "ShortInteriorFloor");
+	const Entity interiorCeiling = InScene(store, "ShortInteriorCeiling");
+	const Entity interiorPane = InScene(store, "ShortInteriorNorth");
+	REQUIRE(interiorFloor != engine::ecs::NULL_ENTITY);
+	REQUIRE(interiorCeiling != engine::ecs::NULL_ENTITY);
+	REQUIRE(interiorPane != engine::ecs::NULL_ENTITY);
+	const auto *floorPlacement = store.Get<engine::scene::Transform>(interiorFloor);
+	const auto *floorBounds = store.Get<engine::scene::Bounds>(interiorFloor);
+	const auto *ceilingPlacement = store.Get<engine::scene::Transform>(interiorCeiling);
+	const auto *ceilingBounds = store.Get<engine::scene::Bounds>(interiorCeiling);
+	const auto *panePlacement = store.Get<engine::scene::Transform>(interiorPane);
+	const auto *paneBounds = store.Get<engine::scene::Bounds>(interiorPane);
+	REQUIRE(floorPlacement != nullptr);
+	REQUIRE(floorBounds != nullptr);
+	REQUIRE(ceilingPlacement != nullptr);
+	REQUIRE(ceilingBounds != nullptr);
+	REQUIRE(panePlacement != nullptr);
+	REQUIRE(paneBounds != nullptr);
+	// **The pane fills the cross-section exactly**, which is the whole reason
+	// the tunnel is built as a shell rather than as a box with its ends taken
+	// off - see the scene's own note.
+	//
+	// **Measured against the floor and the ceiling rather than against 0 and
+	// 8.** The shell stands `INSIDE` above the plain outside it so that its
+	// floor is not coplanar with a baseplate, and heights pinned to absolutes
+	// would call that lift a regression while a crack along the bottom of every
+	// pane - the exact fault the shell exists to avoid - still passed.
+	const float floorTop = floorPlacement->Frame.Position.Y + floorBounds->HalfExtent.Y;
+	const float ceilingBottom = ceilingPlacement->Frame.Position.Y - ceilingBounds->HalfExtent.Y;
+	CHECK(panePlacement->Frame.Position.Y - paneBounds->HalfExtent.Y == Approx(floorTop).margin(1.0e-4f));
+	CHECK(
+		panePlacement->Frame.Position.Y + paneBounds->HalfExtent.Y == Approx(ceilingBottom).margin(1.0e-4f)
+	);
+	CHECK(ceilingBottom - floorTop == Approx(8.0f).margin(1.0e-4f));
+
+	// And the shell stands clear of the plain it is set into, or those two are
+	// the coplanar pair instead of the plain and a baseplate.
+	const Entity plain = InScene(store, "Ground");
+	REQUIRE(plain != engine::ecs::NULL_ENTITY);
+	const auto *plainPlacement = store.Get<engine::scene::Transform>(plain);
+	const auto *plainBounds = store.Get<engine::scene::Bounds>(plain);
+	REQUIRE(plainPlacement != nullptr);
+	REQUIRE(plainBounds != nullptr);
+	CHECK(floorTop > plainPlacement->Frame.Position.Y + plainBounds->HalfExtent.Y);
 
 	// **Nothing is set as the world's camera**, which is what makes this one
 	// walkable where `Hallway.luau` is a capture: a `CurrentCamera` standing in
 	// a world somebody presses Play in overrides the character's own.
 	CHECK(InScene(store, "Viewer") == engine::ecs::NULL_ENTITY);
+}
+
+TEST_CASE("the tunnels scene leaves its walk paths clear", "[examples][scene]") {
+	// **A demonstration you cannot walk down demonstrates nothing**, and this
+	// one was blocked by its own props: the two drifting blocks travelled each
+	// tunnel's centre line at eye height, so a block stood in the mouth on the
+	// approach and was the first thing in the picture when a pane was looked
+	// through. The isolated corridor - the one space in the scene that only
+	// exists on the far side of a hole - had one running its whole length.
+	//
+	// So the claim is a *volume*: down the middle of every walked space, from
+	// above the floor markings to over a character's head, nothing stands.
+	// `DRIFT_SIDE` is what the scene answers with, and this is what stops the
+	// answer being quietly reverted.
+	//
+	// **The panes are the one exception and they are excluded by construction,
+	// not by name.** A portal fills its cross-section - that is what makes it a
+	// hole rather than a window with a frame - and it is authored
+	// `CanCollide = false` so a walker passes through it. Anything else in the
+	// channel is furniture in a doorway.
+	//
+	// What a headless run cannot decide is what the tunnel *looks* like, and
+	// `scripts/demos/capture-tunnels.sh` is the half that can: it photographs
+	// the three authored viewpoints and counts the blocking pixels.
+	const StagedAssets assets;
+
+	Store store("tunnels.walk");
+	Scheduler systems;
+
+	std::string error;
+	const bool loaded = LoadScene(store, systems, ExamplePath("Tunnels.luau"), error);
+	INFO(error);
+	REQUIRE(loaded);
+
+	// One tick, so the drifters have been placed by their own `Heartbeat` rather
+	// than left at the birthplace `block` gave them. A route's first leg starts
+	// out on the plain, so an unticked scene would be measured before the props
+	// had moved at all.
+	systems.Tick(store, 1.0f / 60.0f);
+
+	// The walked channel, in metres. Two studs across is a body's width with
+	// room either side; the floor stops at 0.5 so the painted stripes - which
+	// are 0.35 tall and are the floor - are not read as obstacles; the ceiling
+	// stops at `CHARACTER_HEIGHT` so the lamps hanging at 7.3 are not either.
+	constexpr float CHANNEL_HALF_WIDTH = 1.0f;
+	constexpr float CHANNEL_FLOOR = 0.5f;
+	constexpr float CHANNEL_CEILING = 5.0f;
+
+	struct Corridor {
+		const char *What;
+		float X;
+		float FromZ;
+		float ToZ;
+	};
+
+	// Every space in this scene a body is meant to walk, including the six studs
+	// of plain either side of each mouth - a prop parked outside a doorway
+	// blocks the approach as surely as one inside it.
+	const std::array<Corridor, 3> corridors{
+		Corridor{"the west tunnel", -20.0f, -22.0f, 22.0f},
+		Corridor{"the east tunnel", 20.0f, -8.0f, 8.0f},
+		Corridor{"the isolated interior", 256.0f, -13.0f, 13.0f},
+	};
+
+	// Whether this part is a portal pane. Asked of the part rather than of its
+	// name, because a pane is a part with a `Portal` on a child of it and that
+	// is what every one of the six is.
+	const auto isPane = [&store](Entity part) {
+		bool found = false;
+		store.EachChild(part, [&](Entity child) {
+			found = found || store.Get<engine::scene::Portal>(child) != nullptr;
+		});
+		return found;
+	};
+
+	size_t measured = 0;
+	store.Each<const engine::scene::Transform, const engine::scene::Bounds>(
+		[&](Entity part, const engine::scene::Transform &placement, const engine::scene::Bounds &bounds) {
+			if (isPane(part)) {
+				return;
+			}
+
+			// A conservative world box: the rotated half-extent along each
+			// world axis. Every part in this scene is either unrotated or
+			// turned half a lap about Y, so this is exact for all of them - and
+			// it stays honest if one is ever tilted.
+			const engine::core::Vector3 right = placement.Frame.RightVector() * bounds.HalfExtent.X;
+			const engine::core::Vector3 up = placement.Frame.UpVector() * bounds.HalfExtent.Y;
+			const engine::core::Vector3 ahead = placement.Frame.LookVector() * bounds.HalfExtent.Z;
+			const engine::core::Vector3 reach{
+				std::abs(right.X) + std::abs(up.X) + std::abs(ahead.X),
+				std::abs(right.Y) + std::abs(up.Y) + std::abs(ahead.Y),
+				std::abs(right.Z) + std::abs(up.Z) + std::abs(ahead.Z),
+			};
+			const engine::core::Vector3 at = placement.Frame.Position;
+
+			for (const Corridor &corridor : corridors) {
+				const bool acrossX = std::abs(at.X - corridor.X) < CHANNEL_HALF_WIDTH + reach.X;
+				const bool throughY = at.Y + reach.Y > CHANNEL_FLOOR && at.Y - reach.Y < CHANNEL_CEILING;
+				const bool alongZ = at.Z + reach.Z > corridor.FromZ && at.Z - reach.Z < corridor.ToZ;
+
+				if (acrossX && throughY && alongZ) {
+					INFO(
+						"'" << store.InstanceNameOf(part).Text() << "' stands in " << corridor.What << " at ("
+							<< at.X << ", " << at.Y << ", " << at.Z << ")"
+					);
+					CHECK(false);
+				}
+			}
+			measured++;
+		}
+	);
+
+	// A scene that loaded nothing would pass every line above. The floors,
+	// ceilings, walls, stripes, lamps, posts and drifters are forty-odd parts;
+	// this only has to be more than none.
+	CHECK(measured > 20);
+
+	// And the props are still there rather than deleted, which is the other way
+	// to make the channels clear and is not the fix.
+	CHECK(CountNamed(store, "LongDrifter") == 1);
+	CHECK(CountNamed(store, "ShortDrifter") == 1);
 }
 
 TEST_CASE("the interface scene builds and connects its buttons", "[examples][scene][gui]") {
@@ -922,38 +1093,54 @@ TEST_CASE("the studio's TypeScript property grid builds its tree", "[examples][s
 
 namespace {
 
-	// Every voxel box the terrain scene built, as a canonical sorted list.
+	// Every terrain chunk the scene built, as a canonical sorted list of
+	// vertex positions.
 	//
 	// Sorted rather than taken in iteration order, because two worlds built the
-	// same way are only guaranteed to hold the same *set* of rows - an
-	// archetype walk is free to visit them in a different sequence, and a
-	// determinism check that compared sequences would fail for a reason that has
-	// nothing to do with the generator.
-	std::vector<std::array<float, 6>> VoxelBoxes(Store &store) {
-		std::vector<std::array<float, 6>> boxes;
+	// same way are only guaranteed to hold the same *set* of rows - an archetype
+	// walk is free to visit them in a different sequence, and a determinism
+	// check that compared sequences would fail for a reason that has nothing to
+	// do with the generator.
+	std::vector<std::array<float, 3>> TerrainVertices(Store &store) {
+		std::vector<std::array<float, 3>> points;
 
-		store.Each<const engine::scene::Transform, const engine::scene::Bounds, const Visual>(
-			[&](Entity entity,
-				const engine::scene::Transform &transform,
-				const engine::scene::Bounds &bounds,
-				const Visual &visual) {
-				if (store.InstanceNameOf(entity) != Name("Voxels") || !visual.Visible) {
-					return;
+		store.Each<const engine::scene::EditableMesh>([&](Entity, const engine::scene::EditableMesh &mesh) {
+			for (const engine::core::Vector3 &at : mesh.Positions) {
+				points.push_back({at.X, at.Y, at.Z});
+			}
+		});
+
+		std::sort(points.begin(), points.end());
+		return points;
+	}
+
+	// How many chunk parts the scene has put in the world so far.
+	size_t TerrainChunks(Store &store) {
+		size_t chunks = 0;
+		store.Each<const engine::scene::Transform, const Visual>(
+			[&](Entity entity, const engine::scene::Transform &, const Visual &) {
+				if (store.InstanceNameOf(entity).Text().rfind("Terrain_", 0) == 0) {
+					chunks++;
 				}
-
-				const engine::core::Vector3 &at = transform.Frame.Position;
-				boxes.push_back(
-					{at.X, at.Y, at.Z, bounds.HalfExtent.X, bounds.HalfExtent.Y, bounds.HalfExtent.Z}
-				);
 			}
 		);
+		return chunks;
+	}
 
-		std::sort(boxes.begin(), boxes.end());
-		return boxes;
+	// Ticks until the scene has finished building, or gives up.
+	//
+	// **The scene builds a chunk a frame rather than all of them before the
+	// first present**, so a test that only loaded it would find an empty world -
+	// which is the scene working as its header describes rather than a failure.
+	// The bound is generous and the loop stops as soon as the count settles.
+	void BuildTerrain(Store &store, Scheduler &systems, size_t expected) {
+		for (int tick = 0; tick < 400 && TerrainChunks(store) < expected; tick++) {
+			systems.Tick(store, 1.0f / 60.0f);
+		}
 	}
 }
 
-TEST_CASE("the terrain scene generates a voxel world from noise", "[examples][scene]") {
+TEST_CASE("the terrain scene builds a coloured heightfield mesh", "[examples][scene]") {
 	const StagedAssets assets;
 
 	Store store("terrain");
@@ -964,64 +1151,77 @@ TEST_CASE("the terrain scene generates a voxel world from noise", "[examples][sc
 	INFO(error);
 	REQUIRE(loaded);
 
-	// The prefill runs before the first frame, so a world exists the moment the
-	// scene is loaded rather than one beat later. Nine chunks of it - the exact
-	// count depends on the terrain the camera starts over, so this asserts the
-	// order of magnitude and not a number that would have to be edited every
-	// time a constant moved.
-	const std::vector<std::array<float, 6>> boxes = VoxelBoxes(store);
-	CHECK(boxes.size() > 100);
-	CHECK(boxes.size() < 20000);
+	// 512 studs cut into 64-stud chunks is 8 by 8 of them.
+	constexpr size_t CHUNKS = 64;
+	BuildTerrain(store, systems, CHUNKS);
+	CHECK(TerrainChunks(store) == CHUNKS);
 
-	// **The merge actually merged.** A box wider or deeper than one metre is a
-	// run of voxels that became one part, and this is the assertion that
-	// separates "the generator emitted something" from "the generator emitted a
-	// quarter of a million one-metre cubes". Half-extents, so 0.5 is one block.
-	size_t merged = 0;
-	for (const std::array<float, 6> &box : boxes) {
-		if (box[3] > 0.5f || box[5] > 0.5f) {
-			merged++;
+	// **One `EditableMesh` per chunk and not one shared between them**, which is
+	// what makes each a `MeshPart` the frustum can reject on its own. A scene
+	// that built one enormous mesh would pass a part count and fail here.
+	size_t meshes = 0;
+	size_t vertices = 0;
+	size_t indices = 0;
+	store.Each<const engine::scene::EditableMesh>([&](Entity, const engine::scene::EditableMesh &mesh) {
+		meshes++;
+		vertices += mesh.Positions.size();
+		indices += mesh.Indices.size();
+	});
+
+	CHECK(meshes == CHUNKS);
+
+	// A chunk is 65 by 65 samples - the extra column and row are the ones it
+	// shares with its neighbours, which is what makes the surface continuous -
+	// and 64 by 64 cells of two triangles each.
+	CHECK(vertices == CHUNKS * 65 * 65);
+	CHECK(indices == CHUNKS * 64 * 64 * 2 * 3);
+
+	// **More than one colour, which is the whole of the "color them" ask.** The
+	// bands are cut from the field that was generated rather than from constants
+	// beside it, so this asserts that the scene painted *something* different
+	// somewhere rather than pinning which band a given corner fell in.
+	//
+	// It is also the only place this suite can see the colours at all: turning
+	// them into draw runs is `client::BuildMeshData`'s job and `client` is two
+	// tiers above this one.
+	size_t distinct = 0;
+	store.Each<const engine::scene::EditableMesh>([&](Entity, const engine::scene::EditableMesh &mesh) {
+		std::vector<std::array<float, 3>> seen;
+		for (const engine::core::Color3 &colour : mesh.Colours) {
+			const std::array<float, 3> entry{colour.R, colour.G, colour.B};
+			if (std::find(seen.begin(), seen.end(), entry) == seen.end()) {
+				seen.push_back(entry);
+			}
 		}
-	}
-	CHECK(merged > boxes.size() / 4);
+		distinct = std::max(distinct, seen.size());
+	});
+	CHECK(distinct > 1);
 
-	// Nothing reaches below bedrock or above the height field's ceiling. A
-	// generator that produced a column stretching to the origin is the failure
-	// this catches, and it is invisible in a part count.
-	for (const std::array<float, 6> &box : boxes) {
-		const float bottom = box[1] - box[4];
-		const float top = box[1] + box[4];
-		CHECK(bottom >= -8.0f);
-		CHECK(top <= 200.0f);
-	}
-
-	// The camera the scene placed, above the ground rather than inside it.
+	// The camera the scene placed, outside the map looking in.
 	REQUIRE(store.Resource<ActiveCamera>() != nullptr);
 
 	const Entity eye = InScene(store, "Surveyor");
 	REQUIRE(eye != engine::ecs::NULL_ENTITY);
-	CHECK(store.Get<engine::scene::Transform>(eye)->Frame.Position.Y > 34.0f);
+	CHECK(store.Get<engine::scene::Transform>(eye)->Frame.Position.Y > 100.0f);
 
-	// Measured bounds, not declared. A streamed world reaches as far as what is
-	// loaded, which is the camera's neighbourhood rather than the whole map -
-	// the 16384-block extent exists as a function and never as geometry.
+	// Measured bounds, not declared: the whole field is built, so the world
+	// reaches the half-width of the map plus whatever the relief adds.
 	REQUIRE(store.Resource<WorldBounds>() != nullptr);
-	CHECK(store.Resource<WorldBounds>()->HalfExtent > 100.0f);
+	CHECK(store.Resource<WorldBounds>()->HalfExtent > 200.0f);
 }
 
 TEST_CASE("the terrain generator is a pure function of its seed", "[examples][scene]") {
 	const StagedAssets assets;
 
-	// **Rule 5, asserted rather than asserted-in-a-comment.** The map is
-	// 268 million columns and is never stored, so every block anybody ever sees
-	// comes out of `HeightAt` - which means a recording replays if and only if
-	// two runs of that function agree. The integer hashing exists for this, and
-	// a change that reached for `math.random` or wall time would pass every
-	// other check in this file.
-	std::vector<std::array<float, 6>> first;
-	std::vector<std::array<float, 6>> second;
+	// **Rule 5, asserted rather than asserted-in-a-comment.** Every vertex on
+	// screen comes out of `HeightAt`, which means a recording replays if and
+	// only if two runs of that function agree. The integer hashing exists for
+	// this, and a change that reached for `math.random` or wall time would pass
+	// every other check in this file.
+	std::vector<std::array<float, 3>> first;
+	std::vector<std::array<float, 3>> second;
 
-	for (std::vector<std::array<float, 6>> *into : {&first, &second}) {
+	for (std::vector<std::array<float, 3>> *into : {&first, &second}) {
 		Store store("terrain.determinism");
 		Scheduler systems;
 
@@ -1030,18 +1230,79 @@ TEST_CASE("the terrain generator is a pure function of its seed", "[examples][sc
 		INFO(error);
 		REQUIRE(loaded);
 
-		// Ten fixed ticks each, so the camera moves and the streaming runs -
-		// comparing only the prefill would pin the generator and leave the part
-		// of the file that decides *when* a chunk is built untested.
-		for (int tick = 0; tick < 10; tick++) {
+		// Four chunks each rather than all sixty-four: the generator is the
+		// thing under test and a quarter of a million vertices proves it as
+		// well as a million do, at a quarter of the cost.
+		for (int tick = 0; tick < 4; tick++) {
 			systems.Tick(store, 1.0f / 60.0f);
 		}
 
-		*into = VoxelBoxes(store);
+		*into = TerrainVertices(store);
 	}
 
+	REQUIRE(!first.empty());
 	REQUIRE(first.size() == second.size());
 	CHECK(first == second);
+}
+
+// **A world nobody loaded a scene into, which is the editor's shape.**
+// `LoadScene` mounts a scene's modules on the way past, so every test below
+// proves the mount only for programs that go through it - and `studio::Editor`
+// does not: it installs an example as a `Script` instance in a world it built
+// itself. A scene whose first line is `require(script.MagicCore)` therefore
+// worked under `client --script` and failed in the one program it is authored
+// in. This pins the door the editor calls.
+TEST_CASE("a scene's modules mount under a script nothing loaded", "[examples][scene]") {
+	const StagedAssets assets;
+
+	Store store("libraries.bare");
+
+	engine::scene::RegisterSceneClasses();
+	engine::scene::InstallServices(store);
+
+	const Entity holder = store.CreateInstance(engine::script::ScriptClass(), std::string("LibrariesScene"));
+	REQUIRE(holder != engine::ecs::NULL_ENTITY);
+	REQUIRE(store.FindFirstChild(holder, "MagicCore") == engine::ecs::NULL_ENTITY);
+
+	CHECK(engine::examples::MountSceneLibraries(store, holder, "Libraries.luau") == 2);
+
+	const Entity magic = store.FindFirstChild(holder, "MagicCore");
+	REQUIRE(magic != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(magic, "Compiler") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(holder, "TerrainCore") != engine::ecs::NULL_ENTITY);
+
+	// **Nothing in `ReplicatedStorage`, which is the point of the move.** These
+	// used to be mirrored there for every world in the program, so a brand-new
+	// empty game carried a demo's modules and a scene had no way to say it
+	// wanted them.
+	const Entity replicated = store.FindFirstRoot("ReplicatedStorage");
+	REQUIRE(replicated != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(replicated, "MagicCore") == engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(replicated, "TerrainCore") == engine::ecs::NULL_ENTITY);
+
+	// **Twice is once**, which is what lets a host call it whatever the script's
+	// age: a module is cached per instance, so two trees under one script would
+	// give `require` two copies that share no state.
+	CHECK(engine::examples::MountSceneLibraries(store, holder, "Libraries.luau") == 0);
+
+	size_t named = 0;
+	store.EachChild(holder, [&](Entity child) {
+		named += store.InstanceNameOf(child) == Name("MagicCore") ? 1 : 0;
+	});
+	CHECK(named == 1);
+}
+
+// A scene with no modules of its own gets none, which is every scene but three.
+TEST_CASE("a scene with no modules mounts nothing", "[examples][scene]") {
+	const StagedAssets assets;
+
+	Store store("libraries.none");
+	engine::scene::RegisterSceneClasses();
+
+	const Entity holder = store.CreateInstance(engine::script::ScriptClass(), std::string("RingsScene"));
+	REQUIRE(holder != engine::ecs::NULL_ENTITY);
+
+	CHECK(engine::examples::MountSceneLibraries(store, holder, "Rings.luau") == 0);
 }
 
 TEST_CASE("the shipped Luau libraries mount and run", "[examples][scene]") {
@@ -1055,12 +1316,13 @@ TEST_CASE("the shipped Luau libraries mount and run", "[examples][scene]") {
 	INFO(error);
 	REQUIRE(loaded);
 
-	// **Mounted where a Rojo place would put them**, which is the whole contract
-	// the ported libraries were written against.
-	const Entity replicated = store.FindFirstRoot("ReplicatedStorage");
-	REQUIRE(replicated != engine::ecs::NULL_ENTITY);
+	// **Mounted under the script that requires them**, which is Rojo's own
+	// arrangement and the contract every `require(script.Parent.X)` inside the
+	// ported libraries was written against.
+	const Entity holder = InScene(store, "Libraries");
+	REQUIRE(holder != engine::ecs::NULL_ENTITY);
 
-	const Entity magic = store.FindFirstChild(replicated, "MagicCore");
+	const Entity magic = store.FindFirstChild(holder, "MagicCore");
 	REQUIRE(magic != engine::ecs::NULL_ENTITY);
 	CHECK(store.FindFirstChild(magic, "Compiler") != engine::ecs::NULL_ENTITY);
 	CHECK(store.FindFirstChild(magic, "SpellSolver") != engine::ecs::NULL_ENTITY);
@@ -1073,7 +1335,7 @@ TEST_CASE("the shipped Luau libraries mount and run", "[examples][scene]") {
 	CHECK(store.ClassOf(presets) == engine::script::ModuleScriptClass());
 	CHECK(store.FindFirstChild(presets, "ChainLightning") != engine::ecs::NULL_ENTITY);
 
-	const Entity terrain = store.FindFirstChild(replicated, "TerrainCore");
+	const Entity terrain = store.FindFirstChild(holder, "TerrainCore");
 	REQUIRE(terrain != engine::ecs::NULL_ENTITY);
 	CHECK(store.FindFirstChild(terrain, "Noise") != engine::ecs::NULL_ENTITY);
 
@@ -1206,5 +1468,224 @@ TEST_CASE("the player list names everybody in the world", "[examples][scene][pla
 			}
 		});
 		CHECK(named == 2);
+	}
+}
+
+TEST_CASE("the portal lighting scenes author lamps a seam can carry", "[examples][scene]") {
+	// **What a scene gets wrong about portal lighting is placement, and it is
+	// silent.** The transport itself is `client::CollectLights`' and
+	// `mono.client/tests/PortalLighting.cpp` asserts it; what belongs here is
+	// that the two shipped scenes hand that pass what it needs - a linked pair
+	// of mouths, every lamp inside its own seam's reach, and a world dark
+	// enough that a capture of the far room measures transported light rather
+	// than the sun. A lamp authored a stud out of range would load, render,
+	// and quietly turn the far room into the dark frame the capture script
+	// calls a failure.
+	const StagedAssets assets;
+
+	struct Lamp {
+		engine::core::Vector3 Position;
+		float Range = 0.0f;
+	};
+
+	struct Authoring {
+		const char *Scene;
+		size_t Lamps;
+	};
+
+	for (const Authoring &expected : {Authoring{"PortalLightOut.luau", 1}, {"PortalLightMix.luau", 2}}) {
+		INFO(expected.Scene);
+
+		Store store("portal-lighting");
+		Scheduler systems;
+
+		std::string error;
+		const bool loaded = LoadScene(store, systems, ExamplePath(expected.Scene), error);
+		INFO(error);
+		REQUIRE(loaded);
+
+		// A linked pair, neither mouth crossing worlds, both enabled.
+		static thread_local std::vector<engine::scene::PortalSeam> seams;
+		REQUIRE(engine::scene::GatherPortalSeams(store, seams) == 2);
+		for (const engine::scene::PortalSeam &seam : seams) {
+			CHECK(!seam.Crosses);
+		}
+
+		// Every lamp within reach of at least one seam, or nothing crosses.
+		std::vector<Lamp> lamps;
+		store.Each<const engine::scene::Light>([&](Entity bulb, const engine::scene::Light &light) {
+			const auto *fitting = store.Get<engine::scene::Transform>(store.ParentOf(bulb));
+			REQUIRE(fitting != nullptr);
+			lamps.push_back({fitting->Frame.Position, light.Range});
+		});
+		REQUIRE(lamps.size() == expected.Lamps);
+
+		for (const Lamp &lamp : lamps) {
+			float nearest = std::numeric_limits<float>::infinity();
+			for (const engine::scene::PortalSeam &seam : seams) {
+				nearest = std::min(nearest, engine::scene::SeamDistance(seam, lamp.Position));
+			}
+			CHECK(nearest < lamp.Range);
+		}
+
+		// No sun and no ambient, so the far room's floor answers for the seam
+		// alone - the property both capture reports lean on.
+		bool dark = false;
+		store.Each<const engine::scene::LightingServiceComponent>(
+			[&](Entity, const engine::scene::LightingServiceComponent &lighting) {
+				dark = lighting.Brightness == 0.0f && lighting.Ambient.R == 0.0f &&
+					   lighting.OutdoorAmbient.R == 0.0f;
+			}
+		);
+		CHECK(dark);
+	}
+}
+
+// The mirror ball, and the two things about it that are arithmetic rather than
+// authoring.
+//
+// **The facets are placed by a formula and nothing else in the repository would
+// notice it going wrong.** A tile whose front face points *inward* reflects the
+// inside of the ball, which the renderer draws perfectly and which looks exactly
+// like a tile that is not reflecting at all - so the sign of `CFrame.lookAt`'s
+// look direction is a one-character mistake with no visible symptom and no test
+// but this one. `Mirrors-1-world.luau`'s case pins the same property for four
+// unrotated walls, where a face is an axis; here every facet is rotated
+// differently and the answer has to come out of the geometry.
+//
+// **And the stated bounce depth is a guard rather than a preference.** A ball is
+// the worst shape the automatic rule has: every pane can see most of the others,
+// so it says "deeper" at every level and climbs to `render::MAX_SURFACE_DEPTH`,
+// where the passes go as `panes x (panes - 1) ^ (levels - 1)` - 3,600 of them at
+// sixteen panes. A change that dropped the `workspace.SurfaceBounces = 1` line
+// would turn this scene from slow into a hang.
+TEST_CASE("the mirror ball mirrors every facet, faces them out and has no holes", "[examples][scene]") {
+	// **Two of these claims were false and both read as the mirrors being
+	// broken.** The scene authored sixteen cameras over eighty facets because
+	// sixteen is what `scene::MAX_SURFACES` used to compile in - so five sixths
+	// of a *mirror ball* were not mirrors - and it cut each facet as a square
+	// 0.62 of an edge across, which is smaller than the triangle it sits on. A
+	// square cannot fill a triangle, so the tiles never met and the ball was a
+	// shell of loose plates with the dark core showing at every seam.
+	//
+	// The budget is the world's since v0.17 and the scene states it. Asking is
+	// still the scene's, and every facet asks: what the panes over budget cost
+	// is the whole point of a stress scene, so a change that quietly caps the
+	// asking again is a regression rather than a saving.
+	const StagedAssets assets;
+
+	Store store("mirrorball");
+	Scheduler systems;
+
+	std::string error;
+	const bool loaded = LoadScene(store, systems, ExamplePath("StressMirrors.luau"), error);
+	INFO(error);
+	REQUIRE(loaded);
+
+	// Two subdivisions of an icosahedron is three hundred and twenty faces, and
+	// the count is checked rather than assumed because the midpoint cache is
+	// what makes it that - without the sharing every face would still be split
+	// into four and the vertex count would be wrong while this number stayed
+	// right.
+	size_t facets = 0;
+	float tiled = 0.0f;
+	store.Each<const engine::scene::Transform, const engine::scene::Bounds>(
+		[&](Entity part, const engine::scene::Transform &, const engine::scene::Bounds &bounds) {
+			if (store.InstanceNameOf(part).Text().rfind("Facet_", 0) != 0) {
+				return;
+			}
+			facets++;
+
+			// The face of the tile that reflects, which is the one a mirror is
+			// projected onto. The third axis is the plate's thickness.
+			tiled += bounds.HalfExtent.X * 2.0f * bounds.HalfExtent.Y * 2.0f;
+		}
+	);
+	CHECK(facets == 320);
+
+	// **A camera on every one of them, which is what makes it a mirror ball.**
+	// The world draws `workspace.MaxSurfaces` of them - the ones covering the
+	// most screen - and the rest reach no screen at all; that cost is the finding
+	// this scene exists to produce, and capping the asking to hide it would be
+	// hiding the finding.
+	static thread_local std::vector<engine::scene::SurfacePane> panes;
+	REQUIRE(engine::scene::GatherSurfacePanes(store, panes) == facets);
+
+	// **And the tiles more than cover the ball, which is what closes the holes.**
+	// A rectangle circumscribing a triangle is twice the triangle's area, so a
+	// ball whose every facet is covered costs about twice its own surface in
+	// tile; the old squares came to four fifths of it, which is a shell that
+	// cannot close however the tiles are turned. The ratio separates the two
+	// arrangements without this test re-deriving the ico-sphere and disagreeing
+	// with the scene about what it built - the ball's own surface is measured
+	// from the core mesh the scene made, which is that ico-sphere scaled down a
+	// few per cent to sit under the plates.
+	float cored = 0.0f;
+	size_t meshes = 0;
+	store.Each<const engine::scene::EditableMesh>([&](Entity, const engine::scene::EditableMesh &mesh) {
+		meshes++;
+		for (size_t at = 0; at + 2 < mesh.Indices.size(); at += 3) {
+			const engine::core::Vector3 &a = mesh.Positions[mesh.Indices[at]];
+			const engine::core::Vector3 &b = mesh.Positions[mesh.Indices[at + 1]];
+			const engine::core::Vector3 &c = mesh.Positions[mesh.Indices[at + 2]];
+			cored += (b - a).Cross(c - a).Magnitude() * 0.5f;
+		}
+	});
+
+	REQUIRE(meshes == 1);
+	REQUIRE(cored > 0.0f);
+
+	INFO(tiled << " of tile over " << cored << " of ball");
+	CHECK(tiled / cored > 1.8f);
+
+	// The ball's middle, taken from the core rather than from a literal - the
+	// scene's `RADIUS` and `HEIGHT` are free to change without this following
+	// them.
+	const Entity core = InScene(store, "Core");
+	REQUIRE(core != engine::ecs::NULL_ENTITY);
+	const auto *hub = store.Get<engine::scene::Transform>(core);
+	REQUIRE(hub != nullptr);
+
+	for (const engine::scene::SurfacePane &pane : panes) {
+		// Every pane on the sphere, facing away from its middle. The radius is
+		// not checked against a number for the same reason the centre is not;
+		// what matters is that the normal and the outward direction agree.
+		const engine::core::Vector3 outward = pane.Centre - hub->Frame.Position;
+		CHECK(outward.Magnitude() > 0.0f);
+		CHECK(outward.Dot(pane.Normal) > 0.0f);
+	}
+
+	CHECK(engine::scene::SurfaceBouncesOf(store) == 1);
+}
+
+// What the studio's `World -> New Scene from Example` menu is built from.
+//
+// **The menu walks the staged directory rather than naming scenes**, so the
+// thing that can break is the walk: a listing that comes back empty is a menu
+// that says "no staged examples" in a build that staged forty of them, and
+// nothing else in the editor would notice. Checked against scenes this suite
+// already loads by name, so the two cannot disagree about what is shipped.
+TEST_CASE("every staged scene is offered by name, sorted", "[examples][scene]") {
+	const StagedAssets assets;
+
+	const std::vector<std::string> scenes = engine::examples::ExampleScenes();
+	REQUIRE(!scenes.empty());
+
+	CHECK(std::is_sorted(scenes.begin(), scenes.end()));
+
+	for (const char *shipped :
+		 {"Rings.luau", "StressMirrors.luau", "StressParticles.luau", "StressPhysics.luau"}) {
+		INFO(shipped);
+		CHECK(std::find(scenes.begin(), scenes.end(), shipped) != scenes.end());
+	}
+
+	// **Luau only.** A `.ts` scene is staged as transpiled JavaScript under a
+	// `.js` name, so offering either would name a second copy of a scene already
+	// in the list - and offering the `.ts` itself would name a file no program
+	// on this path can read.
+	for (const std::string &scene : scenes) {
+		INFO(scene);
+		CHECK(scene.size() > 5);
+		CHECK(scene.compare(scene.size() - 5, 5, ".luau") == 0);
 	}
 }

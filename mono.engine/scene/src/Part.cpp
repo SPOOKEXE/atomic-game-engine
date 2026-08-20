@@ -478,6 +478,37 @@ namespace engine::scene {
 			return property;
 		}
 
+		// LocalTransparency: read-only through the property table, for
+		// `scene::LocalTransparency`'s own reason.
+		//
+		// **Written through `scene::SetLocalTransparency` instead**, which is
+		// not gated by `Store::AdoptOnly` the way `Store::SetProperty` is - see
+		// that function's header. A script still reads `part.LocalTransparency`
+		// like any other property; it calls a method to change it, the same
+		// shape `Instance:SetAttribute` already asks an author to accept.
+		PropertyDescriptor LocalTransparencyProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("LocalTransparency");
+			property.Type = PropertyType::Float;
+			property.Size = sizeof(float);
+			property.Kind = PropertyKind::Computed;
+
+			property.Writable = false;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<LocalTransparency>()});
+			property.Writes = &ecs::ComponentSet::Intern({});
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const LocalTransparency *local = store.Get<LocalTransparency>(instance);
+				if (local == nullptr) {
+					return false;
+				}
+				*static_cast<float *>(out) = local->Value;
+				return true;
+			};
+
+			return property;
+		}
+
 		// FieldOfView: the camera's vertical angle, in degrees.
 		//
 		// Degrees out, radians stored - Roblox's `Camera.FieldOfView` is
@@ -537,6 +568,14 @@ namespace engine::scene {
 		// on top of the `EnumTable` mutex the lookup already takes.
 		const core::Name &NormalIdEnum() {
 			static const core::Name name("NormalId");
+			return name;
+		}
+
+		// The collider shape's enum name, interned for `NormalIdEnum`'s reason:
+		// a properties panel reads this every frame and a `core::Name` built
+		// from a literal takes the registry mutex and hashes a string each time.
+		const core::Name &ShapeKindEnum() {
+			static const core::Name name("ShapeKind");
 			return name;
 		}
 
@@ -1014,6 +1053,112 @@ namespace engine::scene {
 		// template over the component would save nine lines and cost the reader
 		// the ability to see what a property touches, which is what `Reads` and
 		// `Writes` exist to state.
+		// `BasePart.CollisionShape`: which shape the collider is, as an enum.
+		//
+		// **Named `CollisionShape` rather than `Shape`**, because a part already
+		// has a *drawn* shape in every engine a script author has used and the
+		// two are not the same thing - `scene::Bounds` is what it is drawn at
+		// and `scene::Collider` is what it collides as. A single `Shape` would
+		// read as both and be neither.
+		//
+		// **The whole set, including the two that need geometry.** `Hull` and
+		// `Mesh` are only meaningful with a `CollisionGeometry` beside them, and
+		// a shape set to one with no geometry collides as the part's bound -
+		// which `scene::Collider::Geometry` states and which is visible in the
+		// studio's collider outlines. Hiding them here would leave the only way
+		// to reach them a C++ call.
+		//
+		// @since v0.17
+		PropertyDescriptor CollisionShapeProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("CollisionShape");
+			property.Type = PropertyType::Enum;
+			property.EnumName = ShapeKindEnum();
+			property.Size = sizeof(core::Name);
+			property.Kind = PropertyKind::Field;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Collider>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Collider *collider = store.Get<Collider>(instance);
+				if (collider == nullptr) {
+					return false;
+				}
+				*static_cast<core::Name *>(out) =
+					ecs::EnumTable::MemberAt(ShapeKindEnum(), static_cast<size_t>(collider->Shape));
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				Collider *collider = store.GetMutable<Collider>(instance);
+				if (collider == nullptr) {
+					return false;
+				}
+
+				size_t ordinal = 0;
+				if (!ecs::EnumTable::OrdinalOf(
+						ShapeKindEnum(), *static_cast<const core::Name *>(value), ordinal
+					)) {
+					return false;
+				}
+
+				collider->Shape = static_cast<ShapeKind>(ordinal);
+				return true;
+			};
+
+			return property;
+		}
+
+		// `BasePart.CollisionGeometry`: which baked shape the collider names.
+		//
+		// **A name, and the same name a `Visual::Mesh` is.** Whoever loads
+		// content bakes a hull or a triangle soup into `scene::CollisionShapes`
+		// under a name, and this is how a part says which one it is. Unread for
+		// the three shapes an extent describes.
+		//
+		// **Generated rather than hand-written would have been enough** -
+		// `Collider::Geometry` is a plain `core::Name` field - except that a
+		// generated property is named after the field, and `Geometry` on a
+		// `BasePart` reads as the thing it is drawn as. The one-word difference
+		// is worth the twenty lines.
+		//
+		// @since v0.17
+		PropertyDescriptor CollisionGeometryProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("CollisionGeometry");
+			property.Type = PropertyType::Name;
+			property.Size = sizeof(core::Name);
+			property.Kind = PropertyKind::Field;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Collider>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Collider *collider = store.Get<Collider>(instance);
+				if (collider == nullptr) {
+					return false;
+				}
+				*static_cast<core::Name *>(out) = collider->Geometry;
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				Collider *collider = store.GetMutable<Collider>(instance);
+				if (collider == nullptr) {
+					return false;
+				}
+
+				// **Any name is accepted, including one nothing has baked.** A
+				// scene is authored before its content finishes streaming and a
+				// setter that refused an unresolved name would make the order
+				// the two arrive in load-bearing. The part collides as its bound
+				// until the shape appears.
+				collider->Geometry = *static_cast<const core::Name *>(value);
+				return true;
+			};
+
+			return property;
+		}
+
 		PropertyDescriptor LightFaceProperty() {
 			PropertyDescriptor property;
 			property.Name = core::Name("Face");
@@ -1250,7 +1395,16 @@ namespace engine::scene {
 				// allows fails at creation with a driver message nobody can act
 				// on; sixteen thousand is past every limit worth having and
 				// small enough to allocate.
+				//
+				// **Read-modify-write, so a resize keeps the rest of the
+				// component.** A fresh `SurfaceCamera` here silently reset
+				// `Face`, `Effect`, `TagFilter` and `ImageTransparency` on
+				// every size edit - a mirror that lost its thermal grade the
+				// moment somebody dragged its resolution.
 				SurfaceCamera surface;
+				if (const SurfaceCamera *existing = store.Get<SurfaceCamera>(instance)) {
+					surface = *existing;
+				}
 				surface.Width = static_cast<uint16_t>(std::min(size.X, 16384.0f));
 				surface.Height = static_cast<uint16_t>(std::min(size.Y, 16384.0f));
 				store.Set(instance, surface);
@@ -1313,6 +1467,15 @@ namespace engine::scene {
 				AlphaModeEnum().Text(), std::array<std::string_view, 3>{"Opaque", "Clip", "Blend"}
 			);
 
+			// The collider shapes. **In `ShapeKind`'s own declaration order**,
+			// because `CollisionShapeProperty` converts between an ordinal and
+			// the enum by casting - so a list written in a different order here
+			// would silently make every part a different shape than it says.
+			ecs::EnumTable::Register(
+				ShapeKindEnum().Text(),
+				std::array<std::string_view, 5>{"Box", "Sphere", "Cylinder", "Hull", "Mesh"}
+			);
+
 			// The default collision group, so `CollisionGroup` reads back
 			// something a script can compare rather than an invalid name on a
 			// part nobody configured.
@@ -1360,6 +1523,12 @@ namespace engine::scene {
 				// carries the whole argument.
 				ecs::Components::Of<SurfaceAppearance>(),
 				ecs::Components::Of<Tags>(),
+
+				// **On the class for `SurfaceAppearance`'s reason, and never
+				// replicated for `LocalTransparency`'s own.** Four bytes on
+				// every part, in exchange for `client::CollectInstances`
+				// reading it as a plain column rather than a per-row join.
+				ecs::Components::Of<LocalTransparency>(),
 
 				// **On the class, so every part has one, for
 				// `SurfaceAppearance`'s reason.** A properties panel that could
@@ -1440,7 +1609,7 @@ namespace engine::scene {
 			// two.** It carries members this engine has nothing behind, and
 			// registering it would put an instantiable class that does nothing
 			// into the insert palette - which is the exact objection
-			// `docs/DEFERRED.md` D00120 held this class back for.
+			// `docs/retired/DEFERRED.md` D00120 held this class back for.
 			//
 			// The component is in the class set, which is `SurfaceCamera`'s
 			// argument: `Instance.new("Tool")` has to make something that can be
@@ -1737,6 +1906,14 @@ namespace engine::scene {
 			// `CustomPhysicalProperties` keeps Roblox's name because it is the
 			// one an author looks for, and it is the switch: without it the
 			// three below are ignored and the part feels like its material.
+			// **What the part collides as, which nothing else on it says.** A
+			// part is drawn at its `Bounds` and collides at its `Collider`, and
+			// until v0.17 the second of those was unreachable from a script or
+			// the properties panel at all - a box was the only collider a part
+			// could ever have without a C++ call.
+			ecs::Classes::Computed(basePart, CollisionShapeProperty());
+			ecs::Classes::Computed(basePart, CollisionGeometryProperty());
+
 			ecs::Classes::Property<&PhysicsProperties::Custom>(basePart, "CustomPhysicalProperties");
 			ecs::Classes::Property<&PhysicsProperties::Density>(basePart, "Density");
 			ecs::Classes::Property<&PhysicsProperties::Friction>(basePart, "Friction");
@@ -1807,6 +1984,11 @@ namespace engine::scene {
 			// ImageTransparency` below is still clamped because it is not
 			// Roblox's property and has no such expectation to honour.
 			ecs::Classes::Property<&Visual::Transparency>(basePart, "Transparency");
+
+			// **Read-only through the table and never sent**, for
+			// `LocalTransparencyProperty`'s and `scene::LocalTransparency`'s
+			// own reasons.
+			ecs::Classes::Computed(basePart, LocalTransparencyProperty());
 
 			// **The third of the three, and they are three questions rather
 			// than one.** `Visible` decides whether the part is submitted at
@@ -1981,6 +2163,7 @@ namespace engine::scene {
 			ecs::Classes::ClampedProperty<&Humanoid::JumpSpeed, 0.0f, 1000.0f>(humanoidClass, "JumpPower");
 			ecs::Classes::ClampedProperty<&Humanoid::Height, 0.1f, 100.0f>(humanoidClass, "HipHeight");
 			ecs::Classes::Property<&Humanoid::Enabled>(humanoidClass, "Enabled");
+			ecs::Classes::Property<&Humanoid::AutoRotate>(humanoidClass, "AutoRotate");
 
 			// **The two that decide whether a character is alive**, and both are
 			// written conversions because each is clamped against the other. See
@@ -2044,6 +2227,20 @@ namespace engine::scene {
 		return true;
 	}
 
+	float LocalTransparencyOf(const ecs::Store &store, ecs::Entity instance) {
+		const LocalTransparency *local = store.Get<LocalTransparency>(instance);
+		return local == nullptr ? 0.0f : local->Value;
+	}
+
+	bool SetLocalTransparency(ecs::Store &store, ecs::Entity instance, float value) {
+		LocalTransparency *local = store.GetMutable<LocalTransparency>(instance);
+		if (local == nullptr) {
+			return false;
+		}
+		local->Value = value;
+		return true;
+	}
+
 	ecs::ClassId PartClass() {
 		static const ecs::ClassId part = (EnsureClassTree(), ecs::Classes::Find(core::Name("Part")));
 		return part;
@@ -2071,6 +2268,20 @@ namespace engine::scene {
 			// Radius from X, half-height from Y - the axes `InverseInertiaOf`
 			// puts the barrel along.
 			return std::numbers::pi_v<float> * x * x * (2.0f * y);
+
+		case ShapeKind::Hull:
+		case ShapeKind::Mesh:
+			// **The part's bound, not the baked geometry's volume**, and the
+			// difference is deliberate. This module has no edge to `collision`
+			// and should not grow one to weigh a crate: a density times a volume
+			// is what a *part* weighs, `scene::Bounds` is the extent a part is
+			// drawn at, and a hull that is a good fit for its part differs from
+			// that box by a factor a designer will not notice and cannot be
+			// surprised by. A hull that is *not* a good fit for its part is a
+			// scene mistake this would only hide.
+			//
+			// Read as half-extents, exactly as the box case above.
+			return 8.0f * x * y * z;
 		}
 		return 0.0f;
 	}

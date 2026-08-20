@@ -11,7 +11,7 @@
 // nothing advancing it.
 //
 // This is the half that advances it, and it is arithmetic rather than a system:
-// three passes need the same answer - the opaque pass for a part, the interface
+// three paths need the same answer: geometry for a part, the interface
 // pass for an `ImageLabel`, and the studio's imgui painter for the same label in
 // a viewport panel - and three copies of a modulo would be three chances to
 // disagree about whether a sheet loops on the frame count or the cell count.

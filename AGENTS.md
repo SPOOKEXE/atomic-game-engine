@@ -202,6 +202,9 @@ mono.vendor/   submodules, shared by every mono.X that needs one
 mono.engine/   the libraries, L0 to L13 - never a product
 mono.client/   the client library and its thin main        [client]
 mono.server/   the server library and its thin main        [server]
+mono.network/
+mono.unified_server_client/
+mono.cdn/
 mono.tools/    architecture check, test runner, doc filter, and their tests
 ```
 

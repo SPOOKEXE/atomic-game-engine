@@ -53,10 +53,20 @@ makes them conventions, and this is where they are written down.
   ticking is one the layout tests cannot use without standing a world up.
   `Layout` and `Compiled::Rebuild` take an `ecs::Store &` and nothing larger.
 
-## `Resolved` is the only derived component, and nothing may keep a second copy
+## The derived components have one writer each, and nothing keeps a second copy
 
-One pass writes it, parent before child. The draw list, the hit test and a
-script asking `AbsoluteSize` all read that component with a query.
+`Resolved` is the first and the rule is its: one pass writes it, parent before
+child. The draw list, the hit test and a script asking `AbsoluteSize` all read
+that component with a query.
+
+**`ScrollState` is the second and is the same rule applied to one class.** The
+canvas extent after `AutomaticCanvasSize`, the window after the bars are inset
+and the two thumb rectangles are all things `ContentArea` works out to place a
+scrolling frame's children - and three consumers need them: a script reading
+`AbsoluteCanvasSize`, the compile drawing the bars, and the router hit-testing a
+drag. Before v0.18 the compile worked the thumbs out again, which is why the
+bars could be seen and not grabbed. **A bar's geometry is decided once, in the
+layout.**
 
 A cached rectangle anywhere else is the stale-cache bug `scene::Bounds` refuses
 in as many words, and here it has a specific failure: the compiled list and the
@@ -147,6 +157,27 @@ Not because the estimate is good - because a backend with real metrics would
 disagree with the hit test and with what a headless test asserts, and two
 answers is the failure this module is arranged to avoid everywhere else.
 
+## A backend lays text out, and that is why markup is spans
+
+`RichText` parses to a plain string plus a list of **byte ranges** over it -
+`DrawSpan` - and never to positioned runs. The reason is the section on
+`AVERAGE_ADVANCE` above: only a backend can measure a glyph, so a compile that
+placed the second word would place it with an estimate the renderer disagrees
+with, and the emphasis would visibly drift as a panel resized. One string, one
+layout pass, styles looked up per byte.
+
+**A malformed string is shown literally, tags and all.** That is Roblox's
+behaviour and the useful one: an author who typed `a < b` sees `a < b`, and one
+who mistyped a tag sees the tag rather than a gap where their text was. Half a
+parse is the outcome refused - a reader given a partly-stripped string cannot
+tell whether the markup ran out or the text did.
+
+**A gradient is the same shape one dimension over.** `gui::Gradient` authors an
+angle and a size-relative offset; `Compile` resolves those into the two ends of
+a line in canvas pixels, because everything a backend receives is in canvas
+pixels. Two backends resolving an angle would be two answers to where a ramp
+starts.
+
 ## Input produces events; it does not fire signals
 
 `script::Signals` is L9 and this is L7, so nothing here can fire a
@@ -163,6 +194,18 @@ Two rules inside it are worth keeping:
   happened.** That is what makes dragging off a button and back one
   interaction. A release routed by position leaves the pressed button stuck
   looking pressed.
+
+**Two gestures are not presses and must not become them**, and both arrived at
+v0.18. A scroll bar's thumb and a `UIDragDetector` are grabbed *before* the
+pick, because neither element is `Active` and the pick would walk straight past
+both; and once one is held, the press path is skipped entirely. A drag that
+emitted `InputBegan` would make every draggable button fire `Activated` each
+time somebody moved it - which is a bug people file against the button.
+
+**What a drag produces is `Element::Position`, which is authored and does
+cross.** Where the gesture *is* - the grab point, the position it started from -
+is the router's, exactly as the hover and the press are. A `UIDragDetector`
+carrying a "being dragged" flag would be one replicated row two clients write.
 - **`MouseLeave` fires before `MouseEnter`.** A handler that moves something on
   leave has to run before the one reacting to the arrival, or a swap between
   two adjacent buttons produces an enter against state the leave is about to
@@ -309,13 +352,18 @@ re-cloned every *other* time passes a two-spawn check - and the second player in
 `engine.gui.services` is what catches a reset reaching the template rather than
 the copy.
 
-## An interface replicates, and three components deliberately do not
+## An interface replicates, and four components deliberately do not
 
 A server authors a `ScreenGui` and a client is shown it: that is what `shared`
 was for, and from v0.15 it is what actually happens.
 `replication::DefaultReplicatedComponents` takes the whole `gui.` prefix less
-three names, and the three are the module's own answer to what a *viewer*
-decides rather than what an author does.
+four names, and the four are the module's own answer to what a *viewer* decides
+rather than what an author does.
+
+- **`ScrollState`** joined the list at v0.18 and is `Resolved`'s case for one
+  class: the pixel canvas, the visible window and the thumb rectangles are all
+  derived from an `AbsoluteSize` belonging to the display doing the looking.
+  What an author wrote is `Scrolling`, and that crosses.
 
 - **`Resolved`** is where the layout put a rectangle on *this* display. Every
   client recomputes it from the tree it was sent, so the authority's answer is

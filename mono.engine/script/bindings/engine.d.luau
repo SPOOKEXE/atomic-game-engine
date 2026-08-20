@@ -355,6 +355,18 @@ declare extern type PointerSignal with
 	function Once(self, handler: (x: number, y: number) -> ()): RBXScriptConnection
 end
 
+-- `uiDragDetector.DragStart`, `.DragContinue` and `.DragEnd`.
+--
+-- **Four numbers: where the pointer is, and how far it has come.** Roblox hands
+-- a drag handler an `InputObject`; this engine has none for the reason
+-- `GuiSignal` above gives, and the two things a handler actually reads off one
+-- are exactly these. The travel is zero on `DragStart`, which is what "how far
+-- has this gesture gone" means at its first frame.
+declare extern type DragSignal with
+	function Connect(self, handler: (x: number, y: number, dx: number, dy: number) -> ()): RBXScriptConnection
+	function Once(self, handler: (x: number, y: number, dx: number, dy: number) -> ()): RBXScriptConnection
+end
+
 -- `textBox.Focused`, which takes no arguments.
 --
 -- **Its own name rather than `GuiSignal`**, for `TweenCompletedSignal`'s
@@ -401,6 +413,9 @@ end
 declare extern type Enum_AlphaMode extends EnumItem with
 end
 
+declare extern type Enum_ApplyStrokeMode extends EnumItem with
+end
+
 declare extern type Enum_AspectType extends EnumItem with
 end
 
@@ -425,6 +440,9 @@ end
 declare extern type Enum_EasingStyle extends EnumItem with
 end
 
+declare extern type Enum_ElasticBehavior extends EnumItem with
+end
+
 declare extern type Enum_FillDirection extends EnumItem with
 end
 
@@ -434,7 +452,13 @@ end
 declare extern type Enum_HorizontalAlignment extends EnumItem with
 end
 
+declare extern type Enum_ItemLineAlignment extends EnumItem with
+end
+
 declare extern type Enum_KeyCode extends EnumItem with
+end
+
+declare extern type Enum_LineJoinMode extends EnumItem with
 end
 
 declare extern type Enum_ListenerType extends EnumItem with
@@ -464,16 +488,25 @@ end
 declare extern type Enum_ParticleOrientation extends EnumItem with
 end
 
+declare extern type Enum_ResamplerMode extends EnumItem with
+end
+
 declare extern type Enum_ScaleType extends EnumItem with
 end
 
 declare extern type Enum_ScriptLanguage extends EnumItem with
 end
 
+declare extern type Enum_ScrollBarInset extends EnumItem with
+end
+
 declare extern type Enum_ScrollingDirection extends EnumItem with
 end
 
 declare extern type Enum_ServiceScope extends EnumItem with
+end
+
+declare extern type Enum_ShapeKind extends EnumItem with
 end
 
 declare extern type Enum_SizeConstraint extends EnumItem with
@@ -483,6 +516,9 @@ declare extern type Enum_SortOrder extends EnumItem with
 end
 
 declare extern type Enum_StartCorner extends EnumItem with
+end
+
+declare extern type Enum_StrokeSizingMode extends EnumItem with
 end
 
 declare extern type Enum_SurfaceEffect extends EnumItem with
@@ -500,6 +536,18 @@ end
 declare extern type Enum_TextYAlignment extends EnumItem with
 end
 
+declare extern type Enum_UIDragDetectorDragStyle extends EnumItem with
+end
+
+declare extern type Enum_UIDragDetectorDragStyleResponse extends EnumItem with
+end
+
+declare extern type Enum_UIFlexAlignment extends EnumItem with
+end
+
+declare extern type Enum_UIFlexMode extends EnumItem with
+end
+
 declare extern type Enum_UserInputState extends EnumItem with
 end
 
@@ -507,6 +555,9 @@ declare extern type Enum_UserInputType extends EnumItem with
 end
 
 declare extern type Enum_VerticalAlignment extends EnumItem with
+end
+
+declare extern type Enum_VerticalScrollBarPosition extends EnumItem with
 end
 
 declare extern type Enum_ZIndexBehavior extends EnumItem with
@@ -517,6 +568,10 @@ declare Enum: {
 		Opaque: Enum_AlphaMode,
 		Clip: Enum_AlphaMode,
 		Blend: Enum_AlphaMode,
+	},
+	ApplyStrokeMode: {
+		Contextual: Enum_ApplyStrokeMode,
+		Border: Enum_ApplyStrokeMode,
 	},
 	AspectType: {
 		FitWithinMaxSize: Enum_AspectType,
@@ -565,6 +620,11 @@ declare Enum: {
 		Elastic: Enum_EasingStyle,
 		Bounce: Enum_EasingStyle,
 	},
+	ElasticBehavior: {
+		WhenScrollable: Enum_ElasticBehavior,
+		Always: Enum_ElasticBehavior,
+		Never: Enum_ElasticBehavior,
+	},
 	FillDirection: {
 		Horizontal: Enum_FillDirection,
 		Vertical: Enum_FillDirection,
@@ -579,6 +639,13 @@ declare Enum: {
 		Left: Enum_HorizontalAlignment,
 		Center: Enum_HorizontalAlignment,
 		Right: Enum_HorizontalAlignment,
+	},
+	ItemLineAlignment: {
+		Automatic: Enum_ItemLineAlignment,
+		Start: Enum_ItemLineAlignment,
+		Center: Enum_ItemLineAlignment,
+		End: Enum_ItemLineAlignment,
+		Stretch: Enum_ItemLineAlignment,
 	},
 	KeyCode: {
 		Unknown: Enum_KeyCode,
@@ -646,6 +713,11 @@ declare Enum: {
 		F11: Enum_KeyCode,
 		F12: Enum_KeyCode,
 	},
+	LineJoinMode: {
+		Round: Enum_LineJoinMode,
+		Bevel: Enum_LineJoinMode,
+		Miter: Enum_LineJoinMode,
+	},
 	ListenerType: {
 		Camera: Enum_ListenerType,
 		ObjectPosition: Enum_ListenerType,
@@ -696,6 +768,10 @@ declare Enum: {
 		VelocityParallel: Enum_ParticleOrientation,
 		VelocityPerpendicular: Enum_ParticleOrientation,
 	},
+	ResamplerMode: {
+		Default: Enum_ResamplerMode,
+		Pixelated: Enum_ResamplerMode,
+	},
 	ScaleType: {
 		Stretch: Enum_ScaleType,
 		Slice: Enum_ScaleType,
@@ -707,6 +783,11 @@ declare Enum: {
 		Luau: Enum_ScriptLanguage,
 		JavaScript: Enum_ScriptLanguage,
 	},
+	ScrollBarInset: {
+		None: Enum_ScrollBarInset,
+		ScrollBar: Enum_ScrollBarInset,
+		Always: Enum_ScrollBarInset,
+	},
 	ScrollingDirection: {
 		X: Enum_ScrollingDirection,
 		Y: Enum_ScrollingDirection,
@@ -716,6 +797,13 @@ declare Enum: {
 		Shared: Enum_ServiceScope,
 		Server: Enum_ServiceScope,
 		Client: Enum_ServiceScope,
+	},
+	ShapeKind: {
+		Box: Enum_ShapeKind,
+		Sphere: Enum_ShapeKind,
+		Cylinder: Enum_ShapeKind,
+		Hull: Enum_ShapeKind,
+		Mesh: Enum_ShapeKind,
 	},
 	SizeConstraint: {
 		RelativeXY: Enum_SizeConstraint,
@@ -732,6 +820,10 @@ declare Enum: {
 		TopRight: Enum_StartCorner,
 		BottomLeft: Enum_StartCorner,
 		BottomRight: Enum_StartCorner,
+	},
+	StrokeSizingMode: {
+		FixedSize: Enum_StrokeSizingMode,
+		ScaledSize: Enum_StrokeSizingMode,
 	},
 	SurfaceEffect: {
 		None: Enum_SurfaceEffect,
@@ -758,6 +850,33 @@ declare Enum: {
 		Center: Enum_TextYAlignment,
 		Bottom: Enum_TextYAlignment,
 	},
+	UIDragDetectorDragStyle: {
+		TranslatePlane: Enum_UIDragDetectorDragStyle,
+		TranslateLine: Enum_UIDragDetectorDragStyle,
+		TranslateLineOrPlane: Enum_UIDragDetectorDragStyle,
+		Rotate: Enum_UIDragDetectorDragStyle,
+		Scriptable: Enum_UIDragDetectorDragStyle,
+	},
+	UIDragDetectorDragStyleResponse: {
+		Offset: Enum_UIDragDetectorDragStyleResponse,
+		Scale: Enum_UIDragDetectorDragStyleResponse,
+		CustomOffset: Enum_UIDragDetectorDragStyleResponse,
+		CustomScale: Enum_UIDragDetectorDragStyleResponse,
+	},
+	UIFlexAlignment: {
+		None: Enum_UIFlexAlignment,
+		Fill: Enum_UIFlexAlignment,
+		SpaceAround: Enum_UIFlexAlignment,
+		SpaceBetween: Enum_UIFlexAlignment,
+		SpaceEvenly: Enum_UIFlexAlignment,
+	},
+	UIFlexMode: {
+		None: Enum_UIFlexMode,
+		Grow: Enum_UIFlexMode,
+		Shrink: Enum_UIFlexMode,
+		Fill: Enum_UIFlexMode,
+		Custom: Enum_UIFlexMode,
+	},
 	UserInputState: {
 		Begin: Enum_UserInputState,
 		Change: Enum_UserInputState,
@@ -775,6 +894,10 @@ declare Enum: {
 		Top: Enum_VerticalAlignment,
 		Center: Enum_VerticalAlignment,
 		Bottom: Enum_VerticalAlignment,
+	},
+	VerticalScrollBarPosition: {
+		Right: Enum_VerticalScrollBarPosition,
+		Left: Enum_VerticalScrollBarPosition,
 	},
 	ZIndexBehavior: {
 		Global: Enum_ZIndexBehavior,
@@ -1031,6 +1154,19 @@ declare extern type Instance with
 	function IsKeepingWorldAwake(self): boolean
 	function SetNetworkOwner(self, player: Instance?): ()
 	function GetNetworkOwner(self): Instance?
+	function SetLocalTransparency(self, value: number): ()
+	function AddVertex(self, position: Vector3, normal: Vector3?, uv: Vector2?): number
+	function AddTriangle(self, a: number, b: number, c: number): number?
+	function RemoveTriangle(self, triangle: number): boolean
+	function SetVertexPosition(self, vertex: number, position: Vector3): boolean
+	function SetVertexNormal(self, vertex: number, normal: Vector3): boolean
+	function SetVertexUV(self, vertex: number, uv: Vector2): boolean
+	function SetVertexColor(self, vertex: number, colour: Color3, alpha: number?): boolean
+	function Clear(self): boolean
+	function Resize(self, width: number, height: number): boolean
+	function DrawRectangle(self, position: Vector2, size: Vector2, colour: Color3, transparency: number?): boolean
+	function DrawLine(self, from: Vector2, to: Vector2, colour: Color3, transparency: number?): boolean
+	function DrawCircle(self, centre: Vector2, radius: number, colour: Color3, transparency: number?): boolean
 	function GetAttribute(self, name: string): EngineAttribute?
 	function SetAttribute(self, name: string, value: EngineAttribute?): ()
 	function GetAttributes(self): { [string]: EngineAttribute }
@@ -1047,6 +1183,9 @@ declare extern type Instance with
 	MouseEnter: PointerSignal
 	MouseLeave: PointerSignal
 	MouseMoved: PointerSignal
+	DragStart: DragSignal
+	DragContinue: DragSignal
+	DragEnd: DragSignal
 	Focused: FocusSignal
 	FocusLost: FocusLostSignal
 	function GetGuiObjectsAtPosition(self, x: number, y: number): { Instance }
@@ -1069,13 +1208,16 @@ declare extern type BasePart extends PVInstance with
 	AngularDamping: number
 	CanCollide: boolean
 	CastShadow: boolean
+	CollisionGeometry: string
 	CollisionGroup: string
+	CollisionShape: Enum_ShapeKind
 	Color: Color3
 	CustomPhysicalProperties: boolean
 	Density: number
 	Elasticity: number
 	Friction: number
 	LinearDamping: number
+	read LocalTransparency: number
 	Locked: boolean
 	read Mass: number
 	Size: Vector3
@@ -1148,6 +1290,7 @@ declare extern type Material extends Instance with
 end
 
 declare extern type Humanoid extends Instance with
+	AutoRotate: boolean
 	Enabled: boolean
 	read Grounded: boolean
 	Health: number
@@ -1186,6 +1329,21 @@ declare extern type StringValue extends ValueBase with
 end
 
 declare extern type LocalizationTable extends ValueBase with
+end
+
+declare extern type ShaderScript extends Instance with
+	read Revision: number
+end
+
+declare extern type EditableMesh extends Instance with
+	read ContentId: string
+	read TriangleCount: number
+	read VertexCount: number
+end
+
+declare extern type EditableImage extends Instance with
+	read ContentId: string
+	read Size: Vector2
 end
 
 declare extern type LuaSourceContainer extends Instance with
@@ -1291,9 +1449,15 @@ declare extern type PVAdornment extends GuiBase3d with
 end
 
 declare extern type SelectionBox extends PVAdornment with
+	LineThickness: number
+	SurfaceColor3: Color3
+	SurfaceTransparency: number
 end
 
 declare extern type SelectionSphere extends PVAdornment with
+	LineThickness: number
+	SurfaceColor3: Color3
+	SurfaceTransparency: number
 end
 
 declare extern type HandleAdornment extends PVAdornment with
@@ -1335,10 +1499,17 @@ declare extern type GuiObject extends GuiBase2d with
 	BorderMode: Enum_BorderMode
 	BorderSizePixel: number
 	ClipsDescendants: boolean
+	Interactable: boolean
 	LayoutOrder: number
+	NextSelectionDown: Instance
+	NextSelectionLeft: Instance
+	NextSelectionRight: Instance
+	NextSelectionUp: Instance
 	Position: UDim2
 	Rotation: number
 	Selectable: boolean
+	SelectionImageObject: Instance
+	SelectionOrder: number
 	Size: UDim2
 	SizeConstraint: Enum_SizeConstraint
 	Visible: boolean
@@ -1354,12 +1525,23 @@ declare extern type CanvasGroup extends Frame with
 end
 
 declare extern type ScrollingFrame extends Frame with
+	read AbsoluteCanvasSize: Vector2
+	read AbsoluteWindowSize: Vector2
+	AutomaticCanvasSize: Enum_AutomaticSize
+	BottomImage: string
 	CanvasPosition: Vector2
 	CanvasSize: UDim2
+	ElasticBehavior: Enum_ElasticBehavior
+	HorizontalScrollBarInset: Enum_ScrollBarInset
+	MidImage: string
 	ScrollBarImageColor3: Color3
 	ScrollBarImageTransparency: number
 	ScrollBarThickness: number
 	ScrollingDirection: Enum_ScrollingDirection
+	ScrollingEnabled: boolean
+	TopImage: string
+	VerticalScrollBarInset: Enum_ScrollBarInset
+	VerticalScrollBarPosition: Enum_VerticalScrollBarPosition
 end
 
 declare extern type GuiButton extends GuiObject with
@@ -1367,10 +1549,15 @@ declare extern type GuiButton extends GuiObject with
 end
 
 declare extern type TextButton extends GuiButton with
+	read ContentText: string
 	Font: Enum_Font
 	LineHeight: number
+	MaxVisibleGraphemes: number
+	RichText: boolean
 	Text: string
+	read TextBounds: Vector2
 	TextColor3: Color3
+	read TextFits: boolean
 	TextScaled: boolean
 	TextSize: number
 	TextStrokeColor3: Color3
@@ -1383,12 +1570,16 @@ declare extern type TextButton extends GuiButton with
 end
 
 declare extern type ImageButton extends GuiButton with
+	HoverImage: string
 	Image: string
 	ImageColor3: Color3
 	ImageRectOffset: Vector2
 	ImageRectSize: Vector2
 	ImageTransparency: number
+	PressedImage: string
+	ResampleMode: Enum_ResamplerMode
 	ScaleType: Enum_ScaleType
+	Shader: string
 	SliceCenter: Rect
 	SliceScale: number
 	TileSize: UDim2
@@ -1398,10 +1589,15 @@ declare extern type GuiLabel extends GuiObject with
 end
 
 declare extern type TextLabel extends GuiLabel with
+	read ContentText: string
 	Font: Enum_Font
 	LineHeight: number
+	MaxVisibleGraphemes: number
+	RichText: boolean
 	Text: string
+	read TextBounds: Vector2
 	TextColor3: Color3
+	read TextFits: boolean
 	TextScaled: boolean
 	TextSize: number
 	TextStrokeColor3: Color3
@@ -1419,7 +1615,9 @@ declare extern type ImageLabel extends GuiLabel with
 	ImageRectOffset: Vector2
 	ImageRectSize: Vector2
 	ImageTransparency: number
+	ResampleMode: Enum_ResamplerMode
 	ScaleType: Enum_ScaleType
+	Shader: string
 	SliceCenter: Rect
 	SliceScale: number
 	TileSize: UDim2
@@ -1427,16 +1625,21 @@ end
 
 declare extern type TextBox extends GuiObject with
 	ClearTextOnFocus: boolean
+	read ContentText: string
 	CursorPosition: number
 	Font: Enum_Font
 	LineHeight: number
+	MaxVisibleGraphemes: number
 	MultiLine: boolean
 	PlaceholderColor3: Color3
 	PlaceholderText: string
+	RichText: boolean
 	SelectionStart: number
 	Text: string
+	read TextBounds: Vector2
 	TextColor3: Color3
 	TextEditable: boolean
+	read TextFits: boolean
 	TextScaled: boolean
 	TextSize: number
 	TextStrokeColor3: Color3
@@ -1469,23 +1672,35 @@ declare extern type ScreenGui extends LayerCollector with
 end
 
 declare extern type SurfaceGui extends LayerCollector with
+	Active: boolean
 	Adornee: Instance
 	AlwaysOnTop: boolean
 	Brightness: number
 	CanvasSize: Vector2
+	ClipsDescendants: boolean
 	Face: Enum_NormalId
 	LightInfluence: number
+	MaxDistance: number
 	PixelsPerStud: number
 	SizingMode: Enum_SurfaceSizingMode
+	ZOffset: number
 end
 
 declare extern type BillboardGui extends LayerCollector with
+	Active: boolean
 	Adornee: Instance
 	AlwaysOnTop: boolean
+	Brightness: number
+	ClipsDescendants: boolean
+	read CurrentDistance: number
+	DistanceStep: number
 	ExtentsOffset: Vector3
+	ExtentsOffsetWorldSpace: Vector3
 	LightInfluence: number
 	MaxDistance: number
+	PlayerToHideFrom: Instance
 	Size: UDim2
+	SizeOffset: Vector2
 	StudsOffset: Vector3
 	StudsOffsetWorldSpace: Vector3
 end
@@ -1508,9 +1723,13 @@ end
 declare extern type UIListLayout extends UILayout with
 	FillDirection: Enum_FillDirection
 	HorizontalAlignment: Enum_HorizontalAlignment
+	HorizontalFlex: Enum_UIFlexAlignment
+	ItemLineAlignment: Enum_ItemLineAlignment
 	Padding: UDim
 	SortOrder: Enum_SortOrder
 	VerticalAlignment: Enum_VerticalAlignment
+	VerticalFlex: Enum_UIFlexAlignment
+	Wraps: boolean
 end
 
 declare extern type UIGridLayout extends UILayout with
@@ -1522,6 +1741,28 @@ declare extern type UIGridLayout extends UILayout with
 	SortOrder: Enum_SortOrder
 	StartCorner: Enum_StartCorner
 	VerticalAlignment: Enum_VerticalAlignment
+end
+
+declare extern type UITableLayout extends UILayout with
+	FillDirection: Enum_FillDirection
+	FillEmptySpaceColumns: boolean
+	FillEmptySpaceRows: boolean
+	HorizontalAlignment: Enum_HorizontalAlignment
+	Padding: UDim2
+	SortOrder: Enum_SortOrder
+	VerticalAlignment: Enum_VerticalAlignment
+end
+
+declare extern type UIPageLayout extends UILayout with
+	Animated: boolean
+	Circular: boolean
+	CurrentPage: Instance
+	EasingDirection: Enum_EasingDirection
+	EasingStyle: Enum_EasingStyle
+	FillDirection: Enum_FillDirection
+	Padding: UDim
+	SortOrder: Enum_SortOrder
+	TweenTime: number
 end
 
 declare extern type UIConstraint extends UIComponent with
@@ -1555,13 +1796,42 @@ declare extern type UICorner extends UIComponent with
 end
 
 declare extern type UIStroke extends UIComponent with
+	ApplyStrokeMode: Enum_ApplyStrokeMode
 	Color: Color3
+	Enabled: boolean
+	LineJoinMode: Enum_LineJoinMode
+	StrokeSizingMode: Enum_StrokeSizingMode
 	Thickness: number
 	Transparency: number
 end
 
 declare extern type UIScale extends UIComponent with
 	Scale: number
+end
+
+declare extern type UIFlexItem extends UIComponent with
+	FlexMode: Enum_UIFlexMode
+	GrowRatio: number
+	ItemLineAlignment: Enum_ItemLineAlignment
+	ShrinkRatio: number
+end
+
+declare extern type UIGradient extends UIComponent with
+	Color: ColorSequence
+	Enabled: boolean
+	Offset: Vector2
+	Rotation: number
+	Transparency: NumberSequence
+end
+
+declare extern type UIDragDetector extends UIComponent with
+	BoundingUI: Instance
+	DragAxis: Vector2
+	DragStyle: Enum_UIDragDetectorDragStyle
+	Enabled: boolean
+	MaxDragTranslation: Vector2
+	MinDragTranslation: Vector2
+	ResponseStyle: Enum_UIDragDetectorDragStyleResponse
 end
 
 declare extern type Service extends Instance with
@@ -1571,6 +1841,7 @@ end
 
 declare extern type Workspace extends Service with
 	CurrentCamera: Instance
+	MaxSurfaces: number
 	SurfaceBounces: number
 	function Raycast(self, origin: Vector3, direction: Vector3, params: RaycastParams?): {
 		Instance: Instance,
@@ -1590,6 +1861,7 @@ declare extern type Lighting extends Service with
 	FogStart: number
 	GeographicLatitude: number
 	OutdoorAmbient: Color3
+	PostProcessShader: string
 end
 
 declare extern type ReplicatedFirst extends Service with
@@ -1646,6 +1918,7 @@ declare extern type Player extends Instance with
 	read Backpack: Instance
 	Character: Instance
 	DisplayName: string
+	LocalSimulatedNetworkLatency: number
 	read PlayerGui: Instance
 	read PlayerScripts: Instance
 	RespawnTime: number
@@ -2136,6 +2409,9 @@ type CreatableInstances = {
 	ValueBase: ValueBase,
 	StringValue: StringValue,
 	LocalizationTable: LocalizationTable,
+	ShaderScript: ShaderScript,
+	EditableMesh: EditableMesh,
+	EditableImage: EditableImage,
 	LuaSourceContainer: LuaSourceContainer,
 	Script: Script,
 	LocalScript: LocalScript,
@@ -2180,6 +2456,8 @@ type CreatableInstances = {
 	UILayout: UILayout,
 	UIListLayout: UIListLayout,
 	UIGridLayout: UIGridLayout,
+	UITableLayout: UITableLayout,
+	UIPageLayout: UIPageLayout,
 	UIConstraint: UIConstraint,
 	UIAspectRatioConstraint: UIAspectRatioConstraint,
 	UISizeConstraint: UISizeConstraint,
@@ -2188,6 +2466,9 @@ type CreatableInstances = {
 	UICorner: UICorner,
 	UIStroke: UIStroke,
 	UIScale: UIScale,
+	UIFlexItem: UIFlexItem,
+	UIGradient: UIGradient,
+	UIDragDetector: UIDragDetector,
 	Player: Player,
 	Team: Team,
 }

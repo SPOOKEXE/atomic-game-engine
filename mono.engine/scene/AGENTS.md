@@ -73,6 +73,55 @@ type on both sides of that call is the only thing that narrows it.
 - Anything that makes `scene` construct or query a grid. `scene` takes an
   `ecs::Store &` and nothing larger, and it holds data and one resolver.
 
+## `collision` is here for `CollisionShapes` and for nothing else
+
+A `Collider` names its geometry with a `core::Name` and `scene::CollisionShapes`
+is where that name resolves to a hull or a triangle soup. That table is the whole
+of the edge to L5.
+
+**Why the table is at L7 rather than in `physics`.** `physics` is L8 and could
+hold it - and then anything that merely wanted to *fill* it would have to reach
+L8 to do so, and the thing that fills it is whoever loaded the content. `scene`
+already owns the components that name shapes and is below every host.
+
+**Why the geometry could not live in `assets` where the meshes are.**
+`assets::MeshData` is L8, the same height as `physics`, and both modules'
+`AGENTS.md` refuse an edge between them - two modules at one height have to stay
+disjoint. So a mesh collider could not be `physics` reaching sideways for a mesh;
+the geometry had to enter the stack from below. `collision/AGENTS.md` carries the
+rest of that argument.
+
+Refuse anything that widens it:
+
+- **Reading a file here.** A hull arrives as points and a mesh as vertices and
+  indices. Turning a `.glb` into either is `bake`'s job at L9, and an edge from
+  here to it would invert the stack.
+- **Building a hull here.** `collision::BuildConvexHull` is a bake-time
+  algorithm with a point cap and a determinism requirement; calling it from a
+  property setter would put quickhull on the frame a script assigned a name.
+- **A `collision::ConvexHull` on a component.** `Collider` carries the *name*,
+  for rule 4's reason: a name survives a save file, a wire format and a rename,
+  and a hull is bytes that would then exist once per part that used it.
+
+**Who fills it is `game`, at L10, and there is one of them.** `game::
+AddCollisionShapes` is the only conversion from a mesh to the two shapes; the
+client, the studio and a headless server all reach it, so all three resolve a
+name to the same geometry. A host that built a hull of its own would be a host
+that eventually disagrees with the others about where a body stops.
+
+**`CollisionShapes` is registered with a writer that writes nothing, and that is
+deliberate.** A hull is derived from content the receiving side already has, so
+putting it on the wire is sending a conclusion instead of its input - and the
+conclusion is the half an attacker gets to choose. A shape whose bound disagrees
+with its points is a collider that stops things it is not touching.
+`assets::MeshData` refuses to store its own bound for the same reason.
+
+It has an empty writer rather than no writer because `Store::Save` refuses a
+resource with no serialisation at all, and the studio snapshots a universe every
+time Play is pressed - `client::DrawList` is registered the same way for the same
+reason. The reader clears, so a restored world is handed its shapes again by
+whichever host restored it rather than inheriting a table nothing owns.
+
 ## A fixture is found by class and never by name
 
 `WorkspaceOf` was `FindFirstRoot("Workspace")` from v0.7 to v0.17, and so was

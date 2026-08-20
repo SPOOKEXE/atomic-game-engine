@@ -73,6 +73,29 @@ namespace engine::scene {
 
 		// A cylinder about the local Y axis, radius in X and half-height in Y.
 		Cylinder,
+
+		// A baked convex hull, named by `Collider::Geometry`.
+		//
+		// **`Extent` is not read**, which is the one thing about this kind that
+		// surprises: a hull carries its own points, so the extent that describes
+		// the other three shapes describes nothing here. A hull whose name
+		// resolves to nothing collides as its bound, which is stated in
+		// `Collider::Geometry` and is the honest fallback rather than a part that
+		// silently stops colliding.
+		//
+		// @since v0.17
+		Hull,
+
+		// A baked triangle mesh, named by `Collider::Geometry`.
+		//
+		// **A surface and not a solid**, per `collision::TriangleMesh`: a body
+		// resting on one is held up by the triangles it touches, and a body that
+		// has been put *through* it is not pushed back out because nothing can
+		// say which side it should have been on. That is why this kind is for
+		// static geometry and a moving body wants `Hull`.
+		//
+		// @since v0.17
+		Mesh,
 	};
 
 	// Returns a stable, human-readable name for a body kind.

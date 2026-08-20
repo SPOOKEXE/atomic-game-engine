@@ -95,3 +95,44 @@ purpose.
 registered by scripts today, so a loaded world rebuilds its table when its
 scripts run. The moment a studio lets somebody edit a material by hand, that
 stops being true and this module gains a `<Surfaces>` section.
+
+## One place bakes a hull, and every host calls it
+
+`CollisionContent.hpp` is the only conversion from `assets::MeshData` to the
+`collision::ConvexHull` and `collision::TriangleMesh` that a `scene::Collider`
+names. The client had its own inline copy until v0.17 and the server had none,
+which is how a headless server came to have mesh colliders it could not resolve:
+every one of them fell back to the part's bound in silence, and a client and a
+server disagreed about where a player was standing while both looked
+self-consistent.
+
+**A second copy of the conversion anywhere is the bug.** Two callers that build
+a hull separately will eventually build different hulls - a different tolerance,
+a different vertex order, one that welds and one that does not - and physics on
+either side of a link has to reach the same answer.
+
+**The built-ins are content that never arrives.** `assets::MakeBuiltin`
+generates the six rather than shipping files, so they never travel the path an
+arriving asset takes. Every host calls `RecordBuiltinCollisionShapes` on every
+world it simulates; without it a `MeshPart` set to `Cube` with a hull collider
+resolves to nothing.
+
+**Bake once, merge many.** The `Add` functions fill a table and the
+`Record`/`Merge` functions put one on a world, because quickhull over a model is
+not free and `SetResource` copies a `scene::CollisionShapes` whole. A host with
+several worlds fills one table and merges it; a host that called a per-world
+function in a loop would run the same quickhull once per world. `Plane` hulls to
+no faces, which is `BuildConvexHull`'s documented answer for a flat input and not
+a failure - a quad collides as a quad.
+
+## This module may see `assets`, and may not see `bake`
+
+`Engine::assets` is here for `CollisionContent.cpp` alone: the mesh format, the
+manifest and the chunk store, none of which open anything this module did not
+already have bytes for. **`Engine::bake` remains forbidden** for the reason the
+`bakegraph` edge exists - it carries the PNG, JPEG, GIF, BMP, OBJ, glTF and PMX
+readers, `server` links this target, and a dedicated server has no business
+holding a decoder. `D00102`.
+
+Nothing here opens a file or a socket. A caller hands over bytes it already has,
+and the trust boundary stays `delivery`'s.

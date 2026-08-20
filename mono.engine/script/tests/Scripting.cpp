@@ -16,6 +16,8 @@
 #include <engine/physics/Pipeline.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/EditableImage.hpp>
+#include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
@@ -953,6 +955,129 @@ TEST_CASE("attributes hold what a script puts in them", "[scripting]") {
 			part:SetAttribute("Other", Instance.new("Part"))
 		end)
 		assert(not ok, 'an instance was accepted as an attribute')
+	)");
+}
+
+// --- EditableMesh ------------------------------------------------------------
+
+TEST_CASE("a script builds a triangle mesh and reads it back", "[scripting]") {
+	RegisterClasses();
+	engine::scene::EditableMeshClass();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local mesh = Instance.new("EditableMesh")
+		assert(mesh.VertexCount == 0, 'a fresh mesh already had vertices')
+		assert(mesh.TriangleCount == 0, 'a fresh mesh already had triangles')
+		assert(#mesh.ContentId > 0, 'ContentId was empty')
+
+		local a = mesh:AddVertex(Vector3.new(0, 0, 0))
+		local b = mesh:AddVertex(Vector3.new(1, 0, 0), Vector3.new(0, 0, 1), Vector2.new(1, 0))
+		local c = mesh:AddVertex(Vector3.new(0, 1, 0))
+		assert(a == 0 and b == 1 and c == 2, 'vertex ids were not sequential from zero')
+		assert(mesh.VertexCount == 3, 'VertexCount did not follow AddVertex')
+
+		local triangle = mesh:AddTriangle(a, b, c)
+		assert(triangle == 0, 'the first triangle was not id zero')
+		assert(mesh.TriangleCount == 1, 'TriangleCount did not follow AddTriangle')
+
+		-- A vertex id past what exists is refused rather than silently
+		-- wrapping into some other triangle.
+		assert(mesh:AddTriangle(a, b, 99) == nil, 'a bad vertex id built a triangle anyway')
+
+		assert(mesh:SetVertexColor(a, Color3.new(1, 0, 0), 0.5), 'SetVertexColor was refused on a real vertex')
+		assert(not mesh:SetVertexColor(99, Color3.new(1, 0, 0)), 'SetVertexColor accepted a bad id')
+
+		assert(mesh:RemoveTriangle(triangle), 'the one triangle could not be removed')
+		assert(mesh.TriangleCount == 0, 'TriangleCount did not follow RemoveTriangle')
+		assert(not mesh:RemoveTriangle(0), 'removing from an empty mesh did not report failure')
+
+		assert(mesh:Clear(), 'Clear was refused')
+		assert(mesh.VertexCount == 0, 'Clear left vertices behind')
+
+		-- Two meshes never share a content id.
+		local other = Instance.new("EditableMesh")
+		assert(mesh.ContentId ~= other.ContentId, 'two EditableMeshes shared a ContentId')
+
+		-- **The door that is not a property write.** `MeshId` is Roblox's
+		-- spelling and a plain string assignment is what makes an
+		-- `EditableMesh` usable from a `MeshPart` with nothing more exotic
+		-- than the property table every other mesh reference already goes
+		-- through.
+		local part = Instance.new("MeshPart")
+		part.MeshId = other.ContentId
+		assert(part.MeshId == other.ContentId, 'MeshId did not hold the ContentId it was given')
+	)");
+}
+
+TEST_CASE("AddVertex refuses an instance that is not an EditableMesh", "[scripting]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local part = Instance.new("Part")
+		local ok = pcall(function()
+			part:AddVertex(Vector3.new(0, 0, 0))
+		end)
+		assert(not ok, 'AddVertex ran on a Part')
+	)");
+}
+
+// --- EditableImage ------------------------------------------------------------
+
+TEST_CASE("a script paints an image and reads its size back", "[scripting]") {
+	RegisterClasses();
+	engine::scene::EditableImageClass();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local image = Instance.new("EditableImage")
+		assert(image.Size == Vector2.new(256, 256), 'the default size was not 256x256')
+		assert(#image.ContentId > 0, 'ContentId was empty')
+
+		assert(image:Resize(8, 4), 'Resize was refused')
+		assert(image.Size == Vector2.new(8, 4), 'Size did not follow Resize')
+
+		assert(image:DrawRectangle(Vector2.new(0, 0), Vector2.new(8, 4), Color3.new(1, 0, 0)), 'DrawRectangle was refused')
+		assert(image:DrawLine(Vector2.new(0, 0), Vector2.new(7, 3), Color3.new(0, 1, 0)), 'DrawLine was refused')
+		assert(image:DrawCircle(Vector2.new(4, 2), 1.5, Color3.new(0, 0, 1)), 'DrawCircle was refused')
+
+		-- Width and height are each clamped to at least one rather than
+		-- refused - `ResizeEditableImage`'s own header says why.
+		assert(image:Resize(0, 0), 'a zero size was refused rather than clamped')
+		assert(image.Size == Vector2.new(1, 1), 'a zero size did not clamp to one')
+
+		-- An absurd size is refused rather than allocating without limit.
+		assert(not image:Resize(1000000, 1000000), 'an absurd Resize was accepted')
+
+		-- Two images never share a content id.
+		local other = Instance.new("EditableImage")
+		assert(image.ContentId ~= other.ContentId, 'two EditableImages shared a ContentId')
+
+		-- The same door `EditableMesh.ContentId` uses to reach a `MeshPart`
+		-- works here for an ordinary texture reference - `TextureID` is a
+		-- `MeshPart`'s own property, for `SurfaceAppearance::ColourMap`'s
+		-- reason.
+		local part = Instance.new("MeshPart")
+		part.TextureID = other.ContentId
+		assert(part.TextureID == other.ContentId, 'TextureID did not hold the ContentId it was given')
+	)");
+}
+
+TEST_CASE("DrawRectangle refuses an instance that is not an EditableImage", "[scripting]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local part = Instance.new("Part")
+		local ok = pcall(function()
+			part:DrawRectangle(Vector2.new(0, 0), Vector2.new(1, 1), Color3.new(1, 1, 1))
+		end)
+		assert(not ok, 'DrawRectangle ran on a Part')
 	)");
 }
 

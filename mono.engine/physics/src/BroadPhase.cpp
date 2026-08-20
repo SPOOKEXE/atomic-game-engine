@@ -21,12 +21,18 @@
 namespace engine::physics {
 
 	namespace {
-		// The pair, with the smaller entity id first.
-		CandidatePair Ordered(ecs::Entity left, ecs::Entity right) {
+		// The pair, with the smaller entity id first, and its indices swapped to
+		// match.
+		//
+		// **The indices swap with the entities, and forgetting that is the one
+		// silent way to get this wrong**: the narrow phase would then test the
+		// right two shapes in the wrong order, and every normal from an
+		// asymmetric pair would point the wrong way.
+		SourcedPair Ordered(ecs::Entity left, ecs::Entity right, uint32_t leftAt, uint32_t rightAt) {
 			if (left.Id < right.Id) {
-				return CandidatePair{left, right};
+				return SourcedPair{CandidatePair{left, right}, CandidateSource{leftAt, rightAt}};
 			}
-			return CandidatePair{right, left};
+			return SourcedPair{CandidatePair{right, left}, CandidateSource{rightAt, leftAt}};
 		}
 	}
 
@@ -41,7 +47,11 @@ namespace engine::physics {
 		// Cleared, never freed. A steady scene stops allocating a pair list
 		// after its first tick.
 		std::vector<CandidatePair> &pairs = PipelineInternals::Pairs(*world);
+		std::vector<CandidateSource> &sources = PipelineInternals::PairSources(*world);
+		std::vector<SourcedPair> &sourced = PipelineInternals::SourcedPairs(*world);
 		pairs.clear();
+		sources.clear();
+		sourced.clear();
 
 		const std::vector<spatial::Proxy> &dynamicProxies = PipelineInternals::DynamicProxies(*world);
 		const std::vector<ColliderRecord> &dynamicRecords = PipelineInternals::DynamicRecords(*world);
@@ -92,7 +102,9 @@ namespace engine::physics {
 				if (!PairAdmitted(a, b)) {
 					continue;
 				}
-				pairs.push_back(Ordered(a.Owner, b.Owner));
+				sourced.push_back(
+					Ordered(a.Owner, b.Owner, static_cast<uint32_t>(index), static_cast<uint32_t>(other))
+				);
 			}
 
 			const spatial::QueryResult anchored = spatial::OverlapBox(staticIndex, box, a.Mask, candidates);
@@ -111,7 +123,12 @@ namespace engine::physics {
 				if (!PairAdmitted(a, b)) {
 					continue;
 				}
-				pairs.push_back(Ordered(a.Owner, b.Owner));
+				sourced.push_back(Ordered(
+					a.Owner,
+					b.Owner,
+					static_cast<uint32_t>(index),
+					static_cast<uint32_t>(candidates[at]) | CandidateSource::STATIC
+				));
 			}
 		}
 
@@ -120,12 +137,25 @@ namespace engine::physics {
 		// gives one answer on a scene built one way and another on the same
 		// scene built another way - and `just determinism` reports it a long
 		// way from here.
-		std::sort(pairs.begin(), pairs.end());
+		std::sort(sourced.begin(), sourced.end());
 
 		// Each pair once. The generation above already reports each one once;
 		// this is what makes "once" a property of the list the solver reads
 		// rather than a property of how it was filled, and applying one contact
 		// twice doubles its impulse.
-		pairs.erase(std::unique(pairs.begin(), pairs.end()), pairs.end());
+		sourced.erase(std::unique(sourced.begin(), sourced.end()), sourced.end());
+
+		// **Split into the public list and the private one, after the sort.**
+		// The pair list is what a manifold, a contact event and every consumer
+		// outside this module reads, and it names entities; the indices beside it
+		// are into `PhysicsWorld`'s own arrays and are nobody else's business -
+		// `CandidateSource` says why publishing one would hand a caller a number
+		// that is plausible and wrong.
+		pairs.reserve(sourced.size());
+		sources.reserve(sourced.size());
+		for (const SourcedPair &row : sourced) {
+			pairs.push_back(row.Pair);
+			sources.push_back(row.Source);
+		}
 	}
 }

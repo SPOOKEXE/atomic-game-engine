@@ -23,6 +23,7 @@
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/examples/Scene.hpp>
+#include <engine/graph/PipelineDocument.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/world/Universe.hpp>
@@ -126,6 +127,70 @@ namespace client {
 	// @since v0.15
 	size_t CollectPortalViews(engine::ecs::Store &store, std::vector<engine::render::PortalView> &portals);
 
+	// One world, as the things that address worlds by name see it.
+	//
+	// @since v0.17
+	struct WorldIdentity {
+		// The world itself.
+		engine::world::WorldId Id;
+
+		// The name a scene authored against this world. Its own for a world the
+		// host owns, and the world it mirrors for a replica - see
+		// `world::Replica::Of`.
+		engine::core::Name Authored;
+
+		// Whose copy this is, from `world::Replica::View`. Invalid for a world
+		// that is not a replica.
+		engine::core::Name View;
+
+		// Whether this world is somebody's copy rather than the original.
+		bool IsReplica = false;
+	};
+
+	// Every world in the universe, with the name its panes are addressed by.
+	//
+	// **Because `Universe::NameOf` is not that name once a host mirrors a
+	// world.** A replica is registered apart from what it mirrors - rule 4 makes
+	// a name the identity, so two worlds cannot share one - and the editor's are
+	// `"<world> (client 1)"`. Everything a scene *authored* still says
+	// `"<world>"`: a `Portal.DestinationWorld` is a string somebody typed and
+	// replication carries it across verbatim. Comparing those two directly is
+	// what made a cross-world pane in a client's view show a flat slab, because
+	// nothing on either side of the pair recognised the other.
+	//
+	// **Enters every world, so it must be called from outside one.**
+	// `Universe::Enter` is not re-entrant and the resource this reads lives in
+	// each store.
+	//
+	// @param universe The worlds.
+	// @param worlds   Cleared and filled, keeping capacity.
+	// @return How many worlds were written.
+	// @since v0.17
+	size_t SurveyWorlds(engine::world::Universe &universe, std::vector<WorldIdentity> &worlds);
+
+	// Which world a pane in `viewer` means when it names `wanted`.
+	//
+	// **The same viewer's copy, or the original.** A host that mirrors a
+	// universe for two clients holds two copies of every world, and a hole in
+	// one client's copy of a room leads to that client's copy of the next -
+	// pointing it at the other client's would show one player another player's
+	// interpolated view, and pointing it at the authority would show a room
+	// nobody's character is in. So a replica prefers a replica of the same
+	// `View`, and everything else takes the first world of the authored name.
+	//
+	// Pure, and deliberately: `SurveyWorlds` does the entering once and this
+	// decides, so a pass resolving several names pays for one walk.
+	//
+	// @param worlds The survey.
+	// @param viewer The world being drawn.
+	// @param wanted The name the pane carries.
+	// @return The world to draw, or an invalid id where the name matches
+	//         nothing but the viewer itself.
+	// @since v0.17
+	engine::world::WorldId ResolveDestinationWorld(
+		std::span<const WorldIdentity> worlds, engine::world::WorldId viewer, const engine::core::Name &wanted
+	);
+
 	// Points a cross-world portal's surface at the world it names.
 	//
 	// **The half of a portal a store cannot do for itself.** `AimSurfaceCameras`
@@ -210,12 +275,64 @@ namespace client {
 		std::vector<engine::render::SurfaceView> &views
 	);
 
-	// Turns a world's particle pool into the batches the renderer draws.
+	// Everything a frame's particles need, on one object.
 	//
-	// **One batch per emitter that has live particles, and a span rather than a
-	// copy.** The pool's blocks are contiguous per emitter with the live ones a
-	// prefix - `effects::ParticleSystem` - so a batch is that prefix pointed at,
-	// and half a million particles reach the renderer without being moved.
+	// **Four lists rather than four out-parameters**, because they are only
+	// meaningful together: a batch names a block, a birth names a slot of the
+	// pool those blocks index into, and a seam is a property of the same world.
+	// Handing them separately made the studio's copy - see `Detach` - a thing
+	// four call sites had to remember.
+	//
+	// @since v0.17
+	struct ParticleFrame {
+		// One per emitter with a block, in the emitter column's order.
+		std::vector<engine::render::ParticleBatch> Batches;
+
+		// What was spawned on the tick that just ran.
+		//
+		// **Copied out of the world rather than spanned into it**, so a caller
+		// that renders outside the tick has something that outlives it. A birth
+		// is sixty-four bytes and a busy scene has a couple of thousand a tick.
+		std::vector<engine::effects::ParticleBirth> Births;
+
+		// The portal panes, if the world has any.
+		std::vector<engine::render::ParticleSeam> Seams;
+
+		// How many slots the device pool must hold, from the world's own.
+		uint32_t Pool = 0;
+
+		// How many blocks the world has ever handed out, which is what sizes the
+		// renderer's per-block tables. See `render::View::ParticleBlocks`.
+		uint32_t BlockCount = 0;
+
+		// Where `Batches` point when they have been detached from the world.
+		//
+		// Empty for a caller that renders inside the tick, which the client does.
+		std::vector<engine::effects::EmitterBlock> Blocks;
+
+		// Copies the blocks the batches point at and repoints them.
+		//
+		// **For a caller that renders outside the tick that filled this**, which
+		// is the studio: `Renderer::Render` happens after `Universe::Enter` has
+		// returned, and by then the world may be stepping again. Copying the
+		// batches alone would copy the pointers.
+		//
+		// A block is about three hundred bytes and a scene has thousands of them,
+		// so this is a couple of megabytes - against the sixteen the same call
+		// used to copy when a batch was a span of particles.
+		void Detach();
+
+		// Empties every list. `Pool` is kept, being a property of the world.
+		void Clear();
+	};
+
+	// Turns a world's particle pool into what the renderer's step and draw need.
+	//
+	// **One batch per emitter with a block, pointing at the block rather than at
+	// its particles.** Since v0.17 the device owns the pool: `particle-step.comp`
+	// integrates and shades from the block's own parameters, so what reaches the
+	// renderer is a few hundred bytes an emitter and not the half million
+	// particles they between them hold.
 	//
 	// **Here rather than in `effects`, for `CollectSurfaceViews`'s reason.**
 	// `render::ParticleBatch` is a `client`-tier type and `effects` is `shared`;
@@ -227,12 +344,13 @@ namespace client {
 	// particle, which is the whole reason `ParticleInstance` is twenty-eight
 	// bytes.
 	//
-	// @param store   The world.
-	// @param batches Cleared and filled. Valid until the world's pool is stepped
-	//                again, which is why the caller submits within the frame.
+	// @param store The world.
+	// @param frame Cleared and filled. Its batches point into the world's block
+	//              list, so they are valid until the world is stepped again -
+	//              see `ParticleFrame::Detach` for the caller that cannot rely
+	//              on that.
 	// @return How many batches have something to draw.
-	size_t
-	CollectParticleBatches(engine::ecs::Store &store, std::vector<engine::render::ParticleBatch> &batches);
+	size_t CollectParticleBatches(engine::ecs::Store &store, ParticleFrame &frame);
 
 	// Turns a world's `scene::Light` rows into the lights the renderer takes.
 	//
@@ -330,11 +448,31 @@ namespace client {
 	//         already had one.
 	bool InstallDefaultCamera(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler);
 
-	// TODO(render-pipeline): `InstallWorldPipelines` was declared here.
+	// Installs one universe rendering profile under a key qualified by world.
 	//
-	// See the marker in `Scene.cpp` for what it did and the three decisions in
-	// it worth carrying over. Its callers are marked too: `Client.cpp`'s render
-	// call, and the studio's viewport.
+	// The renderer owns compiled device plans and knows nothing about stores.
+	// This client-tier join reads the universe `PipelineSet`, removes a stale key
+	// from an earlier install, and hands one complete graph across. Two worlds may
+	// select the same profile without colliding because the installed key
+	// includes `world`.
+	//
+	// The world's selected profile is tried first. Otherwise `Default PBR` and
+	// then each remaining profile are tried, which also recovers from an invalid
+	// authored graph. Profiles that this world does not select stay as documents
+	// and consume no runtime renderer resources.
+	// An invalid return selects the renderer's standard frame.
+	//
+	// @param profiles The universe's authored documents.
+	// @param renderer The runtime cache to update.
+	// @param world    The stable world number used to qualify keys.
+	// @param selected The profile selected in this world's settings.
+	// @return The key this world's primary view should select.
+	engine::core::Name InstallRenderingProfiles(
+		const engine::graph::PipelineSet &profiles,
+		engine::render::Renderer &renderer,
+		uint64_t world,
+		engine::core::Name selected
+	);
 
 	// Registers this module's own types under explicit names.
 	//

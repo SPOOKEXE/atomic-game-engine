@@ -20,11 +20,11 @@
 // at the barrier, on one thread, which is why creating a world from inside a
 // tick queues rather than mutating the world list underneath the batch.
 //
-// **Worlds are the batch, not threads.** Step 3 is one `Jobs::For` over the
-// active worlds. There is no thread per world: the pool is sized once, the
-// caller drains alongside it, and a world is picked up by whichever worker gets
-// to it. That is why a world's store rebinds every tick and why a world tick
-// must never block.
+// **Worlds keep assigned execution lanes.** Step 3 is one `Jobs::ForWorkers`
+// over the active worlds. Every lane belongs to a worker pinned to one physical
+// core. A world keeps its lane while that pinned worker set is unchanged;
+// excess worlds share lanes and execute serially there. A world tick must never
+// block because its lane may have other worlds waiting behind it.
 //
 // @tier L4 · shared
 
@@ -185,6 +185,19 @@ namespace engine::world {
 		uint64_t Deliveries = 0;
 	};
 
+	// One request to prepare a world's frame-rate presentation data.
+	//
+	// The request is a value so a host can gather several visible worlds, leave
+	// every store, and then dispatch them together. No store reference or pointer
+	// crosses the lane boundary.
+	//
+	// @since v0.17
+	struct Presentation {
+		WorldId World;
+		float FrameSeconds = 0.0f;
+		float Alpha = 0.0f;
+	};
+
 	// Owns worlds and drives them.
 	//
 	// @since v0.2
@@ -300,18 +313,75 @@ namespace engine::world {
 
 		// What a world was configured with.
 		//
-		// **Read-only, and there is no setter to match it.** A world's tick
-		// rate is decided when it is created and changing one underneath a
-		// running simulation is a different operation with different answers
-		// about the ticks already in flight. This exists because a save file
-		// has to write what a world actually is: `game::WriteGame` wrote the
-		// defaults for every world before it, so a scene authored at 30Hz
-		// saved as 60 and nothing said so.
+		// **A copy, and `Reconfigure` below is the way back.** This exists
+		// because a save file has to write what a world actually is:
+		// `game::WriteGame` wrote the defaults for every world before it, so a
+		// scene authored at 30Hz saved as 60 and nothing said so.
+		//
+		// It said there was no setter until v0.17, on the grounds that changing
+		// a rate underneath a running simulation is a different operation with
+		// different answers about the ticks already in flight. That reasoning
+		// survives in what `Reconfigure` will not do - it will not rename a
+		// world, and it does not rebuild the timestep - rather than in refusing
+		// the whole thing.
 		//
 		// @param id The world to ask about.
 		// @return The settings, or a default-constructed set for an unknown
 		//         world.
 		WorldSettings SettingsOf(WorldId id) const;
+
+		// Re-applies a world's settings, keeping its name.
+		//
+		// **The setter the paragraph above used to say did not exist.** The
+		// argument it made still holds for what this refuses: a *name* is what
+		// the registry is keyed on and what crosses every boundary, so renaming
+		// is a different operation and this ignores `settings.Name`. What it no
+		// longer refuses is the rates, and the reason is that they turned out to
+		// be the numbers somebody most needs to change and had no way to: the
+		// three tick rates reach a `.agame` file and a server command line, and
+		// until v0.17 they reached no editor at all - so a world of a hundred
+		// thousand bodies could be made affordable everywhere except in the
+		// program somebody builds it in.
+		//
+		// **Applied at once rather than queued to the barrier.** `Create` and
+		// `Destroy` queue because they move the world list underneath a running
+		// batch; this writes one world's own settings and moves nothing, which
+		// is the same ground `SetRenderingProfile` stands on. `World::Owed`
+		// re-reads the rate every frame, so a change is in force on the next
+		// frame with the accumulator intact.
+		//
+		// **`PhysicsTickRate` is stored and not pushed.** This module is at L4
+		// and `physics` at L8, so a caller that changes it must also call
+		// `physics::SetPhysicsTickRate` on the world's store - `World::
+		// Reconfigure` carries the whole of that argument.
+		//
+		// @param id       The world to re-configure.
+		// @param settings What to become. `Name` is ignored.
+		// @return `Ok`, or `NoSuchWorld`.
+		WorldStatus Reconfigure(WorldId id, const WorldSettings &settings);
+
+		// Whether a world has ticked past its replication clock since this was
+		// last asked, clearing the answer.
+		//
+		// The host calls it once per frame per world it publishes; `World::
+		// TakeReplicationTick` carries what the answer means and why asking is
+		// what clears it. A remote or unknown world answers `false`, because
+		// this process is not the one that would publish it.
+		//
+		// @param id The world to ask about.
+		// @return `true` when the world should publish now.
+		bool TakeReplicationTick(WorldId id);
+
+		// Selects one universe-owned rendering profile for a world.
+		//
+		// The name is stored with the world and resolved by a client. An invalid
+		// name deliberately selects no authored profile, which lets the renderer
+		// use its built-in fallback.
+		//
+		// @param id      The world whose presentation changes.
+		// @param profile The stable profile name.
+		// @return `NoSuchWorld`, or `Ok`.
+		WorldStatus SetRenderingProfile(WorldId id, core::Name profile);
 
 		// What state a world is in.
 		//
@@ -353,17 +423,39 @@ namespace engine::world {
 		// @tick
 		void Tick(float frameSeconds);
 
-		// Runs one world's presentation phase, on the driver thread.
+		// Runs one world's presentation phase on its stable execution lane.
 		//
 		// Separate from Tick because a client renders one world while the rest
 		// keep simulating, and because presentation advances at the frame rate
 		// rather than the tick rate.
+		//
+		// In WorldParallel mode the call blocks while the world's pinned worker
+		// runs PreRender. SceneParallel mode and unavailable affinity use the
+		// driver-thread fallback, preserving the same result with different
+		// placement.
 		//
 		// @param id           The world to present.
 		// @param frameSeconds Wall seconds the frame took.
 		// @param alpha        Interpolation position between the last two ticks.
 		// @return Whether the world exists.
 		WorldStatus Present(WorldId id, float frameSeconds, float alpha);
+
+		// Runs several worlds' presentation phases on their stable lanes.
+		//
+		// A client or editor should submit exactly the worlds demanded by visible
+		// viewports and cross-world captures. Distinct lanes run concurrently;
+		// worlds sharing a lane remain serial. The call joins before returning, so
+		// copied draw packets can be collected immediately and no work crosses a
+		// frame boundary.
+		//
+		// Unknown and remote worlds are ignored. Repeated world ids are refused by
+		// omission after the first request because one PreRender pass is one frame
+		// of derived world state.
+		//
+		// @param requests Value-only presentation requests.
+		// @return The number of local worlds presented.
+		// @tick
+		size_t PresentMany(std::span<const Presentation> requests);
 
 		// Runs `body` against a world's storage, on the driver thread.
 		//
@@ -433,6 +525,28 @@ namespace engine::world {
 		//
 		// @param budget The new per-world budget.
 		void SetBusBudgetPerTick(uint32_t budget);
+
+		// Changes how many channel deliveries one world may have queued per
+		// barrier.
+		//
+		// The router reads the settings at every barrier, so the new bound
+		// applies from the next one. Zero refuses every channel delivery,
+		// which is the same deliberate reading `SetBusBudgetPerTick` gives
+		// zero.
+		//
+		// @param limit The new per-destination queue bound.
+		// @since v0.17
+		void SetChannelQueueLimit(uint32_t limit);
+
+		// Changes how many channels one world may hold open.
+		//
+		// Applies to *opens* from the next barrier; channels already held stay
+		// held, because closing one on the world's behalf is the refusal
+		// `world/AGENTS.md` argues against.
+		//
+		// @param channels The new per-world channel table bound.
+		// @since v0.17
+		void SetChannelsPerWorld(uint32_t channels);
 
 		// The number of worlds subscribed to a topic.
 		//
@@ -543,7 +657,7 @@ namespace engine::world {
 		std::vector<RemoteDelivery> TakeOutbound();
 
 		// The snapshot format this build writes and accepts.
-		static constexpr uint32_t SNAPSHOT_VERSION = 2;
+		static constexpr uint32_t SNAPSHOT_VERSION = 5;
 
 		// Reports whether the caller is the driver thread.
 		//
@@ -567,6 +681,7 @@ namespace engine::world {
 
 		void Apply(const Control &control);
 		void DrainControls();
+		void RefreshLanes(unsigned laneCount);
 		WorldId Adopt(const WorldSettings &settings, core::Name host = {});
 		World *Reach(WorldId id);
 		const World *Reach(WorldId id) const;
@@ -588,12 +703,28 @@ namespace engine::world {
 		// inside the thing being booked.
 		std::vector<core::Name> Hosts;
 
+		// The pinned worker holding each local world's stable execution lane,
+		// parallel to `Registry`. More worlds than workers share lanes, but tasks
+		// on one lane are serial and therefore never contend for its processor.
+		static constexpr unsigned INVALID_LANE = static_cast<unsigned>(-1);
+		std::vector<unsigned> LaneByWorld;
+		unsigned LaneCount = 0;
+
 		std::vector<Control> Pending;
 
 		// Reused between driver ticks rather than rebuilt, because the active
 		// list is walked every frame and most frames it is nearly the same.
 		std::vector<World *> ActiveList;
 		std::vector<int> OwedList;
+		std::vector<unsigned> ActiveLanes;
+		std::vector<unsigned> DispatchLanes;
+
+		// Reused by PresentMany. The public requests are values, while these
+		// pointers remain private to the joined dispatch that consumes them.
+		std::vector<World *> PresentationList;
+		std::vector<Presentation> PresentationRequests;
+		std::vector<unsigned> PresentationLanes;
+		std::vector<uint8_t> PresentationQueued;
 
 		// The bus backends and the barrier that applies traffic to them. Held
 		// by pointer so the header does not have to describe either - a

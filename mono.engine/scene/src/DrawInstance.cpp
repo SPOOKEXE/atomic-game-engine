@@ -117,6 +117,13 @@ namespace engine::scene {
 			b = MixSignature(b, Pair(instance.Texture.Id(), static_cast<uint32_t>(instance.TagMask)));
 			c = MixSignature(c, Pair(static_cast<uint32_t>(instance.Alpha), 0u));
 
+			// Material maps and shader selection are visible state too. Omitting one
+			// lets a cached mirror keep the old material after streamed content or a
+			// live shader arrives, even though the main camera has already changed.
+			d = MixSignature(d, Pair(instance.NormalMap.Id(), instance.RoughnessMap.Id()));
+			a = MixSignature(a, Pair(instance.OcclusionMap.Id(), instance.HeightMap.Id()));
+			b = MixSignature(b, Pair(instance.EmissiveMap.Id(), instance.Shader.Id()));
+
 			// **And where it is cut, which is half of what a straddling body
 			// looks like.** A seam plane that moved changes which half of the
 			// body is drawn, so a surface holding the old image is holding a body

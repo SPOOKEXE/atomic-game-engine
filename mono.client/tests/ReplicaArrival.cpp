@@ -303,11 +303,28 @@ TEST_CASE("every interface and script component is classified", "[client][replic
 
 		INFO("component: " << name);
 
-		// Three interface rows are what the machine looking at the world works
+		// Four interface rows are what the machine looking at the world works
 		// out for itself, and the world's script table is a resource that could
 		// only ever cross whole. Everything else is authored and crosses.
+		//
+		// `gui.ScrollState` joined the four at v0.18 and is `gui.Resolved`'s case
+		// for one class: the pixel canvas, the visible window and the thumb
+		// rectangles are all derived from an `AbsoluteSize` that belongs to the
+		// display doing the looking.
+		//
+		// **`gui.PageMotion` and `gui.ScrollMotion` joined at v0.17 on a
+		// stronger ground than any of those.** The others are local because
+		// they are re-derived from what was sent; these two hold a reading of
+		// *this* process's monotonic clock, which is not a quantity that means
+		// anything anywhere else. A client handed the authority's `StartedAt`
+		// would evaluate a page tween against that machine's uptime. What
+		// crosses is the destination - `CurrentPage` and `CanvasPosition` - and
+		// each end animates to it on its own clock, which is also what makes a
+		// client that dropped a packet arrive rather than stutter.
 		const bool excluded = name == "gui.Resolved" || name == "gui.SpatialCanvas" ||
-							  name == "gui.GuiServiceState" || name == "script.SourceCache";
+							  name == "gui.GuiServiceState" || name == "gui.ScrollState" ||
+							  name == "gui.PageMotion" || name == "gui.ScrollMotion" ||
+							  name == "script.SourceCache";
 
 		CHECK((excluded == (Row(name) == nullptr)));
 	}

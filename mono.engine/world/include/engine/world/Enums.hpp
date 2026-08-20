@@ -75,9 +75,10 @@ namespace engine::world {
 	//
 	// @since v0.2
 	enum class ExecutionMode : uint8_t {
-		// One job batch over the worlds. Right for a host holding many worlds
-		// that are each below the intra-world parallel crossover, which is most
-		// of them.
+		// One assigned job batch over the worlds. Each local world keeps a pinned
+		// worker lane while the pool shape is unchanged. Right for a host holding
+		// many worlds that are each below the intra-world parallel crossover,
+		// which is most of them.
 		WorldParallel,
 
 		// Worlds in a plain loop, each free to use the whole pool for its own

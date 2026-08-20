@@ -36,6 +36,185 @@ entries are in `docs/retired/DEFERRED.md`.
 
 ## Deferred Items
 
+### [_] D00129
+
+**Filed as `D00120` and renumbered at v0.17, because that number was already
+taken.** `docs/retired/DEFERRED.md` carries a `D00120` closed at v0.15 -
+`Player.Backpack` and the `Tool` class - and the counter increments past retired
+entries rather than reusing them. This is the second time it has happened;
+`D00109` records the first, and the cause is identical both times: the number
+was picked by reading the front of the live file, which is exactly the half of
+the register that does not hold the used ones. **The highest number in either
+file is what the next entry follows, and at v0.17 that is `D00128`.**
+
+Both numbers were live at once for two versions, and the collision was doing
+real damage rather than sitting there: four comments under `mono.engine/scene`
+cite "`docs/DEFERRED.md` D00120" meaning the *Tool* entry, which by then was a
+different entry in that file and the right one in the retired file. Those
+citations now name the retired file. `ROADMAP.md` cites this entry and follows
+the rename.
+
+**The interface members that are absent because the thing behind them is.** The
+2D tree is otherwise complete against Roblox's as of v0.18; what follows is
+every member left out, each with what it would need first. The rule they are all
+filed under is `SoundService.cpp`'s and `gui/tests/Registration.cpp`'s: **a
+property with nothing behind it reads as decided**, so each of these is named
+here rather than declared and left answering a default.
+
+- **`VideoFrame`.** The class needs a video decoder; this engine has one image
+  path and a GIF flipbook, which is `render::Flipbook`. `Playing`,
+  `TimePosition`, `Looped` and `Volume` are all facts about a stream nothing can
+  produce. **Reopen trigger: a decoder in `mono.vendor` and a
+  `assets::VideoData` beside `TextureData`.**
+
+- ~~**`SelectionBox.LineThickness`, `.SurfaceColor3` and
+  `.SurfaceTransparency`.**~~ **Shipped at v0.17, and the reason they were
+  deferred was wrong in a way worth recording.**
+
+  This entry said they needed "a triangle path for adornments". What was
+  actually missing was *any* path: `render::AdornmentGeometry::Build` and
+  `Lines()` had no caller anywhere in the repository - not in `mono.client`, not
+  in `mono.studio`, not elsewhere in `render` - and no pass drew a world-space
+  line. A `SelectionBox` therefore drew nothing whatever its properties said,
+  and three absent members sat on a class whose *implemented* members were
+  equally unreachable. The entry named the second obstacle and missed the first.
+
+  **The consumer is an overlay, not a render pass**, which is the arrangement
+  `Editor::DrawColliderOutlines` already had and argues for in full: the studio
+  projects world points into a panel and hands imgui segments, so
+  `Editor::DrawAdornments` is a list of lines and no pipeline, no shader and no
+  target. It also gets from imgui the two things a pass would have had to build
+  - a line width that is a real number rather than a device setting with no
+  portable guarantee, and a filled convex polygon.
+
+  `LineThickness` is carried in **studs** and converted per segment against how
+  far away that segment is, because a box outlined in pixels keeps its weight as
+  it recedes and ends up a solid blob. The surface is six wound quads and is
+  emitted only when `SurfaceTransparency` moves off 1 - a drawer handed six
+  invisible quads still projects and rasterises them, which is the whole cost of
+  the feature paid by everybody who did not ask for it.
+
+  **What is still absent is depth**, and it is stated rather than implied.
+  `AlwaysOnTop` is honoured in its `true` sense only, because an overlay is
+  drawn after the world and has no depth buffer to test against. That is the
+  right way round for the default. **Reopen trigger for the `false` sense: a
+  world-space pass that draws these with a depth test** - which is also what a
+  *client* would need, since this consumer is the studio's.
+
+- **`ImageLabel.IsLoaded` and `ImageButton.IsLoaded`.** Whether a texture has
+  staged is the client's texture cache's answer, and `gui` is L7 `shared` - the
+  same wall `D00022` describes for a `SurfaceGui`'s canvas. Unlike that one, the
+  fact does not fit `SpatialCanvas`'s shape: it is per *content name* rather than
+  per instance, so the slot would be a table rather than a component. **Reopen
+  trigger: a `shared` content-state table something above L12 fills.**
+
+- **`TextLabel.OpenTypeFeatures` and `.TextDirection`.** Both need a shaping
+  engine. `GlyphAtlas` is stb_truetype at one instance per family with no
+  substitution, no kerning table and no bidi pass, so ligatures and
+  right-to-left runs are not a property away. **Reopen trigger: HarfBuzz or
+  equivalent behind the atlas.**
+
+- ~~**The animated halves: `UIPageLayout.Animated`, `.TweenTime`, `.EasingStyle`,
+  `.EasingDirection`, and `ScrollingFrame.ElasticBehavior`'s spring.**~~ **All
+  five shipped at v0.17, and the objection they were filed under was the wrong
+  shape of answer.**
+
+  The entry said a tween needs a clock and `gui` is L7 with none. Every other
+  module in this engine that needs a clock is *handed* one:
+  `render::FlipbookFrameAt` takes `seconds` and answers which frame is showing,
+  `assets::Grant::HasExpired` takes `nowSeconds`, `net` reads no clock at all.
+  So the answer was never "give `gui` a tick" or "put an animator above it" -
+  it was `CompileRequest::Seconds`, and this module still reads no clock.
+
+  **Both are pure functions of elapsed time rather than states a tick
+  advances**, which is what `Flipbook` buys and buys the same things here: a
+  carousel halfway through a slide is a value a suite *states* rather than one
+  it steps a hundred frames to reach, and a rubber band recovers at the same
+  rate whatever the frame rate. `core::TweenInfo::Ease` already existed and is
+  the whole of the easing, so no curve was written for this.
+
+  **The clock touches two functions and neither is in the walk.**
+  `AdvancePages` and `AdvanceScrolling` run once before `gui::Layout`'s
+  recursion and turn seconds into a number - a page's `Alpha`, a canvas's
+  `Overshoot`. `Place` is recursive and reached from five run functions;
+  threading a time argument through all of them to serve one caller would have
+  put a clock on every layout in the module.
+
+  **`ElasticBehavior` had a second blocker the entry did not know about, and it
+  was the larger one: nothing dragged a canvas at all.** The only caller of the
+  scroll mover was the wheel, and a wheel does not overscroll in Roblox either -
+  so the property was authored, replicated and describing a pull nothing could
+  produce. `Router::BeginCanvasDrag` is the gesture, gated on the pick finding
+  nothing active so a button inside a list stays clickable.
+
+  **Two findings worth keeping, both caught by tests rather than by review.**
+  The first is that the signature has to fold the clock *while something is
+  moving and only then*: folding the resolved numbers alone is circular, since
+  they cannot change until the layout runs and the layout does not run until
+  they change - so an animation ran for exactly one frame. Folding `Seconds`
+  unconditionally is the other failure and a worse one, because every still
+  interface in the engine would rebuild its draw list every frame forever. The
+  second is that the first sight of a layout must *adopt* its page rather than
+  slide to it: a `UIPageLayout` authored with `CurrentPage` set is saying where
+  it starts, and animating that made every interface swing into place when it
+  opened.
+
+  `gui.PageMotion` and `gui.ScrollMotion` are local and never replicated, on a
+  sharper ground than the four rows already on that list: they hold a reading of
+  *this* process's monotonic clock, which means nothing on another one. What
+  crosses is the destination, and each end animates to it on its own clock.
+
+- **`GuiObject.GuiState` and `.InputSink`.** `GuiState` is Idle/Hover/Press and
+  those live on `gui::Router`, which is deliberately not a component - nobody
+  replicates where a mouse is, and `gui/AGENTS.md` says so. Exposing it would
+  mean a per-element row two clients write. `InputSink` is `Active` under a
+  second name and is not worth a second property. **Reopen trigger: none
+  expected for `InputSink`.**
+
+- ~~**`UIStroke.LineJoinMode`, `.BorderOffset`, `.StrokeSizingMode` and
+  `.ZIndex`.**~~ **Two shipped at v0.17, one was never a Roblox property, and
+  `ZIndex` is the only half still deferred.**
+
+  `LineJoinMode` and `StrokeSizingMode` are implemented. The join needed no
+  outline builder in the end, which is the part worth recording: the reopen
+  trigger asked for "an outline builder that takes a join rule" and
+  `PushRoundedOutline` already separated *where the ring's points are* from
+  *how they are stitched*, so all three modes are the same ring with its corner
+  points moved. `Round` walks the arc, `Bevel` cuts the chord, `Miter` runs out
+  to the corner the arc was hiding and back - identical vertex count, identical
+  index loop, no second path. **A trigger asking for a mechanism, answered by a
+  seam that already existed.** `StrokeSizingMode` is resolved in the compile
+  rather than carried to a backend, because a draw list has no element to
+  measure a fraction against; the reference is the smaller side, and the text
+  size when the glyphs took the stroke.
+
+  **`BorderOffset` is not a Roblox property and this entry invented it.** The
+  API dump has `ApplyStrokeMode`, `Color`, `Enabled`, `LineJoinMode`,
+  `StrokeSizingMode`, `Thickness`, `Transparency` and `ZIndex`. There is a
+  `BorderStrokePosition` enum documented against `UIStroke`, but it appears in
+  no version of the class this engine has seen, so there is nothing to
+  implement and nothing to defer. Recorded rather than deleted because a
+  deferred property that does not exist is a reopen trigger that can never fire.
+
+  **`ZIndex` stays, unchanged.** It needs the stroke sortable independently of
+  the element it is on, which the compile's paint order does not express.
+  **Reopen trigger: a draw list whose ordering is a key rather than a
+  sequence.**
+
+- **`SurfaceGui.ToolPunchThroughDistance`.** ~~There is no `Tool` class, so
+  there is nothing the distance is about.~~ **That reason went stale and this is
+  the collision above costing something.** `Tool` derives from `Model` and is
+  registered in `scene/src/Part.cpp`; the entry that held it back is the *other*
+  `D00120`, closed at v0.15, and this bullet was written as though it had not
+  been. What the property actually needs is unchanged and is worth stating
+  properly: a distance at which a tool's interaction ray stops being blocked by
+  a `SurfaceGui`, which needs a tool interaction ray. Nothing casts one.
+  **Reopen trigger: a tool that reaches through the world to click something.**
+
+- **`BillboardGui.DistanceLowerLimit` and `.DistanceUpperLimit`.** Deprecated in
+  Roblox and superseded by `DistanceStep`, which is implemented. Not worth
+  carrying a deprecation forward into a new engine.
+
 ### [_] D00119
 
 **`Player.CharacterAppearanceId` is absent, and it is absent because the thing
@@ -334,166 +513,28 @@ unchanged.
 **Reopen trigger: a vendored QuickJS with a debugger API**, or the first
 TypeScript plugin big enough that its author asks for one.
 
-### [_] D00103
-
-**Per-pass GPU time is not measured. The Vulkan path that measured it was
-removed with the rest of the render pipeline.**
-
-`render/src/VulkanTimestamps.{hpp,cpp}` existed and worked: it reached into SDL's
-Vulkan backend, created a query pool, marked each pass and read the results back
-a frame later. It went out with the revert because it was wired into the pass
-executor that no longer exists.
-
-**Everything it established is still true and worth reusing.**
-
-- SDL has no timestamp query, no query pool and no `SDL_GPUQuery`, exposes no
-  native handle, and its Vulkan backend has zero references to
-  `vkCmdWriteTimestamp` or `VkQueryPool`. There is no supported call to make.
-  **Established against 3.2.31 and re-checked against 3.4.14 at v0.15**, when
-  `mono.vendor/sdl` was bumped: two minor releases later, `SDL_gpu.h` still has
-  none of it. The bump was taken for other reasons and this entry did not move.
-- `SDL_Vulkan_GetVkGetInstanceProcAddr` **is** public SDL, so the entry points can
-  be loaded rather than linked - no Vulkan SDK and no linked Vulkan library. The
-  Khronos headers come from SDL's own copy.
-- What is not public is the `VkDevice` and the `VkCommandBuffer`. Those came from
-  mirroring the first fields of `VulkanCommandBuffer` and `VulkanRenderer` and
-  casting the opaque pointers the renderer already holds - pinned to one SDL
-  version, guarded by a plausibility check that gave up rather than reading a
-  wild pointer, and gated on `SDL_GetGPUDeviceDriver` being `vulkan` before any
-  cast, because a D3D12 command buffer read through the Vulkan mirror is a crash
-  rather than a wrong number.
-- Marks belong at the **bottom of pipe**, and the read must not block: waiting on
-  a timestamp serialises the CPU against the GPU in order to report how fast the
-  GPU is.
-- **Never fill the field with CPU time.** A submit-side number labelled as a
-  pass's cost is worse than a blank - somebody reads "0.4 ms" for the shadow
-  pass, believes the GPU said it, and optimises the wrong thing.
-
-**Trigger:** a new pass executor to hang the marks off. The file is recoverable
-from git history on `v0.11` or the local branch `renderer-before-revert`.
-
 ### [_] D00046
 
-**Per-pass GPU timestamps, which `SDL_GPU` cannot express.**
+**SDL still has no portable GPU timestamp-query API. Vulkan is measured through
+the backend-specific bridge; Metal and Direct3D 12 remain deliberately
+unmeasured rather than displaying CPU submission time as GPU cost.**
 
-**Correction at v0.13, and it is the largest one in this file: every symbol and
-every document this entry named has been deleted.** Checked by grepping for each
-one rather than by remembering, the way `D00038` and `D00103` were.
+The graph executor, per-node profile rows, upload counters and Vulkan timestamps
+are live. `render/src/VulkanTimestamps.{hpp,cpp}` creates rotating query pools,
+writes bottom-of-pipe marks around the command buffer that records each node and
+collects completed slots without waiting. Dedicated compute-prefix command
+buffers rebase onto a query slot whose reset travels with the earlier
+submission, so their timings are not erased by the main command buffer.
 
-- **`ProfilePass::Elapsed` does not exist.** The only occurrence of `ProfilePass`
-  anywhere in the tree is the sentence below that names it. So the field the
-  timestamps "land in" is not there to land in.
-- **`PIPELINE_NODES.md` does not exist**, so "stage 7's remaining half" points at
-  nothing a reader can open. The staging it refers to is `ROADMAP.md`'s extended
-  rendering pipeline now.
-- **`graph::Execute` is gone, and with it the node to hang a mark off.** The
-  bullet below saying this entry is no longer blocked on the executor was true
-  when it was written and stopped being true at the render-pipeline revert. It is
-  blocked on the executor again.
-- **`FrameRunner::Run` and its `SDL_PushGPUDebugGroup` calls are gone.** There are
-  no GPU debug groups anywhere in this repository, so the "readable-capture half
-  that could be built, was" describes work that is no longer in the tree.
-- **`FrameResult::UploadedBytes` and `Uploads` are gone.** `FrameResult` carries
-  `Presented`, `DrawCalls`, `Triangles`, `SurfaceInstances`, `SurfacePasses`,
-  `RibbonVertices`, `Particles`, `Culled` and `Passes`, and none of them counts a
-  copy into GPU memory. The one surviving `UploadedBytes` is `TextureTable`'s own
-  private counter, which is a different number about a different thing.
+The remaining question is portability. SDL exposes fences only at whole-command
+granularity and no query pool, timestamp write or native device handle. A native
+bridge therefore has to mirror each backend's private command-buffer layout,
+just as the Vulkan implementation does. Until those bridges can be built and
+tested on their native platforms, Studio shows those GPU timings as unmeasured
+while retaining CPU wall time, graph traffic and operation counts.
 
-**This entry and `D00103` are now one item seen from two sides**, and the split
-is worth keeping only because the two halves are blocked on different things.
-This one is the *portable* question - SDL exposes no way to write a timestamp,
-so no amount of work here moves it. `D00103` is the *Vulkan* answer that existed,
-worked, and was reverted, and is recoverable from git. **Whoever builds the pass
-executor should read both and close both**; building one without the other
-produces a number on Vulkan and a blank everywhere else with nothing saying why.
-
-What it said before, with the deleted names left in place so the correction above
-is checkable:
-
-`PIPELINE_NODES.md` stage 7's remaining half. `ProfilePass::Elapsed` is the field
-they land in; it reads zero and the profile panel shows that as *not measured*
-rather than as free.
-
-- **This entry used to say it was blocked on the executor.** It is not, any more:
-  D00002 landed and `graph::Execute` submits the frame, so there is now a node to
-  put a timestamp around. There is still no way to write one.
-- **`SDL_GPU` has no timestamp query API.** Checked by reading
-  `SDL_gpu.h` at the vendored version rather than by remembering - 3.2.31 when
-  this was written and 3.4.14 since the v0.15 bump: there are fences
-  - `SDL_SubmitGPUCommandBufferAndAcquireFence`, `SDL_QueryGPUFence` - and those
-  are whole-command-buffer granularity, which is one number for the frame. No
-  query pool, no timestamp write, nothing per pass.
-- So this is blocked on SDL rather than on us, which is a different kind of
-  blocked: no amount of work here moves it. Either a release adds the API, or it
-  needs a per-backend path behind `Renderer::Backend()` - Vulkan has
-  `vkCmdWriteTimestamp`, D3D12 has `EndQuery` - which is real per-backend code in
-  a module whose whole point is not being per-backend.
-- **Do not fill `Elapsed` with CPU time in the meantime.** A submit-side number
-  in a field labelled as the pass's cost is worse than a blank: somebody reads
-  "0.4 ms" for the shadow pass, believes the GPU said it, and optimises the wrong
-  thing.
-- **The half that could be built, was.** `FrameRunner::Run` pushes an
-  `SDL_PushGPUDebugGroup` named for each node, so RenderDoc, Nsight and Xcode
-  attribute every draw to a node. One group spans `opaque` and `transparent`
-  because they share a render pass. That is the readable-capture half of §7; the
-  numbers half is what is stuck.
-- The upload counters **are** built: `FrameResult::UploadedBytes` and `Uploads`
-  count every copy into GPU memory, measured at the region rather than derived
-  from a count, and the profile panel shows them.
-
-**Reopen trigger, which this entry never had: a pass executor to hang a mark off,
-same as `D00103`'s** - or an SDL release with a timestamp query, which would make
-this the portable answer and `D00103` a fallback rather than the only path.
-Written down because an entry with no trigger is one nobody can decide is due,
-and this one has been carried since v0.4 on an argument alone.
-
-### [_] D00038
-
-**`Renderer::Render` draws one view, and the studio round-robins its panels
-through it - so two viewports each update at half the rate.**
-
-- **Correction at v0.13, and it changes what this entry is blocked on.** The
-  first bullet used to read "v0.11 replaced the twelve-parameter `Render` with
-  `std::span<const View>` … the seam exists and is unexercised". **It does not
-  exist.** `render::View` and the span went out with the render-pipeline revert,
-  exactly as `D00103` records for `VulkanTimestamps`, and `Render` is a
-  twelve-parameter call taking one `cameraFrame`, one `camera` and one
-  `targetSlot`. Checked by grepping for the type rather than by remembering.
-  Recorded rather than quietly rewritten, for the reason `D00004`'s drifting
-  figure is: a reader following this entry would have gone looking for a span to
-  loop over and found nothing.
-- **So the cost moved from "convert a loop" to "re-establish the seam".**
-  `Renderer::Render` owns the swapchain acquisition and the present, so one call
-  is one frame and the round-robin is not a choice the studio is making - it is
-  the only shape the API allows. Closing this needs "draw a view into a target"
-  separated from "present the frame", which is the reverted pipeline's shape and
-  is `ROADMAP.md`'s extended rendering pipeline, behind a prototype project.
-- **What v0.13 did fix is the half that was a bug rather than a limitation.**
-  Each viewport owns its surface textures - `Impl::SurfaceBank` per slot - so a
-  panel showing a mirror no longer composites another panel's reflection, and
-  the aim-overwrites-aim failure below is contained to the frame rather than
-  crossing panels. The rate is still halved; the picture is no longer wrong.
-- **The studio is the caller that wants it and cannot have it yet.** It
-  round-robins one panel per frame, so with two open each updates at half the
-  rate. Converting the loop is not the hard part; the hard part is above it.
-- **`Universe->Present` runs `PreRender`, and `aim-surface-cameras` lives
-  there.** A panel's surface cameras are aimed from *that panel's* eye, into
-  world state, immediately before its draw list is collected. Drawing two panels
-  in one frame means aiming twice before rendering once, and the second aim
-  overwrites the first - which `Editor.cpp` already records as the bug that made
-  a mirror in one panel track the camera being flown in the other.
-- **Two panels on two worlds is fine and is the interesting case.** `Present` is
-  per world, the aim is per world, and the second panel already defaults to a
-  *different* world - which is the roadmap's "handle multiple worlds in
-  parallel" exactly. **Two panels on one world is the one that breaks**: it
-  would present the same world twice in a frame and run its `PreRender` systems
-  twice against one `frameSeconds`.
-- So the conversion needs the same-world case answered first - present once per
-  distinct world per frame, then aim and collect per panel - rather than a loop
-  around what is there now.
-- Until then the round-robin stays, and `render/benchmarks/Frame.cpp` says what
-  it is buying: about 150 us of CPU record per viewport, 18% of a 300 fps frame
-  at four panels.
+**Reopen trigger:** access to Metal and Direct3D 12 test machines, or an SDL GPU
+timestamp API that makes the backend bridges unnecessary.
 
 ### [_] D00030
 
@@ -576,6 +617,19 @@ the send rate is ours whatever carries the bytes.*
 - **A delivery signal for unreliable traffic**, which is new to the argument and which v0.15 could not give itself. QUIC's ACK frames acknowledge packets rather than payloads, so DATAGRAM frames are acknowledged too - the controller would see the whole outbound stream instead of the reliable slice of it, and that is the one thing the hand-rolled version structurally cannot have without inventing a second ack path.
 - **It still passes the second-consumer test.** The game link is one; `ROADMAP.md`'s cdn wire streaming is the other, blocked on `net` growing an `http/` sub-area because a content origin serves bulk bytes over request/response rather than over a game datagram channel with a per-tick budget. **HTTP/3 is QUIC.** One dependency answers both.
 - The clock question is settled and stays settled: `ngtcp2` takes an explicit `ngtcp2_tstamp` on every entry point, which is the only shape compatible with *time is passed in, never read*.
+
+**The implementation survey lives in [`docs/QUIC.md`](QUIC.md) as of v0.17**,
+so that the day this trigger fires starts from a survey rather than from a
+search engine. It re-checked the library landscape and **three of the paragraph
+below have moved**: `quictls`' ngtcp2 helper is deprecated upstream, OpenSSL
+3.5 shipped a QUIC TLS API so vanilla OpenSSL is a candidate at all, and
+**AWS-LC ships pre-generated build files precisely so a project that cannot take
+a Go or Perl dependency can still build it** - which is a fourth answer to the
+TLS question that did not exist when this was written, keeps the fresh-clone
+property, and uses ngtcp2's mature BoringSSL helper rather than the experimental
+OpenSSL one. The `http/` sub-area the cdn half was blocked on has also since
+shipped. The paragraph below is kept as written because what it *reasoned* is
+still right; the document carries the corrections and the staging.
 
 **Everything the v0.13 scoping wrote out still stands, minus one line.** The
 library is `ngtcp2`, because nothing under its `lib/` references a TLS stack -

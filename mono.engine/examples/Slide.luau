@@ -64,11 +64,16 @@ local BLOCK_LIFETIME = 10
 local SPAWN_EVERY = 0.45
 
 -- The floor, so a launched block lands rather than falling for ever.
+-- Clear of a baseplate's top face at y = 0: coplanar surfaces do not flicker in
+-- this engine, they resolve stably to whichever one the draw order happens to
+-- favour. `scripts/demos/zfight-scan.sh` holds the control for that.
+local GROUND_LIFT = 0.01
+
 local floor = Instance.new("Part")
 floor.Name = "Baseplate"
 floor.Anchored = true
 floor.Size = Vector3.new(140, 2, 60)
-floor.Position = Vector3.new(28, -1, 0)
+floor.Position = Vector3.new(28, -1 + GROUND_LIFT, 0)
 floor.Color = Color3.fromRGB(118, 120, 126)
 floor.Parent = workspace
 

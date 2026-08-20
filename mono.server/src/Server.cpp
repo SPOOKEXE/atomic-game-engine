@@ -8,6 +8,7 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/delivery/Relay.hpp>
 #include <engine/examples/Scene.hpp>
+#include <engine/game/CollisionContent.hpp>
 #include <engine/game/Content.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Play.hpp>
@@ -21,6 +22,7 @@
 #include <engine/replication/SnapshotBuffer.hpp>
 #include <engine/scene/Awake.hpp>
 #include <engine/scene/Characters.hpp>
+#include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Ownership.hpp>
@@ -215,10 +217,18 @@ namespace server {
 
 	// Out of line so CDN types remain incomplete in the public header.
 	Server::~Server() {
+		ContentShapes.reset();
 		ContentLink.reset();
 		ContentService.reset();
 		ContentOrigin.reset();
 		ContentGrantSecret.reset();
+	}
+
+	void Server::InstallCollisionShapes(engine::ecs::Store &store) {
+		engine::game::RecordBuiltinCollisionShapes(store);
+		if (ContentShapes) {
+			engine::game::MergeCollisionShapes(store, *ContentShapes);
+		}
 	}
 
 	bool Server::BeginServingContent() {
@@ -277,6 +287,19 @@ namespace server {
 		if (!mounted) {
 			return false;
 		}
+
+		// **Here, because this is the last point that holds both the store and
+		// the manifest.** The publication takes the manifest and the service
+		// takes the store, so a bake after these two lines has nothing to read.
+		//
+		// The worlds already exist - `StartHosts` and the primary world are both
+		// built above this - so the table is pushed into them below rather than
+		// waited for. Nothing has ticked yet: `Running` is still false.
+		ContentShapes = std::make_unique<engine::scene::CollisionShapes>();
+		const size_t shapes = engine::game::AddCollisionShapesFrom(*ContentShapes, *store, *manifest);
+		if (shapes != 0) {
+			ENGINE_INFO("server: baked collision geometry for {} mesh(es)", shapes);
+		}
 		if (!ContentOrigin->Publish(
 				std::make_shared<const cdn::Publication>(*mounted, std::move(*manifest))
 			)) {
@@ -290,6 +313,20 @@ namespace server {
 		if (!ContentService) {
 			ENGINE_ERROR("server: could not serve content on port {}", Settings.ContentPort);
 			return false;
+		}
+
+		// **Into the worlds that were built before this ran.** A world created
+		// after this point picks the table up from `InstallCollisionShapes`;
+		// these were made during startup, above, when there was nothing to give
+		// them. Without this a `--content-store` server's meshes would collide
+		// as their bounds for the life of the process.
+		for (const engine::world::WorldId id : Worlds().Worlds()) {
+			if (Worlds().IsRemote(id)) {
+				continue;
+			}
+			Worlds().Enter(id, [this](engine::ecs::Store &store) {
+				engine::game::MergeCollisionShapes(store, *ContentShapes);
+			});
 		}
 
 		ENGINE_INFO(
@@ -532,7 +569,10 @@ namespace server {
 
 		engine::world::DriverSettings driver;
 		driver.Universe = universe;
-		driver.Hosts.WorldsPerHost = Settings.WorldsPerHost;
+		// A listening host is one replication authority and one UDP endpoint.
+		// Keeping one world in it makes the process, physics state, ECS store,
+		// and listener share the same failure and restart boundary.
+		driver.Hosts.WorldsPerHost = Settings.Listening ? 1u : Settings.WorldsPerHost;
 
 		driver.Hosts.Program = Settings.HostProgram.empty() ? ThisProgram() : Settings.HostProgram;
 
@@ -543,12 +583,28 @@ namespace server {
 			"--tick-rate",
 			std::to_string(Settings.TickRate),
 
+			// Carried to the child, so a world hosted in another process steps
+			// and publishes at the rate this one was asked for. Without these a
+			// federated universe would run the same world at two rates
+			// depending on which process picked it up.
+			"--physics-tick-rate",
+			std::to_string(Settings.PhysicsTickRate),
+			"--replication-tick-rate",
+			std::to_string(Settings.ReplicationTickRate),
+
 			"--processes",
 			std::to_string(1u + PlannedHosts()),
 		};
 
 		if (Settings.Chatter) {
 			driver.Hosts.Arguments.emplace_back("--chatter");
+		}
+		if (Settings.Listening) {
+			// Every child asks the OS for its own free port. The bound value comes
+			// back in its Ready frame, so no process races another over a guessed
+			// range and the driver can publish the exact endpoint.
+			driver.Hosts.Arguments.emplace_back("--listen");
+			driver.Hosts.Arguments.emplace_back("0");
 		}
 
 		Driver_ = std::make_unique<engine::world::Driver>(driver);
@@ -608,6 +664,8 @@ namespace server {
 			engine::world::WorldSettings world;
 			world.Name = engine::core::Name(PRIMARY);
 			world.TickRate = Settings.TickRate;
+			world.PhysicsTickRate = Settings.PhysicsTickRate;
+			world.ReplicationTickRate = Settings.ReplicationTickRate;
 
 			PrimaryWorld = Worlds().Create(world);
 			if (!PrimaryWorld.IsValid()) {
@@ -702,17 +760,27 @@ namespace server {
 				continue;
 			}
 
+			// Read before the borrow, so the settings lookup is not made from
+			// inside the world it is asking about.
+			const double physicsTickRate = Worlds().SettingsOf(id).PhysicsTickRate;
+
 			std::string failure;
 			Worlds().Enter(
 				id,
-				[this, &limits, &failure, id](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+				[this, &limits, &failure, id, physicsTickRate](
+					engine::ecs::Store &store, engine::ecs::Scheduler &systems
+				) {
 					// **Before the scripts, because a script may create a
 					// part.** `PreparePhysicsWorld` calls `Store::Observe`,
 					// which moves every row already carrying the component
 					// into an archetype with somewhere to put the change
 					// bits - a structural change, and one that is free on an
 					// empty world and a re-shuffle on a populated one.
-					PrepareSimulation(store, systems);
+					PrepareSimulation(store, systems, physicsTickRate);
+
+					// **Beside the physics, because it is what the physics
+					// resolves a mesh collider through.** See `ContentShapes`.
+					InstallCollisionShapes(store);
 
 					// The same call the studio's Play makes. What "running a
 					// game" means is one function, or the two drift and the
@@ -764,7 +832,8 @@ namespace server {
 		// What it does *not* install is the client's half - there is no camera
 		// and no draw list here, because a server draws nothing. That split is
 		// the reason the loader stops where it does.
-		PrepareSimulation(store, scheduler);
+		PrepareSimulation(store, scheduler, Settings.PhysicsTickRate);
+		InstallCollisionShapes(store);
 
 		std::string error;
 		if (!engine::examples::LoadScene(store, scheduler, Settings.GamePath, error)) {
@@ -777,15 +846,6 @@ namespace server {
 	bool Server::BeginListening() {
 		if (!Settings.Listening) {
 			return true;
-		}
-
-		if (IsHost()) {
-			// A driver is the authority for every world in the universe,
-			// including the ones a host holds. A host that also streamed would
-			// be a second answer to the same world, which is the split brain the
-			// federated universe exists to prevent.
-			ENGINE_ERROR("--listen is for a driver. A host serves its driver, not clients.");
-			return false;
 		}
 
 		Socket = engine::net::MakeUdpTransport(Settings.ListenPort);
@@ -1009,6 +1069,12 @@ namespace server {
 		);
 
 		Replication->OnAdmitted([this](engine::replication::ClientId client) {
+			// Apply the world delay before the join notice and first snapshot are
+			// sent. Placeholder worlds have no Player row but still use this value.
+			Replication->SetSimulatedLatency(
+				client, Worlds().SettingsOf(PrimaryWorld).GlobalSimulatedNetworkLatency
+			);
+
 			Worlds().Enter(PrimaryWorld, [this, client](engine::ecs::Store &store) {
 				// **A world with no `Players` service gets no player, quietly.**
 				// That is not a misconfiguration to warn about - it is the
@@ -1819,7 +1885,30 @@ namespace server {
 		// player stands still and exactly wrong while they run.
 		UpdateClientViewpoints();
 
-		Worlds().Enter(PrimaryWorld, [this, nowSeconds](engine::ecs::Store &store) {
+		// **Asked once per frame, and asking is what clears it.** A world with
+		// no replication rate answers `true` after every tick, which is what
+		// this program did before rates existed. A world at 20 Hz inside a 60 Hz
+		// simulation answers `true` on one tick in three, and the world has been
+		// holding its change bits across the other two so that the delta built
+		// below covers all three - see `World::Tick`.
+		const bool publishDue = Worlds().TakeReplicationTick(PrimaryWorld);
+
+		Worlds().Enter(PrimaryWorld, [this, nowSeconds, publishDue](engine::ecs::Store &store) {
+			{
+				ENGINE_PROFILE_CAT("Server::NetworkLatency", engine::core::ProfileCategory::Network);
+				const double global = Worlds().SettingsOf(PrimaryWorld).GlobalSimulatedNetworkLatency;
+				for (const auto &[slot, occupant] : Players) {
+					if (!store.Alive(occupant.Instance)) {
+						continue;
+					}
+					const auto *network = store.Get<engine::scene::PlayerNetworkComponent>(occupant.Instance);
+					const double local = network != nullptr ? network->LocalSimulatedNetworkLatency : 0.0;
+					Replication->SetSimulatedLatency(
+						engine::replication::ClientId{slot, occupant.Generation}, global + local
+					);
+				}
+			}
+
 			// **What the clients that own something said, applied before this
 			// tick is published.** Applying after would publish a delta built
 			// from last tick's value and send the owner's own state back to it
@@ -1891,6 +1980,22 @@ namespace server {
 			// **The visibility survey immediately before it, inside the same
 			// entry**, because what it works out is only true of the world as it
 			// stands now - and nothing between the two mutates one.
+			//
+			// **The survey and the publish are skipped together on a tick this
+			// world does not publish.** What the survey works out is only true
+			// of the world as it stands, so running it for a delta nobody is
+			// building is its whole cost for nothing.
+			if (!publishDue) {
+				// **The wire is still pumped.** `Listener::Flush` exists for
+				// exactly this caller: acknowledgements that never leave fill
+				// the far side's reliable window, and a link that is working
+				// perfectly then gives up. What waits for the next published
+				// tick is the queued outgoing messages, which is what a
+				// replication rate is asking for.
+				Replication->Flush(nowSeconds);
+				return;
+			}
+
 			SurveyVisibility(store);
 			Publishing = &store;
 			Replication->Publish(store, store.Time().Tick, nowSeconds);
@@ -1935,7 +2040,7 @@ namespace server {
 			remote.push_back(world);
 		}
 
-		return engine::world::PlanHosts(remote, Settings.WorldsPerHost).size();
+		return engine::world::PlanHosts(remote, Settings.Listening ? 1u : Settings.WorldsPerHost).size();
 	}
 
 	bool Server::StartHosts() {
@@ -1950,6 +2055,8 @@ namespace server {
 			engine::world::WorldSettings world;
 			world.Name = engine::core::Name(name);
 			world.TickRate = Settings.TickRate;
+			world.PhysicsTickRate = Settings.PhysicsTickRate;
+			world.ReplicationTickRate = Settings.ReplicationTickRate;
 			remote.push_back(world);
 		}
 
@@ -1987,6 +2094,8 @@ namespace server {
 			engine::world::WorldSettings world;
 			world.Name = engine::core::Name(name);
 			world.TickRate = Settings.TickRate;
+			world.PhysicsTickRate = Settings.PhysicsTickRate;
+			world.ReplicationTickRate = Settings.ReplicationTickRate;
 
 			const engine::world::WorldId id = Worlds().Create(world);
 			if (!id.IsValid()) {
@@ -2011,8 +2120,13 @@ namespace server {
 			}
 		}
 
+		if (!BeginListening()) {
+			return false;
+		}
+
 		engine::world::HostFrame ready;
 		ready.Signal = engine::world::HostSignal::Ready;
+		ready.Port = ListeningOn().Port;
 		Link->Send(ready);
 
 		Running = true;
@@ -2189,6 +2303,11 @@ namespace server {
 			}
 		}
 
+		// Once, and here rather than in the constructor: the game file is
+		// loaded and the socket is bound by now, and both are what the first
+		// card says.
+		StartDiscord();
+
 		while (Running && !StopRequested.load()) {
 			const uint64_t tickStarted = engine::core::Clock::Nanoseconds();
 
@@ -2200,6 +2319,12 @@ namespace server {
 			if (ControlServer.IsRunning()) {
 				ControlServer.Pump([this](const std::string &line) { return ControlSurface.Answer(line); });
 			}
+
+			// Beside the control surface and for its reason: telling Discord
+			// how many people are on changes nothing a recorded run has to
+			// reproduce, so it belongs where the frame is bookkept rather than
+			// where the world is simulated.
+			PumpDiscord(engine::core::Clock::Seconds());
 
 			// Beside the control surface, and for the same reason it is here:
 			// content delivery is not part of the tick. A fetch that completes
@@ -2317,6 +2442,21 @@ namespace server {
 			// From the world, which counted the tick it just ran. The loop does
 			// not keep its own tally.
 			const uint64_t ticks = ticksSoFar();
+
+			// **A cumulative sample, not a second collector.** `WriteFolded` reads
+			// the running total without resetting it, so this is the same call the
+			// shutdown block below makes, just made early and repeatedly. Two
+			// samples N ticks apart subtract into that window's folded stacks -
+			// `scripts/flamegraph.py --average` does the subtracting - so nothing
+			// here has to track a window's spans on its own.
+			if (Settings.ProfileWindowTicks > 0 && !Settings.ProfilePath.empty() &&
+				ticks % Settings.ProfileWindowTicks == 0) {
+				const std::filesystem::path window =
+					Settings.ProfilePath.parent_path() /
+					(Settings.ProfilePath.stem().string() + ".window" + std::to_string(ticks) +
+					 Settings.ProfilePath.extension().string());
+				engine::core::FrameGraph::WriteFolded(window);
+			}
 
 			if (Settings.MaximumTicks >= 0 && ticks >= static_cast<uint64_t>(Settings.MaximumTicks)) {
 				break;

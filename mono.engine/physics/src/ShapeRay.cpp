@@ -2,10 +2,14 @@
 
 #include "ShapeSupport.hpp"
 
+#include <engine/collision/ConvexHull.hpp>
+#include <engine/collision/TriangleMesh.hpp>
+#include <engine/core/types/AABB.hpp>
 #include <engine/core/types/Ray.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/scene/Enums.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <limits>
@@ -189,6 +193,166 @@ namespace engine::physics {
 		}
 	}
 
+	namespace {
+		// A ray against a convex hull, in the hull's own space.
+		//
+		// **Clipped against every face plane, which is the whole test.** A convex
+		// polyhedron is the intersection of its half-spaces, so the segment
+		// inside it is the interval that survives clipping against all of them -
+		// the same slab method `RayBox` uses for a box, with the hull's own
+		// planes instead of three axis pairs. Exact, and linear in the face count
+		// rather than in the point count.
+		//
+		// **A hull with no faces is answered by its bound.** Flat, straight and
+		// single-point hulls are ordinary output from
+		// `collision::BuildConvexHull` - see its header - and none of them
+		// encloses a volume for a ray to enter. The bound is the conservative
+		// answer, which is the direction a raycast may be wrong in: an extra hit
+		// on a shape the caller can see, rather than a missing one.
+		ShapeHit HullRay(const ShapeInstance &shape, const core::Ray &ray, float maxDistance) {
+			const core::Vector3 origin = ToLocalPoint(shape.Frame, ray.Origin);
+			const core::Vector3 direction = ToLocalVector(shape.Frame, ray.Direction);
+
+			if (!shape.Hull->Solid()) {
+				ShapeInstance bound{
+					shape.Frame,
+					core::Vector3{
+						std::max(
+							std::abs(shape.Hull->Bounds.Minimum.X), std::abs(shape.Hull->Bounds.Maximum.X)
+						),
+						std::max(
+							std::abs(shape.Hull->Bounds.Minimum.Y), std::abs(shape.Hull->Bounds.Maximum.Y)
+						),
+						std::max(
+							std::abs(shape.Hull->Bounds.Minimum.Z), std::abs(shape.Hull->Bounds.Maximum.Z)
+						),
+					},
+					scene::ShapeKind::Box,
+				};
+				return BoxRay(bound, ray, maxDistance);
+			}
+
+			float entry = 0.0f;
+			float exit = maxDistance;
+			core::Vector3 entered;
+			bool inside = true;
+
+			for (const collision::HullFace &face : shape.Hull->Faces) {
+				const float towards = face.Normal.Dot(direction);
+				const float above = face.Normal.Dot(origin) - face.Offset;
+
+				if (std::abs(towards) < 1e-8f) {
+					// Parallel to this plane. Outside it means outside the hull
+					// for the whole ray; inside it constrains nothing.
+					if (above > 0.0f) {
+						return ShapeHit{};
+					}
+					continue;
+				}
+
+				const float crossing = -above / towards;
+				if (towards < 0.0f) {
+					// Entering through this face.
+					if (crossing > entry) {
+						entry = crossing;
+						entered = face.Normal;
+						inside = false;
+					}
+				} else if (crossing < exit) {
+					exit = crossing;
+				}
+
+				if (entry > exit) {
+					return ShapeHit{};
+				}
+			}
+
+			if (entry > maxDistance) {
+				return ShapeHit{};
+			}
+
+			// An origin inside reports zero and the direction it came from, which
+			// is this file's stated convention for every shape.
+			if (inside) {
+				return ShapeHit{true, 0.0f, ray.Direction * -1.0f};
+			}
+			return ShapeHit{true, entry, shape.Frame.VectorToWorldSpace(entered)};
+		}
+
+		// A ray against a triangle soup.
+		//
+		// **The nearest triangle, by Moller-Trumbore against each one the ray's
+		// own bound reaches.** There is no index here - `collision/AGENTS.md`
+		// explains why the module has none - so the candidates come from the
+		// mesh's per-triangle bounds against the segment's box, which is the same
+		// rejection a scan would do and is what makes it affordable.
+		//
+		// **The normal is turned to face the ray**, because a soup has no inside:
+		// a triangle's winding says which way it was authored, and a caller
+		// raycasting terrain wants the surface it hit rather than a normal
+		// pointing away from it because the level was modelled the other way up.
+		ShapeHit MeshRay(const ShapeInstance &shape, const core::Ray &ray, float maxDistance) {
+			const core::Vector3 origin = ToLocalPoint(shape.Frame, ray.Origin);
+			const core::Vector3 direction = ToLocalVector(shape.Frame, ray.Direction);
+			const core::Vector3 finish = origin + direction * maxDistance;
+
+			const core::AABB segment = core::AABB{origin, origin}.Union(core::AABB{finish, finish});
+
+			ShapeHit nearest;
+			nearest.Distance = maxDistance;
+
+			for (size_t triangle = 0; triangle < shape.Mesh->TriangleCount(); triangle++) {
+				if (!shape.Mesh->TriangleBounds[triangle].Overlaps(segment)) {
+					continue;
+				}
+
+				const collision::Triangle corners = shape.Mesh->TriangleAt(triangle);
+				const core::Vector3 edgeA = corners.B - corners.A;
+				const core::Vector3 edgeB = corners.C - corners.A;
+				const core::Vector3 across = direction.Cross(edgeB);
+				const float determinant = edgeA.Dot(across);
+
+				// Parallel to the triangle's plane. Not a hit either way: a ray
+				// travelling along a surface has no entry point.
+				if (std::abs(determinant) < 1e-9f) {
+					continue;
+				}
+
+				const float inverse = 1.0f / determinant;
+				const core::Vector3 toCorner = origin - corners.A;
+				const float u = toCorner.Dot(across) * inverse;
+				if (u < 0.0f || u > 1.0f) {
+					continue;
+				}
+
+				const core::Vector3 sideways = toCorner.Cross(edgeA);
+				const float v = direction.Dot(sideways) * inverse;
+				if (v < 0.0f || u + v > 1.0f) {
+					continue;
+				}
+
+				const float distance = edgeB.Dot(sideways) * inverse;
+				if (distance < 0.0f || distance >= nearest.Distance) {
+					continue;
+				}
+
+				core::Vector3 normal = edgeA.Cross(edgeB).Unit();
+				if (normal.Dot(direction) > 0.0f) {
+					normal = normal * -1.0f;
+				}
+
+				nearest.Touched = true;
+				nearest.Distance = distance;
+				nearest.Normal = shape.Frame.VectorToWorldSpace(normal);
+			}
+
+			if (!nearest.Touched) {
+				return ShapeHit{};
+			}
+			return nearest;
+		}
+	}
+
 	ShapeHit IntersectRayShape(const ShapeInstance &shape, const core::Ray &ray, float maxDistance) {
 		switch (shape.Shape) {
 		case scene::ShapeKind::Box:
@@ -197,6 +361,12 @@ namespace engine::physics {
 			return SphereRay(shape, ray, maxDistance);
 		case scene::ShapeKind::Cylinder:
 			return CylinderRay(shape, ray, maxDistance);
+
+		case scene::ShapeKind::Hull:
+			return HullRay(shape, ray, maxDistance);
+
+		case scene::ShapeKind::Mesh:
+			return MeshRay(shape, ray, maxDistance);
 		}
 
 		// A shape kind off a wire that this build does not know: no hit, for

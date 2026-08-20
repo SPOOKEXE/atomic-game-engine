@@ -1,6 +1,33 @@
 
 # DEFERRED
 
+### [x] D00103
+
+**Closed at v0.17 by restoring Vulkan query-pool timestamps around authored
+render-graph nodes.** `render/src/VulkanTimestamps.{hpp,cpp}` rotates query
+slots, writes bottom-of-pipe marks and collects completed frames without a CPU
+wait. The Studio pipeline profiler joins those measurements to node names and
+keeps CPU wall time separate. Dedicated compute-prefix command buffers rebase
+the active timing slot so their earlier submission cannot be erased by a reset
+recorded in the later main command buffer.
+
+The portable half remains D00046 because SDL exposes no timestamp-query API.
+Unsupported backends report the GPU value as unmeasured rather than presenting
+CPU submission time as GPU work.
+
+### [x] D00038
+
+**Closed at v0.17 by making `std::span<const render::View>` the only public
+rendering entry point.** One call groups views by world and pipeline, executes
+world-scoped graph work once per distinct group, records every view into one
+frame-owned command buffer and submits only after the final view. Studio and the
+client both construct `View`; the twelve-parameter fixed-pass entry point and
+the round-robin-only constraint are gone.
+
+The execution plan reports per-world resource traffic and concurrent logical
+queue waves. SDL's unified queue still serialises physical submissions, which
+is a backend capability limit rather than a return to one-view rendering.
+
 ### [x] D00015
 
 **Closed at v0.15 with all three parts built, and the third only after the invariant that forbade it was amended on purpose.** Three proposals for replication bandwidth, recorded together because they interact and separately because they were not equally ready. Written before any code, in the shape `v02v03v04.md` used: the open questions were the point rather than the plan, and each of the three closed by its own question being answered.

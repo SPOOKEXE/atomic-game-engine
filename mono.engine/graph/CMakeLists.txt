@@ -22,6 +22,7 @@ mono_add_library(graph
 	TIER shared
 	DEPS
 		Engine::core
+		Engine::ecs
 
 		# `scene` for `DrawInstance` - the thing being culled - and for
 		# `ResolveCamera`, which is the one place the engine decides what a

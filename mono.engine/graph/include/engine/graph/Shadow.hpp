@@ -72,16 +72,19 @@ namespace engine::graph {
 	// `NON-EUCLIDEAN.md` Part V.3 is the derivation, and the surprising half of
 	// it is which way the map goes: the near room's casters are left where they
 	// are and the far-side *fragment* is mapped back, so this matrix is built in
-	// the near room's own coordinates and needs nothing transformed.
+	// the near room's own coordinates. Caster positions stay untouched, but the
+	// caller must rotate the far room's light direction through that same back
+	// map before passing it here.
 	//
 	// @param bounds    What the light must be able to see, in world space. Only
 	//                  its extent along `direction` is used.
 	// @param centre    The middle of the pane's rectangle.
 	// @param first     One half-axis of it, as a vector.
 	// @param second    The other.
-	// @param direction Which way the light travels. A zero direction, or a
-	//                  degenerate rectangle, yields the identity - which
-	//                  shadows nothing rather than shadowing everything.
+	// @param direction Which way the light travels in the pane's coordinate
+	//                  chart. A zero direction, or a degenerate rectangle,
+	//                  yields the identity, which shadows nothing rather than
+	//                  shadowing everything.
 	// @return `Projection * View` for the beam.
 	// @since v0.15
 	glm::mat4 FitPortalLight(

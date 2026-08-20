@@ -64,9 +64,8 @@ namespace studio {
 		// @param which    Which colour.
 		// @param inherited What this colour is when nothing overrides it.
 		// @return Whether the set changed.
-		bool ColourRow(
-			engine::ui::ThemeColours &colours, engine::ui::ThemeColour which, unsigned int inherited
-		) {
+		bool
+		ColourRow(engine::ui::ThemeColours &colours, engine::ui::ThemeColour which, unsigned int inherited) {
 			const bool overridden = colours[which].has_value();
 			const unsigned int packed = overridden ? *colours[which] : inherited;
 
@@ -207,6 +206,49 @@ namespace studio {
 		ImGui::BeginDisabled(!capped);
 		ImGui::SetNextItemWidth(engine::ui::Scaled(160.0f));
 		ImGui::SliderFloat("Frames per second", &FrameCap, 30.0f, 360.0f, "%.0f fps");
+
+		// **Four rates under the one ceiling, because a still editor and a busy
+		// one are not the same question.** The number above is the most this
+		// program will ever draw; these four are what it settles to when nobody
+		// is asking it for anything. An editor behind a browser drawing a
+		// hundred and twenty identical pictures a second is what they exist to
+		// stop.
+		ImGui::Spacing();
+		ImGui::SeparatorText("Rates");
+
+		ImGui::TextDisabled("the lowest ceiling that applies is the one the frame is paced at");
+
+		const auto rate = [](const char *label, float &value, const char *tip) {
+			ImGui::SetNextItemWidth(engine::ui::Scaled(160.0f));
+			ImGui::SliderFloat(label, &value, 0.0f, 360.0f, value <= 0.0f ? "no limit" : "%.0f Hz");
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("%s", tip);
+			}
+		};
+
+		rate(
+			"Interface, active",
+			InterfaceActiveHz,
+			"How often the panels are rebuilt while somebody is working."
+		);
+		rate(
+			"Interface, idle",
+			InterfaceIdleHz,
+			"After three seconds with no key and no mouse. Drop this to stop a still\n"
+			"editor costing a laptop its fans."
+		);
+		rate(
+			"Renderer, focused",
+			RendererFocusedHz,
+			"How often the world behind the panels is redrawn while this window has focus."
+		);
+		rate(
+			"Renderer, unfocused",
+			RendererUnfocusedHz,
+			"While the window is behind something else. There is nobody looking at it,\n"
+			"so this is the one worth setting low."
+		);
+
 		ImGui::EndDisabled();
 
 		ImGui::EndDisabled();
@@ -214,6 +256,14 @@ namespace studio {
 		ImGui::TextDisabled("without a cap the editor draws as fast as it can, which on a still");
 		ImGui::TextDisabled("scene is a great many frames of the same picture");
 
+		// **Said rather than left implied.** `Renderer::Render` owns the
+		// swapchain, the interface and the present in one call, so a frame that
+		// redraws the panels redraws the world too - the interface and renderer
+		// rates therefore bound the same frame rather than running apart. A page
+		// offering four independent numbers that are not independent would be
+		// worse than one saying so.
+		ImGui::TextDisabled("interface and renderer share one frame today, so the two act as");
+		ImGui::TextDisabled("ceilings on it rather than as separate clocks");
 	}
 
 	void Editor::DrawAppearanceSettings() {
@@ -236,7 +286,9 @@ namespace studio {
 
 			// `SetPalette` restyles and marks the layout dirty itself, so this
 			// is the whole of choosing a theme.
-			if (ImGui::Selectable("##palette", chosen, ImGuiSelectableFlags_AllowOverlap, ImVec2(0.0f, row))) {
+			if (ImGui::Selectable(
+					"##palette", chosen, ImGuiSelectableFlags_AllowOverlap, ImVec2(0.0f, row)
+				)) {
 				engine::ui::SetPalette(palette);
 			}
 
@@ -518,18 +570,18 @@ namespace studio {
 				ImGui::TableSetColumnIndex(2);
 				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
 				switch (binding.Where) {
-					case Scope::Global:
-						ImGui::TextUnformatted("anywhere");
-						break;
-					case Scope::Viewport:
-						ImGui::TextUnformatted("viewport");
-						break;
-					case Scope::Tree:
-						ImGui::TextUnformatted("explorer");
-						break;
-					case Scope::Script:
-						ImGui::TextUnformatted("scripts");
-						break;
+				case Scope::Global:
+					ImGui::TextUnformatted("anywhere");
+					break;
+				case Scope::Viewport:
+					ImGui::TextUnformatted("viewport");
+					break;
+				case Scope::Tree:
+					ImGui::TextUnformatted("explorer");
+					break;
+				case Scope::Script:
+					ImGui::TextUnformatted("scripts");
+					break;
 				}
 				ImGui::PopStyleColor();
 
@@ -647,7 +699,8 @@ namespace studio {
 				if (!source.IsValid() && ImGui::IsItemHovered()) {
 					ImGui::SetTooltip(
 						source.Kind == engine::delivery::SourceKind::Http
-							? "an address and a port, as 127.0.0.1:9080 - a host name has to be resolved first"
+							? "an address and a port, as 127.0.0.1:9080 - a host name has to be resolved "
+							  "first"
 							: "a directory holding a published content store"
 					);
 				}
@@ -709,22 +762,26 @@ namespace studio {
 		}
 
 		if (ImGui::Button("Add origin")) {
-			Content.Sources.push_back(engine::delivery::Source{
-				.Name = "origin",
-				.Kind = engine::delivery::SourceKind::Http,
-				.Location = "127.0.0.1:" + std::to_string(engine::delivery::DEFAULT_ORIGIN_PORT),
-				.Enabled = true,
-			});
+			Content.Sources.push_back(
+				engine::delivery::Source{
+					.Name = "origin",
+					.Kind = engine::delivery::SourceKind::Http,
+					.Location = "127.0.0.1:" + std::to_string(engine::delivery::DEFAULT_ORIGIN_PORT),
+					.Enabled = true,
+				}
+			);
 			changed = true;
 		}
 		ImGui::SameLine();
 		if (ImGui::Button("Add local store")) {
-			Content.Sources.push_back(engine::delivery::Source{
-				.Name = "on-disk",
-				.Kind = engine::delivery::SourceKind::Directory,
-				.Location = "",
-				.Enabled = true,
-			});
+			Content.Sources.push_back(
+				engine::delivery::Source{
+					.Name = "on-disk",
+					.Kind = engine::delivery::SourceKind::Directory,
+					.Location = "",
+					.Enabled = true,
+				}
+			);
 			changed = true;
 		}
 		ImGui::SameLine();
@@ -827,6 +884,168 @@ namespace studio {
 		}
 	}
 
+	void Editor::DrawComputeSettings() {
+		// **How this process spends its cores, in one place.** These used to be
+		// nowhere or on whichever panel first needed them - `force serial
+		// compute` was a checkbox on the frame graph - and a decision that
+		// changes how the whole engine dispatches is not a property of a panel.
+		ImGui::SeparatorText("The pool");
+
+		const unsigned workers = engine::parallel::Jobs::WorkerCount();
+		const unsigned pinned = engine::parallel::Jobs::PinnedWorkerCount();
+
+		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+		ImGui::Text("%u worker(s), %u pinned to a physical core", workers, pinned);
+		ImGui::PopStyleColor();
+
+		ImGui::Spacing();
+		ImGui::SeparatorText("Dispatch");
+
+		// **The one global switch, and the one that can make every measurement
+		// on this machine a lie.** It is here rather than on the frame graph
+		// because it is not a property of that panel; the panel says when it is
+		// on, which is the half that mattered.
+		bool serial = engine::parallel::ForceSerialCompute();
+		if (ImGui::Checkbox("Force serial compute", &serial)) {
+			engine::parallel::SetForceSerialCompute(serial);
+			Say(serial ? "every parallel dispatch now runs on the thread that asked"
+					   : "parallel dispatch restored");
+		}
+
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip(
+				"Every parallel dispatch runs on the thread that asked, so no span is dropped\n"
+				"and the frame graph keeps the whole tree.\n"
+				"The frame gets slower on purpose: this measures a serial cost, not a verdict\n"
+				"on the parallel one."
+			);
+		}
+
+		if (serial) {
+			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
+			ImGui::TextUnformatted("every timing taken while this is on is a serial one");
+			ImGui::PopStyleColor();
+		}
+
+		ImGui::Spacing();
+
+		// **The universe's own mode, which is the coarser of the two splits.**
+		// `WorldParallel` overlaps whole worlds on pinned lanes; `WorldSerial`
+		// runs them one after another on the driver. It is a universe setting
+		// rather than a preference - a game file carries it - so this edits the
+		// open universe and says so.
+		const engine::world::ExecutionMode mode = Universe->Settings().Mode;
+		int chosen = mode == engine::world::ExecutionMode::WorldParallel ? 0 : 1;
+
+		static const char *MODES[] = {"Worlds in parallel", "Worlds one after another"};
+		ImGui::SetNextItemWidth(engine::ui::Scaled(220.0f));
+		if (ImGui::Combo("World execution", &chosen, MODES, IM_ARRAYSIZE(MODES))) {
+			Universe->SetMode(
+				chosen == 0 ? engine::world::ExecutionMode::WorldParallel
+							: engine::world::ExecutionMode::WorldSerial
+			);
+			Modified = true;
+		}
+
+		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+		ImGui::TextUnformatted("this universe's own setting, saved with the game");
+		ImGui::PopStyleColor();
+
+		ImGui::Spacing();
+
+		// **The rule that explains a serial-looking single-world game**, which
+		// is otherwise the most confusing thing on this page: somebody sets
+		// worlds-in-parallel, opens a game with one world, and the frame graph
+		// says `worlds (serial)`.
+		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+		ImGui::TextWrapped(
+			"A universe holding one world ticks it on this thread whatever the mode says. A "
+			"dispatch batch owns the whole worker pool, so putting a lone world on a lane would "
+			"make every parallel loop inside it - particles, transforms, physics - run inline "
+			"while the rest of the pool waits for a batch of one. With two or more worlds the "
+			"lanes have something to overlap and are taken."
+		);
+		ImGui::PopStyleColor();
+	}
+
+	void Editor::DrawDefaultWorldSettings() {
+		ImGui::SeparatorText("Worlds a new game opens with");
+
+		ImGui::TextDisabled(
+			"ticked worlds are created by File > New. Nothing here touches a game already open."
+		);
+
+		ImGui::Spacing();
+
+		// **Two buttons rather than a right-click menu on the list**, because
+		// the two things anybody wants from a thirteen-row checkbox page are
+		// "all of them" and "none of them", and both are one click away or they
+		// are not worth having.
+		if (ImGui::SmallButton("Select all")) {
+			for (const DefaultWorldEntry &entry : DefaultWorldCatalogue()) {
+				SetDefaultWorldEnabled(entry.Key, true);
+			}
+		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton("Select none")) {
+			for (const DefaultWorldEntry &entry : DefaultWorldCatalogue()) {
+				SetDefaultWorldEnabled(entry.Key, false);
+			}
+		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton("Reset")) {
+			for (const DefaultWorldEntry &entry : DefaultWorldCatalogue()) {
+				SetDefaultWorldEnabled(entry.Key, entry.OnByDefault);
+			}
+		}
+
+		ImGui::Spacing();
+
+		size_t chosen = 0;
+		for (const DefaultWorldEntry &entry : DefaultWorldCatalogue()) {
+			ImGui::PushID(entry.Key.data(), entry.Key.data() + entry.Key.size());
+
+			bool enabled = DefaultWorldEnabled(entry.Key);
+			const std::string label(entry.World);
+			if (ImGui::Checkbox(label.c_str(), &enabled)) {
+				SetDefaultWorldEnabled(entry.Key, enabled);
+			}
+
+			// The note is the paragraph that used to sit beside this world's
+			// `AddWorld` call in `Editor::NewGame`. A tooltip rather than a line
+			// under each row: thirteen paragraphs stacked is a page nobody reads
+			// the top of.
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("%s", std::string(entry.Note).c_str());
+			}
+
+			// The scene that builds it, dimmed on the same row - an annotation
+			// rather than a second name, which is the Explorer's rule for the
+			// class name it puts beside an instance.
+			ImGui::SameLine();
+			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+			ImGui::TextUnformatted(entry.First.data(), entry.First.data() + entry.First.size());
+			ImGui::PopStyleColor();
+
+			chosen += enabled ? 1 : 0;
+			ImGui::PopID();
+		}
+
+		ImGui::Spacing();
+
+		// **Said rather than left to be discovered on the next New.** An empty
+		// selection is allowed - somebody clearing the list means it - and a new
+		// game that opened one blank world when they expected none, or none when
+		// they expected several, is a surprise worth spending a line on.
+		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+		if (chosen == 0) {
+			ImGui::TextUnformatted("nothing ticked - a new game opens one empty world called Start");
+		} else {
+			ImGui::Text("%zu world(s) - the first is the one selected on open", chosen);
+		}
+		ImGui::PopStyleColor();
+	}
+
 	void Editor::DrawSettings() {
 		if (!ShowSettings) {
 			return;
@@ -854,6 +1073,21 @@ namespace studio {
 
 			if (ImGui::BeginTabItem("Content")) {
 				DrawContentSettings();
+				ImGui::EndTabItem();
+			}
+
+			if (ImGui::BeginTabItem("Default Worlds")) {
+				DrawDefaultWorldSettings();
+				ImGui::EndTabItem();
+			}
+
+			if (ImGui::BeginTabItem("Compute")) {
+				DrawComputeSettings();
+				ImGui::EndTabItem();
+			}
+
+			if (ImGui::BeginTabItem("Discord Presence")) {
+				DrawDiscordSettings();
 				ImGui::EndTabItem();
 			}
 

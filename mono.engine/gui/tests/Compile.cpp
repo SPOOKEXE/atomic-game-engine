@@ -223,6 +223,7 @@ TEST_CASE("every declared property moves the signature", "[gui][compile]") {
 		"UICorner",
 		"UIStroke",
 		"UIScale",
+		"UIFlexItem",
 	};
 
 	size_t checked = 0;
@@ -630,9 +631,447 @@ TEST_CASE("a scrolling frame emits proportional bars over its children", "[gui][
 	const DrawCommand &vertical = *rectangles[1];
 	const DrawCommand &horizontal = *rectangles[2];
 	CHECK(vertical.Bounds.Width() == Approx(10.0f));
-	CHECK(vertical.Bounds.Height() == Approx(30.0f));
 	CHECK(horizontal.Bounds.Height() == Approx(10.0f));
-	CHECK(horizontal.Bounds.Width() == Approx(45.0f));
 	CHECK(vertical.CornerRadius == Approx(5.0f));
 	CHECK(horizontal.CornerRadius == Approx(5.0f));
+
+	// **The full height, because neither inset is reserved.** With
+	// `ScrollBarInset::None` - Roblox's default and this one - the two bars
+	// overlap in the corner rather than shortening each other's track, so a
+	// hundred-pixel frame showing a third of a three-hundred-pixel canvas gets a
+	// third of a hundred-pixel track.
+	CHECK(vertical.Bounds.Height() == Approx(100.0f / 3.0f));
+	CHECK(horizontal.Bounds.Width() == Approx(50.0f));
+
+	// And reserving both strips shortens the window, which shortens both the
+	// track and the share of it each thumb takes.
+	scrolling.HorizontalInset = ScrollBarInset::Always;
+	scrolling.VerticalInset = ScrollBarInset::Always;
+	world.Data.Set(frame, scrolling);
+	REQUIRE(world.Rebuild());
+
+	const ScrollState *state = world.Data.Get<ScrollState>(frame);
+	REQUIRE(state != nullptr);
+	CHECK(state->WindowSize.X == Approx(90.0f));
+	CHECK(state->WindowSize.Y == Approx(90.0f));
+	CHECK(state->CanvasSize.X == Approx(180.0f));
+	CHECK(state->VerticalThumb.Height() == Approx(90.0f * 90.0f / 270.0f));
+}
+
+TEST_CASE("an automatic canvas grows to what the frame holds", "[gui][compile]") {
+	// The property has been declared and unread since the tree went in; this is
+	// the case that makes it mean something. A list of three fixed rows in a
+	// frame shorter than they are is exactly what it is for.
+	World world("gui_compile.autocanvas");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("ScrollingFrame", screen);
+
+	Element element;
+	element.Size = UDim2{0.0f, 100.0f, 0.0f, 100.0f};
+	world.Data.Set(frame, element);
+
+	Scrolling scrolling;
+	scrolling.CanvasSize = UDim2{0.0f, 0.0f, 0.0f, 0.0f};
+	scrolling.AutomaticCanvas = AutomaticSize::Y;
+	world.Data.Set(frame, scrolling);
+
+	const Entity layout = world.Make("UIListLayout", frame);
+	world.Data.Set(layout, ListLayout{});
+
+	for (int index = 0; index < 3; index++) {
+		const Entity row = world.Make("Frame", frame);
+		Element size;
+		size.Size = UDim2{0.0f, 100.0f, 0.0f, 60.0f};
+		size.LayoutOrder = index;
+		world.Data.Set(row, size);
+	}
+
+	REQUIRE(world.Rebuild());
+
+	const ScrollState *state = world.Data.Get<ScrollState>(frame);
+	REQUIRE(state != nullptr);
+
+	// **The content replaces that axis rather than adding to it**, which is
+	// Roblox's rule: three sixty-pixel rows are a hundred and eighty pixels of
+	// canvas whatever `CanvasSize` said.
+	CHECK(state->CanvasSize.Y == Approx(180.0f));
+
+	// The other axis is untouched, so a frame that grows downwards does not
+	// start scrolling sideways.
+	CHECK(state->CanvasSize.X == Approx(0.0f));
+}
+
+TEST_CASE("a billboard is hidden from the one viewer it names", "[gui][compile]") {
+	// **A compile decision and not a layout one**, which is what the two halves
+	// of this case check: the tree resolves identically for everybody - the
+	// billboard is `Rendered` either way - and what differs is only which
+	// commands reach the list. Deciding it in the backend instead would leave a
+	// compiled list that disagreed with the frame drawn from it.
+	World world("gui_compile.hidefrom");
+
+	const Entity workspace =
+		world.Data.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Instance")), "Workspace");
+
+	const Entity viewer =
+		world.Data.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Instance")), "Somebody");
+	const Entity other =
+		world.Data.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Instance")), "SomebodyElse");
+
+	const Entity billboard = world.Make("BillboardGui", workspace);
+	const Entity frame = world.Make("Frame", billboard);
+	world.Data.Set(frame, Element{});
+
+	const auto drawn = [&] {
+		size_t found = 0;
+		for (const DrawCommand &command : world.List.Commands().Commands) {
+			found += command.Source == frame ? 1 : 0;
+		}
+		return found;
+	};
+
+	Billboard state;
+	state.PlayerToHideFrom = viewer;
+	world.Data.Set(billboard, state);
+
+	world.Request.Viewer = other;
+	REQUIRE(world.Rebuild());
+	CHECK(drawn() > 0);
+
+	world.Request.Viewer = viewer;
+	REQUIRE(world.Rebuild());
+	CHECK(drawn() == 0);
+
+	// **The tree is untouched either way.** A viewer-specific decision that had
+	// reached `Resolved` would make one client's `AbsoluteSize` differ from
+	// another's for an element neither of them authored differently.
+	CHECK(world.Data.Get<Resolved>(frame)->Rendered);
+
+	// And nobody in particular hides nothing, which is the studio's case and a
+	// test's - an unset `PlayerToHideFrom` is also null and must not match.
+	world.Request.Viewer = engine::ecs::NULL_ENTITY;
+	REQUIRE(world.Rebuild());
+	CHECK(drawn() > 0);
+}
+
+TEST_CASE("a gradient resolves into the line it ramps along", "[gui][compile]") {
+	// **The compile's whole job for a `UIGradient`**: an angle and a size-
+	// relative offset go in, two points in canvas pixels come out. Doing it here
+	// rather than in a backend is what stops the client and the studio
+	// disagreeing about where a ramp starts.
+	World world("gui_compile.gradient");
+
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("Frame", screen);
+
+	Element element;
+	element.Position = UDim2{0.0f, 100.0f, 0.0f, 50.0f};
+	element.Size = UDim2{0.0f, 200.0f, 0.0f, 100.0f};
+	world.Data.Set(frame, element);
+
+	const Entity ramp = world.Make("UIGradient", frame);
+	world.Data.Set(ramp, Gradient{});
+
+	REQUIRE(world.Rebuild());
+
+	const DrawCommand *fill = nullptr;
+	for (const DrawCommand &command : world.List.Commands().Commands) {
+		if (command.Source == frame && command.Kind == DrawKind::Rectangle) {
+			fill = &command;
+			break;
+		}
+	}
+
+	REQUIRE(fill != nullptr);
+	REQUIRE(fill->Gradient >= 0);
+	const DrawGradient &resolved = world.List.Commands().Gradients[std::size_t(fill->Gradient)];
+
+	// Unrotated, so the ramp runs left to right across the element's own width.
+	CHECK(resolved.Origin.X == Approx(100.0f));
+	CHECK(resolved.Origin.Y == Approx(100.0f));
+	CHECK(resolved.Axis.X == Approx(200.0f));
+	CHECK(resolved.Axis.Y == Approx(0.0f).margin(0.001f));
+
+	// **A quarter turn ramps over the full height, not over the width.** The
+	// ends snap to the element's edges *along the rotated axis*, which is what
+	// makes a ninety-degree gradient a top-to-bottom one rather than a diagonal.
+	Gradient turned;
+	turned.Rotation = 90.0f;
+	world.Data.Set(ramp, turned);
+	REQUIRE(world.Rebuild());
+
+	const DrawGradient &vertical = world.List.Commands().Gradients.front();
+	CHECK(vertical.Axis.X == Approx(0.0f).margin(0.001f));
+	CHECK(vertical.Axis.Y == Approx(100.0f));
+	CHECK(vertical.Origin.X == Approx(200.0f));
+	CHECK(vertical.Origin.Y == Approx(50.0f));
+
+	// The offset is in multiples of the element's own size, so one whole width
+	// slides the ramp entirely off the right-hand edge.
+	Gradient slid;
+	slid.Offset = Vector2{1.0f, 0.0f};
+	world.Data.Set(ramp, slid);
+	REQUIRE(world.Rebuild());
+	CHECK(world.List.Commands().Gradients.front().Origin.X == Approx(300.0f));
+
+	// And a disabled one resolves to nothing at all rather than to a ramp that
+	// happens to be flat - a backend that got the second would still subdivide.
+	Gradient off;
+	off.Enabled = false;
+	world.Data.Set(ramp, off);
+	REQUIRE(world.Rebuild());
+	CHECK(world.List.Commands().Gradients.empty());
+	for (const DrawCommand &command : world.List.Commands().Commands) {
+		CHECK(command.Gradient == -1);
+	}
+}
+
+TEST_CASE("a stroke takes its own gradient and never the element's", "[gui][compile]") {
+	// Roblox's arrangement, and the reason it is worth a case: an outline is a
+	// separate thing with a separate colour, so inheriting the fill's ramp would
+	// tint it with one nobody asked for.
+	World world("gui_compile.strokegradient");
+
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("Frame", screen);
+	world.Data.Set(frame, Element{});
+
+	const Entity fillRamp = world.Make("UIGradient", frame);
+	Gradient warm;
+	warm.Color = engine::core::ColorSequence{Color3{1.0f, 0.0f, 0.0f}};
+	world.Data.Set(fillRamp, warm);
+
+	const Entity stroke = world.Make("UIStroke", frame);
+	world.Data.Set(stroke, Stroke{});
+
+	REQUIRE(world.Rebuild());
+
+	const DrawCommand *outline = nullptr;
+	for (const DrawCommand &command : world.List.Commands().Commands) {
+		if (command.Source == frame && command.Kind == DrawKind::Outline) {
+			outline = &command;
+		}
+	}
+
+	// The border and the stroke are both outlines; the stroke is the last one
+	// this element emits, which is what `Emit` promises.
+	REQUIRE(outline != nullptr);
+	CHECK(outline->Gradient == -1);
+
+	const Entity strokeRamp = world.Make("UIGradient", stroke);
+	Gradient cool;
+	cool.Color = engine::core::ColorSequence{Color3{0.0f, 0.0f, 1.0f}};
+	world.Data.Set(strokeRamp, cool);
+
+	REQUIRE(world.Rebuild());
+
+	for (const DrawCommand &command : world.List.Commands().Commands) {
+		if (command.Source == frame && command.Kind == DrawKind::Outline) {
+			outline = &command;
+		}
+	}
+
+	REQUIRE(outline->Gradient >= 0);
+	const DrawGradient &ramp = world.List.Commands().Gradients[std::size_t(outline->Gradient)];
+	CHECK(ramp.Color.Evaluate(0.5f).B == Approx(1.0f));
+}
+
+TEST_CASE("a rich text label reaches the list as spans over one string", "[gui][compile]") {
+	// **One command and not several**, which is the arrangement the whole
+	// feature turns on: only a backend can measure a glyph, so a marked-up run
+	// has to arrive as one string it lays out in one pass.
+	World world("gui_compile.richtext");
+
+	const Entity screen = world.Make("ScreenGui");
+	const Entity label = world.Make("TextLabel", screen);
+	world.Data.Set(label, Element{});
+
+	Label text;
+	text.Text = "a <b>big</b> word";
+	text.Rich = true;
+	world.Data.Set(label, text);
+
+	REQUIRE(world.Rebuild());
+
+	const DrawCommand *run = nullptr;
+	size_t runs = 0;
+	for (const DrawCommand &command : world.List.Commands().Commands) {
+		if (command.Source == label && command.Kind == DrawKind::Text) {
+			run = &command;
+			runs++;
+		}
+	}
+
+	REQUIRE(run != nullptr);
+	CHECK(runs == 1);
+	CHECK(run->Text == "a big word");
+	REQUIRE(run->Spans.size() == 1);
+	CHECK(run->Spans[0].Font == FontFace::Bold);
+
+	// Without the property the markup is text, which is what an author who
+	// wrote a less-than sign into a plain label meant.
+	text.Rich = false;
+	world.Data.Set(label, text);
+	REQUIRE(world.Rebuild());
+
+	for (const DrawCommand &command : world.List.Commands().Commands) {
+		if (command.Source == label && command.Kind == DrawKind::Text) {
+			CHECK(command.Text == "a <b>big</b> word");
+			CHECK(command.Spans.empty());
+		}
+	}
+}
+
+TEST_CASE("the visible limit cuts the text and the spans together", "[gui][compile]") {
+	// Roblox applies `MaxVisibleGraphemes` to what a reader sees, so a
+	// typewriter effect on a marked-up string reveals letters and not tags - and
+	// a span left pointing past the cut would be a range a backend indexes with.
+	World world("gui_compile.maxvisible");
+
+	const Entity screen = world.Make("ScreenGui");
+	const Entity label = world.Make("TextLabel", screen);
+	world.Data.Set(label, Element{});
+
+	Label text;
+	text.Text = "<b>abcdef</b>";
+	text.Rich = true;
+	text.MaxVisible = 3;
+	world.Data.Set(label, text);
+
+	REQUIRE(world.Rebuild());
+
+	for (const DrawCommand &command : world.List.Commands().Commands) {
+		if (command.Source != label || command.Kind != DrawKind::Text) {
+			continue;
+		}
+		CHECK(command.Text == "abc");
+		REQUIRE(command.Spans.size() == 1);
+		CHECK(command.Spans[0].End == 3);
+	}
+
+	// And the measurement follows, so `TextScaled` fits what is shown rather
+	// than what was typed.
+	const Resolved *resolved = world.Data.Get<Resolved>(label);
+	REQUIRE(resolved != nullptr);
+	CHECK(resolved->TextBounds.X == Approx(3.0f * AVERAGE_ADVANCE * float(resolved->TextSize)));
+}
+
+TEST_CASE("a scaled stroke resolves to pixels before it reaches a backend", "[gui][compile]") {
+	// **A draw list has no element to measure against**, so a fraction that
+	// survived the compile would be a thickness a backend could not resolve -
+	// and the one that arrived at `InterfaceMesh` would be read as pixels and
+	// draw a hairline. See `StrokeThickness`.
+	World world("gui_compile.strokesizing");
+
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("Frame", screen);
+
+	// 200 wide and 80 tall, so the smaller side is 80 and the two modes cannot
+	// be confused by a square.
+	Element box;
+	box.Size = UDim2{0.0f, 200.0f, 0.0f, 80.0f};
+	world.Data.Set(frame, box);
+
+	const Entity stroke = world.Make("UIStroke", frame);
+
+	const auto thicknessOf = [&]() {
+		REQUIRE(world.Rebuild());
+		const DrawCommand *outline = nullptr;
+		for (const DrawCommand &command : world.List.Commands().Commands) {
+			if (command.Source == frame && command.Kind == DrawKind::Outline) {
+				outline = &command;
+			}
+		}
+		REQUIRE(outline != nullptr);
+		return outline->Thickness;
+	};
+
+	SECTION("fixed is the number that was typed") {
+		Stroke pixels;
+		pixels.Thickness = 3.0f;
+		pixels.Sizing = StrokeSizing::FixedSize;
+		world.Data.Set(stroke, pixels);
+		CHECK(thicknessOf() == Approx(3.0f));
+	}
+
+	SECTION("scaled is a fraction of the smaller side") {
+		Stroke fraction;
+		fraction.Thickness = 0.1f;
+		fraction.Sizing = StrokeSizing::ScaledSize;
+		world.Data.Set(stroke, fraction);
+
+		// The smaller side, not the larger and not the average: an outline
+		// scaled by a long thin element's width would be thicker than the
+		// element is tall.
+		CHECK(thicknessOf() == Approx(8.0f));
+	}
+
+	SECTION("a scaled zero draws nothing, like a fixed zero") {
+		// **Counted rather than asserted absent**, because a `Frame` carries a
+		// one-pixel `Background::BorderSizePixel` and that is an outline too.
+		// Counting is the stronger question anyway: it says the stroke is a
+		// second command rather than something that edits the border.
+		const auto outlines = [&]() {
+			REQUIRE(world.Rebuild());
+			size_t found = 0;
+			for (const DrawCommand &command : world.List.Commands().Commands) {
+				found += command.Source == frame && command.Kind == DrawKind::Outline ? 1 : 0;
+			}
+			return found;
+		};
+
+		Stroke drawn;
+		drawn.Thickness = 0.1f;
+		drawn.Sizing = StrokeSizing::ScaledSize;
+		world.Data.Set(stroke, drawn);
+		const size_t withStroke = outlines();
+
+		Stroke none = drawn;
+		none.Thickness = 0.0f;
+		world.Data.Set(stroke, none);
+		CHECK(outlines() == withStroke - 1);
+	}
+}
+
+TEST_CASE("a stroke's join and sizing reach the draw list and the signature", "[gui][compile]") {
+	// The signature is what decides whether a frame recompiles at all, so a
+	// property that changed the picture without changing the hash would draw
+	// the old one until something else moved.
+	World world("gui_compile.strokejoin");
+
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("Frame", screen);
+	world.Data.Set(frame, Element{});
+	const Entity stroke = world.Make("UIStroke", frame);
+
+	Stroke round;
+	round.Thickness = 2.0f;
+	round.Join = LineJoin::Round;
+	world.Data.Set(stroke, round);
+	REQUIRE(world.Rebuild());
+
+	const auto joinOf = [&]() {
+		const DrawCommand *outline = nullptr;
+		for (const DrawCommand &command : world.List.Commands().Commands) {
+			if (command.Source == frame && command.Kind == DrawKind::Outline) {
+				outline = &command;
+			}
+		}
+		REQUIRE(outline != nullptr);
+		return outline->Join;
+	};
+	CHECK(joinOf() == LineJoin::Round);
+
+	Stroke mitred = round;
+	mitred.Join = LineJoin::Miter;
+	world.Data.Set(stroke, mitred);
+	REQUIRE(world.Rebuild());
+	CHECK(joinOf() == LineJoin::Miter);
+
+	// And the sizing half of the same argument: switching mode changes the
+	// thickness, so it has to move the hash even though the typed number did
+	// not change.
+	Stroke scaled = mitred;
+	scaled.Sizing = StrokeSizing::ScaledSize;
+	world.Data.Set(stroke, scaled);
+	REQUIRE(world.Rebuild());
 }

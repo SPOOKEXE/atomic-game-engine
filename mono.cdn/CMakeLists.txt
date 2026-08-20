@@ -53,6 +53,13 @@ mono_add_library(cdn
 		# UDP socket and an HMAC, and no part of it wants a window. `just
 		# check-cdn-is-bare` is the standing proof.
 		Mono::network
+
+		# `shared`. What a person's Discord profile says while this program is
+		# running. It links `core` and a header-only JSON parser and nothing
+		# else, so this row does not put a graphics stack or a wire protocol on
+		# an origin's link line - which is the property `just check-cdn-is-bare`
+		# is there to keep true.
+		Mono::discord
 )
 
 # The library above is built whenever the server is, because a server can attach

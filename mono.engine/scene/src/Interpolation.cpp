@@ -1,6 +1,9 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Interpolation.hpp>
 
+#include <utility>
+#include <vector>
+
 namespace engine::scene {
 
 	void CapturePreviousTransforms(ecs::Store &store) {
@@ -34,5 +37,34 @@ namespace engine::scene {
 				previous.Frame = transform.Frame;
 			}
 		);
+	}
+
+	size_t SnapPortalTransit(ecs::Store &store) {
+		// **Gathered and then written, because writing adds a column.** A body
+		// crossing for the first time has no `PortalTransitSeen` row, and adding
+		// one is a structural change to the archetype the walk is standing on.
+		// Every other pass in this engine that touches storage from inside an
+		// iteration does the same two-phase thing.
+		static thread_local std::vector<std::pair<ecs::Entity, uint32_t>> snapped;
+		snapped.clear();
+
+		store.Each<PreviousTransform, const Transform, const PortalTransit>([&](ecs::Entity entity,
+																				PreviousTransform &previous,
+																				const Transform &placement,
+																				const PortalTransit &went) {
+			const PortalTransitSeen *seen = store.Get<PortalTransitSeen>(entity);
+			if (seen != nullptr && seen->Serial == went.Serial) {
+				return;
+			}
+
+			previous.Frame = placement.Frame;
+			snapped.emplace_back(entity, went.Serial);
+		});
+
+		for (const auto &[entity, serial] : snapped) {
+			store.Set(entity, PortalTransitSeen{serial});
+		}
+
+		return snapped.size();
 	}
 }

@@ -115,6 +115,53 @@ lives in one function.
 A class added by any module appears in the palette with nothing here changing.
 That is the same property the properties panel has, for the same reason.
 
+## The example menu never hard-codes a scene either
+
+`New Scene from Example` lists whatever `examples::ExampleScenes` found in the
+staged directory, sorted. A scene added to `mono.engine/examples` is in the menu
+after a build, with nothing here changing.
+
+**Three places offer it and one function submits it.** The `World` menu, the
+universe's context menu in the explorer and the Worlds panel all offer "add a
+world" already, so all three offer this too - through `DrawExampleSceneItems`,
+because three copies of a list read off a directory would be three chances to
+filter it differently. The rows sit in a scrolling child: there are more than
+forty scenes and an imgui menu that does not fit is clamped rather than
+scrolled, so the bottom of the list would be unreachable.
+
+The ten scenes named by hand in `RecreateDefaultWorlds` are a different thing
+and stay one: those are what a *new place* opens with, which is a choice about
+the first thing somebody sees rather than a list of what exists. Refuse a change
+that turns the menu into a second copy of that list, and refuse one that adds a
+stress scene to the template - a new place that built a hundred thousand parts
+on open is a studio that looks broken.
+
+## A tree row that can be selected needs `OpenOnArrow`
+
+An imgui tree node with no `ImGuiTreeNodeFlags_OpenOnArrow` toggles open on a
+click anywhere along the row, which sets `IsItemToggledOpen` for that frame. Every
+selectable row in the explorer guards on `IsItemClicked() && !IsItemToggledOpen()`,
+because a person opening a node is not choosing it - so a node without the flag
+can never be selected at all.
+
+The universe row was missing it from the day it was drawn. Clicking it opened or
+closed the tree and `UniverseSelected` stayed false for the life of the session,
+so the Properties panel said "nothing selected" for a root whose editable
+settings were sitting right behind it. The world rows had the flag and therefore
+worked, which is what made the difference look like the universe having no panel
+rather than the panel being unreachable.
+
+## Three things can be selected, and one function says none of them are
+
+`UniverseSelected`, `SelectedWorldRow` and `Selection` are the universe, a world
+and an instance. `SelectedWorldRow` is not `SelectionWorld`: the second says
+which world an *instance* selection lives in and is meaningless alone.
+
+Six places mean "something else has just been selected" - a range, an instance, a
+duplicate, a gallery tile, a pipeline node, a clear. All of them go through
+`ClearRootSelection`, because two fields assigned in six places is exactly the
+drift rule 2 names. Refuse a seventh that writes the fields directly.
+
 ## The viewport is a texture in a panel, not a hole in the dockspace
 
 The cheap version - draw the world to the swapchain and put a

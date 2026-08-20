@@ -1,12 +1,17 @@
+#include "Utf8.hpp"
+
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Layout.hpp>
 #include <engine/gui/Registration.hpp>
+#include <engine/gui/RichText.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace engine::gui {
@@ -26,6 +31,15 @@ namespace engine::gui {
 		// its own limit: a hang with a growing allocation behind it is the worst
 		// way to find out.
 		constexpr int MAXIMUM_DEPTH = 256;
+
+		// How far past the fill axis a child may land before a wrapped list
+		// breaks the line.
+		//
+		// Three children at a third of the parent each can sum a ULP over the
+		// span, and wrapping the last one onto its own line for that is the
+		// bug an author cannot see. A quarter pixel is invisible at any scale
+		// a UI draws at.
+		constexpr float WRAP_TOLERANCE = 0.25f;
 
 		// The class ids this pass tests against, looked up once per process.
 		//
@@ -146,10 +160,28 @@ namespace engine::gui {
 			const Padding *Inset = nullptr;
 			const ListLayout *List = nullptr;
 			const GridLayout *Grid = nullptr;
+			const TableLayout *Table = nullptr;
+			const PageLayout *Page = nullptr;
+
+			// **Which instance `Page` came off, because the motion lives
+			// there.** Every other modifier is read and thrown away; this one
+			// has state beside it - `PageMotion` - and `AdvancePages` writes
+			// that onto the `UIPageLayout` rather than onto the container it
+			// modifies. Carrying the handle is what stops `RunPages` looking
+			// for it on the parent and quietly finding nothing, which is
+			// exactly the shape the first draft of this had: an animation that
+			// resolved correctly, was never read, and left every existing case
+			// passing.
+			ecs::Entity PageOn;
 			const AspectRatio *Aspect = nullptr;
 			const SizeLimits *Limits = nullptr;
 			const TextSizeLimits *TextLimits = nullptr;
 			const Scale *Factor = nullptr;
+
+			// Read by the *parent's* list layout rather than by this node's
+			// own placement - a `UIFlexItem` describes how its parent trades
+			// size for the line's spare room.
+			const FlexItem *Flex = nullptr;
 		};
 
 		// Everything one walk of a node's child list produces.
@@ -256,9 +288,9 @@ namespace engine::gui {
 		// A `UIPadding` under a frame is a child in the tree, and a list layout
 		// that stacked it would leave a blank row where the modifier was. "Does
 		// it have an `Element`" is exactly what makes something a `GuiObject`,
-		// so the same test that finds the children rules out all seven modifier
+		// so the same test that finds the children rules out all eight modifier
 		// lookups for each of them - which matters because the common container
-		// is a frame full of frames and seven misses against one hit is the
+		// is a frame full of frames and eight misses against one hit is the
 		// ratio in every real interface.
 		Scan ScanChildren(const Store &store, Entity instance, std::vector<Entity> &arena) {
 			Scan found;
@@ -279,6 +311,15 @@ namespace engine::gui {
 				if (found.Mods.Grid == nullptr) {
 					found.Mods.Grid = store.Get<GridLayout>(child);
 				}
+				if (found.Mods.Table == nullptr) {
+					found.Mods.Table = store.Get<TableLayout>(child);
+				}
+				if (found.Mods.Page == nullptr) {
+					found.Mods.Page = store.Get<PageLayout>(child);
+					if (found.Mods.Page != nullptr) {
+						found.Mods.PageOn = child;
+					}
+				}
 				if (found.Mods.Aspect == nullptr) {
 					found.Mods.Aspect = store.Get<AspectRatio>(child);
 				}
@@ -290,6 +331,9 @@ namespace engine::gui {
 				}
 				if (found.Mods.Factor == nullptr) {
 					found.Mods.Factor = store.Get<Scale>(child);
+				}
+				if (found.Mods.Flex == nullptr) {
+					found.Mods.Flex = store.Get<FlexItem>(child);
 				}
 			});
 
@@ -322,12 +366,77 @@ namespace engine::gui {
 			return out;
 		}
 
+		// Declared here and defined below, because a scrolling frame's automatic
+		// canvas measures its children with the same function an automatically
+		// sized element does - and that function needs the layout helpers this
+		// one sits above. One declaration is cheaper than moving either.
+		Vector2 ContentExtent(
+			const Store &store, const Scan &scan, const Vector2 &basis, int depth, std::vector<Entity> &arena
+		);
+
+		// Whether a bar's strip is taken out of the window.
+		//
+		// Three answers rather than two, and the third is the one worth having:
+		// `Always` reserves the strip whether or not a bar is showing, which is
+		// what stops a list jumping sideways the moment it grows past the frame.
+		float BarInset(ScrollBarInset mode, bool showing, float thickness) {
+			switch (mode) {
+			case ScrollBarInset::None:
+				return 0.0f;
+			case ScrollBarInset::ScrollBar:
+				return showing ? thickness : 0.0f;
+			case ScrollBarInset::Always:
+				return thickness;
+			}
+			return 0.0f;
+		}
+
+		// One thumb's rectangle along a track.
+		//
+		// **The length is the window's share of the canvas and the position is
+		// the scroll's share of the travel**, which is the only pair of rules
+		// under which a thumb at the bottom of its track means the canvas is at
+		// the end of its range. Floored at the bar's own thickness so a very long
+		// canvas still leaves something grabbable.
+		//
+		// @return The offset along the track and the thumb's length.
+		std::pair<float, float>
+		ThumbAlong(float track, float window, float canvas, float scrolled, float thickness) {
+			const float length =
+				canvas > 0.0f ? std::clamp(track * window / canvas, thickness, track) : track;
+			const float travel = std::max(track - length, 0.0f);
+			const float range = std::max(canvas - window, 0.0f);
+			const float offset = range > 0.0f ? travel * std::clamp(scrolled / range, 0.0f, 1.0f) : 0.0f;
+			return {offset, length};
+		}
+
 		// The rectangle a container's children are placed inside.
 		//
 		// The container's own rectangle, less its padding, less any scroll
 		// offset. A scrolling frame's canvas is larger than the frame and moves
 		// under it, which is the whole of what scrolling is here.
-		Rect ContentArea(const Store &store, Entity instance, const Rect &own, const Modifiers &modifiers) {
+		//
+		// **It also produces the frame's `ScrollState`, and that is deliberate
+		// rather than convenient.** The canvas extent, the window after the bars
+		// are inset, and the two thumb rectangles are all the same arithmetic
+		// this function already does to place the children - and three consumers
+		// need them: a script, the compile's bars and the router's drag. Working
+		// them out a second time somewhere else is the failure `Resolved` exists
+		// to refuse, and here it shows up as a thumb you can see and cannot grab.
+		//
+		// @param state Filled when `instance` scrolls, untouched otherwise.
+		// @return Whether `state` was written.
+		bool ContentArea(
+			const Store &store,
+			Entity instance,
+			const Rect &own,
+			const Modifiers &modifiers,
+			const Scan &scan,
+			int depth,
+			std::vector<Entity> &arena,
+			Rect &out,
+			ScrollState &state
+		) {
 			Vector2 size = own.Size();
 			Vector2 origin = own.Min;
 
@@ -340,16 +449,119 @@ namespace engine::gui {
 				};
 			}
 
-			if (const Scrolling *scrolling = store.Get<Scrolling>(instance)) {
-				// The canvas resolves against the *padded* frame, so a padded
-				// scrolling frame does not scroll its padding away.
-				const Vector2 canvas = scrolling->CanvasSize.Resolve(size);
-				origin =
-					Vector2{origin.X - scrolling->CanvasPosition.X, origin.Y - scrolling->CanvasPosition.Y};
-				size = Vector2{std::max(canvas.X, size.X), std::max(canvas.Y, size.Y)};
+			const Scrolling *scrolling = store.Get<Scrolling>(instance);
+			if (scrolling == nullptr) {
+				out = FromCorner(origin, size);
+				return false;
 			}
 
-			return FromCorner(origin, size);
+			const Vector2 padded = size;
+			const auto axes = static_cast<uint8_t>(scrolling->Direction);
+			const bool scrollsX = (axes & static_cast<uint8_t>(ScrollingDirection::X)) != 0;
+			const bool scrollsY = (axes & static_cast<uint8_t>(ScrollingDirection::Y)) != 0;
+			const float thickness = static_cast<float>(std::max(scrolling->BarThickness, 0));
+
+			// **The content is measured once, against the un-inset window.** It
+			// cannot be measured against the final one, because the final one
+			// depends on which bars show and that depends on the content - so
+			// something has to be measured first and this is the choice that
+			// keeps the pass single. A list whose rows are fixed-size, which is
+			// every list this property is for, measures the same either way.
+			Vector2 automatic;
+			const bool growsX = scrolling->AutomaticCanvas == AutomaticSize::X ||
+								scrolling->AutomaticCanvas == AutomaticSize::XY;
+			const bool growsY = scrolling->AutomaticCanvas == AutomaticSize::Y ||
+								scrolling->AutomaticCanvas == AutomaticSize::XY;
+			if ((growsX || growsY) && depth < MAXIMUM_DEPTH) {
+				automatic = ContentExtent(store, scan, padded, depth + 1, arena);
+			}
+
+			// Twice: once to find out which bars show, once with their strips
+			// taken out. A third pass would change nothing - taking a strip out
+			// can only make a bar *more* necessary, never less, so the second
+			// answer is stable.
+			Vector2 window = padded;
+			Vector2 canvas;
+			for (int pass = 0; pass < 2; pass++) {
+				canvas = scrolling->CanvasSize.Resolve(window);
+				if (growsX) {
+					canvas.X = automatic.X;
+				}
+				if (growsY) {
+					canvas.Y = automatic.Y;
+				}
+
+				const bool showsY = scrollsY && canvas.Y > window.Y;
+				const bool showsX = scrollsX && canvas.X > window.X;
+				window = Vector2{
+					padded.X - BarInset(scrolling->VerticalInset, showsY, thickness),
+					padded.Y - BarInset(scrolling->HorizontalInset, showsX, thickness),
+				};
+			}
+
+			window = Vector2{std::max(window.X, 0.0f), std::max(window.Y, 0.0f)};
+
+			// **Clamped here and not written back.** Roblox clamps
+			// `CanvasPosition` on assignment; this module has no setter to hook -
+			// the class table writes the field - so the clamp lives at the one
+			// reader that offsets by it, and `Router::Update` clamps what *it*
+			// writes. A script that assigns past the end therefore reads back
+			// what it wrote and still sees the canvas stop where it should.
+			//
+			// **The rubber band is added after the clamp and not folded into
+			// it**, which is the whole point of it: the clamp is where the
+			// canvas is *allowed* to stop and the overshoot is how far past
+			// that a hand has dragged it. Adding it here rather than widening
+			// the clamp means a script still reads `CanvasPosition` back inside
+			// the range while the frame is visibly past its end - which is
+			// Roblox's behaviour and the only one that keeps a script's idea of
+			// the canvas from lurching every time somebody flicks it.
+			Vector2 pull;
+			if (const ScrollMotion *motion = store.Get<ScrollMotion>(instance)) {
+				pull = motion->Overshoot;
+			}
+
+			const Vector2 scrolled{
+				std::clamp(scrolling->CanvasPosition.X, 0.0f, std::max(canvas.X - window.X, 0.0f)) + pull.X,
+				std::clamp(scrolling->CanvasPosition.Y, 0.0f, std::max(canvas.Y - window.Y, 0.0f)) + pull.Y,
+			};
+
+			state = ScrollState{};
+			state.CanvasSize = canvas;
+			state.WindowSize = window;
+
+			const bool showsY = scrollsY && canvas.Y > window.Y && thickness > 0.0f;
+			const bool showsX = scrollsX && canvas.X > window.X && thickness > 0.0f;
+			const Vector2 corner{origin.X, origin.Y};
+
+			if (showsY) {
+				const auto [offset, length] =
+					ThumbAlong(std::max(window.Y, 0.0f), window.Y, canvas.Y, scrolled.Y, thickness);
+				const float left =
+					scrolling->VerticalBar == BarPosition::Left ? corner.X : corner.X + padded.X - thickness;
+				state.VerticalThumb = Rect{
+					Vector2{left, corner.Y + offset},
+					Vector2{left + thickness, corner.Y + offset + length},
+				};
+			}
+
+			if (showsX) {
+				const auto [offset, length] =
+					ThumbAlong(std::max(window.X, 0.0f), window.X, canvas.X, scrolled.X, thickness);
+				const float shift = scrolling->VerticalBar == BarPosition::Left && showsY ? thickness : 0.0f;
+				state.HorizontalThumb = Rect{
+					Vector2{corner.X + shift + offset, corner.Y + padded.Y - thickness},
+					Vector2{corner.X + shift + offset + length, corner.Y + padded.Y},
+				};
+			}
+
+			// The canvas is at least the window, so a frame whose content does
+			// not fill it still places children against the whole rectangle.
+			out = FromCorner(
+				Vector2{origin.X - scrolled.X, origin.Y - scrolled.Y},
+				Vector2{std::max(canvas.X, window.X), std::max(canvas.Y, window.Y)}
+			);
+			return true;
 		}
 
 		// Applies the constraints that reshape a resolved size.
@@ -393,11 +605,45 @@ namespace engine::gui {
 		// answer everything downstream uses. Returning the authored size
 		// unchanged when `Scaled` is off is not a shortcut - a scaled size on an
 		// unscaled label would silently override what the author typed.
+		// How many characters a label actually draws.
+		//
+		// **After the markup is stripped and after the visible limit**, because
+		// both change what a reader sees and `TextScaled` fits what a reader
+		// sees. A label whose text is mostly tags would otherwise shrink to fit
+		// a string nobody is shown.
+		//
+		// **Characters and not bytes**, which is the same crossing
+		// `Entry::CursorPosition` makes: `AVERAGE_ADVANCE` is a fraction of an em
+		// per *glyph*, so counting the three bytes of an accented letter three
+		// times measures a word half again too wide.
+		size_t DrawnCharacters(const Label &label) {
+			std::string plain;
+			std::vector<DrawSpan> spans;
+			std::string_view text = label.Text;
+			if (label.Rich) {
+				ParseRichText(label.Text, label, plain, spans);
+				text = plain;
+			}
+			return Characters(FirstCharacters(text, label.MaxVisible));
+		}
+
+		// How many lines a label occupies, counting only the breaks it carries.
+		//
+		// **Wrapping is deliberately not modelled here.** Where a line breaks
+		// depends on the width the element ends up with, which is what this is
+		// helping to decide; `Layout.hpp`'s note on the single pass is the same
+		// argument one property along. A wrapped label therefore reports the
+		// bounds of its unwrapped text, which is the honest answer to "how much
+		// room does this string want".
+		size_t TextLines(std::string_view text) {
+			return static_cast<size_t>(std::count(text.begin(), text.end(), '\n')) + 1;
+		}
+
 		int32_t FittedTextSize(const Label &label, const Vector2 &box, const TextSizeLimits *limits) {
 			int32_t size = label.Size;
 
 			if (label.Scaled) {
-				const size_t characters = std::max<size_t>(label.Text.size(), 1);
+				const size_t characters = std::max<size_t>(DrawnCharacters(label), 1);
 				const float byWidth = box.X / (static_cast<float>(characters) * AVERAGE_ADVANCE);
 				const float byHeight = box.Y / LINE_SPACING;
 
@@ -525,12 +771,32 @@ namespace engine::gui {
 			const bool stacked = modifiers.List != nullptr;
 			const bool horizontal = stacked && modifiers.List->Direction == FillDirection::Horizontal;
 
+			// A wrapped list only wraps against a real span - a container
+			// growing along its own fill axis has no edge to wrap at, so its
+			// children stay one line, which is also what resolves the
+			// circularity of "wrap against the width the wrapping decides".
+			const float gap =
+				stacked ? modifiers.List->Padding.Resolve(horizontal ? basis.X : basis.Y) : 0.0f;
+			const float lineGap =
+				stacked ? modifiers.List->Padding.Resolve(horizontal ? basis.Y : basis.X) : 0.0f;
+			const float wrapSpan = horizontal ? basis.X : basis.Y;
+			const bool wraps = stacked && modifiers.List->Wraps && wrapSpan > 0.0f;
+
+			// The line being filled, and the lines already closed. For an
+			// unwrapped list everything lands on the first line and the totals
+			// reduce to the plain sum-and-maximum this always was.
+			float lineAlong = 0.0f;
+			float lineAcross = 0.0f;
+			uint32_t lineCounted = 0;
+			float widestLine = 0.0f;
+			float closedAcross = 0.0f;
+			uint32_t lines = 0;
+
 			float along = 0.0f;
 			float across = 0.0f;
-			uint32_t counted = 0;
 
 			// Free positioning accumulates a bounding box instead, which is what
-			// the two locals above hold when `stacked` is false.
+			// `along` and `across` hold when `stacked` is false.
 			for (uint32_t index = 0; index < scan.ChildCount; index++) {
 				const Entity node = arena[scan.ChildFirst + index];
 
@@ -543,9 +809,26 @@ namespace engine::gui {
 				const Vector2 size = Measure(store, node, basis, depth, found, arena);
 
 				if (stacked) {
-					along += horizontal ? size.X : size.Y;
-					across = std::max(across, horizontal ? size.Y : size.X);
-					counted++;
+					const float mainSize = horizontal ? size.X : size.Y;
+					const float extended = lineAlong + (lineCounted > 0 ? gap : 0.0f) + mainSize;
+
+					// The same break `ScanLine` makes, against the same span,
+					// or the measured height and the placed height disagree by
+					// one line - the wrap arithmetic lives in two passes and
+					// this is the half that sizes.
+					if (wraps && lineCounted > 0 && extended > wrapSpan + WRAP_TOLERANCE) {
+						widestLine = std::max(widestLine, lineAlong);
+						closedAcross += lineAcross;
+						lines++;
+						lineAlong = mainSize;
+						lineAcross = horizontal ? size.Y : size.X;
+						lineCounted = 1;
+						continue;
+					}
+
+					lineAlong = extended;
+					lineAcross = std::max(lineAcross, horizontal ? size.Y : size.X);
+					lineCounted++;
 					continue;
 				}
 
@@ -563,9 +846,16 @@ namespace engine::gui {
 				return Vector2{std::max(along, 0.0f), std::max(across, 0.0f)};
 			}
 
-			if (counted > 1) {
-				const float gap = modifiers.List->Padding.Resolve(horizontal ? basis.X : basis.Y);
-				along += gap * static_cast<float>(counted - 1);
+			if (lineCounted > 0) {
+				widestLine = std::max(widestLine, lineAlong);
+				closedAcross += lineAcross;
+				lines++;
+			}
+
+			along = widestLine;
+			across = closedAcross;
+			if (lines > 1) {
+				across += lineGap * static_cast<float>(lines - 1);
 			}
 
 			return horizontal ? Vector2{along, across} : Vector2{across, along};
@@ -774,6 +1064,12 @@ namespace engine::gui {
 			if (modifiers.Grid != nullptr) {
 				return modifiers.Grid->Order == SortOrder::Name;
 			}
+			if (modifiers.Table != nullptr) {
+				return modifiers.Table->Order == SortOrder::Name;
+			}
+			if (modifiers.Page != nullptr) {
+				return modifiers.Page->Order == SortOrder::Name;
+			}
 			// A container with neither runs no sort at all - its children are
 			// placed by their own `UDim2` - so no name is read.
 			return false;
@@ -810,7 +1106,154 @@ namespace engine::gui {
 			}
 		}
 
-		// Places a container's children in a stack.
+		// The grow and shrink weights one child brings to its line.
+		struct FlexFactors {
+			float Grow = 0.0f;
+			float Shrink = 0.0f;
+		};
+
+		// What a child flexes as, from its own `UIFlexItem` else the layout.
+		//
+		// **A `FlexItem` overrides the layout even at `None`** - Roblox reads
+		// that member as "unaffected", which is what lets one fixed button sit
+		// in a `Fill` row. Without one, `Fill` on the fill axis means every
+		// child grows and shrinks alike; the spacing members size nothing.
+		FlexFactors FactorsFor(const FlexItem *flex, FlexAlignment mainFlex) {
+			if (flex == nullptr) {
+				return mainFlex == FlexAlignment::Fill ? FlexFactors{1.0f, 1.0f} : FlexFactors{};
+			}
+
+			switch (flex->Mode) {
+			case FlexMode::None:
+				return {};
+			case FlexMode::Grow:
+				return {1.0f, 0.0f};
+			case FlexMode::Shrink:
+				return {0.0f, 1.0f};
+			case FlexMode::Fill:
+				return {1.0f, 1.0f};
+			case FlexMode::Custom:
+				// Clamped because a negative ratio would grow on shrink and
+				// shrink on grow, which no author means and CSS also refuses.
+				return {std::max(flex->GrowRatio, 0.0f), std::max(flex->ShrinkRatio, 0.0f)};
+			}
+			return {};
+		}
+
+		// Where a child sits across its line, after every override has spoken:
+		// its own `UIFlexItem` first, the layout's `ItemLineAlignment` second,
+		// and `Automatic` falls through to the cross alignment - or to
+		// `Stretch` when the cross axis is flexed at all, which is Roblox's
+		// documented reading of `Automatic`.
+		ItemLineAlignment LineAlignmentFor(
+			const FlexItem *flex, const ListLayout &layout, FlexAlignment crossFlex, int crossAlign
+		) {
+			if (flex != nullptr && flex->ItemLine != ItemLineAlignment::Automatic) {
+				return flex->ItemLine;
+			}
+			if (layout.ItemLine != ItemLineAlignment::Automatic) {
+				return layout.ItemLine;
+			}
+			if (crossFlex != FlexAlignment::None) {
+				return ItemLineAlignment::Stretch;
+			}
+			// The alignments and `ItemLineAlignment` agree on start/centre/end
+			// order, one ordinal apart - `Automatic` occupies zero.
+			return static_cast<ItemLineAlignment>(crossAlign + 1);
+		}
+
+		// The lead-in and the extra gap spare room becomes under one flex
+		// spacing mode. `aligned` is where plain alignment would put the
+		// block, which is the answer whenever no spacing mode applies.
+		struct Spacing {
+			float Lead = 0.0f;
+			float Between = 0.0f;
+		};
+
+		Spacing SpacingFor(FlexAlignment flex, float spare, size_t count, float aligned) {
+			if (spare <= 0.0f || count == 0) {
+				return {aligned, 0.0f};
+			}
+
+			switch (flex) {
+			case FlexAlignment::SpaceBetween:
+				// One item has no between, and CSS parks it at the start.
+				return count > 1 ? Spacing{0.0f, spare / static_cast<float>(count - 1)} : Spacing{};
+			case FlexAlignment::SpaceAround: {
+				const float share = spare / static_cast<float>(count);
+				return {share * 0.5f, share};
+			}
+			case FlexAlignment::SpaceEvenly: {
+				const float share = spare / static_cast<float>(count + 1);
+				return {share, share};
+			}
+			case FlexAlignment::None:
+			case FlexAlignment::Fill:
+				break;
+			}
+			return {aligned, 0.0f};
+		}
+
+		// One line of a list, found by walking forward from `first`.
+		//
+		// Recomputed rather than stored: the walk below needs every line twice
+		// - once to total the cross extents, once to place - and scanning a
+		// range again is cheaper than a per-frame vector of lines at every
+		// depth of the recursion, which is the allocation `ScratchAt` exists
+		// to avoid.
+		struct LineRun {
+			// One past the last item on the line.
+			size_t End = 0;
+
+			// Basis sizes plus the authored gaps.
+			float MainExtent = 0.0f;
+
+			// The tallest basis cross size on the line.
+			float CrossExtent = 0.0f;
+
+			// The line's grow total, and its shrink total weighted by basis -
+			// CSS's weighting, so a wide child gives up more than a narrow one.
+			float Grow = 0.0f;
+			float ShrinkWeight = 0.0f;
+		};
+
+		LineRun ScanLine(
+			const std::vector<Item> &items,
+			size_t first,
+			bool horizontal,
+			float gap,
+			float mainSpan,
+			bool wraps,
+			FlexAlignment mainFlex
+		) {
+			LineRun line;
+			size_t index = first;
+
+			for (; index < items.size(); index++) {
+				const float mainSize = horizontal ? items[index].Size.X : items[index].Size.Y;
+				const float extended = line.MainExtent + (index > first ? gap : 0.0f) + mainSize;
+
+				// The first item always lands, however big, or the walk would
+				// never advance past a child wider than the container.
+				if (wraps && index > first && extended > mainSpan + WRAP_TOLERANCE) {
+					break;
+				}
+
+				line.MainExtent = extended;
+				line.CrossExtent =
+					std::max(line.CrossExtent, horizontal ? items[index].Size.Y : items[index].Size.X);
+
+				const FlexFactors factors = FactorsFor(items[index].Found.Mods.Flex, mainFlex);
+				line.Grow += factors.Grow;
+				line.ShrinkWeight += factors.Shrink * mainSize;
+			}
+
+			line.End = index;
+			return line;
+		}
+
+		// Places a container's children in a stack - one line, or several once
+		// `Wraps` or a flex alignment is involved.
 		size_t RunList(
 			Store &store,
 			const ListLayout &layout,
@@ -824,35 +1267,127 @@ namespace engine::gui {
 
 			const Vector2 span = area.Size();
 			const bool horizontal = layout.Direction == FillDirection::Horizontal;
-			const float gap = layout.Padding.Resolve(horizontal ? span.X : span.Y);
+			const float mainSpan = horizontal ? span.X : span.Y;
+			const float crossSpan = horizontal ? span.Y : span.X;
 
-			float extent = 0.0f;
-			for (size_t index = 0; index < items.size(); index++) {
-				extent += horizontal ? items[index].Size.X : items[index].Size.Y;
-				if (index + 1 < items.size()) {
-					extent += gap;
-				}
+			// One `Padding` serves both axes, resolved against each: the gap
+			// between items along a line, and between lines across them.
+			const float gap = layout.Padding.Resolve(mainSpan);
+			const float lineGap = layout.Padding.Resolve(crossSpan);
+
+			// The flex pair is named by axis and the layout runs by role, so
+			// which one is "along the fill" depends on the direction.
+			const FlexAlignment mainFlex = horizontal ? layout.HorizontalFlex : layout.VerticalFlex;
+			const FlexAlignment crossFlex = horizontal ? layout.VerticalFlex : layout.HorizontalFlex;
+			const int mainAlign =
+				horizontal ? static_cast<int>(layout.Horizontal) : static_cast<int>(layout.Vertical);
+			const int crossAlign =
+				horizontal ? static_cast<int>(layout.Vertical) : static_cast<int>(layout.Horizontal);
+
+			// Pass one: every line, because the cross-axis arithmetic - where
+			// the block of lines starts, and what `Fill` stretches each line by
+			// - has to see all of them before the first is placed.
+			size_t lineCount = 0;
+			float linesExtent = 0.0f;
+			for (size_t first = 0; first < items.size();) {
+				const LineRun line =
+					ScanLine(items, first, horizontal, gap, mainSpan, layout.Wraps, mainFlex);
+				linesExtent += line.CrossExtent;
+				lineCount++;
+				first = line.End;
+			}
+			if (lineCount > 1) {
+				linesExtent += lineGap * static_cast<float>(lineCount - 1);
 			}
 
-			// The alignment along the fill axis positions the whole stack; the
-			// one across it positions each item on its own, because items in a
-			// stack may differ in the cross extent and centring the block would
-			// leave the narrow ones off-centre.
-			float along = horizontal ? AlignedStart(span.X, extent, static_cast<int>(layout.Horizontal))
-									 : AlignedStart(span.Y, extent, static_cast<int>(layout.Vertical));
+			// `Fill` across the lines is CSS's `align-content: stretch`: the
+			// spare room grows every line equally and the block starts at the
+			// top. The spacing members spend the same room between the lines.
+			const float crossFree = crossSpan - linesExtent;
+			float lineStretch = 0.0f;
+			Spacing crossSpacing;
+			if (crossFlex == FlexAlignment::Fill) {
+				lineStretch =
+					lineCount > 0 ? std::max(crossFree, 0.0f) / static_cast<float>(lineCount) : 0.0f;
+			} else {
+				crossSpacing = SpacingFor(
+					crossFlex, crossFree, lineCount, AlignedStart(crossSpan, linesExtent, crossAlign)
+				);
+			}
 
 			size_t placed = 0;
-			for (const Item &item : items) {
-				const float across =
-					horizontal ? AlignedStart(span.Y, item.Size.Y, static_cast<int>(layout.Vertical))
-							   : AlignedStart(span.X, item.Size.X, static_cast<int>(layout.Horizontal));
+			float crossPos = (horizontal ? area.Min.Y : area.Min.X) + crossSpacing.Lead;
 
-				const Vector2 corner = horizontal ? Vector2{area.Min.X + along, area.Min.Y + across}
-												  : Vector2{area.Min.X + across, area.Min.Y + along};
+			for (size_t first = 0; first < items.size();) {
+				const LineRun line =
+					ScanLine(items, first, horizontal, gap, mainSpan, layout.Wraps, mainFlex);
+				const float lineCross = line.CrossExtent + lineStretch;
+				const size_t count = line.End - first;
 
-				placed +=
-					Place(store, item.Node, FromCorner(corner, item.Size), clip, depth, rotation, item.Found);
-				along += (horizontal ? item.Size.X : item.Size.Y) + gap;
+				// Spare room feeds growth first; only what the growers leave is
+				// spent as spacing. Shrinking is the same trade under overflow,
+				// weighted by basis so a wide child gives up more - and a line
+				// that cannot shrink overflows from its aligned start, exactly
+				// as the single unwrapped line always has.
+				const float freeRoom = mainSpan - line.MainExtent;
+				float growUnit = 0.0f;
+				float shrinkUnit = 0.0f;
+				float effectiveExtent = line.MainExtent;
+				if (freeRoom > 0.0f && line.Grow > 0.0f) {
+					growUnit = freeRoom / line.Grow;
+					effectiveExtent = mainSpan;
+				} else if (freeRoom < 0.0f && line.ShrinkWeight > 0.0f) {
+					shrinkUnit = freeRoom / line.ShrinkWeight;
+					effectiveExtent = mainSpan;
+				}
+
+				const Spacing mainSpacing = SpacingFor(
+					mainFlex,
+					mainSpan - effectiveExtent,
+					count,
+					AlignedStart(mainSpan, effectiveExtent, mainAlign)
+				);
+
+				float along = (horizontal ? area.Min.X : area.Min.Y) + mainSpacing.Lead;
+
+				for (size_t index = first; index < line.End; index++) {
+					const Item &item = items[index];
+					const FlexFactors factors = FactorsFor(item.Found.Mods.Flex, mainFlex);
+
+					float mainSize = horizontal ? item.Size.X : item.Size.Y;
+					mainSize += growUnit * factors.Grow + shrinkUnit * factors.Shrink * mainSize;
+
+					// A ratio large enough to shrink past zero is clamped and
+					// the loss is not redistributed - a second pass could hand
+					// it to the survivors, and one pass that leaves a pixel
+					// short beats two that can disagree.
+					mainSize = std::max(mainSize, 0.0f);
+
+					float crossSize = horizontal ? item.Size.Y : item.Size.X;
+					const ItemLineAlignment lineAlign =
+						LineAlignmentFor(item.Found.Mods.Flex, layout, crossFlex, crossAlign);
+
+					float crossOffset = 0.0f;
+					if (lineAlign == ItemLineAlignment::Stretch) {
+						crossSize = lineCross;
+					} else {
+						// `Start`, `Center`, `End` are one past the alignment
+						// ordinals `AlignedStart` reads.
+						crossOffset = AlignedStart(lineCross, crossSize, static_cast<int>(lineAlign) - 1);
+					}
+
+					const Vector2 size =
+						horizontal ? Vector2{mainSize, crossSize} : Vector2{crossSize, mainSize};
+					const Vector2 corner = horizontal ? Vector2{along, crossPos + crossOffset}
+													  : Vector2{crossPos + crossOffset, along};
+
+					placed +=
+						Place(store, item.Node, FromCorner(corner, size), clip, depth, rotation, item.Found);
+					along += mainSize + gap + mainSpacing.Between;
+				}
+
+				crossPos += lineCross + lineGap + crossSpacing.Between;
+				first = line.End;
 			}
 
 			return placed;
@@ -953,6 +1488,424 @@ namespace engine::gui {
 			return placed;
 		}
 
+		// Lays the parent's children out as rows and their children as cells.
+		//
+		// **The only layout here that reaches two levels down**, because a
+		// column has to be one width in every row or the thing is not a table.
+		// `gui::TableLayout` carries the argument; what follows is its two
+		// consequences.
+		//
+		// **A row's `Resolved` is written here rather than through `Place`**, and
+		// that is not a shortcut: `Place` would go on to lay the row's children
+		// out by *their* own rules, and this function is about to place them by
+		// the table's. Running both would place every cell twice and leave the
+		// arena's per-level scratch being written by two levels at once.
+		//
+		// **The cell lists are local vectors rather than the per-level scratch**,
+		// for the same collision: `Place` on a cell uses the scratch at the depth
+		// this function would want. A table is a handful of rows, so an
+		// allocation per row per rebuild is a cost nobody will find - and a
+		// rebuild is not a frame.
+		size_t RunTable(
+			Store &store,
+			const TableLayout &layout,
+			std::vector<Item> &rows,
+			const Rect &area,
+			const Rect &clip,
+			int depth,
+			float rotation,
+			std::vector<Entity> &arena
+		) {
+			Sort(rows, layout.Order);
+
+			const bool stacked = layout.Direction == FillDirection::Vertical;
+			const Vector2 span = area.Size();
+			const Vector2 gap = layout.Padding.Resolve(span);
+			const bool named = layout.Order == SortOrder::Name;
+
+			// Along a row and across the rows. For a horizontal table the two
+			// swap, which is the whole of what `FillDirection` does here.
+			const auto along = [&](const Vector2 &value) { return stacked ? value.X : value.Y; };
+			const auto across = [&](const Vector2 &value) { return stacked ? value.Y : value.X; };
+
+			std::vector<std::vector<Item>> table;
+			table.reserve(rows.size());
+
+			std::vector<float> cellExtent;
+			std::vector<float> lineExtent;
+			lineExtent.reserve(rows.size());
+
+			for (const Item &row : rows) {
+				std::vector<Item> cells;
+				ChildItems(store, row.Found, row.Size, depth + 1, named, cells, arena);
+				Sort(cells, layout.Order);
+
+				float line = across(row.Size);
+				for (size_t index = 0; index < cells.size(); index++) {
+					if (index >= cellExtent.size()) {
+						cellExtent.push_back(0.0f);
+					}
+					cellExtent[index] = std::max(cellExtent[index], along(cells[index].Size));
+					line = std::max(line, across(cells[index].Size));
+				}
+
+				lineExtent.push_back(line);
+				table.push_back(std::move(cells));
+			}
+
+			const auto total = [](const std::vector<float> &extents, float between) {
+				float sum = 0.0f;
+				for (const float extent : extents) {
+					sum += extent;
+				}
+				return extents.empty() ? 0.0f : sum + between * static_cast<float>(extents.size() - 1);
+			};
+
+			// **Spare room is shared evenly, not proportionally.** Roblox fills
+			// the empty space; an even share is the reading under which two
+			// columns of very different content end up the same width, which is
+			// what a table with a header row looks like.
+			const auto fill = [](std::vector<float> &extents, float slack) {
+				if (extents.empty() || !(slack > 0.0f)) {
+					return;
+				}
+				const float each = slack / static_cast<float>(extents.size());
+				for (float &extent : extents) {
+					extent += each;
+				}
+			};
+
+			if (layout.FillEmptySpaceColumns) {
+				fill(cellExtent, along(span) - total(cellExtent, along(gap)));
+			}
+			if (layout.FillEmptySpaceRows) {
+				fill(lineExtent, across(span) - total(lineExtent, across(gap)));
+			}
+
+			const float usedAlong = total(cellExtent, along(gap));
+			const float usedAcross = total(lineExtent, across(gap));
+
+			const float startAlong = AlignedStart(
+				along(span),
+				usedAlong,
+				stacked ? static_cast<int>(layout.Horizontal) : static_cast<int>(layout.Vertical)
+			);
+			const float startAcross = AlignedStart(
+				across(span),
+				usedAcross,
+				stacked ? static_cast<int>(layout.Vertical) : static_cast<int>(layout.Horizontal)
+			);
+
+			const auto corner = [&](float alongAt, float acrossAt) {
+				return stacked ? Vector2{area.Min.X + alongAt, area.Min.Y + acrossAt}
+							   : Vector2{area.Min.X + acrossAt, area.Min.Y + alongAt};
+			};
+			const auto extent = [&](float alongAt, float acrossAt) {
+				return stacked ? Vector2{alongAt, acrossAt} : Vector2{acrossAt, alongAt};
+			};
+
+			size_t placed = 0;
+			float acrossAt = startAcross;
+
+			for (size_t line = 0; line < rows.size(); line++) {
+				const Rect rowRect =
+					FromCorner(corner(startAlong, acrossAt), extent(usedAlong, lineExtent[line]));
+
+				Resolved value;
+				value.AbsolutePosition = rowRect.Min;
+				value.AbsoluteSize = rowRect.Size();
+				value.AbsoluteRotation = rotation;
+				value.Clip = clip;
+				value.Depth = depth;
+				value.Rendered = true;
+				store.Set(rows[line].Node, value);
+				placed++;
+
+				const Element *rowElement = store.Get<Element>(rows[line].Node);
+				const Rect inner =
+					rowElement != nullptr && rowElement->ClipsDescendants ? clip.Intersection(rowRect) : clip;
+
+				float alongAt = startAlong;
+				for (size_t column = 0; column < table[line].size(); column++) {
+					const Rect cellRect =
+						FromCorner(corner(alongAt, acrossAt), extent(cellExtent[column], lineExtent[line]));
+					placed += Place(
+						store,
+						table[line][column].Node,
+						cellRect,
+						inner,
+						depth + 1,
+						rotation,
+						table[line][column].Found
+					);
+					alongAt += cellExtent[column] + along(gap);
+				}
+
+				acrossAt += lineExtent[line] + across(gap);
+			}
+
+			return placed;
+		}
+
+		// How hard the rubber band pulls back, as a time constant in seconds.
+		//
+		// **An exponential decay rather than a spring integration.** A spring
+		// needs a velocity and a step; a decay is a closed form, which is what
+		// makes the recovery a function of elapsed time - frame-rate
+		// independent by construction, and a thing a suite states rather than
+		// steps a hundred frames to reach.
+		constexpr float ELASTIC_SPRING_SECONDS = 0.12f;
+
+		// Below this the canvas is back and the state is dropped, so a settled
+		// frame stops folding a new number every tick.
+		constexpr float ELASTIC_SETTLED_PIXELS = 0.5f;
+
+		// Resolves every scrolling frame's rubber band against the clock, once.
+		//
+		// Held: the canvas sits where the drag put it. Let go: it comes back
+		// along a decay whose zero is the end of the canvas.
+		//
+		// @param store   The world.
+		// @param seconds The caller's clock. Only differences are read.
+		void AdvanceScrolling(Store &store, double seconds) {
+			std::vector<Entity> frames;
+			store.Each<const ScrollMotion>([&](Entity entity, const ScrollMotion &) {
+				frames.push_back(entity);
+			});
+
+			for (const Entity entity : frames) {
+				const ScrollMotion *had = store.Get<ScrollMotion>(entity);
+				if (had == nullptr) {
+					continue;
+				}
+				ScrollMotion motion = *had;
+
+				if (motion.Held) {
+					// A held canvas is wherever the hand put it, and the spring
+					// has not been let go of yet.
+					motion.Overshoot = motion.Pull;
+					motion.ReleasedAt = -1.0;
+					store.Set(entity, motion);
+					continue;
+				}
+
+				// **Stamped here rather than by the router**, which is what
+				// keeps the clock in one place. The router says "this was let
+				// go of"; the first layout after that says when.
+				if (motion.ReleasedAt < 0.0) {
+					motion.Released = motion.Pull;
+					motion.Pull = core::Vector2{};
+					motion.ReleasedAt = seconds;
+				}
+
+				const auto since = static_cast<float>(seconds - motion.ReleasedAt);
+				const float decay = std::exp(-std::max(since, 0.0f) / ELASTIC_SPRING_SECONDS);
+				motion.Overshoot = core::Vector2{motion.Released.X * decay, motion.Released.Y * decay};
+
+				if (std::abs(motion.Overshoot.X) < ELASTIC_SETTLED_PIXELS &&
+					std::abs(motion.Overshoot.Y) < ELASTIC_SETTLED_PIXELS) {
+					// Settled. Everything back to rest, so the fold below stops
+					// moving and the list stops rebuilding.
+					motion = ScrollMotion{};
+				}
+
+				store.Set(entity, motion);
+			}
+		}
+
+		// Resolves every page layout's slide against the clock, once.
+		//
+		// **Before the walk rather than inside it, and that is the whole design
+		// of this feature.** `Place` is recursive and reached from five run
+		// functions; threading a clock through all of them to serve one caller
+		// would put a time argument on every layout in the module. One pass
+		// over a packed column beforehand leaves the recursion exactly as
+		// clock-free as it was, and leaves `Alpha` - a number - as the only
+		// thing `RunPages` has to read.
+		//
+		// @param store   The world.
+		// @param seconds The caller's clock. Only differences are read.
+		void AdvancePages(Store &store, double seconds) {
+			// **Collected before anything is written**, for the reason the
+			// collector walk gives: `store.Set` can move a row between
+			// archetypes, and moving one out from under the query walking it is
+			// what `Store::Each`'s deferral exists to prevent.
+			std::vector<Entity> layouts;
+			store.Each<const PageLayout>([&](Entity entity, const PageLayout &) {
+				layouts.push_back(entity);
+			});
+
+			for (const Entity entity : layouts) {
+				const PageLayout *layout = store.Get<PageLayout>(entity);
+				if (layout == nullptr) {
+					continue;
+				}
+
+				PageMotion motion;
+				if (const PageMotion *had = store.Get<PageMotion>(entity)) {
+					motion = *had;
+				}
+
+				// **The first sight of a layout adopts its page rather than
+				// sliding to it**, and that distinction is the whole difference
+				// between an interface that opens and one that swings into
+				// place every time it is shown. A `UIPageLayout` authored with
+				// `CurrentPage` already set is describing where it *starts*; a
+				// script assigning the same property later is asking for a
+				// jump, and only the second is motion.
+				//
+				// `StartedAt` is the marker, which is why it is written here
+				// even when nothing moved: negative means this layout has never
+				// been resolved.
+				if (motion.StartedAt < 0.0) {
+					motion.From = layout->CurrentPage;
+					motion.To = layout->CurrentPage;
+					motion.StartedAt = seconds;
+					motion.Alpha = 1.0f;
+				} else if (motion.To != layout->CurrentPage) {
+					// **A jump is noticed rather than announced.** There is no
+					// `JumpTo` to hook and no setter this module owns - the
+					// class table writes `CurrentPage` straight into the
+					// component - so the difference between what is wanted and
+					// what was wanted last time is the event.
+					motion.From = motion.To;
+					motion.To = layout->CurrentPage;
+					motion.StartedAt = seconds;
+					motion.Alpha = 0.0f;
+				}
+
+				const bool moving = motion.From != motion.To && motion.StartedAt >= 0.0;
+				const bool tweens = moving && layout->Animated && layout->TweenTime > 0.0f;
+
+				if (!moving) {
+					motion.Alpha = 1.0f;
+				} else if (!tweens) {
+					// **`Animated` off and a zero `TweenTime` both cut**, and
+					// they are still two properties: one says this layout does
+					// not animate and the other says it animates over no time.
+					motion.From = motion.To;
+					motion.Alpha = 1.0f;
+				} else {
+					const double elapsed = seconds - motion.StartedAt;
+					const float through = static_cast<float>(elapsed / layout->TweenTime);
+					motion.Alpha = core::TweenInfo::Ease(through, layout->Easing, layout->EasingWay);
+
+					// **Settled by collapsing `From` onto `To`**, which is what
+					// stops the signature moving once the slide is over. A
+					// layout left "animating at alpha 1" would fold a different
+					// number every frame and rebuild the whole list forever.
+					if (through >= 1.0f) {
+						motion.From = motion.To;
+						motion.Alpha = 1.0f;
+					}
+				}
+
+				store.Set(entity, motion);
+			}
+		}
+
+		// Shows one of the parent's children and slides the rest aside.
+		//
+		// Every page is the parent's own size and sits one step further along
+		// than the one before it, so the strip moves under the container rather
+		// than the pages moving inside it.
+		//
+		// **The slide is a fractional page index rather than an integer one.**
+		// `AdvancePages` has already turned the clock into `PageMotion::Alpha`,
+		// so all this does is put the strip between two pages instead of on one
+		// - which is why nothing here reads a time and why an overshooting
+		// curve needs no special case.
+		size_t RunPages(
+			Store &store,
+			Entity owner,
+			const PageLayout &layout,
+			std::vector<Item> &items,
+			const Rect &area,
+			const Rect &clip,
+			int depth,
+			float rotation
+		) {
+			Sort(items, layout.Order);
+
+			const Vector2 span = area.Size();
+			const bool horizontal = layout.Direction == FillDirection::Horizontal;
+			const float step =
+				(horizontal ? span.X : span.Y) + layout.Padding.Resolve(horizontal ? span.X : span.Y);
+
+			// Which page is under the container. An unset or stale `CurrentPage`
+			// is the first one, which is what an author who set nothing means and
+			// what a page destroyed while it was showing leaves behind.
+			const auto indexOf = [&items](Entity page) {
+				for (size_t index = 0; index < items.size(); index++) {
+					if (items[index].Node == page) {
+						return static_cast<float>(index);
+					}
+				}
+				return 0.0f;
+			};
+
+			const auto count = static_cast<int32_t>(items.size());
+
+			// **Wrapping is applied to the *distance* as well as to each page's
+			// offset**, and it has to be: a three-page carousel jumping from the
+			// last page to the first should slide one step forward, not two
+			// steps back past everything. Without this the loop reads as a
+			// rewind, which is the one thing `Circular` exists to prevent.
+			const auto shortest = [&](float from, float to) {
+				float delta = to - from;
+				if (layout.Circular && count > 0) {
+					const auto whole = static_cast<float>(count);
+					if (delta > whole * 0.5f) {
+						delta -= whole;
+					} else if (delta < -whole * 0.5f) {
+						delta += whole;
+					}
+				}
+				return delta;
+			};
+
+			float current = indexOf(layout.CurrentPage);
+			if (const PageMotion *motion = store.Get<PageMotion>(owner);
+				motion != nullptr && motion->From != motion->To) {
+				const float from = indexOf(motion->From);
+				current = from + shortest(from, indexOf(motion->To)) * motion->Alpha;
+			}
+
+			size_t placed = 0;
+
+			for (size_t index = 0; index < items.size(); index++) {
+				float offset = static_cast<float>(index) - current;
+
+				// **Wrapped to the nearer side**, which is what makes a circular
+				// strip read as a loop: the page before the first is drawn just
+				// off the near edge rather than at the far end of everything.
+				if (layout.Circular && count > 0) {
+					const auto whole = static_cast<float>(count);
+					if (offset > whole * 0.5f) {
+						offset -= whole;
+					} else if (offset < -whole * 0.5f) {
+						offset += whole;
+					}
+				}
+
+				const float slide = offset * step;
+				const Vector2 corner = horizontal ? Vector2{area.Min.X + slide, area.Min.Y}
+												  : Vector2{area.Min.X, area.Min.Y + slide};
+
+				placed += Place(
+					store,
+					items[index].Node,
+					FromCorner(corner, span),
+					clip,
+					depth,
+					rotation,
+					items[index].Found
+				);
+			}
+
+			return placed;
+		}
+
 		// Writes one node's `Resolved` and descends.
 		//
 		// `rect` is where this node goes and is already final - a list layout
@@ -1003,6 +1956,20 @@ namespace engine::gui {
 
 			if (const Label *label = store.Get<Label>(instance)) {
 				value.TextSize = FittedTextSize(*label, rect.Size(), modifiers.TextLimits);
+
+				// **The same estimate the fit used, kept rather than recomputed
+				// by whoever asks.** `TextBounds` and `TextFits` are two readings
+				// of one measurement, and a script that derived the second from
+				// the first would be doing arithmetic this pass has already done
+				// with the numbers it already had.
+				const auto characters = static_cast<float>(DrawnCharacters(*label));
+				const auto drawn = static_cast<float>(value.TextSize);
+				const auto lines = static_cast<float>(TextLines(label->Text));
+				value.TextBounds = Vector2{
+					characters * AVERAGE_ADVANCE * drawn,
+					lines * LINE_SPACING * drawn,
+				};
+				value.TextFits = value.TextBounds.X <= rect.Width() && value.TextBounds.Y <= rect.Height();
 			}
 
 			store.Set(instance, value);
@@ -1011,14 +1978,6 @@ namespace engine::gui {
 			// node clipped by three ancestors costs three intersections in
 			// total rather than three per descendant.
 			const Rect inner = element->ClipsDescendants ? clip.Intersection(rect) : clip;
-			const Rect area = ContentArea(store, instance, rect, modifiers);
-
-			size_t placed = 1;
-
-			// This level's scratch. Live only until the loops below finish with
-			// it: every recursive call uses the next level's, and by the time
-			// this one returns nothing is reading it.
-			std::vector<Item> &items = ScratchAt(depth);
 
 			// **Marked before the children are measured and released after they
 			// are placed.** Measuring each child appends that child's own
@@ -1027,15 +1986,41 @@ namespace engine::gui {
 			// on top of it. Releasing to the mark at the end drops the whole
 			// generation at once, so the arena's high-water mark is the widest
 			// path through the tree rather than the tree.
+			//
+			// **Opened before the content area rather than after it**, because
+			// `AutomaticCanvas` measures the children to size the canvas and that
+			// measure appends to the same arena.
 			std::vector<Entity> &arena = ChildArena();
 			const ArenaScope scope(arena);
 
+			Rect area;
+			ScrollState scrolled;
+			if (ContentArea(store, instance, rect, modifiers, scan, depth, arena, area, scrolled)) {
+				store.Set(instance, scrolled);
+			}
+
+			size_t placed = 1;
+
+			// This level's scratch. Live only until the loops below finish with
+			// it: every recursive call uses the next level's, and by the time
+			// this one returns nothing is reading it.
+			std::vector<Item> &items = ScratchAt(depth);
+
 			ChildItems(store, scan, area.Size(), depth, SortsByName(modifiers), items, arena);
 
+			// **One layout wins and the order is the declaration order.** Two on
+			// one container is an authoring mistake with no sensible reading -
+			// there is no arrangement that is both a grid and a page strip - so
+			// the first found decides rather than the two fighting per frame.
 			if (modifiers.List != nullptr) {
 				placed += RunList(store, *modifiers.List, items, area, inner, depth + 1, total);
 			} else if (modifiers.Grid != nullptr) {
 				placed += RunGrid(store, *modifiers.Grid, items, area, inner, depth + 1, total);
+			} else if (modifiers.Table != nullptr) {
+				placed += RunTable(store, *modifiers.Table, items, area, inner, depth + 1, total, arena);
+			} else if (modifiers.Page != nullptr) {
+				placed +=
+					RunPages(store, modifiers.PageOn, *modifiers.Page, items, area, inner, depth + 1, total);
 			} else {
 				for (const Item &item : items) {
 					const Element *child = store.Get<Element>(item.Node);
@@ -1053,18 +2038,52 @@ namespace engine::gui {
 			return placed;
 		}
 
+		// How far a collector that clips nothing lets its subtree reach.
+		//
+		// **A number rather than an infinity**, because the clip is intersected
+		// on the way down and a `Rect` holding infinities produces a NaN the
+		// first time one is subtracted from another. A canvas is measured in
+		// pixels and no interface is a million of them across in either
+		// direction, so this cuts nothing an author meant to draw and stays
+		// arithmetic every reader can do.
+		constexpr float UNCLIPPED_REACH = 1.0e6f;
+
 		// The rectangle one collector's roots lay out inside.
 		//
+		// @param clip Filled with the rectangle the subtree is cut to, which is
+		//        `out` for a collector that clips and a very large rectangle for
+		//        one that does not. **Two outputs rather than one**, because a
+		//        `SurfaceGui` with `ClipsDescendants` off still lays its children
+		//        out against the canvas and merely draws them past its edge - the
+		//        two rectangles answer different questions and folding them into
+		//        one would make an unclipped surface resolve every `UDim2` scale
+		//        against a million pixels.
 		// @return `false` for a collector that has no canvas - a `PluginGui`
 		//         today - so nothing under it is laid out rather than being laid
 		//         out against a rectangle nobody chose.
-		bool CanvasFor(const Store &store, Entity collector, const Screen &screen, Rect &out) {
+		bool CanvasFor(const Store &store, Entity collector, const Screen &screen, Rect &out, Rect &clip) {
 			const Ids &ids = Classes();
+
+			const auto unclipped = [](const Rect &canvas) {
+				const Vector2 centre{
+					(canvas.Min.X + canvas.Max.X) * 0.5f,
+					(canvas.Min.Y + canvas.Max.Y) * 0.5f,
+				};
+				return Rect{
+					Vector2{centre.X - UNCLIPPED_REACH, centre.Y - UNCLIPPED_REACH},
+					Vector2{centre.X + UNCLIPPED_REACH, centre.Y + UNCLIPPED_REACH},
+				};
+			};
 
 			if (store.IsA(collector, ids.ScreenGui)) {
 				const Layer *layer = store.Get<Layer>(collector);
 				const float top = layer != nullptr && layer->IgnoreGuiInset ? 0.0f : screen.TopInset;
 				out = Rect{Vector2{0.0f, top}, Vector2{screen.Width, screen.Height}};
+
+				// **A screen gui always clips and has no property saying so**,
+				// which is Roblox's shape: the canvas *is* the display, so there
+				// is nowhere past it for anything to be drawn.
+				clip = out;
 				return true;
 			}
 
@@ -1084,6 +2103,7 @@ namespace engine::gui {
 			if (const Surface *surface = store.Get<Surface>(collector);
 				surface != nullptr && store.IsA(collector, ids.SurfaceGui)) {
 				out = Rect{Vector2::Zero, resolved != nullptr ? resolved->Size : surface->CanvasSize};
+				clip = surface->ClipsDescendants ? out : unclipped(out);
 				return true;
 			}
 
@@ -1097,6 +2117,7 @@ namespace engine::gui {
 					resolved != nullptr ? resolved->Size
 										: Vector2{billboard->Size.X.Offset, billboard->Size.Y.Offset},
 				};
+				clip = billboard->ClipsDescendants ? out : unclipped(out);
 				return true;
 			}
 
@@ -1104,12 +2125,19 @@ namespace engine::gui {
 		}
 	}
 
-	size_t Layout(Store &store, const Screen &screen) {
+	size_t Layout(Store &store, const Screen &screen, double seconds) {
 		ENGINE_PROFILE_CAT("gui layout", engine::core::ProfileCategory::ECS);
 
 		// Forces the class table up before the first `IsA` below, which is
 		// what makes a store that has never seen this module still lay out.
 		Classes();
+
+		// **The only two places in this module that read the clock, and both
+		// are here rather than in the walk.** Each turns elapsed seconds into a
+		// number - a page's `Alpha`, a canvas's spring - so everything below
+		// places rectangles exactly as it did before any of this existed.
+		AdvancePages(store, seconds);
+		AdvanceScrolling(store, seconds);
 
 		// **Cleared first, then set by the walk.** Anything the walk does not
 		// reach is an orphan - an element a script created and has not
@@ -1152,6 +2180,7 @@ namespace engine::gui {
 		for (const Entity collector : collectors) {
 			const Layer *layer = store.Get<Layer>(collector);
 			Rect canvas;
+			Rect clip;
 
 			// **Where it sits decides whether it draws at all**, before
 			// anything asks how big it is. A `SurfaceGui` or a `BillboardGui`
@@ -1162,7 +2191,7 @@ namespace engine::gui {
 				store.IsA(collector, ids.SurfaceGui) || store.IsA(collector, ids.BillboardGui);
 
 			const bool drawn = layer != nullptr && layer->Enabled && Contained(store, collector, spatial) &&
-							   CanvasFor(store, collector, screen, canvas);
+							   CanvasFor(store, collector, screen, canvas, clip);
 
 			if (!drawn) {
 				continue;
@@ -1173,7 +2202,14 @@ namespace engine::gui {
 			Resolved value;
 			value.AbsolutePosition = canvas.Min;
 			value.AbsoluteSize = canvas.Size();
-			value.Clip = canvas;
+
+			// **The clip and not the canvas**, which is the whole of what
+			// `ClipsDescendants` does on a spatial collector: the rectangle the
+			// roots lay out inside is the canvas either way, and what changes is
+			// only what the subtree is cut to. `Compile`'s emit still drops an
+			// element that misses the canvas entirely, so "not clipped" means
+			// "may hang over the edge" rather than "may draw anywhere".
+			value.Clip = clip;
 			value.Rendered = true;
 			store.Set(collector, value);
 
@@ -1208,7 +2244,7 @@ namespace engine::gui {
 				// finds its scan, and there is no path to `Place` that has not
 				// measured first - which is what lets `Place` take a `const
 				// Scan &` rather than a pointer it has to test.
-				placed += Place(store, root, FromCorner(corner, size), canvas, 1, 0.0f, scan);
+				placed += Place(store, root, FromCorner(corner, size), clip, 1, 0.0f, scan);
 			}
 		}
 
