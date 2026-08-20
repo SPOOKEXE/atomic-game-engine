@@ -143,13 +143,10 @@ namespace engine::collision {
 					if (!Finite(point)) {
 						continue;
 					}
-					const bool duplicate = std::any_of(
-						kept.begin(),
-						kept.end(),
-						[&](const core::Vector3 &seen) {
+					const bool duplicate =
+						std::any_of(kept.begin(), kept.end(), [&](const core::Vector3 &seen) {
 							return (seen - point).MagnitudeSquared() <= squared;
-						}
-					);
+						});
 					if (!duplicate) {
 						kept.push_back(point);
 					}

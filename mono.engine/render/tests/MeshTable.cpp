@@ -79,12 +79,9 @@ TEST_CASE("a burst of arrivals is one pending delta, not one per mesh", "[render
 	CHECK(table.Count() == 3);
 	CHECK(table.UploadCount() == 0);
 	CHECK(
-		table.PendingVertexCount() ==
-		cube.Vertices.size() + plane.Vertices.size() + sphere.Vertices.size()
+		table.PendingVertexCount() == cube.Vertices.size() + plane.Vertices.size() + sphere.Vertices.size()
 	);
-	CHECK(
-		table.PendingIndexCount() == cube.Indices.size() + plane.Indices.size() + sphere.Indices.size()
-	);
+	CHECK(table.PendingIndexCount() == cube.Indices.size() + plane.Indices.size() + sphere.Indices.size());
 }
 
 TEST_CASE("each mesh is placed after the one before it", "[render][meshtable]") {

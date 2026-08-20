@@ -3317,6 +3317,13 @@ namespace engine::render {
 			return 0;
 		}
 
+		// **Nine call sites and three of them were outside every span.** This is
+		// where a pass turns its slot range into draw calls, so it is the CPU
+		// cost of recording geometry - the thing a frame graph is being read to
+		// find. Named here rather than at each caller, which is what stops the
+		// tenth caller from being the one that forgets.
+		ENGINE_PROFILE_CAT("draw slots", core::ProfileCategory::Render);
+
 		uint32_t calls = 0;
 
 		// Which slot-run and which draw argument the walk is at, for the
@@ -5727,6 +5734,13 @@ namespace engine::render {
 			}
 		}
 
+		// **Past the cache scan, so this reads zero on every frame but one.** A
+		// miss compiles GLSL through shaderc and builds a device pipeline, in
+		// the middle of the frame that first drew the node - tens to hundreds of
+		// milliseconds, with nothing naming it. A hitch the first time a graph
+		// node is used is not a mystery once it has a bar.
+		ENGINE_PROFILE_CAT("compile graph pipeline", core::ProfileCategory::Render);
+
 		SDL_GPUShader *vertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
 		std::vector<uint8_t> bytes;
 		std::string entryPoint;
@@ -5789,6 +5803,9 @@ namespace engine::render {
 				return entry.Handle;
 			}
 		}
+
+		// Past the cache scan, exactly as `GraphRasterFor` above. See its note.
+		ENGINE_PROFILE_CAT("compile graph pipeline", core::ProfileCategory::Render);
 
 		std::vector<uint8_t> bytes;
 		std::string entryPoint;
@@ -8489,37 +8506,52 @@ namespace engine::render {
 		size_t visibleCount = instances.size();
 		size_t opaqueCount = 0;
 		core::Name orderedEntities;
-		for (const graph::NodeId id : selectedPipeline->Compiled.PerView) {
-			const graph::Node *node = selectedPipeline->Graph.Find(id);
-			if (node == nullptr) {
-				continue;
+
+		// **The whole CPU half of the pipeline, and it had no span.** Frustum
+		// culling, distance culling, tag filtering and the draw-order sort all
+		// run here, before a single GPU call, and every one of them walks the
+		// draw list. `cpuNodeWall` beside it has been measuring them for the
+		// pipeline panel the whole time; the frame graph could not see them at
+		// all, so they read as a blank at the top of `Renderer::RenderView`.
+		{
+			ENGINE_PROFILE_CAT("entity nodes", core::ProfileCategory::Render);
+			for (const graph::NodeId id : selectedPipeline->Compiled.PerView) {
+				const graph::Node *node = selectedPipeline->Graph.Find(id);
+				if (node == nullptr) {
+					continue;
+				}
+				const auto started = std::chrono::steady_clock::now();
+				const graph::EntityNodeRun run = graph::RunEntityNode(
+					selectedPipeline->Graph,
+					*node,
+					instances,
+					fallbackViewpoint,
+					cameraAspect,
+					entityFlow,
+					viewpoints
+				);
+				if (!run.Handled) {
+					continue;
+				}
+				visibleCount = run.Output.IsValid() ? run.Count : visibleCount;
+				if (run.Ordered) {
+					opaqueCount = run.Opaque;
+					orderedEntities = run.Output;
+				}
+				const auto ended = std::chrono::steady_clock::now();
+				cpuNodeWall[node->Name.Id()] +=
+					std::chrono::duration<double, std::micro>(ended - started).count();
 			}
-			const auto started = std::chrono::steady_clock::now();
-			const graph::EntityNodeRun run = graph::RunEntityNode(
-				selectedPipeline->Graph,
-				*node,
-				instances,
-				fallbackViewpoint,
-				cameraAspect,
-				entityFlow,
-				viewpoints
-			);
-			if (!run.Handled) {
-				continue;
-			}
-			visibleCount = run.Output.IsValid() ? run.Count : visibleCount;
-			if (run.Ordered) {
-				opaqueCount = run.Opaque;
-				orderedEntities = run.Output;
-			}
-			const auto ended = std::chrono::steady_clock::now();
-			cpuNodeWall[node->Name.Id()] +=
-				std::chrono::duration<double, std::micro>(ended - started).count();
 		}
 
 		const std::span<const uint32_t> ordered = entityFlow.Get(orderedEntities);
-		State->VisibleInstances.assign(instances.begin(), instances.end());
-		State->DrawOrder.assign(ordered.begin(), ordered.end());
+		{
+			// Two full copies of the draw list, per view, per frame. Small on a
+			// demo and not small on a scene, and nothing named them.
+			ENGINE_PROFILE_CAT("copy draw lists", core::ProfileCategory::Render);
+			State->VisibleInstances.assign(instances.begin(), instances.end());
+			State->DrawOrder.assign(ordered.begin(), ordered.end());
+		}
 		visibleCount = ordered.size();
 
 		// **Fitted to the whole draw list, not to what survived culling.** A
@@ -8571,6 +8603,7 @@ namespace engine::render {
 		// that disagreed would put a pane's reflection on another pane's pass.
 		scene::SurfaceRun cameraRuns[scene::MAX_SURFACES];
 		if (surfaceInCamera > 0) {
+			ENGINE_PROFILE_CAT("group surfaces", core::ProfileCategory::Render);
 			scene::GroupSurfaces(
 				State->VisibleInstances,
 				std::span<uint32_t>(State->DrawOrder.data() + plainOpaque, surfaceInCamera),
@@ -8603,6 +8636,7 @@ namespace engine::render {
 		const uint32_t plainTransparent = transparentCount - transparentSurfaces;
 
 		if (transparentSurfaces > 0) {
+			ENGINE_PROFILE_CAT("group blended surfaces", core::ProfileCategory::Render);
 			scene::GroupSurfaces(
 				State->VisibleInstances,
 				std::span<uint32_t>(
@@ -8779,27 +8813,39 @@ namespace engine::render {
 			acceptedCount = kept;
 		}
 
+		// **Where surface textures are created and released**, which is device
+		// work in the middle of a frame and had nothing naming it. It reads as
+		// zero until a pane changes how much of the screen it covers, and as a
+		// spike on the frame it does - which is exactly the reading somebody
+		// chasing a hitch while walking towards a mirror needs.
 		size_t liveCount = 0;
-		for (size_t index = 0; index < acceptedCount; index++) {
-			const AcceptedView &view = accepted[index];
+		{
+			ENGINE_PROFILE_CAT("ensure surfaces", core::ProfileCategory::Render);
 
-			// **Sized to what the pane covers, not to what was authored.** The
-			// authored size is a floor and the screen is a ceiling; between them
-			// the target doubles as the pane grows on screen, which is what stops
-			// a portal going coarse when you walk into it. See `SurfaceScale`.
-			const uint32_t authored = std::max<uint32_t>(view.View->Width, view.View->Height);
-			const Impl::SurfaceSlotState &sized = bank.Surfaces[view.Index];
-			const uint32_t held = std::max<uint32_t>(sized.Width, sized.Height);
-			const uint32_t current = authored > 0 && held >= authored ? held / authored : 1u;
+			for (size_t index = 0; index < acceptedCount; index++) {
+				const AcceptedView &view = accepted[index];
 
-			const uint32_t scale = SurfaceScale(
-				authored, surfaceCoverage[view.Index], std::max<uint32_t>(sceneWidth, sceneHeight), current
-			);
+				// **Sized to what the pane covers, not to what was authored.** The
+				// authored size is a floor and the screen is a ceiling; between them
+				// the target doubles as the pane grows on screen, which is what stops
+				// a portal going coarse when you walk into it. See `SurfaceScale`.
+				const uint32_t authored = std::max<uint32_t>(view.View->Width, view.View->Height);
+				const Impl::SurfaceSlotState &sized = bank.Surfaces[view.Index];
+				const uint32_t held = std::max<uint32_t>(sized.Width, sized.Height);
+				const uint32_t current = authored > 0 && held >= authored ? held / authored : 1u;
 
-			if (State->EnsureSurface(
-					targetSlot, view.Index, view.View->Width * scale, view.View->Height * scale
-				)) {
-				accepted[liveCount++] = view;
+				const uint32_t scale = SurfaceScale(
+					authored,
+					surfaceCoverage[view.Index],
+					std::max<uint32_t>(sceneWidth, sceneHeight),
+					current
+				);
+
+				if (State->EnsureSurface(
+						targetSlot, view.Index, view.View->Width * scale, view.View->Height * scale
+					)) {
+					accepted[liveCount++] = view;
+				}
 			}
 		}
 		acceptedCount = liveCount;
@@ -8914,7 +8960,10 @@ namespace engine::render {
 		// and submits; the tail exists only so a surface can name a range of it.
 		// Joining them before the plan is what drew two rooms on top of each
 		// other until v0.14, and is why `foreign` is its own argument.
-		State->SceneInstances.assign(instances.begin(), instances.end());
+		{
+			ENGINE_PROFILE_CAT("copy scene instances", core::ProfileCategory::Render);
+			State->SceneInstances.assign(instances.begin(), instances.end());
+		}
 		const auto ownCount = static_cast<uint32_t>(State->SceneInstances.size());
 		State->SceneInstances.insert(State->SceneInstances.end(), foreign.begin(), foreign.end());
 
@@ -9445,6 +9494,12 @@ namespace engine::render {
 				uploadsSubmitted = true;
 				return true;
 			}
+
+			// **Past the early-out, so it names work rather than a null check.**
+			// Eight `SDL_UploadToGPUBuffer` calls, a transfer-buffer map and a
+			// command submit, all inside whichever graph node happened to be the
+			// first to need them - and only the overlay staging had a span.
+			ENGINE_PROFILE_CAT("submit uploads", core::ProfileCategory::Render);
 
 			OverlayImage::Region overlayRegion;
 			if (uploadOverlay) {
@@ -13172,6 +13227,15 @@ namespace engine::render {
 			windowTarget.load_op = SDL_GPU_LOADOP_LOAD;
 			return true;
 		});
+
+		// **The whole of the frame's recording, and it was the widest blank of
+		// the lot.** Everything below this line is `RenderGraph::Execute`
+		// walking the compiled graph and calling the handlers built above, and
+		// neither `GraphRunner::Run` nor most of the handlers opened a span - so
+		// the gbuffer, the lighting, the tonemap and the present all landed
+		// inside `Renderer::RenderView` with nothing to attribute them to.
+		// `GraphRunner::Run` now names each node; this is the bar they sit under.
+		ENGINE_PROFILE_CAT("execute graph", core::ProfileCategory::Render);
 
 		GraphRunner frameRunner(frameNodes);
 		bool dispatched = false;
