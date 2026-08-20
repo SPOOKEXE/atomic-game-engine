@@ -72,6 +72,15 @@ namespace engine::core {
 			return {X * other.X, Y * other.Y, Z * other.Z};
 		}
 
+		// Divides corresponding components without checking for zero.
+		//
+		// Unchecked for the reason the scalar overload is: a value type that
+		// branched per component would charge every caller for a test only the
+		// caller can act on, and an infinity is at least visible in the result.
+		constexpr Vector3 operator/(const Vector3 &other) const {
+			return {X / other.X, Y / other.Y, Z / other.Z};
+		}
+
 		// Reports whether all components are exactly equal.
 		constexpr bool operator==(const Vector3 &other) const {
 			return X == other.X && Y == other.Y && Z == other.Z;
@@ -118,6 +127,93 @@ namespace engine::core {
 		// range extrapolate.
 		constexpr Vector3 Lerp(const Vector3 &target, float alpha) const {
 			return *this + (target - *this) * alpha;
+		}
+
+		// Returns the magnitude of each component, dropping the signs.
+		constexpr Vector3 Abs() const {
+			return {X < 0.0f ? -X : X, Y < 0.0f ? -Y : Y, Z < 0.0f ? -Z : Z};
+		}
+
+		// Returns each component rounded down to a whole number.
+		//
+		// Down, not toward zero: `-2.6` floors to `-3`. That is what Roblox
+		// answers and what Luau's `//` means, and truncating instead would put a
+		// one-unit step at the origin that no caller asked for.
+		Vector3 Floor() const {
+			return {std::floor(X), std::floor(Y), std::floor(Z)};
+		}
+
+		// Returns each component rounded up to a whole number.
+		Vector3 Ceil() const {
+			return {std::ceil(X), std::ceil(Y), std::ceil(Z)};
+		}
+
+		// Returns -1, 0 or 1 per component, according to its sign.
+		//
+		// A zero component answers zero rather than a sign, so a vector already
+		// on an axis plane stays on it.
+		constexpr Vector3 Sign() const {
+			const auto sign = [](float value) { return value > 0.0f ? 1.0f : value < 0.0f ? -1.0f : 0.0f; };
+			return {sign(X), sign(Y), sign(Z)};
+		}
+
+		// Returns the larger of each pair of corresponding components.
+		constexpr Vector3 Max(const Vector3 &other) const {
+			return {
+				X > other.X ? X : other.X,
+				Y > other.Y ? Y : other.Y,
+				Z > other.Z ? Z : other.Z,
+			};
+		}
+
+		// Returns the smaller of each pair of corresponding components.
+		constexpr Vector3 Min(const Vector3 &other) const {
+			return {
+				X < other.X ? X : other.X,
+				Y < other.Y ? Y : other.Y,
+				Z < other.Z ? Z : other.Z,
+			};
+		}
+
+		// Returns the unsigned angle to `other` in radians, from zero to pi.
+		//
+		// **`atan2` of the cross product's length against the dot, not
+		// `acos(dot / lengths)`.** The `acos` form loses most of its precision
+		// exactly where directions are nearly parallel - which is where a "have I
+		// arrived yet" test lives - and rounding can push its argument past 1.0,
+		// where it answers NaN rather than the zero angle it was asked for.
+		//
+		// A zero vector has no direction and answers zero, matching Unit().
+		float Angle(const Vector3 &other) const {
+			return std::atan2(Cross(other).Magnitude(), Dot(other));
+		}
+
+		// Returns the angle to `other` in radians, signed by which way `axis` points.
+		//
+		// Negative when turning from this vector to `other` goes the opposite way
+		// round `axis` by the right hand. `axis` need not be unit length and need
+		// not be perpendicular; only the sign of its dot with the cross is read.
+		float Angle(const Vector3 &other, const Vector3 &axis) const {
+			const float unsigned_angle = Angle(other);
+			return axis.Dot(Cross(other)) < 0.0f ? -unsigned_angle : unsigned_angle;
+		}
+
+		// Reports whether `other` is within `epsilon` of this vector.
+		//
+		// **The tolerance is relative to the longer of the two**, so one epsilon
+		// works for a normal and for a position a thousand studs out - an absolute
+		// one is either useless at that distance or far too loose near the origin.
+		// Vectors shorter than one unit are compared against a plain `epsilon`
+		// rather than a shrinking one, which is what keeps a near-zero vector from
+		// only ever matching itself.
+		//
+		// @param other   The vector to compare against.
+		// @param epsilon The tolerance, in component units at unit scale.
+		constexpr bool FuzzyEq(const Vector3 &other, float epsilon = 1.0e-5f) const {
+			const float longest =
+				MagnitudeSquared() > other.MagnitudeSquared() ? MagnitudeSquared() : other.MagnitudeSquared();
+			const float scale = longest > 1.0f ? longest : 1.0f;
+			return (*this - other).MagnitudeSquared() <= epsilon * epsilon * scale;
 		}
 	};
 

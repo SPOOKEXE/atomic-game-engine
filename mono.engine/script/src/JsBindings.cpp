@@ -9,9 +9,11 @@
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/script/Datatypes.hpp>
 #include <engine/world/Postbox.hpp>
 
 #include <algorithm>
+#include <iterator>
 #include <span>
 #include <string>
 #include <string_view>
@@ -781,6 +783,34 @@ namespace engine::script {
 			);
 		}
 
+		// `Vector3.FromNormalId(Enum.NormalId.Top)` and `Vector3.FromAxis(Enum.Axis.Y)`.
+		//
+		// Capitalised because Roblox capitalises these two and not `new`, and
+		// the mapping is `script::DirectionOfNormalId`, which the Luau surface
+		// calls as well - one answer about which way `Front` points rather than
+		// two that agree until one of them is edited.
+		JSValue Vector3FromNormalId(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
+			core::Name member;
+			core::Vector3 direction;
+
+			if (argc < 1 || !ReadJsEnumValue(context, argv[0], core::Name("NormalId"), member) ||
+				!DirectionOfNormalId(member, direction)) {
+				return JS_ThrowTypeError(context, "FromNormalId needs an Enum.NormalId");
+			}
+			return MakeVector3(context, direction);
+		}
+
+		JSValue Vector3FromAxis(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
+			core::Name member;
+			core::Vector3 direction;
+
+			if (argc < 1 || !ReadJsEnumValue(context, argv[0], core::Name("Axis"), member) ||
+				!DirectionOfAxis(member, direction)) {
+				return JS_ThrowTypeError(context, "FromAxis needs an Enum.Axis");
+			}
+			return MakeVector3(context, direction);
+		}
+
 		JSValue Color3FromRgb(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
 			double r = 0.0;
 			double g = 0.0;
@@ -1041,6 +1071,10 @@ namespace engine::script {
 				return MakeVector3(context, *left * *right);
 			}
 
+			// Cleared for `Vector3Divide`'s reason: the failed class check left
+			// an exception behind, and a scalar is not a failure.
+			JS_FreeValue(context, JS_GetException(context));
+
 			double scalar = 1.0;
 			JS_ToFloat64(context, &scalar, argv[0]);
 			return MakeVector3(context, *left * static_cast<float>(scalar));
@@ -1062,7 +1096,177 @@ namespace engine::script {
 			if (magic == 0) {
 				return JS_NewFloat64(context, value->Magnitude());
 			}
+
+			// **Refused, and this used to hand back the zero vector.** A zero
+			// vector has no direction; `core::Vector3::Unit` answers `Zero` so
+			// that C++ callers get no NaN, and the Luau surface throws instead
+			// so an author is told rather than quietly given a direction that
+			// points nowhere. Two languages over one engine that answered
+			// differently about `Vector3.zero.Unit` was the worse of the three
+			// options, and the JavaScript half was the one nothing tested.
+			if (value->Magnitude() <= 0.0f) {
+				return JS_ThrowRangeError(context, "the zero vector has no Unit");
+			}
 			return MakeVector3(context, value->Unit());
+		}
+
+		// The component-wise unaries and the negation JavaScript has no operator
+		// for. One function with a selector rather than five that differ by a
+		// single call, which is what `JS_CFUNC_MAGIC_DEF` is for.
+		enum class VectorUnary {
+			Abs = 0,
+			Ceil,
+			Floor,
+			Sign,
+			Negate,
+		};
+
+		JSValue Vector3Unary(JSContext *context, JSValueConst self, int, JSValueConst *, int magic) {
+			const core::Vector3 *value = AsVector3(context, self);
+			if (value == nullptr) {
+				return JS_ThrowTypeError(context, "not a Vector3");
+			}
+
+			switch (static_cast<VectorUnary>(magic)) {
+			case VectorUnary::Abs:
+				return MakeVector3(context, value->Abs());
+			case VectorUnary::Ceil:
+				return MakeVector3(context, value->Ceil());
+			case VectorUnary::Floor:
+				return MakeVector3(context, value->Floor());
+			case VectorUnary::Sign:
+				return MakeVector3(context, value->Sign());
+			case VectorUnary::Negate:
+				break;
+			}
+			return MakeVector3(context, -*value);
+		}
+
+		// The three that take one vector and answer one. The name comes back out
+		// of the selector so the type error says which method was called - a
+		// shared "needs a Vector3" would be the least useful half of the message.
+		enum class VectorPair {
+			Cross = 0,
+			Max,
+			Min,
+		};
+
+		JSValue Vector3Pair(JSContext *context, JSValueConst self, int argc, JSValueConst *argv, int magic) {
+			static const char *const NAMES[] = {"Cross", "Max", "Min"};
+
+			const core::Vector3 *left = AsVector3(context, self);
+			const core::Vector3 *right = argc > 0 ? AsVector3(context, argv[0]) : nullptr;
+
+			if (left == nullptr || right == nullptr) {
+				return JS_ThrowTypeError(context, "%s needs a Vector3", NAMES[magic]);
+			}
+
+			switch (static_cast<VectorPair>(magic)) {
+			case VectorPair::Cross:
+				return MakeVector3(context, left->Cross(*right));
+			case VectorPair::Max:
+				return MakeVector3(context, left->Max(*right));
+			case VectorPair::Min:
+				break;
+			}
+			return MakeVector3(context, left->Min(*right));
+		}
+
+		// `div` and `idiv`, which Luau spells `/` and `//`.
+		//
+		// The vector is the receiver, so there is no `2 / v` to refuse the way
+		// the Luau side has to - a method call has a side.
+		JSValue
+		Vector3Divide(JSContext *context, JSValueConst self, int argc, JSValueConst *argv, int magic) {
+			const core::Vector3 *left = AsVector3(context, self);
+			if (left == nullptr || argc < 1) {
+				return JS_ThrowTypeError(
+					context, "%s needs a number or a Vector3", magic == 0 ? "div" : "idiv"
+				);
+			}
+
+			core::Vector3 quotient;
+			if (const core::Vector3 *right = AsVector3(context, argv[0]); right != nullptr) {
+				quotient = *left / *right;
+			} else {
+				// `AsVector3` throws when the argument is of another class, and
+				// a number is a legitimate second form rather than a failure -
+				// so the exception is cleared before it can surface on whatever
+				// the VM does next. `ReadEnumValueImpl` does the same.
+				JS_FreeValue(context, JS_GetException(context));
+
+				double scalar = 1.0;
+				JS_ToFloat64(context, &scalar, argv[0]);
+				quotient = *left / static_cast<float>(scalar);
+			}
+
+			return MakeVector3(context, magic == 0 ? quotient : quotient.Floor());
+		}
+
+		JSValue Vector3Dot(JSContext *context, JSValueConst self, int argc, JSValueConst *argv) {
+			const core::Vector3 *left = AsVector3(context, self);
+			const core::Vector3 *right = argc > 0 ? AsVector3(context, argv[0]) : nullptr;
+
+			if (left == nullptr || right == nullptr) {
+				return JS_ThrowTypeError(context, "Dot needs a Vector3");
+			}
+			return JS_NewFloat64(context, left->Dot(*right));
+		}
+
+		// The axis is optional and decides the sign, exactly as it does in Luau.
+		JSValue Vector3Angle(JSContext *context, JSValueConst self, int argc, JSValueConst *argv) {
+			const core::Vector3 *left = AsVector3(context, self);
+			const core::Vector3 *right = argc > 0 ? AsVector3(context, argv[0]) : nullptr;
+
+			if (left == nullptr || right == nullptr) {
+				return JS_ThrowTypeError(context, "Angle needs a Vector3");
+			}
+
+			if (const core::Vector3 *axis = argc > 1 ? AsVector3(context, argv[1]) : nullptr;
+				axis != nullptr) {
+				return JS_NewFloat64(context, left->Angle(*right, *axis));
+			}
+
+			// `AsVector3` threw when the second argument was some other object,
+			// and an omitted axis is the ordinary call rather than a mistake.
+			JS_FreeValue(context, JS_GetException(context));
+			return JS_NewFloat64(context, left->Angle(*right));
+		}
+
+		JSValue Vector3FuzzyEq(JSContext *context, JSValueConst self, int argc, JSValueConst *argv) {
+			const core::Vector3 *left = AsVector3(context, self);
+			const core::Vector3 *right = argc > 0 ? AsVector3(context, argv[0]) : nullptr;
+
+			if (left == nullptr || right == nullptr) {
+				return JS_ThrowTypeError(context, "FuzzyEq needs a Vector3");
+			}
+
+			// The default epsilon stays in `core::Vector3::FuzzyEq`, so the two
+			// languages cannot be told apart by how close is close enough.
+			if (argc < 2 || JS_IsUndefined(argv[1])) {
+				return JS_NewBool(context, left->FuzzyEq(*right));
+			}
+
+			double epsilon = 0.0;
+			if (JS_ToFloat64(context, &epsilon, argv[1]) != 0) {
+				return JS_EXCEPTION;
+			}
+			return JS_NewBool(context, left->FuzzyEq(*right, static_cast<float>(epsilon)));
+		}
+
+		JSValue Vector3Lerp(JSContext *context, JSValueConst self, int argc, JSValueConst *argv) {
+			const core::Vector3 *left = AsVector3(context, self);
+			const core::Vector3 *goal = argc > 0 ? AsVector3(context, argv[0]) : nullptr;
+
+			if (left == nullptr || goal == nullptr || argc < 2) {
+				return JS_ThrowTypeError(context, "Lerp needs a Vector3 and a number");
+			}
+
+			double alpha = 0.0;
+			if (JS_ToFloat64(context, &alpha, argv[1]) != 0) {
+				return JS_EXCEPTION;
+			}
+			return MakeVector3(context, left->Lerp(*goal, static_cast<float>(alpha)));
 		}
 
 		JSValue Color3Equals(JSContext *context, JSValueConst self, int argc, JSValueConst *argv) {
@@ -1359,15 +1563,43 @@ namespace engine::script {
 				JS_CFUNC_DEF("add", 1, Vector3Add),
 				JS_CFUNC_DEF("sub", 1, Vector3Sub),
 				JS_CFUNC_DEF("mul", 1, Vector3Mul),
+				JS_CFUNC_MAGIC_DEF("div", 1, Vector3Divide, 0),
+				JS_CFUNC_MAGIC_DEF("idiv", 1, Vector3Divide, 1),
+				JS_CFUNC_MAGIC_DEF("neg", 0, Vector3Unary, static_cast<int>(VectorUnary::Negate)),
 				JS_CFUNC_DEF("Equals", 1, Vector3Equals),
+				JS_CFUNC_MAGIC_DEF("Abs", 0, Vector3Unary, static_cast<int>(VectorUnary::Abs)),
+				JS_CFUNC_MAGIC_DEF("Ceil", 0, Vector3Unary, static_cast<int>(VectorUnary::Ceil)),
+				JS_CFUNC_MAGIC_DEF("Floor", 0, Vector3Unary, static_cast<int>(VectorUnary::Floor)),
+				JS_CFUNC_MAGIC_DEF("Sign", 0, Vector3Unary, static_cast<int>(VectorUnary::Sign)),
+				JS_CFUNC_MAGIC_DEF("Cross", 1, Vector3Pair, static_cast<int>(VectorPair::Cross)),
+				JS_CFUNC_MAGIC_DEF("Max", 1, Vector3Pair, static_cast<int>(VectorPair::Max)),
+				JS_CFUNC_MAGIC_DEF("Min", 1, Vector3Pair, static_cast<int>(VectorPair::Min)),
+				JS_CFUNC_DEF("Dot", 1, Vector3Dot),
+				JS_CFUNC_DEF("Angle", 2, Vector3Angle),
+				JS_CFUNC_DEF("FuzzyEq", 2, Vector3FuzzyEq),
+				JS_CFUNC_DEF("Lerp", 2, Vector3Lerp),
 			};
-			JS_SetPropertyFunctionList(context, proto, fields, 9);
+
+			// **`std::size` rather than the count written out again.** The list
+			// was nine entries and the literal `9` beside it, which is the kind
+			// of pair that stops agreeing the moment somebody appends a method -
+			// and the failure is a method that silently does not exist.
+			JS_SetPropertyFunctionList(context, proto, fields, static_cast<int>(std::size(fields)));
 			JS_SetClassProto(context, bound->Vector3Class, proto);
 
 			JSValue table = JS_NewObject(context);
 			JS_SetPropertyStr(context, table, "new", JS_NewCFunction(context, Vector3New, "new", 3));
+			JS_SetPropertyStr(
+				context,
+				table,
+				"FromNormalId",
+				JS_NewCFunction(context, Vector3FromNormalId, "FromNormalId", 1)
+			);
+			JS_SetPropertyStr(
+				context, table, "FromAxis", JS_NewCFunction(context, Vector3FromAxis, "FromAxis", 1)
+			);
 
-			// **The same two constants the Luau surface carries, spelled the same
+			// **The same five constants the Luau surface carries, spelled the same
 			// way.** Two bindings over one engine is exactly the drift a declared
 			// property prevents for components, and there is no such mechanism for
 			// a library constant - so the only thing keeping `Vector3.zero`
@@ -1377,6 +1609,9 @@ namespace engine::script {
 			// Lowercase, because Roblox's are. `LuauValues.cpp` carries the argument.
 			JS_SetPropertyStr(context, table, "zero", MakeVector3(context, core::Vector3::Zero));
 			JS_SetPropertyStr(context, table, "one", MakeVector3(context, core::Vector3::One));
+			JS_SetPropertyStr(context, table, "xAxis", MakeVector3(context, core::Vector3::XAxis));
+			JS_SetPropertyStr(context, table, "yAxis", MakeVector3(context, core::Vector3::YAxis));
+			JS_SetPropertyStr(context, table, "zAxis", MakeVector3(context, core::Vector3::ZAxis));
 			JS_SetPropertyStr(context, global, "Vector3", table);
 		}
 
