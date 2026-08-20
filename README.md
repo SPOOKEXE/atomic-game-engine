@@ -33,6 +33,7 @@
 | [docs/CODE_DOCUMENTING.md](docs/CODE_DOCUMENTING.md) | where a comment ends up in the generated reference, and the tags |
 | [AGENTS.md](AGENTS.md) | the four rules, and how AI is used here |
 | [ROADMAP.md](ROADMAP.md) | what is built, what is next |
+| [docs/RELEASING.md](docs/RELEASING.md) | the version scheme, and how a tag becomes a download |
 | [docs/DEFERRED.md](docs/DEFERRED.md) | deferred items from ROADMAP.md that need to be revisited |
 | [SECURITY.md](SECURITY.md) | the threat model, and reporting |
 
@@ -42,15 +43,27 @@ whatever you are about to change.
 
 ## Releases
 
-Once the engine is built up more, I'll start building out releases for all platforms so you can test it out!
+Pushing a `vX.Y.Z` tag builds the `release` preset on Linux, Windows and macOS
+and publishes what it built to the GitHub releases page:
 
-For now, all media relating to development builds will be in the discord server below.
+- **Linux:** a `.tar.gz` of all four programs, plus an `.AppImage` each for the
+  client and the studio
+- **Windows:** a `.zip` of all four programs
+- **macOS:** a `.tar.gz`, unsigned and untested
+
+Linux is the platform this is developed on. Windows compiles but has never
+shipped, and macOS has never been run, so neither one holds up a release.
+
+Development builds and media are still in the discord server below.
 
 ## Version
 
-Current Version: **v0.17**
+Current Version: **v0.18.0**
 
-See more in [`ROADMAP.md`](ROADMAP.md).
+Versions are `v[major].[minor].[patch]`. Everything before `1.0.0` is a
+pre-release with no compatibility promise. See
+[`docs/RELEASING.md`](docs/RELEASING.md) for what each number means and how a
+release is cut, and [`ROADMAP.md`](ROADMAP.md) for what is in each one.
 
 ## Development Cycle
 
