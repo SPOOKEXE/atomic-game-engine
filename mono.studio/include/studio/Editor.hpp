@@ -39,6 +39,8 @@
 #include <engine/delivery/Uploader.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/effects/Particles.hpp>
+#include <engine/effects/Ribbon.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/gui/Compile.hpp>
@@ -1000,6 +1002,38 @@ namespace studio {
 		// @param instance What to frame. Needs a `scene::Transform`; anything
 		//        else is refused, because there is nowhere to point at.
 		void ZoomViewportTo(WorldId world, Entity instance);
+
+		// Puts whichever viewport shows `world` at a distance where a sphere of
+		// `radius` about `centre` fills the frame, keeping the orientation.
+		void FrameViewportOn(WorldId world, const engine::core::Vector3 &centre, float radius);
+
+		// Frames everything drawable in `world`.
+		//
+		// **Because a scene is not obliged to build at the origin, and one does
+		// not.** `Magic.luau` searches its height field for dry ground and puts
+		// its arena wherever it finds some - on the shipped seed that is 2,345
+		// studs west and 634 north, at a surface height of about 48. A fresh
+		// editor camera starts at (18, 14, 18), so the world opened two and a
+		// third kilometres away *and* below the terrain: a completely black
+		// viewport, with nothing wrong in the scene, the renderer or the mount.
+		// Every other example happens to build at the origin, which is why this
+		// went unnoticed rather than why it was fine.
+		//
+		// @param world The world to look at.
+		// @return False when the world holds nothing drawable yet, which is the
+		//         ordinary state of an example world before Play runs its
+		//         script - the caller retries.
+		bool FrameWorldContents(WorldId world);
+
+		// Worlds added from an example that have not been framed yet.
+		//
+		// **A queue rather than a call, because the content does not exist
+		// when the world is made.** `InstallExampleScript` puts a `Script` in
+		// the tree and nothing else; the parts appear when Play runs it, which
+		// is some number of frames later and may be never. So the world is
+		// remembered and framed on the first present where it has anything
+		// drawable in it, once.
+		std::vector<WorldId> PendingFrame;
 
 	  public:
 		// One row of the catalogue a new game's worlds are chosen from.
@@ -3150,6 +3184,47 @@ namespace studio {
 		// `client::CollectPortalViews`.
 		std::vector<engine::render::PortalView> Portals;
 
+		// The rest of what a frame is made of, and the editor was handing the
+		// renderer none of it.
+		//
+		// **`render::View` has eight spans and this program filled four.** The
+		// instances, the surface cameras, the foreign rows and the portals were
+		// there; the particles, the beams and trails, and the *lights* were not,
+		// and an omitted span is an empty span rather than an error. So every
+		// `ParticleEmitter` in the editor emitted into nothing, every `Beam` and
+		// `Trail` drew nothing, and any scene lit by `PointLight`s alone
+		// rendered black - each of which reads as a broken feature rather than
+		// as a caller that never asked. `client::Client` collects all of them
+		// and this class is a second, thinner copy of the same frame; these are
+		// the rows that were missing from the copy.
+		//
+		// Rebuilt per frame from the world being drawn, for `Surfaces`' reason:
+		// a script can create or destroy any of them at any point in a run, and
+		// a list assembled from what is in the world is also what makes a
+		// deleted emitter stop being drawn.
+		//@{
+		std::vector<engine::render::ParticleBatch> Particles;
+		std::vector<engine::effects::RibbonVertex> RibbonVertices;
+		std::vector<engine::effects::RibbonRun> RibbonRuns;
+		std::vector<engine::render::SceneLight> Lights;
+		//@}
+
+		// The particles themselves, copied out of the world's pool.
+		//
+		// **Copied rather than spanned, which `drawn` already explains**: the
+		// renderer is called outside `Universe::Enter`, and a span into a store
+		// nobody is inside is a pointer across a boundary rule 3 exists to keep
+		// closed. A `render::ParticleBatch` is a span into
+		// `effects::ParticleSystem::Instances`, so copying the batches alone
+		// would copy the pointers and leave the pixels where they were.
+		//
+		// Reserved to the whole set before anything is written, and that is
+		// load-bearing rather than tidy: every batch points into this buffer, so
+		// a later one that grew it would leave an earlier one pointing at freed
+		// memory. `client::CollectParticleBatches` reserves its own scratch for
+		// the same reason.
+		std::vector<engine::effects::ParticleInstance> ParticleInstances;
+
 		// The universe-authored rendering profiles. Worlds hold only the name
 		// they select, so one graph edit reaches every world using that profile
 		// and the game writer emits the library once.
@@ -5247,5 +5322,5 @@ namespace studio {
 	// grows by adding a row rather than by editing `Editor::NewGame`. See the
 	// definition in `Editor.cpp` for what a row means and why the keys are
 	// fixed.
-	const std::array<Editor::DefaultWorldEntry, 13> &DefaultWorldCatalogue();
+	const std::array<Editor::DefaultWorldEntry, 14> &DefaultWorldCatalogue();
 }

@@ -116,8 +116,8 @@ namespace studio {
 	// The keys are what land in `studio.json` and they never change. A row may
 	// be renamed for the interface freely; renaming its key silently unticks it
 	// for everybody who had it on.
-	const std::array<Editor::DefaultWorldEntry, 13> &DefaultWorldCatalogue() {
-		static const std::array<Editor::DefaultWorldEntry, 13> catalogue{{
+	const std::array<Editor::DefaultWorldEntry, 14> &DefaultWorldCatalogue() {
+		static const std::array<Editor::DefaultWorldEntry, 14> catalogue{{
 			{"rings",
 			 "Rings",
 			 "Rings.luau",
@@ -203,6 +203,14 @@ namespace studio {
 			 "Crossing by walking through a hole rather than by standing on a tile. One script "
 			 "in both worlds, branching on the world's own name - two files mirroring each "
 			 "other by hand drift.",
+			 false},
+			{"magic",
+			 "Magic",
+			 "Magic.luau",
+			 "",
+			 "Spells fired at generated terrain, which they dig holes in. The whole stack from "
+			 "a spell graph to a crater, through Luau modules ported from a Rojo project without "
+			 "an edit. Off by default: it builds about five thousand parts on the first tick.",
 			 false},
 			{"immersive-two",
 			 std::string_view(IMMERSIVE_TWO),
@@ -1202,6 +1210,13 @@ namespace studio {
 		Active = created;
 		SelectionWorld = created;
 		ClearSelection();
+
+		// **Framed once the script has built something** - see
+		// `FrameWorldContents` for the scene that made this necessary. Queued
+		// rather than done here, because right now the world holds one `Script`
+		// and no geometry at all.
+		PendingFrame.push_back(created);
+
 		Say("added world '" + name + "' from " + std::string(file));
 		return true;
 	}
@@ -1796,6 +1811,20 @@ namespace studio {
 			// returning before the tick. `studio::PresentationAlpha` carries
 			// the whole argument and is where it is now decided, because
 			// nothing in this class is reachable from a test.
+			// **After the world has been asked for its picture, so the bounds
+			// are this frame's.** The queue is empty on every frame but the one
+			// after a scene first builds itself, so this is a walk of an empty
+			// vector.
+			for (size_t index = 0; index < PendingFrame.size(); index++) {
+				if (PendingFrame[index] != shown) {
+					continue;
+				}
+				if (FrameWorldContents(shown)) {
+					PendingFrame.erase(PendingFrame.begin() + static_cast<ptrdiff_t>(index));
+				}
+				break;
+			}
+
 			ENGINE_PROFILE_CAT("world present", engine::core::ProfileCategory::ECS);
 			Universe->Present(
 				shown,
@@ -1818,6 +1847,11 @@ namespace studio {
 		// a texture nothing samples, and a surface pass paid for every frame the
 		// panel is empty.
 		Surfaces.clear();
+		Particles.clear();
+		ParticleInstances.clear();
+		RibbonVertices.clear();
+		RibbonRuns.clear();
+		Lights.clear();
 
 		if (shown.IsValid()) {
 			const Name selectedProfile = Universe->SettingsOf(shown).RenderingProfile;
@@ -1865,6 +1899,58 @@ namespace studio {
 					ENGINE_PROFILE_CAT("collect surfaces", engine::core::ProfileCategory::Render);
 					(void)client::CollectPortalViews(store, Portals);
 					(void)client::CollectSurfaceViews(store, Surfaces, Portals);
+				}
+
+				// **The other four spans a frame is made of, which this program
+				// never gathered.** `render::View` takes instances, surfaces,
+				// foreign rows, portals, particles, ribbon vertices, ribbon runs
+				// and lights; the editor filled the first four and left the rest
+				// default-constructed, and an omitted span is an empty span
+				// rather than an error. So a `ParticleEmitter` emitted into
+				// nothing here, a `Beam` and a `Trail` drew nothing, and a scene
+				// lit by `PointLight`s alone came out black - three features
+				// that worked under `client --script` and looked broken in the
+				// one program they are authored in.
+				{
+					ENGINE_PROFILE_CAT("collect effects", engine::core::ProfileCategory::Render);
+
+					// **Copied out of the pool, not spanned into it**, for the
+					// reason `drawn` gives one screen up: `Renderer::Render`
+					// happens outside this `Enter`, and a `ParticleBatch` is a
+					// span into `effects::ParticleSystem::Instances`. Copying
+					// the batches alone would copy the pointers.
+					(void)client::CollectParticleBatches(store, Particles);
+
+					size_t total = 0;
+					for (const engine::render::ParticleBatch &batch : Particles) {
+						total += batch.Particles.size();
+					}
+
+					// Reserved before anything is written, so no later batch can
+					// reallocate the buffer an earlier one already points into.
+					ParticleInstances.reserve(total);
+					for (engine::render::ParticleBatch &batch : Particles) {
+						const size_t first = ParticleInstances.size();
+						ParticleInstances.insert(
+							ParticleInstances.end(), batch.Particles.begin(), batch.Particles.end()
+						);
+						batch.Particles = {ParticleInstances.data() + first, batch.Particles.size()};
+					}
+
+					const std::span<const engine::effects::RibbonVertex> vertices =
+						engine::effects::RibbonStream(store);
+					RibbonVertices.assign(vertices.begin(), vertices.end());
+
+					const std::span<const engine::effects::RibbonRun> runs =
+						engine::effects::RibbonRuns(store);
+					RibbonRuns.assign(runs.begin(), runs.end());
+
+					// **Ordered from the eye, which is why this needs the camera
+					// and the three above do not.** The renderer takes sixteen
+					// and a world may hold any number; which sixteen is a scene
+					// question and distance is the answer that is right more
+					// often than it is wrong.
+					(void)client::CollectLights(store, eye.Position, Lights);
 				}
 
 				// **How deep this world's mirrors go, pushed with the world that
@@ -2025,6 +2111,10 @@ namespace studio {
 		view.Instances = instances != nullptr ? std::span<const engine::scene::DrawInstance>(*instances)
 											  : std::span<const engine::scene::DrawInstance>{};
 		view.Surfaces = Surfaces;
+		view.Particles = Particles;
+		view.RibbonVertices = RibbonVertices;
+		view.RibbonRuns = RibbonRuns;
+		view.Lights = Lights;
 		view.Target = target.IsValid() ? &target : nullptr;
 		view.Slot = DrawingViewport;
 		view.Foreign = foreign;
@@ -2324,6 +2414,7 @@ namespace studio {
 
 	void Editor::NewGame() {
 		EndAllRuns();
+		PendingFrame.clear();
 		Scripts.clear();
 		ActiveScript = -1;
 		ClearSelection();
@@ -2393,6 +2484,11 @@ namespace studio {
 			opened.push_back(world);
 			names.push_back(entry.World);
 			ExpandWorldTree(world);
+
+			// **Framed once it has built something**, for the reason
+			// `FrameWorldContents` gives: a scene is not obliged to build at the
+			// origin and `Magic.luau` does not.
+			PendingFrame.push_back(world);
 		}
 
 		// **A world regardless, because a universe with none cannot be edited.**

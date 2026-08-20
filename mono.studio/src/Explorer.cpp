@@ -232,6 +232,112 @@ namespace studio {
 		}
 	}
 
+	void Editor::FrameViewportOn(WorldId world, const engine::core::Vector3 &centre, float radius) {
+		// A part may be authored flat on an axis - a pane is - and one flat on
+		// all three would put the camera inside it.
+		radius = std::max(radius, 0.5f);
+
+		// The viewport this applies to: the focused one when it is showing the
+		// world, and the main one otherwise.
+		//
+		// **One panel rather than every panel showing the world.** Two viewports
+		// both jumping because a row was right-clicked once is the surprise; the
+		// second panel is usually the one being kept still on purpose.
+		size_t panel = 0;
+		if (FocusedIsViewport && ViewportWorld(FocusedViewport) == world) {
+			panel = FocusedViewport;
+		} else if (Active != world) {
+			for (size_t index = 1; index <= Extras.size(); index++) {
+				if (Extras[index - 1].Open && ViewportWorld(index) == world) {
+					panel = index;
+					break;
+				}
+			}
+		}
+
+		ViewportState *view = ExtraAt(panel);
+		engine::core::CFrame &frame = view != nullptr ? view->Frame : CameraFrame;
+		const float yaw = view != nullptr ? view->Yaw : CameraYaw;
+		const float pitch = view != nullptr ? view->Pitch : CameraPitch;
+
+		// **The same framing arithmetic `MeshPreview` uses**, and for the same
+		// reason: the distance at which a sphere of this radius subtends the
+		// whole of a vertical field of view is `radius / tan(fov / 2)`, and the
+		// padding is what stops it touching the edges.
+		//
+		// A quarter rather than the four fifths a first attempt used. The radius
+		// is already the *sphere* around the box, so rotation is covered before
+		// the padding is applied at all - and doubling on top of that puts a
+		// wide flat thing, which a terrain arena is, in the middle of a mostly
+		// empty frame.
+		constexpr float PADDING = 1.25f;
+		const float halfFov = engine::scene::Camera{}.FieldOfViewRadians * 0.5f;
+		const float distance = (radius / std::tan(halfFov)) * PADDING;
+
+		const engine::core::Vector3 forward =
+			engine::core::CFrame::Angles(pitch, yaw, 0.0f)
+				.VectorToWorldSpace(engine::core::Vector3{0.0f, 0.0f, -1.0f});
+
+		frame = engine::core::CFrame(centre - forward * distance, frame.Rotation());
+	}
+
+	bool Editor::FrameWorldContents(WorldId world) {
+		if (!world.IsValid()) {
+			return false;
+		}
+
+		engine::core::Vector3 lowest{};
+		engine::core::Vector3 highest{};
+		bool found = false;
+
+		Universe->Enter(world, [&](Store &store) {
+			// **Drawable rows only.** A world's services, its scripts and its
+			// modules have no place, and an invisible part is one the author
+			// does not want looked at - framing on either would aim the camera
+			// at somewhere nothing is.
+			store.Each<
+				const engine::scene::Transform,
+				const engine::scene::Bounds,
+				const engine::scene::Visual>([&](Entity,
+												 const engine::scene::Transform &placement,
+												 const engine::scene::Bounds &bounds,
+												 const engine::scene::Visual &visual) {
+				if (!visual.Visible) {
+					return;
+				}
+
+				const engine::core::Vector3 at = placement.Frame.Position;
+				const engine::core::Vector3 half = bounds.HalfExtent;
+
+				if (!found) {
+					lowest = at - half;
+					highest = at + half;
+					found = true;
+					return;
+				}
+
+				lowest = engine::core::Vector3{
+					std::min(lowest.X, at.X - half.X),
+					std::min(lowest.Y, at.Y - half.Y),
+					std::min(lowest.Z, at.Z - half.Z),
+				};
+				highest = engine::core::Vector3{
+					std::max(highest.X, at.X + half.X),
+					std::max(highest.Y, at.Y + half.Y),
+					std::max(highest.Z, at.Z + half.Z),
+				};
+			});
+		});
+
+		if (!found) {
+			return false;
+		}
+
+		const engine::core::Vector3 centre = (lowest + highest) * 0.5f;
+		FrameViewportOn(world, centre, ((highest - lowest) * 0.5f).Magnitude());
+		return true;
+	}
+
 	void Editor::ZoomViewportTo(WorldId world, Entity instance) {
 		if (!world.IsValid() || instance == NULL_ENTITY) {
 			return;
@@ -265,47 +371,7 @@ namespace studio {
 			return;
 		}
 
-		// A part may be authored at zero on an axis - a pane is - and one
-		// authored at zero on all three would put the camera inside it.
-		radius = std::max(radius, 0.5f);
-
-		// The viewport this applies to: the focused one when it is showing the
-		// world, and the main one otherwise.
-		//
-		// **One panel rather than every panel showing the world.** Two viewports
-		// both jumping because a row was right-clicked once is the surprise; the
-		// second panel is usually the one being kept still on purpose.
-		size_t panel = 0;
-		if (FocusedIsViewport && ViewportWorld(FocusedViewport) == world) {
-			panel = FocusedViewport;
-		} else if (Active != world) {
-			for (size_t index = 1; index <= Extras.size(); index++) {
-				if (Extras[index - 1].Open && ViewportWorld(index) == world) {
-					panel = index;
-					break;
-				}
-			}
-		}
-
-		ViewportState *view = ExtraAt(panel);
-		engine::core::CFrame &frame = view != nullptr ? view->Frame : CameraFrame;
-		const float yaw = view != nullptr ? view->Yaw : CameraYaw;
-		const float pitch = view != nullptr ? view->Pitch : CameraPitch;
-
-		// **The same framing arithmetic `MeshPreview` uses**, and for the same
-		// reason: the distance at which a sphere of this radius subtends the
-		// whole of a vertical field of view is `radius / tan(fov / 2)`, and the
-		// padding is what stops it touching the edges.
-		constexpr float PADDING = 1.8f;
-		const float halfFov = engine::scene::Camera{}.FieldOfViewRadians * 0.5f;
-		const float distance = (radius / std::tan(halfFov)) * PADDING;
-
-		const engine::core::Vector3 forward =
-			engine::core::CFrame::Angles(pitch, yaw, 0.0f)
-				.VectorToWorldSpace(engine::core::Vector3{0.0f, 0.0f, -1.0f});
-
-		frame = engine::core::CFrame(placement.Position - forward * distance, frame.Rotation());
-
+		FrameViewportOn(world, placement.Position, radius);
 		Say("framed the selection");
 	}
 
