@@ -38,22 +38,59 @@
 -- thing that distinguishes a starved scene from a fast one - an emitter that
 -- never got a block from the pool is silent rather than wrong.
 --
--- ## The knob
+-- ## The knobs, and why the shape changed
 --
--- `GRID`. 320 is 102,400 emitters, and it is not an arbitrary number: at five
--- particles each that is 512,000 alive against a default pool of 524,288, so
--- 320 is the largest square this scene can spam without starving itself. Raise
--- the pool before raising this, or the extra emitters are refused and the count
--- stops climbing while the cost of authoring them does not.
+-- **A thousand parts carrying five emitters each, not a hundred thousand parts
+-- carrying one.** The old field was 320 by 320 invisible one-metre hosts with a
+-- single emitter apiece, which measured one thing well - the per-emitter cost of
+-- a refresh pass walking a hundred thousand rows - and measured it in a shape no
+-- game has. A game has scenery, and a piece of scenery that emits usually emits
+-- several things at once: a torch is flame and smoke and embers, a thruster is
+-- exhaust and heat-haze and sparks. Five on one part is that, and it is also the
+-- case the old field could not reach at all: every emitter under one `Transform`
+-- and one `Bounds`, which is a different walk and a different cache pattern from
+-- one emitter per host.
 --
--- 100 is 10,000 and is where a machine without a discrete GPU should start.
+-- **The particle count is deliberately the same as before**, so the two shapes
+-- are comparable rather than merely different. `HOSTS` of 32 is 1,024 parts;
+-- five emitters each is 5,120; a rate of 20 over a five-second life is a hundred
+-- alive apiece, and 5,120 times a hundred is 512,000 - the same load the 320
+-- grid carried, against the same default pool of 524,288. What moved is where
+-- the cost sits: twenty times fewer emitters to refresh, the same number of
+-- particles to step and draw. A frame that got faster is a refresh-bound frame
+-- and a frame that did not is a fill-bound one, and that is a question the old
+-- scene could not ask.
+--
+-- Raise the pool before raising either knob, or the extra emitters are refused
+-- and the count stops climbing while the cost of authoring them does not.
+--
+-- 16 is 256 parts and is where a machine without a discrete GPU should start.
+--
+-- ## What it measures on this machine
+--
+-- `release`, uncapped, 4,000 frames - long enough for a five-second life to
+-- fill the pool, which 400 frames is not: **249.6 fps average with 1,039,274
+-- triangles in the busiest frame**, which is 519,637 particles, and 60 Hz ticks
+-- with none dropped. A short run reports a number several times higher and it
+-- means nothing; check the triangle count reached about a million before
+-- quoting anything.
+--
+-- `dev` runs the same scene at 4 fps, which is `-O0` and not a finding.
 
-local GRID = 320
+local HOSTS = 32
 
--- Two metres between hosts. `Particles.luau` carries the argument: at four the
--- field is sub-pixel from any camera that can see the whole of it, which is a
--- stress scene that costs everything and shows nothing.
-local SPACING = 2
+-- **Five, and each one points a different way.** Five emitters at one place
+-- with the same settings is one emitter with five times the rate, which is not
+-- what this is for: they differ by `EmissionDirection`, so a host sprays up,
+-- down and along both horizontal axes and a reader can see all five. It is also
+-- the only place in this repository where that property is exercised at scale.
+local EMITTERS_PER_HOST = 5
+
+-- Six metres between hosts, up from two. The old field was invisible
+-- one-metre hosts packed tight because only the emitter count mattered; these
+-- are parts somebody can see, spraying five ways, and at two metres the plumes
+-- of neighbouring hosts are one fog.
+local SPACING = 6
 
 -- Where the feature bays sit relative to the spam, which is deliberately in
 -- front of it rather than inside it. A bay surrounded by a hundred thousand
@@ -68,7 +105,7 @@ local RunService = game:GetService("RunService")
 local plate = Instance.new("Part")
 plate.Name = "Baseplate"
 plate.Anchored = true
-plate.Size = Vector3.new(GRID * SPACING + 80, 1, GRID * SPACING + 80)
+plate.Size = Vector3.new(HOSTS * SPACING + 80, 1, HOSTS * SPACING + 80)
 plate.CFrame = CFrame.new(Vector3.new(0, -0.5, 0))
 plate.Color = Color3.new(0.10, 0.11, 0.14)
 plate.Parent = workspace
@@ -283,57 +320,94 @@ end
 
 -- --- the spam ----------------------------------------------------------------
 --
--- **`GRID x GRID` hosts on the baseplate, and the field is not quite uniform.**
--- `Particles.luau` makes every emitter in its grid identical on purpose, so that
--- the count is the only variable. This one alternates `Additive`, because the
--- draw loop groups batches by exactly that and then by texture - so a field of
--- one kind is one run and a field of two kinds is two, and a scene that only
--- ever spammed one kind would never notice a grouping rule that stopped
--- grouping.
+-- **`HOSTS x HOSTS` visible parts on the baseplate, five emitters in each.**
+-- `Particles.luau` makes every emitter in its grid identical on purpose, so
+-- that the count is the only variable. This one varies two things and nothing
+-- else.
+--
+--   * **`EmissionDirection` per emitter**, which is what makes five on one part
+--     five plumes rather than one five times as dense - and is the only place
+--     the property is under load rather than in a labelled bay of its own.
+--   * **`Additive` alternating**, because the draw loop groups batches by
+--     exactly that and then by texture. A field of one kind is one run and a
+--     field of two is two, so a scene that only ever spammed one kind would
+--     never notice a grouping rule that stopped grouping.
 --
 -- Everything else about them is identical, for the reason the other scene
 -- gives: a random scene is a different scene every run.
+--
+-- **The hosts are visible now, and that is affordable where it was not.** The
+-- old field left them `Visible = false` because a hundred thousand submitted
+-- instances cost more than the particles did - measured at 4 FPS when they were
+-- authored `Transparency = 1`, which is *submitted and blended* rather than
+-- skipped. A thousand opaque cubes is a rounding error against half a million
+-- particles, and a stress scene where the emitters hang in empty air is one
+-- nobody can tell is working.
 
-local half = GRID * SPACING * 0.5
+local DIRECTIONS = {
+	Enum.NormalId.Top,
+	Enum.NormalId.Front,
+	Enum.NormalId.Back,
+	Enum.NormalId.Right,
+	Enum.NormalId.Left,
+}
+
+local half = HOSTS * SPACING * 0.5
+local hosts = 0
 local made = 0
 
-for row = 0, GRID - 1 do
-	for column = 0, GRID - 1 do
+for row = 0, HOSTS - 1 do
+	for column = 0, HOSTS - 1 do
 		local host = Instance.new("Part")
+		host.Name = "Emitters"
 		host.Anchored = true
-		host.Size = Vector3.one
-
-		-- **`Visible = false` and not `Transparency = 1`.** They look the same
-		-- and they are different questions: a fully transparent part is still
-		-- *submitted*, and being blended it lands in the pass sorted
-		-- back-to-front from the eye every frame. A hundred thousand of those is
-		-- a hundred thousand instances sorted and drawn to produce nothing -
-		-- measured at 4 FPS on the scene this rule was found on. `Visible =
-		-- false` submits nothing at all.
-		host.Visible = false
+		host.Size = Vector3.new(2, 2, 2)
+		host.Color = Color3.new(0.18, 0.20, 0.26)
 		host.CFrame = CFrame.new(Vector3.new(column * SPACING - half, 1, row * SPACING - half))
 		host.Parent = workspace
+		hosts += 1
 
-		local emitter = Instance.new("ParticleEmitter")
+		for index = 1, EMITTERS_PER_HOST do
+			local emitter = Instance.new("ParticleEmitter")
 
-		-- Five alive apiece: five a second over a one-second life.
-		emitter.Rate = 5
-		emitter.Lifetime = NumberRange.new(1, 1)
-		emitter.Speed = NumberRange.new(1, 2)
-		emitter.SpreadAngle = Vector2.new(20, 20)
-		emitter.Acceleration = Vector3.new(0, -1, 0)
-		emitter.Size = NumberSequence.new(0.35, 0.05)
-		emitter.Additive = (column % 2) == 0
-		emitter.Color = ColorSequence.new({
-			ColorSequenceKeypoint.new(0, Color3.new(0.4, 0.7, 1)),
-			ColorSequenceKeypoint.new(1, Color3.new(0.1, 0.2, 0.5)),
-		})
-		emitter.Parent = host
-		made += 1
+			-- A hundred alive apiece: twenty a second over a five-second life.
+			-- See the knobs at the top for why that number and not another.
+			emitter.Rate = 20
+			emitter.Lifetime = NumberRange.new(5, 5)
+			emitter.Speed = NumberRange.new(2, 4)
+			emitter.SpreadAngle = Vector2.new(16, 16)
+			emitter.Acceleration = Vector3.new(0, -1, 0)
+			emitter.Size = NumberSequence.new(0.35, 0.05)
+
+			-- **The one thing that differs within a host.** Roblox's
+			-- `EmissionDirection` is the face a particle leaves by, so five
+			-- faces is five plumes off one two-metre cube.
+			emitter.EmissionDirection = DIRECTIONS[index]
+
+			-- Alternated across the *emitter*, not the host, so a single part
+			-- carries both blend modes and the grouping has to sort within a
+			-- host as well as across the field.
+			emitter.Additive = (index % 2) == 0
+			emitter.Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, Color3.new(0.4, 0.7, 1)),
+				ColorSequenceKeypoint.new(1, Color3.new(0.1, 0.2, 0.5)),
+			})
+			emitter.Parent = host
+			made += 1
+		end
 	end
 end
 
-print(string.format("stressparticles: %d bays, %d grid emitters, ~%d particles", bayIndex, made, made * 5))
+print(
+	string.format(
+		"stressparticles: %d bays, %d host(s) x %d emitter(s) = %d, ~%d particles",
+		bayIndex,
+		hosts,
+		EMITTERS_PER_HOST,
+		made,
+		made * 100
+	)
+)
 
 -- --- the camera --------------------------------------------------------------
 
