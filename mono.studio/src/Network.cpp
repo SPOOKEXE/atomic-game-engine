@@ -196,6 +196,7 @@ namespace studio {
 		// mistyped address with a key beside it would then be a stall on a path
 		// nobody chose. The tab says it has not been asked, and Refresh asks.
 		AssetTabs = BuildCatalogue(Content);
+		AssetTabsRevision++;
 
 		// **Built even when delivery is not.** An uploader verifies nothing, so
 		// it does not need a publisher key - and an editor being used to *seed*

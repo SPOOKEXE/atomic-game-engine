@@ -34,6 +34,7 @@
 #include <engine/core/Clock.hpp>
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/Name.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/delivery/Client.hpp>
 #include <engine/delivery/IntakeBudget.hpp>
 #include <engine/delivery/Uploader.hpp>
@@ -79,6 +80,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <studio/AssetCatalogue.hpp>
 #include <studio/CodeMetrics.hpp>
 #include <studio/Commands.hpp>
@@ -2134,6 +2136,19 @@ namespace studio {
 		// @param body  The draw call.
 		// @since v0.13
 		template <typename Body> void Skinned(const char *panel, Body &&body) {
+			// **One bar per panel, from the one place every panel goes through.**
+			// The sixteen tool panels were a single `tools` span - about half of
+			// `build interface` - so "which panel costs that" had no answer
+			// short of adding a span and rebuilding. A panel that is closed
+			// costs its early return and reads as zero, which is the reading
+			// that says the list is not the problem.
+			//
+			// The title is a literal owned for the life of the process, so the
+			// stable form is right and nothing is copied per frame.
+			ENGINE_PROFILE_DYNAMIC_STABLE(
+				"panel", std::string_view(panel), engine::core::ProfileCategory::Render
+			);
+
 			const engine::ui::ScopedColours skin(PanelColoursFor(panel));
 			body();
 		}
@@ -4845,6 +4860,48 @@ namespace studio {
 		// publish, and when the content sources are edited - which is exactly
 		// when the answer can have changed.
 		std::vector<CatalogueTab> AssetTabs;
+
+		// Bumped whenever `AssetTabs` is replaced.
+		//
+		// What makes the cached row list below safe: it holds pointers into a
+		// tab's entries, and a rebuilt catalogue moves them. Comparing the
+		// number is how the cache learns that without having to be told by every
+		// caller that rebuilds.
+		uint64_t AssetTabsRevision = 1;
+
+		// The catalogue rows the assets panel is drawing: filtered, then sorted.
+		//
+		// **Cached, because filtering and sorting the whole catalogue every
+		// frame was half of `build interface`.** `ImGuiListClipper` already
+		// bounds how many rows are *drawn*, but the list it clips has to exist
+		// first - so a store of two thousand assets paid two thousand fuzzy
+		// matches and a sort with string comparisons at the frame rate to
+		// produce a list identical to the previous frame's. Sorting by the
+		// address column made it worse still: the comparator builds a hex string
+		// per comparison.
+		//
+		// Rebuilt when the tab, the filter, the sort order or the catalogue
+		// changes - which is exactly when the answer can differ.
+		//@{
+		std::vector<const CatalogueEntry *> AssetRows;
+		const void *AssetRowsTab = nullptr;
+		std::string AssetRowsFilter;
+		uint64_t AssetRowsRevision = 0;
+		//@}
+
+		// The tab bar's imgui ids, one per entry in `AssetTabs`.
+		//
+		// Built with the tabs rather than with the frame: they are a function of
+		// the catalogue alone. See `AssetTabsRevision`.
+		//@{
+		std::vector<std::string> AssetTabLabels;
+		uint64_t AssetTabLabelsRevision = 0;
+		//@}
+
+		// The local store's root, as text, for the line the assets panel draws.
+		//
+		// Fixed for the run, and `std::filesystem::path::string()` allocates.
+		std::string AssetRootText;
 
 		// What the person typed into a picker's filter.
 		std::string PickerFilter;

@@ -17,6 +17,7 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <span>
+#include <string_view>
 #include <studio/Editor.hpp>
 #include <studio/Keybinds.hpp>
 #include <studio/Widgets.hpp>
@@ -179,7 +180,10 @@ namespace studio {
 			return NONE;
 		}
 
-		const auto found = Prefs.PanelColours.find(panel);
+		// `string_view` rather than the pointer, which is what reaches the
+		// transparent comparator instead of constructing a key. See
+		// `Preferences::PanelColours`.
+		const auto found = Prefs.PanelColours.find(std::string_view(panel));
 		return found == Prefs.PanelColours.end() ? NONE : found->second;
 	}
 

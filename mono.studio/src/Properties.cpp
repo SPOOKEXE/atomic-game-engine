@@ -19,8 +19,8 @@ namespace studio {
 	static constexpr const char *ASSET_PICKER = "Choose content";
 
 	using engine::core::Name;
-	using engine::ecs::ClassId;
 	using engine::ecs::Classes;
+	using engine::ecs::ClassId;
 	using engine::ecs::NULL_ENTITY;
 	using engine::ecs::PropertyDescriptor;
 	using engine::ecs::PropertyType;
@@ -97,9 +97,7 @@ namespace studio {
 			return;
 		}
 
-		if (!ImGui::BeginTable(
-				"Universe", 2, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_RowBg
-			)) {
+		if (!ImGui::BeginTable("Universe", 2, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_RowBg)) {
 			return;
 		}
 
@@ -673,320 +671,322 @@ namespace studio {
 					bool wrote = false;
 
 					switch (descriptor->Type) {
-						case PropertyType::Bool:
-							wrote = ImGui::Checkbox("##v", &changed.Bool);
-							break;
+					case PropertyType::Bool:
+						wrote = ImGui::Checkbox("##v", &changed.Bool);
+						break;
 
-						case PropertyType::Int32:
-							wrote = ImGui::DragInt("##v", &changed.Int32);
-							break;
+					case PropertyType::Int32:
+						wrote = ImGui::DragInt("##v", &changed.Int32);
+						break;
 
-						case PropertyType::Int64: {
-							int narrowed = static_cast<int>(changed.Int64);
-							if (ImGui::DragInt("##v", &narrowed)) {
-								changed.Int64 = narrowed;
-								wrote = true;
-							}
-							break;
+					case PropertyType::Int64: {
+						int narrowed = static_cast<int>(changed.Int64);
+						if (ImGui::DragInt("##v", &narrowed)) {
+							changed.Int64 = narrowed;
+							wrote = true;
+						}
+						break;
+					}
+
+					case PropertyType::Float:
+						wrote = ImGui::DragFloat("##v", &changed.Float, StepFor(changed.Float));
+						break;
+
+					case PropertyType::Double: {
+						auto narrowed = static_cast<float>(changed.Double);
+						if (ImGui::DragFloat("##v", &narrowed, StepFor(narrowed))) {
+							changed.Double = narrowed;
+							wrote = true;
+						}
+						break;
+					}
+
+					case PropertyType::Vector3: {
+						float parts[3]{changed.Vector3.X, changed.Vector3.Y, changed.Vector3.Z};
+						if (ImGui::DragFloat3("##v", parts, StepFor(parts[0]))) {
+							changed.Vector3 = engine::core::Vector3{parts[0], parts[1], parts[2]};
+							wrote = true;
+						}
+						break;
+					}
+
+					case PropertyType::Color3: {
+						float parts[3]{changed.Color3.R, changed.Color3.G, changed.Color3.B};
+						if (ImGui::ColorEdit3("##v", parts, ImGuiColorEditFlags_Float)) {
+							changed.Color3 = engine::core::Color3{parts[0], parts[1], parts[2]};
+							wrote = true;
+						}
+						break;
+					}
+
+					case PropertyType::CFrame: {
+						// Position only. The rotation has its own property -
+						// `Orientation`, in degrees, which is what an author
+						// actually wants - and offering a raw quaternion
+						// beside it would be four numbers nobody can edit by
+						// hand next to three that are obvious.
+						float parts[3]{
+							changed.CFrame.Position.X,
+							changed.CFrame.Position.Y,
+							changed.CFrame.Position.Z,
+						};
+						if (ImGui::DragFloat3("##v", parts, StepFor(parts[0]))) {
+							changed.CFrame.Position = engine::core::Vector3{parts[0], parts[1], parts[2]};
+							wrote = true;
+						}
+						break;
+					}
+
+					case PropertyType::Vector2: {
+						float parts[2]{changed.Vector2.X, changed.Vector2.Y};
+						if (ImGui::DragFloat2("##v", parts, StepFor(parts[0]))) {
+							changed.Vector2 = engine::core::Vector2{parts[0], parts[1]};
+							wrote = true;
+						}
+						break;
+					}
+
+					case PropertyType::UDim: {
+						// **Scale and offset get different steps.** Scale is
+						// a fraction, so a drag in whole numbers moves it
+						// past the parent in one pixel of mouse travel;
+						// offset is pixels and a hundredth of one is a drag
+						// that never arrives. Two controls rather than a
+						// `DragFloat2` is what buys the two steps.
+						float scale = changed.UDim.Scale;
+						float offset = changed.UDim.Offset;
+						const float half = ImGui::GetContentRegionAvail().x * 0.5f - 2.0f;
+
+						ImGui::SetNextItemWidth(half);
+						if (ImGui::DragFloat("##s", &scale, 0.01f)) {
+							changed.UDim.Scale = scale;
+							wrote = true;
+						}
+						ImGui::SameLine(0.0f, 4.0f);
+						ImGui::SetNextItemWidth(half);
+						if (ImGui::DragFloat("##o", &offset, 1.0f, 0.0f, 0.0f, "%.0f")) {
+							changed.UDim.Offset = offset;
+							wrote = true;
+						}
+						break;
+					}
+
+					case PropertyType::UDim2: {
+						// Two rows of the pair above, X then Y - which is
+						// the shape Roblox's own property grid uses, and the
+						// one an author reading `UDim2.new(0.5, -8, 0, 24)`
+						// already has in their head.
+						const float half = ImGui::GetContentRegionAvail().x * 0.5f - 2.0f;
+						float axes[4]{
+							changed.UDim2.X.Scale,
+							changed.UDim2.X.Offset,
+							changed.UDim2.Y.Scale,
+							changed.UDim2.Y.Offset,
+						};
+
+						ImGui::SetNextItemWidth(half);
+						if (ImGui::DragFloat("##xs", &axes[0], 0.01f)) {
+							wrote = true;
+						}
+						ImGui::SameLine(0.0f, 4.0f);
+						ImGui::SetNextItemWidth(half);
+						if (ImGui::DragFloat("##xo", &axes[1], 1.0f, 0.0f, 0.0f, "%.0f")) {
+							wrote = true;
+						}
+						ImGui::SetNextItemWidth(half);
+						if (ImGui::DragFloat("##ys", &axes[2], 0.01f)) {
+							wrote = true;
+						}
+						ImGui::SameLine(0.0f, 4.0f);
+						ImGui::SetNextItemWidth(half);
+						if (ImGui::DragFloat("##yo", &axes[3], 1.0f, 0.0f, 0.0f, "%.0f")) {
+							wrote = true;
 						}
 
-						case PropertyType::Float:
-							wrote = ImGui::DragFloat("##v", &changed.Float, StepFor(changed.Float));
-							break;
-
-						case PropertyType::Double: {
-							auto narrowed = static_cast<float>(changed.Double);
-							if (ImGui::DragFloat("##v", &narrowed, StepFor(narrowed))) {
-								changed.Double = narrowed;
-								wrote = true;
-							}
-							break;
+						if (wrote) {
+							changed.UDim2 = engine::core::UDim2{axes[0], axes[1], axes[2], axes[3]};
 						}
+						break;
+					}
 
-						case PropertyType::Vector3: {
-							float parts[3]{changed.Vector3.X, changed.Vector3.Y, changed.Vector3.Z};
-							if (ImGui::DragFloat3("##v", parts, StepFor(parts[0]))) {
-								changed.Vector3 = engine::core::Vector3{parts[0], parts[1], parts[2]};
-								wrote = true;
-							}
-							break;
+					case PropertyType::Rect: {
+						// Four pixel offsets into an image, so one step and
+						// one control. `%.0f` because a fractional texel in
+						// a slice centre is an author's typo rather than an
+						// intent.
+						float parts[4]{
+							changed.Rect.Min.X,
+							changed.Rect.Min.Y,
+							changed.Rect.Max.X,
+							changed.Rect.Max.Y,
+						};
+						if (ImGui::DragFloat4("##v", parts, 1.0f, 0.0f, 0.0f, "%.0f")) {
+							changed.Rect = engine::core::Rect{parts[0], parts[1], parts[2], parts[3]};
+							wrote = true;
 						}
+						break;
+					}
 
-						case PropertyType::Color3: {
-							float parts[3]{changed.Color3.R, changed.Color3.G, changed.Color3.B};
-							if (ImGui::ColorEdit3("##v", parts, ImGuiColorEditFlags_Float)) {
-								changed.Color3 = engine::core::Color3{parts[0], parts[1], parts[2]};
-								wrote = true;
-							}
-							break;
-						}
-
-						case PropertyType::CFrame: {
-							// Position only. The rotation has its own property -
-							// `Orientation`, in degrees, which is what an author
-							// actually wants - and offering a raw quaternion
-							// beside it would be four numbers nobody can edit by
-							// hand next to three that are obvious.
-							float parts[3]{
-								changed.CFrame.Position.X,
-								changed.CFrame.Position.Y,
-								changed.CFrame.Position.Z,
-							};
-							if (ImGui::DragFloat3("##v", parts, StepFor(parts[0]))) {
-								changed.CFrame.Position =
-									engine::core::Vector3{parts[0], parts[1], parts[2]};
-								wrote = true;
-							}
-							break;
-						}
-
-						case PropertyType::Vector2: {
-							float parts[2]{changed.Vector2.X, changed.Vector2.Y};
-							if (ImGui::DragFloat2("##v", parts, StepFor(parts[0]))) {
-								changed.Vector2 = engine::core::Vector2{parts[0], parts[1]};
-								wrote = true;
-							}
-							break;
-						}
-
-						case PropertyType::UDim: {
-							// **Scale and offset get different steps.** Scale is
-							// a fraction, so a drag in whole numbers moves it
-							// past the parent in one pixel of mouse travel;
-							// offset is pixels and a hundredth of one is a drag
-							// that never arrives. Two controls rather than a
-							// `DragFloat2` is what buys the two steps.
-							float scale = changed.UDim.Scale;
-							float offset = changed.UDim.Offset;
-							const float half = ImGui::GetContentRegionAvail().x * 0.5f - 2.0f;
-
-							ImGui::SetNextItemWidth(half);
-							if (ImGui::DragFloat("##s", &scale, 0.01f)) {
-								changed.UDim.Scale = scale;
-								wrote = true;
-							}
-							ImGui::SameLine(0.0f, 4.0f);
-							ImGui::SetNextItemWidth(half);
-							if (ImGui::DragFloat("##o", &offset, 1.0f, 0.0f, 0.0f, "%.0f")) {
-								changed.UDim.Offset = offset;
-								wrote = true;
-							}
-							break;
-						}
-
-						case PropertyType::UDim2: {
-							// Two rows of the pair above, X then Y - which is
-							// the shape Roblox's own property grid uses, and the
-							// one an author reading `UDim2.new(0.5, -8, 0, 24)`
-							// already has in their head.
-							const float half = ImGui::GetContentRegionAvail().x * 0.5f - 2.0f;
-							float axes[4]{
-								changed.UDim2.X.Scale,
-								changed.UDim2.X.Offset,
-								changed.UDim2.Y.Scale,
-								changed.UDim2.Y.Offset,
-							};
-
-							ImGui::SetNextItemWidth(half);
-							if (ImGui::DragFloat("##xs", &axes[0], 0.01f)) {
-								wrote = true;
-							}
-							ImGui::SameLine(0.0f, 4.0f);
-							ImGui::SetNextItemWidth(half);
-							if (ImGui::DragFloat("##xo", &axes[1], 1.0f, 0.0f, 0.0f, "%.0f")) {
-								wrote = true;
-							}
-							ImGui::SetNextItemWidth(half);
-							if (ImGui::DragFloat("##ys", &axes[2], 0.01f)) {
-								wrote = true;
-							}
-							ImGui::SameLine(0.0f, 4.0f);
-							ImGui::SetNextItemWidth(half);
-							if (ImGui::DragFloat("##yo", &axes[3], 1.0f, 0.0f, 0.0f, "%.0f")) {
-								wrote = true;
-							}
-
-							if (wrote) {
-								changed.UDim2 = engine::core::UDim2{axes[0], axes[1], axes[2], axes[3]};
-							}
-							break;
-						}
-
-						case PropertyType::Rect: {
-							// Four pixel offsets into an image, so one step and
-							// one control. `%.0f` because a fractional texel in
-							// a slice centre is an author's typo rather than an
-							// intent.
-							float parts[4]{
-								changed.Rect.Min.X,
-								changed.Rect.Min.Y,
-								changed.Rect.Max.X,
-								changed.Rect.Max.Y,
-							};
-							if (ImGui::DragFloat4("##v", parts, 1.0f, 0.0f, 0.0f, "%.0f")) {
-								changed.Rect = engine::core::Rect{parts[0], parts[1], parts[2], parts[3]};
-								wrote = true;
-							}
-							break;
-						}
-
-						case PropertyType::Enum: {
-							// **The registered set, not a text field.** That is
-							// the whole reason `PropertyType::Enum` exists: a
-							// typed `AlphaMode = "Clipp"` is refused where it
-							// was written rather than landing in the component
-							// and surfacing as a part drawn with the default.
-							// A combo makes the typo impossible rather than
-							// caught.
+					case PropertyType::Enum: {
+						// **The registered set, not a text field.** That is
+						// the whole reason `PropertyType::Enum` exists: a
+						// typed `AlphaMode = "Clipp"` is refused where it
+						// was written rather than landing in the component
+						// and surfacing as a part drawn with the default.
+						// A combo makes the typo impossible rather than
+						// caught.
+						// **Asked for inside the open combo, not beside it.**
+						// `MembersOf` takes the enum registry's lock and
+						// returns its member list *by value*, and the list is
+						// read nowhere else - so a closed combo, which is
+						// every combo on almost every frame, paid a lock and
+						// a heap allocation per enum row for a vector it
+						// threw away.
+						const char *current = changed.Name.IsValid() ? Label(changed.Name) : "";
+						if (ImGui::BeginCombo("##v", current)) {
 							const std::vector<Name> members =
 								engine::ecs::EnumTable::MembersOf(descriptor->EnumName);
-
-							const char *current = changed.Name.IsValid() ? Label(changed.Name) : "";
-							if (ImGui::BeginCombo("##v", current)) {
-								for (const Name member : members) {
-									if (ImGui::Selectable(Label(member), member == changed.Name)) {
-										changed.Name = member;
-										wrote = true;
-									}
-								}
-								ImGui::EndCombo();
-							}
-							break;
-						}
-
-						case PropertyType::Name: {
-							std::string text =
-								changed.Name.IsValid() ? std::string(Label(changed.Name)) : std::string{};
-
-							// **A picker for the handful of properties that name
-							// content, and a plain field for every other `Name`.**
-							// `Mesh`, `TextureID`, `Texture`, `SoundId` and `Image`
-							// take a string a publisher wrote - rule 4 - and getting
-							// one wrong has no visible failure: an unknown mesh draws
-							// the missing-mesh marker, which is also what a mesh that
-							// has not streamed in yet looks like. Every other `Name`
-							// property is an ordinary label, and a modal over one
-							// would be a dialog in the way.
-							const engine::assets::AssetKind content =
-								ContentKindOfProperty(descriptor->Spelling);
-
-							if (content == engine::assets::AssetKind::Unknown) {
-								if (TextField("##v", text)) {
-									changed.Name = text.empty() ? Name{} : Name(text);
+							for (const Name member : members) {
+								if (ImGui::Selectable(Label(member), member == changed.Name)) {
+									changed.Name = member;
 									wrote = true;
 								}
-								break;
 							}
+							ImGui::EndCombo();
+						}
+						break;
+					}
 
-							// **The field stays, narrowed.** Somebody who knows the
-							// name should still be able to paste it, and a property
-							// only settable through a modal would be one a script can
-							// write and a person cannot.
-							const float browse = engine::ui::Scaled(28.0f);
-							ImGui::SetNextItemWidth(-(browse + ImGui::GetStyle().ItemSpacing.x));
+					case PropertyType::Name: {
+						std::string text =
+							changed.Name.IsValid() ? std::string(Label(changed.Name)) : std::string{};
+
+						// **A picker for the handful of properties that name
+						// content, and a plain field for every other `Name`.**
+						// `Mesh`, `TextureID`, `Texture`, `SoundId` and `Image`
+						// take a string a publisher wrote - rule 4 - and getting
+						// one wrong has no visible failure: an unknown mesh draws
+						// the missing-mesh marker, which is also what a mesh that
+						// has not streamed in yet looks like. Every other `Name`
+						// property is an ordinary label, and a modal over one
+						// would be a dialog in the way.
+						const engine::assets::AssetKind content = ContentKindOfProperty(descriptor->Spelling);
+
+						if (content == engine::assets::AssetKind::Unknown) {
 							if (TextField("##v", text)) {
 								changed.Name = text.empty() ? Name{} : Name(text);
 								wrote = true;
 							}
-
-							ImGui::SameLine();
-							if (ImGui::Button("...", ImVec2(browse, 0.0f)) && !locked) {
-								// **Opened after the loop rather than here.** An
-								// `OpenPopup` inside the table is inside this
-								// property's `PushID`, so its id would not be the one
-								// `BeginPopupModal` computes at the window's root, and
-								// the popup would never appear. Recorded here and
-								// opened where the modal is drawn.
-								PickerWanted = true;
-								PickerKind = content;
-								PickerProperty = descriptor->Name;
-								PickerType = descriptor->Type;
-								PickerChoice = text;
-							}
-							if (ImGui::IsItemHovered()) {
-								ImGui::SetTooltip("choose from the content store");
-							}
 							break;
 						}
 
-						case PropertyType::String:
-							// **The same widget as `Name` and a different
-							// meaning**, which is the whole of the distinction
-							// showing up in the one place a person can see it:
-							// the field is edited character by character, and
-							// each keystroke used to intern a string that never
-							// went away. Typing a sentence into a `Name`
-							// property leaks it a letter at a time.
-							if (TextField("##v", changed.String)) {
+						// **The field stays, narrowed.** Somebody who knows the
+						// name should still be able to paste it, and a property
+						// only settable through a modal would be one a script can
+						// write and a person cannot.
+						const float browse = engine::ui::Scaled(28.0f);
+						ImGui::SetNextItemWidth(-(browse + ImGui::GetStyle().ItemSpacing.x));
+						if (TextField("##v", text)) {
+							changed.Name = text.empty() ? Name{} : Name(text);
+							wrote = true;
+						}
+
+						ImGui::SameLine();
+						if (ImGui::Button("...", ImVec2(browse, 0.0f)) && !locked) {
+							// **Opened after the loop rather than here.** An
+							// `OpenPopup` inside the table is inside this
+							// property's `PushID`, so its id would not be the one
+							// `BeginPopupModal` computes at the window's root, and
+							// the popup would never appear. Recorded here and
+							// opened where the modal is drawn.
+							PickerWanted = true;
+							PickerKind = content;
+							PickerProperty = descriptor->Name;
+							PickerType = descriptor->Type;
+							PickerChoice = text;
+						}
+						if (ImGui::IsItemHovered()) {
+							ImGui::SetTooltip("choose from the content store");
+						}
+						break;
+					}
+
+					case PropertyType::String:
+						// **The same widget as `Name` and a different
+						// meaning**, which is the whole of the distinction
+						// showing up in the one place a person can see it:
+						// the field is edited character by character, and
+						// each keystroke used to intern a string that never
+						// went away. Typing a sentence into a `Name`
+						// property leaks it a letter at a time.
+						if (TextField("##v", changed.String)) {
+							wrote = true;
+						}
+						break;
+
+					case PropertyType::Reference: {
+						// Read-only for now, and it says so rather than
+						// offering a control that does nothing. Picking a
+						// reference means a target picker over the tree,
+						// which is `mono.studio/AGENTS.md`'s deferred list.
+						const Name target = changed.Reference == NULL_ENTITY
+												? Name{}
+												: store.InstanceNameOf(changed.Reference);
+						ImGui::TextDisabled("%s", target.IsValid() ? Label(target) : "(none)");
+						break;
+					}
+
+					case PropertyType::NumberRange: {
+						float parts[2]{changed.NumberRange.Minimum, changed.NumberRange.Maximum};
+						if (ImGui::DragFloat2("##v", parts, StepFor(parts[1]))) {
+							// **Not clamped so the minimum stays below the
+							// maximum.** Dragging either handle past the other
+							// is how a person *inverts* a range, and a widget
+							// that silently pushed the other end along would
+							// make that impossible to express and impossible
+							// to notice. `game::ParseValue` refuses to reorder
+							// for the same reason.
+							changed.NumberRange = engine::core::NumberRange{parts[0], parts[1]};
+							wrote = true;
+						}
+						break;
+					}
+
+					// --- the two curves ---------------------------------
+					//
+					// **A text field, and a curve editor is deliberately not
+					// here.** `game::FormatValue` already writes a sequence as
+					// `0, 1, 0; 1, 0, 0` and `ParseValue` reads it back, so a
+					// text field is a complete, round-tripping editor for
+					// about six lines - and the alternative is a spline widget
+					// with keypoint dragging, which is a panel rather than a
+					// row and belongs beside the emitter preview rather than
+					// in the generic property list.
+					//
+					// What the text field is *not* is comfortable, and that is
+					// the honest trade rather than a claim it is fine. The
+					// curve editor is `mono.studio/AGENTS.md`'s deferred list.
+					//
+					// **Parsed on commit rather than per keystroke**, because
+					// half a typed gradient is a parse failure and writing one
+					// per character would fight the person typing it.
+					case PropertyType::NumberSequence:
+					case PropertyType::ColorSequence: {
+						std::string text = FormatValue(changed);
+						if (TextField("##v", text)) {
+							PropertyValue parsed;
+							std::string reason;
+							if (ParseValue(descriptor->Type, text, parsed, reason)) {
+								changed = parsed;
 								wrote = true;
 							}
-							break;
-
-						case PropertyType::Reference: {
-							// Read-only for now, and it says so rather than
-							// offering a control that does nothing. Picking a
-							// reference means a target picker over the tree,
-							// which is `mono.studio/AGENTS.md`'s deferred list.
-							const Name target = changed.Reference == NULL_ENTITY
-													? Name{}
-													: store.InstanceNameOf(changed.Reference);
-							ImGui::TextDisabled(
-								"%s", target.IsValid() ? Label(target) : "(none)"
-							);
-							break;
 						}
+						break;
+					}
 
-						case PropertyType::NumberRange: {
-							float parts[2]{changed.NumberRange.Minimum, changed.NumberRange.Maximum};
-							if (ImGui::DragFloat2("##v", parts, StepFor(parts[1]))) {
-								// **Not clamped so the minimum stays below the
-								// maximum.** Dragging either handle past the other
-								// is how a person *inverts* a range, and a widget
-								// that silently pushed the other end along would
-								// make that impossible to express and impossible
-								// to notice. `game::ParseValue` refuses to reorder
-								// for the same reason.
-								changed.NumberRange = engine::core::NumberRange{parts[0], parts[1]};
-								wrote = true;
-							}
-							break;
-						}
-
-						// --- the two curves ---------------------------------
-						//
-						// **A text field, and a curve editor is deliberately not
-						// here.** `game::FormatValue` already writes a sequence as
-						// `0, 1, 0; 1, 0, 0` and `ParseValue` reads it back, so a
-						// text field is a complete, round-tripping editor for
-						// about six lines - and the alternative is a spline widget
-						// with keypoint dragging, which is a panel rather than a
-						// row and belongs beside the emitter preview rather than
-						// in the generic property list.
-						//
-						// What the text field is *not* is comfortable, and that is
-						// the honest trade rather than a claim it is fine. The
-						// curve editor is `mono.studio/AGENTS.md`'s deferred list.
-						//
-						// **Parsed on commit rather than per keystroke**, because
-						// half a typed gradient is a parse failure and writing one
-						// per character would fight the person typing it.
-						case PropertyType::NumberSequence:
-						case PropertyType::ColorSequence: {
-							std::string text = FormatValue(changed);
-							if (TextField("##v", text)) {
-								PropertyValue parsed;
-								std::string reason;
-								if (ParseValue(descriptor->Type, text, parsed, reason)) {
-									changed = parsed;
-									wrote = true;
-								}
-							}
-							break;
-						}
-
-						case PropertyType::Opaque:
-							ImGui::TextDisabled("(not readable as a value)");
-							break;
+					case PropertyType::Opaque:
+						ImGui::TextDisabled("(not readable as a value)");
+						break;
 					}
 
 					ImGui::EndDisabled();
@@ -1065,8 +1065,8 @@ namespace studio {
 						PropertyValue before;
 						const bool had = ReadProperty(store, instance, descriptor, before);
 
-						if (engine::game::WriteAuthoredProperty(store, instance, descriptor, edit.Value) && had &&
-							authoritative && Commands != nullptr) {
+						if (engine::game::WriteAuthoredProperty(store, instance, descriptor, edit.Value) &&
+							had && authoritative && Commands != nullptr) {
 							Commands->RecordProperty(
 								SelectionWorld,
 								instance,

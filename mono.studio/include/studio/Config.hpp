@@ -52,6 +52,7 @@
 #include <cstdint>
 #include <discord/Settings.hpp>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <nlohmann/json_fwd.hpp>
 #include <string>
@@ -318,8 +319,15 @@ namespace studio {
 		// this feature something somebody opts into per panel rather than a
 		// second set of defaults to maintain.
 		//
+		// **Transparently comparable, so a lookup by `const char *` builds no
+		// string.** `PanelColoursFor` runs once per panel per frame - about
+		// twenty-five times - and a plain `std::map<std::string, ...>` converts
+		// the literal to a `std::string` on every one of them, which for a title
+		// past the small-string limit is a heap allocation inside the interface
+		// build. `std::less<>` orders identically, so nothing on disk moves.
+		//
 		// @since v0.13
-		std::map<std::string, engine::ui::ThemeColours> PanelColours;
+		std::map<std::string, engine::ui::ThemeColours, std::less<>> PanelColours;
 
 		// What Discord is told the editor is doing, and whether it is told
 		// anything at all.
