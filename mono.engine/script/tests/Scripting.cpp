@@ -5715,3 +5715,178 @@ TEST_CASE("javascript reads the same CFrame members", "[scripting][cframe][js]")
 			.RightVector.Magnitude, 1, 'fromMatrix');
 	)");
 }
+
+
+// --- the Vector3 surface, brought up to Roblox's ------------------------------
+//
+// **The type a port touches first, and it had five members.** `Dot`, `Cross`
+// and `Unit` are the top three lines of every aiming routine, `Floor` is how a
+// grid snap is written and `/` is how a direction is scaled - all of them
+// errored at run time on a script that typechecked clean, because the
+// declarations describe a value type that `bindings-check` cannot see into.
+//
+// Both languages, because the roadmap's gate is that a member lands in both or
+// it is not done - and because the two had already drifted: `Vector3.zero.Unit`
+// threw in Luau and answered the zero vector in JavaScript.
+
+TEST_CASE("Vector3 carries the methods a Roblox script calls", "[scripting]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local a = Vector3.new(1, 2, 3)
+		local b = Vector3.new(4, 5, 6)
+
+		assert(a:Dot(b) == 32, 'Dot')
+		assert(Vector3.xAxis:Cross(Vector3.yAxis) == Vector3.zAxis, 'Cross follows the right hand')
+		assert(a:Lerp(b, 0.5) == Vector3.new(2.5, 3.5, 4.5), 'Lerp')
+
+		-- Each component on its own, so the answer is usually neither operand.
+		assert(a:Max(b) == b and a:Min(b) == a, 'Max and Min')
+		assert(
+			Vector3.new(1, 2, 1):Max(Vector3.new(2, 1, 2)) == Vector3.new(2, 2, 2),
+			'Max is component-wise rather than the longer vector'
+		)
+
+		local rough = Vector3.new(-2.6, 5.1, 8.8)
+		assert(rough:Abs() == Vector3.new(2.6, 5.1, 8.8), 'Abs')
+		assert(rough:Ceil() == Vector3.new(-2, 6, 9), 'Ceil')
+		assert(rough:Floor() == Vector3.new(-3, 5, 8), 'Floor rounds down, not toward zero')
+		assert(Vector3.new(-2.6, 5.1, 0):Sign() == Vector3.new(-1, 1, 0), 'Sign, and zero has none')
+
+		assert(math.abs(Vector3.xAxis:Angle(Vector3.zAxis) - math.pi / 2) < 1e-5, 'Angle')
+		assert(math.abs(Vector3.xAxis:Angle(-Vector3.xAxis) - math.pi) < 1e-5, 'a half turn is pi')
+
+		-- Without an axis a steering routine knows how far off it is and not
+		-- which way to turn, which is the whole reason the argument exists.
+		assert(Vector3.xAxis:Angle(Vector3.zAxis, Vector3.yAxis) < 0, 'the axis signs the angle')
+		assert(Vector3.xAxis:Angle(Vector3.zAxis, -Vector3.yAxis) > 0, 'and the other way round')
+
+		assert(Vector3.one:FuzzyEq(Vector3.one + Vector3.one * 1e-7), 'FuzzyEq default epsilon')
+		assert(not Vector3.one:FuzzyEq(Vector3.new(1, 1, 2)), 'FuzzyEq is not everything-equals')
+		assert(Vector3.one:FuzzyEq(Vector3.new(1, 1, 2), 2), 'an explicit epsilon is honoured')
+	)");
+
+	// A name that is not a member is still an error rather than a nil call,
+	// which is what makes a typo say where it is.
+	CHECK_FALSE(runtime->Run("return Vector3.new():Abz()"));
+}
+
+TEST_CASE("Vector3 carries the five constants and the two named constructors", "[scripting]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		assert(Vector3.xAxis == Vector3.new(1, 0, 0), 'xAxis')
+		assert(Vector3.yAxis == Vector3.new(0, 1, 0), 'yAxis')
+		assert(Vector3.zAxis == Vector3.new(0, 0, 1), 'zAxis')
+
+		assert(Vector3.FromNormalId(Enum.NormalId.Top) == Vector3.yAxis, 'FromNormalId')
+
+		-- **Front is -Z in this engine and in Roblox**, and it is the entry a
+		-- hand-written table gets backwards - silently, because nothing about a
+		-- face is checkable once it has become a direction.
+		assert(Vector3.FromNormalId(Enum.NormalId.Front) == Vector3.new(0, 0, -1), 'Front is -Z')
+		assert(Vector3.FromAxis(Enum.Axis.Z) == Vector3.zAxis, 'FromAxis')
+	)");
+
+	// A member of the wrong enum is refused rather than read as whatever it
+	// happens to be called.
+	CHECK_FALSE(runtime->Run("return Vector3.FromAxis(Enum.NormalId.Top)"));
+	CHECK_FALSE(runtime->Run("return Vector3.FromNormalId('Sideways')"));
+}
+
+TEST_CASE("Vector3 divides the way Roblox's operator table says", "[scripting]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		assert((Vector3.new(10, 9, 8) / 2) == Vector3.new(5, 4.5, 4), 'a scalar quotient')
+		assert(
+			(Vector3.new(10, 9, 8) / Vector3.new(2, 3, 4)) == Vector3.new(5, 3, 2),
+			'a component-wise quotient'
+		)
+
+		assert((Vector3.new(10, 9, 8) // 4) == Vector3.new(2, 2, 2), 'floor division by a scalar')
+		assert((Vector3.new(-5, 5, 0) // 2) == Vector3.new(-3, 2, 0), 'floor division rounds down')
+		assert(
+			(Vector3.new(10, 9, 8) // Vector3.new(3, 3, 3)) == Vector3.new(3, 3, 2),
+			'component-wise floor division'
+		)
+	)");
+
+	// **`2 * v` is in Roblox's operator table and `2 / v` is not.** Luau hands
+	// `__div` both operand orders, so answering one here would be inventing
+	// arithmetic no script written elsewhere can rely on.
+	CHECK_FALSE(runtime->Run("return 2 / Vector3.new(1, 2, 3)"));
+}
+
+TEST_CASE("javascript reaches the same Vector3 surface", "[scripting][js]") {
+	// The roadmap's gate: a member lands in both languages or it is not done.
+	// The operators are methods here because JavaScript has no overloading, and
+	// `div`, `idiv` and `neg` are the three that had no method at all.
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	MustRun(*runtime, R"(
+		const check = (ok, what) => { if (!ok) throw new Error(what); };
+
+		const a = Vector3.new(1, 2, 3);
+		const b = Vector3.new(4, 5, 6);
+
+		check(a.Dot(b) === 32, 'Dot');
+		check(Vector3.xAxis.Cross(Vector3.yAxis).Equals(Vector3.zAxis), 'Cross');
+		check(a.Lerp(b, 0.5).Equals(Vector3.new(2.5, 3.5, 4.5)), 'Lerp');
+		check(a.Max(b).Equals(b) && a.Min(b).Equals(a), 'Max and Min');
+
+		const rough = Vector3.new(-2.6, 5.1, 8.8);
+		check(rough.Abs().Equals(Vector3.new(2.6, 5.1, 8.8)), 'Abs');
+		check(rough.Ceil().Equals(Vector3.new(-2, 6, 9)), 'Ceil');
+		check(rough.Floor().Equals(Vector3.new(-3, 5, 8)), 'Floor rounds down');
+		check(Vector3.new(-2.6, 5.1, 0).Sign().Equals(Vector3.new(-1, 1, 0)), 'Sign');
+
+		check(Math.abs(Vector3.xAxis.Angle(Vector3.zAxis) - Math.PI / 2) < 1e-5, 'Angle');
+		check(Vector3.xAxis.Angle(Vector3.zAxis, Vector3.yAxis) < 0, 'the axis signs the angle');
+
+		check(Vector3.one.FuzzyEq(Vector3.new(1, 1, 1 + 1e-7)), 'FuzzyEq default epsilon');
+		check(!Vector3.one.FuzzyEq(Vector3.new(1, 1, 2)), 'FuzzyEq is not everything-equals');
+		check(Vector3.one.FuzzyEq(Vector3.new(1, 1, 2), 2), 'an explicit epsilon is honoured');
+
+		check(a.div(2).Equals(Vector3.new(0.5, 1, 1.5)), 'div by a scalar');
+		check(a.div(a).Equals(Vector3.one), 'div component-wise');
+		check(Vector3.new(10, 9, 8).idiv(4).Equals(Vector3.new(2, 2, 2)), 'idiv');
+		check(Vector3.new(-5, 5, 0).idiv(2).Equals(Vector3.new(-3, 2, 0)), 'idiv rounds down');
+		check(a.neg().Equals(Vector3.new(-1, -2, -3)), 'neg');
+
+		check(Vector3.xAxis.Equals(Vector3.new(1, 0, 0)), 'xAxis');
+		check(Vector3.yAxis.Equals(Vector3.new(0, 1, 0)), 'yAxis');
+		check(Vector3.zAxis.Equals(Vector3.new(0, 0, 1)), 'zAxis');
+
+		check(Vector3.FromNormalId(Enum.NormalId.Top).Equals(Vector3.yAxis), 'FromNormalId');
+		check(Vector3.FromNormalId(Enum.NormalId.Front).Equals(Vector3.new(0, 0, -1)), 'Front is -Z');
+		check(Vector3.FromAxis(Enum.Axis.Z).Equals(Vector3.zAxis), 'FromAxis');
+	)");
+}
+
+TEST_CASE("both languages refuse the Unit of a zero vector", "[scripting][js]") {
+	// **This is what drift looks like when nothing tests one half.** Luau threw
+	// and JavaScript handed back the zero vector, so one script moved a part in
+	// one language and left it where it was in the other. Roblox answers three
+	// NaNs, which is the third answer and the one that surfaces as geometry
+	// vanishing somewhere unrelated; being told is better than either.
+	RegisterClasses();
+	Store store("script_test");
+
+	for (const Language language : {Language::Luau, Language::JavaScript}) {
+		const auto runtime = MakeRuntime(store, language);
+		const bool ok = language == Language::Luau ? runtime->Run("return Vector3.new(0, 0, 0).Unit")
+												   : runtime->Run("const nowhere = Vector3.zero.Unit;");
+
+		CHECK_FALSE(ok);
+		CHECK(runtime->LastError().find("zero vector") != std::string::npos);
+	}
+}

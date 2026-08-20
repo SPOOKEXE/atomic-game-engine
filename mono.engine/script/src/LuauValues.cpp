@@ -3,6 +3,7 @@
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Color3.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/script/Datatypes.hpp>
 
 #include <array>
 #include <cmath>
@@ -28,6 +29,131 @@ namespace engine::script {
 			const auto z = static_cast<float>(luaL_optnumber(state, 3, 0.0));
 
 			*PushVector3(state) = Vector3{x, y, z};
+			return 1;
+		}
+
+		// `Vector3.FromNormalId(Enum.NormalId.Top)` - a face of a box as the
+		// direction it points.
+		//
+		// **Capitalised, because Roblox capitalises these two and not `new`.**
+		// It reads as an inconsistency and is one, but it is Roblox's, and a
+		// second spelling of one constructor is the duplicate `AGENTS.md` calls
+		// the most expensive kind of debt.
+		//
+		// The face-to-direction mapping is `script::DirectionOfNormalId`, shared
+		// with the JavaScript surface so the two cannot drift.
+		int Vector3FromNormalId(lua_State *state) {
+			core::Name member;
+			Vector3 direction;
+
+			if (!ReadEnumValue(state, 1, core::Name("NormalId"), member) ||
+				!DirectionOfNormalId(member, direction)) {
+				luaL_errorL(state, "FromNormalId needs an Enum.NormalId");
+			}
+
+			*PushVector3(state) = direction;
+			return 1;
+		}
+
+		// `Vector3.FromAxis(Enum.Axis.Y)`.
+		int Vector3FromAxis(lua_State *state) {
+			core::Name member;
+			Vector3 direction;
+
+			if (!ReadEnumValue(state, 1, core::Name("Axis"), member) || !DirectionOfAxis(member, direction)) {
+				luaL_errorL(state, "FromAxis needs an Enum.Axis");
+			}
+
+			*PushVector3(state) = direction;
+			return 1;
+		}
+
+		// --- the methods a script calls with a colon -------------------------
+		//
+		// The vector is argument one, because `v:Dot(other)` passes it there.
+		// Each one is `core::Vector3`'s own arithmetic and none of it is
+		// implemented here: the JavaScript surface calls the same functions, so
+		// the two languages cannot answer differently about the same vector.
+
+		int Vector3Abs(lua_State *state) {
+			*PushVector3(state) = CheckVector3(state, 1).Abs();
+			return 1;
+		}
+
+		int Vector3Ceil(lua_State *state) {
+			*PushVector3(state) = CheckVector3(state, 1).Ceil();
+			return 1;
+		}
+
+		int Vector3Floor(lua_State *state) {
+			*PushVector3(state) = CheckVector3(state, 1).Floor();
+			return 1;
+		}
+
+		int Vector3Sign(lua_State *state) {
+			*PushVector3(state) = CheckVector3(state, 1).Sign();
+			return 1;
+		}
+
+		int Vector3Cross(lua_State *state) {
+			*PushVector3(state) = CheckVector3(state, 1).Cross(CheckVector3(state, 2));
+			return 1;
+		}
+
+		int Vector3Dot(lua_State *state) {
+			lua_pushnumber(state, CheckVector3(state, 1).Dot(CheckVector3(state, 2)));
+			return 1;
+		}
+
+		// `v:Angle(other)` is unsigned, from zero to pi. `v:Angle(other, axis)`
+		// is signed by which side of `axis` the turn goes, which is what a
+		// steering routine actually needs - the unsigned form cannot tell left
+		// from right.
+		int Vector3Angle(lua_State *state) {
+			const Vector3 self = CheckVector3(state, 1);
+			const Vector3 other = CheckVector3(state, 2);
+
+			if (lua_touserdatatagged(state, 3, TAG_VECTOR3) != nullptr) {
+				lua_pushnumber(state, self.Angle(other, CheckVector3(state, 3)));
+				return 1;
+			}
+
+			lua_pushnumber(state, self.Angle(other));
+			return 1;
+		}
+
+		// The epsilon is left to `core::Vector3::FuzzyEq` when a script omits
+		// it, rather than repeated here: a default written down twice is a
+		// default that means two things the first time one of them moves.
+		int Vector3FuzzyEq(lua_State *state) {
+			const Vector3 self = CheckVector3(state, 1);
+			const Vector3 other = CheckVector3(state, 2);
+
+			if (lua_isnoneornil(state, 3)) {
+				lua_pushboolean(state, self.FuzzyEq(other));
+				return 1;
+			}
+
+			lua_pushboolean(state, self.FuzzyEq(other, static_cast<float>(luaL_checknumber(state, 3))));
+			return 1;
+		}
+
+		int Vector3Lerp(lua_State *state) {
+			const Vector3 self = CheckVector3(state, 1);
+			const Vector3 goal = CheckVector3(state, 2);
+			const auto alpha = static_cast<float>(luaL_checknumber(state, 3));
+
+			*PushVector3(state) = self.Lerp(goal, alpha);
+			return 1;
+		}
+
+		int Vector3Max(lua_State *state) {
+			*PushVector3(state) = CheckVector3(state, 1).Max(CheckVector3(state, 2));
+			return 1;
+		}
+
+		int Vector3Min(lua_State *state) {
+			*PushVector3(state) = CheckVector3(state, 1).Min(CheckVector3(state, 2));
 			return 1;
 		}
 
@@ -76,6 +202,33 @@ namespace engine::script {
 				}
 				*PushVector3(state) = value.Unit();
 				return 1;
+			}
+
+			// **`__index` is a function, so a method has to be handed back as a
+			// closure** - there is no table behind it for Luau to find one in.
+			// `RayIndex` does the same for `PointAt`. A fresh closure per access
+			// is what Luau's `lua_pushcfunction` costs, and a table cached in the
+			// registry would trade that for a second place the member list
+			// lives; this list is short and read once per call site in practice.
+			static const luaL_Reg METHODS[] = {
+				{"Abs", Vector3Abs},
+				{"Ceil", Vector3Ceil},
+				{"Floor", Vector3Floor},
+				{"Sign", Vector3Sign},
+				{"Cross", Vector3Cross},
+				{"Dot", Vector3Dot},
+				{"Angle", Vector3Angle},
+				{"FuzzyEq", Vector3FuzzyEq},
+				{"Lerp", Vector3Lerp},
+				{"Max", Vector3Max},
+				{"Min", Vector3Min},
+			};
+
+			for (const luaL_Reg &method : METHODS) {
+				if (std::strcmp(field, method.name) == 0) {
+					lua_pushcfunction(state, method.func, method.name);
+					return 1;
+				}
 			}
 
 			luaL_errorL(state, "Vector3 has no member '%s'", field);
@@ -619,6 +772,39 @@ namespace engine::script {
 			return 1;
 		}
 
+		// **The vector has to be on the left, and that is not an oversight.**
+		// Luau calls `__div` whichever operand carried the metatable, so `2 / v`
+		// arrives here too - and Roblox's operator table has no `number /
+		// Vector3` row. Answering one would be inventing arithmetic rather than
+		// matching it, so `CheckVector3` refuses the first argument and names the
+		// type. `2 * v` is different: Roblox does define it, and `Vector3Mul`
+		// handles it.
+		int Vector3Div(lua_State *state) {
+			const Vector3 left = CheckVector3(state, 1);
+
+			if (lua_isnumber(state, 2)) {
+				*PushVector3(state) = left / static_cast<float>(lua_tonumber(state, 2));
+				return 1;
+			}
+
+			*PushVector3(state) = left / CheckVector3(state, 2);
+			return 1;
+		}
+
+		// `//`, which floors each quotient - the same thing Luau's `//` does to
+		// two numbers, applied per component.
+		int Vector3Idiv(lua_State *state) {
+			const Vector3 left = CheckVector3(state, 1);
+
+			if (lua_isnumber(state, 2)) {
+				*PushVector3(state) = (left / static_cast<float>(lua_tonumber(state, 2))).Floor();
+				return 1;
+			}
+
+			*PushVector3(state) = (left / CheckVector3(state, 2)).Floor();
+			return 1;
+		}
+
 		// Registers one value type: a metatable carrying `__index` and a global
 		// table carrying the constructors.
 		void Install(
@@ -631,7 +817,9 @@ namespace engine::script {
 			lua_CFunction equal = nullptr,
 			lua_CFunction add = nullptr,
 			lua_CFunction subtract = nullptr,
-			lua_CFunction negate = nullptr
+			lua_CFunction negate = nullptr,
+			lua_CFunction divide = nullptr,
+			lua_CFunction floorDivide = nullptr
 		) {
 			luaL_newmetatable(state, name);
 
@@ -654,6 +842,8 @@ namespace engine::script {
 				{"__add", add},
 				{"__sub", subtract},
 				{"__unm", negate},
+				{"__div", divide},
+				{"__idiv", floorDivide},
 			};
 
 			for (const auto &entry : METAMETHODS) {
@@ -917,7 +1107,12 @@ namespace engine::script {
 	}
 
 	void OpenValues(lua_State *state) {
-		static const luaL_Reg vectorConstructors[] = {{"new", Vector3New}, {nullptr, nullptr}};
+		static const luaL_Reg vectorConstructors[] = {
+			{"new", Vector3New},
+			{"FromNormalId", Vector3FromNormalId},
+			{"FromAxis", Vector3FromAxis},
+			{nullptr, nullptr}
+		};
 		static const luaL_Reg colorConstructors[] = {
 			{"new", Color3New}, {"fromRGB", Color3FromRgb}, {nullptr, nullptr}
 		};
@@ -952,7 +1147,9 @@ namespace engine::script {
 			Vector3Equal,
 			Vector3Add,
 			Vector3Sub,
-			Vector3Unm
+			Vector3Unm,
+			Vector3Div,
+			Vector3Idiv
 		);
 		Install(state, "Color3", Color3Index, nullptr, colorConstructors, nullptr, Color3Equal);
 		// The method table, parked in the registry before anything can index a
@@ -987,7 +1184,7 @@ namespace engine::script {
 		lua_pop(state, 1);
 
 		// **Lowercase, because Roblox's are.** Every other member of this
-		// vocabulary is capitalised and these two are not, which reads as a
+		// vocabulary is capitalised and these five are not, which reads as a
 		// mistake until you try to run a script written elsewhere. The rule
 		// `scene/Part.cpp` states for the class tree is the rule here: a second
 		// spelling of one constant is the duplicate `AGENTS.md` calls the most
@@ -997,6 +1194,9 @@ namespace engine::script {
 		// these attach to.
 		SetVectorConstant(state, "Vector3", "zero", core::Vector3::Zero);
 		SetVectorConstant(state, "Vector3", "one", core::Vector3::One);
+		SetVectorConstant(state, "Vector3", "xAxis", core::Vector3::XAxis);
+		SetVectorConstant(state, "Vector3", "yAxis", core::Vector3::YAxis);
+		SetVectorConstant(state, "Vector3", "zAxis", core::Vector3::ZAxis);
 	}
 
 	const char *Describe(HostTag tag) {

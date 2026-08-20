@@ -620,20 +620,46 @@ declare extern type Vector3 with
 	Z: number
 	Magnitude: number
 	Unit: Vector3
+	function Abs(self): Vector3
+	function Ceil(self): Vector3
+	function Floor(self): Vector3
+	function Sign(self): Vector3
+	function Cross(self, other: Vector3): Vector3
+	function Dot(self, other: Vector3): number
+	-- Unsigned without an axis, and signed by which side of `axis` the turn goes
+	-- with one. The unsigned form cannot tell left from right.
+	function Angle(self, other: Vector3, axis: Vector3?): number
+	function FuzzyEq(self, other: Vector3, epsilon: number?): boolean
+	function Lerp(self, goal: Vector3, alpha: number): Vector3
+	function Max(self, vector: Vector3): Vector3
+	function Min(self, vector: Vector3): Vector3
 	function __add(self, other: Vector3): Vector3
 	function __sub(self, other: Vector3): Vector3
 	function __mul(self, other: Vector3 | number): Vector3
+	-- The vector has to be on the left of `/` and `//`. Roblox's operator table
+	-- has no `number / Vector3` row, and `2 * v` is the one that does.
+	function __div(self, other: Vector3 | number): Vector3
+	function __idiv(self, other: Vector3 | number): Vector3
 	function __unm(self): Vector3
 end
 
 declare Vector3: {
 	new: (x: number?, y: number?, z: number?) -> Vector3,
 
+	-- Capitalised, because Roblox capitalises these two and leaves `new` lower
+	-- case. It reads as an inconsistency and is one, but it is the one a script
+	-- written elsewhere already contains.
+	FromNormalId: (normal: Enum_NormalId) -> Vector3,
+	FromAxis: (axis: Enum_Axis) -> Vector3,
+
 	-- **Lowercase, because Roblox's are.** Every other member of this vocabulary
-	-- is capitalised and these two are not, which reads as a mistake until you
+	-- is capitalised and these five are not, which reads as a mistake until you
 	-- try to run a script written elsewhere.
 	zero: Vector3,
 	one: Vector3,
+	xAxis: Vector3,
+	yAxis: Vector3,
+	zAxis: Vector3,
 }
 
 declare extern type Color3 with
@@ -2409,7 +2435,24 @@ declare interface Vector3 {
 	add(other: Vector3): Vector3;
 	sub(other: Vector3): Vector3;
 	mul(other: Vector3 | number): Vector3;
+	div(other: Vector3 | number): Vector3;
+	// `//` in Luau: each quotient floored.
+	idiv(other: Vector3 | number): Vector3;
+	// Unary minus, which is an operator in Luau and has no method form there.
+	neg(): Vector3;
 	Equals(other: Vector3): boolean;
+	Abs(): Vector3;
+	Ceil(): Vector3;
+	Floor(): Vector3;
+	Sign(): Vector3;
+	Cross(other: Vector3): Vector3;
+	Dot(other: Vector3): number;
+	// Unsigned without an axis, signed by which side of `axis` the turn goes with one.
+	Angle(other: Vector3, axis?: Vector3): number;
+	FuzzyEq(other: Vector3, epsilon?: number): boolean;
+	Lerp(goal: Vector3, alpha: number): Vector3;
+	Max(vector: Vector3): Vector3;
+	Min(vector: Vector3): Vector3;
 }
 
 declare interface Color3 {
@@ -2470,9 +2513,17 @@ declare interface CFrame {
 declare const Vector3: {
 	new: (x?: number, y?: number, z?: number) => Vector3;
 
+	// Capitalised, because Roblox capitalises these two. The Luau half carries
+	// the argument.
+	FromNormalId: (normal: Enum.NormalId) => Vector3;
+	FromAxis: (axis: Enum.Axis) => Vector3;
+
 	// Lowercase, because Roblox's are. The Luau half carries the argument.
 	readonly zero: Vector3;
 	readonly one: Vector3;
+	readonly xAxis: Vector3;
+	readonly yAxis: Vector3;
+	readonly zAxis: Vector3;
 };
 
 declare const Color3: {

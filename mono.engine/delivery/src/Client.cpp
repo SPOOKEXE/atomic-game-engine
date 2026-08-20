@@ -41,6 +41,24 @@ namespace engine::delivery {
 		// socket and a decompression buffer.
 		constexpr size_t MAXIMUM_BUNDLES_IN_FLIGHT = 4;
 
+		// How many bundles a local store may be read out of in one pump.
+		//
+		// **One, because a store read is not a fetch and the two cost the caller
+		// entirely different things.** A wire fetch is a socket: four of them in
+		// flight cost this thread almost nothing, which is what
+		// `MAXIMUM_BUNDLES_IN_FLIGHT` is sized for. A `dir:` source has no wire,
+		// so `Start` reads the file, verifies every member against the signed
+		// manifest and writes them all to the cache before it returns - measured
+		// at about 10 ms a bundle in `release` on this repository's own store.
+		// Four of those is a 40 ms frame, which is the hitch a game shows while
+		// it loads, and it is the frame the editor and every dev build take.
+		//
+		// The cost of one is that a local load takes more pumps. That is the
+		// trade the whole intake path already makes: `IntakeBudget` spends
+		// latency to keep a frame's work bounded, and this is the same currency
+		// one layer down.
+		constexpr size_t MAXIMUM_STORE_BUNDLES_PER_PUMP = 1;
+
 		std::string ToHex(std::span<const std::byte> bytes) {
 			static constexpr char DIGITS[] = "0123456789abcdef";
 			std::string hex;
@@ -574,12 +592,27 @@ namespace engine::delivery {
 					}
 				}
 
+				size_t read = 0;
 				for (BundleJob &job : Jobs) {
 					if (job.Active || admitted >= MAXIMUM_BUNDLES_IN_FLIGHT) {
 						continue;
 					}
-					if (Start(job) != StartOutcome::Idle) {
-						++admitted;
+
+					// **The store allowance is passed in rather than checked
+					// here**, so a spent one stops store reads without also
+					// stopping a wire fetch that costs this thread nothing. Which
+					// kind a job turns out to be is not knowable until `Start`
+					// has walked its sources.
+					switch (Start(job, read < MAXIMUM_STORE_BUNDLES_PER_PUMP)) {
+						case StartOutcome::Fetching:
+							++admitted;
+							break;
+						case StartOutcome::Completed:
+							++admitted;
+							++read;
+							break;
+						case StartOutcome::Idle:
+							break;
 					}
 				}
 				Transfer->Pump();
@@ -615,12 +648,21 @@ namespace engine::delivery {
 				Idle,
 			};
 
+			// @param mayReadStore Whether this pump still has room for a
+			//                     synchronous store read. A store source reached
+			//                     with this false is left for the next pump
+			//                     rather than skipped, because skipping it would
+			//                     burn a perfectly good origin over a budget.
 			// @return What the attempt did. See `StartOutcome`.
-			StartOutcome Start(BundleJob &job) {
+			StartOutcome Start(BundleJob &job, bool mayReadStore) {
 				while (job.SourceIndex < Sources.size()) {
 					Resolved &source = Sources[job.SourceIndex];
 
 					if (source.Store) {
+						if (!mayReadStore) {
+							return StartOutcome::Idle;
+						}
+
 						// A local store has no wire, so there is nothing to
 						// compress and no group to expand - the chunks are read
 						// and the assets fall out of them. Same manifest, same
