@@ -49,6 +49,7 @@
 #include <engine/core/types/Color3.hpp>
 #include <engine/core/types/Rect.hpp>
 #include <engine/core/types/Sequence.hpp>
+#include <engine/core/types/TweenInfo.hpp>
 #include <engine/core/types/UDim.hpp>
 #include <engine/core/types/Vector2.hpp>
 #include <engine/core/types/Vector3.hpp>
@@ -500,6 +501,60 @@ namespace engine::gui {
 		core::Rect VerticalThumb;
 		core::Rect HorizontalThumb;
 		//@}
+	};
+
+	// Where a `ScrollingFrame` has been pulled past its end, and how it is
+	// getting back.
+	//
+	// **`ElasticBehavior` had two blockers and the clock was the smaller one.**
+	// The other is that nothing dragged a canvas at all: until v0.17 the only
+	// caller of the scroll mover was the wheel, and a wheel does not overscroll
+	// in Roblox either. So a pull needs something to pull it, which is
+	// `Router::BeginCanvasDrag` and the two calls after it.
+	//
+	// The spring is a **function of elapsed time** rather than a stepped
+	// integration, which is `render::FlipbookFrameAt`'s shape and buys the same
+	// thing: a suite states where the canvas is a tenth of a second after the
+	// release rather than stepping a hundred frames to find out. It also makes
+	// the recovery independent of frame rate, which a per-frame multiply is not.
+	//
+	// Local, never replicated - see `PageMotion` for why a clock reading must
+	// not cross.
+	//
+	// @since v0.17
+	struct ScrollMotion {
+		// When the pull was let go of, or negative while nothing is springing.
+		//
+		// **First, because it is the widest member.** Everything below is four
+		// or one byte, so putting the `double` anywhere else opens a hole that
+		// `ecs::AuditComponents` refuses - a component serialised as its object
+		// representation carries whatever is in that hole into every save.
+		double ReleasedAt = -1.0;
+
+		// How far past the end the canvas is being held, in pixels, signed.
+		// Negative is past the near end and positive past the far end.
+		core::Vector2 Pull;
+
+		// The pull that was let go of, which the spring decays from.
+		core::Vector2 Released;
+
+		// Where the pointer was when the drag last moved the canvas, so the
+		// next move is a delta rather than an absolute.
+		core::Vector2 LastPoint;
+
+		// How far past the end the canvas is drawn right now, in pixels.
+		// Resolved once per layout from the two above, so `ContentArea` reads a
+		// number and never a clock.
+		//
+		// Zeroed when the spring has settled under a pixel, which is what stops
+		// the signature moving for a frame nobody can see.
+		core::Vector2 Overshoot;
+
+		// Whether a drag is holding the canvas right now.
+		bool Held = false;
+
+		// Explicit padding, for the reason every other `Reserved` gives.
+		uint8_t Reserved[7] = {};
 	};
 
 	// What makes a text box editable.
@@ -1088,13 +1143,21 @@ namespace engine::gui {
 
 	// Shows one of the parent's children at a time and slides the rest aside.
 	//
-	// **What is here is the placement, and the animation is honestly absent.**
-	// Roblox's `UIPageLayout` tweens between pages, and a tween needs a clock -
-	// `gui` is L7 and has no notion of a frame time, which is why `Animated`,
-	// `TweenTime`, `EasingStyle` and `EasingDirection` are *not* declared rather
-	// than declared and ignored. A game that wants motion animates
-	// `CurrentPage`'s neighbours itself, or drives the offset with its own
-	// tween; what this gives is the paging.
+	// **The animation is here as of v0.17, and the clock is still not.** The
+	// objection this entry carried was that a tween needs a frame time and `gui`
+	// is L7 with none - which was the wrong shape of answer, because every other
+	// module in this engine that needs a clock is *handed* one.
+	// `render::FlipbookFrameAt` takes `seconds` and answers which frame is
+	// showing; `assets::Grant::HasExpired` takes `nowSeconds`; `net` reads no
+	// clock at all. So the page position is a **pure function of elapsed time**
+	// rather than a state a tick advances, `CompileRequest::Seconds` is where
+	// the time arrives, and this module still reads no clock.
+	//
+	// What that buys is the same thing it buys `Flipbook`: a carousel halfway
+	// through a slide is a value a test states rather than one it waits for.
+	//
+	// **`PageMotion` is where the jump's start time lives**, and it is engine
+	// state rather than a property - see that component.
 	//
 	// **`CurrentPage` is writable here and read-only in Roblox**, where it moves
 	// through `JumpTo`, `Next` and `Previous`. A property a script can assign is
@@ -1108,6 +1171,14 @@ namespace engine::gui {
 
 		// Space between one page and the next, in the fill direction.
 		core::UDim Padding;
+
+		// How long a slide takes, in seconds. Zero or less cuts.
+		//
+		// **Above the byte-sized members rather than among them**, which is the
+		// alignment argument the `Reserved` field below carries in full.
+		//
+		// @since v0.17
+		float TweenTime = 1.0f;
 
 		// Which way the pages are stacked.
 		FillDirection Direction = FillDirection::Horizontal;
@@ -1123,9 +1194,84 @@ namespace engine::gui {
 		// makes a carousel read as a loop while it is moving.
 		bool Circular = false;
 
+		// Whether changing `CurrentPage` slides or cuts.
+		//
+		// **Off cuts instantly and is not the same as a zero `TweenTime`**,
+		// which also cuts: one says "this layout does not animate" and the other
+		// says "animate over no time". They draw the same thing and read back
+		// differently, which is Roblox's arrangement.
+		//
+		// @since v0.17
+		bool Animated = true;
+
+		// The curve the slide follows, and which end of it is eased.
+		//
+		// `core::EasingStyle` rather than a set of this module's own: the curve
+		// is `core::TweenInfo::Ease` and a second enum meaning the same eleven
+		// things is the debt this repository names most often.
+		//
+		// @since v0.17
+		//@{
+		core::EasingStyle Easing = core::EasingStyle::Back;
+		core::EasingDirection EasingWay = core::EasingDirection::Out;
+		//@}
+
 		// Explicit padding, for the reason every other `Reserved` gives.
 		// `CurrentPage` aligns the whole component to eight.
-		uint8_t Reserved[5] = {};
+		//
+		// **The six byte-sized members are grouped and `TweenTime` sits above
+		// them**, which is what `ecs::AuditComponents` asks for and what it
+		// caught twice here. `Entity` is a `uint64_t`, so this component aligns
+		// to eight; a `float` left below the byte group put four bytes of tail
+		// padding after it, and a component serialised as its object
+		// representation carries those bytes into every save and every delta.
+		// They differ between two runs of one scene, which is `just
+		// determinism` failing for a reason no member explains.
+		uint8_t Reserved[6] = {};
+	};
+
+	// Where a `UIPageLayout` is between two pages, and when it set off.
+	//
+	// **Engine state rather than a property, and local rather than replicated.**
+	// It holds a moment on *this* process's monotonic clock, which means nothing
+	// on another one - so it sits beside `ScrollState` on the list
+	// `replication::DefaultReplicatedComponents` refuses, for the same reason:
+	// what crosses is `CurrentPage`, and each end animates to it on its own
+	// clock. A client that received a timestamp from a server would slide from
+	// wherever that server's uptime happened to put it.
+	//
+	// Written by the layout when it notices `CurrentPage` has moved, which is
+	// what makes assigning the property enough - there is no `JumpTo` to hook
+	// and no setter this module owns.
+	//
+	// @since v0.17
+	struct PageMotion {
+		// The page the strip is sliding away from.
+		ecs::Entity From;
+
+		// The page it is sliding to, as of the last time the layout looked.
+		// Not the same as `PageLayout::CurrentPage`: the difference between
+		// them is how the layout knows a jump happened.
+		ecs::Entity To;
+
+		// `CompileRequest::Seconds` when the slide began. Negative means the
+		// strip is at rest, which is what a layout that has never moved holds.
+		double StartedAt = -1.0;
+
+		// How far along the slide is, after the easing curve. Resolved once per
+		// layout, before the walk, so the recursion that places the pages needs
+		// no clock of its own.
+		//
+		// **Not clamped to one, deliberately.** `Back` and `Elastic` overshoot
+		// by design and the overshoot is the whole visual point of them; a
+		// clamp here would make the two curves that are worth choosing look
+		// exactly like `Quad`.
+		float Alpha = 1.0f;
+
+		// Explicit padding, for the reason every other `Reserved` gives. The
+		// two entities and the `double` align this to eight, so a lone `float`
+		// leaves four bytes nothing writes.
+		uint8_t Reserved[4] = {};
 	};
 
 	// Forces the parent's resolved size to a ratio.

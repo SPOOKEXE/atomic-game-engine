@@ -45,6 +45,7 @@
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Input.hpp>
+#include <engine/render/AdornmentGeometry.hpp>
 #include <engine/render/DebugPanels.hpp>
 #include <engine/render/FrameStatistics.hpp>
 #include <engine/render/InterfacePass.hpp>
@@ -4245,6 +4246,25 @@ namespace studio {
 		// @since v0.17
 		void DrawColliderOutlines(size_t viewport, const PanelProjection &panel);
 
+		// Draws every `SelectionBox`, `SelectionSphere` and handle adornment in
+		// the viewport's world.
+		//
+		// **The first consumer `render::AdornmentGeometry` has ever had.** It
+		// resolved adornments against their adornees for two versions and
+		// nothing called it, so a `SelectionBox` drew nothing whatever its
+		// properties said - which is why `LineThickness`, `SurfaceColor3` and
+		// `SurfaceTransparency` were deferred behind "a triangle path for
+		// adornments" when what was actually missing was any path at all.
+		//
+		// An overlay rather than a render pass, for `DrawColliderOutlines`'
+		// reason: the studio already projects world points into a panel and
+		// hands imgui segments, so this is a list of lines and no pipeline, no
+		// shader and no target. `LineThickness` is in studs, so it is converted
+		// per segment against how far away that segment is.
+		//
+		// @since v0.17
+		void DrawAdornments(size_t viewport, const PanelProjection &panel);
+
 		// Where the selection is, as a gizmo needs it.
 		//
 		// @param world  The scene.
@@ -4377,6 +4397,13 @@ namespace studio {
 		//
 		// @since v0.17
 		bool ShowColliders = false;
+
+		// The adornment geometry for the viewport being drawn, kept between
+		// frames so a steady selection stops allocating - which is the property
+		// `render::AdornmentGeometry` is built for and documents.
+		//
+		// @since v0.17
+		engine::render::AdornmentGeometry Adornments;
 
 		// Which viewport a panel index refers to, or null for the main one.
 		//

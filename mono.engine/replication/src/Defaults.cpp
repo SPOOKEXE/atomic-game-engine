@@ -325,8 +325,19 @@ namespace engine::replication {
 		// rectangles a `ScrollingFrame` worked out - all of them derived from an
 		// `AbsoluteSize` that is this display's. What an author wrote is
 		// `gui.Scrolling`, and that crosses.
+		// **`gui.PageMotion` and `gui.ScrollMotion` are the sharpest of the
+		// set, because what they hold is a *clock reading*.** Every other row
+		// here is local because it is recomputed from what was sent; these two
+		// are local because the number in them means nothing anywhere else. A
+		// client handed the authority's `StartedAt` would evaluate a tween
+		// against that machine's uptime and slide from an arbitrary place, or
+		// not slide at all. What crosses is `PageLayout::CurrentPage` and
+		// `Scrolling::CanvasPosition` - the destination - and each end animates
+		// to it on its own clock, which is also what makes a laggy client
+		// arrive rather than stutter.
 		if (component == "gui.Resolved" || component == "gui.SpatialCanvas" ||
-			component == "gui.GuiServiceState" || component == "gui.ScrollState") {
+			component == "gui.GuiServiceState" || component == "gui.ScrollState" ||
+			component == "gui.PageMotion" || component == "gui.ScrollMotion") {
 			return true;
 		}
 

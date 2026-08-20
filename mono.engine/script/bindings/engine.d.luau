@@ -1449,9 +1449,15 @@ declare extern type PVAdornment extends GuiBase3d with
 end
 
 declare extern type SelectionBox extends PVAdornment with
+	LineThickness: number
+	SurfaceColor3: Color3
+	SurfaceTransparency: number
 end
 
 declare extern type SelectionSphere extends PVAdornment with
+	LineThickness: number
+	SurfaceColor3: Color3
+	SurfaceTransparency: number
 end
 
 declare extern type HandleAdornment extends PVAdornment with
@@ -1748,11 +1754,15 @@ declare extern type UITableLayout extends UILayout with
 end
 
 declare extern type UIPageLayout extends UILayout with
+	Animated: boolean
 	Circular: boolean
 	CurrentPage: Instance
+	EasingDirection: Enum_EasingDirection
+	EasingStyle: Enum_EasingStyle
 	FillDirection: Enum_FillDirection
 	Padding: UDim
 	SortOrder: Enum_SortOrder
+	TweenTime: number
 end
 
 declare extern type UIConstraint extends UIComponent with

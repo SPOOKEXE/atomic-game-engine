@@ -206,3 +206,108 @@ TEST_CASE("an adornment outside a container draws nothing", "[render][adornmentg
 	geometry.Build(world.Data);
 	CHECK(geometry.Lines().empty());
 }
+
+TEST_CASE("a surface is six faces and only when asked for", "[render][adornmentgeometry]") {
+	// **The default fills nothing**, which is Roblox's and is the one that
+	// matters: a selection box exists to leave visible what it is drawn around,
+	// so a box that filled by default would hide the thing it is pointing at.
+	World world("adornment_geometry.surface");
+
+	const Entity part = world.Part(Vector3{0.0f, 0.0f, 0.0f}, Vector3{1.0f, 1.0f, 1.0f});
+	const Entity box = world.Adorn("SelectionBox", part);
+
+	AdornmentGeometry geometry;
+	geometry.Build(world.Data);
+	REQUIRE(geometry.Lines().size() == 12);
+	CHECK(geometry.Faces().empty());
+
+	engine::gui::SelectionOutline outline;
+	outline.SurfaceColor = engine::core::Color3{1.0f, 0.0f, 0.0f};
+	outline.SurfaceTransparency = 0.5f;
+	world.Data.Set(box, outline);
+
+	geometry.Build(world.Data);
+	CHECK(geometry.Lines().size() == 12);
+	REQUIRE(geometry.Faces().size() == 6);
+
+	for (const engine::render::AdornmentFace &face : geometry.Faces()) {
+		CHECK(face.Transparency == Approx(0.5f));
+		CHECK(face.Colour.R == Approx(1.0f));
+
+		// **Wound so consecutive pairs are edges**, which is what the struct
+		// promises and what lets a drawer treat the four points as a convex
+		// polygon. A bad winding draws a bow tie, and the test for it is that
+		// no two consecutive corners are diagonally opposite: on a unit box
+		// every edge is one axis long, never two.
+		for (size_t corner = 0; corner < 4; corner++) {
+			const Vector3 step = face.Corners[(corner + 1) % 4] - face.Corners[corner];
+			const int axes = (std::abs(step.X) > 0.01f ? 1 : 0) + (std::abs(step.Y) > 0.01f ? 1 : 0) +
+							 (std::abs(step.Z) > 0.01f ? 1 : 0);
+			CHECK(axes == 1);
+		}
+	}
+
+	// **A fully transparent surface emits nothing rather than six invisible
+	// quads.** A drawer handed those still projects and rasterises them, which
+	// is the whole cost of the feature paid by everybody who did not ask for it.
+	outline.SurfaceTransparency = 1.0f;
+	world.Data.Set(box, outline);
+	geometry.Build(world.Data);
+	CHECK(geometry.Faces().empty());
+}
+
+TEST_CASE("line thickness reaches the geometry in studs", "[render][adornmentgeometry]") {
+	// Studs rather than pixels, which is `SelectionBox.LineThickness`'s unit:
+	// a box outlined in pixels keeps its weight as it recedes and ends up a
+	// solid blob at a distance. Converting is a drawer's job, because only a
+	// drawer knows where the camera is.
+	World world("adornment_geometry.thickness");
+
+	const Entity part = world.Part(Vector3{0.0f, 0.0f, 0.0f}, Vector3{1.0f, 1.0f, 1.0f});
+	const Entity box = world.Adorn("SelectionBox", part);
+
+	AdornmentGeometry geometry;
+	geometry.Build(world.Data);
+	REQUIRE(!geometry.Lines().empty());
+
+	// Roblox's default, carried by the component rather than invented here.
+	CHECK(geometry.Lines()[0].Thickness == Approx(0.05f));
+
+	engine::gui::SelectionOutline outline;
+	outline.LineThickness = 0.4f;
+	world.Data.Set(box, outline);
+
+	geometry.Build(world.Data);
+	for (const AdornmentLine &line : geometry.Lines()) {
+		CHECK(line.Thickness == Approx(0.4f));
+	}
+
+	// A negative thickness is a number somebody typed, not a direction. Clamped
+	// rather than refused, because an outline nobody can see is the same
+	// failure as one that was never asked for.
+	outline.LineThickness = -3.0f;
+	world.Data.Set(box, outline);
+	geometry.Build(world.Data);
+	CHECK(geometry.Lines()[0].Thickness == Approx(0.0f));
+}
+
+TEST_CASE("a handle has no surface and no authored thickness", "[render][adornmentgeometry]") {
+	// `gui::SelectionOutline` is on the two selection classes only, so a handle
+	// keeps the default width and fills nothing - which is what a grab target
+	// is, and what stops a move gizmo turning into six coloured slabs.
+	World world("adornment_geometry.handle");
+
+	const Entity part = world.Part(Vector3{0.0f, 0.0f, 0.0f}, Vector3{1.0f, 1.0f, 1.0f});
+	const Entity handle = world.Adorn("BoxHandleAdornment", part);
+
+	engine::gui::HandleShape shape;
+	shape.Size = Vector3{1.0f, 1.0f, 1.0f};
+	world.Data.Set(handle, shape);
+
+	AdornmentGeometry geometry;
+	geometry.Build(world.Data);
+
+	REQUIRE(geometry.Lines().size() == 12);
+	CHECK(geometry.Faces().empty());
+	CHECK(geometry.Lines()[0].Thickness == Approx(0.05f));
+}

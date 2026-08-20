@@ -679,8 +679,11 @@
 				{"name": "Adornee", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "AlwaysOnTop", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "Color3", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
+				{"name": "LineThickness", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.SelectionOutline"], "writes": ["gui.SelectionOutline"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "SurfaceColor3", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["gui.SelectionOutline"], "writes": ["gui.SelectionOutline"]},
+				{"name": "SurfaceTransparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.SelectionOutline"], "writes": ["gui.SelectionOutline"]},
 				{"name": "Transparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "Visible", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "ZIndex", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]}
@@ -695,8 +698,11 @@
 				{"name": "Adornee", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "AlwaysOnTop", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "Color3", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
+				{"name": "LineThickness", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.SelectionOutline"], "writes": ["gui.SelectionOutline"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "SurfaceColor3", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["gui.SelectionOutline"], "writes": ["gui.SelectionOutline"]},
+				{"name": "SurfaceTransparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.SelectionOutline"], "writes": ["gui.SelectionOutline"]},
 				{"name": "Transparency", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "Visible", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]},
 				{"name": "ZIndex", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.Adornment"], "writes": ["gui.Adornment"]}
@@ -1615,13 +1621,17 @@
 			"constructible": true,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.PageLayout"],
 			"properties": [
+				{"name": "Animated", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.PageLayout"], "writes": ["gui.PageLayout"]},
 				{"name": "Circular", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["gui.PageLayout"], "writes": ["gui.PageLayout"]},
 				{"name": "CurrentPage", "type": "Instance", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.PageLayout"], "writes": ["gui.PageLayout"]},
+				{"name": "EasingDirection", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "EasingDirection", "reads": ["gui.PageLayout"], "writes": ["gui.PageLayout"]},
+				{"name": "EasingStyle", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "EasingStyle", "reads": ["gui.PageLayout"], "writes": ["gui.PageLayout"]},
 				{"name": "FillDirection", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "FillDirection", "reads": ["gui.PageLayout"], "writes": ["gui.PageLayout"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Padding", "type": "UDim", "kind": "field", "bytes": 8, "writable": true, "reads": ["gui.PageLayout"], "writes": ["gui.PageLayout"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
-				{"name": "SortOrder", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "SortOrder", "reads": ["gui.PageLayout"], "writes": ["gui.PageLayout"]}
+				{"name": "SortOrder", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "SortOrder", "reads": ["gui.PageLayout"], "writes": ["gui.PageLayout"]},
+				{"name": "TweenTime", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["gui.PageLayout"], "writes": ["gui.PageLayout"]}
 			]
 		},
 		{

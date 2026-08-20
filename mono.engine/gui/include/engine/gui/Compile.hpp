@@ -89,6 +89,23 @@ namespace engine::gui {
 		//
 		// @since v0.18
 		ecs::Entity Viewer;
+
+		// The caller's monotonic clock, in seconds.
+		//
+		// **Passed in, never read**, which is the standing rule
+		// `render::FlipbookFrameAt` and `assets::Grant::HasExpired` both keep
+		// and the one this module was said to be unable to satisfy. A module
+		// that read the time would hold a non-deterministic input in the
+		// subsystem whose failures are hardest to reproduce, and would make a
+		// suite *wait* for an animation rather than state where it is.
+		//
+		// The origin does not matter and only differences are used, so any
+		// steady clock works. Left at zero a page slide finishes instantly on
+		// the second frame, which is the honest answer for a caller that has
+		// not started passing one: it still lands on the right page.
+		//
+		// @since v0.17
+		double Seconds = 0.0;
 	};
 
 	// A compiled draw list and the signature that says whether it is still

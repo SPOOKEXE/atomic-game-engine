@@ -66,6 +66,8 @@ namespace engine::gui {
 		GUI_ENUM_NAME(StrokeMode, "ApplyStrokeMode")
 		GUI_ENUM_NAME(LineJoin, "LineJoinMode")
 		GUI_ENUM_NAME(StrokeSizing, "StrokeSizingMode")
+		GUI_ENUM_NAME(core::EasingStyle, "EasingStyle")
+		GUI_ENUM_NAME(core::EasingDirection, "EasingDirection")
 		GUI_ENUM_NAME(DragStyle, "UIDragDetectorDragStyle")
 		GUI_ENUM_NAME(DragResponse, "UIDragDetectorDragStyleResponse")
 		GUI_ENUM_NAME(ElasticBehavior, "ElasticBehavior")
@@ -125,6 +127,8 @@ namespace engine::gui {
 		GUI_ENUM_COUNT(StrokeMode, 2)
 		GUI_ENUM_COUNT(LineJoin, 3)
 		GUI_ENUM_COUNT(StrokeSizing, 2)
+		GUI_ENUM_COUNT(core::EasingStyle, core::EASING_STYLE_COUNT)
+		GUI_ENUM_COUNT(core::EasingDirection, core::EASING_DIRECTION_COUNT)
 		GUI_ENUM_COUNT(DragStyle, 5)
 		GUI_ENUM_COUNT(DragResponse, 4)
 		GUI_ENUM_COUNT(ElasticBehavior, 3)
@@ -424,6 +428,16 @@ namespace engine::gui {
 			RegisterEnum<StrokeMode>();
 			RegisterEnum<LineJoin>();
 			RegisterEnum<StrokeSizing>();
+
+			// **Registered here as well as by the script surface, and that
+			// is agreement rather than a clash.** `EnumTable::Register`
+			// says so in as many words: two modules may each declare that
+			// a set has a member, and refusing the second would make the
+			// order two files happened to link in decide whether a build
+			// works. Both walk `core::Describe`, so the ordinals - which
+			// are the storage - cannot disagree.
+			RegisterEnum<core::EasingStyle>();
+			RegisterEnum<core::EasingDirection>();
 			RegisterEnum<DragStyle>();
 			RegisterEnum<DragResponse>();
 			RegisterEnum<ElasticBehavior>();
@@ -863,6 +877,10 @@ namespace engine::gui {
 			Classes::Property<&PageLayout::Circular>(uiPageLayout, "Circular");
 			Classes::Computed(uiPageLayout, EnumField<&PageLayout::Direction>("FillDirection"));
 			Classes::Computed(uiPageLayout, EnumField<&PageLayout::Order>("SortOrder"));
+			Classes::Property<&PageLayout::Animated>(uiPageLayout, "Animated");
+			Classes::Property<&PageLayout::TweenTime>(uiPageLayout, "TweenTime");
+			Classes::Computed(uiPageLayout, EnumField<&PageLayout::Easing>("EasingStyle"));
+			Classes::Computed(uiPageLayout, EnumField<&PageLayout::EasingWay>("EasingDirection"));
 
 			Classes::Property<&AspectRatio::Ratio>(uiAspect, "AspectRatio");
 			Classes::Computed(uiAspect, EnumField<&AspectRatio::Type>("AspectType"));
@@ -925,8 +943,23 @@ namespace engine::gui {
 			(void)canvasGroup;
 			(void)dockWidget;
 			(void)uiScale;
-			(void)selectionBox;
-			(void)selectionSphere;
+			// **The three that were `Reserved until the renderer consumes them`,
+			// declared at v0.17 now that it does.** They were absent rather than
+			// answering a default on `SoundService.cpp`'s rule - a property with
+			// nothing behind it reads as decided - and what was actually behind
+			// them was nothing at all: `AdornmentGeometry` had no caller and
+			// there was no pass to draw its lines.
+			//
+			// `SelectionSphere` shares the component and therefore the three
+			// properties, which is Roblox's arrangement: both are a
+			// `PVAdornment` with an outline and a surface, and only the shape a
+			// drawer makes of them differs.
+			for (const ClassId klass : {selectionBox, selectionSphere}) {
+				Classes::Property<&SelectionOutline::LineThickness>(klass, "LineThickness");
+				Classes::Property<&SelectionOutline::SurfaceColor>(klass, "SurfaceColor3");
+				Classes::Property<&SelectionOutline::SurfaceTransparency>(klass, "SurfaceTransparency");
+			}
+
 			(void)boxHandle;
 			(void)sphereHandle;
 			(void)cylinderHandle;

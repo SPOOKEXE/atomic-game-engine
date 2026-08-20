@@ -2337,6 +2337,12 @@ namespace client {
 			// however the focus went away.
 			std::vector<engine::gui::GuiEvent> typedEvents;
 
+			// **The clock a page slide and a rubber band are measured against.**
+			// Passed in rather than read inside `gui`, which is the standing
+			// rule `render::FlipbookFrameAt` and `assets::Grant` both keep -
+			// see `CompileRequest::Seconds`.
+			request.Seconds = engine::core::Clock::Seconds();
+
 			request.Display.Width = static_cast<float>(Settings.Width);
 			request.Display.Height = static_cast<float>(Settings.Height);
 

@@ -270,5 +270,15 @@ namespace engine::gui {
 		ecs::Components::Register<TableLayout>("gui.TableLayout");
 		ecs::Components::Register<PageLayout>("gui.PageLayout");
 		ecs::Components::Register<DragDetector>("gui.DragDetector");
+
+		// Derived and local, like `ScrollState` and for a sharper version of
+		// its reason: this one holds a moment on *this* process's clock. A
+		// client handed a server's timestamp would slide from wherever that
+		// server's uptime happened to put it. Excluded from replication in
+		// `replication::DefaultReplicatedComponents`; what crosses is
+		// `PageLayout::CurrentPage`, and each end animates to it on its own
+		// clock.
+		ecs::Components::Register<PageMotion>("gui.PageMotion");
+		ecs::Components::Register<ScrollMotion>("gui.ScrollMotion");
 	}
 }

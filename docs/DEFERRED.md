@@ -67,27 +67,39 @@ here rather than declared and left answering a default.
   produce. **Reopen trigger: a decoder in `mono.vendor` and a
   `assets::VideoData` beside `TextureData`.**
 
-- **`SelectionBox.LineThickness`, `.SurfaceColor3` and `.SurfaceTransparency`.**
-  `render::AdornmentGeometry` emits `AdornmentLine` and nothing else, and its own
-  header says why: an adornment is twelve edges and filling one would hide the
-  thing it is drawn around. A thickness needs variable-width world lines and a
-  surface needs filled faces, which are two renderer capabilities rather than two
-  properties.
+- ~~**`SelectionBox.LineThickness`, `.SurfaceColor3` and
+  `.SurfaceTransparency`.**~~ **Shipped at v0.17, and the reason they were
+  deferred was wrong in a way worth recording.**
 
-  **The blocker is larger than that paragraph says, and it was found by costing
-  the work at v0.17 rather than by doing it.** `AdornmentGeometry::Build` and
-  `Lines()` have **no caller anywhere** - not in `mono.client`, not in
-  `mono.studio`, not elsewhere in `render` - and no world-space line pass exists
-  for them to feed. So a `SelectionBox` draws nothing today whatever its
-  properties say, and the three members here are absent from a class whose
-  *implemented* members are equally unreachable. Adding filled faces would mean
-  building the draw pass first, which is a renderer feature rather than a
-  property. The module is forward API and correctly kept - `AdornmentGeometry`
-  is tested and headless, which is what makes it cheap to leave standing until
-  something draws it.
+  This entry said they needed "a triangle path for adornments". What was
+  actually missing was *any* path: `render::AdornmentGeometry::Build` and
+  `Lines()` had no caller anywhere in the repository - not in `mono.client`, not
+  in `mono.studio`, not elsewhere in `render` - and no pass drew a world-space
+  line. A `SelectionBox` therefore drew nothing whatever its properties said,
+  and three absent members sat on a class whose *implemented* members were
+  equally unreachable. The entry named the second obstacle and missed the first.
 
-  **Reopen trigger, sharpened: a pass that draws `AdornmentGeometry::Lines()`.**
-  A triangle path is the second thing this needs, not the first.
+  **The consumer is an overlay, not a render pass**, which is the arrangement
+  `Editor::DrawColliderOutlines` already had and argues for in full: the studio
+  projects world points into a panel and hands imgui segments, so
+  `Editor::DrawAdornments` is a list of lines and no pipeline, no shader and no
+  target. It also gets from imgui the two things a pass would have had to build
+  - a line width that is a real number rather than a device setting with no
+  portable guarantee, and a filled convex polygon.
+
+  `LineThickness` is carried in **studs** and converted per segment against how
+  far away that segment is, because a box outlined in pixels keeps its weight as
+  it recedes and ends up a solid blob. The surface is six wound quads and is
+  emitted only when `SurfaceTransparency` moves off 1 - a drawer handed six
+  invisible quads still projects and rasterises them, which is the whole cost of
+  the feature paid by everybody who did not ask for it.
+
+  **What is still absent is depth**, and it is stated rather than implied.
+  `AlwaysOnTop` is honoured in its `true` sense only, because an overlay is
+  drawn after the world and has no depth buffer to test against. That is the
+  right way round for the default. **Reopen trigger for the `false` sense: a
+  world-space pass that draws these with a depth test** - which is also what a
+  *client* would need, since this consumer is the studio's.
 
 - **`ImageLabel.IsLoaded` and `ImageButton.IsLoaded`.** Whether a texture has
   staged is the client's texture cache's answer, and `gui` is L7 `shared` - the
@@ -102,14 +114,55 @@ here rather than declared and left answering a default.
   right-to-left runs are not a property away. **Reopen trigger: HarfBuzz or
   equivalent behind the atlas.**
 
-- **The animated halves: `UIPageLayout.Animated`, `.TweenTime`, `.EasingStyle`,
-  `.EasingDirection`, and `ScrollingFrame.ElasticBehavior`'s spring.** A tween
-  needs a clock and `gui` is L7 with no notion of a frame time - the standing
-  rule `render::Flipbook` and `assets::Grant` both keep. The *placement* both
-  properties decorate is implemented; what is missing is motion between two
-  states. `ElasticBehavior` is declared and pinned anyway, because its three
-  members are the save format. **Reopen trigger: a tick this module may read, or
-  a `control`-tier animator that writes the two properties from above.**
+- ~~**The animated halves: `UIPageLayout.Animated`, `.TweenTime`, `.EasingStyle`,
+  `.EasingDirection`, and `ScrollingFrame.ElasticBehavior`'s spring.**~~ **All
+  five shipped at v0.17, and the objection they were filed under was the wrong
+  shape of answer.**
+
+  The entry said a tween needs a clock and `gui` is L7 with none. Every other
+  module in this engine that needs a clock is *handed* one:
+  `render::FlipbookFrameAt` takes `seconds` and answers which frame is showing,
+  `assets::Grant::HasExpired` takes `nowSeconds`, `net` reads no clock at all.
+  So the answer was never "give `gui` a tick" or "put an animator above it" -
+  it was `CompileRequest::Seconds`, and this module still reads no clock.
+
+  **Both are pure functions of elapsed time rather than states a tick
+  advances**, which is what `Flipbook` buys and buys the same things here: a
+  carousel halfway through a slide is a value a suite *states* rather than one
+  it steps a hundred frames to reach, and a rubber band recovers at the same
+  rate whatever the frame rate. `core::TweenInfo::Ease` already existed and is
+  the whole of the easing, so no curve was written for this.
+
+  **The clock touches two functions and neither is in the walk.**
+  `AdvancePages` and `AdvanceScrolling` run once before `gui::Layout`'s
+  recursion and turn seconds into a number - a page's `Alpha`, a canvas's
+  `Overshoot`. `Place` is recursive and reached from five run functions;
+  threading a time argument through all of them to serve one caller would have
+  put a clock on every layout in the module.
+
+  **`ElasticBehavior` had a second blocker the entry did not know about, and it
+  was the larger one: nothing dragged a canvas at all.** The only caller of the
+  scroll mover was the wheel, and a wheel does not overscroll in Roblox either -
+  so the property was authored, replicated and describing a pull nothing could
+  produce. `Router::BeginCanvasDrag` is the gesture, gated on the pick finding
+  nothing active so a button inside a list stays clickable.
+
+  **Two findings worth keeping, both caught by tests rather than by review.**
+  The first is that the signature has to fold the clock *while something is
+  moving and only then*: folding the resolved numbers alone is circular, since
+  they cannot change until the layout runs and the layout does not run until
+  they change - so an animation ran for exactly one frame. Folding `Seconds`
+  unconditionally is the other failure and a worse one, because every still
+  interface in the engine would rebuild its draw list every frame forever. The
+  second is that the first sight of a layout must *adopt* its page rather than
+  slide to it: a `UIPageLayout` authored with `CurrentPage` set is saying where
+  it starts, and animating that made every interface swing into place when it
+  opened.
+
+  `gui.PageMotion` and `gui.ScrollMotion` are local and never replicated, on a
+  sharper ground than the four rows already on that list: they hold a reading of
+  *this* process's monotonic clock, which means nothing on another one. What
+  crosses is the destination, and each end animates to it on its own clock.
 
 - **`GuiObject.GuiState` and `.InputSink`.** `GuiState` is Idle/Hover/Press and
   those live on `gui::Router`, which is deliberately not a component - nobody

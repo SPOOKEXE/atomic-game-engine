@@ -10,6 +10,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <cmath>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -832,4 +833,176 @@ TEST_CASE("a line drag keeps only what lies along its axis", "[gui][input]") {
 	Send(world, pointer);
 
 	CHECK(world.Data.Get<Element>(panel)->Position.Y.Offset == Approx(70.0f));
+}
+
+TEST_CASE("a drag on a scrolling frame's background moves its canvas", "[gui][input]") {
+	// **The gesture `ElasticBehavior` was always about.** Until v0.17 the only
+	// thing that ever moved a canvas was the wheel, so the property was
+	// authored, replicated, and describing a pull nothing could produce.
+	World world("gui_input.canvasdrag");
+
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("ScrollingFrame", screen);
+	world.Box(frame, 0.0f, 0.0f, 100.0f, 100.0f);
+
+	Scrolling scrolling;
+	scrolling.CanvasSize = UDim2{0.0f, 100.0f, 0.0f, 400.0f};
+	world.Data.Set(frame, scrolling);
+
+	// Press on the frame's own background, then drag upward. The content
+	// follows the hand, so the canvas moves the other way - which is what every
+	// touch surface does and the opposite of what a scroll bar does.
+	world.Move(40.0f, 80.0f, true);
+	REQUIRE(world.Route.CanvasHeld() == frame);
+
+	world.Move(40.0f, 50.0f, true);
+	CHECK(world.Data.Get<Scrolling>(frame)->CanvasPosition.Y == Approx(30.0f));
+
+	world.Move(40.0f, 30.0f, true);
+	CHECK(world.Data.Get<Scrolling>(frame)->CanvasPosition.Y == Approx(50.0f));
+
+	world.Move(40.0f, 30.0f, false);
+	CHECK(world.Route.CanvasHeld() == engine::ecs::NULL_ENTITY);
+	CHECK(world.Data.Get<Scrolling>(frame)->CanvasPosition.Y == Approx(50.0f));
+}
+
+TEST_CASE("a press on something active is not a canvas drag", "[gui][input]") {
+	// **The rule that keeps a list usable.** A button inside a scrolling frame
+	// has to stay clickable, so only a press on the frame's own background is a
+	// scroll gesture. Getting this wrong makes every button in every list into
+	// a scroll handle, which is invisible until somebody tries to press one.
+	World world("gui_input.canvasdragpick");
+
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("ScrollingFrame", screen);
+	world.Box(frame, 0.0f, 0.0f, 100.0f, 100.0f);
+
+	Scrolling scrolling;
+	scrolling.CanvasSize = UDim2{0.0f, 100.0f, 0.0f, 400.0f};
+	world.Data.Set(frame, scrolling);
+
+	const Entity button = world.Make("TextButton", screen);
+	world.Data.SetParent(button, frame);
+	world.Box(button, 0.0f, 0.0f, 80.0f, 20.0f);
+
+	world.Move(40.0f, 10.0f, true);
+	CHECK(world.Route.CanvasHeld() == engine::ecs::NULL_ENTITY);
+	CHECK(world.Route.Pressed() == button);
+
+	// And the canvas did not move under the press either.
+	world.Move(40.0f, 5.0f, true);
+	CHECK(world.Data.Get<Scrolling>(frame)->CanvasPosition.Y == Approx(0.0f));
+}
+
+TEST_CASE("a pull past the end is resisted, bounded and springs back", "[gui][input]") {
+	// The three halves of `ElasticBehavior`, in the order somebody meets them.
+	World world("gui_input.elastic");
+
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("ScrollingFrame", screen);
+	world.Box(frame, 0.0f, 0.0f, 100.0f, 100.0f);
+
+	Scrolling scrolling;
+	scrolling.CanvasSize = UDim2{0.0f, 100.0f, 0.0f, 400.0f};
+	scrolling.Elastic = ElasticBehavior::WhenScrollable;
+	world.Data.Set(frame, scrolling);
+
+	const auto overshoot = [&]() {
+		const ScrollMotion *motion = world.Data.Get<ScrollMotion>(frame);
+		return motion != nullptr ? motion->Overshoot.Y : 0.0f;
+	};
+
+	// Already at the top, so dragging down can only go past the end.
+	world.Move(40.0f, 20.0f, true);
+	REQUIRE(world.Route.CanvasHeld() == frame);
+
+	world.Move(40.0f, 60.0f, true);
+
+	// **Resisted by half**, so forty pixels of hand is twenty of canvas. And
+	// `CanvasPosition` stays inside its range while the frame is visibly past
+	// the end, which is what keeps a script's idea of the canvas from lurching.
+	CHECK(overshoot() == Approx(-20.0f));
+	CHECK(world.Data.Get<Scrolling>(frame)->CanvasPosition.Y == Approx(0.0f));
+
+	// **Bounded to a fraction of the window**, so a flick cannot drag the
+	// content off the frame entirely. The window is a hundred tall.
+	world.Move(40.0f, 600.0f, true);
+	CHECK(overshoot() == Approx(-35.0f));
+
+	// Let go, and the rubber band comes back along a decay.
+	world.Move(40.0f, 600.0f, false);
+	CHECK(world.Route.CanvasHeld() == engine::ecs::NULL_ENTITY);
+
+	// **The first layout after the release is when the spring starts**, not the
+	// release itself: the router has no clock and deliberately does not get one,
+	// so it says "this was let go of" and the layout says when. The pull is
+	// still its full height at that moment.
+	world.Request.Seconds = 0.0;
+	world.Compile();
+	CHECK(overshoot() == Approx(-35.0f));
+
+	// The time constant is 0.12s, so one of them leaves about a third.
+	world.Request.Seconds = 0.12;
+	world.Compile();
+	CHECK(overshoot() == Approx(-35.0f * std::exp(-1.0f)).margin(0.5f));
+
+	// And it settles rather than approaching forever, which is what stops the
+	// compile signature moving for a frame nobody can see.
+	world.Request.Seconds = 2.0;
+	world.Compile();
+	CHECK(overshoot() == Approx(0.0f));
+	CHECK(world.Data.Get<ScrollMotion>(frame)->ReleasedAt < 0.0);
+}
+
+TEST_CASE("elastic never means the canvas stops at its end", "[gui][input]") {
+	World world("gui_input.elasticnever");
+
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("ScrollingFrame", screen);
+	world.Box(frame, 0.0f, 0.0f, 100.0f, 100.0f);
+
+	Scrolling scrolling;
+	scrolling.CanvasSize = UDim2{0.0f, 100.0f, 0.0f, 400.0f};
+	scrolling.Elastic = ElasticBehavior::Never;
+	world.Data.Set(frame, scrolling);
+
+	world.Move(40.0f, 20.0f, true);
+	REQUIRE(world.Route.CanvasHeld() == frame);
+	world.Move(40.0f, 200.0f, true);
+
+	const ScrollMotion *motion = world.Data.Get<ScrollMotion>(frame);
+	REQUIRE(motion != nullptr);
+	CHECK(motion->Overshoot.Y == Approx(0.0f));
+	CHECK(world.Data.Get<Scrolling>(frame)->CanvasPosition.Y == Approx(0.0f));
+}
+
+TEST_CASE("a frame with nothing to scroll only stretches when told Always", "[gui][input]") {
+	// `WhenScrollable` is the member worth a case: it asks whether there is
+	// anything to scroll, so a short list in a tall frame does not rubber-band.
+	World world("gui_input.elasticshort");
+
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("ScrollingFrame", screen);
+	world.Box(frame, 0.0f, 0.0f, 100.0f, 100.0f);
+
+	const auto pullFor = [&](ElasticBehavior behaviour) {
+		Scrolling scrolling;
+		// A canvas smaller than the window: nothing to scroll at all.
+		scrolling.CanvasSize = UDim2{0.0f, 50.0f, 0.0f, 50.0f};
+		scrolling.Elastic = behaviour;
+		scrolling.CanvasPosition = Vector2{0.0f, 0.0f};
+		world.Data.Set(frame, scrolling);
+		world.Data.Set(frame, ScrollMotion{});
+		world.Route.Forget();
+
+		world.Move(40.0f, 20.0f, true);
+		world.Move(40.0f, 60.0f, true);
+		const ScrollMotion *motion = world.Data.Get<ScrollMotion>(frame);
+		const float pull = motion != nullptr ? motion->Overshoot.Y : 0.0f;
+		world.Move(40.0f, 60.0f, false);
+		return pull;
+	};
+
+	CHECK(pullFor(ElasticBehavior::WhenScrollable) == Approx(0.0f));
+	CHECK(pullFor(ElasticBehavior::Always) == Approx(-20.0f));
 }

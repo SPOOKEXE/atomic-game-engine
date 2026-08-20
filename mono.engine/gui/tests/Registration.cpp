@@ -156,6 +156,11 @@ TEST_CASE("the property surface exposes no controls without consumers", "[gui][r
 	// These fields remain reserved in the raw components for format stability,
 	// but none has an input, layout, or render consumer yet. Advertising them
 	// would turn a successful write into a visible no-op.
+	//
+	// **The list is meant to shrink**, and every removal below records what
+	// arrived to allow it. A property leaving this case is the only evidence
+	// that "absent because the thing behind it is" was a statement about the
+	// engine rather than a permanent excuse.
 	CHECK_FALSE(has("TextButton", "Modal"));
 	CHECK_FALSE(has("TextButton", "Selected"));
 
@@ -167,9 +172,29 @@ TEST_CASE("the property surface exposes no controls without consumers", "[gui][r
 	CHECK(has("ScrollingFrame", "ScrollingEnabled"));
 	CHECK(has("ScrollingFrame", "AutomaticCanvasSize"));
 
-	CHECK_FALSE(has("SelectionBox", "LineThickness"));
-	CHECK_FALSE(has("SelectionBox", "SurfaceColor3"));
-	CHECK_FALSE(has("SelectionBox", "SurfaceTransparency"));
+	// **The three `SelectionBox` members left this list at v0.17**, and what
+	// unblocked them is worth recording because it was not what the entry that
+	// held them back predicted. `docs/DEFERRED.md` said they needed "a triangle
+	// path for adornments"; what was actually missing was any path at all -
+	// `render::AdornmentGeometry` had no caller anywhere and no pass in the
+	// engine drew a world-space line, so a `SelectionBox` drew nothing whatever
+	// its properties said. `Editor::DrawAdornments` is the consumer, and the
+	// surface arrived with it rather than after it.
+	CHECK(has("SelectionBox", "LineThickness"));
+	CHECK(has("SelectionBox", "SurfaceColor3"));
+	CHECK(has("SelectionBox", "SurfaceTransparency"));
+
+	// A `SelectionSphere` shares the component, so it shares the three. Checked
+	// because sharing is Roblox's arrangement rather than an implementation
+	// detail: both are a `PVAdornment` with an outline and a surface.
+	CHECK(has("SelectionSphere", "LineThickness"));
+	CHECK(has("SelectionSphere", "SurfaceTransparency"));
+
+	// And a handle still has none of them, which is the half that keeps the
+	// rule honest: `gui::SelectionOutline` is on the two selection classes only,
+	// so a grab target does not grow a surface it would draw as six slabs.
+	CHECK_FALSE(has("BoxHandleAdornment", "LineThickness"));
+	CHECK_FALSE(has("BoxHandleAdornment", "SurfaceTransparency"));
 
 	// Neighbouring implemented controls stay present, so this cannot pass by
 	// accidentally dropping the component or the whole class.

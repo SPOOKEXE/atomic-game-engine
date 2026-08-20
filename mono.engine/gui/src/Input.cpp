@@ -539,6 +539,157 @@ namespace engine::gui {
 		};
 	}
 
+	namespace {
+		// How much of a drag past the end actually moves the canvas.
+		//
+		// **Resisted rather than refused, and resisted by a constant rather than
+		// by a curve.** A diminishing function reads better under a finger and
+		// is a worse thing to test: half is a number a case can assert exactly,
+		// and the difference is invisible at the twenty or thirty pixels anybody
+		// actually pulls.
+		constexpr float ELASTIC_RESISTANCE = 0.5f;
+
+		// The furthest a pull may reach, as a fraction of the window it is in.
+		// Bounded so a flick cannot drag the content off the frame entirely.
+		constexpr float ELASTIC_REACH = 0.35f;
+
+		// Whether this axis may be pulled past its end at all.
+		//
+		// `WhenScrollable` is the interesting member: it asks whether there is
+		// anything to scroll, which is the same question `Scrolls` answers, so a
+		// short list in a tall frame does not rubber-band.
+		bool Elastic(const Scrolling &scrolling, const ScrollState &state, bool vertical) {
+			switch (scrolling.Elastic) {
+			case ElasticBehavior::Never:
+				return false;
+			case ElasticBehavior::Always:
+				return true;
+			case ElasticBehavior::WhenScrollable:
+				break;
+			}
+			return Scrolls(scrolling, state, vertical);
+		}
+	}
+
+	bool Router::BeginCanvasDrag(Store &store, const DrawList &list, const Vector2 &point) {
+		// Topmost first, which is the same walk the bars take and for the same
+		// reason: a frame drawn over another frame gets the press.
+		for (size_t index = list.Commands.size(); index > 0; index--) {
+			const DrawCommand &command = list.Commands[index - 1];
+
+			const Scrolling *scrolling = store.Get<Scrolling>(command.Source);
+			const ScrollState *state = store.Get<ScrollState>(command.Source);
+			if (scrolling == nullptr || state == nullptr || !scrolling->Enabled ||
+				!command.Clip.Contains(point)) {
+				continue;
+			}
+
+			// **A frame that cannot move and cannot stretch is not holding
+			// anything.** Taking the press anyway would swallow it from
+			// whatever is behind, which for a list that happens to fit its
+			// window is every press in it.
+			const bool movesY = Scrolls(*scrolling, *state, true) || Elastic(*scrolling, *state, true);
+			const bool movesX = Scrolls(*scrolling, *state, false) || Elastic(*scrolling, *state, false);
+			if (!movesX && !movesY) {
+				continue;
+			}
+
+			Canvas = command.Source;
+
+			ScrollMotion motion;
+			if (const ScrollMotion *had = store.Get<ScrollMotion>(Canvas)) {
+				motion = *had;
+			}
+
+			// **The pull carries over from a spring still in flight**, so
+			// catching a bouncing list mid-return takes hold of it where it is
+			// rather than snapping it back to the end first.
+			motion.Pull = motion.Overshoot;
+			motion.Released = core::Vector2{};
+			motion.ReleasedAt = -1.0;
+			motion.LastPoint = point;
+			motion.Held = true;
+			store.Set(Canvas, motion);
+			return true;
+		}
+		return false;
+	}
+
+	void Router::DragCanvas(Store &store, const Vector2 &point) {
+		if (Canvas == NULL_ENTITY) {
+			return;
+		}
+
+		Scrolling *scrolling = store.GetMutable<Scrolling>(Canvas);
+		const ScrollState *state = store.Get<ScrollState>(Canvas);
+		ScrollMotion *motion = store.GetMutable<ScrollMotion>(Canvas);
+		if (scrolling == nullptr || state == nullptr || motion == nullptr) {
+			return;
+		}
+
+		// **The content follows the hand**, so dragging down reveals what is
+		// above - the canvas position moves the other way. That is what every
+		// touch surface does and the opposite of what a scroll bar does, which
+		// is why this is not `DragBar` with a different grab.
+		const Vector2 moved{point.X - motion->LastPoint.X, point.Y - motion->LastPoint.Y};
+		motion->LastPoint = point;
+
+		const auto axis = [&](bool vertical) {
+			const float delta = vertical ? -moved.Y : -moved.X;
+			const float range = std::max(
+				vertical ? state->CanvasSize.Y - state->WindowSize.Y
+						 : state->CanvasSize.X - state->WindowSize.X,
+				0.0f
+			);
+			const float at = vertical ? scrolling->CanvasPosition.Y : scrolling->CanvasPosition.X;
+			float &pull = vertical ? motion->Pull.Y : motion->Pull.X;
+
+			// Inside the range this is an ordinary scroll and the rubber band
+			// is not involved at all.
+			const float wanted = at + delta + pull;
+			if (wanted >= 0.0f && wanted <= range && pull == 0.0f) {
+				(vertical ? scrolling->CanvasPosition.Y : scrolling->CanvasPosition.X) =
+					std::clamp(at + delta, 0.0f, range);
+				return;
+			}
+
+			if (!Elastic(*scrolling, *state, vertical)) {
+				(vertical ? scrolling->CanvasPosition.Y : scrolling->CanvasPosition.X) =
+					std::clamp(at + delta, 0.0f, range);
+				pull = 0.0f;
+				return;
+			}
+
+			// Past an end: the position pins to that end and the surplus
+			// becomes pull, resisted and bounded.
+			const float pinned = std::clamp(wanted, 0.0f, range);
+			const float surplus = wanted - pinned;
+			const float reach = (vertical ? state->WindowSize.Y : state->WindowSize.X) * ELASTIC_REACH;
+
+			(vertical ? scrolling->CanvasPosition.Y : scrolling->CanvasPosition.X) = pinned;
+			pull = std::clamp(surplus * ELASTIC_RESISTANCE, -reach, reach);
+		};
+
+		axis(true);
+		axis(false);
+		motion->Overshoot = motion->Pull;
+	}
+
+	void Router::ReleaseCanvas(Store &store) {
+		if (Canvas == NULL_ENTITY) {
+			return;
+		}
+
+		// **`Held` off and nothing else.** The layout stamps when it was let go
+		// of, because the layout is the half of this that has a clock - see
+		// `AdvanceScrolling`.
+		if (ScrollMotion *motion = store.GetMutable<ScrollMotion>(Canvas)) {
+			motion->Held = false;
+			motion->ReleasedAt = -1.0;
+		}
+		Canvas = NULL_ENTITY;
+	}
+
 	void Router::DragBar(Store &store, const Vector2 &point) {
 		const Scrolling *scrolling = store.Get<Scrolling>(Dragging);
 		const ScrollState *state = store.Get<ScrollState>(Dragging);
@@ -637,6 +788,17 @@ namespace engine::gui {
 			return Events;
 		}
 
+		// **A held canvas, on the same footing as a held bar**, and before the
+		// detector for the reason the bar is before both: a gesture already in
+		// flight owns the pointer until it is let go of.
+		if (pointer.Down && Canvas != NULL_ENTITY) {
+			DragCanvas(store, pointer.Position);
+			Last = pointer.Position;
+			WasDown = true;
+			Started = true;
+			return Events;
+		}
+
 		// **A held drag detector, on the same footing as a held bar.** The
 		// element being dragged is not being *pressed* - a drag that lit up the
 		// button it started on and activated it on release would make every
@@ -708,6 +870,19 @@ namespace engine::gui {
 				return Events;
 			}
 
+			// **Last of the three gestures, and gated on the pick finding
+			// nothing.** A press that landed on something a script can react to
+			// belongs to that thing: a button in a scrolling list stays
+			// clickable, and only a press on the frame's own background is a
+			// scroll. That ordering is why this sits below `BeginDrag` rather
+			// than beside the bars, which win outright.
+			if (found == NULL_ENTITY && BeginCanvasDrag(store, list, pointer.Position)) {
+				Last = pointer.Position;
+				WasDown = true;
+				Started = true;
+				return Events;
+			}
+
 			Holding = found;
 			emit(EventKind::InputBegan, found);
 
@@ -740,6 +915,10 @@ namespace engine::gui {
 			// which is the same rule `Router::Forget` states from the other side:
 			// firing at something nothing pressed is worse than firing nothing.
 			Dragging = NULL_ENTITY;
+
+			// Letting go of a canvas owes no event either, and starts the
+			// rubber band coming back. Same rule, one gesture along.
+			ReleaseCanvas(store);
 
 			// A drag ends the same way, and it is the one of the two that owes
 			// an event: a script watching `DragEnd` is what commits whatever the

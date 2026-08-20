@@ -1437,17 +1437,181 @@ TEST_CASE("a page layout shows one child and slides the rest aside", "[gui][layo
 	CHECK(world.Where(pages[0]).AbsolutePosition.X == Approx(-100.0f));
 	CHECK(world.Where(pages[2]).AbsolutePosition.X == Approx(300.0f));
 
+	// **`Animated` off from here down, because this case is about placement.**
+	// Sliding arrived at v0.17 and has its own three cases below; asking about
+	// where a page *ends up* while a tween is a tenth of the way through it
+	// would be asking two questions and asserting one.
+	PageLayout unset;
+	unset.Animated = false;
+	world.Data.Set(layout, unset);
+	Layout(world.Data, world.Display);
+
 	// **An unset `CurrentPage` is the first one**, which is what an author who
 	// set nothing means and what a page destroyed mid-show leaves behind.
-	world.Data.Set(layout, PageLayout{});
-	Layout(world.Data, world.Display);
 	CHECK(world.Where(pages[0]).AbsolutePosition.X == Approx(100.0f));
 
 	// Circular wraps to the nearer side, so the page before the first is drawn
 	// just off the near edge rather than at the far end of everything.
 	PageLayout loop;
 	loop.Circular = true;
+	loop.Animated = false;
 	world.Data.Set(layout, loop);
 	Layout(world.Data, world.Display);
 	CHECK(world.Where(pages[2]).AbsolutePosition.X == Approx(-100.0f));
+}
+
+TEST_CASE("a page layout slides between pages over time", "[gui][layout]") {
+	// **The whole feature is that the position is a function of elapsed time**,
+	// so every assertion here states a moment rather than stepping frames to
+	// reach one. That is `render::FlipbookFrameAt`'s shape and it is why this
+	// case runs in microseconds and has no sleep in it.
+	World world("gui_layout.pageslide");
+
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("Frame", screen);
+
+	Element outer;
+	outer.Position = UDim2{0.0f, 0.0f, 0.0f, 0.0f};
+	outer.Size = UDim2{0.0f, 200.0f, 0.0f, 100.0f};
+	world.Data.Set(frame, outer);
+
+	const Entity layout = world.Make("UIPageLayout", frame);
+
+	Entity pages[3]{};
+	for (int index = 0; index < 3; index++) {
+		pages[index] = world.Make("Frame", frame);
+		Element page;
+		page.LayoutOrder = index;
+		world.Data.Set(pages[index], page);
+	}
+
+	// Linear, so the arithmetic below is the position rather than a curve's
+	// opinion of it. The curves themselves are `core::TweenInfo`'s to test and
+	// `engine.core.tweeninfo` does.
+	PageLayout paging;
+	paging.CurrentPage = pages[0];
+	paging.Animated = true;
+	paging.TweenTime = 2.0f;
+	paging.Easing = engine::core::EasingStyle::Linear;
+	paging.EasingWay = engine::core::EasingDirection::In;
+	world.Data.Set(layout, paging);
+
+	// Settle on page 0 first, so the jump below is the only motion in flight.
+	Layout(world.Data, world.Display, 100.0);
+	Layout(world.Data, world.Display, 110.0);
+	REQUIRE(world.Where(pages[0]).AbsolutePosition.X == Approx(0.0f));
+
+	paging.CurrentPage = pages[1];
+	world.Data.Set(layout, paging);
+
+	// The jump is noticed on the next layout, and nothing has moved yet.
+	Layout(world.Data, world.Display, 200.0);
+	CHECK(world.Where(pages[0]).AbsolutePosition.X == Approx(0.0f));
+	CHECK(world.Where(pages[1]).AbsolutePosition.X == Approx(200.0f));
+
+	// Halfway through two seconds is half a page, and a page is the container.
+	Layout(world.Data, world.Display, 201.0);
+	CHECK(world.Where(pages[0]).AbsolutePosition.X == Approx(-100.0f));
+	CHECK(world.Where(pages[1]).AbsolutePosition.X == Approx(100.0f));
+
+	// And past the end it is exactly there rather than nearly there.
+	Layout(world.Data, world.Display, 202.0);
+	CHECK(world.Where(pages[1]).AbsolutePosition.X == Approx(0.0f));
+
+	// **Settled, so it stays put however much time passes.** A layout that kept
+	// evaluating a finished tween would keep moving the signature with it.
+	Layout(world.Data, world.Display, 900.0);
+	CHECK(world.Where(pages[1]).AbsolutePosition.X == Approx(0.0f));
+}
+
+TEST_CASE("a page layout cuts when it is told not to animate", "[gui][layout]") {
+	World world("gui_layout.pagecut");
+
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("Frame", screen);
+
+	Element outer;
+	outer.Size = UDim2{0.0f, 200.0f, 0.0f, 100.0f};
+	world.Data.Set(frame, outer);
+
+	const Entity layout = world.Make("UIPageLayout", frame);
+
+	Entity pages[2]{};
+	for (int index = 0; index < 2; index++) {
+		pages[index] = world.Make("Frame", frame);
+		Element page;
+		page.LayoutOrder = index;
+		world.Data.Set(pages[index], page);
+	}
+
+	const auto jump = [&](bool animated, float tweenTime) {
+		PageLayout paging;
+		paging.Animated = animated;
+		paging.TweenTime = tweenTime;
+		paging.CurrentPage = pages[0];
+		world.Data.Set(layout, paging);
+		Layout(world.Data, world.Display, 10.0);
+
+		paging.CurrentPage = pages[1];
+		world.Data.Set(layout, paging);
+		Layout(world.Data, world.Display, 10.0);
+		return world.Where(pages[1]).AbsolutePosition.X;
+	};
+
+	// **Two properties that draw the same thing and read back differently**,
+	// which is Roblox's arrangement: one says this layout does not animate and
+	// the other says it animates over no time.
+	CHECK(jump(false, 1.0f) == Approx(0.0f));
+	CHECK(jump(true, 0.0f) == Approx(0.0f));
+
+	// And with both on, the same jump has not moved at the instant it begins.
+	CHECK(jump(true, 1.0f) == Approx(200.0f));
+}
+
+TEST_CASE("a circular page layout slides the short way round", "[gui][layout]") {
+	// The case wrapping exists for: going from the last page to the first is
+	// one step forward, not two steps back past everything. Without wrapping
+	// the *distance* as well as each page's offset, the loop reads as a rewind.
+	World world("gui_layout.pageloop");
+
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("Frame", screen);
+
+	Element outer;
+	outer.Size = UDim2{0.0f, 200.0f, 0.0f, 100.0f};
+	world.Data.Set(frame, outer);
+
+	const Entity layout = world.Make("UIPageLayout", frame);
+
+	Entity pages[3]{};
+	for (int index = 0; index < 3; index++) {
+		pages[index] = world.Make("Frame", frame);
+		Element page;
+		page.LayoutOrder = index;
+		world.Data.Set(pages[index], page);
+	}
+
+	PageLayout paging;
+	paging.Circular = true;
+	paging.Animated = true;
+	paging.TweenTime = 2.0f;
+	paging.Easing = engine::core::EasingStyle::Linear;
+	paging.EasingWay = engine::core::EasingDirection::In;
+	paging.CurrentPage = pages[2];
+	world.Data.Set(layout, paging);
+
+	Layout(world.Data, world.Display, 10.0);
+	Layout(world.Data, world.Display, 20.0);
+	REQUIRE(world.Where(pages[2]).AbsolutePosition.X == Approx(0.0f));
+
+	// Last page to first. The short way is forward by one, so halfway through
+	// the strip has moved half a container forward and page 2 is on its way out
+	// to the left rather than sweeping back across two pages.
+	paging.CurrentPage = pages[0];
+	world.Data.Set(layout, paging);
+	Layout(world.Data, world.Display, 30.0);
+	Layout(world.Data, world.Display, 31.0);
+
+	CHECK(world.Where(pages[2]).AbsolutePosition.X == Approx(-100.0f));
+	CHECK(world.Where(pages[0]).AbsolutePosition.X == Approx(100.0f));
 }

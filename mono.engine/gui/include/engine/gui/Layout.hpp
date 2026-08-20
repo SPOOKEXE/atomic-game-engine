@@ -134,8 +134,13 @@ namespace engine::gui {
 	// is zeroed: an element scrolled out of view keeps the rectangle it had, so
 	// the hit test does not have to tell "off screen" from "never laid out".
 	//
-	// @param store    The world.
-	// @param screen The screen a `ScreenGui` collects onto.
+	// @param store   The world.
+	// @param screen  The screen a `ScreenGui` collects onto.
+	// @param seconds The caller's monotonic clock. Only differences are read,
+	//        so the origin does not matter; see `CompileRequest::Seconds` for
+	//        why it is an argument rather than something this module reads.
+	//        Defaulted so every caller that lays out a still interface - which
+	//        is most tests - says nothing about time and gets a settled one.
 	// @return How many nodes were reached and marked rendered.
-	size_t Layout(ecs::Store &store, const Screen &screen);
+	size_t Layout(ecs::Store &store, const Screen &screen, double seconds = 0.0);
 }

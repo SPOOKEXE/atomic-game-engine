@@ -300,6 +300,11 @@ namespace engine::gui {
 			Dragging = ecs::NULL_ENTITY;
 			Detector = ecs::NULL_ENTITY;
 			Dragged = ecs::NULL_ENTITY;
+
+			// **The handle only.** A canvas the router forgets keeps whatever
+			// `ScrollMotion` it had, so the rubber band still comes back - this
+			// object is dropping a gesture, not undoing what the gesture did.
+			Canvas = ecs::NULL_ENTITY;
 		}
 
 		// The `ScrollingFrame` whose bar is being dragged, or null.
@@ -313,6 +318,17 @@ namespace engine::gui {
 		// @since v0.18
 		ecs::Entity ScrollBarHeld() const {
 			return Dragging;
+		}
+
+		// The frame whose content a drag is holding, or null.
+		//
+		// Beside `ScrollBarHeld` because it is the same question one gesture
+		// along: a caller asking "is this pointer already busy" has to ask both.
+		//
+		// @return The frame, or null.
+		// @since v0.17
+		ecs::Entity CanvasHeld() const {
+			return Canvas;
 		}
 
 		// The `UIDragDetector` a gesture is running through, or null.
@@ -338,6 +354,36 @@ namespace engine::gui {
 
 		// Moves a held bar's canvas to follow the pointer.
 		void DragBar(ecs::Store &store, const core::Vector2 &point);
+
+		// Takes hold of a scrolling frame's content, so a drag moves the canvas.
+		//
+		// **Only when the pick found nothing active**, which is the rule that
+		// keeps a button inside a scrolling list clickable: a press that landed
+		// on something a script can react to belongs to that thing, and only a
+		// press on the frame's own background is a scroll gesture.
+		//
+		// @param store   The world.
+		// @param list    What was drawn, for the frame's clip rectangle.
+		// @param point   Where the pointer went down.
+		// @return `true` when a frame took the press.
+		// @since v0.17
+		bool BeginCanvasDrag(ecs::Store &store, const DrawList &list, const core::Vector2 &point);
+
+		// Moves the held canvas to follow the pointer.
+		//
+		// Past the end the movement is resisted rather than refused, and how far
+		// it may go is `Scrolling::Elastic`. See `gui::ScrollMotion`.
+		//
+		// @param store The world.
+		// @param point Where the pointer is now.
+		// @since v0.17
+		void DragCanvas(ecs::Store &store, const core::Vector2 &point);
+
+		// Lets go of the held canvas, so the rubber band starts coming back.
+		//
+		// @param store The world.
+		// @since v0.17
+		void ReleaseCanvas(ecs::Store &store);
 
 		std::vector<GuiEvent> Events;
 		ecs::Entity Over;
@@ -371,6 +417,18 @@ namespace engine::gui {
 		core::UDim2 DragStart;
 		float DragAngle = 0.0f;
 		//@}
+
+		// --- the canvas drag -------------------------------------------------
+		//
+		// **The gesture `ElasticBehavior` was always about, and until v0.17 it
+		// did not exist.** The only thing that ever moved a canvas was the
+		// wheel, and a wheel does not overscroll - so the property was authored,
+		// replicated and unobservable. This is the frame a hand is holding;
+		// where it has been pulled to lives in `gui::ScrollMotion`, because
+		// that is a rectangle the layout has to read.
+		//
+		// @since v0.17
+		ecs::Entity Canvas;
 
 		core::Vector2 Last;
 		bool WasDown = false;

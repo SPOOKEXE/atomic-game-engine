@@ -380,7 +380,31 @@ namespace engine::gui {
 			running = Fold(running, value.Padding);
 			running = Fold(running, value.Direction);
 			running = Fold(running, value.Order);
-			return Fold(running, value.Circular);
+			running = Fold(running, value.Circular);
+			running = Fold(running, value.Animated);
+			running = Fold(running, value.TweenTime);
+			running = Fold(running, value.Easing);
+			return Fold(running, value.EasingWay);
+		}
+
+		// **The two motion rows are folded, and that is what makes an animation
+		// draw at all.** The signature decides whether a frame recompiles; a
+		// carousel that slid without moving the hash would draw its first frame
+		// and then sit there until something else in the tree changed.
+		//
+		// Folding the *resolved* number rather than the clock is what keeps a
+		// still interface still: `Alpha` and `Overshoot` stop changing the
+		// moment a slide lands or a spring settles, so a rebuild-per-frame
+		// lasts exactly as long as the motion does. Folding
+		// `CompileRequest::Seconds` instead would rebuild every frame forever.
+		uint64_t Fold(uint64_t running, const PageMotion &value) {
+			running = Fold(running, value.From);
+			running = Fold(running, value.To);
+			return Fold(running, value.Alpha);
+		}
+
+		uint64_t Fold(uint64_t running, const ScrollMotion &value) {
+			return Fold(running, value.Overshoot);
 		}
 
 		uint64_t Fold(uint64_t running, const AspectRatio &value) {
@@ -1161,6 +1185,38 @@ namespace engine::gui {
 		stamp = FoldRows<GridLayout>(store, stamp);
 		stamp = FoldRows<TableLayout>(store, stamp);
 		stamp = FoldRows<PageLayout>(store, stamp);
+		stamp = FoldRows<PageMotion>(store, stamp);
+		stamp = FoldRows<ScrollMotion>(store, stamp);
+
+		// **The clock is folded while something is moving and only then, and
+		// without this an animation runs for exactly one frame.** The signature
+		// is what decides whether `Rebuild` lays out at all, and the layout is
+		// what advances a slide or a spring - so folding only the *resolved*
+		// numbers is circular: they cannot change until the layout runs, and
+		// the layout does not run until they change.
+		//
+		// Folding `Seconds` unconditionally would be the other failure, and a
+		// worse one: every still interface in the engine would rebuild its
+		// whole draw list every frame forever.
+		//
+		// So the question asked is whether anything is *in flight*, which is a
+		// property of the rows rather than of the clock. It stops being true
+		// the moment a page lands or a spring settles, and the signature goes
+		// back to standing still with it.
+		bool moving = false;
+		store.Each<const PageMotion>([&](Entity, const PageMotion &motion) {
+			moving = moving || motion.From != motion.To;
+		});
+		store.Each<const ScrollMotion>([&](Entity, const ScrollMotion &motion) {
+			moving = moving || motion.Held || motion.ReleasedAt >= 0.0;
+		});
+		if (moving) {
+			// As a `float`, which is what every other real number here folds
+			// as. A `double` is ambiguous against the integer overload, and
+			// picking it would be folding more precision than an animation
+			// running at a frame rate can express anyway.
+			stamp = Fold(stamp, static_cast<float>(request.Seconds));
+		}
 		stamp = FoldRows<DragDetector>(store, stamp);
 		stamp = FoldRows<AspectRatio>(store, stamp);
 		stamp = FoldRows<SizeLimits>(store, stamp);
@@ -1183,7 +1239,7 @@ namespace engine::gui {
 		Fresh = true;
 		Built++;
 
-		Layout(store, request.Display);
+		Layout(store, request.Display, request.Seconds);
 
 		List.Commands.clear();
 		List.Gradients.clear();

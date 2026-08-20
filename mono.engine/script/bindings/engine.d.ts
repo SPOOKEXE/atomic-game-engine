@@ -1257,9 +1257,15 @@ declare interface PVAdornment extends GuiBase3d {
 }
 
 declare interface SelectionBox extends PVAdornment {
+	LineThickness: number;
+	SurfaceColor3: Color3;
+	SurfaceTransparency: number;
 }
 
 declare interface SelectionSphere extends PVAdornment {
+	LineThickness: number;
+	SurfaceColor3: Color3;
+	SurfaceTransparency: number;
 }
 
 declare interface HandleAdornment extends PVAdornment {
@@ -1556,11 +1562,15 @@ declare interface UITableLayout extends UILayout {
 }
 
 declare interface UIPageLayout extends UILayout {
+	Animated: boolean;
 	Circular: boolean;
 	CurrentPage: Instance;
+	EasingDirection: Enum.EasingDirection;
+	EasingStyle: Enum.EasingStyle;
 	FillDirection: Enum.FillDirection;
 	Padding: UDim;
 	SortOrder: Enum.SortOrder;
+	TweenTime: number;
 }
 
 declare interface UIConstraint extends UIComponent {

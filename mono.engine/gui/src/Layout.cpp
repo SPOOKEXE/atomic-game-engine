@@ -162,6 +162,17 @@ namespace engine::gui {
 			const GridLayout *Grid = nullptr;
 			const TableLayout *Table = nullptr;
 			const PageLayout *Page = nullptr;
+
+			// **Which instance `Page` came off, because the motion lives
+			// there.** Every other modifier is read and thrown away; this one
+			// has state beside it - `PageMotion` - and `AdvancePages` writes
+			// that onto the `UIPageLayout` rather than onto the container it
+			// modifies. Carrying the handle is what stops `RunPages` looking
+			// for it on the parent and quietly finding nothing, which is
+			// exactly the shape the first draft of this had: an animation that
+			// resolved correctly, was never read, and left every existing case
+			// passing.
+			ecs::Entity PageOn;
 			const AspectRatio *Aspect = nullptr;
 			const SizeLimits *Limits = nullptr;
 			const TextSizeLimits *TextLimits = nullptr;
@@ -305,6 +316,9 @@ namespace engine::gui {
 				}
 				if (found.Mods.Page == nullptr) {
 					found.Mods.Page = store.Get<PageLayout>(child);
+					if (found.Mods.Page != nullptr) {
+						found.Mods.PageOn = child;
+					}
 				}
 				if (found.Mods.Aspect == nullptr) {
 					found.Mods.Aspect = store.Get<AspectRatio>(child);
@@ -493,9 +507,23 @@ namespace engine::gui {
 			// reader that offsets by it, and `Router::Update` clamps what *it*
 			// writes. A script that assigns past the end therefore reads back
 			// what it wrote and still sees the canvas stop where it should.
+			//
+			// **The rubber band is added after the clamp and not folded into
+			// it**, which is the whole point of it: the clamp is where the
+			// canvas is *allowed* to stop and the overshoot is how far past
+			// that a hand has dragged it. Adding it here rather than widening
+			// the clamp means a script still reads `CanvasPosition` back inside
+			// the range while the frame is visibly past its end - which is
+			// Roblox's behaviour and the only one that keeps a script's idea of
+			// the canvas from lurching every time somebody flicks it.
+			Vector2 pull;
+			if (const ScrollMotion *motion = store.Get<ScrollMotion>(instance)) {
+				pull = motion->Overshoot;
+			}
+
 			const Vector2 scrolled{
-				std::clamp(scrolling->CanvasPosition.X, 0.0f, std::max(canvas.X - window.X, 0.0f)),
-				std::clamp(scrolling->CanvasPosition.Y, 0.0f, std::max(canvas.Y - window.Y, 0.0f)),
+				std::clamp(scrolling->CanvasPosition.X, 0.0f, std::max(canvas.X - window.X, 0.0f)) + pull.X,
+				std::clamp(scrolling->CanvasPosition.Y, 0.0f, std::max(canvas.Y - window.Y, 0.0f)) + pull.Y,
 			};
 
 			state = ScrollState{};
@@ -1619,14 +1647,177 @@ namespace engine::gui {
 			return placed;
 		}
 
+		// How hard the rubber band pulls back, as a time constant in seconds.
+		//
+		// **An exponential decay rather than a spring integration.** A spring
+		// needs a velocity and a step; a decay is a closed form, which is what
+		// makes the recovery a function of elapsed time - frame-rate
+		// independent by construction, and a thing a suite states rather than
+		// steps a hundred frames to reach.
+		constexpr float ELASTIC_SPRING_SECONDS = 0.12f;
+
+		// Below this the canvas is back and the state is dropped, so a settled
+		// frame stops folding a new number every tick.
+		constexpr float ELASTIC_SETTLED_PIXELS = 0.5f;
+
+		// Resolves every scrolling frame's rubber band against the clock, once.
+		//
+		// Held: the canvas sits where the drag put it. Let go: it comes back
+		// along a decay whose zero is the end of the canvas.
+		//
+		// @param store   The world.
+		// @param seconds The caller's clock. Only differences are read.
+		void AdvanceScrolling(Store &store, double seconds) {
+			std::vector<Entity> frames;
+			store.Each<const ScrollMotion>([&](Entity entity, const ScrollMotion &) {
+				frames.push_back(entity);
+			});
+
+			for (const Entity entity : frames) {
+				const ScrollMotion *had = store.Get<ScrollMotion>(entity);
+				if (had == nullptr) {
+					continue;
+				}
+				ScrollMotion motion = *had;
+
+				if (motion.Held) {
+					// A held canvas is wherever the hand put it, and the spring
+					// has not been let go of yet.
+					motion.Overshoot = motion.Pull;
+					motion.ReleasedAt = -1.0;
+					store.Set(entity, motion);
+					continue;
+				}
+
+				// **Stamped here rather than by the router**, which is what
+				// keeps the clock in one place. The router says "this was let
+				// go of"; the first layout after that says when.
+				if (motion.ReleasedAt < 0.0) {
+					motion.Released = motion.Pull;
+					motion.Pull = core::Vector2{};
+					motion.ReleasedAt = seconds;
+				}
+
+				const auto since = static_cast<float>(seconds - motion.ReleasedAt);
+				const float decay = std::exp(-std::max(since, 0.0f) / ELASTIC_SPRING_SECONDS);
+				motion.Overshoot = core::Vector2{motion.Released.X * decay, motion.Released.Y * decay};
+
+				if (std::abs(motion.Overshoot.X) < ELASTIC_SETTLED_PIXELS &&
+					std::abs(motion.Overshoot.Y) < ELASTIC_SETTLED_PIXELS) {
+					// Settled. Everything back to rest, so the fold below stops
+					// moving and the list stops rebuilding.
+					motion = ScrollMotion{};
+				}
+
+				store.Set(entity, motion);
+			}
+		}
+
+		// Resolves every page layout's slide against the clock, once.
+		//
+		// **Before the walk rather than inside it, and that is the whole design
+		// of this feature.** `Place` is recursive and reached from five run
+		// functions; threading a clock through all of them to serve one caller
+		// would put a time argument on every layout in the module. One pass
+		// over a packed column beforehand leaves the recursion exactly as
+		// clock-free as it was, and leaves `Alpha` - a number - as the only
+		// thing `RunPages` has to read.
+		//
+		// @param store   The world.
+		// @param seconds The caller's clock. Only differences are read.
+		void AdvancePages(Store &store, double seconds) {
+			// **Collected before anything is written**, for the reason the
+			// collector walk gives: `store.Set` can move a row between
+			// archetypes, and moving one out from under the query walking it is
+			// what `Store::Each`'s deferral exists to prevent.
+			std::vector<Entity> layouts;
+			store.Each<const PageLayout>([&](Entity entity, const PageLayout &) {
+				layouts.push_back(entity);
+			});
+
+			for (const Entity entity : layouts) {
+				const PageLayout *layout = store.Get<PageLayout>(entity);
+				if (layout == nullptr) {
+					continue;
+				}
+
+				PageMotion motion;
+				if (const PageMotion *had = store.Get<PageMotion>(entity)) {
+					motion = *had;
+				}
+
+				// **The first sight of a layout adopts its page rather than
+				// sliding to it**, and that distinction is the whole difference
+				// between an interface that opens and one that swings into
+				// place every time it is shown. A `UIPageLayout` authored with
+				// `CurrentPage` already set is describing where it *starts*; a
+				// script assigning the same property later is asking for a
+				// jump, and only the second is motion.
+				//
+				// `StartedAt` is the marker, which is why it is written here
+				// even when nothing moved: negative means this layout has never
+				// been resolved.
+				if (motion.StartedAt < 0.0) {
+					motion.From = layout->CurrentPage;
+					motion.To = layout->CurrentPage;
+					motion.StartedAt = seconds;
+					motion.Alpha = 1.0f;
+				} else if (motion.To != layout->CurrentPage) {
+					// **A jump is noticed rather than announced.** There is no
+					// `JumpTo` to hook and no setter this module owns - the
+					// class table writes `CurrentPage` straight into the
+					// component - so the difference between what is wanted and
+					// what was wanted last time is the event.
+					motion.From = motion.To;
+					motion.To = layout->CurrentPage;
+					motion.StartedAt = seconds;
+					motion.Alpha = 0.0f;
+				}
+
+				const bool moving = motion.From != motion.To && motion.StartedAt >= 0.0;
+				const bool tweens = moving && layout->Animated && layout->TweenTime > 0.0f;
+
+				if (!moving) {
+					motion.Alpha = 1.0f;
+				} else if (!tweens) {
+					// **`Animated` off and a zero `TweenTime` both cut**, and
+					// they are still two properties: one says this layout does
+					// not animate and the other says it animates over no time.
+					motion.From = motion.To;
+					motion.Alpha = 1.0f;
+				} else {
+					const double elapsed = seconds - motion.StartedAt;
+					const float through = static_cast<float>(elapsed / layout->TweenTime);
+					motion.Alpha = core::TweenInfo::Ease(through, layout->Easing, layout->EasingWay);
+
+					// **Settled by collapsing `From` onto `To`**, which is what
+					// stops the signature moving once the slide is over. A
+					// layout left "animating at alpha 1" would fold a different
+					// number every frame and rebuild the whole list forever.
+					if (through >= 1.0f) {
+						motion.From = motion.To;
+						motion.Alpha = 1.0f;
+					}
+				}
+
+				store.Set(entity, motion);
+			}
+		}
+
 		// Shows one of the parent's children and slides the rest aside.
 		//
 		// Every page is the parent's own size and sits one step further along
 		// than the one before it, so the strip moves under the container rather
-		// than the pages moving inside it. Nothing here animates - see
-		// `gui::PageLayout` for why the tween is absent rather than ignored.
+		// than the pages moving inside it.
+		//
+		// **The slide is a fractional page index rather than an integer one.**
+		// `AdvancePages` has already turned the clock into `PageMotion::Alpha`,
+		// so all this does is put the strip between two pages instead of on one
+		// - which is why nothing here reads a time and why an overshooting
+		// curve needs no special case.
 		size_t RunPages(
 			Store &store,
+			Entity owner,
 			const PageLayout &layout,
 			std::vector<Item> &items,
 			const Rect &area,
@@ -1644,32 +1835,60 @@ namespace engine::gui {
 			// Which page is under the container. An unset or stale `CurrentPage`
 			// is the first one, which is what an author who set nothing means and
 			// what a page destroyed while it was showing leaves behind.
-			size_t current = 0;
-			for (size_t index = 0; index < items.size(); index++) {
-				if (items[index].Node == layout.CurrentPage) {
-					current = index;
-					break;
+			const auto indexOf = [&items](Entity page) {
+				for (size_t index = 0; index < items.size(); index++) {
+					if (items[index].Node == page) {
+						return static_cast<float>(index);
+					}
 				}
+				return 0.0f;
+			};
+
+			const auto count = static_cast<int32_t>(items.size());
+
+			// **Wrapping is applied to the *distance* as well as to each page's
+			// offset**, and it has to be: a three-page carousel jumping from the
+			// last page to the first should slide one step forward, not two
+			// steps back past everything. Without this the loop reads as a
+			// rewind, which is the one thing `Circular` exists to prevent.
+			const auto shortest = [&](float from, float to) {
+				float delta = to - from;
+				if (layout.Circular && count > 0) {
+					const auto whole = static_cast<float>(count);
+					if (delta > whole * 0.5f) {
+						delta -= whole;
+					} else if (delta < -whole * 0.5f) {
+						delta += whole;
+					}
+				}
+				return delta;
+			};
+
+			float current = indexOf(layout.CurrentPage);
+			if (const PageMotion *motion = store.Get<PageMotion>(owner);
+				motion != nullptr && motion->From != motion->To) {
+				const float from = indexOf(motion->From);
+				current = from + shortest(from, indexOf(motion->To)) * motion->Alpha;
 			}
 
 			size_t placed = 0;
-			const auto count = static_cast<int32_t>(items.size());
 
 			for (size_t index = 0; index < items.size(); index++) {
-				auto offset = static_cast<int32_t>(index) - static_cast<int32_t>(current);
+				float offset = static_cast<float>(index) - current;
 
 				// **Wrapped to the nearer side**, which is what makes a circular
 				// strip read as a loop: the page before the first is drawn just
 				// off the near edge rather than at the far end of everything.
 				if (layout.Circular && count > 0) {
-					if (offset > count / 2) {
-						offset -= count;
-					} else if (offset < -count / 2) {
-						offset += count;
+					const auto whole = static_cast<float>(count);
+					if (offset > whole * 0.5f) {
+						offset -= whole;
+					} else if (offset < -whole * 0.5f) {
+						offset += whole;
 					}
 				}
 
-				const float slide = static_cast<float>(offset) * step;
+				const float slide = offset * step;
 				const Vector2 corner = horizontal ? Vector2{area.Min.X + slide, area.Min.Y}
 												  : Vector2{area.Min.X, area.Min.Y + slide};
 
@@ -1800,7 +2019,8 @@ namespace engine::gui {
 			} else if (modifiers.Table != nullptr) {
 				placed += RunTable(store, *modifiers.Table, items, area, inner, depth + 1, total, arena);
 			} else if (modifiers.Page != nullptr) {
-				placed += RunPages(store, *modifiers.Page, items, area, inner, depth + 1, total);
+				placed +=
+					RunPages(store, modifiers.PageOn, *modifiers.Page, items, area, inner, depth + 1, total);
 			} else {
 				for (const Item &item : items) {
 					const Element *child = store.Get<Element>(item.Node);
@@ -1905,12 +2125,19 @@ namespace engine::gui {
 		}
 	}
 
-	size_t Layout(Store &store, const Screen &screen) {
+	size_t Layout(Store &store, const Screen &screen, double seconds) {
 		ENGINE_PROFILE_CAT("gui layout", engine::core::ProfileCategory::ECS);
 
 		// Forces the class table up before the first `IsA` below, which is
 		// what makes a store that has never seen this module still lay out.
 		Classes();
+
+		// **The only two places in this module that read the clock, and both
+		// are here rather than in the walk.** Each turns elapsed seconds into a
+		// number - a page's `Alpha`, a canvas's spring - so everything below
+		// places rectangles exactly as it did before any of this existed.
+		AdvancePages(store, seconds);
+		AdvanceScrolling(store, seconds);
 
 		// **Cleared first, then set by the walk.** Anything the walk does not
 		// reach is an orphan - an element a script created and has not

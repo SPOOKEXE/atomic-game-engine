@@ -230,6 +230,12 @@ namespace studio {
 			// the world and writes lines, so it goes last and cannot be in
 			// either one's way.
 			DrawColliderOutlines(index, panel);
+
+			// Last of all, and for the same reason the outlines are late: an
+			// adornment reads the world and writes lines, so it can be in
+			// nothing's way. It is drawn *after* the collider outlines because
+			// a selection somebody made is the thing they are looking at.
+			DrawAdornments(index, panel);
 		}
 
 		if (PendingPick.Wanted) {
@@ -1531,6 +1537,10 @@ namespace studio {
 		engine::gui::CompileRequest request;
 		request.Display.Width = canvas.Width;
 		request.Display.Height = canvas.Height;
+
+		// The clock a page slide and a rubber band are measured against. See
+		// `CompileRequest::Seconds` for why it is handed in.
+		request.Seconds = engine::core::Clock::Seconds();
 
 		// **Fed back from the previous frame's routing, deliberately.** The
 		// hover is computed from the list a compile produced, so a compile that

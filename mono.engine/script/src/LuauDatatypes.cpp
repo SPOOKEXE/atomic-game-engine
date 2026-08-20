@@ -876,23 +876,23 @@ namespace engine::script {
 	// needs them without opening a VM at all - see `script/Datatypes.hpp` for
 	// what having written the list twice actually cost.
 	void RegisterDatatypeEnums() {
-		static const std::string_view EASING_STYLES[] = {
-			"Linear",
-			"Quad",
-			"Cubic",
-			"Quart",
-			"Quint",
-			"Sine",
-			"Exponential",
-			"Circular",
-			"Back",
-			"Elastic",
-			"Bounce",
-		};
-		static const std::string_view EASING_DIRECTIONS[] = {"In", "Out", "InOut"};
+		// **Walked off the enum rather than typed out**, which is the rule the
+		// comment above is about and which this pair broke: `gui` registers the
+		// same two sets for `UIPageLayout`, and two literal lists would be two
+		// orderings that agree until somebody adds a curve to one of them. The
+		// ordinal is the storage, so the order is not a detail.
+		std::array<std::string_view, core::EASING_STYLE_COUNT> styles{};
+		for (size_t index = 0; index < styles.size(); index++) {
+			styles[index] = core::Describe(static_cast<core::EasingStyle>(index));
+		}
 
-		ecs::EnumTable::Register("EasingStyle", EASING_STYLES);
-		ecs::EnumTable::Register("EasingDirection", EASING_DIRECTIONS);
+		std::array<std::string_view, core::EASING_DIRECTION_COUNT> directions{};
+		for (size_t index = 0; index < directions.size(); index++) {
+			directions[index] = core::Describe(static_cast<core::EasingDirection>(index));
+		}
+
+		ecs::EnumTable::Register("EasingStyle", styles);
+		ecs::EnumTable::Register("EasingDirection", directions);
 	}
 
 	void OpenDatatypes(lua_State *state) {
