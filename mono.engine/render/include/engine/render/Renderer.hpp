@@ -7,6 +7,7 @@
 #include <engine/assets/Mesh.hpp>
 #include <engine/assets/Texture.hpp>
 #include <engine/core/types/CFrame.hpp>
+#include <engine/effects/ParticleSystem.hpp>
 #include <engine/effects/Particles.hpp>
 #include <engine/effects/Ribbon.hpp>
 #include <engine/graph/Frustum.hpp>
@@ -429,6 +430,56 @@ namespace engine::render {
 		float ConeCosine = -1.0f;
 	};
 
+	// One particle that was born this tick, and the pool row it belongs in.
+	//
+	// **Gathered by the caller rather than pointed at**, so the studio - which
+	// renders outside the tick that spawned - can copy a few thousand of these
+	// instead of the whole state pool.
+	//
+	// @since v0.17
+	struct ParticleBirth {
+		// Which slot of the device pool this particle occupies.
+		uint32_t Row = 0;
+
+		// Its whole simulation half, as the host worked it out at spawn.
+		effects::ParticleState State;
+	};
+
+	// One portal pane a particle can be drawn through.
+	//
+	// **Flattened out of `scene::PortalSeam` and `scene::SeamTransform` rather
+	// than carrying them**, because the step shader needs exactly seven things
+	// and those two types carry rather more - a pane's entities, the part its far
+	// end is on, whether the viewer crosses it. A seam is uploaded per frame per
+	// pane, so what it carries is what it costs.
+	//
+	// The rectangle test is `scene::SeamCarries` and the mapping is
+	// `scene::SeamTransform::Point`; `particle-step.comp` states both again in
+	// the form it applies them.
+	//
+	// @since v0.17
+	struct ParticleSeam {
+		// The pane's plane: a point on it and its face's unit normal.
+		//@{
+		core::Vector3 Centre;
+		core::Vector3 Normal;
+		//@}
+
+		// The pane's half-axes in the world, so `Centre ± First ± Second` is the
+		// rectangle.
+		//@{
+		core::Vector3 First;
+		core::Vector3 Second;
+		//@}
+
+		// Where a point on this side lands on the far one, and what it is scaled
+		// about - which is `Centre`.
+		core::CFrame Mapping;
+
+		// `scene::SeamTransform::Scale`: 1 for a mirror and for any matched pair.
+		float Scale = 1.0f;
+	};
+
 	// One emitter's worth of particles, and the state they share.
 	//
 	// **A batch rather than a per-particle description, and that is the whole of
@@ -438,18 +489,24 @@ namespace engine::render {
 	// Half a million particles times the four bytes a texture name would have cost
 	// is two megabytes a frame.
 	//
-	// **A span and not a copy.** The pool is the caller's and the renderer reads
-	// it during the call; nothing is retained past `Render`, exactly as the draw
+	// **A pointer to the block and not a copy of the particles**, and since v0.17
+	// not a span of them either. The device owns the pool: `particle-step.comp`
+	// integrates and shades from the block's own parameters and writes the
+	// finished instances straight into the sorted draw stream, so what has to
+	// cross is the block - its frame, its drag, its curves, its run of the pool -
+	// and not half a million particles. The block is the caller's and is read
+	// during the call; nothing is retained past `Render`, exactly as the draw
 	// list is not.
 	//
 	// @since v0.10
 	struct ParticleBatch {
-		// This emitter's live particles, contiguous.
+		// This emitter's block: where its run of the pool is and what the step
+		// should do to it.
 		//
-		// The pool's blocks are contiguous per emitter with the live ones a
-		// prefix - `effects::ParticleSystem` - so a batch is that prefix and
-		// nothing has to be copied to produce one.
-		std::span<const effects::ParticleInstance> Particles;
+		// Null draws nothing. The renderer reads `First`, `Capacity`, `Frame`,
+		// `Acceleration`, `Drag`, `Locked`, the flipbook fields and all four
+		// curves out of it, and reads nothing else.
+		const effects::EmitterBlock *Block = nullptr;
 
 		// Which texture, by name. Invalid draws an untextured quad, which is a
 		// visible flat square rather than nothing.
@@ -562,6 +619,46 @@ namespace engine::render {
 		// Borrowed transparent and lighting work for this view.
 		//@{
 		std::span<const ParticleBatch> Particles;
+
+		// What was born this tick, and where it goes in the device pool.
+		//
+		// **The host still spawns**, because a birth reads `ParticleEmitter`, the
+		// entity tree and the parent's motion, and none of those is going to the
+		// device. So the one thing that crosses per frame besides the blocks is
+		// this: a few thousand rows of sixty bytes, scattered into the device's
+		// state pool by a compute pass before the step runs.
+		std::span<const ParticleBirth> ParticleBirths;
+
+		// The panes a particle can be drawn through, already flattened.
+		//
+		// Empty in a scene with no portals, which is nearly all of them. See
+		// `ParticleSeam`.
+		std::span<const ParticleSeam> ParticleSeams;
+
+		// How far to advance the particle simulation, in seconds.
+		//
+		// **The frame's step and not the tick's.** The device steps once per
+		// rendered frame, so this is time since the last one; spawning still
+		// happens on the tick, and the two agree because both are rates per
+		// second.
+		//
+		// **Zero on every view of a frame but one.** A frame has several views
+		// and one pool - a mirror and the room it reflects are two pictures of
+		// the same particles - so a caller that passed the frame's step to each
+		// would age them once per camera. Zero draws what the step already wrote,
+		// which for a repeat view is exactly right, and it is also what a paused
+		// view wants.
+		float ParticleDelta = 0.0f;
+
+		// How many slots the device pool must hold, from
+		// `effects::ParticleSystem::Capacity`.
+		//
+		// **Declared by the caller rather than inferred from the batches**,
+		// because the pool is allocated once and the blocks index into it: a
+		// buffer sized to this frame's highest block would be re-created the
+		// first time a further emitter claimed a later one.
+		uint32_t ParticlePool = 0;
+
 		std::span<const effects::RibbonVertex> RibbonVertices;
 		std::span<const effects::RibbonRun> RibbonRuns;
 		std::span<const SceneLight> Lights;
@@ -1600,6 +1697,7 @@ namespace engine::render {
 			FrameOverlayHook *hostOverlayHook,
 			const SceneTarget *sceneTarget,
 			size_t targetSlot,
+			const View &source,
 			std::span<const ParticleBatch> particles,
 			std::span<const effects::RibbonVertex> ribbonVertices,
 			std::span<const effects::RibbonRun> ribbonRuns,

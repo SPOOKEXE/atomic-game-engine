@@ -149,11 +149,73 @@ TEST_CASE("particle light properties reach the render batch", "[client][presenta
 		REQUIRE(engine::effects::RefreshEmitters(store) == 1);
 		REQUIRE(engine::effects::StepParticles(store, 1.0f / 30.0f).Live > 0);
 
-		std::vector<engine::render::ParticleBatch> batches;
-		REQUIRE(client::CollectParticleBatches(store, batches) == 1);
-		REQUIRE(batches.size() == 1);
-		CHECK(batches[0].LightEmission == Catch::Approx(0.35f));
-		CHECK(batches[0].LightInfluence == Catch::Approx(0.8f));
+		client::ParticleFrame frame;
+		REQUIRE(client::CollectParticleBatches(store, frame) == 1);
+		REQUIRE(frame.Batches.size() == 1);
+		CHECK(frame.Batches[0].LightEmission == Catch::Approx(0.35f));
+		CHECK(frame.Batches[0].LightInfluence == Catch::Approx(0.8f));
+
+		// The block is what the batch carries now, and the renderer steps and
+		// draws from it - see `render::ParticleBatch`.
+		REQUIRE(frame.Batches[0].Block != nullptr);
+		CHECK(frame.Batches[0].Block->Capacity > 0);
+		CHECK(frame.Pool > 0);
+	});
+}
+
+// **The studio's copy, and it is the studio that needs it.** `Renderer::Render`
+// runs after `Universe::Enter` has returned, and by then the world may be
+// stepping again - so a batch pointing into `ParticleSystem::Blocks` is a
+// pointer into an array whose owner is running. `Detach` copies the blocks and
+// repoints; the copy is a few hundred bytes an emitter, against the twenty-eight
+// a particle used to cost when a batch was a span of them.
+TEST_CASE("a detached particle frame stops pointing into the world", "[client][presentation][particles]") {
+	Universe universe;
+	const WorldId world = AddWorld(universe, "particle-detach");
+
+	universe.Enter(world, [](Store &store) {
+		const Entity workspace = engine::scene::InstallServices(store);
+		engine::scene::PartDesc parentDescription;
+		parentDescription.Anchored = true;
+		const Entity parent = engine::scene::MakePart(store, parentDescription);
+		store.SetParent(parent, workspace);
+
+		for (int index = 0; index < 3; index++) {
+			const Entity emitter = store.CreateInstance(engine::ecs::Classes::Find(Name("ParticleEmitter")));
+			store.SetParent(emitter, parent);
+			auto *settings = store.GetMutable<engine::effects::ParticleEmitter>(emitter);
+			REQUIRE(settings != nullptr);
+			settings->Rate = 60.0f;
+			settings->Lifetime = engine::core::NumberRange{1.0f, 1.0f};
+		}
+
+		engine::scene::ResolveAttachments(store);
+		REQUIRE(engine::effects::RefreshEmitters(store) == 3);
+		REQUIRE(engine::effects::StepParticles(store, 1.0f / 30.0f).Emitted > 0);
+
+		client::ParticleFrame frame;
+		REQUIRE(client::CollectParticleBatches(store, frame) == 3);
+
+		const auto *system = store.Resource<engine::effects::ParticleSystem>();
+		const engine::effects::EmitterBlock *pool = system->Blocks.data();
+		for (const engine::render::ParticleBatch &batch : frame.Batches) {
+			REQUIRE(batch.Block >= pool);
+			REQUIRE(batch.Block < pool + system->Blocks.size());
+		}
+
+		frame.Detach();
+
+		// **Every batch, and each still describing its own block.** Repointing
+		// them all at the first copy would be a frame of three emitters drawing
+		// one emitter's particles three times, which is the kind of wrong that
+		// looks like a working scene.
+		REQUIRE(frame.Blocks.size() == frame.Batches.size());
+		for (size_t at = 0; at < frame.Batches.size(); at++) {
+			CHECK(frame.Batches[at].Block == frame.Blocks.data() + at);
+			CHECK(frame.Batches[at].Block->First == system->Blocks[at].First);
+			CHECK(frame.Batches[at].Block->Capacity == system->Blocks[at].Capacity);
+			CHECK(frame.Batches[at].Block->Generation == system->Blocks[at].Generation);
+		}
 	});
 }
 

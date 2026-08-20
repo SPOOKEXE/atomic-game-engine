@@ -60,6 +60,7 @@
 
 #include <array>
 #include <cdn/LocalStore.hpp>
+#include <client/Scene.hpp>
 #include <client/EditableImages.hpp>
 #include <client/EditableMeshes.hpp>
 #include <cstdint>
@@ -3206,27 +3207,18 @@ namespace studio {
 		// a list assembled from what is in the world is also what makes a
 		// deleted emitter stop being drawn.
 		//@{
-		std::vector<engine::render::ParticleBatch> Particles;
+		client::ParticleFrame Particles;
+
+		// Whether this frame has already advanced the particle simulation.
+		//
+		// **Because a frame is several `Render` calls here and one pool.** Each
+		// open viewport is drawn by its own call, and the particles belong to the
+		// world rather than to any of the cameras looking at it.
+		bool ParticleStepped = false;
 		std::vector<engine::effects::RibbonVertex> RibbonVertices;
 		std::vector<engine::effects::RibbonRun> RibbonRuns;
 		std::vector<engine::render::SceneLight> Lights;
 		//@}
-
-		// The particles themselves, copied out of the world's pool.
-		//
-		// **Copied rather than spanned, which `drawn` already explains**: the
-		// renderer is called outside `Universe::Enter`, and a span into a store
-		// nobody is inside is a pointer across a boundary rule 3 exists to keep
-		// closed. A `render::ParticleBatch` is a span into
-		// `effects::ParticleSystem::Instances`, so copying the batches alone
-		// would copy the pointers and leave the pixels where they were.
-		//
-		// Reserved to the whole set before anything is written, and that is
-		// load-bearing rather than tidy: every batch points into this buffer, so
-		// a later one that grew it would leave an earlier one pointing at freed
-		// memory. `client::CollectParticleBatches` reserves its own scratch for
-		// the same reason.
-		std::vector<engine::effects::ParticleInstance> ParticleInstances;
 
 		// The universe-authored rendering profiles. Worlds hold only the name
 		// they select, so one graph edit reaches every world using that profile
@@ -5325,5 +5317,5 @@ namespace studio {
 	// grows by adding a row rather than by editing `Editor::NewGame`. See the
 	// definition in `Editor.cpp` for what a row means and why the keys are
 	// fixed.
-	const std::array<Editor::DefaultWorldEntry, 14> &DefaultWorldCatalogue();
+	const std::array<Editor::DefaultWorldEntry, 15> &DefaultWorldCatalogue();
 }

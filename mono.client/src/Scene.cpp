@@ -1084,85 +1084,42 @@ namespace client {
 		return views.size();
 	}
 
-	namespace {
-		// Where a moved particle lives for the rest of the frame.
-		//
-		// **One buffer for every batch, and each batch takes a range of it.** The
-		// spans handed to the renderer have to survive until it has drawn them, so
-		// they cannot point at anything a loop iteration owns - and they cannot be
-		// appended to while an earlier span is outstanding unless the buffer is
-		// reserved. It is cleared once a frame and reserved to the pool's own size
-		// the first time anything crosses, so no batch's span is ever invalidated
-		// by a later batch's copy.
-		std::vector<engine::effects::ParticleInstance> &Carried() {
-			static thread_local std::vector<engine::effects::ParticleInstance> carried;
-			return carried;
+	void ParticleFrame::Detach() {
+		Blocks.clear();
+		Blocks.reserve(Batches.size());
+		for (const engine::render::ParticleBatch &batch : Batches) {
+			if (batch.Block != nullptr) {
+				Blocks.push_back(*batch.Block);
+			}
 		}
 
-		// Moves every particle in a batch that has gone through a hole.
-		//
-		// **Moved and not copied**, which is the whole difference from what a
-		// straddling body needs. A body has a size and is cut by the plane; a
-		// particle is a point, wholly on one side or the other, and drawing it in
-		// both places would be two sparks where the author authored one.
-		//
-		// Returns the batch's own span when nothing crossed, so a scene with a
-		// hole in it and no particles near it copies nothing at all.
-		std::span<const engine::effects::ParticleInstance> CarryThroughSeams(
-			const std::vector<engine::scene::PortalSeam> &seams,
-			const std::vector<engine::scene::SeamTransform> &maps,
-			std::span<const engine::effects::ParticleInstance> particles
-		) {
-			bool any = false;
-			for (const engine::effects::ParticleInstance &particle : particles) {
-				for (const engine::scene::PortalSeam &seam : seams) {
-					if (!seam.Crosses && engine::scene::SeamCarries(seam, particle.Position)) {
-						any = true;
-						break;
-					}
-				}
-				if (any) {
-					break;
-				}
+		// **Reserved before anything is written**, so no later push can move the
+		// vector an earlier batch already points into. The same rule the carry
+		// buffer this replaced followed, and for the same reason.
+		size_t at = 0;
+		for (engine::render::ParticleBatch &batch : Batches) {
+			if (batch.Block != nullptr) {
+				batch.Block = Blocks.data() + at;
+				at++;
 			}
-
-			if (!any) {
-				return particles;
-			}
-
-			std::vector<engine::effects::ParticleInstance> &carried = Carried();
-			const size_t first = carried.size();
-
-			for (const engine::effects::ParticleInstance &particle : particles) {
-				engine::effects::ParticleInstance moved = particle;
-				for (size_t index = 0; index < seams.size(); index++) {
-					if (seams[index].Crosses ||
-						!engine::scene::SeamCarries(seams[index], particle.Position)) {
-						continue;
-					}
-
-					// `Point`, because a position moves and scales. The packed
-					// size is left alone: it is an unsigned normalised pair over a
-					// sixty-four metre ceiling, and unpacking and repacking it per
-					// particle to serve a mismatched pair of panes is a cost every
-					// matched pair would also pay for nothing.
-					moved.Position = maps[index].Point(particle.Position);
-					break;
-				}
-				carried.push_back(moved);
-			}
-
-			return {carried.data() + first, particles.size()};
 		}
 	}
 
-	size_t CollectParticleBatches(Store &store, std::vector<engine::render::ParticleBatch> &batches) {
-		batches.clear();
+	void ParticleFrame::Clear() {
+		Batches.clear();
+		Births.clear();
+		Seams.clear();
+		Blocks.clear();
+	}
+
+	size_t CollectParticleBatches(Store &store, ParticleFrame &frame) {
+		frame.Clear();
 
 		const auto *system = store.Resource<engine::effects::ParticleSystem>();
 		if (system == nullptr || system->Blocks.empty()) {
 			return 0;
 		}
+		frame.Pool = system->Capacity;
 
 		// **The holes, so a spark that has gone through one is drawn in the room
 		// it went into.** A particle is a point rather than a body: it is on one
@@ -1172,28 +1129,37 @@ namespace client {
 		// ones past it arrive in the far room, which is what stops a flame dying
 		// at the seam while the torch holding it does not.
 		//
-		// **A scratch copy, because the pool is the effects system's.** A batch is
-		// normally a span straight into `ParticleSystem::Instances` and nothing is
-		// copied at all; only an emitter with a particle actually through a hole
-		// pays for one, and it pays once per frame.
-		//
-		// **Reserved to the whole pool before anything is written, and that is
-		// load-bearing rather than tidy.** Every batch's span points into this
-		// buffer and every span has to survive until the renderer has drawn it, so
-		// a later batch that grew it would leave an earlier one pointing at freed
-		// memory. The pool is the ceiling on how much can ever be carried, so one
-		// reserve makes reallocation impossible rather than unlikely.
+		// **Flattened here and applied in the step shader**, which is where the
+		// positions are. What crosses is a pane, not a particle: a scene with a
+		// doorway in it uploads eighty bytes and the decision is taken per
+		// particle on the device, where it costs a dot product.
 		static thread_local std::vector<engine::scene::PortalSeam> seams;
-		const bool holed = engine::scene::GatherPortalSeams(store, seams) > 0;
-
-		static thread_local std::vector<engine::scene::SeamTransform> maps;
-		maps.clear();
-
-		Carried().clear();
-		if (holed) {
-			Carried().reserve(system->Instances.size());
+		if (engine::scene::GatherPortalSeams(store, seams) > 0) {
 			for (const engine::scene::PortalSeam &seam : seams) {
-				maps.push_back(engine::scene::SeamMapping(seam));
+				if (seam.Crosses) {
+					// A pane straddles its own plane by definition, so carrying
+					// through it is a portal inside a portal.
+					continue;
+				}
+
+				const engine::scene::SeamTransform map = engine::scene::SeamMapping(seam);
+				engine::render::ParticleSeam flat;
+				flat.Centre = seam.Centre;
+				flat.Normal = seam.Normal;
+				flat.First = seam.First;
+				flat.Second = seam.Second;
+				flat.Mapping = map.Frame;
+				flat.Scale = map.Scale;
+				frame.Seams.push_back(flat);
+			}
+		}
+
+		// This tick's births, gathered rather than pointed at, so a caller that
+		// renders outside the tick has something that outlives it.
+		frame.Births.reserve(system->Births.size());
+		for (const uint32_t row : system->Births) {
+			if (row < system->States.size()) {
+				frame.Births.push_back(engine::render::ParticleBirth{row, system->States[row]});
 			}
 		}
 
@@ -1216,21 +1182,22 @@ namespace client {
 				}
 
 				const engine::effects::EmitterBlock &block = system->Blocks[slot.Index];
-				if (block.Live == 0) {
+				if (block.Capacity == 0 || block.Live == 0) {
 					// **Skipped rather than emitted as an empty batch.** An empty
 					// batch is a uniform push and a pipeline bind for zero
 					// vertices, and in a scene of a hundred thousand emitters most
 					// of them are empty at any moment.
+					//
+					// **`Live` still means "worth drawing" when the device owns
+					// the pool**, but it is arithmetic rather than a count: it is
+					// what the block has ever been given until nothing more is
+					// born for longer than the longest lifetime, at which point
+					// it falls to zero. See `EmitterBlock::Idle`.
 					return;
 				}
 
 				engine::render::ParticleBatch batch;
-				batch.Particles = {system->Instances.data() + block.First, block.Live};
-
-				if (holed) {
-					batch.Particles = CarryThroughSeams(seams, maps, batch.Particles);
-				}
-
+				batch.Block = &block;
 				batch.Texture = emitter.Texture;
 				batch.FlipbookSide = static_cast<float>(engine::effects::FlipbookSide(emitter.Flipbook));
 				batch.ZOffset = emitter.ZOffset;
@@ -1239,11 +1206,11 @@ namespace client {
 				batch.Additive = emitter.Additive;
 				batch.WorldUp =
 					emitter.Orientation == engine::effects::ParticleOrientation::FacingCameraWorldUp;
-				batches.push_back(batch);
+				frame.Batches.push_back(batch);
 			}
 		);
 
-		return batches.size();
+		return frame.Batches.size();
 	}
 
 	size_t CollectLights(Store &store, const Vector3 &eye, std::vector<engine::render::SceneLight> &lights) {
@@ -1408,6 +1375,20 @@ namespace client {
 
 			if (!store.HasResource<engine::effects::ParticleSystem>()) {
 				engine::effects::InstallParticles(store, poolCapacity);
+			}
+
+			// **Every world a client installs is stepped on the device**, which
+			// is what turns the ageing half of `StepParticles` off. A client has
+			// a renderer by definition, and `render::Renderer` owns the pool: it
+			// integrates and shades in `particle-step.comp` and writes the
+			// instances straight into the draw stream, so nothing crosses the bus
+			// but the block records and the tick's births.
+			//
+			// The host-side pass is what a test asserts against and what a build
+			// with no compute device would fall back on; it is not what a client
+			// runs. See `ParticleSystem::DeviceStepped`.
+			if (auto *particles = store.ResourceMutable<engine::effects::ParticleSystem>()) {
+				particles->DeviceStepped = true;
 			}
 			if (!store.HasResource<engine::effects::RibbonBuffer>()) {
 				store.SetResource(engine::effects::RibbonBuffer{});

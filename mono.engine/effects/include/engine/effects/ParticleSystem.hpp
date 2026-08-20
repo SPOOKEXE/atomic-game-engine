@@ -264,6 +264,38 @@ namespace engine::effects {
 		// How fast speed is shed, as a fraction per second.
 		float Drag = 0.0f;
 
+		// Which tenancy of this run of the pool the block is on.
+		//
+		// **Because the device cannot be told to forget.** A block's rows are
+		// returned to the free list and handed to the next emitter that asks,
+		// and the host used to make that safe by resetting `Live` to zero - the
+		// old particles were still in the array, but nothing drew them. The
+		// device draws a block's whole capacity, so they would be drawn, with
+		// the new emitter's curves and for as long as their old lifetimes had
+		// left.
+		//
+		// A particle carries the generation it was born under and the step
+		// treats a mismatch as death, so a recycled block starts empty without
+		// anything being cleared. Bumped once when the range is taken; the
+		// alternative was uploading a zeroed state for every row of every block
+		// claimed, which at scene load is the whole pool.
+		uint32_t Generation = 1;
+
+		// Seconds since this block last spawned anything.
+		//
+		// **What lets `Live` reach zero when the device owns the pool.** The
+		// host cannot see a particle die, so `Live` is what it has ever put in
+		// the block - which never falls, so a disabled emitter would hold its
+		// rows for as long as it existed and go on costing its capacity in
+		// quads with no extent. Past `Longest` nothing born before can still be
+		// alive, whatever the device is doing, and the block is empty by
+		// arithmetic rather than by observation.
+		float Idle = 0.0f;
+
+		// The longest a particle of this emitter can live, in seconds. Read with
+		// `Idle` and set from `ParticleEmitter::Lifetime`.
+		float Longest = 0.0f;
+
 		// What is left over from the last frame's emission, in particles.
 		//
 		// **A fractional accumulator, and it is what makes a low rate work at
@@ -310,8 +342,8 @@ namespace engine::effects {
 	// One particle's simulation half.
 	//
 	// **Never read by the upload and never written by it**, which is the whole
-	// reason it is a separate array from `ParticleInstance`. Twenty-four bytes,
-	// so half a million is twelve megabytes touched by the step and by nothing
+	// reason it is a separate array from `ParticleInstance`. Sixty bytes, so
+	// half a million is thirty megabytes touched by the step and by nothing
 	// else.
 	//
 	// @since v0.10
@@ -357,6 +389,37 @@ namespace engine::effects {
 		// dies. See `EmitterBlock::Spawned` for what seeding from the slot does to
 		// a steady emitter.
 		uint32_t Seed = 0;
+
+		// Where it is, in world space.
+		//
+		// **Here and not in `ParticleInstance`, and that is what lets the whole
+		// instance stream be output.** Of the five things an instance carries,
+		// only the position and the accumulated turn are read by the *next*
+		// step - size, colour and the flipbook cell are functions of age and are
+		// recomputed from scratch every frame. Keeping the two that persist on
+		// this side means nothing in the instance stream is ever read back, so
+		// the step can write it straight to wherever the draw wants it rather
+		// than to a pool that then has to be gathered.
+		//
+		// It is also what keeps a particle carried through a portal honest: the
+		// seam moves the *drawn* position and leaves this one alone, so the
+		// spark goes on integrating in the space it was born in and is carried
+		// afresh each frame, which is exactly what the host-side carry did.
+		core::Vector3 Position;
+
+		// Which tenancy of its block this particle belongs to.
+		//
+		// **Compared by the step, which is what makes a recycled block start
+		// empty.** See `EmitterBlock::Generation`; a mismatch is death.
+		uint32_t Generation = 0;
+
+		// The accumulated turn, over 65,536, and the cell a fixed flipbook drew.
+		//
+		// Laid out as `ParticleInstance::RotationAndCell` is, because that is
+		// where it is going. The cell half is only meaningful for the random
+		// flipbook mode, which picks once at spawn and keeps it - every other
+		// mode is a function of age and the step works it out.
+		uint32_t Rotation = 0;
 	};
 
 	// What one step did, for the panel and for a test.
@@ -424,6 +487,34 @@ namespace engine::effects {
 		// in that order in one `RefreshEmitters` - so a row freed this tick is
 		// reused on the next one rather than under the walk that freed it.
 		std::vector<uint32_t> FreeSlots;
+
+		// Whether the device owns the pool and this module only spawns into it.
+		//
+		// **Set by whoever has a renderer, and the client always does.** When it
+		// is on, `StepParticles` skips its ageing pass entirely: the device
+		// integrates, shades and draws from `particle-step.comp` and nothing has
+		// to cross the bus but the block parameters and the frame's births. That
+		// is worth about two milliseconds a frame at half a million particles,
+		// which is most of what a particle frame used to cost.
+		//
+		// **The host-side pass is kept rather than deleted, and not out of
+		// timidity.** It is the reference the module's tests pin the behaviour
+		// to - a compute shader cannot be asserted about from a unit test - and
+		// it is what a build with no compute device falls back on. The two are
+		// the same integration written twice, so a change to one is a change to
+		// both; `particle-step.comp` says so at each point where it matters.
+		bool DeviceStepped = false;
+
+		// Which pool rows were spawned into this tick.
+		//
+		// **Rows and not states**, because the state is already in `States` and
+		// the renderer is going to read it there. A birth is four bytes here and
+		// fifty-six in the array it points at, and the array is written by the
+		// same worker that decides the birth - so nothing is copied twice.
+		//
+		// Empty unless `DeviceStepped`. The host-side pass has no need of it:
+		// it spawns into the array it also ages.
+		std::vector<uint32_t> Births;
 
 		// How many slots the pool holds in total.
 		//

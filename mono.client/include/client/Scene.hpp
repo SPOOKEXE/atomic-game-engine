@@ -275,12 +275,56 @@ namespace client {
 		std::vector<engine::render::SurfaceView> &views
 	);
 
-	// Turns a world's particle pool into the batches the renderer draws.
+	// Everything a frame's particles need, on one object.
 	//
-	// **One batch per emitter that has live particles, and a span rather than a
-	// copy.** The pool's blocks are contiguous per emitter with the live ones a
-	// prefix - `effects::ParticleSystem` - so a batch is that prefix pointed at,
-	// and half a million particles reach the renderer without being moved.
+	// **Four lists rather than four out-parameters**, because they are only
+	// meaningful together: a batch names a block, a birth names a slot of the
+	// pool those blocks index into, and a seam is a property of the same world.
+	// Handing them separately made the studio's copy - see `Detach` - a thing
+	// four call sites had to remember.
+	//
+	// @since v0.17
+	struct ParticleFrame {
+		// One per emitter with a block, in the emitter column's order.
+		std::vector<engine::render::ParticleBatch> Batches;
+
+		// What was spawned on the tick that just ran.
+		std::vector<engine::render::ParticleBirth> Births;
+
+		// The portal panes, if the world has any.
+		std::vector<engine::render::ParticleSeam> Seams;
+
+		// How many slots the device pool must hold, from the world's own.
+		uint32_t Pool = 0;
+
+		// Where `Batches` point when they have been detached from the world.
+		//
+		// Empty for a caller that renders inside the tick, which the client does.
+		std::vector<engine::effects::EmitterBlock> Blocks;
+
+		// Copies the blocks the batches point at and repoints them.
+		//
+		// **For a caller that renders outside the tick that filled this**, which
+		// is the studio: `Renderer::Render` happens after `Universe::Enter` has
+		// returned, and by then the world may be stepping again. Copying the
+		// batches alone would copy the pointers.
+		//
+		// A block is about three hundred bytes and a scene has thousands of them,
+		// so this is a couple of megabytes - against the sixteen the same call
+		// used to copy when a batch was a span of particles.
+		void Detach();
+
+		// Empties every list. `Pool` is kept, being a property of the world.
+		void Clear();
+	};
+
+	// Turns a world's particle pool into what the renderer's step and draw need.
+	//
+	// **One batch per emitter with a block, pointing at the block rather than at
+	// its particles.** Since v0.17 the device owns the pool: `particle-step.comp`
+	// integrates and shades from the block's own parameters, so what reaches the
+	// renderer is a few hundred bytes an emitter and not the half million
+	// particles they between them hold.
 	//
 	// **Here rather than in `effects`, for `CollectSurfaceViews`'s reason.**
 	// `render::ParticleBatch` is a `client`-tier type and `effects` is `shared`;
@@ -292,12 +336,13 @@ namespace client {
 	// particle, which is the whole reason `ParticleInstance` is twenty-eight
 	// bytes.
 	//
-	// @param store   The world.
-	// @param batches Cleared and filled. Valid until the world's pool is stepped
-	//                again, which is why the caller submits within the frame.
+	// @param store The world.
+	// @param frame Cleared and filled. Its batches point into the world's block
+	//              list, so they are valid until the world is stepped again -
+	//              see `ParticleFrame::Detach` for the caller that cannot rely
+	//              on that.
 	// @return How many batches have something to draw.
-	size_t
-	CollectParticleBatches(engine::ecs::Store &store, std::vector<engine::render::ParticleBatch> &batches);
+	size_t CollectParticleBatches(engine::ecs::Store &store, ParticleFrame &frame);
 
 	// Turns a world's `scene::Light` rows into the lights the renderer takes.
 	//

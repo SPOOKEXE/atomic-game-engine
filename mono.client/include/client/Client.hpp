@@ -986,11 +986,11 @@ namespace client {
 		// allocating after the first one. At a hundred thousand emitters that is
 		// the difference between one allocation and one a frame.
 		//
-		// **Only the rendered world fills it.** A batch is a span into that
-		// world's pool, and a second world's pool is a different allocation - so
-		// mixing two worlds' batches in one list would hand the renderer spans
-		// with nothing in common but a type.
-		std::vector<engine::render::ParticleBatch> Particles;
+		// **Only the rendered world fills it.** A batch points at a block of that
+		// world's pool and a birth names a slot of it, and a second world's pool
+		// is a different allocation - so mixing two worlds in one frame would
+		// hand the renderer indices into a buffer they do not belong to.
+		ParticleFrame Particles;
 
 		// This frame's beams and trails, as spans into the drawn world's buffer.
 		//

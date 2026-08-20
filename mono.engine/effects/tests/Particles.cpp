@@ -659,3 +659,143 @@ TEST_CASE("a destroyed emitter gives its block row back", "[effects]") {
 	CHECK(system->Statistics.Blocks == 1);
 	CHECK(store.Get<engine::effects::EmitterSlot>(first)->Index != engine::effects::NO_SLOT);
 }
+
+// --- the device-stepped pool -------------------------------------------------
+//
+// **What the host still owes when it no longer ages anything.** With
+// `DeviceStepped` on, `particle-step.comp` integrates, shades and retires; this
+// module keeps only the three things a compute shader cannot do, and each of
+// them is a place a wrong answer is invisible on screen.
+//
+//   - Births have to *reach* the device, so every one has to appear in `Births`
+//     pointing at the row it was written to.
+//   - Slots have to be found without a live count, so the ring has to come back
+//     round instead of refusing.
+//   - Recycled rows have to start empty, and nothing clears them - the
+//     generation is the whole mechanism, so a reused block has to disagree with
+//     what it inherited.
+
+TEST_CASE("a device-stepped pool reports every birth and the row it went to", "[effects][device]") {
+	Store store("effects_test");
+	const Entity emitter = MakeEmitter(store);
+	store.ResourceMutable<engine::effects::ParticleSystem>()->DeviceStepped = true;
+
+	Settings(store, emitter).Rate = 60.0f;
+	Settings(store, emitter).Lifetime = NumberRange{1.0f, 1.0f};
+
+	Frame(store, 1.0f / 60.0f);
+	const auto stats = Frame(store, 1.0f / 60.0f);
+
+	const auto *system = store.Resource<engine::effects::ParticleSystem>();
+	REQUIRE(stats.Emitted > 0);
+	REQUIRE(system->Births.size() == stats.Emitted);
+
+	const engine::effects::EmitterBlock &block = system->Blocks[0];
+	for (const uint32_t row : system->Births) {
+		// In the block, and holding the particle the host just wrote - which is
+		// what the renderer uploads from.
+		CHECK(row >= block.First);
+		CHECK(row < block.First + block.Capacity);
+		CHECK(system->States[row].Lifetime > 0.0f);
+		CHECK(system->States[row].Generation == block.Generation);
+	}
+}
+
+TEST_CASE("a device-stepped block spawns round its ring rather than refusing", "[effects][device]") {
+	Store store("effects_test");
+	const Entity emitter = MakeEmitter(store);
+	store.ResourceMutable<engine::effects::ParticleSystem>()->DeviceStepped = true;
+
+	// A rate and a lifetime that size the block small, then run for far longer
+	// than it holds. The host-side pass would have dropped everything past the
+	// capacity; the ring overwrites the oldest instead.
+	Settings(store, emitter).Rate = 60.0f;
+	Settings(store, emitter).Lifetime = NumberRange{0.25f, 0.25f};
+
+	uint32_t dropped = 0;
+	uint32_t emitted = 0;
+	for (int frame = 0; frame < 120; frame++) {
+		const auto stats = Frame(store, 1.0f / 60.0f);
+		dropped += stats.SpawnsDropped;
+		emitted += stats.Emitted;
+	}
+
+	const auto *system = store.Resource<engine::effects::ParticleSystem>();
+	const engine::effects::EmitterBlock &block = system->Blocks[0];
+
+	CHECK(dropped == 0);
+	CHECK(emitted > block.Capacity);
+
+	// **Round, not off the end.** Every row the ring ever named is inside the
+	// block, which is the property the whole design rests on: the shader is
+	// handed `First` and `Capacity` and trusts them.
+	CHECK(block.Spawned == emitted);
+	CHECK(block.First + block.Spawned % block.Capacity < block.First + block.Capacity);
+	CHECK(block.Live == std::min(block.Spawned, block.Capacity));
+}
+
+TEST_CASE("a recycled device block disagrees with what it inherited", "[effects][device]") {
+	Store store("effects_test");
+	const Entity first = MakeEmitter(store);
+	store.ResourceMutable<engine::effects::ParticleSystem>()->DeviceStepped = true;
+
+	Settings(store, first).Rate = 60.0f;
+	Settings(store, first).Lifetime = NumberRange{4.0f, 4.0f};
+
+	Frame(store, 1.0f / 60.0f);
+	Frame(store, 1.0f / 60.0f);
+
+	auto *system = store.ResourceMutable<engine::effects::ParticleSystem>();
+	const uint32_t generation = system->Blocks[0].Generation;
+	const uint32_t row = system->Blocks[0].First;
+	REQUIRE(system->States[row].Lifetime > 0.0f);
+	REQUIRE(system->States[row].Generation == generation);
+
+	// The emitter goes and another takes its rows. Nothing clears them: the
+	// particle written above is still in the array with four seconds left.
+	const Entity part = store.ParentOf(first);
+	store.Destroy(first);
+	Frame(store, 1.0f / 60.0f);
+	Frame(store, 1.0f / 60.0f);
+
+	const Entity second =
+		store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("ParticleEmitter")));
+	store.SetParent(second, part);
+	Settings(store, second).Rate = 60.0f;
+	Settings(store, second).Lifetime = NumberRange{4.0f, 4.0f};
+	Frame(store, 1.0f / 60.0f);
+
+	system = store.ResourceMutable<engine::effects::ParticleSystem>();
+	const uint32_t slot = store.Get<engine::effects::EmitterSlot>(second)->Index;
+	REQUIRE(slot != engine::effects::NO_SLOT);
+
+	// **The same rows and a different number**, which is what the step compares.
+	// Without this the new emitter would draw the old one's particles, with its
+	// own curves, for the four seconds they had left.
+	CHECK(system->Blocks[slot].First == row);
+	CHECK(system->Blocks[slot].Generation != generation);
+}
+
+TEST_CASE("a device block empties once nothing has been born for a lifetime", "[effects][device]") {
+	Store store("effects_test");
+	const Entity emitter = MakeEmitter(store);
+	store.ResourceMutable<engine::effects::ParticleSystem>()->DeviceStepped = true;
+
+	Settings(store, emitter).Rate = 60.0f;
+	Settings(store, emitter).Lifetime = NumberRange{0.25f, 0.25f};
+
+	for (int frame = 0; frame < 30; frame++) {
+		Frame(store, 1.0f / 60.0f);
+	}
+	REQUIRE(store.Resource<engine::effects::ParticleSystem>()->Blocks[0].Live > 0);
+
+	// Turned off. The host cannot see a particle die, so this is the only thing
+	// that ever brings `Live` back down - and without it a disabled emitter
+	// holds its rows and goes on drawing its capacity in quads with no extent.
+	Settings(store, emitter).Enabled = false;
+	for (int frame = 0; frame < 30; frame++) {
+		Frame(store, 1.0f / 60.0f);
+	}
+
+	CHECK(store.Resource<engine::effects::ParticleSystem>()->Blocks[0].Live == 0);
+}

@@ -116,8 +116,8 @@ namespace studio {
 	// The keys are what land in `studio.json` and they never change. A row may
 	// be renamed for the interface freely; renaming its key silently unticks it
 	// for everybody who had it on.
-	const std::array<Editor::DefaultWorldEntry, 14> &DefaultWorldCatalogue() {
-		static const std::array<Editor::DefaultWorldEntry, 14> catalogue{{
+	const std::array<Editor::DefaultWorldEntry, 15> &DefaultWorldCatalogue() {
+		static const std::array<Editor::DefaultWorldEntry, 15> catalogue{{
 			{"rings",
 			 "Rings",
 			 "Rings.luau",
@@ -204,6 +204,14 @@ namespace studio {
 			 "in both worlds, branching on the world's own name - two files mirroring each "
 			 "other by hand drift.",
 			 false},
+			{"particles",
+			 "Particles",
+			 "Particles.luau",
+			 "",
+			 "One bay per emitter shape, orientation and flipbook mode, which is where an "
+			 "effect is authored and therefore where a particle change has to be looked at. "
+			 "Cheap: a few dozen emitters against the stress scene's five thousand.",
+			 true},
 			{"magic",
 			 "Magic",
 			 "Magic.luau",
@@ -1847,8 +1855,8 @@ namespace studio {
 		// a texture nothing samples, and a surface pass paid for every frame the
 		// panel is empty.
 		Surfaces.clear();
-		Particles.clear();
-		ParticleInstances.clear();
+		Particles.Clear();
+		ParticleStepped = false;
 		RibbonVertices.clear();
 		RibbonRuns.clear();
 		Lights.clear();
@@ -1914,28 +1922,17 @@ namespace studio {
 				{
 					ENGINE_PROFILE_CAT("collect effects", engine::core::ProfileCategory::Render);
 
-					// **Copied out of the pool, not spanned into it**, for the
-					// reason `drawn` gives one screen up: `Renderer::Render`
-					// happens outside this `Enter`, and a `ParticleBatch` is a
-					// span into `effects::ParticleSystem::Instances`. Copying
-					// the batches alone would copy the pointers.
+					// **Detached from the pool, for the reason `drawn` gives one
+					// screen up:** `Renderer::Render` happens outside this
+					// `Enter`, and a `ParticleBatch` points at a block the world
+					// may reclaim the moment the tick resumes. Copying the
+					// batches alone would copy the pointers.
+					//
+					// A block is a few hundred bytes against the twenty-eight a
+					// particle was, so this copies a couple of megabytes where it
+					// used to copy sixteen.
 					(void)client::CollectParticleBatches(store, Particles);
-
-					size_t total = 0;
-					for (const engine::render::ParticleBatch &batch : Particles) {
-						total += batch.Particles.size();
-					}
-
-					// Reserved before anything is written, so no later batch can
-					// reallocate the buffer an earlier one already points into.
-					ParticleInstances.reserve(total);
-					for (engine::render::ParticleBatch &batch : Particles) {
-						const size_t first = ParticleInstances.size();
-						ParticleInstances.insert(
-							ParticleInstances.end(), batch.Particles.begin(), batch.Particles.end()
-						);
-						batch.Particles = {ParticleInstances.data() + first, batch.Particles.size()};
-					}
+					Particles.Detach();
 
 					const std::span<const engine::effects::RibbonVertex> vertices =
 						engine::effects::RibbonStream(store);
@@ -2111,7 +2108,16 @@ namespace studio {
 		view.Instances = instances != nullptr ? std::span<const engine::scene::DrawInstance>(*instances)
 											  : std::span<const engine::scene::DrawInstance>{};
 		view.Surfaces = Surfaces;
-		view.Particles = Particles;
+		view.Particles = Particles.Batches;
+		view.ParticleBirths = Particles.Births;
+		view.ParticleSeams = Particles.Seams;
+		view.ParticlePool = Particles.Pool;
+		// **Once a frame and not once a viewport.** The editor draws each open
+		// viewport with its own `Render`, and the pool is the world's rather than
+		// a camera's - passing the step to each would age every particle as many
+		// times as there are panels open. See `View::ParticleDelta`.
+		view.ParticleDelta = ParticleStepped ? 0.0f : frameSeconds;
+		ParticleStepped = true;
 		view.RibbonVertices = RibbonVertices;
 		view.RibbonRuns = RibbonRuns;
 		view.Lights = Lights;

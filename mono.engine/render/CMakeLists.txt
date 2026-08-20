@@ -13,24 +13,16 @@ mono_add_library(render
 
 		Engine::scene
 
-		# `render::ParticleBatch` carries a span of `effects::ParticleInstance`,
-		# which is the whole point of the type: the particle stream crosses from
-		# simulation to presentation without being copied or converted. That makes
-		# it a public dependency in the same way `assets` is - the payload type has
-		# to propagate to whoever fills a batch.
+		# `render::ParticleBatch` names an `effects::EmitterBlock` and
+		# `render::ParticleBirth` carries an `effects::ParticleState`, which is
+		# the whole point of both types: the renderer owns the particle pool and
+		# steps it, so the layouts have to be the ones simulation writes. That
+		# makes it a public dependency in the same way `assets` is - the payload
+		# type has to propagate to whoever fills a batch.
 		#
 		# L8 is below L12 and `effects` is `shared`, so the edge goes downward and
 		# the tier check has nothing to say about it.
 		Engine::effects
-
-		# **For the particle pack, and only for that.** Half a million particles
-		# is sixteen megabytes copied into a staging buffer every frame, which is
-		# the largest single thing a particle frame does and is pure bandwidth -
-		# one core cannot saturate a memory bus and several can. `Renderer::
-		# Render` is called from the host's own thread rather than from inside a
-		# worker batch, so a dispatch here actually dispatches; see
-		# `Universe::Tick` for why that is worth saying out loud.
-		Engine::parallel
 
 		# Public table APIs use asset data types.
 		Engine::assets

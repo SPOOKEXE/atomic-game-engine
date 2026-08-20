@@ -1897,10 +1897,10 @@ namespace client {
 
 			// **Cleared with the surfaces and for a sharper version of the same
 			// reason.** A stale `SurfaceView` renders a camera that has gone; a
-			// stale `ParticleBatch` is a span into a pool that has been stepped
-			// since, so its `Live` prefix may now be shorter than the span says.
-			// That is a read past the live particles rather than a wrong picture.
-			Particles.clear();
+			// stale `ParticleBatch` points at a block that may since have been
+			// reclaimed and handed to another emitter, so its run of the pool
+			// would be stepped with somebody else's curves.
+			Particles.Clear();
 			Lights.clear();
 			RibbonVertices = {};
 			RibbonRuns = {};
@@ -2726,7 +2726,15 @@ namespace client {
 		view.Instances = drawn;
 		view.Surfaces = Surfaces;
 		view.Target = sceneTarget;
-		view.Particles = Particles;
+		view.Particles = Particles.Batches;
+		view.ParticleBirths = Particles.Births;
+		view.ParticleSeams = Particles.Seams;
+		view.ParticlePool = Particles.Pool;
+
+		// **The frame's step and not the tick's**, because the device steps once
+		// per rendered frame - see `View::ParticleDelta`. Spawning is still on
+		// the tick and the two agree, both being rates per second.
+		view.ParticleDelta = delta;
 		view.RibbonVertices = RibbonVertices;
 		view.RibbonRuns = RibbonRuns;
 		view.Lights = Lights;

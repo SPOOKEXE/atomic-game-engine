@@ -145,6 +145,14 @@ namespace engine::effects {
 			// Per plan rather than one shared counter, which is the reason the
 			// block counters are per block.
 			uint32_t Dropped = 0;
+
+			// Where this plan's births start in `ParticleSystem::Births`.
+			//
+			// **Handed out by the serial walk that fills the plan**, so a worker
+			// writes its own disjoint run of a vector that was sized before the
+			// dispatch. The alternative is an append under a lock, once per
+			// birth, from every worker at once.
+			uint32_t BirthAt = 0;
 		};
 
 		Vector3 SpawnPoint(const SpawnPlan &plan, const Vector3 &half, uint32_t id, uint32_t index) {
@@ -654,6 +662,7 @@ namespace engine::effects {
 						// which is a thing to drive through `Brightness` instead.
 						if (store.Changed<ParticleEmitter>(entity)) {
 							SampleCurves(emitter, block.Curves);
+							block.Longest = std::max(emitter.Lifetime.Maximum, 0.0f);
 						}
 						ApplyPlayback(store, emitter, block);
 
@@ -687,6 +696,7 @@ namespace engine::effects {
 					block.Capacity = wanted;
 					block.Owner = entity;
 					block.Reserved = 1;
+					block.Longest = std::max(emitter.Lifetime.Maximum, 0.0f);
 
 					// **A fresh block owes one particle immediately.**
 					//
@@ -706,9 +716,15 @@ namespace engine::effects {
 					ApplyPlayback(store, emitter, block);
 					block.Frame = EmitterFrame(store, entity);
 
+					// **The generation is carried over and advanced, not reset**,
+					// which is the whole point of it: whatever the last tenant of
+					// these rows left behind is stamped with the number this one
+					// is leaving behind, so the step reads it as death. Starting
+					// again at one would make a block agree with its predecessor.
 					if (recycling) {
 						const uint32_t reused = system->FreeSlots.back();
 						system->FreeSlots.pop_back();
+						block.Generation = system->Blocks[reused].Generation + 1;
 						slot.Index = static_cast<uint16_t>(reused);
 						system->Blocks[reused] = block;
 					} else {
@@ -815,7 +831,12 @@ namespace engine::effects {
 		// because it reads `ParticleEmitter`. One bar over both could only say
 		// the tick was expensive, and the first question anybody asks of this
 		// module is which of those two grew.
-		{
+		//
+		// **The ageing half does not run at all when the device owns the pool**,
+		// which is what `ParticleSystem::DeviceStepped` is for. The spawning half
+		// always runs: a birth reads `ParticleEmitter` and the entity tree, and
+		// neither of those is going to the device.
+		if (!system->DeviceStepped) {
 			ENGINE_PROFILE_CAT("particles.age", core::ProfileCategory::Simulation);
 
 			parallel::Jobs::For(
@@ -888,10 +909,11 @@ namespace engine::effects {
 								// integrated. That is what makes an engine glow stay
 								// on the engine.
 								state.LocalOffset = state.LocalOffset + state.Velocity * scaled;
-								instance.Position = block.Frame.PointToWorldSpace(state.LocalOffset);
+								state.Position = block.Frame.PointToWorldSpace(state.LocalOffset);
 							} else {
-								instance.Position = instance.Position + state.Velocity * scaled;
+								state.Position = state.Position + state.Velocity * scaled;
 							}
+							instance.Position = state.Position;
 
 							// **One cursor for four curves.** `Size`, `Squash`,
 							// `Alpha` and `Colour` are all asked about this same
@@ -919,12 +941,13 @@ namespace engine::effects {
 							const auto turned = static_cast<int32_t>(state.Spin * scaled * 65536.0f);
 							const uint32_t rotation =
 								(static_cast<uint32_t>(
-									static_cast<int32_t>(instance.RotationAndCell & 0xFFFFu) + turned
+									static_cast<int32_t>(state.Rotation & 0xFFFFu) + turned
 								)) &
 								0xFFFFu;
 
 							const uint32_t cell =
 								animated ? FlipbookCell(block, state.Age, state.Lifetime, state.Seed) : 0u;
+							state.Rotation = rotation;
 							instance.RotationAndCell = rotation | (cell << 16);
 							instance.Colour = WithAlpha(
 								SampleColourCurve(block.Curves.Colour, cursor),
@@ -1003,13 +1026,31 @@ namespace engine::effects {
 			// that dominates this module, and the emitter column is walked
 			// sequentially exactly once. Leave it alone unless a measurement
 			// says otherwise; these three are the ones already taken.
+			uint32_t births = 0;
 			store.Each<const ParticleEmitter, const EmitterSlot>(
 				[&](ecs::Entity entity, const ParticleEmitter &emitter, const EmitterSlot &slot) {
 					if (slot.Index == NO_SLOT || slot.Index >= blocks.size()) {
 						return;
 					}
 					EmitterBlock &block = blocks[slot.Index];
-					if (block.Capacity == 0 || !emitter.Enabled) {
+					if (block.Capacity == 0) {
+						return;
+					}
+
+					// **Advanced before the enabled test, and that is the point of
+					// it.** A disabled emitter is exactly the one whose block has
+					// to be seen emptying: nothing more is born, and once the
+					// longest lifetime has passed nothing born before can still be
+					// alive. Without this a block the device owns would hold its
+					// rows and go on drawing its capacity in quads with no extent
+					// for as long as the emitter existed.
+					block.Idle += delta;
+					if (system->DeviceStepped && block.Idle > block.Longest) {
+						block.Live = 0;
+						block.Spawned = 0;
+					}
+
+					if (!emitter.Enabled) {
 						return;
 					}
 
@@ -1052,9 +1093,21 @@ namespace engine::effects {
 						}
 					}
 
+					block.Idle = 0.0f;
+					plan.BirthAt = births;
+					births += owed;
+
 					plans.push_back(plan);
 				}
 			);
+
+			// Sized once, after the walk that decided how many there are. The
+			// rows themselves are written by the workers below, each into its
+			// own run.
+			system->Births.clear();
+			if (system->DeviceStepped) {
+				system->Births.resize(births);
+			}
 		}
 
 		{
@@ -1067,10 +1120,15 @@ namespace engine::effects {
 			// Resolved once here, on the thread that filled it.
 			SpawnPlan *const planned = plans.data();
 
+			// The same reasoning as `planned`: resolved on the thread that owns
+			// them, not named from inside a worker.
+			const bool ring = system->DeviceStepped;
+			uint32_t *const births = system->Births.empty() ? nullptr : system->Births.data();
+
 			parallel::Jobs::For(
 				plans.size(),
 				SPAWN_GRAIN,
-				[instances, states, &blocks, planned](size_t begin, size_t end) {
+				[instances, states, &blocks, planned, ring, births](size_t begin, size_t end) {
 					for (size_t at = begin; at < end; at++) {
 						SpawnPlan &plan = planned[at];
 						EmitterBlock &block = blocks[plan.Block];
@@ -1087,12 +1145,36 @@ namespace engine::effects {
 						const auto bornSlot = static_cast<uint16_t>(plan.Block);
 
 						for (uint32_t spawn = 0; spawn < plan.Owed; spawn++) {
-							if (block.Live >= block.Capacity) {
+							// **A ring when the device owns the pool, a prefix
+							// when the host does**, and the difference is which
+							// side knows about death. The host-side pass ages
+							// the particles, so it knows the moment one dies and
+							// keeps the live ones as a prefix by swapping the
+							// last into the hole - which is what lets it draw
+							// `Live` rather than `Capacity`.
+							//
+							// The device's pass cannot tell the host anything
+							// without a readback, so there is no live count here
+							// to keep and no hole to fill. Births go round the
+							// block instead. `BlockSizeFor` is
+							// `Rate * maxLifetime + 1`, so the slot the ring
+							// comes back to is one the oldest particle has just
+							// left; when it has not - a rate that rose, a
+							// lifetime that grew - the oldest is overwritten,
+							// which is a particle cut short rather than a birth
+							// refused. That is the better of the two: an emitter
+							// that outgrows its block thins out instead of
+							// stopping.
+							if (!ring && block.Live >= block.Capacity) {
 								plan.Dropped = plan.Owed - spawn;
 								break;
 							}
 
-							const uint32_t row = block.First + block.Live;
+							const uint32_t row = ring ? block.First + block.Spawned % block.Capacity
+													  : block.First + block.Live;
+							if (births != nullptr) {
+								births[plan.BirthAt + spawn] = row;
+							}
 
 							// **A per-particle index that keeps advancing rather
 							// than the slot number**, because the slot is reused
@@ -1112,6 +1194,7 @@ namespace engine::effects {
 							state.Lifetime = std::max(Between(SeedOf(id, index, 11), plan.Lifetime), 1e-4f);
 							state.LocalOffset = local;
 							state.Seed = index;
+							state.Generation = block.Generation;
 							state.Spin =
 								Between(SeedOf(id, index, 13), plan.RotationSpeed) * TURNS_PER_DEGREE;
 							state.Velocity = block.Frame.VectorToWorldSpace(direction) * speed;
@@ -1122,20 +1205,27 @@ namespace engine::effects {
 							// origin of each frame.
 							state.Velocity = state.Velocity + plan.Inherited;
 
-							ParticleInstance &instance = instances[row];
-							instance.Position = block.Frame.PointToWorldSpace(local);
-							instance.Slot = bornSlot;
+							state.Position = block.Frame.PointToWorldSpace(local);
 
 							const float degrees = Between(SeedOf(id, index, 12), plan.Rotation);
 							const auto turns = static_cast<uint32_t>(
 								std::fmod(degrees * TURNS_PER_DEGREE + 1.0f, 1.0f) * 65535.0f
 							);
-							instance.RotationAndCell = turns & 0xFFFFu;
+							state.Rotation = turns & 0xFFFFu;
+
+							ParticleInstance &instance = instances[row];
+							instance.Position = state.Position;
+							instance.Slot = bornSlot;
+							instance.RotationAndCell = state.Rotation;
 
 							instance.Size = bornSize;
 							instance.Colour = bornColour;
 
-							block.Live++;
+							// A statistic either way, but in the ring it is only
+							// a count of what has ever been born: the device
+							// draws the whole capacity and works out for itself
+							// which slots hold anything.
+							block.Live = ring ? std::min(block.Spawned, block.Capacity) : block.Live + 1;
 						}
 					}
 				},
