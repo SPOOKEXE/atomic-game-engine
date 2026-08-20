@@ -39,19 +39,20 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### v0.18
 
-- [_] add release builds for linux (windows and mac, if builds)
+- [x] add release builds for linux (windows and mac, if builds)
+- [_] ~~in the engine, rename Anchored to Static, keep roblox shim as Anchored but refer to static when changing property~~. Change so everything is static until we add a "physics component" to it.
+- [_] rename mono.unified_server_client to mono.unified_tests which imports all the mono reports into the code so it can fully test all features with all variations between clients, servers, cdn, networking, engine, etc. This one focused more on CROSS communication and management, NOT per-mono specific systems and such.
+
 - [_] build out proper code architecture documents (AGENTS.md, docs/CODE_FORMAT.md, docs/CODE_QUALITY.md) => CODE_ARCH.md
 - [_] DOMAIN DRIVEN DESIGN & HEXAGONAL ARCHITECTURE
 - [_] check if we need to move files / classes / structures around in the codebase to properly fit (mainly focus on engine)
 - [_] properly make a ECS component document list so i can see all components and what they're for
 - [_] clean up all ECS components that exist and find better ways to represent stuff (e.g. merge, split, rename).
-- [_] in the engine, rename Anchored to Static, keep roblox shim as Anchored but refer to static when changing property
 - [_] think plan for future features as well listed in roadmap and plan for them now
-- [_] rename mono.unified_server_client to mono.unified_tests which imports all the mono reports into the code so it can fully test all features with all variations between clients, servers, cdn, networking, engine, etc. This one focused more on CROSS communication and management, NOT per-mono specific systems and such.
-- [_] deferred catchup
 - [_] improve build times (flamegraph => optimise)
 - [_] mono.launcher (run singleplayer game, host game on server, join server, run studio, run cdn, etc)
 - [_] quic implementation
+- [_] deferred catchup
 
 ### v0.19
 
