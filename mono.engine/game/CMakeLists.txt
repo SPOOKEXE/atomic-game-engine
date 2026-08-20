@@ -62,4 +62,21 @@ mono_add_library(game
 		#
 		# Drop this edge if the new system does not put a resource on the world.
 		Engine::graph
+
+		# L5 and L8, together, for one file. `CollisionContent.cpp` turns an
+		# `assets::MeshData` into the hull and the triangle soup a
+		# `scene::Collider` names, and this is the lowest module that can see
+		# both halves: the geometry types are at L5 and cannot see an asset, the
+		# components are at L7, and `assets` is at L8.
+		#
+		# **`assets` and never `bake`**, for exactly the reason the `bakegraph`
+		# edge above gives. `assets` links `core` and two vendors and holds the
+		# engine's own mesh format; `bake` holds the glTF, OBJ and PMX readers.
+		# A server links this target and has no business decoding a PMX.
+		#
+		# **Nothing here opens a file or a socket.** A caller hands over bytes it
+		# already has - the client from `delivery`, a server from the store it is
+		# already serving - so the trust boundary stays where it was.
+		Engine::collision
+		Engine::assets
 )

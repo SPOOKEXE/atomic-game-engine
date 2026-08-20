@@ -8,6 +8,7 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/delivery/Relay.hpp>
 #include <engine/examples/Scene.hpp>
+#include <engine/game/CollisionContent.hpp>
 #include <engine/game/Content.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Play.hpp>
@@ -21,6 +22,7 @@
 #include <engine/replication/SnapshotBuffer.hpp>
 #include <engine/scene/Awake.hpp>
 #include <engine/scene/Characters.hpp>
+#include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Ownership.hpp>
@@ -215,10 +217,18 @@ namespace server {
 
 	// Out of line so CDN types remain incomplete in the public header.
 	Server::~Server() {
+		ContentShapes.reset();
 		ContentLink.reset();
 		ContentService.reset();
 		ContentOrigin.reset();
 		ContentGrantSecret.reset();
+	}
+
+	void Server::InstallCollisionShapes(engine::ecs::Store &store) {
+		engine::game::RecordBuiltinCollisionShapes(store);
+		if (ContentShapes) {
+			engine::game::MergeCollisionShapes(store, *ContentShapes);
+		}
 	}
 
 	bool Server::BeginServingContent() {
@@ -277,6 +287,19 @@ namespace server {
 		if (!mounted) {
 			return false;
 		}
+
+		// **Here, because this is the last point that holds both the store and
+		// the manifest.** The publication takes the manifest and the service
+		// takes the store, so a bake after these two lines has nothing to read.
+		//
+		// The worlds already exist - `StartHosts` and the primary world are both
+		// built above this - so the table is pushed into them below rather than
+		// waited for. Nothing has ticked yet: `Running` is still false.
+		ContentShapes = std::make_unique<engine::scene::CollisionShapes>();
+		const size_t shapes = engine::game::AddCollisionShapesFrom(*ContentShapes, *store, *manifest);
+		if (shapes != 0) {
+			ENGINE_INFO("server: baked collision geometry for {} mesh(es)", shapes);
+		}
 		if (!ContentOrigin->Publish(
 				std::make_shared<const cdn::Publication>(*mounted, std::move(*manifest))
 			)) {
@@ -290,6 +313,20 @@ namespace server {
 		if (!ContentService) {
 			ENGINE_ERROR("server: could not serve content on port {}", Settings.ContentPort);
 			return false;
+		}
+
+		// **Into the worlds that were built before this ran.** A world created
+		// after this point picks the table up from `InstallCollisionShapes`;
+		// these were made during startup, above, when there was nothing to give
+		// them. Without this a `--content-store` server's meshes would collide
+		// as their bounds for the life of the process.
+		for (const engine::world::WorldId id : Worlds().Worlds()) {
+			if (Worlds().IsRemote(id)) {
+				continue;
+			}
+			Worlds().Enter(id, [this](engine::ecs::Store &store) {
+				engine::game::MergeCollisionShapes(store, *ContentShapes);
+			});
 		}
 
 		ENGINE_INFO(
@@ -741,6 +778,10 @@ namespace server {
 					// empty world and a re-shuffle on a populated one.
 					PrepareSimulation(store, systems, physicsTickRate);
 
+					// **Beside the physics, because it is what the physics
+					// resolves a mesh collider through.** See `ContentShapes`.
+					InstallCollisionShapes(store);
+
 					// The same call the studio's Play makes. What "running a
 					// game" means is one function, or the two drift and the
 					// first thing to drift is the heartbeat's delta.
@@ -792,6 +833,7 @@ namespace server {
 		// and no draw list here, because a server draws nothing. That split is
 		// the reason the loader stops where it does.
 		PrepareSimulation(store, scheduler, Settings.PhysicsTickRate);
+		InstallCollisionShapes(store);
 
 		std::string error;
 		if (!engine::examples::LoadScene(store, scheduler, Settings.GamePath, error)) {

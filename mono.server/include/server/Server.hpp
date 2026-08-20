@@ -42,6 +42,10 @@ namespace engine::assets {
 	class GrantKey;
 }
 
+namespace engine::scene {
+	struct CollisionShapes;
+}
+
 namespace server {
 	class ContentRelay;
 	struct ContentRelayStatistics;
@@ -747,6 +751,15 @@ namespace server {
 		// @return `false` when a store was asked for and cannot be served.
 		bool BeginServingContent();
 
+		// Gives one world the collision geometry its colliders name.
+		//
+		// The built-in shapes always, because a `MeshPart` set to `Cube` needs
+		// one before any content exists, and `ContentShapes` when the store has
+		// been read. Called beside `PrepareSimulation`, so every world this
+		// process simulates gets it and the placeholder benchmark world - which
+		// has no physics at all - does not.
+		void InstallCollisionShapes(engine::ecs::Store &store);
+
 		// Builds the relay that answers clients' content routes.
 		//
 		// @return `false` when relay mode was asked for and could not be set up,
@@ -907,6 +920,30 @@ namespace server {
 		// would make the in-process arrangement a different code path from the
 		// deployed one, which is exactly what §16.6 forbids for the transport.
 		std::unique_ptr<engine::assets::GrantKey> ContentGrantSecret;
+
+		// The collision geometry of every mesh in the content store.
+		//
+		// **Because a headless server has to agree with a client about what a
+		// mesh collides as.** A `Collider` naming a hull resolves through
+		// `scene::CollisionShapes`, and until v0.17 the only thing that ever
+		// filled that table was the client, on the frame an asset arrived. A
+		// server therefore had mesh colliders it could not resolve and every one
+		// of them silently fell back to the part's bound - which reads as a
+		// client and a server disagreeing about where a player is standing.
+		//
+		// **Baked once and merged into each world**, rather than per world: the
+		// hull is quickhull over the model and the table is copied whole by
+		// `SetResource`, so a host of eight worlds would otherwise read its
+		// store eight times. `game::AddCollisionShapesFrom` fills this;
+		// `InstallCollisionShapes` puts it on a world.
+		//
+		// Held by pointer for the reason the origin is - the header stays free
+		// of the geometry types. Null until `BeginServingContent` runs, and null
+		// for ever on a server with no `--content-store`, which then has the
+		// built-in shapes and nothing else.
+		//
+		// @since v0.17
+		std::unique_ptr<engine::scene::CollisionShapes> ContentShapes;
 
 		// One VM per world, while a game file is being hosted.
 		//

@@ -103,12 +103,24 @@ Refuse anything that widens it:
   for rule 4's reason: a name survives a save file, a wire format and a rename,
   and a hull is bytes that would then exist once per part that used it.
 
-**`CollisionShapes` is registered with no writer, and that is deliberate.** A
-hull is derived from content the receiving side already has, so putting it on the
-wire is sending a conclusion instead of its input - and the conclusion is the
-half an attacker gets to choose. A shape whose bound disagrees with its points is
-a collider that stops things it is not touching. `assets::MeshData` refuses to
-store its own bound for the same reason.
+**Who fills it is `game`, at L10, and there is one of them.** `game::
+AddCollisionShapes` is the only conversion from a mesh to the two shapes; the
+client, the studio and a headless server all reach it, so all three resolve a
+name to the same geometry. A host that built a hull of its own would be a host
+that eventually disagrees with the others about where a body stops.
+
+**`CollisionShapes` is registered with a writer that writes nothing, and that is
+deliberate.** A hull is derived from content the receiving side already has, so
+putting it on the wire is sending a conclusion instead of its input - and the
+conclusion is the half an attacker gets to choose. A shape whose bound disagrees
+with its points is a collider that stops things it is not touching.
+`assets::MeshData` refuses to store its own bound for the same reason.
+
+It has an empty writer rather than no writer because `Store::Save` refuses a
+resource with no serialisation at all, and the studio snapshots a universe every
+time Play is pressed - `client::DrawList` is registered the same way for the same
+reason. The reader clears, so a restored world is handed its shapes again by
+whichever host restored it rather than inheriting a table nothing owns.
 
 ## A fixture is found by class and never by name
 

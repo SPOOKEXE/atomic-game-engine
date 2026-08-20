@@ -11,6 +11,7 @@
 #include <engine/effects/Registration.hpp>
 #include <engine/effects/Ribbon.hpp>
 #include <engine/examples/Scene.hpp>
+#include <engine/game/CollisionContent.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/parallel/Jobs.hpp>
@@ -438,6 +439,14 @@ namespace client {
 			for (const Counted &builtin : BUILTINS) {
 				engine::scene::RecordMesh(store, builtin.Name, builtin.Triangles);
 			}
+
+			// **And what they collide as, which nothing else was ever going to
+			// do.** `MakeBuiltin` generates the six rather than shipping files,
+			// so they never travel the content path that bakes a hull for an
+			// arriving mesh - a `MeshPart` set to `Cube` with a hull collider
+			// resolved to nothing and fell back to its bound. The same six
+			// shapes on every host, out of `game::AddBuiltinCollisionShapes`.
+			engine::game::RecordBuiltinCollisionShapes(store);
 		}
 
 		void InstallResources(Store &store, Entity camera, float extent, uint32_t reserve) {

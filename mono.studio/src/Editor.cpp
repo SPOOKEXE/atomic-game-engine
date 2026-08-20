@@ -5,6 +5,7 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/examples/Scene.hpp>
+#include <engine/game/CollisionContent.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
 #include <engine/parallel/Jobs.hpp>
@@ -2364,6 +2365,16 @@ namespace studio {
 		engine::physics::PreparePhysicsWorld(store);
 		engine::physics::RegisterPhysicsSystems(systems);
 
+		// **What a mesh collider resolves through**, and the studio needs it for
+		// the same reason a server does: a `Collider` names its geometry with a
+		// string, and a world with no table behind that name falls back to the
+		// part's bound without saying so.
+		//
+		// The built-ins here because a `MeshPart` set to `Cube` is content that
+		// never arrives; this session's own meshes in `PrepareWorldIn`, which is
+		// the half that can see the editor.
+		engine::game::RecordBuiltinCollisionShapes(store);
+
 		// **And the weight, which is a separate feature and was the other half
 		// of why nothing fell.** `physics` deliberately has no gravity - a
 		// top-down game should not have to switch one off - so wiring the
@@ -2425,12 +2436,20 @@ namespace studio {
 		// and the store being prepared cannot answer for them.
 		const double physicsTickRate = Universe->SettingsOf(id).PhysicsTickRate;
 
-		Universe->Enter(id, [physicsTickRate](Store &store, Scheduler &systems) {
+		Universe->Enter(id, [this, physicsTickRate](Store &store, Scheduler &systems) {
 			PrepareWorld(store, systems);
 
 			// After `PrepareWorld`, because that is what gives the world the
 			// clock this writes to.
 			engine::physics::SetPhysicsTickRate(store, physicsTickRate);
+
+			// **The meshes this session has already taken in.** Content arrives
+			// into the worlds that are open at the time, so a world created or
+			// opened afterwards holds parts naming a mesh whose shape it has
+			// never heard of - and a collider that cannot resolve its geometry
+			// falls back to the part's bound in silence. `ContentShapes` is the
+			// same argument `ContentMeshFacts` makes, one layer down.
+			engine::game::MergeCollisionShapes(store, ContentShapes);
 		});
 	}
 

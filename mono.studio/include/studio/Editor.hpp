@@ -51,6 +51,7 @@
 #include <engine/render/Renderer.hpp>
 #include <engine/render/ShaderLibrary.hpp>
 #include <engine/render/ViewportFrames.hpp>
+#include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/ui/Interface.hpp>
@@ -2511,6 +2512,21 @@ namespace studio {
 			std::vector<engine::core::Name> Sheets;
 		};
 		std::unordered_map<uint32_t, RegisteredMesh> ContentMeshFacts;
+
+		// The collision geometry of every mesh this session has taken in.
+		//
+		// **The same argument as `ContentMeshFacts`, one layer down.** A hull is
+		// baked at intake into the worlds that were open then, so a world
+		// created or opened afterwards holds parts naming a mesh whose shape it
+		// has never heard of - and a collider that cannot resolve its geometry
+		// falls back to the part's bound in silence. `PrepareWorld` merges this
+		// into every world this program makes.
+		//
+		// Kept rather than re-derived for the reason above it: re-deriving means
+		// decoding an `.amesh` again and running quickhull over it again.
+		//
+		// @since v0.17
+		engine::scene::CollisionShapes ContentShapes;
 		size_t ContentTextures = 0;
 
 		// How many shader modules the content store delivered.

@@ -806,19 +806,43 @@ namespace engine::scene {
 		ecs::Components::Register<SurfaceTable>("scene.SurfaceTable", WriteSurfaceTables, ReadSurfaceTables);
 		ecs::Components::Register<TagTable>("scene.TagTable", WriteTagTables, ReadTagTables);
 
-		// **The baked collision shapes, and they do not cross.** Registered with
-		// no writer at all, which is `PhysicsWorld`'s decision for its grids and
-		// holds here for a sharper version of the same reason: a hull is derived
-		// from content the receiving side already has, so putting it on the wire
-		// is sending a conclusion instead of its input - and the conclusion is
-		// the half an attacker gets to choose. A shape with a bound that does not
-		// match its points is a collider that stops things it is not touching.
+		// **The baked collision shapes, and they do not cross.** A hull is
+		// derived from content the receiving side already has, so putting it on
+		// the wire is sending a conclusion instead of its input - and the
+		// conclusion is the half an attacker gets to choose. A shape with a
+		// bound that does not match its points is a collider that stops things
+		// it is not touching. `PhysicsWorld` makes the same decision for its
+		// grids.
+		//
+		// **A writer that writes nothing rather than no writer at all**, which
+		// is `client::DrawList`'s arrangement and is here for its reason:
+		// `Store::Save` refuses a resource with no serialisation rather than
+		// writing bytes that cannot be read back, so a world holding this could
+		// not be snapshotted - and the studio snapshots a universe every time
+		// Play is pressed. Nothing crosses either way, so the wire argument
+		// above is untouched.
+		//
+		// **The reader clears**, because what comes back has to be rebuilt
+		// rather than inherited: a restored world is handed its shapes again by
+		// whichever host restored it - `Editor::PrepareWorldIn`,
+		// `Server::InstallCollisionShapes` - out of the content that host has.
+		// Keeping a stale table would be keeping the one copy nothing owns.
 		//
 		// It is registered rather than left to be minted by the first
 		// `SetResource`, for the reason this block opens with: an unregistered
 		// resource takes the compiler's spelling of its type and aborts once the
 		// table is sealed.
-		ecs::Components::Register<CollisionShapes>("scene.CollisionShapes");
+		ecs::Components::Register<CollisionShapes>(
+			"scene.CollisionShapes",
+			[](core::ByteWriter &, const void *, size_t) {},
+			[](core::ByteReader &, void *destination, size_t count) {
+				auto *tables = static_cast<CollisionShapes *>(destination);
+				for (size_t index = 0; index < count; index++) {
+					tables[index].Hulls.clear();
+					tables[index].Meshes.clear();
+				}
+			}
+		);
 		ecs::Components::Register<ActiveCamera>("scene.ActiveCamera");
 
 		// **`InputState` crosses and `CameraController` crosses**, which is worth

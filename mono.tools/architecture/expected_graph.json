@@ -204,6 +204,7 @@
     "game": {
       "tier": "shared",
       "links": [
+        "assets",
         "bakegraph",
         "collision",
         "core",

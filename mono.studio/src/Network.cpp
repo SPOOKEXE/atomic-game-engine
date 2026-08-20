@@ -35,6 +35,7 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/delivery/Client.hpp>
 #include <engine/delivery/Uploader.hpp>
+#include <engine/game/CollisionContent.hpp>
 #include <engine/scene/Materials.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/PublishedCatalogue.hpp>
@@ -384,8 +385,23 @@ namespace studio {
 					// `MeshPart.TrianglesCount` answers in an edited world too -
 					// which is how somebody checks a mesh actually arrived.
 					const auto triangles = static_cast<uint32_t>(mesh.Indices.size() / 3);
-					EachOpenWorld([&name, triangles, &sheets](engine::ecs::Store &store) {
+
+					// **The hull and the soup, baked once here rather than once
+					// per world.** Quickhull over a model is not free and the
+					// answer is a function of the mesh alone, so four viewports
+					// on four worlds would otherwise run it four times for one
+					// arrival.
+					engine::scene::CollisionShapes arrived;
+					engine::game::AddCollisionShapes(arrived, name, mesh);
+
+					// **Kept as well as given out, because a world can arrive
+					// after a mesh does** - the same argument the mesh facts
+					// above make, and `PrepareWorld` is where it is spent.
+					engine::game::MergeCollisionShapes(ContentShapes, arrived);
+
+					EachOpenWorld([&name, triangles, &sheets, &arrived](engine::ecs::Store &store) {
 						engine::scene::RecordMesh(store, name, triangles, sheets);
+						engine::game::MergeCollisionShapes(store, arrived);
 					});
 
 					// **Kept, because a world can arrive after a mesh does.**
