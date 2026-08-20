@@ -305,6 +305,20 @@ namespace engine::world {
 		// @return The handles, copied.
 		std::vector<WorldId> Worlds() const;
 
+		// Every world's handle, without building a vector to hold them.
+		//
+		// **The same answer as `Worlds`, for the callers that only walk it.**
+		// `Worlds` returns by value, so a panel or a content pump that iterates
+		// it once a frame pays a heap allocation a frame for a list it discards
+		// - and the editor's draw path calls it several times over between the
+		// explorer, the worlds panel, the statistics rows and the content pump.
+		//
+		// Creating or destroying a world inside the body is not supported: the
+		// registry is walked in place, exactly as `Worlds` walks it.
+		//
+		// @param body Called once per live world, in creation order.
+		void EachWorld(const std::function<void(WorldId)> &body) const;
+
 		// What a world is called.
 		//
 		// @param id The world to ask about.

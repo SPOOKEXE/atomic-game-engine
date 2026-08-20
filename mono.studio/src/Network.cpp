@@ -159,6 +159,20 @@ namespace studio {
 		ContentUploads.reset();
 		ContentSamples = NetworkSamples{};
 
+		// **Everything the old client's answers were recorded in goes with it.**
+		// `ContentAsked` is what stops a name being requested twice, and it was
+		// keyed to a client that no longer exists - so saving the Content page
+		// mid-session left every asset already named permanently unfetchable
+		// against the new sources, which reads as the new origin being empty.
+		// `ContentPending` and `ContentIssued` hold request ids belonging to the
+		// dead client and would be asked about a live one. `mono.client` clears
+		// its own set for this reason when it rebuilds; the editor did not.
+		ContentAsked.clear();
+		ContentPending.clear();
+		ContentIssued.clear();
+		ContentRequested = false;
+		ContentReportedTotal = 0;
+
 		if (settings.IsValid()) {
 			ContentClient = engine::delivery::MakeAssetClient(settings);
 		} else {
@@ -193,17 +207,25 @@ namespace studio {
 	void Editor::PumpContent(double frameSeconds) {
 		ContentSeconds += frameSeconds;
 
-		// **Three spans rather than one, because "content costs 0.1 ms in an
-		// idle editor" is not an answer.** The three things under here are a
-		// delivery client polling a socket, a walk over parts waiting for a mesh
-		// to size them against, and an upload queue - and in an editor with
+		// **Five spans rather than one, because "content costs 0.1 ms in an idle
+		// editor" is not an answer.** The things under here are a delivery
+		// client polling a socket, a demand scan over every world's instances, a
+		// decode-and-upload of whatever arrived, a walk over parts waiting for a
+		// mesh to size them against, and an upload queue - and in an editor with
 		// nothing downloading they cost very different amounts for very
 		// different reasons. One bar labelled `content` could only say that the
 		// total was small and non-zero, which is exactly the reading that
 		// prompts somebody to go looking and find nothing.
+		//
+		// `content.deliver` was three of those at once, and the reading it gave
+		// on an idle frame was almost entirely the demand scan rather than the
+		// client it was named after. The names now match `mono.client`'s, so a
+		// figure from one program means the same thing in the other.
 		if (ContentClient) {
-			ENGINE_PROFILE_CAT("content.deliver", engine::core::ProfileCategory::Assets);
-			ContentClient->Pump();
+			{
+				ENGINE_PROFILE_CAT("content.deliver", engine::core::ProfileCategory::Assets);
+				ContentClient->Pump();
+			}
 			DrainContent();
 		}
 
@@ -259,9 +281,12 @@ namespace studio {
 		// registered into the renderer is registered for all of them, so a
 		// catalogue filled for one would leave `TrianglesCount` answering zero
 		// in the others for no reason anybody could see.
-		for (const engine::world::WorldId world : Universe->Worlds()) {
+		// `EachWorld` rather than `Worlds`, which returns the list by value: this
+		// runs several times a frame between the content pump and the fit pass,
+		// and each call was a heap allocation for a list it walked once.
+		Universe->EachWorld([this, &body](engine::world::WorldId world) {
 			Universe->Enter(world, [&body](engine::ecs::Store &store) { body(store); });
-		}
+		});
 	}
 
 	void Editor::DrainContent() {
@@ -287,6 +312,15 @@ namespace studio {
 		}
 
 		if (ContentRequested) {
+			// **Named apart from the delivery client**, because they answer
+			// different questions and only one of them is "is anything
+			// arriving". An idle editor's `content.deliver` reading was almost
+			// entirely this: a walk of every world for the names its instances
+			// carry, recomputing a bit-identical answer at the frame rate. One
+			// bar covering both could only say the total was small and non-zero,
+			// which is exactly the reading that sends somebody looking in the
+			// delivery client and finding nothing.
+			ENGINE_PROFILE_CAT("content.demand", engine::core::ProfileCategory::Assets);
 			OfferPublishedNames();
 			RequestShownContent();
 		}
@@ -301,6 +335,14 @@ namespace studio {
 		// `IntakeBudget` says why it is bytes rather than a count, why what does
 		// not fit is deferred rather than dropped, and why the first arrival of
 		// a frame is admitted however large it is.
+		// **The decode-and-upload half, named apart from the fetch.** Everything
+		// below reads bytes that have already arrived and turns them into
+		// meshes, textures and collision shapes - which is where a burst of
+		// arrivals actually costs a frame, and it is not the delivery client.
+		// The same split the client makes, so the two programs' frame graphs can
+		// be read against each other.
+		ENGINE_PROFILE_CAT("content.intake", engine::core::ProfileCategory::Assets);
+
 		ContentBudget.Begin();
 
 		size_t kept = 0;
@@ -684,7 +726,12 @@ namespace studio {
 		// a second or two, which is what an editor opening a large place should
 		// look like. The collection is idempotent, so what is not issued this
 		// pump is simply issued on the next - there is no queue to keep in step.
-		std::vector<engine::core::Name> wanted;
+		// **A member cleared rather than a local rebuilt.** This runs every pump
+		// and the list is discarded every pump, so a local was one allocation
+		// and a geometric regrowth per frame for an answer that is almost always
+		// the same one.
+		std::vector<engine::core::Name> &wanted = WantedContent;
+		wanted.clear();
 		EachOpenWorld([&wanted](engine::ecs::Store &store) { client::CollectWantedContent(store, wanted); });
 
 		size_t issued = 0;
@@ -699,6 +746,22 @@ namespace studio {
 	}
 
 	bool Editor::RequestContentAsset(const engine::core::Name &asset) {
+		// **The already-asked probe first, and the order is the whole cost of
+		// this function on an idle frame.** Every name a world carries reaches
+		// here every pump, and almost all of them have been asked for already -
+		// so the cheapest question that can end the call has to be the first
+		// one. `Name::Text()` takes a shared lock on a process-wide table and
+		// `BuiltinFromName` then compares six strings, both of which used to run
+		// before the hash probe that already knew the answer. The shipped client
+		// has always had these the right way round; the editor had not.
+		//
+		// A built-in now enters `ContentAsked` on its first sight, which is six
+		// extra ids and no change in what is fetched: the check below still
+		// refuses it before anything is requested.
+		if (!ContentClient || !asset.IsValid() || !ContentAsked.insert(asset.Id()).second) {
+			return false;
+		}
+
 		// **A built-in is never fetched, because there is nothing to fetch.**
 		// `engine.Cube` and its five siblings are generated by
 		// `assets::MakeBuiltin` and registered by `MeshTable::Initialise` before
@@ -707,12 +770,6 @@ namespace studio {
 		// back as a miss - a warning per built-in in the log of anybody using
 		// the picker's default rows, describing content that is already there.
 		if (engine::assets::BuiltinMesh ignored; engine::assets::BuiltinFromName(asset.Text(), ignored)) {
-			return false;
-		}
-
-		// Asked once, whatever happened to it - a misspelled name must not
-		// issue a request per frame for the life of the session.
-		if (!ContentClient || !asset.IsValid() || !ContentAsked.insert(asset.Id()).second) {
 			return false;
 		}
 

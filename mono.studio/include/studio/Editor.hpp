@@ -2601,6 +2601,15 @@ namespace studio {
 		// Which texture names have been asked for, by `core::Name::Id`.
 		std::unordered_set<uint32_t> ContentAsked;
 
+		// The names the open worlds carry, refilled once per content pump.
+		//
+		// A member rather than a local in `RequestShownContent` so the buffer's
+		// capacity survives the frame. The answer is recomputed from scratch
+		// every pump - there is nothing cheap to observe that would say when a
+		// world's content names changed - so the allocation was the one part of
+		// that which did not have to be paid again.
+		std::vector<engine::core::Name> WantedContent;
+
 		// Queues every file in the local store's `raw/` for every write source.
 		void UploadStore();
 
