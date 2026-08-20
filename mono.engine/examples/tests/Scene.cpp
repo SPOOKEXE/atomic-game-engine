@@ -1412,6 +1412,26 @@ TEST_CASE("the magic scene fires spells that crater terrain", "[examples][scene]
 
 	// Every lane compiled; skipped lanes would leave an empty arena.
 	CHECK(CountNamed(store, "Muzzle") == 5);
+
+	// --- the terrain cache ---------------------------------------------------
+	//
+	// **`TerrainRuntime` folds each new crater into its cached column depths
+	// rather than recomputing them**, which is what keeps a chunk rebuild cheap
+	// however long an arena has been shot at - measured over 1800 ticks, it took
+	// the ticks over a 60 Hz budget from 112 to one. It is also the only cache in
+	// that file that can go stale: the others wrap pure functions of position and
+	// this one is invalidated by hand.
+	//
+	// The scene audits itself once, after enough craters to have overlapped, and
+	// leaves a part named for the outcome. Run on far enough for that to have
+	// happened - the loop above stops at the first changed voxel, which is one
+	// crater.
+	for (int tick = 0; tick < 60 * 25; tick++) {
+		systems.Tick(store, 1.0f / 60.0f);
+	}
+
+	CHECK(CountNamed(store, "TerrainCacheFresh") == 1);
+	CHECK(CountNamed(store, "TerrainCacheStale") == 0);
 }
 
 TEST_CASE("the magic scene draws the effects its presets author", "[examples][scene]") {
