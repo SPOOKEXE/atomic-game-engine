@@ -1015,14 +1015,6 @@ namespace engine::script {
 			return MakeCFrame(context, *left * *right);
 		}
 
-		JSValue CFramePosition(JSContext *context, JSValueConst self, int) {
-			const core::CFrame *value = AsCFrame(context, self);
-			if (value == nullptr) {
-				return JS_ThrowTypeError(context, "not a CFrame");
-			}
-			return MakeVector3(context, value->Position);
-		}
-
 		// `CFrame.add(v)` and `CFrame.sub(v)`, which Luau spells `+` and `-`.
 		//
 		// **Translation only, and that is the distinction from `mul`.**
