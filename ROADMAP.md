@@ -40,8 +40,9 @@ The milestone headings below are development labels. Not in line with project ve
 ### v0.18
 
 - [x] add release builds for linux (windows and mac, if builds)
-- [_] ~~in the engine, rename Anchored to Static, keep roblox shim as Anchored but refer to static when changing property~~. Change so everything is static until we add a "physics component" to it.
+- [x] in the engine, replace Anchored for a better component. Keep roblox shim as Anchored but refer to the new property. Update: "Simulated" property.
 - [_] rename mono.unified_server_client to mono.unified_tests which imports all the mono reports into the code so it can fully test all features with all variations between clients, servers, cdn, networking, engine, etc. This one focused more on CROSS communication and management, NOT per-mono specific systems and such.
+- [_] expose spatial querying to luau / quickjs
 
 - [_] build out proper code architecture documents (AGENTS.md, docs/CODE_FORMAT.md, docs/CODE_QUALITY.md) => CODE_ARCH.md
 - [_] DOMAIN DRIVEN DESIGN & HEXAGONAL ARCHITECTURE
@@ -52,6 +53,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] improve build times (flamegraph => optimise)
 - [_] mono.launcher (run singleplayer game, host game on server, join server, run studio, run cdn, etc)
 - [_] quic implementation
+- [_] choose networking backend (quic, tcp, udp, etc) for each engine feature like replication and whatnot.
 - [_] deferred catchup
 
 ### v0.19
@@ -105,3 +107,4 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] full ui features
 - [_] level-of-details (4 different meshes version, auto-decimate version, smart-triangle-reduction-version thinking of nanite triangle surface area)
 - [_] project demos: space engineers asteroids + planets full demo, blackhole simulator (warp space, warp visual, etc), huge medieval battle full ai war, ai magic battle with tons of particles and explosions and whatnot, user interface (copy bladeborne's for demo?)
+- [_] datastores (sqlite, mongo, supabase, etc - make a selection with local and remote setups)
