@@ -164,7 +164,11 @@ namespace client {
 			ENGINE_INFO("compositing {} worlds, {:.0f} units apart", Simulated.size(), Settings.ViewSpacing);
 		}
 
-		FrameGraph::SetEnabled(Settings.ShowFrameGraph);
+		// **A snapshot asks for the recording too.** Collecting every span is real
+		// work, so it is off unless something wants it - and a run given
+		// `--profile-snapshot` and nothing else recorded nothing, then reported
+		// that it could not write the document.
+		FrameGraph::SetEnabled(Settings.ShowFrameGraph || !Settings.ProfileSnapshot.empty());
 		return FinishStartup();
 	}
 
@@ -2858,6 +2862,19 @@ namespace client {
 		}
 
 		ReportReplica();
+
+		// **Before anything is torn down**, for the reason the editor's own
+		// call gives: the graph's history is what is being written, and a
+		// snapshot taken after the world has gone is a snapshot of the
+		// shutdown.
+		if (!Settings.ProfileSnapshot.empty()) {
+			if (FrameGraph::WriteSnapshot(Settings.ProfileSnapshot)) {
+				ENGINE_INFO("frame graph written to {}", Settings.ProfileSnapshot.string());
+			} else {
+				ENGINE_ERROR("could not write {}", Settings.ProfileSnapshot.string());
+			}
+		}
+
 		return 0;
 	}
 

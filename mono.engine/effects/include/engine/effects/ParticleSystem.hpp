@@ -405,6 +405,26 @@ namespace engine::effects {
 		// One per live emitter.
 		std::vector<EmitterBlock> Blocks;
 
+		// Rows of `Blocks` whose emitter has gone, waiting to be handed to the
+		// next one that arrives.
+		//
+		// **Without this the cap above is on emitters that have *ever* existed
+		// rather than on emitters emitting at once, which is what it says it
+		// is.** Reclaiming a block put its particle range back on `Free` and
+		// left the row itself in `Blocks` for ever, while every new emitter did
+		// a `push_back` - so a game doing what a game does, one emitter per
+		// explosion and muzzle flash and footstep, walked a row per effect it
+		// had ever played on every tick, held three hundred-odd bytes for each,
+		// and after 65,535 of them refused to emit anything again for the rest
+		// of the process. None of that is visible in a scene that builds its
+		// emitters once, which is every scene in `examples/`.
+		//
+		// Indices rather than pointers, because `Blocks` moves when it grows.
+		// Refilled by the reclaim sweep and drained by the claim walk, which run
+		// in that order in one `RefreshEmitters` - so a row freed this tick is
+		// reused on the next one rather than under the walk that freed it.
+		std::vector<uint32_t> FreeSlots;
+
 		// How many slots the pool holds in total.
 		//
 		// **Fixed at install time rather than grown on demand**, and the reason is

@@ -1348,12 +1348,27 @@ because it builds before it runs and a plain `cmd` window has no compiler in it;
 --capture PATH                   Write a BMP near the end; needs --frames
 --enable-profiler SECONDS        Wait for a Tracy profiler before starting
 --profile-seconds SECONDS        Run for this long, then exit
+--profile-snapshot PATH          Write a frame-graph snapshot when the run ends
 --override-assets-directory DIR  Read shaders and data from here
 --help                           Show this text
 ```
 
 Naming a `--profiler-tab` opens the graph, and `--profile-seconds` turns
 collection on - asking to see something is not a separate flag from showing it.
+`--profile-snapshot` does the same and then writes the window out, which is how
+a profile gets read rather than looked at: the overlay is a picture and the
+snapshot is a table with a mean, a median and a worst reading per span.
+
+**Pair it with `--force-serial-compute` or the interesting spans are missing.**
+A world ticks on a pinned worker and a span opened off the frame's owning
+thread is refused, so `worlds (pinned workers)` arrives as one bar with the
+whole tick inside it and nothing underneath. Serial makes the frame slower on
+purpose and complete.
+
+**And read the table as per occurrence, not per frame.** A run that is dropping
+ticks runs several of them per frame, and each one opens its own `ecs.systems`;
+the column is the worst *single* reading, so the parent can be several times
+the child without a millisecond being unaccounted for.
 
 `--game` plays a `.agame` written by the editor: every world in it is
 simulated, its scripts run with both roles true, and there is no socket and no

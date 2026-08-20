@@ -603,3 +603,59 @@ TEST_CASE("a looping flipbook runs at the rate its texture was drawn at", "[effe
 	// worth asserting.
 	CHECK(static_cast<uint32_t>((29.0f / 60.0f) * 12.0f) == 5);
 }
+
+// --- cleanup ------------------------------------------------------------------
+
+TEST_CASE("a destroyed emitter gives its block row back", "[effects]") {
+	Store store("effects_test");
+
+	// One emitter, so the pool and the classes exist, and it is the row every
+	// later emitter should be handed.
+	const Entity first = MakeEmitter(store, 4096);
+	Settings(store, first).Rate = 10.0f;
+	Settings(store, first).Lifetime = NumberRange{1.0f, 1.0f};
+	Frame(store, 1.0f / 60.0f);
+
+	const auto *system = store.Resource<engine::effects::ParticleSystem>();
+	REQUIRE(system != nullptr);
+	REQUIRE(system->Blocks.size() == 1);
+
+	const Entity part = store.ParentOf(first);
+	REQUIRE(part != engine::ecs::NULL_ENTITY);
+
+	// **Twenty rounds of create-and-destroy, which is what a game does.** An
+	// explosion, a muzzle flash and a footstep are each an emitter that exists
+	// for a moment and goes; a scene that builds its emitters once and keeps
+	// them - which is every scene in `examples/` - never reaches this at all,
+	// and that is why it went unseen.
+	for (int round = 0; round < 20; round++) {
+		const Entity emitter =
+			store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("ParticleEmitter")));
+		store.SetParent(emitter, part);
+		Settings(store, emitter).Rate = 10.0f;
+		Settings(store, emitter).Lifetime = NumberRange{1.0f, 1.0f};
+
+		// Claimed on this frame.
+		Frame(store, 1.0f / 60.0f);
+
+		store.Destroy(emitter);
+
+		// **Two frames to recycle, and that is the design rather than a
+		// shortfall.** The reclaim sweep runs after the claim walk inside one
+		// `RefreshEmitters`, so a row freed on this frame is offered on the
+		// next - which is what stops a row being reused underneath the walk
+		// that freed it.
+		Frame(store, 1.0f / 60.0f);
+		Frame(store, 1.0f / 60.0f);
+	}
+
+	// **Two, not twenty-one.** One row for the emitter that never went away and
+	// one that the twenty short-lived ones passed between them. Before the free
+	// list this was twenty-one, and `MAX_EMITTER_SLOTS` was therefore a cap on
+	// emitters ever made rather than on emitters emitting at once.
+	CHECK(system->Blocks.size() == 2);
+
+	// And the surviving emitter still has its own row and is still emitting.
+	CHECK(system->Statistics.Blocks == 1);
+	CHECK(store.Get<engine::effects::EmitterSlot>(first)->Index != engine::effects::NO_SLOT);
+}

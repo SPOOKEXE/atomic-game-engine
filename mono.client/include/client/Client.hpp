@@ -153,6 +153,21 @@ namespace client {
 		// Run for this long, then exit. Zero means run until closed.
 		double ProfileSeconds = 0.0;
 
+		// Write a frame-graph snapshot here when the run ends. Empty writes
+		// none.
+		//
+		// **The studio has had this and the client has not, which is backwards.**
+		// Every stress scene this repository ships is run through
+		// `client --script`, so the program with no way to dump a profile was
+		// the one every profile is taken in - and reading a flame graph off a
+		// screenshot of an overlay is not reading it. Same flag name as the
+		// editor's, because a second spelling for one idea is a second thing to
+		// remember.
+		//
+		// Turning it on turns the frame graph on: recording every span is real
+		// work and `--graph` is otherwise the only thing that asks for it.
+		std::filesystem::path ProfileSnapshot;
+
 		// Read staged data from here instead of from beside the binary.
 		std::filesystem::path AssetsDirectory;
 

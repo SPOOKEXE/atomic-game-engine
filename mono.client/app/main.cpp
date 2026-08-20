@@ -82,6 +82,7 @@ int main(int argc, char **argv) {
 	arguments.Value("game", "PATH", "Game file to play single-player (.agame)");
 	arguments.Value("enable-profiler", "SECONDS", "Wait for a Tracy profiler before starting");
 	arguments.Value("profile-seconds", "SECONDS", "Run for this long, then exit");
+	arguments.Value("profile-snapshot", "PATH", "Write a frame-graph snapshot when the run ends");
 	arguments.Value("override-assets-directory", "DIR", "Read shaders and data from here");
 	arguments.Value("connect", "HOST:PORT", "Replicate a world from this server, beside the demo");
 	arguments.Flag("browse", "Look for a server announcing itself on this subnet instead of naming one");
@@ -194,6 +195,9 @@ int main(int argc, char **argv) {
 	options.MaximumFrameRate =
 		static_cast<uint32_t>(arguments.GetInteger("max-fps", options.MaximumFrameRate));
 	options.ProfileSeconds = arguments.GetNumber("profile-seconds", 0.0);
+	if (auto snapshot = arguments.Get("profile-snapshot")) {
+		options.ProfileSnapshot = std::filesystem::path(*snapshot);
+	}
 
 	if (arguments.Has("enable-profiler")) {
 		options.ProfilerWaitSeconds = arguments.GetNumber("enable-profiler", 10.0);

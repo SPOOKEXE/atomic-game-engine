@@ -319,36 +319,78 @@ namespace engine::effects {
 		}
 	}
 
+	namespace {
+		// Where one age lands in a sampled curve: the pair of samples either
+		// side of it and how far between them it is.
+		//
+		// **One age, four curves, and it used to be resolved four times.** The
+		// step loop asks `Size`, `Squash`, `Alpha` and `Colour` for the *same*
+		// particle age, and each call clamped, scaled, truncated, took a min and
+		// subtracted to find the same pair of indices and the same fraction.
+		// Three quarters of that is arithmetic done to reach an answer already
+		// in hand.
+		//
+		// It is a small thing in a release build, where the compiler can see
+		// through four inlined calls and common up the work. It is not a small
+		// thing at `-O0`, which is what `dev` builds first-party code at and
+		// therefore what anybody profiling this engine is looking at: nothing is
+		// inlined, so those are four real calls doing the same six operations on
+		// their own stack frames, half a million times a tick.
+		struct CurveCursor {
+			uint32_t Low = 0;
+			uint32_t High = 0;
+			float Fraction = 0.0f;
+		};
+
+		CurveCursor CurveAt(float age) {
+			const float scaled = std::clamp(age, 0.0f, 1.0f) * static_cast<float>(CURVE_SAMPLES - 1);
+
+			CurveCursor cursor;
+			cursor.Low = static_cast<uint32_t>(scaled);
+			cursor.High = std::min(cursor.Low + 1, CURVE_SAMPLES - 1);
+			cursor.Fraction = scaled - static_cast<float>(cursor.Low);
+			return cursor;
+		}
+
+		float SampleCurve(const float (&samples)[CURVE_SAMPLES], const CurveCursor &cursor) {
+			return samples[cursor.Low] + (samples[cursor.High] - samples[cursor.Low]) * cursor.Fraction;
+		}
+
+		uint32_t SampleColourCurve(const uint32_t (&samples)[CURVE_SAMPLES], const CurveCursor &cursor);
+	}
+
 	float SampleAt(const float (&samples)[CURVE_SAMPLES], float age) {
-		const float scaled = std::clamp(age, 0.0f, 1.0f) * static_cast<float>(CURVE_SAMPLES - 1);
-		const auto low = static_cast<uint32_t>(scaled);
-		const uint32_t high = std::min(low + 1, CURVE_SAMPLES - 1);
-		const float fraction = scaled - static_cast<float>(low);
-		return samples[low] + (samples[high] - samples[low]) * fraction;
+		return SampleCurve(samples, CurveAt(age));
 	}
 
 	uint32_t SampleColourAt(const uint32_t (&samples)[CURVE_SAMPLES], float age) {
-		const float scaled = std::clamp(age, 0.0f, 1.0f) * static_cast<float>(CURVE_SAMPLES - 1);
-		const auto low = static_cast<uint32_t>(scaled);
-		const uint32_t high = std::min(low + 1, CURVE_SAMPLES - 1);
+		return SampleColourCurve(samples, CurveAt(age));
+	}
 
-		if (low == high || samples[low] == samples[high]) {
-			return samples[low];
-		}
+	namespace {
+		uint32_t SampleColourCurve(const uint32_t (&samples)[CURVE_SAMPLES], const CurveCursor &cursor) {
+			const uint32_t low = cursor.Low;
+			const uint32_t high = cursor.High;
 
-		// **Integer lerp per channel, in the packed representation.** The obvious
-		// alternative is to unpack to floats, lerp, and repack - which is six
-		// divides and six multiplies for a value that lands in eight bits. This is
-		// the same arithmetic in fixed point: an eight-bit blend factor, three
-		// byte lerps, no conversion in either direction.
-		const auto factor = static_cast<uint32_t>((scaled - static_cast<float>(low)) * 256.0f);
-		uint32_t blended = 0;
-		for (uint32_t shift = 0; shift < 24; shift += 8) {
-			const uint32_t from = (samples[low] >> shift) & 0xFFu;
-			const uint32_t to = (samples[high] >> shift) & 0xFFu;
-			blended |= (((from * (256 - factor)) + (to * factor)) >> 8) << shift;
+			if (low == high || samples[low] == samples[high]) {
+				return samples[low];
+			}
+
+			// **Integer lerp per channel, in the packed representation.** The
+			// obvious alternative is to unpack to floats, lerp, and repack -
+			// which is six divides and six multiplies for a value that lands in
+			// eight bits. This is the same arithmetic in fixed point: an
+			// eight-bit blend factor, three byte lerps, no conversion in either
+			// direction.
+			const auto factor = static_cast<uint32_t>(cursor.Fraction * 256.0f);
+			uint32_t blended = 0;
+			for (uint32_t shift = 0; shift < 24; shift += 8) {
+				const uint32_t from = (samples[low] >> shift) & 0xFFu;
+				const uint32_t to = (samples[high] >> shift) & 0xFFu;
+				blended |= (((from * (256 - factor)) + (to * factor)) >> 8) << shift;
+			}
+			return blended;
 		}
-		return blended;
 	}
 
 	core::CFrame EmitterFrame(const ecs::Store &store, ecs::Entity emitter) {
@@ -485,112 +527,144 @@ namespace engine::effects {
 			block.Reserved = 0;
 		}
 
-		store.Each<const ParticleEmitter, EmitterSlot>(
-			[&](ecs::Entity entity, const ParticleEmitter &emitter, EmitterSlot &slot) {
-				// An emitter that is off and has nothing left alive gives its
-				// block back. One that is off and still has particles keeps it,
-				// because disabling must not kill what is already in the air -
-				// `ParticleEmitter::Enabled` carries the argument.
-				const bool holds = slot.Index != NO_SLOT && slot.Index < system->Blocks.size();
-				if (holds) {
-					EmitterBlock &block = system->Blocks[slot.Index];
-					block.Reserved = 1;
+		// **Three spans, and the split is where the three costs actually are.**
+		// The claim walk is proportional to *emitters* and is where the curve
+		// sampling lives; the reclaim sweep is proportional to blocks ever
+		// allocated, which is not the same number and does not come back down;
+		// and the compaction below is what stops the second from growing
+		// forever. A single `refresh emitters` bar could say none of that.
+		{
+			ENGINE_PROFILE_CAT("emitters.claim", core::ProfileCategory::Simulation);
 
-					if (!emitter.Enabled && block.Live == 0) {
-						system->Free.emplace_back(block.First, block.Capacity);
-						block.Capacity = 0;
-						block.Owner = ecs::NULL_ENTITY;
-						block.Reserved = 0;
-						slot.Index = NO_SLOT;
+			store.Each<const ParticleEmitter, EmitterSlot>(
+				[&](ecs::Entity entity, const ParticleEmitter &emitter, EmitterSlot &slot) {
+					// An emitter that is off and has nothing left alive gives its
+					// block back. One that is off and still has particles keeps it,
+					// because disabling must not kill what is already in the air -
+					// `ParticleEmitter::Enabled` carries the argument.
+					const bool holds = slot.Index != NO_SLOT && slot.Index < system->Blocks.size();
+					if (holds) {
+						EmitterBlock &block = system->Blocks[slot.Index];
+						block.Reserved = 1;
+
+						if (!emitter.Enabled && block.Live == 0) {
+							system->Free.emplace_back(block.First, block.Capacity);
+							block.Capacity = 0;
+							block.Owner = ecs::NULL_ENTITY;
+							block.Reserved = 0;
+							slot.Index = NO_SLOT;
+							return;
+						}
+
+						// **Re-sampled only when the emitter was written, and this
+						// gate is the single largest thing in the module's frame
+						// cost.** Sampling four curves is sixty-four `Evaluate`
+						// calls, each a scan over a keypoint list; at a hundred
+						// thousand emitters that is 6.4 million evaluations a frame
+						// for tables that almost never change.
+						//
+						// Measured before and after, `bench` preset, 24 threads, at
+						// the roadmap's 100,000 emitters and 500,000 particles:
+						// **522 us unconditional against 192 us gated**, taking the
+						// whole frame from 738 us to 389 us. The refresh pass was 70
+						// per cent of the frame and is now half of it - the remaining
+						// 192 us is the archetype walk itself and the scalar copies,
+						// which is what a walk over a hundred thousand rows costs.
+						//
+						// `ecs::ChangeChannel` is the mechanism and `Observe` in
+						// `InstallParticles` is what turns it on. What it costs is
+						// **one frame of latency on a curve edit** - a script writing
+						// `emitter.Size` during `Simulation` is seen by the next
+						// frame's refresh, because `ClearChanges` runs at the phase
+						// boundary between them. That is invisible for an authored
+						// property and would matter for a curve driven per frame,
+						// which is a thing to drive through `Brightness` instead.
+						if (store.Changed<ParticleEmitter>(entity)) {
+							SampleCurves(emitter, block.Curves);
+						}
+						ApplyPlayback(store, emitter, block);
+
+						// Where the emitter is now. An emitter on an `Attachment`
+						// takes the attachment's resolved world frame; one on a part
+						// takes the part's. Neither is a walk - both are one column
+						// read on the parent, and `ResolveAttachments` has already run.
+						block.Frame = EmitterFrame(store, entity);
 						return;
 					}
 
-					// **Re-sampled only when the emitter was written, and this
-					// gate is the single largest thing in the module's frame
-					// cost.** Sampling four curves is sixty-four `Evaluate`
-					// calls, each a scan over a keypoint list; at a hundred
-					// thousand emitters that is 6.4 million evaluations a frame
-					// for tables that almost never change.
-					//
-					// Measured before and after, `bench` preset, 24 threads, at
-					// the roadmap's 100,000 emitters and 500,000 particles:
-					// **522 us unconditional against 192 us gated**, taking the
-					// whole frame from 738 us to 389 us. The refresh pass was 70
-					// per cent of the frame and is now half of it - the remaining
-					// 192 us is the archetype walk itself and the scalar copies,
-					// which is what a walk over a hundred thousand rows costs.
-					//
-					// `ecs::ChangeChannel` is the mechanism and `Observe` in
-					// `InstallParticles` is what turns it on. What it costs is
-					// **one frame of latency on a curve edit** - a script writing
-					// `emitter.Size` during `Simulation` is seen by the next
-					// frame's refresh, because `ClearChanges` runs at the phase
-					// boundary between them. That is invisible for an authored
-					// property and would matter for a curve driven per frame,
-					// which is a thing to drive through `Brightness` instead.
-					if (store.Changed<ParticleEmitter>(entity)) {
-						SampleCurves(emitter, block.Curves);
+					if (!emitter.Enabled) {
+						return;
 					}
+
+					uint32_t first = 0;
+					const uint32_t wanted = BlockSizeFor(emitter, system->BlockCeiling);
+					// **The ceiling is on rows in use, not rows ever made** - which
+					// is what `MAX_EMITTER_SLOTS` has always claimed to be. A free
+					// row costs nothing to take, so it is only a fresh one that has
+					// to fit under the cap.
+					const bool recycling = !system->FreeSlots.empty();
+					if ((!recycling && system->Blocks.size() >= MAX_EMITTER_SLOTS) ||
+						!Take(*system, wanted, first)) {
+						system->Statistics.EmittersRefused++;
+						return;
+					}
+
+					EmitterBlock block;
+					block.First = first;
+					block.Capacity = wanted;
+					block.Owner = entity;
+					block.Reserved = 1;
+
+					// **A fresh block owes one particle immediately.**
+					//
+					// The accumulator adds `Rate * delta` per frame, so an emitter at
+					// a low rate produces nothing for `1 / Rate` seconds after it is
+					// enabled - a fifth of a particle a second waits five seconds, and
+					// what an author sees is an effect that does not work. They turn
+					// the rate up, get a crowd, and never find out the first one was
+					// merely late.
+					//
+					// Starting the accumulator owing one makes "enable it and it
+					// starts" true at every rate. It is not free particles: the debt
+					// is subtracted like any other, so the *steady* rate is unchanged
+					// and only the first particle moves.
+					block.Pending = 1.0f;
+					SampleCurves(emitter, block.Curves);
 					ApplyPlayback(store, emitter, block);
-
-					// Where the emitter is now. An emitter on an `Attachment`
-					// takes the attachment's resolved world frame; one on a part
-					// takes the part's. Neither is a walk - both are one column
-					// read on the parent, and `ResolveAttachments` has already run.
 					block.Frame = EmitterFrame(store, entity);
-					return;
+
+					if (recycling) {
+						const uint32_t reused = system->FreeSlots.back();
+						system->FreeSlots.pop_back();
+						slot.Index = static_cast<uint16_t>(reused);
+						system->Blocks[reused] = block;
+					} else {
+						slot.Index = static_cast<uint16_t>(system->Blocks.size());
+						system->Blocks.push_back(block);
+					}
 				}
-
-				if (!emitter.Enabled) {
-					return;
-				}
-
-				uint32_t first = 0;
-				const uint32_t wanted = BlockSizeFor(emitter, system->BlockCeiling);
-				if (system->Blocks.size() >= MAX_EMITTER_SLOTS || !Take(*system, wanted, first)) {
-					system->Statistics.EmittersRefused++;
-					return;
-				}
-
-				EmitterBlock block;
-				block.First = first;
-				block.Capacity = wanted;
-				block.Owner = entity;
-				block.Reserved = 1;
-
-				// **A fresh block owes one particle immediately.**
-				//
-				// The accumulator adds `Rate * delta` per frame, so an emitter at
-				// a low rate produces nothing for `1 / Rate` seconds after it is
-				// enabled - a fifth of a particle a second waits five seconds, and
-				// what an author sees is an effect that does not work. They turn
-				// the rate up, get a crowd, and never find out the first one was
-				// merely late.
-				//
-				// Starting the accumulator owing one makes "enable it and it
-				// starts" true at every rate. It is not free particles: the debt
-				// is subtracted like any other, so the *steady* rate is unchanged
-				// and only the first particle moves.
-				block.Pending = 1.0f;
-				SampleCurves(emitter, block.Curves);
-				ApplyPlayback(store, emitter, block);
-				block.Frame = EmitterFrame(store, entity);
-
-				slot.Index = static_cast<uint16_t>(system->Blocks.size());
-				system->Blocks.push_back(block);
-			}
-		);
+			);
+		}
 
 		// Reclaim the blocks nobody claimed. Their particles go with them: an
 		// emitter that has been destroyed takes its effect with it, which is what
 		// deleting one is for.
+		ENGINE_PROFILE_CAT("emitters.reclaim", core::ProfileCategory::Simulation);
+
 		size_t live = 0;
-		for (EmitterBlock &block : system->Blocks) {
+		for (size_t index = 0; index < system->Blocks.size(); index++) {
+			EmitterBlock &block = system->Blocks[index];
 			if (block.Reserved == 0 && block.Capacity > 0) {
 				system->Free.emplace_back(block.First, block.Capacity);
 				block.Capacity = 0;
 				block.Live = 0;
 				block.Owner = ecs::NULL_ENTITY;
+
+				// **And the row itself, which used to be abandoned.** See
+				// `ParticleSystem::FreeSlots`: the particles came back and the
+				// row did not, so the walk above and the memory under it grew
+				// with every effect the game had ever played.
+				system->FreeSlots.push_back(static_cast<uint32_t>(index));
 			}
 			if (block.Capacity > 0) {
 				live++;
@@ -649,99 +723,136 @@ namespace engine::effects {
 		// fights over, and the sum is the same number either way.
 		std::vector<EmitterBlock> &blocks = system->Blocks;
 
-		parallel::Jobs::For(
-			blocks.size(),
-			BLOCK_GRAIN,
-			[&blocks, instances, states, capacity, delta](size_t begin, size_t end) {
-				for (size_t index = begin; index < end; index++) {
-					EmitterBlock &block = blocks[index];
-					if (block.Capacity == 0 || block.First + block.Capacity > capacity) {
-						continue;
-					}
+		// **Two spans, because the two halves answer to different things.**
+		// Ageing is proportional to particles *alive* and is parallel over
+		// blocks; spawning is proportional to particles *born* and is serial
+		// because it reads `ParticleEmitter`. One bar over both could only say
+		// the tick was expensive, and the first question anybody asks of this
+		// module is which of those two grew.
+		{
+			ENGINE_PROFILE_CAT("particles.age", core::ProfileCategory::Simulation);
 
-					const auto slot = static_cast<uint16_t>(index);
-					const float scaled = delta;
-
-					// --- age what is alive ---------------------------------
-					//
-					// Backwards, so a swap-with-last cannot move a row this loop
-					// has yet to visit. Forwards with a swap is the classic way to
-					// skip a particle: the one swapped in takes the index the loop
-					// has already passed.
-					uint32_t live = block.Live;
-					for (uint32_t at = live; at-- > 0;) {
-						const uint32_t row = block.First + at;
-						ParticleState &state = states[row];
-
-						state.Age += scaled;
-						if (state.Age >= state.Lifetime || state.Lifetime <= 0.0f) {
-							live--;
-							if (at != live) {
-								states[row] = states[block.First + live];
-								instances[row] = instances[block.First + live];
-							}
-							states[block.First + live].Lifetime = 0.0f;
+			parallel::Jobs::For(
+				blocks.size(),
+				BLOCK_GRAIN,
+				[&blocks, instances, states, capacity, delta](size_t begin, size_t end) {
+					for (size_t index = begin; index < end; index++) {
+						EmitterBlock &block = blocks[index];
+						if (block.Capacity == 0 || block.First + block.Capacity > capacity) {
 							continue;
 						}
 
-						// Drag first, then acceleration, then position - which is
-						// semi-implicit Euler and is what `physics::Integrate`
-						// uses. Explicit Euler on a drag term diverges at large
-						// steps, and a particle system is exactly where a large
-						// step happens: a frame after a stall is a tenth of a
-						// second.
-						state.Velocity = state.Velocity * std::max(0.0f, 1.0f - block.Drag * scaled);
-						state.Velocity = state.Velocity + block.Acceleration * scaled;
+						const auto slot = static_cast<uint16_t>(index);
+						const float scaled = delta;
 
-						ParticleInstance &instance = instances[row];
-						if (block.Locked) {
-							// A locked particle's offset from its parent is what is
-							// preserved, so it is recomputed rather than
-							// integrated. That is what makes an engine glow stay
-							// on the engine.
-							state.LocalOffset = state.LocalOffset + state.Velocity * scaled;
-							instance.Position = block.Frame.PointToWorldSpace(state.LocalOffset);
-						} else {
-							instance.Position = instance.Position + state.Velocity * scaled;
+						// **The block's own terms, resolved once rather than per
+						// particle.** Every one of these is a function of the block
+						// and the step and of nothing a particle carries, so a block
+						// of a hundred computed each of them a hundred times. That
+						// is invisible in a release build and is a measurable share
+						// of the tick at `-O0`, where `Vector3 operator*` is a call
+						// that returns through memory.
+						const float damping = std::max(0.0f, 1.0f - block.Drag * scaled);
+						const core::Vector3 push = block.Acceleration * scaled;
+
+						// **The flipbook, decided once.** `FlipbookCell` starts by
+						// working out how many cells the sheet holds and returning
+						// zero when there are not two - which is every emitter in
+						// every scene that has no flipbook, and they are almost all
+						// of them. Asking here means those never make the call.
+						const uint32_t cells =
+							std::min<uint32_t>(block.Frames, FlipbookCells(block.Flipbook));
+						const bool animated = cells > 1;
+
+						// --- age what is alive ---------------------------------
+						//
+						// Backwards, so a swap-with-last cannot move a row this loop
+						// has yet to visit. Forwards with a swap is the classic way to
+						// skip a particle: the one swapped in takes the index the loop
+						// has already passed.
+						uint32_t live = block.Live;
+						for (uint32_t at = live; at-- > 0;) {
+							const uint32_t row = block.First + at;
+							ParticleState &state = states[row];
+
+							state.Age += scaled;
+							if (state.Age >= state.Lifetime || state.Lifetime <= 0.0f) {
+								live--;
+								if (at != live) {
+									states[row] = states[block.First + live];
+									instances[row] = instances[block.First + live];
+								}
+								states[block.First + live].Lifetime = 0.0f;
+								continue;
+							}
+
+							// Drag first, then acceleration, then position - which is
+							// semi-implicit Euler and is what `physics::Integrate`
+							// uses. Explicit Euler on a drag term diverges at large
+							// steps, and a particle system is exactly where a large
+							// step happens: a frame after a stall is a tenth of a
+							// second.
+							state.Velocity = state.Velocity * damping;
+							state.Velocity = state.Velocity + push;
+
+							ParticleInstance &instance = instances[row];
+							if (block.Locked) {
+								// A locked particle's offset from its parent is what is
+								// preserved, so it is recomputed rather than
+								// integrated. That is what makes an engine glow stay
+								// on the engine.
+								state.LocalOffset = state.LocalOffset + state.Velocity * scaled;
+								instance.Position = block.Frame.PointToWorldSpace(state.LocalOffset);
+							} else {
+								instance.Position = instance.Position + state.Velocity * scaled;
+							}
+
+							// **One cursor for four curves.** `Size`, `Squash`,
+							// `Alpha` and `Colour` are all asked about this same
+							// age, and resolving where that age falls is the bulk of
+							// what asking costs. See `CurveCursor`.
+							const float age = state.Lifetime > 0.0f ? state.Age / state.Lifetime : 1.0f;
+							const CurveCursor cursor = CurveAt(age);
+
+							const float width = SampleCurve(block.Curves.Size, cursor);
+							const float squash = SampleCurve(block.Curves.Squash, cursor);
+
+							// Squash stretches one axis and shrinks the other, so the
+							// particle's area is roughly kept - a squash that only
+							// stretched would make a flattening particle grow.
+							instance.Size = PackParticleSize(
+								width * (squash < 0.0f ? 1.0f - squash : 1.0f / (1.0f + squash)),
+								width * (squash > 0.0f ? 1.0f + squash : 1.0f / (1.0f - squash))
+							);
+
+							// **Wrapped in sixteen-bit integer arithmetic**, which is
+							// the whole reason the rotation is stored as a turn rather
+							// than as an angle: adding past 65,535 wraps to zero for
+							// free, so a spinning particle needs no `fmod` and cannot
+							// drift out of range after a few thousand frames.
+							const auto turned = static_cast<int32_t>(state.Spin * scaled * 65536.0f);
+							const uint32_t rotation =
+								(static_cast<uint32_t>(
+									static_cast<int32_t>(instance.RotationAndCell & 0xFFFFu) + turned
+								)) &
+								0xFFFFu;
+
+							const uint32_t cell =
+								animated ? FlipbookCell(block, state.Age, state.Lifetime, state.Seed) : 0u;
+							instance.RotationAndCell = rotation | (cell << 16);
+							instance.Colour = WithAlpha(
+								SampleColourCurve(block.Curves.Colour, cursor),
+								SampleCurve(block.Curves.Alpha, cursor)
+							);
+							instance.Slot = slot;
 						}
 
-						const float age = state.Lifetime > 0.0f ? state.Age / state.Lifetime : 1.0f;
-						const float width = SampleAt(block.Curves.Size, age);
-						const float squash = SampleAt(block.Curves.Squash, age);
-
-						// Squash stretches one axis and shrinks the other, so the
-						// particle's area is roughly kept - a squash that only
-						// stretched would make a flattening particle grow.
-						instance.Size = PackParticleSize(
-							width * (squash < 0.0f ? 1.0f - squash : 1.0f / (1.0f + squash)),
-							width * (squash > 0.0f ? 1.0f + squash : 1.0f / (1.0f - squash))
-						);
-
-						// **Wrapped in sixteen-bit integer arithmetic**, which is
-						// the whole reason the rotation is stored as a turn rather
-						// than as an angle: adding past 65,535 wraps to zero for
-						// free, so a spinning particle needs no `fmod` and cannot
-						// drift out of range after a few thousand frames.
-						const auto turned = static_cast<int32_t>(state.Spin * scaled * 65536.0f);
-						const uint32_t rotation =
-							(static_cast<uint32_t>(
-								static_cast<int32_t>(instance.RotationAndCell & 0xFFFFu) + turned
-							)) &
-							0xFFFFu;
-
-						const uint32_t cell = FlipbookCell(block, state.Age, state.Lifetime, state.Seed);
-						instance.RotationAndCell = rotation | (cell << 16);
-						instance.Colour = WithAlpha(
-							SampleColourAt(block.Curves.Colour, age), SampleAt(block.Curves.Alpha, age)
-						);
-						instance.Slot = slot;
+						block.Live = live;
 					}
-
-					block.Live = live;
-				}
-			},
-			BLOCK_MINIMUM
-		);
+				},
+				BLOCK_MINIMUM
+			);
+		}
 
 		// Spawning is a second pass and a serial one.
 		//
@@ -759,6 +870,8 @@ namespace engine::effects {
 		ParticleStatistics counted;
 		counted.Blocks = system->Statistics.Blocks;
 		counted.EmittersRefused = system->Statistics.EmittersRefused;
+
+		ENGINE_PROFILE_CAT("particles.spawn", core::ProfileCategory::Simulation);
 
 		store.Each<const ParticleEmitter, const EmitterSlot>(
 			[&](ecs::Entity entity, const ParticleEmitter &emitter, const EmitterSlot &slot) {
