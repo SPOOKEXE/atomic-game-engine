@@ -19,6 +19,13 @@ namespace engine::physics {
 			return name;
 		}
 
+		// The clock's, interned the same way and for the same reason: it is
+		// read once per step and once per direct call into any of them.
+		core::Name ClockName() {
+			static const core::Name name{PHYSICS_CLOCK_COMPONENT};
+			return name;
+		}
+
 		// Loud rather than silent, and every tick rather than once: a world
 		// with no `PhysicsWorld` produces no pairs, no contacts and no query
 		// answers at all, so one line at startup would scroll away long before
@@ -74,5 +81,19 @@ namespace engine::physics {
 			Complain(store);
 		}
 		return world;
+	}
+
+	const PhysicsClock *PreparedClock(const ecs::Store &store) {
+		if (!ecs::Components::Find(ClockName()).IsValid()) {
+			return nullptr;
+		}
+		return store.Resource<PhysicsClock>();
+	}
+
+	PhysicsClock *PreparedClockMutable(ecs::Store &store) {
+		if (!ecs::Components::Find(ClockName()).IsValid()) {
+			return nullptr;
+		}
+		return store.ResourceMutable<PhysicsClock>();
 	}
 }

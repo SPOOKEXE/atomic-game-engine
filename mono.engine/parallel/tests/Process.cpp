@@ -1,3 +1,5 @@
+#include "ThreadAffinity.hpp"
+
 #include <engine/core/Paths.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/testing/Suite.hpp>
@@ -209,7 +211,7 @@ TEST_CASE("workers are divided between hosts rather than duplicated", "[process]
 	// Every host calling Jobs::Start(0) is the bug this exists to prevent:
 	// eight hosts on a twenty-four core machine would run a hundred and ninety
 	// threads over twenty-four cores.
-	const unsigned cores = std::thread::hardware_concurrency();
+	const unsigned cores = static_cast<unsigned>(engine::parallel::platform::AvailableProcessors().size());
 	if (cores <= 1) {
 		SUCCEED("a single-core machine has nothing to divide");
 		return;

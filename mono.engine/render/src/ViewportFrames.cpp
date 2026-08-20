@@ -47,9 +47,14 @@ namespace engine::render {
 		Renderer &renderer, ecs::Store &store, const gui::DrawList &list, size_t firstSlot
 	) {
 		Entries.clear();
-		const core::Vector3 previousSun = renderer.SunDirection();
-		const core::Color3 previousAmbient = renderer.SunAmbient();
-		const core::Color3 previousDirect = renderer.SunColor();
+		std::vector<std::vector<scene::DrawInstance>> instances;
+		std::vector<SceneTarget> targets;
+		std::vector<View> views;
+		instances.reserve(list.Commands.size());
+		targets.reserve(list.Commands.size());
+		views.reserve(list.Commands.size());
+		Entries.reserve(list.Commands.size());
+		const scene::WorldLighting baseLighting = renderer.CurrentLighting();
 
 		for (const gui::DrawCommand &command : list.Commands) {
 			if (command.Kind != gui::DrawKind::Viewport ||
@@ -79,43 +84,46 @@ namespace engine::render {
 				MAX_VIEWPORT_EDGE
 			);
 
-			Instances.clear();
-			CollectViewportInstances(store, command.Source, 0, Instances);
-			renderer.SetSun(viewport->LightDirection, viewport->Ambient, viewport->LightColor);
-
 			const size_t slot = firstSlot + Entries.size();
-			const SceneTarget target{width, height};
-			(void)renderer.Render(
-				placement->Frame,
-				*lens,
-				Instances,
-				EmptyOverlay,
-				{},
-				nullptr,
-				&target,
-				slot,
-				{},
-				{},
-				{},
-				{},
-				{},
-				{},
-				false
-			);
+			instances.emplace_back();
+			CollectViewportInstances(store, command.Source, 0, instances.back());
+			targets.push_back({width, height});
 
-			const SceneExtent extent = renderer.SceneTextureExtent(slot);
+			View view;
+			view.CameraFrame = placement->Frame;
+			view.Camera = *lens;
+			view.Instances = instances.back();
+			view.Target = &targets.back();
+			view.Slot = slot;
+			// Each ViewportFrame owns a miniature scene rooted at itself. Two
+			// frames in the same Store are not two cameras on one world, so their
+			// world-scoped shadow work must not be shared.
+			view.World = command.Source.Id;
+			view.Lighting = baseLighting;
+			view.Lighting.Direction = viewport->LightDirection;
+			view.Lighting.Ambient = viewport->Ambient;
+			view.Lighting.Direct = viewport->LightColor;
+			view.OverrideLighting = true;
+			views.push_back(view);
+
 			Entries.push_back(
 				Entry{
 					command.Source,
-					renderer.SceneTexture(slot),
-					core::Vector2{extent.U, extent.V},
+					nullptr,
+					core::Vector2{1.0f, 1.0f},
 					width,
 					height,
 				}
 			);
 		}
 
-		renderer.SetSun(previousSun, previousAmbient, previousDirect);
+		(void)renderer.Render(views, EmptyOverlay, nullptr, false);
+		for (size_t index = 0; index < Entries.size(); index++) {
+			const size_t slot = firstSlot + index;
+			const SceneExtent extent = renderer.SceneTextureExtent(slot);
+			Entries[index].Texture = renderer.SceneTexture(slot);
+			Entries[index].UVMax = core::Vector2{extent.U, extent.V};
+		}
 		return Entries.size();
 	}
 

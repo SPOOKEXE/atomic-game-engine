@@ -49,10 +49,15 @@ local function block(name: string, size: Vector3, at: Vector3, colour: Color3): 
 	return part
 end
 
+-- Clear of a baseplate's top face at y = 0: coplanar surfaces do not flicker in
+-- this engine, they resolve stably to whichever one the draw order happens to
+-- favour. `scripts/demos/zfight-scan.sh` holds the control for that.
+local GROUND_LIFT = 0.01
+
 block(
 	"Ground",
 	Vector3.new(FLOOR_SIZE, FLOOR_THICKNESS, FLOOR_SIZE),
-	Vector3.new(0, -FLOOR_THICKNESS / 2, 0),
+	Vector3.new(0, -FLOOR_THICKNESS / 2 + GROUND_LIFT, 0),
 	GROUND
 )
 

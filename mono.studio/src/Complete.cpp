@@ -726,4 +726,283 @@ namespace studio {
 		return offered;
 	}
 
+	namespace {
+
+		// One keyword and its sentence. The tables are checked against
+		// `script::Keywords` by the suite, so a word missing from either side
+		// is a test failure rather than a silent gap.
+		struct KeywordNote {
+			std::string_view Word;
+			std::string_view Doc;
+		};
+
+		constexpr KeywordNote LUAU_KEYWORD_DOCS[] = {
+			{"and", "answers the left value when it is false or nil, otherwise the right"},
+			{"break", "leaves the innermost loop"},
+			{"continue", "skips to the next pass of the innermost loop"},
+			{"do", "opens a block with its own locals, closed by end"},
+			{"else", "what runs when no condition above held"},
+			{"elseif", "another condition, tried when the ones above were false"},
+			{"end", "closes a function, if, for, while or do block"},
+			{"export", "makes a type visible to files that require this one"},
+			{"false", "the boolean false"},
+			{"for", "a counted or iterator loop: for i = 1, 10 do, or for k, v in pairs(t) do"},
+			{"function", "declares a function, closed by end"},
+			{"if", "runs a block when a condition holds: if x then ... end"},
+			{"in", "separates a for loop's names from what it iterates"},
+			{"local", "declares a variable scoped to this block"},
+			{"nil", "the absence of a value: a missing member reads as nil"},
+			{"not", "answers true for false and nil, false for everything else"},
+			{"or", "answers the left value unless it is false or nil, then the right"},
+			{"repeat", "a loop that runs at least once, closed by until"},
+			{"return", "hands values back to the caller and ends the function"},
+			{"then", "separates an if or elseif condition from its block"},
+			{"true", "the boolean true"},
+			{"type", "declares a type alias: type Point = { x: number, y: number }"},
+			{"until", "closes a repeat loop: it runs again while the condition is false"},
+			{"while", "loops while a condition holds: while x do ... end"},
+		};
+
+		constexpr KeywordNote JAVASCRIPT_KEYWORD_DOCS[] = {
+			{"async", "marks a function that returns a promise and may await"},
+			{"await", "waits for a promise, inside an async function"},
+			{"break", "leaves the innermost loop or switch"},
+			{"case", "one branch of a switch"},
+			{"catch", "handles whatever a try block threw"},
+			{"class", "declares a class"},
+			{"const", "declares a binding that cannot be reassigned"},
+			{"continue", "skips to the next pass of the innermost loop"},
+			{"debugger", "a breakpoint statement: does nothing without a debugger attached"},
+			{"default", "the switch branch taken when no case matched"},
+			{"delete", "removes a property from an object"},
+			{"do", "a loop that runs at least once, closed by while"},
+			{"else", "what runs when the if condition did not hold"},
+			{"export", "makes a binding visible to importing modules"},
+			{"extends", "names a class's parent"},
+			{"false", "the boolean false"},
+			{"finally", "runs after a try block whether it threw or not"},
+			{"for", "a loop: for (;;), for..of over values, for..in over keys"},
+			{"function", "declares a function"},
+			{"if", "runs a block when a condition holds"},
+			{"import", "brings another module's exports into scope"},
+			{"in", "whether an object has a property, or a for..in loop over keys"},
+			{"instanceof", "whether a value was built by a constructor"},
+			{"let", "declares a block scoped variable"},
+			{"new", "constructs an instance: new Thing()"},
+			{"null", "the deliberate absence of a value"},
+			{"of", "a for..of loop over values"},
+			{"return", "hands a value back to the caller and ends the function"},
+			{"static", "a class member on the class rather than on instances"},
+			{"super", "the parent class's constructor or members"},
+			{"switch", "branches on one value across cases"},
+			{"this", "the receiver the function was called on"},
+			{"throw", "raises a value as an error"},
+			{"true", "the boolean true"},
+			{"try", "runs a block and hands what it throws to catch"},
+			{"typeof", "a value's type name, as a string"},
+			{"var", "declares a function scoped variable: prefer let or const"},
+			{"void", "evaluates an expression and answers undefined"},
+			{"while", "loops while a condition holds"},
+			{"yield", "pauses a generator and hands a value out"},
+		};
+
+		// Whether a byte sits at or past a line comment on its own line.
+		// `WithoutComment` already knows both languages' markers and what a
+		// string does to them; this only asks where the line it kept ends.
+		bool InsideComment(const std::string_view text, const size_t offset) {
+			size_t lineStart = text.rfind('\n', offset == 0 ? 0 : offset - 1);
+			lineStart = (lineStart == std::string_view::npos || offset == 0) ? 0 : lineStart + 1;
+
+			const size_t newline = text.find('\n', lineStart);
+			const std::string_view line = text.substr(
+				lineStart, (newline == std::string_view::npos ? text.size() : newline) - lineStart
+			);
+
+			return offset - lineStart >= WithoutComment(line).size();
+		}
+
+	}
+
+	std::string_view Describe(const CompletionKind kind) {
+		switch (kind) {
+		case CompletionKind::Class:
+			return "class";
+		case CompletionKind::Property:
+			return "property";
+		case CompletionKind::Member:
+			return "method or signal on every instance";
+		case CompletionKind::Enum:
+			return "enum";
+		case CompletionKind::Global:
+			return "global";
+		case CompletionKind::Keyword:
+			return "keyword";
+		case CompletionKind::Local:
+			return "in this file";
+		case CompletionKind::Child:
+			return "in the tree beside this script";
+		}
+		return "completion";
+	}
+
+	std::string_view KeywordDoc(const Language language, const std::string_view word) {
+		const std::span<const KeywordNote> notes =
+			language == Language::Luau ? std::span<const KeywordNote>(LUAU_KEYWORD_DOCS)
+									   : std::span<const KeywordNote>(JAVASCRIPT_KEYWORD_DOCS);
+
+		for (const KeywordNote &note : notes) {
+			if (note.Word == word) {
+				return note.Doc;
+			}
+		}
+		return {};
+	}
+
+	std::string_view WordAt(const std::string_view text, const size_t offset) {
+		if (offset >= text.size() || !IsWordCharacter(text[offset])) {
+			return {};
+		}
+
+		size_t start = offset;
+		while (start > 0 && IsWordCharacter(text[start - 1])) {
+			start--;
+		}
+		size_t end = offset;
+		while (end < text.size() && IsWordCharacter(text[end])) {
+			end++;
+		}
+		return text.substr(start, end - start);
+	}
+
+	std::string
+	HoverText(const std::string_view text, const size_t offset, const CompletionSources &sources) {
+		const std::string_view word = WordAt(text, offset);
+
+		// A bare number is a number: there is nothing to say about `10`.
+		if (word.empty() || std::isdigit(static_cast<unsigned char>(word.front())) != 0) {
+			return {};
+		}
+
+		// A keyword quoted in a string or written in a comment is prose.
+		size_t openedAt = 0;
+		if (InsideString(text, offset, openedAt) || InsideComment(text, offset)) {
+			return {};
+		}
+
+		for (const std::string_view keyword : engine::script::Keywords(sources.Language)) {
+			if (keyword == word) {
+				const std::string_view doc = KeywordDoc(sources.Language, word);
+				return doc.empty() ? std::string("keyword") : std::string("keyword\n").append(doc);
+			}
+		}
+
+		if (sources.Surface != nullptr) {
+			for (const VocabularyEntry &entry : sources.Surface->Globals) {
+				if (entry.Name != word) {
+					continue;
+				}
+				if (entry.Kind == NameKind::Function) {
+					return "global function";
+				}
+				if (entry.Kind == NameKind::Container && !entry.Members.empty()) {
+					// A few members by name, so the tooltip says what a dot
+					// after this would reach rather than only that one would.
+					std::string described =
+						"global with " + std::to_string(entry.Members.size()) + " member(s): ";
+					constexpr size_t NAMED = 4;
+					for (size_t index = 0; index < std::min(entry.Members.size(), NAMED); index++) {
+						described += index == 0 ? "" : ", ";
+						described += entry.Members[index];
+					}
+					if (entry.Members.size() > NAMED) {
+						described += ", ...";
+					}
+					return described;
+				}
+				return "global";
+			}
+
+			for (const std::string &member : sources.Surface->InstanceMembers) {
+				if (member == word) {
+					return std::string(Describe(CompletionKind::Member));
+				}
+			}
+		}
+
+		for (const Name set : EnumTable::Names()) {
+			if (set.Text() == word) {
+				return "enum set with " + std::to_string(EnumTable::MembersOf(set).size()) +
+					   " member(s): Enum." + std::string(word);
+			}
+		}
+
+		if (const Name klass = ClassNamed(word); klass.IsValid()) {
+			const ClassInfo &info = Classes::Describe(Classes::Find(klass));
+			if (info.Parent.IsValid()) {
+				return "class, extends " + std::string(Classes::Describe(info.Parent).Name.Text());
+			}
+			return "class";
+		}
+
+		for (const std::string &child : sources.Children) {
+			if (child == word) {
+				return "an instance beside this script";
+			}
+		}
+
+		// The same narrowing `CompleteAt` does after a dot, and only that:
+		// a class the buffer states outright, never an inference.
+		if (const Name held = ClassOfLocal(text, offset, word, ASSIGNMENT_DEPTH); held.IsValid()) {
+			return "a " + std::string(held.Text()) + ", by its last assignment";
+		}
+
+		// A property, attributed to the classes that declare it - the ones
+		// whose parent does not already carry it, because `ClassInfo::
+		// Properties` is the inherited span and every descendant repeats it.
+		Name declaringClass;
+		size_t declarers = 0;
+		std::string_view propertyType;
+		bool oneType = true;
+
+		for (size_t index = 0; index < Classes::Count(); index++) {
+			const ClassId id{static_cast<uint32_t>(index)};
+			const ClassInfo &info = Classes::Describe(id);
+
+			for (const PropertyDescriptor &property : info.Properties) {
+				if (!property.Scriptable || !property.Name.IsValid() || property.Name.Text() != word) {
+					continue;
+				}
+
+				bool inherited = false;
+				if (info.Parent.IsValid()) {
+					for (const PropertyDescriptor &above : Classes::Describe(info.Parent).Properties) {
+						if (above.Name == property.Name) {
+							inherited = true;
+							break;
+						}
+					}
+				}
+				if (inherited) {
+					continue;
+				}
+
+				declarers++;
+				declaringClass = info.Name;
+				const std::string_view described = engine::ecs::Describe(property.Type);
+				oneType = oneType && (propertyType.empty() || propertyType == described);
+				propertyType = described;
+			}
+		}
+
+		if (declarers == 1) {
+			return std::string(propertyType) + " on " + std::string(declaringClass.Text());
+		}
+		if (declarers > 1) {
+			return oneType ? std::string(propertyType) + " on " + std::to_string(declarers) + " classes"
+						   : "a property on " + std::to_string(declarers) + " classes";
+		}
+
+		return {};
+	}
+
 }

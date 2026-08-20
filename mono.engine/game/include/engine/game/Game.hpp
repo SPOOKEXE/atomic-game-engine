@@ -37,6 +37,7 @@
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Xml.hpp>
+#include <engine/graph/PipelineDocument.hpp>
 #include <engine/script/Debugger.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/world/Universe.hpp>
@@ -66,7 +67,12 @@ namespace engine::game {
 	// fall back to the attributes, so a file written before this change loads
 	// with its own numbers rather than with the defaults - a migration that
 	// silently substituted 60 for somebody's 30 would be worse than a refusal.
-	inline constexpr uint32_t FORMAT_VERSION = 2;
+	//
+	// **3 adds one universe-level rendering profile library and a selected
+	// profile name to each world's properties.** The graph text remains graph's
+	// own format and is embedded once, so adding a second world does not copy
+	// every render node.
+	inline constexpr uint32_t FORMAT_VERSION = 3;
 
 	// The extension a whole game takes.
 	inline constexpr std::string_view GAME_EXTENSION = ".agame";
@@ -95,6 +101,13 @@ namespace engine::game {
 		// Names rather than handles: this is what a file said, and resolving it
 		// to a `WorldId` is the caller's business after `LoadGame` has run.
 		std::vector<core::Name> Worlds;
+
+		// Named render graphs shared by every world in this universe.
+		//
+		// Worlds store only the profile name they select. Keeping the graph once
+		// here makes an export self-contained without duplicating the same node
+		// document into every world.
+		graph::PipelineSet RenderingProfiles;
 	};
 
 	// Registers every class a document can name.
@@ -290,6 +303,15 @@ namespace engine::game {
 		world::Universe &universe, core::Name name, const std::filesystem::path &path, std::string &error
 	);
 
+	// Writes a universe with its shared rendering profile library.
+	bool SaveGame(
+		world::Universe &universe,
+		core::Name name,
+		const graph::PipelineSet &renderingProfiles,
+		const std::filesystem::path &path,
+		std::string &error
+	);
+
 	// Adds a game file's worlds to a universe, keeping what is already there.
 	//
 	// **The merging counterpart to `LoadGame`, and the reason both exist.**
@@ -343,4 +365,8 @@ namespace engine::game {
 	// @param name     The game's name.
 	// @return The document.
 	std::string WriteGame(world::Universe &universe, core::Name name);
+
+	// Builds a game document carrying the universe's rendering profiles.
+	std::string
+	WriteGame(world::Universe &universe, core::Name name, const graph::PipelineSet &renderingProfiles);
 }

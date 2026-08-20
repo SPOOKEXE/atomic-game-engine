@@ -70,20 +70,31 @@ namespace studio {
 		engine::replication::InterpolationSettings interpolation;
 		interpolation.TickRate = tickRate;
 
-		universe.Enter(replica, [&interpolation](Store &store, engine::ecs::Scheduler &systems) {
-			// **Both refusals first, because the build now asks about them.**
-			// Replicas cannot publish bus writes or mint authoritative entities,
-			// and `BuildReplicatedWorld` opens a VM and installs `GuiService` -
-			// each of which asks the store whether minting is legal. Setting the
-			// flag afterwards left a window in which the answer was wrong.
-			store.SetResource(engine::world::Replica{});
-			store.SetAdoptOnly(true);
+		universe.Enter(
+			replica, [&interpolation, authorityName, label](Store &store, engine::ecs::Scheduler &systems) {
+				// **Both refusals first, because the build now asks about them.**
+				// Replicas cannot publish bus writes or mint authoritative entities,
+				// and `BuildReplicatedWorld` opens a VM and installs `GuiService` -
+				// each of which asks the store whether minting is legal. Setting the
+				// flag afterwards left a window in which the answer was wrong.
+				//
+				// **The two names beside the flag, because a replica is named
+				// apart from what it mirrors.** This world is
+				// `"<authority> (client 1)"` so the registry can tell the copies
+				// apart, and every string a scene authored still says
+				// `"<authority>"` - a `Portal.DestinationWorld`, a teleport
+				// place. `client::SurveyWorlds` reads these two, so a hole drawn
+				// from inside this copy leads to this viewer's copy of the world
+				// it names rather than to nothing.
+				store.SetResource(engine::world::Replica{true, authorityName, Name(std::string(label))});
+				store.SetAdoptOnly(true);
 
-			// Replicas present received state and run the client's own scripts;
-			// they do not simulate. The runtime is held by the scheduler, which
-			// drops it with the world.
-			(void)client::BuildReplicatedWorld(store, systems, interpolation);
-		});
+				// Replicas present received state and run the client's own scripts;
+				// they do not simulate. The runtime is held by the scheduler, which
+				// drops it with the world.
+				(void)client::BuildReplicatedWorld(store, systems, interpolation);
+			}
+		);
 
 		for (const engine::replication::ReplicatedComponent &component :
 			 engine::replication::DefaultReplicatedComponents()) {

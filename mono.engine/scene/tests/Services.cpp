@@ -126,6 +126,7 @@ TEST_CASE("installing twice furnishes nothing twice", "[scene][services]") {
 
 TEST_CASE("a service carries its scope and Lighting carries more", "[scene][services]") {
 	services_test::Ready();
+	CHECK(ServiceComponent{}.Scope == ServiceScope::Shared);
 
 	Store store("services.components");
 	InstallServices(store);
@@ -151,8 +152,13 @@ TEST_CASE("a service carries its scope and Lighting carries more", "[scene][serv
 	// eight services is eight floats in every snapshot of every world.
 	const Entity lighting = store.FindFirstRoot("Lighting");
 	REQUIRE(lighting != NULL_ENTITY);
-	REQUIRE(store.Get<LightingServiceComponent>(lighting) != nullptr);
-	CHECK(store.Get<LightingServiceComponent>(lighting)->ClockTime == 14.0f);
+	const LightingServiceComponent *lightingState = store.Get<LightingServiceComponent>(lighting);
+	REQUIRE(lightingState != nullptr);
+	CHECK(lightingState->Ambient == engine::core::Color3{0.078f, 0.078f, 0.078f});
+	CHECK(lightingState->OutdoorAmbient == engine::core::Color3{0.058f, 0.058f, 0.058f});
+	CHECK(lightingState->FogColor == engine::core::Color3{0.0f, 0.0f, 0.0f});
+	CHECK(lightingState->Brightness == 0.440f);
+	CHECK(lightingState->ClockTime == 14.0f);
 	CHECK(store.Get<LightingServiceComponent>(storage) == nullptr);
 
 	// The scope reads back as a word through the property surface, which is
@@ -160,6 +166,12 @@ TEST_CASE("a service carries its scope and Lighting carries more", "[scene][serv
 	Name scope;
 	REQUIRE(store.GetProperty(storage, Name("Scope"), &scope, sizeof(scope)));
 	CHECK(scope == Name("Server"));
+
+	const Name shared("Shared");
+	REQUIRE(store.SetProperty(storage, Name("Scope"), &shared, sizeof(shared)));
+	CHECK(store.Get<ServiceComponent>(storage)->Scope == ServiceScope::Shared);
+	InstallServices(store);
+	CHECK(store.Get<ServiceComponent>(storage)->Scope == ServiceScope::Shared);
 }
 
 TEST_CASE("fixture identity is read-only and Lighting inputs are bounded", "[scene][services]") {
@@ -421,6 +433,10 @@ TEST_CASE("a player has an identity and the world is bounded", "[scene][services
 	// The world's respawn delay is what a new occupant starts from, and their
 	// own copy is what they actually wait.
 	CHECK(identity->RespawnTime == 3.0f);
+
+	const auto *network = store.Get<engine::scene::PlayerNetworkComponent>(first);
+	REQUIRE(network != nullptr);
+	CHECK(network->LocalSimulatedNetworkLatency == 0.0f);
 
 	// A number the host supplied wins, and the counter is not spent on it.
 	CHECK(store.Get<engine::scene::PlayerIdentity>(second)->UserId == 4242);

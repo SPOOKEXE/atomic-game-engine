@@ -36,11 +36,39 @@ namespace {
 	// is what makes it show up as a failing test rather than as a save that
 	// loads into a narrower world.
 	const std::vector<std::string_view> EXPECTED_COMPONENTS{
-		"gui.Element",	  "gui.Background",	 "gui.Label",	   "gui.Picture",		 "gui.Button",
-		"gui.Scrolling",  "gui.Entry",		 "gui.Layer",	   "gui.Canvas",		 "gui.Surface",
-		"gui.Billboard",  "gui.Group",		 "gui.Viewport",   "gui.Padding",		 "gui.ListLayout",
-		"gui.GridLayout", "gui.AspectRatio", "gui.SizeLimits", "gui.TextSizeLimits", "gui.Corner",
-		"gui.Stroke",	  "gui.Scale",		 "gui.Resolved",
+		"gui.Element",
+		"gui.Background",
+		"gui.Label",
+		"gui.Picture",
+		"gui.Button",
+		"gui.Scrolling",
+		"gui.Entry",
+		"gui.Layer",
+		"gui.Canvas",
+		"gui.Surface",
+		"gui.Billboard",
+		"gui.Group",
+		"gui.Viewport",
+		"gui.Padding",
+		"gui.ListLayout",
+		"gui.GridLayout",
+		"gui.AspectRatio",
+		"gui.SizeLimits",
+		"gui.TextSizeLimits",
+		"gui.Corner",
+		"gui.Stroke",
+		"gui.Scale",
+		"gui.Resolved",
+		"gui.FlexItem",
+
+		// v0.18: the gradient, the scrolling frame's derived state, the
+		// selection handles, and the two layouts that arrived with them.
+		"gui.Gradient",
+		"gui.ScrollState",
+		"gui.Selection",
+		"gui.TableLayout",
+		"gui.PageLayout",
+		"gui.DragDetector",
 	};
 }
 
@@ -70,12 +98,12 @@ TEST_CASE("the class tree registers every promised class", "[gui][registration]"
 	// The list is a contract in both directions: a class registered and not
 	// listed would go unmentioned by the palette and the manifest.
 	//
-	// **Forty-five**: the thirty-three of the 2D tree, `GuiService`, and the
-	// eleven of the 3D branch. The service is in this list rather than in
+	// **Fifty**: the thirty-eight of the 2D tree, `GuiService`, and the eleven
+	// of the 3D branch. The service is in this list rather than in
 	// `scene`'s because it is a `gui` class - the two modules may not link each
 	// other - and it is registered at all because it owns the selection, which
 	// is what finally gave `GuiObject::Selectable` a reader.
-	CHECK(GuiClassNames().size() == 45);
+	CHECK(GuiClassNames().size() == 50);
 }
 
 TEST_CASE("the 2D tree descends the way a script expects", "[gui][registration]") {
@@ -94,6 +122,11 @@ TEST_CASE("the 2D tree descends the way a script expects", "[gui][registration]"
 	CHECK(Classes::IsA(GuiClass("DockWidgetPluginGui"), GuiClass("PluginGui")));
 	CHECK(Classes::IsA(GuiClass("UIListLayout"), GuiClass("UILayout")));
 	CHECK(Classes::IsA(GuiClass("UIAspectRatioConstraint"), GuiClass("UIConstraint")));
+
+	// A `UIFlexItem` is a component-style modifier and not a constraint - a
+	// migrating script tells the two apart with exactly this pair.
+	CHECK(Classes::IsA(GuiClass("UIFlexItem"), GuiClass("UIComponent")));
+	CHECK_FALSE(Classes::IsA(GuiClass("UIFlexItem"), GuiClass("UIConstraint")));
 
 	// **A collector is not a `GuiObject`**, which is the one relation people
 	// assume and Roblox does not have. A `ScreenGui` has no `Position` and no
@@ -123,13 +156,45 @@ TEST_CASE("the property surface exposes no controls without consumers", "[gui][r
 	// These fields remain reserved in the raw components for format stability,
 	// but none has an input, layout, or render consumer yet. Advertising them
 	// would turn a successful write into a visible no-op.
+	//
+	// **The list is meant to shrink**, and every removal below records what
+	// arrived to allow it. A property leaving this case is the only evidence
+	// that "absent because the thing behind it is" was a statement about the
+	// engine rather than a permanent excuse.
 	CHECK_FALSE(has("TextButton", "Modal"));
 	CHECK_FALSE(has("TextButton", "Selected"));
-	CHECK_FALSE(has("ScrollingFrame", "ScrollingEnabled"));
-	CHECK_FALSE(has("ScrollingFrame", "AutomaticCanvasSize"));
-	CHECK_FALSE(has("SelectionBox", "LineThickness"));
-	CHECK_FALSE(has("SelectionBox", "SurfaceColor3"));
-	CHECK_FALSE(has("SelectionBox", "SurfaceTransparency"));
+
+	// **`ScrollingEnabled` and `AutomaticCanvasSize` left this list at v0.18**,
+	// which is what the list is for: the rule is that a property appears when
+	// something reads it, and both are now read - the first by `gui::Router`,
+	// which is what a wheel and a bar drag go through, and the second by
+	// `gui::ContentArea`, which measures the content back into the canvas.
+	CHECK(has("ScrollingFrame", "ScrollingEnabled"));
+	CHECK(has("ScrollingFrame", "AutomaticCanvasSize"));
+
+	// **The three `SelectionBox` members left this list at v0.17**, and what
+	// unblocked them is worth recording because it was not what the entry that
+	// held them back predicted. `docs/DEFERRED.md` said they needed "a triangle
+	// path for adornments"; what was actually missing was any path at all -
+	// `render::AdornmentGeometry` had no caller anywhere and no pass in the
+	// engine drew a world-space line, so a `SelectionBox` drew nothing whatever
+	// its properties said. `Editor::DrawAdornments` is the consumer, and the
+	// surface arrived with it rather than after it.
+	CHECK(has("SelectionBox", "LineThickness"));
+	CHECK(has("SelectionBox", "SurfaceColor3"));
+	CHECK(has("SelectionBox", "SurfaceTransparency"));
+
+	// A `SelectionSphere` shares the component, so it shares the three. Checked
+	// because sharing is Roblox's arrangement rather than an implementation
+	// detail: both are a `PVAdornment` with an outline and a surface.
+	CHECK(has("SelectionSphere", "LineThickness"));
+	CHECK(has("SelectionSphere", "SurfaceTransparency"));
+
+	// And a handle still has none of them, which is the half that keeps the
+	// rule honest: `gui::SelectionOutline` is on the two selection classes only,
+	// so a grab target does not grow a surface it would draw as six slabs.
+	CHECK_FALSE(has("BoxHandleAdornment", "LineThickness"));
+	CHECK_FALSE(has("BoxHandleAdornment", "SurfaceTransparency"));
 
 	// Neighbouring implemented controls stay present, so this cannot pass by
 	// accidentally dropping the component or the whole class.
@@ -158,6 +223,8 @@ TEST_CASE("a fully populated Label round-trips through its serialiser", "[gui][r
 	written.StrokeColor = engine::core::Color3{0.4f, 0.5f, 0.6f};
 	written.StrokeTransparency = 0.75f;
 	written.LineHeight = 1.5f;
+	written.MaxVisible = 9;
+	written.Rich = true;
 
 	const TypeDescriptor &descriptor = Components::Describe(Components::Of<Label>());
 
@@ -183,6 +250,8 @@ TEST_CASE("a fully populated Label round-trips through its serialiser", "[gui][r
 	CHECK(read.StrokeColor.R == written.StrokeColor.R);
 	CHECK(read.StrokeTransparency == written.StrokeTransparency);
 	CHECK(read.LineHeight == written.LineHeight);
+	CHECK(read.MaxVisible == written.MaxVisible);
+	CHECK(read.Rich == written.Rich);
 }
 
 TEST_CASE("a fully populated Picture round-trips through its serialiser", "[gui][registration]") {
@@ -198,6 +267,10 @@ TEST_CASE("a fully populated Picture round-trips through its serialiser", "[gui]
 	written.TileSize = engine::core::UDim2{0.25f, 3.0f, 0.5f, 7.0f};
 	written.RectOffset = engine::core::Vector2{11.0f, 12.0f};
 	written.RectSize = engine::core::Vector2{13.0f, 14.0f};
+	written.Shader = Name("toon");
+	written.HoverImage = Name("rbxasset://textures/panel-hover.png");
+	written.PressedImage = Name("rbxasset://textures/panel-press.png");
+	written.Resample = ResampleMode::Pixelated;
 
 	const TypeDescriptor &descriptor = Components::Describe(Components::Of<Picture>());
 
@@ -216,6 +289,10 @@ TEST_CASE("a fully populated Picture round-trips through its serialiser", "[gui]
 	CHECK(read.TileSize == written.TileSize);
 	CHECK(read.RectOffset == written.RectOffset);
 	CHECK(read.RectSize == written.RectSize);
+	CHECK(read.Shader == written.Shader);
+	CHECK(read.HoverImage == written.HoverImage);
+	CHECK(read.PressedImage == written.PressedImage);
+	CHECK(read.Resample == written.Resample);
 }
 
 TEST_CASE("a text box's caret does not cross a save", "[gui][registration]") {

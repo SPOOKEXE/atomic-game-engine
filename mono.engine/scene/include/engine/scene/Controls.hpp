@@ -99,6 +99,18 @@ namespace engine::scene {
 		// How far one notch of the wheel moves it, in metres.
 		float ZoomStep = 2.0f;
 
+		// How fast `I` and `O` move it while held, in metres per second.
+		//
+		// **A rate rather than a step, because a key held has no "notch" to
+		// count.** `I`/`O` are the pair a player without a wheel - a laptop
+		// trackpad with scroll disabled, a controller mapped to the keyboard -
+		// still has, and Roblox's own remap of the same idea. Zoomed the same
+		// direction the wheel forward-scrolls: `I` in, `O` out, matching the
+		// mnemonic "in"/"out" rather than the letters' keyboard order.
+		//
+		// @since v0.18
+		float KeyZoomSpeed = 8.0f;
+
 		// How far the camera turns per pixel of mouse motion, in radians.
 		float Sensitivity = 0.0035f;
 
@@ -110,6 +122,27 @@ namespace engine::scene {
 
 		// How far to the side a shift-locked camera sits, in metres.
 		float ShoulderOffset = 2.0f;
+
+		// The distance `PlaceCamera` uses in place of `Distance`, or negative
+		// to use `Distance` itself.
+		//
+		// **A second field rather than a temporary write to `Distance`, and
+		// that is the whole of why a poppercam needs one.** `Distance` is the
+		// player's own setting - what the wheel and `I`/`O` change - and a
+		// pass that shortened it to clear a wall would have nothing to
+		// lengthen it back to once the wall was gone, short of remembering the
+		// old value somewhere else. This *is* somewhere else: a client-tier
+		// pass with a raycast, which `scene` cannot have on its own, writes
+		// this every frame it runs and clears it to negative the moment
+		// nothing is in the way - `Distance` never moves either way.
+		//
+		// **Negative rather than a bool beside it**, because the two states -
+		// "clear" and "the distance is exactly zero" - are both real: a
+		// poppercam that has pushed the eye all the way to the subject writes
+		// zero here, and it has to read back as zero rather than as clear.
+		//
+		// @since v0.18
+		float OccludedDistance = -1.0f;
 
 		// Which of the subject's portal crossings this camera has already
 		// turned for.
@@ -261,9 +294,21 @@ namespace engine::scene {
 		// Whether the controller may move it.
 		bool Enabled = true;
 
+		// Whether the body turns to face where it is walking.
+		//
+		// **Roblox's field, and Roblox's default.** A humanoid with no facing
+		// logic at all is not "facing forward" - it is frozen at whatever
+		// orientation it spawned with, because nothing but this flag decides
+		// what `StepCharacters` does with `Motion::Angular.Y`. Off is a real
+		// case: a vehicle seat or a turret drives its own facing and would
+		// otherwise fight this every tick.
+		//
+		// @since v0.18
+		bool AutoRotate = true;
+
 		// Explicit padding, for the reason every other `Reserved` gives.
 		//
-		// **Five bytes rather than one, and that is what the two health floats
+		// **Four bytes rather than one, and that is what the two health floats
 		// paid for.** An `ecs::Entity` aligns to eight, so this object rounds up
 		// to a multiple of eight whatever is in it - and at one byte the round-up
 		// was four *unnamed* bytes on the end, which a snapshot writes and nobody
@@ -271,7 +316,10 @@ namespace engine::scene {
 		// how the rest of this module states the same rule, and `just
 		// determinism` is what checks it: two runs of one scene writing
 		// different bytes is what uninitialised padding looks like from outside.
-		uint8_t Reserved[5] = {};
+		//
+		// **`AutoRotate` took one of the five this used to be**, matching the
+		// shape `Visual::Reserved` already went through as fields arrived.
+		uint8_t Reserved[4] = {};
 	};
 
 	// Whether a humanoid has run out of life.

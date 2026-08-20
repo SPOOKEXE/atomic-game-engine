@@ -8,6 +8,7 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <span>
 #include <utility>
 
 namespace engine::replication {
@@ -336,68 +337,78 @@ namespace engine::replication {
 	void Authority::Survey(ecs::Store &store) {
 		ENGINE_PROFILE_CAT("Authority::Survey", core::ProfileCategory::Network);
 
-		// **`Resolved` and `ResolvedNames` are one list in two spellings, filled
-		// in one pass.** The audit puts an *ordinal* in every leaf and the names
-		// on the wire, so the two ends agree only while both spellings skip the
-		// same unregistered slots - and two loops is two chances for them not
-		// to. See `Audit.hpp`.
-		Resolved.clear();
-		ResolvedNames.clear();
-		for (size_t slot = 0; slot < Components.size(); slot++) {
-			const ecs::ComponentId id = ecs::Components::Find(Components[slot]);
-			if (!id.IsValid()) {
-				continue;
-			}
+		{
+			ENGINE_PROFILE_CAT("Authority::ResolveComponents", core::ProfileCategory::Network);
 
-			Resolved.push_back(id);
-			ResolvedNames.push_back(Components[slot]);
+			// **`Resolved` and `ResolvedNames` are one list in two spellings, filled
+			// in one pass.** The audit puts an *ordinal* in every leaf and the names
+			// on the wire, so the two ends agree only while both spellings skip the
+			// same unregistered slots - and two loops is two chances for them not
+			// to. See `Audit.hpp`.
+			Resolved.clear();
+			ResolvedNames.clear();
+			for (size_t slot = 0; slot < Components.size(); slot++) {
+				const ecs::ComponentId id = ecs::Components::Find(Components[slot]);
+				if (!id.IsValid()) {
+					continue;
+				}
 
-			// **A component declared `Observed` is observed here rather than by
-			// whoever built the authority, because the pairing is worth nothing
-			// if its two halves can disagree.** `Observed` means "read the
-			// store's dirty bits", and a store that is not recording them
-			// answers `false` for every row - so a host that declared the
-			// detector and forgot `Store::Observe` sends nothing, reports
-			// nothing, and looks exactly like a component nobody wrote to. That
-			// is the failure `ReplicatedComponent::Detection`'s own comment
-			// calls silent in both directions, and there were three hosts to
-			// forget it in.
-			//
-			// `ObserveComponent` is idempotent, so the steady cost is a set
-			// lookup per replicated component per tick. The *first* call is not
-			// free: it moves every entity already carrying the component into an
-			// archetype with somewhere to put the bits, which happens once, on
-			// the tick the first client makes this run.
-			if (Detection[slot] == ChangeDetection::Observed) {
-				store.ObserveComponent(id);
-			}
-		}
+				Resolved.push_back(id);
+				ResolvedNames.push_back(Components[slot]);
 
-		// **Indexed by slot, so it is filled for every slot including the ones
-		// that resolve to nothing.** `Resolved` above is a compacted list - it
-		// skips a component this process has not registered - and using its
-		// indices for anything slot-shaped is how the wrong component gets
-		// filtered. See `SuppressWhenTagged`.
-		ResolvedSuppressors.assign(Components.size(), ecs::ComponentId{});
-		for (size_t slot = 0; slot < Suppressors.size(); slot++) {
-			if (Suppressors[slot].IsValid()) {
-				ResolvedSuppressors[slot] = ecs::Components::Find(Suppressors[slot]);
-			}
-		}
-
-		Bearing.clear();
-		store.EachEntity([this, &store](ecs::Entity entity) {
-			for (const ecs::ComponentId id : Resolved) {
-				if (store.HasComponent(entity, id)) {
-					Bearing.push_back(entity.Id);
-					return;
+				// **A component declared `Observed` is observed here rather than by
+				// whoever built the authority, because the pairing is worth nothing
+				// if its two halves can disagree.** `Observed` means "read the
+				// store's dirty bits", and a store that is not recording them
+				// answers `false` for every row - so a host that declared the
+				// detector and forgot `Store::Observe` sends nothing, reports
+				// nothing, and looks exactly like a component nobody wrote to. That
+				// is the failure `ReplicatedComponent::Detection`'s own comment
+				// calls silent in both directions, and there were three hosts to
+				// forget it in.
+				//
+				// `ObserveComponent` is idempotent, so the steady cost is a set
+				// lookup per replicated component per tick. The *first* call is not
+				// free: it moves every entity already carrying the component into an
+				// archetype with somewhere to put the bits, which happens once, on
+				// the tick the first client makes this run.
+				if (Detection[slot] == ChangeDetection::Observed) {
+					store.ObserveComponent(id);
 				}
 			}
-		});
 
-		std::sort(Bearing.begin(), Bearing.end());
+			// **Indexed by slot, so it is filled for every slot including the ones
+			// that resolve to nothing.** `Resolved` above is a compacted list - it
+			// skips a component this process has not registered - and using its
+			// indices for anything slot-shaped is how the wrong component gets
+			// filtered. See `SuppressWhenTagged`.
+			ResolvedSuppressors.assign(Components.size(), ecs::ComponentId{});
+			for (size_t slot = 0; slot < Suppressors.size(); slot++) {
+				if (Suppressors[slot].IsValid()) {
+					ResolvedSuppressors[slot] = ecs::Components::Find(Suppressors[slot]);
+				}
+			}
+		}
 
-		Resign(store);
+		{
+			ENGINE_PROFILE_CAT("Authority::FindBearing", core::ProfileCategory::Network);
+			Bearing.clear();
+			store.EachEntity([this, &store](ecs::Entity entity) {
+				for (const ecs::ComponentId id : Resolved) {
+					if (store.HasComponent(entity, id)) {
+						Bearing.push_back(entity.Id);
+						return;
+					}
+				}
+			});
+
+			std::sort(Bearing.begin(), Bearing.end());
+		}
+
+		{
+			ENGINE_PROFILE_CAT("Authority::Resign", core::ProfileCategory::Network);
+			Resign(store);
+		}
 	}
 
 	void Authority::Resign(ecs::Store &store) {
@@ -428,38 +439,62 @@ namespace engine::replication {
 				continue;
 			}
 
-			size_t present = 0;
-			for (const uint64_t id64 : Bearing) {
-				const void *value = store.GetComponent(ecs::Entity{id64}, id);
-				if (value == nullptr) {
-					continue;
-				}
-				present++;
+			// One span per component, not one for the whole loop - `Resign`
+			// used to be a single frame no capture could see inside: twenty
+			// components signed for one 39%-of-the-tick line gives a reader no
+			// way to tell whether that is one expensive component or several
+			// cheap ones. The name is stable for the life of the run, so this
+			// is the `_STABLE` form rather than the copying one.
+			ENGINE_PROFILE_DYNAMIC_STABLE(
+				"Authority::Resign::slot", Components[slot].Text(), core::ProfileCategory::Network
+			);
 
-				const uint64_t hash = HashBytes(value, descriptor.Size);
-				const auto [entry, fresh] = signature.Hashes.try_emplace(id64, hash);
-				if (fresh) {
+			// This slot's actual carriers, hashed straight out of the column -
+			// not `Bearing` filtered down to them and not read back through
+			// `GetComponent`. `Bearing` is the union of every replicated
+			// component's carriers, and a scene usually declares far more
+			// replicated component types than any one entity has: walking
+			// `Bearing` here would spend a miss on every entity that does not
+			// happen to carry *this* component. `EachRuns` instead visits only
+			// the archetype tables that do, chunk by chunk, and hands back the
+			// raw column alongside the entities - so a component nothing in the
+			// scene carries costs one table lookup and touches no entity at
+			// all, and hashing a populated one reads contiguous memory instead
+			// of paying a directory lookup and an archetype fetch per entity.
+			ResignHashed.clear();
+			store.EachRuns(id, [this, &descriptor](const ecs::Entity *entities, void *values, size_t rows) {
+				const auto *bytes = static_cast<const std::byte *>(values);
+				for (size_t row = 0; row < rows; row++) {
+					ResignHashed.emplace_back(
+						entities[row].Id, HashBytes(bytes + row * descriptor.Size, descriptor.Size)
+					);
+				}
+			});
+			// `EachRuns` visits table by table, not id order, and the merge
+			// below needs id order to walk `signature.Hashes` alongside it.
+			std::sort(ResignHashed.begin(), ResignHashed.end());
+
+			// A merge against `ResignHashed`, which is now sorted the same way
+			// `signature.Hashes` already is. `previous` only ever moves forward,
+			// so an entity the candidate set skipped past - it departed since
+			// last tick - is left behind rather than copied into `next`, which
+			// is what used to need a second pass over the whole map to find.
+			std::vector<std::pair<uint64_t, uint64_t>> next;
+			next.reserve(signature.Hashes.size());
+			size_t previous = 0;
+			for (const auto &[id64, hash] : ResignHashed) {
+				while (previous < signature.Hashes.size() && signature.Hashes[previous].first < id64) {
+					previous++;
+				}
+
+				const bool known =
+					previous < signature.Hashes.size() && signature.Hashes[previous].first == id64;
+				if (!known || signature.Hashes[previous].second != hash) {
 					signature.Changed.push_back(id64);
-					continue;
 				}
-				if (entry->second != hash) {
-					entry->second = hash;
-					signature.Changed.push_back(id64);
-				}
+				next.emplace_back(id64, hash);
 			}
-
-			if (signature.Hashes.size() == present) {
-				continue;
-			}
-
-			for (auto entry = signature.Hashes.begin(); entry != signature.Hashes.end();) {
-				const ecs::Entity entity{entry->first};
-				if (!store.Alive(entity) || store.GetComponent(entity, id) == nullptr) {
-					entry = signature.Hashes.erase(entry);
-					continue;
-				}
-				++entry;
-			}
+			signature.Hashes.swap(next);
 		}
 	}
 
@@ -1250,18 +1285,21 @@ namespace engine::replication {
 			// In bulk, because a joining client's `Appearing` is the whole world
 			// and inserting that into a sorted list one entity at a time moves
 			// the tail once per entity.
-			unconfirmed.EmplaceAll(Appearing);
+			{
+				ENGINE_PROFILE_CAT("Authority::PrepareOutstanding", core::ProfileCategory::Network);
+				unconfirmed.EmplaceAll(Appearing);
 
-			// **The repair is the recovery walk, not a second way to resend.**
-			// An audit that disagreed says nothing about *which* value is
-			// wrong, only that something in the group is - so what it does is
-			// put every value of that group back into the unconfirmed set the
-			// walk below already reads. `Emplace` leaves an entry that is
-			// already there alone, so a repair cannot restart the clock on
-			// something genuinely in flight.
-			for (const uint64_t repairing : client.Repairing) {
-				if (client.Known.find(repairing) != client.Known.end()) {
-					unconfirmed.Emplace(repairing);
+				// **The repair is the recovery walk, not a second way to resend.**
+				// An audit that disagreed says nothing about *which* value is
+				// wrong, only that something in the group is - so what it does is
+				// put every value of that group back into the unconfirmed set the
+				// walk below already reads. `Emplace` leaves an entry that is
+				// already there alone, so a repair cannot restart the clock on
+				// something genuinely in flight.
+				for (const uint64_t repairing : client.Repairing) {
+					if (client.Known.find(repairing) != client.Known.end()) {
+						unconfirmed.Emplace(repairing);
+					}
 				}
 			}
 
@@ -1384,37 +1422,40 @@ namespace engine::replication {
 				return suppressor.IsValid() && store.HasComponent(entity, suppressor);
 			};
 
-			if (Detection[slot] == ChangeDetection::Signature) {
-				for (const uint64_t changed : Signatures[slot].Changed) {
-					const ecs::Entity entity{changed};
-					if (client.Known.find(changed) == client.Known.end()) {
-						continue;
-					}
-					if (derivedThere(entity)) {
-						continue;
-					}
-
-					const void *value = store.GetComponent(entity, id);
-					if (value == nullptr) {
-						continue;
-					}
-
-					offer(entity, value);
-				}
-			} else {
-				store.EachChangedRuns(id, [&](const ecs::Entity *entities, void *data, size_t rows) {
-					for (size_t row = 0; row < rows; row++) {
-						const ecs::Entity entity = entities[row];
-						if (client.Known.find(entity.Id) == client.Known.end()) {
+			{
+				ENGINE_PROFILE_CAT("Authority::DetectRows", core::ProfileCategory::Network);
+				if (Detection[slot] == ChangeDetection::Signature) {
+					for (const uint64_t changed : Signatures[slot].Changed) {
+						const ecs::Entity entity{changed};
+						if (client.Known.find(changed) == client.Known.end()) {
 							continue;
 						}
 						if (derivedThere(entity)) {
 							continue;
 						}
 
-						offer(entity, static_cast<const std::byte *>(data) + row * descriptor.Size);
+						const void *value = store.GetComponent(entity, id);
+						if (value == nullptr) {
+							continue;
+						}
+
+						offer(entity, value);
 					}
-				});
+				} else {
+					store.EachChangedRuns(id, [&](const ecs::Entity *entities, void *data, size_t rows) {
+						for (size_t row = 0; row < rows; row++) {
+							const ecs::Entity entity = entities[row];
+							if (client.Known.find(entity.Id) == client.Known.end()) {
+								continue;
+							}
+							if (derivedThere(entity)) {
+								continue;
+							}
+
+							offer(entity, static_cast<const std::byte *>(data) + row * descriptor.Size);
+						}
+					});
+				}
 			}
 
 			// **Already in order, so there is no sort here any more.**
@@ -1431,44 +1472,50 @@ namespace engine::replication {
 			//
 			// Ids rather than an iterator, because `offer` inserts into
 			// `unconfirmed` and would invalidate one.
-			unconfirmed.SelectRecovering(tick, Settings_.RecoveryRowsPerTick, Recovering);
+			{
+				ENGINE_PROFILE_CAT("Authority::RecoverRows", core::ProfileCategory::Network);
+				unconfirmed.SelectRecovering(tick, Settings_.RecoveryRowsPerTick, Recovering);
 
-			// **Dropped in one pass at the end rather than one at a time.** A
-			// row leaves the set when the entity has gone, and erasing from a
-			// sorted list moves its tail - so a world losing a thousand entities
-			// would move that tail a thousand times. `EraseSorted` needs its
-			// input ascending and `Recovering` wraps, so this is sorted rather
-			// than assumed - it holds only rows with nothing behind them, which
-			// is a handful next to the walk that produced them.
-			Dropping.clear();
-			for (const uint64_t known : Recovering) {
-				const ecs::Entity entity{known};
+				// **Dropped in one pass at the end rather than one at a time.** A
+				// row leaves the set when the entity has gone, and erasing from a
+				// sorted list moves its tail - so a world losing a thousand entities
+				// would move that tail a thousand times. `EraseSorted` needs its
+				// input ascending and `Recovering` wraps, so this is sorted rather
+				// than assumed - it holds only rows with nothing behind them, which
+				// is a handful next to the walk that produced them.
+				Dropping.clear();
+				for (const uint64_t known : Recovering) {
+					const ecs::Entity entity{known};
 
-				if (client.Known.find(known) == client.Known.end() || !store.Alive(entity)) {
-					Dropping.push_back(known);
+					if (client.Known.find(known) == client.Known.end() || !store.Alive(entity)) {
+						Dropping.push_back(known);
+						continue;
+					}
+
+					const void *value = store.GetComponent(entity, id);
+					if (value == nullptr) {
+						Dropping.push_back(known);
+						continue;
+					}
+
+					offer(entity, value);
+				}
+				std::sort(Dropping.begin(), Dropping.end());
+				unconfirmed.EraseSorted(Dropping);
+			}
+
+			{
+				ENGINE_PROFILE_CAT("Authority::CommitRows", core::ProfileCategory::Network);
+				if (component.Entities.empty()) {
+					Candidates.resize(before);
 					continue;
 				}
 
-				const void *value = store.GetComponent(entity, id);
-				if (value == nullptr) {
-					Dropping.push_back(known);
-					continue;
-				}
+				component.Values.assign(values.Bytes().begin(), values.Bytes().end());
 
-				offer(entity, value);
+				SourceSlot.push_back(slot);
+				delta.Components.push_back(std::move(component));
 			}
-			std::sort(Dropping.begin(), Dropping.end());
-			unconfirmed.EraseSorted(Dropping);
-
-			if (component.Entities.empty()) {
-				Candidates.resize(before);
-				continue;
-			}
-
-			component.Values.assign(values.Bytes().begin(), values.Bytes().end());
-
-			SourceSlot.push_back(slot);
-			delta.Components.push_back(std::move(component));
 		}
 	}
 

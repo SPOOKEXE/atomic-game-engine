@@ -55,6 +55,11 @@ local GATE_SIZE = Vector3.new(768, 768)
 local STAGE_STEP = 44
 local AWAY = 500
 
+-- Clear of a baseplate's top face at y = 0: coplanar surfaces do not flicker in
+-- this engine, they resolve stably to whichever one the draw order happens to
+-- favour. `scripts/demos/zfight-scan.sh` holds the control for that.
+local GROUND_LIFT = 0.01
+
 local WHITE = Color3.new(0.92, 0.92, 0.94)
 local FLOOR = Color3.fromRGB(96, 100, 110)
 local HALF_TURN = CFrame.Angles(0, math.pi, 0)
@@ -118,7 +123,12 @@ local function chamber(
 	local half = span / 2
 	local mid = Vector3.new(0, height / 2, 0)
 
-	block(name .. "Floor", CFrame.new(origin + Vector3.new(0, -0.25, 0)), Vector3.new(span, 0.5, span), colour)
+	block(
+		name .. "Floor",
+		CFrame.new(origin + Vector3.new(0, -0.25 + GROUND_LIFT, 0)),
+		Vector3.new(span, 0.5, span),
+		colour
+	)
 	block(name .. "Ceiling", CFrame.new(origin + Vector3.new(0, height, 0)), Vector3.new(span, 0.5, span), colour)
 	block(name .. "Far", CFrame.new(origin + mid - Vector3.new(0, 0, half)), Vector3.new(span, height, 0.5), WHITE)
 	block(name .. "Left", CFrame.new(origin + mid - Vector3.new(half, 0, 0)), Vector3.new(0.5, height, span), WHITE)
@@ -154,7 +164,12 @@ local function passage(name: string, from: Vector3, length: number, cap: Color3)
 	block(name .. "Left", CFrame.new(middle + Vector3.new(-3.2, 4, 0)), Vector3.new(0.5, 8, length), WHITE)
 	block(name .. "Right", CFrame.new(middle + Vector3.new(3.2, 4, 0)), Vector3.new(0.5, 8, length), WHITE)
 	block(name .. "Roof", CFrame.new(middle + Vector3.new(0, 8, 0)), Vector3.new(7, 0.5, length), FLOOR)
-	block(name .. "Floor", CFrame.new(middle + Vector3.new(0, -0.25, 0)), Vector3.new(7, 0.5, length), FLOOR)
+	block(
+		name .. "Floor",
+		CFrame.new(middle + Vector3.new(0, -0.25 + GROUND_LIFT, 0)),
+		Vector3.new(7, 0.5, length),
+		FLOOR
+	)
 	block(
 		name .. "End",
 		CFrame.new(from + Vector3.new(0, 4, -length - 0.2)),
@@ -258,7 +273,7 @@ end
 do
 	local at = Vector3.new(STAGE_STEP * 3, 0, 0)
 
-	block("PillarFloor", CFrame.new(at + Vector3.new(0, -0.25, -6)), Vector3.new(24, 0.5, 16), FLOOR)
+	block("PillarFloor", CFrame.new(at + Vector3.new(0, -0.25 + GROUND_LIFT, -6)), Vector3.new(24, 0.5, 16), FLOOR)
 	block("PillarShaft", CFrame.new(at + Vector3.new(0, 5, -8)), Vector3.new(4, 10, 4), Color3.fromRGB(150, 140, 120))
 	block("PillarBack", CFrame.new(at + Vector3.new(0, 4, -13)), Vector3.new(24, 8, 0.5), FLOOR)
 
@@ -298,7 +313,12 @@ do
 	block("HillMouthWall", CFrame.new(at + Vector3.new(0, 3, -4)), Vector3.new(16, 6, 0.5), FLOOR)
 
 	local top = at + Vector3.new(0, 14.4, -AWAY)
-	block("HillTopFloor", CFrame.new(top + Vector3.new(0, -0.25, -8)), Vector3.new(16, 0.5, 16), Color3.fromRGB(110, 140, 100))
+	block(
+		"HillTopFloor",
+		CFrame.new(top + Vector3.new(0, -0.25 + GROUND_LIFT, -8)),
+		Vector3.new(16, 0.5, 16),
+		Color3.fromRGB(110, 140, 100)
+	)
 	block("HillTopFar", CFrame.new(top + Vector3.new(0, 3, -16.2)), Vector3.new(16, 6, 0.5), WHITE)
 	marker("HillTopMarker", top + Vector3.new(0, 0, -10), Color3.fromRGB(240, 230, 140))
 
@@ -322,7 +342,7 @@ end
 do
 	local at = Vector3.new(STAGE_STEP * 5, 0, 0)
 
-	block("CellFloor", CFrame.new(at + Vector3.new(0, -0.25, -10)), Vector3.new(20, 0.5, 20), FLOOR)
+	block("CellFloor", CFrame.new(at + Vector3.new(0, -0.25 + GROUND_LIFT, -10)), Vector3.new(20, 0.5, 20), FLOOR)
 
 	-- The fourth side is left out to look in through, which is this exhibit's
 	-- compromise: somebody who could walk in would have four of them.

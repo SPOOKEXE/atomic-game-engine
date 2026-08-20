@@ -1,0 +1,455 @@
+#version 450
+
+// Ages, integrates and shades every live particle, on the device.
+//
+// **The pool lives here now, and that is the whole point.** The host used to
+// simulate into its own array and copy the result across every frame: at half a
+// million particles that is sixteen megabytes a frame, and it was the largest
+// single thing a particle frame did - larger than the simulation itself and two
+// orders of magnitude larger than recording the draw. Nothing crosses now but
+// the block parameters and whatever was born this tick, which together are a
+// few hundred kilobytes.
+//
+// ## One workgroup per block, writing straight to its draw range
+//
+// A block is one emitter's contiguous run of the pool. `PrepareParticles` has
+// already sorted the emitters by draw state and worked out where each one's run
+// lands in the vertex stream, so each block record carries a `Destination` and
+// this pass writes the finished instance *there* rather than into a pool that
+// would then have to be gathered. That is what keeps the draw grouping the
+// renderer depends on - the same three draw calls for a scene of five thousand
+// emitters - without a second pool or a second dispatch.
+//
+// It is also why nothing here reads an instance back. The only two things a
+// particle remembers between frames, its position and its accumulated turn,
+// live in `ParticleState`; size, colour and the flipbook cell are functions of
+// age and are worked out from nothing each time.
+//
+// ## Nothing is compacted
+//
+// `BlockSizeFor` is `Rate * maxLifetime + 1`, so a steady block's live count is
+// its capacity minus about one. There is nothing worth compacting, and the usual
+// design - ping-pong the pool, atomically append survivors, draw indirect
+// because the counts now live on the device - would buy a slot per block and
+// cost an atomic per particle and an indirect draw. A dead slot writes a zero
+// `Size` instead, which `particle.vert` already turns into a quad with no
+// extent, and the whole capacity is drawn.
+//
+// ## The layouts are hand-indexed
+//
+// `vec3` takes sixteen-byte alignment in std430 and neither `ParticleState`
+// (fifty-six bytes) nor `ParticleInstance` (twenty-eight) is laid out that way.
+// So both are `uint words[]` and the offsets are spelled out below, which is
+// what `occlusion-args.comp` already does with its five-word draw command. A
+// mismatch here is a scene of garbage rather than a compile error, so the words
+// are named as constants and `Renderer.cpp` asserts its own structs against the
+// same numbers.
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+// --- the layouts -------------------------------------------------------------
+
+// ParticleState, fifteen words: velocity xyz, age, lifetime, offset xyz, spin,
+// seed, position xyz, generation, rotation.
+const uint STATE_WORDS = 15u;
+const uint STATE_VELOCITY = 0u;
+const uint STATE_AGE = 3u;
+const uint STATE_LIFETIME = 4u;
+const uint STATE_OFFSET = 5u;
+const uint STATE_SPIN = 8u;
+const uint STATE_POSITION = 10u;
+const uint STATE_GENERATION = 13u;
+const uint STATE_ROTATION = 14u;
+
+// ParticleInstance, seven words: position xyz, size, rotation and cell, colour,
+// slot. The last word is the sixteen-bit slot and its sixteen bits of padding.
+const uint INSTANCE_WORDS = 7u;
+const uint INSTANCE_POSITION = 0u;
+const uint INSTANCE_SIZE = 3u;
+const uint INSTANCE_ROTATION = 4u;
+const uint INSTANCE_COLOUR = 5u;
+const uint INSTANCE_SLOT = 6u;
+
+// One block's parameters, in a table indexed by block rather than by draw.
+//
+// **Split from the curves, and both split from the per-frame draw list, because
+// of what changes when.** The curves change when a script writes the emitter and
+// otherwise never; these change when the emitter moves; and which block draws
+// where changes every frame because the sort that decides it does. Staging all
+// of it every frame is thirty-nine megabytes at the roadmap's hundred thousand
+// emitters, which is more than the whole particle pool used to cost. See
+// `particle-scatter.comp`.
+const uint PARAM_WORDS = 24u;
+const uint PARAM_ROTATION = 0u;  // xyzw, the emitter frame's turn
+const uint PARAM_POSITION = 4u;  // xyz
+const uint PARAM_ACCELERATION = 7u;  // xyz
+const uint PARAM_DRAG = 10u;
+const uint PARAM_FIRST = 11u;  // this block's first slot in the state pool
+const uint PARAM_CAPACITY = 12u;
+const uint PARAM_FLAGS = 13u;  // bit 0 locked, bit 1 the cell is fixed at spawn
+const uint PARAM_CELLS = 14u;
+const uint PARAM_PLAYBACK = 15u;  // 0 loop, 1 one-shot, 2 ping-pong
+const uint PARAM_RATE = 16u;  // flipbook frames a second
+const uint PARAM_GENERATION = 17u;  // which tenancy of the pool rows this is
+// Eighteen to twenty-three are spare, deliberately: a field added here would
+// otherwise shift the table's stride and silently reinterpret every record.
+
+// The four sixteen-sample curves, in a table indexed by block. Declared as
+// words rather than floats because the colour curve is packed RGB and the other
+// three are floats; one table with one stride beats two of each.
+const uint CURVE_SIZE = 16u;
+const uint CURVE_WORDS = 64u;
+const uint CURVE_OF_SIZE = 0u;
+const uint CURVE_OF_ALPHA = 16u;
+const uint CURVE_OF_SQUASH = 32u;
+const uint CURVE_OF_COLOUR = 48u;
+
+// One entry of the per-frame draw list: which block, and where its run of the
+// instance stream starts. The only thing that crosses per emitter per frame.
+const uint DRAW_WORDS = 2u;
+
+// One portal pane a particle can be carried through, eighteen words.
+//
+// **The drawn position is moved and the remembered one is not**, which is what
+// the host-side carry did and is the only form that is right: a spark goes on
+// falling in the room it was born in, and whether it shows up through the hole
+// is decided afresh every frame from where it has got to.
+const uint SEAM_WORDS = 20u;
+const uint SEAM_CENTRE = 0u;  // xyz, a point on the pane
+const uint SEAM_NORMAL = 3u;  // xyz, the face's unit normal
+const uint SEAM_FIRST = 6u;  // xyz, half-axis
+const uint SEAM_SECOND = 9u;  // xyz, the other half-axis
+const uint SEAM_TURN = 12u;  // xyzw, the mapping's rotation
+const uint SEAM_MOVE = 16u;  // xyz, the mapping's translation
+const uint SEAM_SCALE = 19u;
+
+layout(set = 0, binding = 0) readonly buffer Draws { uint words[]; } draws;
+layout(set = 0, binding = 1) readonly buffer Params { uint words[]; } params;
+layout(set = 0, binding = 2) readonly buffer Curves { uint words[]; } curves;
+layout(set = 0, binding = 3) readonly buffer Seams { uint words[]; } seams;
+
+layout(set = 1, binding = 0) buffer States { uint words[]; } states;
+layout(set = 1, binding = 1) writeonly buffer Instances { uint words[]; } instances;
+
+layout(set = 2, binding = 0) uniform Step {
+	// x: the tick, in seconds. y: how many entries the draw list holds. z: how
+	// many seams. w: unused.
+	vec4 Delta;
+} step_;
+
+// --- the pieces --------------------------------------------------------------
+
+float BlockFloat(uint base, uint word) { return uintBitsToFloat(params.words[base + word]); }
+uint BlockUint(uint base, uint word) { return params.words[base + word]; }
+
+vec3 BlockVector(uint base, uint word) {
+	return vec3(BlockFloat(base, word), BlockFloat(base, word + 1u), BlockFloat(base, word + 2u));
+}
+
+// Rotates a vector by the emitter frame's quaternion. The standard two-cross
+// form, which is what `core::CFrame::VectorToWorldSpace` reduces to.
+vec3 TurnedBy(vec4 turn, vec3 value) {
+	vec3 axis = turn.xyz;
+	vec3 crossed = cross(axis, value) + turn.w * value;
+	return value + 2.0 * cross(axis, crossed);
+}
+
+// Where one age falls in a sixteen-sample curve. One cursor serves all four,
+// which is the same saving the host-side step takes: resolving the pair of
+// samples and the fraction is most of what asking a curve costs.
+struct Cursor { uint low; uint high; float fraction; };
+
+Cursor CurveAt(float age) {
+	float scaled = clamp(age, 0.0, 1.0) * float(CURVE_SIZE - 1u);
+	Cursor cursor;
+	cursor.low = uint(scaled);
+	cursor.high = min(cursor.low + 1u, CURVE_SIZE - 1u);
+	cursor.fraction = scaled - float(cursor.low);
+	return cursor;
+}
+
+float SampleCurve(uint base, uint curve, Cursor cursor) {
+	float low = uintBitsToFloat(curves.words[base + curve + cursor.low]);
+	float high = uintBitsToFloat(curves.words[base + curve + cursor.high]);
+	return low + (high - low) * cursor.fraction;
+}
+
+// The packed-RGB lerp, in fixed point, exactly as `SampleColourAt` does it: an
+// eight-bit blend factor and three byte lerps, no conversion either way.
+uint SampleColour(uint base, Cursor cursor) {
+	uint low = curves.words[base + CURVE_OF_COLOUR + cursor.low];
+	uint high = curves.words[base + CURVE_OF_COLOUR + cursor.high];
+	if (cursor.low == cursor.high || low == high) {
+		return low;
+	}
+
+	uint factor = uint(cursor.fraction * 256.0);
+	uint blended = 0u;
+	for (uint shift = 0u; shift < 24u; shift += 8u) {
+		uint from = (low >> shift) & 0xFFu;
+		uint to = (high >> shift) & 0xFFu;
+		blended |= (((from * (256u - factor)) + (to * factor)) >> 8u) << shift;
+	}
+	return blended;
+}
+
+// Sixty-four metres over 65535, matching `PackParticleSize` and the constant
+// `particle.vert` unpacks with.
+uint PackSize(float width, float height) {
+	float scale = 65535.0 / 64.0;
+	uint w = uint(clamp(width, 0.0, 64.0) * scale);
+	uint h = uint(clamp(height, 0.0, 64.0) * scale);
+	return w | (h << 16u);
+}
+
+// Loop, one-shot and ping-pong. **Random is absent on purpose**: that mode picks
+// a cell once and keeps it for the particle's whole life, so the host writes it
+// at spawn and this pass leaves the cell alone - which is what the fixed-cell
+// flag says. It is also what keeps a sixty-four-bit hash out of a shader that
+// has no sixty-four-bit integers.
+uint FlipbookCell(uint base, float age, float lifetime, uint cells) {
+	if (cells <= 1u) {
+		return 0u;
+	}
+
+	uint playback = BlockUint(base, PARAM_PLAYBACK);
+	if (playback == 1u) {
+		float fraction = lifetime > 0.0 ? age / lifetime : 0.0;
+		return min(uint(fraction * float(cells)), cells - 1u);
+	}
+
+	uint stepped = uint(age * BlockFloat(base, PARAM_RATE));
+	if (playback == 2u) {
+		uint span = cells * 2u - 2u;
+		uint at = span == 0u ? 0u : stepped % span;
+		return at < cells ? at : span - at;
+	}
+	return stepped % cells;
+}
+
+// Whether a point is past this pane and inside its rectangle, which is what
+// `scene::SeamCarries` asks. Both half-axis tests are against the squared
+// length, so nothing here takes a square root.
+bool SeamCarries(uint base, vec3 at) {
+	vec3 centre = vec3(
+		uintBitsToFloat(seams.words[base + SEAM_CENTRE]),
+		uintBitsToFloat(seams.words[base + SEAM_CENTRE + 1u]),
+		uintBitsToFloat(seams.words[base + SEAM_CENTRE + 2u])
+	);
+	vec3 normal = vec3(
+		uintBitsToFloat(seams.words[base + SEAM_NORMAL]),
+		uintBitsToFloat(seams.words[base + SEAM_NORMAL + 1u]),
+		uintBitsToFloat(seams.words[base + SEAM_NORMAL + 2u])
+	);
+
+	vec3 offset = at - centre;
+	if (dot(offset, normal) <= 0.0) {
+		return false;
+	}
+
+	vec3 first = vec3(
+		uintBitsToFloat(seams.words[base + SEAM_FIRST]),
+		uintBitsToFloat(seams.words[base + SEAM_FIRST + 1u]),
+		uintBitsToFloat(seams.words[base + SEAM_FIRST + 2u])
+	);
+	vec3 second = vec3(
+		uintBitsToFloat(seams.words[base + SEAM_SECOND]),
+		uintBitsToFloat(seams.words[base + SEAM_SECOND + 1u]),
+		uintBitsToFloat(seams.words[base + SEAM_SECOND + 2u])
+	);
+
+	float alongFirst = dot(offset, first);
+	float alongSecond = dot(offset, second);
+	return abs(alongFirst) <= dot(first, first) && abs(alongSecond) <= dot(second, second);
+}
+
+// `scene::SeamTransform::Point`: scale about the source pane's centre, then the
+// rigid half.
+vec3 SeamPoint(uint base, vec3 at) {
+	vec3 centre = vec3(
+		uintBitsToFloat(seams.words[base + SEAM_CENTRE]),
+		uintBitsToFloat(seams.words[base + SEAM_CENTRE + 1u]),
+		uintBitsToFloat(seams.words[base + SEAM_CENTRE + 2u])
+	);
+	vec4 turn = vec4(
+		uintBitsToFloat(seams.words[base + SEAM_TURN]),
+		uintBitsToFloat(seams.words[base + SEAM_TURN + 1u]),
+		uintBitsToFloat(seams.words[base + SEAM_TURN + 2u]),
+		uintBitsToFloat(seams.words[base + SEAM_TURN + 3u])
+	);
+	vec3 move = vec3(
+		uintBitsToFloat(seams.words[base + SEAM_MOVE]),
+		uintBitsToFloat(seams.words[base + SEAM_MOVE + 1u]),
+		uintBitsToFloat(seams.words[base + SEAM_MOVE + 2u])
+	);
+	float scale = uintBitsToFloat(seams.words[base + SEAM_SCALE]);
+
+	return move + TurnedBy(turn, centre + (at - centre) * scale);
+}
+
+// --- the pass ----------------------------------------------------------------
+
+void main() {
+	uint record = gl_WorkGroupID.x;
+	if (record >= uint(step_.Delta.y)) {
+		return;
+	}
+
+	// **The draw list is the only thing that is per frame.** It says which block
+	// this workgroup is and where its run of the instance stream starts; the
+	// parameters and the curves are looked up by block index in tables the host
+	// only writes when something actually changed.
+	uint block = draws.words[record * DRAW_WORDS];
+	uint destination = draws.words[record * DRAW_WORDS + 1u];
+
+	uint base = block * PARAM_WORDS;
+	uint curveAt = block * CURVE_WORDS;
+
+	uint capacity = BlockUint(base, PARAM_CAPACITY);
+	if (capacity == 0u) {
+		return;
+	}
+
+	uint first = BlockUint(base, PARAM_FIRST);
+	uint flags = BlockUint(base, PARAM_FLAGS);
+	uint cells = BlockUint(base, PARAM_CELLS);
+	uint seamCount = uint(step_.Delta.z);
+	uint generation = BlockUint(base, PARAM_GENERATION);
+
+	float delta = step_.Delta.x;
+	vec4 turn = vec4(
+		BlockFloat(base, PARAM_ROTATION),
+		BlockFloat(base, PARAM_ROTATION + 1u),
+		BlockFloat(base, PARAM_ROTATION + 2u),
+		BlockFloat(base, PARAM_ROTATION + 3u)
+	);
+	vec3 origin = BlockVector(base, PARAM_POSITION);
+
+	// The block's own terms, once per group rather than once per particle - the
+	// same hoist the host-side step took and for the same reason.
+	float damping = max(0.0, 1.0 - BlockFloat(base, PARAM_DRAG) * delta);
+	vec3 push = BlockVector(base, PARAM_ACCELERATION) * delta;
+	bool locked = (flags & 1u) != 0u;
+	bool fixedCell = (flags & 2u) != 0u;
+
+	// One group, its whole block. A capacity of four thousand is sixty-four
+	// strides; a capacity of a hundred is two.
+	for (uint at = gl_LocalInvocationID.x; at < capacity; at += gl_WorkGroupSize.x) {
+		uint stateAt = (first + at) * STATE_WORDS;
+		uint instanceAt = (destination + at) * INSTANCE_WORDS;
+
+		instances.words[instanceAt + INSTANCE_SLOT] = block & 0xFFFFu;
+
+		// **The generation before the lifetime**, because a row this block has
+		// only just been handed may hold a live particle of whoever had it last.
+		// The host bumps the number when it takes the rows rather than clearing
+		// them, so this compare is what an emptied block costs - see
+		// `EmitterBlock::Generation`.
+		float lifetime = uintBitsToFloat(states.words[stateAt + STATE_LIFETIME]);
+		if (lifetime <= 0.0 || states.words[stateAt + STATE_GENERATION] != generation) {
+			// Never spawned into, retired, or somebody else's. A zero size is a
+			// quad with no extent - see the header.
+			instances.words[instanceAt + INSTANCE_SIZE] = 0u;
+			continue;
+		}
+
+		float age = uintBitsToFloat(states.words[stateAt + STATE_AGE]) + delta;
+		if (age >= lifetime) {
+			// **Retired by clearing the lifetime**, which is what makes a dead
+			// slot recognisable both to the next step and to the host's spawn:
+			// nothing else has to be written and nothing has to be moved.
+			states.words[stateAt + STATE_LIFETIME] = floatBitsToUint(0.0);
+			instances.words[instanceAt + INSTANCE_SIZE] = 0u;
+			continue;
+		}
+		states.words[stateAt + STATE_AGE] = floatBitsToUint(age);
+
+		vec3 velocity = vec3(
+			uintBitsToFloat(states.words[stateAt + STATE_VELOCITY]),
+			uintBitsToFloat(states.words[stateAt + STATE_VELOCITY + 1u]),
+			uintBitsToFloat(states.words[stateAt + STATE_VELOCITY + 2u])
+		);
+
+		// Drag, then acceleration, then position - semi-implicit Euler, which is
+		// what `physics::Integrate` uses and what stops a drag term diverging on
+		// the long step a frame after a stall.
+		velocity = velocity * damping + push;
+
+		states.words[stateAt + STATE_VELOCITY] = floatBitsToUint(velocity.x);
+		states.words[stateAt + STATE_VELOCITY + 1u] = floatBitsToUint(velocity.y);
+		states.words[stateAt + STATE_VELOCITY + 2u] = floatBitsToUint(velocity.z);
+
+		vec3 position;
+		if (locked) {
+			// A locked particle's offset from its parent is what is preserved, so
+			// it is recomputed rather than integrated. That is what makes an
+			// engine glow stay on the engine.
+			vec3 offset = vec3(
+				uintBitsToFloat(states.words[stateAt + STATE_OFFSET]),
+				uintBitsToFloat(states.words[stateAt + STATE_OFFSET + 1u]),
+				uintBitsToFloat(states.words[stateAt + STATE_OFFSET + 2u])
+			) + velocity * delta;
+
+			states.words[stateAt + STATE_OFFSET] = floatBitsToUint(offset.x);
+			states.words[stateAt + STATE_OFFSET + 1u] = floatBitsToUint(offset.y);
+			states.words[stateAt + STATE_OFFSET + 2u] = floatBitsToUint(offset.z);
+
+			position = origin + TurnedBy(turn, offset);
+		} else {
+			position = vec3(
+				uintBitsToFloat(states.words[stateAt + STATE_POSITION]),
+				uintBitsToFloat(states.words[stateAt + STATE_POSITION + 1u]),
+				uintBitsToFloat(states.words[stateAt + STATE_POSITION + 2u])
+			) + velocity * delta;
+		}
+
+		states.words[stateAt + STATE_POSITION] = floatBitsToUint(position.x);
+		states.words[stateAt + STATE_POSITION + 1u] = floatBitsToUint(position.y);
+		states.words[stateAt + STATE_POSITION + 2u] = floatBitsToUint(position.z);
+
+		// **The hole, applied to the drawn position only**, so a spark that has
+		// gone through a doorway is drawn in the far room while the one that has
+		// not is left where it is. The state keeps the unmoved position, which is
+		// what lets the decision be taken again next frame.
+		vec3 drawn = position;
+		for (uint seam = 0u; seam < seamCount; seam++) {
+			uint seamAt = seam * SEAM_WORDS;
+			if (SeamCarries(seamAt, position)) {
+				drawn = SeamPoint(seamAt, position);
+				break;
+			}
+		}
+
+		instances.words[instanceAt + INSTANCE_POSITION] = floatBitsToUint(drawn.x);
+		instances.words[instanceAt + INSTANCE_POSITION + 1u] = floatBitsToUint(drawn.y);
+		instances.words[instanceAt + INSTANCE_POSITION + 2u] = floatBitsToUint(drawn.z);
+
+		Cursor cursor = CurveAt(age / lifetime);
+
+		float width = SampleCurve(curveAt, CURVE_OF_SIZE, cursor);
+		float squash = SampleCurve(curveAt, CURVE_OF_SQUASH, cursor);
+
+		// Squash stretches one axis and shrinks the other, so the particle's area
+		// is roughly kept - a squash that only stretched would make a flattening
+		// particle grow.
+		instances.words[instanceAt + INSTANCE_SIZE] = PackSize(
+			width * (squash < 0.0 ? 1.0 - squash : 1.0 / (1.0 + squash)),
+			width * (squash > 0.0 ? 1.0 + squash : 1.0 / (1.0 - squash))
+		);
+
+		// **Wrapped in sixteen-bit arithmetic**, which is why the rotation is a
+		// turn rather than an angle: adding past 65,535 wraps for free, so a
+		// spinning particle needs no modulo and cannot drift out of range.
+		uint remembered = states.words[stateAt + STATE_ROTATION];
+		float spin = uintBitsToFloat(states.words[stateAt + STATE_SPIN]);
+		uint turned = uint(int(remembered & 0xFFFFu) + int(spin * delta * 65536.0)) & 0xFFFFu;
+		states.words[stateAt + STATE_ROTATION] = turned | (remembered & 0xFFFF0000u);
+
+		uint cell = fixedCell ? (remembered >> 16u) : FlipbookCell(base, age, lifetime, cells);
+		instances.words[instanceAt + INSTANCE_ROTATION] = turned | (cell << 16u);
+
+		uint colour = SampleColour(curveAt, cursor);
+		uint alpha = uint(clamp(SampleCurve(curveAt, CURVE_OF_ALPHA, cursor), 0.0, 1.0) * 255.0 + 0.5);
+		instances.words[instanceAt + INSTANCE_COLOUR] = (colour & 0x00FFFFFFu) | (alpha << 24u);
+	}
+}

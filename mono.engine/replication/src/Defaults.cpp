@@ -125,6 +125,24 @@ namespace engine::replication {
 		// those buys a dirty column paid every tick and read never, and *not*
 		// signing them is the v0.7 bug where a part recoloured at runtime kept
 		// its old colour on every client for ever.
+		//
+		// **Tried widening this to everything a grep for `SetComponent`/`Set<T>`
+		// found no write site for, at v0.18, and reverted it the same day.**
+		// `scene.Visual` and `scene.Bounds` passed that search and are exactly
+		// as write-once as `scene.Transform` looked from the same angle - and
+		// `mono.unified_server_client/tests/Harness.cpp` still failed five cases,
+		// because a real system reaches both through `Store::GetMutable<T>` and
+		// `Store::EachBatch<T>`, which hand out raw column pointers and set no
+		// bit *by design* - the cost that path exists to avoid is exactly the
+		// per-row check `Observed` would add back. A grep across call sites
+		// cannot rule that out for a component it has not been told is safe;
+		// only a system's own author can say a component is never reached that
+		// way, and none of the ten beyond `Transform` and `Motion` have made
+		// that claim. `Authority::Resign`'s profile against
+		// `examples/ReplicationStress.luau` found the two functions above
+		// costing roughly 3% of the tick each at twenty thousand carriers - real
+		// and worth reducing, but not by guessing a component's write path from
+		// outside the module that owns it.
 		bool WrittenEveryTick(std::string_view component) {
 			return component == "scene.Transform" || component == "scene.Motion";
 		}
@@ -152,7 +170,19 @@ namespace engine::replication {
 		// `Authority::Survey` is what turns the observation on, so declaring one
 		// here is the whole of the wiring.
 		bool CannotBeSigned(std::string_view component) {
-			return component == "gui.Label" || component == "gui.Entry" || component == "script.Program";
+			// **`scene.EditableMesh` joins this list for the same reason as
+			// the three above it, arriving at a different scale.** Five
+			// `std::vector`s are five pointers in the object representation
+			// a signature would hash - it would answer about the allocation
+			// and never about a vertex actually moving. `Observed` is exactly
+			// right here rather than merely convenient: every mutator in
+			// `scene/EditableMesh.hpp` reaches the row through `Store::
+			// GetMutable`, which marks the dirty bit for free - there is no
+			// `EachBatch` or raw-pointer door for this type the way there is
+			// for `Visual` and `Bounds`, so there is no hole `Observed`
+			// leaves open for it.
+			return component == "gui.Label" || component == "gui.Entry" || component == "script.Program" ||
+				   component == "scene.EditableMesh" || component == "scene.EditableImage";
 		}
 	}
 
@@ -235,6 +265,17 @@ namespace engine::replication {
 			return true;
 		}
 
+		// **A fact about this viewer's own camera, not about the part.**
+		// `scene::LocalTransparency` exists so a poppercam can thin out
+		// whatever stands between the eye and its subject on *this* machine
+		// without editing `Visual::Transparency`, which every other client
+		// draws by. Replicating it would put one viewer's occlusion fade on
+		// every screen, which is the exact bug the split between the two
+		// fields exists to prevent - see the component's own header.
+		if (component == "scene.LocalTransparency") {
+			return true;
+		}
+
 		// **The same argument as `scene.Camera`'s, arriving one step further
 		// on.** A `SurfaceCamera` crosses because it is authored scene content;
 		// the *frustum fitted to its pane* does not, because that fit is made
@@ -278,8 +319,25 @@ namespace engine::replication {
 		// two clients writing one row, and the authority would hand each of them
 		// back the other's answer. A client's own keyboard is its own, exactly
 		// as `scene.InputState` is.
+		//
+		// **`gui.ScrollState` is `gui.Resolved`'s case restated for one class.**
+		// It is the pixel canvas, the visible window and the two thumb
+		// rectangles a `ScrollingFrame` worked out - all of them derived from an
+		// `AbsoluteSize` that is this display's. What an author wrote is
+		// `gui.Scrolling`, and that crosses.
+		// **`gui.PageMotion` and `gui.ScrollMotion` are the sharpest of the
+		// set, because what they hold is a *clock reading*.** Every other row
+		// here is local because it is recomputed from what was sent; these two
+		// are local because the number in them means nothing anywhere else. A
+		// client handed the authority's `StartedAt` would evaluate a tween
+		// against that machine's uptime and slide from an arbitrary place, or
+		// not slide at all. What crosses is `PageLayout::CurrentPage` and
+		// `Scrolling::CanvasPosition` - the destination - and each end animates
+		// to it on its own clock, which is also what makes a laggy client
+		// arrive rather than stutter.
 		if (component == "gui.Resolved" || component == "gui.SpatialCanvas" ||
-			component == "gui.GuiServiceState") {
+			component == "gui.GuiServiceState" || component == "gui.ScrollState" ||
+			component == "gui.PageMotion" || component == "gui.ScrollMotion") {
 			return true;
 		}
 

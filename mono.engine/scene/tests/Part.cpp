@@ -28,6 +28,7 @@ using engine::ecs::Store;
 using engine::scene::Anchored;
 using engine::scene::Bounds;
 using engine::scene::Collider;
+using engine::scene::LocalTransparencyOf;
 using engine::scene::MakePart;
 using engine::scene::Motion;
 using engine::scene::PartClass;
@@ -35,6 +36,7 @@ using engine::scene::PartDesc;
 using engine::scene::Portal;
 using engine::scene::RegisterSceneClasses;
 using engine::scene::RigidBody;
+using engine::scene::SetLocalTransparency;
 using engine::scene::ShapeKind;
 using engine::scene::Surface;
 using engine::scene::Transform;
@@ -434,6 +436,64 @@ TEST_CASE("a surface camera has its own opacity, clamped the same way", "[scene]
 
 	REQUIRE(Write(store, camera, "ImageTransparency", -1.0f));
 	CHECK(Read<float>(store, camera, "ImageTransparency") == 0.0f);
+}
+
+TEST_CASE("resizing a surface camera keeps its grade, face and filter", "[scene][part]") {
+	Store store("surface_size_test");
+	RegisterSceneClasses();
+
+	const Entity camera =
+		store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "Reflection");
+	REQUIRE(camera != NULL_ENTITY);
+
+	// Everything on the component that is not the size, authored first.
+	REQUIRE(Write(store, camera, "Effect", Name("Thermal")));
+	REQUIRE(Write(store, camera, "Face", Name("Left")));
+	REQUIRE(Write(store, camera, "ImageTransparency", 0.5f));
+
+	// **The regression this pins:** `SurfaceSize`'s setter built a fresh
+	// `SurfaceCamera` and `store.Set` replaced the whole component, so a
+	// resize silently reset the grade, the face, the filter and the opacity.
+	REQUIRE(Write(store, camera, "SurfaceSize", Vector3{512.0f, 256.0f, 0.0f}));
+
+	const engine::scene::SurfaceCamera *surface = store.Get<engine::scene::SurfaceCamera>(camera);
+	REQUIRE(surface != nullptr);
+	CHECK(surface->Width == 512);
+	CHECK(surface->Height == 256);
+	CHECK(Read<Name>(store, camera, "Effect") == Name("Thermal"));
+	CHECK(Read<Name>(store, camera, "Face") == Name("Left"));
+	CHECK(Read<float>(store, camera, "ImageTransparency") == 0.5f);
+}
+
+TEST_CASE("LocalTransparency is read-only and written through its own door", "[scene][part]") {
+	Store store("local_transparency_test");
+	const Entity part = MakePart(store, PartDesc{});
+
+	CHECK(LocalTransparencyOf(store, part) == 0.0f);
+	CHECK(Read<float>(store, part, "LocalTransparency") == 0.0f);
+
+	// The ordinary property door refuses it, exactly as it refuses any other
+	// read-only property - `MeshPart::TrianglesCount` gets the same check for
+	// the same reason.
+	CHECK_FALSE(Write(store, part, "LocalTransparency", 0.7f));
+	CHECK(LocalTransparencyOf(store, part) == 0.0f);
+
+	// The dedicated door works on an ordinary store...
+	REQUIRE(SetLocalTransparency(store, part, 0.7f));
+	CHECK(LocalTransparencyOf(store, part) == 0.7f);
+	CHECK(Read<float>(store, part, "LocalTransparency") == 0.7f);
+
+	// ...and, unlike every other write, on a replica too. A viewer fading
+	// their own character has to be able to do it from inside a world they do
+	// not own - `scene::SetLocalTransparency`'s header carries the argument.
+	store.SetAdoptOnly(true);
+	REQUIRE(SetLocalTransparency(store, part, 1.0f));
+	CHECK(LocalTransparencyOf(store, part) == 1.0f);
+
+	// The ordinary door stays refused even there - this is not a general
+	// bypass of `AdoptOnly`, only the one field that was never going to be
+	// sent in the first place.
+	CHECK_FALSE(Write(store, part, "LocalTransparency", 0.2f));
 }
 
 TEST_CASE("Face is an enum, so a misspelling is refused where it was written", "[scene][part]") {

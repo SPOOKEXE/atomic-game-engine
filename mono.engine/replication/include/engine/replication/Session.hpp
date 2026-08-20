@@ -16,6 +16,7 @@
 #include <engine/replication/Protocol.hpp>
 
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <optional>
 #include <span>
@@ -117,6 +118,21 @@ namespace engine::replication {
 		//         holding no keys.
 		bool Send(std::span<const std::byte> message, double nowSeconds);
 
+		// Adds deterministic one-way delay before sealed datagrams reach the
+		// transport. Already queued datagrams keep the deadline they received.
+		//
+		// Non-finite and negative values become zero. Values above one minute are
+		// capped so a mistaken property cannot retain an unbounded queue.
+		//
+		// @param milliseconds The added delay.
+		// @since v0.18
+		void SetSimulatedLatency(double milliseconds);
+
+		// The effective delay after sanitising, in milliseconds.
+		double SimulatedLatency() const {
+			return SimulatedLatencySeconds * 1000.0;
+		}
+
 		// Sends what is queued and resends what has gone unacknowledged.
 		//
 		// @param nowSeconds The current time.
@@ -204,7 +220,13 @@ namespace engine::replication {
 
 	  private:
 		bool Emit(net::ChannelKind channel, std::span<const std::byte> payload, double nowSeconds);
-		bool Transmit(net::PacketHeader header, std::span<const std::byte> payload);
+		bool Transmit(net::PacketHeader header, std::span<const std::byte> payload, double nowSeconds);
+		size_t FlushDelayed(double nowSeconds);
+
+		struct DelayedDatagram {
+			double ReadyAtSeconds = 0.0;
+			std::vector<std::byte> Bytes;
+		};
 
 		net::Transport *Transport_;
 		net::Endpoint Peer_;
@@ -236,6 +258,11 @@ namespace engine::replication {
 		// every frame stops allocating. It holds the header while the header is
 		// being sealed over and the sealed frame afterwards.
 		core::ByteWriter Framing;
+
+		// Sealed before queuing, exactly like bytes already in flight on a real
+		// network. The FIFO preserves send order for equal and increasing delays.
+		std::deque<DelayedDatagram> Delayed;
+		double SimulatedLatencySeconds = 0.0;
 
 		Statistics Stats_;
 	};

@@ -89,6 +89,7 @@ namespace engine::world {
 	}
 
 	bool Supervisor::Launch(Entry &entry) {
+		entry.Port = 0;
 		if (Launch_) {
 			return Launch_(entry.Plan, entry.Child);
 		}
@@ -154,6 +155,7 @@ namespace engine::world {
 				case HostSignal::Ready:
 					entry.Ready = true;
 					entry.Tick = frame.Tick;
+					entry.Port = frame.Port;
 					Heartbeat(entry.Plan.Name, now);
 					break;
 
@@ -355,6 +357,7 @@ namespace engine::world {
 			entry.State = HostState::Restarting;
 			entry.Restarts++;
 			entry.Ready = false;
+			entry.Port = 0;
 
 			// The old link belongs to a process that is gone. Kept, it would
 			// report `Connected()` until the kernel noticed, and the respawn
@@ -412,6 +415,7 @@ namespace engine::world {
 			}
 			entry.State = HostState::Idle;
 			entry.Ready = false;
+			entry.Port = 0;
 		}
 	}
 
@@ -427,6 +431,7 @@ namespace engine::world {
 			status.SinceHeartbeat = entry.EverBeat ? entry.LastHeartbeat : 0.0;
 			status.Tick = entry.Tick;
 			status.Milliseconds = entry.Milliseconds;
+			status.Port = entry.Port;
 			status.Linked = entry.Link != nullptr && entry.Link->Connected();
 			status.Ready = entry.Ready;
 			status.Worlds = entry.Plan.Worlds;
@@ -449,6 +454,7 @@ namespace engine::world {
 		status.SinceHeartbeat = entry->EverBeat ? entry->LastHeartbeat : 0.0;
 		status.Tick = entry->Tick;
 		status.Milliseconds = entry->Milliseconds;
+		status.Port = entry->Port;
 		status.Linked = entry->Link != nullptr && entry->Link->Connected();
 		status.Ready = entry->Ready;
 		status.Worlds = entry->Plan.Worlds;

@@ -10,8 +10,10 @@
 #include <engine/parallel/Settings.hpp>
 #include <engine/world/Lifecycle.hpp>
 
+#include <algorithm>
 #include <csignal>
 #include <cstdio>
+#include <discord/Settings.hpp>
 #include <server/Server.hpp>
 #include <server/Settings.hpp>
 
@@ -43,6 +45,12 @@ int main(int argc, char **argv) {
 	engine::assets::DeclareContentFlags(engine::assets::ContentVerb::Publish);
 	server::DeclareFlags();
 
+	// The `discord.*` table, shared with the client and the origin. Declared
+	// rather than owned: the wording differs per program and lives in
+	// `DiscordPresence.cpp`, but the switches are one table so a config file
+	// spells them the same everywhere.
+	discord::DeclareFlags();
+
 	engine::core::Arguments arguments("server", "atomic - hosts a game.");
 	engine::core::Config::DeclareOptions(arguments);
 
@@ -59,6 +67,8 @@ int main(int argc, char **argv) {
 	arguments.Flag("chatter", "Make every world publish on a shared topic (no game file yet)");
 
 	arguments.Value("tick-rate", "HZ", "Ticks per second (default 30)");
+	arguments.Value("physics-tick-rate", "HZ", "Physics steps per second (default: the tick rate)");
+	arguments.Value("replication-tick-rate", "HZ", "Snapshots per second (default: every tick)");
 	arguments.Value("entities", "N", "Entities in the placeholder world (default 4096)");
 	arguments.Value("ticks", "N", "Exit after N ticks");
 	arguments.Value("seconds", "N", "Exit after N seconds");
@@ -78,6 +88,11 @@ int main(int argc, char **argv) {
 	arguments.Value("host-program", "PATH", "The program a host runs (default: this one)");
 	arguments.Value("processes", "N", "How many processes share this machine (default: worked out)");
 	arguments.Value("profile-out", "PATH", "Fold this run's frame graph into a .folded flamegraph capture");
+	arguments.Value(
+		"profile-window",
+		"TICKS",
+		"With --profile-out, also snapshot every TICKS ticks for scripts/flamegraph.py --average"
+	);
 	arguments.Value("listen", "PORT", "Serve the world to clients on this UDP port (0 for ephemeral)");
 	arguments.Value("max-clients", "N", "The hard cap on connected clients (default 64)");
 	arguments.Flag("advertise", "Announce this server on the local subnet so clients can find it");
@@ -139,6 +154,8 @@ int main(int argc, char **argv) {
 	// `main` for the precedence this expresses.
 	server::Options options = server::OptionsFromFlags();
 	options.TickRate = arguments.GetNumber("tick-rate", options.TickRate);
+	options.PhysicsTickRate = arguments.GetNumber("physics-tick-rate", options.PhysicsTickRate);
+	options.ReplicationTickRate = arguments.GetNumber("replication-tick-rate", options.ReplicationTickRate);
 	options.Entities = static_cast<uint32_t>(arguments.GetInteger("entities", options.Entities));
 	options.MaximumTicks = arguments.GetInteger("ticks", -1);
 	options.Seconds = arguments.GetNumber("seconds", 0.0);
@@ -209,6 +226,8 @@ int main(int argc, char **argv) {
 	if (auto profile = arguments.Get("profile-out")) {
 		options.ProfilePath = std::filesystem::path(*profile);
 	}
+	options.ProfileWindowTicks =
+		static_cast<uint64_t>(std::max<int64_t>(0, arguments.GetInteger("profile-window", 0)));
 	if (auto assets = arguments.Get("override-assets-directory")) {
 		options.AssetsDirectory = std::filesystem::path(*assets);
 	}

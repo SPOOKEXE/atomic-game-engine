@@ -75,6 +75,63 @@ namespace engine::ui {
 			}
 		}
 
+		// Multiplies a `UIGradient` into whatever this command just emitted.
+		//
+		// **A pass over the vertices imgui produced, exactly as the rotation
+		// above is.** Dear ImGui has no gradient primitive and no vertex
+		// callback, so the only seam is the buffer it just appended to - and
+		// the same seam already serves rotation, which is why this sits beside
+		// it rather than inside every `Add*` call.
+		//
+		// **Before the rotation and not after.** A `DrawGradient` is resolved
+		// against the command's unrotated bounds, so a point has to be projected
+		// onto the ramp while it is still where the compile put it.
+		//
+		// **Per vertex, which is the studio's approximation of what the client
+		// does exactly.** `render::InterfaceMesh` splits a shape at every
+		// keypoint so each piece interpolates one linear segment; imgui's
+		// rectangle is four vertices and cannot be split without rebuilding its
+		// geometry. A two-stop ramp is therefore identical in both and a
+		// many-stop one is smoother here than it should be. The editor is not
+		// the shipping surface and `ui/AGENTS.md` says so; what matters is that
+		// neither backend disagrees about *where* an element is.
+		void ShadeVertices(ImDrawList *into, int first, const gui::DrawGradient &ramp, const Space &space) {
+			const float span = ramp.Axis.X * ramp.Axis.X + ramp.Axis.Y * ramp.Axis.Y;
+
+			for (int index = first; index < into->VtxBuffer.Size; index++) {
+				ImDrawVert &vertex = into->VtxBuffer[index];
+
+				// Back out of the panel's own placement, because the ramp is in
+				// canvas pixels and these are in the panel's.
+				const float canvasX =
+					space.Scale != 0.0f ? (vertex.pos.x - space.Origin.x) / space.Scale : 0.0f;
+				const float canvasY =
+					space.Scale != 0.0f ? (vertex.pos.y - space.Origin.y) / space.Scale : 0.0f;
+
+				const float where = span > 0.0f ? std::clamp(
+													  ((canvasX - ramp.Origin.X) * ramp.Axis.X +
+													   (canvasY - ramp.Origin.Y) * ramp.Axis.Y) /
+														  span,
+													  0.0f,
+													  1.0f
+												  )
+												: 0.0f;
+
+				const engine::core::Color3 tint = ramp.Color.Evaluate(where);
+				const float fade = ramp.Transparency.Evaluate(where);
+
+				const auto channel = [](ImU32 packed, int shift, float scale) {
+					const float value = static_cast<float>((packed >> shift) & 0xFFu) * scale;
+					return static_cast<ImU32>(std::clamp(value + 0.5f, 0.0f, 255.0f)) << shift;
+				};
+
+				vertex.col = channel(vertex.col, IM_COL32_R_SHIFT, std::clamp(tint.R, 0.0f, 1.0f)) |
+							 channel(vertex.col, IM_COL32_G_SHIFT, std::clamp(tint.G, 0.0f, 1.0f)) |
+							 channel(vertex.col, IM_COL32_B_SHIFT, std::clamp(tint.B, 0.0f, 1.0f)) |
+							 channel(vertex.col, IM_COL32_A_SHIFT, std::clamp(1.0f - fade, 0.0f, 1.0f));
+			}
+		}
+
 		// The marker an unresolvable image draws.
 		//
 		// **Visible rather than absent.** An `ImageLabel` whose content name
@@ -296,7 +353,161 @@ namespace engine::ui {
 			return 1;
 		}
 
+		// A marked-up run, one styled range at a time.
+		//
+		// **Split into one `AddText` per span rather than one for the run**,
+		// because imgui's is one colour, one face and one size - which is exactly
+		// what a span overrides. The x is accumulated with `CalcTextSizeA`, which
+		// is the same measurement imgui would have used itself, so the words land
+		// where they would have.
+		//
+		// **Wrapping is not applied to a marked-up run here**, and that is the
+		// editor stopping short rather than the feature doing so:
+		// `render::InterfaceMesh` wraps spans exactly, because it lays out
+		// glyph by glyph and can ask which span each one is in. Reproducing that
+		// against imgui's wrapper would be a second line-breaker, which is the
+		// one thing `PaintText` below refuses in as many words. `ui/AGENTS.md`
+		// carries why the editor is allowed to be the poorer of the two: what
+		// must agree between them is *where an element is*, and that does.
+		size_t PaintRichText(const DrawCommand &command, ImDrawList *into, const Space &space) {
+			const float baseSize = static_cast<float>(command.TextSize) * space.Scale;
+			ImFont *baseFont = Font(FaceFor(command.Font));
+			ImFont *measure = baseFont != nullptr ? baseFont : ImGui::GetFont();
+
+			struct Piece {
+				size_t Begin = 0;
+				size_t End = 0;
+				const gui::DrawSpan *Span = nullptr;
+			};
+
+			// One piece per span and one per gap between them, in order. The
+			// spans are already sorted and non-overlapping - `DrawSpan` says so -
+			// so this is a walk rather than a merge.
+			std::vector<Piece> pieces;
+			size_t at = 0;
+			for (const gui::DrawSpan &span : command.Spans) {
+				if (span.Begin > at) {
+					pieces.push_back(Piece{at, span.Begin, nullptr});
+				}
+				pieces.push_back(Piece{span.Begin, span.End, &span});
+				at = span.End;
+			}
+			if (at < command.Text.size()) {
+				pieces.push_back(Piece{at, command.Text.size(), nullptr});
+			}
+
+			const ImVec2 min = space.Point(command.Bounds.Min);
+			const ImVec2 max = space.Point(command.Bounds.Max);
+
+			const auto sizeOf = [&](const Piece &piece) {
+				return piece.Span != nullptr && piece.Span->Size > 0
+						   ? static_cast<float>(piece.Span->Size) * space.Scale
+						   : baseSize;
+			};
+			const auto fontOf = [&](const Piece &piece) {
+				return piece.Span != nullptr ? Font(FaceFor(piece.Span->Font)) : baseFont;
+			};
+
+			// The block's extent, so the two alignments have something to work
+			// against. Lines are split on the newlines the parse already put in.
+			float widest = 0.0f;
+			float lineWidth = 0.0f;
+			float lineHeight = baseSize;
+			float blockHeight = 0.0f;
+			for (const Piece &piece : pieces) {
+				ImFont *font = fontOf(piece);
+				ImFont *pieceMeasure = font != nullptr ? font : measure;
+				const float size = sizeOf(piece);
+
+				size_t start = piece.Begin;
+				for (size_t index = piece.Begin; index <= piece.End; index++) {
+					const bool ends = index == piece.End;
+					if (!ends && command.Text[index] != '\n') {
+						continue;
+					}
+
+					lineWidth +=
+						pieceMeasure
+							->CalcTextSizeA(
+								size, FLT_MAX, 0.0f, command.Text.data() + start, command.Text.data() + index
+							)
+							.x;
+					lineHeight = std::max(lineHeight, size);
+					if (!ends) {
+						widest = std::max(widest, lineWidth);
+						blockHeight += lineHeight;
+						lineWidth = 0.0f;
+						lineHeight = baseSize;
+						start = index + 1;
+					}
+				}
+			}
+			widest = std::max(widest, lineWidth);
+			blockHeight += lineHeight;
+
+			float originX = min.x;
+			if (command.XAlignment == TextXAlignment::Center) {
+				originX = min.x + ((max.x - min.x) - widest) * 0.5f;
+			} else if (command.XAlignment == TextXAlignment::Right) {
+				originX = max.x - widest;
+			}
+
+			float y = min.y;
+			if (command.YAlignment == TextYAlignment::Center) {
+				y = min.y + ((max.y - min.y) - blockHeight) * 0.5f;
+			} else if (command.YAlignment == TextYAlignment::Bottom) {
+				y = max.y - blockHeight;
+			}
+
+			float x = originX;
+			size_t drawn = 0;
+
+			for (const Piece &piece : pieces) {
+				ImFont *font = fontOf(piece);
+				ImFont *pieceMeasure = font != nullptr ? font : measure;
+				const float size = sizeOf(piece);
+				const ImU32 tint = piece.Span != nullptr ? Colour(piece.Span->Tint, piece.Span->Transparency)
+														 : Colour(command.Tint, command.Transparency);
+
+				size_t start = piece.Begin;
+				for (size_t index = piece.Begin; index <= piece.End; index++) {
+					const bool ends = index == piece.End;
+					if (!ends && command.Text[index] != '\n') {
+						continue;
+					}
+
+					const char *from = command.Text.data() + start;
+					const char *to = command.Text.data() + index;
+					if (to > from) {
+						into->AddText(font, size, ImVec2{x, y}, tint, from, to);
+						drawn++;
+
+						const float width = pieceMeasure->CalcTextSizeA(size, FLT_MAX, 0.0f, from, to).x;
+						if (piece.Span != nullptr && (piece.Span->Underline || piece.Span->Strike)) {
+							const float weight = std::max(size * 0.1f, 1.0f);
+							const float rule = piece.Span->Strike ? y + size * 0.55f : y + size * 0.95f;
+							into->AddRectFilled(ImVec2{x, rule}, ImVec2{x + width, rule + weight}, tint);
+							drawn++;
+						}
+						x += width;
+					}
+
+					if (!ends) {
+						x = originX;
+						y += std::max(size, baseSize);
+						start = index + 1;
+					}
+				}
+			}
+
+			return drawn;
+		}
+
 		size_t PaintText(const DrawCommand &command, ImDrawList *into, const Space &space) {
+			if (!command.Spans.empty() && command.TextSize > 0 && !command.Text.empty()) {
+				return PaintRichText(command, into, space);
+			}
+
 			std::string visible = command.Text;
 			std::string_view text = visible;
 			if (text.empty() || command.TextSize <= 0) {
@@ -433,6 +644,14 @@ namespace engine::ui {
 				drawn += PaintText(command, into, space);
 				break;
 			}
+			// Shade before turning, because the ramp is measured against the
+			// unrotated bounds the compile resolved it from.
+			if (command.Gradient >= 0 && static_cast<size_t>(command.Gradient) < list.Gradients.size()) {
+				ShadeVertices(
+					into, firstVertex, list.Gradients[static_cast<size_t>(command.Gradient)], space
+				);
+			}
+
 			RotateVertices(into, firstVertex, min, max, command.Rotation);
 
 			into->PopClipRect();

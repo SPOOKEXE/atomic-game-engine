@@ -908,7 +908,19 @@ namespace engine::replication {
 		};
 
 		struct Signature {
-			std::unordered_map<uint64_t, uint64_t> Hashes;
+			// Entity, last hash - ascending by entity id, because `Resign` builds
+			// it by merge-walking `ResignCandidates`, which is sorted for the same
+			// reason.
+			//
+			// **A sorted vector rather than a hash map, as of v0.18.** A tick with
+			// twenty thousand signed entities did twenty thousand
+			// `unordered_map::try_emplace` calls here, each a scattered heap node;
+			// walking two sorted sequences together touches memory in order instead.
+			// It also folds in what used to be a second full pass: an entity this
+			// tick's carrier set skipped past is simply not carried into the
+			// rebuilt vector, so the map's separate dead-entry sweep no longer
+			// exists.
+			std::vector<std::pair<uint64_t, uint64_t>> Hashes;
 
 			std::vector<uint64_t> Changed;
 		};
@@ -1027,6 +1039,26 @@ namespace engine::replication {
 		std::vector<Candidate> Candidates;
 
 		std::vector<uint64_t> Bearing;
+
+		// `Resign`'s scratch space: entity, this tick's hash - the one
+		// component slot it is currently signing, sorted by entity id once
+		// `Resign` has finished collecting it.
+		//
+		// **Not filtered out of `Bearing`, and not read back through
+		// `GetComponent` either.** `Bearing` is the union of every replicated
+		// component's carriers, and most scenes have far more declared
+		// component slots than any one entity carries - a scene of nothing but
+		// moving parts replicates `scene.Transform` on all of them and half a
+		// dozen other component types on none. `Store::EachRuns` visits only
+		// the archetype tables that have the component, chunk by chunk, and
+		// hands back the raw column alongside the entities - so a slot with
+		// zero carriers costs one table lookup and touches no entity at all,
+		// and a populated one is hashed straight out of contiguous memory
+		// instead of one `GetComponent` - a directory lookup, an archetype
+		// fetch, a binary search - per entity. A member rather than a local so
+		// the vector's storage survives between slots instead of reallocating
+		// once per component per tick.
+		std::vector<std::pair<uint64_t, uint64_t>> ResignHashed;
 
 		std::vector<ecs::ComponentId> Resolved;
 

@@ -87,11 +87,16 @@ local POOL_RESERVE = GRID * GRID * 6
 
 -- --- the floor ---------------------------------------------------------------
 
+-- Clear of a baseplate's top face at y = 0: coplanar surfaces do not flicker in
+-- this engine, they resolve stably to whichever one the draw order happens to
+-- favour. `scripts/demos/zfight-scan.sh` holds the control for that.
+local GROUND_LIFT = 0.01
+
 local plate = Instance.new("Part")
 plate.Name = "Baseplate"
 plate.Anchored = true
 plate.Size = Vector3.new(GRID * SPACING + 40, 1, GRID * SPACING + 40)
-plate.CFrame = CFrame.new(Vector3.new(0, -0.5, 0))
+plate.CFrame = CFrame.new(Vector3.new(0, -0.5 + GROUND_LIFT, 0))
 plate.Color = Color3.new(0.10, 0.11, 0.14)
 plate.Parent = workspace
 
@@ -222,6 +227,15 @@ end
 --     assetc --input ART --output content        # fox_dance.gif -> fox_dance.atex
 --     cdn --publish content --store store --signing-key HEX
 --     client --cdn dir:store --publisher-key PUB --script Particles.luau
+--
+-- `scripts/demos/bake-fox-flipbook.sh` is those three lines with the paths
+-- filled in, and it exists because this bay drew an untextured square on every
+-- machine that had the GIF. `contentimport` - which is how the local store gets
+-- filled - renames every file it takes to its own content hash, so the GIF was
+-- in the store as `67e91cae....atex` and no name in any scene could reach it.
+-- `assetc` is the half of the pipeline that keeps the tree, so the script stages
+-- the GIFs under the names the scenes use, bakes, and publishes a store of its
+-- own beside the library rather than over it.
 --
 -- `bake` decodes the GIF into **one flipbook sheet** - 48 frames of a 420x420
 -- animation laid out as an 8x8 grid - so by the time it reaches here it is an

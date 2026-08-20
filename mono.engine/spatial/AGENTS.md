@@ -49,6 +49,44 @@ every rebuild. **The answer to that is a second grid**, holding the static
 proxies and rebuilt only when the scene changes. It is not a mutable grid, and
 it is not a "just this one" `Insert`.
 
+## `ChunkMap` is a partition, and that is a different promise from the grid
+
+`HashGrid` answers "what is near this box" and reports a proxy from every cell it
+spans. `ChunkMap` answers "which disjoint group is each proxy in", and every
+proxy lands in **exactly one** chunk - chosen from the centre of its bounds.
+
+The difference is the whole reason the second structure exists. A caller running
+one group per thread needs a function, not a relation: bin by bounds and the same
+proxy is handed to two workers. `physics::Solve` is that caller, and
+`physics/AGENTS.md` carries what it does with the answer.
+
+Four things a reviewer should refuse:
+
+- **A per-chunk acceleration structure.** There is none, and adding one is the
+  algorithmic change this file already governs for the grid: the measured curves
+  in `HashGrid` put a uniform grid ahead of a tree at every density this
+  repository has scenes for, and a tree per chunk is that comparison repeated
+  with fewer proxies in each. What a chunk buys is *disjointness* and
+  *locality*, and both are properties of the partition rather than of anything
+  inside it.
+- **Binning by bounds "so a big proxy is in every chunk it touches".** That is
+  the grid, and it is one include away. What it would cost here is the one
+  guarantee the type is for.
+- **A hashed chunk order.** `ChunkCoordinate::operator<` is a total order, so the
+  chunk list is a function of the contents alone. A hashed order depends on the
+  bucket count, which depends on the proxy count, so a consumer splitting work by
+  chunk would visit them in an order that moved whenever anything was added.
+- **`SuggestChunkSize` treated as `SuggestCellSize` with a different constant.**
+  They answer different questions and their optima are an order of magnitude
+  apart: a cell is sized so a query walks few cells, a chunk so the partition has
+  enough non-empty groups to keep a machine busy. The chunk estimate also cuts
+  the two *widest* axes rather than the volume, because a tray of blocks is flat
+  and a cube root of its volume asks for a chunk near zero.
+
+The consumer has to treat anything crossing a chunk boundary as its own case: a
+proxy binned by its centre pokes out of its own chunk, so a chunk is not a closed
+box and nothing here pretends it is.
+
 ## De-duplication is first-shared-cell, and a visited stamp is refused
 
 A proxy spanning several cells appears in several buckets, and is reported once.
@@ -208,3 +246,6 @@ Raising either is a measurement, not an opinion.
   decision about how many rays it has, not a `spatial` one.
 - **No `Vector2` and no 2D grid.** The same cells serve a flat world with one
   cell on Y.
+- **No query over `ChunkMap`.** It answers membership and nothing else. A caller
+  wanting "what is near this" wants the grid, which is in the same module and
+  measured for it.

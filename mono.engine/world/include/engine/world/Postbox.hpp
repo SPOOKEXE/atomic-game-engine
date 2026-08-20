@@ -100,6 +100,33 @@ namespace engine::world {
 		// Whether this world is a replica. Present-and-false is the same as
 		// absent, so a world can be demoted without removing the resource.
 		bool Active = true;
+
+		// The world this one mirrors, by the name that world is registered
+		// under. Invalid where the authority is not in this process, which is
+		// every replica a `--connect` client holds.
+		//
+		// **Because a replica's own name is not the name anything addresses it
+		// by.** A host that mirrors a world gives the copy a name of its own -
+		// the editor's is `"<world> (client 1)"` - so the registry can tell the
+		// two apart, which rule 4 requires. Everything a scene *authored*
+		// against that world still names the original: `Portal.DestinationWorld`
+		// and `TeleportService` carry strings a person typed, and those strings
+		// survive replication verbatim. So a world drawn from inside a replica
+		// resolves a name against this rather than against `Universe::NameOf`,
+		// or a pane onto another scene finds nothing and a pane back to this one
+		// is not recognised as leading home.
+		core::Name Of;
+
+		// Whose copy this is, where a host mirrors the same worlds for several
+		// viewers. The editor's is the client label - `"client 1"` - and it is
+		// invalid for a process holding one view.
+		//
+		// **It is what keeps one viewer's rooms joined to each other.** Two
+		// clients playing a universe of two worlds give four replicas, two
+		// mirroring each world; a hole in client 1's copy of the first leads to
+		// client 1's copy of the second, and pointing it at client 2's would
+		// show one player another player's interpolated view.
+		core::Name View;
 	};
 
 	// A system's view of its world's mailbox.

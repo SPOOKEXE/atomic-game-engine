@@ -36,8 +36,8 @@
 // clones the same way - walk first, refuse with a sentence, never clone and
 // regret it.
 
-#include <engine/assets/Builtin.hpp>
 #include <engine/assets/AssetKind.hpp>
+#include <engine/assets/Builtin.hpp>
 #include <engine/assets/Material.hpp>
 #include <engine/assets/Mesh.hpp>
 #include <engine/assets/Resample.hpp>
@@ -208,8 +208,7 @@ namespace studio {
 		// calls a preview that lies rather than one that is absent. A store
 		// published from another machine has the `.amat` and not its pixels,
 		// which is precisely this case.
-		const std::filesystem::path sheet =
-			cdn::FindInStore(cdn::DefaultLocalPaths(), material.ColourMap);
+		const std::filesystem::path sheet = cdn::FindInStore(cdn::DefaultLocalPaths(), material.ColourMap);
 		if (!std::filesystem::is_regular_file(sheet, failure)) {
 			// **Asked for rather than given up on**, which is the other half of
 			// v0.12's preview fix. A store published from another machine has
@@ -306,8 +305,7 @@ namespace studio {
 				return state;
 			}
 			mesh = engine::assets::MakeBuiltin(engine::assets::BuiltinMesh::Sphere);
-		} else if (engine::assets::BuiltinMesh builtin;
-				   engine::assets::BuiltinFromName(name, builtin)) {
+		} else if (engine::assets::BuiltinMesh builtin; engine::assets::BuiltinFromName(name, builtin)) {
 			mesh = engine::assets::MakeBuiltin(builtin);
 		} else {
 			// **`cdn::FindInStore` and not a folder spelled here.** This read
@@ -356,9 +354,8 @@ namespace studio {
 		bounds.Centre = (mesh.Minimum + mesh.Maximum) * 0.5f;
 
 		const engine::core::Vector3 extent = (mesh.Maximum - mesh.Minimum) * 0.5f;
-		bounds.Radius = std::max(
-			0.05f, std::sqrt(extent.X * extent.X + extent.Y * extent.Y + extent.Z * extent.Z)
-		);
+		bounds.Radius =
+			std::max(0.05f, std::sqrt(extent.X * extent.X + extent.Y * extent.Y + extent.Z * extent.Z));
 
 		bounds.Texture = texture;
 
@@ -411,9 +408,8 @@ namespace studio {
 		// lets the camera aim at a fixed point: a mesh baked off-centre would
 		// otherwise sit outside a frame fitted around nothing.
 		instance.Frame = engine::core::CFrame(engine::core::Vector3{} - bounds->second.Centre);
-		instance.HalfExtent = engine::core::Vector3{
-			bounds->second.Radius, bounds->second.Radius, bounds->second.Radius
-		};
+		instance.HalfExtent =
+			engine::core::Vector3{bounds->second.Radius, bounds->second.Radius, bounds->second.Radius};
 		// **White under a texture and a light grey without one.** The grey exists
 		// so an untextured mesh is not a black silhouette; multiplying a
 		// material's own colour map by it would darken every material preview by
@@ -464,15 +460,12 @@ namespace studio {
 		const engine::core::CFrame eye =
 			engine::core::CFrame::LookAt(direction.Unit() * distance, engine::core::Vector3{});
 
-		// **The interface is passed, and leaving it out turned the window
-		// black.** The claim that used to be here was that "passing the editor's
-		// chrome would draw the whole editor into a 132-pixel texture". It does
-		// not: the *world* goes to the offscreen slot named by `targetSlot`, and
-		// the interface pass writes the **swapchain**. They are different
-		// attachments in one call.
+		// **Studio chrome is the host overlay, not the graph interface.** The mesh
+		// goes to the preview slot while the already-built Studio draw list goes
+		// directly to the swapchain after the graph has finished.
 		//
-		// What passing `nullptr` did instead was leave nothing at all touching
-		// the swapchain - and `Renderer::Render` then clears it and presents,
+		// Leaving out that host overlay leaves nothing at all touching the
+		// swapchain, and `Renderer::Render` then clears it and presents,
 		// deliberately, because presenting a texture the driver handed back
 		// unwritten shows uninitialised memory. So every frame spent on a preview
 		// presented a cleared window. Hovering a mesh row blanked the entire
@@ -480,16 +473,13 @@ namespace studio {
 		//
 		// **No surfaces, though**, and that part was right: a mirror pass here
 		// would render a scene that is not there.
-		Renderer.Render(
-			eye,
-			lens,
-			std::span<const engine::scene::DrawInstance>(one),
-			Overlay,
-			{},
-			&Interface,
-			&target,
-			PreviewSlot()
-		);
+		engine::render::View view;
+		view.CameraFrame = eye;
+		view.Camera = lens;
+		view.Instances = one;
+		view.Target = &target;
+		view.Slot = PreviewSlot();
+		Renderer.Render(std::span<const engine::render::View>(&view, 1), Overlay, nullptr, true, &Interface);
 
 		// **What the slot now holds, so a row can draw it.** There is one slot,
 		// so exactly one mesh in the list can be live at a time - and a row that

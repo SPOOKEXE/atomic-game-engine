@@ -24,6 +24,7 @@ mono_add_library(studio
 		Engine::world
 		Engine::scene
 		Engine::script
+		Engine::graph
 
 		# L6, `shared`. The simulation. **Named here rather than reached
 		# through `Engine::script`**, which is where it was arriving from: since
@@ -77,6 +78,12 @@ mono_add_library(studio
 		# three features. `studio/TeamCreate.hpp` says at length what it is and
 		# what it deliberately is not yet.
 		Mono::network
+
+		# `shared`. What a person's Discord profile says while this program is
+		# running. Named here rather than reached through anything else: the
+		# link is owned and pumped by `Editor`, and a dependency a file
+		# includes is one its build file should say out loud.
+		Mono::discord
 
 		# L9, `shared`. Image decoding, for the asset previews.
 		#

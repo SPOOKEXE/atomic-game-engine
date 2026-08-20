@@ -5,9 +5,11 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Registration.hpp>
+#include <engine/gui/RichText.hpp>
 
 #include <array>
 #include <cstddef>
+#include <string>
 #include <string_view>
 #include <type_traits>
 #include <vector>
@@ -34,7 +36,7 @@ namespace engine::gui {
 		// **A function template keyed on the C++ enum, not a parameter.** The
 		// generated conversions below are captureless function pointers, so
 		// they cannot close over a name; keying on the type is what lets one
-		// template generate the getter and setter for all nineteen sets.
+		// template generate the getter and setter for all twenty-two sets.
 
 		template <class E> const core::Name &EnumNameOf();
 
@@ -48,6 +50,7 @@ namespace engine::gui {
 		GUI_ENUM_NAME(AutomaticSize, "AutomaticSize")
 		GUI_ENUM_NAME(BorderMode, "BorderMode")
 		GUI_ENUM_NAME(ScaleType, "ScaleType")
+		GUI_ENUM_NAME(ResampleMode, "ResamplerMode")
 		GUI_ENUM_NAME(TextXAlignment, "TextXAlignment")
 		GUI_ENUM_NAME(TextYAlignment, "TextYAlignment")
 		GUI_ENUM_NAME(TextTruncate, "TextTruncate")
@@ -60,6 +63,19 @@ namespace engine::gui {
 		GUI_ENUM_NAME(AspectType, "AspectType")
 		GUI_ENUM_NAME(DominantAxis, "DominantAxis")
 		GUI_ENUM_NAME(ScrollingDirection, "ScrollingDirection")
+		GUI_ENUM_NAME(StrokeMode, "ApplyStrokeMode")
+		GUI_ENUM_NAME(LineJoin, "LineJoinMode")
+		GUI_ENUM_NAME(StrokeSizing, "StrokeSizingMode")
+		GUI_ENUM_NAME(core::EasingStyle, "EasingStyle")
+		GUI_ENUM_NAME(core::EasingDirection, "EasingDirection")
+		GUI_ENUM_NAME(DragStyle, "UIDragDetectorDragStyle")
+		GUI_ENUM_NAME(DragResponse, "UIDragDetectorDragStyleResponse")
+		GUI_ENUM_NAME(ElasticBehavior, "ElasticBehavior")
+		GUI_ENUM_NAME(ScrollBarInset, "ScrollBarInset")
+		GUI_ENUM_NAME(BarPosition, "VerticalScrollBarPosition")
+		GUI_ENUM_NAME(FlexAlignment, "UIFlexAlignment")
+		GUI_ENUM_NAME(ItemLineAlignment, "ItemLineAlignment")
+		GUI_ENUM_NAME(FlexMode, "UIFlexMode")
 		GUI_ENUM_NAME(ZIndexBehavior, "ZIndexBehavior")
 		GUI_ENUM_NAME(SurfaceSizingMode, "SurfaceSizingMode")
 		GUI_ENUM_NAME(Face, "NormalId")
@@ -95,6 +111,7 @@ namespace engine::gui {
 		GUI_ENUM_COUNT(AutomaticSize, 4)
 		GUI_ENUM_COUNT(BorderMode, 3)
 		GUI_ENUM_COUNT(ScaleType, 5)
+		GUI_ENUM_COUNT(ResampleMode, 2)
 		GUI_ENUM_COUNT(TextXAlignment, 3)
 		GUI_ENUM_COUNT(TextYAlignment, 3)
 		GUI_ENUM_COUNT(TextTruncate, 2)
@@ -107,6 +124,19 @@ namespace engine::gui {
 		GUI_ENUM_COUNT(AspectType, 2)
 		GUI_ENUM_COUNT(DominantAxis, 2)
 		GUI_ENUM_COUNT(ScrollingDirection, 3)
+		GUI_ENUM_COUNT(StrokeMode, 2)
+		GUI_ENUM_COUNT(LineJoin, 3)
+		GUI_ENUM_COUNT(StrokeSizing, 2)
+		GUI_ENUM_COUNT(core::EasingStyle, core::EASING_STYLE_COUNT)
+		GUI_ENUM_COUNT(core::EasingDirection, core::EASING_DIRECTION_COUNT)
+		GUI_ENUM_COUNT(DragStyle, 5)
+		GUI_ENUM_COUNT(DragResponse, 4)
+		GUI_ENUM_COUNT(ElasticBehavior, 3)
+		GUI_ENUM_COUNT(ScrollBarInset, 3)
+		GUI_ENUM_COUNT(BarPosition, 2)
+		GUI_ENUM_COUNT(FlexAlignment, 5)
+		GUI_ENUM_COUNT(ItemLineAlignment, 5)
+		GUI_ENUM_COUNT(FlexMode, 5)
 		GUI_ENUM_COUNT(ZIndexBehavior, 2)
 		GUI_ENUM_COUNT(SurfaceSizingMode, 2)
 		GUI_ENUM_COUNT(Face, 6)
@@ -218,14 +248,35 @@ namespace engine::gui {
 		template <class T> constexpr PropertyType TypeOfValue() {
 			if constexpr (std::is_same_v<T, core::Vector2>) {
 				return PropertyType::Vector2;
+			} else if constexpr (std::is_same_v<T, bool>) {
+				return PropertyType::Bool;
 			} else {
 				static_assert(std::is_same_v<T, float>, "add a case for this type");
 				return PropertyType::Float;
 			}
 		}
 
-		template <auto Member> PropertyDescriptor ResolvedField(std::string_view name) {
-			using Value = typename MemberOf<decltype(Member)>::Value;
+		// A field of a **derived** component, exposed read-only.
+		//
+		// The component is deduced from the member pointer, so one template
+		// serves `Resolved` - what the layout decided - and `SpatialCanvas` -
+		// what the host that holds a camera decided. Both are derived every
+		// frame from something else, which is what makes read-only the contract
+		// rather than a convenience: a write would be gone before the script
+		// that made it returned.
+		//
+		// **A default and not a refusal for a row that has no such component.**
+		// `Resolved` is in `GuiBase2d`'s own set and always present, but
+		// `SpatialCanvas` is written by whoever holds a camera and a world nobody
+		// is drawing has none - and a property that raised `could not read` there
+		// would make `CurrentDistance` throw in the studio and answer in the
+		// client. `ecs::AuditProperties` refuses that shape outright, and
+		// `scene`'s `Mass` is the precedent it names: a derived number nothing
+		// has computed yet reads as zero, which is the honest answer.
+		template <auto Member> PropertyDescriptor DerivedField(std::string_view name) {
+			using Traits = MemberOf<decltype(Member)>;
+			using Component = typename Traits::Component;
+			using Value = typename Traits::Value;
 
 			PropertyDescriptor property;
 			property.Name = core::Name(name);
@@ -233,20 +284,56 @@ namespace engine::gui {
 			property.Size = sizeof(Value);
 			property.Kind = PropertyKind::Computed;
 			property.Writable = false;
-			property.Reads = &ComponentSet::Intern({Components::Of<Resolved>()});
+			property.Reads = &ComponentSet::Intern({Components::Of<Component>()});
 			property.Writes = &ComponentSet::Intern({});
 
 			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
-				const Resolved *resolved = store.Get<Resolved>(instance);
-				if (resolved == nullptr) {
-					return false;
-				}
-				*static_cast<Value *>(out) = resolved->*Member;
+				const Component *component = store.Get<Component>(instance);
+				*static_cast<Value *>(out) = component != nullptr ? component->*Member : Value{};
 				return true;
 			};
 
 			property.Set = [](ecs::Store &, ecs::Entity, const void *) -> bool { return false; };
 
+			return property;
+		}
+
+		// A label's text with its markup stripped, read-only.
+		//
+		// **Computed on the read rather than stored.** It is a pure function of
+		// `Label::Text` and `Label::Rich`, so a second copy in a component would
+		// be rule 2's two-statements-of-one-fact - and this is read by a script
+		// asking what a person sees, which is a rare call rather than a frame
+		// one. `Compile.cpp` parses the same string for its own reasons and the
+		// two agree because they call the same parser.
+		PropertyDescriptor ContentTextField() {
+			PropertyDescriptor property;
+			property.Name = core::Name("ContentText");
+			property.Type = PropertyType::String;
+			property.Size = sizeof(std::string);
+			property.Kind = PropertyKind::Computed;
+			property.Writable = false;
+			property.Reads = &ComponentSet::Intern({Components::Of<Label>()});
+			property.Writes = &ComponentSet::Intern({});
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				auto &result = *static_cast<std::string *>(out);
+				const Label *label = store.Get<Label>(instance);
+				if (label == nullptr) {
+					result.clear();
+					return true;
+				}
+				if (!label->Rich) {
+					result = label->Text;
+					return true;
+				}
+
+				std::vector<DrawSpan> spans;
+				ParseRichText(label->Text, *label, result, spans);
+				return true;
+			};
+
+			property.Set = [](ecs::Store &, ecs::Entity, const void *) -> bool { return false; };
 			return property;
 		}
 
@@ -283,6 +370,8 @@ namespace engine::gui {
 			"UILayout",
 			"UIListLayout",
 			"UIGridLayout",
+			"UITableLayout",
+			"UIPageLayout",
 			"UIConstraint",
 			"UIAspectRatioConstraint",
 			"UISizeConstraint",
@@ -291,6 +380,9 @@ namespace engine::gui {
 			"UICorner",
 			"UIStroke",
 			"UIScale",
+			"UIFlexItem",
+			"UIGradient",
+			"UIDragDetector",
 			"GuiService",
 
 			// The 3D branch. `GuiBase3d` and `PVAdornment` are abstract in
@@ -320,6 +412,7 @@ namespace engine::gui {
 			RegisterEnum<AutomaticSize>();
 			RegisterEnum<BorderMode>();
 			RegisterEnum<ScaleType>();
+			RegisterEnum<ResampleMode>();
 			RegisterEnum<TextXAlignment>();
 			RegisterEnum<TextYAlignment>();
 			RegisterEnum<TextTruncate>();
@@ -332,6 +425,27 @@ namespace engine::gui {
 			RegisterEnum<AspectType>();
 			RegisterEnum<DominantAxis>();
 			RegisterEnum<ScrollingDirection>();
+			RegisterEnum<StrokeMode>();
+			RegisterEnum<LineJoin>();
+			RegisterEnum<StrokeSizing>();
+
+			// **Registered here as well as by the script surface, and that
+			// is agreement rather than a clash.** `EnumTable::Register`
+			// says so in as many words: two modules may each declare that
+			// a set has a member, and refusing the second would make the
+			// order two files happened to link in decide whether a build
+			// works. Both walk `core::Describe`, so the ordinals - which
+			// are the storage - cannot disagree.
+			RegisterEnum<core::EasingStyle>();
+			RegisterEnum<core::EasingDirection>();
+			RegisterEnum<DragStyle>();
+			RegisterEnum<DragResponse>();
+			RegisterEnum<ElasticBehavior>();
+			RegisterEnum<ScrollBarInset>();
+			RegisterEnum<BarPosition>();
+			RegisterEnum<FlexAlignment>();
+			RegisterEnum<ItemLineAlignment>();
+			RegisterEnum<FlexMode>();
 			RegisterEnum<ZIndexBehavior>();
 			RegisterEnum<SurfaceSizingMode>();
 
@@ -409,7 +523,9 @@ namespace engine::gui {
 			const std::array base2d{Components::Of<Resolved>()};
 			const ClassId guiBase2d = Classes::Register("GuiBase2d", guiBase, base2d);
 
-			const std::array object{Components::Of<Element>(), Components::Of<Background>()};
+			const std::array object{
+				Components::Of<Element>(), Components::Of<Background>(), Components::Of<Selection>()
+			};
 			const ClassId guiObject = Classes::Register("GuiObject", guiBase2d, object);
 
 			const ClassId frame = Classes::Register("Frame", guiObject, {});
@@ -480,6 +596,12 @@ namespace engine::gui {
 			const std::array gridLayout{Components::Of<GridLayout>()};
 			const ClassId uiGridLayout = Classes::Register("UIGridLayout", uiLayout, gridLayout);
 
+			const std::array tableLayout{Components::Of<TableLayout>()};
+			const ClassId uiTableLayout = Classes::Register("UITableLayout", uiLayout, tableLayout);
+
+			const std::array pageLayout{Components::Of<PageLayout>()};
+			const ClassId uiPageLayout = Classes::Register("UIPageLayout", uiLayout, pageLayout);
+
 			const ClassId uiConstraint = Classes::Register("UIConstraint", uiComponent, {});
 
 			const std::array aspect{Components::Of<AspectRatio>()};
@@ -503,6 +625,21 @@ namespace engine::gui {
 			const std::array scale{Components::Of<Scale>()};
 			const ClassId uiScale = Classes::Register("UIScale", uiComponent, scale);
 
+			// On the *child* being flexed, not on the layout - Roblox's shape,
+			// and the one that lets one spring sit beside fixed buttons.
+			const std::array flexItem{Components::Of<FlexItem>()};
+			const ClassId uiFlexItem = Classes::Register("UIFlexItem", uiComponent, flexItem);
+
+			// A `UIComponent` rather than a `UIConstraint`, which is Roblox's
+			// placement and the right one: a constraint changes where something
+			// ends up and this changes what colour it is, so the layout never
+			// looks at it and the compile always does.
+			const std::array gradient{Components::Of<Gradient>()};
+			const ClassId uiGradient = Classes::Register("UIGradient", uiComponent, gradient);
+
+			const std::array dragDetector{Components::Of<DragDetector>()};
+			const ClassId uiDragDetector = Classes::Register("UIDragDetector", uiComponent, dragDetector);
+
 			// --- the property surface ----------------------------------------
 			//
 			// Each declared on the class that first holds what it projects, so
@@ -512,9 +649,9 @@ namespace engine::gui {
 			// is almost every class.
 
 			// The three every 2D thing reports and nothing may assign.
-			Classes::Computed(guiBase2d, ResolvedField<&Resolved::AbsolutePosition>("AbsolutePosition"));
-			Classes::Computed(guiBase2d, ResolvedField<&Resolved::AbsoluteSize>("AbsoluteSize"));
-			Classes::Computed(guiBase2d, ResolvedField<&Resolved::AbsoluteRotation>("AbsoluteRotation"));
+			Classes::Computed(guiBase2d, DerivedField<&Resolved::AbsolutePosition>("AbsolutePosition"));
+			Classes::Computed(guiBase2d, DerivedField<&Resolved::AbsoluteSize>("AbsoluteSize"));
+			Classes::Computed(guiBase2d, DerivedField<&Resolved::AbsoluteRotation>("AbsoluteRotation"));
 
 			// The authored geometry.
 			Classes::Property<&Element::Position>(guiObject, "Position");
@@ -527,6 +664,20 @@ namespace engine::gui {
 			Classes::Property<&Element::ClipsDescendants>(guiObject, "ClipsDescendants");
 			Classes::Property<&Element::Active>(guiObject, "Active");
 			Classes::Property<&Element::Selectable>(guiObject, "Selectable");
+			Classes::Property<&Element::Interactable>(guiObject, "Interactable");
+
+			// **The four overrides and the highlight, on `GuiObject` because
+			// every one of them is a `GuiObject`'s to answer.** `SelectNext`
+			// scores by direction and takes one of these instead whenever it is
+			// set, which is Roblox's rule and the one a menu with an awkward
+			// layout needs - geometry gets the common case right and an author
+			// gets the last word.
+			Classes::Property<&Selection::NextUp>(guiObject, "NextSelectionUp");
+			Classes::Property<&Selection::NextDown>(guiObject, "NextSelectionDown");
+			Classes::Property<&Selection::NextLeft>(guiObject, "NextSelectionLeft");
+			Classes::Property<&Selection::NextRight>(guiObject, "NextSelectionRight");
+			Classes::Property<&Selection::ImageObject>(guiObject, "SelectionImageObject");
+			Classes::Property<&Selection::Order>(guiObject, "SelectionOrder");
 			Classes::Computed(guiObject, EnumField<&Element::Constraint>("SizeConstraint"));
 			Classes::Computed(guiObject, EnumField<&Element::Automatic>("AutomaticSize"));
 
@@ -556,6 +707,15 @@ namespace engine::gui {
 				Classes::Property<&Label::StrokeColor>(owner, "TextStrokeColor3");
 				Classes::Property<&Label::StrokeTransparency>(owner, "TextStrokeTransparency");
 				Classes::Property<&Label::LineHeight>(owner, "LineHeight");
+				Classes::Property<&Label::MaxVisible>(owner, "MaxVisibleGraphemes");
+				Classes::Property<&Label::Rich>(owner, "RichText");
+				Classes::Computed(owner, ContentTextField());
+
+				// What the layout measured, read-only for `AbsoluteSize`'s
+				// reason: a script assigning either would be overwritten by the
+				// next pass.
+				Classes::Computed(owner, DerivedField<&Resolved::TextBounds>("TextBounds"));
+				Classes::Computed(owner, DerivedField<&Resolved::TextFits>("TextFits"));
 				Classes::Computed(owner, EnumField<&Label::Font>("Font"));
 				Classes::Computed(owner, EnumField<&Label::XAlignment>("TextXAlignment"));
 				Classes::Computed(owner, EnumField<&Label::YAlignment>("TextYAlignment"));
@@ -574,7 +734,20 @@ namespace engine::gui {
 				Classes::Property<&Picture::RectOffset>(owner, "ImageRectOffset");
 				Classes::Property<&Picture::RectSize>(owner, "ImageRectSize");
 				Classes::Computed(owner, EnumField<&Picture::Scale>("ScaleType"));
+				Classes::Computed(owner, EnumField<&Picture::Resample>("ResampleMode"));
+
+				// **`scene.SurfaceAppearance.Shader`'s exact vocabulary, one
+				// indirection flatter** - see `Picture::Shader`'s own header
+				// for why an `ImageLabel` names it directly rather than
+				// through a child instance.
+				Classes::Property<&Picture::Shader>(owner, "Shader");
 			}
+
+			// **On `ImageButton` alone**, because an image swapped under the
+			// pointer is what a button does with one and an `ImageLabel` has no
+			// pointer state to swap on.
+			Classes::Property<&Picture::HoverImage>(imageButton, "HoverImage");
+			Classes::Property<&Picture::PressedImage>(imageButton, "PressedImage");
 
 			Classes::Property<&Button::AutoButtonColor>(guiButton, "AutoButtonColor");
 
@@ -583,7 +756,25 @@ namespace engine::gui {
 			Classes::Property<&Scrolling::BarThickness>(scrollingFrame, "ScrollBarThickness");
 			Classes::Property<&Scrolling::BarColor>(scrollingFrame, "ScrollBarImageColor3");
 			Classes::Property<&Scrolling::BarTransparency>(scrollingFrame, "ScrollBarImageTransparency");
+			Classes::Property<&Scrolling::Enabled>(scrollingFrame, "ScrollingEnabled");
+			Classes::Property<&Scrolling::TopImage>(scrollingFrame, "TopImage");
+			Classes::Property<&Scrolling::MidImage>(scrollingFrame, "MidImage");
+			Classes::Property<&Scrolling::BottomImage>(scrollingFrame, "BottomImage");
 			Classes::Computed(scrollingFrame, EnumField<&Scrolling::Direction>("ScrollingDirection"));
+			Classes::Computed(scrollingFrame, EnumField<&Scrolling::AutomaticCanvas>("AutomaticCanvasSize"));
+			Classes::Computed(scrollingFrame, EnumField<&Scrolling::Elastic>("ElasticBehavior"));
+			Classes::Computed(
+				scrollingFrame, EnumField<&Scrolling::HorizontalInset>("HorizontalScrollBarInset")
+			);
+			Classes::Computed(scrollingFrame, EnumField<&Scrolling::VerticalInset>("VerticalScrollBarInset"));
+			Classes::Computed(
+				scrollingFrame, EnumField<&Scrolling::VerticalBar>("VerticalScrollBarPosition")
+			);
+
+			// What the layout worked out, read-only for `Resolved`'s reason: a
+			// script assigning either would be overwritten by the next pass.
+			Classes::Computed(scrollingFrame, DerivedField<&ScrollState::CanvasSize>("AbsoluteCanvasSize"));
+			Classes::Computed(scrollingFrame, DerivedField<&ScrollState::WindowSize>("AbsoluteWindowSize"));
 
 			Classes::Property<&Entry::PlaceholderText>(textBox, "PlaceholderText");
 			Classes::Property<&Entry::PlaceholderColor>(textBox, "PlaceholderColor3");
@@ -618,17 +809,36 @@ namespace engine::gui {
 			Classes::Property<&Surface::AlwaysOnTop>(surfaceGui, "AlwaysOnTop");
 			Classes::Property<&Surface::LightInfluence>(surfaceGui, "LightInfluence");
 			Classes::Property<&Surface::Brightness>(surfaceGui, "Brightness");
+			Classes::Property<&Surface::ZOffset>(surfaceGui, "ZOffset");
+			Classes::Property<&Surface::MaxDistance>(surfaceGui, "MaxDistance");
+			Classes::Property<&Surface::ClipsDescendants>(surfaceGui, "ClipsDescendants");
+			Classes::Property<&Surface::Active>(surfaceGui, "Active");
 			Classes::Computed(surfaceGui, EnumField<&Surface::On>("Face"));
 			Classes::Computed(surfaceGui, EnumField<&Surface::Sizing>("SizingMode"));
 
 			Classes::Property<&Billboard::Adornee>(billboardGui, "Adornee");
+			Classes::Property<&Billboard::PlayerToHideFrom>(billboardGui, "PlayerToHideFrom");
 			Classes::Property<&Billboard::Size>(billboardGui, "Size");
 			Classes::Property<&Billboard::StudsOffset>(billboardGui, "StudsOffset");
 			Classes::Property<&Billboard::StudsOffsetWorldSpace>(billboardGui, "StudsOffsetWorldSpace");
 			Classes::Property<&Billboard::ExtentsOffset>(billboardGui, "ExtentsOffset");
+			Classes::Property<&Billboard::ExtentsOffsetWorldSpace>(billboardGui, "ExtentsOffsetWorldSpace");
+			Classes::Property<&Billboard::SizeOffset>(billboardGui, "SizeOffset");
 			Classes::Property<&Billboard::AlwaysOnTop>(billboardGui, "AlwaysOnTop");
 			Classes::Property<&Billboard::LightInfluence>(billboardGui, "LightInfluence");
+			Classes::Property<&Billboard::Brightness>(billboardGui, "Brightness");
 			Classes::Property<&Billboard::MaxDistance>(billboardGui, "MaxDistance");
+			Classes::Property<&Billboard::DistanceStep>(billboardGui, "DistanceStep");
+			Classes::Property<&Billboard::ClipsDescendants>(billboardGui, "ClipsDescendants");
+			Classes::Property<&Billboard::Active>(billboardGui, "Active");
+
+			// Read-only, and from the *derived* component rather than the
+			// authored one - which is what makes it worth having at all. A script
+			// fading a name tag by range wants the number its size was computed
+			// from, and `SpatialCanvas::CurrentDistance` is that number. A world
+			// nobody is drawing has no such component and the property answers
+			// zero, which is the honest reading of "no camera has measured this".
+			Classes::Computed(billboardGui, DerivedField<&SpatialCanvas::CurrentDistance>("CurrentDistance"));
 
 			Classes::Property<&Padding::Top>(uiPadding, "PaddingTop");
 			Classes::Property<&Padding::Bottom>(uiPadding, "PaddingBottom");
@@ -636,10 +846,14 @@ namespace engine::gui {
 			Classes::Property<&Padding::Right>(uiPadding, "PaddingRight");
 
 			Classes::Property<&ListLayout::Padding>(uiListLayout, "Padding");
+			Classes::Property<&ListLayout::Wraps>(uiListLayout, "Wraps");
 			Classes::Computed(uiListLayout, EnumField<&ListLayout::Direction>("FillDirection"));
 			Classes::Computed(uiListLayout, EnumField<&ListLayout::Horizontal>("HorizontalAlignment"));
 			Classes::Computed(uiListLayout, EnumField<&ListLayout::Vertical>("VerticalAlignment"));
 			Classes::Computed(uiListLayout, EnumField<&ListLayout::Order>("SortOrder"));
+			Classes::Computed(uiListLayout, EnumField<&ListLayout::HorizontalFlex>("HorizontalFlex"));
+			Classes::Computed(uiListLayout, EnumField<&ListLayout::VerticalFlex>("VerticalFlex"));
+			Classes::Computed(uiListLayout, EnumField<&ListLayout::ItemLine>("ItemLineAlignment"));
 
 			Classes::Property<&GridLayout::CellSize>(uiGridLayout, "CellSize");
 			Classes::Property<&GridLayout::CellPadding>(uiGridLayout, "CellPadding");
@@ -649,6 +863,24 @@ namespace engine::gui {
 			Classes::Computed(uiGridLayout, EnumField<&GridLayout::Horizontal>("HorizontalAlignment"));
 			Classes::Computed(uiGridLayout, EnumField<&GridLayout::Vertical>("VerticalAlignment"));
 			Classes::Computed(uiGridLayout, EnumField<&GridLayout::Order>("SortOrder"));
+
+			Classes::Property<&TableLayout::Padding>(uiTableLayout, "Padding");
+			Classes::Property<&TableLayout::FillEmptySpaceColumns>(uiTableLayout, "FillEmptySpaceColumns");
+			Classes::Property<&TableLayout::FillEmptySpaceRows>(uiTableLayout, "FillEmptySpaceRows");
+			Classes::Computed(uiTableLayout, EnumField<&TableLayout::Direction>("FillDirection"));
+			Classes::Computed(uiTableLayout, EnumField<&TableLayout::Horizontal>("HorizontalAlignment"));
+			Classes::Computed(uiTableLayout, EnumField<&TableLayout::Vertical>("VerticalAlignment"));
+			Classes::Computed(uiTableLayout, EnumField<&TableLayout::Order>("SortOrder"));
+
+			Classes::Property<&PageLayout::CurrentPage>(uiPageLayout, "CurrentPage");
+			Classes::Property<&PageLayout::Padding>(uiPageLayout, "Padding");
+			Classes::Property<&PageLayout::Circular>(uiPageLayout, "Circular");
+			Classes::Computed(uiPageLayout, EnumField<&PageLayout::Direction>("FillDirection"));
+			Classes::Computed(uiPageLayout, EnumField<&PageLayout::Order>("SortOrder"));
+			Classes::Property<&PageLayout::Animated>(uiPageLayout, "Animated");
+			Classes::Property<&PageLayout::TweenTime>(uiPageLayout, "TweenTime");
+			Classes::Computed(uiPageLayout, EnumField<&PageLayout::Easing>("EasingStyle"));
+			Classes::Computed(uiPageLayout, EnumField<&PageLayout::EasingWay>("EasingDirection"));
 
 			Classes::Property<&AspectRatio::Ratio>(uiAspect, "AspectRatio");
 			Classes::Computed(uiAspect, EnumField<&AspectRatio::Type>("AspectType"));
@@ -665,8 +897,31 @@ namespace engine::gui {
 			Classes::Property<&Stroke::Color>(uiStroke, "Color");
 			Classes::Property<&Stroke::Thickness>(uiStroke, "Thickness");
 			Classes::Property<&Stroke::Transparency>(uiStroke, "Transparency");
+			Classes::Property<&Stroke::Enabled>(uiStroke, "Enabled");
+			Classes::Computed(uiStroke, EnumField<&Stroke::Apply>("ApplyStrokeMode"));
+			Classes::Computed(uiStroke, EnumField<&Stroke::Join>("LineJoinMode"));
+			Classes::Computed(uiStroke, EnumField<&Stroke::Sizing>("StrokeSizingMode"));
 
 			Classes::Property<&Scale::Factor>(uiScale, "Scale");
+
+			Classes::Property<&Gradient::Color>(uiGradient, "Color");
+			Classes::Property<&Gradient::Transparency>(uiGradient, "Transparency");
+			Classes::Property<&Gradient::Offset>(uiGradient, "Offset");
+			Classes::Property<&Gradient::Rotation>(uiGradient, "Rotation");
+			Classes::Property<&Gradient::Enabled>(uiGradient, "Enabled");
+
+			Classes::Property<&DragDetector::BoundingUI>(uiDragDetector, "BoundingUI");
+			Classes::Property<&DragDetector::Axis>(uiDragDetector, "DragAxis");
+			Classes::Property<&DragDetector::MinTranslation>(uiDragDetector, "MinDragTranslation");
+			Classes::Property<&DragDetector::MaxTranslation>(uiDragDetector, "MaxDragTranslation");
+			Classes::Property<&DragDetector::Enabled>(uiDragDetector, "Enabled");
+			Classes::Computed(uiDragDetector, EnumField<&DragDetector::Style>("DragStyle"));
+			Classes::Computed(uiDragDetector, EnumField<&DragDetector::Response>("ResponseStyle"));
+
+			Classes::Property<&FlexItem::GrowRatio>(uiFlexItem, "GrowRatio");
+			Classes::Property<&FlexItem::ShrinkRatio>(uiFlexItem, "ShrinkRatio");
+			Classes::Computed(uiFlexItem, EnumField<&FlexItem::Mode>("FlexMode"));
+			Classes::Computed(uiFlexItem, EnumField<&FlexItem::ItemLine>("ItemLineAlignment"));
 
 			Classes::Property<&Adornment::Adornee>(pvAdornment, "Adornee");
 			Classes::Property<&Adornment::Color>(pvAdornment, "Color3");
@@ -688,8 +943,23 @@ namespace engine::gui {
 			(void)canvasGroup;
 			(void)dockWidget;
 			(void)uiScale;
-			(void)selectionBox;
-			(void)selectionSphere;
+			// **The three that were `Reserved until the renderer consumes them`,
+			// declared at v0.17 now that it does.** They were absent rather than
+			// answering a default on `SoundService.cpp`'s rule - a property with
+			// nothing behind it reads as decided - and what was actually behind
+			// them was nothing at all: `AdornmentGeometry` had no caller and
+			// there was no pass to draw its lines.
+			//
+			// `SelectionSphere` shares the component and therefore the three
+			// properties, which is Roblox's arrangement: both are a
+			// `PVAdornment` with an outline and a surface, and only the shape a
+			// drawer makes of them differs.
+			for (const ClassId klass : {selectionBox, selectionSphere}) {
+				Classes::Property<&SelectionOutline::LineThickness>(klass, "LineThickness");
+				Classes::Property<&SelectionOutline::SurfaceColor>(klass, "SurfaceColor3");
+				Classes::Property<&SelectionOutline::SurfaceTransparency>(klass, "SurfaceTransparency");
+			}
+
 			(void)boxHandle;
 			(void)sphereHandle;
 			(void)cylinderHandle;

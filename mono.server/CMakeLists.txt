@@ -78,6 +78,12 @@ mono_add_library(server
 		# proof.
 		Mono::network
 
+		# `shared`. What a person's Discord profile says while this program is
+		# running. Named here rather than reached through anything else: the
+		# link is owned and pumped by `Server`, and a dependency a file
+		# includes is one its build file should say out loud.
+		Mono::discord
+
 		# L10, `shared`. What a game file is. `--game FILE.agame` hosts a
 		# universe of worlds authored in the studio; the same module the studio
 		# wrote it with reads it back, which is what keeps one description of

@@ -105,13 +105,13 @@ namespace engine::scene {
 		core::Color3 Ambient{0.078f, 0.078f, 0.078f};
 
 		// The ambient term outdoors, which a sky replaces indoors.
-		core::Color3 OutdoorAmbient{0.502f, 0.502f, 0.502f};
+		core::Color3 OutdoorAmbient{0.058f, 0.058f, 0.058f};
 
 		// What distance fades to.
-		core::Color3 FogColor{0.753f, 0.753f, 0.753f};
+		core::Color3 FogColor{0.0f, 0.0f, 0.0f};
 
 		// How strong the sun is.
-		float Brightness = 2.0f;
+		float Brightness = 0.440f;
 
 		// The time of day, in hours. 14 is Roblox's default afternoon.
 		float ClockTime = 14.0f;
@@ -195,6 +195,18 @@ namespace engine::scene {
 		// How long *this* player waits, which is `PlayersServiceComponent`'s
 		// value at the moment they joined unless a game has changed it.
 		float RespawnTime = 5.0f;
+	};
+
+	// Network conditions simulated for one player by the authority.
+	//
+	// Separate from identity because a host may tune this repeatedly while the
+	// stable facts in `PlayerIdentity` remain unchanged.
+	//
+	// @since v0.18
+	struct PlayerNetworkComponent {
+		// Additional one-way replication delay for this player, in milliseconds.
+		// The world's global delay is added by the host.
+		float LocalSimulatedNetworkLatency = 0.0f;
 	};
 
 	// When this player may have a body again.

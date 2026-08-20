@@ -21,6 +21,7 @@ using engine::graph::BoundsOfAll;
 using engine::graph::Cull;
 using engine::graph::CullAndBound;
 using engine::graph::FitDirectionalLight;
+using engine::graph::FitPortalLight;
 using engine::graph::Frustum;
 using engine::scene::Camera;
 using engine::scene::DrawInstance;
@@ -148,6 +149,40 @@ TEST_CASE("something nearer the light is nearer in the map", "[graph][shadow]") 
 	const glm::vec3 low = Project(light, Vector3{0.0f, -8.0f, 0.0f});
 
 	CHECK(high.z < low.z);
+}
+
+TEST_CASE("a portal light reaches scene bounds offset from its aperture", "[graph][shadow]") {
+	// The portal is at the origin while the room it lights is far along the
+	// beam. A radius derived from the room's size does not cover that distance:
+	// the fit has to project the room's position relative to the aperture.
+	const AABB bounds = AABB::FromCentre(Vector3{75.0f, 0.0f, 0.0f}, Vector3{5.0f, 4.0f, 4.0f});
+	const glm::mat4 light = FitPortalLight(
+		bounds, Vector3::Zero, Vector3{0.0f, 6.0f, 0.0f}, Vector3{0.0f, 0.0f, 6.0f}, Vector3{1.0f, 0.0f, 0.0f}
+	);
+
+	for (float along : {0.0f, bounds.Minimum.X, bounds.Maximum.X}) {
+		const glm::vec3 clip = Project(light, Vector3{along, bounds.Maximum.Y, bounds.Maximum.Z});
+		INFO("point at " << along << " projects to depth " << clip.z);
+		CHECK(clip.z >= 0.0f);
+		CHECK(clip.z <= 1.0f);
+	}
+}
+
+TEST_CASE("a portal light reaches scene bounds behind its aperture", "[graph][shadow]") {
+	// Portals are visible from both faces. Keeping the aperture in the fitted
+	// interval makes the same matrix valid when the scene bounds lie opposite
+	// the authored light direction.
+	const AABB bounds = AABB::FromCentre(Vector3{-75.0f, 0.0f, 0.0f}, Vector3{5.0f, 4.0f, 4.0f});
+	const glm::mat4 light = FitPortalLight(
+		bounds, Vector3::Zero, Vector3{0.0f, 6.0f, 0.0f}, Vector3{0.0f, 0.0f, 6.0f}, Vector3{1.0f, 0.0f, 0.0f}
+	);
+
+	for (float along : {bounds.Minimum.X, bounds.Maximum.X, 0.0f}) {
+		const glm::vec3 clip = Project(light, Vector3{along, bounds.Minimum.Y, bounds.Minimum.Z});
+		INFO("point at " << along << " projects to depth " << clip.z);
+		CHECK(clip.z >= 0.0f);
+		CHECK(clip.z <= 1.0f);
+	}
 }
 
 TEST_CASE("the bounds of a draw list cover every instance", "[graph][shadow]") {

@@ -31,6 +31,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <optional>
 #include <vector>
 
@@ -581,6 +582,240 @@ TEST_CASE("a shape cast sweeps a rotated shape by its own bound", "[physics][que
 
 	REQUIRE(result.Written == 1);
 	CHECK(found[0] == beside);
+}
+
+TEST_CASE("a long diagonal sweep no longer reports the union box's corner", "[physics][query]") {
+	// The old implementation tested candidates against the union of the start
+	// and end bounds, and over forty metres that union is a quadrant of the
+	// map. The corner collider here sits squarely inside it and seventeen
+	// metres from the path, so it is exactly what the swept walk exists to
+	// stop returning.
+	Store store("query.shapecast.tight");
+	PreparePhysicsWorld(store, 2.0f);
+
+	const Entity onPath = Place(store, Placed{.Position = Vector3{20.0f, 20.0f, 0.0f}, .Moving = false});
+	Place(store, Placed{.Position = Vector3{30.0f, 5.0f, 0.0f}, .Moving = false});
+	Index(store);
+
+	std::array<Entity, 8> found{};
+	const QueryResult result = ShapeCast(
+		store,
+		Shaped(ShapeKind::Box, Vector3{0.5f, 0.5f, 0.5f}),
+		CFrame{Vector3::Zero},
+		Vector3{40.0f, 40.0f, 0.0f},
+		LayerMask::All(),
+		found
+	);
+
+	REQUIRE(result.Written == 1);
+	CHECK(found[0] == onPath);
+	CHECK_FALSE(result.Overflowed);
+}
+
+TEST_CASE("a collider spanning many cells along the sweep is reported once", "[physics][query]") {
+	// Sixty metres of rail lies along most of the sweep, so the walk crosses
+	// its cells over and over. One answer, however many cells agreed.
+	Store store("query.shapecast.span");
+	PreparePhysicsWorld(store, 2.0f);
+
+	const Entity rail = Place(
+		store,
+		Placed{.Position = Vector3{30.0f, 0.0f, 0.0f}, .Extent = Vector3{30.0f, 0.5f, 0.5f}, .Moving = false}
+	);
+	Index(store);
+
+	std::array<Entity, 8> found{};
+	const QueryResult result = ShapeCast(
+		store,
+		Shaped(ShapeKind::Box, Vector3{0.5f, 0.5f, 0.5f}),
+		CFrame{Vector3{-5.0f, 0.0f, 0.0f}},
+		Vector3{80.0f, 0.0f, 0.0f},
+		LayerMask::All(),
+		found
+	);
+
+	REQUIRE(result.Written == 1);
+	CHECK(found[0] == rail);
+}
+
+TEST_CASE("a thin shape with fat motion stays a thin sweep", "[physics][query]") {
+	// A tenth-of-a-metre sphere travelling sixty metres sweeps a straw, not
+	// the sixty-metre box that bounds the straw. The collider three metres
+	// off the line was inside that box.
+	Store store("query.shapecast.thin");
+	PreparePhysicsWorld(store, 2.0f);
+
+	const Entity ahead = Place(store, Placed{.Position = Vector3{50.0f, 0.0f, 0.0f}, .Moving = false});
+	Place(store, Placed{.Position = Vector3{50.0f, 3.0f, 0.0f}, .Moving = false});
+	Index(store);
+
+	std::array<Entity, 8> found{};
+	const QueryResult result = ShapeCast(
+		store,
+		Shaped(ShapeKind::Sphere, Vector3{0.1f, 0.0f, 0.0f}),
+		CFrame{Vector3::Zero},
+		Vector3{60.0f, 0.0f, 0.0f},
+		LayerMask::All(),
+		found
+	);
+
+	REQUIRE(result.Written == 1);
+	CHECK(found[0] == ahead);
+}
+
+TEST_CASE("a sweep tests the envelope's shape and not the candidate's bound", "[physics][query]") {
+	// Two spheres whose bounds both clip the corner of the swept bound: the
+	// near one really reaches into it, the far one only reaches with its
+	// bound. The exact test against the window's envelope has to tell them
+	// apart - it is the still overlap's corner case, restated for a mover.
+	Store store("query.shapecast.corner");
+	PreparePhysicsWorld(store, 2.0f);
+
+	const Entity reaching = Place(
+		store,
+		Placed{
+			.Position = Vector3{10.0f, 1.1f, 1.1f},
+			.Extent = Vector3{1.0f, 0.0f, 0.0f},
+			.Shape = ShapeKind::Sphere,
+			.Moving = false
+		}
+	);
+	Place(
+		store,
+		Placed{
+			.Position = Vector3{14.0f, 1.3f, 1.3f},
+			.Extent = Vector3{1.0f, 0.0f, 0.0f},
+			.Shape = ShapeKind::Sphere,
+			.Moving = false
+		}
+	);
+	Index(store);
+
+	std::array<Entity, 8> found{};
+	const QueryResult result = ShapeCast(
+		store,
+		Shaped(ShapeKind::Box, Vector3{0.5f, 0.5f, 0.5f}),
+		CFrame{Vector3::Zero},
+		Vector3{20.0f, 0.0f, 0.0f},
+		LayerMask::All(),
+		found
+	);
+
+	REQUIRE(result.Written == 1);
+	CHECK(found[0] == reaching);
+}
+
+TEST_CASE("a diagonal sweep tests each candidate against its own stretch of the path", "[physics][query]") {
+	// Two spheres beside a diagonal sweep, both close enough for their bounds
+	// to graze the moving bound's. The envelope of the *whole* path is an
+	// axis-aligned box that contains both of them outright, so a cast that
+	// clipped nothing would report both; clipped to each candidate's own
+	// overlap window, the envelope is a short diagonal step that only the
+	// nearer sphere really reaches.
+	Store store("query.shapecast.window");
+	PreparePhysicsWorld(store, 2.0f);
+
+	const Entity grazing = Place(
+		store,
+		Placed{
+			.Position = Vector3{21.2f, 18.8f, 0.0f},
+			.Extent = Vector3{1.0f, 0.0f, 0.0f},
+			.Shape = ShapeKind::Sphere,
+			.Moving = false
+		}
+	);
+	Place(
+		store,
+		Placed{
+			.Position = Vector3{21.45f, 18.55f, 0.0f},
+			.Extent = Vector3{1.0f, 0.0f, 0.0f},
+			.Shape = ShapeKind::Sphere,
+			.Moving = false
+		}
+	);
+	Index(store);
+
+	std::array<Entity, 8> found{};
+	const QueryResult result = ShapeCast(
+		store,
+		Shaped(ShapeKind::Box, Vector3{0.5f, 0.5f, 0.5f}),
+		CFrame{Vector3::Zero},
+		Vector3{40.0f, 40.0f, 0.0f},
+		LayerMask::All(),
+		found
+	);
+
+	REQUIRE(result.Written == 1);
+	CHECK(found[0] == grazing);
+}
+
+TEST_CASE("a sweep that outgrows the span keeps a reproducible prefix", "[physics][query]") {
+	// The overlap's `Overflowed` semantics, preserved across the new walk: the
+	// span holds a prefix and says there was more. And the prefix is in walk
+	// order along the sweep, so two identical casts keep the same two
+	// colliders - the order written into the span is part of what a recorded
+	// run reproduces.
+	Store store("query.shapecast.overflow");
+	PreparePhysicsWorld(store, 2.0f);
+
+	std::array<Entity, 4> placed{};
+	for (int index = 0; index < 4; index++) {
+		placed[static_cast<size_t>(index)] = Place(
+			store,
+			Placed{.Position = Vector3{2.0f + 2.0f * static_cast<float>(index), 0.0f, 0.0f}, .Moving = false}
+		);
+	}
+	Index(store);
+
+	std::array<Entity, 2> first{};
+	std::array<Entity, 2> second{};
+	const QueryResult once = ShapeCast(
+		store,
+		Shaped(ShapeKind::Box, Vector3{0.3f, 0.3f, 0.3f}),
+		CFrame{Vector3::Zero},
+		Vector3{12.0f, 0.0f, 0.0f},
+		LayerMask::All(),
+		first
+	);
+	const QueryResult again = ShapeCast(
+		store,
+		Shaped(ShapeKind::Box, Vector3{0.3f, 0.3f, 0.3f}),
+		CFrame{Vector3::Zero},
+		Vector3{12.0f, 0.0f, 0.0f},
+		LayerMask::All(),
+		second
+	);
+
+	CHECK(once.Written == 2);
+	CHECK(once.Overflowed);
+	CHECK(again.Written == 2);
+	CHECK(again.Overflowed);
+	CHECK(first == second);
+	CHECK(first[0] == placed[0]);
+	CHECK(first[1] == placed[1]);
+}
+
+TEST_CASE("a shape cast refuses a motion that is not a number", "[physics][query]") {
+	// The `OverlapSphere` guard's reason, applied to the sweep: a NaN motion
+	// would become a NaN ray that compares false against every cell.
+	Store store("query.shapecast.nan");
+	PreparePhysicsWorld(store, 2.0f);
+
+	Place(store, Placed{.Moving = false});
+	Index(store);
+
+	std::array<Entity, 4> found{};
+	const Vector3 broken{std::numeric_limits<float>::quiet_NaN(), 0.0f, 0.0f};
+	const QueryResult result = ShapeCast(
+		store,
+		Shaped(ShapeKind::Box, Vector3{0.5f, 0.5f, 0.5f}),
+		CFrame{Vector3::Zero},
+		broken,
+		LayerMask::All(),
+		found
+	);
+	CHECK(result.Written == 0);
+	CHECK_FALSE(result.Overflowed);
 }
 
 TEST_CASE("a raycast can look straight through the thing casting it", "[physics][query]") {

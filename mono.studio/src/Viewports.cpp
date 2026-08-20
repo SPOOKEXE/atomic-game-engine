@@ -4,6 +4,22 @@ namespace studio {
 
 	using engine::world::WorldId;
 
+	ViewportCanvas CanvasForViewport(
+		float panelX,
+		float panelY,
+		float panelWidth,
+		float panelHeight,
+		float pointerX,
+		float pointerY
+	) {
+		return ViewportCanvas{
+			panelWidth,
+			panelHeight,
+			pointerX - panelX,
+			pointerY - panelY,
+		};
+	}
+
 	size_t
 	ChooseViewportFor(WorldId world, WorldId mainWorld, bool mainOpen, std::span<const PanelView> panels) {
 		if (!world.IsValid()) {

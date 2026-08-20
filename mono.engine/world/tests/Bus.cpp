@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cstring>
 #include <string>
+#include <thread>
 #include <vector>
 
 TEST_SUITE_ID("engine.world.bus")
@@ -85,6 +86,85 @@ namespace bus_test {
 using namespace bus_test;
 
 // --- messaging ------------------------------------------------------------
+
+TEST_CASE("bus and service traffic crosses pinned world lanes at the barrier", "[world][bus]") {
+	Pool pool{4};
+	if (Jobs::PinnedWorkerCount() < 2) {
+		SUCCEED("this platform or process affinity exposes fewer than two pinned workers");
+		return;
+	}
+
+	Universe universe;
+	const WorldId listener = universe.Create(Named("cross-core.listener"));
+	const WorldId sender = universe.Create(Named("cross-core.sender"));
+
+	std::thread::id listenerThread;
+	std::thread::id senderThread;
+	bool listenerMoved = false;
+	bool senderMoved = false;
+	bool channelQueued = false;
+	bool channelHeard = false;
+	bool storeWritten = false;
+	bool storeHeard = false;
+	int listenerTicks = 0;
+	int senderTicks = 0;
+
+	OnTick(universe, listener, [&](Postbox &box) {
+		const std::thread::id current = std::this_thread::get_id();
+		if (listenerThread == std::thread::id{}) {
+			listenerThread = current;
+		} else if (listenerThread != current) {
+			listenerMoved = true;
+		}
+
+		if (listenerTicks == 0) {
+			(void)box.OpenChannel("updates");
+		} else if (listenerTicks == 1) {
+			(void)box.Get(BusKind::MemoryStore, "cross-core.value");
+		} else {
+			for (const Delivery &delivery : box.Deliveries()) {
+				if (delivery.Bus == BusKind::Channel && Text(delivery.Payload) == "hello") {
+					channelHeard = true;
+				}
+				if (delivery.Bus == BusKind::MemoryStore && delivery.Status == BusStatus::Ok &&
+					Text(delivery.Payload) == "stored") {
+					storeHeard = true;
+				}
+			}
+		}
+		listenerTicks++;
+	});
+
+	OnTick(universe, sender, [&](Postbox &box) {
+		const std::thread::id current = std::this_thread::get_id();
+		if (senderThread == std::thread::id{}) {
+			senderThread = current;
+		} else if (senderThread != current) {
+			senderMoved = true;
+		}
+
+		if (senderTicks == 0) {
+			storeWritten = box.Set(BusKind::MemoryStore, "cross-core.value", Bytes("stored")).Expected();
+		} else if (senderTicks == 1) {
+			channelQueued = box.SendTo("cross-core.listener", "updates", Bytes("hello")).Expected();
+		}
+		senderTicks++;
+	});
+
+	for (int frame = 0; frame < 3; frame++) {
+		universe.Tick(1.0f / 60.0f);
+	}
+
+	CHECK(listenerThread != std::thread::id{});
+	CHECK(senderThread != std::thread::id{});
+	CHECK(listenerThread != senderThread);
+	CHECK_FALSE(listenerMoved);
+	CHECK_FALSE(senderMoved);
+	CHECK(storeWritten);
+	CHECK(channelQueued);
+	CHECK(storeHeard);
+	CHECK(channelHeard);
+}
 
 TEST_CASE("a publish reaches its subscribers and nobody else", "[world]") {
 	Universe universe;
@@ -620,7 +700,7 @@ TEST_CASE("a replica may not publish", "[world]") {
 
 	universe.Enter(server, [](Store &store) { Postbox(store).Subscribe("replica.topic"); });
 	universe.Enter(client, [](Store &store) {
-		store.SetResource<engine::world::Replica>({true});
+		store.SetResource<engine::world::Replica>({});
 		Postbox(store).Subscribe("replica.topic");
 	});
 	universe.Tick(1.0f / 60.0f);
@@ -644,7 +724,7 @@ TEST_CASE("a replica may not reach a datastore, a memorystore, or a teleport", "
 	const WorldId client = universe.Create(Named("bus.replica.writes"));
 
 	universe.Enter(client, [](Store &store) {
-		store.SetResource<engine::world::Replica>({true});
+		store.SetResource<engine::world::Replica>({});
 
 		Postbox box(store);
 		REQUIRE(box.IsReplica());
@@ -676,7 +756,7 @@ TEST_CASE("a replica still receives everything sent to it", "[world]") {
 	// and then handed authority over would be.
 	universe.Enter(client, [](Store &store) { Postbox(store).Subscribe("state"); });
 	universe.Tick(1.0f / 60.0f);
-	universe.Enter(client, [](Store &store) { store.SetResource<engine::world::Replica>({true}); });
+	universe.Enter(client, [](Store &store) { store.SetResource<engine::world::Replica>({}); });
 
 	universe.Enter(server, [](Store &store) { Postbox(store).Publish("state", Bytes("tick-1")); });
 	universe.Tick(1.0f / 60.0f);
@@ -699,13 +779,13 @@ TEST_CASE("clearing the replica flag restores the handle", "[world]") {
 	const WorldId world = universe.Create(Named("bus.replica.promote"));
 
 	universe.Enter(world, [](Store &store) {
-		store.SetResource<engine::world::Replica>({true});
+		store.SetResource<engine::world::Replica>({});
 		REQUIRE_FALSE(Postbox(store).Set(BusKind::MemoryStore, "k", Bytes("v")).Expected());
 	});
 	universe.Tick(1.0f / 60.0f);
 
 	universe.Enter(world, [](Store &store) {
-		store.SetResource<engine::world::Replica>({false});
+		store.SetResource<engine::world::Replica>({false, {}, {}});
 		REQUIRE_FALSE(Postbox(store).IsReplica());
 		REQUIRE(Postbox(store).Set(BusKind::MemoryStore, "k", Bytes("v")).Expected());
 	});
@@ -721,7 +801,7 @@ TEST_CASE("the replica flag survives a snapshot", "[world]") {
 	// with authority it never had.
 	Universe universe;
 	const WorldId client = universe.Create(Named("bus.replica.saved"));
-	universe.Enter(client, [](Store &store) { store.SetResource<engine::world::Replica>({true}); });
+	universe.Enter(client, [](Store &store) { store.SetResource<engine::world::Replica>({}); });
 
 	engine::core::ByteWriter writer;
 	REQUIRE(universe.Save(writer));
@@ -1002,6 +1082,48 @@ TEST_CASE("a world may not hold more channels than the universe allows", "[world
 	const std::vector<Delivery> freed = Received(universe, sender);
 	REQUIRE(freed.size() == 1);
 	CHECK(freed[0].Status == BusStatus::Ok);
+}
+
+TEST_CASE("channel bounds retune between barriers", "[world]") {
+	// **The setters are read at the barrier, not copied at construction.**
+	// `BusRouter::Route` takes the settings by reference every tick, and this
+	// pins that: a router that copied them once would keep enforcing the
+	// numbers the universe was built with, and the studio's Universe panel
+	// would be writing to a dead copy nothing ever reads.
+	Universe universe;
+	const WorldId sender = universe.Create(Named("channel.retune.sender"));
+	const WorldId victim = universe.Create(Named("channel.retune.victim"));
+
+	universe.Enter(victim, [](Store &store) { REQUIRE(Postbox(store).OpenChannel("first").Expected()); });
+	universe.Tick(1.0f / 60.0f);
+
+	universe.SetChannelQueueLimit(2);
+	universe.SetChannelsPerWorld(1);
+
+	// The table bound: a second open is past the retuned cap of one, though
+	// the default the universe was built with would have taken it.
+	universe.Enter(victim, [](Store &store) { REQUIRE(Postbox(store).OpenChannel("second").Expected()); });
+	universe.Tick(1.0f / 60.0f);
+
+	const std::vector<Delivery> verdicts = Received(universe, victim);
+	REQUIRE(verdicts.size() == 1);
+	CHECK(verdicts[0].Status == BusStatus::TooManyChannels);
+
+	// The queue bound: the third send in one barrier is past the retuned two.
+	universe.Enter(sender, [](Store &store) {
+		Postbox box(store);
+		for (int message = 0; message < 3; message++) {
+			REQUIRE(box.SendTo("channel.retune.victim", "first", Bytes("x")).Expected());
+		}
+	});
+	universe.Tick(1.0f / 60.0f);
+
+	CHECK(Received(universe, victim).size() == 2);
+
+	const std::vector<Delivery> replies = Received(universe, sender);
+	REQUIRE(replies.size() == 3);
+	CHECK(replies[1].Status == BusStatus::Ok);
+	CHECK(replies[2].Status == BusStatus::Overflow);
 }
 
 TEST_CASE("what a world holds is what it comes back holding", "[world]") {

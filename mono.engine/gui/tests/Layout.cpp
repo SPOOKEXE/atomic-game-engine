@@ -220,6 +220,285 @@ TEST_CASE("a list layout stacks children and ignores their positions", "[gui][la
 	}
 }
 
+namespace {
+	// A frame of a fixed pixel size under `parent`, for the flex cases below.
+	// They build wide rows of these and the four lines per child drowned what
+	// each case was actually asserting.
+	Entity Block(World &world, Entity parent, float width, float height) {
+		const Entity made = world.Make("Frame", parent);
+		Element element;
+		element.Size = UDim2{0.0f, width, 0.0f, height};
+		world.Data.Set(made, element);
+		return made;
+	}
+
+	// A container with a horizontal list layout, handing back both.
+	Entity ListIn(World &world, Entity screen, const ListLayout &stack, Entity &layout) {
+		const Entity holder = world.Make("Frame", screen);
+		Element container;
+		container.Size = UDim2{0.0f, 300.0f, 0.0f, 300.0f};
+		world.Data.Set(holder, container);
+
+		layout = world.Make("UIListLayout", holder);
+		world.Data.Set(layout, stack);
+		return holder;
+	}
+}
+
+TEST_CASE("a wrapped list breaks lines at the fill axis", "[gui][layout][flex]") {
+	World world("gui_layout.wraps");
+	const Entity screen = world.Make("ScreenGui");
+
+	ListLayout stack;
+	stack.Direction = FillDirection::Horizontal;
+	stack.Padding = UDim{0.0f, 10.0f};
+	stack.Wraps = true;
+
+	Entity layout;
+	const Entity holder = ListIn(world, screen, stack, layout);
+
+	// Two fit on a line with the gap; the third would land at 380 of 300.
+	Entity rows[3];
+	for (Entity &row : rows) {
+		row = Block(world, holder, 120.0f, 20.0f);
+	}
+
+	Layout(world.Data, world.Display);
+
+	const Vector2 origin = world.Where(holder).AbsolutePosition;
+	CHECK(world.Where(rows[0]).AbsolutePosition.X == Approx(origin.X));
+	CHECK(world.Where(rows[1]).AbsolutePosition.X == Approx(origin.X + 130.0f));
+	CHECK(world.Where(rows[1]).AbsolutePosition.Y == Approx(origin.Y));
+
+	// The second line starts one line's height plus the gap down, at the
+	// left edge again - `Padding` serves both axes, resolved against each.
+	CHECK(world.Where(rows[2]).AbsolutePosition.X == Approx(origin.X));
+	CHECK(world.Where(rows[2]).AbsolutePosition.Y == Approx(origin.Y + 30.0f));
+}
+
+TEST_CASE("Fill on the fill axis grows children to close the container", "[gui][layout][flex]") {
+	World world("gui_layout.flex_fill");
+	const Entity screen = world.Make("ScreenGui");
+
+	ListLayout stack;
+	stack.Direction = FillDirection::Horizontal;
+	stack.HorizontalFlex = FlexAlignment::Fill;
+
+	Entity layout;
+	const Entity holder = ListIn(world, screen, stack, layout);
+	const Entity left = Block(world, holder, 50.0f, 20.0f);
+	const Entity right = Block(world, holder, 50.0f, 20.0f);
+
+	Layout(world.Data, world.Display);
+
+	// 200 spare, split by equal grow weights: 150 each.
+	const float x = world.Where(holder).AbsolutePosition.X;
+	CHECK(world.Where(left).AbsoluteSize.X == Approx(150.0f));
+	CHECK(world.Where(right).AbsoluteSize.X == Approx(150.0f));
+	CHECK(world.Where(left).AbsolutePosition.X == Approx(x));
+	CHECK(world.Where(right).AbsolutePosition.X == Approx(x + 150.0f));
+}
+
+TEST_CASE("a UIFlexItem spring takes the whole of the spare room", "[gui][layout][flex]") {
+	World world("gui_layout.flex_spring");
+	const Entity screen = world.Make("ScreenGui");
+
+	ListLayout stack;
+	stack.Direction = FillDirection::Horizontal;
+
+	Entity layout;
+	const Entity holder = ListIn(world, screen, stack, layout);
+	const Entity leading = Block(world, holder, 50.0f, 20.0f);
+	const Entity spring = Block(world, holder, 50.0f, 20.0f);
+	const Entity trailing = Block(world, holder, 50.0f, 20.0f);
+
+	FlexItem grow;
+	grow.Mode = FlexMode::Grow;
+	world.Data.Set(world.Make("UIFlexItem", spring), grow);
+
+	Layout(world.Data, world.Display);
+
+	// The toolbar shape: fixed buttons at both ends, the spring between them
+	// swallowing the 150 the line had spare.
+	const float x = world.Where(holder).AbsolutePosition.X;
+	CHECK(world.Where(leading).AbsoluteSize.X == Approx(50.0f));
+	CHECK(world.Where(spring).AbsoluteSize.X == Approx(200.0f));
+	CHECK(world.Where(trailing).AbsoluteSize.X == Approx(50.0f));
+	CHECK(world.Where(trailing).AbsolutePosition.X == Approx(x + 250.0f));
+}
+
+TEST_CASE("FlexMode None opts a child out of a Fill row", "[gui][layout][flex]") {
+	World world("gui_layout.flex_optout");
+	const Entity screen = world.Make("ScreenGui");
+
+	ListLayout stack;
+	stack.Direction = FillDirection::Horizontal;
+	stack.HorizontalFlex = FlexAlignment::Fill;
+
+	Entity layout;
+	const Entity holder = ListIn(world, screen, stack, layout);
+	const Entity fixed = Block(world, holder, 50.0f, 20.0f);
+	const Entity growing = Block(world, holder, 50.0f, 20.0f);
+
+	// A `UIFlexItem` at `None` is an override, not an absence - the row is
+	// `Fill` and this child still keeps its authored width.
+	world.Data.Set(world.Make("UIFlexItem", fixed), FlexItem{});
+
+	Layout(world.Data, world.Display);
+
+	CHECK(world.Where(fixed).AbsoluteSize.X == Approx(50.0f));
+	CHECK(world.Where(growing).AbsoluteSize.X == Approx(250.0f));
+}
+
+TEST_CASE("the spacing modes spend spare room as gaps", "[gui][layout][flex]") {
+	World world("gui_layout.flex_spacing");
+	const Entity screen = world.Make("ScreenGui");
+
+	ListLayout between;
+	between.Direction = FillDirection::Horizontal;
+	between.HorizontalFlex = FlexAlignment::SpaceBetween;
+
+	Entity layout;
+	const Entity first = ListIn(world, screen, between, layout);
+	const Entity firstRows[3]{
+		Block(world, first, 60.0f, 20.0f),
+		Block(world, first, 60.0f, 20.0f),
+		Block(world, first, 60.0f, 20.0f),
+	};
+
+	ListLayout evenly = between;
+	evenly.HorizontalFlex = FlexAlignment::SpaceEvenly;
+	const Entity second = ListIn(world, screen, evenly, layout);
+	const Entity secondRows[2]{
+		Block(world, second, 50.0f, 20.0f),
+		Block(world, second, 50.0f, 20.0f),
+	};
+
+	ListLayout around = between;
+	around.HorizontalFlex = FlexAlignment::SpaceAround;
+	const Entity third = ListIn(world, screen, around, layout);
+	const Entity thirdRows[2]{
+		Block(world, third, 50.0f, 20.0f),
+		Block(world, third, 50.0f, 20.0f),
+	};
+
+	Layout(world.Data, world.Display);
+
+	// SpaceBetween: 120 spare over two gaps, nothing at the ends.
+	float x = world.Where(first).AbsolutePosition.X;
+	CHECK(world.Where(firstRows[0]).AbsolutePosition.X == Approx(x));
+	CHECK(world.Where(firstRows[1]).AbsolutePosition.X == Approx(x + 120.0f));
+	CHECK(world.Where(firstRows[2]).AbsolutePosition.X == Approx(x + 240.0f));
+
+	// SpaceEvenly: 200 spare over three equal shares.
+	x = world.Where(second).AbsolutePosition.X;
+	CHECK(world.Where(secondRows[0]).AbsolutePosition.X == Approx(x + 200.0f / 3.0f));
+	CHECK(world.Where(secondRows[1]).AbsolutePosition.X == Approx(x + 400.0f / 3.0f + 50.0f));
+
+	// SpaceAround: a full share between, half a share at each end.
+	x = world.Where(third).AbsolutePosition.X;
+	CHECK(world.Where(thirdRows[0]).AbsolutePosition.X == Approx(x + 50.0f));
+	CHECK(world.Where(thirdRows[1]).AbsolutePosition.X == Approx(x + 200.0f));
+}
+
+TEST_CASE("shrink absorbs an overflow in proportion to size", "[gui][layout][flex]") {
+	World world("gui_layout.flex_shrink");
+	const Entity screen = world.Make("ScreenGui");
+
+	ListLayout stack;
+	stack.Direction = FillDirection::Horizontal;
+	stack.HorizontalFlex = FlexAlignment::Fill;
+
+	Entity layout;
+	const Entity holder = ListIn(world, screen, stack, layout);
+	const Entity wide = Block(world, holder, 240.0f, 20.0f);
+	const Entity narrow = Block(world, holder, 120.0f, 20.0f);
+
+	Layout(world.Data, world.Display);
+
+	// 60 over, weighted by basis: the wide child gives up twice as much as
+	// the narrow one, which is CSS's weighting and keeps the pair's ratio.
+	CHECK(world.Where(wide).AbsoluteSize.X == Approx(200.0f));
+	CHECK(world.Where(narrow).AbsoluteSize.X == Approx(100.0f));
+}
+
+TEST_CASE("the cross axis stretches when it is flexed", "[gui][layout][flex]") {
+	World world("gui_layout.flex_stretch");
+	const Entity screen = world.Make("ScreenGui");
+
+	ListLayout stack;
+	stack.Direction = FillDirection::Horizontal;
+	stack.VerticalFlex = FlexAlignment::Fill;
+
+	Entity layout;
+	const Entity holder = ListIn(world, screen, stack, layout);
+	const Entity row = Block(world, holder, 100.0f, 20.0f);
+
+	Layout(world.Data, world.Display);
+
+	// `ItemLineAlignment::Automatic` reads a flexed cross axis as `Stretch`,
+	// and `Fill` grows the single line to the whole container.
+	CHECK(world.Where(row).AbsoluteSize.Y == Approx(300.0f));
+	CHECK(world.Where(row).AbsoluteSize.X == Approx(100.0f));
+}
+
+TEST_CASE("ItemLineAlignment places a child against its line", "[gui][layout][flex]") {
+	World world("gui_layout.flex_line");
+	const Entity screen = world.Make("ScreenGui");
+
+	ListLayout stack;
+	stack.Direction = FillDirection::Horizontal;
+	stack.ItemLine = ItemLineAlignment::End;
+
+	Entity layout;
+	const Entity holder = ListIn(world, screen, stack, layout);
+	const Entity shallow = Block(world, holder, 50.0f, 20.0f);
+	const Entity deep = Block(world, holder, 50.0f, 60.0f);
+	const Entity centred = Block(world, holder, 50.0f, 20.0f);
+
+	// The child's own `UIFlexItem` overrides the layout's `End`.
+	FlexItem middle;
+	middle.ItemLine = ItemLineAlignment::Center;
+	world.Data.Set(world.Make("UIFlexItem", centred), middle);
+
+	Layout(world.Data, world.Display);
+
+	// The line is as deep as its deepest child; `End` sits on its floor and
+	// the override centres against the same line.
+	const float top = world.Where(holder).AbsolutePosition.Y;
+	CHECK(world.Where(deep).AbsolutePosition.Y == Approx(top));
+	CHECK(world.Where(shallow).AbsolutePosition.Y == Approx(top + 40.0f));
+	CHECK(world.Where(centred).AbsolutePosition.Y == Approx(top + 20.0f));
+}
+
+TEST_CASE("an automatic container grows to its wrapped lines", "[gui][layout][automatic][flex]") {
+	World world("gui_layout.flex_automatic");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity holder = world.Make("Frame", screen);
+
+	Element container;
+	container.Size = UDim2{0.0f, 300.0f, 0.0f, 0.0f};
+	container.Automatic = AutomaticSize::Y;
+	world.Data.Set(holder, container);
+
+	ListLayout stack;
+	stack.Direction = FillDirection::Horizontal;
+	stack.Padding = UDim{0.0f, 10.0f};
+	stack.Wraps = true;
+	world.Data.Set(world.Make("UIListLayout", holder), stack);
+
+	for (int index = 0; index < 3; index++) {
+		Block(world, holder, 120.0f, 20.0f);
+	}
+
+	Layout(world.Data, world.Display);
+
+	// Two lines of 20 and the gap between them - the measure wraps at the
+	// same span the placement does, or the two would disagree by a line.
+	CHECK(world.Where(holder).AbsoluteSize.Y == Approx(50.0f));
+	CHECK(world.Where(holder).AbsoluteSize.X == Approx(300.0f));
+}
+
 TEST_CASE("a grid layout gives every child the cell's size", "[gui][layout]") {
 	World world("gui_layout.grid");
 	const Entity screen = world.Make("ScreenGui");
@@ -633,6 +912,47 @@ TEST_CASE("only the world-attached collectors draw from the Workspace", "[gui][l
 	CHECK(world.Data.Get<Resolved>(billboard)->Rendered);
 }
 
+TEST_CASE("a spatial collector that clips nothing still lays out against its canvas", "[gui][layout]") {
+	// **Two rectangles, and the case exists because they are easy to conflate.**
+	// `ClipsDescendants` decides what the subtree is *cut* to and nothing about
+	// what a `UDim2` resolves against - so a half-width child of an unclipped
+	// surface is half the canvas, not half of the very large rectangle the clip
+	// becomes. Folding the two into one number would produce a child five
+	// hundred thousand pixels wide and nothing would say why.
+	World world("gui_layout.unclipped");
+
+	const Entity workspace = world.Data.CreateInstance(
+		engine::ecs::Classes::Find(engine::core::Name("Instance")), std::string(WORKSPACE)
+	);
+
+	const Entity surface = world.Make("SurfaceGui", workspace);
+	Surface state;
+	state.CanvasSize = Vector2{400.0f, 300.0f};
+	state.ClipsDescendants = false;
+	world.Data.Set(surface, state);
+
+	const Entity frame = world.Make("Frame", surface);
+	Element element;
+	element.Size = UDim2{0.5f, 0.0f, 0.5f, 0.0f};
+	world.Data.Set(frame, element);
+
+	Layout(world.Data, world.Display);
+
+	CHECK(world.Where(frame).AbsoluteSize.X == Approx(200.0f));
+	CHECK(world.Where(frame).AbsoluteSize.Y == Approx(150.0f));
+
+	// The clip is what changed, and it has to be wide enough to cut nothing an
+	// author meant to draw.
+	CHECK(world.Where(frame).Clip.Width() > 400.0f);
+
+	state.ClipsDescendants = true;
+	world.Data.Set(surface, state);
+	Layout(world.Data, world.Display);
+
+	CHECK(world.Where(frame).Clip.Width() == Approx(400.0f));
+	CHECK(world.Where(frame).AbsoluteSize.X == Approx(200.0f));
+}
+
 TEST_CASE("the container names are the ones scene registers", "[gui][layout]") {
 	// **The pin at this end**, and `scene/tests/Services.cpp` holds the other.
 	//
@@ -1009,4 +1329,289 @@ TEST_CASE("an invisible child is not measured into its parent", "[gui][layout][a
 	Layout(world.Data, world.Display);
 
 	CHECK(world.Where(box).AbsoluteSize.Y == Approx(30.0f));
+}
+
+TEST_CASE("a table layout gives a column one width in every row", "[gui][layout]") {
+	// **The reason a table is not a grid of frames**, and the only thing it is
+	// for: a column has to be the same width in every row, which means the
+	// layout has to reach two levels down and size the cells rather than letting
+	// each row decide for itself.
+	World world("gui_layout.table");
+
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("Frame", screen);
+
+	Element outer;
+	outer.Size = UDim2{0.0f, 400.0f, 0.0f, 300.0f};
+	world.Data.Set(frame, outer);
+
+	const Entity layout = world.Make("UITableLayout", frame);
+	world.Data.Set(layout, TableLayout{});
+
+	// Two rows, two cells each. The first column is wide in one row and narrow
+	// in the other; the widest wins for both.
+	const float widths[2][2]{{200.0f, 40.0f}, {60.0f, 90.0f}};
+	Entity cells[2][2]{};
+
+	for (int row = 0; row < 2; row++) {
+		const Entity rowNode = world.Make("Frame", frame);
+		Element rowElement;
+		rowElement.Size = UDim2{0.0f, 0.0f, 0.0f, 30.0f};
+		rowElement.LayoutOrder = row;
+		world.Data.Set(rowNode, rowElement);
+
+		for (int column = 0; column < 2; column++) {
+			cells[row][column] = world.Make("TextLabel", rowNode);
+			Element cell;
+			cell.Size = UDim2{0.0f, widths[row][column], 0.0f, 24.0f};
+			cell.LayoutOrder = column;
+			world.Data.Set(cells[row][column], cell);
+		}
+	}
+
+	Layout(world.Data, world.Display);
+
+	// Column one is two hundred wide in both rows, because one cell asked for
+	// two hundred; column two is ninety, for the same reason.
+	CHECK(world.Where(cells[0][0]).AbsoluteSize.X == Approx(200.0f));
+	CHECK(world.Where(cells[1][0]).AbsoluteSize.X == Approx(200.0f));
+	CHECK(world.Where(cells[0][1]).AbsoluteSize.X == Approx(90.0f));
+	CHECK(world.Where(cells[1][1]).AbsoluteSize.X == Approx(90.0f));
+
+	// The second column starts where the first ends, and the second row below
+	// the first.
+	CHECK(world.Where(cells[0][1]).AbsolutePosition.X == Approx(200.0f));
+	CHECK(world.Where(cells[1][0]).AbsolutePosition.Y > world.Where(cells[0][0]).AbsolutePosition.Y);
+
+	// **Rows are laid out and remain instances.** A row that stopped being
+	// rendered would take its own background with it, which is how a table gets
+	// its stripes.
+	CHECK(world.Where(cells[0][0]).Rendered);
+
+	// Filling shares the spare width out, so the table reaches the parent's edge.
+	TableLayout filled;
+	filled.FillEmptySpaceColumns = true;
+	world.Data.Set(layout, filled);
+	Layout(world.Data, world.Display);
+
+	const float across = world.Where(cells[0][0]).AbsoluteSize.X + world.Where(cells[0][1]).AbsoluteSize.X;
+	CHECK(across == Approx(400.0f));
+}
+
+TEST_CASE("a page layout shows one child and slides the rest aside", "[gui][layout]") {
+	// Every page is the container's own size and sits one step further along, so
+	// the strip moves under the container rather than the pages moving inside
+	// it. Nothing animates - `gui::PageLayout` says why the tween is absent
+	// rather than ignored.
+	World world("gui_layout.pages");
+
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("Frame", screen);
+
+	Element outer;
+	outer.Position = UDim2{0.0f, 100.0f, 0.0f, 0.0f};
+	outer.Size = UDim2{0.0f, 200.0f, 0.0f, 100.0f};
+	outer.ClipsDescendants = true;
+	world.Data.Set(frame, outer);
+
+	const Entity layout = world.Make("UIPageLayout", frame);
+
+	Entity pages[3]{};
+	for (int index = 0; index < 3; index++) {
+		pages[index] = world.Make("Frame", frame);
+		Element page;
+		page.LayoutOrder = index;
+		world.Data.Set(pages[index], page);
+	}
+
+	PageLayout paging;
+	paging.CurrentPage = pages[1];
+	world.Data.Set(layout, paging);
+
+	Layout(world.Data, world.Display);
+
+	// The current page fills the container; its neighbours sit one container
+	// width either side of it.
+	CHECK(world.Where(pages[1]).AbsolutePosition.X == Approx(100.0f));
+	CHECK(world.Where(pages[1]).AbsoluteSize.X == Approx(200.0f));
+	CHECK(world.Where(pages[0]).AbsolutePosition.X == Approx(-100.0f));
+	CHECK(world.Where(pages[2]).AbsolutePosition.X == Approx(300.0f));
+
+	// **`Animated` off from here down, because this case is about placement.**
+	// Sliding arrived at v0.17 and has its own three cases below; asking about
+	// where a page *ends up* while a tween is a tenth of the way through it
+	// would be asking two questions and asserting one.
+	PageLayout unset;
+	unset.Animated = false;
+	world.Data.Set(layout, unset);
+	Layout(world.Data, world.Display);
+
+	// **An unset `CurrentPage` is the first one**, which is what an author who
+	// set nothing means and what a page destroyed mid-show leaves behind.
+	CHECK(world.Where(pages[0]).AbsolutePosition.X == Approx(100.0f));
+
+	// Circular wraps to the nearer side, so the page before the first is drawn
+	// just off the near edge rather than at the far end of everything.
+	PageLayout loop;
+	loop.Circular = true;
+	loop.Animated = false;
+	world.Data.Set(layout, loop);
+	Layout(world.Data, world.Display);
+	CHECK(world.Where(pages[2]).AbsolutePosition.X == Approx(-100.0f));
+}
+
+TEST_CASE("a page layout slides between pages over time", "[gui][layout]") {
+	// **The whole feature is that the position is a function of elapsed time**,
+	// so every assertion here states a moment rather than stepping frames to
+	// reach one. That is `render::FlipbookFrameAt`'s shape and it is why this
+	// case runs in microseconds and has no sleep in it.
+	World world("gui_layout.pageslide");
+
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("Frame", screen);
+
+	Element outer;
+	outer.Position = UDim2{0.0f, 0.0f, 0.0f, 0.0f};
+	outer.Size = UDim2{0.0f, 200.0f, 0.0f, 100.0f};
+	world.Data.Set(frame, outer);
+
+	const Entity layout = world.Make("UIPageLayout", frame);
+
+	Entity pages[3]{};
+	for (int index = 0; index < 3; index++) {
+		pages[index] = world.Make("Frame", frame);
+		Element page;
+		page.LayoutOrder = index;
+		world.Data.Set(pages[index], page);
+	}
+
+	// Linear, so the arithmetic below is the position rather than a curve's
+	// opinion of it. The curves themselves are `core::TweenInfo`'s to test and
+	// `engine.core.tweeninfo` does.
+	PageLayout paging;
+	paging.CurrentPage = pages[0];
+	paging.Animated = true;
+	paging.TweenTime = 2.0f;
+	paging.Easing = engine::core::EasingStyle::Linear;
+	paging.EasingWay = engine::core::EasingDirection::In;
+	world.Data.Set(layout, paging);
+
+	// Settle on page 0 first, so the jump below is the only motion in flight.
+	Layout(world.Data, world.Display, 100.0);
+	Layout(world.Data, world.Display, 110.0);
+	REQUIRE(world.Where(pages[0]).AbsolutePosition.X == Approx(0.0f));
+
+	paging.CurrentPage = pages[1];
+	world.Data.Set(layout, paging);
+
+	// The jump is noticed on the next layout, and nothing has moved yet.
+	Layout(world.Data, world.Display, 200.0);
+	CHECK(world.Where(pages[0]).AbsolutePosition.X == Approx(0.0f));
+	CHECK(world.Where(pages[1]).AbsolutePosition.X == Approx(200.0f));
+
+	// Halfway through two seconds is half a page, and a page is the container.
+	Layout(world.Data, world.Display, 201.0);
+	CHECK(world.Where(pages[0]).AbsolutePosition.X == Approx(-100.0f));
+	CHECK(world.Where(pages[1]).AbsolutePosition.X == Approx(100.0f));
+
+	// And past the end it is exactly there rather than nearly there.
+	Layout(world.Data, world.Display, 202.0);
+	CHECK(world.Where(pages[1]).AbsolutePosition.X == Approx(0.0f));
+
+	// **Settled, so it stays put however much time passes.** A layout that kept
+	// evaluating a finished tween would keep moving the signature with it.
+	Layout(world.Data, world.Display, 900.0);
+	CHECK(world.Where(pages[1]).AbsolutePosition.X == Approx(0.0f));
+}
+
+TEST_CASE("a page layout cuts when it is told not to animate", "[gui][layout]") {
+	World world("gui_layout.pagecut");
+
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("Frame", screen);
+
+	Element outer;
+	outer.Size = UDim2{0.0f, 200.0f, 0.0f, 100.0f};
+	world.Data.Set(frame, outer);
+
+	const Entity layout = world.Make("UIPageLayout", frame);
+
+	Entity pages[2]{};
+	for (int index = 0; index < 2; index++) {
+		pages[index] = world.Make("Frame", frame);
+		Element page;
+		page.LayoutOrder = index;
+		world.Data.Set(pages[index], page);
+	}
+
+	const auto jump = [&](bool animated, float tweenTime) {
+		PageLayout paging;
+		paging.Animated = animated;
+		paging.TweenTime = tweenTime;
+		paging.CurrentPage = pages[0];
+		world.Data.Set(layout, paging);
+		Layout(world.Data, world.Display, 10.0);
+
+		paging.CurrentPage = pages[1];
+		world.Data.Set(layout, paging);
+		Layout(world.Data, world.Display, 10.0);
+		return world.Where(pages[1]).AbsolutePosition.X;
+	};
+
+	// **Two properties that draw the same thing and read back differently**,
+	// which is Roblox's arrangement: one says this layout does not animate and
+	// the other says it animates over no time.
+	CHECK(jump(false, 1.0f) == Approx(0.0f));
+	CHECK(jump(true, 0.0f) == Approx(0.0f));
+
+	// And with both on, the same jump has not moved at the instant it begins.
+	CHECK(jump(true, 1.0f) == Approx(200.0f));
+}
+
+TEST_CASE("a circular page layout slides the short way round", "[gui][layout]") {
+	// The case wrapping exists for: going from the last page to the first is
+	// one step forward, not two steps back past everything. Without wrapping
+	// the *distance* as well as each page's offset, the loop reads as a rewind.
+	World world("gui_layout.pageloop");
+
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("Frame", screen);
+
+	Element outer;
+	outer.Size = UDim2{0.0f, 200.0f, 0.0f, 100.0f};
+	world.Data.Set(frame, outer);
+
+	const Entity layout = world.Make("UIPageLayout", frame);
+
+	Entity pages[3]{};
+	for (int index = 0; index < 3; index++) {
+		pages[index] = world.Make("Frame", frame);
+		Element page;
+		page.LayoutOrder = index;
+		world.Data.Set(pages[index], page);
+	}
+
+	PageLayout paging;
+	paging.Circular = true;
+	paging.Animated = true;
+	paging.TweenTime = 2.0f;
+	paging.Easing = engine::core::EasingStyle::Linear;
+	paging.EasingWay = engine::core::EasingDirection::In;
+	paging.CurrentPage = pages[2];
+	world.Data.Set(layout, paging);
+
+	Layout(world.Data, world.Display, 10.0);
+	Layout(world.Data, world.Display, 20.0);
+	REQUIRE(world.Where(pages[2]).AbsolutePosition.X == Approx(0.0f));
+
+	// Last page to first. The short way is forward by one, so halfway through
+	// the strip has moved half a container forward and page 2 is on its way out
+	// to the left rather than sweeping back across two pages.
+	paging.CurrentPage = pages[0];
+	world.Data.Set(layout, paging);
+	Layout(world.Data, world.Display, 30.0);
+	Layout(world.Data, world.Display, 31.0);
+
+	CHECK(world.Where(pages[2]).AbsolutePosition.X == Approx(-100.0f));
+	CHECK(world.Where(pages[0]).AbsolutePosition.X == Approx(100.0f));
 }

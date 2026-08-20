@@ -114,8 +114,7 @@ namespace engine::scene {
 		// Baked ambient occlusion, multiplied into the ambient term.
 		core::Name Occlusion = {};
 
-		// Height, for whatever the pipeline does with it. Written by the baker
-		// and carried here because a material names it; nothing samples it yet.
+		// Height sampled by the default PBR paths for bounded parallax mapping.
 		core::Name Height = {};
 
 		// What the surface emits on its own, independent of any light.
@@ -128,7 +127,7 @@ namespace engine::scene {
 		//         catalogue knows this material" rather than "it is usable".
 		bool IsValid() const {
 			return Colour.IsValid() || Normal.IsValid() || Roughness.IsValid() || Occlusion.IsValid() ||
-				   Height.IsValid();
+				   Height.IsValid() || Emissive.IsValid();
 		}
 	};
 

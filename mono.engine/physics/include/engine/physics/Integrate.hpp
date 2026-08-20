@@ -128,9 +128,11 @@ namespace engine::physics {
 	// sphere scales everything it transforms, which reads as parts slowly
 	// growing rather than as a rotation bug.
 	//
-	// The delta is `Store::Time().Delta`, the fixed tick, never a measured frame
-	// time. A tick has to be a function of its state or a recording stops
-	// replaying.
+	// The delta is `PhysicsStepSeconds(store)`, never a measured frame time. A
+	// tick has to be a function of its state or a recording stops replaying.
+	// That is `Store::Time().Delta` for a world that steps physics at its own
+	// tick rate, and the shorter or longer step of `Clock.hpp` for a world that
+	// does not.
 	//
 	// @param store The world to advance.
 	// @tick

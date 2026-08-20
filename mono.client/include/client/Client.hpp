@@ -10,6 +10,7 @@
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Content.hpp>
+#include <engine/graph/PipelineDocument.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Input.hpp>
 #include <engine/input/Actions.hpp>
@@ -31,9 +32,12 @@
 #include <chrono>
 #include <client/Compositor.hpp>
 #include <client/ContentLink.hpp>
+#include <client/EditableImages.hpp>
+#include <client/EditableMeshes.hpp>
 #include <client/Scene.hpp>
 #include <client/Sounds.hpp>
 #include <cstdint>
+#include <discord/Link.hpp>
 #include <filesystem>
 #include <memory>
 #include <network/Presence.hpp>
@@ -149,6 +153,21 @@ namespace client {
 
 		// Run for this long, then exit. Zero means run until closed.
 		double ProfileSeconds = 0.0;
+
+		// Write a frame-graph snapshot here when the run ends. Empty writes
+		// none.
+		//
+		// **The studio has had this and the client has not, which is backwards.**
+		// Every stress scene this repository ships is run through
+		// `client --script`, so the program with no way to dump a profile was
+		// the one every profile is taken in - and reading a flame graph off a
+		// screenshot of an overlay is not reading it. Same flag name as the
+		// editor's, because a second spelling for one idea is a second thing to
+		// remember.
+		//
+		// Turning it on turns the frame graph on: recording every span is real
+		// work and `--graph` is otherwise the only thing that asks for it.
+		std::filesystem::path ProfileSnapshot;
 
 		// Read staged data from here instead of from beside the binary.
 		std::filesystem::path AssetsDirectory;
@@ -523,6 +542,31 @@ namespace client {
 		// with speakers.
 		void PumpSounds();
 
+		// Tells Discord what is being played, and keeps that connection alive.
+		//
+		// Beside `PumpSounds` and bounded the same way: cheap when nothing is
+		// configured, and safe every frame because `discord::Link` sends only
+		// what changed and only as often as the protocol allows.
+		//
+		// @param nowSeconds This process's monotonic clock.
+		// @since v0.17
+		void PumpDiscord(double nowSeconds);
+
+		// Makes the link, if the flags asked for one.
+		//
+		// Called once, from `Run`. Nothing is allocated and no socket is opened
+		// for a program nobody configured this for, which is every default
+		// install.
+		//
+		// @since v0.17
+		void StartDiscord();
+
+		// What the Discord templates can name, filled from this frame.
+		//
+		// @return The tokens and what they resolve to.
+		// @since v0.17
+		discord::Facts DiscordFacts() const;
+
 		// Opens the audio device and builds the mixer's routing.
 		//
 		// @return `false` only when a sound was asked for and cannot be played.
@@ -581,6 +625,19 @@ namespace client {
 
 		Options Settings;
 
+		// The connection to Discord, or null when nothing is configured. See
+		// `client/Settings.hpp` for where the `discord` flags come from.
+		//
+		// @since v0.17
+		std::unique_ptr<discord::Link> DiscordLink;
+
+		// When this process started, as a unix epoch second, for the elapsed
+		// timer. Read once: `discord::Link` takes monotonic seconds and Discord
+		// wants epoch ones, and this is the one place the two meet.
+		//
+		// @since v0.17
+		int64_t DiscordStartedUnixSeconds = 0;
+
 		SDL_Window *Window = nullptr;
 		engine::render::Renderer Renderer;
 
@@ -590,6 +647,23 @@ namespace client {
 		// process-wide names, and `Refresh` takes whichever world is being
 		// drawn.
 		engine::render::ShaderLibrary Shaders;
+
+		// **What `Renderer::PostProcessShaderName` was last set to from this
+		// world's own `scene::PostProcessShaderOf`.** `ShaderLibrary::
+		// Changed` only fires when a *compiled module* moves, so a world
+		// switching between two shaders it had already asked for once - both
+		// already compiled - needs a second signal, and this is it: compared
+		// every frame against what the world currently names, independent of
+		// whether anything recompiled.
+		engine::core::Name LastPostProcessShader;
+
+		// **What an `EditableMesh` a script built converts into and
+		// uploads**, one per client for `Shaders`' own reason: the ledger of
+		// last-uploaded revisions is process-wide state, not world state.
+		client::EditableMeshUploader EditableMeshes;
+
+		// The identical ledger, for `EditableImage`.
+		client::EditableImageUploader EditableImages;
 
 		engine::render::OverlayImage Overlay;
 
@@ -737,20 +811,22 @@ namespace client {
 		// The world the panels report on, and the first view composited.
 		engine::world::WorldId Rendered;
 
-		// TODO(render-pipeline): these two are the world-to-renderer seam.
-		//
-		// Kept rather than deleted so the shape of what was here survives: a
-		// world change installed that world's pipelines and chose one, and the
-		// render call named it. Nothing writes them now.
-		//
-		// Which world's saved pipelines are installed in the renderer.
+		// The one rendering profile library loaded with this universe.
+		engine::graph::PipelineSet RenderingProfiles;
+
+		// Which world's selected profile is installed in the renderer.
 		//
 		// **A guard so installing happens on a world change and not per frame.**
-		// `client::InstallWorldPipelines` compiles every pipeline it installs
+		// `client::InstallRenderingProfiles` compiles every profile it installs
 		// and reports what is wrong with each - worth paying when the world
 		// changes, and sixty complaints a second about a half-wired one if it
 		// were not guarded.
-		engine::world::WorldId PipelinesInstalledFor;
+		engine::world::WorldId ProfilesInstalledFor;
+
+		// The selection used for that install. A replicated WorldSettings change
+		// keeps the same WorldId, so the world id alone cannot invalidate the
+		// selected runtime key.
+		engine::core::Name ProfileInstalledSelection;
 
 		// What to put in `render::View::Pipeline`, from that install.
 		//
@@ -949,11 +1025,11 @@ namespace client {
 		// allocating after the first one. At a hundred thousand emitters that is
 		// the difference between one allocation and one a frame.
 		//
-		// **Only the rendered world fills it.** A batch is a span into that
-		// world's pool, and a second world's pool is a different allocation - so
-		// mixing two worlds' batches in one list would hand the renderer spans
-		// with nothing in common but a type.
-		std::vector<engine::render::ParticleBatch> Particles;
+		// **Only the rendered world fills it.** A batch points at a block of that
+		// world's pool and a birth names a slot of it, and a second world's pool
+		// is a different allocation - so mixing two worlds in one frame would
+		// hand the renderer indices into a buffer they do not belong to.
+		ParticleFrame Particles;
 
 		// This frame's beams and trails, as spans into the drawn world's buffer.
 		//

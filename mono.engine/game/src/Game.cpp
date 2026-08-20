@@ -4,6 +4,7 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Values.hpp>
+#include <engine/graph/PipelineDocument.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
@@ -34,6 +35,7 @@ namespace engine::game {
 
 		// A world's settings, as of format 2. See `WriteWorldProperties`.
 		constexpr std::string_view WORLD_PROPERTIES = "WorldProperties";
+		constexpr std::string_view RENDERING_PROFILES = "RenderingProfiles";
 
 		// A world's bake pipelines. See `WriteAssetPipelines`.
 		//
@@ -492,21 +494,85 @@ namespace engine::game {
 			}
 		}
 
-		// TODO(render-pipeline): a world's render pipelines were saved here.
-		//
-		// `WritePipelines` and `ReadPipelines` lived at this point and carried a
-		// `graph::PipelineSet` as one CDATA block - the set's own line-oriented
-		// format embedded verbatim rather than restated as XML, so there was one
-		// grammar for a pipeline rather than two that could disagree while both
-		// parsing. A malformed block warned and dropped rather than failing the
-		// world, because a world whose parts loaded and whose pipeline did not is
-		// recoverable.
-		//
-		// **Both rules are worth keeping when the new system lands.** They are
-		// the reason a half-written pipeline never cost somebody their parts.
-		//
-		// See `ReadWorldBody` below, which still recognises the element so that
-		// `.agame` files written while the old system existed still load.
+		void WriteRenderingProfiles(XmlWriter &writer, const graph::PipelineSet &profiles) {
+			if (profiles.Count() == 0) {
+				return;
+			}
+
+			writer.Open(RENDERING_PROFILES);
+			writer.Verbatim(graph::Write(profiles));
+			writer.Close();
+		}
+
+		void ReadRenderingProfiles(const XmlElement &element, graph::PipelineSet &profiles) {
+			core::Name offender;
+			const graph::PipelineDocumentStatus status = graph::Read(element.Text, profiles, offender);
+			if (status == graph::PipelineDocumentStatus::Ok) {
+				return;
+			}
+
+			ENGINE_WARN(
+				"rendering profiles: {} at '{}'; the universe loads with the standard graph",
+				graph::Describe(status),
+				offender.IsValid() ? offender.Text() : ""
+			);
+			profiles.Clear();
+		}
+
+		// A malformed render graph loses authored rendering data, not the world's
+		// instances. The standard graph is a safe fallback and the document stays
+		// repairable in Studio.
+		void ReadPipelines(const XmlElement &element, Store &store) {
+			graph::PipelineSet set;
+			core::Name offender;
+			const graph::PipelineDocumentStatus status = graph::Read(element.Text, set, offender);
+			if (status != graph::PipelineDocumentStatus::Ok) {
+				ENGINE_WARN(
+					"world pipelines: {} at '{}'; the world loads with the standard graph",
+					graph::Describe(status),
+					offender.IsValid() ? offender.Text() : ""
+				);
+				return;
+			}
+
+			if (set.Count() > 0) {
+				store.SetResource(std::move(set));
+			}
+		}
+
+		core::Name
+		MigrateWorldPipelines(Store &store, core::Name worldName, graph::PipelineSet &renderingProfiles) {
+			const graph::PipelineSet *legacy = store.Resource<graph::PipelineSet>();
+			if (legacy == nullptr || legacy->Count() == 0) {
+				return {};
+			}
+
+			core::Name selected;
+			for (const core::Name name : legacy->Names()) {
+				const graph::PipelineDocument *document = legacy->Find(name);
+				if (document == nullptr) {
+					continue;
+				}
+
+				core::Name destination = name;
+				if (const graph::PipelineDocument *existing = renderingProfiles.Find(name);
+					existing != nullptr && graph::Write(*existing) != graph::Write(*document)) {
+					const std::string base = std::string(worldName.Text()) + "/" + std::string(name.Text());
+					destination = core::Name(base);
+					for (uint32_t suffix = 2; renderingProfiles.Find(destination) != nullptr; suffix++) {
+						destination = core::Name(base + " " + std::to_string(suffix));
+					}
+				}
+
+				renderingProfiles.Set(destination, *document);
+				if (!selected.IsValid() || name == core::Name("main")) {
+					selected = destination;
+				}
+			}
+
+			store.RemoveResource<graph::PipelineSet>();
+			return selected;
+		}
 
 		// A world's asset pipelines, as one block of text.
 		//
@@ -658,7 +724,16 @@ namespace engine::game {
 			writer.Open(WORLD_PROPERTIES);
 			writer.Attribute("tickRate", FormatNumber(settings.TickRate));
 			writer.Attribute("idleTickRate", FormatNumber(settings.IdleTickRate));
+			writer.Attribute("physicsTickRate", FormatNumber(settings.PhysicsTickRate));
+			writer.Attribute("replicationTickRate", FormatNumber(settings.ReplicationTickRate));
+			writer.Attribute(
+				"globalSimulatedNetworkLatency", FormatNumber(settings.GlobalSimulatedNetworkLatency)
+			);
 			writer.Attribute("faultLimit", std::to_string(settings.FaultLimit));
+			writer.Attribute(
+				"renderingProfile",
+				settings.RenderingProfile.IsValid() ? settings.RenderingProfile.Text() : ""
+			);
 			writer.Close();
 		}
 
@@ -681,7 +756,15 @@ namespace engine::game {
 
 			settings.TickRate = NumberOf(source, "tickRate", 60.0);
 			settings.IdleTickRate = NumberOf(source, "idleTickRate", 2.0);
+
+			// Zero for a file that predates them, which is the same "follow the
+			// tick rate" every world in this repository already means.
+			settings.PhysicsTickRate = NumberOf(source, "physicsTickRate", 0.0);
+			settings.ReplicationTickRate = NumberOf(source, "replicationTickRate", 0.0);
+
+			settings.GlobalSimulatedNetworkLatency = NumberOf(source, "globalSimulatedNetworkLatency", 0.0);
 			settings.FaultLimit = CountOf(source, "faultLimit", 3);
+			settings.RenderingProfile = core::Name(TextOf(source, "renderingProfile", "Default PBR"));
 			return settings;
 		}
 
@@ -789,12 +872,7 @@ namespace engine::game {
 		// saves, loads, and quietly has no pipelines because the two spellings
 		// never met. Naming it beside the classes is what makes the order
 		// impossible to get wrong from outside.
-		// TODO(render-pipeline): `graph::RegisterPipelineComponents();` went
-		// here, beside the class registrations and for their reason - a resource
-		// is keyed by a component id, and one first minted by `SetResource`
-		// takes the compiler's spelling of the type, which is a world that saves,
-		// loads, and quietly has no pipelines because the two spellings never
-		// met. Register the new system's resource types in this function.
+		graph::RegisterPipelineComponents();
 	}
 
 	void WriteWorldBody(XmlWriter &writer, Store &store) {
@@ -802,8 +880,6 @@ namespace engine::game {
 
 		WriteSources(writer, store);
 		WriteAssetPipelines(writer, store);
-
-		// TODO(render-pipeline): `WritePipelines(writer, store);` went here.
 
 		Numbering numbering;
 		store.EachRoot([&](Entity root) { numbering.Walk(store, root); });
@@ -835,15 +911,8 @@ namespace engine::game {
 				continue;
 			}
 
-			// TODO(render-pipeline): `ReadPipelines(*child, store);` went here.
-			//
-			// **Still matched, and deliberately.** Worlds saved while the old
-			// pipeline system existed carry this element, and the fall-through
-			// below only skips things that are not `Item` - so leaving it out
-			// would work by accident rather than on purpose. Skipping it here
-			// says the element is known and currently unused, which is a
-			// different fact from "unrecognised".
 			if (child->Name == "Pipelines") {
+				ReadPipelines(*child, store);
 				continue;
 			}
 
@@ -923,7 +992,8 @@ namespace engine::game {
 		return runtime;
 	}
 
-	std::string WriteGame(world::Universe &universe, core::Name name) {
+	std::string
+	WriteGame(world::Universe &universe, core::Name name, const graph::PipelineSet &renderingProfiles) {
 		XmlWriter writer;
 
 		writer.Open(GAME_ROOT);
@@ -937,7 +1007,11 @@ namespace engine::game {
 		);
 		writer.Attribute("catchUp", std::to_string(settings.MaximumCatchUpTicks));
 		writer.Attribute("busBudget", std::to_string(settings.BusBudgetPerTick));
+		writer.Attribute("channelQueue", std::to_string(settings.ChannelQueueLimit));
+		writer.Attribute("channelsPerWorld", std::to_string(settings.ChannelsPerWorld));
 		writer.Close();
+
+		WriteRenderingProfiles(writer, renderingProfiles);
 
 		for (const world::WorldId id : universe.Worlds()) {
 			// **A replica is not authored here, so it is not written here.**
@@ -1000,10 +1074,24 @@ namespace engine::game {
 		return writer.Finish();
 	}
 
+	std::string WriteGame(world::Universe &universe, core::Name name) {
+		return WriteGame(universe, name, graph::PipelineSet{});
+	}
+
 	bool SaveGame(
 		world::Universe &universe, core::Name name, const std::filesystem::path &path, std::string &error
 	) {
-		return WriteFile(path, WriteGame(universe, name), error);
+		return SaveGame(universe, name, graph::PipelineSet{}, path, error);
+	}
+
+	bool SaveGame(
+		world::Universe &universe,
+		core::Name name,
+		const graph::PipelineSet &renderingProfiles,
+		const std::filesystem::path &path,
+		std::string &error
+	) {
+		return WriteFile(path, WriteGame(universe, name, renderingProfiles), error);
 	}
 
 	size_t ImportUniverse(
@@ -1039,7 +1127,16 @@ namespace engine::game {
 
 		for (const uint32_t index : root.Children) {
 			const XmlElement *child = document.At(index);
-			if (child == nullptr || child->Name != WORLD_ROOT) {
+			if (child == nullptr) {
+				continue;
+			}
+
+			if (child->Name == RENDERING_PROFILES) {
+				ReadRenderingProfiles(*child, out.RenderingProfiles);
+				continue;
+			}
+
+			if (child->Name != WORLD_ROOT) {
 				continue;
 			}
 
@@ -1077,7 +1174,13 @@ namespace engine::game {
 			}
 
 			std::string worldError;
-			universe.Enter(id, [&](Store &store) { ReadWorldBody(document, *child, store, worldError); });
+			core::Name migratedProfile;
+			universe.Enter(id, [&](Store &store) {
+				ReadWorldBody(document, *child, store, worldError);
+				if (worldError.empty()) {
+					migratedProfile = MigrateWorldPipelines(store, settings.Name, out.RenderingProfiles);
+				}
+			});
 
 			if (!worldError.empty()) {
 				// **Only this world is undone.** The ones already imported are
@@ -1086,6 +1189,9 @@ namespace engine::game {
 				error = worldError;
 				universe.Destroy(id);
 				return imported;
+			}
+			if (migratedProfile.IsValid()) {
+				(void)universe.SetRenderingProfile(id, migratedProfile);
 			}
 
 			out.Worlds.push_back(settings.Name);
@@ -1133,17 +1239,26 @@ namespace engine::game {
 					CountOf(*child, "catchUp", static_cast<uint32_t>(settings.MaximumCatchUpTicks))
 				);
 				settings.BusBudgetPerTick = CountOf(*child, "busBudget", settings.BusBudgetPerTick);
+				settings.ChannelQueueLimit = CountOf(*child, "channelQueue", settings.ChannelQueueLimit);
+				settings.ChannelsPerWorld = CountOf(*child, "channelsPerWorld", settings.ChannelsPerWorld);
 
 				// These are authored tuning, so opening a game applies the same
-				// values its file reports. Federation and the router's hard caps
-				// remain construction-time host policy and are not in this file.
+				// values its file reports. Federation alone remains
+				// construction-time host policy and is not in this file.
 				settings.Mode = TextOf(*child, "mode", "WorldParallel") == "WorldSerial"
 									? world::ExecutionMode::WorldSerial
 									: world::ExecutionMode::WorldParallel;
 				universe.SetMode(settings.Mode);
 				universe.SetMaximumCatchUpTicks(settings.MaximumCatchUpTicks);
 				universe.SetBusBudgetPerTick(settings.BusBudgetPerTick);
+				universe.SetChannelQueueLimit(settings.ChannelQueueLimit);
+				universe.SetChannelsPerWorld(settings.ChannelsPerWorld);
 				out.Universe = settings;
+				continue;
+			}
+
+			if (child->Name == RENDERING_PROFILES) {
+				ReadRenderingProfiles(*child, out.RenderingProfiles);
 				continue;
 			}
 
@@ -1164,10 +1279,12 @@ namespace engine::game {
 			}
 
 			std::string worldError;
+			core::Name migratedProfile;
 			universe.Enter(id, [&](Store &store) {
 				if (!ReadWorldBody(document, *child, store, worldError)) {
 					return;
 				}
+				migratedProfile = MigrateWorldPipelines(store, settings.Name, out.RenderingProfiles);
 			});
 
 			if (!worldError.empty()) {
@@ -1176,6 +1293,9 @@ namespace engine::game {
 					universe.Destroy(created);
 				}
 				return false;
+			}
+			if (migratedProfile.IsValid()) {
+				(void)universe.SetRenderingProfile(id, migratedProfile);
 			}
 
 			out.Worlds.push_back(settings.Name);

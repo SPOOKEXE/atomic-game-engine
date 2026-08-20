@@ -4,9 +4,11 @@
 #include <engine/ui/Theme.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <imgui.h>
-#include <string>
 #include <imgui_internal.h>
+#include <string>
+#include <studio/CodeMetrics.hpp>
 #include <studio/Editor.hpp>
 #include <studio/Widgets.hpp>
 
@@ -34,7 +36,9 @@ namespace studio {
 
 		size_t closing = Scripts.size();
 
-		if (ImGui::BeginTabBar("##scripts", ImGuiTabBarFlags_Reorderable | ImGuiTabBarFlags_TabListPopupButton)) {
+		if (ImGui::BeginTabBar(
+				"##scripts", ImGuiTabBarFlags_Reorderable | ImGuiTabBarFlags_TabListPopupButton
+			)) {
 			for (size_t index = 0; index < Scripts.size(); index++) {
 				OpenScript &tab = Scripts[index];
 
@@ -158,8 +162,7 @@ namespace studio {
 								// contains the needle, which is an editor that
 								// hangs on "a" -> "aa".
 								size_t at = 0;
-								for (size_t found = tab.Text.find(FindText, at);
-									 found != std::string::npos;
+								for (size_t found = tab.Text.find(FindText, at); found != std::string::npos;
 									 found = tab.Text.find(FindText, at)) {
 									rebuilt.append(tab.Text, at, found - at);
 									rebuilt.append(ReplaceText);
@@ -169,10 +172,8 @@ namespace studio {
 
 								tab.Text = rebuilt;
 								tab.Modified = true;
-								Say(
-									"replaced " + std::to_string(matches) + " occurrence(s) in " +
-									std::string(Label(tab.Path))
-								);
+								Say("replaced " + std::to_string(matches) + " occurrence(s) in " +
+									std::string(Label(tab.Path)));
 							}
 							ImGui::EndDisabled();
 
@@ -238,6 +239,13 @@ namespace studio {
 						// insert a newline before accepting. `LockThisFrame` is
 						// what makes the widget's owner-agnostic poll fail
 						// rather than win.
+						// **Tab is on the list, and it can be.** The field
+						// polls Tab through `Shortcut` against its own id -
+						// the `AllowTabInput`/`CallbackCompletion` assert is
+						// about the *flags*, not the key - so the same
+						// `LockThisFrame` that keeps Enter out of the text
+						// keeps Tab out of the indentation, and Tab accepts
+						// exactly while the popup is up.
 						const ImGuiID popupId = ImGui::GetID("##completion");
 						if (ScriptPopupOpen) {
 							for (const ImGuiKey key :
@@ -245,6 +253,7 @@ namespace studio {
 								  ImGuiKey_DownArrow,
 								  ImGuiKey_Enter,
 								  ImGuiKey_KeypadEnter,
+								  ImGuiKey_Tab,
 								  ImGuiKey_Escape}) {
 								ImGui::SetKeyOwner(key, popupId, ImGuiInputFlags_LockThisFrame);
 							}
@@ -252,11 +261,41 @@ namespace studio {
 
 						const ImVec2 fieldMin = ImGui::GetCursorScreenPos();
 
-						const bool changed = CodeField("##text", tab.Text, &tab.Edit, -1.0f, -1.0f);
+						// The minimap's column, taken off the field's width
+						// up front. Fixed rather than zoomed: it is an
+						// overview of the file, not text somebody reads, so
+						// only the interface scale sizes it - and a panel too
+						// narrow to share simply keeps the whole width for
+						// the code.
+						const float minimapWidth = 72.0f * Settings.Scale;
+						const float available = ImGui::GetContentRegionAvail().x;
+						const bool minimapFits = available > minimapWidth * 3.0f;
+
+						const bool changed = CodeField(
+							"##text",
+							tab.Text,
+							&tab.Edit,
+							minimapFits ? available - minimapWidth : -1.0f,
+							-1.0f
+						);
+
+						// Read here, while the field is still the last item,
+						// so imgui's own rest delay decides when a tooltip is
+						// wanted; the drawing happens after the completion
+						// has had its turn.
+						const bool resting = ImGui::IsItemHovered(
+							ImGuiHoveredFlags_DelayNormal | ImGuiHoveredFlags_Stationary
+						);
+
 						if (changed) {
 							tab.Modified = true;
 						}
 						(void)gutter;
+
+						if (minimapFits) {
+							ImGui::SameLine(0.0f, 0.0f);
+							DrawScriptMinimap(tab, minimapWidth);
+						}
 
 						// Ctrl+Space asks for the list whatever is under the
 						// caret, which is the binding every editor has and the
@@ -269,6 +308,8 @@ namespace studio {
 						if (ScriptPopupOpen) {
 							DrawScriptCompletion(tab, fieldMin, popupId);
 						}
+
+						DrawScriptHover(tab, fieldMin, resting);
 
 						// Ctrl+wheel over the text, which is what every editor
 						// binds it to.
@@ -435,6 +476,10 @@ namespace studio {
 
 		const std::vector<std::string> children = ScriptSiblings(tab);
 
+		// Kept for the popup's footer, which wants a keyword's doc line
+		// without re-resolving the container selector every frame.
+		ScriptPopupLanguage = language;
+
 		CompletionSources sources;
 		sources.Language = language;
 		sources.Surface = &SurfaceFor(language);
@@ -486,8 +531,12 @@ namespace studio {
 			ScriptPopupChoice = (ScriptPopupChoice + count - 1) % count;
 		}
 
+		// Tab accepts as well, as it does in VS Code. It only reaches here
+		// while the popup owns it - `DrawScripts` locks it beside Enter - so
+		// with the popup closed Tab still indents.
 		bool accept = ImGui::IsKeyPressed(ImGuiKey_Enter, ImGuiInputFlags_None, popupId) ||
-					  ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, ImGuiInputFlags_None, popupId);
+					  ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, ImGuiInputFlags_None, popupId) ||
+					  ImGui::IsKeyPressed(ImGuiKey_Tab, ImGuiInputFlags_None, popupId);
 
 		// **Where the caret is, computed rather than asked for, and exact
 		// because the face is monospace.** Every glyph is one advance wide, so a
@@ -495,14 +544,14 @@ namespace studio {
 		// `Typeface::Monospace` a few lines above this and that is what makes it
 		// true. A proportional face would need the run measured, which is the
 		// sort of thing that is nearly right and drifts a character per line.
+		// `ColumnAt` counts a tab as the four columns imgui draws it as, so an
+		// indented line places the popup under the caret rather than left of it.
 		const auto caret = static_cast<size_t>(std::max(0, tab.Edit.Caret));
 		const std::string_view before =
 			std::string_view(tab.Text).substr(0, std::min(caret, tab.Text.size()));
 
 		const auto line = static_cast<float>(std::count(before.begin(), before.end(), '\n'));
-		const size_t lineStart = before.rfind('\n');
-		const auto column =
-			static_cast<float>(before.size() - (lineStart == std::string_view::npos ? 0 : lineStart + 1));
+		const auto column = static_cast<float>(ColumnAt(tab.Text, caret));
 
 		const float rowHeight = ImGui::GetTextLineHeight();
 		const float glyph = ImGui::CalcTextSize("0").x;
@@ -520,10 +569,14 @@ namespace studio {
 			fieldMin.y + padding.y + ((line + 1.0f) * rowHeight) - scroll.y
 		);
 
+		// One footer row under the list: what kind of thing is chosen, and a
+		// keyword's doc line when it has one. The size accounts for it up
+		// front because the window's size is set, not measured.
 		const int rows = std::min(count, 10);
+		const float footer = ImGui::GetTextLineHeightWithSpacing() + ImGui::GetStyle().ItemSpacing.y + 1.0f;
 		const ImVec2 size(
 			320.0f * Settings.Scale,
-			(static_cast<float>(rows) * ImGui::GetTextLineHeightWithSpacing()) + (padding.y * 2.0f)
+			(static_cast<float>(rows) * ImGui::GetTextLineHeightWithSpacing()) + (padding.y * 2.0f) + footer
 		);
 
 		// Kept on screen. A popup near the right edge or the last line would
@@ -547,14 +600,55 @@ namespace studio {
 										   ImGuiWindowFlags_NoFocusOnAppearing |
 										   ImGuiWindowFlags_NoNavInputs | ImGuiWindowFlags_AlwaysAutoResize;
 
+		// What the author has typed of the word being completed, for the
+		// matched-prefix highlight. The anchor is where the word began.
+		std::string_view typed;
+		if (ScriptPopupAnchor >= 0 && caret >= static_cast<size_t>(ScriptPopupAnchor)) {
+			typed = std::string_view(tab.Text).substr(
+				static_cast<size_t>(ScriptPopupAnchor), caret - static_cast<size_t>(ScriptPopupAnchor)
+			);
+		}
+
 		if (ImGui::Begin("##completion", nullptr, FLAGS)) {
+			// The rows in their own child so the footer under them stays put
+			// while a long list scrolls.
+			const float listHeight = static_cast<float>(rows) * ImGui::GetTextLineHeightWithSpacing();
+			ImGui::BeginChild("##rows", ImVec2(0.0f, listHeight), false);
+
 			for (int index = 0; index < count; index++) {
 				const Completion &entry = ScriptCompletions[static_cast<size_t>(index)];
 
 				ImGui::PushID(index);
+				const ImVec2 rowPosition = ImGui::GetCursorScreenPos();
 				if (ImGui::Selectable(entry.Text.c_str(), index == ScriptPopupChoice)) {
 					ScriptPopupChoice = index;
 					accept = true;
+				}
+
+				// **The typed prefix re-drawn in the accent colour over the
+				// label**, glyph for glyph - exact because the face is
+				// monospace and the label starts at the cursor the row was
+				// submitted at. Only a real prefix is marked: `FuzzyMatch`
+				// also admits subsequences, and marking those would need the
+				// match positions it deliberately does not report.
+				if (!typed.empty() && entry.Text.size() >= typed.size()) {
+					const auto samePrefix = std::equal(
+						typed.begin(),
+						typed.end(),
+						entry.Text.begin(),
+						[](const char left, const char right) {
+							return std::tolower(static_cast<unsigned char>(left)) ==
+								   std::tolower(static_cast<unsigned char>(right));
+						}
+					);
+					if (samePrefix) {
+						ImGui::GetWindowDrawList()->AddText(
+							rowPosition,
+							engine::ui::AccentColour(),
+							entry.Text.c_str(),
+							entry.Text.c_str() + typed.size()
+						);
+					}
 				}
 
 				// Scrolled to rather than merely highlighted, so arrowing past
@@ -571,6 +665,27 @@ namespace studio {
 				}
 				ImGui::PopID();
 			}
+
+			ImGui::EndChild();
+
+			// The footer: what the chosen row is, in the vocabulary the rest
+			// of the editor uses, plus a keyword's one-line doc. A property's
+			// type and owner are already its `Detail`, so the footer says the
+			// kind rather than repeating them.
+			const Completion &picked = ScriptCompletions[static_cast<size_t>(ScriptPopupChoice)];
+			ImGui::Separator();
+			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+
+			const std::string_view doc = picked.Kind == CompletionKind::Keyword
+											 ? KeywordDoc(ScriptPopupLanguage, picked.Text)
+											 : std::string_view{};
+			if (!doc.empty()) {
+				ImGui::TextUnformatted(doc.data(), doc.data() + doc.size());
+			} else {
+				const std::string_view kind = Describe(picked.Kind);
+				ImGui::TextUnformatted(kind.data(), kind.data() + kind.size());
+			}
+			ImGui::PopStyleColor();
 		}
 		ImGui::End();
 
@@ -669,10 +784,9 @@ namespace studio {
 				// what every editor draws and what makes "switched off" visible
 				// rather than absent.
 				const ImVec2 centre(origin.x + (rowHeight * 0.5f), y + (rowHeight * 0.5f));
-				const ImU32 colour =
-					point->Action == engine::script::BreakAction::Stop
-						? IM_COL32(220, 90, 90, 255)
-						: IM_COL32(220, 160, 60, 255);
+				const ImU32 colour = point->Action == engine::script::BreakAction::Stop
+										 ? IM_COL32(220, 90, 90, 255)
+										 : IM_COL32(220, 160, 60, 255);
 
 				if (point->Enabled) {
 					draw->AddCircleFilled(centre, rowHeight * 0.32f, colour);
@@ -692,14 +806,215 @@ namespace studio {
 			const float text = ImGui::CalcTextSize(label.c_str()).x;
 
 			draw->AddText(
-				ImVec2(origin.x + width - text - 4.0f, y),
-				engine::ui::MutedColour(),
-				label.c_str()
+				ImVec2(origin.x + width - text - 4.0f, y), engine::ui::MutedColour(), label.c_str()
 			);
 		}
 
 		ImGui::EndChild();
 		return width;
+	}
+
+	void Editor::DrawScriptMinimap(const OpenScript &tab, const float width) {
+		const ImVec2 area = ImGui::GetContentRegionAvail();
+
+		ImGui::BeginChild("##minimap", ImVec2(width, area.y), false, ImGuiWindowFlags_NoScrollbar);
+
+		size_t lines = 1;
+		for (const char character : tab.Text) {
+			lines += character == '\n' ? 1 : 0;
+		}
+
+		const float rowHeight = ImGui::GetTextLineHeight();
+
+		// The code field's scroll, read from the window it made - the same
+		// lookup, the same justification and the same benign fallback
+		// `DrawScriptGutter` documents above.
+		float scroll = 0.0f;
+		ImGuiWindow *code = ImGui::FindWindowByName("##text");
+		if (code != nullptr) {
+			scroll = code->Scroll.y;
+		}
+
+		const ImVec2 origin = ImGui::GetCursorScreenPos();
+		const float mapRow = MinimapRowHeight(lines, area.y, 2.0f * Settings.Scale);
+
+		// The first hundred columns of the file, spread across the width.
+		// Longer lines are cut rather than squeezed: a minimap answers "where
+		// is the shape I remember", and shapes stop being recognisable when
+		// their scale depends on the longest line in the file.
+		constexpr float MAP_COLUMNS = 100.0f;
+		const float mapGlyph = width / MAP_COLUMNS;
+
+		// One invisible button over the whole column, so imgui owns the
+		// hover, the click and the drag capture. Scroll-to-click while it is
+		// held is what makes the map a scrollbar as well as a picture.
+		ImGui::InvisibleButton("##map", ImVec2(width, std::max(area.y, 1.0f)));
+		if (ImGui::IsItemActive() && code != nullptr && rowHeight > 0.0f) {
+			const float picked = (ImGui::GetMousePos().y - origin.y) / mapRow;
+
+			// Writing the field's scroll is the same reach as reading it:
+			// internal `SetScrollY(window, ...)` sets what public `SetScrollY`
+			// sets on the current window, and the only internal part is
+			// addressing the window by name - which already answered non-null
+			// on the line above, or this does nothing.
+			ImGui::SetScrollY(code, MinimapScrollFor(picked, lines, rowHeight, area.y));
+		}
+
+		ImDrawList *draw = ImGui::GetWindowDrawList();
+
+		// Two intensities and not a highlighter. The code field tints
+		// nothing, so the honest minimap is a density map: identifier runs
+		// bright, punctuation dim, whitespace empty.
+		const unsigned int wordColour = engine::ui::MutedColour();
+		const unsigned int dimColour = (wordColour & ~IM_COL32_A_MASK) | (0x50u << IM_COL32_A_SHIFT);
+
+		// When the file is compressed below a pixel per line, lines are
+		// stepped over rather than overdrawn - the work stays proportional to
+		// the map's pixels, never to the file.
+		const auto stride = std::max<size_t>(1, static_cast<size_t>(1.0f / mapRow));
+		const float runHeight = std::max(mapRow * 0.7f, 1.0f);
+
+		const std::string_view text(tab.Text);
+		size_t lineStart = 0;
+		for (size_t row = 0; lineStart <= text.size(); row++) {
+			const size_t newline = text.find('\n', lineStart);
+			const size_t lineEnd = newline == std::string_view::npos ? text.size() : newline;
+
+			const float y = origin.y + (static_cast<float>(row) * mapRow);
+			if (y > origin.y + area.y) {
+				break;
+			}
+
+			if (row % stride == 0) {
+				MinimapRunsOf(
+					text.substr(lineStart, lineEnd - lineStart),
+					static_cast<size_t>(MAP_COLUMNS),
+					ScriptMinimapRuns
+				);
+				for (const MinimapRun &run : ScriptMinimapRuns) {
+					const float x = origin.x + (static_cast<float>(run.Column) * mapGlyph);
+					draw->AddRectFilled(
+						ImVec2(x, y),
+						ImVec2(x + (static_cast<float>(run.Columns) * mapGlyph), y + runHeight),
+						run.Word ? wordColour : dimColour
+					);
+				}
+			}
+
+			if (newline == std::string_view::npos) {
+				break;
+			}
+			lineStart = newline + 1;
+		}
+
+		// The visible region, drawn over the runs so what the code field
+		// shows is findable in the picture of the whole.
+		if (rowHeight > 0.0f) {
+			const float viewTop = origin.y + ((scroll / rowHeight) * mapRow);
+			const float viewHeight = std::max((area.y / rowHeight) * mapRow, 2.0f);
+			const unsigned int viewColour =
+				(engine::ui::BrightColour() & ~IM_COL32_A_MASK) | (0x20u << IM_COL32_A_SHIFT);
+			draw->AddRectFilled(
+				ImVec2(origin.x, viewTop),
+				ImVec2(origin.x + width, std::min(viewTop + viewHeight, origin.y + area.y)),
+				viewColour
+			);
+		}
+
+		ImGui::EndChild();
+	}
+
+	void Editor::DrawScriptHover(OpenScript &tab, const ImVec2 fieldMin, const bool hovered) {
+		// The popup wins outright: two floating answers at the caret would
+		// fight for the same spot and the one being typed against matters.
+		if (!hovered || ScriptPopupOpen) {
+			ScriptHoverWord.clear();
+			ScriptHoverText.clear();
+			return;
+		}
+
+		const float rowHeight = ImGui::GetTextLineHeight();
+		const float glyph = ImGui::CalcTextSize("0").x;
+		if (rowHeight <= 0.0f || glyph <= 0.0f) {
+			return;
+		}
+
+		// The same scroll lookup and the same fallback as the gutter; from
+		// the top-left when it fails, which at worst hovers the wrong word
+		// for a frame.
+		ImVec2 scroll(0.0f, 0.0f);
+		if (const ImGuiWindow *code = ImGui::FindWindowByName("##text"); code != nullptr) {
+			scroll = ImVec2(code->Scroll.x, code->Scroll.y);
+		}
+
+		// Pixels to cell: the inverse of the arithmetic that places the
+		// completion popup, with the same monospace guarantee making it
+		// exact.
+		const ImVec2 padding = ImGui::GetStyle().FramePadding;
+		const ImVec2 mouse = ImGui::GetMousePos();
+		const float x = mouse.x - fieldMin.x - padding.x + scroll.x;
+		const float y = mouse.y - fieldMin.y - padding.y + scroll.y;
+		if (x < 0.0f || y < 0.0f) {
+			ScriptHoverWord.clear();
+			ScriptHoverText.clear();
+			return;
+		}
+
+		// `OffsetAtCell` answers nothing for empty space - past a line's end,
+		// past the file's last line - which is what keeps the tooltip off
+		// text that is not there.
+		const size_t offset =
+			OffsetAtCell(tab.Text, static_cast<size_t>(y / rowHeight), static_cast<size_t>(x / glyph));
+		if (offset == std::string_view::npos) {
+			ScriptHoverWord.clear();
+			ScriptHoverText.clear();
+			return;
+		}
+
+		const std::string_view word = WordAt(tab.Text, offset);
+		if (word.empty()) {
+			ScriptHoverWord.clear();
+			ScriptHoverText.clear();
+			return;
+		}
+
+		// Rebuilt only when the mouse reaches a different occurrence, because
+		// building it resolves the tab's language and walks its siblings
+		// inside `Universe::Enter` - fine once per word, wasteful per frame.
+		const auto anchor = static_cast<int>(word.data() - tab.Text.data());
+		if (word != ScriptHoverWord || anchor != ScriptHoverAnchor || tab.Instance != ScriptHoverInstance) {
+			ScriptHoverWord.assign(word);
+			ScriptHoverAnchor = anchor;
+			ScriptHoverInstance = tab.Instance;
+
+			// The language the script will actually run as - the selector's
+			// answer, exactly as `UpdateScriptCompletion` resolves it.
+			engine::script::Language language = engine::script::LanguageOf(tab.Path.Text());
+			if (tab.World.IsValid()) {
+				Universe->Enter(tab.World, [&](Store &store) {
+					if (store.Alive(tab.Instance)) {
+						language = engine::script::ActiveLanguageOf(store, tab.Instance);
+					}
+				});
+			}
+
+			const std::vector<std::string> children = ScriptSiblings(tab);
+
+			CompletionSources sources;
+			sources.Language = language;
+			sources.Surface = &SurfaceFor(language);
+			sources.Children = children;
+
+			ScriptHoverText = HoverText(tab.Text, offset, sources);
+		}
+
+		// A word the editor knows nothing about is no tooltip at all, and the
+		// cached empty answer is what keeps that silence cheap.
+		if (ScriptHoverText.empty()) {
+			return;
+		}
+
+		ImGui::SetTooltip("%s", ScriptHoverText.c_str());
 	}
 
 	const engine::script::Breakpoint *Editor::BreakpointAt(engine::core::Name path, int line) const {
@@ -733,10 +1048,8 @@ namespace studio {
 		// fired would read as the debugger being broken rather than as the
 		// language not being supported, and those are not the same thing to go
 		// and fix.
-		if (const std::string_view refused = engine::script::BreakpointsRefused(source);
-			!refused.empty()) {
-			Say("cannot break in " + source + ": " + std::string(refused),
-				engine::core::LogLevel::Warning);
+		if (const std::string_view refused = engine::script::BreakpointsRefused(source); !refused.empty()) {
+			Say("cannot break in " + source + ": " + std::string(refused), engine::core::LogLevel::Warning);
 			return;
 		}
 

@@ -48,7 +48,6 @@ namespace engine::render {
 		};
 
 		std::vector<Entry> Entries;
-		std::vector<scene::DrawInstance> Instances;
 		OverlayImage EmptyOverlay;
 	};
 }

@@ -129,8 +129,11 @@ TEST_CASE("an empty universe round-trips", "[world]") {
 
 TEST_CASE("worlds, their state and their storage all come back", "[world]") {
 	Universe source;
-	const WorldId busy = source.Create(Named("snap.busy", 60.0));
+	WorldSettings busySettings = Named("snap.busy", 60.0);
+	busySettings.GlobalSimulatedNetworkLatency = 37.5;
+	const WorldId busy = source.Create(busySettings);
 	const WorldId dozing = source.Create(Named("snap.dozing", 30.0));
+	REQUIRE(source.SetRenderingProfile(busy, Name("Cinematic")) == engine::world::WorldStatus::Ok);
 
 	Build(source, busy, "snap.topic");
 	Build(source, dozing, "snap.topic");
@@ -153,6 +156,8 @@ TEST_CASE("worlds, their state and their storage all come back", "[world]") {
 	REQUIRE(restoredBusy.IsValid());
 	REQUIRE(restored.StatisticsOf(restoredBusy).Ticks == source.StatisticsOf(busy).Ticks);
 	REQUIRE(TallyIn(restored, restoredBusy) == TallyIn(source, busy));
+	REQUIRE(restored.SettingsOf(restoredBusy).RenderingProfile == Name("Cinematic"));
+	REQUIRE(restored.SettingsOf(restoredBusy).GlobalSimulatedNetworkLatency == 37.5);
 
 	// State came back too, so a suspended world does not silently wake up.
 	REQUIRE(restored.StateOf(restored.Find(Name("snap.dozing"))) == WorldState::Suspended);

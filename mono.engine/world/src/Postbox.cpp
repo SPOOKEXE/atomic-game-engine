@@ -89,13 +89,38 @@ namespace engine::world {
 				}
 			}
 		}
+
+		void WriteReplicas(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *replicas = static_cast<const Replica *>(source);
+			for (size_t index = 0; index < count; index++) {
+				writer.WriteBool(replicas[index].Active);
+				writer.WriteName(replicas[index].Of);
+				writer.WriteName(replicas[index].View);
+			}
+		}
+
+		void ReadReplicas(core::ByteReader &reader, void *destination, size_t count) {
+			auto *replicas = static_cast<Replica *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				replicas[index].Active = reader.ReadBool();
+				replicas[index].Of = reader.ReadName();
+				replicas[index].View = reader.ReadName();
+			}
+		}
 	}
 
 	void RegisterMailboxTypes() {
 		ecs::Components::Register<Outbox>("world.Outbox", WriteEnvelopes, ReadEnvelopes);
 		ecs::Components::Register<Inbox>("world.Inbox", WriteDeliveries, ReadDeliveries);
 		ecs::Components::Register<BusBudget>("world.BusBudget");
-		ecs::Components::Register<Replica>("world.Replica");
+
+		// **Hand-written since `Replica` gained two names.** A name's id is a
+		// counter this process assigned in first-seen order, so the generated
+		// form would write that counter and a reading process would resolve it
+		// to whatever string happened to take the same number - a file that
+		// loads and is wrong rather than one that fails. `scene/Registration.cpp`
+		// states the rule and this is the same answer.
+		ecs::Components::Register<Replica>("world.Replica", WriteReplicas, ReadReplicas);
 	}
 
 	std::span<const Delivery> Postbox::Deliveries() const {

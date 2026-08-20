@@ -78,10 +78,19 @@ namespace engine::render {
 			return Vector3{0.0f, 0.0f, -1.0f};
 		}
 
+		// How far off a face a canvas floats before its own `ZOffset` is added.
+		//
+		// A canvas exactly on a face is coplanar with it and z-fights, which
+		// reads as the sign flickering rather than as a depth precision problem -
+		// so the bias is unconditional and `SurfaceGui.ZOffset` adds to it rather
+		// than replacing it. See `gui::Surface::ZOffset`.
+		constexpr float SURFACE_BIAS = 1.0e-3f;
+
 		void FaceCanvas(
 			gui::Face face,
 			const scene::Transform &placement,
 			const scene::Bounds &bounds,
+			float zOffset,
 			gui::SpatialCanvas &canvas
 		) {
 			Vector3 localRight;
@@ -126,7 +135,8 @@ namespace engine::render {
 			canvas.AxisX = placement.Frame.VectorToWorldSpace(localRight) * extent.X;
 			canvas.AxisY = placement.Frame.VectorToWorldSpace(localDown) * extent.Y;
 			const Vector3 centre = placement.Frame.Position + normal * reach;
-			canvas.Origin = centre - canvas.AxisX * 0.5f - canvas.AxisY * 0.5f + normal * 1.0e-3f;
+			canvas.Origin =
+				centre - canvas.AxisX * 0.5f - canvas.AxisY * 0.5f + normal * (SURFACE_BIAS + zOffset);
 		}
 
 		// How many pixels one stud covers at a given distance from the camera.
@@ -207,7 +217,29 @@ namespace engine::render {
 			entry.Canvas.LightInfluence = std::clamp(surface.LightInfluence, 0.0f, 1.0f);
 			entry.Canvas.Brightness = std::max(surface.Brightness, 0.0f);
 			entry.Canvas.AlwaysOnTop = surface.AlwaysOnTop;
-			FaceCanvas(surface.On, *placement, *bounds, entry.Canvas);
+			entry.Canvas.Interactive = surface.Active;
+			entry.Canvas.MaxDistance = surface.MaxDistance;
+			FaceCanvas(surface.On, *placement, *bounds, surface.ZOffset, entry.Canvas);
+
+			// **Measured to the canvas's own centre rather than to the part's**,
+			// which is the difference a `PixelsPerStud` sign on the end of a long
+			// wall notices: the part's origin can be tens of studs from the face
+			// being drawn, and a range test against it fades out a sign the player
+			// is standing in front of.
+			//
+			// **A world with no camera is not culled at all**, rather than culled
+			// against a distance of zero. That is the honest reading of "nobody
+			// has measured this yet", and it is what keeps a headless layout test
+			// asserting the same rectangle whether or not a camera exists.
+			if (hasCamera) {
+				const Vector3 centre =
+					entry.Canvas.Origin + entry.Canvas.AxisX * 0.5f + entry.Canvas.AxisY * 0.5f;
+				const Vector3 away = centre - eye;
+				entry.Canvas.CurrentDistance = std::sqrt(away.Dot(away));
+				entry.Canvas.Visible =
+					!(surface.MaxDistance > 0.0f && entry.Canvas.CurrentDistance > surface.MaxDistance);
+			}
+
 			entry.Resolved = true;
 			pending.push_back(entry);
 		});
@@ -227,7 +259,19 @@ namespace engine::render {
 			}
 
 			const Vector3 to = frame->Frame.Position - eye;
-			const float distance = std::sqrt(to.X * to.X + to.Y * to.Y + to.Z * to.Z);
+			const float measured = std::sqrt(to.X * to.X + to.Y * to.Y + to.Z * to.Z);
+
+			// **The size is computed from the stepped distance and the range test
+			// from the measured one.** `DistanceStep` exists to stop text
+			// re-fitting every frame a player walks, which is a fact about the
+			// scale; quantising the *cull* as well would make a billboard at the
+			// limit appear and disappear a step early or late for no stated
+			// reason. Roblox's `CurrentDistance` is the stepped one, so that is
+			// what is stored.
+			const float distance =
+				billboard.DistanceStep > 0.0f
+					? std::round(measured / billboard.DistanceStep) * billboard.DistanceStep
+					: measured;
 
 			// **The adornee's own position, and none of the three offsets.**
 			// They move where a billboard is *drawn*, which is the projection's
@@ -260,19 +304,42 @@ namespace engine::render {
 								  eyeFrame.UpVector() * billboard.StudsOffset.Y +
 								  eyeFrame.LookVector() * billboard.StudsOffset.Z;
 			if (bounds != nullptr) {
-				entry.Canvas.Origin =
-					entry.Canvas.Origin + frame->Frame.VectorToWorldSpace(
-											  Vector3{
-												  bounds->HalfExtent.X * billboard.ExtentsOffset.X,
-												  bounds->HalfExtent.Y * billboard.ExtentsOffset.Y,
-												  bounds->HalfExtent.Z * billboard.ExtentsOffset.Z,
-											  }
-										  );
+				const Vector3 extents{
+					bounds->HalfExtent.X * billboard.ExtentsOffset.X,
+					bounds->HalfExtent.Y * billboard.ExtentsOffset.Y,
+					bounds->HalfExtent.Z * billboard.ExtentsOffset.Z,
+				};
+
+				// **Both offsets add; neither overrides the other.** The local one
+				// turns with the adornee and the world one does not, which is what
+				// makes an arrow on a spinning part and a name tag above it two
+				// settings of one pair rather than two mutually exclusive modes.
+				entry.Canvas.Origin = entry.Canvas.Origin + frame->Frame.VectorToWorldSpace(extents) +
+									  Vector3{
+										  bounds->HalfExtent.X * billboard.ExtentsOffsetWorldSpace.X,
+										  bounds->HalfExtent.Y * billboard.ExtentsOffsetWorldSpace.Y,
+										  bounds->HalfExtent.Z * billboard.ExtentsOffsetWorldSpace.Z,
+									  };
 			}
+
+			// **`SizeOffset` moves the anchor and therefore the origin**, which is
+			// where it has to be applied: the origin is the billboard's centre and
+			// every reader downstream - the projection, the pointer, the draw -
+			// takes it as such. Roblox's sign convention is that a positive offset
+			// moves the *anchor* towards the bottom left, so the quad moves the
+			// other way, which is the negation below.
+			entry.Canvas.Origin =
+				entry.Canvas.Origin -
+				eyeFrame.RightVector() * (billboard.SizeOffset.X * entry.Canvas.WorldSize.X) +
+				eyeFrame.UpVector() * (billboard.SizeOffset.Y * entry.Canvas.WorldSize.Y);
+
 			entry.Canvas.LightInfluence = std::clamp(billboard.LightInfluence, 0.0f, 1.0f);
+			entry.Canvas.Brightness = std::max(billboard.Brightness, 0.0f);
 			entry.Canvas.AlwaysOnTop = billboard.AlwaysOnTop;
+			entry.Canvas.Interactive = billboard.Active;
 			entry.Canvas.MaxDistance = billboard.MaxDistance;
-			entry.Canvas.Visible = !(billboard.MaxDistance > 0.0f && distance > billboard.MaxDistance);
+			entry.Canvas.CurrentDistance = distance;
+			entry.Canvas.Visible = !(billboard.MaxDistance > 0.0f && measured > billboard.MaxDistance);
 			entry.Resolved = true;
 			pending.push_back(entry);
 		});
@@ -350,7 +417,13 @@ namespace engine::render {
 		size_t foundOrder = 0;
 
 		store.Each<const gui::SpatialCanvas>([&](Entity collector, const gui::SpatialCanvas &spatial) {
-			if (!spatial.Visible || spatial.Size.X <= 0.0f || spatial.Size.Y <= 0.0f) {
+			// **`Interactive` is asked before anything is projected**, and it is
+			// the difference between a sign and a control panel. A surface gui
+			// that takes the pointer intercepts every click crossing its plane,
+			// including the ones aimed at the part behind it - so Roblox makes it
+			// opt-in and `gui::Surface::Active` carries the argument.
+			if (!spatial.Interactive || !spatial.Visible || spatial.Size.X <= 0.0f ||
+				spatial.Size.Y <= 0.0f) {
 				return;
 			}
 

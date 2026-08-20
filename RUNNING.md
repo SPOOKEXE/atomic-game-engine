@@ -83,7 +83,7 @@ already learnt from `just docs-check` at v0.2.
 
 **The hook builds and does not test**, which is the whole of its design. The
 failure class is a warning going fatal, and that is a compile-time property; the
-suites are `just check`'s job, cost two and a half minutes, and go red for
+suites are `just check`'s job, cost about a minute and a half, and go red for
 whoever else's half-finished module is in the tree. A gate that fails for work
 that is not yours is a gate that gets skipped every time.
 
@@ -92,7 +92,7 @@ that is not yours is a gate that gets skipped every time.
 | `just preset=ci build`, nothing changed | ~1 s |
 | `just preset=ci build`, a day of another preset's drift | ~1 min |
 | `just preset=ci build`, from an empty `.cache/build/ci/` | ~3 min, once - 1,998 targets, vendors included |
-| `just preset=ci check`, warm | ~3 min, and `test-all` is 2.5 of them |
+| `just preset=ci check`, warm | ~2 min, and `test-all` is 1.5 of them |
 
 `ci` builds into `.cache/build/ci/`, a tree of its own, so the first push after
 working in `dev` recompiles what changed since the last push rather than
@@ -565,6 +565,27 @@ just host --game My.agame       # a dedicated server hosting every world in it
 just run  --game My.agame       # single-player, both roles in one process
 ```
 
+### Editing a universe and a world
+
+Click a row in the Explorer and the Properties panel describes it. There are
+three kinds of row and all three answer:
+
+- **the universe row** at the top: name, execution mode, maximum catch-up ticks,
+  bus budget per tick, channel queue limit and channels per world, with the
+  federated flag, world counts, fault counts, tick cost and bus traffic
+  read-only;
+- **a world row**: `TickRate`, `IdleTickRate`, `PhysicsTickRate`,
+  `ReplicationTickRate`, the simulated network latency and the fault limit, with
+  the world's state, isolation, rendering profile and per-world statistics
+  read-only. A world's *name* is changed with Rename Scene in the row's own
+  context menu, because the universe's registry is keyed on it;
+- **an instance row**: its class's properties, as before.
+
+**`PhysicsTickRate` is the one to reach for on a world that cannot keep up.**
+Zero follows the tick rate; anything lower runs the solver every few ticks while
+scripts, signals and rendering keep the tick rate. A climbing `Dropped Ticks` in
+the same panel is what says a world needs it.
+
 ### Options
 
 | Option | Default | What it does |
@@ -573,6 +594,7 @@ just run  --game My.agame       # single-player, both roles in one process
 | `--force-serial-compute` | off | run parallel dispatches on one thread |
 | `--game PATH` | - | open a game file at startup |
 | `--rojo PATH` | `$ATOMIC_ROJO_PROJECT` | sync a Rojo project or universe once the scene exists |
+| `--config-root DIR` | user config folder | keep this run's preferences, keybinds and layout in `DIR` |
 | `--width`, `--height` | 1600×900 | window size |
 | `--scale FACTOR` | 1.0 | multiplies every font and padding |
 | `--tick-rate HZ` | 60 | simulation rate while running |
@@ -682,6 +704,13 @@ just studio-smoke                      # loads, plays, renders, writes a capture
 just edit --headless --frames 12 --run play --capture shot.bmp
 ```
 
+For window, swapchain, docking and mouse tests without touching the live
+desktop or Studio configuration, run the whole editor on a private X display:
+
+```sh
+scripts/run-studio-virtual.sh --frames 120 --run play
+```
+
 **`--headless` is a renderer with no window rather than a hidden one.** There is
 no swapchain, nothing is presented, and the overlay and editor chrome do not
 draw - but the game loads, the panels lay themselves out, `--run play` starts the
@@ -758,6 +787,59 @@ shifts everything below a multi-line annotation upward, so the two rarely agree.
 `mono.engine/examples/` holds the demo scenes, each written twice - once in each
 language, doing the same thing - so that the binding surface is exercised from
 both.
+
+### Opening an example in the studio
+
+Every staged `.luau` scene is offered by the studio in three places, all of which
+already offer New World:
+
+- the **World** menu, as `New Scene from Example`;
+- the universe's right-click menu at the top of the **Explorer**;
+- the **Example...** button in the **Worlds** panel, beside New and Import.
+
+Picking one adds a world named after the file and puts the scene in it as a
+`Script` in `ServerScriptService`, so nothing is built until Play runs it and
+Stop takes it away again. The list walks the staged directory rather than a
+hand-kept table, so a scene added to `mono.engine/examples/` is there after a
+build.
+
+It is refused while anything is running, for the reason New World is: the
+snapshot Stop restores was taken before the run began, so a world added during
+Play would vanish on Stop.
+
+### The stress scenes *(v0.17)*
+
+Three scenes exist to be measured rather than looked at. All three name their
+knobs at the top of the file and say what each one costs.
+
+| scene | what it loads | run it with |
+| --- | --- | --- |
+| `StressParticles.luau` | ten bays covering every authored `ParticleEmitter` property, then 1,024 parts carrying five emitters each - 512,000 particles | `just run --script .../StressParticles.luau --stats` |
+| `StressPhysics.luau` | 100,000 unanchored blocks in a tray that tilts, so nothing ever settles | `server --game .../StressPhysics.luau --physics-tick-rate 20` |
+| `StressMirrors.luau` | an ico-sphere mirror ball - 80 facets, 16 of them mirrors | `just run --script .../StressMirrors.luau` |
+
+Two things are worth knowing before running them rather than afterwards.
+
+**A client does not simulate `StressPhysics.luau`.** A client installs the
+character systems and not the physics pipeline, so a scripted client world
+integrates nothing: the blocks hang in the air. The studio's Play and
+`server --game` are the two hosts that install it, and
+`--physics-tick-rate` - or the world's `PhysicsTickRate` in the studio - is what
+makes a hundred thousand bodies affordable, by solving slower than the world
+ticks. Measured on `release`, 24 threads, headless at 30 Hz over 600 ticks: the
+tick rate costs a 361 ms mean tick, and `--physics-tick-rate 10` costs 125 ms.
+The scene's own header carries the percentiles, and the short version is that a
+hundred thousand contacting bodies is past interactive either way.
+
+**`StressMirrors.luau` states its own bounce depth**, and the line is a guard
+rather than a preference: a ball is the worst shape the automatic depth rule has,
+because every pane can see most of the others and it therefore asks for one level
+deeper every frame. The passes go as `panes x (panes - 1) ^ (levels - 1)`, so
+sixteen panes cost 16 at one level and 3,600 at three. Compare depths with
+`--surface-bounces N`, which overrides the scene.
+
+`dev` is `-O0` and no frame-rate number from it means anything. Build `release`
+before quoting one.
 
 ### Shared Luau libraries
 
@@ -861,9 +943,9 @@ its own, and it needs no language server and no configuration:
 | `Ctrl+Space` | offer a list, whatever is under the caret |
 | `.` or `:`, or two characters | offer one automatically |
 | `Up` / `Down` | move through it |
-| `Enter`, or a click | accept |
+| `Enter`, `Tab`, or a click | accept |
 | `Escape` | dismiss |
-| `Tab` | still indents - it is never the accept key |
+| `Tab` with the list closed | indents, as always |
 
 It offers classes inside an `Instance.new` call, properties after a dot, methods
 and signals after a colon, enum sets and their members, the globals of whichever
@@ -885,6 +967,21 @@ because the class is written on the line; one from `FindFirstChild` gets the
 union of every scriptable property instead - a longer list, never a wrong one.
 `D00114` carries what narrowing it would take and why the obvious answer only
 helps one of the two languages.
+
+The list shows the typed prefix highlighted in each row and, under it, what
+kind of thing the chosen row is - for a keyword, its one-line doc.
+
+**Resting the mouse on a word** shows the same information as a tooltip: a
+keyword's doc line, what a global is, an enum set, a class and its parent, a
+sibling instance, a narrowed local's class, or a property's type and declaring
+class. It stays quiet over strings, comments, numbers, empty space and
+anything the editor does not know, and it never appears while the completion
+list is up.
+
+**The minimap** on the code field's right is a shrunken impression of the
+whole file - bright stripes for identifiers, dim for punctuation, since the
+field itself does no syntax tinting - with the visible region marked. Click or
+drag it to scroll.
 
 ### What happens today
 
@@ -1251,12 +1348,27 @@ because it builds before it runs and a plain `cmd` window has no compiler in it;
 --capture PATH                   Write a BMP near the end; needs --frames
 --enable-profiler SECONDS        Wait for a Tracy profiler before starting
 --profile-seconds SECONDS        Run for this long, then exit
+--profile-snapshot PATH          Write a frame-graph snapshot when the run ends
 --override-assets-directory DIR  Read shaders and data from here
 --help                           Show this text
 ```
 
 Naming a `--profiler-tab` opens the graph, and `--profile-seconds` turns
 collection on - asking to see something is not a separate flag from showing it.
+`--profile-snapshot` does the same and then writes the window out, which is how
+a profile gets read rather than looked at: the overlay is a picture and the
+snapshot is a table with a mean, a median and a worst reading per span.
+
+**Pair it with `--force-serial-compute` or the interesting spans are missing.**
+A world ticks on a pinned worker and a span opened off the frame's owning
+thread is refused, so `worlds (pinned workers)` arrives as one bar with the
+whole tick inside it and nothing underneath. Serial makes the frame slower on
+purpose and complete.
+
+**And read the table as per occurrence, not per frame.** A run that is dropping
+ticks runs several of them per frame, and each one opens its own `ecs.systems`;
+the column is the worst *single* reading, so the parent can be several times
+the child without a millisecond being unaccounted for.
 
 `--game` plays a `.agame` written by the editor: every world in it is
 simulated, its scripts run with both roles true, and there is no socket and no
@@ -1452,6 +1564,8 @@ just host --ticks 300 --entities 20000
 --force-serial-compute           Run parallel dispatches on one thread
 --mcp-port PORT                  Open the loopback control surface (default 8734)
 --tick-rate HZ                   Ticks per second (default 30)
+--physics-tick-rate HZ           Physics steps per second (default: the tick rate)
+--replication-tick-rate HZ       Snapshots per second (default: every tick)
 --entities N                     Entities in the placeholder world (default 4096)
 --ticks N                        Exit after N ticks
 --seconds N                      Exit after N seconds
@@ -1473,6 +1587,33 @@ just host --ticks 300 --entities 20000
 --content-grant-key HEX          Secret used for content grants
 --help                           Show this text
 ```
+
+### Three rates, not one
+
+A world ticks, steps its physics, and publishes snapshots. Those are three
+different costs and they get three different numbers:
+
+```sh
+./server --game My.agame --tick-rate 60 --physics-tick-rate 30 --replication-tick-rate 20
+```
+
+- `--tick-rate` is what scripts, signals and character input run at.
+- `--physics-tick-rate` is what the solver runs at. Lower it when a world is
+  spending its tick in physics and the scripts still need the full rate; raise
+  it for a world of fast, precise bodies. Zero follows the tick rate.
+- `--replication-tick-rate` is how often a snapshot goes on the wire. Zero
+  publishes every tick. Lowering it does not lose state: the world holds its
+  change bits across the ticks it does not publish, so a property written on
+  any of them still reaches the client on the next one that does.
+
+Both are measured in *simulated* seconds, so a suspended world owes nothing for
+the time it was asked to and an idle world at 2 Hz cannot publish twenty times a
+second however loudly it was asked to.
+
+The three flags apply to the worlds this program creates itself. A `.agame`
+carries `physicsTickRate` and `replicationTickRate` per world under
+`<WorldProperties>`, and those win - a scene authored to solve at 30 solves at
+30 whoever hosts it.
 
 ### Recording and replaying
 
@@ -2191,7 +2332,29 @@ just test-list                                # what it would run, and why
 --all         Run every suite, cache or not
 --list        List suites and signatures, run nothing
 --verbose     Name every skipped suite
+--jobs N      Suites to run at once (default 2; 1 is one after another)
 ```
+
+**Suites run beside each other, and the default is two.** The slowest suites are
+the ones that wait: `server.replication` is 35 seconds of a 168-second run and
+`server.hostmode` another 12, and nearly all of both is a client ticking in real
+time while a spawned server process gets somewhere. That wait cannot be
+shortened without breaking what it waits for, and a sleeping suite does not need
+a core - so the saving is running them alongside each other.
+
+Measured on this machine, 24 threads:
+
+| `--jobs` | Wall clock | Stability |
+|---|---|---|
+| 1 | 2 min 54 s | the old behaviour |
+| 2 | 1 min 36 s | three clean runs |
+| 4 | 1 min 11 s | `server.replication` red once in three |
+
+Two is the default because it is the fastest setting that was not observed to
+flake: loading the machine loads the server the tests are waiting for, and a
+runner that goes red under its own concurrency is worse than a slow one. Results
+are printed in list order rather than completion order, so a run can still be
+diffed against another.
 
 It prints what it skipped, and warns when it had to narrow - no header closure
 for a suite, an unknown `TEST_DEPENDS`, a dependency cycle. Those warnings mean

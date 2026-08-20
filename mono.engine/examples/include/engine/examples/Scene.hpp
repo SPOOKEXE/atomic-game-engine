@@ -31,6 +31,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace engine::script {
 	class Runtime;
@@ -75,6 +76,40 @@ namespace engine::examples {
 	// Idempotent. Calling it is not optional on any path that writes one: a
 	// component minted under the compiler's spelling for a type is a name one
 	// build can write into a recording and another cannot read back.
+	// Mounts a scene's own Luau modules as children of the script that uses
+	// them.
+	//
+	// **A scene's libraries belong to the scene, not to every world in the
+	// program.** These used to be mirrored into `ReplicatedStorage` from a
+	// single staged `assets/lib` tree, which made them a property of the *host*:
+	// `MagicCore` and `TerrainCore` appeared under every world of every game,
+	// including a brand-new empty one somebody had just made, and a scene that
+	// wanted them had no way to say so - it asserted that somebody else had
+	// already put them there and failed with "is assets/lib staged?" whenever
+	// nobody had. That is the shape a shipped engine library has, and these are
+	// a demo's modules.
+	//
+	// So they are staged per scene - `assets/examples/Magic/MagicCore/...` -
+	// and mounted under the `Script` instance itself, which is Rojo's own
+	// arrangement and the one every `require(script.Parent.X)` inside the
+	// modules was written against. A world that never loads `Magic.luau` has no
+	// trace of any of it.
+	//
+	// **Idempotent by name**, for the reason a module always has: a module is
+	// cached per instance, so two trees under one script would give `require`
+	// two copies that share no state.
+	//
+	// Does nothing when the scene has no library directory, which is every scene
+	// but three.
+	//
+	// @param store  The world the script is in.
+	// @param script The `Script` or `ModuleScript` the modules belong to.
+	// @param scene  The scene's file name or stem - `Magic.luau` and `Magic`
+	//        both resolve to the same directory.
+	// @return How many top-level modules were mounted.
+	// @since v0.17
+	size_t MountSceneLibraries(ecs::Store &store, ecs::Entity script, std::string_view scene);
+
 	void RegisterExampleComponents();
 
 	// Installs the systems that move what a script built.
@@ -133,4 +168,28 @@ namespace engine::examples {
 	// @param name The file name, such as "Rings.luau".
 	// @return The absolute path.
 	std::string ExamplePath(const std::string &name);
+
+	// Every Luau scene shipped with the engine, by file name.
+	//
+	// **The directory rather than a list, because a list is a second place a
+	// scene has to be added to.** The studio offers these as worlds a person can
+	// create, and the alternative - a table of names beside the menu - is one
+	// that goes stale the first time somebody writes a scene and forgets it. The
+	// staging rule is already "every `.luau` in this directory"; this reads back
+	// exactly what that rule put there.
+	//
+	// **Sorted, so the order is the same on every machine.** A directory walk is
+	// in whatever order the filesystem answers in, and a menu that reshuffles
+	// itself between runs is one nobody builds muscle memory for.
+	//
+	// The `.ts` scenes are deliberately absent: they are staged as `.js` and
+	// `LoadScene` picks its runtime off the extension, so listing the source
+	// would name a file no program on this path can read. `Rings.js` and the
+	// other transpiled twins are absent for the same reason - they are second
+	// copies of a scene already in the list, in a second language.
+	//
+	// @return The file names, such as "Rings.luau", sorted. Empty when nothing
+	//         was staged, which is a real situation rather than an error: a
+	//         program built without the example target still runs.
+	std::vector<std::string> ExampleScenes();
 }

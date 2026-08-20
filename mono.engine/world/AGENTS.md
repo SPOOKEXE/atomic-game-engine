@@ -94,6 +94,63 @@ So:
   already claimed. That changes timing and not results - see
   `parallel/AGENTS.md`.
 
+## Three rates per world, and only one of them is a tick
+
+`WorldSettings` carries `TickRate`, `PhysicsTickRate` and `ReplicationTickRate`.
+They are three separate numbers because they are paid for separately: the tick
+is what scripts, signals and character input run at, the physics rate is what
+the solver costs, and the replication rate is what the wire costs. Zero on
+either of the last two means "follow the tick", which is what every world in
+this repository is.
+
+Only the first is this module's own machinery. `physics::PhysicsClock` owns the
+second - `physics` sits at L8 and cannot be named from here, so whatever built
+the world pushes the number down. Refuse a change that adds a `physics` edge to
+this module to shorten that path.
+
+The third is here, and two things about it are load-bearing:
+
+- **It is charged in simulated seconds, never wall ones.** A world suspended for
+  an hour owes no snapshots for it, and a world at its 2 Hz idle rate publishes
+  at most twice a second however loudly it was asked for twenty. A wall clock
+  would make what a client receives a function of how busy the host was.
+- **`World::Tick` holds the change bits across the ticks between two published
+  ones.** They are the delta source, so clearing them on a tick nobody published
+  is how a property written on that tick reaches no client. A world with no
+  replication rate clears every tick exactly as it always did, so the hold costs
+  it one branch.
+
+Asking is what consumes: `Universe::TakeReplicationTick` answers once per
+published tick and then answers `false`. A host that asks twice in a frame
+publishes once.
+
+## `Reconfigure` changes every setting except the one that identifies a world
+
+`Universe::SettingsOf` was read-only until v0.17 and `Universe::Reconfigure` is
+the setter that arrived with the studio's world panel. Three rules hold it
+together, and each of them is a bug that would compile:
+
+- **The name is ignored.** The registry is keyed on it, `Find` is what
+  everything crossing a boundary uses, and a world whose settings say one thing
+  while the registry says another is reachable under a name nobody can read off
+  it. Renaming is the registry's operation. Refuse a `Reconfigure` that writes
+  `Settings_.Name`.
+- **The timestep is not rebuilt.** `World::Owed` calls `SetRate` from the
+  settings on every frame already, so a new rate is in force next frame with the
+  accumulator intact. Re-seeding it throws away the simulated time the world has
+  been charged for, which is a world that skips forward whenever an author
+  touches a slider. `physics::SetPhysicsTickRate` keeps its accumulator for the
+  same reason.
+- **`PhysicsTickRate` is stored here and applied elsewhere.** The section above
+  says why this module may not name `physics`; the consequence is that a caller
+  changing the number must push it into the store itself. A change that reaches
+  the panel and not the clock reads as the setting doing nothing.
+
+It applies at once rather than queueing to the barrier, because it moves no
+world in the list - the same ground `SetRenderingProfile` stands on. Refuse a
+`Reconfigure` that grows into a structural change without moving to the queue
+`Create` and `Destroy` use.
+
 ## Two kinds of failure, and they are not the same
 
 | | Caught | Blast radius |

@@ -54,7 +54,8 @@
     "`client`. A virtual client here is a socket, a connector and a store, which",
     "is the whole reason two hundred of them fit in one process where two hundred",
     "`client --headless` processes would be a measurement of the GPU driver. No",
-    "other row changed: nothing links it."
+    "other row changed: nothing links it.",
+    "v0.17 adds `discord` - what a person's Discord profile says while an Atomic program is running. It is `shared` and links only `core`, which is why all five program rows gained it at once and no row gained anything else. The server row is still headless and the cdn row still configures on a machine with no Vulkan SDK: the module is a unix socket and a JSON writer, and it deliberately does not link `net` - Discord is a desktop application on the same box rather than a peer on a wire."
   ],
   "modules": {
     "assetc": {
@@ -99,6 +100,7 @@
         "assets",
         "core",
         "delivery",
+        "discord",
         "net",
         "network",
         "parallel"
@@ -110,8 +112,10 @@
         "assets",
         "audio",
         "bakegraph",
+        "collision",
         "core",
         "delivery",
+        "discord",
         "ecs",
         "effects",
         "examples",
@@ -134,6 +138,12 @@
       ],
       "requires": "MONO_BUILD_CLIENT"
     },
+    "collision": {
+      "tier": "shared",
+      "links": [
+        "core"
+      ]
+    },
     "control": {
       "tier": "shared",
       "links": [
@@ -155,6 +165,12 @@
         "net"
       ]
     },
+    "discord": {
+      "tier": "shared",
+      "links": [
+        "core"
+      ]
+    },
     "docgen": {
       "tier": "shared",
       "links": [
@@ -171,6 +187,7 @@
     "effects": {
       "tier": "shared",
       "links": [
+        "collision",
         "core",
         "ecs",
         "parallel",
@@ -181,6 +198,7 @@
     "examples": {
       "tier": "shared",
       "links": [
+        "collision",
         "core",
         "ecs",
         "gui",
@@ -195,7 +213,9 @@
     "game": {
       "tier": "shared",
       "links": [
+        "assets",
         "bakegraph",
+        "collision",
         "core",
         "ecs",
         "graph",
@@ -211,6 +231,7 @@
     "graph": {
       "tier": "shared",
       "links": [
+        "collision",
         "core",
         "ecs",
         "parallel",
@@ -229,6 +250,7 @@
     "input": {
       "tier": "client",
       "links": [
+        "collision",
         "core",
         "ecs",
         "parallel",
@@ -248,6 +270,7 @@
       "links": [
         "assets",
         "bakegraph",
+        "collision",
         "core",
         "ecs",
         "game",
@@ -290,6 +313,7 @@
     "physics": {
       "tier": "shared",
       "links": [
+        "collision",
         "core",
         "ecs",
         "parallel",
@@ -301,6 +325,7 @@
       "tier": "client",
       "links": [
         "assets",
+        "collision",
         "core",
         "ecs",
         "effects",
@@ -335,6 +360,7 @@
     "scene": {
       "tier": "shared",
       "links": [
+        "collision",
         "core",
         "ecs",
         "parallel",
@@ -344,6 +370,7 @@
     "script": {
       "tier": "shared",
       "links": [
+        "collision",
         "core",
         "ecs",
         "gui",
@@ -360,9 +387,11 @@
         "assets",
         "bakegraph",
         "cdn",
+        "collision",
         "control",
         "core",
         "delivery",
+        "discord",
         "ecs",
         "examples",
         "game",
@@ -400,9 +429,11 @@
         "bakegraph",
         "cdn",
         "client",
+        "collision",
         "control",
         "core",
         "delivery",
+        "discord",
         "ecs",
         "effects",
         "examples",
@@ -437,6 +468,7 @@
       "tier": "client",
       "links": [
         "assets",
+        "collision",
         "core",
         "ecs",
         "effects",
@@ -459,9 +491,11 @@
         "bakegraph",
         "cdn",
         "client",
+        "collision",
         "control",
         "core",
         "delivery",
+        "discord",
         "ecs",
         "effects",
         "examples",
@@ -501,6 +535,7 @@
         "assets",
         "core",
         "delivery",
+        "discord",
         "net",
         "network",
         "parallel"
@@ -514,8 +549,10 @@
         "audio",
         "bakegraph",
         "cdn",
+        "collision",
         "core",
         "delivery",
+        "discord",
         "ecs",
         "effects",
         "examples",
@@ -544,9 +581,11 @@
         "assets",
         "bakegraph",
         "cdn",
+        "collision",
         "control",
         "core",
         "delivery",
+        "discord",
         "ecs",
         "examples",
         "game",
@@ -574,9 +613,11 @@
         "bakegraph",
         "cdn",
         "client",
+        "collision",
         "control",
         "core",
         "delivery",
+        "discord",
         "ecs",
         "effects",
         "examples",
@@ -609,9 +650,11 @@
         "bakegraph",
         "cdn",
         "client",
+        "collision",
         "control",
         "core",
         "delivery",
+        "discord",
         "ecs",
         "effects",
         "examples",

@@ -13,7 +13,10 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <cmath>
 #include <filesystem>
+#include <limits>
+#include <vector>
 
 TEST_SUITE_ID("engine.render.interfacemesh")
 TEST_DEPENDS("engine.render.glyphatlas")
@@ -121,6 +124,95 @@ TEST_CASE("an outline is four quads and never a line primitive", "[render][inter
 	CHECK(mesh.Vertices().size() == 16);
 }
 
+TEST_CASE("a join moves an outline's corners without changing its cost", "[render][interfacemesh]") {
+	// **The three modes are one ring with its corner points moved**, so the
+	// vertex and index counts must not move with the mode. That is the property
+	// the implementation is built on, and a join that quietly grew the mesh
+	// would make a stroke a performance decision.
+	GlyphAtlas atlas;
+
+	const auto ringFor = [&](engine::gui::LineJoin join) {
+		engine::gui::DrawList list;
+		auto outline = Rectangle(0.0f, 0.0f, 100.0f, 60.0f);
+		outline.Kind = engine::gui::DrawKind::Outline;
+		outline.Thickness = 4.0f;
+		outline.CornerRadius = 12.0f;
+		outline.Join = join;
+		list.Commands.push_back(outline);
+
+		InterfaceMesh mesh;
+		mesh.Build(list, atlas);
+		return mesh.Vertices();
+	};
+
+	const auto round = ringFor(engine::gui::LineJoin::Round);
+	const auto bevel = ringFor(engine::gui::LineJoin::Bevel);
+	const auto miter = ringFor(engine::gui::LineJoin::Miter);
+
+	REQUIRE(round.size() == bevel.size());
+	REQUIRE(round.size() == miter.size());
+	CHECK(!round.empty());
+
+	// How near the top-left corner of the box each mode gets. The radius is 12,
+	// so a round corner stays a radius away along the diagonal and a mitred one
+	// reaches the corner exactly.
+	const auto nearestToOrigin = [](const std::vector<engine::render::InterfaceVertex> &vertices) {
+		float best = std::numeric_limits<float>::max();
+		for (const engine::render::InterfaceVertex &vertex : vertices) {
+			best = std::min(best, std::hypot(vertex.X, vertex.Y));
+		}
+		return best;
+	};
+
+	// **Miter reaches the corner exactly**, which is the whole point of it.
+	CHECK(nearestToOrigin(miter) == Approx(0.0f).margin(0.001f));
+
+	// **Round stops a radius short along the diagonal**: the arc is centred at
+	// (12, 12) with radius 12, so its closest approach to the origin is
+	// `12 * sqrt(2) - 12`.
+	CHECK(nearestToOrigin(round) == Approx(12.0f * std::sqrt(2.0f) - 12.0f).margin(0.01f));
+
+	// **Bevel stops furthest short, not nearest**, and the arithmetic is the
+	// reason: the chord runs from (0, 12) to (12, 0) and its midpoint is
+	// (6, 6), at `6 * sqrt(2)`. An arc *bulges toward* the corner it rounds, so
+	// a straight cut across it takes more off than the round does - which is
+	// the opposite of what "bevel is a cheaper round" suggests, and is why the
+	// three are asserted against arithmetic rather than against each other.
+	CHECK(nearestToOrigin(bevel) == Approx(6.0f * std::sqrt(2.0f)).margin(0.01f));
+	CHECK(nearestToOrigin(miter) < nearestToOrigin(round));
+	CHECK(nearestToOrigin(round) < nearestToOrigin(bevel));
+}
+
+TEST_CASE("every join is the same shape at a square corner", "[render][interfacemesh]") {
+	// A zero radius is already a sharp corner, so there is nothing for a join
+	// to decide and all three must agree. Stated as a test because the
+	// implementation reaches that case through an entirely different branch -
+	// four rectangles rather than a ring - and a mode leaking into it would be
+	// invisible until somebody set one.
+	GlyphAtlas atlas;
+
+	const auto squareFor = [&](engine::gui::LineJoin join) {
+		engine::gui::DrawList list;
+		auto outline = Rectangle(0.0f, 0.0f, 100.0f, 40.0f);
+		outline.Kind = engine::gui::DrawKind::Outline;
+		outline.Thickness = 2.0f;
+		outline.Join = join;
+		list.Commands.push_back(outline);
+
+		InterfaceMesh mesh;
+		mesh.Build(list, atlas);
+		return mesh.Vertices();
+	};
+
+	const auto round = squareFor(engine::gui::LineJoin::Round);
+	const auto miter = squareFor(engine::gui::LineJoin::Miter);
+	REQUIRE(round.size() == miter.size());
+	for (size_t index = 0; index < round.size(); index++) {
+		CHECK(round[index].X == Approx(miter[index].X));
+		CHECK(round[index].Y == Approx(miter[index].Y));
+	}
+}
+
 TEST_CASE("batches split on a scissor change and merge otherwise", "[render][interfacemesh]") {
 	// **A clip is pipeline state rather than a vertex attribute**, so two
 	// elements clipped differently cannot be one draw however alike their pixels
@@ -177,6 +269,37 @@ TEST_CASE("an image starts its own batch and carries its name", "[render][interf
 	REQUIRE(mesh.Batches().size() == 2);
 	CHECK_FALSE(mesh.Batches()[0].Image.IsValid());
 	CHECK(mesh.Batches()[1].Image == engine::core::Name("rbxasset://textures/wall"));
+}
+
+TEST_CASE(
+	"a shader change starts its own batch, the same rule a texture change follows", "[render][interfacemesh]"
+) {
+	GlyphAtlas atlas;
+	engine::gui::DrawList list;
+
+	auto plain = Rectangle(0.0f, 0.0f, 10.0f, 10.0f);
+	plain.Kind = engine::gui::DrawKind::Image;
+	plain.Image = engine::core::Name("rbxasset://textures/wall");
+	list.Commands.push_back(plain);
+
+	// Same image, same clip, same collector - only the shader differs, and
+	// that alone has to be enough to end the run: a pipeline is bound per
+	// batch, and these two want different ones.
+	auto shaded = plain;
+	shaded.Shader = engine::core::Name("toon");
+	list.Commands.push_back(shaded);
+
+	// A second command naming the same shader stays in the batch the first
+	// one opened, rather than starting a third.
+	list.Commands.push_back(shaded);
+
+	InterfaceMesh mesh;
+	mesh.Build(list, atlas);
+
+	REQUIRE(mesh.Batches().size() == 2);
+	CHECK_FALSE(mesh.Batches()[0].Shader.IsValid());
+	CHECK(mesh.Batches()[1].Shader == engine::core::Name("toon"));
+	CHECK(mesh.Batches()[1].IndexCount == 12);
 }
 
 TEST_CASE("text without an atlas draws nothing and breaks nothing", "[render][interfacemesh]") {
@@ -493,4 +616,97 @@ TEST_CASE("text size alignment wrapping truncation and stroke affect geometry", 
 	list.Commands[0].Truncate = engine::gui::TextTruncate::AtEnd;
 	mesh.Build(list, atlas);
 	CHECK(mesh.Vertices().size() < 44);
+}
+
+TEST_CASE("a two-stop gradient ramps a quad's own vertices", "[render][interfacemesh]") {
+	// **Four vertices and no split, which is the case that has to stay cheap.**
+	// A ramp with a stop at each end is one linear segment, and a linear
+	// function interpolated across a triangle from exact vertex values is exact
+	// - so subdividing would be work that changed no pixel.
+	engine::gui::DrawList list;
+	engine::gui::DrawCommand fill = Rectangle(0.0f, 0.0f, 100.0f, 40.0f);
+	fill.Gradient = 0;
+	list.Commands.push_back(fill);
+
+	engine::gui::DrawGradient ramp;
+	ramp.Color = engine::core::ColorSequence{
+		engine::core::Color3{1.0f, 1.0f, 1.0f}, engine::core::Color3{0.0f, 0.0f, 0.0f}
+	};
+	ramp.Origin = Vector2{0.0f, 0.0f};
+	ramp.Axis = Vector2{100.0f, 0.0f};
+	list.Gradients.push_back(ramp);
+
+	GlyphAtlas atlas;
+	InterfaceMesh mesh;
+	mesh.Build(list, atlas);
+
+	REQUIRE(mesh.Vertices().size() == 4);
+
+	// The clipper winds a rectangle top-left, top-right, bottom-right,
+	// bottom-left, so the two left-hand corners are the white end.
+	CHECK(mesh.Vertices()[0].R == 255);
+	CHECK(mesh.Vertices()[3].R == 255);
+	CHECK(mesh.Vertices()[1].R == 0);
+	CHECK(mesh.Vertices()[2].R == 0);
+}
+
+TEST_CASE("a three-stop gradient splits the shape at its keypoint", "[render][interfacemesh]") {
+	// **The reason `PushShaded` exists.** A ramp that is white, then black, then
+	// white again is two linear segments; one quad interpolated across both
+	// would read the midpoint as white at every pixel of it, which is the
+	// opposite of what was authored.
+	engine::gui::DrawList list;
+	engine::gui::DrawCommand fill = Rectangle(0.0f, 0.0f, 100.0f, 40.0f);
+	fill.Gradient = 0;
+	list.Commands.push_back(fill);
+
+	engine::gui::DrawGradient ramp;
+	ramp.Color.Add(engine::core::ColorKeypoint{0.0f, engine::core::Color3{1.0f, 1.0f, 1.0f}});
+	ramp.Color.Add(engine::core::ColorKeypoint{0.5f, engine::core::Color3{0.0f, 0.0f, 0.0f}});
+	ramp.Color.Add(engine::core::ColorKeypoint{1.0f, engine::core::Color3{1.0f, 1.0f, 1.0f}});
+	ramp.Origin = Vector2{0.0f, 0.0f};
+	ramp.Axis = Vector2{100.0f, 0.0f};
+	list.Gradients.push_back(ramp);
+
+	GlyphAtlas atlas;
+	InterfaceMesh mesh;
+	mesh.Build(list, atlas);
+
+	// Two bands, four corners each: the cut runs down the middle of the quad.
+	REQUIRE(mesh.Vertices().size() == 8);
+
+	bool sawSeam = false;
+	for (const engine::render::InterfaceVertex &vertex : mesh.Vertices()) {
+		if (vertex.X > 49.0f && vertex.X < 51.0f) {
+			sawSeam = true;
+			CHECK(vertex.R == 0);
+		}
+	}
+	CHECK(sawSeam);
+}
+
+TEST_CASE("a gradient's transparency adds to what the command already has", "[render][interfacemesh]") {
+	// Roblox's composition, and the half that is easy to get backwards: a
+	// gradient is a modifier on what the element draws, so a half-faded element
+	// under a ramp that fades to one ends up fully clear rather than half.
+	engine::gui::DrawList list;
+	engine::gui::DrawCommand fill = Rectangle(0.0f, 0.0f, 100.0f, 40.0f);
+	fill.Transparency = 0.5f;
+	fill.Gradient = 0;
+	list.Commands.push_back(fill);
+
+	engine::gui::DrawGradient ramp;
+	ramp.Color = engine::core::ColorSequence{engine::core::Color3{1.0f, 1.0f, 1.0f}};
+	ramp.Transparency = engine::core::NumberSequence{0.0f, 1.0f};
+	ramp.Origin = Vector2{0.0f, 0.0f};
+	ramp.Axis = Vector2{100.0f, 0.0f};
+	list.Gradients.push_back(ramp);
+
+	GlyphAtlas atlas;
+	InterfaceMesh mesh;
+	mesh.Build(list, atlas);
+
+	REQUIRE(mesh.Vertices().size() == 4);
+	CHECK(mesh.Vertices()[0].A == 128);
+	CHECK(mesh.Vertices()[1].A == 0);
 }

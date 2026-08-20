@@ -26,6 +26,7 @@ namespace engine::input {
 			{Action::DecreaseProfilerDepth, SDLK_MINUS, "-"},
 			{Action::IncreaseProfilerDepth, SDLK_EQUALS, "="},
 			{Action::WriteProfilerSnapshot, SDLK_F8, "F8"},
+			{Action::ToggleWireframe, SDLK_F9, "F9"},
 		};
 	}
 
@@ -53,6 +54,8 @@ namespace engine::input {
 			return "deeper graph";
 		case Action::WriteProfilerSnapshot:
 			return "write profiler snapshot";
+		case Action::ToggleWireframe:
+			return "toggle wireframe";
 		case Action::Count:
 			break;
 		}

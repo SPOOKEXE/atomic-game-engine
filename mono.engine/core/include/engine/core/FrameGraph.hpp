@@ -262,8 +262,9 @@ namespace engine::core {
 		// Overflow is counted, not resized: reallocating mid-frame would show up
 		// in the measurement.
 		//
-		// **Sixteen thousand, and the number moved at v0.16 because 4096 was
-		// wrong about what a frame is.** The argument for the old figure was
+		// **Sixty-five thousand, and the number moved again at v0.18 because a
+		// granular server capture proved 16384 was still a truncated frame.** The
+		// argument for the original 4096 figure was
 		// that a frame wanting more had an instrumentation bug - which holds for
 		// a client drawing one world and does not hold for a server, where
 		// several of the spans are *per connection* and one is per packet. A
@@ -276,7 +277,7 @@ namespace engine::core {
 		//
 		// The cost is the reservation, taken once when collection turns on and
 		// paid only while something is watching.
-		static constexpr size_t MAXIMUM_SPANS = 16384;
+		static constexpr size_t MAXIMUM_SPANS = 65536;
 
 		// Deep enough to reach past the schedule. The first levels are spent
 		// before any real work starts - frame, phase, system - so a smaller
@@ -284,7 +285,7 @@ namespace engine::core {
 		//
 		// Past this the depth is still tracked, so Pop stays balanced, but
 		// nothing is recorded and the drop is counted.
-		static constexpr uint32_t MAXIMUM_DEPTH = 12;
+		static constexpr uint32_t MAXIMUM_DEPTH = 32;
 
 		// Marks a root span's parent and the root of a filtered view.
 		static constexpr uint32_t NO_PARENT = UINT32_MAX;

@@ -295,10 +295,15 @@ local WALL_Z = Vector3.new(WALL_THICKNESS, TILE, TILE)
 
 -- --- the ground, and the three rooms that have one ------------------------
 
-tileFloor("Ground", Vector3.new(0, -0.5, 0), GROUND, GROUND_TILE, 1, GRASS, OUTER)
+-- Clear of a baseplate's top face at y = 0: coplanar surfaces do not flicker in
+-- this engine, they resolve stably to whichever one the draw order happens to
+-- favour. `scripts/demos/zfight-scan.sh` holds the control for that.
+local GROUND_LIFT = 0.01
+
+tileFloor("Ground", Vector3.new(0, -0.5 + GROUND_LIFT, 0), GROUND, GROUND_TILE, 1, GRASS, OUTER)
 
 for _, room in ROOMS do
-	tileFloor(room.Name .. "Floor", room.Centre + Vector3.new(0, -0.5, 0), ROOM, TILE, 1, room.Floor)
+	tileFloor(room.Name .. "Floor", room.Centre + Vector3.new(0, -0.5 + GROUND_LIFT, 0), ROOM, TILE, 1, room.Floor)
 	tileFloor(
 		room.Name .. "Ceiling",
 		room.Centre + Vector3.new(0, WALL_HEIGHT + 0.5, 0),

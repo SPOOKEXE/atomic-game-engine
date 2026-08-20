@@ -720,6 +720,14 @@ replay-check entities="256" ticks="120": (build "server")
 stress label="baseline" clients="200" seconds="45" port="45100": (build "server") (build "loadtest")
     ./scripts/stress-test.sh {{build}} {{label}} {{clients}} {{seconds}} {{port}}
 
+# Twenty thousand moving replicated parts and real encrypted clients. One client
+# is enough to exercise the full authority-to-replica path without multiplying
+# the object workload by a separate client-count experiment. Windowed every
+# thirty ticks (one second at 30 Hz), so flamegraph.py --average has enough
+# windows across a twenty-second run to make min/max/avg/median mean something.
+stress-motion label="motion-baseline" clients="1" seconds="20" port="45200" window="30": (build "server") (build "loadtest")
+    ./scripts/stress-test.sh {{build}} {{label}} {{clients}} {{seconds}} {{port}} ReplicationStress.luau {{window}}
+
 # Configure and build with no client at all, which is how the tier split is
 # proved rather than asserted: the staged server/ gets no shaders/ directory.
 check-server-is-headless:
@@ -770,8 +778,8 @@ check-one-node-graph:
     set -euo pipefail
     found=$(grep -rlE 'namespace[[:space:]]+nodegraph[[:space:]]*\{' \
         --include='*.hpp' --include='*.cpp' \
-        mono.build mono.cdn mono.client mono.engine mono.network mono.server \
-        mono.studio mono.tools mono.unified_server_client || true)
+        mono.build mono.cdn mono.client mono.discord mono.engine mono.network \
+        mono.server mono.studio mono.tools mono.unified_server_client || true)
     if [ -n "$found" ]; then
         echo "FAIL: a second node graph implementation, in first-party code:"
         echo "$found" | sed 's/^/  /'
@@ -823,7 +831,7 @@ docs-check: (build "docgen") docs
 # Every first-party .cpp and .hpp. The directory list is explicit rather than
 # `find .` so that mono.vendor/ is never touched - reformatting a submodule
 # turns every future update into a conflict.
-mono_sources := "mono.engine mono.client mono.server mono.unified_server_client mono.cdn mono.network mono.tools mono.build"
+mono_sources := "mono.engine mono.client mono.server mono.unified_server_client mono.cdn mono.network mono.discord mono.tools mono.build"
 
 # Finding it is two problems, not one.
 #

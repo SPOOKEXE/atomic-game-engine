@@ -4,8 +4,11 @@
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Audio.hpp>
 #include <engine/scene/Characters.hpp>
+#include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
+#include <engine/scene/EditableImage.hpp>
+#include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/Materials.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
@@ -161,6 +164,25 @@ namespace engine::scene {
 			}
 		}
 
+		// **A `LocalTransparency` is a fact about this viewer, and its
+		// serialisation says so by writing nothing.**
+		//
+		// A saved world holding last session's camera-occlusion fade would
+		// reopen with a wall standing there permanently half-transparent, for
+		// a poppercam that has not run a single frame yet - the same shape of
+		// bug `RenderedSignature`'s own comment warns against, one row up. The
+		// reader resets every row to the default rather than reading any bytes
+		// at all, so a fresh load always starts from "nothing is faded" and
+		// the very next camera pass decides the truth from there.
+		void WriteLocalTransparencies(core::ByteWriter &, const void *, size_t) {}
+
+		void ReadLocalTransparencies(core::ByteReader &, void *destination, size_t count) {
+			auto *values = static_cast<LocalTransparency *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				values[index] = LocalTransparency{};
+			}
+		}
+
 		// **A `RenderedSignature` is derived state, and its serialisation says
 		// so by writing nothing.**
 		//
@@ -285,6 +307,151 @@ namespace engine::scene {
 			for (size_t index = 0; index < count; index++) {
 				sources[index].Code = std::string(reader.ReadString());
 				sources[index].Revision = reader.ReadUInt32();
+			}
+		}
+
+		// **A written pair for `WriteShaderSources`' reason**: five
+		// `std::vector`s hold no object representation a raw copy could
+		// write. The vertex count is written once and read back to size
+		// every array the same way, rather than once per array, because the
+		// four are parallel by construction - `EditableMesh`'s own header
+		// carries that invariant.
+		void WriteEditableMeshes(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *meshes = static_cast<const EditableMesh *>(source);
+			for (size_t index = 0; index < count; index++) {
+				const EditableMesh &mesh = meshes[index];
+				const auto vertices = static_cast<uint32_t>(mesh.Positions.size());
+				writer.WriteUInt32(vertices);
+				for (uint32_t vertex = 0; vertex < vertices; vertex++) {
+					writer.WriteFloat(mesh.Positions[vertex].X);
+					writer.WriteFloat(mesh.Positions[vertex].Y);
+					writer.WriteFloat(mesh.Positions[vertex].Z);
+					writer.WriteFloat(mesh.Normals[vertex].X);
+					writer.WriteFloat(mesh.Normals[vertex].Y);
+					writer.WriteFloat(mesh.Normals[vertex].Z);
+					writer.WriteFloat(mesh.UVs[vertex].X);
+					writer.WriteFloat(mesh.UVs[vertex].Y);
+					writer.WriteFloat(mesh.Colours[vertex].R);
+					writer.WriteFloat(mesh.Colours[vertex].G);
+					writer.WriteFloat(mesh.Colours[vertex].B);
+					writer.WriteFloat(mesh.Alphas[vertex]);
+				}
+
+				const auto indices = static_cast<uint32_t>(mesh.Indices.size());
+				writer.WriteUInt32(indices);
+				for (uint32_t entry = 0; entry < indices; entry++) {
+					writer.WriteUInt32(mesh.Indices[entry]);
+				}
+
+				// The revision travels with the geometry, for
+				// `WriteShaderSources`' identical reason: a reader that reset
+				// it would believe a reloaded mesh was one already uploaded.
+				writer.WriteUInt32(mesh.Revision);
+			}
+		}
+
+		void ReadEditableMeshes(core::ByteReader &reader, void *destination, size_t count) {
+			auto *meshes = static_cast<EditableMesh *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				EditableMesh &mesh = meshes[index];
+				mesh.Positions.clear();
+				mesh.Normals.clear();
+				mesh.UVs.clear();
+				mesh.Colours.clear();
+				mesh.Alphas.clear();
+				mesh.Indices.clear();
+
+				const uint32_t vertices = reader.ReadUInt32();
+				mesh.Positions.reserve(vertices);
+				mesh.Normals.reserve(vertices);
+				mesh.UVs.reserve(vertices);
+				mesh.Colours.reserve(vertices);
+				mesh.Alphas.reserve(vertices);
+				for (uint32_t vertex = 0; vertex < vertices; vertex++) {
+					core::Vector3 position;
+					position.X = reader.ReadFloat();
+					position.Y = reader.ReadFloat();
+					position.Z = reader.ReadFloat();
+					mesh.Positions.push_back(position);
+
+					core::Vector3 normal;
+					normal.X = reader.ReadFloat();
+					normal.Y = reader.ReadFloat();
+					normal.Z = reader.ReadFloat();
+					mesh.Normals.push_back(normal);
+
+					core::Vector2 uv;
+					uv.X = reader.ReadFloat();
+					uv.Y = reader.ReadFloat();
+					mesh.UVs.push_back(uv);
+
+					core::Color3 colour;
+					colour.R = reader.ReadFloat();
+					colour.G = reader.ReadFloat();
+					colour.B = reader.ReadFloat();
+					mesh.Colours.push_back(colour);
+
+					mesh.Alphas.push_back(reader.ReadFloat());
+				}
+
+				const uint32_t indices = reader.ReadUInt32();
+				mesh.Indices.reserve(indices);
+				for (uint32_t entry = 0; entry < indices; entry++) {
+					mesh.Indices.push_back(reader.ReadUInt32());
+				}
+
+				mesh.Revision = reader.ReadUInt32();
+			}
+		}
+
+		// **A written pair for `WriteEditableMeshes`' identical reason.**
+		// Width and height are written explicitly rather than derived from
+		// the buffer's length, so a corrupt file that lied about one is
+		// caught the moment the two disagree with `Pixels.size()` rather
+		// than read past the end of a shorter buffer.
+		void WriteEditableImages(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *images = static_cast<const EditableImage *>(source);
+			for (size_t index = 0; index < count; index++) {
+				const EditableImage &image = images[index];
+				writer.WriteUInt32(image.Width);
+				writer.WriteUInt32(image.Height);
+				writer.WriteUInt32(static_cast<uint32_t>(image.Pixels.size()));
+				if (!image.Pixels.empty()) {
+					writer.WriteRaw(image.Pixels.data(), image.Pixels.size());
+				}
+				writer.WriteUInt32(image.Revision);
+			}
+		}
+
+		void ReadEditableImages(core::ByteReader &reader, void *destination, size_t count) {
+			auto *images = static_cast<EditableImage *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				EditableImage &image = images[index];
+				image.Width = reader.ReadUInt32();
+				image.Height = reader.ReadUInt32();
+				const uint32_t bytes = reader.ReadUInt32();
+				image.Pixels.assign(bytes, 0);
+				if (bytes > 0) {
+					reader.ReadRaw(image.Pixels.data(), bytes);
+				}
+				image.Revision = reader.ReadUInt32();
+			}
+		}
+
+		// A written pair for `WriteMaterialRefs`' reason: `PostProcessing`
+		// holds a `core::Name`, and the raw object representation is a
+		// process-local id rather than the text it names.
+		void WritePostProcessing(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *settings = static_cast<const PostProcessing *>(source);
+			for (size_t index = 0; index < count; index++) {
+				writer.WriteName(settings[index].Shader);
+			}
+		}
+
+		void ReadPostProcessing(core::ByteReader &reader, void *destination, size_t count) {
+			auto *settings = static_cast<PostProcessing *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				settings[index].Shader = reader.ReadName();
 			}
 		}
 
@@ -524,6 +691,16 @@ namespace engine::scene {
 		// which is serialised beside it, so the mask and the meanings of its
 		// bits travel together or not at all.
 		ecs::Components::Register<Tags>("scene.Tags");
+
+		// **A dense column for the same reason `SurfaceAppearance` and `Tags`
+		// are, and a hand-written pair for `RenderedSignature`'s.** See
+		// `LocalTransparency`'s own header for why the value must not survive
+		// a save, and `replication::LocalToTheClient` for why it must not
+		// cross the wire despite the `scene.` name every replicated component
+		// carries.
+		ecs::Components::Register<LocalTransparency>(
+			"scene.LocalTransparency", WriteLocalTransparencies, ReadLocalTransparencies
+		);
 		ecs::Components::Register<SurfaceCamera>("scene.SurfaceCamera");
 
 		// **A written pair rather than the generated one**, because the type
@@ -597,6 +774,20 @@ namespace engine::scene {
 		// pair because it holds a `std::string`, not because it holds a name.
 		ecs::Components::Register<ShaderSource>("scene.ShaderSource", WriteShaderSources, ReadShaderSources);
 
+		// **What an `EditableMesh` instance holds, beside the shader source
+		// for the same registration-order reason.** A written pair because it
+		// holds five `std::vector`s, not because it holds a name.
+		ecs::Components::Register<EditableMesh>(
+			"scene.EditableMesh", WriteEditableMeshes, ReadEditableMeshes
+		);
+
+		// **What an `EditableImage` instance holds, beside its mesh
+		// counterpart for the identical reason.** A written pair because it
+		// holds a `std::vector<uint8_t>` of raw pixels.
+		ecs::Components::Register<EditableImage>(
+			"scene.EditableImage", WriteEditableImages, ReadEditableImages
+		);
+
 		// The render gate, at the end for the reason this list opens with.
 		//
 		// **No wire form, and it is not an oversight.** This is a conclusion
@@ -614,6 +805,44 @@ namespace engine::scene {
 		// aborting outright once the table is sealed.
 		ecs::Components::Register<SurfaceTable>("scene.SurfaceTable", WriteSurfaceTables, ReadSurfaceTables);
 		ecs::Components::Register<TagTable>("scene.TagTable", WriteTagTables, ReadTagTables);
+
+		// **The baked collision shapes, and they do not cross.** A hull is
+		// derived from content the receiving side already has, so putting it on
+		// the wire is sending a conclusion instead of its input - and the
+		// conclusion is the half an attacker gets to choose. A shape with a
+		// bound that does not match its points is a collider that stops things
+		// it is not touching. `PhysicsWorld` makes the same decision for its
+		// grids.
+		//
+		// **A writer that writes nothing rather than no writer at all**, which
+		// is `client::DrawList`'s arrangement and is here for its reason:
+		// `Store::Save` refuses a resource with no serialisation rather than
+		// writing bytes that cannot be read back, so a world holding this could
+		// not be snapshotted - and the studio snapshots a universe every time
+		// Play is pressed. Nothing crosses either way, so the wire argument
+		// above is untouched.
+		//
+		// **The reader clears**, because what comes back has to be rebuilt
+		// rather than inherited: a restored world is handed its shapes again by
+		// whichever host restored it - `Editor::PrepareWorldIn`,
+		// `Server::InstallCollisionShapes` - out of the content that host has.
+		// Keeping a stale table would be keeping the one copy nothing owns.
+		//
+		// It is registered rather than left to be minted by the first
+		// `SetResource`, for the reason this block opens with: an unregistered
+		// resource takes the compiler's spelling of its type and aborts once the
+		// table is sealed.
+		ecs::Components::Register<CollisionShapes>(
+			"scene.CollisionShapes",
+			[](core::ByteWriter &, const void *, size_t) {},
+			[](core::ByteReader &, void *destination, size_t count) {
+				auto *tables = static_cast<CollisionShapes *>(destination);
+				for (size_t index = 0; index < count; index++) {
+					tables[index].Hulls.clear();
+					tables[index].Meshes.clear();
+				}
+			}
+		);
 		ecs::Components::Register<ActiveCamera>("scene.ActiveCamera");
 
 		// **`InputState` crosses and `CameraController` crosses**, which is worth
@@ -662,6 +891,14 @@ namespace engine::scene {
 		// pair above.
 		ecs::Components::Register<RenderedSignature>(
 			"scene.RenderedSignature", WriteRenderedSignatures, ReadRenderedSignatures
+		);
+
+		// **One per world, for the identical reason - and authored rather
+		// than derived, so it is saved rather than reset.** A game that
+		// picked a look for its screen expects a reopened place to still
+		// have it.
+		ecs::Components::Register<PostProcessing>(
+			"scene.PostProcessing", WritePostProcessing, ReadPostProcessing
 		);
 
 		// **At the end, which is where a new component goes**, per the ordering
@@ -725,6 +962,13 @@ namespace engine::scene {
 		// with no name and no handle in them.
 		ecs::Components::Register<PortalTransit>("scene.PortalTransit");
 
+		// **No wire form, for `PreviousTransform`'s reason**: it is a record of
+		// what a *viewer* has drawn, so a replica must keep its own and never be
+		// handed the authority's. Giving it one would make every client agree
+		// that a crossing had already been shown, which is precisely the state
+		// in which nothing snaps.
+		ecs::Components::Register<PortalTransitSeen>("scene.PortalTransitSeen");
+
 		// **The three the player pipeline added, appended for this list's
 		// standing reason.** Component ids are a dense counter and an archetype
 		// is a sorted list of them, so inserting one anywhere but the end
@@ -753,6 +997,11 @@ namespace engine::scene {
 		// an explicit name arrives keeps the compiler's spelling and aborts when
 		// the real one turns up. Appended, for this list's standing reason.
 		ecs::Components::Register<SurfaceBounces>("scene.SurfaceBounces");
+
+		// `workspace.MaxSurfaces`, beside the depth and for the same reason: a
+		// declared property has to resolve a component id, and a resource is
+		// keyed by one like anything else.
+		ecs::Components::Register<SurfaceLimit>("scene.SurfaceLimit");
 
 		// **The three the team pipeline added, appended for this list's
 		// standing reason**: a component id is registration order, an archetype
@@ -789,6 +1038,11 @@ namespace engine::scene {
 		// those clients poses the handle by. Nothing about that needed a rule of
 		// its own - see `scene/Tools.hpp`.
 		ecs::Components::Register<Tool>("scene.Tool");
+
+		// Appended because component ids are registration order. This is authored
+		// player state, so the generated scalar serializer is sufficient and the
+		// default replication catalogue includes it with the other `scene.` rows.
+		ecs::Components::Register<PlayerNetworkComponent>("scene.PlayerNetworkComponent");
 	}
 
 	void RegisterSceneClasses() {
@@ -812,5 +1066,7 @@ namespace engine::scene {
 		// built by walking everything registered under `Instance`, so a class
 		// nothing registered is a class nobody can create.
 		(void)ShaderScriptClass();
+		(void)EditableMeshClass();
+		(void)EditableImageClass();
 	}
 }

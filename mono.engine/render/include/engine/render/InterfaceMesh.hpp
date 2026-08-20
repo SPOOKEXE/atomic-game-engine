@@ -28,6 +28,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <span>
 #include <vector>
 
 namespace engine::render {
@@ -98,6 +99,25 @@ namespace engine::render {
 		// The canvas this batch belongs to. A backend uses this to keep screen
 		// pixels out of a world-space collector and vice versa.
 		ecs::Entity Collector;
+
+		// Which fragment shader draws this run, or invalid for the pass's
+		// own - from `gui::DrawCommand::Shader`.
+		//
+		// **Split for the identical reason a texture change is**: a pipeline
+		// is bound per batch, not per quad, so two quads wanting different
+		// fragment shaders cannot be one draw call whatever else they share.
+		//
+		// @since v0.18
+		core::Name Shader;
+
+		// How this run's texels are filtered.
+		//
+		// **Split on for a sampler change, exactly as a texture change is**: a
+		// sampler is bound per draw and not per quad, so two images wanting
+		// different filtering cannot be one call however alike they are.
+		//
+		// @since v0.18
+		gui::ResampleMode Resample = gui::ResampleMode::Default;
 	};
 
 	// The source-pixel extent of an image after selecting its animation cell.
@@ -189,7 +209,63 @@ namespace engine::render {
 			const core::Rect &bounds,
 			float radius,
 			float thickness,
+			gui::LineJoin join,
 			const core::Vector2 &uv,
+			uint32_t colour,
+			const Rotation &turn
+		);
+
+		// --- the gradient -----------------------------------------------------
+		//
+		// **A ramp active for the current command rather than an argument
+		// threaded through six push functions.** Every one of them already takes
+		// a flat colour and turns it into four or eighty vertices; the gradient
+		// changes only what colour each of those vertices gets, so the ramp is
+		// set once per command and read where the vertex is written. Threading
+		// it instead would touch every call site to say "no ramp" in the case
+		// that is almost all of them.
+
+		// The ramp for the command being built, or null.
+		const gui::DrawGradient *Ramp = nullptr;
+
+		// The colour a point takes, with the active ramp applied.
+		//
+		// **The point is the *unrotated* one**, because a `DrawGradient` is
+		// resolved against `DrawCommand::Bounds` and those are unrotated too - so
+		// a rotated label's gradient turns with the label rather than staying
+		// pinned to the screen, which is what an author who set both expects.
+		//
+		// @param colour The flat colour the command asked for.
+		// @param point  Where the vertex is, before this command's own rotation.
+		// @return The ramped colour, packed the same way.
+		uint32_t Shade(uint32_t colour, const core::Vector2 &point) const;
+
+		// Emits a convex polygon, split across the ramp's keypoints.
+		//
+		// **Split, because a ramp is piecewise linear and a triangle is not.**
+		// Interpolating vertex colours across a triangle is exact for one linear
+		// segment and wrong for a shape spanning two, so the polygon is clipped
+		// into one piece per segment and each piece is exact. A two-stop ramp -
+		// which is most of them - clips to one piece and costs nothing.
+		//
+		// @param polygon The shape, convex, wound either way, unrotated.
+		// @param bounds  What the UVs are measured against.
+		// @param uv      The rectangle to map across `bounds`.
+		// @param colour  The flat colour to ramp.
+		// @param turn    The command's rotation.
+		void PushShaded(
+			std::span<const core::Vector2> polygon,
+			const core::Rect &bounds,
+			const core::Rect &uv,
+			uint32_t colour,
+			const Rotation &turn
+		);
+
+		// One vertex, with the ramp and the rotation applied.
+		void PushVertex(
+			const core::Vector2 &point,
+			const core::Rect &bounds,
+			const core::Rect &uv,
 			uint32_t colour,
 			const Rotation &turn
 		);
@@ -197,5 +273,11 @@ namespace engine::render {
 		std::vector<InterfaceVertex> VertexData;
 		std::vector<uint16_t> IndexData;
 		std::vector<InterfaceBatch> BatchData;
+
+		// Scratch for `PushShaded`'s clipping, kept so a frame of gradients does
+		// not allocate once per band.
+		std::vector<core::Vector2> ClipFront;
+		std::vector<core::Vector2> ClipBack;
+		std::vector<float> RampStops;
 	};
 }

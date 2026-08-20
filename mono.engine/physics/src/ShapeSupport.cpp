@@ -6,6 +6,7 @@
 
 #include <glm/gtc/quaternion.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -143,9 +144,31 @@ namespace engine::physics {
 	ShapeInstance::ShapeInstance(
 		const core::CFrame &frame, const core::Vector3 &extent, scene::ShapeKind shape
 	)
+		: ShapeInstance(frame, extent, shape, nullptr, nullptr) {}
+
+	ShapeInstance::ShapeInstance(
+		const core::CFrame &frame,
+		const core::Vector3 &extent,
+		scene::ShapeKind shape,
+		const collision::ConvexHull *hull,
+		const collision::TriangleMesh *mesh
+	)
 		: Frame(frame), Extent(extent),
 		  Axis{frame.RightVector(), frame.UpVector(), frame.VectorToWorldSpace(core::Vector3::ZAxis)},
-		  Shape(shape) {}
+		  Shape(shape), Hull(shape == scene::ShapeKind::Hull ? hull : nullptr),
+		  Mesh(shape == scene::ShapeKind::Mesh ? mesh : nullptr) {
+		// **A baked kind with nothing baked collides as its extent.** The name
+		// did not resolve - content still streaming, a typo, a world saved
+		// against a mesh that has since gone - and the two answers available are
+		// a box the size of the part or no collision at all. A part that
+		// silently stops colliding is a floor that is not there; a box is
+		// visibly the wrong shape and stops things. `scene::Collider::Geometry`
+		// states this as the behaviour rather than as a fallback.
+		if ((Shape == scene::ShapeKind::Hull && Hull == nullptr) ||
+			(Shape == scene::ShapeKind::Mesh && Mesh == nullptr)) {
+			Shape = scene::ShapeKind::Box;
+		}
+	}
 
 	core::Vector3 ToLocalPoint(const core::CFrame &frame, const core::Vector3 &point) {
 		return ToLocalVector(frame, point - frame.Position);
@@ -157,6 +180,20 @@ namespace engine::physics {
 	}
 
 	float ProjectionRadius(const ShapeInstance &shape, const core::Vector3 &axis) {
+		// **A hull and a mesh never reach here, and that is a routing rule
+		// rather than an omission.** The expression this feeds -
+		// `radiusA + radiusB - |offset . axis|` - is exact *because* all three
+		// analytic shapes are centrally symmetric, which the file comment states
+		// at length. A convex hull is not: its reach along an axis and its reach
+		// along the opposite one are different numbers, so a single radius about
+		// the frame's origin is not a wrong-but-conservative answer, it is a
+		// wrong answer in both directions at once.
+		//
+		// `ContactBetween` sends every pair naming one to `ConvexQuery` before
+		// any axis search happens. The cases below exist so the compiler still
+		// checks this switch is exhaustive; reaching one is a routing bug, and
+		// the half-extent it returns is the conservative reading of a shape
+		// nothing has resolved.
 		switch (shape.Shape) {
 		case scene::ShapeKind::Box:
 			return std::abs(axis.Dot(shape.Axis[0])) * shape.Extent.X +
@@ -178,6 +215,14 @@ namespace engine::physics {
 			const float across = square >= 1.0f ? 0.0f : std::sqrt(1.0f - square);
 			return shape.Extent.Y * std::abs(along) + shape.Extent.X * across;
 		}
+
+		case scene::ShapeKind::Hull:
+		case scene::ShapeKind::Mesh:
+			// Unreachable; see the paragraph above this switch. Zero reach means
+			// a shape that separates from everything rather than one that
+			// produces a contact with a made-up depth, which is the direction a
+			// routing bug should fail in.
+			return 0.0f;
 		}
 
 		// Unreachable for a value that came from the enum. A `ShapeKind` read
@@ -191,6 +236,27 @@ namespace engine::physics {
 
 	core::Vector3 SupportPoint(const ShapeInstance &shape, const core::Vector3 &direction) {
 		switch (shape.Shape) {
+		case scene::ShapeKind::Hull: {
+			// **The direction goes into the hull's space and the answer comes
+			// back out**, which is two rotations rather than rotating every one
+			// of the hull's points into the world. A hull is up to
+			// `collision::MAXIMUM_HULL_POINTS` corners and this is asked several
+			// times per contact per iteration, so the difference is two
+			// quaternion products against sixty-four.
+			const core::Vector3 local = ToLocalVector(shape.Frame, direction);
+			const core::Vector3 point = collision::SupportPoint(*shape.Hull, local);
+			return shape.Frame.Position + shape.Frame.VectorToWorldSpace(point);
+		}
+
+		case scene::ShapeKind::Mesh:
+			// **A triangle soup has no support point worth the name.** It is a
+			// surface rather than a solid, so the furthest point of it along a
+			// direction is a corner of whichever triangle happens to stick out -
+			// which is not the answer any convex algorithm is asking for.
+			// `ContactBetween` solves a mesh triangle by triangle, and each
+			// triangle is a three-point hull with a support of its own.
+			return shape.Frame.Position;
+
 		case scene::ShapeKind::Box: {
 			const float extent[3] = {shape.Extent.X, shape.Extent.Y, shape.Extent.Z};
 			core::Vector3 point = shape.Frame.Position;
@@ -220,6 +286,66 @@ namespace engine::physics {
 
 	SupportFeature FaceTowards(const ShapeInstance &shape, const core::Vector3 &direction) {
 		switch (shape.Shape) {
+		case scene::ShapeKind::Hull: {
+			// The face whose outward normal is most nearly the direction asked
+			// for, which is what a clip needs: the widest flat piece of the
+			// surface facing that way. A hull with no faces - flat, or a line,
+			// or fewer than four distinct points, all of which
+			// `collision::BuildConvexHull` produces deliberately - has no face
+			// to present, and the support *point* is the honest answer instead.
+			const core::Vector3 local = ToLocalVector(shape.Frame, direction);
+
+			size_t best = shape.Hull->Faces.size();
+			float facing = -2.0f;
+			for (size_t index = 0; index < shape.Hull->Faces.size(); index++) {
+				const float towards = shape.Hull->Faces[index].Normal.Dot(local);
+				if (towards > facing) {
+					facing = towards;
+					best = index;
+				}
+			}
+
+			SupportFeature feature;
+			if (best == shape.Hull->Faces.size()) {
+				feature.Points[0] = SupportPoint(shape, direction);
+				feature.Plane = direction;
+				feature.Count = 1;
+				return feature;
+			}
+
+			const collision::HullFace &face = shape.Hull->Faces[best];
+			feature.Plane = shape.Frame.VectorToWorldSpace(face.Normal);
+
+			// **Capped at `MAXIMUM_FEATURE_POINTS`, which is a clip budget and
+			// not a hull limit.** A baked hull may have a twenty-sided face and
+			// the clipper takes eight points; keeping the first eight of the
+			// loop is a convex sub-polygon of the face, which is the same kind
+			// of approximation an inscribed octagon is for a cylinder cap.
+			const uint32_t taken =
+				std::min<uint32_t>(face.IndexCount, static_cast<uint32_t>(MAXIMUM_FEATURE_POINTS));
+			for (uint32_t at = 0; at < taken; at++) {
+				const core::Vector3 &corner = shape.Hull->Points[shape.Hull->Loops[face.FirstIndex + at]];
+				feature.Points[at] = shape.Frame.Position + shape.Frame.VectorToWorldSpace(corner);
+			}
+			feature.Count = taken;
+
+			// **The face index is the feature id**, which is what the warm start
+			// keys on. A hull's faces keep their order between builds of the
+			// same points - `collision/AGENTS.md` makes that a requirement - so
+			// the same physical contact carries the same number next tick.
+			feature.Id = static_cast<uint8_t>(best & 0xFFu);
+			return feature;
+		}
+
+		case scene::ShapeKind::Mesh: {
+			// A soup presents no face; see `SupportPoint`.
+			SupportFeature feature;
+			feature.Points[0] = shape.Frame.Position;
+			feature.Plane = direction;
+			feature.Count = 1;
+			return feature;
+		}
+
 		case scene::ShapeKind::Box:
 			return BoxFace(shape, direction);
 

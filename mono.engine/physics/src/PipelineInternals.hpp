@@ -75,10 +75,42 @@ namespace engine::physics {
 			return world.PairList;
 		}
 
+		// Which proxy each pair came from, parallel to the pair list.
+		static std::vector<CandidateSource> &PairSources(PhysicsWorld &world) {
+			return world.PairSourceList;
+		}
+
+		// Where the broad phase sorts the two together before splitting them.
+		static std::vector<SourcedPair> &SourcedPairs(PhysicsWorld &world) {
+			return world.SourcedPairList;
+		}
+
+		// The placed shape of every collider, parallel to the records.
+		//@{
+		static std::vector<PlacedCollider> &DynamicShapes(PhysicsWorld &world) {
+			return world.DynamicShapes;
+		}
+
+		static std::vector<PlacedCollider> &StaticShapes(PhysicsWorld &world) {
+			return world.StaticShapes;
+		}
+		//@}
+
 		// The manifold list, cleared and refilled by `NarrowPhase`.
 		static std::vector<ContactManifold> &Manifolds(PhysicsWorld &world) {
 			return world.ManifoldList;
 		}
+
+		// One slot per candidate pair, and the flags that say which were filled.
+		//@{
+		static std::vector<ContactManifold> &ManifoldSlots(PhysicsWorld &world) {
+			return world.ManifoldSlots;
+		}
+
+		static std::vector<uint8_t> &ManifoldTouching(PhysicsWorld &world) {
+			return world.ManifoldTouching;
+		}
+		//@}
 
 		// The event list, cleared by `NarrowPhase` and filled by `Publish`.
 		static std::vector<ContactEvent> &Events(PhysicsWorld &world) {
@@ -91,8 +123,15 @@ namespace engine::physics {
 		}
 
 		// The per-point constraint rows, refilled by `Solve`.
+		//
+		// **`size()` is the high-water mark**; `RowCount` below is the length.
 		static std::vector<ContactRow> &Rows(PhysicsWorld &world) {
 			return world.RowList;
+		}
+
+		// How many of those rows this tick actually filled.
+		static size_t &RowCount(PhysicsWorld &world) {
+			return world.SolverRowCount;
 		}
 
 		// The gather's sort buffer, and the body indices it resolves.
@@ -162,10 +201,73 @@ namespace engine::physics {
 			return world.StaticRebuildCount;
 		}
 
+		// How many bodies the continuous step has clamped.
+		static uint64_t &SweptBodyCount(PhysicsWorld &world) {
+			return world.SweptBodyCount;
+		}
+
 		// The cell size the world was constructed with, for a reader that has
 		// to reconstruct the grids - a snapshot, above all.
 		static float CellSize(const PhysicsWorld &world) {
 			return world.DynamicIndex.CellSize();
 		}
+
+		// The partition the parallel solve batches by, and the points it is
+		// built from.
+		//@{
+		static spatial::ChunkMap &SolverChunks(PhysicsWorld &world) {
+			return world.SolverChunks;
+		}
+
+		static std::vector<spatial::Proxy> &SolverPoints(PhysicsWorld &world) {
+			return world.SolverPoints;
+		}
+
+		// The chunk edge the last solve used, or zero when it did not partition.
+		static float &SolverChunkEdge(PhysicsWorld &world) {
+			return world.SolverChunkEdge;
+		}
+		//@}
+
+		// The counting pass's answer per manifold, and the offsets it turns
+		// into.
+		//@{
+		static std::vector<uint32_t> &GroupOfManifold(PhysicsWorld &world) {
+			return world.GroupOfManifold;
+		}
+
+		static std::vector<uint32_t> &GroupRowStart(PhysicsWorld &world) {
+			return world.GroupRowStart;
+		}
+
+		// Where the filling pass is up to in each group. A second array rather
+		// than the starts advanced in place, for `HashGrid::Rebuild`'s reason:
+		// the starts are what the sweeps read.
+		static std::vector<uint32_t> &GroupRowCursor(PhysicsWorld &world) {
+			return world.GroupRowCursor;
+		}
+
+		// Where each manifold's rows begin. What the dispatched set-up pass
+		// writes against instead of a shared cursor.
+		static std::vector<uint32_t> &RowStartOfManifold(PhysicsWorld &world) {
+			return world.RowStartOfManifold;
+		}
+
+		// Where each manifold's impulses begin. Pair order, unlike the rows.
+		static std::vector<uint32_t> &ImpulseStartOfManifold(PhysicsWorld &world) {
+			return world.ImpulseStartOfManifold;
+		}
+		//@}
+
+		// The groups a sweep dispatches over, and the rows left over.
+		//@{
+		static std::vector<SolverGroup> &SolverGroups(PhysicsWorld &world) {
+			return world.SolverGroups;
+		}
+
+		static SolverGroup &BorderRows(PhysicsWorld &world) {
+			return world.BorderRows;
+		}
+		//@}
 	};
 }

@@ -74,6 +74,38 @@ namespace engine::gui {
 
 		// The element the pointer is pressed on, or null.
 		ecs::Entity Pressed;
+
+		// The `Player` this list is being compiled for, or null.
+		//
+		// **Only `BillboardGui.PlayerToHideFrom` reads it, and that is enough to
+		// justify it being here rather than in the renderer.** The alternative is
+		// a backend testing a handle while it records - which would mean the
+		// compiled list said one thing and the frame drew another, and a headless
+		// test could not assert what a player actually sees. Deciding it here
+		// also folds it into the signature, so switching viewers rebuilds.
+		//
+		// Null means "no particular viewer", which is the studio's answer and a
+		// test's: nothing is hidden.
+		//
+		// @since v0.18
+		ecs::Entity Viewer;
+
+		// The caller's monotonic clock, in seconds.
+		//
+		// **Passed in, never read**, which is the standing rule
+		// `render::FlipbookFrameAt` and `assets::Grant::HasExpired` both keep
+		// and the one this module was said to be unable to satisfy. A module
+		// that read the time would hold a non-deterministic input in the
+		// subsystem whose failures are hardest to reproduce, and would make a
+		// suite *wait* for an animation rather than state where it is.
+		//
+		// The origin does not matter and only differences are used, so any
+		// steady clock works. Left at zero a page slide finishes instantly on
+		// the second frame, which is the honest answer for a caller that has
+		// not started passing one: it still lands on the right page.
+		//
+		// @since v0.17
+		double Seconds = 0.0;
 	};
 
 	// A compiled draw list and the signature that says whether it is still
@@ -149,4 +181,23 @@ namespace engine::gui {
 		// be treated as already compiled and would draw nothing, forever.
 		bool Fresh = false;
 	};
+
+	// Every shader an `ImageLabel` or `ImageButton` in this world names,
+	// without duplicates.
+	//
+	// **`scene::DemandedShaders`'s exact shape, one indirection flatter.**
+	// That function walks `MaterialRef` because a part's shader is authored
+	// on a child instance; a `Picture` carries its own name directly, so this
+	// walks `Picture` rather than anything standing in for it. Both feed the
+	// same `render::ShaderLibrary`, which resolves a name against the same
+	// `scene::ShaderScript` tree and the same built-ins regardless of which
+	// module asked.
+	//
+	// A `const` walk, so this may be called from a read-only consumer.
+	//
+	// @param store The world.
+	// @param out   Filled with the names, sorted by id. Cleared first.
+	// @return How many distinct shaders are named.
+	// @since v0.18
+	size_t DemandedShaders(ecs::Store &store, std::vector<core::Name> &out);
 }

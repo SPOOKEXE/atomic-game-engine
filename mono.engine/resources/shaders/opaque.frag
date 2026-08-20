@@ -22,6 +22,11 @@ layout(set = 2, binding = 2) uniform sampler2D colourMap;
 // what makes that coherent with one global sun; adding a second contribution
 // would double-light every floor near a doorway.
 layout(set = 2, binding = 3) uniform sampler2D beamMap;
+layout(set = 2, binding = 4) uniform sampler2D normalMap;
+layout(set = 2, binding = 5) uniform sampler2D roughnessMap;
+layout(set = 2, binding = 6) uniform sampler2D occlusionMap;
+layout(set = 2, binding = 7) uniform sampler2D emissiveMap;
+layout(set = 2, binding = 8) uniform sampler2D heightMap;
 
 layout(set = 3, binding = 0) uniform Lighting {
 	vec4 Direction;
@@ -46,7 +51,11 @@ layout(set = 3, binding = 0) uniform Lighting {
 	// x: 1 when `colourMap` holds this draw's texture rather than the one-texel
 	//    stand-in.
 	// y: the alpha below which a fragment is discarded, or 0 to discard none.
+	// z: 1 when a height map is present. w: its world-independent UV scale.
 	vec4 Surface;
+
+	// Presence of normal, roughness, occlusion, and emissive data maps.
+	vec4 Material;
 
 	// Where the current animation cell sits in its sheet: x the scale, yz the
 	// offset. The identity (1, 0, 0) for a texture that is not a sheet, so this
@@ -121,12 +130,15 @@ vec2 MirrorLookup(vec2 uv, float effect, float seconds) {
 		return uv;
 	}
 
-	// About the middle of the pane, falling off to nothing at the edge, and
-	// turning slowly. Clamped rather than wrapped: a mirror whose image tiled
-	// at the rim would read as a texture rather than as a twist.
+	// About the middle of the pane, falling off to nothing at every edge. Time
+	// changes the amount of twist instead of adding a rotation shared by every
+	// texel, which keeps the pane's frame anchored to the world.
 	vec2 centred = uv - 0.5;
 	float radius = length(centred);
-	float twist = (0.35 - min(radius, 0.35)) * 7.0 + seconds * 0.4;
+	vec2 edgeDistance = min(uv, vec2(1.0) - uv);
+	float boundary = smoothstep(0.0, 0.30, min(edgeDistance.x, edgeDistance.y));
+	float centre = 1.0 - smoothstep(0.08, 0.72, radius);
+	float twist = boundary * centre * (2.6 + sin(seconds * 0.55) * 0.65);
 
 	float sine = sin(twist);
 	float cosine = cos(twist);
@@ -143,11 +155,29 @@ vec2 MirrorLookup(vec2 uv, float effect, float seconds) {
 // every thermal camera ships with, because it is the one that keeps its
 // ordering legible to somebody who has never seen one before.
 vec3 ThermalRamp(float level) {
-	vec3 colour = mix(vec3(0.0, 0.0, 0.18), vec3(0.35, 0.0, 0.62), smoothstep(0.0, 0.28, level));
-	colour = mix(colour, vec3(0.90, 0.10, 0.25), smoothstep(0.28, 0.52, level));
-	colour = mix(colour, vec3(1.0, 0.55, 0.0), smoothstep(0.52, 0.74, level));
-	colour = mix(colour, vec3(1.0, 0.95, 0.35), smoothstep(0.74, 0.90, level));
-	return mix(colour, vec3(1.0), smoothstep(0.90, 1.0, level));
+	if (level < 0.12) {
+		return mix(vec3(0.0), vec3(0.0, 0.05, 0.42), smoothstep(0.0, 0.12, level));
+	}
+	if (level < 0.32) {
+		return mix(
+			vec3(0.0, 0.05, 0.42), vec3(0.58, 0.0, 0.72), smoothstep(0.12, 0.32, level)
+		);
+	}
+	if (level < 0.54) {
+		return mix(
+			vec3(0.58, 0.0, 0.72), vec3(0.96, 0.04, 0.04), smoothstep(0.32, 0.54, level)
+		);
+	}
+	if (level < 0.78) {
+		return mix(
+			vec3(0.96, 0.04, 0.04), vec3(1.0, 0.86, 0.02), smoothstep(0.54, 0.78, level)
+		);
+	}
+	return mix(vec3(1.0, 0.86, 0.02), vec3(1.0), smoothstep(0.78, 1.0, level));
+}
+
+float MirrorVignette(float edge, float inner, float outer) {
+	return 1.0 - smoothstep(inner, outer, edge);
 }
 
 // What the pane shows, once the sampled image has been graded.
@@ -171,14 +201,14 @@ vec3 MirrorGrade(vec3 image, vec2 uv, float effect, float seconds) {
 		// that saturated the mid-tones made a lit room a flat green rectangle,
 		// which is a filter rather than a picture: what makes this read as a
 		// scope is that the shapes survive it.
-		float gained = pow(clamp(level * 1.35 + 0.03, 0.0, 1.0), 0.85);
+		float gained = max(1.0 - exp(-max(level, 0.0) * 5.5), 0.07);
 
 		// Grain that moves. A still grain reads as dirt on the glass.
 		float grain = MirrorNoise(uv * 640.0 + seconds * 37.0);
-		gained = clamp(gained + (grain - 0.5) * 0.16, 0.0, 1.0);
+		gained = clamp(gained + (grain - 0.5) * 0.08, 0.0, 1.0);
 
-		float lines = 0.90 + 0.10 * sin(uv.y * 900.0);
-		float vignette = smoothstep(0.78, 0.16, edge);
+		float lines = 0.94 + 0.06 * sin(uv.y * 900.0);
+		float vignette = mix(0.38, 1.0, MirrorVignette(edge, 0.34, 0.70));
 		return vec3(gained * 0.18, gained, gained * 0.30) * lines * vignette;
 	}
 
@@ -187,7 +217,8 @@ vec3 MirrorGrade(vec3 image, vec2 uv, float effect, float seconds) {
 		// engine with no thermal model cannot avoid - `scene::SurfaceEffect`
 		// says so rather than implying otherwise. It reads right because bright
 		// things in a lit scene usually are the hot ones.
-		return ThermalRamp(clamp(level * 1.25, 0.0, 1.0));
+		float temperature = pow(clamp(level * 1.8, 0.0, 1.0), 0.62);
+		return ThermalRamp(temperature);
 	}
 
 	if (effect < float(EFFECT_CCTV) + 0.5) {
@@ -198,8 +229,8 @@ vec3 MirrorGrade(vec3 image, vec2 uv, float effect, float seconds) {
 
 		float lines = 0.82 + 0.18 * sin(uv.y * 620.0);
 		float grain = MirrorNoise(uv * 380.0 + seconds * 53.0);
-		float band = smoothstep(0.10, 0.0, abs(fract(uv.y + seconds * 0.22) - 0.5));
-		float vignette = smoothstep(0.85, 0.25, edge);
+		float band = 1.0 - smoothstep(0.0, 0.10, abs(fract(uv.y + seconds * 0.22) - 0.5));
+		float vignette = mix(0.45, 1.0, MirrorVignette(edge, 0.36, 0.72));
 
 		float value = clamp(grey * lines + (grain - 0.5) * 0.07 + band * 0.16, 0.0, 1.0);
 
@@ -432,14 +463,39 @@ float ShadowFactor(vec3 normal, vec3 toLight) {
 	return lit * 0.25;
 }
 
+mat3 CotangentFrame(vec3 normal, vec3 position, vec2 uv) {
+	vec3 positionX = dFdx(position);
+	vec3 positionY = dFdy(position);
+	vec2 uvX = dFdx(uv);
+	vec2 uvY = dFdy(uv);
+	vec3 tangent = positionX * uvY.y - positionY * uvX.y;
+	vec3 bitangent = -positionX * uvY.x + positionY * uvX.x;
+	float scale = inversesqrt(max(max(dot(tangent, tangent), dot(bitangent, bitangent)), 1e-8));
+	return mat3(tangent * scale, bitangent * scale, normal);
+}
+
+float DistributionGGX(vec3 normal, vec3 halfway, float roughness) {
+	float alpha = roughness * roughness;
+	float alphaSquared = alpha * alpha;
+	float normalHalf = max(dot(normal, halfway), 0.0);
+	float denominator = normalHalf * normalHalf * (alphaSquared - 1.0) + 1.0;
+	return alphaSquared / max(3.14159265 * denominator * denominator, 1e-5);
+}
+
+float GeometrySchlickGGX(float cosine, float roughness) {
+	float radius = roughness + 1.0;
+	float factor = radius * radius * 0.125;
+	return cosine / max(cosine * (1.0 - factor) + factor, 1e-5);
+}
+
+vec3 FresnelSchlick(float cosine, vec3 base) {
+	return base + (1.0 - base) * pow(clamp(1.0 - cosine, 0.0, 1.0), 5.0);
+}
+
 void main() {
 	vec3 normal = normalize(inNormal);
 	vec3 toLight = -normalize(lighting.Direction.xyz);
 	float lambert = max(dot(normal, toLight), 0.0);
-
-	// The outdoor term is directional enough to distinguish sky-facing surfaces
-	// without pretending the engine has indoor volumes it does not yet model.
-	float sky = max(normal.y, 0.0);
 
 	// **The three colour sources multiply rather than one winning.** The
 	// texture is what the artist painted, the base colour is what the *material*
@@ -452,9 +508,32 @@ void main() {
 	// repeats them, which is right for a whole sheet and catastrophic for a cell:
 	// without this a coordinate of 1.2 would land two cells further along and a
 	// GIF on a tiled surface would show several frames at once.
-	const vec2 cellUv = fract(inTexCoord) * lighting.Flipbook.x + lighting.Flipbook.yz;
+	vec2 localUv = fract(inTexCoord);
+	vec2 cellUv = localUv * lighting.Flipbook.x + lighting.Flipbook.yz;
+	if (lighting.Surface.z > 0.5) {
+		mat3 tangentFrame = CotangentFrame(normal, inWorldPosition, cellUv);
+		vec3 tangentEye = transpose(tangentFrame) * normalize(lighting.Eye.xyz - inWorldPosition);
+		float height = texture(heightMap, cellUv).r - 0.5;
+		float grazing = max(abs(tangentEye.z), 0.2);
+		localUv = fract(localUv - tangentEye.xy * (height * lighting.Surface.w / grazing));
+		cellUv = localUv * lighting.Flipbook.x + lighting.Flipbook.yz;
+	}
+	if (lighting.Material.x > 0.5) {
+		vec3 mappedNormal = texture(normalMap, cellUv).xyz * 2.0 - 1.0;
+		normal = normalize(CotangentFrame(normal, inWorldPosition, cellUv) * mappedNormal);
+		toLight = -normalize(lighting.Direction.xyz);
+		lambert = max(dot(normal, toLight), 0.0);
+	}
+
+	// The outdoor term follows the final material normal. Computing it before
+	// the normal map made raised detail receive the sky light of the flat mesh.
+	float sky = max(normal.y, 0.0);
 
 	vec4 sampled = lighting.Surface.x > 0.5 ? texture(colourMap, cellUv) : vec4(1.0);
+	float roughness = lighting.Material.y > 0.5 ? texture(roughnessMap, cellUv).r : 0.65;
+	roughness = clamp(roughness, 0.045, 1.0);
+	float occlusion = lighting.Material.z > 0.5 ? texture(occlusionMap, cellUv).r : 1.0;
+	vec3 emissive = lighting.Material.w > 0.5 ? texture(emissiveMap, cellUv).rgb : vec3(0.0);
 
 	// Cut-out before anything else is computed. A hair card is authored as a
 	// plane with a mask, and discarding is what keeps it opaque and out of the
@@ -487,9 +566,17 @@ void main() {
 	// room's own geometry blocks and a beam says what the room through a hole
 	// blocks; light that fails either test does not arrive.
 	float shadow = min(ShadowFactor(normal, toLight), BeamFactor());
-	vec3 lit = albedo *
-		(lighting.Ambient.rgb + lighting.OutdoorAmbient.rgb * sky +
-		 lighting.Direct.rgb * lambert * shadow + LocalLight(normal));
+	vec3 viewDirection = normalize(lighting.Eye.xyz - inWorldPosition);
+	vec3 halfway = normalize(viewDirection + toLight);
+	vec3 fresnel = FresnelSchlick(max(dot(halfway, viewDirection), 0.0), vec3(0.04));
+	float distribution = DistributionGGX(normal, halfway, roughness);
+	float geometry = GeometrySchlickGGX(max(dot(normal, viewDirection), 0.0), roughness) *
+		GeometrySchlickGGX(lambert, roughness);
+	vec3 specular = distribution * geometry * fresnel /
+		max(4.0 * max(dot(normal, viewDirection), 0.0) * lambert, 1e-4);
+	vec3 ambient = albedo * (lighting.Ambient.rgb + lighting.OutdoorAmbient.rgb * sky) * occlusion;
+	vec3 direct = (albedo * (1.0 - fresnel) * lambert + specular) * lighting.Direct.rgb * shadow;
+	vec3 lit = ambient + direct + albedo * LocalLight(normal) + emissive;
 	lit = mix(lit, lighting.FogColour.rgb, FogFactor());
 
 	// **A portal pane reads the sub-render by screen position**, which is the

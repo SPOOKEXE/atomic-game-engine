@@ -20,6 +20,7 @@
 // @tier L1 · shared
 
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 
 namespace engine::core {
@@ -76,6 +77,28 @@ namespace engine::core {
 		// curve and the `Out` curve, each compressed into half the span.
 		InOut,
 	};
+
+	// How many curves there are, for a caller registering the set.
+	inline constexpr size_t EASING_STYLE_COUNT = 11;
+
+	// How many directions there are.
+	inline constexpr size_t EASING_DIRECTION_COUNT = 3;
+
+	// A stable name for a curve, as a script spells it.
+	//
+	// **Here rather than beside each caller that needs the list.** Two modules
+	// register `Enum.EasingStyle` - the script surface and `gui`'s page layout -
+	// and a literal list in each is the debt `gui::RegisterEnum` names in as
+	// many words: two declarations that agree until they do not. Deriving both
+	// from this one is what makes adding a curve a single edit.
+	//
+	// @param value The curve.
+	// @return A view valid for the lifetime of the process.
+	// @since v0.17
+	//@{
+	const char *Describe(EasingStyle value);
+	const char *Describe(EasingDirection value);
+	//@}
 
 	// How long an interpolation takes and what shape it follows.
 	//

@@ -1,3 +1,6 @@
+#include "WorldResource.hpp"
+
+#include <engine/core/Name.hpp>
 #include <engine/core/types/Ray.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
@@ -5,15 +8,58 @@
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Portals.hpp>
 #include <engine/physics/Query.hpp>
+#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
+#include <engine/scene/Part.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/Tagging.hpp>
 #include <engine/spatial/LayerMask.hpp>
 
+#include <cmath>
+#include <optional>
 #include <vector>
 
 namespace engine::physics {
+
+	namespace {
+		// A blocker wearing this tag is walked straight through, up to
+		// `POPPERCAM_IGNORE_LIMIT` of them in one cast. `UpdatePoppercam`'s
+		// own header carries the reason a tag rather than a query argument.
+		const core::Name &PoppercamIgnoreTag() {
+			static const core::Name tag("IgnorePoppercam");
+			return tag;
+		}
+
+		constexpr int POPPERCAM_IGNORE_LIMIT = 8;
+
+		// How far short of the blocker the eye stops, in metres.
+		//
+		// **Not zero**, because a raycast hit is a surface and an eye placed
+		// exactly on one clips into it the moment the camera's own near plane
+		// - which has real thickness - crosses the same point. A hair of
+		// clearance is cheaper than a per-frame fight with the near plane.
+		constexpr float POPPERCAM_MARGIN = 0.15f;
+
+		// How see-through a blocker becomes. **Partial rather than
+		// invisible**, which is what the goal this closes asks for by name:
+		// a wall thinned enough to steer by and still readable as a wall,
+		// rather than a hole in the world with a floor plan behind it.
+		constexpr float POPPERCAM_FADE = 0.6f;
+	}
+
+	// What the previous call faded, so the next one can clear exactly that
+	// and nothing else.
+	//
+	// **A resource rather than a field on `CameraController`**, because it is
+	// this pass's own bookkeeping and nothing else has a reason to read it -
+	// `scene` may not even know this module exists. Self-installing the same
+	// way `scene::MaterialCatalogue` is, because there is exactly one of it
+	// and nothing needs to have set it up in advance.
+	struct PoppercamState {
+		ecs::Entity FadedBlocker = ecs::NULL_ENTITY;
+	};
 
 	size_t GroundCharacters(ecs::Store &store) {
 		size_t tested = 0;
@@ -77,7 +123,140 @@ namespace engine::physics {
 		return tested;
 	}
 
+	bool UpdatePoppercam(ecs::Store &store) {
+		PoppercamState *state = store.ResourceMutable<PoppercamState>();
+		if (state == nullptr) {
+			store.SetResource(PoppercamState{});
+			state = store.ResourceMutable<PoppercamState>();
+		}
+
+		// Clears whatever the previous frame faded and drops the occlusion,
+		// so every early return below leaves the world in the state a caller
+		// with nothing to occlude expects: the player's own distance, and
+		// nothing translucent that should not be.
+		const auto clear = [&]() -> bool {
+			bool changed = false;
+			auto *controller = store.ResourceMutable<scene::CameraController>();
+			if (controller != nullptr && controller->OccludedDistance >= 0.0f) {
+				controller->OccludedDistance = -1.0f;
+				changed = true;
+			}
+			if (state->FadedBlocker != ecs::NULL_ENTITY) {
+				scene::SetLocalTransparency(store, state->FadedBlocker, 0.0f);
+				state->FadedBlocker = ecs::NULL_ENTITY;
+				changed = true;
+			}
+			return changed;
+		};
+
+		auto *controller = store.ResourceMutable<scene::CameraController>();
+		const auto *active = store.Resource<scene::ActiveCamera>();
+		if (controller == nullptr || active == nullptr || !controller->Enabled ||
+			controller->Mode == scene::CameraMode::Scriptable ||
+			controller->Mode == scene::CameraMode::LockFirstPerson) {
+			// **First person is not "zero distance", it is nothing to occlude
+			// at all.** The eye sits at the head with no arm reaching back
+			// from it, so there is no point between the two for anything to
+			// stand in.
+			return clear();
+		}
+
+		const scene::Transform *subject = store.Get<scene::Transform>(controller->Subject);
+		if (subject == nullptr) {
+			return clear();
+		}
+
+		// The same arithmetic `PlaceCamera` uses to find where the eye wants
+		// to be, repeated here rather than shared - that function is `scene`
+		// and takes no query, and duplicating four lines of trigonometry is
+		// cheaper than a callback for what the query decides. Portal seams
+		// are deliberately not accounted for: a poppercam correcting for a
+		// wall on the far side of a hole it has not been told about is a
+		// sharper edge than one that is a frame late clearing a wall that
+		// was, and the ordinary case - no portal in the shot - pays nothing
+		// extra either way.
+		const core::Vector3 head =
+			subject->Frame.Position + core::Vector3{0.0f, controller->HeadHeight, 0.0f};
+		const float pitch = controller->Angles.X;
+		const float yaw = controller->Angles.Y;
+		const core::Vector3 forward{
+			-std::sin(yaw) * std::cos(pitch),
+			std::sin(pitch),
+			-std::cos(yaw) * std::cos(pitch),
+		};
+
+		core::Vector3 desired = head - forward * controller->Distance;
+		if (controller->Mode == scene::CameraMode::ShiftLock) {
+			const core::Vector3 side{std::cos(yaw), 0.0f, -std::sin(yaw)};
+			desired = desired + side * controller->ShoulderOffset;
+		}
+
+		const core::Vector3 toEye = desired - head;
+		const float wanted = toEye.Magnitude();
+		if (wanted <= POPPERCAM_MARGIN) {
+			// Already closer than the margin allows - nothing to pull in to.
+			return clear();
+		}
+		const core::Vector3 direction = toEye / wanted;
+
+		// **A loop of single-hit casts rather than a filtered query**, because
+		// `Raycast` refuses a general ignore list by design - see its own
+		// header. Each pass starts just past the last hit, which is the same
+		// "inside rather than on the surface" trick `GroundCharacters` uses
+		// above, for the identical reason: a ray beginning exactly on a face
+		// is a coin flip about whether it hits it again.
+		float travelled = 0.0f;
+		std::optional<ColliderHit> blocking;
+		for (int pass = 0; pass < POPPERCAM_IGNORE_LIMIT && travelled < wanted; pass++) {
+			const core::Ray ray{head + direction * travelled, direction};
+			const auto hit =
+				Raycast(store, ray, wanted - travelled, spatial::LayerMask::All(), controller->Subject);
+			if (!hit.has_value()) {
+				break;
+			}
+
+			if (scene::HasTag(store, hit->Owner, PoppercamIgnoreTag())) {
+				travelled += hit->Distance + 0.01f;
+				continue;
+			}
+
+			blocking = hit;
+			blocking->Distance += travelled;
+			break;
+		}
+
+		if (!blocking.has_value()) {
+			return clear();
+		}
+
+		bool changed = false;
+
+		const float occluded = std::max(0.0f, blocking->Distance - POPPERCAM_MARGIN);
+		if (controller->OccludedDistance != occluded) {
+			controller->OccludedDistance = occluded;
+			changed = true;
+		}
+
+		if (state->FadedBlocker != blocking->Owner) {
+			if (state->FadedBlocker != ecs::NULL_ENTITY) {
+				scene::SetLocalTransparency(store, state->FadedBlocker, 0.0f);
+			}
+			scene::SetLocalTransparency(store, blocking->Owner, POPPERCAM_FADE);
+			state->FadedBlocker = blocking->Owner;
+			changed = true;
+		}
+
+		return changed;
+	}
+
 	size_t WakeMovingCharacters(ecs::Store &store) {
+		// Silent like `GhostPortalBodies`, and guarded the same way: hosts
+		// without a solver run this system, and the typed lookup would register
+		// the resource under the compiler's spelling to say it found nothing -
+		// see `WorldResource.hpp`.
+		if (!PhysicsWorldRegistered()) {
+			return 0;
+		}
 		auto *world = store.ResourceMutable<PhysicsWorld>();
 		if (world == nullptr) {
 			return 0;

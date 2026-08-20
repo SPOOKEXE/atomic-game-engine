@@ -267,6 +267,23 @@ TEST_CASE("a session takes keys once", "[replication][encryption]") {
 	CHECK_FALSE(first.AdoptKeys(std::move(*spare)));
 }
 
+TEST_CASE("simulated latency holds sealed datagrams until their deadline", "[replication][encryption]") {
+	Wire wire;
+	wire.ClientSide->SetSimulatedLatency(100.0);
+	REQUIRE(wire.ClientSide->SimulatedLatency() == 100.0);
+
+	REQUIRE(wire.ClientSide->Send(CanaryInput(1), 1.0));
+	CHECK(wire.ClientTap->Sent().empty());
+	CHECK(wire.ClientSide->Flush(1.099) == 0);
+	CHECK(wire.ClientTap->Sent().empty());
+
+	CHECK(wire.ClientSide->Flush(1.1) >= 1);
+	CHECK(wire.ClientTap->Sent().size() >= 1);
+
+	wire.ClientSide->SetSimulatedLatency(-10.0);
+	CHECK(wire.ClientSide->SimulatedLatency() == 0.0);
+}
+
 TEST_CASE("a resend is sealed again rather than replayed", "[replication][encryption]") {
 	// **The resend decision, asserted.** `ReliableSender` holds the plaintext and
 	// `Session::Flush` seals it again under a fresh counter, so the same reliable

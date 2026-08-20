@@ -7,6 +7,7 @@
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/physics/Clock.hpp>
 #include <engine/physics/Contacts.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Solver.hpp>
@@ -78,7 +79,7 @@ namespace engine::physics {
 		// therefore has no `Motion` to exclude it, rebuilds the static index
 		// every tick forever. `Store::Each` documents a write through the
 		// reference as a direct memory write, which is exactly what is wanted.
-		const float delta = store.Time().Delta;
+		const float delta = PhysicsStepSeconds(store);
 		const std::span<const SolverBody> bodies = world->Bodies();
 		if (!bodies.empty() && delta > 0.0f) {
 			store.Each<scene::Transform, const scene::Motion>(

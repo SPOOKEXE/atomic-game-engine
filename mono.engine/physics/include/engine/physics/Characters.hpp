@@ -43,6 +43,46 @@ namespace engine::physics {
 	// @return How many humanoids were tested.
 	size_t GroundCharacters(ecs::Store &store);
 
+	// Pulls the camera in front of whatever stands between it and its subject,
+	// and fades that one thing so the player can still see past it.
+	//
+	// **Roblox's poppercam, and the same reason it lives here as
+	// `GroundCharacters` does.** `scene::PlaceCamera` cannot ask a query
+	// whether the eye it just computed is inside a wall - `scene` may not
+	// link this module - so the query and the placement it corrects have to
+	// meet somewhere both are visible, which is `physics`.
+	//
+	// **Writes `scene::CameraController::OccludedDistance`, never `Distance`
+	// itself.** The player's own zoom setting must survive being pushed in
+	// by a wall and pulled back out the moment it clears - see that field's
+	// own header for why a second one exists rather than a temporary
+	// overwrite.
+	//
+	// **Fades the blocker rather than hiding it**, through
+	// `scene::SetLocalTransparency` - client-only and never sent, so a wall
+	// thinned out for one viewer's camera is not thinned out for anyone
+	// standing on the other side of it. Exactly one blocker is faded at a
+	// time; the previous frame's is cleared first if a new tick names a
+	// different one or none at all, so nothing stays translucent after the
+	// camera has moved past it.
+	//
+	// **A part tagged `IgnorePoppercam` is looked straight through**, up to
+	// a handful of times, so an author can mark a canopy or a low ceiling
+	// nobody wants the camera fighting. `Raycast` itself refuses a general
+	// ignore list - see its own header - so this is a loop over single-hit
+	// casts rather than a filtered one.
+	//
+	// A no-op wherever there is nothing to place a camera *for*: no
+	// `CameraController`, no `ActiveCamera`, no subject, `Scriptable`, or
+	// disabled. `LockFirstPerson` is also left alone - the eye already sits
+	// at the head, and there is nothing between a point and itself to be
+	// occluded by.
+	//
+	// @param store The world.
+	// @return `true` when a blocker's fade or the occluded distance changed.
+	// @since v0.18
+	bool UpdatePoppercam(ecs::Store &store);
+
 	// Gives a body back to the simulation when its humanoid wants to move.
 	//
 	// **The half of a character controller that a sleeping body breaks.**

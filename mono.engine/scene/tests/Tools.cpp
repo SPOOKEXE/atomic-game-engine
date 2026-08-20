@@ -1,7 +1,7 @@
 // A thing a character can hold.
 //
 // **The case that decides whether this was worth building is the second one.**
-// `docs/DEFERRED.md` D00120 refused a `Tool` class on the grounds that one with
+// `docs/retired/DEFERRED.md` D00120 refused a `Tool` class on the grounds that one with
 // no equip behaviour would appear in the insert palette, save into a game file
 // and then do nothing for ever - so what has to be proved is not that the class
 // registers, but that putting a tool in a hand *moves the handle*, in the

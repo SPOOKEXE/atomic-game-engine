@@ -1167,19 +1167,16 @@ namespace engine::scene {
 
 		const Vector3 offset = frame.Position - seam.Centre;
 
-		// **Strictly inside, and the margin is what identifies the hole
-		// itself.** A pane's own row is exactly the seam's rectangle - that is
-		// what the rectangle was measured from - so an inclusive test says every
-		// pane fits through itself, and a copy of one lands on the far pane and
-		// z-fights a wall with a picture on it. `CutAndCloneSeams` could refuse
-		// it by surface slot because it reads rows a viewer's world has aimed;
-		// the cross-world half reads rows from a world that may have no camera
-		// in it at all, where no pane carries a slot. A rule about size needs
-		// neither.
+		// **The rim is part of the aperture.** A character standing in the
+		// opening puts its lowest limbs exactly on the bottom edge, and an inward
+		// margin rejects only those limbs while the rest of the rig crosses. The
+		// small outward tolerance absorbs transform round-off; a real overhang is
+		// still refused.
 		//
-		// It also says the plain thing it looks like it says: to pass through a
-		// hole you have to be smaller than the hole. A body wedged exactly into
-		// a doorway is drawn whole on its own side, which is what it looks like.
+		// A row filling both axes is the pane itself in a world whose camera has
+		// not assigned surface slots yet. It is the one equality that must not
+		// cross: its copy lands on the partner pane and z-fights it. Contact on
+		// only one rim is ordinary doorway geometry and remains valid.
 		constexpr float SNUG = 1.0e-3f;
 
 		// **And it has to have two halves to be cut into**, which is the same
@@ -1191,9 +1188,13 @@ namespace engine::scene {
 		// question of a bounding sphere, which is the conservative form; this is
 		// the exact one, and it is free here because the support is already
 		// built.
+		const float firstReach = std::abs(offset.Dot(first)) + span(first);
+		const float secondReach = std::abs(offset.Dot(second)) + span(second);
+		const bool fillsPane =
+			std::abs(firstReach - firstLength) <= SNUG && std::abs(secondReach - secondLength) <= SNUG;
+
 		cut.Fits = span(seam.Normal) > std::abs(offset.Dot(seam.Normal)) + SNUG &&
-				   std::abs(offset.Dot(first)) + span(first) <= firstLength - SNUG &&
-				   std::abs(offset.Dot(second)) + span(second) <= secondLength - SNUG;
+				   firstReach <= firstLength + SNUG && secondReach <= secondLength + SNUG && !fillsPane;
 
 		return cut;
 	}
@@ -1464,6 +1465,19 @@ namespace engine::scene {
 		);
 
 		return panes.size();
+	}
+
+	int32_t SurfaceLimitOf(const Store &store) {
+		const SurfaceLimit *authored = store.Resource<SurfaceLimit>();
+
+		// **Never below zero, whatever is in the resource.** The property setter
+		// refuses a negative, and a snapshot is hostile input that did not go
+		// through it - a negative here would reach a `size_t` comparison in the
+		// renderer as an enormous positive.
+		if (authored == nullptr) {
+			return DEFAULT_SURFACE_LIMIT;
+		}
+		return authored->Panes > 0 ? authored->Panes : 0;
 	}
 
 	int32_t SurfaceBouncesOf(const Store &store) {
@@ -2536,23 +2550,42 @@ namespace engine::scene {
 					// vector for a hole that shrinks to nothing.
 					const Vector3 turned = through.Rotate(facing);
 
+					// **The serial moves on every crossing and the turn only on
+					// some**, which is the split this used to get wrong by
+					// putting both inside the guard. A pair of panes facing each
+					// other head-on turns nothing, so `turned` and `facing` agree
+					// and the old code wrote nothing at all - and the serial is
+					// now what tells a *viewer* that a body jumped, which is true
+					// of a straight crossing exactly as much as of a corner. A
+					// straight-through portal was therefore the one case where a
+					// replica had no way to know, and it is the commonest kind.
+					PortalTransit went;
+					if (const PortalTransit *before_ = store.Get<PortalTransit>(entity)) {
+						went = *before_;
+					}
+					went.Serial++;
+					went.Turn = 0.0f;
+
 					if ((std::abs(turned.X) > 1e-6f || std::abs(turned.Z) > 1e-6f) &&
 						(std::abs(facing.X) > 1e-6f || std::abs(facing.Z) > 1e-6f)) {
-						PortalTransit went;
-						if (const PortalTransit *before_ = store.Get<PortalTransit>(entity)) {
-							went = *before_;
-						}
-
 						// Wrapped, so a quarter turn is reported as a quarter
 						// turn and never as seven quarters the other way - the
 						// camera it reaches adds it to an angle it already has.
 						float turn = std::atan2(-turned.X, -turned.Z) - std::atan2(-facing.X, -facing.Z);
-						turn = std::remainder(turn, 2.0f * PI);
-
-						went.Serial++;
-						went.Turn = turn;
-						store.Set(entity, went);
+						went.Turn = std::remainder(turn, 2.0f * PI);
 					}
+
+					store.Set(entity, went);
+
+					// **Taken here, so the snap below is a no-op on the machine
+					// that did the crossing.** This pass has just mapped
+					// `before.Frame` through the seam - which keeps the whole
+					// tick's motion, expressed in the room the body is now in -
+					// and a snap would throw that away and stand the body still
+					// for the rest of the tick. A replica never reaches this
+					// line, so its own counter stays behind and
+					// `SnapPortalTransit` fires there exactly once.
+					store.Set(entity, PortalTransitSeen{went.Serial});
 
 					crossed++;
 				}

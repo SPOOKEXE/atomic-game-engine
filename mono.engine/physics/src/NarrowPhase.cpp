@@ -9,41 +9,19 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/parallel/Jobs.hpp>
+#include <engine/physics/Clock.hpp>
 #include <engine/physics/Contacts.hpp>
 #include <engine/physics/NarrowPhase.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/scene/Components.hpp>
 
 #include <cstddef>
+#include <cstdint>
+#include <span>
 #include <vector>
 
 namespace engine::physics {
-
-	namespace {
-		// One collider's placed shape, or nothing when the row has gone.
-		//
-		// A pair is a snapshot of the world as the broad phase saw it, and a
-		// row can be destroyed between the two steps - deferred structural
-		// changes land at the end of an `Each`, not at the end of the phase. A
-		// missing component is therefore an ordinary outcome and not a
-		// diagnostic.
-		struct PlacedCollider {
-			ShapeInstance Shape;
-			bool Trigger = false;
-			bool Present = false;
-		};
-
-		PlacedCollider Resolve(const ecs::Store &store, ecs::Entity entity) {
-			const scene::Transform *transform = store.Get<scene::Transform>(entity);
-			const scene::Collider *collider = store.Get<scene::Collider>(entity);
-			if (transform == nullptr || collider == nullptr) {
-				return PlacedCollider{};
-			}
-			return PlacedCollider{
-				ShapeInstance{transform->Frame, collider->Extent, collider->Shape}, collider->Trigger, true
-			};
-		}
-	}
 
 	void NarrowPhase(ecs::Store &store) {
 		ENGINE_PROFILE_CAT("physics.narrowphase", core::ProfileCategory::Physics);
@@ -58,66 +36,132 @@ namespace engine::physics {
 		// The event list is cleared here rather than in `Publish` so that a
 		// world whose narrow phase ran and whose solver did not cannot hand a
 		// reader last tick's events as though they were this tick's.
+		//
+		// **The manifolds belong to a step and the events belong to a tick**,
+		// which only differ on a world stepping physics more than once per
+		// tick. A reader asks what touched this tick, and a touch that began on
+		// the second step of one is a touch that happened - clearing per step
+		// would drop every contact that began and ended inside a tick, and the
+		// faster the world was configured the more of them it would drop.
 		std::vector<ContactManifold> &manifolds = PipelineInternals::Manifolds(*world);
 		manifolds.clear();
-		PipelineInternals::Events(*world).clear();
 
-		// **Serial, and measured rather than assumed.** A pair function is pure
-		// - it reads two placed shapes and writes one manifold - so splitting
-		// the pair list across workers gives bit-for-bit the same answer, and
-		// the obvious thing to do is dispatch it. Measured on a twenty-four
-		// thread machine it was **twice as slow**: writing a slot per candidate
-		// so workers never share a cursor costs a pass over several megabytes,
-		// and the dispatch itself loses badly whenever the cores are already
-		// busy with something else. Worth retrying on an idle machine against
-		// `benchmarks/Solver.cpp`'s phase rows; not worth carrying on this
-		// evidence.
+		if (FirstPhysicsStepOfTick(store)) {
+			PipelineInternals::Events(*world).clear();
+		}
+
+		// **Dispatched since v0.17, and the note it replaces said the opposite
+		// twice.** A pair function is pure - it reads two placed shapes and
+		// writes one manifold - so splitting the pair list across workers gives
+		// bit-for-bit the same answer, and the obvious thing to do is dispatch
+		// it. Two attempts did, and both lost:
 		//
-		// The pair list is sorted, so every pair that names the same first
-		// collider arrives in one run - a body against the six things around it
-		// is one lookup rather than six. `BroadPhase` sorts for determinism and
-		// this is the second thing that sort buys. The second side varies within
-		// a run and is resolved each time.
-		ecs::Entity resolved;
-		PlacedCollider first;
+		// - the first wrote a slot per *candidate*, which cost a pass over
+		//   several megabytes;
+		// - the second wrote a slot only for the pairs that touch, and finished
+		//   in 4.07 ms of wall against 4.19 ms serial - having spent **89.5 ms
+		//   of worker time** doing it. Twenty-four workers each did twenty-one
+		//   times the per-pair work one thread does.
+		//
+		// The cause was isolated rather than guessed: hoisting the two
+		// `Store::Get` calls out of the dispatched body, and changing nothing
+		// else, dropped worker time to 3.67 ms and wall time to 349 us.
+		// `physics/AGENTS.md` carries the whole finding.
+		//
+		// **So this step no longer looks anything up.** `SyncBroadphase` reads
+		// every collider's `Transform` and `Collider` to build the proxies, and
+		// now keeps the placed shape beside each one; `BroadPhase` carries the
+		// proxy indices alongside the entities it emits. A pair is two array
+		// subscripts.
+		const std::span<const CandidatePair> pairs = world->Pairs();
+		const std::span<const CandidateSource> sources = PipelineInternals::PairSources(*world);
+		if (pairs.empty() || sources.size() != pairs.size()) {
+			return;
+		}
 
-		for (const CandidatePair &pair : world->Pairs()) {
-			if (pair.A != resolved) {
-				first = Resolve(store, pair.A);
-				resolved = pair.A;
+		const std::vector<PlacedCollider> &dynamicShapes = PipelineInternals::DynamicShapes(*world);
+		const std::vector<PlacedCollider> &staticShapes = PipelineInternals::StaticShapes(*world);
+
+		std::vector<ContactManifold> &slots = PipelineInternals::ManifoldSlots(*world);
+		std::vector<uint8_t> &touching = PipelineInternals::ManifoldTouching(*world);
+
+		// Grown and never shrunk, for `PhysicsWorld::RowList`'s reason: only the
+		// slots the flags point at are ever read, so the tail is never seen.
+		if (slots.size() < pairs.size()) {
+			slots.resize(pairs.size());
+		}
+		touching.assign(pairs.size(), 0);
+
+		parallel::Jobs::For(
+			pairs.size(),
+			NARROW_GRAIN,
+			[pairs, sources, &dynamicShapes, &staticShapes, &slots, &touching](size_t begin, size_t end) {
+				for (size_t at = begin; at < end; at++) {
+					const CandidateSource &source = sources[at];
+
+					// **Bounds-checked, because the two index arrays are built
+					// one step apart.** A row destroyed between the sync and the
+					// broad phase leaves an index into an array that has since
+					// been rebuilt shorter - deferred structural changes land at
+					// the end of an `Each`, not at the end of the phase, so this
+					// is an ordinary outcome and not a diagnostic.
+					const std::vector<PlacedCollider> &firstTable =
+						source.FirstIsStatic() ? staticShapes : dynamicShapes;
+					const std::vector<PlacedCollider> &secondTable =
+						source.SecondIsStatic() ? staticShapes : dynamicShapes;
+
+					const size_t firstAt = source.FirstIndex();
+					const size_t secondAt = source.SecondIndex();
+					if (firstAt >= firstTable.size() || secondAt >= secondTable.size()) {
+						continue;
+					}
+
+					const PlacedCollider &first = firstTable[firstAt];
+					const PlacedCollider &second = secondTable[secondAt];
+
+					const ContactSolution solution = ContactBetween(first.Shape, second.Shape);
+					if (!solution.Touching) {
+						continue;
+					}
+
+					ContactManifold manifold;
+					manifold.A = pairs[at].A;
+					manifold.B = pairs[at].B;
+					manifold.Normal = solution.Normal;
+					manifold.PointCount = solution.PointCount;
+
+					// Either side being a trigger makes the whole manifold one.
+					// There is no half-solved contact: a trigger reports and
+					// never pushes, and a pair where one side pushed and the
+					// other did not would apply an impulse to one body out of
+					// two.
+					manifold.Trigger = first.Trigger || second.Trigger;
+
+					for (size_t index = 0; index < solution.PointCount; index++) {
+						manifold.Points[index] = ContactPoint{
+							solution.Positions[index],
+							solution.Penetrations[index],
+							solution.Features[index],
+						};
+					}
+
+					slots[at] = manifold;
+					touching[at] = 1;
+				}
+			},
+			NARROW_GRAIN
+		);
+
+		// **In pair order, on one thread, and that is the whole point of the
+		// flag array.** A worker appending to one manifold list would need a
+		// cursor, and the order the appends landed in would be the order the
+		// workers got there - which is exactly the dependence on the schedule
+		// `AGENTS.md` refuses, because the solver visits contacts in list order.
+		manifolds.reserve(pairs.size());
+		for (size_t at = 0; at < pairs.size(); at++) {
+			if (touching[at] != 0) {
+				manifolds.push_back(slots[at]);
 			}
-			if (!first.Present) {
-				continue;
-			}
-
-			const PlacedCollider second = Resolve(store, pair.B);
-			if (!second.Present) {
-				continue;
-			}
-
-			const ContactSolution solution = ContactBetween(first.Shape, second.Shape);
-			if (!solution.Touching) {
-				continue;
-			}
-
-			ContactManifold manifold;
-			manifold.A = pair.A;
-			manifold.B = pair.B;
-			manifold.Normal = solution.Normal;
-			manifold.PointCount = solution.PointCount;
-
-			// Either side being a trigger makes the whole manifold one. There
-			// is no half-solved contact: a trigger reports and never pushes,
-			// and a pair where one side pushed and the other did not would
-			// apply an impulse to one body out of two.
-			manifold.Trigger = first.Trigger || second.Trigger;
-
-			for (size_t index = 0; index < solution.PointCount; index++) {
-				manifold.Points[index] = ContactPoint{
-					solution.Positions[index], solution.Penetrations[index], solution.Features[index]
-				};
-			}
-			manifolds.push_back(manifold);
 		}
 	}
 }

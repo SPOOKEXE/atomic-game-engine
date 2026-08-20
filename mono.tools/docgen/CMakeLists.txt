@@ -125,6 +125,10 @@ foreach(root IN ITEMS
 	# rather than a cost of doing so.
 	"${CMAKE_SOURCE_DIR}/mono.studio"
 	"${CMAKE_SOURCE_DIR}/mono.cdn"
+	# Presence, added at v0.17. Listed for `mono.studio`'s reason: a member with
+	# public headers four programs include is one whose headers are checked for
+	# coverage.
+	"${CMAKE_SOURCE_DIR}/mono.discord"
 	"${CMAKE_SOURCE_DIR}/mono.tools")
 	# An input Doxygen cannot read is a warning, and `docs-check` fails on
 	# warnings - so a checkout that legitimately does not have one of these yet

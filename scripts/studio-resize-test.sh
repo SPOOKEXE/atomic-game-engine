@@ -39,12 +39,31 @@ if ! command -v xdotool > /dev/null; then
 fi
 
 if [ -z "${DISPLAY:-}" ]; then
-    echo "no DISPLAY - this needs a real window and a real swapchain" >&2
+    if ! command -v xvfb-run > /dev/null; then
+        echo "no DISPLAY and no xvfb-run; this needs an X display and a real swapchain" >&2
+        exit 2
+    fi
+
+    # Re-enter the same test inside a private display. The marker prevents an
+    # unhelpful loop if Xvfb itself cannot provide a display.
+    if [ -z "${ATOMIC_STUDIO_VIRTUAL_REENTRY:-}" ]; then
+        export ATOMIC_STUDIO_VIRTUAL_REENTRY=1
+        exec xvfb-run -a -s "-screen 0 1600x1000x24 -nolisten tcp" "$0" "$binary"
+    fi
+
+    echo "xvfb-run did not provide DISPLAY" >&2
     exit 2
 fi
 
 log=$(mktemp)
-"$binary" --width 1200 --height 700 > "$log" 2>&1 &
+config=$(mktemp -d "${TMPDIR:-/tmp}/atomic-studio-resize.XXXXXX")
+cleanup() {
+    rm -f "$log"
+    rm -rf -- "$config"
+}
+trap cleanup EXIT
+
+"$binary" --config-root "$config" --width 1200 --height 700 > "$log" 2>&1 &
 pid=$!
 
 # **Found by pid, then verified by name.** `xdotool search` defaults to
@@ -101,7 +120,6 @@ sleep 0.5
 if kill -0 "$pid" 2>/dev/null; then
     kill "$pid" 2>/dev/null
     wait "$pid" 2>/dev/null
-    rm -f "$log"
     echo "studio ok - survived ~250 resizes with the viewport docked"
     exit 0
 fi
@@ -110,5 +128,4 @@ wait "$pid" 2>/dev/null
 status=$?
 echo "FAIL: the studio died during a resize (exit $status)" >&2
 tail -20 "$log" >&2
-rm -f "$log"
 exit 1

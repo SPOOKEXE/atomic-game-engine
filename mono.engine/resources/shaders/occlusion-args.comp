@@ -1,0 +1,27 @@
+#version 450
+
+// Copies each slot-run's survivor count into the indexed indirect draw
+// arguments of every draw that run emits. A mesh with material runs emits
+// one draw per material range, and all of them share the run's one count -
+// which is why this cannot be an atomic in the cull pass: it would count a
+// survivor once per material range.
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) readonly buffer ArgRuns { uint run[]; } argRuns;
+layout(set = 0, binding = 1) readonly buffer Counts { uint survivors[]; } counts;
+
+// SDL_GPUIndexedIndirectDrawCommand is five 32-bit words; word one is
+// num_instances.
+layout(set = 1, binding = 0) buffer Args { uint words[]; } args;
+
+layout(set = 2, binding = 0) uniform Fill {
+	uvec4 Range; // x: first late argument entry. y: how many.
+} fill;
+
+void main() {
+	uint index = gl_GlobalInvocationID.x;
+	if (index >= fill.Range.y) {
+		return;
+	}
+	args.words[(fill.Range.x + index) * 5u + 1u] = counts.survivors[argRuns.run[index]];
+}

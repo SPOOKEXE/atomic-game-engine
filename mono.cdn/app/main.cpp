@@ -33,6 +33,7 @@
 #include <engine/delivery/Source.hpp>
 
 #include <cdn/Dashboard.hpp>
+#include <cdn/DiscordPresence.hpp>
 #include <cdn/Origin.hpp>
 #include <cdn/Publisher.hpp>
 #include <cdn/Service.hpp>
@@ -141,6 +142,12 @@ int main(int argc, char **argv) {
 	// with nothing here to read them.
 	engine::assets::DeclareContentFlags(engine::assets::ContentVerb::Publish);
 	cdn::DeclareFlags();
+
+	// The `discord.*` table, shared with the client and the server. Declared
+	// rather than owned: the wording differs per program and lives in
+	// `cdn/DiscordPresence.hpp`, but the switches are one table so a config
+	// file spells them the same everywhere.
+	discord::DeclareFlags();
 
 	engine::core::Arguments arguments("cdn", "atomic - serves a game's content.");
 	engine::core::Config::DeclareOptions(arguments);
@@ -515,8 +522,22 @@ int main(int argc, char **argv) {
 		}
 	}
 
+	// Null unless somebody asked for it, which is every default deployment. A
+	// datacentre origin will never find a Discord socket and that costs a
+	// `TRACE` line on a widening retry; the case this is for is an origin run
+	// beside the game it serves.
+	const std::unique_ptr<cdn::DiscordPresence> presence = cdn::DiscordPresence::Start();
+
 	for (long frame = 0; frames < 0 || frame < frames; ++frame) {
 		const size_t answered = serving->Pump(NowSeconds());
+
+		// Beside the content pump, for the reason the announcer below is: this
+		// is bookkeeping around the serve loop rather than part of answering a
+		// request, and a second thread would buy nothing but a place for two
+		// clocks to disagree.
+		if (presence) {
+			presence->Pump(serving->Local().Port, serving->Counters(), NowSeconds());
+		}
 
 		// Beside the content pump rather than on a thread of its own: an
 		// announcement is one datagram a second and a rendezvous point is a

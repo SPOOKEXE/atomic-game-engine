@@ -27,34 +27,32 @@
 // `world::Universe::Save` and `Load` are exactly that operation and already
 // exist; this program is the first caller with a reason to use them.
 
+#include <engine/assets/AssetKind.hpp>
+#include <engine/assets/Texture.hpp>
 #include <engine/control/Server.hpp>
 #include <engine/control/Surface.hpp>
 #include <engine/core/Clock.hpp>
+#include <engine/core/FrameGraph.hpp>
 #include <engine/core/Name.hpp>
-#include <engine/ecs/Entity.hpp>
-#include <engine/ecs/Store.hpp>
-#include <engine/game/Game.hpp>
-
-#include <studio/Complete.hpp>
-#include <studio/Config.hpp>
-#include <studio/Plugins.hpp>
-#include <studio/Widgets.hpp>
-// TODO(render-pipeline): `<engine/nodeview/Editor.hpp>` and `State.hpp` were
-// included here. `Engine::nodeview` was the node-canvas module the Render and
-// Assets Pipeline panels were built on; it is removed. See the member and
-// method markers below.
-#include <engine/assets/AssetKind.hpp>
-#include <engine/assets/Texture.hpp>
 #include <engine/delivery/Client.hpp>
 #include <engine/delivery/IntakeBudget.hpp>
 #include <engine/delivery/Uploader.hpp>
+#include <engine/ecs/Entity.hpp>
+#include <engine/ecs/Store.hpp>
+#include <engine/effects/Particles.hpp>
+#include <engine/effects/Ribbon.hpp>
+#include <engine/game/Game.hpp>
+#include <engine/graph/PipelineDocument.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Input.hpp>
+#include <engine/render/AdornmentGeometry.hpp>
 #include <engine/render/DebugPanels.hpp>
 #include <engine/render/FrameStatistics.hpp>
+#include <engine/render/InterfacePass.hpp>
 #include <engine/render/Renderer.hpp>
-#include <engine/render/ViewportFrames.hpp>
 #include <engine/render/ShaderLibrary.hpp>
+#include <engine/render/ViewportFrames.hpp>
+#include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/ui/Interface.hpp>
@@ -64,8 +62,12 @@
 
 #include <array>
 #include <cdn/LocalStore.hpp>
+#include <client/EditableImages.hpp>
+#include <client/EditableMeshes.hpp>
+#include <client/Scene.hpp>
 #include <cstdint>
 #include <deque>
+#include <discord/Link.hpp>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -78,14 +80,19 @@
 #include <span>
 #include <string>
 #include <studio/AssetCatalogue.hpp>
+#include <studio/CodeMetrics.hpp>
 #include <studio/Commands.hpp>
+#include <studio/Complete.hpp>
+#include <studio/Config.hpp>
 #include <studio/ContentSources.hpp>
 #include <studio/Hierarchy.hpp>
 #include <studio/Operators.hpp>
 #include <studio/PlayLink.hpp>
+#include <studio/Plugins.hpp>
 #include <studio/Preview.hpp>
 #include <studio/Projection.hpp>
 #include <studio/TeamCreate.hpp>
+#include <studio/Widgets.hpp>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -839,6 +846,17 @@ namespace studio {
 		void ResolveFocusedViewport();
 		void DrawProperties();
 		void DrawUniverseProperties();
+
+		// The settings of one world, when its row in the explorer is selected.
+		//
+		// **The panel the three tick rates never had.** They reach an `.agame`
+		// file and a server command line, and until this they reached no editor
+		// at all - so a world could be tuned everywhere except in the program
+		// somebody builds it in, which is the gap `ROADMAP.md` recorded when
+		// `PhysicsTickRate` landed.
+		//
+		// @param world The world whose row was clicked.
+		void DrawWorldProperties(WorldId world);
 		void DrawScripts();
 
 		// The breakpoint column beside a script's text.
@@ -851,6 +869,38 @@ namespace studio {
 		// @param tab The script being edited.
 		// @return How wide the column drew, so the caller can lay out beside it.
 		float DrawScriptGutter(const OpenScript &tab);
+
+		// The minimap column on the code field's right.
+		//
+		// A shrunken impression of the whole file - stripes per text run, not
+		// tiny glyphs - with the visible region marked, and a click or drag
+		// scrolls the code there. The gutter's sibling in every discipline:
+		// its own child window, the same `##text` scroll lookup with the same
+		// benign fallback, and one `InvisibleButton` so imgui owns the
+		// hit-testing.
+		//
+		// @param tab   The script being edited.
+		// @param width How wide to draw, already scaled.
+		// @since v0.17
+		void DrawScriptMinimap(const OpenScript &tab, float width);
+
+		// The tooltip for whatever word the mouse is resting on.
+		//
+		// The inverse of the completion popup's caret arithmetic: the popup
+		// turns a byte into a cell into pixels, this turns the mouse's pixels
+		// into a cell into a byte, and `CodeMetrics.hpp` keeps the two
+		// mappings honest about tabs. What it says comes from
+		// `HoverText` - the same language-aware surface the completion uses -
+		// and nothing appears over empty space, inside strings or comments,
+		// or while the completion popup is up.
+		//
+		// @param tab      The script being edited.
+		// @param fieldMin The code field's top-left, in screen space.
+		// @param hovered  Whether the field reported a rested hover this
+		//                 frame, read by the caller right after the field so
+		//                 imgui's hover delay owns the timing.
+		// @since v0.17
+		void DrawScriptHover(OpenScript &tab, ImVec2 fieldMin, bool hovered);
 
 		// Rebuilds the completion list when there is a reason to.
 		//
@@ -940,6 +990,96 @@ namespace studio {
 		// @since v0.13
 		void DrawZoomControl(float &zoom, const char *what);
 
+		// Moves whichever viewport shows `world` so that `instance` fills it.
+		//
+		// **The orientation is kept and only the position moves**, which is what
+		// every editor's "frame selection" does and is the behaviour that does
+		// not surprise: an author who has lined a shot up and then asks to see a
+		// part closer wants it centred from where they are standing, not a new
+		// angle chosen for them.
+		//
+		// The distance comes from the instance's own `scene::Bounds` and the
+		// viewport's field of view, so a baseplate and a stud both end up
+		// filling about the same fraction of the frame.
+		//
+		// @param world    The world the instance is in.
+		// @param instance What to frame. Needs a `scene::Transform`; anything
+		//        else is refused, because there is nowhere to point at.
+		void ZoomViewportTo(WorldId world, Entity instance);
+
+		// Puts whichever viewport shows `world` at a distance where a sphere of
+		// `radius` about `centre` fills the frame, keeping the orientation.
+		void FrameViewportOn(WorldId world, const engine::core::Vector3 &centre, float radius);
+
+		// Frames everything drawable in `world`.
+		//
+		// **Because a scene is not obliged to build at the origin, and one does
+		// not.** `Magic.luau` searches its height field for dry ground and puts
+		// its arena wherever it finds some - on the shipped seed that is 2,345
+		// studs west and 634 north, at a surface height of about 48. A fresh
+		// editor camera starts at (18, 14, 18), so the world opened two and a
+		// third kilometres away *and* below the terrain: a completely black
+		// viewport, with nothing wrong in the scene, the renderer or the mount.
+		// Every other example happens to build at the origin, which is why this
+		// went unnoticed rather than why it was fine.
+		//
+		// @param world The world to look at.
+		// @return False when the world holds nothing drawable yet, which is the
+		//         ordinary state of an example world before Play runs its
+		//         script - the caller retries.
+		bool FrameWorldContents(WorldId world);
+
+		// Worlds added from an example that have not been framed yet.
+		//
+		// **A queue rather than a call, because the content does not exist
+		// when the world is made.** `InstallExampleScript` puts a `Script` in
+		// the tree and nothing else; the parts appear when Play runs it, which
+		// is some number of frames later and may be never. So the world is
+		// remembered and framed on the first present where it has anything
+		// drawable in it, once.
+		std::vector<WorldId> PendingFrame;
+
+	  public:
+		// One row of the catalogue a new game's worlds are chosen from.
+		//
+		// **Public because the catalogue is a free function**, which is what
+		// keeps a table of thirteen rows out of a header nine thousand lines
+		// long. Nothing outside `Editor.cpp` and the Preferences page reads it.
+		struct DefaultWorldEntry {
+			// What lands in `studio.json`. Never changed once shipped - see the
+			// catalogue's own comment.
+			std::string_view Key;
+
+			// The world's name in the universe, and the row's label.
+			std::string_view World;
+
+			// The example scripts installed into it. `Second` is empty for the
+			// worlds that need only one.
+			//@{
+			std::string_view First;
+			std::string_view Second;
+			//@}
+
+			// Why it is worth opening with. Shown as the row's tooltip.
+			std::string_view Note;
+
+			// Whether a fresh install starts with it ticked.
+			bool OnByDefault = false;
+		};
+
+	  private:
+		// Whether `key` is in the set a new game opens with.
+		bool DefaultWorldEnabled(std::string_view key) const;
+
+		// Ticks or unticks one row, and remembers that somebody chose.
+		void SetDefaultWorldEnabled(std::string_view key, bool enabled);
+
+		// The Preferences page listing the catalogue.
+		void DrawDefaultWorldSettings();
+
+		// The Preferences page for how this process spends its cores.
+		void DrawComputeSettings();
+
 		// Applies Ctrl+wheel to a zoom, for the item just drawn.
 		//
 		// Separate from the control because the wheel belongs over the *text*
@@ -979,6 +1119,17 @@ namespace studio {
 		// changed. See `studio::Keybinds` - this page edits that table
 		// directly, so it cannot drift from what the keys actually do.
 		void DrawKeybindSettings();
+
+		// The Preferences page that decides what Discord says this editor is
+		// doing.
+		//
+		// **Most of the page is the preview.** Discord does not draw a person
+		// their own card or their own buttons, so without something that
+		// renders what the templates produce, the only way to find out what
+		// friends are seeing is to ask one.
+		//
+		// @since v0.17
+		void DrawDiscordSettings();
 
 		// The Preferences page that says where content comes from.
 		//
@@ -1359,6 +1510,17 @@ namespace studio {
 
 		// --- selection -------------------------------------------------------
 
+		// Makes one viewport the source of truth for Explorer and Properties.
+		//
+		// @param index 0 is the main viewport, later indices are extra panels.
+		void EditThroughViewport(size_t index);
+
+		// Points the editing viewport at a world and moves panel selection with it.
+		//
+		// @param index The viewport being edited through.
+		// @param world The authoritative or client-replica world to show.
+		void RetargetEditingViewport(size_t index, WorldId world);
+
 		void Select(WorldId world, Entity instance, bool add);
 		void ClearSelection();
 
@@ -1462,7 +1624,17 @@ namespace studio {
 		// need a render target per open editor; boxes and lines on a draw list need
 		// none, and this panel is the editor's chrome rather than a game's UI.
 		//@{
-		// TODO(render-pipeline): `void DrawRenderPipeline();` drew the Render Pipeline node editor.
+		void DrawRenderPipeline();
+		void DrawRenderPipelineLibrary();
+		void DrawRenderPipelineInspector();
+		void DrawRenderPipelineSchedule();
+		void DrawPipelineProfile();
+		void DrawWorldLighting();
+		void DrawProfileWatch();
+		void
+		DrawProfileImage(engine::core::Name resource, uint32_t width, uint32_t height, float maximumWidth);
+		void LoadRenderPipeline(WorldId world, engine::core::Name pipeline);
+		bool SaveRenderPipeline();
 
 		// The pipeline as a grid: passes across, resources down, what each does
 		// to each where they meet.
@@ -1473,24 +1645,14 @@ namespace studio {
 		// different question and wants a different shape.
 		// `docs/PIPELINE_NODES.md` §7 argues the point; `graph::PipelineProfile`
 		// is the arithmetic and this is only the drawing.
-		// TODO(render-pipeline): `void DrawPipelineProfile();` drew the profile grid - passes across the top,
-		// resources down the side.
+		// The picture and histogram under the access grid use the renderer's
+		// nonblocking resource readback. See `ProfileWatched`.
 
-		// The picture and histogram under the access grid. See `ProfileWatched`.
-		// TODO(render-pipeline): `void DrawProfileWatch();` drew the picture and channel histogram under the
-		// profile grid.
+		// Node parameters, including authored shader source, live in the graph
+		// canvas widgets. Resource images and channel histograms live under the
+		// profile access grid so both views read the same graph document.
 
-		// The selected node's own settings, under the canvas.
-		//
-		// **Without it the parameters are unreachable.** Which shader a `raster`
-		// runs is a node's own business, and a canvas that could only wire
-		// things could describe the shape of a frame and nothing about it.
-		// TODO(render-pipeline): `DrawNodeParameters` edited a node's parameters,
-		// including the multi-line GLSL box a `raster` node's shader was typed into.
-
-		// TODO(render-pipeline): `DrawChannelHistogram` drew one channel's
-		// distribution as sixteen bars and a range, over `render::ChannelHistogram`.
-		// TODO(render-pipeline): `void DrawAssetsPipeline();` drew the Assets Pipeline node editor.
+		// TODO(asset-pipeline): add a separate editor for asset processing graphs.
 
 		//@}
 
@@ -1940,6 +2102,18 @@ namespace studio {
 		// @since v0.13
 		static void PrepareWorld(engine::ecs::Store &store, engine::ecs::Scheduler &systems);
 
+		// `PrepareWorld` on a world this editor holds, plus the settings that
+		// only the world's handle can answer for.
+		//
+		// **The reason `PrepareWorld` is not simply called with the settings.**
+		// It is a function pointer at five call sites and takes what a store
+		// needs; the physics rate is a property of the *world*, not of its
+		// store, so somebody has to read it from the universe first. This is
+		// that somebody, and every one of the five now goes through it.
+		//
+		// @param id The world to prepare.
+		void PrepareWorldIn(engine::world::WorldId id);
+
 		// The colours a panel was given, by the title imgui identifies it with.
 		//
 		// @param panel The panel's title.
@@ -2227,6 +2401,38 @@ namespace studio {
 		// @param frameSeconds How long the last frame took.
 		void PumpContent(double frameSeconds);
 
+		// Tells Discord what is being edited, and keeps that connection alive.
+		//
+		// Cheap when nothing is configured: one null check. Safe every frame -
+		// `discord::Link` sends only what changed and only as often as the
+		// protocol allows.
+		//
+		// @param nowSeconds The editor's monotonic clock.
+		// @since v0.17
+		void PumpDiscord(double nowSeconds);
+
+		// What the Discord templates can name, filled from this frame.
+		//
+		// **Rebuilt every pump rather than cached against a dirty flag.** It is
+		// five short strings, and the alternative is a sixth copy of facts the
+		// ECS already owns - which is the drift `AGENTS.md` rule 2 is about.
+		//
+		// @return The tokens and what they resolve to.
+		// @since v0.17
+		// Not `const`: `InstanceCountOf` recounts on a clock and caches what it
+		// found, which is a mutation this has no business hiding.
+		discord::Facts DiscordFacts();
+
+		// The activity `PumpDiscord` publishes, from `Prefs.Discord` and
+		// `DiscordFacts`.
+		//
+		// Separate from the pump so the Preferences page can render exactly
+		// what would be sent without sending it.
+		//
+		// @return The card.
+		// @since v0.17
+		discord::Activity DiscordActivity();
+
 		// Takes what the delivery client has finished and registers it.
 		//
 		// **The editor fetches content, which it did not before at all.** Its
@@ -2351,6 +2557,21 @@ namespace studio {
 			std::vector<engine::core::Name> Sheets;
 		};
 		std::unordered_map<uint32_t, RegisteredMesh> ContentMeshFacts;
+
+		// The collision geometry of every mesh this session has taken in.
+		//
+		// **The same argument as `ContentMeshFacts`, one layer down.** A hull is
+		// baked at intake into the worlds that were open then, so a world
+		// created or opened afterwards holds parts naming a mesh whose shape it
+		// has never heard of - and a collider that cannot resolve its geometry
+		// falls back to the part's bound in silence. `PrepareWorld` merges this
+		// into every world this program makes.
+		//
+		// Kept rather than re-derived for the reason above it: re-deriving means
+		// decoding an `.amesh` again and running quickhull over it again.
+		//
+		// @since v0.17
+		engine::scene::CollisionShapes ContentShapes;
 		size_t ContentTextures = 0;
 
 		// How many shader modules the content store delivered.
@@ -2562,6 +2783,76 @@ namespace studio {
 		void
 		InstallExampleScript(engine::ecs::Store &store, std::string_view file, std::string_view instanceName);
 
+		// Adds a world holding one of the shipped example scenes.
+		//
+		// **What makes an example something a person can open rather than
+		// something a `--script` flag can.** The template that a new place is
+		// built from names ten of them by hand, and every other scene in
+		// `mono.engine/examples` was reachable from the client's command line and
+		// from nowhere in the editor - including the three stress scenes v0.17
+		// adds, which are exactly the ones somebody wants to press Play on and
+		// watch the frame graph.
+		//
+		// The world is named after the file's stem, suffixed when that name is
+		// already in the universe, and the scene arrives as a `Script` rather
+		// than as geometry - see `InstallExampleScript`.
+		//
+		// **Structural, so it is for a stopped universe.** The snapshot Stop
+		// restores was taken before the run began, so a world added during Play
+		// would vanish on Stop. The caller is what refuses; this does not check.
+		//
+		// @param file The staged scene's file name, from `examples::ExampleScenes`.
+		// @return `false` when the world could not be created.
+		bool AddExampleWorld(std::string_view file);
+
+		// Forgets that the universe row or a world row was clicked.
+		//
+		// **One definition of "no root is selected", because there are two
+		// fields and six places that mean it.** Every one of those places is
+		// "something else has just been selected" - a range, an instance, a
+		// gallery tile, a pipeline node - and two assignments in six places is
+		// the drift `AGENTS.md` rule 2 names. `ClearSelection` calls this, so a
+		// caller clearing the instance selection gets it for free.
+		void ClearRootSelection();
+
+		// Re-applies a world's settings and pushes the parts of them that live
+		// outside the world.
+		//
+		// **`Universe::Reconfigure` is not enough on its own, and that is a
+		// layer fact rather than an oversight.** `world` is at L4 and `physics`
+		// at L8, so the physics rate is *stored* on the world and *applied* to
+		// its store by whoever built it - this editor, in `PrepareWorldIn`.
+		// Changing the number without pushing it leaves the world solving at the
+		// old rate while every panel reports the new one, which is the worst
+		// shape a setting can have.
+		//
+		// @param world    The world to re-configure.
+		// @param settings What to become. `Name` is ignored - renaming is the
+		//                 explorer's operation, because the registry is keyed on
+		//                 it.
+		void ApplyWorldSettings(WorldId world, const engine::world::WorldSettings &settings);
+
+		// One row per shipped scene, each of which adds a world holding it.
+		//
+		// **Submitted into whatever menu or popup is already open**, which is
+		// what lets the three places that offer "add a world" share it: the
+		// `World` menu, the universe's context menu in the explorer, and the
+		// Worlds panel's own button. Three copies of a list read off a directory
+		// would be three chances to filter it differently.
+		//
+		// The rows live in a scrolling child rather than directly in the menu.
+		// There are more than forty scenes, an imgui menu that does not fit is
+		// clamped rather than scrolled, and the entries past the bottom of the
+		// screen would be unreachable.
+		void DrawExampleSceneItems();
+
+		// The same, wrapped in a submenu and greyed while anything is running.
+		//
+		// **For the two callers that are inside a menu.** The Worlds panel is a
+		// button and a popup, so it submits the rows itself and carries the
+		// refusal on its button.
+		void DrawExampleSceneMenu();
+
 		// Marks every instance in a world as expanded in the explorer.
 		//
 		// **A request rather than a state, which is what `Expanded` already
@@ -2746,6 +3037,39 @@ namespace studio {
 		// rather than out of this - see `SaveConfiguration`.
 		Preferences Prefs;
 
+		// The connection to Discord, or null when nothing is configured.
+		//
+		// **Held even while it is reporting nothing**, because the Preferences
+		// page shows what it is doing and a null one has nothing to say. It is
+		// made and unmade by `PumpDiscord` from `Prefs.Discord`.
+		//
+		// @since v0.17
+		std::unique_ptr<discord::Link> DiscordLink;
+
+		// When this editor started, as a unix epoch second, for the elapsed
+		// timer Discord draws.
+		//
+		// **A wall clock read once at startup rather than per update.**
+		// `discord::Link` takes monotonic seconds and Discord wants epoch ones;
+		// this is the single place the two meet, and reading it repeatedly
+		// would make the timer jump whenever the system clock was corrected.
+		//
+		// @since v0.17
+		int64_t DiscordStartedUnixSeconds = 0;
+
+		// Whether an edit on the Discord Presence page has settled and the link
+		// has not been told yet.
+		//
+		// **Set when a field is left rather than when it changes**, and that
+		// distinction is the whole reason this flag exists. `Prefs.Discord` is
+		// also the preview's source, so it has to follow every keystroke; if
+		// the link followed it too, typing an eighteen-digit application id
+		// would open and fail seventeen connections on the way to the right
+		// one, and Discord would rate-limit the eighteenth.
+		//
+		// @since v0.17
+		bool DiscordSettled = false;
+
 		// The last five games opened, most recent first. See `Config.hpp`.
 		RecentProjects Recent;
 
@@ -2777,7 +3101,26 @@ namespace studio {
 		// caches over process-wide names, and `Refresh` takes whichever world
 		// the panel being drawn shows.
 		engine::render::ShaderLibrary Shaders;
+
+		// **What an `EditableMesh` a script built converts into and uploads.**
+		//
+		// The editor had neither of these and drew neither: a `MeshPart` naming
+		// `mesh.ContentId` resolved to a name nothing had ever registered, so
+		// the part drew nothing at all - in the editor's viewport, in a Play
+		// run and in the studio's own capture, while the same scene under
+		// `client --script` was correct. Every scene built out of geometry a
+		// script makes was invisible in the one program it is authored in, and
+		// `StressMirrors.luau` - whose solid core is an `EditableMesh` - was a
+		// shell of floating tiles there for the same reason.
+		//
+		// One per editor for `Shaders`' reason: the ledger of last-uploaded
+		// revisions is process-wide state rather than world state.
+		client::EditableMeshUploader EditableMeshes;
+
+		// The identical ledger, for `EditableImage`.
+		client::EditableImageUploader EditableImages;
 		engine::render::OverlayImage Overlay;
+		engine::render::InterfacePass GameInterface;
 		engine::ui::Interface Interface;
 		engine::render::ViewportFrames ViewportImages;
 		engine::core::FrameClock Clock;
@@ -2832,10 +3175,22 @@ namespace studio {
 		WorldId Active;
 
 		// What is selected, and which world an instance selection is in. The
-		// universe is editor selection rather than world state, so it has its
-		// own flag and never enters a store.
+		// universe and a world are editor selection rather than world state, so
+		// they have their own fields and never enter a store.
+		//
+		// **`SelectedWorldRow` is not `SelectionWorld`, and the two are one
+		// letter apart for a reason worth stating.** `SelectionWorld` says which
+		// world the *instance* selection lives in and is meaningless on its own;
+		// `SelectedWorldRow` says the person clicked the world row itself and
+		// wants that world's settings. Both can be valid at once and mean
+		// different things.
+		//
+		// The three are mutually exclusive as a *view*: `ClearRootSelection`
+		// is what makes "an instance is selected" and "a root is selected" one
+		// question rather than two flags that drift.
 		//@{
 		bool UniverseSelected = false;
+		WorldId SelectedWorldRow;
 		WorldId SelectionWorld;
 		std::vector<Entity> Selection;
 		//@}
@@ -2927,12 +3282,50 @@ namespace studio {
 		// `client::CollectPortalViews`.
 		std::vector<engine::render::PortalView> Portals;
 
-		// TODO(render-pipeline): `PipelineSelected` mapped world index to the
-		// pipeline key installed for it - a map rather than one name, because two
-		// viewports can show two worlds in the same frame, which is exactly what
-		// `InstallWorldPipelines` qualified its keys for. An absent entry meant
-		// "install on the next frame", and saving a pipeline erased the entry,
-		// which is what made a save visible in the viewport.
+		// The rest of what a frame is made of, and the editor was handing the
+		// renderer none of it.
+		//
+		// **`render::View` has eight spans and this program filled four.** The
+		// instances, the surface cameras, the foreign rows and the portals were
+		// there; the particles, the beams and trails, and the *lights* were not,
+		// and an omitted span is an empty span rather than an error. So every
+		// `ParticleEmitter` in the editor emitted into nothing, every `Beam` and
+		// `Trail` drew nothing, and any scene lit by `PointLight`s alone
+		// rendered black - each of which reads as a broken feature rather than
+		// as a caller that never asked. `client::Client` collects all of them
+		// and this class is a second, thinner copy of the same frame; these are
+		// the rows that were missing from the copy.
+		//
+		// Rebuilt per frame from the world being drawn, for `Surfaces`' reason:
+		// a script can create or destroy any of them at any point in a run, and
+		// a list assembled from what is in the world is also what makes a
+		// deleted emitter stop being drawn.
+		//@{
+		client::ParticleFrame Particles;
+
+		// Whether this frame has already advanced the particle simulation.
+		//
+		// **Because a frame is several `Render` calls here and one pool.** Each
+		// open viewport is drawn by its own call, and the particles belong to the
+		// world rather than to any of the cameras looking at it.
+		bool ParticleStepped = false;
+		std::vector<engine::effects::RibbonVertex> RibbonVertices;
+		std::vector<engine::effects::RibbonRun> RibbonRuns;
+		std::vector<engine::render::SceneLight> Lights;
+		//@}
+
+		// The universe-authored rendering profiles. Worlds hold only the name
+		// they select, so one graph edit reaches every world using that profile
+		// and the game writer emits the library once.
+		engine::graph::PipelineSet RenderingProfiles;
+
+		// Each world's selected runtime pipeline, keyed by world index.
+		//
+		// Absence requests installation on the next presentation. Saving a graph
+		// erases its entry so the viewport cannot keep drawing a stale compiled
+		// plan. A map is required because separate viewports may show separate
+		// worlds whose authored pipeline names are identical.
+		std::unordered_map<uint32_t, engine::core::Name> PipelineSelected;
 
 		// One world's run, for as long as it is running.
 		//
@@ -3134,7 +3527,40 @@ namespace studio {
 		int ScriptPopupAnchor = -1;
 		int ScriptPopupCaret = -1;
 		std::vector<Completion> ScriptCompletions;
+
+		// The language the list was built against, kept so the popup's footer
+		// can look a keyword's doc line up without re-resolving the tab's
+		// container selector every frame.
+		//
+		// @since v0.17
+		engine::script::Language ScriptPopupLanguage = engine::script::Language::Luau;
 		//@}
+
+		// The hover tooltip's cache: which occurrence of which word it was
+		// last built for, in which script, and what it says.
+		//
+		// **Keyed rather than rebuilt per frame**, because building it walks
+		// the tab's siblings inside `Universe::Enter` and a tooltip rests on
+		// one word for many frames. The anchor keeps two occurrences of one
+		// spelling apart - assignment following can answer differently for
+		// each - and the instance keeps two tabs in two languages from
+		// serving each other's answer. Empty text with a non-empty word is a
+		// remembered "nothing to say", which is what stops the walk repeating
+		// every frame over a word the editor does not know.
+		//
+		// @since v0.17
+		//@{
+		std::string ScriptHoverWord;
+		std::string ScriptHoverText;
+		int ScriptHoverAnchor = -1;
+		Entity ScriptHoverInstance;
+		//@}
+
+		// Scratch for the minimap's per-line runs, reused so drawing a few
+		// hundred visible lines does not allocate per line per frame.
+		//
+		// @since v0.17
+		std::vector<MinimapRun> ScriptMinimapRuns;
 
 		// How much bigger the code is drawn than the interface around it.
 		//
@@ -3800,6 +4226,45 @@ namespace studio {
 		//         would otherwise pick is swallowed.
 		bool DrawGizmo(size_t viewport, const PanelProjection &panel);
 
+		// Outlines what every nearby part actually collides as.
+		//
+		// **The one thing a collider has that nothing else on screen shows.** A
+		// part is drawn at its `scene::Bounds` and collides at its
+		// `scene::Collider`, and those are the same number for a `MakePart` box
+		// and nothing keeps them so. A mesh part whose hull was baked from the
+		// wrong model, a rock still wearing the crate collider it was copied
+		// from, a terrain tile whose triangles stop short of its edge - every
+		// one of those reads as "the physics is wrong" and every one is obvious
+		// in a second with an outline on it.
+		//
+		// A colour per face, stable across frames; see `ColliderView.cpp` for
+		// why that is what makes a hull legible and why the colour is a hash
+		// rather than a counter.
+		//
+		// @param viewport Which panel.
+		// @param panel    Its projection, already resolved.
+		// @since v0.17
+		void DrawColliderOutlines(size_t viewport, const PanelProjection &panel);
+
+		// Draws every `SelectionBox`, `SelectionSphere` and handle adornment in
+		// the viewport's world.
+		//
+		// **The first consumer `render::AdornmentGeometry` has ever had.** It
+		// resolved adornments against their adornees for two versions and
+		// nothing called it, so a `SelectionBox` drew nothing whatever its
+		// properties said - which is why `LineThickness`, `SurfaceColor3` and
+		// `SurfaceTransparency` were deferred behind "a triangle path for
+		// adornments" when what was actually missing was any path at all.
+		//
+		// An overlay rather than a render pass, for `DrawColliderOutlines`'
+		// reason: the studio already projects world points into a panel and
+		// hands imgui segments, so this is a list of lines and no pipeline, no
+		// shader and no target. `LineThickness` is in studs, so it is converted
+		// per segment against how far away that segment is.
+		//
+		// @since v0.17
+		void DrawAdornments(size_t viewport, const PanelProjection &panel);
+
 		// Where the selection is, as a gizmo needs it.
 		//
 		// @param world  The scene.
@@ -3837,6 +4302,53 @@ namespace studio {
 		// display's refresh - being unpaced by the display is the point.
 		float FrameCap = 120.0f;
 
+		// The four rates the ceiling is actually made of, in hertz.
+		//
+		// **One number could not answer this, and the symptom was a laptop.**
+		// `FrameCap` is a single ceiling on the whole loop, so an editor sitting
+		// behind a browser with nobody touching it still drew a hundred and
+		// twenty identical pictures a second. What a person actually wants is
+		// four different answers to two different questions - how often the
+		// panels are rebuilt, and how often the world behind them is - and each
+		// of those has a busy case and a quiet one.
+		//
+		// **They combine as a minimum rather than independently, and that is a
+		// limit of the frame rather than of the preference.**
+		// `render::Renderer::Render` owns the swapchain, the interface and the
+		// present in one call, so a frame that redraws the panels also redraws
+		// the world; there is no arrangement today where the two run at
+		// different rates. The four knobs therefore set a ceiling each and the
+		// lowest one that applies is what the loop is paced at. Splitting them
+		// for real means `Render` taking the world and the chrome separately,
+		// which is a change to the shared renderer.
+		//
+		// Zero on any of them means "no ceiling from this one".
+		//@{
+		float InterfaceActiveHz = 120.0f;
+		float InterfaceIdleHz = 20.0f;
+		float RendererFocusedHz = 120.0f;
+		float RendererUnfocusedHz = 10.0f;
+		//@}
+
+		// `Clock::Seconds()` when the editor last saw a key or the mouse.
+		//
+		// **Any SDL input event, not imgui's idea of one.** imgui reports
+		// whether *it* wanted an event, which is false while somebody is flying
+		// the viewport - and a camera being flown is the last moment to drop to
+		// the idle rate.
+		double LastInputSeconds = 0.0;
+
+		// How long without input counts as idle, in seconds.
+		//
+		// Three, which is longer than a pause between keystrokes and shorter
+		// than a glance away. Below about two the rate flickers while somebody
+		// is reading their own scene.
+		static constexpr double IDLE_AFTER_SECONDS = 3.0;
+
+		// The ceiling that applies right now, from the four above and the
+		// window's focus. Zero for no ceiling.
+		float PacingCeiling() const;
+
 		// The script editor's find bar: whether it is up, and what is in it.
 		//
 		// **One bar for every tab rather than one per tab.** Somebody hunting a
@@ -3873,6 +4385,25 @@ namespace studio {
 		// grid is a black rectangle: no scale, no horizon, and no way to tell
 		// where the origin is or which way is up.
 		bool ShowGrid = true;
+
+		// Whether every nearby part's collider is outlined.
+		//
+		// **Off by default, which the grid is not**, and the difference is what
+		// each is for: the grid is how you tell where the origin is in an empty
+		// world, and this is how you answer a question about a scene that is
+		// already built. It draws a segment per collider face over everything in
+		// reach, so it is a thing to turn on while looking rather than a thing
+		// to leave on while building.
+		//
+		// @since v0.17
+		bool ShowColliders = false;
+
+		// The adornment geometry for the viewport being drawn, kept between
+		// frames so a steady selection stops allocating - which is the property
+		// `render::AdornmentGeometry` is built for and documents.
+		//
+		// @since v0.17
+		engine::render::AdornmentGeometry Adornments;
 
 		// Which viewport a panel index refers to, or null for the main one.
 		//
@@ -4224,6 +4755,9 @@ namespace studio {
 		// top, every resource down the side. See `Editor::DrawPipelineProfile`.
 		bool ShowPipelineProfile = false;
 
+		// Per-world lighting and rendering profile selection.
+		bool ShowWorldLighting = true;
+
 		// Which resource the profile panel is showing a picture of.
 		//
 		// **The grid says who wrote what; this says what they wrote.** Unset is
@@ -4236,18 +4770,29 @@ namespace studio {
 		engine::core::Name ProfileWatched;
 		//@}
 
-		// TODO(render-pipeline): the Render Pipeline editor's state lived here.
-		//
-		// Roughly a dozen members: two `nodeview::CanvasState`s (selection and
-		// scroll, held **outside** the canvas because they outlive a rebuild), an
-		// `EditorGraph` model, the world it was loaded for, a dirty flag, the
-		// canvas view, what was selected, what was being dragged and from where,
-		// the half-drawn wire, and where the add-node menu was opened.
-		//
-		// **The one that mattered was the load guard.** The graph was rebuilt
-		// from the world's document only when the world changed or the graph was
-		// empty - a panel that rebuilt every frame would throw away a wire on the
-		// frame it was dragged and have nowhere to put a node somebody moved.
+		// The Render Pipeline canvas is an editor view over the active world's
+		// `PipelineSet`. It reloads when the world or selected pipeline changes,
+		// never while a gesture is in progress.
+		//@{
+		nodegraph::Graph RenderPipelineGraph;
+		nodegraph::Canvas RenderPipelineCanvas;
+		nodegraph::Evaluator RenderPipelinePreviewEvaluator;
+		std::unordered_map<uint64_t, void *> RenderPipelinePreviewTextures;
+		std::unordered_map<uint32_t, size_t> RenderPipelineRenderedSlots;
+		engine::graph::PipelineDocument RenderPipelineBasis;
+		WorldId RenderPipelineWorld;
+		engine::core::Name RenderPipelineName;
+		engine::core::Name RenderPipelineInstalledName;
+		std::string RenderPipelineLoaded;
+		std::string RenderPipelineStatus;
+		char RenderPipelineFilter[64] = {};
+		char RenderPipelineNewName[64] = {};
+		float RenderPipelinePreviewFps = 5.0f;
+		double RenderPipelinePreviewNext = 0.0;
+		bool RenderPipelineDirty = false;
+		bool RenderPipelineSaveAsWanted = false;
+		bool RenderPipelineCanvasReady = false;
+		//@}
 
 		// Where the add-file and add-folder dialogs are looking.
 		//
@@ -4663,6 +5208,78 @@ namespace studio {
 		// it is opened rather than starting empty.
 		engine::render::FrameStatistics Statistics;
 
+		// One frame's spans, with the names copied.
+		//
+		// **`core::FrameSpan::Name` is a `std::string_view` that may point at a
+		// buffer the frame owns**, which its own header says outright - so it is
+		// safe to read during the frame that produced it and a dangling read
+		// afterwards. Every feature below holds spans across frames, so every
+		// one of them needs the string rather than the view.
+		struct HeldSpan {
+			std::string Name;
+			uint32_t Depth = 0;
+			uint32_t Parent = 0;
+			float StartMilliseconds = 0.0f;
+			float Milliseconds = 0.0f;
+			float SelfMilliseconds = 0.0f;
+			float IdleMilliseconds = 0.0f;
+			engine::core::ProfileCategory Category = engine::core::ProfileCategory::Engine;
+			bool Reported = false;
+		};
+
+		// What the frame-graph panel is showing, and when it changes.
+		//
+		// **A live flame graph is unreadable for the one job it has.** The
+		// spans redraw sixty times a second, so a bar worth looking at is gone
+		// before the pointer reaches it and a number worth reading has changed
+		// by the time it is read. Three controls fix that, and they are three
+		// rather than one because they answer different questions: freeze what
+		// is on screen now, look less often, or look at what is typical rather
+		// than at whichever frame happened to be last.
+		struct FrameGraphView {
+			// Nothing is sampled and nothing is published while this is set.
+			// The panel keeps drawing whatever it last published, which is the
+			// point: a frozen graph can be read.
+			bool Paused = false;
+
+			// Index into `FRAME_GRAPH_INTERVALS`. Zero means every frame.
+			int Interval = 0;
+
+			// Whether an interval publishes the mean of the frames it covered or
+			// simply whichever frame was current when it elapsed.
+			//
+			// **The two are genuinely different answers.** A mean says what a
+			// frame costs; a sample says what one frame cost, including the one
+			// where a shader compiled. Neither is the right default for the
+			// other's question, so this is a switch rather than a decision.
+			bool Average = false;
+
+			// `ImGui::GetTime()` at which the next publish is due.
+			double NextPublish = 0.0;
+
+			// The published snapshot - what is drawn.
+			//@{
+			std::vector<HeldSpan> Spans;
+			float FrameMilliseconds = 0.0f;
+			float IdleMilliseconds = 0.0f;
+			float UnmarkedMilliseconds = 0.0f;
+			size_t Dropped = 0;
+			//@}
+
+			// The running sum since the last publish, and how many frames are in
+			// it. Unused when `Average` is off.
+			//@{
+			std::vector<HeldSpan> Summed;
+			float SummedFrameMilliseconds = 0.0f;
+			float SummedIdleMilliseconds = 0.0f;
+			float SummedUnmarkedMilliseconds = 0.0f;
+			size_t SummedDropped = 0;
+			uint32_t Frames = 0;
+			//@}
+		};
+
+		FrameGraphView FrameGraphState;
+
 		// Whether the next frame rebuilds the default arrangement. Set from the
 		// View menu and acted on at the top of the frame, because rearranging a
 		// dockspace's nodes from inside a menu is rearranging the tree that is
@@ -4722,6 +5339,15 @@ namespace studio {
 		//@{
 		Entity PendingLookThrough;
 		bool PendingLookThroughSet = false;
+		//@}
+
+		// An instance a menu asked the viewport to frame, and the world it is
+		// in. Queued rather than acted on where it is asked, for every other
+		// pending action's reason: the menu is drawn inside a panel walk and
+		// moving a camera from there moves the eye the walk is already using.
+		//@{
+		WorldId PendingZoomWorld;
+		Entity PendingZoomTo;
 		//@}
 
 		// Whether the selection is to be duplicated or destroyed after the
@@ -4835,4 +5461,13 @@ namespace studio {
 		engine::render::FrameResult LastFrame;
 		//@}
 	};
+
+	// Every world a new game may open with, in the order the Preferences page
+	// lists them.
+	//
+	// **A free function over a table rather than thirteen members**, so the set
+	// grows by adding a row rather than by editing `Editor::NewGame`. See the
+	// definition in `Editor.cpp` for what a row means and why the keys are
+	// fixed.
+	const std::array<Editor::DefaultWorldEntry, 15> &DefaultWorldCatalogue();
 }

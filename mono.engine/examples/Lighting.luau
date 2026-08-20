@@ -18,7 +18,12 @@ local function block(name: string, size: Vector3, at: Vector3, colour: Color3): 
 	return part
 end
 
-block("Ground", Vector3.new(70, 1, 110), Vector3.new(0, -0.5, -35), Color3.fromRGB(118, 118, 118))
+-- Clear of a baseplate's top face at y = 0: coplanar surfaces do not flicker in
+-- this engine, they resolve stably to whichever one the draw order happens to
+-- favour. `scripts/demos/zfight-scan.sh` holds the control for that.
+local GROUND_LIFT = 0.01
+
+block("Ground", Vector3.new(70, 1, 110), Vector3.new(0, -0.5 + GROUND_LIFT, -35), Color3.fromRGB(118, 118, 118))
 
 for index = 0, 4 do
 	local depth = -index * 18

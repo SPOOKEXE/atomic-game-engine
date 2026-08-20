@@ -81,6 +81,7 @@ TEST_CASE("a frame survives a round trip through the encoding", "[world]") {
 	written.Host = Name("host.seven");
 	written.World = Name("lobby");
 	written.Tick = 987654321;
+	written.Port = 45123;
 	written.Traffic.push_back(Message("topic.a", "first", 1));
 	written.Traffic.push_back(Message("topic.b", "second", 2));
 	written.Deliveries.push_back(HostDelivery{Name("lobby"), {}});
@@ -96,6 +97,7 @@ TEST_CASE("a frame survives a round trip through the encoding", "[world]") {
 	REQUIRE(read.Host == written.Host);
 	REQUIRE(read.World == written.World);
 	REQUIRE(read.Tick == written.Tick);
+	REQUIRE(read.Port == written.Port);
 	REQUIRE(read.Traffic.size() == 2);
 	REQUIRE(read.Traffic[0].Key == Name("topic.a"));
 	REQUIRE(Text(read.Traffic[1].Payload) == "second");

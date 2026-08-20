@@ -183,19 +183,38 @@ namespace engine::graph {
 			return glm::mat4{1.0f};
 		}
 
-		// **The depth is the scene's, not the rectangle's.** What has to be in
-		// range is every caster between the sun and the hole and every receiver
-		// the beam reaches after it - and the second of those is as far away as
-		// the room is long. Measured as the bounding sphere's radius for
-		// `FitDirectionalLight`'s reason: it does not change as the light turns.
-		const float radius = std::max(bounds.Size().Magnitude() * 0.5f, 1.0e-3f);
-
 		const glm::vec3 middle = ToGlm(centre);
-		const glm::vec3 eye = middle - ahead * radius;
 
-		const glm::mat4 view = glm::lookAt(eye, middle, up);
+		// **The depth is measured from the aperture, not from the scene's
+		// centre.** A room may be a long way from the pane while its own bound is
+		// small. Using only the bound's radius then ends the map in the middle of
+		// the room, and the shader's out-of-range-is-lit rule exposes that far
+		// plane as a hard line across every receiver.
+		float nearest = 0.0f;
+		float farthest = 0.0f;
+		for (int corner = 0; corner < 8; corner++) {
+			const glm::vec3 point{
+				(corner & 1) != 0 ? bounds.Maximum.X : bounds.Minimum.X,
+				(corner & 2) != 0 ? bounds.Maximum.Y : bounds.Minimum.Y,
+				(corner & 4) != 0 ? bounds.Maximum.Z : bounds.Minimum.Z,
+			};
+			const float along = glm::dot(point - middle, ahead);
+			nearest = std::min(nearest, along);
+			farthest = std::max(farthest, along);
+		}
+
+		// A point exactly on a depth plane is vulnerable to the float error of
+		// the matrix product. One ten-thousandth of the fitted interval costs no
+		// meaningful precision and keeps the scene's outermost caster inside it.
+		const float depthPadding = std::max((farthest - nearest) * 1.0e-4f, 1.0e-3f);
+		nearest -= depthPadding;
+		farthest += depthPadding;
+
+		const glm::vec3 eye = middle + ahead * nearest;
+
+		const glm::mat4 view = glm::lookAt(eye, eye + ahead, up);
 		const glm::mat4 projection =
-			glm::orthoZO(-halfWide, halfWide, -halfHigh, halfHigh, 0.0f, radius * 2.0f);
+			glm::orthoZO(-halfWide, halfWide, -halfHigh, halfHigh, 0.0f, farthest - nearest);
 
 		return projection * view;
 	}

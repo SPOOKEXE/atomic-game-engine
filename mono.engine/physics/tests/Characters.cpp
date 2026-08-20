@@ -14,14 +14,17 @@
 #include <engine/physics/Characters.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Pipeline.hpp>
+#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/Tagging.hpp>
 #include <engine/testing/Suite.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 TEST_SUITE_ID("engine.physics.characters")
@@ -39,14 +42,20 @@ using engine::ecs::Store;
 using engine::physics::GroundCharacters;
 using engine::physics::PhysicsWorld;
 using engine::physics::PreparePhysicsWorld;
+using engine::physics::UpdatePoppercam;
 using engine::physics::WakeMovingCharacters;
+using engine::scene::ActiveCamera;
+using engine::scene::CameraController;
+using engine::scene::CameraMode;
 using engine::scene::Character;
 using engine::scene::CharacterDesc;
 using engine::scene::Humanoid;
+using engine::scene::LocalTransparencyOf;
 using engine::scene::MakeCharacter;
 using engine::scene::MakePart;
 using engine::scene::Motion;
 using engine::scene::PartDesc;
+using engine::scene::Transform;
 
 namespace {
 	// A world with a floor, a physics index, and one character standing on it.
@@ -155,4 +164,121 @@ TEST_CASE("a sleeping character is woken by intent and by falling", "[physics][c
 	CHECK_FALSE(world.Body().Grounded);
 	(void)WakeMovingCharacters(world.World);
 	CHECK(world.World.Get<Motion>(world.Root) != nullptr);
+}
+
+namespace {
+	// A subject at the origin, a camera looking at it from ten metres back
+	// along +Z (yaw zero, per `PlaceCamera`'s own convention), and nothing
+	// standing between them yet.
+	struct Occludable {
+		Store World{"physics.poppercam"};
+		Entity Subject;
+		Entity Eye;
+
+		Occludable() {
+			engine::scene::RegisterSceneClasses();
+			engine::scene::InstallServices(World);
+			PreparePhysicsWorld(World);
+
+			PartDesc subject;
+			subject.Frame = CFrame(Vector3{0.0f, 0.0f, 0.0f});
+			subject.Anchored = true;
+			Subject = MakePart(World, subject);
+			World.SetParent(Subject, engine::scene::WorkspaceOf(World));
+
+			Eye = World.CreateInstance(engine::scene::CameraClass(), "Eye");
+			World.Set(Eye, Transform{});
+			World.SetResource(ActiveCamera{Eye});
+
+			CameraController controller;
+			controller.Subject = Subject;
+			controller.Distance = 10.0f;
+			controller.HeadHeight = 0.0f;
+			World.SetResource(controller);
+		}
+
+		// A thin wall crossing the line from the subject to the desired eye,
+		// `at` metres out.
+		Entity Wall(float at) {
+			PartDesc wall;
+			wall.Size = Vector3{4.0f, 4.0f, 0.2f};
+			wall.Frame = CFrame(Vector3{0.0f, 0.0f, at});
+			wall.Anchored = true;
+			const Entity entity = MakePart(World, wall);
+			World.SetParent(entity, engine::scene::WorkspaceOf(World));
+			Reindex();
+			return entity;
+		}
+
+		void Reindex() {
+			engine::physics::SyncBroadphase(World);
+			engine::physics::BroadPhase(World);
+		}
+
+		const CameraController &Controller() {
+			return *World.Resource<CameraController>();
+		}
+	};
+}
+
+TEST_CASE("a wall between the eye and its subject is pulled in front of and faded", "[physics][characters]") {
+	Occludable world;
+	const Entity wall = world.Wall(5.0f);
+
+	// The wall's near face sits at z = 4.9 (half its 0.2 m depth short of its
+	// 5.0 m centre), and the margin pulls the eye 0.15 m further back than
+	// that face.
+	REQUIRE(UpdatePoppercam(world.World));
+	CHECK(world.Controller().OccludedDistance == Catch::Approx(4.75f));
+	CHECK(LocalTransparencyOf(world.World, wall) == Catch::Approx(0.6f));
+
+	// Nothing else in the scene is touched - the fade is exactly the one
+	// blocker, not every part between the eye and the subject.
+	CHECK(LocalTransparencyOf(world.World, world.Subject) == 0.0f);
+}
+
+TEST_CASE("clearing the wall restores the setting and un-fades it", "[physics][characters]") {
+	Occludable world;
+	const Entity wall = world.Wall(5.0f);
+	REQUIRE(UpdatePoppercam(world.World));
+	REQUIRE(world.Controller().OccludedDistance >= 0.0f);
+
+	world.World.DestroyInstance(wall);
+	world.Reindex();
+
+	REQUIRE(UpdatePoppercam(world.World));
+	CHECK(world.Controller().OccludedDistance < 0.0f);
+
+	// **Read after the destroy, through a fresh entity that cannot resolve
+	// to the same row** - `LocalTransparencyOf` on a dead handle answers zero
+	// by the same rule every other `Get` does, which would make this pass
+	// whether or not the fade was actually cleared. The row that was faded is
+	// gone; what this checks is that the *next* frame's occlusion did not
+	// silently start fading nothing forever.
+	CHECK_FALSE(world.World.Alive(wall));
+}
+
+TEST_CASE("a part tagged IgnorePoppercam is looked straight through", "[physics][characters]") {
+	Occludable world;
+	const Entity wall = world.Wall(5.0f);
+	REQUIRE(engine::scene::AddTag(world.World, wall, engine::core::Name("IgnorePoppercam")));
+
+	REQUIRE_FALSE(UpdatePoppercam(world.World));
+	CHECK(world.Controller().OccludedDistance < 0.0f);
+	CHECK(LocalTransparencyOf(world.World, wall) == 0.0f);
+}
+
+TEST_CASE("first person and a scripted camera are left alone", "[physics][characters]") {
+	Occludable world;
+	(void)world.Wall(5.0f);
+
+	CameraController *controller = world.World.ResourceMutable<CameraController>();
+
+	controller->Mode = CameraMode::LockFirstPerson;
+	CHECK_FALSE(UpdatePoppercam(world.World));
+	CHECK(controller->OccludedDistance < 0.0f);
+
+	controller->Mode = CameraMode::Scriptable;
+	CHECK_FALSE(UpdatePoppercam(world.World));
+	CHECK(controller->OccludedDistance < 0.0f);
 }

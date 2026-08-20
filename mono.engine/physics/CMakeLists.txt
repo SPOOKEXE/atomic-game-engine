@@ -31,6 +31,13 @@ mono_add_library(physics
 		# reads to decide whether static geometry moved.
 		Engine::ecs
 
+		# L5. What a hull and a triangle soup *are*, and the support function a
+		# general convex pair is built on. It exists at that height because
+		# `assets::MeshData` is L8 - the same height as this module - and two
+		# modules at one height have to stay disjoint, so geometry could not
+		# reach a narrow phase sideways. See `collision/AGENTS.md`.
+		Engine::collision
+
 		# L6. The index and the queries over it. This module builds two grids
 		# from the components at L7 and asks them what overlaps; `spatial` knows
 		# nothing about either, which is why it sits below `scene` rather than

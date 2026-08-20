@@ -245,7 +245,7 @@ namespace studio {
 		// preview of the save rather than an approximation of one. A second
 		// serialiser here would be a second answer to what a game is, and the
 		// two would disagree the first time one was changed.
-		const std::string live = engine::game::WriteGame(*Universe, GameName);
+		const std::string live = engine::game::WriteGame(*Universe, GameName, RenderingProfiles);
 
 		DiffRows = DiffText(saved, live, &DiffCoarse);
 	}

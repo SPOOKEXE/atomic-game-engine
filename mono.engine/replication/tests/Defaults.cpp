@@ -192,6 +192,10 @@ TEST_CASE("what a machine works out for itself is not sent", "[replication][defa
 	CHECK(LocalToTheClient("scene.InputState"));
 	CHECK(LocalToTheClient("scene.LocalPlayer"));
 
+	// A viewer's own occlusion fade. Sending it would put one client's
+	// poppercam on every other client's screen.
+	CHECK(LocalToTheClient("scene.LocalTransparency"));
+
 	// And the ordinary case: everything else is shared.
 	CHECK_FALSE(LocalToTheClient("scene.Transform"));
 	CHECK_FALSE(LocalToTheClient("scene.Visual"));

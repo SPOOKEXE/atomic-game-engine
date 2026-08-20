@@ -79,6 +79,37 @@ TEST_CASE("a recorded material resolves to its colour map", "[scene][materials]"
 	CHECK(ColourMapOf(store, material).Colour == colour);
 }
 
+TEST_CASE("every PBR map resolves onto the surface appearance", "[scene][materials]") {
+	Store store = Fresh("materials.pbr");
+
+	const Name asset("materials/pbr.amat");
+	const MaterialMaps maps{
+		.Colour = Name("pbr-colour"),
+		.Normal = Name("pbr-normal"),
+		.Roughness = Name("pbr-roughness"),
+		.Occlusion = Name("pbr-occlusion"),
+		.Height = Name("pbr-height"),
+		.Emissive = Name("pbr-emissive"),
+	};
+	REQUIRE(RecordMaterial(store, asset, maps));
+
+	const Entity part = store.CreateInstance(engine::ecs::Classes::Find(Name("Part")), "PBR");
+	REQUIRE(part != NULL_ENTITY);
+	Dress(store, part, asset);
+	REQUIRE(ResolveMaterials(store) == 1);
+
+	const SurfaceAppearance *appearance = store.Get<SurfaceAppearance>(part);
+	REQUIRE(appearance != nullptr);
+	CHECK(appearance->ColourMap == maps.Colour);
+	CHECK(appearance->NormalMap == maps.Normal);
+	CHECK(appearance->RoughnessMap == maps.Roughness);
+	CHECK(appearance->OcclusionMap == maps.Occlusion);
+	CHECK(appearance->HeightMap == maps.Height);
+	CHECK(appearance->EmissiveMap == maps.Emissive);
+
+	CHECK(MaterialMaps{.Emissive = maps.Emissive}.IsValid());
+}
+
 TEST_CASE("a material nobody recorded resolves to nothing", "[scene][materials]") {
 	Store store = Fresh("materials.unknown");
 

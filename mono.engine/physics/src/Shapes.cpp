@@ -15,6 +15,16 @@ namespace engine::physics {
 		case scene::ShapeKind::Cylinder:
 			// Radius on both axes across the barrel, half-height along it.
 			return core::Vector3{extent.X, extent.Y, extent.X};
+
+		case scene::ShapeKind::Hull:
+		case scene::ShapeKind::Mesh:
+			// **The part's extent, because a baked shape's own reach is not
+			// knowable from here.** This function is given a `ShapeKind` and an
+			// extent and nothing else - it cannot resolve a name - so the honest
+			// answer for a baked kind is the extent the part was authored at.
+			// `ShapeWorldBounds` below takes the geometry when it has it and
+			// falls back to this when it does not.
+			return extent;
 		}
 
 		// Unreachable for a value that came from the enum. Returning the extent
@@ -63,6 +73,24 @@ namespace engine::physics {
 				frame.Position, core::Vector3{reachOn(axis.X), reachOn(axis.Y), reachOn(axis.Z)}
 			);
 		}
+
+		case scene::ShapeKind::Hull:
+		case scene::ShapeKind::Mesh:
+			// **The part's own extent, oriented - not the baked geometry's.**
+			// This overload takes a `scene::Collider` and cannot resolve a name,
+			// which is deliberate: it is called once per collider per tick by
+			// `SyncBroadphase`, and a table lookup there would be a random
+			// access per collider on the hottest walk in the module.
+			//
+			// The bound is therefore the part's, which is loose whenever the
+			// baked shape is smaller than the part it sits on and is exactly the
+			// direction `AGENTS.md` says a bound may be wrong in: too large
+			// costs candidates the narrow phase rejects, too small drops
+			// contacts silently. A hull *larger* than its part is a scene
+			// mistake - the part is what a designer sized and what the renderer
+			// draws - and `ShapeWorldBoundsOf` is the overload that takes the
+			// geometry for a caller that has it in hand.
+			return core::AABB::FromOrientedBox(frame, collider.Extent);
 		}
 
 		// See ShapeHalfExtent: a shape kind this build does not know about takes
