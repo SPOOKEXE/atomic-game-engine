@@ -1060,7 +1060,27 @@ namespace engine::replication {
 		// once per component per tick.
 		std::vector<std::pair<uint64_t, uint64_t>> ResignHashed;
 
+		// The list `Resign` swaps into a slot's signature once it has merged this
+		// tick's hashes against last tick's.
+		//
+		// A member for `ResignHashed`'s reason: it is built and swapped away once
+		// per signed slot per tick, and a local was an allocation and a free per
+		// component per tick for a vector whose size barely changes. The swap
+		// leaves the previous tick's buffer here to be reused.
+		std::vector<std::pair<uint64_t, uint64_t>> ResignNext;
+
 		std::vector<ecs::ComponentId> Resolved;
+
+		// The same ids indexed by slot, with an invalid id wherever a declared
+		// component is not registered in this process.
+		//
+		// **`Resolved` is compacted and this is not, which is the whole point.**
+		// `Detection`, `Signatures` and `Suppressors` are keyed by slot, so a pass
+		// over any of them cannot use `Resolved`'s indices - `ResolvedSuppressors`
+		// carries the same warning. Held so that `Resign` does not repeat
+		// `Components::Find`, which takes the component registry's process-wide
+		// lock, once per signed slot per tick.
+		std::vector<ecs::ComponentId> ResolvedSlots;
 
 		// The same list as names, which is what an audit puts on the wire. Kept
 		// beside `Resolved` rather than derived from `Components`, because a
