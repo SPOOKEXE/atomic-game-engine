@@ -138,6 +138,7 @@ namespace engine::render {
 		//        this is what `Record` scales it by. On a display where the two
 		//        differ, passing the canvas twice clips the interface to a
 		//        fraction of the target. Zero or below falls back to the canvas.
+		// @param store The world the spatial collectors are read from.
 		void Submit(
 			const gui::DrawList &list,
 			const core::Vector2 &canvas,

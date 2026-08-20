@@ -78,10 +78,18 @@ namespace engine::render {
 	// @client
 	// @since v0.18
 	struct InterfaceScissor {
+		// The top-left corner, in device pixels. Never negative.
+		//@{
 		int32_t X = 0;
 		int32_t Y = 0;
+		//@}
+
+		// How far it reaches, in device pixels. Zero on either axis means the
+		// batch covers nothing - see `Empty`.
+		//@{
 		int32_t Width = 0;
 		int32_t Height = 0;
+		//@}
 
 		// Whether this covers no pixels, and therefore whether the batch can be
 		// skipped rather than drawn with a degenerate scissor - which is a
@@ -196,6 +204,12 @@ namespace engine::render {
 		//
 		// @param list  The compiled list, in paint order.
 		// @param atlas The glyphs, or an unbuilt atlas for no text.
+		// @param images Resolves a content name to something samplable, and to
+		//        its cell within a sheet. Absent draws every image as the
+		//        atlas's white texel, which is a plain tinted rectangle.
+		// @param viewports The same for an element showing a live viewport,
+		//        which is resolved by entity rather than by name because the
+		//        texture belongs to the element and not to any content.
 		void Build(
 			const gui::DrawList &list,
 			const GlyphAtlas &atlas,

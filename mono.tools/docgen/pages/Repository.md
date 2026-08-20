@@ -7,7 +7,6 @@ How the engine is built, run and contributed to. Start with
 - @subpage md_AGENTS
 - @subpage md_CONTRIBUTING
 - @subpage md_RUNNING
-- @subpage md_SETUP-CDN
 - @subpage md_ROADMAP
 - @subpage md_SECURITY
 - @subpage md_THIRD__PARTY__NOTICES
