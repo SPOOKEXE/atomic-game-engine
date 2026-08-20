@@ -41,14 +41,15 @@ The milestone headings below are development labels. Not in line with project ve
 
 - [x] add release builds for linux (windows and mac, if builds)
 - [x] in the engine, replace Anchored for a better component. Keep roblox shim as Anchored but refer to the new property. Update: "Simulated" property.
-- [_] rename mono.unified_server_client to mono.unified_tests which imports all the mono reports into the code so it can fully test all features with all variations between clients, servers, cdn, networking, engine, etc. This one focused more on CROSS communication and management, NOT per-mono specific systems and such.
-- [_] expose spatial querying to luau / quickjs
+- [x] expose spatial querying to luau / quickjs
+- [x] rename mono.unified_server_client to mono.unified_tests which imports all the mono reports into the code so it can fully test all features with all variations between clients, servers, cdn, networking, engine, etc. This one focused more on CROSS communication and management, NOT per-mono specific systems and such.
 - [x] fix ui scaling and scene camera viewport issue (image)
 - [x] entire game locks when meshes are loading (should be async and non-locking)
 - [x] build interface is 0.2ms still? see if we can improve
 - [x] when you delete a mirror (surfacecamera), it does not clean up the image it was displaying so it becomes a ghost image
 - [x] content.deliver is 0.038ms even though no assets are changing? we should be caching these assets and whatnot
 - [x] in Renderer::RenderView there are a bunch of big gaps
+
 - [_] ensure we benchmark critical systems (network, multiplayer, physics, particles, etc)
 
 ---
