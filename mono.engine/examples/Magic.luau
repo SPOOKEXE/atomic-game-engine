@@ -31,12 +31,19 @@
 -- Nothing in `MagicCore` knows terrain exists and nothing in `TerrainCore` knows
 -- about spells. The coupling is this file.
 --
--- ## What you will not see
+-- ## What draws it
 --
--- Particles, beams, trails and lights. This engine has none of those classes, so
--- every authored emitter -- the tails, the smoke, `AtomicNova`'s nine-emitter
--- mushroom -- has nothing to draw it. The count is printed at startup so the
--- gap is in the log rather than a surprise. See `lib/MagicRuntime/init.luau`.
+-- Every authored emitter, the muzzle beam, the ribbon behind each projectile and
+-- the blast light, all out of `mono.engine/effects`. This scene drew none of them
+-- until the classes existed: `MagicRuntime` was written against an engine that
+-- had only `Part`, said so at the top of itself, and went on saying it after
+-- `effects` landed - so the spells solved correctly, cratered the terrain, and
+-- looked like coloured cubes. The count printed at startup is what is drawn.
+--
+-- The timeline cues are wired here rather than in `MagicRuntime`, because they
+-- arrive as solver events and only this file reads those. `Timeline.EmitParticles`
+-- is what grows `AtomicNova`'s mushroom out of one part, and a scene that drops
+-- it is a scene where five presets detonate into nothing.
 
 local RunService = game:GetService("RunService")
 
@@ -154,6 +161,16 @@ type Visual = {
 	last: Vector3,
 }
 
+-- A projectile whose body is finished and whose tails are not.
+--
+-- **Destroying a part takes its emitters with it**, and an emitter's particles
+-- die with the emitter - so a spell destroyed at the instant it detonates loses
+-- the burst it fired detonating. See `MagicRuntime.longestTail`.
+type Retiring = {
+	handle: any,
+	remaining: number,
+}
+
 type Lane = {
 	name: string,
 	index: number,
@@ -162,6 +179,9 @@ type Lane = {
 	graph: any,
 	solver: any,
 	container: Instance,
+	-- What a projectile's muzzle beam tethers back to. One per lane and not one
+	-- per shot: the far end is the caster, and the caster does not move.
+	muzzleAnchor: Attachment,
 	muzzle: Vector3,
 	direction: Vector3,
 	simulationTime: number,
@@ -169,11 +189,12 @@ type Lane = {
 	castCount: number,
 	recipeByEntity: { [number]: any },
 	visuals: { [number]: Visual },
+	retiring: { Retiring },
 }
 
 local lanes: { Lane } = {}
 local craters = 0
-local missingEmitters = 0
+local drawnEmitters = 0
 
 local function actor(id: string, position: Vector3, faction: string, tags: { string })
 	return {
@@ -197,7 +218,7 @@ for index, entry in LANES do
 		continue
 	end
 
-	missingEmitters += MagicRuntime.missingEmitters(graph)
+	drawnEmitters += MagicRuntime.emitterCount(graph)
 
 	-- Lanes stand on a circle and fire inwards, so every shot crosses different
 	-- ground and the craters do not all land in one line.
@@ -221,6 +242,11 @@ for index, entry in LANES do
 	post.Color = Color3.fromRGB(96, 104, 122)
 	post.Parent = container
 
+	-- At the top of the post, which is where a shot leaves it.
+	local anchor = Instance.new("Attachment")
+	anchor.CFrame = CFrame.new(Vector3.new(0, post.Size.Y * 0.5, 0))
+	anchor.Parent = post
+
 	local sourceId = entry.preset .. ".caster"
 	local enemyId = entry.preset .. ".enemy"
 
@@ -241,6 +267,7 @@ for index, entry in LANES do
 			},
 		}),
 		container = container,
+		muzzleAnchor = anchor,
 		muzzle = muzzle,
 		direction = (target - muzzle).Unit,
 		simulationTime = 0,
@@ -248,6 +275,7 @@ for index, entry in LANES do
 		castCount = 0,
 		recipeByEntity = {},
 		visuals = {},
+		retiring = {},
 	})
 end
 
@@ -279,7 +307,8 @@ local function onSpawned(lane: Lane, entityId: number, position: Vector3)
 		return
 	end
 
-	local handle = MagicRuntime.build(compiled, lane.container, `{lane.name}_{entityId}`)
+	local handle =
+		MagicRuntime.build(compiled, lane.container, `{lane.name}_{entityId}`, lane.muzzleAnchor)
 	MagicRuntime.setPosition(handle, position)
 
 	lane.visuals[entityId] = {
@@ -326,6 +355,20 @@ local function impact(lane: Lane, visual: Visual, position: Vector3)
 	MagicRuntime.conceal(visual.handle)
 end
 
+-- Ends a projectile's body and lets what it put in the air finish.
+--
+-- The Roblox runtime does the same thing by keeping the part until its emitters
+-- release. Here the wait is explicit because nothing reports a particle dying:
+-- the pool is device-resident and the host only knows how long a particle *can*
+-- live. See `MagicRuntime.longestTail`.
+local function retire(lane: Lane, visual: Visual)
+	MagicRuntime.conceal(visual.handle)
+	table.insert(lane.retiring, {
+		handle = visual.handle,
+		remaining = MagicRuntime.longestTail(visual.handle),
+	})
+end
+
 local function step(lane: Lane, delta: number)
 	local result = lane.solver:advance(delta)
 	lane.simulationTime = result.simulationTime
@@ -341,9 +384,29 @@ local function step(lane: Lane, delta: number)
 		elseif event.kind == "ProjectileExpired" or event.kind == "ProjectileCancelled" then
 			local visual = lane.visuals[event.entityId]
 			if visual ~= nil then
-				MagicRuntime.destroy(visual.handle)
+				retire(lane, visual)
 				lane.visuals[event.entityId] = nil
 				lane.recipeByEntity[event.entityId] = nil
+			end
+		elseif event.kind == "TimelineCue" then
+			-- **The five presets that detonate rather than fade are all here.**
+			-- An emitter authored at rate zero says "a cue fires this", so a
+			-- scene that ignores the cue draws an emitter that never emits.
+			local visual = lane.visuals[event.entityId]
+			local cue = event.timelineCue
+			if visual ~= nil and cue ~= nil and cue.emitterId ~= nil then
+				if cue.kind == "Timeline.EmitParticles" then
+					MagicRuntime.emit(visual.handle, cue.emitterId, cue.count or 0)
+				elseif cue.kind == "Timeline.SetEmitterEnabled" then
+					MagicRuntime.setEmitterEnabled(visual.handle, cue.emitterId, cue.enabled == true)
+				end
+			end
+		elseif event.kind == "EmitterDisabled" and event.emitterId ~= nil then
+			-- The solver's own copy of the same decision, which arrives for a
+			-- cancellation as well as for a cue. Applying both is idempotent.
+			local visual = lane.visuals[event.entityId]
+			if visual ~= nil then
+				MagicRuntime.setEmitterEnabled(visual.handle, event.emitterId, false)
 			end
 		end
 	end
@@ -356,6 +419,7 @@ local function step(lane: Lane, delta: number)
 
 		local position = world(entity.position, visual.last)
 		MagicRuntime.setPosition(visual.handle, position)
+		MagicRuntime.advance(visual.handle, delta)
 		if not visual.impacted then
 			MagicRuntime.applyCurves(visual.handle, entity.age)
 		end
@@ -366,6 +430,18 @@ local function step(lane: Lane, delta: number)
 		end
 		if entity.logicalState == "Active" then
 			impact(lane, visual, position)
+		end
+	end
+
+	-- **Backwards, because this removes from the list it is walking.** A forward
+	-- walk with `table.remove` skips the element after every removal, which here
+	-- is a projectile that never gets destroyed.
+	for index = #lane.retiring, 1, -1 do
+		local held = lane.retiring[index]
+		held.remaining -= delta
+		if held.remaining <= 0 then
+			MagicRuntime.destroy(held.handle)
+			table.remove(lane.retiring, index)
 		end
 	end
 
@@ -416,7 +492,7 @@ print(
 	`magic: {#lanes} lane(s) over a {ARENA_CHUNKS * CHUNK * 2}-stud arena at {originX}, {originZ}; `
 		.. `{stats.chunks} chunks, {stats.parts} terrain parts`
 )
-print(`magic: {missingEmitters} authored particle emitter(s) have nothing to draw them in this engine`)
+print(`magic: {drawnEmitters} authored particle emitter(s), a muzzle beam, a trail and a light per shot`)
 
 local reportedAt = 0
 

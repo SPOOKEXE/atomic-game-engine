@@ -94,6 +94,27 @@ namespace {
 		}
 	};
 
+	// How many live instances carry a class, by the class's registered name.
+	//
+	// **By class and not by component**, unlike `CountNamed` below: an emitter,
+	// a beam and a trail have no component in common with a part and none with
+	// each other, so the only thing that names all of them is what they *are*.
+	// `EachEntity` rather than a query for the same reason.
+	size_t CountOfClass(Store &store, const char *klass) {
+		const engine::ecs::ClassId wanted = engine::ecs::Classes::Find(Name(klass));
+		if (!wanted.IsValid()) {
+			return 0;
+		}
+
+		size_t found = 0;
+		store.EachEntity([&](Entity entity) {
+			if (store.ClassOf(entity) == wanted) {
+				found++;
+			}
+		});
+		return found;
+	}
+
 	size_t CountNamed(Store &store, const char *name) {
 		size_t found = 0;
 		store.Each<const Visual>([&](Entity entity, const Visual &) {
@@ -1391,6 +1412,55 @@ TEST_CASE("the magic scene fires spells that crater terrain", "[examples][scene]
 
 	// Every lane compiled; skipped lanes would leave an empty arena.
 	CHECK(CountNamed(store, "Muzzle") == 5);
+}
+
+TEST_CASE("the magic scene draws the effects its presets author", "[examples][scene]") {
+	// **The assertion that would have caught the gap this case was written for.**
+	// `MagicRuntime` was written when the engine had `Part` and none of the
+	// classes an effect is made of, and it went on building only a `Part` after
+	// `effects` landed - so every spell in the demo solved correctly, cratered
+	// the terrain, and drew a coloured cube. The case above passes either way,
+	// because a crater is a fact about the data and not about what is drawn.
+	//
+	// Counted by class rather than asserted on a screenshot: whether a particle
+	// is *painted* needs a GPU and `mono.engine/examples/AGENTS.md` refuses to
+	// answer it with a mock. Whether the scene built the things a renderer would
+	// paint is a question about the world, and this is it.
+	const StagedAssets assets;
+
+	Store store("magic.effects");
+	Scheduler systems;
+
+	std::string error;
+	const bool loaded = LoadScene(store, systems, ExamplePath("Magic.luau"), error);
+	INFO(error);
+	REQUIRE(loaded);
+
+	// Nothing is in the air at load: the first cast is deliberately delayed so
+	// the arena is standing before anything crosses it.
+	CHECK(CountOfClass(store, "ParticleEmitter") == 0);
+
+	// Long enough for the first lane to fire and its projectile to exist. The
+	// loop stops at the first frame that has emitters rather than running on,
+	// so a scene that got faster does not start failing.
+	size_t emitters = 0;
+	for (int tick = 0; tick < 60 * 8 && emitters == 0; tick++) {
+		systems.Tick(store, 1.0f / 60.0f);
+		emitters = CountOfClass(store, "ParticleEmitter");
+	}
+
+	// **Every one of these is a class `MagicRuntime` used to skip.** An authored
+	// emitter per `Presentation.Particle`, the muzzle tether, the ribbon behind
+	// the body and the blast light.
+	CHECK(emitters > 0);
+	CHECK(CountOfClass(store, "Beam") > 0);
+	CHECK(CountOfClass(store, "Trail") > 0);
+	CHECK(CountOfClass(store, "PointLight") > 0);
+
+	// The hang points the three above resolve through - one at the body's
+	// centre for the emitters and the beam, two a body apart for the trail,
+	// plus one per lane on the muzzle post.
+	CHECK(CountOfClass(store, "Attachment") > 5);
 }
 
 TEST_CASE("the player list names everybody in the world", "[examples][scene][players]") {

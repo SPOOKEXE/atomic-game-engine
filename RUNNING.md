@@ -869,12 +869,18 @@ just run --script .cache/build/dev/assets/examples/Libraries.luau  # libraries, 
 just run --script .cache/build/dev/assets/examples/MagicTests.luau # their tests, in this VM
 ```
 
-**`MagicRuntime` draws a body and nothing else.** The Roblox original builds a
-`ParticleEmitter` per authored emitter, plus a `Trail`, a muzzle `Beam` and a
-`PointLight`; this engine has none of those classes, so every tail, plume and
-impact burst has nothing to draw it - 42 of them across the five demo lanes,
-which `Magic.luau` prints at startup. The data is intact and every solver still
-routes it. See the table in `lib/MagicRuntime/init.luau`.
+**`MagicRuntime` draws everything the Roblox original draws.** A
+`ParticleEmitter` per authored emitter - 42 across the five demo lanes, which
+`Magic.luau` prints at startup - plus a `Trail` behind each projectile, a muzzle
+`Beam` and a `PointLight`.
+
+It drew only a body until v0.18. The module was written when this engine had
+`Part` and none of the rest, said so at the top of itself, and went on saying it
+after `mono.engine/effects` landed - so the spells solved correctly, cratered
+the terrain, and looked like coloured cubes. Two things had to change: the
+module, and `examples::LoadScene`, which registered the 3D and 2D class trees
+and not the effects one. See `lib/MagicRuntime/init.luau` for how a
+`Timeline.EmitParticles` burst is spelled without a `ParticleEmitter:Emit`.
 
 ### Autocomplete while you write one
 
