@@ -5,10 +5,35 @@
 # declared is mono.build/MonoLibrary.cmake.
 
 cmake_minimum_required(VERSION 3.24)
+
+# The version, from the one file that holds it.
+#
+# `VERSION` in the repository root is the source of truth, and everything else
+# derives: `project(VERSION)` below, `engine::core::Version()` and therefore
+# every program's `--version`, the names the release workflow gives its
+# artifacts, and the tag it refuses to publish when the two disagree. A number
+# spelled in two places is a number that will be bumped in one of them.
+#
+# Read here rather than passed to `project()` from a variable somebody sets,
+# because `project()` cannot read a file and this has to run before it.
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" MONO_VERSION LIMIT_COUNT 1)
+string(STRIP "${MONO_VERSION}" MONO_VERSION)
+if(NOT MONO_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+	message(FATAL_ERROR
+		"VERSION holds '${MONO_VERSION}', which is not major.minor.patch.\n"
+		"  docs/RELEASING.md is what that file means.")
+endif()
+
 project(atomic
-	VERSION 0.18.0
+	VERSION ${MONO_VERSION}
 	DESCRIPTION "A 3D game engine for Roblox developers"
 	LANGUAGES C CXX)
+
+# Editing VERSION has to re-run the configure, or `project(VERSION)` keeps the
+# number from whenever the cache was written and `--version` reports a build
+# that no longer exists. Only settable after project().
+set_property(DIRECTORY APPEND
+	PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

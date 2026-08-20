@@ -1,4 +1,5 @@
 #include <engine/core/Arguments.hpp>
+#include <engine/core/Version.hpp>
 
 #include <algorithm>
 #include <charconv>
@@ -25,6 +26,12 @@ namespace engine::core {
 	Arguments::Arguments(std::string_view program, std::string_view summary)
 		: Program(program), Summary(summary) {
 		Flag("help", "Show this text");
+
+		// Declared here beside `help` for the same reason `help` is: it is a
+		// property of having a command line at all, not of any one program, and
+		// a flag every program declares for itself is a flag one of them will
+		// spell differently.
+		Flag("version", "Print the version and exit");
 	}
 
 	Arguments &Arguments::Flag(std::string_view name, std::string_view description) {
@@ -156,6 +163,7 @@ namespace engine::core {
 		}
 
 		result.HelpRequested = Has("help");
+		result.VersionRequested = Has("version");
 		return result;
 	}
 
@@ -215,6 +223,10 @@ namespace engine::core {
 		} catch (...) {
 			return fallback;
 		}
+	}
+
+	std::string Arguments::VersionLine() const {
+		return std::string(Program) + " " + std::string(Version()) + "\n";
 	}
 
 	std::string Arguments::Help() const {

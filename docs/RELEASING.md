@@ -32,24 +32,39 @@ heading of its own.
 
 ## Where the version lives
 
-Two places, and they are checked against each other:
+**`VERSION`, in the repository root.** One line, `major.minor.patch`, and it is
+the only place the number is written down. Everything else derives from it:
 
-- `CMakeLists.txt` - `project(atomic VERSION x.y.z)`. This is the source of
-  truth. The configure summary prints it, and the workflow reads it from here.
-- The git tag - `vx.y.z`, on the commit that carries the matching
-  `CMakeLists.txt`.
+| Derives | How |
+|---|---|
+| `project(atomic VERSION ...)` | `CMakeLists.txt` reads `VERSION` before `project()`, and refuses a value that is not `major.minor.patch` |
+| `engine::core::Version()` | `MONO_VERSION`, set from `PROJECT_VERSION` on `mono.engine/core/src/Version.cpp` alone |
+| `<program> --version` | `Arguments::VersionLine()`, so all seventeen programs print the same shape |
+| The artifact names | the `version` job reads `VERSION` |
+| The `VERSION` file inside each archive | `scripts/package-release.sh` writes it |
 
-No program reports its own version yet - there is no `--version` flag and
-nothing compiles `PROJECT_VERSION` into a binary. The `VERSION` file in each
-archive is what says which build a directory came from.
+Editing `VERSION` re-runs the configure - `CMAKE_CONFIGURE_DEPENDS` names it -
+and rebuilds one translation unit. It is not a whole-engine recompile, so there
+is no reason to put off bumping it.
 
-`README.md` also names the current version for people who are reading rather
-than building. It is prose, not a source of truth.
+Two things do *not* derive and have to be kept in step by hand:
+
+- The git tag - `vx.y.z`, on the commit carrying the matching `VERSION`.
+- `README.md`, which names the current version for people who are reading rather
+  than building. Prose, not a source of truth.
 
 The `version` job in `.github/workflows/build.yml` compares the tag against
-`CMakeLists.txt` and stops the run if they differ, before any platform starts
+`VERSION` and stops the run if they differ, before any platform starts
 compiling. A tag pointing at a tree that still says `0.4.0` would otherwise
 produce an hour of binaries reporting the wrong version.
+
+```console
+$ client --version
+client 0.18.0
+```
+
+The program's own name, then the number. The name is there because seventeen
+programs share one version and a pasted line has to say which one wrote it.
 
 ---
 
@@ -57,8 +72,8 @@ produce an hour of binaries reporting the wrong version.
 
 ```sh
 # 1. Bump the declared version.
-#    CMakeLists.txt:  project(atomic VERSION 0.18.1 ...)
-#    README.md:       Current Version: **v0.18.1**
+echo 0.18.1 > VERSION
+#    and README.md:  Current Version: **v0.18.1**
 
 # 2. Check it the way CI will, from a clean tree.
 #    `bun install` (or npm install) first: without node_modules/.bin/tsc the

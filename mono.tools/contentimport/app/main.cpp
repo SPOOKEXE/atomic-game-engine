@@ -234,6 +234,10 @@ int main(int argc, char **argv) {
 		std::fprintf(stderr, "%s\n", parsed.Error.c_str());
 		return 2;
 	}
+	if (parsed.VersionRequested) {
+		std::printf("%s", arguments.VersionLine().c_str());
+		return 0;
+	}
 	if (parsed.HelpRequested) {
 		std::printf("%s", arguments.Help().c_str());
 		return 0;

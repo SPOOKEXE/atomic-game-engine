@@ -158,3 +158,22 @@ TEST_CASE("help is declared without being asked for", "[arguments]") {
 	REQUIRE(help.find("--stats") != std::string::npos);
 	REQUIRE(help.find("--frames N") != std::string::npos);
 }
+
+TEST_CASE("version is declared without being asked for", "[arguments]") {
+	auto arguments = Declared();
+	CommandLine line{"--version"};
+
+	const auto result = arguments.Parse(line.Count(), line.Values());
+	REQUIRE(result.Ok);
+	REQUIRE(result.VersionRequested);
+
+	// The program's own name and then a number, because that first line is what
+	// a bug report quotes and the name is what says which of the seventeen
+	// programs wrote it. The number itself is not asserted: it comes from the
+	// root VERSION file and a test that repeated it would have to be edited
+	// every release to keep saying nothing.
+	const std::string line_out = arguments.VersionLine();
+	REQUIRE(line_out.rfind("client ", 0) == 0);
+	REQUIRE(line_out.back() == '\n');
+	REQUIRE(line_out.find_first_of("0123456789") != std::string::npos);
+}

@@ -39,11 +39,14 @@ namespace engine::core {
 			// is an exit, because a program with subcommands may not want it
 			// to be.
 			bool HelpRequested = false;
+			// Set when `--version` or `-version` was given. The caller decides
+			// what to do with it, for `HelpRequested`'s reason.
+			bool VersionRequested = false;
 			// A diagnostic for the first parse error, or empty when `Ok` is true.
 			std::string Error;
 		};
 
-		// Creates a parser and declares its built-in `help` flag.
+		// Creates a parser and declares its built-in `help` and `version` flags.
 		Arguments(std::string_view program, std::string_view summary);
 
 		// A boolean option. Present or absent; it never takes a value.
@@ -97,6 +100,15 @@ namespace engine::core {
 
 		// Builds usage text from the program summary and option declarations.
 		std::string Help() const;
+
+		// The one line `--version` prints: the program name and the engine
+		// version, newline terminated.
+		//
+		// Here rather than in each `main`, so that seventeen programs cannot
+		// disagree about the format of the first thing a bug report quotes.
+		//
+		// @return `"<program> <major>.<minor>.<patch>\n"`.
+		std::string VersionLine() const;
 
 	  private:
 		struct Option {

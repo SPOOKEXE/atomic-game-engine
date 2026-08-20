@@ -95,6 +95,13 @@ int main(int argc, char **argv) {
 	arguments.Value("definitions", "PATH", "The declaration file to check against");
 
 	const engine::core::Arguments::Result parsed = arguments.Parse(argc, argv);
+	// Guarded on `parsed.Ok` because the block below folds a parse failure in
+	// with `--help`, and a command line that did not parse should report that
+	// rather than answer a question it may not have been asked.
+	if (parsed.Ok && parsed.VersionRequested) {
+		std::printf("%s", arguments.VersionLine().c_str());
+		return 0;
+	}
 	if (!parsed.Ok || parsed.HelpRequested) {
 		return parsed.Ok ? 0 : 2;
 	}

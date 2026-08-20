@@ -46,21 +46,22 @@ jobs:
         run: |
           set -euo pipefail
 
-          # The declared version, from the one place it is declared. The
-          # `cmake_minimum_required(VERSION 3.24)` line does not match: this
-          # anchors VERSION to the start of the line, and that one has a
-          # function name in front of it.
-          declared=$(sed -nE 's/^[[:space:]]*VERSION[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' CMakeLists.txt | head -1)
-          if [ -z "$declared" ]; then
-            echo "no project(VERSION x.y.z) found in CMakeLists.txt" >&2
+          # The declared version, from the one file that holds it. CMakeLists.txt
+          # reads the same file for `project(VERSION)`, and `engine::core::Version()`
+          # is compiled from that - so the number here, the number in the
+          # artifact names and the number `client --version` prints cannot
+          # disagree without somebody editing this file.
+          declared=$(tr -d '[:space:]' < VERSION)
+          if ! printf '%s' "$declared" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "VERSION holds '$declared', which is not major.minor.patch." >&2
             exit 1
           fi
 
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             tagged=${GITHUB_REF_NAME#v}
             if [ "$tagged" != "$declared" ]; then
-              echo "tag ${GITHUB_REF_NAME} does not match CMakeLists.txt, which says $declared." >&2
-              echo "  Bump project(VERSION) in the same commit the tag points at." >&2
+              echo "tag ${GITHUB_REF_NAME} does not match VERSION, which says $declared." >&2
+              echo "  Bump VERSION in the same commit the tag points at." >&2
               exit 1
             fi
             version=$declared

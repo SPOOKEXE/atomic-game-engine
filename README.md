@@ -61,8 +61,17 @@ Development builds and media are still in the discord server below.
 Current Version: **v0.18.0**
 
 Versions are `v[major].[minor].[patch]`. Everything before `1.0.0` is a
-pre-release with no compatibility promise. See
-[`docs/RELEASING.md`](docs/RELEASING.md) for what each number means and how a
+pre-release with no compatibility promise.
+
+The number lives in one file, [`VERSION`](VERSION), and everything derives from
+it - the build, the artifact names, and `--version` on any program:
+
+```console
+$ client --version
+client 0.18.0
+```
+
+See [`docs/RELEASING.md`](docs/RELEASING.md) for what each number means and how a
 release is cut, and [`ROADMAP.md`](ROADMAP.md) for what is in each one.
 
 ## Development Cycle
