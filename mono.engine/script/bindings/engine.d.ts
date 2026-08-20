@@ -952,7 +952,7 @@ declare interface Instance {
 	SetNetworkOwner(player?: Instance | null): void;
 	GetNetworkOwner(): Instance | null;
 	SetLocalTransparency(value: number): void;
-	AddVertex(position: Vector3, normal?: Vector3, uv?: Vector2): number | undefined;
+	AddVertex(position: Vector3, normal?: Vector3, uv?: Vector2): number;
 	AddTriangle(a: number, b: number, c: number): number | undefined;
 	RemoveTriangle(triangle: number): boolean;
 	SetVertexPosition(vertex: number, position: Vector3): boolean;

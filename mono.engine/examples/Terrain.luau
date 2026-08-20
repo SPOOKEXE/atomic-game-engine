@@ -558,7 +558,7 @@ end
 
 -- Nearest the camera's opening position first, so what is built early is what
 -- is on screen early.
-table.sort(pending, function(left, right)
+table.sort(pending, function(left: { number }, right: { number })
 	local lx = left[1] * CHUNK + CHUNK / 2 + ORIGIN - ORBIT_RADIUS
 	local rx = right[1] * CHUNK + CHUNK / 2 + ORIGIN - ORBIT_RADIUS
 	return lx * lx < rx * rx

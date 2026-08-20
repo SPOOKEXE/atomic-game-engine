@@ -1140,7 +1140,7 @@ declare extern type Instance with
 	function SetNetworkOwner(self, player: Instance?): ()
 	function GetNetworkOwner(self): Instance?
 	function SetLocalTransparency(self, value: number): ()
-	function AddVertex(self, position: Vector3, normal: Vector3?, uv: Vector2?): number?
+	function AddVertex(self, position: Vector3, normal: Vector3?, uv: Vector2?): number
 	function AddTriangle(self, a: number, b: number, c: number): number?
 	function RemoveTriangle(self, triangle: number): boolean
 	function SetVertexPosition(self, vertex: number, position: Vector3): boolean

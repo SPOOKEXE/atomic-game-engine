@@ -1991,13 +1991,27 @@ declare task: {
 				out << "\tfunction SetLocalTransparency(self, value: number): ()\n";
 
 				// **The `EditableMesh` core, declared on `Instance` for the
-				// reason every method above it is.** A vertex or triangle id
-				// that names nothing answers `nil` rather than raising -
-				// `AddTriangle`'s own header in `ScriptMethods.cpp` explains
-				// why that one and `AddVertex` differ - so both are typed
-				// optional here rather than as a plain `number`.
+				// reason every method above it is.**
+				//
+				// **`AddVertex` returns a `number` and `AddTriangle` returns a
+				// `number?`, and the difference is the point.**
+				// `AddTriangle`'s own header in `ScriptMethods.cpp` draws the
+				// line: a bad vertex id is the ordinary shape of building a
+				// mesh from computed indices, so asking "did that work" is
+				// control flow rather than a bug to stop a script over, and it
+				// answers `nil`. `AddVertex` has no such case - the only thing
+				// it can fail on is being called on an instance that is not an
+				// `EditableMesh`, which raises, and `ScriptCall::Raise` is
+				// `[[noreturn]]`.
+				//
+				// Typing it optional anyway used to make every caller narrow a
+				// `nil` that cannot arrive: `mesh:SetVertexNormal(id, ...)`
+				// right after `local id = mesh:AddVertex(...)` was a type error
+				// in `examples/Terrain.luau` for exactly that reason. A binding
+				// that describes a failure the engine does not have costs every
+				// script that reads it.
 				out << "\tfunction AddVertex(self, position: Vector3, normal: Vector3?, uv: Vector2?): "
-					   "number?\n";
+					   "number\n";
 				out << "\tfunction AddTriangle(self, a: number, b: number, c: number): number?\n";
 				out << "\tfunction RemoveTriangle(self, triangle: number): boolean\n";
 				out << "\tfunction SetVertexPosition(self, vertex: number, position: Vector3): boolean\n";
@@ -3328,8 +3342,7 @@ declare const task: {
 
 				// The `EditableMesh` core, matching the Luau half and for
 				// the same reason declared there.
-				out << "\tAddVertex(position: Vector3, normal?: Vector3, uv?: Vector2): number | "
-					   "undefined;\n";
+				out << "\tAddVertex(position: Vector3, normal?: Vector3, uv?: Vector2): number;\n";
 				out << "\tAddTriangle(a: number, b: number, c: number): number | undefined;\n";
 				out << "\tRemoveTriangle(triangle: number): boolean;\n";
 				out << "\tSetVertexPosition(vertex: number, position: Vector3): boolean;\n";
