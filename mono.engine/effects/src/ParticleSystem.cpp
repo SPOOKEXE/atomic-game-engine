@@ -972,6 +972,37 @@ namespace engine::effects {
 		{
 			ENGINE_PROFILE_CAT("particles.plan", core::ProfileCategory::Simulation);
 
+			// **An archetype walk, and two attempts to make it something else
+			// were both slower.** The obvious complaint about this loop is that
+			// it opens a fifteen-hundred-byte row for every emitter to decide
+			// whether that emitter owes a particle, when at a steady rate two
+			// thirds of them do not. Both ways of avoiding that cost more than
+			// it does. Measured on `StressParticles.luau` - 5,120 emitters,
+			// 512,000 particles, `dev`, milliseconds a tick:
+			//
+			//                            ecs.systems  claim   plan   age  frame
+			//   this                        6.98      4.45   0.89  1.35  11.89
+			//   blocks, row on demand       7.32      4.45   1.19  1.39  12.40
+			//   blocks, whole plan cached   9.19      6.82   0.10  2.03  15.06
+			//
+			// The second walks `Blocks` for the accumulator and opens the row
+			// only for an emitter that owes: about seventeen hundred scattered
+			// component lookups, which cost more than five thousand sequential
+			// ones.
+			//
+			// The third carries everything a birth needs on the block, so this
+			// walk touches no column at all - and it *is* nine times faster, and
+			// it is the worst of the three. `EmitterBlock` grows by about
+			// seventy-five bytes, and `particles.age` streams every block every
+			// tick, so the saving is paid twice over: once in the age pass and
+			// again in `emitters.claim`, which then resolves a half-extent and
+			// fifteen fields for every emitter rather than for the third that
+			// need them.
+			//
+			// **The block is not free storage.** It is the hot array of the pass
+			// that dominates this module, and the emitter column is walked
+			// sequentially exactly once. Leave it alone unless a measurement
+			// says otherwise; these three are the ones already taken.
 			store.Each<const ParticleEmitter, const EmitterSlot>(
 				[&](ecs::Entity entity, const ParticleEmitter &emitter, const EmitterSlot &slot) {
 					if (slot.Index == NO_SLOT || slot.Index >= blocks.size()) {
