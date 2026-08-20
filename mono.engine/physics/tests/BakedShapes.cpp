@@ -3,7 +3,9 @@
 #include <engine/core/Name.hpp>
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Entity.hpp>
+#include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/physics/Broadphase.hpp>
 #include <engine/physics/NarrowPhase.hpp>
@@ -13,6 +15,8 @@
 #include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Enums.hpp>
+#include <engine/scene/Part.hpp>
+#include <engine/scene/Registration.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -322,4 +326,90 @@ TEST_CASE("a shape table replaces a name rather than shadowing it", "[bakedshape
 	// otherwise resolve to whatever was registered first without one.
 	CHECK(shapes.FindHull(Name()) == nullptr);
 	CHECK(shapes.FindMesh(Name("crate")) == nullptr);
+}
+
+TEST_CASE("a part states which shape it collides as", "[bakedshapes]") {
+	// **The authoring surface, and until v0.17 there was none.** A part is drawn
+	// at its `Bounds` and collides at its `Collider`, and the second of those was
+	// unreachable from a script or the properties panel at all - a box was the
+	// only collider a part could ever have without a C++ call.
+	Store store("physics.bakedshapes.properties");
+	engine::scene::RegisterSceneComponents();
+	engine::scene::RegisterSceneClasses();
+
+	const Entity part = store.CreateInstance(engine::ecs::Classes::Find(Name("Part")), "Rock");
+	REQUIRE(part != engine::ecs::NULL_ENTITY);
+
+	// **The declared type is checked and not only the round-trip**, for
+	// `TagFilter`'s reason one module over: writing raw bytes through
+	// `SetProperty` succeeds whatever the descriptor claims, so a wrongly
+	// declared property passes every test until the first script assigns to it.
+	bool shapeDeclared = false;
+	bool geometryDeclared = false;
+	for (const engine::ecs::PropertyDescriptor &property : store.PropertiesOf(part)) {
+		if (property.Name == Name("CollisionShape")) {
+			shapeDeclared = true;
+			CHECK(property.Type == engine::ecs::PropertyType::Enum);
+			CHECK(property.EnumName == Name("ShapeKind"));
+		}
+		if (property.Name == Name("CollisionGeometry")) {
+			geometryDeclared = true;
+			CHECK(property.Type == engine::ecs::PropertyType::Name);
+		}
+	}
+	CHECK(shapeDeclared);
+	CHECK(geometryDeclared);
+
+	// A part starts as a box, which is what every scene authored before this
+	// was.
+	Name read;
+	REQUIRE(store.GetProperty(part, Name("CollisionShape"), &read, sizeof(read)));
+	CHECK(read == Name("Box"));
+
+	const Name hull("Hull");
+	REQUIRE(store.SetProperty(part, Name("CollisionShape"), &hull, sizeof(hull)));
+	CHECK(store.Get<Collider>(part)->Shape == ShapeKind::Hull);
+
+	REQUIRE(store.GetProperty(part, Name("CollisionShape"), &read, sizeof(read)));
+	CHECK(read == hull);
+
+	// **A member the enum does not have is refused**, which is what an enum
+	// property buys over a bare integer: a typo is an error at the assignment
+	// rather than a part that silently became a cylinder.
+	const Name nonsense("Hexahedron");
+	CHECK_FALSE(store.SetProperty(part, Name("CollisionShape"), &nonsense, sizeof(nonsense)));
+	CHECK(store.Get<Collider>(part)->Shape == ShapeKind::Hull);
+
+	// Any geometry name is accepted, including one nothing has baked - a scene
+	// is authored before its content finishes streaming, and a setter that
+	// refused an unresolved name would make the order the two arrive in
+	// load-bearing.
+	const Name geometry("rock_01");
+	REQUIRE(store.SetProperty(part, Name("CollisionGeometry"), &geometry, sizeof(geometry)));
+	CHECK(store.Get<Collider>(part)->Geometry == geometry);
+
+	REQUIRE(store.GetProperty(part, Name("CollisionGeometry"), &read, sizeof(read)));
+	CHECK(read == geometry);
+}
+
+TEST_CASE("the shape enum is registered in its own declaration order", "[bakedshapes]") {
+	// **The one way `CollisionShapeProperty` can be silently wrong.** It
+	// converts between an ordinal and the enum by casting, so a member list
+	// written in a different order than `ShapeKind` declares would make every
+	// part a different shape than it says - and every round-trip would still
+	// pass, because both halves would be wrong the same way.
+	engine::scene::RegisterSceneComponents();
+	engine::scene::RegisterSceneClasses();
+
+	const Name shapeKind("ShapeKind");
+	CHECK(engine::ecs::EnumTable::MemberAt(shapeKind, static_cast<size_t>(ShapeKind::Box)) == Name("Box"));
+	CHECK(
+		engine::ecs::EnumTable::MemberAt(shapeKind, static_cast<size_t>(ShapeKind::Sphere)) == Name("Sphere")
+	);
+	CHECK(
+		engine::ecs::EnumTable::MemberAt(shapeKind, static_cast<size_t>(ShapeKind::Cylinder)) ==
+		Name("Cylinder")
+	);
+	CHECK(engine::ecs::EnumTable::MemberAt(shapeKind, static_cast<size_t>(ShapeKind::Hull)) == Name("Hull"));
+	CHECK(engine::ecs::EnumTable::MemberAt(shapeKind, static_cast<size_t>(ShapeKind::Mesh)) == Name("Mesh"));
 }

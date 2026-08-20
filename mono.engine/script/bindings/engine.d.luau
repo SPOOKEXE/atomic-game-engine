@@ -503,6 +503,9 @@ end
 declare extern type Enum_ServiceScope extends EnumItem with
 end
 
+declare extern type Enum_ShapeKind extends EnumItem with
+end
+
 declare extern type Enum_SizeConstraint extends EnumItem with
 end
 
@@ -783,6 +786,13 @@ declare Enum: {
 		Shared: Enum_ServiceScope,
 		Server: Enum_ServiceScope,
 		Client: Enum_ServiceScope,
+	},
+	ShapeKind: {
+		Box: Enum_ShapeKind,
+		Sphere: Enum_ShapeKind,
+		Cylinder: Enum_ShapeKind,
+		Hull: Enum_ShapeKind,
+		Mesh: Enum_ShapeKind,
 	},
 	SizeConstraint: {
 		RelativeXY: Enum_SizeConstraint,
@@ -1183,7 +1193,9 @@ declare extern type BasePart extends PVInstance with
 	AngularDamping: number
 	CanCollide: boolean
 	CastShadow: boolean
+	CollisionGeometry: string
 	CollisionGroup: string
+	CollisionShape: Enum_ShapeKind
 	Color: Color3
 	CustomPhysicalProperties: boolean
 	Density: number

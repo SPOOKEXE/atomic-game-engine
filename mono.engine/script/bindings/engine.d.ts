@@ -374,6 +374,7 @@ declare namespace Enum {
 	interface ScrollBarInset extends EnumItem { readonly __enum: "ScrollBarInset"; }
 	interface ScrollingDirection extends EnumItem { readonly __enum: "ScrollingDirection"; }
 	interface ServiceScope extends EnumItem { readonly __enum: "ServiceScope"; }
+	interface ShapeKind extends EnumItem { readonly __enum: "ShapeKind"; }
 	interface SizeConstraint extends EnumItem { readonly __enum: "SizeConstraint"; }
 	interface SortOrder extends EnumItem { readonly __enum: "SortOrder"; }
 	interface StartCorner extends EnumItem { readonly __enum: "StartCorner"; }
@@ -620,6 +621,13 @@ declare namespace Enum {
 		readonly Shared: ServiceScope;
 		readonly Server: ServiceScope;
 		readonly Client: ServiceScope;
+	};
+	const ShapeKind: {
+		readonly Box: ShapeKind;
+		readonly Sphere: ShapeKind;
+		readonly Cylinder: ShapeKind;
+		readonly Hull: ShapeKind;
+		readonly Mesh: ShapeKind;
 	};
 	const SizeConstraint: {
 		readonly RelativeXY: SizeConstraint;
@@ -997,7 +1005,9 @@ declare interface BasePart extends PVInstance {
 	AngularDamping: number;
 	CanCollide: boolean;
 	CastShadow: boolean;
+	CollisionGeometry: string;
 	CollisionGroup: string;
+	CollisionShape: Enum.ShapeKind;
 	Color: Color3;
 	CustomPhysicalProperties: boolean;
 	Density: number;

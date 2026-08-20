@@ -571,6 +571,14 @@ namespace engine::scene {
 			return name;
 		}
 
+		// The collider shape's enum name, interned for `NormalIdEnum`'s reason:
+		// a properties panel reads this every frame and a `core::Name` built
+		// from a literal takes the registry mutex and hashes a string each time.
+		const core::Name &ShapeKindEnum() {
+			static const core::Name name("ShapeKind");
+			return name;
+		}
+
 		// The surface effect's enum name, interned for `NormalIdEnum`'s reason.
 		const core::Name &SurfaceEffectEnum() {
 			static const core::Name name("SurfaceEffect");
@@ -1045,6 +1053,112 @@ namespace engine::scene {
 		// template over the component would save nine lines and cost the reader
 		// the ability to see what a property touches, which is what `Reads` and
 		// `Writes` exist to state.
+		// `BasePart.CollisionShape`: which shape the collider is, as an enum.
+		//
+		// **Named `CollisionShape` rather than `Shape`**, because a part already
+		// has a *drawn* shape in every engine a script author has used and the
+		// two are not the same thing - `scene::Bounds` is what it is drawn at
+		// and `scene::Collider` is what it collides as. A single `Shape` would
+		// read as both and be neither.
+		//
+		// **The whole set, including the two that need geometry.** `Hull` and
+		// `Mesh` are only meaningful with a `CollisionGeometry` beside them, and
+		// a shape set to one with no geometry collides as the part's bound -
+		// which `scene::Collider::Geometry` states and which is visible in the
+		// studio's collider outlines. Hiding them here would leave the only way
+		// to reach them a C++ call.
+		//
+		// @since v0.17
+		PropertyDescriptor CollisionShapeProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("CollisionShape");
+			property.Type = PropertyType::Enum;
+			property.EnumName = ShapeKindEnum();
+			property.Size = sizeof(core::Name);
+			property.Kind = PropertyKind::Field;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Collider>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Collider *collider = store.Get<Collider>(instance);
+				if (collider == nullptr) {
+					return false;
+				}
+				*static_cast<core::Name *>(out) =
+					ecs::EnumTable::MemberAt(ShapeKindEnum(), static_cast<size_t>(collider->Shape));
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				Collider *collider = store.GetMutable<Collider>(instance);
+				if (collider == nullptr) {
+					return false;
+				}
+
+				size_t ordinal = 0;
+				if (!ecs::EnumTable::OrdinalOf(
+						ShapeKindEnum(), *static_cast<const core::Name *>(value), ordinal
+					)) {
+					return false;
+				}
+
+				collider->Shape = static_cast<ShapeKind>(ordinal);
+				return true;
+			};
+
+			return property;
+		}
+
+		// `BasePart.CollisionGeometry`: which baked shape the collider names.
+		//
+		// **A name, and the same name a `Visual::Mesh` is.** Whoever loads
+		// content bakes a hull or a triangle soup into `scene::CollisionShapes`
+		// under a name, and this is how a part says which one it is. Unread for
+		// the three shapes an extent describes.
+		//
+		// **Generated rather than hand-written would have been enough** -
+		// `Collider::Geometry` is a plain `core::Name` field - except that a
+		// generated property is named after the field, and `Geometry` on a
+		// `BasePart` reads as the thing it is drawn as. The one-word difference
+		// is worth the twenty lines.
+		//
+		// @since v0.17
+		PropertyDescriptor CollisionGeometryProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("CollisionGeometry");
+			property.Type = PropertyType::Name;
+			property.Size = sizeof(core::Name);
+			property.Kind = PropertyKind::Field;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Collider>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Collider *collider = store.Get<Collider>(instance);
+				if (collider == nullptr) {
+					return false;
+				}
+				*static_cast<core::Name *>(out) = collider->Geometry;
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				Collider *collider = store.GetMutable<Collider>(instance);
+				if (collider == nullptr) {
+					return false;
+				}
+
+				// **Any name is accepted, including one nothing has baked.** A
+				// scene is authored before its content finishes streaming and a
+				// setter that refused an unresolved name would make the order
+				// the two arrive in load-bearing. The part collides as its bound
+				// until the shape appears.
+				collider->Geometry = *static_cast<const core::Name *>(value);
+				return true;
+			};
+
+			return property;
+		}
+
 		PropertyDescriptor LightFaceProperty() {
 			PropertyDescriptor property;
 			property.Name = core::Name("Face");
@@ -1351,6 +1465,15 @@ namespace engine::scene {
 			// so a script setting `.AlphaMode = "Clip"` is checked against it.
 			ecs::EnumTable::Register(
 				AlphaModeEnum().Text(), std::array<std::string_view, 3>{"Opaque", "Clip", "Blend"}
+			);
+
+			// The collider shapes. **In `ShapeKind`'s own declaration order**,
+			// because `CollisionShapeProperty` converts between an ordinal and
+			// the enum by casting - so a list written in a different order here
+			// would silently make every part a different shape than it says.
+			ecs::EnumTable::Register(
+				ShapeKindEnum().Text(),
+				std::array<std::string_view, 5>{"Box", "Sphere", "Cylinder", "Hull", "Mesh"}
 			);
 
 			// The default collision group, so `CollisionGroup` reads back
@@ -1783,6 +1906,14 @@ namespace engine::scene {
 			// `CustomPhysicalProperties` keeps Roblox's name because it is the
 			// one an author looks for, and it is the switch: without it the
 			// three below are ignored and the part feels like its material.
+			// **What the part collides as, which nothing else on it says.** A
+			// part is drawn at its `Bounds` and collides at its `Collider`, and
+			// until v0.17 the second of those was unreachable from a script or
+			// the properties panel at all - a box was the only collider a part
+			// could ever have without a C++ call.
+			ecs::Classes::Computed(basePart, CollisionShapeProperty());
+			ecs::Classes::Computed(basePart, CollisionGeometryProperty());
+
 			ecs::Classes::Property<&PhysicsProperties::Custom>(basePart, "CustomPhysicalProperties");
 			ecs::Classes::Property<&PhysicsProperties::Density>(basePart, "Density");
 			ecs::Classes::Property<&PhysicsProperties::Friction>(basePart, "Friction");
