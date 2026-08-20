@@ -111,4 +111,4 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] full procedural terrain studio tools
 - [_] full ui features
 - [_] level-of-details (4 different meshes version, auto-decimate version, smart-triangle-reduction-version thinking of nanite triangle surface area)
-- [_] project demos: space engineers asteroids + planets full demo, blackhole simulator, huge medieval battle full ai war, ai magic battle with tons of particles and explosions and whatnot
+- [_] project demos: space engineers asteroids + planets full demo, blackhole simulator (warp space, warp visual, etc), huge medieval battle full ai war, ai magic battle with tons of particles and explosions and whatnot
