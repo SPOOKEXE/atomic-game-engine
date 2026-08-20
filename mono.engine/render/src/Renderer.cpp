@@ -12,6 +12,7 @@
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/graph/Schedule.hpp>
 #include <engine/graph/Shadow.hpp>
+#include <engine/parallel/Jobs.hpp>
 #include <engine/render/GraphRunner.hpp>
 #include <engine/render/MeshTable.hpp>
 #include <engine/render/MissingTexture.hpp>
@@ -1494,6 +1495,24 @@ namespace engine::render {
 		// same argument `DrawOrder` makes one screen up.
 		std::vector<ParticleGroup> ParticleGroups;
 		std::vector<uint32_t> ParticleOrder;
+
+		// One batch's worth of particles and where it lands in the staging
+		// buffer.
+		//
+		// **The pack is a two-pass now because the second pass dispatches.**
+		// Deciding where a batch goes is a running total and is therefore
+		// serial; performing the copy is not, and at half a million particles
+		// the copy is sixteen megabytes and the largest single thing the frame
+		// does. Splitting them costs one walk over the batch list - which the
+		// first pass was doing anyway - and buys the whole worker pool for the
+		// bandwidth.
+		struct ParticleCopy {
+			const effects::ParticleInstance *Source = nullptr;
+			uint32_t Destination = 0;
+			uint32_t Count = 0;
+		};
+
+		std::vector<ParticleCopy> ParticleCopies;
 
 		// Grows the particle buffer to hold at least `count`, keeping what fits.
 		//
@@ -3998,6 +4017,20 @@ namespace engine::render {
 		}
 	}
 
+	namespace {
+		// How many batches are worth handing to another worker, and the total
+		// below which the dispatch is not worth having.
+		//
+		// **Batches rather than particles, because a batch is the unit that has
+		// a destination.** A steady emitter carries about a hundred particles,
+		// so thirty-two batches is a few thousand of them and roughly a hundred
+		// kilobytes - large enough that the copy dominates the hand-off. The
+		// floor is low because a scene with a few dozen emitters has nothing to
+		// gain and a memcpy of that size is over before a worker wakes.
+		constexpr size_t PARTICLE_COPY_GRAIN = 32;
+		constexpr size_t PARTICLE_COPY_MINIMUM = 64;
+	}
+
 	uint32_t Renderer::Impl::PrepareParticles(std::span<const render::ParticleBatch> batches) {
 		ParticleGroups.clear();
 		if (ParticlePipeline == nullptr || batches.empty()) {
@@ -4083,7 +4116,10 @@ namespace engine::render {
 		// the bytes have to cross. Nothing here can make it smaller - only
 		// moving the simulation to the device would, which is what the
 		// five-million-particle line is about.
-		ENGINE_PROFILE_CAT("particles.pack", core::ProfileCategory::Render);
+		// **Where everything goes, before anything moves.** The destination is a
+		// running total and so this walk is serial; it does no copying, which is
+		// the whole point of separating it.
+		ParticleCopies.clear();
 
 		uint32_t written = 0;
 		for (const uint32_t index : ParticleOrder) {
@@ -4097,9 +4133,42 @@ namespace engine::render {
 			}
 
 			const auto count = static_cast<uint32_t>(batch.Particles.size());
-			std::memcpy(mapped + written, batch.Particles.data(), count * sizeof(effects::ParticleInstance));
+			ParticleCopies.push_back(ParticleCopy{batch.Particles.data(), written, count});
 			written += count;
 			ParticleGroups.back().Count += count;
+		}
+
+		{
+			ENGINE_PROFILE_CAT("particles.pack", core::ProfileCategory::Render);
+
+			// **Sixteen megabytes at half a million particles, and one core
+			// cannot saturate a memory bus.** Every destination range was
+			// decided above and no two overlap, so this is as parallel as work
+			// gets - and `Renderer::Render` runs on the host's own thread rather
+			// than inside a `Jobs::ForWorkers` batch, so unlike a dispatch from
+			// within a world this one actually reaches the pool.
+			//
+			// The buffer is taken by value into the body rather than named
+			// through `this`, which is what keeps the workers off a member the
+			// calling thread is still writing.
+			const ParticleCopy *const copies = ParticleCopies.data();
+			effects::ParticleInstance *const destination = mapped;
+
+			parallel::Jobs::For(
+				ParticleCopies.size(),
+				PARTICLE_COPY_GRAIN,
+				[copies, destination](size_t begin, size_t end) {
+					for (size_t at = begin; at < end; at++) {
+						const ParticleCopy &copy = copies[at];
+						std::memcpy(
+							destination + copy.Destination,
+							copy.Source,
+							static_cast<size_t>(copy.Count) * sizeof(effects::ParticleInstance)
+						);
+					}
+				},
+				PARTICLE_COPY_MINIMUM
+			);
 		}
 
 		SDL_UnmapGPUTransferBuffer(Device, ParticleTransfer);

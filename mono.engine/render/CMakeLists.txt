@@ -23,6 +23,15 @@ mono_add_library(render
 		# the tier check has nothing to say about it.
 		Engine::effects
 
+		# **For the particle pack, and only for that.** Half a million particles
+		# is sixteen megabytes copied into a staging buffer every frame, which is
+		# the largest single thing a particle frame does and is pure bandwidth -
+		# one core cannot saturate a memory bus and several can. `Renderer::
+		# Render` is called from the host's own thread rather than from inside a
+		# worker batch, so a dispatch here actually dispatches; see
+		# `Universe::Tick` for why that is worth saying out loud.
+		Engine::parallel
+
 		# Public table APIs use asset data types.
 		Engine::assets
 
