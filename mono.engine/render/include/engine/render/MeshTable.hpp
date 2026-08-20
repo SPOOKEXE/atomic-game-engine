@@ -3,6 +3,10 @@
 // Renderer meshes share one vertex buffer and one index buffer.
 // Growth rebuilds both buffers; mesh eviction is not supported.
 //
+// `Add` accumulates on the host and `Flush` sends what is new, so the cost of
+// admitting a batch of meshes is one transfer of the batch rather than one
+// transfer of the whole table per mesh.
+//
 // @tier L12 · client
 
 #include <engine/assets/Mesh.hpp>
@@ -128,12 +132,38 @@ namespace engine::render {
 
 		// Uploads whatever `Add` has accumulated.
 		//
-		// Safe to call when no mesh has changed.
+		// Safe to call when no mesh has changed, and cheap: only the bytes
+		// appended since the last flush are sent, so a hundred meshes admitted
+		// in one frame cost one transfer of their own size rather than a hundred
+		// transfers of the whole table.
 		//
 		// @return `false` when the upload failed. The table keeps whatever it
 		//         had, so a failed upload is a frame drawn with the old
 		//         geometry rather than with none.
 		bool Flush();
+
+		// How many device uploads have happened.
+		//
+		// The number `Flush` exists to keep down, and therefore the number worth
+		// asserting: a burst of arrivals that moves this by more than one has
+		// lost the batching it is supposed to have.
+		size_t UploadCount() const {
+			return Uploads;
+		}
+
+		// Vertices and indices added but not yet uploaded.
+		//
+		// What the next `Flush` will send, which is the other half of the same
+		// property: a delta that is the size of the whole table means the mark
+		// was not kept.
+		//@{
+		size_t PendingVertexCount() const {
+			return HostVertices.size() - UploadedVertices;
+		}
+		size_t PendingIndexCount() const {
+			return HostIndices.size() - UploadedIndices;
+		}
+		//@}
 
 		// The entry for a name, or the default when the name is unknown.
 		//
@@ -173,6 +203,22 @@ namespace engine::render {
 		// re-create every time.
 		size_t VertexCapacity = 0;
 		size_t IndexCapacity = 0;
+
+		// How far into the host arrays the device has been told about.
+		//
+		// **The mark that makes a flush a delta.** `Add` only ever appends -
+		// replacing a mesh appends its geometry and repoints the entry, which is
+		// what keeps a range a frame in flight is drawing from valid - so
+		// everything below this is already on the device and byte-identical.
+		// Reset to zero when the buffers are recreated, because the new ones are
+		// empty.
+		//@{
+		size_t UploadedVertices = 0;
+		size_t UploadedIndices = 0;
+		//@}
+
+		// Device uploads performed. See `UploadCount`.
+		size_t Uploads = 0;
 
 		std::vector<assets::MeshVertex> HostVertices;
 		std::vector<uint32_t> HostIndices;

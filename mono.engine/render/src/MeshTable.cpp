@@ -54,6 +54,9 @@ namespace engine::render {
 		IndexBuffer = nullptr;
 		VertexCapacity = 0;
 		IndexCapacity = 0;
+		UploadedVertices = 0;
+		UploadedIndices = 0;
+		Uploads = 0;
 		HostVertices.clear();
 		HostIndices.clear();
 		Entries.clear();
@@ -123,10 +126,12 @@ namespace engine::render {
 			return false;
 		}
 
-		const size_t vertexBytes = HostVertices.size() * sizeof(assets::MeshVertex);
-		const size_t indexBytes = HostIndices.size() * sizeof(uint32_t);
-
 		// Grow geometrically to avoid recreating buffers for every arrival.
+		//
+		// **A growth is the one case that re-sends everything.** The new buffers
+		// are empty, so the tail alone would leave the meshes already registered
+		// pointing at nothing.
+		bool recreated = false;
 		if (VertexBuffer == nullptr || HostVertices.size() > VertexCapacity ||
 			HostIndices.size() > IndexCapacity) {
 			size_t vertices = VertexCapacity == 0 ? HostVertices.size() : VertexCapacity;
@@ -159,12 +164,36 @@ namespace engine::render {
 				ENGINE_ERROR("mesh table: buffers: {}", SDL_GetError());
 				VertexCapacity = 0;
 				IndexCapacity = 0;
+				UploadedVertices = 0;
+				UploadedIndices = 0;
 				return false;
 			}
 
 			VertexCapacity = vertices;
 			IndexCapacity = indices;
+			recreated = true;
 		}
+
+		// **Only what `Add` appended since the last upload.** `Add` never
+		// rewrites a byte it has already handed to the device - a replacement
+		// appends its geometry and repoints the entry, which is what keeps the
+		// ranges a frame in flight is drawing from valid - so everything below
+		// the mark is already on the device and identical. Re-sending it made
+		// registering N meshes cost O(N^2) bytes of memcpy and PCIe traffic, and
+		// a table near its eight-million-vertex ceiling made that a 384 MB
+		// transfer for one arriving mesh. That is the stall a game shows as a
+		// freeze while its meshes load.
+		const size_t firstVertex = recreated ? 0 : UploadedVertices;
+		const size_t firstIndex = recreated ? 0 : UploadedIndices;
+		const size_t vertexCount = HostVertices.size() - firstVertex;
+		const size_t indexCount = HostIndices.size() - firstIndex;
+		if (vertexCount == 0 && indexCount == 0) {
+			Dirty = false;
+			return true;
+		}
+
+		const size_t vertexBytes = vertexCount * sizeof(assets::MeshVertex);
+		const size_t indexBytes = indexCount * sizeof(uint32_t);
 
 		SDL_GPUTransferBufferCreateInfo transferInfo{};
 		transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
@@ -177,27 +206,50 @@ namespace engine::render {
 		}
 
 		auto *mapped = static_cast<uint8_t *>(SDL_MapGPUTransferBuffer(Device, transfer, false));
-		std::memcpy(mapped, HostVertices.data(), vertexBytes);
-		std::memcpy(mapped + vertexBytes, HostIndices.data(), indexBytes);
+		if (vertexBytes > 0) {
+			std::memcpy(mapped, HostVertices.data() + firstVertex, vertexBytes);
+		}
+		if (indexBytes > 0) {
+			std::memcpy(mapped + vertexBytes, HostIndices.data() + firstIndex, indexBytes);
+		}
 		SDL_UnmapGPUTransferBuffer(Device, transfer);
 
 		SDL_GPUCommandBuffer *command = SDL_AcquireGPUCommandBuffer(Device);
 		SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(command);
 
-		SDL_GPUTransferBufferLocation source{transfer, 0};
-		SDL_GPUBufferRegion destination{VertexBuffer, 0, static_cast<uint32_t>(vertexBytes)};
+		// **Never cycled, which is the price of writing only the tail.** Cycling
+		// hands back a fresh allocation whose contents are undefined, so a
+		// partial write into a cycled buffer would discard every mesh below the
+		// mark. The copy is to bytes past everything a frame in flight can be
+		// reading, so a barrier is all it costs - and batching the flush to once
+		// per frame is what keeps it to one.
+		if (vertexBytes > 0) {
+			SDL_GPUTransferBufferLocation source{transfer, 0};
+			SDL_GPUBufferRegion destination{
+				VertexBuffer,
+				static_cast<uint32_t>(firstVertex * sizeof(assets::MeshVertex)),
+				static_cast<uint32_t>(vertexBytes)
+			};
+			SDL_UploadToGPUBuffer(copy, &source, &destination, false);
+		}
 
-		// Cycle the upload so a previous frame can still read the buffer.
-		SDL_UploadToGPUBuffer(copy, &source, &destination, true);
-
-		source.offset = static_cast<uint32_t>(vertexBytes);
-		destination = SDL_GPUBufferRegion{IndexBuffer, 0, static_cast<uint32_t>(indexBytes)};
-		SDL_UploadToGPUBuffer(copy, &source, &destination, true);
+		if (indexBytes > 0) {
+			SDL_GPUTransferBufferLocation source{transfer, static_cast<uint32_t>(vertexBytes)};
+			SDL_GPUBufferRegion destination{
+				IndexBuffer,
+				static_cast<uint32_t>(firstIndex * sizeof(uint32_t)),
+				static_cast<uint32_t>(indexBytes)
+			};
+			SDL_UploadToGPUBuffer(copy, &source, &destination, false);
+		}
 
 		SDL_EndGPUCopyPass(copy);
 		SDL_SubmitGPUCommandBuffer(command);
 		SDL_ReleaseGPUTransferBuffer(Device, transfer);
 
+		UploadedVertices = HostVertices.size();
+		UploadedIndices = HostIndices.size();
+		Uploads++;
 		Dirty = false;
 		return true;
 	}

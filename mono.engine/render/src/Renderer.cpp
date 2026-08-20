@@ -7111,12 +7111,25 @@ namespace engine::render {
 			return false;
 		}
 
-		// Uploaded on the spot rather than at the next frame's barrier.
-		// Registration happens when content arrives, which a caller has already
-		// arranged to be a moment it controls - `delivery::Client::Pump` is the
-		// whole design of that - so deferring would add a second barrier for a
-		// caller that already had one.
-		return State->Meshes.Add(name, mesh) && State->Meshes.Flush();
+		// **Accumulated here and uploaded by `Render`**, which is what makes a
+		// burst of arrivals cost one transfer. It used to upload on the spot,
+		// and because a copy pass cannot write part of a cycled buffer that
+		// meant re-sending the whole table per mesh: admitting N meshes moved
+		// O(N^2) bytes over the bus and froze the frame that a game finished
+		// loading in. The entry is registered immediately either way, so
+		// `MeshExtentOf` and the parts waiting to be sized by it are unaffected.
+		//
+		// A caller that needs the geometry resident before the next `Render` -
+		// a readback, a preview taken outside the frame loop - calls
+		// `FlushMeshes` itself.
+		return State->Meshes.Add(name, mesh);
+	}
+
+	bool Renderer::FlushMeshes() {
+		if (State == nullptr || State->Device == nullptr) {
+			return false;
+		}
+		return State->Meshes.Flush();
 	}
 
 	bool Renderer::AddTexture(const core::Name &name, const assets::TextureData &image) {
@@ -7806,6 +7819,11 @@ namespace engine::render {
 		if (State == nullptr || State->Device == nullptr || views.empty() || State->BatchActive) {
 			return frame;
 		}
+
+		// **Every mesh admitted since the last frame, in one transfer.** `AddMesh`
+		// only accumulates, so this is the barrier the content pump used to pay
+		// once per arriving mesh. Free when nothing arrived.
+		State->Meshes.Flush();
 
 		struct ViewGroup {
 			uint64_t World = 0;

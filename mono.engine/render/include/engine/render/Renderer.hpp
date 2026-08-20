@@ -1019,6 +1019,17 @@ namespace engine::render {
 		// @return `false` for an invalid mesh, a full table or a failed upload.
 		bool AddMesh(const core::Name &name, const assets::MeshData &mesh);
 
+		// Sends every mesh `AddMesh` has accumulated to the device.
+		//
+		// `Render` does this itself, so a caller inside the frame loop never
+		// needs it. It is for the paths that read the geometry without drawing a
+		// frame first.
+		//
+		// @return `false` with no device, or when the upload failed. The table
+		//         keeps what it had, so a failure is a frame drawn with the old
+		//         geometry rather than with none.
+		bool FlushMeshes();
+
 		// A registered mesh's own half-extent, in mesh space.
 		//
 		// **So an editor can make `Size` mean the mesh's proportions.** Since
