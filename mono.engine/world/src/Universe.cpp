@@ -701,8 +701,32 @@ namespace engine::world {
 		// kept, and the flame graph would count the tick twice. A measurement
 		// instrument that makes the picture wrong in a new way is worse than no
 		// instrument, so the shape goes serial with the execution.
-		const bool parallel =
-			Settings_.Mode == ExecutionMode::WorldParallel && !parallel::ForceSerialCompute();
+		// **And a universe of one world ticks here rather than on a lane, which
+		// is a performance decision rather than a tidiness one.**
+		//
+		// `Jobs::ForWorkers` owns the process-wide pool for the length of its
+		// batch, and `Jobs.hpp` is explicit that a nested `For` from an assigned
+		// task therefore runs inline. Every parallel loop a world contains is
+		// nested inside this dispatch - `StepParticles` over its blocks,
+		// `CapturePreviousTransforms` over its transforms, the physics integrate
+		// - so handing one world to a lane does not make it parallel, it makes
+		// everything *inside* it serial while twenty-two workers watch.
+		//
+		// With two or more worlds that is the right trade: the lanes overlap the
+		// worlds themselves, which is the coarser and better-balanced split. With
+		// one there is nothing to overlap it with, so the dispatch buys no
+		// concurrency at all and spends the pool to get it. Ticking here leaves
+		// the pool free for whatever the world dispatches, and measured on
+		// `StressParticles.luau` - one world, 5,120 emitters, 512,000 particles -
+		// that is the difference between `particles.age` having twenty-three
+		// workers and having one.
+		//
+		// It also makes the frame graph better rather than worse, which the
+		// paragraph above worries about for the flag: the world's spans are now
+		// on the frame's owning thread and are kept, instead of arriving as one
+		// aggregate bar with everything it contained refused.
+		const bool parallel = Settings_.Mode == ExecutionMode::WorldParallel &&
+							  !parallel::ForceSerialCompute() && order.size() > 1;
 
 		if (parallel && !ActiveList.empty() && LaneCount > 0) {
 			// A world keeps its lane while the pinned worker prefix is unchanged.
@@ -823,9 +847,14 @@ namespace engine::world {
 			);
 		}
 
+		// **One world presents here rather than on a lane**, for the reason the
+		// tick's own dispatch gives in full: a batch owns the process-wide pool,
+		// so every parallel loop inside `World::Present` - the draw-list build,
+		// the attachment resolve - runs inline while the rest of the pool waits
+		// for a batch of one to finish.
 		const bool parallel =
 			Settings_.Mode == ExecutionMode::WorldParallel && !parallel::ForceSerialCompute() &&
-			LaneCount > 0 &&
+			LaneCount > 0 && PresentationList.size() > 1 &&
 			std::all_of(PresentationLanes.begin(), PresentationLanes.end(), [this](unsigned lane) {
 				return lane < LaneCount;
 			});

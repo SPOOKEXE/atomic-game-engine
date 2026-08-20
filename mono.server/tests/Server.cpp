@@ -264,11 +264,17 @@ TEST_CASE("a tick reports itself to the frame graph and the metrics sink", "[ser
 	};
 
 	// The server no longer has a tick span of its own: the universe drives the
-	// barrier and reports the joined time its pinned workers measured. Worker
-	// scopes cannot enter the driver-owned frame graph, so expecting individual
-	// world and system spans here would require contention on every worker span.
+	// barrier and whichever branch it took names itself.
+	//
+	// **One world ticks on the driver's own thread**, so its spans are on the
+	// frame's owning thread and are kept. `Universe::Tick` explains why: a
+	// `Jobs::ForWorkers` batch owns the process-wide pool, so handing a lone
+	// world to a lane makes every parallel loop *inside* it run inline while the
+	// rest of the pool waits - which is no concurrency bought at the price of
+	// all of it.
 	REQUIRE(named("Universe::Tick"));
-	REQUIRE(named("worlds (pinned workers)"));
+	REQUIRE(named("worlds (serial)"));
+	REQUIRE_FALSE(named("worlds (pinned workers)"));
 
 	const auto counters = Metrics::Drain();
 	REQUIRE(std::any_of(counters.begin(), counters.end(), [](const auto &counter) {

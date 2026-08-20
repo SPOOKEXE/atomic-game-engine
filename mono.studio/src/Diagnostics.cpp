@@ -468,38 +468,33 @@ namespace studio {
 		// ticking on workers open a span per phase and per system, and every one
 		// of them is refused. Reading "overflowed the buffer" sent at least one
 		// investigation at the span budget, which was 1% used.
-		if (const size_t dropped = view.Dropped; dropped > 0) {
+		const size_t dropped = view.Dropped;
+		if (dropped > 0) {
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
 			ImGui::Text("%zu spans dropped - off-thread, too deep, or past the buffer", dropped);
 			ImGui::PopStyleColor();
 		}
 
-		// **The switch belongs on the panel that is lying without it.** The
-		// dropped-span line above is the symptom and this is the cure, so
-		// putting them a menu apart would mean reading the warning and having
-		// to know what to go and find. Flipping it here also means the two
-		// flame graphs - parallel and serial - come from one session and one
-		// build, which is what makes them comparable at all.
-		bool serial = engine::parallel::ForceSerialCompute();
-		if (ImGui::Checkbox("force serial compute", &serial)) {
-			engine::parallel::SetForceSerialCompute(serial);
-		}
-
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip(
-				"Every parallel dispatch runs on the thread that asked, so no span is dropped.\n"
-				"The frame gets slower on purpose: this measures a serial cost, not a verdict\n"
-				"on the parallel one."
-			);
-		}
-
-		// Said on the panel rather than left for somebody to remember, because
-		// the whole risk of this switch is reading a number taken with it on and
-		// treating it as the engine's real cost.
-		if (serial) {
-			ImGui::SameLine();
+		// **The switch lives in Preferences > Compute now, and this says so.**
+		// It used to sit here, on the argument that the dropped-span line above
+		// is the symptom and the switch is the cure, so a menu between them is a
+		// warning you have to know what to do about. That argument was right
+		// about the *pairing* and wrong about the place: it is one of several
+		// decisions about how this process uses its cores, the rest of which had
+		// nowhere to be, and a checkbox that changes how the whole engine
+		// dispatches is not a property of a panel. The pairing survives as this
+		// line, which is the part that was actually load-bearing.
+		//
+		// Said whenever it is on rather than only when spans are dropped,
+		// because the whole risk of the switch is reading a number taken with it
+		// and treating it as the engine's real cost.
+		if (engine::parallel::ForceSerialCompute()) {
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
-			ImGui::TextUnformatted("- timings are serial, not the shipped cost");
+			ImGui::TextUnformatted("serial compute is on - these timings are not the shipped cost");
+			ImGui::PopStyleColor();
+		} else if (dropped > 0) {
+			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+			ImGui::TextUnformatted("Preferences > Compute > force serial compute keeps every span");
 			ImGui::PopStyleColor();
 		}
 

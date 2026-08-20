@@ -884,6 +884,90 @@ namespace studio {
 		}
 	}
 
+	void Editor::DrawComputeSettings() {
+		// **How this process spends its cores, in one place.** These used to be
+		// nowhere or on whichever panel first needed them - `force serial
+		// compute` was a checkbox on the frame graph - and a decision that
+		// changes how the whole engine dispatches is not a property of a panel.
+		ImGui::SeparatorText("The pool");
+
+		const unsigned workers = engine::parallel::Jobs::WorkerCount();
+		const unsigned pinned = engine::parallel::Jobs::PinnedWorkerCount();
+
+		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+		ImGui::Text("%u worker(s), %u pinned to a physical core", workers, pinned);
+		ImGui::PopStyleColor();
+
+		ImGui::Spacing();
+		ImGui::SeparatorText("Dispatch");
+
+		// **The one global switch, and the one that can make every measurement
+		// on this machine a lie.** It is here rather than on the frame graph
+		// because it is not a property of that panel; the panel says when it is
+		// on, which is the half that mattered.
+		bool serial = engine::parallel::ForceSerialCompute();
+		if (ImGui::Checkbox("Force serial compute", &serial)) {
+			engine::parallel::SetForceSerialCompute(serial);
+			Say(serial ? "every parallel dispatch now runs on the thread that asked"
+					   : "parallel dispatch restored");
+		}
+
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip(
+				"Every parallel dispatch runs on the thread that asked, so no span is dropped\n"
+				"and the frame graph keeps the whole tree.\n"
+				"The frame gets slower on purpose: this measures a serial cost, not a verdict\n"
+				"on the parallel one."
+			);
+		}
+
+		if (serial) {
+			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
+			ImGui::TextUnformatted("every timing taken while this is on is a serial one");
+			ImGui::PopStyleColor();
+		}
+
+		ImGui::Spacing();
+
+		// **The universe's own mode, which is the coarser of the two splits.**
+		// `WorldParallel` overlaps whole worlds on pinned lanes; `WorldSerial`
+		// runs them one after another on the driver. It is a universe setting
+		// rather than a preference - a game file carries it - so this edits the
+		// open universe and says so.
+		const engine::world::ExecutionMode mode = Universe->Settings().Mode;
+		int chosen = mode == engine::world::ExecutionMode::WorldParallel ? 0 : 1;
+
+		static const char *MODES[] = {"Worlds in parallel", "Worlds one after another"};
+		ImGui::SetNextItemWidth(engine::ui::Scaled(220.0f));
+		if (ImGui::Combo("World execution", &chosen, MODES, IM_ARRAYSIZE(MODES))) {
+			Universe->SetMode(
+				chosen == 0 ? engine::world::ExecutionMode::WorldParallel
+							: engine::world::ExecutionMode::WorldSerial
+			);
+			Modified = true;
+		}
+
+		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+		ImGui::TextUnformatted("this universe's own setting, saved with the game");
+		ImGui::PopStyleColor();
+
+		ImGui::Spacing();
+
+		// **The rule that explains a serial-looking single-world game**, which
+		// is otherwise the most confusing thing on this page: somebody sets
+		// worlds-in-parallel, opens a game with one world, and the frame graph
+		// says `worlds (serial)`.
+		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+		ImGui::TextWrapped(
+			"A universe holding one world ticks it on this thread whatever the mode says. A "
+			"dispatch batch owns the whole worker pool, so putting a lone world on a lane would "
+			"make every parallel loop inside it - particles, transforms, physics - run inline "
+			"while the rest of the pool waits for a batch of one. With two or more worlds the "
+			"lanes have something to overlap and are taken."
+		);
+		ImGui::PopStyleColor();
+	}
+
 	void Editor::DrawDefaultWorldSettings() {
 		ImGui::SeparatorText("Worlds a new game opens with");
 
@@ -994,6 +1078,11 @@ namespace studio {
 
 			if (ImGui::BeginTabItem("Default Worlds")) {
 				DrawDefaultWorldSettings();
+				ImGui::EndTabItem();
+			}
+
+			if (ImGui::BeginTabItem("Compute")) {
+				DrawComputeSettings();
 				ImGui::EndTabItem();
 			}
 

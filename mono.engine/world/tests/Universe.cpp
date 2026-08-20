@@ -1,3 +1,4 @@
+#include <engine/core/FrameGraph.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/core/Random.hpp>
 #include <engine/parallel/Jobs.hpp>
@@ -370,6 +371,61 @@ TEST_CASE("parallel and serial execution produce the same result", "[world]") {
 
 	Pool pool{4};
 	REQUIRE(run(ExecutionMode::WorldParallel) == run(ExecutionMode::WorldSerial));
+}
+
+// **Which branch a tick takes, and it turns on the world count.**
+//
+// A `Jobs::ForWorkers` batch owns the process-wide pool, so a nested `Jobs::For`
+// from an assigned task runs inline - which means handing a *lone* world to a
+// lane buys no concurrency and spends the pool that everything inside the world
+// would otherwise have dispatched to. `Universe::Tick` carries the argument. The
+// visible half is the span it names, and that is what this pins: a name is the
+// only thing a caller can see the decision through.
+TEST_CASE("a lone world ticks on the driver and a pair goes to lanes", "[world]") {
+	Pool pool{4};
+	if (Jobs::PinnedWorkerCount() < 2) {
+		SUCCEED("this platform or process affinity exposes fewer than two pinned workers");
+		return;
+	}
+
+	const auto tickWith = [](size_t worlds) {
+		Universe universe;
+		for (size_t index = 0; index < worlds; index++) {
+			const WorldId id = universe.Create(Named(("world.branch." + std::to_string(index)).c_str()));
+			universe.Enter(id, [](Store &store, Scheduler &) {
+				store.Set<Counter>(store.Create(), Counter{});
+			});
+		}
+
+		engine::core::FrameGraph::SetEnabled(true);
+		engine::core::FrameGraph::BeginFrame();
+		universe.Tick(1.0f / 60.0f);
+		engine::core::FrameGraph::EndFrame();
+
+		std::vector<std::string> names;
+		for (const auto &span : engine::core::FrameGraph::Spans()) {
+			names.emplace_back(span.Name);
+		}
+		engine::core::FrameGraph::SetEnabled(false);
+		return names;
+	};
+
+	const auto has = [](const std::vector<std::string> &names, std::string_view wanted) {
+		return std::find(names.begin(), names.end(), wanted) != names.end();
+	};
+
+	// One world: on this thread, so everything it contains keeps its spans and
+	// the pool is free for whatever it dispatches.
+	const std::vector<std::string> alone = tickWith(1);
+	CHECK(has(alone, "worlds (serial)"));
+	CHECK_FALSE(has(alone, "worlds (pinned workers)"));
+
+	// Two: the lanes now have something to overlap, which is the case they are
+	// for. Their spans arrive as one reported total, because a worker cannot
+	// enter the driver's frame graph.
+	const std::vector<std::string> pair = tickWith(2);
+	CHECK(has(pair, "worlds (pinned workers)"));
+	CHECK_FALSE(has(pair, "worlds (serial)"));
 }
 
 TEST_CASE("world ticks keep stable assigned workers", "[world]") {

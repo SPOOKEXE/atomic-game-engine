@@ -1073,6 +1073,9 @@ namespace studio {
 		// The Preferences page listing the catalogue.
 		void DrawDefaultWorldSettings();
 
+		// The Preferences page for how this process spends its cores.
+		void DrawComputeSettings();
+
 		// Applies Ctrl+wheel to a zoom, for the item just drawn.
 		//
 		// Separate from the control because the wheel belongs over the *text*
