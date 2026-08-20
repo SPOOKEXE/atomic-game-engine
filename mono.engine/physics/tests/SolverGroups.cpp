@@ -56,11 +56,11 @@ using engine::physics::Solve;
 using engine::physics::SolverBody;
 using engine::physics::SolverGroup;
 using engine::physics::SyncBroadphase;
-using engine::scene::Anchored;
 using engine::scene::BodyKind;
 using engine::scene::Collider;
 using engine::scene::Motion;
 using engine::scene::RigidBody;
+using engine::scene::Simulated;
 using engine::scene::Transform;
 
 namespace {
@@ -84,7 +84,6 @@ namespace {
 		// group rule exists for: an immovable body constrains nothing.
 		const Entity floor = store->Create();
 		store->Set<Transform>(floor, Transform{CFrame{Vector3{0.0f, -1.0f, 0.0f}}});
-		store->Set<Anchored>(floor, Anchored{});
 		Collider ground;
 		ground.Extent = Vector3{128.0f, 1.0f, 128.0f};
 		store->Set<Collider>(floor, ground);
@@ -99,6 +98,13 @@ namespace {
 				const Entity box = store->Create();
 				const auto y = static_cast<float>(level) * 0.98f + 0.49f;
 				store->Set<Transform>(box, Transform{CFrame{Vector3{x, y, z}}});
+
+				// **Both, and the tag is not optional.** `FactsFor` asks whether
+				// the world may move this and hands back an infinite mass when
+				// the answer is no - so a row with a `Motion` and no tag solves
+				// as a wall, every contact resolves to nothing, and the group
+				// count this file measures comes back zero.
+				store->Set<Simulated>(box, Simulated{});
 				store->Set<Motion>(box, Motion{});
 
 				RigidBody body;

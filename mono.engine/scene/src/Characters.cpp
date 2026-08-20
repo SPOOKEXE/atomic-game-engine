@@ -287,7 +287,7 @@ namespace engine::scene {
 		PartDesc rootDesc;
 		rootDesc.Frame = centre;
 		rootDesc.Size = Vector3{2.0f, CHARACTER_HEIGHT, 1.0f};
-		rootDesc.Anchored = false;
+		rootDesc.Simulated = true;
 
 		const ecs::Entity root = MakePart(store, rootDesc);
 		store.SetInstanceName(root, "HumanoidRootPart");
@@ -304,10 +304,15 @@ namespace engine::scene {
 			part.Frame = centre * CFrame(limb.Offset);
 			part.Size = limb.Size;
 
-			// **Anchored, so they carry no `RigidBody` and no `Motion`.** They
-			// are placed by `PoseCharacters` and integrating them would be the
-			// solver fighting that pass every tick.
-			part.Anchored = true;
+			// **Not simulated, so they carry no `Motion`.** They are placed by
+			// `PoseCharacters` and integrating them would be the solver fighting
+			// that pass every tick.
+			//
+			// `PartDesc::Simulated` already defaults false, so this assignment
+			// is redundant and kept anyway: the reason is worth having at the
+			// site, and a limb that silently became dynamic because a default
+			// moved is a character that falls apart.
+			part.Simulated = false;
 
 			const ecs::Entity entity = MakePart(store, part);
 			store.SetInstanceName(entity, limb.Name);

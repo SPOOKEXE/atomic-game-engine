@@ -57,12 +57,12 @@ using engine::physics::Publish;
 using engine::physics::SLEEP_SETTLE_SECONDS;
 using engine::physics::Solve;
 using engine::physics::SyncBroadphase;
-using engine::scene::Anchored;
 using engine::scene::BodyKind;
 using engine::scene::Collider;
 using engine::scene::Motion;
 using engine::scene::RigidBody;
 using engine::scene::ShapeKind;
+using engine::scene::Simulated;
 using engine::scene::Surface;
 using engine::scene::SurfaceProperties;
 using engine::scene::SurfaceTable;
@@ -102,18 +102,20 @@ namespace {
 			store.Set<Surface>(entity, Surface{Name(description.Material)});
 		}
 
-		// `Anchored` decides presence rather than setting a flag, exactly as
-		// `MakePart` does: an anchored body carries the tag and no `Motion`, and
-		// lands in a different archetype. The `RigidBody` is on both, because
-		// what a part weighs is not the world's decision about whether it may
-		// move it.
+		// Presence rather than a flag, exactly as `MakePart` does: an anchored
+		// body carries neither `Simulated` nor `Motion` and lands in a different
+		// archetype. The `RigidBody` is on both, because what a part weighs is
+		// not the world's decision about whether it may move it.
+		//
+		// The field here stays `Anchored` because that is what the scenes below
+		// mean when they place a floor, and it is the Roblox word a reader
+		// arrives with. The inversion is spelled once, here.
 		RigidBody body;
 		body.Mass = description.Mass;
 		store.Set<RigidBody>(entity, body);
 
-		if (description.Anchored) {
-			store.Set<Anchored>(entity, Anchored{});
-		} else {
+		if (!description.Anchored) {
+			store.Set<Simulated>(entity, Simulated{});
 			store.Set<Motion>(entity, Motion{description.Velocity, Vector3::Zero});
 		}
 		return entity;

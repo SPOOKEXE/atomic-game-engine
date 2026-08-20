@@ -195,7 +195,7 @@ TEST_CASE("a spawn part puts a character on top of itself", "[scene][characters]
 	PartDesc pad;
 	pad.Frame = CFrame(Vector3{5.0f, 8.0f, 5.0f});
 	pad.Size = Vector3{12.0f, 2.0f, 12.0f};
-	pad.Anchored = true;
+	pad.Simulated = false;
 
 	const Entity spawn = MakePart(store, pad);
 	store.SetInstanceName(spawn, "SpawnLocation");
@@ -293,7 +293,7 @@ TEST_CASE("Player.Character is the one hook a game needs", "[scene][characters]"
 	PartDesc rootDesc;
 	rootDesc.Frame = CFrame(Vector3{0.0f, 3.0f, 0.0f});
 	rootDesc.Size = Vector3{2.0f, CHARACTER_HEIGHT, 1.0f};
-	rootDesc.Anchored = false;
+	rootDesc.Simulated = true;
 	const Entity root = MakePart(store, rootDesc);
 	store.SetInstanceName(root, "HumanoidRootPart");
 	store.SetParent(root, model);

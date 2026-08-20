@@ -1941,11 +1941,16 @@ namespace server {
 			// could not be shot - and nothing reported it, because a hit test
 			// against an empty candidate list is an ordinary miss.
 			//
-			// `scene::Anchored` is the question actually being asked, and it is
-			// asked as an exclusion: an anchored part carries the tag, so this
-			// skips the static geometry the old predicate was aiming at and
-			// skips nothing else. `Static` is skipped for the same reason one
-			// layer in: it is a body that does not move.
+			// `scene::Simulated` is the question actually being asked, and since
+			// v0.18 it is asked positively: a part the world may move carries
+			// the tag, so this records exactly those and skips the static
+			// geometry the old predicate was aiming at. `Static` is skipped for
+			// the same reason one layer in: it is a body that does not move.
+			//
+			// **A sleeping body keeps the tag**, which is the whole of the fix
+			// above surviving the polarity change: it loses `scene::Motion` and
+			// nothing else, so a player standing still is still in the rewind
+			// history and can still be shot.
 			//
 			// **It was the absence of `RigidBody` until v0.15**, when that
 			// component became the author's numbers rather than the world's
@@ -1955,7 +1960,7 @@ namespace server {
 				ENGINE_PROFILE_CAT("Server::Rewind", engine::core::ProfileCategory::Network);
 				if (History.Begin(store.Time().Tick)) {
 					store.Query<const engine::scene::Transform, const engine::scene::RigidBody>()
-						.Without<engine::scene::Anchored>()
+						.With<engine::scene::Simulated>()
 						.Each([this](
 								  engine::ecs::Entity entity,
 								  const engine::scene::Transform &placement,

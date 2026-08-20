@@ -320,7 +320,7 @@ namespace engine::scene {
 				// Named because the answer depends on it: an anchored part
 				// weighs zero here, and `.Changed` on `Mass` has to fire when a
 				// part is anchored or let go.
-				ecs::Components::Of<Anchored>(),
+				ecs::Components::Of<Simulated>(),
 			});
 
 			// **The empty set rather than nothing at all.** A read-only
@@ -342,11 +342,15 @@ namespace engine::scene {
 
 				// **Anchored still weighs zero**, which is what the solver reads
 				// as immovable and the honest number for a thing the world may
-				// not move. The test is `Anchored` rather than a missing
+				// not move. The test is `Simulated` rather than a missing
 				// `RigidBody` because a part now keeps its body while anchored -
 				// the number it would weigh is still there and is still not the
 				// answer to this question.
-				if (body == nullptr || collider == nullptr || store.Has<Anchored>(instance)) {
+				//
+				// A *sleeping* part still reports its real mass, which is the
+				// right answer: it is a body that happens to be resting, and the
+				// panel should not blink to zero when a crate settles.
+				if (body == nullptr || collider == nullptr || !store.Has<Simulated>(instance)) {
 					*static_cast<float *>(out) = 0.0f;
 					return true;
 				}
@@ -362,13 +366,21 @@ namespace engine::scene {
 		// Anchored: whether the world may move it - and the one property that
 		// is not stored anywhere.
 		//
-		// **Anchored decides presence, not a flag**, and since v0.15 the
-		// presence it decides is the `scene::Anchored` tag's rather than
-		// `RigidBody`'s. An anchored part carries the tag and no `Motion`, so it
-		// sits in a different archetype and the dynamic queries skip it with a
-		// `Without` - which is the same archetype split as before. What changed
-		// is that it keeps its `RigidBody`, so the mass and the drag an author
-		// typed are still there when the part is let go again.
+		// **This is the Roblox name and it is the negation of what the engine
+		// stores.** The engine's tag is `scene::Simulated` and its presence
+		// means the world may move it, so `Anchored` is `!Has<Simulated>`.
+		// **This function is the only place that inversion is spelled**, which
+		// is the whole reason the shim is a property descriptor rather than a
+		// rename: a second `!` somewhere else is a part that reads as anchored
+		// and falls.
+		//
+		// **Presence, not a flag**, and since v0.15 the presence it decides is a
+		// tag's rather than `RigidBody`'s. A static part carries no tag and no
+		// `Motion`, so it sits in a different archetype and the dynamic queries
+		// name the tag positively. What changed at v0.15 is that it keeps its
+		// `RigidBody`, so the mass and the drag an author typed are still there
+		// when the part is let go again; what changed at v0.18 is which way
+		// round the tag reads.
 		//
 		// Reading it is therefore a component test and writing it is an
 		// archetype move - which is what `PropertyKind::Structural` exists to
@@ -379,12 +391,12 @@ namespace engine::scene {
 			property.Type = PropertyType::Bool;
 			property.Size = sizeof(bool);
 			property.Kind = PropertyKind::Structural;
-			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Anchored>()});
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Simulated>()});
 			property.Writes =
-				&ecs::ComponentSet::Intern({ecs::Components::Of<Anchored>(), ecs::Components::Of<Motion>()});
+				&ecs::ComponentSet::Intern({ecs::Components::Of<Simulated>(), ecs::Components::Of<Motion>()});
 
 			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
-				*static_cast<bool *>(out) = store.Has<Anchored>(instance);
+				*static_cast<bool *>(out) = !store.Has<Simulated>(instance);
 				return true;
 			};
 
@@ -396,12 +408,18 @@ namespace engine::scene {
 			// **`RigidBody` is not touched either way.** Removing it here was
 			// the bug: it is the author's numbers, and anchoring a part to move
 			// it and unanchoring it again should not reset its mass.
+			//
+			// **`Motion` moves with the tag rather than being left to the
+			// solver.** Unanchoring has to hand back a `Motion` or the part is
+			// indistinguishable from a sleeping one and waits for a contact that
+			// may never come; anchoring has to take it away or the integrator
+			// keeps moving something the author just declared immovable.
 			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
 				if (*static_cast<const bool *>(value)) {
-					store.Set(instance, Anchored{});
+					store.Remove<Simulated>(instance);
 					store.Remove<Motion>(instance);
 				} else {
-					store.Remove<Anchored>(instance);
+					store.Set(instance, Simulated{});
 					store.Set(instance, Motion{});
 				}
 				return true;
@@ -1544,32 +1562,34 @@ namespace engine::scene {
 				// - a mass, two drags and a body kind - and while its presence
 				// was what said "unanchored", anchoring a part deleted them and
 				// unanchoring it brought back the defaults rather than what the
-				// author typed. `Anchored` carries that decision now, so this
+				// author typed. `Simulated` carries that decision now, so this
 				// is free to be what it reads as: the part's physical
 				// description. Sixteen bytes on every part, which is the trade
 				// the two entries above already make.
 				ecs::Components::Of<RigidBody>(),
 
-				// **So that a part is anchored until something says otherwise.**
-				// The tag marks the anchored ones, so its *absence* is what puts
-				// a row in the simulated set - and a bare `CreateInstance`, which
-				// is what `Instance.new("Part")` is, would otherwise produce a
-				// part the solver treats as dynamic while the broad phase has it
-				// in the static index. Anchored is the safe default and Roblox's
-				// `Instance.new` is the only caller that notices.
-				ecs::Components::Of<Anchored>(),
+				// **`Simulated` is deliberately not here, and that is the safe
+				// default rather than an omission.** A part is static until
+				// something says otherwise, so the safe default is the one that
+				// adds nothing - a bare `CreateInstance`, which is what
+				// `Instance.new("Part")` is, produces a row the solver leaves
+				// alone and the broad phase files in the static index, and the
+				// two agree because neither was told anything.
+				//
+				// Until v0.18 the tag was `Anchored` and had to be *listed here*
+				// to reach that same default, so every placed thing in every
+				// scene carried a component to say it was ordinary.
 			};
 			const ecs::ClassId basePart = ecs::Classes::Register("BasePart", pvInstance, base);
 
 			// Part adds nothing of its own: BasePart already holds the set
 			// `v02v03v04.md` §3.3 names, and Part is the concrete leaf a script
-			// asks for by name. `Motion` is the one deliberately absent - whether
-			// a part has one is `PartDesc::Anchored`'s decision, and putting it
-			// in the class set would land static geometry in the dynamic
-			// archetype. `RigidBody` used to be in that sentence and no longer
-			// is: it holds the author's numbers rather than the world's
-			// decision, and the `Anchored` tag is what keeps static geometry out
-			// of the dynamic archetype now.
+			// asks for by name. `Motion` and `Simulated` are the two
+			// deliberately absent - whether a part has them is
+			// `PartDesc::Simulated`'s decision, and putting either in the class
+			// set would land static geometry in the dynamic archetype.
+			// `RigidBody` used to be in that sentence and no longer is: it holds
+			// the author's numbers rather than the world's decision.
 			const ecs::ClassId part = ecs::Classes::Register("Part", basePart, {});
 
 			// **A `SpawnLocation` is a `Part` that says who may stand up on
@@ -2384,18 +2404,20 @@ namespace engine::scene {
 		visual.Mesh = desc.Mesh;
 		store.Set(part, visual);
 
-		// **Anchored decides presence, not a flag.** An anchored part carries
-		// the tag and no `Motion`, so it sits in a different archetype and the
-		// dynamic queries skip it with a `Without` rather than a branch per row
-		// per tick - which is the form the ECS is built for.
+		// **The decision is presence, not a flag.** A simulated part carries the
+		// tag and a `Motion`, so it sits in a different archetype and the
+		// dynamic queries name the tag rather than branching per row per tick -
+		// which is the form the ECS is built for.
 		//
-		// The tag arrives with the class set, so this only has to take it off.
+		// Neither arrives with the class set, so this only has to put them on.
+		// It is the whole of what `PartDesc::Simulated` does, and a static part
+		// leaves this function having stored nothing to say so.
 		//
 		// `RigidBody` is on both and arrives from the class set: it is what the
-		// part weighs and how it sheds speed, which an anchored part still has.
-		// See `scene::Anchored`.
-		if (!desc.Anchored) {
-			store.Remove<Anchored>(part);
+		// part weighs and how it sheds speed, which a static part still has.
+		// See `scene::Simulated`.
+		if (desc.Simulated) {
+			store.Set(part, Simulated{});
 			store.Set(part, Motion{});
 		}
 

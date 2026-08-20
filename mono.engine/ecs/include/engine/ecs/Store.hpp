@@ -772,7 +772,7 @@ namespace engine::ecs {
 		//
 		//     store.Query<Transform, const Motion>()
 		//          .With<Collider>()
-		//          .Without<Anchored>()
+		//          .Without<PortalProxy>()
 		//          .Each([](Entity, Transform &frame, const Motion &motion) { ... });
 		//
 		// A selection holds a reference to its store and spans into its own

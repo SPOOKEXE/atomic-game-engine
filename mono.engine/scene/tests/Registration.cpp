@@ -57,7 +57,7 @@ namespace registration_test {
 		"scene.WorldBounds", "scene.RenderedSignature", "scene.Portal",
 		"scene.SurfaceLens", "scene.SurfaceBounces",	"scene.Team",
 		"scene.PlayerTeam",	 "scene.SpawnLocation",		"scene.Tool",
-		"scene.Anchored",
+		"scene.Simulated",
 	};
 }
 

@@ -45,6 +45,19 @@ namespace ownership_test {
 		engine::scene::RegisterSceneClasses();
 		engine::scene::RegisterSceneComponents();
 	}
+
+	// **Named rather than a bare `PartDesc{}`, because ownership is only ever
+	// about a body the world may move.** A default `PartDesc` has been static
+	// since v0.18, and `SetNetworkOwner` refuses a static part on purpose -
+	// there is nothing to simulate, so there is nothing to hand out. Every case
+	// below that hands a part to a player wants a simulated one, and saying so
+	// once keeps the refusal a thing this file tests rather than a thing it
+	// trips over.
+	engine::scene::PartDesc Dynamic() {
+		engine::scene::PartDesc desc;
+		desc.Simulated = true;
+		return desc;
+	}
 }
 
 TEST_CASE("an unassigned body is the server's", "[scene][ownership]") {
@@ -53,7 +66,7 @@ TEST_CASE("an unassigned body is the server's", "[scene][ownership]") {
 	Store store("ownership.default");
 	InstallServices(store);
 
-	const Entity part = MakePart(store, PartDesc{});
+	const Entity part = MakePart(store, ownership_test::Dynamic());
 
 	// **Both halves, because they are two claims.** The component is absent -
 	// which is what keeps ownership free for a game that never uses it - and
@@ -68,7 +81,7 @@ TEST_CASE("a body handed to a player names that player", "[scene][ownership]") {
 	Store store("ownership.assign");
 	InstallServices(store);
 
-	const Entity part = MakePart(store, PartDesc{});
+	const Entity part = MakePart(store, ownership_test::Dynamic());
 	const Entity player = AddPlayer(store, "Ada");
 	REQUIRE(player != NULL_ENTITY);
 
@@ -82,7 +95,7 @@ TEST_CASE("a null owner gives the body back rather than storing a hole", "[scene
 	Store store("ownership.release");
 	InstallServices(store);
 
-	const Entity part = MakePart(store, PartDesc{});
+	const Entity part = MakePart(store, ownership_test::Dynamic());
 	const Entity player = AddPlayer(store, "Ada");
 	REQUIRE(SetNetworkOwner(store, part, player));
 
@@ -105,9 +118,9 @@ TEST_CASE("an anchored part is the server's and cannot be handed over", "[scene]
 	InstallServices(store);
 
 	PartDesc anchored;
-	anchored.Anchored = true;
+	anchored.Simulated = false;
 	const Entity fixed = MakePart(store, anchored);
-	REQUIRE(store.Has<engine::scene::Anchored>(fixed));
+	REQUIRE_FALSE(store.Has<engine::scene::Simulated>(fixed));
 
 	// It keeps its body all the same, which is the v0.15 correction: what a
 	// part weighs is not the world's decision about whether it may move it.
@@ -134,13 +147,15 @@ TEST_CASE("anchoring an owned body returns it to the server", "[scene][ownership
 	Store store("ownership.reanchored");
 	InstallServices(store);
 
-	const Entity part = MakePart(store, PartDesc{});
+	PartDesc desc;
+	desc.Simulated = true;
+	const Entity part = MakePart(store, desc);
 	const Entity player = AddPlayer(store, "Ada");
 	REQUIRE(SetNetworkOwner(store, part, player));
 
-	// Anchoring, as the property does it: the tag arrives, the velocity goes,
-	// and the body stays.
-	store.Set<engine::scene::Anchored>(part, engine::scene::Anchored{});
+	// Anchoring, as the property does it: the tag goes, the velocity goes, and
+	// the body stays.
+	store.Remove<engine::scene::Simulated>(part);
 	store.Remove<engine::scene::Motion>(part);
 
 	ReclaimAbandonedOwnership(store);
@@ -153,8 +168,8 @@ TEST_CASE("a non-player is refused and writes nothing", "[scene][ownership]") {
 	Store store("ownership.refuse");
 	InstallServices(store);
 
-	const Entity part = MakePart(store, PartDesc{});
-	const Entity other = MakePart(store, PartDesc{});
+	const Entity part = MakePart(store, ownership_test::Dynamic());
+	const Entity other = MakePart(store, ownership_test::Dynamic());
 
 	// **Refused rather than stored, because the reclaim below cannot save it.**
 	// That only fires for an owner that was alive and stopped being; a body
@@ -170,7 +185,7 @@ TEST_CASE("a body comes back to the server when its owner leaves", "[scene][owne
 	Store store("ownership.reclaim");
 	InstallServices(store);
 
-	const Entity part = MakePart(store, PartDesc{});
+	const Entity part = MakePart(store, ownership_test::Dynamic());
 	const Entity player = AddPlayer(store, "Ada");
 	REQUIRE(SetNetworkOwner(store, part, player));
 
@@ -202,7 +217,7 @@ TEST_CASE("the reclaim runs before anything simulates", "[scene][ownership]") {
 	Store store("ownership.scheduled");
 	InstallServices(store);
 
-	const Entity part = MakePart(store, PartDesc{});
+	const Entity part = MakePart(store, ownership_test::Dynamic());
 	const Entity player = AddPlayer(store, "Ada");
 	REQUIRE(SetNetworkOwner(store, part, player));
 

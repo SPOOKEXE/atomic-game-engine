@@ -258,17 +258,26 @@ namespace engine::physics {
 			const scene::RigidBody *body,
 			const scene::Collider *collider,
 			const scene::PhysicsProperties *physical,
-			bool unanchored
+			bool simulated
 		) {
-			// **Anchored is asked first, and it used to be asked by omission.**
-			// Until v0.15 an anchored part had no `RigidBody` at all, so a null
-			// pointer here meant "the world may not move this" and the infinite
-			// mass below was the right answer to it. Every part carries one now
-			// - it is what the part weighs, not whether it may be pushed - so
-			// the question is asked through `scene::Anchored` instead. Left as
-			// it was, every anchored floor in every scene became a dynamic body
-			// and the things standing on it fell through.
-			if (!unanchored || body == nullptr || collider == nullptr) {
+			// **Whether the world may move it is asked first, and it used to be
+			// asked by omission.** Until v0.15 an anchored part had no
+			// `RigidBody` at all, so a null pointer here meant "the world may
+			// not move this" and the infinite mass below was the right answer to
+			// it. Every part carries one now - it is what the part weighs, not
+			// whether it may be pushed - so the question is asked through
+			// `scene::Simulated` instead. Left as it was, every anchored floor
+			// in every scene became a dynamic body and the things standing on it
+			// fell through.
+			//
+			// **A sleeping body arrives here with `simulated` true**, and that
+			// is deliberate rather than an oversight. It has no `scene::Motion`,
+			// so the broad phase has it in the static index, but it is a real
+			// body with a real mass and the wake pass below needs it recognised
+			// as one - `body.Asleep` is gated on `Movable`, which is what this
+			// returns. Test `Motion` here instead and a settled crate becomes a
+			// wall that nothing can ever wake.
+			if (!simulated || body == nullptr || collider == nullptr) {
 				// Not a body at all - `scene::Enums` is explicit that this is
 				// not the same as a static one. It still stops things, which is
 				// exactly what an infinite mass does.
@@ -526,7 +535,7 @@ namespace engine::physics {
 				}
 
 				const BodyFacts facts =
-					FactsFor(rigid, collider, physical, !reader.Has<scene::Anchored>(body.Owner));
+					FactsFor(rigid, collider, physical, reader.Has<scene::Simulated>(body.Owner));
 				body.InverseMass = facts.InverseMass;
 				body.InverseInertia = facts.InverseInertia;
 				body.Movable = facts.Dynamic;
