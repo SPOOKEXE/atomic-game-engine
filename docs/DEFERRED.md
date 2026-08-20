@@ -618,6 +618,19 @@ the send rate is ours whatever carries the bytes.*
 - **It still passes the second-consumer test.** The game link is one; `ROADMAP.md`'s cdn wire streaming is the other, blocked on `net` growing an `http/` sub-area because a content origin serves bulk bytes over request/response rather than over a game datagram channel with a per-tick budget. **HTTP/3 is QUIC.** One dependency answers both.
 - The clock question is settled and stays settled: `ngtcp2` takes an explicit `ngtcp2_tstamp` on every entry point, which is the only shape compatible with *time is passed in, never read*.
 
+**The implementation survey lives in [`docs/QUIC.md`](QUIC.md) as of v0.17**,
+so that the day this trigger fires starts from a survey rather than from a
+search engine. It re-checked the library landscape and **three of the paragraph
+below have moved**: `quictls`' ngtcp2 helper is deprecated upstream, OpenSSL
+3.5 shipped a QUIC TLS API so vanilla OpenSSL is a candidate at all, and
+**AWS-LC ships pre-generated build files precisely so a project that cannot take
+a Go or Perl dependency can still build it** - which is a fourth answer to the
+TLS question that did not exist when this was written, keeps the fresh-clone
+property, and uses ngtcp2's mature BoringSSL helper rather than the experimental
+OpenSSL one. The `http/` sub-area the cdn half was blocked on has also since
+shipped. The paragraph below is kept as written because what it *reasoned* is
+still right; the document carries the corrections and the staging.
+
 **Everything the v0.13 scoping wrote out still stands, minus one line.** The
 library is `ngtcp2`, because nothing under its `lib/` references a TLS stack -
 one MIT submodule, no Perl and no Go, which is the only shape that keeps a fresh
