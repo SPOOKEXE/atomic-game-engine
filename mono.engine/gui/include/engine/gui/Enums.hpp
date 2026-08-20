@@ -258,6 +258,37 @@ namespace engine::gui {
 		Border = 1,
 	};
 
+	// How a `UIStroke` turns the corner of the element it outlines.
+	//
+	// **All three are the same ring with its corner points moved**, which is
+	// what `InterfaceMesh::PushRoundedOutline` does with this: `Round` walks the
+	// arc, `Bevel` cuts straight across it and `Miter` runs out to the corner
+	// the arc was hiding. So a join costs no vertices and no second code path.
+	//
+	// A `UICorner` radius of zero is already a sharp corner, and all three
+	// members draw the same thing there.
+	//
+	// @since v0.17
+	enum class LineJoin : uint8_t {
+		Round = 0,
+		Bevel = 1,
+		Miter = 2,
+	};
+
+	// Whether a `UIStroke`'s thickness is pixels or a fraction of what it is on.
+	//
+	// `ScaledSize` measures against the smaller of the element's two sides, and
+	// against the text size when the stroke is outlining glyphs - Roblox's rule.
+	// It is what keeps an outline in proportion on an element sized in `Scale`,
+	// where a fixed pixel thickness is hairline on one screen and a slab on the
+	// next.
+	//
+	// @since v0.17
+	enum class StrokeSizing : uint8_t {
+		FixedSize = 0,
+		ScaledSize = 1,
+	};
+
 	// What a drag does to the element it is attached to.
 	//
 	// **Five members because five is the format**, and three of them do
@@ -412,6 +443,12 @@ namespace engine::gui {
 	const char *Describe(DominantAxis value);
 	const char *Describe(ScrollingDirection value);
 	const char *Describe(StrokeMode value);
+
+	// @since v0.17
+	//@{
+	const char *Describe(LineJoin value);
+	const char *Describe(StrokeSizing value);
+	//@}
 	const char *Describe(DragStyle value);
 	const char *Describe(DragResponse value);
 	const char *Describe(ElasticBehavior value);

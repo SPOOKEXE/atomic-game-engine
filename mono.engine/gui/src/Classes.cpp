@@ -64,6 +64,8 @@ namespace engine::gui {
 		GUI_ENUM_NAME(DominantAxis, "DominantAxis")
 		GUI_ENUM_NAME(ScrollingDirection, "ScrollingDirection")
 		GUI_ENUM_NAME(StrokeMode, "ApplyStrokeMode")
+		GUI_ENUM_NAME(LineJoin, "LineJoinMode")
+		GUI_ENUM_NAME(StrokeSizing, "StrokeSizingMode")
 		GUI_ENUM_NAME(DragStyle, "UIDragDetectorDragStyle")
 		GUI_ENUM_NAME(DragResponse, "UIDragDetectorDragStyleResponse")
 		GUI_ENUM_NAME(ElasticBehavior, "ElasticBehavior")
@@ -121,6 +123,8 @@ namespace engine::gui {
 		GUI_ENUM_COUNT(DominantAxis, 2)
 		GUI_ENUM_COUNT(ScrollingDirection, 3)
 		GUI_ENUM_COUNT(StrokeMode, 2)
+		GUI_ENUM_COUNT(LineJoin, 3)
+		GUI_ENUM_COUNT(StrokeSizing, 2)
 		GUI_ENUM_COUNT(DragStyle, 5)
 		GUI_ENUM_COUNT(DragResponse, 4)
 		GUI_ENUM_COUNT(ElasticBehavior, 3)
@@ -418,6 +422,8 @@ namespace engine::gui {
 			RegisterEnum<DominantAxis>();
 			RegisterEnum<ScrollingDirection>();
 			RegisterEnum<StrokeMode>();
+			RegisterEnum<LineJoin>();
+			RegisterEnum<StrokeSizing>();
 			RegisterEnum<DragStyle>();
 			RegisterEnum<DragResponse>();
 			RegisterEnum<ElasticBehavior>();
@@ -875,6 +881,8 @@ namespace engine::gui {
 			Classes::Property<&Stroke::Transparency>(uiStroke, "Transparency");
 			Classes::Property<&Stroke::Enabled>(uiStroke, "Enabled");
 			Classes::Computed(uiStroke, EnumField<&Stroke::Apply>("ApplyStrokeMode"));
+			Classes::Computed(uiStroke, EnumField<&Stroke::Join>("LineJoinMode"));
+			Classes::Computed(uiStroke, EnumField<&Stroke::Sizing>("StrokeSizingMode"));
 
 			Classes::Property<&Scale::Factor>(uiScale, "Scale");
 

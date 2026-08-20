@@ -1213,8 +1213,19 @@ namespace engine::gui {
 		// @since v0.18
 		StrokeMode Apply = StrokeMode::Contextual;
 
-		// Explicit padding, for the reason every other `Reserved` gives.
-		uint8_t Reserved[2] = {};
+		// How the corners are turned, and what `Thickness` is measured in.
+		//
+		// **These two took the padding rather than growing the row**, which is
+		// the whole reason `Reserved` was there: a component in an archetype
+		// store is a column, and two bytes that were already being paid for are
+		// free where two more would cost a byte per element in every world that
+		// has one.
+		//
+		// @since v0.17
+		//@{
+		LineJoin Join = LineJoin::Round;
+		StrokeSizing Sizing = StrokeSizing::FixedSize;
+		//@}
 	};
 
 	// Multiplies a ramp of colour and transparency into what the parent draws.

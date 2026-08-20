@@ -143,7 +143,17 @@ namespace engine::gui {
 		float Transparency = 0.0f;
 
 		// How thick an `Outline` is, in pixels. Ignored by every other kind.
+		//
+		// **Always pixels here, whatever `StrokeSizingMode` said.** A draw list
+		// is what a backend consumes and it has no element to measure against,
+		// so a fraction is resolved in the compile - see `StrokeThickness`.
 		float Thickness = 0.0f;
+
+		// How an `Outline` turns its corners. Ignored by every other kind, and
+		// ignored at a zero `CornerRadius`, which is already a sharp corner.
+		//
+		// @since v0.17
+		LineJoin Join = LineJoin::Round;
 
 		// The corner radius, in pixels. Zero is a square corner.
 		float CornerRadius = 0.0f;

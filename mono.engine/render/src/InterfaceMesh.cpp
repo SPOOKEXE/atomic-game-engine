@@ -528,6 +528,7 @@ namespace engine::render {
 		const Rect &bounds,
 		float radius,
 		float thickness,
+		gui::LineJoin join,
 		const Vector2 &uv,
 		uint32_t colour,
 		const Rotation &turn
@@ -556,9 +557,17 @@ namespace engine::render {
 			);
 			return;
 		}
+		// **A stroke at least half the smaller side has no hole left in it**, so
+		// it is a filled shape rather than a ring. `Miter` fills a *sharp* one,
+		// which is what a mitred corner at full thickness is - and passing the
+		// radius here instead would round the very corner the mode exists to
+		// keep. `Bevel` is the one approximation: its chamfer is not a shape
+		// `PushRounded` can draw, and it fills round rather than growing a
+		// second filled path for a stroke nobody can see the inside of.
 		const float maxThickness = std::min(bounds.Width(), bounds.Height()) * 0.5f;
 		if (thickness >= maxThickness) {
-			PushRounded(bounds, Rect{uv, uv}, radius, colour, turn);
+			const float filled = join == gui::LineJoin::Miter ? 0.0f : radius;
+			PushRounded(bounds, Rect{uv, uv}, filled, colour, turn);
 			return;
 		}
 
@@ -574,6 +583,16 @@ namespace engine::render {
 			return;
 		}
 
+		// **The three joins are one ring with its corner points moved**, which
+		// is what makes a join cost nothing. Every mode emits the same
+		// `CORNER_STEPS + 1` points per corner between the same two tangent
+		// points, so the vertex budget, the index loop and the stitching below
+		// are identical whichever was asked for - only where the points sit
+		// changes.
+		//
+		// `Round` walks the arc. `Bevel` runs straight across it, which is the
+		// chord. `Miter` runs out to the corner the arc was hiding and back,
+		// which is the sharp corner a radius removed.
 		const auto ring = [&](const Rect &box, float arc, std::array<Vector2, count> &points) {
 			const Vector2 centres[4]{
 				{box.Min.X + arc, box.Min.Y + arc},
@@ -581,16 +600,51 @@ namespace engine::render {
 				{box.Max.X - arc, box.Max.Y - arc},
 				{box.Min.X + arc, box.Max.Y - arc},
 			};
+
+			// Where the arc was hiding a corner, per corner, in the same order.
+			const Vector2 corners[4]{
+				{box.Min.X, box.Min.Y},
+				{box.Max.X, box.Min.Y},
+				{box.Max.X, box.Max.Y},
+				{box.Min.X, box.Max.Y},
+			};
+
 			const float starts[4]{PI, PI * 1.5f, 0.0f, PI * 0.5f};
+			const auto lerp = [](const Vector2 &from, const Vector2 &to, float at) {
+				return Vector2{from.X + (to.X - from.X) * at, from.Y + (to.Y - from.Y) * at};
+			};
+
 			size_t out = 0;
 			for (size_t corner = 0; corner < 4; corner++) {
-				for (size_t step = 0; step <= CORNER_STEPS; step++) {
+				const auto onArc = [&](size_t step) {
 					const float angle = starts[corner] + PI * 0.5f * static_cast<float>(step) /
 															 static_cast<float>(CORNER_STEPS);
-					points[out++] = Vector2{
+					return Vector2{
 						centres[corner].X + std::cos(angle) * arc,
 						centres[corner].Y + std::sin(angle) * arc,
 					};
+				};
+
+				const Vector2 from = onArc(0);
+				const Vector2 to = onArc(CORNER_STEPS);
+
+				for (size_t step = 0; step <= CORNER_STEPS; step++) {
+					const float at = static_cast<float>(step) / static_cast<float>(CORNER_STEPS);
+					switch (join) {
+					case gui::LineJoin::Bevel:
+						points[out++] = lerp(from, to, at);
+						break;
+					case gui::LineJoin::Miter:
+						// Out along one straight edge and back along the other,
+						// so the run has a real vertex *at* the corner rather
+						// than a fold between two segments that miss it.
+						points[out++] = at <= 0.5f ? lerp(from, corners[corner], at * 2.0f)
+												   : lerp(corners[corner], to, (at - 0.5f) * 2.0f);
+						break;
+					case gui::LineJoin::Round:
+						points[out++] = onArc(step);
+						break;
+					}
 				}
 			}
 		};
@@ -684,7 +738,7 @@ namespace engine::render {
 
 			case gui::DrawKind::Outline:
 				PushRoundedOutline(
-					command.Bounds, command.CornerRadius, command.Thickness, white, colour, turn
+					command.Bounds, command.CornerRadius, command.Thickness, command.Join, white, colour, turn
 				);
 				break;
 

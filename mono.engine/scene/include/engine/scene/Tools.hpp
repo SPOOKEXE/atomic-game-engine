@@ -11,7 +11,7 @@
 // this file.
 //
 // **What carries the handle is a `CharacterLimb` and deliberately not an
-// `Attachment`.** `docs/DEFERRED.md` D00120 held this entry open on "a joint,
+// `Attachment`.** `docs/retired/DEFERRED.md` D00120 held this entry open on "a joint,
 // or an attachment strong enough to carry a handle", and named
 // `scene::Attachment` as the first thing to look at. It is the wrong half:
 // `ResolveAttachments` runs in `PreRender` and *resolves a frame* rather than

@@ -13,7 +13,10 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <cmath>
 #include <filesystem>
+#include <limits>
+#include <vector>
 
 TEST_SUITE_ID("engine.render.interfacemesh")
 TEST_DEPENDS("engine.render.glyphatlas")
@@ -119,6 +122,95 @@ TEST_CASE("an outline is four quads and never a line primitive", "[render][inter
 
 	mesh.Build(thin, atlas);
 	CHECK(mesh.Vertices().size() == 16);
+}
+
+TEST_CASE("a join moves an outline's corners without changing its cost", "[render][interfacemesh]") {
+	// **The three modes are one ring with its corner points moved**, so the
+	// vertex and index counts must not move with the mode. That is the property
+	// the implementation is built on, and a join that quietly grew the mesh
+	// would make a stroke a performance decision.
+	GlyphAtlas atlas;
+
+	const auto ringFor = [&](engine::gui::LineJoin join) {
+		engine::gui::DrawList list;
+		auto outline = Rectangle(0.0f, 0.0f, 100.0f, 60.0f);
+		outline.Kind = engine::gui::DrawKind::Outline;
+		outline.Thickness = 4.0f;
+		outline.CornerRadius = 12.0f;
+		outline.Join = join;
+		list.Commands.push_back(outline);
+
+		InterfaceMesh mesh;
+		mesh.Build(list, atlas);
+		return mesh.Vertices();
+	};
+
+	const auto round = ringFor(engine::gui::LineJoin::Round);
+	const auto bevel = ringFor(engine::gui::LineJoin::Bevel);
+	const auto miter = ringFor(engine::gui::LineJoin::Miter);
+
+	REQUIRE(round.size() == bevel.size());
+	REQUIRE(round.size() == miter.size());
+	CHECK(!round.empty());
+
+	// How near the top-left corner of the box each mode gets. The radius is 12,
+	// so a round corner stays a radius away along the diagonal and a mitred one
+	// reaches the corner exactly.
+	const auto nearestToOrigin = [](const std::vector<engine::render::InterfaceVertex> &vertices) {
+		float best = std::numeric_limits<float>::max();
+		for (const engine::render::InterfaceVertex &vertex : vertices) {
+			best = std::min(best, std::hypot(vertex.X, vertex.Y));
+		}
+		return best;
+	};
+
+	// **Miter reaches the corner exactly**, which is the whole point of it.
+	CHECK(nearestToOrigin(miter) == Approx(0.0f).margin(0.001f));
+
+	// **Round stops a radius short along the diagonal**: the arc is centred at
+	// (12, 12) with radius 12, so its closest approach to the origin is
+	// `12 * sqrt(2) - 12`.
+	CHECK(nearestToOrigin(round) == Approx(12.0f * std::sqrt(2.0f) - 12.0f).margin(0.01f));
+
+	// **Bevel stops furthest short, not nearest**, and the arithmetic is the
+	// reason: the chord runs from (0, 12) to (12, 0) and its midpoint is
+	// (6, 6), at `6 * sqrt(2)`. An arc *bulges toward* the corner it rounds, so
+	// a straight cut across it takes more off than the round does - which is
+	// the opposite of what "bevel is a cheaper round" suggests, and is why the
+	// three are asserted against arithmetic rather than against each other.
+	CHECK(nearestToOrigin(bevel) == Approx(6.0f * std::sqrt(2.0f)).margin(0.01f));
+	CHECK(nearestToOrigin(miter) < nearestToOrigin(round));
+	CHECK(nearestToOrigin(round) < nearestToOrigin(bevel));
+}
+
+TEST_CASE("every join is the same shape at a square corner", "[render][interfacemesh]") {
+	// A zero radius is already a sharp corner, so there is nothing for a join
+	// to decide and all three must agree. Stated as a test because the
+	// implementation reaches that case through an entirely different branch -
+	// four rectangles rather than a ring - and a mode leaking into it would be
+	// invisible until somebody set one.
+	GlyphAtlas atlas;
+
+	const auto squareFor = [&](engine::gui::LineJoin join) {
+		engine::gui::DrawList list;
+		auto outline = Rectangle(0.0f, 0.0f, 100.0f, 40.0f);
+		outline.Kind = engine::gui::DrawKind::Outline;
+		outline.Thickness = 2.0f;
+		outline.Join = join;
+		list.Commands.push_back(outline);
+
+		InterfaceMesh mesh;
+		mesh.Build(list, atlas);
+		return mesh.Vertices();
+	};
+
+	const auto round = squareFor(engine::gui::LineJoin::Round);
+	const auto miter = squareFor(engine::gui::LineJoin::Miter);
+	REQUIRE(round.size() == miter.size());
+	for (size_t index = 0; index < round.size(); index++) {
+		CHECK(round[index].X == Approx(miter[index].X));
+		CHECK(round[index].Y == Approx(miter[index].Y));
+	}
 }
 
 TEST_CASE("batches split on a scissor change and merge otherwise", "[render][interfacemesh]") {

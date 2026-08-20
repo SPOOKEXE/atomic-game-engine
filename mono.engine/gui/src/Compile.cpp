@@ -408,7 +408,9 @@ namespace engine::gui {
 			running = Fold(running, value.Thickness);
 			running = Fold(running, value.Transparency);
 			running = Fold(running, value.Enabled);
-			return Fold(running, value.Apply);
+			running = Fold(running, value.Apply);
+			running = Fold(running, value.Join);
+			return Fold(running, value.Sizing);
 		}
 
 		uint64_t Fold(uint64_t running, const Scale &value) {
@@ -536,6 +538,24 @@ namespace engine::gui {
 		// Three answers rather than one because the choice decides whether two
 		// elements sized to touch overlap by a pixel - which is the difference
 		// between a table with hairlines and a table with double rules.
+		// A stroke's thickness in pixels, whatever it was authored in.
+		//
+		// **`ScaledSize` measures against the smaller side rather than the
+		// area or the diagonal.** That is Roblox's rule and it is the one that
+		// behaves: an outline scaled by a long thin element's width would be
+		// thicker than the element is tall, and the ring would swallow it.
+		//
+		// @param stroke    What was authored.
+		// @param reference The length a fraction is of - the smaller of the
+		//        element's sides, or its text size when the glyphs took it.
+		// @return Pixels, never negative.
+		float StrokeThickness(const Stroke &stroke, float reference) {
+			if (stroke.Sizing != StrokeSizing::ScaledSize) {
+				return std::max(stroke.Thickness, 0.0f);
+			}
+			return std::max(stroke.Thickness, 0.0f) * std::max(reference, 0.0f);
+		}
+
 		Rect BorderRect(const Rect &bounds, BorderMode mode, float thickness) {
 			const float half = thickness * 0.5f;
 			switch (mode) {
@@ -858,7 +878,16 @@ namespace engine::gui {
 					// two are one outline and drawing both would double its
 					// weight - and a modifier an author put there deliberately is
 					// the more specific of the two.
-					if (stroke != nullptr && stroke->Enabled && stroke->Thickness > 0.0f &&
+					// **Measured against the *drawn* text size, not the
+					// authored one.** `resolved.TextSize` is what `TextScaled`
+					// settled on, so a scaled stroke on a shrinking label stays
+					// in proportion to the glyphs it is actually outlining.
+					const float glyphStroke =
+						stroke != nullptr
+							? StrokeThickness(*stroke, static_cast<float>(std::max(resolved.TextSize, 0)))
+							: 0.0f;
+
+					if (stroke != nullptr && stroke->Enabled && glyphStroke > 0.0f &&
 						stroke->Transparency < 1.0f && stroke->Apply == StrokeMode::Contextual) {
 						run.StrokeTint = tintByGroup(stroke->Color);
 						run.StrokeTransparency = fadeByGroup(stroke->Transparency);
@@ -887,12 +916,17 @@ namespace engine::gui {
 									store.Get<Label>(instance) != nullptr &&
 									!store.Get<Label>(instance)->Text.empty();
 
+			const float ringStroke = stroke != nullptr
+										 ? StrokeThickness(*stroke, std::min(bounds.Width(), bounds.Height()))
+										 : 0.0f;
+
 			if (stroke != nullptr && stroke->Enabled && !tookByText && stroke->Transparency < 1.0f &&
-				stroke->Thickness > 0.0f) {
+				ringStroke > 0.0f) {
 				DrawCommand outline = base;
 				outline.Kind = DrawKind::Outline;
-				outline.Bounds = BorderRect(bounds, BorderMode::Outline, stroke->Thickness);
-				outline.Thickness = stroke->Thickness;
+				outline.Bounds = BorderRect(bounds, BorderMode::Outline, ringStroke);
+				outline.Thickness = ringStroke;
+				outline.Join = stroke->Join;
 				outline.Tint = tintByGroup(stroke->Color);
 				outline.Transparency = fadeByGroup(stroke->Transparency);
 

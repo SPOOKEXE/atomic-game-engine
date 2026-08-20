@@ -458,6 +458,9 @@ end
 declare extern type Enum_KeyCode extends EnumItem with
 end
 
+declare extern type Enum_LineJoinMode extends EnumItem with
+end
+
 declare extern type Enum_ListenerType extends EnumItem with
 end
 
@@ -513,6 +516,9 @@ declare extern type Enum_SortOrder extends EnumItem with
 end
 
 declare extern type Enum_StartCorner extends EnumItem with
+end
+
+declare extern type Enum_StrokeSizingMode extends EnumItem with
 end
 
 declare extern type Enum_SurfaceEffect extends EnumItem with
@@ -707,6 +713,11 @@ declare Enum: {
 		F11: Enum_KeyCode,
 		F12: Enum_KeyCode,
 	},
+	LineJoinMode: {
+		Round: Enum_LineJoinMode,
+		Bevel: Enum_LineJoinMode,
+		Miter: Enum_LineJoinMode,
+	},
 	ListenerType: {
 		Camera: Enum_ListenerType,
 		ObjectPosition: Enum_ListenerType,
@@ -809,6 +820,10 @@ declare Enum: {
 		TopRight: Enum_StartCorner,
 		BottomLeft: Enum_StartCorner,
 		BottomRight: Enum_StartCorner,
+	},
+	StrokeSizingMode: {
+		FixedSize: Enum_StrokeSizingMode,
+		ScaledSize: Enum_StrokeSizingMode,
 	},
 	SurfaceEffect: {
 		None: Enum_SurfaceEffect,
@@ -1774,6 +1789,8 @@ declare extern type UIStroke extends UIComponent with
 	ApplyStrokeMode: Enum_ApplyStrokeMode
 	Color: Color3
 	Enabled: boolean
+	LineJoinMode: Enum_LineJoinMode
+	StrokeSizingMode: Enum_StrokeSizingMode
 	Thickness: number
 	Transparency: number
 end

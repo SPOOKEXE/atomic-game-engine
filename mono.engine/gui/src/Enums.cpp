@@ -224,6 +224,28 @@ namespace engine::gui {
 		return "Contextual";
 	}
 
+	const char *Describe(LineJoin value) {
+		switch (value) {
+		case LineJoin::Round:
+			return "Round";
+		case LineJoin::Bevel:
+			return "Bevel";
+		case LineJoin::Miter:
+			return "Miter";
+		}
+		return "Round";
+	}
+
+	const char *Describe(StrokeSizing value) {
+		switch (value) {
+		case StrokeSizing::FixedSize:
+			return "FixedSize";
+		case StrokeSizing::ScaledSize:
+			return "ScaledSize";
+		}
+		return "FixedSize";
+	}
+
 	const char *Describe(DragStyle value) {
 		switch (value) {
 		case DragStyle::TranslatePlane:

@@ -209,6 +209,7 @@ namespace engine::render {
 			const core::Rect &bounds,
 			float radius,
 			float thickness,
+			gui::LineJoin join,
 			const core::Vector2 &uv,
 			uint32_t colour,
 			const Rotation &turn

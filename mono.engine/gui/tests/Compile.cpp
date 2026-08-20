@@ -954,3 +954,124 @@ TEST_CASE("the visible limit cuts the text and the spans together", "[gui][compi
 	REQUIRE(resolved != nullptr);
 	CHECK(resolved->TextBounds.X == Approx(3.0f * AVERAGE_ADVANCE * float(resolved->TextSize)));
 }
+
+TEST_CASE("a scaled stroke resolves to pixels before it reaches a backend", "[gui][compile]") {
+	// **A draw list has no element to measure against**, so a fraction that
+	// survived the compile would be a thickness a backend could not resolve -
+	// and the one that arrived at `InterfaceMesh` would be read as pixels and
+	// draw a hairline. See `StrokeThickness`.
+	World world("gui_compile.strokesizing");
+
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("Frame", screen);
+
+	// 200 wide and 80 tall, so the smaller side is 80 and the two modes cannot
+	// be confused by a square.
+	Element box;
+	box.Size = UDim2{0.0f, 200.0f, 0.0f, 80.0f};
+	world.Data.Set(frame, box);
+
+	const Entity stroke = world.Make("UIStroke", frame);
+
+	const auto thicknessOf = [&]() {
+		REQUIRE(world.Rebuild());
+		const DrawCommand *outline = nullptr;
+		for (const DrawCommand &command : world.List.Commands().Commands) {
+			if (command.Source == frame && command.Kind == DrawKind::Outline) {
+				outline = &command;
+			}
+		}
+		REQUIRE(outline != nullptr);
+		return outline->Thickness;
+	};
+
+	SECTION("fixed is the number that was typed") {
+		Stroke pixels;
+		pixels.Thickness = 3.0f;
+		pixels.Sizing = StrokeSizing::FixedSize;
+		world.Data.Set(stroke, pixels);
+		CHECK(thicknessOf() == Approx(3.0f));
+	}
+
+	SECTION("scaled is a fraction of the smaller side") {
+		Stroke fraction;
+		fraction.Thickness = 0.1f;
+		fraction.Sizing = StrokeSizing::ScaledSize;
+		world.Data.Set(stroke, fraction);
+
+		// The smaller side, not the larger and not the average: an outline
+		// scaled by a long thin element's width would be thicker than the
+		// element is tall.
+		CHECK(thicknessOf() == Approx(8.0f));
+	}
+
+	SECTION("a scaled zero draws nothing, like a fixed zero") {
+		// **Counted rather than asserted absent**, because a `Frame` carries a
+		// one-pixel `Background::BorderSizePixel` and that is an outline too.
+		// Counting is the stronger question anyway: it says the stroke is a
+		// second command rather than something that edits the border.
+		const auto outlines = [&]() {
+			REQUIRE(world.Rebuild());
+			size_t found = 0;
+			for (const DrawCommand &command : world.List.Commands().Commands) {
+				found += command.Source == frame && command.Kind == DrawKind::Outline ? 1 : 0;
+			}
+			return found;
+		};
+
+		Stroke drawn;
+		drawn.Thickness = 0.1f;
+		drawn.Sizing = StrokeSizing::ScaledSize;
+		world.Data.Set(stroke, drawn);
+		const size_t withStroke = outlines();
+
+		Stroke none = drawn;
+		none.Thickness = 0.0f;
+		world.Data.Set(stroke, none);
+		CHECK(outlines() == withStroke - 1);
+	}
+}
+
+TEST_CASE("a stroke's join and sizing reach the draw list and the signature", "[gui][compile]") {
+	// The signature is what decides whether a frame recompiles at all, so a
+	// property that changed the picture without changing the hash would draw
+	// the old one until something else moved.
+	World world("gui_compile.strokejoin");
+
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("Frame", screen);
+	world.Data.Set(frame, Element{});
+	const Entity stroke = world.Make("UIStroke", frame);
+
+	Stroke round;
+	round.Thickness = 2.0f;
+	round.Join = LineJoin::Round;
+	world.Data.Set(stroke, round);
+	REQUIRE(world.Rebuild());
+
+	const auto joinOf = [&]() {
+		const DrawCommand *outline = nullptr;
+		for (const DrawCommand &command : world.List.Commands().Commands) {
+			if (command.Source == frame && command.Kind == DrawKind::Outline) {
+				outline = &command;
+			}
+		}
+		REQUIRE(outline != nullptr);
+		return outline->Join;
+	};
+	CHECK(joinOf() == LineJoin::Round);
+
+	Stroke mitred = round;
+	mitred.Join = LineJoin::Miter;
+	world.Data.Set(stroke, mitred);
+	REQUIRE(world.Rebuild());
+	CHECK(joinOf() == LineJoin::Miter);
+
+	// And the sizing half of the same argument: switching mode changes the
+	// thickness, so it has to move the hash even though the typed number did
+	// not change.
+	Stroke scaled = mitred;
+	scaled.Sizing = StrokeSizing::ScaledSize;
+	world.Data.Set(stroke, scaled);
+	REQUIRE(world.Rebuild());
+}

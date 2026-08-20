@@ -1609,7 +1609,7 @@ namespace engine::scene {
 			// two.** It carries members this engine has nothing behind, and
 			// registering it would put an instantiable class that does nothing
 			// into the insert palette - which is the exact objection
-			// `docs/DEFERRED.md` D00120 held this class back for.
+			// `docs/retired/DEFERRED.md` D00120 held this class back for.
 			//
 			// The component is in the class set, which is `SurfaceCamera`'s
 			// argument: `Instance.new("Tool")` has to make something that can be

@@ -359,6 +359,7 @@ declare namespace Enum {
 	interface HorizontalAlignment extends EnumItem { readonly __enum: "HorizontalAlignment"; }
 	interface ItemLineAlignment extends EnumItem { readonly __enum: "ItemLineAlignment"; }
 	interface KeyCode extends EnumItem { readonly __enum: "KeyCode"; }
+	interface LineJoinMode extends EnumItem { readonly __enum: "LineJoinMode"; }
 	interface ListenerType extends EnumItem { readonly __enum: "ListenerType"; }
 	interface MouseBehavior extends EnumItem { readonly __enum: "MouseBehavior"; }
 	interface NormalId extends EnumItem { readonly __enum: "NormalId"; }
@@ -378,6 +379,7 @@ declare namespace Enum {
 	interface SizeConstraint extends EnumItem { readonly __enum: "SizeConstraint"; }
 	interface SortOrder extends EnumItem { readonly __enum: "SortOrder"; }
 	interface StartCorner extends EnumItem { readonly __enum: "StartCorner"; }
+	interface StrokeSizingMode extends EnumItem { readonly __enum: "StrokeSizingMode"; }
 	interface SurfaceEffect extends EnumItem { readonly __enum: "SurfaceEffect"; }
 	interface SurfaceSizingMode extends EnumItem { readonly __enum: "SurfaceSizingMode"; }
 	interface TextTruncate extends EnumItem { readonly __enum: "TextTruncate"; }
@@ -542,6 +544,11 @@ declare namespace Enum {
 		readonly F11: KeyCode;
 		readonly F12: KeyCode;
 	};
+	const LineJoinMode: {
+		readonly Round: LineJoinMode;
+		readonly Bevel: LineJoinMode;
+		readonly Miter: LineJoinMode;
+	};
 	const ListenerType: {
 		readonly Camera: ListenerType;
 		readonly ObjectPosition: ListenerType;
@@ -644,6 +651,10 @@ declare namespace Enum {
 		readonly TopRight: StartCorner;
 		readonly BottomLeft: StartCorner;
 		readonly BottomRight: StartCorner;
+	};
+	const StrokeSizingMode: {
+		readonly FixedSize: StrokeSizingMode;
+		readonly ScaledSize: StrokeSizingMode;
 	};
 	const SurfaceEffect: {
 		readonly None: SurfaceEffect;
@@ -1586,6 +1597,8 @@ declare interface UIStroke extends UIComponent {
 	ApplyStrokeMode: Enum.ApplyStrokeMode;
 	Color: Color3;
 	Enabled: boolean;
+	LineJoinMode: Enum.LineJoinMode;
+	StrokeSizingMode: Enum.StrokeSizingMode;
 	Thickness: number;
 	Transparency: number;
 }

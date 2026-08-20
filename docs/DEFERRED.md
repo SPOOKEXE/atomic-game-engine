@@ -36,7 +36,23 @@ entries are in `docs/retired/DEFERRED.md`.
 
 ## Deferred Items
 
-### [_] D00120
+### [_] D00129
+
+**Filed as `D00120` and renumbered at v0.17, because that number was already
+taken.** `docs/retired/DEFERRED.md` carries a `D00120` closed at v0.15 -
+`Player.Backpack` and the `Tool` class - and the counter increments past retired
+entries rather than reusing them. This is the second time it has happened;
+`D00109` records the first, and the cause is identical both times: the number
+was picked by reading the front of the live file, which is exactly the half of
+the register that does not hold the used ones. **The highest number in either
+file is what the next entry follows, and at v0.17 that is `D00128`.**
+
+Both numbers were live at once for two versions, and the collision was doing
+real damage rather than sitting there: four comments under `mono.engine/scene`
+cite "`docs/DEFERRED.md` D00120" meaning the *Tool* entry, which by then was a
+different entry in that file and the right one in the retired file. Those
+citations now name the retired file. `ROADMAP.md` cites this entry and follows
+the rename.
 
 **The interface members that are absent because the thing behind them is.** The
 2D tree is otherwise complete against Roblox's as of v0.18; what follows is
@@ -56,7 +72,22 @@ here rather than declared and left answering a default.
   header says why: an adornment is twelve edges and filling one would hide the
   thing it is drawn around. A thickness needs variable-width world lines and a
   surface needs filled faces, which are two renderer capabilities rather than two
-  properties. **Reopen trigger: a triangle path for adornments.**
+  properties.
+
+  **The blocker is larger than that paragraph says, and it was found by costing
+  the work at v0.17 rather than by doing it.** `AdornmentGeometry::Build` and
+  `Lines()` have **no caller anywhere** - not in `mono.client`, not in
+  `mono.studio`, not elsewhere in `render` - and no world-space line pass exists
+  for them to feed. So a `SelectionBox` draws nothing today whatever its
+  properties say, and the three members here are absent from a class whose
+  *implemented* members are equally unreachable. Adding filled faces would mean
+  building the draw pass first, which is a renderer feature rather than a
+  property. The module is forward API and correctly kept - `AdornmentGeometry`
+  is tested and headless, which is what makes it cheap to leave standing until
+  something draws it.
+
+  **Reopen trigger, sharpened: a pass that draws `AdornmentGeometry::Lines()`.**
+  A triangle path is the second thing this needs, not the first.
 
 - **`ImageLabel.IsLoaded` and `ImageButton.IsLoaded`.** Whether a texture has
   staged is the client's texture cache's answer, and `gui` is L7 `shared` - the
@@ -87,15 +118,45 @@ here rather than declared and left answering a default.
   second name and is not worth a second property. **Reopen trigger: none
   expected for `InputSink`.**
 
-- **`UIStroke.LineJoinMode`, `.BorderOffset`, `.StrokeSizingMode` and
-  `.ZIndex`.** The first three are corner and offset geometry on the stroke ring
-  that `InterfaceMesh::PushRoundedOutline` does not distinguish; `ZIndex` would
-  need the stroke to be sortable independently of the element it is on, which the
-  compile's paint order does not express. **Reopen trigger: an outline builder
-  that takes a join rule.**
+- ~~**`UIStroke.LineJoinMode`, `.BorderOffset`, `.StrokeSizingMode` and
+  `.ZIndex`.**~~ **Two shipped at v0.17, one was never a Roblox property, and
+  `ZIndex` is the only half still deferred.**
 
-- **`SurfaceGui.ToolPunchThroughDistance`.** There is no `Tool` class, so there
-  is nothing the distance is about.
+  `LineJoinMode` and `StrokeSizingMode` are implemented. The join needed no
+  outline builder in the end, which is the part worth recording: the reopen
+  trigger asked for "an outline builder that takes a join rule" and
+  `PushRoundedOutline` already separated *where the ring's points are* from
+  *how they are stitched*, so all three modes are the same ring with its corner
+  points moved. `Round` walks the arc, `Bevel` cuts the chord, `Miter` runs out
+  to the corner the arc was hiding and back - identical vertex count, identical
+  index loop, no second path. **A trigger asking for a mechanism, answered by a
+  seam that already existed.** `StrokeSizingMode` is resolved in the compile
+  rather than carried to a backend, because a draw list has no element to
+  measure a fraction against; the reference is the smaller side, and the text
+  size when the glyphs took the stroke.
+
+  **`BorderOffset` is not a Roblox property and this entry invented it.** The
+  API dump has `ApplyStrokeMode`, `Color`, `Enabled`, `LineJoinMode`,
+  `StrokeSizingMode`, `Thickness`, `Transparency` and `ZIndex`. There is a
+  `BorderStrokePosition` enum documented against `UIStroke`, but it appears in
+  no version of the class this engine has seen, so there is nothing to
+  implement and nothing to defer. Recorded rather than deleted because a
+  deferred property that does not exist is a reopen trigger that can never fire.
+
+  **`ZIndex` stays, unchanged.** It needs the stroke sortable independently of
+  the element it is on, which the compile's paint order does not express.
+  **Reopen trigger: a draw list whose ordering is a key rather than a
+  sequence.**
+
+- **`SurfaceGui.ToolPunchThroughDistance`.** ~~There is no `Tool` class, so
+  there is nothing the distance is about.~~ **That reason went stale and this is
+  the collision above costing something.** `Tool` derives from `Model` and is
+  registered in `scene/src/Part.cpp`; the entry that held it back is the *other*
+  `D00120`, closed at v0.15, and this bullet was written as though it had not
+  been. What the property actually needs is unchanged and is worth stating
+  properly: a distance at which a tool's interaction ray stops being blocked by
+  a `SurfaceGui`, which needs a tool interaction ray. Nothing casts one.
+  **Reopen trigger: a tool that reaches through the world to click something.**
 
 - **`BillboardGui.DistanceLowerLimit` and `.DistanceUpperLimit`.** Deprecated in
   Roblox and superseded by `DistanceStep`, which is implemented. Not worth
