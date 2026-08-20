@@ -614,6 +614,45 @@ namespace engine::ecs {
 		});
 	}
 
+	void Store::EachMatchingAny(
+		std::span<const ComponentId> components, const std::function<void(const Entity *, size_t)> &body
+	) {
+		RequireOwningThread("EachMatchingAny");
+
+		// An empty query matches nothing, exactly as `EachMatching`'s does.
+		if (components.empty()) {
+			return;
+		}
+
+		// **No query plan, deliberately.** `VisitTables` caches a plan per term
+		// list because it also resolves a column position per term, which is the
+		// expensive part and the part this does not need: the answer here is the
+		// entity ids, which every table keeps in one contiguous array whatever
+		// its columns do. What is left is a `Contains` per table per term, which
+		// is a binary search over a handful of ids - cheaper than the hash of the
+		// term bytes a plan lookup would start with.
+		const DeferScope defer(*this);
+
+		for (const Archetype &table : State->Tables) {
+			if (table.Rows() == 0) {
+				continue;
+			}
+
+			const ComponentSet &set = table.Set();
+			bool matched = false;
+			for (const ComponentId id : components) {
+				if (set.Contains(id)) {
+					matched = true;
+					break;
+				}
+			}
+
+			if (matched) {
+				body(table.Entities().data(), table.Rows());
+			}
+		}
+	}
+
 	size_t Store::CountMatching(std::span<const ComponentId> components) {
 		RequireOwningThread("CountMatching");
 

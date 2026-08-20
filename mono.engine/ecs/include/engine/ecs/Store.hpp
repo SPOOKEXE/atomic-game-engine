@@ -952,6 +952,42 @@ namespace engine::ecs {
 		// @since v0.12
 		void EachMatching(std::span<const ComponentId> components, const std::function<void(Entity)> &body);
 
+		// Visits every entity carrying **any** of `components`, a run at a time.
+		//
+		// **The other half of the runtime query, and the cheap half.** `EachMatching`
+		// above is an intersection - the entities carrying all of the named
+		// components - and this is the union. The distinction matters because the
+		// union has an answer the caller cannot assemble from the intersection at
+		// any sensible price: calling `EachRuns` once per component and merging
+		// visits an entity once per component it carries, so the merge is over
+		// carrier rows rather than entities, and testing every entity against every
+		// component in turn is a directory lookup and a binary search per pair.
+		//
+		// Whether a component is present is a property of the archetype, so this is
+		// one binary search per table per named component and no per-row test at
+		// all. **An entity is visited exactly once** however many of the named
+		// components it carries, because it lives in exactly one table.
+		//
+		// **Runs rather than one entity at a time**, unlike `EachMatching`: the
+		// reason to ask this question is to collect the answer, and a `std::function`
+		// call per entity would cost more than the query does. The pointer is into
+		// the table's own id array and is valid until the next structural change.
+		//
+		// Tables are walked in id order and rows in row order, so two runs of one
+		// world visit the same entities in the same sequence. That order is *not*
+		// entity-id order - a table is filled as entities arrive in it - so a caller
+		// that needs sorted ids still has to sort.
+		//
+		// An empty list matches nothing, for `EachMatching`'s reason: a query is
+		// defined by what it names.
+		//
+		// @param components The components, any one of which is enough to match.
+		// @param body       Called as `body(entities, rows)` once per matching table.
+		// @since v0.18
+		void EachMatchingAny(
+			std::span<const ComponentId> components, const std::function<void(const Entity *, size_t)> &body
+		);
+
 		// How many entities `EachMatching` would visit.
 		//
 		// The plan is cached per term list exactly as `CountMatching<Ts...>`'s
