@@ -249,6 +249,7 @@ The milestone headings below are development labels. Not in line with project ve
 ---
 
 - [_] pump events lags sometimes for some reason (e.g. user inputs, changing window size, etc). make pump events more granular by adding per-event-name.
+- [_] mouse movement seems to also cause pump events to increase lots
 - [_] in flamegraph, add a "Event Scheduler" where you can setup a rule that auto-pauses the flamegraph when conditions are met (e.g. when pump events hit >2ms, i can force a pause on that flamegraph to see the cause).
 - [_] in discord presence tab, add a list of templating replacement words (e.g. {world} {instances}), etc.
 - [_] when setting keybinds, disable input after keybind sets (it runs immediately after)
