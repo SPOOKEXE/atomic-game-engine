@@ -4,9 +4,19 @@
 -- **The smallest scene that can be captured to prove a cross-world pane shows
 -- the right half of the world it names.** `ImmersivePortals.luau` is the demo
 -- and needs the studio - two runs, a play link, a client. This one needs
--- `client --worlds 2 --script CrossWorldSeam.luau`, which builds both worlds in
--- one process from one file and renders the first, so a still can be taken of
--- exactly the thing the report is about.
+-- `client --worlds 2 --view-spacing 0 --script CrossWorldSeam.luau`, which
+-- builds both worlds in one process from one file and renders the first, so a
+-- still can be taken of exactly the thing the report is about.
+--
+-- **`--view-spacing 0` is not optional, and this line omitted it.** The flag
+-- defaults to 40, and a composite that offsets the second world puts two
+-- 80-stud floors through each other in a coplanar band and slides this world's
+-- pane out from under the camera aimed at it - which is a picture that looks
+-- like the pane is broken and is the command being wrong. Both worlds are laid
+-- out on top of each other here on purpose, because that is what makes the
+-- mapping nearly the identity, so the spacing that helps
+-- `Mirrors-4-worlds.luau` is exactly what breaks this. The two commands further
+-- down always carried the flag; this is the one anybody reads first.
 --
 -- ## What it is arranged to catch
 --

@@ -377,12 +377,37 @@ local DRIFT_SIZE = Vector3.new(1.6, 1.6, 1.6)
 -- offset across the tunnel comes out the far side where it went in.
 local DRIFT_SIDE = 2
 
+-- **The lit pair runs the west side, at a third of the fixed lamps' output.**
+-- `lamp()` sits seven studs up in a shell that swallows most of its throw; a
+-- lantern at eye height on the open plain does not, so the same brightness
+-- floods the whole ground and the stripes stop reading. Forty-five over a
+-- sixteen-stud range is a pool the block carries with it and nothing more.
+local LANTERN_SIDE = -DRIFT_SIDE
+local LANTERN_RANGE = 16
+local LANTERN_BRIGHTNESS = 45
+
 -- **Ping-pong rather than a loop.** A block that restarted at the north end
 -- would only ever show the southbound crossing, and half the point of a pair of
 -- portals is that the walk works both ways.
-local function drifter(name: string, colour: Color3, route: { Leg })
+local function drifter(name: string, colour: Color3, route: { Leg }, range: number?)
 	local body = block(name, DRIFT_SIZE, route[1].From, colour)
 	body.CanCollide = false
+
+	-- **A lamp on the block is what makes a drifter a lighting test rather than
+	-- a timing one.** The fixed lamps above prove a pane carries a *static*
+	-- light; one that crosses a pane proves it carries a light whose position
+	-- moves on the far side of a seam, which is the case a surface camera has to
+	-- re-place every frame. Nil leaves the block unlit, which is what the two
+	-- timing drifters want - a lamp riding them would wash out the stripes they
+	-- are read against.
+	if range ~= nil then
+		local bulb = Instance.new("PointLight")
+		bulb.Name = "Bulb"
+		bulb.Color = colour
+		bulb.Brightness = LANTERN_BRIGHTNESS
+		bulb.Range = range
+		bulb.Parent = body
+	end
 
 	local total = routeLength(route)
 	local travelled = 0
@@ -434,6 +459,48 @@ drifter("ShortDrifter", SHORT_MARK, {
 		Vector3.new(SHORT_X + DRIFT_SIDE, DRIFT_Y, -(SHORT / 2 + 6))
 	),
 })
+
+-- --- and the pair that carries a light -------------------------------------
+--
+-- **The same two walks, lit, down the west side and started at the far end.**
+-- Two studs west leaves the block clear of the walked channel for
+-- `DRIFT_SIDE`'s reason - a tunnel is `WIDTH` across, so a lantern occupies
+-- `x - 2.8` to `x - 1.2` and the middle of the floor stays open between it and
+-- the timing block opposite. Starting at the south end puts a lantern deep in
+-- one tunnel while the block it shares that tunnel with is still outside the
+-- other, so a still of either mouth shows one of the two rather than both in
+-- the doorway.
+--
+-- **What they add over the fixed lamps is the only lighting case a fixed lamp
+-- cannot make.** A pane's camera re-places the far side's lights every frame; a
+-- lamp that does not move never says whether it re-placed them *correctly*.
+-- Watch the far stub brighten through a skip pane before the lantern itself
+-- arrives in it.
+drifter("LongLantern", LONG_MARK, {
+	leg(
+		Vector3.new(LONG_X + LANTERN_SIDE, DRIFT_Y, -(LONG / 2 + 6)),
+		Vector3.new(LONG_X + LANTERN_SIDE, DRIFT_Y, -SKIP)
+	),
+	leg(
+		Vector3.new(LONG_X + LANTERN_SIDE, DRIFT_Y, SKIP),
+		Vector3.new(LONG_X + LANTERN_SIDE, DRIFT_Y, LONG / 2 + 6)
+	),
+}, LANTERN_RANGE)
+
+drifter("ShortLantern", SHORT_MARK, {
+	leg(
+		Vector3.new(SHORT_X + LANTERN_SIDE, DRIFT_Y, -(SHORT / 2 + 6)),
+		Vector3.new(SHORT_X + LANTERN_SIDE, DRIFT_Y, -ENTRY)
+	),
+	leg(
+		Vector3.new(SUBSPACE_X + LANTERN_SIDE, DRIFT_Y, -SPLICE),
+		Vector3.new(SUBSPACE_X + LANTERN_SIDE, DRIFT_Y, SPLICE)
+	),
+	leg(
+		Vector3.new(SHORT_X + LANTERN_SIDE, DRIFT_Y, ENTRY),
+		Vector3.new(SHORT_X + LANTERN_SIDE, DRIFT_Y, SHORT / 2 + 6)
+	),
+}, LANTERN_RANGE)
 
 -- --- where you start ------------------------------------------------------
 --

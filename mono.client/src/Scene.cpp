@@ -103,11 +103,37 @@ namespace client {
 			// that the depth buffer and the culling are visibly doing
 			// something.
 			const float distance = extent * 1.7f + 4.0f;
-			const float angle = now * 0.12f;
+
+			// **Held still for a world somebody stands in, and it reads as a bug
+			// otherwise.** The drift exists so that a scene with nothing moving
+			// in it still shows the depth buffer and the culling working; a
+			// world with a spawn pad has a character to do that. At 0.12 rad a
+			// second a square plate like `Playground.luau` is a quarter turn
+			// round within seven seconds of starting, which is exactly the
+			// "sometimes the baseplate is rotated 45 degrees" report - the scene
+			// is identical every run and how far it has turned by the time
+			// anybody looks is not.
+			//
+			// `FindSpawn` returns a default `CFrame` for a world with no pad, so
+			// this is the "has one" test without a second traversal. It walks
+			// the tree once a frame, which is a cost worth naming: this function
+			// runs only for a world that authored no camera of its own, so it is
+			// the demo path and never a game's.
+			const bool standing = engine::scene::FindSpawn(store).Position != Vector3::Zero;
+			const float angle = standing ? 0.6f : now * 0.12f;
+
+			// The height drifts for the same reason the angle does, and is held
+			// for the same reason: a world with a pad is looked at from one
+			// place, so that two runs of it frame the scene identically.
+			// Proportional to the scene rather than a constant, for the reason
+			// `distance` already is: a fixed 6.5 studs is a grazing, nearly
+			// edge-on look at anything the size of a baseplate, and the drifting
+			// version only ever cleared that because it bobbed.
+			const float height = standing ? extent * 0.55f + 6.0f : 5.0f + std::sin(now * 0.21f) * 3.5f;
 
 			const Vector3 eye{
 				std::cos(angle) * distance,
-				5.0f + std::sin(now * 0.21f) * 3.5f,
+				height,
 				std::sin(angle) * distance,
 			};
 

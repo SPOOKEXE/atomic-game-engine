@@ -53,7 +53,21 @@ local GATE_SIZE = Vector3.new(768, 768)
 -- - the illusion is that they are adjacent, and building them adjacent would let
 -- one exhibit's lighting and geometry arrive at the edges of another.
 local STAGE_STEP = 44
+
+-- **A depth lane each, rather than one row of hidden spaces at a single
+-- distance.** The exhibits stand 44 studs apart on the plain, but what they open
+-- onto is up to 40 studs wide and offset up to 50 studs from its own exhibit, so
+-- hidden spaces all built at one depth overlap: exhibit 3's third room stood
+-- inside exhibit 4's first chamber, and exhibit 4's second stood inside exhibit
+-- 6's first. A hole cannot show that as a mistake - it shows one room with
+-- another room's wall standing through it, which reads as the *portal* being
+-- wrong rather than the layout. `away(n)` hands exhibit `n` a depth nothing else
+-- uses, so an exhibit may be as wide as its trick needs.
 local AWAY = 500
+local LANE = 120
+local function away(exhibit: number): number
+	return AWAY + (exhibit - 1) * LANE
+end
 
 -- Clear of a baseplate's top face at y = 0: coplanar surfaces do not flicker in
 -- this engine, they resolve stably to whichever one the draw order happens to
@@ -188,7 +202,7 @@ do
 	local at = Vector3.new(0, 0, 0)
 	passage("LongShell", at, 30, FLOOR)
 
-	local inside = at + Vector3.new(0, 0, -AWAY)
+	local inside = at + Vector3.new(0, 0, -away(1))
 	passage("ShortInside", inside, 8, Color3.fromRGB(210, 120, 90))
 	marker("ShortInsideMarker", inside + Vector3.new(0, 0, -6), Color3.fromRGB(240, 180, 90))
 
@@ -207,7 +221,7 @@ do
 	local at = Vector3.new(STAGE_STEP, 0, 0)
 	passage("ShortShell", at, 8, FLOOR)
 
-	local inside = at + Vector3.new(0, 0, -AWAY)
+	local inside = at + Vector3.new(0, 0, -away(2))
 	passage("LongInside", inside, 60, Color3.fromRGB(90, 150, 210))
 
 	-- Posts down its length, because a corridor with nothing in it gives the eye
@@ -244,7 +258,7 @@ do
 
 	local rooms: { Part } = {}
 	for index = 1, 3 do
-		local origin = at + Vector3.new((index - 2) * 30, 0, -AWAY)
+		local origin = at + Vector3.new((index - 2) * 30, 0, -away(3))
 		local opening = chamber("House" .. index, origin, 18, 8, tints[index])
 		marker("HouseMarker" .. index, origin, tints[index])
 		rooms[index] = throat("HouseWay" .. index, opening + Vector3.new(0, 0, 0.3), 5, 7)
@@ -279,7 +293,7 @@ do
 
 	local hues = {Color3.fromRGB(230, 150, 60), Color3.fromRGB(70, 200, 190)}
 	for index = 1, 2 do
-		local origin = at + Vector3.new((index - 1.5) * 44, 0, -AWAY)
+		local origin = at + Vector3.new((index - 1.5) * 44, 0, -away(4))
 		local opening = chamber("Turn" .. index, origin, 16, 9, hues[index])
 		marker("TurnMarker" .. index, origin, hues[index])
 
@@ -312,7 +326,7 @@ do
 
 	block("HillMouthWall", CFrame.new(at + Vector3.new(0, 3, -4)), Vector3.new(16, 6, 0.5), FLOOR)
 
-	local top = at + Vector3.new(0, 14.4, -AWAY)
+	local top = at + Vector3.new(0, 14.4, -away(5))
 	block(
 		"HillTopFloor",
 		CFrame.new(top + Vector3.new(0, -0.25 + GROUND_LIFT, -8)),
@@ -362,7 +376,7 @@ do
 		-- from inside at all.
 		local looked = mouth("CellWay" .. side.Name, at + side.At, 18, 7, side.Yaw)
 
-		local origin = at + Vector3.new((part - 2) * 50, 0, -AWAY)
+		local origin = at + Vector3.new((part - 2) * 50, 0, -away(6))
 		local opening = chamber("Quarter" .. part, origin, 40, 10, Color3.fromRGB(60 + part * 25, 90, 150))
 		for post = 1, 4 do
 			marker(
@@ -375,6 +389,20 @@ do
 		link(looked, throat("QuarterWay" .. part, opening + Vector3.new(0, 0, 0.3), 18, 7), "Quarter" .. part)
 	end
 end
+
+-- Where a player stands, on the plate and in front of the row.
+--
+-- **Without one, `scene::FindSpawn` finds nothing and starts everybody at the
+-- origin** - which here is the middle of exhibit 1's tunnel mouth, on
+-- `LongMouth`'s own plane with the shell's walls three studs either side. In
+-- front of the row rather than in it, because these are exhibits looked *at*:
+-- from here the whole plate is ahead and every mouth is a walk away.
+block(
+	"SpawnLocation",
+	CFrame.new(Vector3.new(STAGE_STEP * 2.5, 0.5, 14)),
+	Vector3.new(12, 1, 12),
+	Color3.fromRGB(40, 110, 200)
+)
 
 -- Where the scene is watched from.
 --

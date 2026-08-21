@@ -248,6 +248,7 @@ The milestone headings below are development labels. Not in line with project ve
 
 ---
 
+- [_] when you upload a asset in studio, it doesn't process it in studio for local store
 - [_] add dev build and release builds to github release (two separate tags Release and Dev -O1 but keep things like heap profiler), then you have per-version ones as well
 - [_] ground grid should expand way further
 - [_] in "Start" with 4 clients running, tons of network activity for no character movement, quickhash / caching / signature not working properly or other bug
@@ -266,7 +267,14 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] optimise Authority::DetectRows and missing gap post Authority::Publish. ReplicationStress in release build.
 - [_] add a "bidirection" bool mode for portals, when enabled, you can enter from both sides, when disabled, you can only enter from entry side
 - [_] add a "Play Here" button (spawns character at camera position)
-- [_] input textbox not working
+- [x] input textbox not working. `gui::Type` was called by `mono.client` and by
+      nothing in `mono.studio`, so a `TextBox` in a studio viewport took focus
+      from a click, showed a caret and then ignored the keyboard - the editor was
+      the one place a text box could be focused and not typed into. The overlay
+      pass now builds a `gui::Typing` from `ImGuiIO` (which is already decoded
+      text, so no key-code table), gated on the panel being in front, the
+      keyboard actually being in it, and imgui not wanting the keys for a field
+      of its own.
 - [x] allow creating worlds even when scene is running in studio. The refusal
       was correct when written and its reason had since gone: it said "the
       snapshot Stop restores was taken before the run began", which was true of
@@ -287,8 +295,17 @@ The milestone headings below are development labels. Not in line with project ve
       `ShowWorldInViewport`, the same path the Live Instances "View" button
       uses, so it reuses an open panel or reopens the main one and only makes a
       new panel when every one is spoken for.
-- [_] NonEuclidean.luau spawn is wrong spot
-- [_] NonEuclidean.luau has multiple overlapping things
+- [x] NonEuclidean.luau spawn is wrong spot. The file had no spawn at all, so
+      `scene::FindSpawn` returned a default `CFrame` and started everybody at the
+      origin - which here is the middle of exhibit 1's tunnel mouth, on
+      `LongMouth`'s own plane. A pad now stands on the plate in front of the row.
+- [x] NonEuclidean.luau has multiple overlapping things. Every exhibit built
+      its hidden space at the same depth, so exhibit 3's third room stood inside
+      exhibit 4's first chamber (9 studs of x, 16 of z) and exhibit 4's second
+      stood 12 studs inside exhibit 6's first. A hole cannot show that as a
+      mistake - it shows one room with another room's wall through it, which
+      reads as the *portal* being wrong. `away(n)` gives each exhibit a depth
+      lane, so an exhibit may be as wide as its trick needs.
 - [_] selection boxes are misaligned
 - [x] when pressing CTRL and scaling a part, scale both sides at same time.
       `ScaleSide::Both` already existed as a *preference*, so the only way to
@@ -308,9 +325,31 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] character physics bugs and movement in weird directions and stuff
 - [_] check character physics with portals, i think normal objects are fine but the character
 - [_] when character sits in portal, character split in half
-- [_] add moving cubes in tunnels for lighting test too
-- [_] sometimes when starting playground, the baseplate is rotated 45 degrees?
-- [_] crossworldseam demo is not setup properly
+- [x] add moving cubes in tunnels for lighting test too. A lit drifter pair
+      down the west side, at a third of the fixed lamps' brightness over a 16
+      stud range - a lantern at eye height on the open plain floods the ground at
+      the lamps' own output and the stripes stop reading. They add the one
+      lighting case a fixed lamp cannot make: a pane re-places the far side's
+      lights every frame, and a lamp that does not move never says whether it
+      re-placed them correctly.
+- [x] sometimes when starting playground, the baseplate is rotated 45 degrees.
+      **The scene is not nondeterministic** - captures are byte-identical, and it
+      has no rotation, no random source and no hash-derived transform. What turns
+      is the client's placeholder camera, which orbits at 0.12 rad/s and so is a
+      quarter turn round within seven seconds; "sometimes" is how much wall clock
+      had passed before anybody looked. That camera now holds a fixed angle and
+      height for any world with a spawn pad - a world meant to be stood in is not
+      one to orbit - and the height is proportional to the scene, because a fixed
+      one is a grazing look at a baseplate. Verified: identical captures at 60,
+      200 and 400 frames, where before all three differed.
+- [_] crossworldseam demo is not setup properly. **Half done.** The command in
+      the file's own header omitted `--view-spacing 0`, so following it
+      composited the two worlds 40 apart: two 80-stud floors z-fighting in a
+      coplanar band and the camera aimed down the middle at neither pane. That is
+      fixed, and the flag is now argued rather than just present. What is left is
+      a mirror control in the same scene that draws no image at all in any of
+      eight variants tried, while `MirrorCorridor` works in the same build -
+      that one did not reduce to a scene cause and needs an engine look.
 - [x] surfacecamera lighting is really dark. **Measured: a mirrored floor read
       0.21 of the same floor seen directly.** The main view is deferred and ends
       at the `tonemap` node; a mirror is forward - `mirror-capture` runs

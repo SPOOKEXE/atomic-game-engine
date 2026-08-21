@@ -9,6 +9,7 @@
 
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Values.hpp>
+#include <engine/gui/Typing.hpp>
 #include <engine/render/SpatialCanvas.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
@@ -24,6 +25,7 @@
 #include <cmath>
 #include <imgui.h>
 #include <optional>
+#include <string>
 #include <studio/Editor.hpp>
 #include <studio/Viewports.hpp>
 #include <vector>
@@ -1745,6 +1747,83 @@ namespace studio {
 			const std::span<const engine::gui::GuiEvent> produced =
 				GuiRouters[index].Update(store, GuiLists[index].Commands(), pointer);
 			events.assign(produced.begin(), produced.end());
+
+			// **Typing, which this panel routed clicks for and never delivered.**
+			// A `TextBox` in a studio viewport took focus from a click, showed a
+			// caret, and then ignored the keyboard: `gui::Type` was called by
+			// `mono.client` and by nothing here, so the editor was the one place
+			// a text box could be focused and not typed into.
+			//
+			// **From imgui rather than from `input::Translator`**, because the
+			// studio has no translator - it is an imgui application and its
+			// keyboard arrives in `ImGuiIO`. `InputQueueCharacters` is already
+			// the decoded text, which is the same thing `Typing::Text` wants and
+			// the reason this needs no key-code table.
+			//
+			// **Only when imgui does not want the keyboard itself.** A person
+			// renaming a part in the explorer is typing into an imgui field, and
+			// `WantTextInput` is how imgui says so. A focused `TextBox` in the
+			// world is invisible to imgui, so that flag is false exactly when
+			// this should run.
+			//
+			// **Only for the panel in front, and only while the keyboard is
+			// actually in it.** With two viewports open both route their own
+			// pointer, so a character typed once would otherwise arrive twice in
+			// two different scenes.
+			//
+			// `FocusedIsViewport` as well as `FocusedViewport`, and the header on
+			// the pair says why: the index keeps naming the last viewport when
+			// focus moves to the explorer or the properties panel, deliberately,
+			// so the transport readout does not blank. The bool is the one that
+			// goes false - which is exactly the difference between typing into a
+			// text box in the world and typing into a property field.
+			const ImGuiIO &io = ImGui::GetIO();
+			if (index == FocusedViewport && FocusedIsViewport && !io.WantTextInput) {
+				engine::gui::Typing typing;
+
+				// **A local the view outlives.** `Typing::Text` is a
+				// `string_view`, so the bytes have to live until `Type` has run -
+				// which is what `input::Translator` provides on the client side
+				// and what has to be provided here.
+				std::string entered;
+				for (int character : io.InputQueueCharacters) {
+					// The queue is UTF-32 and `Typing::Text` is UTF-8. Anything
+					// outside the basic plane is dropped rather than truncated,
+					// because half a code point in a `Label::Text` is a string
+					// nothing downstream can measure.
+					if (character > 0 && character < 0x80) {
+						entered.push_back(static_cast<char>(character));
+					} else if (character >= 0x80 && character < 0x800) {
+						entered.push_back(static_cast<char>(0xC0 | (character >> 6)));
+						entered.push_back(static_cast<char>(0x80 | (character & 0x3F)));
+					} else if (character >= 0x800 && character < 0x10000) {
+						entered.push_back(static_cast<char>(0xE0 | (character >> 12)));
+						entered.push_back(static_cast<char>(0x80 | ((character >> 6) & 0x3F)));
+						entered.push_back(static_cast<char>(0x80 | (character & 0x3F)));
+					}
+				}
+
+				typing.Text = entered;
+				typing.Backspace = ImGui::IsKeyPressed(ImGuiKey_Backspace, true);
+				typing.Submit = ImGui::IsKeyPressed(ImGuiKey_Enter, false);
+				typing.Extend = io.KeyShift;
+
+				// One step per press, like the client's: `Typing::Caret` is a
+				// direction and not a count.
+				if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true)) {
+					typing.Caret = -1;
+				} else if (ImGui::IsKeyPressed(ImGuiKey_RightArrow, true)) {
+					typing.Caret = 1;
+				}
+
+				if (const engine::gui::TypeResult typed = engine::gui::Type(store, typing); typed.Released) {
+					engine::gui::GuiEvent released;
+					released.Kind = engine::gui::EventKind::FocusReleased;
+					released.Instance = typed.Instance;
+					released.Entered = true;
+					events.push_back(released);
+				}
+			}
 		});
 
 		// **Handed to the VM, which is what turns a click into a `.Activated`.**
