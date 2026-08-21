@@ -248,6 +248,7 @@ The milestone headings below are development labels. Not in line with project ve
 
 ---
 
+- [_] ground grid should expand way further
 - [_] in "Start" with 4 clients running, tons of network activity for no character movement, quickhash / caching / signature not working properly or other bug
 - [_] in flamegraph, simulation needs more granularity, HUGE chunk missing.
 - [_] in flamegraph, when average over 250ms is selected, the flamegraph bars can over-expand into other bars.
