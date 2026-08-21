@@ -900,11 +900,74 @@ namespace studio {
 		return 0;
 	}
 
+	// The SDL event kinds worth telling apart in a frame graph.
+	//
+	// **A switch and not a table, because SDL exposes no name API**, and every
+	// string is a literal with static storage because
+	// `ENGINE_PROFILE_DYNAMIC_STABLE` keeps the pointer rather than copying.
+	// `mono.client` carries the same list for the same reason; two copies of a
+	// switch over an enum somebody else owns is cheaper than a shared header
+	// between a `client`-tier program and this one.
+	static std::string_view EventName(uint32_t type) {
+		switch (type) {
+		case SDL_EVENT_QUIT:
+			return "quit";
+		case SDL_EVENT_KEY_DOWN:
+			return "key down";
+		case SDL_EVENT_KEY_UP:
+			return "key up";
+		case SDL_EVENT_TEXT_INPUT:
+			return "text input";
+		case SDL_EVENT_MOUSE_MOTION:
+			return "mouse motion";
+		case SDL_EVENT_MOUSE_BUTTON_DOWN:
+			return "mouse down";
+		case SDL_EVENT_MOUSE_BUTTON_UP:
+			return "mouse up";
+		case SDL_EVENT_MOUSE_WHEEL:
+			return "mouse wheel";
+		case SDL_EVENT_WINDOW_RESIZED:
+			return "window resized";
+		case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+			return "window pixel size";
+		case SDL_EVENT_WINDOW_MINIMIZED:
+		case SDL_EVENT_WINDOW_MAXIMIZED:
+		case SDL_EVENT_WINDOW_RESTORED:
+			return "window state";
+		case SDL_EVENT_WINDOW_FOCUS_GAINED:
+		case SDL_EVENT_WINDOW_FOCUS_LOST:
+			return "window focus";
+		case SDL_EVENT_DROP_FILE:
+		case SDL_EVENT_DROP_TEXT:
+			return "drop";
+		default:
+			return "other event";
+		}
+	}
+
 	void Editor::PumpEvents() {
 		ENGINE_PROFILE("pump events");
 
+		// **The clock read once per pump rather than once per event.** Every
+		// input kind below set `LastInputSeconds` from `Clock::Seconds()`, and a
+		// mouse dragged across the window delivers a motion event per position
+		// the pointer was sampled at - which is dozens a frame, each paying a
+		// clock read to record the same instant. Nothing reads this value at a
+		// resolution finer than a frame: it decides whether the editor may drop
+		// to its idle rate, and "did anything happen this frame" is the whole
+		// question.
+		bool sawInput = false;
+
 		SDL_Event event;
 		while (SDL_PollEvent(&event)) {
+			// **A span per event kind**, because a pump that is slow says
+			// nothing about why: a window resize is a synchronous round trip to
+			// the window system and a keystroke is not, and one bar covering
+			// both cannot tell them apart.
+			ENGINE_PROFILE_DYNAMIC_STABLE(
+				"event", EventName(event.type), engine::core::ProfileCategory::Engine
+			);
+
 			// **Every event, before anything else looks at it.** imgui decides
 			// whether it wanted an event after being told about it, so a
 			// program that filtered first would have a script editor that never
@@ -931,7 +994,7 @@ namespace studio {
 			case SDL_EVENT_DROP_FILE:
 			case SDL_EVENT_WINDOW_RESIZED:
 			case SDL_EVENT_WINDOW_FOCUS_GAINED:
-				LastInputSeconds = engine::core::Clock::Seconds();
+				sawInput = true;
 				break;
 			default:
 				break;
@@ -955,6 +1018,11 @@ namespace studio {
 				event.window.windowID == SDL_GetWindowID(Window)) {
 				Running = false;
 			}
+		}
+
+		// Once, from the flag the loop set. See `sawInput`.
+		if (sawInput) {
+			LastInputSeconds = engine::core::Clock::Seconds();
 		}
 	}
 

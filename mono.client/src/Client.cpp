@@ -54,6 +54,60 @@ namespace client {
 	using engine::input::Action;
 	using engine::render::ProfilerTab;
 
+	namespace {
+		// The SDL event kinds worth telling apart in a frame graph.
+		//
+		// **A switch and not a table, because SDL exposes no name API.** Every
+		// string here is a literal with static storage, which is what
+		// `ENGINE_PROFILE_DYNAMIC_STABLE` needs: it keeps the pointer rather
+		// than copying, so a name built per event would dangle before the frame
+		// was published.
+		//
+		// Anything unnamed falls into one bucket. The list is the kinds a person
+		// can cause, and therefore the ones a lag report is ever about; growing
+		// it is a line each.
+		std::string_view EventName(uint32_t type) {
+			switch (type) {
+			case SDL_EVENT_QUIT:
+				return "quit";
+			case SDL_EVENT_KEY_DOWN:
+				return "key down";
+			case SDL_EVENT_KEY_UP:
+				return "key up";
+			case SDL_EVENT_TEXT_INPUT:
+				return "text input";
+			case SDL_EVENT_MOUSE_MOTION:
+				return "mouse motion";
+			case SDL_EVENT_MOUSE_BUTTON_DOWN:
+				return "mouse down";
+			case SDL_EVENT_MOUSE_BUTTON_UP:
+				return "mouse up";
+			case SDL_EVENT_MOUSE_WHEEL:
+				return "mouse wheel";
+			case SDL_EVENT_WINDOW_RESIZED:
+				return "window resized";
+			case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+				return "window pixel size";
+			case SDL_EVENT_WINDOW_MINIMIZED:
+			case SDL_EVENT_WINDOW_MAXIMIZED:
+			case SDL_EVENT_WINDOW_RESTORED:
+				return "window state";
+			case SDL_EVENT_WINDOW_FOCUS_GAINED:
+			case SDL_EVENT_WINDOW_FOCUS_LOST:
+				return "window focus";
+			case SDL_EVENT_DROP_FILE:
+			case SDL_EVENT_DROP_TEXT:
+				return "drop";
+			case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+			case SDL_EVENT_GAMEPAD_BUTTON_UP:
+			case SDL_EVENT_GAMEPAD_AXIS_MOTION:
+				return "gamepad";
+			default:
+				return "other event";
+			}
+		}
+	}
+
 	Client::~Client() {
 		Shutdown();
 	}
@@ -579,6 +633,9 @@ namespace client {
 					}
 				}
 
+				// The upload, which had no span while its texture sibling did -
+				// so a slow mesh looked like time `content` spent on nothing.
+				ENGINE_PROFILE_CAT("mesh upload", engine::core::ProfileCategory::Render);
 				if (Renderer.AddMesh(name, mesh)) {
 					ContentMeshes++;
 
@@ -669,6 +726,8 @@ namespace client {
 				}
 			} else if (asset->Kind == engine::assets::AssetKind::Material) {
 				engine::assets::MaterialData material;
+				// The one decode on this path with no span of its own.
+				ENGINE_PROFILE_CAT("material decode", engine::core::ProfileCategory::Engine);
 				if (!engine::assets::Material::Read(reader, material)) {
 					ENGINE_WARN("content: {} is not a material this engine reads", asset->Name);
 					continue;
@@ -766,6 +825,13 @@ namespace client {
 	}
 
 	void Client::OfferPublishedContent() {
+		// **Named, because it lands in `content`'s self time and is not small.**
+		// It walks every entry of the delivery catalogue - nearly two thousand
+		// on a filled store - and enters every world to ask what each wants, on
+		// a path that runs whenever content has been requested. Unprofiled, that
+		// is a chunk of `content` with nothing in it to say what it was.
+		ENGINE_PROFILE_CAT("offer published content", engine::core::ProfileCategory::Engine);
+
 		const engine::assets::Manifest *catalogue = Content ? Content->Catalogue() : nullptr;
 		if (catalogue == nullptr) {
 			return;
@@ -1677,6 +1743,21 @@ namespace client {
 
 			SDL_Event event;
 			while (SDL_PollEvent(&event)) {
+				// **A span per event kind, because "poll events" being slow says
+				// nothing about why.** The report is that this lags on user
+				// input and on a window resize, and those are two different
+				// mechanisms - a resize is a synchronous round trip to the
+				// window system and a keystroke is not. One bar covering both
+				// cannot tell them apart; naming each kind makes the expensive
+				// one say its own name.
+				//
+				// `_STABLE`, so the name reaches the graph rather than the
+				// fallback: the point is to read `window resized` in the bar and
+				// not `event`.
+				ENGINE_PROFILE_DYNAMIC_STABLE(
+					"event", EventName(event.type), engine::core::ProfileCategory::Engine
+				);
+
 				Actions.HandleEvent(event);
 
 				// **Both, unconditionally, and neither consumes for the other.**

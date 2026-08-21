@@ -316,9 +316,26 @@ The milestone headings below are development labels. Not in line with project ve
       not get. Flagged per draw rather than done unconditionally, because
       `portal-capture` runs the same shader and already has its own tonemap
       node - portal captures are byte-compared and visually identical.
-- [_] content needs more granularity, big chunk is not listed (optimise when you find)
-- [_] pump events lags sometimes for some reason (e.g. user inputs, changing window size, etc). make pump events more granular by adding per-event-name.
-- [_] mouse movement seems to also cause pump events to increase lots
+- [x] content needs more granularity. Three stages on the client's content path
+      had no span and therefore landed in `content`'s self time with nothing to
+      name them: `OfferPublishedContent`, which walks every catalogue entry -
+      nearly two thousand on a filled store - and enters every world to ask what
+      each wants; the mesh upload, which had none while its texture sibling did;
+      and the material decode, the only decode on that path without one.
+- [x] pump events lags sometimes. Made granular by event kind, in both the
+      client and the studio: a window resize is a synchronous round trip to the
+      window system and a keystroke is not, and one bar covering both cannot say
+      which one cost the frame. SDL exposes no name API, so it is a switch
+      returning literals - `ENGINE_PROFILE_DYNAMIC_STABLE` keeps the pointer
+      rather than copying, so a name built per event would dangle.
+- [x] mouse movement seems to also cause pump events to increase lots. The
+      studio read `Clock::Seconds()` **once per input event** to stamp
+      `LastInputSeconds`, and a mouse dragged across the window delivers a motion
+      event per sampled position - dozens a frame, each paying a clock read to
+      record the same instant. Nothing reads that value at a resolution finer
+      than a frame: it decides whether the editor may drop to its idle rate. The
+      loop sets a flag and the clock is read once per pump. The per-event spans
+      above are what will say whether anything else remains.
 - [_] in flamegraph, add a "Event Scheduler" where you can setup a rule that auto-pauses the flamegraph when conditions are met (e.g. when pump events hit >2ms, i can force a pause on that flamegraph to see the cause).
 - [_] in discord presence tab, add a list of templating replacement words (e.g. {world} {instances}), etc.
 - [_] add (selectable) text in the control (mcp) that tells you how to add as a mcp (and a section to tell models how to add it). add claude/codex/prompt tabs to hold these.
