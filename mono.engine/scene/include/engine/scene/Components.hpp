@@ -165,6 +165,9 @@ namespace engine::scene {
 	//
 	// @since v0.17
 	struct PortalTransitSeen {
+		// Which crossing this viewer has already accounted for. Compared with
+		// the transit's own serial: equal means the snap has happened, and any
+		// other value means it is due.
 		uint32_t Serial = 0;
 	};
 

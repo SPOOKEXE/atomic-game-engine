@@ -193,8 +193,16 @@ namespace engine::world {
 	//
 	// @since v0.17
 	struct Presentation {
+		// Which world to prepare. An id rather than a store, which is what lets
+		// this cross the lane boundary as a value.
 		WorldId World;
+
+		// How long the presented frame is, in seconds.
 		float FrameSeconds = 0.0f;
+
+		// Where between the last two simulation ticks this frame falls, 0 to 1.
+		// What interpolation reads, so a world simulated at a fixed rate can be
+		// drawn at any rate.
 		float Alpha = 0.0f;
 	};
 

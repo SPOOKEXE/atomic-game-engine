@@ -24,6 +24,10 @@ namespace loadtest {
 	// Opens the sessions, ticks them, and reports.
 	class Harness {
 	  public:
+		// Builds a harness for one run.
+		//
+		// @param options How the run is shaped. Copied, so the caller's may go
+		//        out of scope.
 		explicit Harness(const Options &options);
 
 		// Runs to the tick or time budget.

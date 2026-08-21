@@ -50,11 +50,25 @@ namespace engine::render {
 	// stretch needs the source aspect or source-pixel insets. `Cell` identifies
 	// the current frame of an animated sheet.
 	struct InterfaceImage {
+		// The backend's texture handle, opaque here so this header needs no
+		// device type.
 		void *Texture = nullptr;
+
+		// Which frame of an animated sheet to draw. A still image leaves this
+		// at the whole texture.
 		FlipbookCell Cell;
+
+		// The upper texture coordinate of the used region, so an atlas entry
+		// draws its own rectangle rather than the whole page.
 		core::Vector2 UVMax{1.0f, 1.0f};
+
+		// The source's size in pixels. See the note above: every scale mode
+		// except stretch needs it, so it travels with the handle rather than
+		// being looked up again per draw.
+		//@{
 		uint32_t Width = 0;
 		uint32_t Height = 0;
+		//@}
 	};
 
 	// Draws a compiled `gui::DrawList` into the render target selected by the

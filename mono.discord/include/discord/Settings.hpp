@@ -96,6 +96,9 @@ namespace discord {
 		// piece of work on three platforms.
 		bool JoinSecrets = false;
 
+		// Whether two settings would produce the same behaviour.
+		//
+		// @return `true` when every field matches.
 		bool operator==(const Settings &) const = default;
 	};
 

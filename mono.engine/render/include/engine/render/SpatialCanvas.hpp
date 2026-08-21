@@ -45,8 +45,17 @@ namespace engine::ecs {
 
 namespace engine::render {
 
+	// Where a world-space pointer landed on a collector's canvas.
+	//
+	// @since v0.18
 	struct SpatialPointer {
+		// The collector the pointer hit, or an invalid entity when it hit
+		// nothing.
 		ecs::Entity Collector;
+
+		// Where it landed, in that canvas's own pixels rather than in studs or
+		// on the screen - which is the coordinate space every interface hit test
+		// above this already works in.
 		core::Vector2 Position;
 	};
 

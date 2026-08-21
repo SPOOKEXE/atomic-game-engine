@@ -205,6 +205,16 @@ namespace engine::ui {
 			double seconds
 		);
 
+		// Says how to resolve a `ViewportFrame` that is drawn on a canvas in the
+		// world rather than on the screen.
+		//
+		// **A callback rather than a dependency.** This module would otherwise
+		// have to know how viewport frames are rendered, which is
+		// `render::ViewportFrames`' business and sits above it.
+		//
+		// @param resolve Hands back the texture for one frame's entity. Held
+		//        until replaced, so it must outlive the interface or capture by
+		//        value.
 		void SetSpatialViewportSource(std::function<render::InterfaceImage(ecs::Entity)> resolve);
 
 		// --- render::FrameOverlayHook ---------------------------------------

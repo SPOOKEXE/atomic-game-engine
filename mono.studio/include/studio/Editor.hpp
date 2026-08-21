@@ -482,6 +482,8 @@ namespace studio {
 		// @since v0.18
 		std::filesystem::path HeapReport;
 
+		// Where to write one frame's span tree, and the switch that turns frame
+		// collection on at all. Empty means neither.
 		std::filesystem::path ProfileSnapshot;
 
 		// How long a world with nobody in it keeps ticking before it closes.
@@ -5317,14 +5319,38 @@ namespace studio {
 		// afterwards. Every feature below holds spans across frames, so every
 		// one of them needs the string rather than the view.
 		struct HeldSpan {
+			// The span's name, owned rather than viewed. See the note above -
+			// this copy is the whole reason the type exists.
 			std::string Name;
+
+			// Where it sits in the tree: how deep, and which span opened it.
+			//@{
 			uint32_t Depth = 0;
 			uint32_t Parent = 0;
+			//@}
+
+			// When it opened and how long it was open, in milliseconds from the
+			// start of the frame.
+			//@{
 			float StartMilliseconds = 0.0f;
 			float Milliseconds = 0.0f;
+			//@}
+
+			// The same duration with its children taken out, and the part of it
+			// spent waiting. **Both are what a reader actually wants**: a span
+			// that is wide because its children are wide is not the one to look
+			// at, and one that is wide because it blocked is a different problem
+			// from one that is wide because it worked.
+			//@{
 			float SelfMilliseconds = 0.0f;
 			float IdleMilliseconds = 0.0f;
+			//@}
+
+			// Which colour band it draws in.
 			engine::core::ProfileCategory Category = engine::core::ProfileCategory::Engine;
+
+			// Whether this span has already been counted into a summary, so a
+			// held frame is not summed twice.
 			bool Reported = false;
 		};
 
@@ -5379,6 +5405,8 @@ namespace studio {
 			//@}
 		};
 
+		// What the frame-graph panel is showing. Held across frames, which is
+		// what `HeldSpan` above exists for.
 		FrameGraphView FrameGraphState;
 
 		// What the heap panel is showing, refreshed when a reading is taken

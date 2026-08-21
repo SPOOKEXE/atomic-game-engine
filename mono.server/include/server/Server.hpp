@@ -111,8 +111,10 @@ namespace server {
 		// overwrite them either: a scene authored to solve at 30 should solve
 		// at 30 whoever hosts it. `world::WorldSettings` documents what the two
 		// numbers mean.
+		//@{
 		double PhysicsTickRate = 0.0;
 		double ReplicationTickRate = 0.0;
+		//@}
 
 		// Entities in the placeholder world, until there is a game file to load
 		// one from.

@@ -660,6 +660,13 @@ namespace engine::gui {
 		Billboard,
 	};
 
+	// One collector's resolved placement in the world, ready for the renderer.
+	//
+	// **Resolved once per frame rather than read per draw.** Both kinds carry
+	// every field: the alternative is two components, and a reader that has to
+	// ask which one it is before it can read a position.
+	//
+	// @since v0.8
 	struct SpatialCanvas {
 		// The canvas size in pixels.
 		core::Vector2 Size;
@@ -667,6 +674,7 @@ namespace engine::gui {
 		// How the canvas is placed. A surface uses `Origin` and both full-span
 		// axes directly. A billboard uses `Origin` as its anchor and `WorldSize`
 		// against the camera that draws it.
+		//@{
 		core::Vector3 Origin;
 		core::Vector3 AxisX;
 		core::Vector3 AxisY;
@@ -674,10 +682,18 @@ namespace engine::gui {
 		core::Vector2 BillboardStuds;
 		core::Vector2 BillboardPixels;
 		core::Vector3 Normal;
+		//@}
 
+		// How the world lights it, and how far away it stops being drawn.
+		//
+		// `LightInfluence` blends between unlit and lit, `Brightness` scales the
+		// result, and `MaxDistance` of zero means no limit rather than "never
+		// draw" - which is the reading a default-constructed component needs.
+		//@{
 		float LightInfluence = 0.0f;
 		float Brightness = 1.0f;
 		float MaxDistance = 0.0f;
+		//@}
 
 		// How far the camera that resolved this was from the collector, in studs.
 		//
@@ -691,9 +707,15 @@ namespace engine::gui {
 		// @since v0.18
 		float CurrentDistance = 0.0f;
 
+		// Which of the two placements above the renderer should read.
 		SpatialCanvasKind Kind = SpatialCanvasKind::Surface;
+
+		// Whether it draws over the world rather than being depth-tested
+		// against it, and whether it draws at all.
+		//@{
 		bool AlwaysOnTop = false;
 		bool Visible = true;
+		//@}
 
 		// Whether a pointer projected onto the world may land on this canvas.
 		//
@@ -706,6 +728,10 @@ namespace engine::gui {
 		// @since v0.18
 		bool Interactive = false;
 
+		// Padding, kept explicit so the component's layout is stated rather than
+		// left to the compiler. `ecs`'s padding rule is what makes that matter:
+		// an unnamed hole is bytes a hash and a wire format both have to be told
+		// to skip.
 		uint8_t Reserved[4] = {};
 	};
 

@@ -659,8 +659,12 @@ namespace engine::replication {
 		// existing row survives a collision.
 		class OutstandingSet {
 		  public:
+			// One entity's outstanding state, as the flat sorted array holds it.
 			struct Row {
+				// The entity this row is about, and the sort key.
 				uint64_t Entity = 0;
+
+				// What is outstanding for it.
 				Outstanding Value;
 			};
 
@@ -939,9 +943,17 @@ namespace engine::replication {
 			// The pointers are into the store's own columns and stay good until
 			// a structural change. Signing is a read and nothing between the two
 			// passes writes, so they are good for as long as they are used.
+			// One contiguous slice of a store column, for a signing job to read.
 			struct Run {
+				// The entities in this run, and the component bytes beside them.
+				// Borrowed from the store's own columns - see the note above for
+				// how long they stay good.
+				//@{
 				const ecs::Entity *Entities = nullptr;
 				const std::byte *Values = nullptr;
+				//@}
+
+				// How many rows both pointers cover.
 				size_t Rows = 0;
 			};
 

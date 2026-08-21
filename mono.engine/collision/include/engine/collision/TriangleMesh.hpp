@@ -39,9 +39,14 @@ namespace engine::collision {
 	//
 	// @since v0.17
 	struct Triangle {
+		// The three corners, in the winding the mesh stored them. Winding is
+		// what decides the face normal, so a caller that reorders these has
+		// turned the triangle inside out.
+		//@{
 		core::Vector3 A;
 		core::Vector3 B;
 		core::Vector3 C;
+		//@}
 	};
 
 	// A triangle mesh in its own object space.

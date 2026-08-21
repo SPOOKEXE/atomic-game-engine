@@ -53,10 +53,20 @@ namespace studio {
 	//
 	// @since v0.15
 	struct ViewportCanvas {
+		// The canvas the game interface believes it is laid out on. See the note
+		// above: this is the authored size and not the render target's, which
+		// may be rounded or scaled.
+		//@{
 		float Width = 0.0f;
 		float Height = 0.0f;
+		//@}
+
+		// Where the pointer is on that same canvas, so a hit test inside the
+		// panel agrees with the layout the panel drew.
+		//@{
 		float PointerX = 0.0f;
 		float PointerY = 0.0f;
+		//@}
 	};
 
 	// Resolves panel-local game UI coordinates without involving render-target

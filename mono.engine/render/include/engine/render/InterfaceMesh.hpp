@@ -127,6 +127,10 @@ namespace engine::render {
 	InterfaceScissor
 	ScissorFor(const core::Rect &clip, const core::Vector2 &canvas, const core::Vector2 &targetPixels);
 
+	// One run of indices that can be drawn with a single state setup.
+	//
+	// A batch ends where the texture or the clip changes, which is what makes
+	// the interface one draw call per state rather than one per element.
 	struct InterfaceBatch {
 		// Where this run starts in the index buffer, and how long it is.
 		//@{
@@ -180,8 +184,14 @@ namespace engine::render {
 	// The texture handle stays in `InterfacePass`; this arithmetic layer needs
 	// only the size and remains device-free.
 	struct InterfaceImageInfo {
+		// The source's extent in pixels, after the cell below has been chosen.
 		core::Vector2 Size;
+
+		// Which frame of an animated sheet is being drawn.
 		FlipbookCell Cell;
+
+		// The upper texture coordinate of the used region, so an atlas entry
+		// covers its own rectangle rather than the whole page.
 		core::Vector2 UVMax{1.0f, 1.0f};
 	};
 

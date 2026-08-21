@@ -41,6 +41,11 @@ namespace engine::replication {
 		ecs::Entity Parent;
 	};
 
+	// What applying one delta did.
+	//
+	// **A struct rather than a status alone**, because "it worked" and "every
+	// entity it named still existed" are different questions and a caller that
+	// resubscribes on the second needs to tell them apart.
 	struct WriteOutcome {
 		// How it went. `Ok` for a write that landed, in whole or in part.
 		ApplyStatus Status = ApplyStatus::Ok;
