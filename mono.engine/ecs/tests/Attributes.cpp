@@ -402,3 +402,47 @@ TEST_CASE("a truncated attribute table is refused rather than half-read", "[ecs]
 		CHECK(target.TableCount() == 0);
 	}
 }
+
+TEST_CASE("a recycled entity does not inherit the dead one's attributes", "[ecs][attributes]") {
+	// **`AttributeTable::Entities` is keyed by 32 bits of a 64-bit handle**, and
+	// this is the case that says why that is safe rather than lucky.
+	//
+	// `Entity::Id` carries an index in its low half and a generation in its
+	// high half; the map key is `instance.Id` narrowed to `uint32_t`, so it is
+	// the index alone and the generation is gone. Two *live* entities can never
+	// collide - an index is only handed out once at a time - but a destroyed
+	// entity's index is handed out again, and its row would be read by whoever
+	// gets it next.
+	//
+	// What makes that not happen is `StoreState.cpp`'s `DropAttributes`, which
+	// erases the row when the entity is destroyed. That is the invariant this
+	// case pins: delete the hook and the narrowing becomes a real leak, and
+	// nothing else in the suite would notice.
+	RegisterAttributeComponents();
+
+	Store store("store");
+
+	const Entity first = store.Create();
+	AttributeValue carried;
+	carried.Type = PropertyType::Int32;
+	carried.Int32 = 7;
+	REQUIRE(SetAttribute(store, first, Name("Carried"), carried));
+
+	store.Destroy(first);
+
+	// Recreate until the directory hands the index back. It does so immediately
+	// in practice; the loop is here so the case cannot hang on an allocator that
+	// defers reuse.
+	Entity second = store.Create();
+	for (int attempt = 0; attempt < 64 && (second.Id & 0xFFFF'FFFFull) != (first.Id & 0xFFFF'FFFFull);
+		 attempt++) {
+		second = store.Create();
+	}
+	REQUIRE((second.Id & 0xFFFF'FFFFull) == (first.Id & 0xFFFF'FFFFull));
+	REQUIRE(second != first);
+
+	// The index matches and the generation does not, which is exactly the pair a
+	// 32-bit key cannot tell apart.
+	AttributeValue read;
+	CHECK_FALSE(GetAttribute(store, second, Name("Carried"), read));
+}

@@ -1507,7 +1507,7 @@ namespace client {
 		engine::scene::AimIntent aim;
 		uint64_t tick = 0;
 
-		Universe_->Enter(Replicated, [this, &move, &aim, &tick](engine::ecs::Store &store) {
+		Universe_->Enter(Replicated, [&move, &aim, &tick](engine::ecs::Store &store) {
 			// **Only once there is a body**, because until the join notice
 			// arrives and the character replicates there is nothing for a move
 			// to mean - and a host that received one would look up a player,

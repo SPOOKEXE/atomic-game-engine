@@ -18,13 +18,6 @@
 
 namespace engine::net {
 
-	namespace {
-		// The salt separating the loss draw from every other use of `Random` in
-		// the process. Arbitrary, and only has to be its own: two features drawing
-		// from the same (index, salt) pair get the same numbers.
-		constexpr uint32_t LOSS_SALT = 0x10557u;
-	}
-
 	LossyTransport::LossyTransport(std::unique_ptr<Transport> beneath, const LossSettings &settings)
 		: Inner(std::move(beneath)), Settings(settings) {}
 

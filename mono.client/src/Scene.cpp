@@ -63,8 +63,6 @@ namespace client {
 	using engine::scene::WorldBounds;
 
 	namespace {
-		constexpr float TAU = 2.0f * std::numbers::pi_v<float>;
-
 		// The deterministic sequence used to be an integer mixer written out
 		// here, and the same one again in mono.server/src/Simulation.cpp. It is
 		// engine::core::Random now - same reason, one copy, and a specified
@@ -933,7 +931,7 @@ namespace client {
 			// `panes` needs no capture: it has static storage duration, for the
 			// reason every other scratch buffer in this file does - a per-frame
 			// allocation in a walk that runs once per world per frame.
-			[&views, &store, portals](
+			[&store, portals](
 				Entity entity,
 				const engine::scene::SurfaceCamera &target,
 				const engine::scene::Camera &lens,
