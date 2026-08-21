@@ -19,6 +19,17 @@ namespace engine::core {
 		struct HistoryFrame {
 			double Seconds = 0.0;
 			float Milliseconds = 0.0f;
+
+			// How much of `Milliseconds` the thread spent waiting.
+			//
+			// **Kept per frame because it cannot be recovered from the spans.**
+			// A span's history reading is its *busy* time, and an `Idle` span's
+			// busy time is zero by construction - so a frame that was sixteen
+			// milliseconds of vsync wait and a frame that was sixteen
+			// milliseconds of work record an identical set of span readings.
+			// Without this the snapshot could show the frame total and every
+			// span in it and still not say which of the two it was.
+			float IdleMilliseconds = 0.0f;
 			// Only the spans the frame actually had, as (name id, worst
 			// reading). A frame of six spans costs six pairs rather than a row
 			// per tracked name.
@@ -159,7 +170,9 @@ namespace engine::core {
 		// Reduces the frame just recorded to one worst reading per span, then
 		// feeds both consumers. Called from EndFrame on the spans about to be
 		// published, so nothing walks the tree twice.
-		void RecordHistory(State &state, float frameMilliseconds, uint64_t nowNanoseconds) {
+		void RecordHistory(
+			State &state, float frameMilliseconds, float idleMilliseconds, uint64_t nowNanoseconds
+		) {
 			for (const auto &span : state.Building) {
 				const uint32_t id = HistoryNameId(state, span.Name);
 				if (id == NO_NAME) {
@@ -196,6 +209,7 @@ namespace engine::core {
 			HistoryFrame &frame = state.History[slot];
 			frame.Seconds = static_cast<double>(nowNanoseconds) / 1'000'000'000.0;
 			frame.Milliseconds = frameMilliseconds;
+			frame.IdleMilliseconds = idleMilliseconds;
 			frame.Spans.clear();
 			for (uint32_t id : state.FrameTouched) {
 				frame.Spans.emplace_back(id, state.FrameMaximums[id]);
@@ -535,7 +549,12 @@ namespace engine::core {
 		// Before the swap, on the frame that was just recorded. The folding
 		// needs the same thing the history does - the tree, after the self time
 		// and the idle accounting are in it.
-		RecordHistory(state, total, now);
+		// The waiting, taken from the category total the loop above just
+		// rebuilt. `AccumulateIdleMilliseconds` has already run, so every `Idle`
+		// span's self time is in it and nested waits are counted once.
+		RecordHistory(
+			state, total, state.PublishedCategories[static_cast<size_t>(ProfileCategory::Idle)], now
+		);
 
 		if (state.Folding) {
 			AccumulateFoldedStacks(state.Building, state.Folded);
@@ -633,6 +652,17 @@ namespace engine::core {
 			frameWorst = std::max(frameWorst, milliseconds);
 		}
 
+		// The waiting, gathered the same way the frame times were.
+		std::vector<float> idleMilliseconds;
+		idleMilliseconds.reserve(state.HistoryCount);
+		double idleTotal = 0.0;
+		for (size_t index = 0; index < state.HistoryCount; index++) {
+			const float waited =
+				state.History[(state.HistoryStart + index) % MAXIMUM_HISTORY_FRAMES].IdleMilliseconds;
+			idleMilliseconds.push_back(waited);
+			idleTotal += waited;
+		}
+
 		char line[512];
 		out << "atomic frame graph snapshot\n";
 		std::snprintf(
@@ -657,6 +687,23 @@ namespace engine::core {
 			frameWorst,
 			p99,
 			p50
+		);
+		out << line;
+
+		// **Beside the frame total, because the span table below cannot say
+		// this.** Every span reading there is *busy* time, and an `Idle` span's
+		// busy time is zero by construction - so a sixteen-millisecond frame
+		// that was all vsync wait and one that was all work show the same rows.
+		// Reading the table and finding nothing that adds up to the frame is the
+		// correct outcome, and this is the line that says why.
+		std::vector<float> idleSorted = idleMilliseconds;
+		std::snprintf(
+			line,
+			sizeof(line),
+			"idle ms  mean %.3f  p99 %.3f  p50 %.3f   (waiting; the span rows below are busy time)\n",
+			state.HistoryCount == 0 ? 0.0 : idleTotal / static_cast<double>(state.HistoryCount),
+			Percentile(idleSorted, 0.99),
+			Percentile(idleSorted, 0.50)
 		);
 		out << line;
 
