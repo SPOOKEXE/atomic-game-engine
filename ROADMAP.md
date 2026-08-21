@@ -273,7 +273,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] plan the entire rendering system to a visual compositor system like Unity. https://docs.unity3d.com/Manual/scriptable-render-pipeline-introduction.html https://docs.unity3d.com/Packages/com.unity.visual-compositor@0.27/manual/nodes.html
 - [_] viewport indictator direction gizmo (select and lock to certain directions)
 - [_] 3d cursor and camera orbit options under gizmo
-- [_] ensure full parallel/vectorised (i.e. get all active scenes => build entity list => update gpu resident => batch render)
+- [_] ensure full parallel/vectorised (i.e. get all active scenes => build entity list => update gpu resident => batch render all cameras in every scene)
 
 ### v0.22
 
