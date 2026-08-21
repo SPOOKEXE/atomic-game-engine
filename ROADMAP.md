@@ -254,8 +254,30 @@ The milestone headings below are development labels. Not in line with project ve
 
 ---
 
-- [_] when you upload a asset in studio, it doesn't process it in studio for local store.
-- [_] check cdn processes obj files (dropped in studio)
+- [x] when you upload a asset in studio, it doesn't process it for the local
+      store. `ImportAssetPath` ensured the store, copied the bytes into `raw/`
+      and refreshed the list - and never baked. So a dropped file was invisible
+      in the viewport, silently absent from the next Publish, and on a fresh
+      store made `PublishLocal` refuse everything with a message reading "bake
+      before publishing - `contentimport --publish` and the studio both do",
+      which was true of one of them. It bakes each imported file now, through the
+      same one-file baker the asset picker's per-row button already used. A file
+      that will not bake is counted rather than fatal: plenty of what a person
+      drags into a content store is a licence or a `.txt`.
+- [x] check cdn processes obj files. The `.obj` path itself was wired end to
+      end; two real gaps sat either side of it. Dropping one in studio never
+      baked, which is the item above. And **a textured `.obj` baked white with no
+      error**: `bake::ReadObj` set `Submesh::Material` from `usemtl` and never
+      opened the `.mtl`, so `Texture` stayed empty and `BaseColour` stayed white
+      while the `.mtl` was copied into the store as an `unknown` asset nothing
+      referenced. `bake` has no filesystem by design, so it records the `mtllib`
+      name and `assetc` reads the library - `newmtl`, `map_Kd`, `Kd` - and fills
+      the fields in *before* the existing rewrite, so an OBJ's reference goes
+      through the same resolver and in-tree check as a glTF's. Measured: a mesh
+      that carried a zero-length texture now carries `wood.atex` and
+      `BaseColour [0.8, 0.4, 0.2, 1.0]`, exactly the `.mtl`'s `Kd`. Two tests,
+      and a stale comment in the suite corrected - it said an `.obj` could not
+      express a dangling reference, which stopped being true with this.
 - [_] add dev build and release builds to github release (two separate tags Release and Dev -O1 but keep things like heap profiler), then you have per-version ones as well
 - [x] ground grid should expand way further. 40 cells was 160 studs, which ends
       well inside a baseplate. 120 cells is 480. Tripling the radius does not

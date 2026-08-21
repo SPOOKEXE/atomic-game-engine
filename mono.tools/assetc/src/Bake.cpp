@@ -521,6 +521,93 @@ namespace assetc {
 					slash == std::string::npos ? std::string() : relative.substr(0, slash);
 
 				engine::assets::MeshData mesh = graph.Output(tail).Mesh;
+
+				// **An OBJ keeps its materials in a second file, and reading it
+				// is this program's job rather than the importer's.**
+				// `engine::bake` has no filesystem by design, so `Obj.cpp`
+				// records the `mtllib` name and stops - which left every
+				// textured `.obj` baking to a white mesh with no error and no
+				// warning, the `.mtl` copied through the store as an `unknown`
+				// asset that nothing referenced.
+				//
+				// Filled in *before* the rewrite below rather than after, so a
+				// name found here goes through exactly the same resolver, the
+				// same in-tree check and the same `BakedName` as a glTF's. A
+				// `Submesh::Texture` that skipped that check is the dangling
+				// reference `tests/Bake.cpp` exists to catch.
+				if (const std::string &library = graph.Output(tail).MaterialLibrary; !library.empty()) {
+					std::string libraryPath;
+					if (Resolve(directory, library, libraryPath)) {
+						std::error_code missing;
+						const std::filesystem::path onDisk = settings.Input / libraryPath;
+
+						if (!std::filesystem::is_regular_file(onDisk, missing)) {
+							ENGINE_WARN(
+								"bake: {}: names material library '{}', which is not in the input tree - "
+								"its submeshes will draw untextured",
+								relative,
+								library
+							);
+						} else if (std::ifstream file(onDisk); file) {
+							// The three statements a mesh can use. `newmtl`
+							// opens a material, `map_Kd` is its colour map and
+							// `Kd` its flat colour; everything else in a `.mtl`
+							// describes lighting this engine derives from a
+							// material of its own.
+							std::unordered_map<std::string, std::string> maps;
+							std::unordered_map<std::string, std::array<float, 3>> colours;
+							std::string current;
+							std::string line;
+
+							while (std::getline(file, line)) {
+								std::istringstream fields(line);
+								std::string word;
+								if (!(fields >> word)) {
+									continue;
+								}
+								if (word == "newmtl") {
+									current.clear();
+									fields >> current;
+								} else if (word == "map_Kd" && !current.empty()) {
+									// **The last field, because a `map_Kd` may
+									// carry options.** `map_Kd -s 1 1 1 wood.png`
+									// is legal and the name is at the end.
+									std::string token;
+									std::string last;
+									while (fields >> token) {
+										last = token;
+									}
+									if (!last.empty()) {
+										maps[current] = last;
+									}
+								} else if (word == "Kd" && !current.empty()) {
+									std::array<float, 3> tint{1.0f, 1.0f, 1.0f};
+									fields >> tint[0] >> tint[1] >> tint[2];
+									colours[current] = tint;
+								}
+							}
+
+							for (engine::assets::Submesh &submesh : mesh.Submeshes) {
+								if (submesh.Material.empty()) {
+									continue;
+								}
+								if (const auto found = maps.find(submesh.Material);
+									found != maps.end() && submesh.Texture.empty()) {
+									// The raw spelling, so the loop below
+									// resolves it like any other.
+									submesh.Texture = found->second;
+								}
+								if (const auto tinted = colours.find(submesh.Material);
+									tinted != colours.end()) {
+									submesh.BaseColour[0] = tinted->second[0];
+									submesh.BaseColour[1] = tinted->second[1];
+									submesh.BaseColour[2] = tinted->second[2];
+								}
+							}
+						}
+					}
+				}
+
 				for (engine::assets::Submesh &submesh : mesh.Submeshes) {
 					if (submesh.Texture.empty()) {
 						continue;

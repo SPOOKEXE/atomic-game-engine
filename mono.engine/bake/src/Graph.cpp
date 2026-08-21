@@ -229,6 +229,7 @@ namespace engine::bake {
 			}
 			result.Kind = PayloadKind::Mesh;
 			result.Mesh = std::move(model.Mesh);
+			result.MaterialLibrary = std::move(model.MaterialLibrary);
 			result.Bytes.clear();
 			break;
 		}

@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -276,6 +277,58 @@ TEST_CASE("a model's texture references become baked asset names", "[assetc][bak
 	CHECK(BakedName("characters/tex/skin.bmp") == "characters/tex/skin.atex");
 }
 
+TEST_CASE("a material library's colour map becomes a baked asset name", "[assetc][bake]") {
+	const Scratch scratch("mtllib");
+
+	// **The case that used to bake white with no error.** `bake::ReadObj` sets
+	// `Submesh::Material` from `usemtl` and nothing else, so before v0.19 a
+	// textured `.obj` produced a mesh with an empty `Texture` and a white
+	// `BaseColour`, and the `.mtl` was copied into the store as an `unknown`
+	// asset that nothing referenced.
+	scratch.Write(
+		"props/crate.obj",
+		std::string(
+			"mtllib crate.mtl\nv 0 0 0\nv 1 0 0\nv 1 0 1\nvn 0 1 0\nusemtl wood\nf 1//1 3//1 "
+			"2//1\n"
+		)
+	);
+	scratch.Write("props/crate.mtl", std::string("newmtl wood\nKd 0.5 0.25 0.125\nmap_Kd grain.bmp\n"));
+	scratch.Write("props/grain.bmp", BMP);
+
+	const Report report = Baked(scratch, Settings{});
+	CHECK(report.Failures == 0);
+	CHECK(report.DanglingTextures == 0);
+	CHECK(fs::exists(scratch.Out() / "props/grain.atex"));
+
+	// The mesh names the baked texture rather than the source spelling, which
+	// is the same rule every other format's references go through.
+	std::ifstream baked(scratch.Out() / "props/crate.amesh", std::ios::binary);
+	REQUIRE(baked);
+	const std::string text((std::istreambuf_iterator<char>(baked)), std::istreambuf_iterator<char>());
+	CHECK(text.find("props/grain.atex") != std::string::npos);
+	CHECK(text.find("grain.bmp") == std::string::npos);
+}
+
+TEST_CASE("a material library that is not there is a warning and not a failure", "[assetc][bake]") {
+	const Scratch scratch("mtlmissing");
+
+	// A model may name a library its author did not ship. That is a mesh with
+	// no texture, which is exactly what an untextured model is - not a failed
+	// bake, and not a reference to an asset that will never exist.
+	scratch.Write(
+		"props/crate.obj",
+		std::string(
+			"mtllib gone.mtl\nv 0 0 0\nv 1 0 0\nv 1 0 1\nvn 0 1 0\nusemtl wood\nf 1//1 3//1 "
+			"2//1\n"
+		)
+	);
+
+	const Report report = Baked(scratch, Settings{});
+	CHECK(report.Failures == 0);
+	CHECK(report.DanglingTextures == 0);
+	CHECK(fs::exists(scratch.Out() / "props/crate.amesh"));
+}
+
 TEST_CASE("one bad file costs that file and not the run", "[assetc][bake]") {
 	const Scratch scratch("partial");
 	scratch.Write("props/good.obj", OBJ);
@@ -432,13 +485,16 @@ namespace {
 	// A PMX naming one sheet as `tex\\skin.png`, taken byte for byte from
 	// `bake/tests/Model.cpp`.
 	//
-	// **A PMX and not the `.obj` the tests above use, because an `.obj` cannot
-	// express this bug.** `bake::ReadObj` reads `usemtl` into `Submesh::Material`
-	// and never sets `Submesh::Texture` - it does not open a `.mtl` at all - so a
-	// model built from one has no texture reference to dangle. That is also why
-	// the existing "texture references become baked asset names" case only
-	// asserts that the bitmap baked: there was never a reference in the mesh for
-	// it to check.
+	// **A PMX because it carries its sheet name inside itself**, which is the
+	// shortest way to a mesh with a texture reference in it.
+	//
+	// This used to say an `.obj` *cannot* express the bug, and that stopped
+	// being true at v0.19: `bake::ReadObj` still never opens a `.mtl` - the
+	// module has no filesystem - but it records the `mtllib` name now, and
+	// `assetc` reads the library and fills in `Submesh::Texture` before the
+	// rewrite. So an `.obj` can dangle a reference like any other model, and
+	// "a material library's colour map becomes a baked asset name" below is the
+	// case that covers it.
 	std::string PmxWithSheet() {
 		static constexpr std::array<uint8_t, 347> BYTES{
 			{0x50, 0x4D, 0x58, 0x20, 0x00, 0x00, 0x00, 0x40, 0x08, 0x00, 0x00, 0x02, 0x01, 0x01, 0x01, 0x01,

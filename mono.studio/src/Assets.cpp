@@ -180,7 +180,7 @@ namespace studio {
 		// in the editor's preferences file is a key that signs anything anybody
 		// drops in the folder. The *ingest* key on the Content page is saved and
 		// that is not an inconsistency - `ContentSources.hpp` carries why.
-		ImGui::TextUnformatted("Publish raw/ into processed/");
+		ImGui::TextUnformatted("Publish baked/ into processed/");
 
 		ImGui::SetNextItemWidth(-engine::ui::Scaled(130.0f));
 		ImGui::InputTextWithHint(
@@ -964,16 +964,43 @@ namespace studio {
 		size_t imported = 0;
 		size_t duplicates = 0;
 		size_t failures = 0;
+		size_t baked = 0;
 		const uint64_t now = NowSeconds();
 
 		const auto take = [&](const std::filesystem::path &file) {
 			const auto report = cdn::ImportFile(paths, file, now);
 			if (!report.has_value()) {
 				failures++;
-			} else if (report->Duplicate) {
+				return;
+			}
+			if (report->Duplicate) {
 				duplicates++;
-			} else {
-				imported++;
+				return;
+			}
+			imported++;
+
+			// **Baked as well as copied, because an import that stops at `raw/`
+			// puts nothing in the store anything can read.** This did three
+			// things - ensure the store, copy the bytes, refresh the list - and
+			// baking was not one of them, so a dropped file was invisible in the
+			// viewport, silently absent from the next Publish, and on a fresh
+			// store made `PublishLocal` refuse the whole thing. That refusal's
+			// own message reads "bake before publishing - `contentimport
+			// --publish` and the studio both do", which was true of one of them.
+			//
+			// `BakeRawAsset` is the same one-file bake the asset picker's per-row
+			// button uses: the same `assetc` settings, the same unit-box scale,
+			// the same `StoreTextureResolver`, and it registers the result with
+			// this editor's renderer on the way out.
+			//
+			// **Not fatal when it fails.** Plenty of what a person drags into a
+			// content store is not bakeable - a licence, a `.txt`, a source file
+			// beside the model it belongs to - and `ImportFile` accepted those
+			// deliberately. A count is the honest report; a failure here would
+			// make dragging a folder in an error.
+			std::string name;
+			if (BakeRawAsset(report->Stored.filename().generic_string(), name)) {
+				baked++;
 			}
 		};
 
@@ -1001,8 +1028,8 @@ namespace studio {
 			return;
 		}
 
-		AssetStatus = std::to_string(imported) + " imported, " + std::to_string(duplicates) +
-					  " already there, " + std::to_string(failures) + " failed";
+		AssetStatus = std::to_string(imported) + " imported, " + std::to_string(baked) + " baked, " +
+					  std::to_string(duplicates) + " already there, " + std::to_string(failures) + " failed";
 		ENGINE_INFO("assets: {}", AssetStatus);
 
 		// The list on screen is now wrong, and this is the only place that knows
