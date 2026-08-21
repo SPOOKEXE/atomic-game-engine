@@ -256,6 +256,8 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] physics bugs with the character (in playground steps, you phase through blocks, doesn't do bounds properly)
 - [_] character physics bugs and movement in weird directions and stuff
 - [_] check character physics with portals, i think normal objects are fine but the character
+- [_] when character sits in portal, character split in half
+- [_] add moving cubes in tunnels for lighting test too
 - [_] `/home/declan/Documents/GitHub/BLADEBORNE_UNIFIED/game` port and also studio place `/home/declan/Documents/Bladeborne Floor 0.rbxl`
 
 ### v0.20
