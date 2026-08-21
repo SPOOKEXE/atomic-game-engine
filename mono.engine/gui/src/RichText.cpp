@@ -1,6 +1,6 @@
-#include <engine/core/Chars.hpp>
 #include "Utf8.hpp"
 
+#include <engine/core/Chars.hpp>
 #include <engine/gui/RichText.hpp>
 
 #include <algorithm>

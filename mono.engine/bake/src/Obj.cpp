@@ -1,5 +1,6 @@
-#include <engine/core/Chars.hpp>
 #include "Importers.hpp"
+
+#include <engine/core/Chars.hpp>
 
 #include <algorithm>
 #include <array>

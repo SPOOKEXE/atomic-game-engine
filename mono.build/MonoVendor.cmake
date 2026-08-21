@@ -81,11 +81,28 @@ if(MONO_BUILD_CLIENT)
 
 	set(SDL_SHARED      ON  CACHE BOOL "" FORCE)
 	set(SDL_STATIC      OFF CACHE BOOL "" FORCE)
-	set(SDL_TEST        OFF CACHE BOOL "" FORCE)
 	set(SDL_TESTS       OFF CACHE BOOL "" FORCE)
 	set(SDL_EXAMPLES    OFF CACHE BOOL "" FORCE)
 	set(SDL_INSTALL     OFF CACHE BOOL "" FORCE)
-	set(SDL_DISABLE_PCH ON  CACHE BOOL "" FORCE)
+
+	# **`SDL_TEST_LIBRARY`, and it used to be spelled `SDL_TEST`.** Upstream
+	# renamed it and the old name went on being set here, which is the quiet
+	# kind of stale: a `set(... CACHE ... FORCE)` on a variable no project reads
+	# is not an error, so nothing said anything and `libSDL3_test.a` was built by
+	# every client configure. Nothing in this repository links it - it is the
+	# harness SDL's own test programs use, and `SDL_TESTS` above already declines
+	# those.
+	#
+	# It defaults ON, so the rename silently turned it back on rather than
+	# leaving it where it was put.
+	set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
+
+	# `SDL_DISABLE_PCH` was here and is gone rather than corrected, because there
+	# is nothing to correct it to: this SDL calls `target_precompile_headers`
+	# unconditionally and offers no option over it. A setting that reads as "we
+	# turned the precompiled header off" while the compile line carries `/Yu` is
+	# worse than no setting at all.
+
 	add_subdirectory("${MONO_VENDOR}/sdl" EXCLUDE_FROM_ALL)
 endif()
 

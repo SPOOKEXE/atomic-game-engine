@@ -1,5 +1,5 @@
-#include <engine/core/Chars.hpp>
 #include <engine/bakegraph/Document.hpp>
+#include <engine/core/Chars.hpp>
 
 #include <algorithm>
 #include <array>
