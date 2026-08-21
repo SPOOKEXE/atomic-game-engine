@@ -216,7 +216,12 @@ namespace engine::parallel {
 		// It exists rather than the id being made to mean two things, because
 		// `Id()` promises the number a person types into a debugger, and a
 		// handle is not that number.
-		uint64_t Native = 0;
+		//
+		// `[[maybe_unused]]` because "unused where it is" is a fact about the
+		// platform and not an oversight: Clang reports an unread private field
+		// and GCC does not, so without this the macOS build warns about a
+		// member the comment above already explains.
+		[[maybe_unused]] uint64_t Native = 0;
 
 		ProcessStatus Last;
 	};

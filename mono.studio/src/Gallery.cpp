@@ -260,7 +260,12 @@ namespace studio {
 			// **Only worth saying when the asset is shared; "1" is just
 			// noise.** The reference's rule, unchanged.
 			if (entry.Uses > 1) {
-				char badge[16];
+				// Wide enough for the worst `%zu` there is: twenty digits, the
+				// `x`, and the terminator. `snprintf` would have truncated
+				// rather than overrun, so this was never unsafe - but a badge
+				// reading `x1844674407370955` because the count did not fit is
+				// a wrong number rather than a missing one.
+				char badge[24];
 				std::snprintf(badge, sizeof(badge), "x%zu", entry.Uses);
 				const ImVec2 size = ImGui::CalcTextSize(badge);
 				ImGui::SetCursorPos(ImVec2(start.x + tileWidth - size.x - 6.0f, start.y + 4.0f));

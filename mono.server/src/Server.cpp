@@ -1022,7 +1022,7 @@ namespace server {
 			// a wall is in front of it would put the screen behind the world it
 			// exists to hide.
 			Replication->Authority().SetPriorityRefinement(
-				[this, score](engine::replication::ClientId client, engine::ecs::Entity entity, float hint) {
+				[score](engine::replication::ClientId client, engine::ecs::Entity entity, float hint) {
 					if (hint >= REPLICATED_FIRST) {
 						return hint;
 					}

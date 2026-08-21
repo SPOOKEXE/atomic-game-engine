@@ -19,8 +19,6 @@ namespace engine::script {
 		using core::Color3;
 		using core::Vector3;
 
-		constexpr float RADIANS_PER_DEGREE = std::numbers::pi_v<float> / 180.0f;
-
 		// --- Vector3 ---------------------------------------------------------
 
 		int Vector3New(lua_State *state) {
