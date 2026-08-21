@@ -248,7 +248,7 @@ The milestone headings below are development labels. Not in line with project ve
 
 ---
 
-- [_] add dev build and release builds to github release (two separate tags Release and Dev), then you have per-version ones as well
+- [_] add dev build and release builds to github release (two separate tags Release and Dev -O1 but keep things like heap profiler), then you have per-version ones as well
 - [_] ground grid should expand way further
 - [_] in "Start" with 4 clients running, tons of network activity for no character movement, quickhash / caching / signature not working properly or other bug
 - [_] in flamegraph, simulation needs more granularity, HUGE chunk missing.
