@@ -41,7 +41,7 @@
 --
 -- **The worlds are parallel, not separate processes.** `--worlds N` runs them in
 -- one process under `world::Universe`, dispatched through `parallel::Jobs`; the
--- multi-process arrangement is `mono.unified_server_client`'s and the
+-- multi-process arrangement is `mono.unified_tests`'s and the
 -- supervisor's. What this file proves is the part both share: a world publishes
 -- a view and knows nothing about who composites it.
 --

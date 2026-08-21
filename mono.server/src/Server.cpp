@@ -879,7 +879,7 @@ namespace server {
 		}
 
 		// **One table, and it is `replication`'s.** This was written out here,
-		// in `mono.unified_server_client` and in `mono.studio`, and D00018 said
+		// in `mono.unified_tests` and in `mono.studio`, and D00018 said
 		// all three agreed - which was true of this one and the studio's and
 		// not of the harness, whose own comment claimed it was duplicated from
 		// here. Nothing in the build compared them. `DefaultReplicatedComponents`

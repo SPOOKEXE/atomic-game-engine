@@ -257,7 +257,7 @@ endif()
 # so it configures only where both exist. Under the `server` preset there is no
 # client to link and this is absent rather than stubbed.
 if(MONO_BUILD_CLIENT AND MONO_BUILD_SERVER)
-	add_subdirectory(mono.unified_server_client)
+	add_subdirectory(mono.unified_tests)
 
 	# The editor. Needs the renderer to draw with and the server library to host
 	# with, so like the harness above it configures only where both exist -

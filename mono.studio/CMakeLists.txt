@@ -6,7 +6,7 @@
 # world in one process - which is precisely the arrangement the rule exists to
 # make deliberate rather than accidental.
 #
-# `mono.unified_server_client` took the escape first and its CMakeLists explains
+# `mono.unified_tests` took the escape first and its CMakeLists explains
 # why an escape with a user is different from one without. This is the second,
 # and both are named rather than inferred.
 #

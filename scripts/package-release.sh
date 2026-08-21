@@ -34,7 +34,7 @@ outdir=${4:?output directory}
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
-# The four products. `unified_server_client` is a diagnostic harness rather than
+# The four products. `unified_tests` is a diagnostic harness rather than
 # a product and is deliberately not here; RUNNING.md is where it is described.
 programs="client studio server cdn"
 

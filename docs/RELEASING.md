@@ -115,7 +115,7 @@ Each archive holds the staged directory of all four programs - `client/`,
 where it sits, and flattening them would put four copies of `libSDL3` and four
 disagreeing `shaders/render/` directories in one place.
 
-`unified_server_client` is not shipped. It is a diagnostic harness, and
+`unified_tests` is not shipped. It is a diagnostic harness, and
 `RUNNING.md` is where it is described.
 
 ### Two things packaging adds that the build does not

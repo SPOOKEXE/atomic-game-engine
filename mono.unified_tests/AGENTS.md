@@ -1,4 +1,4 @@
-# mono.unified_server_client - module invariants
+# mono.unified_tests - module invariants
 
 A diagnostic product: the server's world and the client's replicated world in
 one process, with `net` cut out of the middle.

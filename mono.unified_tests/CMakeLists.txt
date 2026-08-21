@@ -1,4 +1,4 @@
-# mono.unified_server_client - both halves of replication in one process.
+# mono.unified_tests - both halves of replication in one process.
 #
 # A diagnostic product, not a shipping one: it hosts the server's placeholder
 # world and the client's replicated world in one address space and hands the
@@ -17,7 +17,7 @@
 # The library exists for the same reason `mono.client`'s does - a test binary
 # needs something to link, and `tests/` here drives the harness directly.
 
-mono_add_library(unified_server_client
+mono_add_library(unified_tests
 	TIER client
 	NAMESPACE Mono
 	DEPS
@@ -41,11 +41,11 @@ mono_add_library(unified_server_client
 	ALLOW_TIER_ESCAPE Mono::server
 )
 
-mono_add_program(unified_server_client
+mono_add_program(unified_tests
 	TIER client
 	SOURCE app/main.cpp
 	DEPS
-		Mono::unified_server_client
+		Mono::unified_tests
 		Engine::core
 		Engine::scene
 )

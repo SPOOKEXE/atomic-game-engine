@@ -256,7 +256,7 @@ namespace studio {
 		Server,
 
 		// Both halves in one process, the arrangement `HostRole::OfBoth`
-		// describes and `mono.unified_server_client` proves. Roblox's "Play".
+		// describes and `mono.unified_tests` proves. Roblox's "Play".
 		Play,
 	};
 

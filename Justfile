@@ -752,9 +752,9 @@ serve *args: (build "cdn")
 # thing that serialises and the thing that draws, and a blank scene is equally
 # consistent with any of them. This cuts all of it and prints a column per
 # stage, so the first column that stops making sense is the answer.
-# mono.unified_server_client/AGENTS.md says how to read it.
-unified *args: (build "unified_server_client")
-    ./{{build}}/unified_server_client/unified_server_client {{args}}
+# mono.unified_tests/AGENTS.md says how to read it.
+unified *args: (build "unified_tests")
+    ./{{build}}/unified_tests/unified_tests {{args}}
 
 # Two runs of one scene, compared byte for byte.
 #
@@ -873,7 +873,7 @@ check-one-node-graph:
     found=$(grep -rlE 'namespace[[:space:]]+nodegraph[[:space:]]*\{' \
         --include='*.hpp' --include='*.cpp' \
         mono.build mono.cdn mono.client mono.discord mono.engine mono.launcher mono.network \
-        mono.server mono.studio mono.tools mono.unified_server_client || true)
+        mono.server mono.studio mono.tools mono.unified_tests || true)
     if [ -n "$found" ]; then
         echo "FAIL: a second node graph implementation, in first-party code:"
         echo "$found" | sed 's/^/  /'
@@ -925,7 +925,7 @@ docs-check: (build "docgen") docs
 # Every first-party .cpp and .hpp. The directory list is explicit rather than
 # `find .` so that mono.vendor/ is never touched - reformatting a submodule
 # turns every future update into a conflict.
-mono_sources := "mono.engine mono.client mono.server mono.unified_server_client mono.cdn mono.launcher mono.network mono.discord mono.tools mono.build"
+mono_sources := "mono.engine mono.client mono.server mono.unified_tests mono.cdn mono.launcher mono.network mono.discord mono.tools mono.build"
 
 # Finding it is two problems, not one.
 #

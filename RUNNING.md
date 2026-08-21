@@ -230,7 +230,7 @@ just preset=release build engine_ecs   # any of the above, other preset
 | `mono.engine/ui` | `engine_ui` | `Engine::ui` | `test_ui` | client |
 | `mono.client` | `client_lib` | `Mono::client` | `test_client` | client |
 | `mono.server` | `server_lib` | `Mono::server` | `test_server` | server |
-| `mono.unified_server_client` | `unified_server_client_lib` | `Mono::unified_server_client` | `test_unified_server_client` | client |
+| `mono.unified_tests` | `unified_tests_lib` | `Mono::unified_tests` | `test_unified_tests` | client |
 | `mono.studio` | `studio_lib` | `Mono::studio` | `test_studio` | client |
 | `mono.cdn` | `cdn_lib` | `Mono::cdn` | `test_cdn` | shared |
 | `mono.tools/testrunner` | `testrunner_lib` | `Tool::testrunner` | `test_testrunner` | shared |
@@ -1132,7 +1132,7 @@ client sees every other character move, because the movement happens once - on
 the server - and what crosses is the intent going up and the transform coming
 down.
 
-**This is not `mono.unified_server_client`, and the difference is the reason to
+**This is not `mono.unified_tests`, and the difference is the reason to
 run it.** That harness cuts `net` out of the middle to prove the
 serialise/deserialise seam; this puts the socket, the handshake, the cipher and
 the bandwidth budget back, and adds the thing neither of them had - more than

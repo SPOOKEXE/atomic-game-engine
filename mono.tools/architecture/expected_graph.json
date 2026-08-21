@@ -505,7 +505,7 @@
       ],
       "requires": "MONO_BUILD_CLIENT"
     },
-    "unified_server_client": {
+    "unified_tests": {
       "tier": "client",
       "links": [
         "assets",
@@ -685,7 +685,7 @@
       ],
       "requires": "MONO_BUILD_CLIENT"
     },
-    "unified_server_client": {
+    "unified_tests": {
       "tier": "client",
       "links": [
         "assets",

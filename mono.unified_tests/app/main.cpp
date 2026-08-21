@@ -65,8 +65,7 @@ int main(int argc, char **argv) {
 	engine::parallel::DeclareFlags();
 
 	engine::core::Arguments arguments(
-		"unified_server_client",
-		"atomic - a server and a client in one process, with no network between them."
+		"unified_tests", "atomic - a server and a client in one process, with no network between them."
 	);
 	engine::core::Config::DeclareOptions(arguments);
 
