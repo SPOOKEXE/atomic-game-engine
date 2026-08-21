@@ -100,8 +100,7 @@ TEST_CASE("two separate changes are reported separately", "[studio][diff]") {
 	// **What the alignment buys.** A prefix/suffix trim alone would collapse
 	// these into one hunk spanning the untouched middle, which is the coarse
 	// answer the size cap falls back to - correct, and much less useful.
-	const std::vector<DiffLine> lines =
-		DiffText("a\nb\nc\nd\ne\n", "a\nB\nc\nd\nE\n");
+	const std::vector<DiffLine> lines = DiffText("a\nb\nc\nd\ne\n", "a\nB\nc\nd\nE\n");
 
 	CHECK(Of(lines, DiffKind::Removed) == std::vector<std::string>{"b", "e"});
 	CHECK(Of(lines, DiffKind::Added) == std::vector<std::string>{"B", "E"});

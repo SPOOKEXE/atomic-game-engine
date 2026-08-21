@@ -182,11 +182,11 @@ if WHICH == "seam" then
 	-- Down on the seam from over the near room's shoulder, which is the angle
 	-- the report was made from: both halves of the crate and both patches of
 	-- floor in one frame.
-	viewpoint = CFrame.new(Vector3.new(9, 11, 16)) * CFrame.Angles(-0.5, 0.5, 0)
+	viewpoint = CFrame.new(Vector3.new(9, 11, 16)) * CFrame.fromOrientation(-0.5, 0.5, 0)
 elseif WHICH == "far" then
 	-- The same seam from the far room, so the clone can be compared against the
 	-- body it is a copy of.
-	viewpoint = CFrame.new(Vector3.new(GAP - 22, 11, 12)) * CFrame.Angles(-0.5, -1.0, 0)
+	viewpoint = CFrame.new(Vector3.new(GAP - 22, 11, 12)) * CFrame.fromOrientation(-0.5, -1.0, 0)
 end
 
 if viewpoint ~= nil then

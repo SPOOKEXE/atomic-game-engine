@@ -5,8 +5,8 @@
 // sockets mean to a render graph.
 
 #include <engine/graph/PipelineDocument.hpp>
+#include <engine/nodegraph/Graph.hpp>
 
-#include <nodegraph/Graph.hpp>
 #include <string>
 
 namespace studio {
@@ -18,14 +18,14 @@ namespace studio {
 	// Rebuilds a canvas graph from a saved pipeline. Pass output bindings are
 	// retained as hidden node values, while reads become typed links.
 	bool LoadRenderPipelineGraph(
-		const engine::graph::PipelineDocument &document, nodegraph::Graph &graph, std::string &error
+		const engine::graph::PipelineDocument &document, engine::nodegraph::Graph &graph, std::string &error
 	);
 
 	// Rebuilds an engine document from the canvas. Existing resource descriptors
 	// are retained and newly introduced outputs receive descriptors from their
 	// catalogue ports.
 	bool SaveRenderPipelineGraph(
-		const nodegraph::Graph &graph,
+		const engine::nodegraph::Graph &graph,
 		const engine::graph::PipelineDocument &basis,
 		engine::graph::PipelineDocument &document,
 		std::string &error

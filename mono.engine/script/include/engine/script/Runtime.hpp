@@ -57,7 +57,7 @@ namespace engine::script {
 	// Where a script is standing.
 	//
 	// **`RunService:IsServer()` is a question about the host, not about the
-	// world**, and the two are genuinely different: `mono.unified_server_client`
+	// world**, and the two are genuinely different: `mono.unified_tests`
 	// hosts a server in the same process as a client, so a world can be
 	// authoritative while the process it runs in also draws. A script asking
 	// which it is on is asking about the program, so the program is what says.
@@ -94,7 +94,7 @@ namespace engine::script {
 		}
 
 		// The role a host that is both has - single-player, and
-		// `mono.unified_server_client`.
+		// `mono.unified_tests`.
 		static constexpr HostRole OfBoth() {
 			return HostRole{true, true, false};
 		}

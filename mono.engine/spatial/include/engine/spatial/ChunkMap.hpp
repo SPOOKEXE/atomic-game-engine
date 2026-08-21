@@ -51,9 +51,13 @@ namespace engine::spatial {
 	//
 	// @since v0.17
 	struct ChunkCoordinate {
+		// The chunk's position on each axis, in chunks rather than studs. See
+		// the note above for why these are signed.
+		//@{
 		int32_t X = 0;
 		int32_t Y = 0;
 		int32_t Z = 0;
+		//@}
 
 		// Orders lexicographically on Z, then Y, then X.
 		//
@@ -76,6 +80,10 @@ namespace engine::spatial {
 			return X < other.X;
 		}
 
+		// Whether two coordinates name the same chunk.
+		//
+		// @param other The coordinate to compare with.
+		// @return `true` when all three axes match.
 		constexpr bool operator==(const ChunkCoordinate &other) const {
 			return X == other.X && Y == other.Y && Z == other.Z;
 		}

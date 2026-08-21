@@ -1,5 +1,6 @@
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/replication/Submission.hpp>
 
@@ -30,6 +31,12 @@ namespace engine::replication {
 			}
 			resolved.push_back(id);
 		}
+
+		// **The one component that is a structure rather than a value.** See
+		// `ecs.Hierarchy`'s registration: only `Parent` crosses, and the tree it
+		// belongs to is rebuilt here through `SetParent` rather than written
+		// over. A store's sibling links are its own.
+		const ecs::ComponentId hierarchy = ecs::Components::Of<ecs::Hierarchy>();
 
 		for (size_t index = 0; index < delta.Components.size(); index++) {
 			const ComponentDelta &component = delta.Components[index];
@@ -71,10 +78,41 @@ namespace engine::replication {
 				// header.
 				if (!permitted) {
 					outcome.Refused++;
-				} else if (store.Alive(entity)) {
-					store.SetComponent(entity, id, scratch.data());
-				} else {
+				} else if (!store.Alive(entity)) {
 					outcome.Whole = false;
+				} else if (id == hierarchy) {
+					// **Linked, not written.** `SetParent` unlinks from wherever
+					// this row currently hangs and appends it where the sender
+					// says, keeping every list in this store consistent by
+					// construction. Writing the component instead would put the
+					// sender's `FirstChild` and `NextSibling` into a tree this
+					// store maintains, which is how a sibling list comes to
+					// contain itself.
+					const auto *node =
+						static_cast<const ecs::Hierarchy *>(static_cast<const void *>(scratch.data()));
+
+					// **A node first, and a blank one.** `SetParent` refuses a
+					// row that has none, and an entity a `Structure` message
+					// just created is bare - so without this every instance
+					// arriving after a join stayed a root. It unlinks from
+					// whatever the row currently names, too, so the node it is
+					// given has to be this store's or nobody's. A row that
+					// already has one keeps it.
+					static const ecs::Hierarchy BLANK{};
+					if (!store.Has<ecs::Hierarchy>(entity)) {
+						store.SetComponent(entity, id, &BLANK);
+					}
+
+					// **Deferred on the answer rather than on a guess at it.**
+					// `SetParent` refuses for more reasons than a parent that
+					// is not here: one that is here but has no node yet, and one
+					// that is already below this row. Asking it and keeping
+					// what it would not take covers every reason at once.
+					if (!store.SetParent(entity, node->Parent) && node->Parent != ecs::NULL_ENTITY) {
+						outcome.Deferred.push_back(DeferredParent{entity, node->Parent});
+					}
+				} else {
+					store.SetComponent(entity, id, scratch.data());
 				}
 
 				descriptor.Destruct(scratch.data(), 1);

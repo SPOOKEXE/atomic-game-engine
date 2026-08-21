@@ -165,6 +165,9 @@ namespace engine::scene {
 	//
 	// @since v0.17
 	struct PortalTransitSeen {
+		// Which crossing this viewer has already accounted for. Compared with
+		// the transit's own serial: equal means the snap has happened, and any
+		// other value means it is due.
 		uint32_t Serial = 0;
 	};
 
@@ -202,41 +205,62 @@ namespace engine::scene {
 		core::Vector3 Angular;
 	};
 
-	// Whether the world may not move this part.
+	// Whether the world may move this part.
 	//
-	// **A tag rather than a flag.** Until v0.15 anchoring was said by the
-	// *absence* of `RigidBody`, which put the decision and the parameters in one
+	// **A tag rather than a flag.** Until v0.15 this was said by the *absence*
+	// of `RigidBody`, which put the decision and the parameters in one
 	// component: anchoring a part therefore threw away its mass and its drag,
 	// and unanchoring it brought the defaults back rather than what the author
 	// had typed. Those two jobs are separate now - `RigidBody` describes the
 	// part and this says what the world may do with it.
 	//
-	// **Presence rather than a boolean, so the dynamic queries skip an anchored
-	// part instead of visiting and rejecting it.** Whether a component is on a
-	// row is a property of the archetype, so `Query<...>().Without<Anchored>()`
-	// costs one test per table per plan and nothing per row - which is the whole
-	// reason this is a component and not a `bool` on `RigidBody`.
+	// **Presence rather than a boolean, so the dynamic queries match the
+	// archetype instead of visiting every part and rejecting most of them.**
+	// Whether a component is on a row is a property of the archetype, so
+	// `Query<...>()` naming this term costs one test per table per plan and
+	// nothing per row - which is the whole reason this is a component and not a
+	// `bool` on `RigidBody`.
 	//
-	// It marks the anchored ones, which reads the way the property does. That
-	// only became writable at v0.15: the ECS matched on presence and had no
-	// exclusion term, so a query meaning "the dynamic set" had to name something
-	// positive and this tag had to be spelled the other way round. `Store::
-	// Selection` is what changed.
+	// **Absence is static, and that is the point of the polarity.** Until v0.18
+	// the tag was `Anchored` and marked the immovable ones, so `BasePart`'s
+	// class set had to *add* a component to reach the safe default and every
+	// placed thing in a scene carried one. Static is the overwhelming majority
+	// of a world - walls, floors, props - and the majority should be the case
+	// that stores nothing. A bare `Transform` is now static because it is bare,
+	// which is also what a reader expects of a thing with no physics on it.
 	//
-	// Paired with `Motion`, which is a different question: this is whether the
-	// world may move it, `Motion` is whether it is moving. A sleeping part has
-	// neither.
+	// It also turns every dynamic query from an exclusion into a positive term,
+	// and a positive term is what the ECS matches archetypes on.
 	//
-	// @since v0.15
-	struct Anchored {};
+	// **Paired with `Motion`, and the pair is what makes sleeping expressible.**
+	// This is whether the world *may* move it; `Motion` is whether it is moving
+	// now. A sleeping body keeps this and loses `Motion` - `physics::Publish`
+	// takes it away, which is the archetype move sleeping is built on. So:
+	//
+	// - this and `Motion`: awake and simulated.
+	// - this, no `Motion`: asleep. Immovable for the tick, and the solver's wake
+	//   pass can give it back.
+	// - neither: static. Immovable, and there is no way back short of a script
+	//   assigning `Anchored = false`.
+	//
+	// The middle row is why the tag cannot be dropped in favour of testing
+	// `Motion` alone. Both a wall and a sleeping crate lack `Motion` and both
+	// take infinite mass in the solve, but only one of them is coming back, and
+	// this is what says which. `physics::FactsFor` reads it for exactly that.
+	//
+	// Roblox's `Anchored` is the negation of this, and `scene::AnchoredProperty`
+	// is the only place that inversion is spelled.
+	//
+	// @since v0.18, and `Anchored` with the opposite polarity since v0.15
+	struct Simulated {};
 
 	// What a part weighs, how it sheds speed, and what the solver may do with
 	// it.
 	//
-	// **On every `BasePart`, anchored or not**, because all four fields are
+	// **On every `BasePart`, simulated or not**, because all four fields are
 	// authored rather than simulated: an author types a mass and a drag, and a
 	// part that is anchored for a while should still have them afterwards.
-	// `Anchored` is what decides whether the solver visits the row.
+	// `Simulated` is what decides whether the solver visits the row.
 	//
 	// Widest-first with named padding, so the object representation a snapshot
 	// writes holds no uninitialised bytes.
@@ -655,8 +679,8 @@ namespace engine::scene {
 		// pointer pick, which is why the field is one byte in existing padding
 		// rather than a component of its own.
 		//
-		// **Not the same as `Anchored`**, which is where it would most easily be
-		// confused: anchored decides whether the physics moves it, and this
+		// **Not the same as `Simulated`**, which is where it would most easily
+		// be confused: that decides whether the physics moves it, and this
 		// decides whether a person can grab it. A locked part still falls.
 		//
 		// @since v0.12

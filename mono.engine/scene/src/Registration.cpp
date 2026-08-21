@@ -664,9 +664,16 @@ namespace engine::scene {
 		ecs::Components::Register<RigidBody>("scene.RigidBody");
 
 		// A tag, so it costs a column of nothing and crosses as presence. The
-		// authority decides whether a part is anchored, so it crosses like every
-		// other `scene.` row.
-		ecs::Components::Register<Anchored>("scene.Anchored");
+		// authority decides whether a part is simulated, so it crosses like
+		// every other `scene.` row.
+		//
+		// **The name changed with the polarity at v0.18**, and a snapshot or an
+		// `.agame` written before that reads wrong rather than failing: the rows
+		// that carried `scene.Anchored` are exactly the ones that should now
+		// carry nothing, and the name is simply absent from this table. Nothing
+		// migrates it, because the format is pre-release and `docs/RELEASING.md`
+		// says what that means.
+		ecs::Components::Register<Simulated>("scene.Simulated");
 		ecs::Components::Register<Collider>("scene.Collider");
 		ecs::Components::Register<Surface>("scene.Surface", WriteSurfaces, ReadSurfaces);
 

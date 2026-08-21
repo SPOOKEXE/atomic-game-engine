@@ -89,6 +89,9 @@ int main(int argc, char **argv) {
 	arguments.Value("processes", "N", "How many processes share this machine (default: worked out)");
 	arguments.Value("profile-out", "PATH", "Fold this run's frame graph into a .folded flamegraph capture");
 	arguments.Value(
+		"heap-report", "PATH", "Write a heap profile when the run ends, and sample while running"
+	);
+	arguments.Value(
 		"profile-window",
 		"TICKS",
 		"With --profile-out, also snapshot every TICKS ticks for scripts/flamegraph.py --average"
@@ -122,8 +125,16 @@ int main(int argc, char **argv) {
 		std::fprintf(stderr, "%s\n\n%s", parsed.Error.c_str(), arguments.Help().c_str());
 		return 2;
 	}
+	if (parsed.VersionRequested) {
+		std::fputs(arguments.VersionLine().c_str(), stdout);
+		return 0;
+	}
 	if (parsed.HelpRequested) {
 		std::fputs(arguments.Help().c_str(), stdout);
+		return 0;
+	}
+	if (parsed.DescribeRequested) {
+		std::fputs(arguments.Describe().c_str(), stdout);
 		return 0;
 	}
 
@@ -225,6 +236,9 @@ int main(int argc, char **argv) {
 	}
 	if (auto profile = arguments.Get("profile-out")) {
 		options.ProfilePath = std::filesystem::path(*profile);
+	}
+	if (auto report = arguments.Get("heap-report")) {
+		options.HeapReport = std::filesystem::path(*report);
 	}
 	options.ProfileWindowTicks =
 		static_cast<uint64_t>(std::max<int64_t>(0, arguments.GetInteger("profile-window", 0)));

@@ -444,11 +444,15 @@ namespace engine::gui {
 	const char *Describe(ScrollingDirection value);
 	const char *Describe(StrokeMode value);
 
+	// **No nested `//@{` here, and that is not a style choice.** Doxygen's member
+	// groups do not nest: an inner `//@}` closes the outer one, so a group
+	// around the v0.17 pair silently ended the group this whole list is in and
+	// left every overload below it undocumented.
+	//
 	// @since v0.17
-	//@{
 	const char *Describe(LineJoin value);
 	const char *Describe(StrokeSizing value);
-	//@}
+
 	const char *Describe(DragStyle value);
 	const char *Describe(DragResponse value);
 	const char *Describe(ElasticBehavior value);

@@ -23,20 +23,46 @@ declare extern type Vector3 with
 	Z: number
 	Magnitude: number
 	Unit: Vector3
+	function Abs(self): Vector3
+	function Ceil(self): Vector3
+	function Floor(self): Vector3
+	function Sign(self): Vector3
+	function Cross(self, other: Vector3): Vector3
+	function Dot(self, other: Vector3): number
+	-- Unsigned without an axis, and signed by which side of `axis` the turn goes
+	-- with one. The unsigned form cannot tell left from right.
+	function Angle(self, other: Vector3, axis: Vector3?): number
+	function FuzzyEq(self, other: Vector3, epsilon: number?): boolean
+	function Lerp(self, goal: Vector3, alpha: number): Vector3
+	function Max(self, vector: Vector3): Vector3
+	function Min(self, vector: Vector3): Vector3
 	function __add(self, other: Vector3): Vector3
 	function __sub(self, other: Vector3): Vector3
 	function __mul(self, other: Vector3 | number): Vector3
+	-- The vector has to be on the left of `/` and `//`. Roblox's operator table
+	-- has no `number / Vector3` row, and `2 * v` is the one that does.
+	function __div(self, other: Vector3 | number): Vector3
+	function __idiv(self, other: Vector3 | number): Vector3
 	function __unm(self): Vector3
 end
 
 declare Vector3: {
 	new: (x: number?, y: number?, z: number?) -> Vector3,
 
+	-- Capitalised, because Roblox capitalises these two and leaves `new` lower
+	-- case. It reads as an inconsistency and is one, but it is the one a script
+	-- written elsewhere already contains.
+	FromNormalId: (normal: Enum_NormalId) -> Vector3,
+	FromAxis: (axis: Enum_Axis) -> Vector3,
+
 	-- **Lowercase, because Roblox's are.** Every other member of this vocabulary
-	-- is capitalised and these two are not, which reads as a mistake until you
+	-- is capitalised and these five are not, which reads as a mistake until you
 	-- try to run a script written elsewhere.
 	zero: Vector3,
 	one: Vector3,
+	xAxis: Vector3,
+	yAxis: Vector3,
+	zAxis: Vector3,
 }
 
 declare extern type Color3 with
@@ -58,14 +84,84 @@ declare Color3: {
 -- overload alone.
 declare extern type CFrame with
 	Position: Vector3
+	-- Roblox's alias for `Position`, kept because a long Roblox habit types it.
+	p: Vector3
+	X: number
+	Y: number
+	Z: number
+
+	-- This frame's rotation at the world origin.
+	Rotation: CFrame
+
+	-- The three basis columns. `XVector`/`YVector` are the same directions as
+	-- `RightVector`/`UpVector`; `ZVector` is the negation of `LookVector`, which
+	-- is the one pair that differ.
+	RightVector: Vector3
+	UpVector: Vector3
+	LookVector: Vector3
+	XVector: Vector3
+	YVector: Vector3
+	ZVector: Vector3
+
 	function __mul(self, other: CFrame): CFrame
+	function __add(self, offset: Vector3): CFrame
+	function __sub(self, offset: Vector3): CFrame
+
+	function Inverse(self): CFrame
+	function Orthonormalize(self): CFrame
+	function Lerp(self, goal: CFrame, alpha: number): CFrame
+	function ToWorldSpace(self, other: CFrame): CFrame
+	function ToObjectSpace(self, other: CFrame): CFrame
+	function PointToWorldSpace(self, point: Vector3): Vector3
+	function PointToObjectSpace(self, point: Vector3): Vector3
+	function VectorToWorldSpace(self, direction: Vector3): Vector3
+	function VectorToObjectSpace(self, direction: Vector3): Vector3
+	function AngleBetween(self, other: CFrame): number
+	function FuzzyEq(self, other: CFrame, epsilon: number?): boolean
+
+	-- Twelve values: the position, then the rotation matrix row by row. That is
+	-- the order the twelve-argument `CFrame.new` takes them back in.
+	function GetComponents(self): (number, number, number, number, number, number, number, number, number, number, number, number)
+	function components(self): (number, number, number, number, number, number, number, number, number, number, number, number)
+
+	function ToEulerAnglesXYZ(self): (number, number, number)
+	function ToEulerAnglesYXZ(self): (number, number, number)
+	function ToOrientation(self): (number, number, number)
+	function ToAxisAngle(self): (Vector3, number)
 end
 
 declare CFrame: {
-	new: ((x: number?, y: number?, z: number?) -> CFrame) & ((position: Vector3) -> CFrame),
+	new: ((x: number?, y: number?, z: number?) -> CFrame)
+		& ((position: Vector3) -> CFrame)
+		& ((x: number, y: number, z: number, qX: number, qY: number, qZ: number, qW: number) -> CFrame)
+		& ((x: number, y: number, z: number, r00: number, r01: number, r02: number, r10: number, r11: number, r12: number, r20: number, r21: number, r22: number) -> CFrame),
+
+	-- The identity: no turn, at the origin.
+	identity: CFrame,
+
 	-- Radians, because Roblox's is radians - while `Orientation` is degrees.
-	Angles: (pitch: number, yaw: number, roll: number) -> CFrame,
+	--
+	-- **X, then Y, then Z**, which is what Roblox means by `Angles` and by
+	-- `fromEulerAnglesXYZ`; the two are one function. Until v0.18 this name was
+	-- bound to the Y-X-Z composition, so a script pasted from Roblox turned the
+	-- wrong way whenever it named two axes at once.
+	Angles: (rx: number, ry: number, rz: number) -> CFrame,
+	fromEulerAnglesXYZ: (rx: number, ry: number, rz: number) -> CFrame,
+
+	-- Y, then X, then Z. The order `BasePart.Orientation` round-trips through,
+	-- here and in Roblox. Two names for one function, as Roblox has.
+	fromEulerAnglesYXZ: (rx: number, ry: number, rz: number) -> CFrame,
+	fromOrientation: (rx: number, ry: number, rz: number) -> CFrame,
+
 	lookAt: (from: Vector3, to: Vector3, up: Vector3?) -> CFrame,
+	lookAlong: (at: Vector3, direction: Vector3, up: Vector3?) -> CFrame,
+	fromAxisAngle: (axis: Vector3, angle: number) -> CFrame,
+
+	-- The third basis vector is determined by the first two, so a fourth
+	-- argument is accepted and ignored rather than honoured into a basis that is
+	-- not a rotation.
+	fromMatrix: (position: Vector3, vX: Vector3, vY: Vector3, vZ: Vector3?) -> CFrame,
+	fromRotationBetweenVectors: (from: Vector3, to: Vector3) -> CFrame,
 }
 
 -- --- signals ---------------------------------------------------------------
@@ -397,6 +493,13 @@ end
 
 declare extern type RaycastParams with
 	CollisionGroup: string
+
+	-- The most entities an overlap or a cast will report. Ignored by `Raycast`,
+	-- which reports one hit or none.
+	--
+	-- A result exactly this long may have been truncated, which is the author's
+	-- own instruction rather than a silent loss. Clamped to 65536.
+	MaxParts: number
 end
 
 declare RaycastParams: {
@@ -420,6 +523,9 @@ declare extern type Enum_AspectType extends EnumItem with
 end
 
 declare extern type Enum_AutomaticSize extends EnumItem with
+end
+
+declare extern type Enum_Axis extends EnumItem with
 end
 
 declare extern type Enum_BorderMode extends EnumItem with
@@ -582,6 +688,11 @@ declare Enum: {
 		X: Enum_AutomaticSize,
 		Y: Enum_AutomaticSize,
 		XY: Enum_AutomaticSize,
+	},
+	Axis: {
+		X: Enum_Axis,
+		Y: Enum_Axis,
+		Z: Enum_Axis,
 	},
 	BorderMode: {
 		Outline: Enum_BorderMode,
@@ -1843,6 +1954,17 @@ declare extern type Workspace extends Service with
 	CurrentCamera: Instance
 	MaxSurfaces: number
 	SurfaceBounces: number
+	function OverlapBox(self, centre: Vector3, size: Vector3, params: RaycastParams?): { Instance }
+	function OverlapSphere(self, centre: Vector3, radius: number, params: RaycastParams?): { Instance }
+	function BlockCast(self, from: CFrame, size: Vector3, motion: Vector3, params: RaycastParams?): { Instance }
+	function SphereCast(self, from: Vector3, radius: number, motion: Vector3, params: RaycastParams?): { Instance }
+	function RaycastThroughPortals(self, origin: Vector3, direction: Vector3, params: RaycastParams?): {
+		Instance: Instance,
+		Position: Vector3,
+		Normal: Vector3,
+		Distance: number,
+		Material: string,
+	}?
 	function Raycast(self, origin: Vector3, direction: Vector3, params: RaycastParams?): {
 		Instance: Instance,
 		Position: Vector3,

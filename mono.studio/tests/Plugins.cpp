@@ -12,17 +12,17 @@
 #include <engine/ecs/Schema.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Part.hpp>
-#include <engine/testing/Suite.hpp>
-#include <studio/Config.hpp>
 #include <engine/script/Host.hpp>
-#include <studio/Plugins.hpp>
+#include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <filesystem>
 #include <fstream>
-#include <string>
 #include <memory>
+#include <string>
+#include <studio/Config.hpp>
+#include <studio/Plugins.hpp>
 #include <vector>
 
 TEST_SUITE_ID("studio.plugins")
@@ -35,13 +35,13 @@ using studio::BeatPlugins;
 using studio::DiscoverPlugins;
 using studio::LoadedPlugin;
 using studio::ParsePluginManifest;
-using studio::PluginManifest;
 using studio::PLUGIN_FAULT_LIMIT;
-using studio::RegisterSelectionComponent;
-using studio::SELECTED_COMPONENT;
 using studio::PluginButton;
+using studio::PluginManifest;
 using studio::PluginToolbar;
 using studio::PluginWidget;
+using studio::RegisterSelectionComponent;
+using studio::SELECTED_COMPONENT;
 using studio::StartPlugins;
 
 namespace {
@@ -52,9 +52,9 @@ namespace {
 		Folder() {
 			Root = std::filesystem::temp_directory_path() /
 				   ("atomic-studio-plugins-" +
-					std::to_string(std::filesystem::hash_value(
-						std::filesystem::temp_directory_path() / "studio-plugins"
-					)));
+					std::to_string(
+						std::filesystem::hash_value(std::filesystem::temp_directory_path() / "studio-plugins")
+					));
 			std::filesystem::remove_all(Root);
 			std::filesystem::create_directories(Root);
 		}
@@ -275,8 +275,7 @@ TEST_CASE("a plugin reads the selection as a component", "[studio][plugins]") {
 	// **A tag, so the query is the whole API.** There is no selection function
 	// for a plugin to call, and this is why: a selection is per-entity state
 	// about the world, which is what a component is for.
-	const engine::ecs::ComponentId id =
-		engine::ecs::Components::Find(Name(std::string(SELECTED_COMPONENT)));
+	const engine::ecs::ComponentId id = engine::ecs::Components::Find(Name(std::string(SELECTED_COMPONENT)));
 	REQUIRE(id.IsValid());
 	REQUIRE(engine::ecs::Schemas::Of(id) != nullptr);
 	CHECK(engine::ecs::Schemas::Of(id)->Fields().empty());
@@ -352,8 +351,9 @@ namespace {
 			};
 		}
 
-		bool Call(std::string_view name, HostArguments arguments, HostValue &result, std::string &failure)
-			override {
+		bool Call(
+			std::string_view name, HostArguments arguments, HostValue &result, std::string &failure
+		) override {
 			const auto text = [&](size_t at) {
 				return at < arguments.size() ? std::string(arguments[at].AsText()) : std::string{};
 			};

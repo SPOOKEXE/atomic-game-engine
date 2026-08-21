@@ -1,5 +1,6 @@
 #include <engine/core/Clock.hpp>
 #include <engine/core/FrameGraph.hpp>
+#include <engine/core/HeapProfile.hpp>
 
 #include <algorithm>
 #include <cstdio>
@@ -19,10 +20,43 @@ namespace engine::core {
 		struct HistoryFrame {
 			double Seconds = 0.0;
 			float Milliseconds = 0.0f;
-			// Only the spans the frame actually had, as (name id, worst
-			// reading). A frame of six spans costs six pairs rather than a row
-			// per tracked name.
-			std::vector<std::pair<uint32_t, float>> Spans;
+
+			// How much of `Milliseconds` the thread spent waiting.
+			//
+			// **Kept per frame because it cannot be recovered from the spans.**
+			// A span's history reading is its *busy* time, and an `Idle` span's
+			// busy time is zero by construction - so a frame that was sixteen
+			// milliseconds of vsync wait and a frame that was sixteen
+			// milliseconds of work record an identical set of span readings.
+			// Without this the snapshot could show the frame total and every
+			// span in it and still not say which of the two it was.
+			float IdleMilliseconds = 0.0f;
+			// Where this frame's readings begin in `State::Readings`, and how
+			// many there are.
+			//
+			// **A slice of one shared ring, and it used to be a `std::vector`
+			// per frame.** The window holds up to `MAXIMUM_HISTORY_FRAMES`
+			// frames, so that was twenty thousand separate heap blocks, each
+			// keeping whatever capacity the busiest frame ever to occupy that
+			// slot had needed - and none of it given back when the panel closed.
+			// The heap profiler measured a headless client reaching **10 MiB
+			// across 20,249 live blocks inside `EndFrame`, still climbing after
+			// forty seconds**, for a panel nobody had open.
+			//
+			// It looked bounded and was not, in the way that matters: the bound
+			// was twenty thousand times the worst frame anybody ever recorded,
+			// which is forty megabytes, and it was approached slowly enough to
+			// read as a leak on any graph short of an hour. A slice into a ring
+			// the whole window shares makes the figure a constant that is
+			// allocated once and stated below.
+			uint32_t FirstReading = 0;
+			uint32_t ReadingCount = 0;
+		};
+
+		// One span's worst reading in one retained frame.
+		struct HistoryReading {
+			uint32_t Name = 0;
+			float Milliseconds = 0.0f;
 		};
 
 		struct State {
@@ -91,6 +125,17 @@ namespace engine::core {
 			size_t HistoryCount = 0;
 			size_t HistoryNamesDropped = 0;
 
+			// Every retained frame's span readings, in one ring.
+			//
+			// Frames are written in order and their readings are contiguous, so
+			// the oldest retained frame's slice is always the tail - which is
+			// what lets a frame be evicted by advancing two integers rather than
+			// by freeing anything.
+			std::vector<HistoryReading> Readings;
+			size_t ReadingsHead = 0;
+			size_t ReadingsUsed = 0;
+			size_t HistoryReadingsDropped = 0;
+
 			// --- folded stacks ------------------------------------------------
 			bool Folding = false;
 			FoldedStacks Folded;
@@ -121,6 +166,10 @@ namespace engine::core {
 			// takes the window's own storage - one hitch, at the moment
 			// somebody opened a profiler, rather than a quota that never comes
 			// back.
+			state.ReadingsHead = 0;
+			state.ReadingsUsed = 0;
+			state.HistoryReadingsDropped = 0;
+
 			state.HistoryNames.clear();
 			state.HistoryNameIds.clear();
 			state.RecentRings.clear();
@@ -159,7 +208,49 @@ namespace engine::core {
 		// Reduces the frame just recorded to one worst reading per span, then
 		// feeds both consumers. Called from EndFrame on the spans about to be
 		// published, so nothing walks the tree twice.
-		void RecordHistory(State &state, float frameMilliseconds, uint64_t nowNanoseconds) {
+		// Whether this binary was compiled with optimisation on.
+		//
+		// GCC and Clang define `__OPTIMIZE__` for any `-O` above zero and leave
+		// it undefined at `-O0`. MSVC has no equivalent, so `NDEBUG` stands in -
+		// it is a weaker question, and the answer it gives is the right one for
+		// the presets this repository ships.
+		constexpr bool OptimisedBuild() {
+#if defined(_MSC_VER)
+#if defined(NDEBUG)
+			return true;
+#else
+			return false;
+#endif
+#elif defined(__OPTIMIZE__)
+			return true;
+#else
+			return false;
+#endif
+		}
+
+		// Retires the oldest retained frame, giving its readings back to the
+		// ring. Two integers and a subtraction; nothing is freed.
+		void DropOldestFrame(State &state) {
+			if (state.HistoryCount == 0) {
+				return;
+			}
+			state.ReadingsUsed -= state.History[state.HistoryStart].ReadingCount;
+			state.HistoryStart = (state.HistoryStart + 1) % FrameGraph::MAXIMUM_HISTORY_FRAMES;
+			state.HistoryCount--;
+		}
+
+		// Visits one retained frame's readings in the order they were recorded.
+		template <typename Visitor>
+		void ForEachReading(const State &state, const HistoryFrame &frame, Visitor visit) {
+			for (uint32_t offset = 0; offset < frame.ReadingCount; offset++) {
+				const size_t at = (frame.FirstReading + offset) % state.Readings.size();
+				visit(state.Readings[at]);
+			}
+		}
+
+		void RecordHistory(
+			State &state, float frameMilliseconds, float idleMilliseconds, uint64_t nowNanoseconds
+		) {
 			for (const auto &span : state.Building) {
 				const uint32_t id = HistoryNameId(state, span.Name);
 				if (id == NO_NAME) {
@@ -185,28 +276,51 @@ namespace engine::core {
 			}
 			state.RecentCursor = (state.RecentCursor + 1) % FrameGraph::RECENT_FRAMES;
 
+			// **Room is made before the frame is placed, and it is made in two
+			// currencies.** The window is bounded by frames *and* by readings,
+			// and at a few thousand frames a second the second bound is the one
+			// that binds: twenty thousand frames of fifty spans is a million
+			// readings, and the ring holds a quarter of that. Whichever runs
+			// out first evicts from the same end.
+			const size_t wanted = std::min(state.FrameTouched.size(), state.Readings.size());
+			while (state.HistoryCount == FrameGraph::MAXIMUM_HISTORY_FRAMES) {
+				DropOldestFrame(state);
+			}
+			while (state.HistoryCount > 0 && state.ReadingsUsed + wanted > state.Readings.size()) {
+				DropOldestFrame(state);
+			}
+
 			const size_t slot =
 				(state.HistoryStart + state.HistoryCount) % FrameGraph::MAXIMUM_HISTORY_FRAMES;
-			if (state.HistoryCount == FrameGraph::MAXIMUM_HISTORY_FRAMES) {
-				state.HistoryStart = (state.HistoryStart + 1) % FrameGraph::MAXIMUM_HISTORY_FRAMES;
-			} else {
-				state.HistoryCount++;
-			}
+			state.HistoryCount++;
 
 			HistoryFrame &frame = state.History[slot];
 			frame.Seconds = static_cast<double>(nowNanoseconds) / 1'000'000'000.0;
 			frame.Milliseconds = frameMilliseconds;
-			frame.Spans.clear();
-			for (uint32_t id : state.FrameTouched) {
-				frame.Spans.emplace_back(id, state.FrameMaximums[id]);
-			}
+			frame.IdleMilliseconds = idleMilliseconds;
+			frame.FirstReading = static_cast<uint32_t>(state.ReadingsHead);
+			frame.ReadingCount = 0;
 
-			// Whatever fell out of the window. Dropping from the front of a ring
-			// is one index, which is the reason it is a ring.
+			for (uint32_t id : state.FrameTouched) {
+				if (frame.ReadingCount >= wanted) {
+					// One frame with more distinct spans than the whole ring
+					// holds. Counted rather than allowed to wrap over its own
+					// slice, which would make a frame's readings the *last* few
+					// it recorded and say nothing about it.
+					state.HistoryReadingsDropped++;
+					continue;
+				}
+				state.Readings[state.ReadingsHead] = HistoryReading{id, state.FrameMaximums[id]};
+				state.ReadingsHead = (state.ReadingsHead + 1) % state.Readings.size();
+				frame.ReadingCount++;
+			}
+			state.ReadingsUsed += frame.ReadingCount;
+
+			// Whatever fell out of the time window. Dropping from the front of a
+			// ring is two indices, which is the reason it is a ring.
 			while (state.HistoryCount > 1 &&
 				   frame.Seconds - state.History[state.HistoryStart].Seconds > FrameGraph::HISTORY_SECONDS) {
-				state.HistoryStart = (state.HistoryStart + 1) % FrameGraph::MAXIMUM_HISTORY_FRAMES;
-				state.HistoryCount--;
+				DropOldestFrame(state);
 			}
 
 			for (uint32_t id : state.FrameTouched) {
@@ -304,6 +418,13 @@ namespace engine::core {
 			// span lists would put the same hitch back the next time the panel
 			// opened, in exchange for memory nothing else is contending for.
 			state.History.resize(FrameGraph::MAXIMUM_HISTORY_FRAMES);
+
+			// The readings the frames above index into. Two allocations for the
+			// whole retained window, taken when the panel opens and never
+			// repeated - where the per-frame vectors this replaced were twenty
+			// thousand, taken over the first twenty thousand frames, and grown
+			// again whenever a slot met a busier frame than it had held before.
+			state.Readings.assign(FrameGraph::MAXIMUM_HISTORY_READINGS, HistoryReading{});
 		} else {
 			state.Published.clear();
 			state.PublishedMilliseconds = 0.0f;
@@ -535,7 +656,12 @@ namespace engine::core {
 		// Before the swap, on the frame that was just recorded. The folding
 		// needs the same thing the history does - the tree, after the self time
 		// and the idle accounting are in it.
-		RecordHistory(state, total, now);
+		// The waiting, taken from the category total the loop above just
+		// rebuilt. `AccumulateIdleMilliseconds` has already run, so every `Idle`
+		// span's self time is in it and nested waits are counted once.
+		RecordHistory(
+			state, total, state.PublishedCategories[static_cast<size_t>(ProfileCategory::Idle)], now
+		);
 
 		if (state.Folding) {
 			AccumulateFoldedStacks(state.Building, state.Folded);
@@ -621,9 +747,9 @@ namespace engine::core {
 		for (size_t offset = 0; offset < state.HistoryCount; offset++) {
 			const HistoryFrame &frame = state.History[(state.HistoryStart + offset) % MAXIMUM_HISTORY_FRAMES];
 			frameMilliseconds.push_back(frame.Milliseconds);
-			for (const auto &[id, milliseconds] : frame.Spans) {
-				readings[id].push_back(milliseconds);
-			}
+			ForEachReading(state, frame, [&](const HistoryReading &reading) {
+				readings[reading.Name].push_back(reading.Milliseconds);
+			});
 		}
 
 		double frameTotal = 0.0;
@@ -633,8 +759,37 @@ namespace engine::core {
 			frameWorst = std::max(frameWorst, milliseconds);
 		}
 
+		// The waiting, gathered the same way the frame times were.
+		std::vector<float> idleMilliseconds;
+		idleMilliseconds.reserve(state.HistoryCount);
+		double idleTotal = 0.0;
+		for (size_t index = 0; index < state.HistoryCount; index++) {
+			const float waited =
+				state.History[(state.HistoryStart + index) % MAXIMUM_HISTORY_FRAMES].IdleMilliseconds;
+			idleMilliseconds.push_back(waited);
+			idleTotal += waited;
+		}
+
 		char line[512];
 		out << "atomic frame graph snapshot\n";
+
+		// **Said first, because every number below it is wrong without it.**
+		// The `dev` preset compiles the engine at `-O0` while the vendored code
+		// keeps `-O2`, which is the right trade for a build you iterate on and
+		// the wrong one to read a profile from. Measured on one scene, the same
+		// display, the same frame, `dev` against `release`: `convert instances`
+		// 11.99 ms against 0.179, `graph.light-bounds` 10.18 against 0.120,
+		// `sync rendered` 26.5 against 0.74. Between thirty and eighty times,
+		// span by span.
+		//
+		// A reader without this line sees a plausible-looking frame and spends a
+		// day optimising the compiler's missing inliner. The panel already warns
+		// about forced serial compute for exactly this reason and this is the
+		// larger of the two.
+		if (!OptimisedBuild()) {
+			out << "WARNING  this build is unoptimised - every figure below is "
+				   "tens of times its shipped cost\n";
+		}
 		std::snprintf(
 			line,
 			sizeof(line),
@@ -657,6 +812,23 @@ namespace engine::core {
 			frameWorst,
 			p99,
 			p50
+		);
+		out << line;
+
+		// **Beside the frame total, because the span table below cannot say
+		// this.** Every span reading there is *busy* time, and an `Idle` span's
+		// busy time is zero by construction - so a sixteen-millisecond frame
+		// that was all vsync wait and one that was all work show the same rows.
+		// Reading the table and finding nothing that adds up to the frame is the
+		// correct outcome, and this is the line that says why.
+		std::vector<float> idleSorted = idleMilliseconds;
+		std::snprintf(
+			line,
+			sizeof(line),
+			"idle ms  mean %.3f  p99 %.3f  p50 %.3f   (waiting; the span rows below are busy time)\n",
+			state.HistoryCount == 0 ? 0.0 : idleTotal / static_cast<double>(state.HistoryCount),
+			Percentile(idleSorted, 0.99),
+			Percentile(idleSorted, 0.50)
 		);
 		out << line;
 
@@ -740,18 +912,22 @@ namespace engine::core {
 			);
 			out << line;
 
-			std::vector<std::pair<uint32_t, float>> spans = frame.Spans;
-			std::sort(spans.begin(), spans.end(), [](const auto &left, const auto &right) {
-				return left.second > right.second;
-			});
+			std::vector<HistoryReading> spans;
+			spans.reserve(frame.ReadingCount);
+			ForEachReading(state, frame, [&](const HistoryReading &reading) { spans.push_back(reading); });
+			std::sort(
+				spans.begin(), spans.end(), [](const HistoryReading &left, const HistoryReading &right) {
+					return left.Milliseconds > right.Milliseconds;
+				}
+			);
 
 			for (size_t index = 0; index < spans.size() && index < WORST_FRAME_SPANS; index++) {
 				std::snprintf(
 					line,
 					sizeof(line),
 					" %s %.3f",
-					state.HistoryNames[spans[index].first].c_str(),
-					spans[index].second
+					state.HistoryNames[spans[index].Name].c_str(),
+					spans[index].Milliseconds
 				);
 				out << line;
 			}

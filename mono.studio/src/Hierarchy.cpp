@@ -1,9 +1,8 @@
-#include <studio/Hierarchy.hpp>
-
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 
 #include <algorithm>
+#include <studio/Hierarchy.hpp>
 #include <studio/Widgets.hpp>
 
 namespace studio {
@@ -112,10 +111,9 @@ namespace studio {
 		size_t instances = 0;
 
 		store.Each<const Hierarchy, const InstanceName, const InstanceClass>(
-			[&](Entity entity,
-				const Hierarchy &node,
-				const InstanceName &label,
-				const InstanceClass &declared) {
+			[&](
+				Entity entity, const Hierarchy &node, const InstanceName &label, const InstanceClass &declared
+			) {
 				instances++;
 
 				// The five fields `Flatten` reads, and nothing else. See the
@@ -161,10 +159,9 @@ namespace studio {
 
 		// --- the second pass, which only a frame that changed something pays --
 		store.Each<const Hierarchy, const InstanceName, const InstanceClass>(
-			[&](Entity entity,
-				const Hierarchy &node,
-				const InstanceName &label,
-				const InstanceClass &declared) {
+			[&](
+				Entity entity, const Hierarchy &node, const InstanceName &label, const InstanceClass &declared
+			) {
 				Node copied;
 				copied.Id = entity.Id;
 				copied.Parent = node.Parent;
@@ -293,10 +290,9 @@ namespace studio {
 				child = link->NextSibling;
 			}
 
-			const bool open = hasChildren && ((node->Flags & OPEN) != 0 ||
-											  std::binary_search(
-												  OpenSorted.begin(), OpenSorted.end(), at.Instance.Id
-											  ));
+			const bool open =
+				hasChildren && ((node->Flags & OPEN) != 0 ||
+								std::binary_search(OpenSorted.begin(), OpenSorted.end(), at.Instance.Id));
 
 			node->Row = RowList.size();
 
@@ -313,9 +309,8 @@ namespace studio {
 			// The two mutex acquisitions, spent here rather than per frame. See
 			// `HierarchyRow::Text`.
 			row.Text = node->Name.IsValid() ? Label(node->Name) : "(unnamed)";
-			row.ClassText = node->Class.IsValid()
-								? Label(engine::ecs::Classes::Describe(node->Class).Name)
-								: "Entity";
+			row.ClassText =
+				node->Class.IsValid() ? Label(engine::ecs::Classes::Describe(node->Class).Name) : "Entity";
 
 			RowList.push_back(row);
 
@@ -340,21 +335,17 @@ namespace studio {
 			}
 
 			for (size_t index = Fringe.size(); index > mark; index--) {
-				Stack.push_back(Pending{
-					Fringe[index - 1], static_cast<uint16_t>(at.Depth + 1)
-				});
+				Stack.push_back(Pending{Fringe[index - 1], static_cast<uint16_t>(at.Depth + 1)});
 			}
 			Fringe.resize(mark);
 		}
 	}
 
 	HierarchyView::Node *HierarchyView::Find(Entity instance) {
-		const auto found = std::lower_bound(
-			Nodes.begin(),
-			Nodes.end(),
-			instance.Id,
-			[](const Node &node, uint64_t id) { return node.Id < id; }
-		);
+		const auto found =
+			std::lower_bound(Nodes.begin(), Nodes.end(), instance.Id, [](const Node &node, uint64_t id) {
+				return node.Id < id;
+			});
 		if (found == Nodes.end() || found->Id != instance.Id) {
 			return nullptr;
 		}
@@ -433,9 +424,7 @@ namespace studio {
 		return rows.subspan(first, last - first + 1);
 	}
 
-	void TopMost(
-		const HierarchyView &view, std::span<const Entity> moving, std::vector<Entity> &out
-	) {
+	void TopMost(const HierarchyView &view, std::span<const Entity> moving, std::vector<Entity> &out) {
 		out.clear();
 		out.reserve(moving.size());
 

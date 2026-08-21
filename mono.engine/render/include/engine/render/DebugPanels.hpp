@@ -11,13 +11,15 @@
 //        is a link - see `NetworkStatistics::Connected`.
 //
 //   F5 - the frame graph: last frame's scope tree as a flamegraph, plus
-//        per-category totals, per-system costs and the metrics counters.
+//        per-category totals, per-system costs, the metrics counters, and the
+//        heap.
 //
 // All three draw into an OverlayImage and know nothing about the GPU.
 //
 // @tier L12 · client
 
 #include <engine/core/FrameGraph.hpp>
+#include <engine/core/HeapProfile.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/render/FrameStatistics.hpp>
 #include <engine/render/Overlay.hpp>
@@ -42,6 +44,19 @@ namespace engine::render {
 		Systems,
 		// Whatever was written to core::Metrics this frame.
 		Counters,
+
+		// Where the live bytes are, and whether they are climbing.
+		//
+		// **The one tab that is not about this frame.** Everything above
+		// reports what the last frame cost, and a frame that is fast and forty
+		// megabytes heavier than the one before it reads as healthy on every
+		// one of them. So this view leads with a graph of live bytes over
+		// minutes and puts the tag tree under it, which is the opposite
+		// arrangement to the flamegraph and is the right way round for a
+		// quantity whose shape over time is the finding.
+		//
+		// @since v0.18
+		Heap,
 
 		// Number of selectable tabs; not itself a view.
 		Count,
@@ -302,6 +317,38 @@ namespace engine::render {
 
 		// What is crossing the replication link, when there is one.
 		NetworkStatistics Network;
+
+		// The process heap totals, as `core::HeapProfile::Totals` reports them.
+		core::HeapTotals Heap;
+
+		// Whether the allocator hooks were compiled into this program.
+		//
+		// **Drawn as a sentence rather than as an empty tree.** A `release`
+		// build has no hooks, so every figure here is zero - and a heap panel
+		// reading zero bytes is a far more alarming thing than one saying it was
+		// not compiled in.
+		bool HeapCompiledIn = false;
+
+		// Borrowed tag tree rows in draw order, from `HeapProfile::TreeRows`.
+		std::span<const core::HeapTreeRow> HeapRows;
+
+		// Borrowed live-byte readings, oldest first, from `HeapProfile::History`.
+		//
+		// This is the graph. Its cadence is the caller's - every program here
+		// samples once a second - so the width of the plot is a span of minutes
+		// rather than of frames.
+		std::span<const core::HeapSample> HeapHistory;
+
+		// Borrowed growth report, steepest first, from `HeapProfile::Growth`.
+		//
+		// **Computed by the caller when it samples rather than when the panel
+		// draws.** Fitting a slope to every tracked node is a pass over the
+		// whole retained window, and doing it at the panel's repaint rate would
+		// make the profiler the most expensive thing in the frame.
+		std::span<const core::HeapGrowth> HeapGrowth;
+
+		// Seconds the growth figures are fitted over.
+		double HeapHistorySeconds = 0.0;
 
 		// Positive integer pixel scale, raised on high-DPI displays to keep the panels legible.
 		int Scale = 2;

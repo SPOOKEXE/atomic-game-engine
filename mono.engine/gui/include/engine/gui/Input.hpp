@@ -200,10 +200,31 @@ namespace engine::gui {
 	// @return The element, or `NULL_ENTITY`.
 	ecs::Entity Pick(const ecs::Store &store, const DrawList &list, const core::Vector2 &point);
 
+	// The same test, restricted to one collector's own elements.
+	//
+	// **What a spatial canvas needs.** A pointer projected onto a surface has
+	// landed on that surface and nowhere else, so a hit test that could return
+	// an element of some other collector would be wrong rather than merely
+	// unhelpful.
+	//
+	// @param store     The world, for the `Active` test and the class test.
+	// @param list      The compiled list, in paint order.
+	// @param collector Whose elements to consider.
+	// @param point     The pointer, in that collector's canvas pixels.
+	// @return The element, or `NULL_ENTITY`.
 	ecs::Entity PickInCollector(
 		const ecs::Store &store, const DrawList &list, ecs::Entity collector, const core::Vector2 &point
 	);
 
+	// The same test, restricted to collectors that draw on the screen.
+	//
+	// The counterpart of `PickInCollector`: a mouse at a window position must
+	// not select an element that only exists on a billboard in the world.
+	//
+	// @param store The world, for the `Active` test and the class test.
+	// @param list  The compiled list, in paint order.
+	// @param point The pointer, in screen pixels.
+	// @return The element, or `NULL_ENTITY`.
 	ecs::Entity PickScreen(const ecs::Store &store, const DrawList &list, const core::Vector2 &point);
 
 	// Every element under a point within one subtree, front to back.

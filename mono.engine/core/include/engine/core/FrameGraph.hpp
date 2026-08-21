@@ -411,9 +411,32 @@ namespace engine::core {
 		// Maximum elapsed time retained for WriteSnapshot().
 		static constexpr double HISTORY_SECONDS = 5.0;
 
-		// Maximum retained frame count. This also bounds memory when the frame
-		// rate is high enough that HISTORY_SECONDS alone would not.
+		// Maximum retained frame count.
+		//
+		// A bound on how many frames the window may describe. It is **not** the
+		// bound on what the window costs - `MAXIMUM_HISTORY_READINGS` is, and at
+		// a few thousand frames a second that is the one that binds first.
 		static constexpr size_t MAXIMUM_HISTORY_FRAMES = 20000;
+
+		// Span readings the retained window holds across every frame in it.
+		//
+		// **This is the memory bound, and it exists because the old one was not
+		// one.** Each retained frame used to own a `std::vector` of its readings,
+		// so the window's cost was twenty thousand heap blocks growing towards
+		// twenty thousand times the busiest frame anybody had recorded - about
+		// forty megabytes, approached slowly enough to read as a leak. The heap
+		// profiler caught a headless client at 10 MiB across 20,249 blocks and
+		// still climbing after forty seconds, for a panel nobody had open.
+		//
+		// A quarter of a million readings is exactly 2 MiB, allocated once when
+		// collection is switched on. What it buys in window depth depends on how
+		// many distinct spans a frame has: fifty is about five thousand frames,
+		// which is five seconds at a thousand frames a second and rather less
+		// above that. `HistoryFrames` and `HistorySeconds` report what was
+		// actually kept, so a snapshot says what it covers rather than assuming.
+		//
+		// @since v0.18
+		static constexpr size_t MAXIMUM_HISTORY_READINGS = 1 << 18;
 
 		// Distinct span names the history tracks. Past this a name is not
 		// recorded and the snapshot says how many it turned away - a copied

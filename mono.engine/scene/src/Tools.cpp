@@ -65,11 +65,11 @@ namespace engine::scene {
 				}
 				store.Remove<CharacterLimb>(handle);
 
-				// **Only where there is a body to move.** An anchored handle
-				// carries the `Anchored` tag and must not gain a `Motion` - that
-				// pair is what `Anchored` means, and handing one back would
-				// silently unanchor a part the author anchored.
-				if (!store.Has<Anchored>(handle)) {
+				// **Only where there is a body to move.** A static handle
+				// carries no `Simulated` tag and must not gain a `Motion` - a
+				// `Motion` without the tag is the row nothing owns, and handing
+				// one back would silently unanchor a part the author anchored.
+				if (store.Has<Simulated>(handle)) {
 					store.Set(handle, Motion{});
 				}
 				return;

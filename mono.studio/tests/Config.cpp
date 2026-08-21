@@ -11,7 +11,6 @@
 // to stay in "most recent first" order across a save and a load.
 
 #include <engine/testing/Suite.hpp>
-#include <studio/Config.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -20,6 +19,7 @@
 #include <imgui.h>
 #include <nlohmann/json.hpp>
 #include <string>
+#include <studio/Config.hpp>
 
 TEST_SUITE_ID("studio.config")
 
@@ -41,9 +41,9 @@ namespace {
 		Scratch() {
 			Root = std::filesystem::temp_directory_path() /
 				   ("atomic-studio-config-" +
-					std::to_string(std::filesystem::hash_value(
-						std::filesystem::temp_directory_path() / "studio-config"
-					)));
+					std::to_string(
+						std::filesystem::hash_value(std::filesystem::temp_directory_path() / "studio-config")
+					));
 			std::filesystem::remove_all(Root);
 			SetConfigRoot(Root);
 		}
@@ -183,22 +183,17 @@ TEST_CASE("a panel's colours round trip, and a broken one is skipped", "[studio]
 	// worth asserting is that a name nobody knows, a colour that is not one,
 	// and a panel with nothing left in it each cost only themselves.
 	Preferences written;
-	written.PanelColours["Explorer"][engine::ui::ThemeColour::Surface] =
-		IM_COL32(0x2E, 0x34, 0x40, 0xFF);
-	written.PanelColours["Output"][engine::ui::ThemeColour::Accent] =
-		IM_COL32(0xFF, 0x00, 0x80, 0xC0);
+	written.PanelColours["Explorer"][engine::ui::ThemeColour::Surface] = IM_COL32(0x2E, 0x34, 0x40, 0xFF);
+	written.PanelColours["Output"][engine::ui::ThemeColour::Accent] = IM_COL32(0xFF, 0x00, 0x80, 0xC0);
 	REQUIRE(written.Save());
 
 	Preferences read;
 	REQUIRE(read.Load());
 	REQUIRE(read.PanelColours.count("Explorer") == 1);
 	CHECK(
-		read.PanelColours["Explorer"][engine::ui::ThemeColour::Surface] ==
-		IM_COL32(0x2E, 0x34, 0x40, 0xFF)
+		read.PanelColours["Explorer"][engine::ui::ThemeColour::Surface] == IM_COL32(0x2E, 0x34, 0x40, 0xFF)
 	);
-	CHECK(
-		read.PanelColours["Output"][engine::ui::ThemeColour::Accent] == IM_COL32(0xFF, 0x00, 0x80, 0xC0)
-	);
+	CHECK(read.PanelColours["Output"][engine::ui::ThemeColour::Accent] == IM_COL32(0xFF, 0x00, 0x80, 0xC0));
 
 	// Nothing else was pinned by writing one colour, which is what keeps a
 	// recoloured panel following the theme in every other respect.
@@ -239,8 +234,7 @@ TEST_CASE("a hand-edited preference is clamped rather than obeyed", "[studio][co
 	// Every one of these is one typo away in a file this format exists to let
 	// somebody edit. A scale of zero is a window nobody can read.
 	scratch.Write(
-		"preferences.json",
-		R"({"scale": 0.0, "gridStep": -4.0, "rotationStep": -1.0, "controlPort": 99999})"
+		"preferences.json", R"({"scale": 0.0, "gridStep": -4.0, "rotationStep": -1.0, "controlPort": 99999})"
 	);
 
 	Preferences preferences;
@@ -317,10 +311,7 @@ TEST_CASE("a hand-edited recent list comes back obeying the same rules", "[studi
 
 	// Seven entries with a duplicate among them, which is more than a session
 	// could have produced.
-	scratch.Write(
-		"recent.json",
-		R"({"projects": ["a", "b", "c", "d", "e", "f", "b", 7]})"
-	);
+	scratch.Write("recent.json", R"({"projects": ["a", "b", "c", "d", "e", "f", "b", 7]})");
 
 	RecentProjects recent;
 	REQUIRE(recent.Load());

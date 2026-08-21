@@ -1,8 +1,7 @@
 #include <engine/assets/Signature.hpp>
-
-#include <cdn/LocalStore.hpp>
 #include <engine/core/Log.hpp>
 
+#include <cdn/LocalStore.hpp>
 #include <fstream>
 #include <sstream>
 #include <string_view>
@@ -210,7 +209,7 @@ namespace studio {
 			if (fields.size() >= 5) {
 				// Anything unrecognised reads as `Both` for the reason above:
 				// the permissive answer is the one that keeps a list working.
-				source.Role = fields[4] == "read"    ? SourceRole::Read
+				source.Role = fields[4] == "read"	 ? SourceRole::Read
 							  : fields[4] == "write" ? SourceRole::Write
 													 : SourceRole::Both;
 			}

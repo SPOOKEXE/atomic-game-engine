@@ -27,6 +27,8 @@ using engine::core::Vector2;
 using engine::render::GlyphAtlas;
 using engine::render::InterfaceBatch;
 using engine::render::InterfaceMesh;
+using engine::render::InterfaceScissor;
+using engine::render::ScissorFor;
 
 namespace {
 	struct StagedAssets {
@@ -709,4 +711,91 @@ TEST_CASE("a gradient's transparency adds to what the command already has", "[re
 	REQUIRE(mesh.Vertices().size() == 4);
 	CHECK(mesh.Vertices()[0].A == 128);
 	CHECK(mesh.Vertices()[1].A == 0);
+}
+
+TEST_CASE("a clip is scaled from canvas units into the target's pixels", "[render][interfacemesh]") {
+	// **The bug this exists for.** The studio lays a viewport's game interface
+	// out against the panel's logical size - that is the space imgui reports
+	// the pointer in - while the panel's texture is allocated at the display's
+	// pixel density. A scissor taken straight from the clip therefore cut the
+	// whole interface down to the top-left quarter of a 2x panel, while the
+	// vertex shader went on stretching it across the whole panel.
+	const engine::core::Rect clip{engine::core::Vector2{0.0f, 0.0f}, engine::core::Vector2{800.0f, 450.0f}};
+
+	const InterfaceScissor doubled =
+		ScissorFor(clip, engine::core::Vector2{800.0f, 450.0f}, engine::core::Vector2{1600.0f, 900.0f});
+	CHECK(doubled.X == 0);
+	CHECK(doubled.Y == 0);
+	CHECK(doubled.Width == 1600);
+	CHECK(doubled.Height == 900);
+
+	// The ordinary display, where the two are the same number - which is why
+	// this went unnoticed for as long as it did.
+	const InterfaceScissor plain =
+		ScissorFor(clip, engine::core::Vector2{800.0f, 450.0f}, engine::core::Vector2{800.0f, 450.0f});
+	CHECK(plain.Width == 800);
+	CHECK(plain.Height == 450);
+}
+
+TEST_CASE("an offset clip keeps its place under scaling", "[render][interfacemesh]") {
+	// A nested frame's clip is not at the origin, so a scale applied to the size
+	// and not to the origin would move every inner panel towards the top-left as
+	// the density went up - which reads as the layout being wrong rather than
+	// the scissor.
+	const engine::core::Rect clip{
+		engine::core::Vector2{100.0f, 50.0f}, engine::core::Vector2{300.0f, 250.0f}
+	};
+
+	const InterfaceScissor scaled =
+		ScissorFor(clip, engine::core::Vector2{800.0f, 450.0f}, engine::core::Vector2{1600.0f, 900.0f});
+	CHECK(scaled.X == 200);
+	CHECK(scaled.Y == 100);
+	CHECK(scaled.Width == 400);
+	CHECK(scaled.Height == 400);
+}
+
+TEST_CASE("a clip is rounded outwards and never starts before the target", "[render][interfacemesh]") {
+	// **Outwards, because the scissor is an early-out and the shader is the
+	// clip.** A fraction of a pixel rounded inwards discards a fragment
+	// `interface.frag` would have kept, which is a hairline of missing text
+	// along a panel edge and nothing to point at.
+	//
+	// A clip left of the target comes from a frame positioned off-screen; a
+	// negative scissor origin is a validation error on some backends and
+	// silently ignored on others, which is the worst pair.
+	const engine::core::Rect fractional{
+		engine::core::Vector2{10.2f, 10.9f}, engine::core::Vector2{20.1f, 20.4f}
+	};
+	const InterfaceScissor rounded =
+		ScissorFor(fractional, engine::core::Vector2{100.0f, 100.0f}, engine::core::Vector2{100.0f, 100.0f});
+	CHECK(rounded.X == 10);
+	CHECK(rounded.Y == 10);
+	CHECK(rounded.X + rounded.Width == 21);
+	CHECK(rounded.Y + rounded.Height == 21);
+
+	const engine::core::Rect offscreen{
+		engine::core::Vector2{-50.0f, -20.0f}, engine::core::Vector2{-10.0f, 30.0f}
+	};
+	const InterfaceScissor clamped =
+		ScissorFor(offscreen, engine::core::Vector2{100.0f, 100.0f}, engine::core::Vector2{100.0f, 100.0f});
+	CHECK(clamped.X == 0);
+	CHECK(clamped.Y == 0);
+	CHECK(clamped.Empty());
+}
+
+TEST_CASE("a canvas of zero leaves the clip alone", "[render][interfacemesh]") {
+	// The frame before the first layout has no canvas, and a ratio against zero
+	// is not a number. Taking the clip as pixels is the answer that draws
+	// something rather than nothing.
+	const engine::core::Rect clip{engine::core::Vector2{0.0f, 0.0f}, engine::core::Vector2{40.0f, 30.0f}};
+
+	const InterfaceScissor none =
+		ScissorFor(clip, engine::core::Vector2{0.0f, 0.0f}, engine::core::Vector2{1600.0f, 900.0f});
+	CHECK(none.Width == 40);
+	CHECK(none.Height == 30);
+
+	const InterfaceScissor unsized =
+		ScissorFor(clip, engine::core::Vector2{800.0f, 450.0f}, engine::core::Vector2{0.0f, 0.0f});
+	CHECK(unsized.Width == 40);
+	CHECK(unsized.Height == 30);
 }

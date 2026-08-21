@@ -514,7 +514,7 @@ local elapsed = 0
 RunService.Heartbeat:Connect(function(delta: number)
 	elapsed += delta
 
-	local ball = CFrame.new(Vector3.new(0, HEIGHT, 0)) * CFrame.Angles(0, elapsed * SPIN, elapsed * SPIN * 0.4)
+	local ball = CFrame.new(Vector3.new(0, HEIGHT, 0)) * CFrame.fromOrientation(0, elapsed * SPIN, elapsed * SPIN * 0.4)
 
 	core.CFrame = ball
 

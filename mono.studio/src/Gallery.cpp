@@ -41,11 +41,11 @@
 namespace studio {
 
 	namespace {
-		using engine::ecs::ClassId;
-		using engine::ecs::Store;
 		using engine::ecs::Classes;
+		using engine::ecs::ClassId;
 		using engine::ecs::PropertyDescriptor;
 		using engine::ecs::PropertyType;
+		using engine::ecs::Store;
 
 		// How big a tile is. Bigger than a row's thumbnail on purpose: the
 		// gallery exists to be *looked* at, and the reference's own note is that
@@ -87,8 +87,8 @@ namespace studio {
 						}
 
 						engine::core::Name value;
-						if (descriptor.Get == nullptr ||
-							!descriptor.Get(store, instance, &value) || !value.IsValid()) {
+						if (descriptor.Get == nullptr || !descriptor.Get(store, instance, &value) ||
+							!value.IsValid()) {
 							continue;
 						}
 
@@ -233,7 +233,9 @@ namespace studio {
 			// The whole tile is the target, drawn first and then written over -
 			// the picker's arrangement, for its reason: a click on the picture
 			// is what a person does.
-			if (ImGui::Selectable("##tile", false, ImGuiSelectableFlags_None, ImVec2(tileWidth, tileHeight))) {
+			if (ImGui::Selectable(
+					"##tile", false, ImGuiSelectableFlags_None, ImVec2(tileWidth, tileHeight)
+				)) {
 				SelectGalleryUsers(entry);
 			}
 			HoverPreview(name, entry.Kind);

@@ -656,7 +656,7 @@ that an unanswered challenge costs zero bytes), the expiry timer driven off the
 tick through `ngtcp2_conn_get_expiry`/`handle_expiry`, the channel model mapped
 onto DATAGRAM frames and streams, the deletions with their suites and benchmarks,
 then the rewiring of `replication::Session`, `Listener`, `Connector`,
-`mono.server`, `mono.client`, `mono.studio`, `mono.unified_server_client` and
+`mono.server`, `mono.client`, `mono.studio`, `mono.unified_tests` and
 `mono.network`'s discovery, then `expected_graph.json` and the tier check, then
 the suites. **The one line that comes off the list is `ConnectionStats` and
 `render`'s panel**, which v0.15 has already sorted out by adding a counter rather

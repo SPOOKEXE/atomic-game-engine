@@ -5,6 +5,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cstring>
 #include <span>
 #include <string>
@@ -226,6 +227,63 @@ TEST_CASE("an empty query matches nothing rather than everything", "[schema]") {
 
 	REQUIRE(visited == 0);
 	REQUIRE(store.CountMatching({}) == 0);
+}
+
+TEST_CASE("a union query visits a carrier of any named component, exactly once", "[schema]") {
+	const FieldSpec fields[] = {{"A", PropertyType::Float}};
+	const ComponentId first = Describe(Unique("union.first"), fields);
+	const ComponentId second = Describe(Unique("union.second"), fields);
+	const ComponentId absent = Describe(Unique("union.absent"), fields);
+
+	Store store("schema-union-query");
+
+	std::vector<std::byte> value(Schemas::Of(first)->Size());
+	Components::Describe(first).DefaultConstruct(value.data(), 1);
+
+	const Entity one = store.Create();
+	store.SetComponent(one, first, value.data());
+
+	const Entity other = store.Create();
+	store.SetComponent(other, second, value.data());
+
+	// **The case an intersection cannot express and a merge gets wrong.** An
+	// entity carrying both named components lives in one table and must arrive
+	// once; asking per component and concatenating would report it twice.
+	const Entity both = store.Create();
+	store.SetComponent(both, first, value.data());
+	store.SetComponent(both, second, value.data());
+
+	const Entity neither = store.Create();
+	store.SetComponent(neither, absent, value.data());
+
+	// One with no components at all, which is in no table and is still an
+	// entity. It carries none of the named components, so it is not a match.
+	const Entity bare = store.Create();
+
+	const ComponentId terms[] = {first, second};
+	std::vector<Entity> found;
+	store.EachMatchingAny(terms, [&found](const Entity *entities, size_t rows) {
+		found.insert(found.end(), entities, entities + rows);
+	});
+
+	std::sort(found.begin(), found.end(), [](Entity left, Entity right) { return left.Id < right.Id; });
+
+	REQUIRE(found.size() == 3);
+	REQUIRE(std::find(found.begin(), found.end(), one) != found.end());
+	REQUIRE(std::find(found.begin(), found.end(), other) != found.end());
+	REQUIRE(std::find(found.begin(), found.end(), both) != found.end());
+	REQUIRE(std::find(found.begin(), found.end(), neither) == found.end());
+	REQUIRE(std::find(found.begin(), found.end(), bare) == found.end());
+
+	// The intersection over the same terms is the one entity carrying both, so
+	// the two queries are visibly different questions rather than one spelling.
+	REQUIRE(store.CountMatching(terms) == 1);
+
+	size_t visited = 0;
+	store.EachMatchingAny({}, [&visited](const Entity *, size_t rows) { visited += rows; });
+	REQUIRE(visited == 0);
+
+	Components::Describe(first).Destruct(value.data(), 1);
 }
 
 TEST_CASE("a query naming one component twice is the same query", "[schema]") {

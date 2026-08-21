@@ -16,6 +16,8 @@
 #include <glm/gtc/quaternion.hpp>
 #include <glm/mat4x4.hpp>
 
+#include <array>
+
 namespace engine::core {
 
 	// A right-handed, Y-up rigid transform with -Z as its forward direction.
@@ -56,10 +58,82 @@ namespace engine::core {
 
 		// Constructs an origin-centred rotation from intrinsic Y, then X, then Z turns.
 		//
+		// **This is Roblox's `CFrame.fromEulerAnglesYXZ`, which it also spells
+		// `CFrame.fromOrientation`. It is NOT Roblox's `CFrame.Angles`**, and
+		// this comment said it was until v0.18. `CFrame.Angles` is an alias for
+		// `fromEulerAnglesXYZ` and composes X, then Y, then Z; `FromEulerAnglesXYZ`
+		// below is that one. Quaternion multiplication does not commute, so the
+		// two build different rotations from the same three numbers and a script
+		// pasted from Roblox turned the wrong way with nothing saying why.
+		//
+		// The order here is right for what actually uses it: `BasePart.Orientation`
+		// is YXZ in Roblox too, and `scene::OrientationProperty` reads `ToAngles`.
+		// The name was the error, not the maths.
+		//
 		// @param pitch Rotation about X, in radians.
 		// @param yaw   Rotation about Y, in radians.
 		// @param roll  Rotation about Z, in radians.
 		static CFrame Angles(float pitch, float yaw, float roll);
+
+		// Constructs an origin-centred rotation from intrinsic X, then Y, then Z turns.
+		//
+		// **Roblox's `CFrame.Angles` and `CFrame.fromEulerAnglesXYZ`, which are
+		// the same function.** Kept apart from `Angles` above rather than
+		// replacing it, because the two are both wanted: this one is what a
+		// ported script means, and the other is what `Orientation` round-trips
+		// through.
+		//
+		// @param rx Rotation about X, in radians.
+		// @param ry Rotation about Y, in radians.
+		// @param rz Rotation about Z, in radians.
+		// @since v0.18
+		static CFrame FromEulerAnglesXYZ(float rx, float ry, float rz);
+
+		// Constructs an origin-centred rotation of `angle` radians about `axis`.
+		//
+		// A zero-length axis yields the identity rather than a NaN quaternion,
+		// which is the same choice `LookAt` makes for a zero-length sight line:
+		// a degenerate input is a rotation of nothing, not a poisoned value that
+		// spreads through every multiply that touches it.
+		//
+		// @param axis  The direction to turn about. Normalised here, so any
+		//              non-zero length works.
+		// @param angle How far to turn, in radians.
+		// @since v0.18
+		static CFrame FromAxisAngle(const Vector3 &axis, float angle);
+
+		// Constructs a frame from a position and three basis directions.
+		//
+		// **Roblox's `CFrame.fromMatrix`, and the 12-argument `CFrame.new`
+		// reaches the same place.** That one is given a row-major rotation
+		// matrix, so its X column is `{R00, R10, R20}` - the caller does that
+		// transpose, and this takes columns.
+		//
+		// The basis is orthonormalised here rather than trusted: three vectors a
+		// script computed are almost never exactly orthogonal, and a quaternion
+		// built from a skewed basis is a rotation that also scales and shears.
+		// `right` is kept as given, `up` is made perpendicular to it, and the
+		// third is their cross product.
+		//
+		// @param position Where the frame sits.
+		// @param right    Local +X, in world space. Must be non-zero.
+		// @param up       Local +Y, in world space. Must not be parallel to `right`.
+		// @return The frame, or the identity rotation at `position` if the two
+		//         directions are degenerate.
+		// @since v0.18
+		static CFrame FromMatrix(const Vector3 &position, const Vector3 &right, const Vector3 &up);
+
+		// Constructs the shortest origin-centred rotation carrying `from` onto `to`.
+		//
+		// Roblox's `CFrame.fromRotationBetweenVectors`. Antiparallel inputs have
+		// no shortest answer - every half-turn about any perpendicular axis works
+		// - so one perpendicular is chosen and the choice is stated rather than
+		// left to whichever way a cross product happened to fall.
+		//
+		// @param from A direction, normalised here.
+		// @param to   Where it should end up, normalised here.
+		// @since v0.18
+		static CFrame FromRotationBetweenVectors(const Vector3 &from, const Vector3 &to);
 
 		// Recovers the intrinsic Y-X-Z turns this rotation was built from.
 		//
@@ -78,6 +152,52 @@ namespace engine::core {
 		//
 		// @return Rotation about X, Y and Z as `{pitch, yaw, roll}`, in radians.
 		Vector3 ToAngles() const;
+
+		// Recovers the intrinsic X-Y-Z turns this rotation was built from.
+		//
+		// The inverse of `FromEulerAnglesXYZ`, and Roblox's `ToEulerAnglesXYZ`.
+		// Gimbal lock is resolved the way `ToAngles` resolves it: at the pole the
+		// split between the first and third turns is arbitrary, so the third is
+		// taken as zero and the whole turn goes to the first. The rotation is
+		// reproduced exactly either way.
+		//
+		// @return Rotation about X, Y and Z, in radians.
+		// @since v0.18
+		Vector3 ToEulerAnglesXYZ() const;
+
+		// Recovers the axis and angle this rotation turns about.
+		//
+		// Roblox's `ToAxisAngle`. The identity has no meaningful axis, so it
+		// reports `{XAxis, 0}` rather than a zero vector - a caller feeding the
+		// result straight back to `FromAxisAngle` gets the identity either way,
+		// and a zero axis would be a direction nothing can normalise.
+		//
+		// @param axis  Written with the unit axis of rotation.
+		// @param angle Written with the turn about it, in radians, in [0, pi].
+		// @since v0.18
+		void ToAxisAngle(Vector3 &axis, float &angle) const;
+
+		// The twelve numbers Roblox's `GetComponents` reports, in its order.
+		//
+		// `{x, y, z, R00, R01, R02, R10, R11, R12, R20, R21, R22}`, with the
+		// rotation **row-major** because that is the order the 12-argument
+		// `CFrame.new` takes them back in. Round-tripping through
+		// `FromMatrix` therefore needs the transpose, which `FromMatrix` says.
+		//
+		// @since v0.18
+		std::array<float, 12> GetComponents() const;
+
+		// This frame's rotation at the world origin.
+		//
+		// Roblox's `CFrame.Rotation`. Named `RotationOnly` here because
+		// `Rotation()` already means "the stored quaternion" on this type, and
+		// two members one letter apart returning different kinds of thing is a
+		// mistake waiting for a tired reader.
+		//
+		// @since v0.18
+		CFrame RotationOnly() const {
+			return CFrame(Vector3::Zero, Rotation());
+		}
 
 		// Constructs a frame at `from` whose -Z direction points toward `to`.
 		//
@@ -101,6 +221,46 @@ namespace engine::core {
 		// Transforms a local-space vector to world space with rotation only.
 		Vector3 VectorToWorldSpace(const Vector3 &vector) const;
 
+		// Transforms a world-space point into this frame's local space.
+		//
+		// Roblox's `PointToObjectSpace`. The inverse of `PointToWorldSpace`, and
+		// computed directly rather than as `Inverse().PointToWorldSpace(...)` -
+		// that form builds a whole frame to throw it away, and this is called per
+		// point in a loop.
+		//
+		// @since v0.18
+		Vector3 PointToObjectSpace(const Vector3 &point) const;
+
+		// Transforms a world-space direction into this frame's local space.
+		//
+		// Roblox's `VectorToObjectSpace`. Rotation only, so a translation of the
+		// frame does not move a direction.
+		//
+		// @since v0.18
+		Vector3 VectorToObjectSpace(const Vector3 &vector) const;
+
+		// Composes `other` as if it were expressed in this frame's local space.
+		//
+		// Roblox's `ToWorldSpace`, and identical to `*this * other`. Both names
+		// exist because both read naturally at different call sites: the operator
+		// where a chain of transforms is being built, this where one frame is
+		// being reinterpreted.
+		//
+		// @since v0.18
+		CFrame ToWorldSpace(const CFrame &other) const {
+			return *this * other;
+		}
+
+		// Expresses `other` relative to this frame.
+		//
+		// Roblox's `ToObjectSpace`. The inverse of `ToWorldSpace`: a frame handed
+		// back through both is the frame it started as.
+		//
+		// @since v0.18
+		CFrame ToObjectSpace(const CFrame &other) const {
+			return Inverse() * other;
+		}
+
 		// Returns the transform that maps world points back into this frame's local space.
 		//
 		// The stored rotation must be a unit quaternion.
@@ -117,6 +277,19 @@ namespace engine::core {
 		// Returns the world-space direction of local -Z, which is camera-forward.
 		Vector3 LookVector() const {
 			return VectorToWorldSpace(-Vector3::ZAxis);
+		}
+		// Returns the world-space direction of local +Z, Roblox's `ZVector`.
+		//
+		// **The opposite of `LookVector`, and both are wanted.** Roblox names the
+		// three basis columns `XVector`, `YVector` and `ZVector`, and its `ZVector`
+		// is +Z where its `LookVector` is -Z - the same pair, spelled for two
+		// different jobs. `RightVector` and `UpVector` are already `XVector` and
+		// `YVector`; this is the third, and without it a script reading all three
+		// columns has to negate one of them and know why.
+		//
+		// @since v0.18
+		Vector3 ZVector() const {
+			return VectorToWorldSpace(Vector3::ZAxis);
 		}
 
 		// Interpolates position linearly and orientation spherically at constant angular speed.
@@ -155,6 +328,41 @@ namespace engine::core {
 		// `alpha` 0 and 1 select the endpoint poses. No clamping is performed, and
 		// both endpoint rotations must be unit quaternions.
 		CFrame NLerp(const CFrame &target, float alpha) const;
+
+		// Returns a copy whose stored quaternion is unit length.
+		//
+		// Roblox's `Orthonormalize`, and it means something narrower here.
+		// Roblox stores a 3x3 matrix, which drifts out of orthogonality as it is
+		// multiplied and needs the basis rebuilt. This stores a quaternion, which
+		// cannot shear at all - the only drift it can accumulate is length - so
+		// the whole of the repair is a normalise.
+		//
+		// A zero quaternion has no direction to keep and yields the identity.
+		//
+		// @since v0.18
+		CFrame Orthonormalize() const;
+
+		// Whether two frames are the same to within `epsilon`.
+		//
+		// Roblox's `FuzzyEq`. Position is compared per component; rotation is
+		// compared as the **angle between them** rather than component by
+		// component, because a quaternion and its negation are the same rotation
+		// and a component-wise test calls those two a mismatch of 2.0.
+		//
+		// @param other   The frame to compare against.
+		// @param epsilon The tolerance, in the caller's distance unit for
+		//                position and in radians for rotation.
+		// @since v0.18
+		bool FuzzyEq(const CFrame &other, float epsilon) const;
+
+		// The angle between this frame's rotation and another's, in radians.
+		//
+		// Roblox's `AngleBetween`. Always in [0, pi]: the shortest turn that
+		// carries one orientation onto the other, whichever sign the two stored
+		// quaternions happen to carry.
+		//
+		// @since v0.18
+		float AngleBetween(const CFrame &other) const;
 
 		// Returns the local-to-world transform as a column-major matrix.
 		//

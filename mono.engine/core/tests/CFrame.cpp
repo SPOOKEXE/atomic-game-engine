@@ -4,6 +4,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <cmath>
 #include <numbers>
 
@@ -274,4 +275,236 @@ TEST_CASE("ToAngles round-trips at the gimbal poles", "[cframe]") {
 			}
 		}
 	}
+}
+
+// --- Roblox parity ----------------------------------------------------------
+//
+// v0.18 brought the script-facing CFrame up to Roblox's surface, and these hold
+// the parts of it that are easy to get plausibly wrong. `docs/RELEASING.md` has
+// nothing to say about it; the thing that matters is that a script pasted from
+// Roblox behaves the same here, and every case below is one a wrong answer would
+// still look reasonable in.
+
+TEST_CASE("the two Euler orders are genuinely different", "[cframe]") {
+	// **The bug this pair exists to stop.** `CFrame::Angles` composes Y-X-Z and
+	// the comment above it claimed that was Roblox's `CFrame.Angles` order. It
+	// is not: Roblox's `Angles` is an alias for `fromEulerAnglesXYZ` and
+	// composes X-Y-Z. `Angles` here is Roblox's `fromOrientation`.
+	//
+	// A single-axis turn is identical under either order, which is exactly why
+	// nothing caught it for eighteen versions - so this asserts on a triple with
+	// two non-zero turns, where the two orders must disagree.
+	const CFrame yxz = CFrame::Angles(0.5f, 0.9f, 0.0f);
+	const CFrame xyz = CFrame::FromEulerAnglesXYZ(0.5f, 0.9f, 0.0f);
+
+	CHECK(yxz.AngleBetween(xyz) > 0.1f);
+
+	// And one axis at a time agrees, which is the other half of the claim: a
+	// port that only ever turned about Y was never affected.
+	for (int axis = 0; axis < 3; axis++) {
+		const float turn = 0.7f;
+		const CFrame first =
+			CFrame::Angles(axis == 0 ? turn : 0.0f, axis == 1 ? turn : 0.0f, axis == 2 ? turn : 0.0f);
+		const CFrame second = CFrame::FromEulerAnglesXYZ(
+			axis == 0 ? turn : 0.0f, axis == 1 ? turn : 0.0f, axis == 2 ? turn : 0.0f
+		);
+		CHECK(first.AngleBetween(second) == Approx(0.0f).margin(1.0e-5f));
+	}
+}
+
+TEST_CASE("ToEulerAnglesXYZ inverts FromEulerAnglesXYZ", "[cframe]") {
+	constexpr float DEGREE = std::numbers::pi_v<float> / 180.0f;
+
+	// The same spread `ToAngles` is held to, and for the same reason: a wrong
+	// order reproduces any single-axis rotation and fails when two compose.
+	const float samples[] = {-170.0f, -95.0f, -44.0f, -1.0f, 0.0f, 17.0f, 89.0f, 133.0f};
+
+	for (const float rx : samples) {
+		for (const float ry : samples) {
+			for (const float rz : samples) {
+				const CFrame original = CFrame::FromEulerAnglesXYZ(rx * DEGREE, ry * DEGREE, rz * DEGREE);
+				const Vector3 recovered = original.ToEulerAnglesXYZ();
+				RequireSameRotation(
+					CFrame::FromEulerAnglesXYZ(recovered.X, recovered.Y, recovered.Z), original
+				);
+			}
+		}
+	}
+}
+
+TEST_CASE("ToEulerAnglesXYZ round-trips at the gimbal poles", "[cframe]") {
+	constexpr float HALF_PI = std::numbers::pi_v<float> / 2.0f;
+
+	// ry at ±90° is where this order locks, where `ToAngles` locks on pitch. The
+	// triple that comes back is not the one that went in - the information is
+	// genuinely gone - but the rotation has to be identical.
+	for (const float ry : {HALF_PI, -HALF_PI}) {
+		for (const float rx : {0.0f, 0.9f, -2.1f}) {
+			for (const float rz : {0.0f, 0.6f, -1.4f}) {
+				const CFrame original = CFrame::FromEulerAnglesXYZ(rx, ry, rz);
+				const Vector3 recovered = original.ToEulerAnglesXYZ();
+				RequireSameRotation(
+					CFrame::FromEulerAnglesXYZ(recovered.X, recovered.Y, recovered.Z), original
+				);
+			}
+		}
+	}
+}
+
+TEST_CASE("axis and angle survive a round trip", "[cframe]") {
+	const Vector3 axis = Vector3{1.0f, 2.0f, -0.5f}.Unit();
+	const CFrame frame = CFrame::FromAxisAngle(axis, 1.1f);
+
+	Vector3 recoveredAxis;
+	float recoveredAngle = 0.0f;
+	frame.ToAxisAngle(recoveredAxis, recoveredAngle);
+
+	CHECK(recoveredAngle == Approx(1.1f).margin(1.0e-4f));
+	RequireSameRotation(CFrame::FromAxisAngle(recoveredAxis, recoveredAngle), frame);
+
+	// **The identity has no axis, and reports one anyway.** A zero vector would
+	// be an axis nothing can normalise, so a caller feeding the pair straight
+	// back would get a NaN out of a perfectly ordinary frame.
+	Vector3 stillAxis;
+	float noAngle = -1.0f;
+	CFrame().ToAxisAngle(stillAxis, noAngle);
+	CHECK(noAngle == Approx(0.0f));
+	CHECK(stillAxis.Magnitude() == Approx(1.0f));
+
+	// A degenerate axis is the identity rather than a NaN quaternion.
+	CHECK(CFrame::FromAxisAngle(Vector3::Zero, 2.0f).QuaternionW == Approx(1.0f));
+}
+
+TEST_CASE("FromMatrix orthonormalises a basis it is given", "[cframe]") {
+	// Deliberately skewed and unnormalised, which is what a script that computed
+	// two directions actually hands over. A quaternion built from this without
+	// correction is a rotation that also scales and shears.
+	const CFrame frame =
+		CFrame::FromMatrix(Vector3{1.0f, 2.0f, 3.0f}, Vector3{2.0f, 0.0f, 0.0f}, Vector3{0.3f, 4.0f, 0.0f});
+
+	CHECK(frame.Position == Vector3{1.0f, 2.0f, 3.0f});
+
+	// Every column unit length and mutually perpendicular, or it is not a
+	// rotation at all.
+	const Vector3 x = frame.RightVector();
+	const Vector3 y = frame.UpVector();
+	const Vector3 z = frame.ZVector();
+
+	CHECK(x.Magnitude() == Approx(1.0f).margin(1.0e-5f));
+	CHECK(y.Magnitude() == Approx(1.0f).margin(1.0e-5f));
+	CHECK(z.Magnitude() == Approx(1.0f).margin(1.0e-5f));
+	CHECK(x.Dot(y) == Approx(0.0f).margin(1.0e-5f));
+	CHECK(x.Dot(z) == Approx(0.0f).margin(1.0e-5f));
+	CHECK(y.Dot(z) == Approx(0.0f).margin(1.0e-5f));
+
+	// Parallel inputs name a plane rather than a basis, and are the identity
+	// rather than a NaN.
+	const CFrame degenerate = CFrame::FromMatrix(Vector3::Zero, Vector3::XAxis, Vector3{2.0f, 0.0f, 0.0f});
+	CHECK(degenerate.QuaternionW == Approx(1.0f));
+}
+
+TEST_CASE("a rotation between two directions carries one onto the other", "[cframe]") {
+	const Vector3 from = Vector3{1.0f, 1.0f, 0.0f}.Unit();
+	const Vector3 to = Vector3{0.0f, 1.0f, 1.0f}.Unit();
+
+	const Vector3 carried = CFrame::FromRotationBetweenVectors(from, to).VectorToWorldSpace(from);
+	CHECK(carried.X == Approx(to.X).margin(1.0e-5f));
+	CHECK(carried.Y == Approx(to.Y).margin(1.0e-5f));
+	CHECK(carried.Z == Approx(to.Z).margin(1.0e-5f));
+
+	// **Antiparallel is the case with no shortest answer**, and the one where a
+	// naive cross product is near zero and its direction is noise. Any half-turn
+	// about any perpendicular is correct; what is not acceptable is a NaN or a
+	// rotation that fails to arrive.
+	const Vector3 reversed = CFrame::FromRotationBetweenVectors(Vector3::XAxis, -Vector3::XAxis)
+								 .VectorToWorldSpace(Vector3::XAxis);
+	CHECK(reversed.X == Approx(-1.0f).margin(1.0e-4f));
+	CHECK(reversed.Y == Approx(0.0f).margin(1.0e-4f));
+	CHECK(reversed.Z == Approx(0.0f).margin(1.0e-4f));
+}
+
+TEST_CASE("object space inverts world space", "[cframe]") {
+	const CFrame frame = CFrame(Vector3{3.0f, -1.0f, 8.0f}) * CFrame::Angles(0.3f, -0.8f, 1.2f);
+	const Vector3 point{2.0f, 5.0f, -4.0f};
+
+	const Vector3 there = frame.PointToObjectSpace(frame.PointToWorldSpace(point));
+	CHECK(there.X == Approx(point.X).margin(1.0e-4f));
+	CHECK(there.Y == Approx(point.Y).margin(1.0e-4f));
+	CHECK(there.Z == Approx(point.Z).margin(1.0e-4f));
+
+	// A direction ignores the translation, which is the whole difference from
+	// the point form and the thing a caller reaches for the other name for.
+	const Vector3 direction = frame.VectorToObjectSpace(frame.VectorToWorldSpace(point));
+	CHECK(direction.X == Approx(point.X).margin(1.0e-4f));
+
+	// The frame forms compose the same way.
+	const CFrame other = CFrame(Vector3{-2.0f, 0.5f, 1.0f}) * CFrame::Angles(1.0f, 0.2f, -0.4f);
+	RequireSameRotation(frame.ToObjectSpace(frame.ToWorldSpace(other)), other);
+}
+
+TEST_CASE("GetComponents reports Roblox's twelve in Roblox's order", "[cframe]") {
+	const CFrame frame = CFrame(Vector3{7.0f, -3.0f, 2.0f}) * CFrame::Angles(0.0f, 0.0f, 0.0f);
+	const std::array<float, 12> parts = frame.GetComponents();
+
+	CHECK(parts[0] == Approx(7.0f));
+	CHECK(parts[1] == Approx(-3.0f));
+	CHECK(parts[2] == Approx(2.0f));
+
+	// An unrotated frame's rotation is the identity matrix, so the diagonal is
+	// ones and everything else is zero - which also pins that the nine are laid
+	// out three to a row rather than three to a column.
+	CHECK(parts[3] == Approx(1.0f));
+	CHECK(parts[7] == Approx(1.0f));
+	CHECK(parts[11] == Approx(1.0f));
+
+	// **Row-major, and this is the case that tells the two apart.** A quarter
+	// turn about Y puts -1 at R02 and +1 at R20; transposed it would be the
+	// other way round, and every 12-argument round trip would mirror.
+	constexpr float QUARTER = std::numbers::pi_v<float> / 2.0f;
+	const std::array<float, 12> turned = CFrame::Angles(0.0f, QUARTER, 0.0f).GetComponents();
+	CHECK(turned[5] == Approx(1.0f).margin(1.0e-5f));
+	CHECK(turned[9] == Approx(-1.0f).margin(1.0e-5f));
+}
+
+TEST_CASE("FuzzyEq and AngleBetween see past a negated quaternion", "[cframe]") {
+	// **A quaternion and its negation are the same rotation.** A component-wise
+	// comparison calls them a mismatch of 2.0, which is the largest wrong answer
+	// available - so both of these compare the angle instead.
+	CFrame frame = CFrame::Angles(0.4f, 1.1f, -0.2f);
+	CFrame negated = frame;
+	negated.QuaternionX = -frame.QuaternionX;
+	negated.QuaternionY = -frame.QuaternionY;
+	negated.QuaternionZ = -frame.QuaternionZ;
+	negated.QuaternionW = -frame.QuaternionW;
+
+	CHECK(frame.AngleBetween(negated) == Approx(0.0f).margin(1.0e-4f));
+	CHECK(frame.FuzzyEq(negated, 1.0e-3f));
+
+	// And a real difference is still a difference, in both position and rotation.
+	CHECK_FALSE(frame.FuzzyEq(CFrame::Angles(0.4f, 1.6f, -0.2f), 1.0e-3f));
+	CHECK_FALSE(CFrame(Vector3::Zero).FuzzyEq(CFrame(Vector3{1.0f, 0.0f, 0.0f}), 1.0e-3f));
+}
+
+TEST_CASE("Orthonormalize restores a drifted quaternion", "[cframe]") {
+	// This type stores a quaternion, so the only drift it can accumulate is
+	// length - it cannot shear the way a stored 3x3 matrix can, which is what
+	// Roblox's `Orthonormalize` is really for.
+	CFrame drifted = CFrame::Angles(0.3f, 0.7f, 0.1f);
+	drifted.QuaternionX *= 1.5f;
+	drifted.QuaternionY *= 1.5f;
+	drifted.QuaternionZ *= 1.5f;
+	drifted.QuaternionW *= 1.5f;
+
+	const CFrame fixed = drifted.Orthonormalize();
+	const float length = std::sqrt(
+		fixed.QuaternionX * fixed.QuaternionX + fixed.QuaternionY * fixed.QuaternionY +
+		fixed.QuaternionZ * fixed.QuaternionZ + fixed.QuaternionW * fixed.QuaternionW
+	);
+	CHECK(length == Approx(1.0f).margin(1.0e-5f));
+
+	// A zero quaternion has no direction to keep, and normalising one is a
+	// division by zero rather than an error.
+	CFrame empty;
+	empty.QuaternionW = 0.0f;
+	CHECK(empty.Orthonormalize().QuaternionW == Approx(1.0f));
 }

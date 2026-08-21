@@ -1,4 +1,5 @@
 #include <engine/bakegraph/Document.hpp>
+#include <engine/core/Chars.hpp>
 
 #include <algorithm>
 #include <array>
@@ -166,7 +167,7 @@ namespace engine::bake {
 			}
 			const char *first = word.data();
 			const char *last = first + word.size();
-			const auto result = std::from_chars(first, last, out);
+			const auto result = core::FromChars(first, last, out);
 			return result.ec == std::errc{} && result.ptr == last;
 		}
 

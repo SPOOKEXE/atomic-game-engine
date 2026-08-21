@@ -230,7 +230,7 @@ just preset=release build engine_ecs   # any of the above, other preset
 | `mono.engine/ui` | `engine_ui` | `Engine::ui` | `test_ui` | client |
 | `mono.client` | `client_lib` | `Mono::client` | `test_client` | client |
 | `mono.server` | `server_lib` | `Mono::server` | `test_server` | server |
-| `mono.unified_server_client` | `unified_server_client_lib` | `Mono::unified_server_client` | `test_unified_server_client` | client |
+| `mono.unified_tests` | `unified_tests_lib` | `Mono::unified_tests` | `test_unified_tests` | client |
 | `mono.studio` | `studio_lib` | `Mono::studio` | `test_studio` | client |
 | `mono.cdn` | `cdn_lib` | `Mono::cdn` | `test_cdn` | shared |
 | `mono.tools/testrunner` | `testrunner_lib` | `Tool::testrunner` | `test_testrunner` | shared |
@@ -320,6 +320,7 @@ mains over the parts of it they need.
 
 | You want to | Run | Adds, over the engine |
 |---|---|---|
+| Pick one of the below without remembering its flags | `launcher` *(v0.18)* | a window, and nothing else |
 | Run a script with nothing else in the way | `atomic` *(v0.6)* | nothing |
 | Build a game | `studio` *(v0.7)* | the editor: explorer, properties, script editor, run and play |
 | See something on screen | `client` | window, input, renderer, and the client half of networking |
@@ -339,6 +340,80 @@ is for.
 `client --help`, `server --help` and `studio --help` print their own options,
 generated from the option declarations, so they cannot drift from what the
 program accepts.
+
+**`--describe` prints the same table as JSON** *(v0.18)*, and every program in
+the tree answers it because `core::Arguments` declares the flag itself. It
+carries both settings surfaces - the options, and `core::Flags`' declared table -
+and it is what the launcher builds its screens out of.
+
+```sh
+./client --describe | jq '.options[] | select(.takesValue) | .name'
+```
+
+---
+
+## The launcher *(v0.18)*
+
+```sh
+just launch                  # the front screen
+just launch --mode cdn       # straight onto one mode
+```
+
+A window with one button per mode - Play, Join, Host, Studio, Serve content -
+and, behind each, a form holding **every option and every setting that program
+declared**. Nothing is filtered out; it is split across three tabs:
+
+| Tab | What is on it |
+|---|---|
+| Common | The four to seven options that decide what the run *is*, filled in |
+| All options | Every option the program declared, grouped by name prefix |
+| Engine settings | `core::Flags`' table, written as `--flag NAME=VALUE` |
+
+Both option tabs edit the same rows, so a value typed on one is the value on the
+other. The search box above the tabs filters all three at once, and each group
+header carries its hit count so a collapsed group still says how much is inside.
+
+An option whose value is a `PATH` or a `DIR` gets a browse button - a page for a
+file, a folder for a folder, and the folder one picks **several at a time**: tick
+three and confirm, and the option gets three rows. The ticks survive walking into
+another parent, so the folders do not have to be siblings. `+` gives an option
+another value by hand and `-` takes a row away.
+
+Ctrl+Enter launches, Escape goes back.
+
+It shows the command line it will run, in full, above the Launch button, with a
+Copy next to it. That line is the same list it hands the child, so pasting it
+into a terminal reproduces the run exactly.
+
+**It links none of the programs it starts.** It finds them staged beside it -
+`<stage>/client/client` and so on - asks each one `--describe`, and spawns the
+one you picked. So it needs them built:
+
+```sh
+just build                   # everything, then every mode is available
+just build cdn && just launch --mode cdn    # or one program and its mode
+```
+
+A mode whose program is not staged is greyed out with the reason on the row,
+which is the ordinary state under the `server` and `cdn` presets. Each row also
+shows its program's version - two different versions in one tree means a
+half-rebuilt tree, and that is worth seeing before the run rather than after.
+
+Host and Serve content keep the launcher up: it reports whether the child is
+running, how long for, and how it ended, and offers Stop, Kill and Restart. Play,
+Join and Studio hand the display over and the launcher minimises until the child
+exits.
+
+The launcher has its own few options:
+
+```sh
+./launcher --mode host --width 1400 --height 900 --scale 1.25
+./launcher --headless --frames 5     # for a smoke test; needs a frame budget
+```
+
+Forms live as long as the window. There are no saved profiles - `--config PATH`
+is on every mode's form like any other option, and a settings file is the thing
+that already does that job.
 
 ---
 
@@ -869,12 +944,18 @@ just run --script .cache/build/dev/assets/examples/Libraries.luau  # libraries, 
 just run --script .cache/build/dev/assets/examples/MagicTests.luau # their tests, in this VM
 ```
 
-**`MagicRuntime` draws a body and nothing else.** The Roblox original builds a
-`ParticleEmitter` per authored emitter, plus a `Trail`, a muzzle `Beam` and a
-`PointLight`; this engine has none of those classes, so every tail, plume and
-impact burst has nothing to draw it - 42 of them across the five demo lanes,
-which `Magic.luau` prints at startup. The data is intact and every solver still
-routes it. See the table in `lib/MagicRuntime/init.luau`.
+**`MagicRuntime` draws everything the Roblox original draws.** A
+`ParticleEmitter` per authored emitter - 42 across the five demo lanes, which
+`Magic.luau` prints at startup - plus a `Trail` behind each projectile, a muzzle
+`Beam` and a `PointLight`.
+
+It drew only a body until v0.18. The module was written when this engine had
+`Part` and none of the rest, said so at the top of itself, and went on saying it
+after `mono.engine/effects` landed - so the spells solved correctly, cratered
+the terrain, and looked like coloured cubes. Two things had to change: the
+module, and `examples::LoadScene`, which registered the 3D and 2D class trees
+and not the effects one. See `lib/MagicRuntime/init.luau` for how a
+`Timeline.EmitParticles` burst is spelled without a `ParticleEmitter:Emit`.
 
 ### Autocomplete while you write one
 
@@ -1051,7 +1132,7 @@ client sees every other character move, because the movement happens once - on
 the server - and what crosses is the intent going up and the transform coming
 down.
 
-**This is not `mono.unified_server_client`, and the difference is the reason to
+**This is not `mono.unified_tests`, and the difference is the reason to
 run it.** That harness cuts `net` out of the middle to prove the
 serialise/deserialise seam; this puts the socket, the handshake, the cipher and
 the bandwidth budget back, and adds the thing neither of them had - more than
@@ -1311,6 +1392,22 @@ The pair is what `--max-fps` is for, and it does nothing without `--uncapped` -
 with the wait on, the display is already the limiter and a second one fighting
 it produces judder rather than a lower number.
 
+**Running a demo without them is what a bottleneck looks like when there is
+none.** Bare, `EditableMesh.luau` reports a mean frame of 7.8 ms with a 34 ms
+tail and reads as choking; with the pair it is 1.3 ms, and uncapped with no
+ceiling at all it is 0.26 ms - a quarter of a millisecond of actual work behind
+eight of waiting. The whole difference is the `submit` span, which is the CPU
+sitting on the vblank, and it is worst on a scene that is *not* busy: with only
+one frame in flight there is nothing queued to cover a missed interval, so
+missing by a hair costs a whole one.
+
+`--frames-in-flight` is the other end of that and is **not** the cure - measured
+on this machine the tail grew with the queue rather than shrank, 35 ms at one,
+52 at two, 69 at three, because a deeper queue means a longer stall when a
+present is late. It is here for parity with the studio, which has had it since
+v0.14, and because it is the first knob anybody reaches for. Reach for
+`--uncapped` instead.
+
 Everything shared lives in `_common.sh` and `_common.bat`; a scene script is a
 header, a filename and its own flags. They call CMake rather than `just`, so the
 two halves cannot drift apart, and they resolve the repository from their own
@@ -1327,6 +1424,7 @@ because it builds before it runs and a plain `cmd` window has no compiler in it;
 --graph                          Open the F5 frame graph at startup
 --uncapped                       Present without waiting for vblank
 --max-fps N                      Hold this frame rate; needs --uncapped
+--frames-in-flight N             Frames the CPU may queue ahead of the GPU, 1 to 3
 --verbose                        Log at trace level
 --force-serial-compute           Run parallel dispatches on one thread
 --worlds N                       Worlds to simulate and composite (default 1)
@@ -1336,7 +1434,7 @@ because it builds before it runs and a plain `cmd` window has no compiler in it;
 --frames N                       Exit after N presented frames
 --width PX                       Window width (default 1280)
 --height PX                      Window height (default 720)
---profiler-tab NAME              frame, categories, systems or counters
+--profiler-tab NAME              frame, categories, systems, counters or heap
 --script PATH                    Luau or JavaScript scene to run at startup
 --game PATH                      Game file to play single-player (.agame)
 --connect HOST:PORT               Replicate a world from this server
@@ -1349,6 +1447,9 @@ because it builds before it runs and a plain `cmd` window has no compiler in it;
 --enable-profiler SECONDS        Wait for a Tracy profiler before starting
 --profile-seconds SECONDS        Run for this long, then exit
 --profile-snapshot PATH          Write a frame-graph snapshot when the run ends
+--heap-report PATH               Write a heap profile when the run ends
+--heap-growth-limit BYTES_PER_S  Exit 3 if a tag's live bytes climb faster than this
+--heap-warmup SECONDS            Leave this much of the start out of the growth fit
 --override-assets-directory DIR  Read shaders and data from here
 --help                           Show this text
 ```
@@ -1375,6 +1476,53 @@ simulated, its scripts run with both roles true, and there is no socket and no
 server library involved - single-player is the format and a VM, not a server
 hosted in this process. Given both `--game` and `--script`, the game file wins
 and the client says so rather than choosing quietly.
+
+### The heap *(v0.18)*
+
+The `heap` view is the one tab that is not about the last frame, and that is why
+it is arranged the other way up: a plot of live bytes over minutes first, then
+the tag tree under it. A frame that is fast and forty megabytes heavier than the
+one before it reads as healthy on every other view here.
+
+Tags come from the `ENGINE_PROFILE` scopes the flamegraph is already made of, so
+a row on one has a row on the other. `LIVE` is a tag and everything under it;
+`SELF` is that tag alone; `GROWTH` is a least-squares slope over the readings,
+sampled once a second. A dash means the tag is not moving.
+
+**A slope alone is not a leak, which is what the `--heap-growth-limit` check is
+careful about.** A world loading its content is a step, and a step has a large
+slope; a leak is a line. The check requires both a rate and a *fit* - see
+`HeapProfile::RUNAWAY_FIT` - and `--heap-warmup` keeps the load out of the
+window altogether.
+
+```sh
+./client --headless --frames 1000000 --profile-seconds 120 \
+    --script Rings.luau --heap-report heap.txt
+```
+
+writes the totals, the forty heaviest tags and the growth of each. Adding
+`--heap-growth-limit 8192` makes the run exit 3 and name every tag over it,
+which is what `just heap-soak` is built on.
+
+The hooks are compiled in by `MONO_HEAP_PROFILE`, which is on in every preset
+but `release` - a shipped build does not pay a 24-byte header on every
+allocation. A `release` client says so rather than showing an empty tree.
+
+### Soaking for leaks *(v0.18)*
+
+```sh
+just heap-soak                         # five scenes, a minute each
+just heap-soak 300                     # five minutes each, so twenty-five
+just heap-soak 60 8192 15 "Stress"     # one scene, everything spelled out
+```
+
+Arguments are positional. A minute of wall clock is about a quarter of a million
+headless frames and a real 60 Hz of ticks, so both axes a leak can live on are
+exercised; the reports are left in `.cache/heap-<scene>.txt` whether the run
+passes or fails, because a green soak is the baseline the next one is read
+against.
+
+Not part of `just check`: it needs a GPU, for `just client-smoke`'s reason.
 
 ### Benchmarks
 
@@ -1437,15 +1585,15 @@ instead of vanishing for one.
 | Key | Does |
 |---|---|
 | **F3** | frame counter - FPS now, and min/avg/max over the last twenty seconds |
-| **F5** | frame graph - last frame's scope tree |
+| **F5** | frame graph - last frame's scope tree, and the heap |
 | **F6** / **F7** | next / previous frame-graph view |
 | **PgUp** / **PgDn** | scroll a graph taller than the panel |
 | **-** / **=** | shallower / deeper flamegraph |
 | **F8** | write `frame-graph-snapshot.txt` beside the binary |
 | **Esc** | quit |
 
-The four frame-graph views are the flamegraph, time by category, per-system cost
-from the scheduler, and whatever was written to the metrics sink.
+The five frame-graph views are the flamegraph, time by category, per-system cost
+from the scheduler, whatever was written to the metrics sink, and the heap.
 
 #### Reading the flamegraph
 
@@ -1693,6 +1841,102 @@ just host --unpaced --ticks 1000 --entities 50000
 `--unpaced` removes the sleep between ticks, so `mean` measures the simulation
 rather than the pacing. Use it for any comparison; leave it off to check that a
 given entity count actually holds a given tick rate.
+
+---
+
+## Every arrangement of the halves *(v0.18)*
+
+```sh
+just unified                              # the bisection, one screen of it
+just unified --all                        # all twelve, one line each
+just unified --arrangement lossy+relayed  # content over a link that loses
+```
+
+`unified_tests` holds a server and a client in **one process** and lets you
+choose what goes between them. It answers two questions that a pair of real
+programs cannot.
+
+**Which stage lost the world.** `--arrangement direct` hands the authority's
+byte vectors straight to the replica: no socket, no framing, no cipher, no
+acknowledgement window, no MTU. The table it prints is a column per stage -
+produced, sent, applied, drawn - so the first column that stops making sense is
+the answer. A blank scene here is above `net`; a blank scene against a real
+server and a full one here is below it.
+
+**Whether the modules agree with each other.** Underneath the table it prints
+every module's own report - `replication`'s authority and replica, `net`'s
+sessions and links, `cdn`'s publication, `server`'s relay, `client`'s content
+link, `network`'s beacon and directory, and `core`'s heap - and then the claims
+that span two of them. Those are the ones no module's own suite can make,
+because the tier system stops each module linking the other end of its seams:
+
+```
+contradictions
+  client/server      the relay answered 12 route(s) in full and the client reassembled 11
+```
+
+### The three axes
+
+| axis | values | what it adds |
+|---|---|---|
+| transport | `direct`, `loopback`, `lossy` | nothing, a real `net` link, a link that drops datagrams |
+| content | `relayed` | a `cdn` publication, a `server` relay, a `client` link |
+| discovery | `advertised` | a `network` beacon announcing and a directory collecting |
+
+Names join with `+` in any order, and `--all` runs the whole cross product -
+twelve of them. `--list-arrangements` prints the names, which is how
+`just unified-soak` stays in step with the axes rather than holding a copy.
+
+### Options
+
+| option | what it does |
+|---|---|
+| `--arrangement NAME` | one arrangement; `direct` unless given |
+| `--all` | every arrangement in turn, one summary line each |
+| `--list-arrangements` | print the names and exit |
+| `--entities N` | rows in the placeholder world (64) |
+| `--scene PATH` | author the server's world from a scene script instead |
+| `--ticks N` | ticks after the join (120) |
+| `--seconds N` | run on wall clock instead, for the heap axis |
+| `--tick-rate HZ` | the authority's rate (30) |
+| `--frames-per-tick N` | frames drawn per tick (4) |
+| `--delay-ticks N` | the snapshot buffer's delay (2) |
+| `--drop N,N,...` | ordinals to lose silently |
+| `--quiet` | the reports only, no line per tick |
+| `--heap-report PATH` | write the heap profile when the run ends |
+| `--heap-growth-limit BYTES` | exit 3 when a tag climbs faster than this |
+| `--heap-warmup SECONDS` | readings to leave out of the growth fit (10) |
+
+`--drop` numbers different things per transport, because a transport can only
+lose what it carries: outgoing **messages** under `direct`, datagram **arrival
+numbers** under `lossy`. `loopback` drops nothing - it exists to add framing and
+nothing else. A `lossy` run with no `--drop` uses a built-in set that lands
+inside the join, so the reliable channel's retransmission is exercised rather
+than merely available.
+
+The exit code is `0` when every arrangement joined and no module contradicted
+another, `1` when one did, and `3` when a heap tag ran away.
+
+### Soaking the seams *(v0.18)*
+
+```sh
+just unified-soak                # twelve arrangements, 25s each
+just unified-soak 60             # twelve minutes
+just unified-soak 30 4096 10     # tighter limit, longer warm-up
+```
+
+`just heap-soak` asks whether drawing a world leaks. This asks whether
+*crossing* one does, which is a different question with different answers: a
+leak in a session's retransmission buffer or in the relay's reassembly is
+invisible to a client that is not connected to anything.
+
+One process per arrangement, deliberately - a single process running all twelve
+in turn has one heap history with twelve workloads in it, and a slope fitted
+across that is fitted across the changeovers. Reports land in
+`.cache/heap-unified-<arrangement>.txt` whether the run passes or fails.
+
+Not part of `just check`: at the default it is five minutes, and a check
+somebody skips is a check that is not run.
 
 ---
 

@@ -29,6 +29,12 @@ namespace engine::render {
 
 	class Renderer;
 
+	// Every `ViewportFrame` in one interface, rendered into scene slots.
+	//
+	// **A pass of its own rather than part of the interface pass**, because each
+	// of these is a whole scene render with its own camera: they have to happen
+	// before the interface that shows them is recorded, and the interface only
+	// needs the texture that came out.
 	class ViewportFrames {
 	  public:
 		// Renders every visible viewport command into consecutive scene slots.

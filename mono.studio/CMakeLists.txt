@@ -6,7 +6,7 @@
 # world in one process - which is precisely the arrangement the rule exists to
 # make deliberate rather than accidental.
 #
-# `mono.unified_server_client` took the escape first and its CMakeLists explains
+# `mono.unified_tests` took the escape first and its CMakeLists explains
 # why an escape with a user is different from one without. This is the second,
 # and both are named rather than inferred.
 #
@@ -51,10 +51,28 @@ mono_add_library(studio
 		Engine::examples
 
 		# L12, `client`. The renderer, and the interface layer that records into
-		# its frames. `Engine::ui` is where Dear ImGui lives; nothing else in
-		# the repository links it.
+		# its frames. `Engine::ui` is where Dear ImGui is public; `nodegraph`
+		# below links it too, but privately.
 		Engine::render
 		Engine::ui
+
+		# L11, `client`. The node graph, its evaluator and its canvas. Was a
+		# vendored submodule until v0.18.0 and is a first-party module now, so
+		# it is a `DEPS` entry rather than a `VENDOR_PUBLIC` one - which is a
+		# narrowing, not a widening: `DEPS` is public linkage either way, and
+		# this no longer drags Dear ImGui along publicly behind it.
+		#
+		# **Public, and it has to be.** `studio::Editor` *holds* the graph, the
+		# canvas and the evaluator by value and hands an
+		# `engine::nodegraph::PreviewImage` to its texture sink, so those types
+		# are named in `studio/Editor.hpp` and cannot be hidden without a pimpl
+		# over the editor's whole state.
+		#
+		# The node set the Demo Nodes panel runs is *not* here. It is
+		# `src/DemoNodes.cpp`, in this target, because it is content rather than
+		# library - D00113's seam, kept: a host with its own vocabulary links
+		# the module and gets none of it.
+		Engine::nodegraph
 
 		# L10, `shared`. The content store this editor manages and lists.
 		# **Named here rather than taken transitively through `Mono::server`**,
@@ -134,17 +152,6 @@ mono_add_library(studio
 	# header here names a `toml::` type.
 	VENDOR Vendor::tomlplusplus
 
-	# The node graph and its canvas, and the node set the Demo Nodes panel runs.
-	# D00113's answer: this design was implemented twice, here and in the
-	# template it came from, and the second copy is now the only one.
-	#
-	# **`VENDOR_PUBLIC` and not `VENDOR`, which is a widening and is meant.** The
-	# `Editor` *holds* the graph, the canvas and the evaluator by value and hands
-	# a `nodegraph::PreviewImage` to its texture sink, so those types are in
-	# `studio/Editor.hpp` and cannot be hidden without a pimpl over the editor's
-	# whole state. What it widens is small: nothing links `Mono::studio` but its
-	# own program and its own tests.
-	VENDOR_PUBLIC Vendor::nodegraph Vendor::nodegraph_nodes
 	ALLOW_TIER_ESCAPE Mono::server
 )
 

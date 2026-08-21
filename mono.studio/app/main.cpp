@@ -63,6 +63,9 @@ int main(int argc, char **argv) {
 	arguments.Value("capture", "PATH", "Write the viewport's world to a BMP and carry on");
 	arguments.Value("capture-world", "NAME", "Point --capture at this scene rather than the active one");
 	arguments.Value("profile-snapshot", "PATH", "Write a frame-graph snapshot when the run ends");
+	arguments.Value(
+		"heap-report", "PATH", "Write a heap profile when the run ends, and sample while running"
+	);
 	arguments.Value("frames-in-flight", "N", "Frames the CPU may queue ahead of the GPU: 1 (default) to 3");
 	arguments.Value("idle-close", "SECONDS", "Close an empty world after this long (default 300)");
 	arguments.Value("run", "MODE", "Start in edit, server or play (default edit)");
@@ -81,8 +84,16 @@ int main(int argc, char **argv) {
 		std::fprintf(stderr, "%s\n\n%s", parsed.Error.c_str(), arguments.Help().c_str());
 		return 2;
 	}
+	if (parsed.VersionRequested) {
+		std::fputs(arguments.VersionLine().c_str(), stdout);
+		return 0;
+	}
 	if (parsed.HelpRequested) {
 		std::fputs(arguments.Help().c_str(), stdout);
+		return 0;
+	}
+	if (parsed.DescribeRequested) {
+		std::fputs(arguments.Describe().c_str(), stdout);
 		return 0;
 	}
 
@@ -136,6 +147,7 @@ int main(int argc, char **argv) {
 	options.Width = static_cast<int>(arguments.GetInteger("width", options.Width));
 	options.Height = static_cast<int>(arguments.GetInteger("height", options.Height));
 	options.Scale = static_cast<float>(arguments.GetNumber("scale", options.Scale));
+	options.ScaleAuthored = arguments.Has("scale");
 	options.TickRate = arguments.GetNumber("tick-rate", options.TickRate);
 	options.MaximumFrames = arguments.GetInteger("frames", -1);
 	// **`Has` then `GetInteger`, and the two-step is the opt-in.** A bare
@@ -226,6 +238,9 @@ int main(int argc, char **argv) {
 	}
 	if (auto snapshot = arguments.Get("profile-snapshot")) {
 		options.ProfileSnapshot = std::filesystem::path(*snapshot);
+	}
+	if (auto report = arguments.Get("heap-report")) {
+		options.HeapReport = std::filesystem::path(*report);
 	}
 	options.FramesInFlight =
 		static_cast<int>(arguments.GetInteger("frames-in-flight", options.FramesInFlight));

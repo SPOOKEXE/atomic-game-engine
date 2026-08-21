@@ -120,8 +120,10 @@ namespace engine::gui {
 		// they do not draw in the same place. Keeping the owner on the flat
 		// command lets a backend split those paths without walking the tree a
 		// second time or asking the source element for its ancestors.
+		//@{
 		ecs::Entity Collector;
 		bool Spatial = false;
+		//@}
 
 		// Where it goes, in canvas pixels.
 		core::Rect Bounds;
@@ -229,8 +231,10 @@ namespace engine::gui {
 		float LineHeight = 1.0f;
 
 		// The outline around every glyph. A transparency of 1 disables it.
+		//@{
 		core::Color3 StrokeTint;
 		float StrokeTransparency = 1.0f;
+		//@}
 
 		// The styled ranges over `Text`, in order and non-overlapping.
 		//

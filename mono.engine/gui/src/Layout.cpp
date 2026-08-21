@@ -639,27 +639,41 @@ namespace engine::gui {
 			return static_cast<size_t>(std::count(text.begin(), text.end(), '\n')) + 1;
 		}
 
-		int32_t FittedTextSize(const Label &label, const Vector2 &box, const TextSizeLimits *limits) {
-			int32_t size = label.Size;
+		// @param factor `UIScale`'s multiplier, or one where there is none.
+		int32_t
+		FittedTextSize(const Label &label, const Vector2 &box, const TextSizeLimits *limits, float factor) {
+			// **`UIScale` multiplies the glyphs as well as the box**, which is
+			// what `gui::Scale` says it does. It was applied in `Constrain` to
+			// the rectangle and nowhere to the text, so a scale of two gave a
+			// label twice the size with its writing at the authored size - and
+			// only when `TextScaled` was off, because a scaled fit re-derives
+			// from the enlarged box and happens to come out right. That is why
+			// this hid: it was correct in the case people test with.
+			float size = static_cast<float>(label.Size) * (factor > 0.0f ? factor : 1.0f);
 
 			if (label.Scaled) {
 				const size_t characters = std::max<size_t>(DrawnCharacters(label), 1);
 				const float byWidth = box.X / (static_cast<float>(characters) * AVERAGE_ADVANCE);
 				const float byHeight = box.Y / LINE_SPACING;
 
-				// Floored rather than rounded. A size that rounds up is a size
-				// that does not fit, which is the one outcome this is for.
-				size =
-					static_cast<int32_t>(std::floor(std::min({byWidth, byHeight, static_cast<float>(size)})));
+				size = std::min({byWidth, byHeight, size});
 			}
 
+			// Floored rather than rounded. A size that rounds up is a size that
+			// does not fit, which is the one outcome this is for.
+			int32_t fitted = static_cast<int32_t>(std::floor(size));
+
+			// **The limits are last and are not scaled**, because they are
+			// authored in the pixels the text ends up at: a maximum of 24 means
+			// "never larger than 24 on screen", and scaling it with the element
+			// would make it a limit on the authored size instead.
 			if (limits != nullptr) {
-				size = std::clamp(size, limits->Min, limits->Max);
+				fitted = std::clamp(fitted, limits->Min, limits->Max);
 			}
 
 			// Never zero: a label drawn at nothing is indistinguishable from one
 			// that failed to lay out.
-			return std::max(size, 1);
+			return std::max(fitted, 1);
 		}
 
 		size_t Place(
@@ -1955,7 +1969,12 @@ namespace engine::gui {
 			value.Rendered = true;
 
 			if (const Label *label = store.Get<Label>(instance)) {
-				value.TextSize = FittedTextSize(*label, rect.Size(), modifiers.TextLimits);
+				value.TextSize = FittedTextSize(
+					*label,
+					rect.Size(),
+					modifiers.TextLimits,
+					modifiers.Factor != nullptr ? modifiers.Factor->Factor : 1.0f
+				);
 
 				// **The same estimate the fit used, kept rather than recomputed
 				// by whoever asks.** `TextBounds` and `TextFits` are two readings

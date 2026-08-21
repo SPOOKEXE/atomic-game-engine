@@ -21,8 +21,10 @@ namespace loadtest {
 		uint32_t Clients = 200;
 
 		// Where the server is. A host and a port.
+		//@{
 		std::string Address = "127.0.0.1";
 		uint16_t Port = 0;
+		//@}
 
 		// How fast the harness ticks its clients, in hertz. Match the server's
 		// tick rate: a client polling slower than the server publishes builds a

@@ -73,6 +73,64 @@ namespace engine::render {
 	// reason this type exists instead of one index buffer.
 	//
 	// @since v0.8
+	// A batch's clip rectangle, in the target attachment's device pixels.
+	//
+	// @client
+	// @since v0.18
+	struct InterfaceScissor {
+		// The top-left corner, in device pixels. Never negative.
+		//@{
+		int32_t X = 0;
+		int32_t Y = 0;
+		//@}
+
+		// How far it reaches, in device pixels. Zero on either axis means the
+		// batch covers nothing - see `Empty`.
+		//@{
+		int32_t Width = 0;
+		int32_t Height = 0;
+		//@}
+
+		// Whether this covers no pixels, and therefore whether the batch can be
+		// skipped rather than drawn with a degenerate scissor - which is a
+		// validation error on some backends and silently ignored on others.
+		bool Empty() const {
+			return Width <= 0 || Height <= 0;
+		}
+	};
+
+	// Converts a canvas-space clip into the target's device pixels.
+	//
+	// **The two are the same number only when the caller laid the interface out
+	// against the attachment's real size, and one caller deliberately does
+	// not.** The studio lays a viewport's game interface out against the panel's
+	// *logical* size, because that is the space imgui reports the pointer in and
+	// a canvas disagreeing with the pointer hit-tests one place and draws
+	// another - while the panel's texture is allocated at the display's pixel
+	// density. A scissor taken straight from the clip therefore cut the whole
+	// interface down to the top-left `1/density` of the panel, with the vertex
+	// shader still stretching it across the whole panel.
+	//
+	// Rounded outwards, so a clip landing between two pixels keeps the fragment
+	// the shader is going to test rather than cutting it: the scissor is an
+	// early-out and `interface.frag` is the clip.
+	//
+	// @param clip The batch's clip, in canvas units.
+	// @param canvas The size the interface was laid out against. Zero or below
+	//        on either axis means the ratio cannot be formed and the clip is
+	//        taken as pixels.
+	// @param targetPixels The attachment's real size, in device pixels. Zero or
+	//        below is treated the same way.
+	// @return The clip in device pixels, never with a negative origin.
+	// @client
+	// @since v0.18
+	InterfaceScissor
+	ScissorFor(const core::Rect &clip, const core::Vector2 &canvas, const core::Vector2 &targetPixels);
+
+	// One run of indices that can be drawn with a single state setup.
+	//
+	// A batch ends where the texture or the clip changes, which is what makes
+	// the interface one draw call per state rather than one per element.
 	struct InterfaceBatch {
 		// Where this run starts in the index buffer, and how long it is.
 		//@{
@@ -126,8 +184,14 @@ namespace engine::render {
 	// The texture handle stays in `InterfacePass`; this arithmetic layer needs
 	// only the size and remains device-free.
 	struct InterfaceImageInfo {
+		// The source's extent in pixels, after the cell below has been chosen.
 		core::Vector2 Size;
+
+		// Which frame of an animated sheet is being drawn.
 		FlipbookCell Cell;
+
+		// The upper texture coordinate of the used region, so an atlas entry
+		// covers its own rectangle rather than the whole page.
 		core::Vector2 UVMax{1.0f, 1.0f};
 	};
 
@@ -150,6 +214,12 @@ namespace engine::render {
 		//
 		// @param list  The compiled list, in paint order.
 		// @param atlas The glyphs, or an unbuilt atlas for no text.
+		// @param images Resolves a content name to something samplable, and to
+		//        its cell within a sheet. Absent draws every image as the
+		//        atlas's white texel, which is a plain tinted rectangle.
+		// @param viewports The same for an element showing a live viewport,
+		//        which is resolved by entity rather than by name because the
+		//        texture belongs to the element and not to any content.
 		void Build(
 			const gui::DrawList &list,
 			const GlyphAtlas &atlas,

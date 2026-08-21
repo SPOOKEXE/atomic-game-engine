@@ -25,7 +25,6 @@ using engine::ecs::ClassId;
 using engine::ecs::Entity;
 using engine::ecs::NULL_ENTITY;
 using engine::ecs::Store;
-using engine::scene::Anchored;
 using engine::scene::Bounds;
 using engine::scene::Collider;
 using engine::scene::LocalTransparencyOf;
@@ -38,6 +37,7 @@ using engine::scene::RegisterSceneClasses;
 using engine::scene::RigidBody;
 using engine::scene::SetLocalTransparency;
 using engine::scene::ShapeKind;
+using engine::scene::Simulated;
 using engine::scene::Surface;
 using engine::scene::Transform;
 using engine::scene::Visual;
@@ -99,20 +99,24 @@ TEST_CASE("size is halved once, into bounds and collider", "[scene][part]") {
 }
 
 TEST_CASE("MakePart with Anchored adds no Motion", "[scene][part]") {
-	// Named in `v02v03v04.md` §3.7. `Anchored` decides presence and not a flag,
-	// so an anchored part is in a different archetype and the dynamic queries
-	// never visit it - which is the whole reason static geometry costs nothing
-	// per tick.
+	// Named in `v02v03v04.md` §3.7. The decision is presence and not a flag, so
+	// an anchored part is in a different archetype and the dynamic queries never
+	// visit it - which is the whole reason static geometry costs nothing per
+	// tick.
+	//
+	// Since v0.18 an anchored part stores *neither* component, so this asserts
+	// two absences. That is the polarity: static is what a row looks like when
+	// nothing has been said about it.
 	Store store("part_test.anchored");
 
 	PartDesc anchored;
-	anchored.Anchored = true;
+	anchored.Simulated = false;
 
 	const Entity fixed = MakePart(store, anchored);
 	REQUIRE(fixed != NULL_ENTITY);
 
 	CHECK_FALSE(store.Has<Motion>(fixed));
-	CHECK(store.Has<Anchored>(fixed));
+	CHECK_FALSE(store.Has<Simulated>(fixed));
 
 	// **And it has a body regardless**, which is what stops anchoring a part
 	// from throwing away the mass and the drag an author typed.
@@ -122,11 +126,35 @@ TEST_CASE("MakePart with Anchored adds no Motion", "[scene][part]") {
 TEST_CASE("a dynamic part is a body that moves", "[scene][part]") {
 	Store store("part_test.dynamic");
 
-	const Entity moving = MakePart(store, PartDesc{});
+	// **Asked for, since v0.18.** A default `PartDesc` is static, which is what
+	// makes it agree with `Instance.new("Part")` - the two disagreed while the
+	// default was dynamic, and a part built one way fell where the same part
+	// built the other way did not.
+	PartDesc desc;
+	desc.Simulated = true;
+
+	const Entity moving = MakePart(store, desc);
 	REQUIRE(moving != NULL_ENTITY);
 
 	CHECK(store.Has<Motion>(moving));
+	CHECK(store.Has<Simulated>(moving));
 	CHECK(store.Has<RigidBody>(moving));
+}
+
+TEST_CASE("a default PartDesc is static", "[scene][part]") {
+	// The v0.18 flip, stated on its own so that moving the default back fails
+	// here rather than somewhere a stack quietly stops resting.
+	Store store("part_test.default");
+
+	const Entity part = MakePart(store, PartDesc{});
+	REQUIRE(part != NULL_ENTITY);
+
+	CHECK_FALSE(store.Has<Simulated>(part));
+	CHECK_FALSE(store.Has<Motion>(part));
+
+	// And it still weighs what an author typed, which is the v0.15 correction
+	// this polarity had to preserve.
+	CHECK(store.Has<RigidBody>(part));
 }
 
 TEST_CASE("anchored and dynamic parts do not share a query", "[scene][part]") {
@@ -136,13 +164,16 @@ TEST_CASE("anchored and dynamic parts do not share a query", "[scene][part]") {
 	Store store("part_test.archetypes");
 
 	PartDesc anchored;
-	anchored.Anchored = true;
+	anchored.Simulated = false;
+
+	PartDesc dynamic;
+	dynamic.Simulated = true;
 
 	for (int index = 0; index < 5; index++) {
 		MakePart(store, anchored);
 	}
-	MakePart(store, PartDesc{});
-	MakePart(store, PartDesc{});
+	MakePart(store, dynamic);
+	MakePart(store, dynamic);
 
 	CHECK(store.CountMatching<Transform>() == 7);
 	CHECK(store.CountMatching<Transform, Motion>() == 2);
@@ -335,19 +366,27 @@ TEST_CASE("a size that disagrees with the property is refused", "[scene][part]")
 TEST_CASE("Anchored is presence rather than a flag", "[scene][part]") {
 	Store store("property_test");
 
-	const Entity dynamic = MakePart(store, PartDesc{});
+	// **The Roblox property is the negation of the stored tag**, and this is the
+	// test that holds `scene::AnchoredProperty` to being the only place that
+	// inversion is spelled: every line below reads the property one way and the
+	// component the other.
+	PartDesc desc;
+	desc.Simulated = true;
+
+	const Entity dynamic = MakePart(store, desc);
 	CHECK(store.Get<RigidBody>(dynamic) != nullptr);
 	CHECK_FALSE(Read<bool>(store, dynamic, "Anchored"));
 
 	// A structural write: the row moves to another archetype rather than a
 	// boolean changing inside it.
 	REQUIRE(Write(store, dynamic, "Anchored", true));
-	CHECK(store.Has<Anchored>(dynamic));
+	CHECK_FALSE(store.Has<Simulated>(dynamic));
 	CHECK(store.Get<Motion>(dynamic) == nullptr);
 	CHECK(Read<bool>(store, dynamic, "Anchored"));
 
 	REQUIRE(Write(store, dynamic, "Anchored", false));
-	CHECK_FALSE(store.Has<Anchored>(dynamic));
+	CHECK(store.Has<Simulated>(dynamic));
+	CHECK(store.Get<Motion>(dynamic) != nullptr);
 	CHECK_FALSE(Read<bool>(store, dynamic, "Anchored"));
 }
 
@@ -804,10 +843,10 @@ TEST_CASE("the physical properties are on every part and readable by name", "[sc
 	CHECK(stored->Friction == Catch::Approx(0.9f));
 	CHECK(stored->Elasticity == Catch::Approx(0.25f));
 
-	// **A part made by `Instance.new` is anchored here**, because `RigidBody`
+	// **A part made by `Instance.new` is anchored here**, because `Simulated`
 	// and `Motion` are not class components - `MakePart` says whether a part has
-	// them and a bare `CreateInstance` says no. So it has to be unanchored
-	// before it has a mass at all, which is also what a script does.
+	// them and a bare `CreateInstance` says nothing at all. So it has to be
+	// unanchored before it has a mass, which is also what a script does.
 	float mass = 0.0f;
 	REQUIRE(store.GetProperty(part, Name("Mass"), &mass, sizeof(mass)));
 	CHECK(mass == Catch::Approx(0.0f));
@@ -842,7 +881,7 @@ TEST_CASE("anchoring a part keeps the numbers an author typed", "[scene][part]")
 	engine::scene::EnsureClassTree();
 
 	PartDesc desc;
-	desc.Anchored = false;
+	desc.Simulated = true;
 	const Entity part = MakePart(store, desc);
 	REQUIRE(part != NULL_ENTITY);
 
@@ -888,7 +927,7 @@ TEST_CASE("drag reads on an anchored part rather than raising", "[scene][part]")
 	engine::scene::EnsureClassTree();
 
 	PartDesc desc;
-	desc.Anchored = true;
+	desc.Simulated = false;
 	const Entity part = MakePart(store, desc);
 
 	float damping = -1.0f;

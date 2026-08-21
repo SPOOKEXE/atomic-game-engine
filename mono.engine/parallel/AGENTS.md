@@ -88,6 +88,36 @@ short span cannot repay a dispatch, and it is what to attack if the crossover
 ever has to come down. Doing so is a rewrite of the join, not a change to a
 constant.
 
+## What a dispatch buys, when the ranges hold work
+
+`engine.parallel.bench.contention` puts the same million rows of real work
+through every arrangement, so the rows divide against each other. On a
+twenty-four thread machine, at `-O3`:
+
+| | |
+|---|---|
+| serial, no dispatch at all | 2.98 ms |
+| 1 worker | 2.24 ms |
+| 2 workers | 1.71 ms |
+| 4 workers | 1.37 ms |
+| 23 workers | 260 us |
+| 23 workers, grain 256 | 343 us |
+| 23 workers, grain 65536 | 325 us |
+| 23 workers, one row in a thousand a hundred times dearer | 1.21 ms |
+| the same million rows as 64 dispatches of 16k | 3.05 ms |
+
+**The last row is the one to remember, and it did not dispatch.** Sixteen
+thousand rows is under `DEFAULT_GRAIN * MINIMUM_GRAINS`, so all sixty-four calls
+ran whole on the caller and the row lands on the serial figure. A system that
+batches its work per chunk rather than per tick hands the pool spans it silently
+refuses to split; the profile shows a busy calling thread and idle workers, and
+nothing anywhere says the word "inline".
+
+The grain rows are what keeps 4096 where it is for a body of this cost - 256 is a
+quarter worse for handing over ranges too small to pay, 65536 a fifth worse for
+leaving workers with nothing to claim - and the imbalance row is the reminder
+that `For` splits by index count and cannot know what an index costs.
+
 ## The calling thread works
 
 `Start(0)` leaves one core for the caller, because the caller drains ranges too.

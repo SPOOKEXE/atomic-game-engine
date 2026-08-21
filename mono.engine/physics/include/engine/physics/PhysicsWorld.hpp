@@ -135,6 +135,10 @@ namespace engine::physics {
 		// Set on an index that refers to the static arrays.
 		static constexpr uint32_t STATIC = 0x80000000u;
 
+		// Whether each collider is in the static index rather than the moving
+		// one, which decides which array `FirstIndex` and `SecondIndex` are
+		// positions into.
+		//@{
 		constexpr bool FirstIsStatic() const {
 			return (First & STATIC) != 0;
 		}
@@ -142,7 +146,11 @@ namespace engine::physics {
 		constexpr bool SecondIsStatic() const {
 			return (Second & STATIC) != 0;
 		}
+		//@}
 
+		// Each collider's position in whichever array it belongs to, with the
+		// static flag masked off.
+		//@{
 		constexpr size_t FirstIndex() const {
 			return static_cast<size_t>(First & ~STATIC);
 		}
@@ -150,6 +158,7 @@ namespace engine::physics {
 		constexpr size_t SecondIndex() const {
 			return static_cast<size_t>(Second & ~STATIC);
 		}
+		//@}
 	};
 
 	// A candidate pair with the proxies it came from, as the broad phase sorts
@@ -167,7 +176,11 @@ namespace engine::physics {
 	//
 	// @since v0.17
 	struct SourcedPair {
+		// The pair itself, which is what everything outside this module reads.
 		CandidatePair Pair;
+
+		// Where it came from, which is nobody else's business once the sort is
+		// done.
 		CandidateSource Source;
 
 		// Ordered and compared by the pair alone. Two rows naming one pair are

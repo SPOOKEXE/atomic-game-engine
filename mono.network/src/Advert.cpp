@@ -4,6 +4,7 @@
 #include <engine/core/SecureWipe.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cryptopp/osrng.h>
 #include <network/Advert.hpp>
 

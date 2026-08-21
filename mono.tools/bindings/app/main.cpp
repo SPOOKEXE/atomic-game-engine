@@ -32,6 +32,7 @@
 #include <engine/script/Vocabulary.hpp>
 
 #include <algorithm>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -620,20 +621,46 @@ declare extern type Vector3 with
 	Z: number
 	Magnitude: number
 	Unit: Vector3
+	function Abs(self): Vector3
+	function Ceil(self): Vector3
+	function Floor(self): Vector3
+	function Sign(self): Vector3
+	function Cross(self, other: Vector3): Vector3
+	function Dot(self, other: Vector3): number
+	-- Unsigned without an axis, and signed by which side of `axis` the turn goes
+	-- with one. The unsigned form cannot tell left from right.
+	function Angle(self, other: Vector3, axis: Vector3?): number
+	function FuzzyEq(self, other: Vector3, epsilon: number?): boolean
+	function Lerp(self, goal: Vector3, alpha: number): Vector3
+	function Max(self, vector: Vector3): Vector3
+	function Min(self, vector: Vector3): Vector3
 	function __add(self, other: Vector3): Vector3
 	function __sub(self, other: Vector3): Vector3
 	function __mul(self, other: Vector3 | number): Vector3
+	-- The vector has to be on the left of `/` and `//`. Roblox's operator table
+	-- has no `number / Vector3` row, and `2 * v` is the one that does.
+	function __div(self, other: Vector3 | number): Vector3
+	function __idiv(self, other: Vector3 | number): Vector3
 	function __unm(self): Vector3
 end
 
 declare Vector3: {
 	new: (x: number?, y: number?, z: number?) -> Vector3,
 
+	-- Capitalised, because Roblox capitalises these two and leaves `new` lower
+	-- case. It reads as an inconsistency and is one, but it is the one a script
+	-- written elsewhere already contains.
+	FromNormalId: (normal: Enum_NormalId) -> Vector3,
+	FromAxis: (axis: Enum_Axis) -> Vector3,
+
 	-- **Lowercase, because Roblox's are.** Every other member of this vocabulary
-	-- is capitalised and these two are not, which reads as a mistake until you
+	-- is capitalised and these five are not, which reads as a mistake until you
 	-- try to run a script written elsewhere.
 	zero: Vector3,
 	one: Vector3,
+	xAxis: Vector3,
+	yAxis: Vector3,
+	zAxis: Vector3,
 }
 
 declare extern type Color3 with
@@ -655,14 +682,84 @@ declare Color3: {
 -- overload alone.
 declare extern type CFrame with
 	Position: Vector3
+	-- Roblox's alias for `Position`, kept because a long Roblox habit types it.
+	p: Vector3
+	X: number
+	Y: number
+	Z: number
+
+	-- This frame's rotation at the world origin.
+	Rotation: CFrame
+
+	-- The three basis columns. `XVector`/`YVector` are the same directions as
+	-- `RightVector`/`UpVector`; `ZVector` is the negation of `LookVector`, which
+	-- is the one pair that differ.
+	RightVector: Vector3
+	UpVector: Vector3
+	LookVector: Vector3
+	XVector: Vector3
+	YVector: Vector3
+	ZVector: Vector3
+
 	function __mul(self, other: CFrame): CFrame
+	function __add(self, offset: Vector3): CFrame
+	function __sub(self, offset: Vector3): CFrame
+
+	function Inverse(self): CFrame
+	function Orthonormalize(self): CFrame
+	function Lerp(self, goal: CFrame, alpha: number): CFrame
+	function ToWorldSpace(self, other: CFrame): CFrame
+	function ToObjectSpace(self, other: CFrame): CFrame
+	function PointToWorldSpace(self, point: Vector3): Vector3
+	function PointToObjectSpace(self, point: Vector3): Vector3
+	function VectorToWorldSpace(self, direction: Vector3): Vector3
+	function VectorToObjectSpace(self, direction: Vector3): Vector3
+	function AngleBetween(self, other: CFrame): number
+	function FuzzyEq(self, other: CFrame, epsilon: number?): boolean
+
+	-- Twelve values: the position, then the rotation matrix row by row. That is
+	-- the order the twelve-argument `CFrame.new` takes them back in.
+	function GetComponents(self): (number, number, number, number, number, number, number, number, number, number, number, number)
+	function components(self): (number, number, number, number, number, number, number, number, number, number, number, number)
+
+	function ToEulerAnglesXYZ(self): (number, number, number)
+	function ToEulerAnglesYXZ(self): (number, number, number)
+	function ToOrientation(self): (number, number, number)
+	function ToAxisAngle(self): (Vector3, number)
 end
 
 declare CFrame: {
-	new: ((x: number?, y: number?, z: number?) -> CFrame) & ((position: Vector3) -> CFrame),
+	new: ((x: number?, y: number?, z: number?) -> CFrame)
+		& ((position: Vector3) -> CFrame)
+		& ((x: number, y: number, z: number, qX: number, qY: number, qZ: number, qW: number) -> CFrame)
+		& ((x: number, y: number, z: number, r00: number, r01: number, r02: number, r10: number, r11: number, r12: number, r20: number, r21: number, r22: number) -> CFrame),
+
+	-- The identity: no turn, at the origin.
+	identity: CFrame,
+
 	-- Radians, because Roblox's is radians - while `Orientation` is degrees.
-	Angles: (pitch: number, yaw: number, roll: number) -> CFrame,
+	--
+	-- **X, then Y, then Z**, which is what Roblox means by `Angles` and by
+	-- `fromEulerAnglesXYZ`; the two are one function. Until v0.18 this name was
+	-- bound to the Y-X-Z composition, so a script pasted from Roblox turned the
+	-- wrong way whenever it named two axes at once.
+	Angles: (rx: number, ry: number, rz: number) -> CFrame,
+	fromEulerAnglesXYZ: (rx: number, ry: number, rz: number) -> CFrame,
+
+	-- Y, then X, then Z. The order `BasePart.Orientation` round-trips through,
+	-- here and in Roblox. Two names for one function, as Roblox has.
+	fromEulerAnglesYXZ: (rx: number, ry: number, rz: number) -> CFrame,
+	fromOrientation: (rx: number, ry: number, rz: number) -> CFrame,
+
 	lookAt: (from: Vector3, to: Vector3, up: Vector3?) -> CFrame,
+	lookAlong: (at: Vector3, direction: Vector3, up: Vector3?) -> CFrame,
+	fromAxisAngle: (axis: Vector3, angle: number) -> CFrame,
+
+	-- The third basis vector is determined by the first two, so a fourth
+	-- argument is accepted and ignored rather than honoured into a basis that is
+	-- not a rotation.
+	fromMatrix: (position: Vector3, vX: Vector3, vY: Vector3, vZ: Vector3?) -> CFrame,
+	fromRotationBetweenVectors: (from: Vector3, to: Vector3) -> CFrame,
 }
 
 -- --- signals ---------------------------------------------------------------
@@ -759,7 +856,20 @@ declare extern type UserInputServiceType with
 	MouseDeltaSensitivity: number
 	read KeyboardEnabled: boolean
 	read MouseEnabled: boolean
-
+)LUAU"
+		// **Two literals rather than one, and they are concatenated by the
+		// compiler.** MSVC caps a single string literal at 16380 bytes and
+		// truncates the rest with `error C2026: string too big` - a *warning*
+		// in shape, an error in effect, and one that would have shipped a
+		// half-written declaration file if it had been the former. GCC and
+		// Clang have no such cap, which is why this was only ever a problem
+		// on the platform nobody builds daily.
+		//
+		// Adjacent literals are joined at translation phase 6, so the string
+		// this produces is byte for byte the one it produced before - which
+		// `just bindings-check` proves by regenerating every artefact and
+		// comparing. Do not rejoin them.
+		R"LUAU(
 	-- **Present and always false.** There is no gamepad, touch surface, headset
 	-- or motion sensor anywhere in `engine::input`, and a Roblox place branches
 	-- on these to pick a control scheme - a missing property raises where a
@@ -994,6 +1104,13 @@ end
 
 declare extern type RaycastParams with
 	CollisionGroup: string
+
+	-- The most entities an overlap or a cast will report. Ignored by `Raycast`,
+	-- which reports one hit or none.
+	--
+	-- A result exactly this long may have been truncated, which is the author's
+	-- own instruction rather than a silent loss. Clamped to 65536.
+	MaxParts: number
 end
 
 declare RaycastParams: {
@@ -1466,7 +1583,9 @@ declare extern type HttpService with
 	-- infinity, and for anything with no JSON form - an `Instance`, a function,
 	-- a `Vector3`, a `Color3` or a `CFrame`.
 	function JSONEncode(self, value: any): string
-
+)LUAU"
+		// Split for the reason the first of these gives: MSVC's 16380-byte cap.
+		R"LUAU(
 	-- Arrays come back **one-based**, which is what `#` and `ipairs` mean.
 	-- `null` becomes `nil`. Raises on malformed text, on text after the value,
 	-- and on a number a double cannot hold.
@@ -2159,6 +2278,36 @@ declare task: {
 			// `PropertyDescriptor` to carry which class a reference points at,
 			// which is a change to `ecs` rather than to this generator.
 			if (name == "Workspace") {
+				// **Emitted here rather than in the hand-written block above
+				// because they hang off a *class*.** `RaycastParams` is a global
+				// and lives in the literal; these are methods on `Workspace`,
+				// and the loop that writes a class's members is this one.
+				//
+				// The volume queries answer with an array of instances and no
+				// hit information, which is what `physics::OverlapBox` and the
+				// two casts return: there is no contact point for a volume test,
+				// so a result carrying `Position` would carry an invented one.
+				out << "\tfunction OverlapBox(self, centre: Vector3, size: Vector3, "
+					   "params: RaycastParams?): { Instance }\n";
+				out << "\tfunction OverlapSphere(self, centre: Vector3, radius: number, "
+					   "params: RaycastParams?): { Instance }\n";
+				out << "\tfunction BlockCast(self, from: CFrame, size: Vector3, motion: Vector3, "
+					   "params: RaycastParams?): { Instance }\n";
+				out << "\tfunction SphereCast(self, from: Vector3, radius: number, motion: Vector3, "
+					   "params: RaycastParams?): { Instance }\n";
+
+				// The portal cast has the same result shape as `Raycast`, and
+				// the two are written out separately because Luau has no way to
+				// name an anonymous table type once.
+				out << "\tfunction RaycastThroughPortals(self, origin: Vector3, direction: Vector3, "
+					   "params: RaycastParams?): {\n";
+				out << "\t\tInstance: Instance,\n";
+				out << "\t\tPosition: Vector3,\n";
+				out << "\t\tNormal: Vector3,\n";
+				out << "\t\tDistance: number,\n";
+				out << "\t\tMaterial: string,\n";
+				out << "\t}?\n";
+
 				out << "\tfunction Raycast(self, origin: Vector3, direction: Vector3, "
 					   "params: RaycastParams?): {\n";
 				out << "\t\tInstance: Instance,\n";
@@ -2302,7 +2451,24 @@ declare interface Vector3 {
 	add(other: Vector3): Vector3;
 	sub(other: Vector3): Vector3;
 	mul(other: Vector3 | number): Vector3;
+	div(other: Vector3 | number): Vector3;
+	// `//` in Luau: each quotient floored.
+	idiv(other: Vector3 | number): Vector3;
+	// Unary minus, which is an operator in Luau and has no method form there.
+	neg(): Vector3;
 	Equals(other: Vector3): boolean;
+	Abs(): Vector3;
+	Ceil(): Vector3;
+	Floor(): Vector3;
+	Sign(): Vector3;
+	Cross(other: Vector3): Vector3;
+	Dot(other: Vector3): number;
+	// Unsigned without an axis, signed by which side of `axis` the turn goes with one.
+	Angle(other: Vector3, axis?: Vector3): number;
+	FuzzyEq(other: Vector3, epsilon?: number): boolean;
+	Lerp(goal: Vector3, alpha: number): Vector3;
+	Max(vector: Vector3): Vector3;
+	Min(vector: Vector3): Vector3;
 }
 
 declare interface Color3 {
@@ -2314,15 +2480,66 @@ declare interface Color3 {
 
 declare interface CFrame {
 	readonly Position: Vector3;
+	readonly X: number;
+	readonly Y: number;
+	readonly Z: number;
+
+	// This frame's rotation at the world origin.
+	readonly Rotation: CFrame;
+
+	// The three basis columns. `XVector`/`YVector` are the same directions as
+	// `RightVector`/`UpVector`; `ZVector` is the negation of `LookVector`.
+	readonly RightVector: Vector3;
+	readonly UpVector: Vector3;
+	readonly LookVector: Vector3;
+	readonly XVector: Vector3;
+	readonly YVector: Vector3;
+	readonly ZVector: Vector3;
+
+	// **Methods, where Luau writes operators.** JavaScript has no operator
+	// overloading, so `a.mul(b)` is the honest spelling rather than pretending
+	// the language has something it does not.
 	mul(other: CFrame): CFrame;
+	mul(point: Vector3): Vector3;
+	add(offset: Vector3): CFrame;
+	sub(offset: Vector3): CFrame;
+
+	Inverse(): CFrame;
+	Orthonormalize(): CFrame;
+	Lerp(goal: CFrame, alpha: number): CFrame;
+	ToWorldSpace(other: CFrame): CFrame;
+	ToObjectSpace(other: CFrame): CFrame;
+	PointToWorldSpace(point: Vector3): Vector3;
+	PointToObjectSpace(point: Vector3): Vector3;
+	VectorToWorldSpace(direction: Vector3): Vector3;
+	VectorToObjectSpace(direction: Vector3): Vector3;
+	AngleBetween(other: CFrame): number;
+	FuzzyEq(other: CFrame, epsilon?: number): boolean;
+
+	// **Arrays, where Luau returns several values.** Same reason as the methods
+	// above: JavaScript has no multiple return.
+	GetComponents(): number[];
+	components(): number[];
+	ToEulerAnglesXYZ(): [number, number, number];
+	ToEulerAnglesYXZ(): [number, number, number];
+	ToOrientation(): [number, number, number];
+	ToAxisAngle(): [Vector3, number];
 }
 
 declare const Vector3: {
 	new: (x?: number, y?: number, z?: number) => Vector3;
 
+	// Capitalised, because Roblox capitalises these two. The Luau half carries
+	// the argument.
+	FromNormalId: (normal: Enum.NormalId) => Vector3;
+	FromAxis: (axis: Enum.Axis) => Vector3;
+
 	// Lowercase, because Roblox's are. The Luau half carries the argument.
 	readonly zero: Vector3;
 	readonly one: Vector3;
+	readonly xAxis: Vector3;
+	readonly yAxis: Vector3;
+	readonly zAxis: Vector3;
 };
 
 declare const Color3: {
@@ -2335,10 +2552,36 @@ declare const CFrame: {
 	new: {
 		(x?: number, y?: number, z?: number): CFrame;
 		(position: Vector3): CFrame;
+		(x: number, y: number, z: number, qX: number, qY: number, qZ: number, qW: number): CFrame;
+		(
+			x: number, y: number, z: number,
+			r00: number, r01: number, r02: number,
+			r10: number, r11: number, r12: number,
+			r20: number, r21: number, r22: number
+		): CFrame;
 	};
-	// Radians, because Roblox's is radians -- while `Orientation` is degrees.
-	Angles: (pitch: number, yaw: number, roll: number) => CFrame;
+
+	// The identity: no turn, at the origin.
+	identity: CFrame;
+
+	// Radians, because Roblox's is radians - while `Orientation` is degrees.
+	//
+	// X, then Y, then Z, which is what Roblox means by `Angles` and by
+	// `fromEulerAnglesXYZ`. Until v0.18 this name was bound to the Y-X-Z
+	// composition, so a pasted script turned the wrong way when it named two
+	// axes at once.
+	Angles: (rx: number, ry: number, rz: number) => CFrame;
+	fromEulerAnglesXYZ: (rx: number, ry: number, rz: number) => CFrame;
+
+	// Y, then X, then Z. The order `BasePart.Orientation` round-trips through.
+	fromEulerAnglesYXZ: (rx: number, ry: number, rz: number) => CFrame;
+	fromOrientation: (rx: number, ry: number, rz: number) => CFrame;
+
 	lookAt: (from: Vector3, to: Vector3, up?: Vector3) => CFrame;
+	lookAlong: (at: Vector3, direction: Vector3, up?: Vector3) => CFrame;
+	fromAxisAngle: (axis: Vector3, angle: number) => CFrame;
+	fromMatrix: (position: Vector3, vX: Vector3, vY: Vector3, vZ?: Vector3) => CFrame;
+	fromRotationBetweenVectors: (from: Vector3, to: Vector3) => CFrame;
 };
 
 // --- signals ---------------------------------------------------------------
@@ -2412,7 +2655,9 @@ declare interface InputObject {
 	readonly Position: Vector3;
 	readonly Delta: Vector3;
 }
-
+)TS"
+		// Split for the reason the first of these gives: MSVC's 16380-byte cap.
+		R"TS(
 // What `InputBegan`, `InputEnded` and `InputChanged` call a handler with.
 //
 // Its own type rather than `PropertyChangedSignal`, which passes nothing.
@@ -2600,6 +2845,13 @@ declare interface FocusLostSignal {
 
 declare interface RaycastParams {
 	CollisionGroup: string;
+
+	// The most entities an overlap or a cast will report. Ignored by `Raycast`,
+	// which reports one hit or none.
+	//
+	// A result exactly this long may have been truncated, which is the author's
+	// own instruction rather than a silent loss. Clamped to 65536.
+	MaxParts: number;
 }
 
 declare const RaycastParams: {
@@ -3434,6 +3686,16 @@ declare const task: {
 			if (name == "Workspace") {
 				out << "\tRaycast(origin: Vector3, direction: Vector3, params?: RaycastParams): "
 					   "RaycastResult | null;\n";
+				out << "\tRaycastThroughPortals(origin: Vector3, direction: Vector3, "
+					   "params?: RaycastParams): RaycastResult | null;\n";
+				out << "\tOverlapBox(centre: Vector3, size: Vector3, params?: RaycastParams): "
+					   "Instance[];\n";
+				out << "\tOverlapSphere(centre: Vector3, radius: number, params?: RaycastParams): "
+					   "Instance[];\n";
+				out << "\tBlockCast(from: CFrame, size: Vector3, motion: Vector3, "
+					   "params?: RaycastParams): Instance[];\n";
+				out << "\tSphereCast(from: Vector3, radius: number, motion: Vector3, "
+					   "params?: RaycastParams): Instance[];\n";
 			}
 
 			out << "}\n\n";
@@ -3547,8 +3809,19 @@ int main(int argc, char **argv) {
 	arguments.Value("out", "DIR", "Where the generated files live");
 
 	const engine::core::Arguments::Result parsed = arguments.Parse(argc, argv);
+	// Guarded on `parsed.Ok` because the block below folds a parse failure in
+	// with `--help`, and a command line that did not parse should report that
+	// rather than answer a question it may not have been asked.
+	if (parsed.Ok && parsed.VersionRequested) {
+		std::cout << arguments.VersionLine();
+		return 0;
+	}
 	if (!parsed.Ok || parsed.HelpRequested) {
 		return parsed.Ok ? 0 : 2;
+	}
+	if (parsed.DescribeRequested) {
+		std::fputs(arguments.Describe().c_str(), stdout);
+		return 0;
 	}
 
 	// Registering the classes is what populates the table: a manifest generated

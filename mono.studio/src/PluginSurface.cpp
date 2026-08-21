@@ -749,9 +749,8 @@ namespace studio {
 		// same choice the preferences file makes and for the same reason: a
 		// plugin author writing `0xFF403020` has to know imgui's byte order to
 		// get it right, and one writing `"#203040"` does not.
-		bool SetWidgetColour(
-			size_t widget, const HostValue &which, const HostValue &value, std::string &failure
-		) {
+		bool
+		SetWidgetColour(size_t widget, const HostValue &which, const HostValue &value, std::string &failure) {
 			const std::string name(which.AsText());
 			const std::optional<engine::ui::ThemeColour> colour = engine::ui::ParseThemeColour(name);
 			if (!colour) {
@@ -776,8 +775,8 @@ namespace studio {
 
 			const std::optional<unsigned int> packed = engine::ui::ParseColourText(value.AsText());
 			if (!packed) {
-				failure = "a colour is RRGGBB or RRGGBBAA text, and '" +
-						  std::string(value.AsText()) + "' is neither";
+				failure = "a colour is RRGGBB or RRGGBBAA text, and '" + std::string(value.AsText()) +
+						  "' is neither";
 				return false;
 			}
 

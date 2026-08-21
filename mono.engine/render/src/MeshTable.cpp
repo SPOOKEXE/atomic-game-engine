@@ -4,6 +4,7 @@
 
 #include <SDL3/SDL_gpu.h>
 
+#include <algorithm>
 #include <cstring>
 
 namespace engine::render {
@@ -54,6 +55,12 @@ namespace engine::render {
 		IndexBuffer = nullptr;
 		VertexCapacity = 0;
 		IndexCapacity = 0;
+		Uploads = 0;
+		Generation = 0;
+		FreeVertices.clear();
+		FreeIndices.clear();
+		DirtyVertices.clear();
+		DirtyIndices.clear();
 		HostVertices.clear();
 		HostIndices.clear();
 		Entries.clear();
@@ -62,17 +69,186 @@ namespace engine::render {
 		Dirty = false;
 	}
 
+	size_t MeshTable::Claim(std::vector<FreeBlock> &blocks, size_t count, size_t generation) {
+		if (count == 0) {
+			return NOWHERE;
+		}
+
+		for (size_t at = 0; at < blocks.size(); at++) {
+			FreeBlock &block = blocks[at];
+			if (block.Count < count) {
+				continue;
+			}
+
+			// **Old enough, not merely big enough.** A run freed this frame may
+			// still be under a draw the device has not finished; see
+			// `DEFERRED_FRAMES`. Skipped rather than refused, because a younger
+			// block sitting at the front must not hide an older one behind it.
+			if (generation < block.FreedAt + DEFERRED_FRAMES) {
+				continue;
+			}
+
+			const size_t offset = block.Offset;
+			if (block.Count == count) {
+				blocks.erase(blocks.begin() + static_cast<ptrdiff_t>(at));
+			} else {
+				// The remainder keeps the block's age: it has been free at
+				// least as long as the part just taken from it.
+				block.Offset += count;
+				block.Count -= count;
+			}
+			return offset;
+		}
+
+		return NOWHERE;
+	}
+
+	void MeshTable::Release(std::vector<FreeBlock> &blocks, size_t offset, size_t count, size_t generation) {
+		if (count == 0) {
+			return;
+		}
+
+		const auto after =
+			std::lower_bound(blocks.begin(), blocks.end(), offset, [](const FreeBlock &block, size_t at) {
+				return block.Offset < at;
+			});
+		const auto inserted = blocks.insert(after, FreeBlock{offset, count, generation});
+		const size_t at = static_cast<size_t>(inserted - blocks.begin());
+
+		// **Merged with the block after it first, then the one before**, so a
+		// run that closes a gap between two free blocks becomes one block rather
+		// than three. Doing the far side first keeps the index of the near one
+		// valid.
+		//
+		// **Only blocks freed on the same frame merge, and that restriction is
+		// load-bearing.** A merged block can only be handed out when every part
+		// of it is old enough, so merging two different ages means taking the
+		// newer - and a mesh rewritten every frame frees a run beside its own
+		// last one every frame, which would keep resetting the age of one
+		// ever-growing block and reclaim nothing at all. That is the exact bug
+		// this whole change exists to remove, reintroduced by the tidying meant
+		// to help it.
+		//
+		// What is given up is merging neighbours of different ages. They stay
+		// separate blocks and each becomes reusable on its own, which costs a
+		// larger mesh the chance to span them and costs nothing else. Runs freed
+		// together - a chunk replacing several meshes at once - still merge,
+		// which is the case that fragments.
+		if (at + 1 < blocks.size() && blocks[at].Offset + blocks[at].Count == blocks[at + 1].Offset &&
+			blocks[at].FreedAt == blocks[at + 1].FreedAt) {
+			blocks[at].Count += blocks[at + 1].Count;
+			blocks.erase(blocks.begin() + static_cast<ptrdiff_t>(at) + 1);
+		}
+		if (at > 0 && blocks[at - 1].Offset + blocks[at - 1].Count == blocks[at].Offset &&
+			blocks[at - 1].FreedAt == blocks[at].FreedAt) {
+			blocks[at - 1].Count += blocks[at].Count;
+			blocks.erase(blocks.begin() + static_cast<ptrdiff_t>(at));
+		}
+	}
+
+	void MeshTable::MarkDirty(std::vector<Span> &spans, size_t offset, size_t count) {
+		if (count == 0) {
+			return;
+		}
+
+		const auto after =
+			std::lower_bound(spans.begin(), spans.end(), offset, [](const Span &span, size_t at) {
+				return span.Offset < at;
+			});
+		const auto inserted = spans.insert(after, Span{offset, count});
+		size_t at = static_cast<size_t>(inserted - spans.begin());
+
+		// Touching or overlapping spans become one, so an append that lands
+		// against the previous one is a single copy rather than two.
+		if (at > 0 && spans[at - 1].Offset + spans[at - 1].Count >= spans[at].Offset) {
+			at--;
+		}
+		while (at + 1 < spans.size() && spans[at].Offset + spans[at].Count >= spans[at + 1].Offset) {
+			const size_t end =
+				std::max(spans[at].Offset + spans[at].Count, spans[at + 1].Offset + spans[at + 1].Count);
+			spans[at].Count = end - spans[at].Offset;
+			spans.erase(spans.begin() + static_cast<ptrdiff_t>(at) + 1);
+		}
+	}
+
+	size_t MeshTable::Total(const std::vector<Span> &spans) {
+		size_t total = 0;
+		for (const Span &span : spans) {
+			total += span.Count;
+		}
+		return total;
+	}
+
+	size_t MeshTable::FreeVertexCount() const {
+		size_t total = 0;
+		for (const FreeBlock &block : FreeVertices) {
+			total += block.Count;
+		}
+		return total;
+	}
+
+	size_t MeshTable::FreeIndexCount() const {
+		size_t total = 0;
+		for (const FreeBlock &block : FreeIndices) {
+			total += block.Count;
+		}
+		return total;
+	}
+
 	bool MeshTable::Add(const core::Name &name, const assets::MeshData &mesh) {
 		if (!name.IsValid() || !mesh.IsValid()) {
 			return false;
 		}
-		if (HostVertices.size() + mesh.Vertices.size() > MAXIMUM_VERTICES ||
-			HostIndices.size() + mesh.Indices.size() > MAXIMUM_INDICES) {
+
+		// **The outgoing entry's storage is given back before the new one asks
+		// for storage**, so a mesh rewritten at the same size takes its own run
+		// back rather than growing the table. It cannot take it back *this*
+		// frame - `Claim` refuses a run younger than `DEFERRED_FRAMES` - which
+		// is what keeps the range a frame in flight is drawing from intact.
+		if (const auto outgoing = Entries.find(name.Id()); outgoing != Entries.end()) {
+			Release(
+				FreeVertices,
+				static_cast<size_t>(outgoing->second.Whole.VertexOffset),
+				outgoing->second.VertexCount,
+				Generation
+			);
+			Release(
+				FreeIndices, outgoing->second.Whole.FirstIndex, outgoing->second.Whole.IndexCount, Generation
+			);
+		}
+
+		// Reused where a run will have it, appended where none will. Both are
+		// claimed before anything is written, so a table that cannot hold the
+		// mesh is refused without having half-taken it.
+		size_t vertexAt = Claim(FreeVertices, mesh.Vertices.size(), Generation);
+		size_t indexAt = Claim(FreeIndices, mesh.Indices.size(), Generation);
+
+		const bool growVertices = vertexAt == NOWHERE;
+		const bool growIndices = indexAt == NOWHERE;
+
+		if ((growVertices && HostVertices.size() + mesh.Vertices.size() > MAXIMUM_VERTICES) ||
+			(growIndices && HostIndices.size() + mesh.Indices.size() > MAXIMUM_INDICES)) {
+			// **Whatever was claimed goes straight back**, or a refusal leaks
+			// the run it had already taken.
+			if (!growVertices) {
+				Release(FreeVertices, vertexAt, mesh.Vertices.size(), Generation);
+			}
+			if (!growIndices) {
+				Release(FreeIndices, indexAt, mesh.Indices.size(), Generation);
+			}
 			ENGINE_WARN("mesh table: full, refusing {}", name.Text());
 			return false;
 		}
 
-		// Append replacements so existing ranges remain valid until the next upload.
+		if (growVertices) {
+			vertexAt = HostVertices.size();
+			HostVertices.resize(vertexAt + mesh.Vertices.size());
+		}
+		if (growIndices) {
+			indexAt = HostIndices.size();
+			HostIndices.resize(indexAt + mesh.Indices.size());
+		}
+
 		MeshEntry entry;
 
 		// **The mesh's own box, which is what turns `Size` into a size.**
@@ -82,9 +258,10 @@ namespace engine::render {
 		entry.Centre = (mesh.Minimum + mesh.Maximum) * 0.5f;
 		entry.Extent = (mesh.Maximum - mesh.Minimum) * 0.5f;
 
-		entry.Whole.FirstIndex = static_cast<uint32_t>(HostIndices.size());
+		entry.Whole.FirstIndex = static_cast<uint32_t>(indexAt);
 		entry.Whole.IndexCount = static_cast<uint32_t>(mesh.Indices.size());
-		entry.Whole.VertexOffset = static_cast<int32_t>(HostVertices.size());
+		entry.Whole.VertexOffset = static_cast<int32_t>(vertexAt);
+		entry.VertexCount = static_cast<uint32_t>(mesh.Vertices.size());
 
 		for (const assets::Submesh &submesh : mesh.Submeshes) {
 			MeshRange run;
@@ -103,8 +280,17 @@ namespace engine::render {
 			});
 		}
 
-		HostVertices.insert(HostVertices.end(), mesh.Vertices.begin(), mesh.Vertices.end());
-		HostIndices.insert(HostIndices.end(), mesh.Indices.begin(), mesh.Indices.end());
+		std::copy(
+			mesh.Vertices.begin(),
+			mesh.Vertices.end(),
+			HostVertices.begin() + static_cast<ptrdiff_t>(vertexAt)
+		);
+		std::copy(
+			mesh.Indices.begin(), mesh.Indices.end(), HostIndices.begin() + static_cast<ptrdiff_t>(indexAt)
+		);
+
+		MarkDirty(DirtyVertices, vertexAt, mesh.Vertices.size());
+		MarkDirty(DirtyIndices, indexAt, mesh.Indices.size());
 
 		Entries[name.Id()] = std::move(entry);
 		Dirty = true;
@@ -112,6 +298,12 @@ namespace engine::render {
 	}
 
 	bool MeshTable::Flush() {
+		// **Counted before the early return, because a quiet frame is still a
+		// frame.** This is what `Claim` measures a freed run's age in, and a
+		// counter that only moved when something was sent would leave a table
+		// nobody is writing to unable to ever reuse anything.
+		Generation++;
+
 		if (!Dirty) {
 			return true;
 		}
@@ -123,10 +315,12 @@ namespace engine::render {
 			return false;
 		}
 
-		const size_t vertexBytes = HostVertices.size() * sizeof(assets::MeshVertex);
-		const size_t indexBytes = HostIndices.size() * sizeof(uint32_t);
-
 		// Grow geometrically to avoid recreating buffers for every arrival.
+		//
+		// **A growth is the one case that re-sends everything.** The new buffers
+		// are empty, so the tail alone would leave the meshes already registered
+		// pointing at nothing.
+		bool recreated = false;
 		if (VertexBuffer == nullptr || HostVertices.size() > VertexCapacity ||
 			HostIndices.size() > IndexCapacity) {
 			size_t vertices = VertexCapacity == 0 ? HostVertices.size() : VertexCapacity;
@@ -164,7 +358,39 @@ namespace engine::render {
 
 			VertexCapacity = vertices;
 			IndexCapacity = indices;
+			recreated = true;
 		}
+
+		// **Only the runs `Add` wrote since the last upload.** Everything else
+		// is already on the device and identical. Re-sending it made registering
+		// N meshes cost O(N^2) bytes of memcpy and PCIe traffic, and a table near
+		// its eight-million-vertex ceiling made that a 384 MB transfer for one
+		// arriving mesh. That is the stall a game shows as a freeze while its
+		// meshes load.
+		//
+		// **A list of runs rather than the single high-water mark this kept.**
+		// A mark describes a delta only while every write is an append; a
+		// replacement that reuses a freed run writes into the middle, and one
+		// line cannot say so. The runs are coalesced as they are recorded, so
+		// the ordinary case - a burst of arrivals landing end to end - is still
+		// exactly one region.
+		// **A recreate sends everything, because the new buffers hold nothing.**
+		// Anything the spans did not name is on the old buffer, which has just
+		// been released.
+		if (recreated) {
+			DirtyVertices.assign(1, Span{0, HostVertices.size()});
+			DirtyIndices.assign(1, Span{0, HostIndices.size()});
+		}
+
+		const size_t vertexCount = Total(DirtyVertices);
+		const size_t indexCount = Total(DirtyIndices);
+		if (vertexCount == 0 && indexCount == 0) {
+			Dirty = false;
+			return true;
+		}
+
+		const size_t vertexBytes = vertexCount * sizeof(assets::MeshVertex);
+		const size_t indexBytes = indexCount * sizeof(uint32_t);
 
 		SDL_GPUTransferBufferCreateInfo transferInfo{};
 		transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
@@ -176,28 +402,69 @@ namespace engine::render {
 			return false;
 		}
 
+		// The spans laid end to end, vertices then indices, so one transfer
+		// buffer carries a frame's worth of scattered edits.
 		auto *mapped = static_cast<uint8_t *>(SDL_MapGPUTransferBuffer(Device, transfer, false));
-		std::memcpy(mapped, HostVertices.data(), vertexBytes);
-		std::memcpy(mapped + vertexBytes, HostIndices.data(), indexBytes);
+		size_t written = 0;
+		for (const Span &span : DirtyVertices) {
+			const size_t bytes = span.Count * sizeof(assets::MeshVertex);
+			std::memcpy(mapped + written, HostVertices.data() + span.Offset, bytes);
+			written += bytes;
+		}
+		for (const Span &span : DirtyIndices) {
+			const size_t bytes = span.Count * sizeof(uint32_t);
+			std::memcpy(mapped + written, HostIndices.data() + span.Offset, bytes);
+			written += bytes;
+		}
 		SDL_UnmapGPUTransferBuffer(Device, transfer);
 
 		SDL_GPUCommandBuffer *command = SDL_AcquireGPUCommandBuffer(Device);
 		SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(command);
 
-		SDL_GPUTransferBufferLocation source{transfer, 0};
-		SDL_GPUBufferRegion destination{VertexBuffer, 0, static_cast<uint32_t>(vertexBytes)};
+		// **Never cycled, which is the price of writing part of the buffer.**
+		// Cycling hands back a fresh allocation whose contents are undefined, so
+		// a partial write into a cycled buffer would discard every mesh it did
+		// not name.
+		//
+		// **What makes that safe is `DEFERRED_FRAMES`, not the offsets.** It
+		// used to be the offsets: every write was an append, so the copy landed
+		// past anything a frame in flight could be reading. A reused run is not
+		// past anything - it is storage that was in use three frames ago - and
+		// the deferral is the whole of the argument that nothing is still
+		// reading it. Batching the flush to once per frame is what keeps this to
+		// one barrier.
+		size_t read = 0;
+		for (const Span &span : DirtyVertices) {
+			const size_t bytes = span.Count * sizeof(assets::MeshVertex);
+			SDL_GPUTransferBufferLocation source{transfer, static_cast<uint32_t>(read)};
+			SDL_GPUBufferRegion destination{
+				VertexBuffer,
+				static_cast<uint32_t>(span.Offset * sizeof(assets::MeshVertex)),
+				static_cast<uint32_t>(bytes)
+			};
+			SDL_UploadToGPUBuffer(copy, &source, &destination, false);
+			read += bytes;
+		}
 
-		// Cycle the upload so a previous frame can still read the buffer.
-		SDL_UploadToGPUBuffer(copy, &source, &destination, true);
-
-		source.offset = static_cast<uint32_t>(vertexBytes);
-		destination = SDL_GPUBufferRegion{IndexBuffer, 0, static_cast<uint32_t>(indexBytes)};
-		SDL_UploadToGPUBuffer(copy, &source, &destination, true);
+		for (const Span &span : DirtyIndices) {
+			const size_t bytes = span.Count * sizeof(uint32_t);
+			SDL_GPUTransferBufferLocation source{transfer, static_cast<uint32_t>(read)};
+			SDL_GPUBufferRegion destination{
+				IndexBuffer,
+				static_cast<uint32_t>(span.Offset * sizeof(uint32_t)),
+				static_cast<uint32_t>(bytes)
+			};
+			SDL_UploadToGPUBuffer(copy, &source, &destination, false);
+			read += bytes;
+		}
 
 		SDL_EndGPUCopyPass(copy);
 		SDL_SubmitGPUCommandBuffer(command);
 		SDL_ReleaseGPUTransferBuffer(Device, transfer);
 
+		DirtyVertices.clear();
+		DirtyIndices.clear();
+		Uploads++;
 		Dirty = false;
 		return true;
 	}

@@ -8,6 +8,24 @@
 
 namespace engine::render {
 
+	InterfaceScissor
+	ScissorFor(const core::Rect &clip, const core::Vector2 &canvas, const core::Vector2 &targetPixels) {
+		const float scaleX = targetPixels.X > 0.0f && canvas.X > 0.0f ? targetPixels.X / canvas.X : 1.0f;
+		const float scaleY = targetPixels.Y > 0.0f && canvas.Y > 0.0f ? targetPixels.Y / canvas.Y : 1.0f;
+
+		const float left = std::max(0.0f, std::floor(clip.Min.X * scaleX));
+		const float top = std::max(0.0f, std::floor(clip.Min.Y * scaleY));
+		const float right = std::max(left, std::ceil(clip.Max.X * scaleX));
+		const float bottom = std::max(top, std::ceil(clip.Max.Y * scaleY));
+
+		InterfaceScissor scissor;
+		scissor.X = static_cast<int32_t>(left);
+		scissor.Y = static_cast<int32_t>(top);
+		scissor.Width = static_cast<int32_t>(right - left);
+		scissor.Height = static_cast<int32_t>(bottom - top);
+		return scissor;
+	}
+
 	namespace {
 		using core::Rect;
 		using core::Vector2;

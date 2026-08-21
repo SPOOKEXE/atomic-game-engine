@@ -110,6 +110,11 @@ namespace engine::examples {
 	// @since v0.17
 	size_t MountSceneLibraries(ecs::Store &store, ecs::Entity script, std::string_view scene);
 
+	// Declares the components the example scenes' own systems read.
+	//
+	// **Idempotent, and called by every program that runs an example.** The
+	// registry replaces by name, so a client, the studio and a headless test
+	// can each call it without agreeing on who goes first.
 	void RegisterExampleComponents();
 
 	// Installs the systems that move what a script built.

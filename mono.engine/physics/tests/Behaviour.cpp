@@ -50,12 +50,12 @@ using engine::ecs::Store;
 using engine::physics::PhysicsWorld;
 using engine::physics::PreparePhysicsWorld;
 using engine::physics::RegisterPhysicsSystems;
-using engine::scene::Anchored;
 using engine::scene::BodyKind;
 using engine::scene::Collider;
 using engine::scene::Motion;
 using engine::scene::RigidBody;
 using engine::scene::ShapeKind;
+using engine::scene::Simulated;
 using engine::scene::Transform;
 
 namespace {
@@ -104,12 +104,14 @@ namespace {
 		store.Set<Collider>(entity, collider);
 
 		// On both, anchored or not: `RigidBody` is what the part weighs and the
-		// `Anchored` tag is whether the world may move it. See `scene::Anchored`.
+		// `Simulated` tag is whether the world may move it. See
+		// `scene::Simulated`.
 		store.Set<RigidBody>(entity, RigidBody{});
 
-		if (part.Anchored) {
-			store.Set<Anchored>(entity, Anchored{});
-		} else {
+		// The field stays `Anchored` because that is what the scenes below mean
+		// when they place a floor. The inversion is spelled once, here.
+		if (!part.Anchored) {
+			store.Set<Simulated>(entity, Simulated{});
 			store.Set<Motion>(entity, Motion{});
 		}
 		return entity;

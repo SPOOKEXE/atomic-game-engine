@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -109,8 +110,16 @@ int main(int argc, char **argv) {
 	arguments.Flag("quiet", "Print only the shaders with findings");
 
 	const auto parsed = arguments.Parse(argc, argv);
+	if (parsed.VersionRequested) {
+		std::cout << arguments.VersionLine();
+		return 0;
+	}
 	if (parsed.HelpRequested) {
 		std::cout << arguments.Help();
+		return 0;
+	}
+	if (parsed.DescribeRequested) {
+		std::fputs(arguments.Describe().c_str(), stdout);
 		return 0;
 	}
 	if (!parsed.Ok) {

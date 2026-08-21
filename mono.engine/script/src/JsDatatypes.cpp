@@ -29,9 +29,13 @@
 #include <engine/core/types/Vector2.hpp>
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/physics/Query.hpp>
+#include <engine/scene/Components.hpp>
 #include <engine/spatial/CollisionGroups.hpp>
+#include <engine/spatial/Query.hpp>
 
+#include <algorithm>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace engine::script {
@@ -550,7 +554,32 @@ namespace engine::script {
 
 		struct RaycastFilter {
 			spatial::LayerMask Mask = spatial::LayerMask::All();
+
+			// The most entities an overlap or a cast will report. See
+			// `LuauQuery.cpp`, which carries why a cap is not optional here:
+			// the engine writes into a span the caller owns, so somebody has to
+			// choose its size and it cannot be the script.
+			int MaxParts = 1024;
 		};
+
+		// The most a single query may be asked for, whatever `MaxParts` says.
+		constexpr int MAX_QUERY_RESULTS = 65536;
+
+		// The filter an optional trailing argument names, or the default one.
+		//
+		// **A value and not a pointer**, so a missing or wrong-typed argument is
+		// the default filter rather than a branch at every call site. A params
+		// object of the wrong class is the one case this cannot tell from an
+		// omission, and it reads as an omission - the same reading the Luau half
+		// gives an explicit `nil`.
+		RaycastFilter FilterAt(JSContext *context, int argc, JSValueConst *argv, int index) {
+			if (argc <= index || JS_IsNull(argv[index]) || JS_IsUndefined(argv[index])) {
+				return RaycastFilter{};
+			}
+			const RaycastFilter *filter =
+				Unwrap<RaycastFilter>(context, argv[index], JsOf(context).RaycastParamsClass);
+			return filter == nullptr ? RaycastFilter{} : *filter;
+		}
 
 		JSValue RaycastParamsNew(JSContext *context, JSValueConst, int, JSValueConst *) {
 			return Wrap(context, JsOf(context).RaycastParamsClass, RaycastFilter{});
@@ -597,6 +626,121 @@ namespace engine::script {
 			return JS_UNDEFINED;
 		}
 
+		JSValue RaycastParamsGetMax(JSContext *context, JSValueConst self) {
+			const RaycastFilter *filter =
+				Unwrap<RaycastFilter>(context, self, JsOf(context).RaycastParamsClass);
+			if (filter == nullptr) {
+				return JS_ThrowTypeError(context, "not a RaycastParams");
+			}
+			return JS_NewInt32(context, filter->MaxParts);
+		}
+
+		JSValue RaycastParamsSetMax(JSContext *context, JSValueConst self, JSValueConst value) {
+			RaycastFilter *filter = Unwrap<RaycastFilter>(context, self, JsOf(context).RaycastParamsClass);
+			if (filter == nullptr) {
+				return JS_ThrowTypeError(context, "not a RaycastParams");
+			}
+
+			int32_t wanted = 0;
+			if (JS_ToInt32(context, &wanted, value) != 0) {
+				return JS_EXCEPTION;
+			}
+
+			// Refused rather than clamped to one, as the Luau half is: zero is
+			// not a smaller query, it is one that can never report anything.
+			if (wanted <= 0) {
+				return JS_ThrowRangeError(context, "MaxParts must be at least 1, not %d", wanted);
+			}
+
+			filter->MaxParts = std::min(wanted, MAX_QUERY_RESULTS);
+			return JS_UNDEFINED;
+		}
+
+		// One hit, as the object a script reads. Shared by both casters, because
+		// a hit is a hit and two builders would stop agreeing the first time a
+		// field was added to one.
+		JSValue MakeHit(JSContext *context, const ecs::Store &world, const physics::ColliderHit &hit) {
+			JSValue result = JS_NewObject(context);
+			JS_SetPropertyStr(context, result, "Instance", MakeJsInstance(context, hit.Owner));
+			JS_SetPropertyStr(context, result, "Position", MakeVector3(context, hit.Position));
+			JS_SetPropertyStr(context, result, "Normal", MakeVector3(context, hit.Normal));
+			JS_SetPropertyStr(context, result, "Distance", JS_NewFloat64(context, hit.Distance));
+
+			// **`Material`, which this half did not set until v0.18 although the
+			// generated `engine.d.ts` has always declared it.** A TypeScript
+			// author reading `hit.Material` typechecked and got `undefined`, and
+			// nothing anywhere said the two disagreed. The Luau half has always
+			// set it; this is the two runtimes agreeing rather than a new field.
+			//
+			// It is the `Surface` name - what the part is like to touch - and
+			// `LuauQuery.cpp` carries why that rather than the visual material.
+			const auto *surface = world.Get<scene::Surface>(hit.Owner);
+			const std::string_view material =
+				surface == nullptr ? std::string_view{} : surface->Material.Text();
+
+			// **The length is passed, so an empty name is an empty string.** An
+			// invalid `core::Name` reads back a default `string_view` whose
+			// pointer is null, and `JS_NewString` on one of those is a read
+			// through it - a part with no surface is the common case, not the
+			// edge one.
+			JS_SetPropertyStr(
+				context, result, "Material", JS_NewStringLen(context, material.data(), material.size())
+			);
+
+			JS_PreventExtensions(context, result);
+			return result;
+		}
+
+		// The entities an overlap or a cast found, as a JavaScript array.
+		//
+		// An array of instances and not of hits: a volume test has no contact
+		// point, so a result carrying `Position` would carry an invented one.
+		JSValue MakeFound(JSContext *context, const std::vector<ecs::Entity> &found, size_t written) {
+			JSValue array = JS_NewArray(context);
+			for (size_t index = 0; index < written; index++) {
+				JS_SetPropertyUint32(
+					context, array, static_cast<uint32_t>(index), MakeJsInstance(context, found[index])
+				);
+			}
+			return array;
+		}
+
+		// Origin and travel, split into the unit ray the engine wants.
+		//
+		// Three answers rather than two, because a caster has three outcomes and
+		// collapsing any pair loses one: a bad argument is an exception, a
+		// zero-length direction is an ordinary miss, and the rest is a ray.
+		enum class RayParse { Failed, NoDirection, Ok };
+
+		RayParse RayFrom(
+			JSContext *context,
+			int argc,
+			JSValueConst *argv,
+			core::Ray &ray,
+			float &distance,
+			const char *name
+		) {
+			if (argc < 2) {
+				JS_ThrowTypeError(context, "%s needs an origin and a direction", name);
+				return RayParse::Failed;
+			}
+
+			const core::Vector3 *origin = AsVector3(context, argv[0]);
+			const core::Vector3 *travel = AsVector3(context, argv[1]);
+			if (origin == nullptr || travel == nullptr) {
+				JS_ThrowTypeError(context, "%s needs two Vector3s", name);
+				return RayParse::Failed;
+			}
+
+			distance = travel->Magnitude();
+			if (distance <= 0.0f) {
+				return RayParse::NoDirection;
+			}
+
+			ray = core::Ray{*origin, *travel / distance};
+			return RayParse::Ok;
+		}
+
 		// `workspace.Raycast(origin, direction, params)`
 		//
 		// The **direction carries the distance**, as Roblox's does:
@@ -604,33 +748,20 @@ namespace engine::script {
 		// `core::Ray` needs a unit direction - so the split happens here rather
 		// than being lost.
 		JSValue WorkspaceRaycast(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
-			if (argc < 2) {
-				return JS_ThrowTypeError(context, "Raycast needs an origin and a direction");
-			}
-
-			const core::Vector3 *origin = AsVector3(context, argv[0]);
-			const core::Vector3 *travel = AsVector3(context, argv[1]);
-			if (origin == nullptr || travel == nullptr) {
-				return JS_ThrowTypeError(context, "Raycast needs two Vector3s");
-			}
-
-			const float distance = travel->Magnitude();
-			if (distance <= 0.0f) {
+			core::Ray ray;
+			float distance = 0.0f;
+			switch (RayFrom(context, argc, argv, ray, distance, "Raycast")) {
+			case RayParse::Failed:
+				return JS_EXCEPTION;
+			case RayParse::NoDirection:
 				return JS_NULL;
-			}
-
-			spatial::LayerMask mask = spatial::LayerMask::All();
-			if (argc > 2 && !JS_IsNull(argv[2]) && !JS_IsUndefined(argv[2])) {
-				if (const RaycastFilter *filter =
-						Unwrap<RaycastFilter>(context, argv[2], JsOf(context).RaycastParamsClass);
-					filter != nullptr) {
-					mask = filter->Mask;
-				}
+			case RayParse::Ok:
+				break;
 			}
 
 			JsContext &bound = JsOf(context);
 			const auto hit =
-				physics::Raycast(*bound.World, core::Ray{*origin, *travel / distance}, distance, mask);
+				physics::Raycast(*bound.World, ray, distance, FilterAt(context, argc, argv, 2).Mask);
 
 			// **Null, not a result carrying a flag.** A flag makes reading the
 			// position out of a miss compile and produce a plausible number.
@@ -638,13 +769,148 @@ namespace engine::script {
 				return JS_NULL;
 			}
 
-			JSValue result = JS_NewObject(context);
-			JS_SetPropertyStr(context, result, "Instance", MakeJsInstance(context, hit->Owner));
-			JS_SetPropertyStr(context, result, "Position", MakeVector3(context, hit->Position));
-			JS_SetPropertyStr(context, result, "Normal", MakeVector3(context, hit->Normal));
-			JS_SetPropertyStr(context, result, "Distance", JS_NewFloat64(context, hit->Distance));
-			JS_PreventExtensions(context, result);
-			return result;
+			return MakeHit(context, *bound.World, *hit);
+		}
+
+		// `workspace.RaycastThroughPortals(origin, direction, params)`
+		//
+		// The JavaScript twin of the Luau method, and the one query with no
+		// Roblox name because Roblox has no seams. `physics::
+		// RaycastThroughPortals` carries the whole of why it exists.
+		JSValue WorkspacePortalRaycast(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
+			core::Ray ray;
+			float distance = 0.0f;
+			switch (RayFrom(context, argc, argv, ray, distance, "RaycastThroughPortals")) {
+			case RayParse::Failed:
+				return JS_EXCEPTION;
+			case RayParse::NoDirection:
+				return JS_NULL;
+			case RayParse::Ok:
+				break;
+			}
+
+			JsContext &bound = JsOf(context);
+			const auto hit = physics::RaycastThroughPortals(
+				*bound.World, ray, distance, FilterAt(context, argc, argv, 2).Mask
+			);
+			if (!hit.has_value()) {
+				return JS_NULL;
+			}
+			return MakeHit(context, *bound.World, *hit);
+		}
+
+		// `workspace.OverlapBox(centre, size, params)`
+		//
+		// Axis-aligned, and it takes a `Vector3` centre where Roblox's
+		// `GetPartBoundsInBox` takes a `CFrame`, for the reason `LuauQuery.cpp`
+		// gives: `physics::OverlapBox` tests an `AABB`, and accepting a rotation
+		// nothing reads would be a query that reads as oriented and is not.
+		//
+		// `size` is the full extent, as a part's `Size` is.
+		JSValue WorkspaceOverlapBox(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
+			if (argc < 2) {
+				return JS_ThrowTypeError(context, "OverlapBox needs a centre and a size");
+			}
+			const core::Vector3 *centre = AsVector3(context, argv[0]);
+			const core::Vector3 *size = AsVector3(context, argv[1]);
+			if (centre == nullptr || size == nullptr) {
+				return JS_ThrowTypeError(context, "OverlapBox needs two Vector3s");
+			}
+
+			const RaycastFilter filter = FilterAt(context, argc, argv, 2);
+			const core::Vector3 half = *size * 0.5f;
+
+			std::vector<ecs::Entity> found(static_cast<size_t>(filter.MaxParts));
+			const spatial::QueryResult result = physics::OverlapBox(
+				*JsOf(context).World, core::AABB{*centre - half, *centre + half}, filter.Mask, found
+			);
+			return MakeFound(context, found, result.Written);
+		}
+
+		// `workspace.OverlapSphere(centre, radius, params)` - Roblox's
+		// `GetPartBoundsInRadius`, named for the engine because it is against the
+		// exact shape rather than its bound.
+		JSValue WorkspaceOverlapSphere(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
+			if (argc < 2) {
+				return JS_ThrowTypeError(context, "OverlapSphere needs a centre and a radius");
+			}
+			const core::Vector3 *centre = AsVector3(context, argv[0]);
+			if (centre == nullptr) {
+				return JS_ThrowTypeError(context, "OverlapSphere needs a Vector3 centre");
+			}
+
+			double radius = 0.0;
+			if (JS_ToFloat64(context, &radius, argv[1]) != 0) {
+				return JS_EXCEPTION;
+			}
+
+			const RaycastFilter filter = FilterAt(context, argc, argv, 2);
+			std::vector<ecs::Entity> found(static_cast<size_t>(filter.MaxParts));
+			const spatial::QueryResult result = physics::OverlapSphere(
+				*JsOf(context).World, *centre, static_cast<float>(radius), filter.Mask, found
+			);
+			return MakeFound(context, found, result.Written);
+		}
+
+		// The two casts, which are one engine function with two shapes. The
+		// split is Roblox's and is here for its reason: a script has a size or it
+		// has a radius, and a shape descriptor would be a type an author has to
+		// build before asking a question.
+		JSValue ShapeCastWith(
+			JSContext *context, int argc, JSValueConst *argv, scene::ShapeKind kind, const char *name
+		) {
+			if (argc < 3) {
+				return JS_ThrowTypeError(context, "%s needs a start, a size and a motion", name);
+			}
+
+			scene::Collider shape;
+			shape.Shape = kind;
+			core::CFrame from;
+
+			if (kind == scene::ShapeKind::Box) {
+				const core::CFrame *start = AsCFrame(context, argv[0]);
+				const core::Vector3 *size = AsVector3(context, argv[1]);
+				if (start == nullptr || size == nullptr) {
+					return JS_ThrowTypeError(context, "BlockCast needs a CFrame and a Vector3");
+				}
+				from = *start;
+				shape.Extent = *size * 0.5f;
+			} else {
+				// A sphere has no orientation to give, so this takes a position
+				// and builds the frame rather than asking for a rotation nothing
+				// reads.
+				const core::Vector3 *start = AsVector3(context, argv[0]);
+				if (start == nullptr) {
+					return JS_ThrowTypeError(context, "SphereCast needs a Vector3 start");
+				}
+				double radius = 0.0;
+				if (JS_ToFloat64(context, &radius, argv[1]) != 0) {
+					return JS_EXCEPTION;
+				}
+				from = core::CFrame{*start};
+				shape.Extent = core::Vector3{
+					static_cast<float>(radius), static_cast<float>(radius), static_cast<float>(radius)
+				};
+			}
+
+			const core::Vector3 *motion = AsVector3(context, argv[2]);
+			if (motion == nullptr) {
+				return JS_ThrowTypeError(context, "%s needs a Vector3 motion", name);
+			}
+
+			const RaycastFilter filter = FilterAt(context, argc, argv, 3);
+			std::vector<ecs::Entity> found(static_cast<size_t>(filter.MaxParts));
+			const spatial::QueryResult result =
+				physics::ShapeCast(*JsOf(context).World, shape, from, *motion, filter.Mask, found);
+			return MakeFound(context, found, result.Written);
+		}
+
+		JSValue WorkspaceBlockCast(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
+			return ShapeCastWith(context, argc, argv, scene::ShapeKind::Box, "BlockCast");
+		}
+
+		JSValue WorkspaceSphereCast(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
+			return ShapeCastWith(context, argc, argv, scene::ShapeKind::Sphere, "SphereCast");
 		}
 
 		template <class T>
@@ -799,17 +1065,40 @@ namespace engine::script {
 		{
 			static const JSCFunctionListEntry members[] = {
 				JS_CGETSET_DEF("CollisionGroup", RaycastParamsGet, RaycastParamsSet),
+				JS_CGETSET_DEF("MaxParts", RaycastParamsGetMax, RaycastParamsSetMax),
 			};
 			static const JSCFunctionListEntry constructors[] = {JS_CFUNC_DEF("new", 0, RaycastParamsNew)};
 			Install<RaycastFilter>(
-				context, global, bound.RaycastParamsClass, "RaycastParams", members, 1, constructors, 1
+				context, global, bound.RaycastParamsClass, "RaycastParams", members, 2, constructors, 1
 			);
 		}
 
 		// On the world, because `workspace.Raycast` is where Roblox puts it - a
 		// query is against a world and not against a part.
-		JS_SetPropertyStr(
-			context, workspace, "Raycast", JS_NewCFunction(context, WorkspaceRaycast, "Raycast", 3)
-		);
+		//
+		// One table, six rows, one loop - the shape `LuauQuery.cpp` uses for the
+		// same six, so that adding a seventh is a row in both files and cannot be
+		// the one that forgets to install itself.
+		const struct {
+			const char *Name;
+			JSCFunction *Function;
+			int Arity;
+		} queries[] = {
+			{"Raycast", WorkspaceRaycast, 3},
+			{"RaycastThroughPortals", WorkspacePortalRaycast, 3},
+			{"OverlapBox", WorkspaceOverlapBox, 3},
+			{"OverlapSphere", WorkspaceOverlapSphere, 3},
+			{"BlockCast", WorkspaceBlockCast, 4},
+			{"SphereCast", WorkspaceSphereCast, 4},
+		};
+
+		for (const auto &query : queries) {
+			JS_SetPropertyStr(
+				context,
+				workspace,
+				query.Name,
+				JS_NewCFunction(context, query.Function, query.Name, query.Arity)
+			);
+		}
 	}
 }

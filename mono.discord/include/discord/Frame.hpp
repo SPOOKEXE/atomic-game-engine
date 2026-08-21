@@ -61,7 +61,12 @@ namespace discord {
 	//
 	// @since v0.17
 	struct DecodedFrame {
+		// Which kind of frame this is, from the four-byte header.
 		Opcode Op = Opcode::Frame;
+
+		// The body, exactly as it arrived. JSON for every opcode that carries
+		// one, and parsed by the caller rather than here - this layer's job is
+		// the framing.
 		std::string Payload;
 	};
 

@@ -192,6 +192,33 @@ namespace engine::replication {
 		}
 		const bool whole = outcome.Whole;
 
+		// **A parent that could not be linked joins the queue that already
+		// exists for exactly this.** `Arriving_` holds an entity out of the tree
+		// until its tick is whole and re-parents it on release, bounded by
+		// `HOLD_DELTAS` - which is the same shape a parent waiting for its own
+		// row needs. Two queues doing one job would be two bounds to keep in
+		// step, and the one nobody looked at would be the one that grew.
+		//
+		// An entity already waiting has its parent filled in rather than a
+		// second entry made: `HoldArrivals` reads a null `Parent` as "not known
+		// yet" and would overwrite it from the tree.
+		for (const DeferredParent &deferred : outcome.Deferred) {
+			const auto held = std::find_if(Arriving_.begin(), Arriving_.end(), [&](const Arrival &one) {
+				return one.Entity == deferred.Child;
+			});
+
+			if (held != Arriving_.end()) {
+				held->Parent = deferred.Parent;
+				continue;
+			}
+
+			if (Arriving_.size() >= MAXIMUM_DEFERRED) {
+				Stats_.Orphaned++;
+				continue;
+			}
+			Arriving_.push_back(Arrival{deferred.Child, deferred.Parent, Stats_.Deltas});
+		}
+
 		const bool complete = Count(delta);
 
 		Stats_.Deltas++;
@@ -270,7 +297,14 @@ namespace engine::replication {
 			// gone by now: a projectile that lived two ticks, or a spawn the
 			// server took back. `SetParent` answering false is the honest
 			// outcome and there is nothing to do about it.
-			(void)store.SetParent(arriving.Entity, arriving.Parent);
+			if (!store.SetParent(arriving.Entity, arriving.Parent)) {
+				// **Counted, because the child is now a root that the sender
+				// never made one.** It is visible in the wrong place rather
+				// than missing, which is the better failure, but a figure that
+				// climbs means the sender is emitting children of rows this
+				// replica is not being sent. See `Statistics::Orphaned`.
+				Stats_.Orphaned++;
+			}
 		}
 		Arriving_.clear();
 	}

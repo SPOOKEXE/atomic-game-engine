@@ -362,6 +362,14 @@ namespace engine::world {
 		return handles;
 	}
 
+	void Universe::EachWorld(const std::function<void(WorldId)> &body) const {
+		for (size_t index = 0; index < Registry.size(); index++) {
+			if (Registry[index] != nullptr) {
+				body(WorldId{static_cast<uint32_t>(index)});
+			}
+		}
+	}
+
 	core::Name Universe::NameOf(WorldId id) const {
 		const World *world = Reach(id);
 		return world == nullptr ? core::Name{} : world->Name();

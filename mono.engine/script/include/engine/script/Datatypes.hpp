@@ -19,9 +19,12 @@
 //
 // @tier L9 · shared
 
+#include <engine/core/Name.hpp>
+#include <engine/core/types/Vector3.hpp>
+
 namespace engine::script {
 
-	// Registers `EasingStyle` and `EasingDirection` with `ecs::EnumTable`.
+	// Registers `EasingStyle`, `EasingDirection` and `Axis` with `ecs::EnumTable`.
 	//
 	// Process-wide and idempotent, like every other registration in this engine.
 	// Call it before anything reads the enum table: both VMs do it while opening
@@ -30,4 +33,28 @@ namespace engine::script {
 	//
 	// @since v0.7
 	void RegisterDatatypeEnums();
+
+	// The outward direction an `Enum.NormalId` member names.
+	//
+	// What `Vector3.FromNormalId` is, in the one place both VMs can call. The
+	// face order is `ecs::EnumTable`'s and the direction is `scene::NormalOf`'s,
+	// so this adds no third copy of either - which matters because `Front` is
+	// **-Z** and a hand-written table is where that gets flipped.
+	//
+	// @param member The member's name, `Top` or `Front` and so on.
+	// @param out    Filled with the outward unit normal when this returns true.
+	// @return `false` when nothing has registered `NormalId` or it holds no such
+	//         member, leaving `out` untouched.
+	bool DirectionOfNormalId(core::Name member, core::Vector3 &out);
+
+	// The unit vector an `Enum.Axis` member names.
+	//
+	// What `Vector3.FromAxis` is. `Axis` is registered by
+	// `RegisterDatatypeEnums` rather than by a world, so this answers in a
+	// process that never built a scene.
+	//
+	// @param member The member's name: `X`, `Y` or `Z`.
+	// @param out    Filled with the axis when this returns true.
+	// @return `false` when the member names no axis, leaving `out` untouched.
+	bool DirectionOfAxis(core::Name member, core::Vector3 &out);
 }

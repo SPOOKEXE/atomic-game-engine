@@ -85,9 +85,8 @@ namespace studio {
 
 		RenderPipelineWorld = world;
 		RenderPipelineName = selected;
-		RenderPipelineInstalledName = engine::core::Name(
-			std::string(selected.Text()) + "#" + std::to_string(world.Index)
-		);
+		RenderPipelineInstalledName =
+			engine::core::Name(std::string(selected.Text()) + "#" + std::to_string(world.Index));
 		RenderPipelineBasis = document;
 		RenderPipelineLoaded = engine::graph::Write(document);
 		RenderPipelineDirty = false;
@@ -96,7 +95,7 @@ namespace studio {
 			return;
 		}
 		RenderPipelineStatus = "loaded " + std::string(selected.Text());
-		RenderPipelineCanvas.Select(nodegraph::NO_NODE);
+		RenderPipelineCanvas.Select(engine::nodegraph::NO_NODE);
 		RenderPipelineCanvas.Fit(RenderPipelineGraph);
 	}
 
@@ -137,7 +136,7 @@ namespace studio {
 			RegisterRenderPipelineNodeTypes();
 			RenderPipelineCanvas.Observe(&RenderPipelinePreviewEvaluator);
 			RenderPipelineCanvas.Images(
-				[this](uint64_t key, const std::function<bool(nodegraph::PreviewImage &)> &) {
+				[this](uint64_t key, const std::function<bool(engine::nodegraph::PreviewImage &)> &) {
 					const auto found = RenderPipelinePreviewTextures.find(key);
 					return found == RenderPipelinePreviewTextures.end() ? nullptr : found->second;
 				}
@@ -239,10 +238,9 @@ namespace studio {
 			std::string previewError;
 			const auto renderedSlot = RenderPipelineRenderedSlots.find(RenderPipelineWorld.Index);
 			const auto installedPipeline = PipelineSelected.find(RenderPipelineWorld.Index);
-			const bool previewSourceReady =
-				renderedSlot != RenderPipelineRenderedSlots.end() &&
-				installedPipeline != PipelineSelected.end() &&
-				installedPipeline->second == RenderPipelineInstalledName;
+			const bool previewSourceReady = renderedSlot != RenderPipelineRenderedSlots.end() &&
+											installedPipeline != PipelineSelected.end() &&
+											installedPipeline->second == RenderPipelineInstalledName;
 			const size_t previewSlot = previewSourceReady ? renderedSlot->second : 0;
 			if (SaveRenderPipelineGraph(
 					RenderPipelineGraph, RenderPipelineBasis, previewDocument, previewError
@@ -250,8 +248,9 @@ namespace studio {
 				engine::graph::Build(previewDocument, previewGraph, previewOffender) ==
 					engine::graph::PipelineDocumentStatus::Ok) {
 				for (size_t index = 0; index < RenderPipelineGraph.Nodes().size(); index++) {
-					const nodegraph::Node &canvasNode = RenderPipelineGraph.Nodes()[index];
-					const nodegraph::NodeType *canvasType = nodegraph::NodeTypes::Find(canvasNode.Type);
+					const engine::nodegraph::Node &canvasNode = RenderPipelineGraph.Nodes()[index];
+					const engine::nodegraph::NodeType *canvasType =
+						engine::nodegraph::NodeTypes::Find(canvasNode.Type);
 					const engine::graph::Node *renderNode =
 						previewGraph.Find(engine::graph::NodeId{static_cast<uint32_t>(index + 1)});
 					if (canvasType == nullptr || canvasType->PreviewPort.empty() || renderNode == nullptr) {
@@ -289,12 +288,12 @@ namespace studio {
 						);
 					}
 					void *texture = resource == nullptr
-								? nullptr
-								: Renderer.ResourcePreviewTexture(
-									  RenderPipelineInstalledName, resource->Name, previewSlot
-								  );
+										? nullptr
+										: Renderer.ResourcePreviewTexture(
+											  RenderPipelineInstalledName, resource->Name, previewSlot
+										  );
 					if (texture != nullptr) {
-						RenderPipelinePreviewTextures[nodegraph::PictureKey(
+						RenderPipelinePreviewTextures[engine::nodegraph::PictureKey(
 							RenderPipelinePreviewEvaluator.RanAt(canvasNode.Id), canvasType->PreviewPort
 						)] = texture;
 					}
@@ -356,9 +355,9 @@ namespace studio {
 			}
 			ImGui::PushID(static_cast<int>(spec.Kind.Id()));
 			if (ImGui::Selectable(title.c_str())) {
-				const nodegraph::NodeId made =
+				const engine::nodegraph::NodeId made =
 					RenderPipelineGraph.Add("render.pass." + std::string(spec.Kind.Text()), 0.0f, 0.0f);
-				if (made != nodegraph::NO_NODE) {
+				if (made != engine::nodegraph::NO_NODE) {
 					RenderPipelineCanvas.Select(made);
 					RenderPipelineCanvas.Centre(RenderPipelineGraph, made);
 					RenderPipelineDirty = true;
@@ -372,28 +371,28 @@ namespace studio {
 	}
 
 	void Editor::DrawRenderPipelineInspector() {
-		const std::vector<nodegraph::NodeId> &selection = RenderPipelineCanvas.Selection();
+		const std::vector<engine::nodegraph::NodeId> &selection = RenderPipelineCanvas.Selection();
 		if (selection.size() != 1) {
 			ImGui::TextDisabled(selection.empty() ? "select a pass" : "multiple passes selected");
 			return;
 		}
-		const nodegraph::Node *node = RenderPipelineGraph.Find(selection.front());
+		const engine::nodegraph::Node *node = RenderPipelineGraph.Find(selection.front());
 		if (node == nullptr) {
 			return;
 		}
-		const nodegraph::NodeType *type = nodegraph::NodeTypes::Find(node->Type);
+		const engine::nodegraph::NodeType *type = engine::nodegraph::NodeTypes::Find(node->Type);
 		ImGui::TextUnformatted(node->Label.empty() ? node->Type.c_str() : node->Label.c_str());
 		if (type != nullptr) {
 			ImGui::TextDisabled("%s", type->Subtitle.c_str());
 			ImGui::SeparatorText("Inputs");
-			for (const nodegraph::PortSpec &port : type->Inputs) {
-				const nodegraph::Link *link = RenderPipelineGraph.LinkInto(node->Id, port.Name);
+			for (const engine::nodegraph::PortSpec &port : type->Inputs) {
+				const engine::nodegraph::Link *link = RenderPipelineGraph.LinkInto(node->Id, port.Name);
 				ImGui::BulletText("%s  %s", port.Name.c_str(), link == nullptr ? "unwired" : "connected");
 			}
 			ImGui::SeparatorText("Outputs");
-			for (const nodegraph::PortSpec &port : type->Outputs) {
+			for (const engine::nodegraph::PortSpec &port : type->Outputs) {
 				size_t consumers = 0;
-				for (const nodegraph::Link &link : RenderPipelineGraph.Links()) {
+				for (const engine::nodegraph::Link &link : RenderPipelineGraph.Links()) {
 					consumers += link.From == node->Id && link.FromPort == port.Name ? 1 : 0;
 				}
 				ImGui::BulletText(
@@ -410,7 +409,7 @@ namespace studio {
 		const auto canvasNode = std::find_if(
 			RenderPipelineGraph.Nodes().begin(),
 			RenderPipelineGraph.Nodes().end(),
-			[node](const nodegraph::Node &candidate) { return candidate.Id == node->Id; }
+			[node](const engine::nodegraph::Node &candidate) { return candidate.Id == node->Id; }
 		);
 		if (canvasNode != RenderPipelineGraph.Nodes().end() &&
 			SaveRenderPipelineGraph(RenderPipelineGraph, RenderPipelineBasis, document, error) &&

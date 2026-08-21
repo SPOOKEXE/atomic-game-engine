@@ -42,9 +42,8 @@
 #include <engine/world/Universe.hpp>
 
 #include <imgui.h>
-#include <studio/Widgets.hpp>
-
 #include <string>
+#include <studio/Widgets.hpp>
 #include <vector>
 
 TEST_SUITE_ID("studio.bench.widgets")
@@ -133,8 +132,7 @@ namespace widget_bench {
 
 			Children.reserve(count);
 			for (size_t index = 0; index < count; index++) {
-				const Entity child =
-					World.CreateInstance(partClass, "Block" + std::to_string(index));
+				const Entity child = World.CreateInstance(partClass, "Block" + std::to_string(index));
 				World.SetParent(child, Root);
 				Children.push_back(child);
 			}
@@ -408,9 +406,8 @@ BENCH("worlds panel · 4 rows", 2000) {
 
 	for (int pass = 0; pass < 2000; pass++) {
 		Frame([] {
-			constexpr ImGuiTableFlags FLAGS = ImGuiTableFlags_RowBg |
-											  ImGuiTableFlags_SizingStretchProp |
-											  ImGuiTableFlags_BordersInnerV;
+			constexpr ImGuiTableFlags FLAGS =
+				ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_BordersInnerV;
 
 			if (ImGui::BeginTable("##worlds", 4, FLAGS)) {
 				ImGui::TableSetupColumn("scene");
@@ -424,11 +421,13 @@ BENCH("worlds panel · 4 rows", 2000) {
 					ImGui::TableSetColumnIndex(0);
 					ImGui::PushID(row);
 
-					Consume(ImGui::Selectable(
-						"##row",
-						row == 0,
-						ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowOverlap
-					));
+					Consume(
+						ImGui::Selectable(
+							"##row",
+							row == 0,
+							ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowOverlap
+						)
+					);
 
 					const bool rowMenu = ImGui::BeginPopupContextItem("##world-menu");
 

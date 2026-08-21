@@ -1,4 +1,5 @@
 #include <engine/bakegraph/Document.hpp>
+#include <engine/core/Chars.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
@@ -200,9 +201,9 @@ namespace engine::game {
 				PropertyValue value;
 				if (!ReadProperty(store, instance, descriptor, value)) {
 					// The instance does not carry what the getter reads. Not an
-					// error: `Anchored` is an archetype, so a part that has been
-					// anchored has no `RigidBody` for a dynamic-only property to
-					// read from.
+					// error: whether a part is simulated is an archetype, so an
+					// anchored part has no `scene::Motion` for a dynamic-only
+					// property to read from.
 					continue;
 				}
 
@@ -676,7 +677,7 @@ namespace engine::game {
 				return fallback;
 			}
 			double value = 0.0;
-			if (std::from_chars(text.data(), text.data() + text.size(), value).ec != std::errc{}) {
+			if (core::FromChars(text.data(), text.data() + text.size(), value).ec != std::errc{}) {
 				return fallback;
 			}
 			return value;

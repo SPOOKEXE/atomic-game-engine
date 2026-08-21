@@ -62,7 +62,7 @@ namespace {
 
 		engine::scene::PartDesc desc;
 		desc.Size = Vector3{2.0f, 2.0f, 2.0f};
-		desc.Anchored = true;
+		desc.Simulated = false;
 		const Entity part = engine::scene::MakePart(store, desc);
 
 		const Entity emitter =
@@ -202,7 +202,7 @@ TEST_CASE("a pool that is full refuses blocks rather than overlapping them", "[e
 	engine::effects::InstallParticles(store, 64);
 
 	engine::scene::PartDesc desc;
-	desc.Anchored = true;
+	desc.Simulated = false;
 	const Entity part = engine::scene::MakePart(store, desc);
 
 	// Each wants 21 slots against a pool of 64, so the fourth cannot fit.
@@ -438,7 +438,7 @@ TEST_CASE("the pool holds the scale the roadmap asks for", "[effects]") {
 	engine::effects::InstallParticles(store, EMITTERS * (PER_EMITTER + 1));
 
 	engine::scene::PartDesc desc;
-	desc.Anchored = true;
+	desc.Simulated = false;
 
 	for (uint32_t index = 0; index < EMITTERS; index++) {
 		desc.Frame = CFrame{Vector3{static_cast<float>(index % 100), 0.0f, static_cast<float>(index / 100)}};

@@ -25,32 +25,33 @@
 // - **Add folder…**, which browses and takes everything under a directory.
 //
 // The typed-path field is gone. It was there because there was no portable file
-// dialog - and there is one, `studio::FilePrompt`, which six other dialogs in
+// dialog - and there is one, `ui::FilePrompt`, which six other dialogs in
 // this editor already use. Keeping a text field beside a browser would be two
 // places to say the same thing.
 
-#include <assetc/Bake.hpp>
-#include <cdn/LocalStore.hpp>
 #include <engine/assets/AssetKind.hpp>
 #include <engine/assets/Mesh.hpp>
 #include <engine/assets/Texture.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/ui/Metrics.hpp>
+#include <engine/ui/Prompts.hpp>
 #include <engine/ui/Theme.hpp>
 
 #include <algorithm>
 #include <array>
+#include <assetc/Bake.hpp>
+#include <cdn/LocalStore.hpp>
 #include <chrono>
-#include <fstream>
-#include <iterator>
-#include <vector>
 #include <filesystem>
+#include <fstream>
 #include <imgui.h>
+#include <iterator>
 #include <studio/Assets.hpp>
 #include <studio/Editor.hpp>
 #include <studio/Preview.hpp>
 #include <studio/Widgets.hpp>
+#include <vector>
 
 namespace studio {
 
@@ -120,7 +121,14 @@ namespace studio {
 			RefreshStoreContents();
 		}
 
-		ImGui::TextUnformatted(paths.Root.string().c_str());
+		// **Held rather than rebuilt.** `path::string()` allocates, and the
+		// store's root is fixed for the run - so drawing one line of text was a
+		// heap allocation a frame. The path itself is cheap to derive and is
+		// wanted below as a path.
+		if (AssetRootText.empty()) {
+			AssetRootText = paths.Root.string();
+		}
+		ImGui::TextUnformatted(AssetRootText.c_str());
 		ImGui::SameLine();
 		if (ImGui::SmallButton("Refresh")) {
 			RefreshStoreContents();
@@ -152,10 +160,10 @@ namespace studio {
 		// `assetc` decides what it can bake and `Publish` decides what kind a
 		// name is, and a dialog that hid a format the pipeline would have handled
 		// would be a third opinion about what content is.
-		if (FilePrompt(ADD_FILE, AssetBrowsePath, "Import", {}, true)) {
+		if (engine::ui::FilePrompt(ADD_FILE, AssetBrowsePath, "Import", {}, true)) {
 			ImportAssetPath(AssetBrowsePath);
 		}
-		if (FolderPrompt(ADD_FOLDER, AssetBrowsePath, "Import all")) {
+		if (engine::ui::FolderPrompt(ADD_FOLDER, AssetBrowsePath, "Import all")) {
 			ImportAssetPath(AssetBrowsePath);
 		}
 
@@ -233,15 +241,29 @@ namespace studio {
 		// "did my file get in" and the gallery answers "what is actually used",
 		// and neither is a place content can be fetched from.
 		if (ImGui::BeginTabBar("##store")) {
+			// **The ids are built with the tabs, not with the frame.** They are a
+			// function of the catalogue alone, and building them here made a
+			// string per tab per frame - past the small-string limit for most
+			// titles, so a heap allocation each.
+			if (AssetTabLabels.size() != AssetTabs.size() || AssetTabLabelsRevision != AssetTabsRevision) {
+				AssetTabLabels.clear();
+				AssetTabLabels.reserve(AssetTabs.size());
+				for (size_t index = 0; index < AssetTabs.size(); index++) {
+					// **The id is pinned to the position and the label is not.**
+					// Two origins may be called the same thing - nothing stops
+					// somebody naming two rows "cdn" - and two tabs sharing an
+					// id is one tab that flickers between two contents.
+					AssetTabLabels.push_back(
+						AssetTabs[index].Title + "###asset-place-" + std::to_string(index)
+					);
+				}
+				AssetTabLabelsRevision = AssetTabsRevision;
+			}
+
 			for (size_t index = 0; index < AssetTabs.size(); index++) {
 				const CatalogueTab &tab = AssetTabs[index];
 
-				// **The id is pinned to the position and the label is not.**
-				// Two origins may be called the same thing - nothing stops
-				// somebody naming two rows "cdn" - and two tabs sharing an id
-				// is one tab that flickers between two contents.
-				const std::string label = tab.Title + "###asset-place-" + std::to_string(index);
-				if (ImGui::BeginTabItem(label.c_str())) {
+				if (ImGui::BeginTabItem(AssetTabLabels[index].c_str())) {
 					DrawCatalogueList(tab);
 					ImGui::EndTabItem();
 				}
@@ -346,9 +368,9 @@ namespace studio {
 		// A cross for refused, a dash for nothing to show, and nothing at all
 		// while it is still pending: a mark that appeared and was replaced two
 		// frames later reads as a flicker.
-		const char *mark = state == PreviewState::TooLarge	  ? "!"
-						   : state == PreviewState::Pending	  ? nullptr
-						   : kind == engine::assets::AssetKind::Mesh ? "M"
+		const char *mark = state == PreviewState::TooLarge			  ? "!"
+						   : state == PreviewState::Pending			  ? nullptr
+						   : kind == engine::assets::AssetKind::Mesh  ? "M"
 						   : kind == engine::assets::AssetKind::Audio ? "S"
 																	  : "-";
 		if (mark != nullptr) {
@@ -590,22 +612,51 @@ namespace studio {
 		ImGui::TableSetupScrollFreeze(0, 1);
 		ImGui::TableHeadersRow();
 
-		// Filtered first, so the sort below orders what is actually drawn.
-		std::vector<const CatalogueEntry *> shown;
-		shown.reserve(tab.Entries.size());
-		for (const CatalogueEntry &entry : tab.Entries) {
-			int score = 0;
-			if (FuzzyMatch(AssetFilter, entry.Name, score)) {
-				shown.push_back(&entry);
-			}
+		// **Rebuilt only when the answer can have changed.** Filtering and
+		// sorting the whole catalogue is proportional to the store - two
+		// thousand assets on this repository's own - and it used to run every
+		// frame to produce a list identical to the last one. `ImGuiListClipper`
+		// below bounds what is *drawn*; it cannot bound building the list it
+		// clips. See `Editor::AssetRows`.
+		//
+		// imgui sets `SpecsDirty` when somebody clicks a header and expects the
+		// application to clear it, which is exactly the "the order changed"
+		// signal this needs. It is read before the early-outs so a click is
+		// never swallowed by a cache hit.
+		bool stale = AssetRowsTab != static_cast<const void *>(&tab) ||
+					 AssetRowsRevision != AssetTabsRevision || AssetRowsFilter != AssetFilter;
+
+		ImGuiTableSortSpecs *specs = ImGui::TableGetSortSpecs();
+		if (specs != nullptr && specs->SpecsDirty) {
+			specs->SpecsDirty = false;
+			stale = true;
 		}
 
-		// **The view is sorted and the catalogue is not.** `AssetTabs` is what
-		// each place said it holds, in name order, and the merged tab is built
-		// from those vectors; a click on a header must not reorder them.
-		if (const ImGuiTableSortSpecs *specs = ImGui::TableGetSortSpecs()) {
-			SortCatalogue(shown, specs, showSource);
+		if (stale) {
+			// Filtered first, so the sort below orders what is actually drawn.
+			AssetRows.clear();
+			AssetRows.reserve(tab.Entries.size());
+			for (const CatalogueEntry &entry : tab.Entries) {
+				int score = 0;
+				if (FuzzyMatch(AssetFilter, entry.Name, score)) {
+					AssetRows.push_back(&entry);
+				}
+			}
+
+			// **The view is sorted and the catalogue is not.** `AssetTabs` is
+			// what each place said it holds, in name order, and the merged tab
+			// is built from those vectors; a click on a header must not reorder
+			// them.
+			if (specs != nullptr) {
+				SortCatalogue(AssetRows, specs, showSource);
+			}
+
+			AssetRowsTab = &tab;
+			AssetRowsRevision = AssetTabsRevision;
+			AssetRowsFilter = AssetFilter;
 		}
+
+		const std::vector<const CatalogueEntry *> &shown = AssetRows;
 
 		ImGuiListClipper clipper;
 		clipper.Begin(static_cast<int>(shown.size()));
@@ -707,9 +758,7 @@ namespace studio {
 			const bool ascending = spec.SortDirection == ImGuiSortDirection_Ascending;
 
 			std::stable_sort(
-				rows.begin(),
-				rows.end(),
-				[&](const CatalogueEntry *left, const CatalogueEntry *right) {
+				rows.begin(), rows.end(), [&](const CatalogueEntry *left, const CatalogueEntry *right) {
 					bool less = false;
 					switch (spec.ColumnIndex) {
 					case 1:
@@ -720,8 +769,8 @@ namespace studio {
 						// ordinal.** The column shows "mesh" and "texture", and
 						// a sort that ordered by the numbers behind them would
 						// look arbitrary to everybody but the compiler.
-						less = std::string_view(KindName(left->Kind)) <
-							   std::string_view(KindName(right->Kind));
+						less =
+							std::string_view(KindName(left->Kind)) < std::string_view(KindName(right->Kind));
 						break;
 					case 3:
 						// **Column three is two different columns.** The merged
@@ -857,9 +906,7 @@ namespace studio {
 			const bool ascending = spec.SortDirection == ImGuiSortDirection_Ascending;
 
 			std::stable_sort(
-				rows.begin(),
-				rows.end(),
-				[&](const cdn::RawEntry *left, const cdn::RawEntry *right) {
+				rows.begin(), rows.end(), [&](const cdn::RawEntry *left, const cdn::RawEntry *right) {
 					bool less = false;
 					switch (spec.ColumnIndex) {
 					case 1:
@@ -901,6 +948,7 @@ namespace studio {
 		// deliberately does not ask, because it runs at start-up.
 		const std::unique_ptr<OriginLister> origins = MakeOriginLister();
 		AssetTabs = BuildCatalogue(Content, origins.get());
+		AssetTabsRevision++;
 	}
 
 	void Editor::ImportAssetPath(const std::string &given) {
@@ -1001,9 +1049,8 @@ namespace studio {
 			return;
 		}
 
-		AssetStatus = std::to_string(report->Assets) + " asset(s) in " +
-					  std::to_string(report->Bundles) + " bundle(s), root " +
-					  report->Root.ToHex().substr(0, 8);
+		AssetStatus = std::to_string(report->Assets) + " asset(s) in " + std::to_string(report->Bundles) +
+					  " bundle(s), root " + report->Root.ToHex().substr(0, 8);
 		ENGINE_INFO("assets: {}", AssetStatus);
 
 		// **Refreshed here rather than left for the next open.** Publishing is

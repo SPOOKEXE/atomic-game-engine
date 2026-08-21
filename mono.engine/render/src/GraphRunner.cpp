@@ -1,3 +1,4 @@
+#include <engine/core/Profiling.hpp>
 #include <engine/render/GraphRunner.hpp>
 
 #include <algorithm>
@@ -53,6 +54,21 @@ namespace engine::render {
 			Missing = context.Kind;
 			return false;
 		}
+
+		// **One span per node, here rather than in each handler.** The handlers
+		// live in `Renderer.cpp` as two dozen lambdas and most of them had no
+		// span at all - `gbuffer`, which records every opaque draw call in the
+		// frame, among them. Everything they did therefore landed inside
+		// `Renderer::RenderView` with nothing naming it, which is what the wide
+		// blanks in the frame graph were. Naming them at the one point they are
+		// all called cannot be forgotten by the next handler somebody adds.
+		//
+		// **The authored node name, not its kind**, because a pipeline with two
+		// `raster` nodes is asking which of them is expensive, and the kind
+		// would answer with one bar for both. `core::Name` interns for the life
+		// of the process, so the stable form is right and nothing is copied.
+		ENGINE_PROFILE_DYNAMIC_STABLE("graph node", context.Name.Text(), core::ProfileCategory::Render);
+
 		SubmittedCount++;
 		return (*handler)(context);
 	}

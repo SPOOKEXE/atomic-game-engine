@@ -18,14 +18,22 @@ namespace engine::scene {
 			const core::Vector3 acceleration = gravity->Acceleration;
 			const float delta = store.Time().Delta;
 
-			// **`Without<Anchored>` is said even though `Motion` already implies
-			// it**, because it no longer follows from `RigidBody`: every part
-			// carries one of those now, so the term that used to mean "the world
-			// may move this" has to be written down. An anchored part has no
-			// `Motion` either, so the set is the same one - and saying so keeps
-			// it the same one the day something hands a `Motion` to a row that
-			// should not have had it.
-			store.Query<Motion, const RigidBody>().Without<Anchored>().Each(
+			// **`Simulated` is named even though `Motion` already implies it**,
+			// because it no longer follows from `RigidBody`: every part carries
+			// one of those now, so the term that means "the world may move this"
+			// has to be written down. A static part has no `Motion` either, so
+			// the set is the same one - and saying so keeps it the same one the
+			// day something hands a `Motion` to a row that should not have had
+			// it.
+			//
+			// A positive term since v0.18, where it was a `Without` before. The
+			// ECS matches archetypes on the terms a query names, so this costs
+			// nothing where the exclusion cost a test per table per plan.
+			//
+			// `With` rather than naming it in the `Query<>` row, because it is a
+			// tag: there is nothing to hand the callback, and a parameter for an
+			// empty struct would be a parameter every reader has to look up.
+			store.Query<Motion, const RigidBody>().With<Simulated>().Each(
 				[acceleration, delta](ecs::Entity, Motion &motion, const RigidBody &body) {
 					// Dynamic only. A static or kinematic body is moved by
 					// whatever owns it, and accelerating it here would fight

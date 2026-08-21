@@ -33,6 +33,7 @@
 #include <spdlog/sinks/base_sink.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <client/Replicated.hpp>
 #include <client/Scene.hpp>
@@ -507,7 +508,6 @@ namespace studio {
 		}
 
 		engine::ui::InterfaceSettings interfaceSettings;
-		interfaceSettings.Scale = Settings.Scale;
 		interfaceSettings.Docking = true;
 		interfaceSettings.DisplayWidth = Settings.Width;
 		interfaceSettings.DisplayHeight = Settings.Height;
@@ -524,6 +524,14 @@ namespace studio {
 		// are the whole interface until somebody says otherwise. See
 		// `Keybinds::Load`.
 		LoadConfiguration();
+
+		// **After the configuration, because the scale lives in it.** The
+		// preferences page writes an interface scale and this is the only place
+		// it can be read back before the fonts are rasterised at it - taking it
+		// from `Options` alone was what made the slider forget itself between
+		// runs. `LoadConfiguration` has already reconciled `--scale` against the
+		// file; see `Options::ScaleAuthored`.
+		interfaceSettings.Scale = Settings.Scale;
 
 		// **Built here rather than lazily on the first fetch**, so a
 		// misconfigured source says so at start-up in the log rather than as a
@@ -727,6 +735,25 @@ namespace studio {
 			}
 		}
 
+		// Beside it, and for the same reason: the tag tree describes what the
+		// editor was holding, and a report written after teardown describes an
+		// empty one.
+		if (!Settings.HeapReport.empty()) {
+			const engine::core::HeapTotals heap = engine::core::HeapProfile::Totals();
+			ENGINE_INFO(
+				"heap: {:.1f} MiB live in {} block(s), {:.1f} MiB peak, {} tag(s)",
+				static_cast<double>(heap.LiveBytes) / (1024.0 * 1024.0),
+				heap.LiveBlocks,
+				static_cast<double>(heap.PeakBytes) / (1024.0 * 1024.0),
+				heap.Nodes
+			);
+			if (engine::core::HeapProfile::WriteReport(Settings.HeapReport)) {
+				ENGINE_INFO("heap report written to {}", Settings.HeapReport.string());
+			} else {
+				ENGINE_ERROR("could not write {}", Settings.HeapReport.string());
+			}
+		}
+
 		SaveConfiguration();
 
 		// Runtimes hold a `Store &`, and the stores are the universe's. Let go
@@ -834,6 +861,10 @@ namespace studio {
 			}
 
 			engine::core::FrameGraph::EndFrame();
+
+			// After the frame's work, so a reading covers whole frames rather
+			// than catching the renderer mid-frame holding its scratch buffers.
+			engine::core::HeapProfile::SampleIfDue();
 
 			// **After `EndFrame`, so the sleep is not measured as part of the
 			// frame.** Inside it, the frame graph would report the editor
@@ -1453,6 +1484,12 @@ namespace studio {
 		engine::core::FrameGraph::SetEnabled(
 			ShowFrameGraph || ControlWantsProfile || !Settings.ProfileSnapshot.empty()
 		);
+
+		// **Not turned off with the panel when a report was asked for.** Closing
+		// F5 mid-run would otherwise throw away the window the report is fitted
+		// over, and the panel is the natural thing to close once you have seen
+		// the shape you were looking for.
+		engine::core::HeapProfile::SetSamplingEnabled(ShowFrameGraph || !Settings.HeapReport.empty());
 	}
 
 	void Editor::PresentPortalDestinations(WorldId shown, float frameSeconds) {
@@ -1880,9 +1917,17 @@ namespace studio {
 					(void)ViewportImages.Render(
 						Renderer, store, GuiLists[DrawingViewport].Commands(), PreviewSlot() + 1
 					);
+					// **The canvas in points and the target in pixels, both
+					// stated.** They are the panel's logical size and the
+					// texture that panel was allocated at, and on a display
+					// whose density is not one they are different numbers. See
+					// `InterfacePass::Submit`.
 					GameInterface.Submit(
 						GuiLists[DrawingViewport].Commands(),
 						GuiLists[DrawingViewport].Commands().CanvasSize,
+						engine::core::Vector2{
+							static_cast<float>(target.Width), static_cast<float>(target.Height)
+						},
 						store
 					);
 				}

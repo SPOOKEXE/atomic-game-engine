@@ -179,14 +179,14 @@ TEST_CASE("anchoring is a structural change and locking is not", "[studio][tools
 	const Entity part = Place(store, "Crate", 0.0f);
 
 	// The two toolbar toggles look alike and are not: anchored decides whether
-	// the physics moves it - which is a component coming off the row - and
-	// locked decides whether a person can grab it, which is a byte.
+	// the physics moves it - which is `scene::Simulated` coming off the row -
+	// and locked decides whether a person can grab it, which is a byte.
 	bool anchored = false;
 	REQUIRE(store.GetProperty(part, Name("Anchored"), &anchored, sizeof(anchored)));
 
 	anchored = true;
 	REQUIRE(store.SetProperty(part, Name("Anchored"), &anchored, sizeof(anchored)));
-	CHECK(store.Has<engine::scene::Anchored>(part));
+	CHECK_FALSE(store.Has<engine::scene::Simulated>(part));
 
 	bool locked = true;
 	REQUIRE(store.SetProperty(part, Name("Locked"), &locked, sizeof(locked)));

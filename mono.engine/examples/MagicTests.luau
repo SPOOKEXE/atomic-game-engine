@@ -30,13 +30,20 @@
 --
 -- The `live` suite, which built real `ParticleEmitter`, `Beam`, `Trail`,
 -- `PointLight` and `Attachment` instances and asserted the particle-tail release
--- deadline. This engine has none of those classes, so the suite was **dropped
--- rather than stubbed** - a mock that asserted against a fake emitter would
--- report a pass for a pipeline that does not exist, which is worse than an
--- honest gap. `MagicRuntime` is absent for the same reason.
+-- deadline. It was dropped rather than stubbed when this engine had none of
+-- those classes, because a mock asserting against a fake emitter would report a
+-- pass for a pipeline that did not exist.
 --
--- Everything the live suite covered is about turning compiled data into
--- Instances. Nothing it covered is about whether the data is right, and that is
+-- **The classes exist now and the suite has still not come back**, which is a
+-- decision rather than an oversight. Everything the live suite covered is about
+-- turning compiled data into Instances, and that is `MagicRuntime`'s job - a
+-- file this engine wrote, not one that came across in the port. So it is covered
+-- where this engine's code is covered: `examples/tests/Scene.cpp` loads
+-- `Magic.luau` and counts the emitters, the beam, the trail and the light it
+-- builds. Re-porting the Roblox suite would be a second test of one thing,
+-- written against the other project's runtime.
+--
+-- Nothing the live suite covered is about whether the data is right, and that is
 -- the whole of what runs here.
 
 -- The modules are children of this script rather than of `ReplicatedStorage` -

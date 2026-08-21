@@ -37,6 +37,7 @@
 #include <engine/graph/RenderGraph.hpp>
 
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>

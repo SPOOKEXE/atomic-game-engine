@@ -1,4 +1,5 @@
-// The two panels that answer "why is this slow".
+// The three panels that answer "why is this slow" and "what is holding this
+// memory".
 //
 // **imgui windows rather than the client's overlay, and that is the whole
 // difference.** `render::DrawDebugPanels` writes pixels into a
@@ -13,6 +14,7 @@
 // does - the data is shared even though the drawing is not.
 
 #include <engine/core/FrameGraph.hpp>
+#include <engine/core/HeapProfile.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/ui/Fonts.hpp>
 #include <engine/ui/Metrics.hpp>
@@ -488,6 +490,30 @@ namespace studio {
 		// Said whenever it is on rather than only when spans are dropped,
 		// because the whole risk of the switch is reading a number taken with it
 		// and treating it as the engine's real cost.
+		// **Ahead of the serial-compute line, because it is the larger of the
+		// two and neither excuses the other.** `just studio` builds the `dev`
+		// preset, which compiles the engine at `-O0` and leaves the vendored
+		// code at `-O2` - the right trade for a build somebody iterates on, and
+		// the wrong one to read a profile from. Measured on one scene, one
+		// display, one frame, `dev` against `release`: `convert instances`
+		// 11.99 ms against 0.179, `graph.light-bounds` 10.18 against 0.120,
+		// `sync rendered` 26.5 against 0.74.
+		//
+		// Nothing said so, so the panel looked like a normal frame with a
+		// plausible distribution and every conclusion drawn from it was about
+		// the compiler rather than the engine. `preset=release just studio` is
+		// the fix, and this is the line that says to.
+#if defined(__OPTIMIZE__) || (defined(_MSC_VER) && defined(NDEBUG))
+		constexpr bool optimised = true;
+#else
+		constexpr bool optimised = false;
+#endif
+		if (!optimised) {
+			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
+			ImGui::TextUnformatted("unoptimised build - every figure here is tens of times its shipped cost");
+			ImGui::PopStyleColor();
+		}
+
 		if (engine::parallel::ForceSerialCompute()) {
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
 			ImGui::TextUnformatted("serial compute is on - these timings are not the shipped cost");
@@ -630,6 +656,181 @@ namespace studio {
 				}
 			}
 
+			ImGui::EndTable();
+		}
+
+		ImGui::End();
+	}
+
+	// --- the heap -------------------------------------------------------------
+
+	namespace {
+
+		// Renders a byte count to three significant figures, signed, so a rate
+		// that is giving memory back reads as one.
+		std::string FormatBytes(double bytes) {
+			const char *const units[] = {"B", "KiB", "MiB", "GiB", "TiB"};
+			size_t unit = 0;
+			while ((bytes >= 1024.0 || bytes <= -1024.0) && unit + 1 < std::size(units)) {
+				bytes /= 1024.0;
+				unit++;
+			}
+
+			char text[64];
+			std::snprintf(text, sizeof(text), unit == 0 ? "%.0f %s" : "%.2f %s", bytes, units[unit]);
+			return text;
+		}
+	}
+
+	void Editor::DrawHeap() {
+		if (!ShowHeap) {
+			return;
+		}
+
+		if (!ImGui::Begin("Heap", &ShowHeap)) {
+			ImGui::End();
+			return;
+		}
+
+		if (!engine::core::HeapProfile::IsCompiledIn()) {
+			// Not an empty tree. Every figure would read zero, and a heap panel
+			// reporting no bytes is a much more alarming thing than one saying
+			// it was left out of this build.
+			ImGui::TextUnformatted("The allocator hooks are not compiled into this build.");
+			ImGui::TextUnformatted("Configure with MONO_HEAP_PROFILE=ON, or use the dev preset.");
+			ImGui::End();
+			return;
+		}
+
+		// **Refreshed on the sampler's clock, not on the panel's.** `Editor::Run`
+		// calls `SampleIfDue` once a frame and it records once a second; this
+		// notices the count changing rather than keeping a second timer, so the
+		// panel and the readings cannot drift apart.
+		HeapView &view = HeapState;
+		const std::vector<engine::core::HeapSample> history = engine::core::HeapProfile::History();
+		if (history.size() != view.Plot.size()) {
+			constexpr int64_t TREE_FLOOR = 16 * 1024;
+			constexpr int64_t GROWTH_FLOOR = 256 * 1024;
+
+			view.Totals = engine::core::HeapProfile::Totals();
+			view.Rows = engine::core::HeapProfile::TreeRows(TREE_FLOOR);
+			view.Growth = engine::core::HeapProfile::Growth(0.0, GROWTH_FLOOR);
+			view.HistorySeconds = engine::core::HeapProfile::HistorySeconds();
+
+			view.Plot.clear();
+			view.Plot.reserve(history.size());
+			for (const engine::core::HeapSample &sample : history) {
+				view.Plot.push_back(static_cast<float>(sample.LiveBytes) / (1024.0f * 1024.0f));
+			}
+		}
+
+		const engine::core::HeapTotals &totals = view.Totals;
+		ImGui::Text(
+			"%s live in %" PRId64 " blocks   peak %s   headers %s",
+			FormatBytes(static_cast<double>(totals.LiveBytes)).c_str(),
+			totals.LiveBlocks,
+			FormatBytes(static_cast<double>(totals.PeakBytes)).c_str(),
+			FormatBytes(static_cast<double>(totals.OverheadBytes)).c_str()
+		);
+
+		if (totals.DroppedScopes > 0 || totals.ForeignFrees > 0) {
+			// A partial tree must not look complete, which is the same position
+			// the frame graph takes about dropped spans.
+			ImGui::TextColored(
+				ImVec4(0.95f, 0.70f, 0.30f, 1.0f),
+				"%" PRIu64 " scope(s) dropped, %" PRIu64 " foreign free(s) - the tree is not the whole "
+				"picture",
+				totals.DroppedScopes,
+				totals.ForeignFrees
+			);
+		}
+
+		// **The graph, and it is the reason this panel is not a table.** A leak
+		// is a slope, and a slope is a shape rather than a number: a subsystem
+		// that saw-tooths between four and six megabytes and one that climbs
+		// steadily through five read identically on any row of figures.
+		if (view.Plot.size() >= 2) {
+			ImGui::PlotLines(
+				"##heaplive",
+				view.Plot.data(),
+				static_cast<int>(view.Plot.size()),
+				0,
+				nullptr,
+				0.0f,
+				FLT_MAX,
+				ImVec2(-1.0f, ImGui::GetTextLineHeight() * 6.0f)
+			);
+			ImGui::Text("live MiB over the last %.0f s, sampled once a second", view.HistorySeconds);
+		} else {
+			ImGui::TextDisabled("collecting - the plot needs a second reading");
+		}
+
+		ImGui::Separator();
+
+		if (view.Rows.empty()) {
+			ImGui::TextDisabled("no tagged allocations - every byte is untagged");
+			ImGui::End();
+			return;
+		}
+
+		// The rate for a node, looked up by index. The growth report is short -
+		// the tracked nodes that cleared a byte floor - so a scan beats building
+		// a map per repaint.
+		const auto rateOf = [&view](uint32_t node) {
+			for (const engine::core::HeapGrowth &entry : view.Growth) {
+				if (entry.Node == node) {
+					return entry.BytesPerSecond;
+				}
+			}
+			return 0.0;
+		};
+
+		constexpr ImGuiTableFlags TABLE = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV |
+										  ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp;
+		if (ImGui::BeginTable("heaptags", 5, TABLE)) {
+			ImGui::TableSetupScrollFreeze(0, 1);
+			ImGui::TableSetupColumn("Tag", ImGuiTableColumnFlags_WidthStretch, 3.0f);
+			ImGui::TableSetupColumn("Live", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+			ImGui::TableSetupColumn("Self", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+			ImGui::TableSetupColumn("Blocks", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+			ImGui::TableSetupColumn("Growth", ImGuiTableColumnFlags_WidthStretch, 1.2f);
+			ImGui::TableHeadersRow();
+
+			for (const engine::core::HeapTreeRow &row : view.Rows) {
+				ImGui::TableNextRow();
+
+				ImGui::TableNextColumn();
+				// Two spaces a level. Past a handful of levels a row is more
+				// indent than name, and the path is in the tooltip anyway.
+				const uint32_t level = row.Depth > 0 ? row.Depth - 1 : 0;
+				const std::string indent(std::min<uint32_t>(level, 6) * 2, ' ');
+				ImGui::Text("%s%.*s", indent.c_str(), static_cast<int>(row.Name.size()), row.Name.data());
+
+				ImGui::TableNextColumn();
+				ImGui::TextUnformatted(FormatBytes(static_cast<double>(row.InclusiveBytes)).c_str());
+
+				ImGui::TableNextColumn();
+				ImGui::TextUnformatted(FormatBytes(static_cast<double>(row.SelfBytes)).c_str());
+
+				ImGui::TableNextColumn();
+				ImGui::Text("%" PRId64, row.LiveBlocks);
+
+				ImGui::TableNextColumn();
+				const double rate = rateOf(row.Node);
+				if (std::abs(rate) < 64.0) {
+					// A dash rather than a zero, so the column reads as a list
+					// of suspects instead of a wall of zeroes with the answer
+					// buried in it.
+					ImGui::TextDisabled("-");
+				} else {
+					const bool bad = rate > 64.0 * 1024.0;
+					const bool warn = rate > 4.0 * 1024.0;
+					const ImVec4 colour = bad	 ? ImVec4(0.93f, 0.38f, 0.38f, 1.0f)
+										  : warn ? ImVec4(0.95f, 0.70f, 0.30f, 1.0f)
+												 : ImVec4(0.86f, 0.89f, 0.93f, 1.0f);
+					ImGui::TextColored(colour, "%s/s", FormatBytes(rate).c_str());
+				}
+			}
 			ImGui::EndTable();
 		}
 

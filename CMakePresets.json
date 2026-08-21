@@ -39,7 +39,8 @@
         "MONO_BUILD_CDN": "ON",
         "MONO_BUILD_TESTS": "OFF",
         "MONO_TRACY": "ON",
-        "MONO_OPTIMISE": "ON"
+        "MONO_OPTIMISE": "ON",
+        "MONO_HEAP_PROFILE": "OFF"
       }
     },
     {
@@ -83,7 +84,19 @@
       "cacheVariables": {
         "MONO_BUILD_BENCH": "ON",
         "MONO_BUILD_TESTS": "OFF",
-        "MONO_BUILD_CDN": "OFF"
+        "MONO_BUILD_CDN": "OFF",
+        "MONO_HEAP_PROFILE": "ON"
+      }
+    },
+    {
+      "name": "windows-cross",
+      "inherits": "release",
+      "displayName": "windows-cross: release, built for Windows from Linux with mingw-w64",
+      "toolchainFile": "${sourceDir}/mono.build/Toolchain-mingw64.cmake",
+      "cacheVariables": {
+        "MONO_HEAP_PROFILE": "OFF",
+        "MONO_VENDORED_GLSLC": "OFF",
+        "MONO_GLSLC": "${sourceDir}/.cache/build/release/mono.vendor/shaderc/glslc/glslc"
       }
     }
   ],
@@ -111,6 +124,10 @@
     {
       "name": "bench",
       "configurePreset": "bench"
+    },
+    {
+      "name": "windows-cross",
+      "configurePreset": "windows-cross"
     }
   ],
   "testPresets": [

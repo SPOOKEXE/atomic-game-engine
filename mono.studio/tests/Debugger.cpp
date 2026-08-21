@@ -183,8 +183,8 @@ TEST_CASE("the panel's selection survives the hit log rolling", "[studio][debugg
 	// the right way for the panel to list them.
 	CHECK(debug.Hits().back().Line == static_cast<int>(Debugger::MAXIMUM_HITS) + 7);
 
-    // An index that was valid before the roll is still in range or is not, and
-    // either way it is a comparison rather than a dereference.
+	// An index that was valid before the roll is still in range or is not, and
+	// either way it is a comparison rather than a dereference.
 	const size_t selected = Debugger::MAXIMUM_HITS + 4;
 	CHECK(selected >= debug.Hits().size());
 }

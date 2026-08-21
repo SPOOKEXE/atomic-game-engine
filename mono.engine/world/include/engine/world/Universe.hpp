@@ -193,8 +193,16 @@ namespace engine::world {
 	//
 	// @since v0.17
 	struct Presentation {
+		// Which world to prepare. An id rather than a store, which is what lets
+		// this cross the lane boundary as a value.
 		WorldId World;
+
+		// How long the presented frame is, in seconds.
 		float FrameSeconds = 0.0f;
+
+		// Where between the last two simulation ticks this frame falls, 0 to 1.
+		// What interpolation reads, so a world simulated at a fixed rate can be
+		// drawn at any rate.
 		float Alpha = 0.0f;
 	};
 
@@ -304,6 +312,20 @@ namespace engine::world {
 		//
 		// @return The handles, copied.
 		std::vector<WorldId> Worlds() const;
+
+		// Every world's handle, without building a vector to hold them.
+		//
+		// **The same answer as `Worlds`, for the callers that only walk it.**
+		// `Worlds` returns by value, so a panel or a content pump that iterates
+		// it once a frame pays a heap allocation a frame for a list it discards
+		// - and the editor's draw path calls it several times over between the
+		// explorer, the worlds panel, the statistics rows and the content pump.
+		//
+		// Creating or destroying a world inside the body is not supported: the
+		// registry is walked in place, exactly as `Worlds` walks it.
+		//
+		// @param body Called once per live world, in creation order.
+		void EachWorld(const std::function<void(WorldId)> &body) const;
 
 		// What a world is called.
 		//

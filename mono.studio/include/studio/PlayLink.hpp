@@ -15,7 +15,7 @@
 // `Replica` of it in a second world, with **nothing in between them**. No
 // datagram, no header, no cipher, no window - the bytes the authority produced
 // are the bytes the replica reads, in the order they were produced. That is
-// `mono.unified_server_client`'s arrangement exactly, and it is deliberately the
+// `mono.unified_tests`'s arrangement exactly, and it is deliberately the
 // same one: a second way to stand the two halves up in one process would be a
 // second thing to keep in step with what replication means.
 //
@@ -36,7 +36,7 @@
 // ## What it is not
 //
 // **Not a network test.** There is no loss, no reordering and no latency here
-// beyond the one tick the pipeline costs; `mono.unified_server_client` takes
+// beyond the one tick the pipeline costs; `mono.unified_tests` takes
 // `--drop` for that and `mono.server`/`mono.client` over a socket is the real
 // thing. What this catches is the class of bug that survives a perfect link:
 // state that is never sent at all.

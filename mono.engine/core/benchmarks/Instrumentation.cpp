@@ -18,13 +18,22 @@
 // ships - collection is off until something asks for it, so the macros are
 // supposed to cost a predictable branch and nothing else, and that claim is
 // checkable only by measuring the branch. Enabled is what pressing F5 costs.
+//
+// **`HeapProfile` is the one row here with no off switch**, and that is why it
+// is measured. The other two are silent until somebody asks; the allocator
+// hooks are in every `dev` build, on every allocation, whether or not anybody
+// ever opens the panel. So the two figures worth having are what a tracked
+// `new`/`delete` pair costs against an untracked one, and what a tag scope
+// costs on top of the profiling scope it now rides along with.
 
 #include <engine/core/Clock.hpp>
 #include <engine/core/FrameGraph.hpp>
+#include <engine/core/HeapProfile.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/testing/Bench.hpp>
 
 #include <cstdint>
+#include <cstdlib>
 #include <string>
 #include <thread>
 #include <vector>
@@ -34,6 +43,7 @@ TEST_SUITE_ID("engine.core.bench.instrumentation")
 using engine::core::Clock;
 using engine::core::Counter;
 using engine::core::FrameGraph;
+using engine::core::HeapProfile;
 using engine::core::Metrics;
 using engine::core::ProfileCategory;
 using engine::testing::Consume;
@@ -353,4 +363,118 @@ BENCH("FrameGraph::Spans · read back 512", 1000) {
 		Consume(FrameGraph::FrameMilliseconds());
 		Consume(FrameGraph::CategoryMilliseconds(ProfileCategory::Engine));
 	}
+}
+
+// --- the heap profiler --------------------------------------------------------
+
+BENCH("malloc/free · 200k blocks of 64 bytes", 200'000) {
+	// **The untracked floor the row below is read against.** `malloc` does not
+	// go through `operator new`, so this is the same allocator doing the same
+	// work with no header written and no counter touched - which makes the
+	// difference between the two rows the whole price of the heap profiler, on
+	// this machine, measured rather than reasoned about.
+	// **The pointer is consumed and the memory is written, and both are
+	// needed.** Consuming only a `block != nullptr` bool left the allocation
+	// provably dead and the optimiser deleted the malloc/free pair outright -
+	// the row measured an empty loop and read as three nanoseconds, which is
+	// the sort of number that makes everything compared against it look
+	// expensive.
+	for (size_t index = 0; index < 200'000; index++) {
+		auto *block = static_cast<char *>(std::malloc(64));
+		Consume(block);
+		if (block != nullptr) {
+			block[0] = static_cast<char>(index);
+			Consume(block[0]);
+		}
+		std::free(block);
+	}
+}
+
+BENCH("HeapProfile new/delete · 200k blocks of 64 bytes", 200'000) {
+	// **What every allocation in a `dev` build pays.** The hooks are compiled in
+	// and cannot be switched off at runtime - a block with no header freed
+	// through the tracking `operator delete` would read somebody else's memory -
+	// so this is not an opt-in cost like the two profilers above it. Read it
+	// against `malloc` on the same machine: the header is 24 bytes and the work
+	// is seven relaxed atomics on the way in and three on the way out.
+	// Written and consumed exactly as the malloc row above is, so the two
+	// differ in the allocator and in nothing else.
+	for (size_t index = 0; index < 200'000; index++) {
+		auto *block = new char[64];
+		Consume(block);
+		block[0] = static_cast<char>(index);
+		Consume(block[0]);
+		delete[] block;
+	}
+}
+
+BENCH("HeapProfile::Scope · 200k pushes at depth 1", 200'000) {
+	// A tag scope on its own. `FindChild` walks the open node's child list
+	// comparing string views, and the pointer compare hits first for a literal,
+	// so the steady state is a load and a compare. Every `ENGINE_PROFILE` in the
+	// engine now pays this, so a figure that is not small here is a figure paid
+	// several hundred times a frame.
+	for (size_t index = 0; index < 200'000; index++) {
+		const HeapProfile::Scope scope("engine.bench.tag");
+		Consume(index);
+	}
+}
+
+BENCH("HeapProfile::Scope · 200k pushes at depth 8", 200'000) {
+	// The same push under seven open scopes. It should read the same: the cost
+	// is the child-list walk of *one* node, not the depth of the stack. A row
+	// that climbs with depth means the lookup is walking to the root.
+	const HeapProfile::Scope a("engine.bench.depth1");
+	const HeapProfile::Scope b("engine.bench.depth2");
+	const HeapProfile::Scope c("engine.bench.depth3");
+	const HeapProfile::Scope d("engine.bench.depth4");
+	const HeapProfile::Scope e("engine.bench.depth5");
+	const HeapProfile::Scope f("engine.bench.depth6");
+	const HeapProfile::Scope g("engine.bench.depth7");
+
+	for (size_t index = 0; index < 200'000; index++) {
+		const HeapProfile::Scope scope("engine.bench.tag");
+		Consume(index);
+	}
+}
+
+BENCH("HeapProfile::Scope · 200k pushes across 16 siblings", 200'000) {
+	// The child list is linear, so a node with many children is a longer walk.
+	// Sixteen is more than any real scope has, and the row exists to say what
+	// the slope of that would be before somebody adds a hundred.
+	static const char *const TAGS[16] = {
+		"engine.bench.s00",
+		"engine.bench.s01",
+		"engine.bench.s02",
+		"engine.bench.s03",
+		"engine.bench.s04",
+		"engine.bench.s05",
+		"engine.bench.s06",
+		"engine.bench.s07",
+		"engine.bench.s08",
+		"engine.bench.s09",
+		"engine.bench.s10",
+		"engine.bench.s11",
+		"engine.bench.s12",
+		"engine.bench.s13",
+		"engine.bench.s14",
+		"engine.bench.s15",
+	};
+
+	for (size_t index = 0; index < 200'000; index++) {
+		const HeapProfile::Scope scope(TAGS[index % 16]);
+		Consume(index);
+	}
+}
+
+BENCH("HeapProfile::Sample · 500 readings of the whole tree", 500) {
+	// What watching costs, on the once-a-second clock every program here uses.
+	// One walk of the tag tree plus a reverse pass for the inclusive totals, so
+	// it scales with the number of tags rather than with allocations - and it
+	// is the only part of this profiler that is opt-in.
+	HeapProfile::SetSamplingEnabled(true);
+	for (size_t pass = 0; pass < 500; pass++) {
+		HeapProfile::Sample();
+	}
+	HeapProfile::SetSamplingEnabled(false);
 }

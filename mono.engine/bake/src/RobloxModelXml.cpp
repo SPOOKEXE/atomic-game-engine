@@ -1,4 +1,5 @@
 #include <engine/bake/RobloxModel.hpp>
+#include <engine/core/Chars.hpp>
 #include <engine/core/Xml.hpp>
 
 #include <glm/gtc/quaternion.hpp>
@@ -155,7 +156,7 @@ namespace engine::bake {
 		// would make the two containers disagree about the same model.
 		bool ParseDouble(std::string_view text, double &out) {
 			const std::string_view trimmed = Trimmed(text);
-			const auto result = std::from_chars(trimmed.data(), trimmed.data() + trimmed.size(), out);
+			const auto result = core::FromChars(trimmed.data(), trimmed.data() + trimmed.size(), out);
 			return result.ec == std::errc() && result.ptr == trimmed.data() + trimmed.size();
 		}
 

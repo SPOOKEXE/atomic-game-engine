@@ -26,10 +26,14 @@ namespace engine::scene {
 			return true;
 		}
 
-		// **Nothing to simulate, nothing to own.** An anchored part carries the
-		// `Anchored` tag - anchored decides presence rather than setting a flag
-		// - and a `Folder` or a service has no body either. See the header.
-		if (store.Has<Anchored>(instance)) {
+		// **Nothing to simulate, nothing to own.** A static part carries no
+		// `Simulated` tag - the decision is presence rather than a flag - and a
+		// `Folder` or a service has no body either. See the header.
+		//
+		// A *sleeping* part still carries the tag and is still ownable, which is
+		// the behaviour that matters here: a crate somebody was handed does not
+		// change hands because it settled.
+		if (!store.Has<Simulated>(instance)) {
 			return false;
 		}
 
@@ -59,10 +63,11 @@ namespace engine::scene {
 		// today.
 		std::vector<ecs::Entity> abandoned;
 		store.Each<const NetworkOwner>([&store, &abandoned](ecs::Entity entity, const NetworkOwner &owner) {
-			// The owner has gone, or the body has. Anchoring adds the
-			// `Anchored` tag, which leaves an owner authorised to write the
-			// transform of something the world has just declared immovable.
-			if (!store.Alive(owner.Player) || store.Has<Anchored>(entity)) {
+			// The owner has gone, or the body has. Anchoring takes the
+			// `Simulated` tag away, which would otherwise leave an owner
+			// authorised to write the transform of something the world has just
+			// declared immovable.
+			if (!store.Alive(owner.Player) || !store.Has<Simulated>(entity)) {
 				abandoned.push_back(entity);
 			}
 		});

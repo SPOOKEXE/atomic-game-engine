@@ -659,8 +659,12 @@ namespace engine::replication {
 		// existing row survives a collision.
 		class OutstandingSet {
 		  public:
+			// One entity's outstanding state, as the flat sorted array holds it.
 			struct Row {
+				// The entity this row is about, and the sort key.
 				uint64_t Entity = 0;
+
+				// What is outstanding for it.
 				Outstanding Value;
 			};
 
@@ -923,6 +927,61 @@ namespace engine::replication {
 			std::vector<std::pair<uint64_t, uint64_t>> Hashes;
 
 			std::vector<uint64_t> Changed;
+
+			// One contiguous block of this slot's column, as `Store::EachRuns`
+			// hands it over.
+			//
+			// **Gathered on the owning thread and hashed off it**, which is the
+			// whole reason `Resign` is in two passes. `EachRuns` walks the
+			// archetype tables and may only be called by the thread that owns
+			// the store; the hashing that follows touches nothing outside this
+			// slot. Splitting them is what lets a dozen signed components be
+			// signed at once rather than one after another - measured as a
+			// dozen even costs of about 0.3 ms each, so the shape of the work
+			// was already a fan-out waiting to happen.
+			//
+			// The pointers are into the store's own columns and stay good until
+			// a structural change. Signing is a read and nothing between the two
+			// passes writes, so they are good for as long as they are used.
+			// One contiguous slice of a store column, for a signing job to read.
+			struct Run {
+				// The entities in this run, and the component bytes beside them.
+				// Borrowed from the store's own columns - see the note above for
+				// how long they stay good.
+				//@{
+				const ecs::Entity *Entities = nullptr;
+				const std::byte *Values = nullptr;
+				//@}
+
+				// How many rows both pointers cover.
+				size_t Rows = 0;
+			};
+
+			std::vector<Run> Runs;
+
+			// Bytes one value occupies, read once on the owning thread because
+			// `Components::Describe` takes the registry's process-wide lock.
+			size_t Stride = 0;
+
+			// This slot's scratch, per slot rather than shared.
+			//
+			// **One buffer between every slot was right while they were signed
+			// one at a time and is a race now.** Held rather than local for the
+			// reason it always was: a vector whose size barely moves, rebuilt
+			// every tick, should not allocate every tick.
+			//@{
+			std::vector<std::pair<uint64_t, uint64_t>> Hashed;
+			std::vector<std::pair<uint64_t, uint64_t>> Next;
+			//@}
+
+			// What this slot cost, so the panel keeps its row per component.
+			//
+			// **Timed by whichever worker signed it and reported by the owner.**
+			// `FrameGraph` drops a span opened off the owning thread, so signing
+			// in parallel would have quietly taken away the per-component
+			// breakdown - which is the thing that showed signing to be a dozen
+			// even costs rather than one expensive one.
+			float Milliseconds = 0.0f;
 		};
 
 		// Queues an inbound delta, having checked only that somebody has said
@@ -937,6 +996,13 @@ namespace engine::replication {
 		const Client *Reach(ClientId client) const;
 		void Survey(ecs::Store &store);
 		void Resign(ecs::Store &store);
+
+		// Signs one slot from the runs `Resign` gathered for it.
+		//
+		// **Called from a worker.** It reads the store's columns through those
+		// runs and writes only into the signature handed to it, which is what
+		// makes a dozen of them at once safe.
+		static void SignSlot(Signature &signature);
 
 		// Bytes of a join still owed to a client, across both blobs.
 		static size_t Owed(const Client &client);
@@ -1058,9 +1124,24 @@ namespace engine::replication {
 		// fetch, a binary search - per entity. A member rather than a local so
 		// the vector's storage survives between slots instead of reallocating
 		// once per component per tick.
-		std::vector<std::pair<uint64_t, uint64_t>> ResignHashed;
+		// The signed slots this tick, as indices into `Signatures`.
+		//
+		// Built by `Resign`'s first pass so the second is a flat parallel range
+		// rather than a walk that skips most of what it visits.
+		std::vector<size_t> ResignWork;
 
 		std::vector<ecs::ComponentId> Resolved;
+
+		// The same ids indexed by slot, with an invalid id wherever a declared
+		// component is not registered in this process.
+		//
+		// **`Resolved` is compacted and this is not, which is the whole point.**
+		// `Detection`, `Signatures` and `Suppressors` are keyed by slot, so a pass
+		// over any of them cannot use `Resolved`'s indices - `ResolvedSuppressors`
+		// carries the same warning. Held so that `Resign` does not repeat
+		// `Components::Find`, which takes the component registry's process-wide
+		// lock, once per signed slot per tick.
+		std::vector<ecs::ComponentId> ResolvedSlots;
 
 		// The same list as names, which is what an audit puts on the wire. Kept
 		// beside `Resolved` rather than derived from `Components`, because a

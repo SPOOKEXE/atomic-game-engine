@@ -42,7 +42,9 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Instance.hpp>
 
+#include <bit>
 #include <cstddef>
+#include <cstdint>
 #include <span>
 #include <string>
 #include <string_view>
@@ -233,6 +235,39 @@ namespace engine::ecs {
 	// name.** `Each<Transform, const Motion>` never sees any of this; physics
 	// and render do not learn that a Roblox vocabulary exists.
 	//
+	// A clamp bound, carried as a template argument.
+	//
+	// **A `float` in everything but the one place it would stop compiling.** The
+	// bounds have to be template arguments rather than parameters - see
+	// `ClampedProperty` below for why the generated setter must stay captureless -
+	// and a floating-point *non-type template parameter* is C++20 that GCC
+	// implements and AppleClang does not. `ClampedProperty<&Sound::Volume, 0.0f,
+	// 10.0f>` compiled here and stopped the macOS release build with "invalid
+	// explicitly-specified argument for template parameter 'Low'".
+	//
+	// So this holds the IEEE-754 bits instead. An integer is a structural type on
+	// every compiler, and a class type whose members are structural has been a
+	// legal template argument since C++20 landed - which is a much older feature
+	// than P1907 and is what makes this portable.
+	//
+	// **Nothing at a call site changes.** The converting constructor is
+	// `constexpr`, so `0.0f` is still written as `0.0f` and the conversion happens
+	// where the argument is formed. `Value()` gives the float back, and both
+	// directions fold at compile time.
+	struct Bound {
+		// The bits of the float this stands for.
+		uint32_t Bits = 0;
+
+		// Not `explicit`, which is the point: it is what keeps the call sites
+		// reading as the numbers they are.
+		constexpr Bound(float value) : Bits(std::bit_cast<uint32_t>(value)) {}
+
+		// The bound itself.
+		constexpr float Value() const {
+			return std::bit_cast<float>(Bits);
+		}
+	};
+
 	// @since v0.2
 	struct PropertyDescriptor {
 		// The property's name, as scripts and files spell it.
@@ -448,15 +483,22 @@ namespace engine::ecs {
 		// are baked into the generated function and the descriptor stays a
 		// pointer.
 		//
+		// They are `Bound` rather than `float` for a second reason that has
+		// nothing to do with this design and everything to do with one compiler:
+		// a floating-point non-type template parameter is C++20 that AppleClang
+		// does not implement. `Bound` holds the bits and hands the float back,
+		// and a call site is written exactly as it was.
+		//
 		// Usage: `ClampedProperty<&Visual::Transparency, 0.0f, 1.0f>(basePart,
 		// "Transparency")`.
 		//
-		// @tparam Member A pointer-to-member of a registered component type.
-		// @tparam Low    The smallest legal value.
+		// @tparam Member A pointer-to-member of a registered component type. Its
+		//                type must be `float`.
+		// @tparam Low    The smallest legal value, written as a float.
 		// @tparam High   The largest.
 		// @param owner   The class that declares it.
 		// @param name    The property's name.
-		template <auto Member, auto Low, auto High>
+		template <auto Member, Bound Low, Bound High>
 		static void ClampedProperty(ClassId owner, std::string_view name);
 
 		// Declares a property whose conversion is written rather than generated.
