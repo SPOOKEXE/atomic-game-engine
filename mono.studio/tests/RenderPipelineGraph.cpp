@@ -13,7 +13,7 @@ TEST_DEPENDS("engine.graph.pipelinedocument")
 using namespace engine::graph;
 
 TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "[studio][pipeline]") {
-	nodegraph::Graph canvas;
+	engine::nodegraph::Graph canvas;
 	std::string error;
 	REQUIRE(studio::LoadRenderPipelineGraph(DefaultPbrDocument(), canvas, error));
 
@@ -26,7 +26,7 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 	CHECK(canvas.Ordered().size() == canvas.Nodes().size());
 
 	bool sawSsao = false;
-	for (const nodegraph::Node &node : canvas.Nodes()) {
+	for (const engine::nodegraph::Node &node : canvas.Nodes()) {
 		if (node.Type == "render.pass.ssao") {
 			sawSsao = true;
 			CHECK(node.Label == "ssao");
@@ -36,7 +36,7 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 	}
 	CHECK(sawSsao);
 	const auto mirrorCapture =
-		std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
+		std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const engine::nodegraph::Node &node) {
 			return node.Type == "render.pass.mirror-capture";
 		});
 	REQUIRE(mirrorCapture != canvas.Nodes().end());
@@ -45,22 +45,22 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 	CHECK(mirrorCapture->Widgets.at("feedback").Text == "last-frame");
 	CHECK(mirrorCapture->Widgets.at("max-recursion").Number == 3.0);
 	const auto deferredLighting =
-		std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
+		std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const engine::nodegraph::Node &node) {
 			return node.Type == "render.pass.deferred-lighting";
 		});
 	REQUIRE(deferredLighting != canvas.Nodes().end());
 	CHECK(canvas.LinkInto(deferredLighting->Id, "portal-light") != nullptr);
 	const auto output =
-		std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
+		std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const engine::nodegraph::Node &node) {
 			return node.Type == "render.pass.output-image";
 		});
 	REQUIRE(output != canvas.Nodes().end());
 	CHECK(canvas.LinkInto(output->Id, "image") != nullptr);
-	CHECK(std::none_of(canvas.Nodes().begin(), canvas.Nodes().end(), [](const nodegraph::Node &node) {
+	CHECK(std::none_of(canvas.Nodes().begin(), canvas.Nodes().end(), [](const engine::nodegraph::Node &node) {
 		return node.Type == "render.pass.output";
 	}));
 
-	const nodegraph::NodeType *gbuffer = nodegraph::NodeTypes::Find("render.pass.gbuffer");
+	const engine::nodegraph::NodeType *gbuffer = engine::nodegraph::NodeTypes::Find("render.pass.gbuffer");
 	REQUIRE(gbuffer != nullptr);
 	CHECK(gbuffer->PreviewPort == "albedo");
 	REQUIRE(gbuffer->Widgets.size() >= 2);
@@ -70,16 +70,16 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 	CHECK_FALSE(gbuffer->Widgets[1].Default.Flag);
 	REQUIRE_FALSE(gbuffer->Outputs.empty());
 	CHECK(gbuffer->Outputs.front().Type == "render.image");
-	const nodegraph::DataType *image = nodegraph::DataTypes::Find("render.image");
+	const engine::nodegraph::DataType *image = engine::nodegraph::DataTypes::Find("render.image");
 	REQUIRE(image != nullptr);
 	CHECK(image->Label == "IMAGE");
-	const nodegraph::NodeType *shadow = nodegraph::NodeTypes::Find("render.pass.shadow");
+	const engine::nodegraph::NodeType *shadow = engine::nodegraph::NodeTypes::Find("render.pass.shadow");
 	REQUIRE(shadow != nullptr);
 	CHECK(shadow->PreviewPort == "shadow");
 	REQUIRE(shadow->Outputs.size() == 1);
 	CHECK(shadow->Outputs.front().Type == "render.image");
 	for (const char *kind : {"portal-capture", "portal-tonemap", "portal-overlay", "mirror-overlay"}) {
-		const nodegraph::NodeType *pass = nodegraph::NodeTypes::Find(std::string("render.pass.") + kind);
+		const engine::nodegraph::NodeType *pass = engine::nodegraph::NodeTypes::Find(std::string("render.pass.") + kind);
 		REQUIRE(pass != nullptr);
 		CHECK_FALSE(pass->PreviewPort.empty());
 	}
@@ -87,7 +87,7 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 
 TEST_CASE("mirror feedback and its bounded recursion are saved as node policy", "[studio][pipeline][mirror]") {
 	const PipelineDocument basis = DefaultPbrDocument();
-	nodegraph::Graph canvas;
+	engine::nodegraph::Graph canvas;
 	std::string error;
 	REQUIRE(studio::LoadRenderPipelineGraph(basis, canvas, error));
 	const auto mirror = std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const auto &node) {
@@ -118,12 +118,12 @@ TEST_CASE("mirror feedback and its bounded recursion are saved as node policy", 
 
 TEST_CASE("preview controls belong to image nodes and round trip with the profile", "[studio][pipeline]") {
 	const PipelineDocument basis = DefaultPbrDocument();
-	nodegraph::Graph canvas;
+	engine::nodegraph::Graph canvas;
 	std::string error;
 	REQUIRE(studio::LoadRenderPipelineGraph(basis, canvas, error));
 
-	for (nodegraph::Node &node : canvas.Nodes()) {
-		const nodegraph::NodeType *type = nodegraph::NodeTypes::Find(node.Type);
+	for (engine::nodegraph::Node &node : canvas.Nodes()) {
+		const engine::nodegraph::NodeType *type = engine::nodegraph::NodeTypes::Find(node.Type);
 		REQUIRE(type != nullptr);
 		if (type->PreviewPort.empty()) {
 			CHECK_FALSE(node.Widgets.contains("preview.enabled"));
@@ -140,7 +140,7 @@ TEST_CASE("preview controls belong to image nodes and round trip with the profil
 
 	PipelineDocument saved;
 	REQUIRE(studio::SaveRenderPipelineGraph(canvas, basis, saved, error));
-	nodegraph::Graph restored;
+	engine::nodegraph::Graph restored;
 	REQUIRE(studio::LoadRenderPipelineGraph(saved, restored, error));
 	const auto gbuffer = std::find_if(restored.Nodes().begin(), restored.Nodes().end(), [](const auto &node) {
 		return node.Type == "render.pass.gbuffer";
@@ -152,21 +152,21 @@ TEST_CASE("preview controls belong to image nodes and round trip with the profil
 
 TEST_CASE("a canvas edit round trips to a schedulable world document", "[studio][pipeline]") {
 	const PipelineDocument basis = DefaultPbrDocument();
-	nodegraph::Graph canvas;
+	engine::nodegraph::Graph canvas;
 	std::string error;
 	REQUIRE(studio::LoadRenderPipelineGraph(basis, canvas, error));
 
-	for (nodegraph::Node &node : canvas.Nodes()) {
+	for (engine::nodegraph::Node &node : canvas.Nodes()) {
 		if (node.Type != "render.pass.ssao") {
 			continue;
 		}
-		nodegraph::Value queue;
-		queue.Kind = nodegraph::WidgetKind::Select;
+		engine::nodegraph::Value queue;
+		queue.Kind = engine::nodegraph::WidgetKind::Select;
 		queue.Text = "compute";
 		node.Widgets["queue"] = queue;
 
-		nodegraph::Value async;
-		async.Kind = nodegraph::WidgetKind::Select;
+		engine::nodegraph::Value async;
+		async.Kind = engine::nodegraph::WidgetKind::Select;
 		async.Text = "allow";
 		node.Widgets["async"] = async;
 	}
@@ -196,10 +196,10 @@ TEST_CASE(
 	"dispatch and output controls are graph data rather than decorative widgets", "[studio][pipeline]"
 ) {
 	studio::RegisterRenderPipelineNodeTypes();
-	nodegraph::Graph dispatchCanvas;
-	const nodegraph::NodeId dispatchId = dispatchCanvas.Add("render.pass.dispatch", 0.0f, 0.0f);
-	REQUIRE(dispatchId != nodegraph::NO_NODE);
-	const nodegraph::Node *dispatch = dispatchCanvas.Find(dispatchId);
+	engine::nodegraph::Graph dispatchCanvas;
+	const engine::nodegraph::NodeId dispatchId = dispatchCanvas.Add("render.pass.dispatch", 0.0f, 0.0f);
+	REQUIRE(dispatchId != engine::nodegraph::NO_NODE);
+	const engine::nodegraph::Node *dispatch = dispatchCanvas.Find(dispatchId);
 	REQUIRE(dispatch != nullptr);
 	CHECK(dispatch->Widgets.contains("dispatch.x"));
 	CHECK(dispatch->Widgets.contains("dispatch.y"));
@@ -211,10 +211,10 @@ TEST_CASE(
 	CHECK(dispatch->Widgets.contains("shader"));
 	CHECK(dispatch->Widgets.contains("source"));
 
-	nodegraph::Graph rasterCanvas;
-	const nodegraph::NodeId rasterId = rasterCanvas.Add("render.pass.raster", 0.0f, 0.0f);
-	REQUIRE(rasterId != nodegraph::NO_NODE);
-	const nodegraph::Node *raster = rasterCanvas.Find(rasterId);
+	engine::nodegraph::Graph rasterCanvas;
+	const engine::nodegraph::NodeId rasterId = rasterCanvas.Add("render.pass.raster", 0.0f, 0.0f);
+	REQUIRE(rasterId != engine::nodegraph::NO_NODE);
+	const engine::nodegraph::Node *raster = rasterCanvas.Find(rasterId);
 	REQUIRE(raster != nullptr);
 	CHECK(raster->Widgets.contains("shader"));
 	CHECK(raster->Widgets.contains("source"));
@@ -243,26 +243,26 @@ TEST_CASE(
 	REQUIRE(exportedNode->Parameter(engine::core::Name("source")) != nullptr);
 	CHECK(*exportedNode->Parameter(engine::core::Name("source")) == "#version 450\nvoid main() {}");
 
-	nodegraph::Graph viewerCanvas;
-	const nodegraph::NodeId viewerId = viewerCanvas.Add("render.pass.viewer", 0.0f, 0.0f);
-	REQUIRE(viewerId != nodegraph::NO_NODE);
+	engine::nodegraph::Graph viewerCanvas;
+	const engine::nodegraph::NodeId viewerId = viewerCanvas.Add("render.pass.viewer", 0.0f, 0.0f);
+	REQUIRE(viewerId != engine::nodegraph::NO_NODE);
 	CHECK(viewerCanvas.Find(viewerId)->Widgets.contains("view"));
 
-	nodegraph::Graph captureCanvas;
-	const nodegraph::NodeId captureId = captureCanvas.Add("render.pass.capture", 0.0f, 0.0f);
-	REQUIRE(captureId != nodegraph::NO_NODE);
-	const nodegraph::Node *capture = captureCanvas.Find(captureId);
+	engine::nodegraph::Graph captureCanvas;
+	const engine::nodegraph::NodeId captureId = captureCanvas.Add("render.pass.capture", 0.0f, 0.0f);
+	REQUIRE(captureId != engine::nodegraph::NO_NODE);
+	const engine::nodegraph::Node *capture = captureCanvas.Find(captureId);
 	REQUIRE(capture != nullptr);
 	CHECK(capture->Widgets.contains("view"));
 	CHECK(capture->Widgets.contains("path"));
 	CHECK(capture->Widgets.contains("capture.mode"));
 
 	const PipelineDocument basis = DefaultPbrDocument();
-	nodegraph::Graph canvas;
+	engine::nodegraph::Graph canvas;
 	std::string error;
 	REQUIRE(studio::LoadRenderPipelineGraph(basis, canvas, error));
 
-	for (nodegraph::Node &node : canvas.Nodes()) {
+	for (engine::nodegraph::Node &node : canvas.Nodes()) {
 		if (node.Type != "render.pass.ssao") {
 			continue;
 		}
@@ -285,15 +285,15 @@ TEST_CASE(
 
 TEST_CASE("entity filters expose only controls their backend executes", "[studio][pipeline][cull]") {
 	studio::RegisterRenderPipelineNodeTypes();
-	nodegraph::Graph canvas;
-	const nodegraph::NodeId frustumId = canvas.Add("render.pass.cull-frustum", 0.0f, 0.0f);
-	const nodegraph::NodeId distanceId = canvas.Add("render.pass.cull-distance", 200.0f, 0.0f);
-	const nodegraph::NodeId tagId = canvas.Add("render.pass.filter-tag", 400.0f, 0.0f);
-	const nodegraph::NodeId gbufferId = canvas.Add("render.pass.gbuffer", 600.0f, 0.0f);
-	REQUIRE(frustumId != nodegraph::NO_NODE);
-	REQUIRE(distanceId != nodegraph::NO_NODE);
-	REQUIRE(tagId != nodegraph::NO_NODE);
-	REQUIRE(gbufferId != nodegraph::NO_NODE);
+	engine::nodegraph::Graph canvas;
+	const engine::nodegraph::NodeId frustumId = canvas.Add("render.pass.cull-frustum", 0.0f, 0.0f);
+	const engine::nodegraph::NodeId distanceId = canvas.Add("render.pass.cull-distance", 200.0f, 0.0f);
+	const engine::nodegraph::NodeId tagId = canvas.Add("render.pass.filter-tag", 400.0f, 0.0f);
+	const engine::nodegraph::NodeId gbufferId = canvas.Add("render.pass.gbuffer", 600.0f, 0.0f);
+	REQUIRE(frustumId != engine::nodegraph::NO_NODE);
+	REQUIRE(distanceId != engine::nodegraph::NO_NODE);
+	REQUIRE(tagId != engine::nodegraph::NO_NODE);
+	REQUIRE(gbufferId != engine::nodegraph::NO_NODE);
 
 	CHECK(canvas.Find(frustumId)->Widgets.contains("culling"));
 	CHECK(canvas.Find(distanceId)->Widgets.contains("radius"));
@@ -319,10 +319,10 @@ TEST_CASE("entity filters expose only controls their backend executes", "[studio
 
 TEST_CASE("the IMAGE socket rejects a non-image before save", "[studio][pipeline]") {
 	studio::RegisterRenderPipelineNodeTypes();
-	nodegraph::Graph canvas;
-	const nodegraph::NodeId entities = canvas.Add("render.pass.entities", 0.0f, 0.0f);
-	const nodegraph::NodeId tonemap = canvas.Add("render.pass.tonemap", 200.0f, 0.0f);
-	REQUIRE(entities != nodegraph::NO_NODE);
-	REQUIRE(tonemap != nodegraph::NO_NODE);
-	CHECK(canvas.Connect(entities, "entities", tonemap, "colour") == nodegraph::LinkResult::TypeMismatch);
+	engine::nodegraph::Graph canvas;
+	const engine::nodegraph::NodeId entities = canvas.Add("render.pass.entities", 0.0f, 0.0f);
+	const engine::nodegraph::NodeId tonemap = canvas.Add("render.pass.tonemap", 200.0f, 0.0f);
+	REQUIRE(entities != engine::nodegraph::NO_NODE);
+	REQUIRE(tonemap != engine::nodegraph::NO_NODE);
+	CHECK(canvas.Connect(entities, "entities", tonemap, "colour") == engine::nodegraph::LinkResult::TypeMismatch);
 }

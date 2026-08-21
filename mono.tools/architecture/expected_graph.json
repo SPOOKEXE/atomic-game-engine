@@ -325,6 +325,11 @@
         "net"
       ]
     },
+    "nodegraph": {
+      "tier": "client",
+      "links": [],
+      "requires": "MONO_BUILD_CLIENT"
+    },
     "parallel": {
       "tier": "shared",
       "links": [
@@ -466,6 +471,7 @@
         "msl",
         "net",
         "network",
+        "nodegraph",
         "parallel",
         "physics",
         "render",
@@ -671,6 +677,7 @@
         "msl",
         "net",
         "network",
+        "nodegraph",
         "parallel",
         "physics",
         "render",

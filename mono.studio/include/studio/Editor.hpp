@@ -74,10 +74,10 @@
 #include <functional>
 #include <memory>
 #include <nlohmann/json_fwd.hpp>
-#include <nodegraph/Editor.hpp>
-#include <nodegraph/Evaluate.hpp>
-#include <nodegraph/Graph.hpp>
-#include <nodegraph/Preview.hpp>
+#include <engine/nodegraph/Editor.hpp>
+#include <engine/nodegraph/Evaluate.hpp>
+#include <engine/nodegraph/Graph.hpp>
+#include <engine/nodegraph/Preview.hpp>
 #include <optional>
 #include <span>
 #include <string>
@@ -754,7 +754,7 @@ namespace studio {
 	// A node's picture, as the texture the renderer takes.
 	//
 	// **A free function because it is the seam, and a seam is the thing to
-	// test.** `nodegraph::PreviewImage` promises red first and the top row first
+	// test.** `engine::nodegraph::PreviewImage` promises red first and the top row first
 	// at four bytes a pixel, which is exactly `TextureFormat::RGBA8` - and
 	// nothing in either repository would notice the day that stopped being true,
 	// because a wrongly-ordered thumbnail is a picture that still draws.
@@ -765,7 +765,7 @@ namespace studio {
 	//         payload nobody taught the library to draw produces.
 	//
 	// @since v0.15
-	bool NodePreviewTexture(const nodegraph::PreviewImage &image, engine::assets::TextureData &out);
+	bool NodePreviewTexture(const engine::nodegraph::PreviewImage &image, engine::assets::TextureData &out);
 
 	// The window, the renderer, the interface and the game.
 	//
@@ -2264,12 +2264,12 @@ namespace studio {
 		// The selected node's knobs, as real widgets.
 		//
 		// **The same `WidgetSpec` the canvas paints and hit-tests from**, which
-		// is the third consumer `nodegraph/Layout.hpp` promises: a knob that existed
+		// is the third consumer `engine/nodegraph/Layout.hpp` promises: a knob that existed
 		// here and not on the node, or took a different range, would be two
 		// declarations of one thing.
 		//
 		// @return Whether anything was changed.
-		bool DrawNodeDemoWidgets(nodegraph::Node &node);
+		bool DrawNodeDemoWidgets(engine::nodegraph::Node &node);
 
 		// Writes one node's picture beside the graph file, as a PNG.
 		//
@@ -2278,7 +2278,7 @@ namespace studio {
 		// link, and a stored-block encoder needs nothing linked at all.
 		//
 		// @return What to say about it, either way.
-		std::string ExportNodeDemoImage(nodegraph::NodeId node);
+		std::string ExportNodeDemoImage(engine::nodegraph::NodeId node);
 
 		// Snapshot undo over the demo graph.
 		//
@@ -2299,7 +2299,7 @@ namespace studio {
 		// to a result rather than to a node, so two nodes computing one thing
 		// share a texture and an edit makes a new key instead of overwriting a
 		// live one.
-		void *NodeDemoImage(uint64_t key, const std::function<bool(nodegraph::PreviewImage &)> &make);
+		void *NodeDemoImage(uint64_t key, const std::function<bool(engine::nodegraph::PreviewImage &)> &make);
 
 		// The 3-D view's picture, which is one texture rather than a table of
 		// them.
@@ -2311,7 +2311,7 @@ namespace studio {
 		// the one being drawn, and the one it replaced - which is released
 		// between frames, because a texture dropped while a draw list still
 		// names it is a use-after-free on the GPU.
-		void *NodeDemoOrbitImage(uint64_t key, const std::function<bool(nodegraph::PreviewImage &)> &make);
+		void *NodeDemoOrbitImage(uint64_t key, const std::function<bool(engine::nodegraph::PreviewImage &)> &make);
 
 		// Releases every preview texture. Called when the cache is dropped and
 		// when the graph is replaced - a texture per result would otherwise be a
@@ -4822,9 +4822,9 @@ namespace studio {
 		// `PipelineSet`. It reloads when the world or selected pipeline changes,
 		// never while a gesture is in progress.
 		//@{
-		nodegraph::Graph RenderPipelineGraph;
-		nodegraph::Canvas RenderPipelineCanvas;
-		nodegraph::Evaluator RenderPipelinePreviewEvaluator;
+		engine::nodegraph::Graph RenderPipelineGraph;
+		engine::nodegraph::Canvas RenderPipelineCanvas;
+		engine::nodegraph::Evaluator RenderPipelinePreviewEvaluator;
 		std::unordered_map<uint64_t, void *> RenderPipelinePreviewTextures;
 		std::unordered_map<uint32_t, size_t> RenderPipelineRenderedSlots;
 		engine::graph::PipelineDocument RenderPipelineBasis;
@@ -5080,10 +5080,10 @@ namespace studio {
 		// containers and nothing else.
 		//@{
 		bool ShowNodeDemo = false;
-		nodegraph::Graph NodeDemoGraph;
-		nodegraph::Canvas NodeDemoCanvas;
-		nodegraph::Evaluator NodeDemoRunner;
-		nodegraph::RunReport NodeDemoReport;
+		engine::nodegraph::Graph NodeDemoGraph;
+		engine::nodegraph::Canvas NodeDemoCanvas;
+		engine::nodegraph::Evaluator NodeDemoRunner;
+		engine::nodegraph::RunReport NodeDemoReport;
 
 		// The signature the demo last evaluated at, so dragging a node does not
 		// recompute a graph that has not changed.

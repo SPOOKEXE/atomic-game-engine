@@ -46,7 +46,6 @@ it. `mono.vendor/AGENTS.md` argues the shape.
 | [Roboto](https://github.com/googlefonts/roboto-classic) | SIL OFL 1.1 | the display typeface, from v0.7 | as above |
 | [Noto Sans](https://github.com/notofonts/latin-greek-cyrillic) | SIL OFL 1.1 | fallback coverage for editor and game UI | as above; render loads it as a separate face |
 | [minimp3](https://github.com/lieff/minimp3) | CC0-1.0 | MP3 decoding behind `engine::audio`, from v0.9 | client only - nothing else links `audio` |
-| [nodegraph](https://github.com/SPOOKEXE/node-graph-template) | MIT | the node graph model and its ImGui canvas, from v0.15 | studio only |
 
 shaderc pulls in **glslang** (BSD-3-Clause / Apache-2.0), **SPIRV-Tools**
 (Apache-2.0) and **SPIRV-Headers** (MIT-style) through its own `DEPS` file. They

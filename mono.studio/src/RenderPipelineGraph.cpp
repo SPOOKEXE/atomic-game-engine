@@ -4,8 +4,8 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
-#include <nodegraph/Registry.hpp>
-#include <nodegraph/Types.hpp>
+#include <engine/nodegraph/Registry.hpp>
+#include <engine/nodegraph/Types.hpp>
 #include <studio/RenderPipelineGraph.hpp>
 #include <tuple>
 #include <unordered_map>
@@ -24,7 +24,7 @@ namespace studio {
 			return std::string(TYPE_PREFIX) + std::string(kind.Text());
 		}
 
-		Name KindOf(const nodegraph::Node &node) {
+		Name KindOf(const engine::nodegraph::Node &node) {
 			if (!node.Type.starts_with(TYPE_PREFIX)) {
 				return {};
 			}
@@ -53,71 +53,71 @@ namespace studio {
 			case ResourceKind::Entities:
 				return "render.entities";
 			}
-			return nodegraph::ANY_TYPE;
+			return engine::nodegraph::ANY_TYPE;
 		}
 
-		nodegraph::Colour Accent(NodeCategory category) {
+		engine::nodegraph::Colour Accent(NodeCategory category) {
 			switch (category) {
 			case NodeCategory::Draw:
-				return nodegraph::Colour::Hex(0x4776A8);
+				return engine::nodegraph::Colour::Hex(0x4776A8);
 			case NodeCategory::Composite:
-				return nodegraph::Colour::Hex(0x8059A6);
+				return engine::nodegraph::Colour::Hex(0x8059A6);
 			case NodeCategory::Interface:
-				return nodegraph::Colour::Hex(0xA86F47);
+				return engine::nodegraph::Colour::Hex(0xA86F47);
 			case NodeCategory::Output:
-				return nodegraph::Colour::Hex(0x4A9164);
+				return engine::nodegraph::Colour::Hex(0x4A9164);
 			}
-			return nodegraph::Colour::Hex(0x666666);
+			return engine::nodegraph::Colour::Hex(0x666666);
 		}
 
 		std::string Key(std::string_view group, std::string_view name) {
 			return std::string(INTERNAL_PREFIX) + std::string(group) + "." + std::string(name);
 		}
 
-		void PutText(nodegraph::Node &node, std::string key, std::string value) {
-			nodegraph::Value held;
-			held.Kind = nodegraph::WidgetKind::Text;
+		void PutText(engine::nodegraph::Node &node, std::string key, std::string value) {
+			engine::nodegraph::Value held;
+			held.Kind = engine::nodegraph::WidgetKind::Text;
 			held.Text = std::move(value);
 			node.Widgets[std::move(key)] = std::move(held);
 		}
 
-		std::string TextOf(const nodegraph::Node &node, const std::string &key) {
+		std::string TextOf(const engine::nodegraph::Node &node, const std::string &key) {
 			const auto found = node.Widgets.find(key);
 			return found == node.Widgets.end() ? std::string() : found->second.Text;
 		}
 
-		void PutToggle(nodegraph::Node &node, const char *key, bool value) {
-			nodegraph::Value held;
-			held.Kind = nodegraph::WidgetKind::Toggle;
+		void PutToggle(engine::nodegraph::Node &node, const char *key, bool value) {
+			engine::nodegraph::Value held;
+			held.Kind = engine::nodegraph::WidgetKind::Toggle;
 			held.Flag = value;
 			node.Widgets[key] = held;
 		}
 
-		bool ToggleOf(const nodegraph::Node &node, const char *key, bool fallback) {
+		bool ToggleOf(const engine::nodegraph::Node &node, const char *key, bool fallback) {
 			const auto found = node.Widgets.find(key);
 			return found == node.Widgets.end() ? fallback : found->second.Flag;
 		}
 
-		void PutSelect(nodegraph::Node &node, const char *key, std::string value) {
-			nodegraph::Value held;
-			held.Kind = nodegraph::WidgetKind::Select;
+		void PutSelect(engine::nodegraph::Node &node, const char *key, std::string value) {
+			engine::nodegraph::Value held;
+			held.Kind = engine::nodegraph::WidgetKind::Select;
 			held.Text = std::move(value);
 			node.Widgets[key] = std::move(held);
 		}
 
-		std::string SelectOf(const nodegraph::Node &node, const char *key, std::string fallback) {
+		std::string SelectOf(const engine::nodegraph::Node &node, const char *key, std::string fallback) {
 			const auto found = node.Widgets.find(key);
 			return found == node.Widgets.end() || found->second.Text.empty() ? fallback : found->second.Text;
 		}
 
-		void PutNumber(nodegraph::Node &node, const char *key, uint32_t value) {
-			nodegraph::Value held;
-			held.Kind = nodegraph::WidgetKind::Number;
+		void PutNumber(engine::nodegraph::Node &node, const char *key, uint32_t value) {
+			engine::nodegraph::Value held;
+			held.Kind = engine::nodegraph::WidgetKind::Number;
 			held.Number = static_cast<double>(value);
 			node.Widgets[key] = held;
 		}
 
-		std::string NumberText(const nodegraph::Node &node, const char *key, uint32_t minimum = 1) {
+		std::string NumberText(const engine::nodegraph::Node &node, const char *key, uint32_t minimum = 1) {
 			const auto found = node.Widgets.find(key);
 			const uint32_t value =
 				found == node.Widgets.end()
@@ -126,7 +126,7 @@ namespace studio {
 			return std::to_string(value);
 		}
 
-		uint32_t NumberOf(const nodegraph::Node &node, const std::string &key, uint32_t fallback) {
+		uint32_t NumberOf(const engine::nodegraph::Node &node, const std::string &key, uint32_t fallback) {
 			const auto found = node.Widgets.find(key);
 			return found == node.Widgets.end() ? fallback
 											   : static_cast<uint32_t>(std::max(found->second.Number, 1.0));
@@ -221,7 +221,7 @@ namespace studio {
 			return nullptr;
 		}
 
-		Name UniqueNodeName(const nodegraph::Node &node, Name kind, std::unordered_set<uint32_t> &used) {
+		Name UniqueNodeName(const engine::nodegraph::Node &node, Name kind, std::unordered_set<uint32_t> &used) {
 			const std::string base = node.Label.empty() ? std::string(kind.Text()) : node.Label;
 			Name candidate(base);
 			uint32_t suffix = 2;
@@ -244,16 +244,16 @@ namespace studio {
 				 std::tuple{"render.camera", "Camera", 0x53A7A0u, "A viewpoint and projection."},
 				 std::tuple{"render.entities", "Entities", 0x73A856u, "A filtered ordered draw list."},
 			 }) {
-			nodegraph::DataType type;
+			engine::nodegraph::DataType type;
 			type.Id = id;
 			type.Label = label;
-			type.Tint = nodegraph::Colour::Hex(tint);
+			type.Tint = engine::nodegraph::Colour::Hex(tint);
 			type.Description = description;
-			nodegraph::DataTypes::Register(type);
+			engine::nodegraph::DataTypes::Register(type);
 		}
 
 		for (const NodeKindSpec &spec : NodeCatalogue::All()) {
-			nodegraph::NodeType type;
+			engine::nodegraph::NodeType type;
 			type.Id = TypeId(spec.Kind);
 			type.Title = spec.Label.empty() ? std::string(spec.Kind.Text()) : spec.Label;
 			type.Category = Describe(spec.Category);
@@ -261,17 +261,17 @@ namespace studio {
 			type.Subtitle = spec.Summary;
 			for (const PortSpec &port : spec.Inputs) {
 				type.Inputs.push_back(
-					nodegraph::Port(std::string(port.Name.Text()), ResourceType(port.Kind))
+					engine::nodegraph::Port(std::string(port.Name.Text()), ResourceType(port.Kind))
 				);
 			}
 			for (const PortSpec &port : spec.Outputs) {
 				type.Outputs.push_back(
-					nodegraph::Port(std::string(port.Name.Text()), ResourceType(port.Kind))
+					engine::nodegraph::Port(std::string(port.Name.Text()), ResourceType(port.Kind))
 				);
 			}
-			type.Evaluate = [outputs = type.Outputs](const nodegraph::Inputs &) {
-				nodegraph::Outputs made;
-				for (const nodegraph::PortSpec &output : outputs) {
+			type.Evaluate = [outputs = type.Outputs](const engine::nodegraph::Inputs &) {
+				engine::nodegraph::Outputs made;
+				for (const engine::nodegraph::PortSpec &output : outputs) {
 					made.emplace(output.Name, uint8_t{0});
 				}
 				return made;
@@ -279,16 +279,16 @@ namespace studio {
 			for (const PortSpec &port : spec.Outputs) {
 				if (IsImage(port.Kind)) {
 					type.PreviewPort = std::string(port.Name.Text());
-					type.Preview = [](const std::any &, nodegraph::PreviewImage &) { return false; };
-					type.Widgets.push_back(nodegraph::Toggle(PREVIEW_ENABLED, "Preview", true));
-					type.Widgets.push_back(nodegraph::Toggle(PREVIEW_REVERSE, "Reverse spectrum", false));
+					type.Preview = [](const std::any &, engine::nodegraph::PreviewImage &) { return false; };
+					type.Widgets.push_back(engine::nodegraph::Toggle(PREVIEW_ENABLED, "Preview", true));
+					type.Widgets.push_back(engine::nodegraph::Toggle(PREVIEW_REVERSE, "Reverse spectrum", false));
 					break;
 				}
 			}
 			const std::array commonWidgets{
-				nodegraph::Toggle("enabled", "Enabled", true),
-				nodegraph::Toggle("optional", "Optional", false),
-				nodegraph::Select(
+				engine::nodegraph::Toggle("enabled", "Enabled", true),
+				engine::nodegraph::Toggle("optional", "Optional", false),
+				engine::nodegraph::Select(
 					"scope",
 					"Scope",
 					{"world", "view", "frame"},
@@ -296,8 +296,8 @@ namespace studio {
 					: spec.Scope == NodeScope::View ? 1
 													: 2
 				),
-				nodegraph::Select("queue", "Queue", {"auto", "cpu", "graphics", "compute", "transfer"}, 0),
-				nodegraph::Select("async", "Async", {"auto", "allow", "serial"}, 0),
+				engine::nodegraph::Select("queue", "Queue", {"auto", "cpu", "graphics", "compute", "transfer"}, 0),
+				engine::nodegraph::Select("async", "Async", {"auto", "allow", "serial"}, 0),
 			};
 			type.Widgets.insert(type.Widgets.end(), commonWidgets.begin(), commonWidgets.end());
 			if (spec.Kind == Name("cull-frustum")) {
@@ -305,55 +305,55 @@ namespace studio {
 				// still culls by frustum on the CPU, and the renderer's gbuffer
 				// pass adds the depth-pyramid test on the GPU.
 				type.Widgets.push_back(
-					nodegraph::Select("culling", "Culling", {"inherit", "none", "frustum", "occlusion"}, 0)
+					engine::nodegraph::Select("culling", "Culling", {"inherit", "none", "frustum", "occlusion"}, 0)
 				);
 			}
 			if (spec.Kind == Name("cull-distance")) {
-				type.Widgets.push_back(nodegraph::Text("radius", "Radius", "0"));
+				type.Widgets.push_back(engine::nodegraph::Text("radius", "Radius", "0"));
 			}
 			if (spec.Kind == Name("filter-tag")) {
-				type.Widgets.push_back(nodegraph::Text("mask", "Tag mask", "0"));
+				type.Widgets.push_back(engine::nodegraph::Text("mask", "Tag mask", "0"));
 			}
 			if (spec.Kind == Name("mirror-capture")) {
-				type.Widgets.push_back(nodegraph::Select("feedback", "Feedback", {"last-frame", "flat"}, 0));
-				type.Widgets.push_back(nodegraph::Number("max-recursion", "Max recursion", 3));
+				type.Widgets.push_back(engine::nodegraph::Select("feedback", "Feedback", {"last-frame", "flat"}, 0));
+				type.Widgets.push_back(engine::nodegraph::Number("max-recursion", "Max recursion", 3));
 			}
 			if (spec.Kind == Name("raster") || spec.Kind == Name("dispatch")) {
-				type.Widgets.push_back(nodegraph::Text("shader", "Shader", ""));
-				type.Widgets.push_back(nodegraph::Text("source", "GLSL source", ""));
+				type.Widgets.push_back(engine::nodegraph::Text("shader", "Shader", ""));
+				type.Widgets.push_back(engine::nodegraph::Text("source", "GLSL source", ""));
 			}
 			if (spec.Kind == Name("raster")) {
-				type.Widgets.push_back(nodegraph::Select("load", "Load", {"clear", "load"}, 0));
+				type.Widgets.push_back(engine::nodegraph::Select("load", "Load", {"clear", "load"}, 0));
 			}
 			if (spec.Kind == Name("dispatch")) {
 				type.Widgets.push_back(
-					nodegraph::Select("dispatch.mode", "Dispatch", {"target", "groups"}, 0)
+					engine::nodegraph::Select("dispatch.mode", "Dispatch", {"target", "groups"}, 0)
 				);
-				type.Widgets.push_back(nodegraph::Number("local.x", "Threads X", 8));
-				type.Widgets.push_back(nodegraph::Number("local.y", "Threads Y", 8));
-				type.Widgets.push_back(nodegraph::Number("local.z", "Threads Z", 1));
-				type.Widgets.push_back(nodegraph::Number("dispatch.x", "Groups X", 1));
-				type.Widgets.push_back(nodegraph::Number("dispatch.y", "Groups Y", 1));
-				type.Widgets.push_back(nodegraph::Number("dispatch.z", "Groups Z", 1));
+				type.Widgets.push_back(engine::nodegraph::Number("local.x", "Threads X", 8));
+				type.Widgets.push_back(engine::nodegraph::Number("local.y", "Threads Y", 8));
+				type.Widgets.push_back(engine::nodegraph::Number("local.z", "Threads Z", 1));
+				type.Widgets.push_back(engine::nodegraph::Number("dispatch.x", "Groups X", 1));
+				type.Widgets.push_back(engine::nodegraph::Number("dispatch.y", "Groups Y", 1));
+				type.Widgets.push_back(engine::nodegraph::Number("dispatch.z", "Groups Z", 1));
 			}
 			if (spec.Kind == Name("viewer") || spec.Kind == Name("capture")) {
-				type.Widgets.push_back(nodegraph::Number("view", "Viewport slot", 0));
+				type.Widgets.push_back(engine::nodegraph::Number("view", "Viewport slot", 0));
 			}
 			if (spec.Kind == Name("capture")) {
-				type.Widgets.push_back(nodegraph::Text("path", "BMP path", ""));
+				type.Widgets.push_back(engine::nodegraph::Text("path", "BMP path", ""));
 				type.Widgets.push_back(
-					nodegraph::Select("capture.mode", "Capture", {"once", "every-frame"}, 0)
+					engine::nodegraph::Select("capture.mode", "Capture", {"once", "every-frame"}, 0)
 				);
 			}
 			for (const PortSpec &port : spec.Outputs) {
 				const std::string output(port.Name.Text());
 				type.Widgets.push_back(
-					nodegraph::Select(
+					engine::nodegraph::Select(
 						ResourceKey("lifetime", output), output + " lifetime", {"transient", "external"}, 0
 					)
 				);
 				type.Widgets.push_back(
-					nodegraph::Select(
+					engine::nodegraph::Select(
 						ResourceKey("resolution", output),
 						output + " resolution",
 						{"full", "half", "quarter", "eighth", "fixed"},
@@ -361,18 +361,18 @@ namespace studio {
 					)
 				);
 				type.Widgets.push_back(
-					nodegraph::Number(ResourceKey("width", output), output + " width", 1920)
+					engine::nodegraph::Number(ResourceKey("width", output), output + " width", 1920)
 				);
 				type.Widgets.push_back(
-					nodegraph::Number(ResourceKey("height", output), output + " height", 1080)
+					engine::nodegraph::Number(ResourceKey("height", output), output + " height", 1080)
 				);
 			}
-			nodegraph::NodeTypes::Register(type);
+			engine::nodegraph::NodeTypes::Register(type);
 		}
 	}
 
 	bool
-	LoadRenderPipelineGraph(const PipelineDocument &document, nodegraph::Graph &graph, std::string &error) {
+	LoadRenderPipelineGraph(const PipelineDocument &document, engine::nodegraph::Graph &graph, std::string &error) {
 		using namespace engine::graph;
 		RegisterRenderPipelineNodeTypes();
 		graph.Clear();
@@ -385,7 +385,7 @@ namespace studio {
 				resourceSettings[edit.Name.Id()] = edit;
 			}
 		}
-		std::vector<nodegraph::NodeId> ids;
+		std::vector<engine::nodegraph::NodeId> ids;
 		ids.reserve(authored.size());
 		for (size_t index = 0; index < authored.size(); index++) {
 			const AuthoredNode &source = authored[index];
@@ -394,13 +394,13 @@ namespace studio {
 							: source.Scope == NodeScope::World ? 0.0f
 							: source.Scope == NodeScope::View  ? 180.0f
 															   : 360.0f;
-			const nodegraph::NodeId id = graph.Add(TypeId(source.Kind), x, y);
-			if (id == nodegraph::NO_NODE) {
+			const engine::nodegraph::NodeId id = graph.Add(TypeId(source.Kind), x, y);
+			if (id == engine::nodegraph::NO_NODE) {
 				error = "no render node type is registered for " + std::string(source.Kind.Text());
 				graph.Clear();
 				return false;
 			}
-			nodegraph::Node &node = *graph.Find(id);
+			engine::nodegraph::Node &node = *graph.Find(id);
 			node.Label = std::string(source.Name_.Text());
 			PutToggle(node, "enabled", source.Enabled);
 			PutToggle(node, "optional", source.Optional);
@@ -467,7 +467,7 @@ namespace studio {
 		}
 
 		struct Writer {
-			nodegraph::NodeId Node = nodegraph::NO_NODE;
+			engine::nodegraph::NodeId Node = engine::nodegraph::NO_NODE;
 			std::string Port;
 			size_t Index = 0;
 		};
@@ -502,11 +502,11 @@ namespace studio {
 					producer = &found->second.front();
 				}
 				if (producer != nullptr && !producer->Port.empty() && !input.empty()) {
-					const nodegraph::LinkResult linked =
+					const engine::nodegraph::LinkResult linked =
 						graph.Connect(producer->Node, producer->Port, ids[index], input);
-					if (linked != nodegraph::LinkResult::Made) {
+					if (linked != engine::nodegraph::LinkResult::Made) {
 						error = "could not restore " + std::string(read.Resource.Text()) + ": " +
-								nodegraph::Describe(linked);
+								engine::nodegraph::Describe(linked);
 						graph.Clear();
 						return false;
 					}
@@ -517,7 +517,7 @@ namespace studio {
 	}
 
 	bool SaveRenderPipelineGraph(
-		const nodegraph::Graph &graph,
+		const engine::nodegraph::Graph &graph,
 		const PipelineDocument &basis,
 		PipelineDocument &document,
 		std::string &error
@@ -536,9 +536,9 @@ namespace studio {
 			}
 		}
 
-		std::unordered_map<nodegraph::NodeId, Name> names;
+		std::unordered_map<engine::nodegraph::NodeId, Name> names;
 		std::unordered_set<uint32_t> usedNames;
-		for (const nodegraph::Node &node : graph.Nodes()) {
+		for (const engine::nodegraph::Node &node : graph.Nodes()) {
 			const Name kind = KindOf(node);
 			if (!kind.IsValid()) {
 				error = "the canvas contains a non-render node";
@@ -547,9 +547,9 @@ namespace studio {
 			names[node.Id] = UniqueNodeName(node, kind, usedNames);
 		}
 
-		for (const nodegraph::Link &link : graph.Links()) {
-			const nodegraph::Node *from = graph.Find(link.From);
-			const nodegraph::Node *to = graph.Find(link.To);
+		for (const engine::nodegraph::Link &link : graph.Links()) {
+			const engine::nodegraph::Node *from = graph.Find(link.From);
+			const engine::nodegraph::Node *to = graph.Find(link.To);
 			if (from == nullptr || to == nullptr) {
 				error = "a render link names a node that no longer exists";
 				return false;
@@ -582,7 +582,7 @@ namespace studio {
 			resourceOrder.push_back(name);
 		};
 
-		for (const nodegraph::Node &node : graph.Nodes()) {
+		for (const engine::nodegraph::Node &node : graph.Nodes()) {
 			const Name kind = KindOf(node);
 			const NodeKindSpec *spec = NodeCatalogue::Find(kind);
 			if (spec == nullptr) {
@@ -621,7 +621,7 @@ namespace studio {
 
 		std::vector<Edit> enables;
 		std::vector<Edit> moves;
-		for (const nodegraph::Node &node : graph.Nodes()) {
+		for (const engine::nodegraph::Node &node : graph.Nodes()) {
 			const Name kind = KindOf(node);
 			const NodeKindSpec &spec = *NodeCatalogue::Find(kind);
 			const Name name = names.at(node.Id);
@@ -639,9 +639,9 @@ namespace studio {
 
 			for (const PortSpec &port : spec.Inputs) {
 				Name target;
-				if (const nodegraph::Link *link = graph.LinkInto(node.Id, std::string(port.Name.Text()));
+				if (const engine::nodegraph::Link *link = graph.LinkInto(node.Id, std::string(port.Name.Text()));
 					link != nullptr) {
-					const nodegraph::Node *producer = graph.Find(link->From);
+					const engine::nodegraph::Node *producer = graph.Find(link->From);
 					if (producer != nullptr) {
 						std::string resource = TextOf(*producer, Key("write", link->FromPort));
 						if (resource.empty()) {

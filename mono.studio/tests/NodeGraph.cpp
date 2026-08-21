@@ -31,12 +31,12 @@
 #include <cstdint>
 #include <functional>
 #include <imgui.h>
-#include <nodegraph/Demo.hpp>
-#include <nodegraph/Evaluate.hpp>
-#include <nodegraph/Graph.hpp>
-#include <nodegraph/Preview.hpp>
-#include <nodegraph/Registry.hpp>
-#include <nodegraph/Types.hpp>
+#include <studio/DemoNodes.hpp>
+#include <engine/nodegraph/Evaluate.hpp>
+#include <engine/nodegraph/Graph.hpp>
+#include <engine/nodegraph/Preview.hpp>
+#include <engine/nodegraph/Registry.hpp>
+#include <engine/nodegraph/Types.hpp>
 #include <string>
 #include <studio/Editor.hpp>
 #include <studio/RenderPipelineGraph.hpp>
@@ -78,8 +78,8 @@ namespace {
 
 	// The demo graph, run until nothing is still working, with a ceiling so a
 	// case fails rather than hangs. Two of its node types are async.
-	void Settle(nodegraph::Evaluator &runner, const nodegraph::Graph &graph) {
-		nodegraph::RunReport report = runner.Run(graph);
+	void Settle(engine::nodegraph::Evaluator &runner, const engine::nodegraph::Graph &graph) {
+		engine::nodegraph::RunReport report = runner.Run(graph);
 		const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(20);
 
 		while ((runner.Busy() || report.Waiting > 0) && std::chrono::steady_clock::now() < until) {
@@ -94,7 +94,7 @@ namespace {
 	// draws as a grey ramp, and a picture where every pixel is `r == g == b`
 	// survives having its channels swapped - so a case that took the first
 	// picture it found would assert the seam and prove nothing about it.
-	bool Coloured(const nodegraph::PreviewImage &image) {
+	bool Coloured(const engine::nodegraph::PreviewImage &image) {
 		for (size_t index = 0; index + 3 < image.Rgba.size(); index += 4) {
 			if (image.Rgba[index] != image.Rgba[index + 2]) {
 				return true;
@@ -108,11 +108,11 @@ namespace {
 	// Taken from a real evaluation rather than filled in by hand, because a
 	// hand-made buffer would agree with whatever this file assumed and the point
 	// of the case is that the *library's* buffer does.
-	bool ColourPicture(nodegraph::PreviewImage &out) {
-		using namespace nodegraph;
+	bool ColourPicture(engine::nodegraph::PreviewImage &out) {
+		using namespace engine::nodegraph;
 
 		Graph graph;
-		BuildDemoGraph(graph);
+		studio::BuildDemoGraph(graph);
 
 		Evaluator runner;
 		Settle(runner, graph);
@@ -136,17 +136,17 @@ TEST_CASE("a hovered render node submits its retained preview texture", "[studio
 	Context context;
 	studio::RegisterRenderPipelineNodeTypes();
 
-	nodegraph::Graph graph;
-	const nodegraph::NodeId shadow = graph.Add("render.pass.shadow", 60.0f, 60.0f);
-	REQUIRE(shadow != nodegraph::NO_NODE);
+	engine::nodegraph::Graph graph;
+	const engine::nodegraph::NodeId shadow = graph.Add("render.pass.shadow", 60.0f, 60.0f);
+	REQUIRE(shadow != engine::nodegraph::NO_NODE);
 
-	nodegraph::Evaluator evaluator;
+	engine::nodegraph::Evaluator evaluator;
 	evaluator.Run(graph);
-	nodegraph::Canvas canvas;
+	engine::nodegraph::Canvas canvas;
 	canvas.Observe(&evaluator);
 	void *const retainedTexture = reinterpret_cast<void *>(uintptr_t{0x1234});
 	size_t previewRequests = 0;
-	canvas.Images([&](uint64_t, const std::function<bool(nodegraph::PreviewImage &)> &) {
+	canvas.Images([&](uint64_t, const std::function<bool(engine::nodegraph::PreviewImage &)> &) {
 		previewRequests++;
 		return retainedTexture;
 	});
@@ -191,7 +191,7 @@ TEST_CASE("a hovered render node submits its retained preview texture", "[studio
 // --- pixels -------------------------------------------------------------------
 
 TEST_CASE("a node's picture is a texture the renderer takes", "[studio][nodegraph]") {
-	nodegraph::PreviewImage image;
+	engine::nodegraph::PreviewImage image;
 	REQUIRE(ColourPicture(image));
 	REQUIRE(image.Valid());
 
@@ -223,12 +223,12 @@ TEST_CASE("a payload with no picture makes no texture", "[studio][nodegraph]") {
 	// null handle and never asks again, so a conversion that answered `true`
 	// here would put an empty texture in the atlas once per such node.
 	engine::assets::TextureData texture;
-	CHECK_FALSE(studio::NodePreviewTexture(nodegraph::PreviewImage{}, texture));
+	CHECK_FALSE(studio::NodePreviewTexture(engine::nodegraph::PreviewImage{}, texture));
 
 	// A buffer that does not match the side it claims is the same answer. It is
 	// the one shape `PreviewImage::Valid` exists to catch, and the one a partly
 	// filled preview would produce.
-	nodegraph::PreviewImage ragged;
+	engine::nodegraph::PreviewImage ragged;
 	ragged.Side = 8;
 	ragged.Rgba.assign(8 * 8 * 4 - 1, 0);
 	CHECK_FALSE(studio::NodePreviewTexture(ragged, texture));
@@ -242,7 +242,7 @@ TEST_CASE("the editor's theme is what the node canvas draws chrome with", "[stud
 	engine::ui::ApplyEditorTheme(1.0f);
 	studio::ApplyNodeChrome();
 
-	const nodegraph::Chrome &chrome = nodegraph::HostChrome();
+	const engine::nodegraph::Chrome &chrome = engine::nodegraph::HostChrome();
 	CHECK(chrome.Muted == engine::ui::MutedColour());
 	CHECK(chrome.Accent == engine::ui::AccentColour());
 	CHECK(chrome.Warning == engine::ui::WarningColour());
@@ -250,7 +250,7 @@ TEST_CASE("the editor's theme is what the node canvas draws chrome with", "[stud
 	// `Scaled` is the library's only spelling of a fixed size, so this is what
 	// every popup width and thumbnail row in it is built from.
 	CHECK(chrome.Scale == 1.0f);
-	CHECK(nodegraph::Scaled(100.0f) == 100.0f);
+	CHECK(engine::nodegraph::Scaled(100.0f) == 100.0f);
 
 	// **A scale changed while the panel is open follows it.** The whole reason
 	// this is copied every frame rather than at start-up: the Settings panel can
@@ -259,7 +259,7 @@ TEST_CASE("the editor's theme is what the node canvas draws chrome with", "[stud
 	engine::ui::ApplyEditorTheme(2.0f);
 	studio::ApplyNodeChrome();
 	CHECK(chrome.Scale == 2.0f);
-	CHECK(nodegraph::Scaled(100.0f) == 200.0f);
+	CHECK(engine::nodegraph::Scaled(100.0f) == 200.0f);
 
 	// And so does a colour, which is the half a scale test would not catch: the
 	// palette is chosen separately from the scale and neither implies the other.

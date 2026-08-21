@@ -920,7 +920,7 @@ check-cdn-is-bare:
         || (echo "FAIL: the server was built into a cdn-only preset" && exit 1)
     @echo "cdn contains no graphics stack and nothing else's program"
 
-# There is one node graph in this repository and it is `mono.vendor/nodegraph`.
+# There is one node graph in this repository and it is `mono.engine/nodegraph`.
 #
 # **The rule `D00113` spent two versions carrying.** That entry was open because
 # this design existed twice - the editor's `studio/NodeGraph.hpp` and the
@@ -934,22 +934,32 @@ check-cdn-is-bare:
 # anybody noticing until the first divergence - which is exactly what AGENTS.md
 # rule 6 says to make the build check rather than leave in somebody's memory.
 #
-# Extend the library where it lives. `mono.vendor/nodegraph` is ours, it takes a
-# pull request, and this repository pins whatever commit it lands on.
+# Extend the library where it lives. `mono.engine/nodegraph` is ours: it was a
+# vendored submodule against a separate repository until v0.18.0 and is a
+# first-party engine module now, so extending it is an edit here rather than a
+# pull request against somewhere else.
+#
+# The studio's Demo Nodes set is not a second implementation. It registers types
+# through that module's public `NodeTypes::Register` and implements none of the
+# model, which is the seam this rule is protecting rather than one it forbids.
 check-one-node-graph:
     #!/usr/bin/env bash
     set -euo pipefail
-    found=$(grep -rlE 'namespace[[:space:]]+nodegraph[[:space:]]*\{' \
+    # `(engine::)?` because the module's own namespace is `engine::nodegraph`
+    # since v0.18.0, and a second implementation would plausibly be spelled
+    # either way. Its own directory is the one place the name is allowed.
+    found=$(grep -rlE 'namespace[[:space:]]+(engine::)?nodegraph[[:space:]]*\{' \
         --include='*.hpp' --include='*.cpp' \
         mono.build mono.cdn mono.client mono.discord mono.engine mono.launcher mono.network \
-        mono.server mono.studio mono.tools mono.unified_tests || true)
+        mono.server mono.studio mono.tools mono.unified_tests \
+        | grep -v '^mono\.engine/nodegraph/' || true)
     if [ -n "$found" ]; then
         echo "FAIL: a second node graph implementation, in first-party code:"
         echo "$found" | sed 's/^/  /'
-        echo "The one this repository has is mono.vendor/nodegraph. Extend it there."
+        echo "The one this repository has is mono.engine/nodegraph. Extend it there."
         exit 1
     fi
-    echo "one node graph, and it is vendored"
+    echo "one node graph, and it is engine/nodegraph"
 
 # The API reference, from the comments already in the headers.
 #
