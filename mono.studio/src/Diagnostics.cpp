@@ -336,6 +336,7 @@ namespace studio {
 						into->Milliseconds += span.Milliseconds;
 						into->SelfMilliseconds += span.SelfMilliseconds;
 						into->IdleMilliseconds += span.IdleMilliseconds;
+						into->Occurrences++;
 					}
 
 					view.SummedFrameMilliseconds += FrameGraph::FrameMilliseconds();
@@ -353,7 +354,16 @@ namespace studio {
 						const float frames = static_cast<float>(view.Frames);
 						view.Spans = view.Summed;
 						for (HeldSpan &span : view.Spans) {
-							span.StartMilliseconds /= frames;
+							// **The duration divides by frames and the start
+							// divides by occurrences**, and the two divisors
+							// being different is the fix. See
+							// `HeldSpan::Occurrences`: a span that opens three
+							// times a frame costs three times its own length
+							// *per frame*, which is what the width should show -
+							// but its left edge is one start, not three added
+							// together.
+							const float seen = static_cast<float>(std::max(span.Occurrences, 1u));
+							span.StartMilliseconds /= seen;
 							span.Milliseconds /= frames;
 							span.SelfMilliseconds /= frames;
 							span.IdleMilliseconds /= frames;
@@ -557,8 +567,15 @@ namespace studio {
 		const HeldSpan *hovered = nullptr;
 
 		for (const HeldSpan &span : spans) {
-			const float left = origin.x + span.StartMilliseconds * scale;
-			const float width = std::max(span.Milliseconds * scale, 1.0f);
+			// **Clamped to the graph, whatever the arithmetic above produced.**
+			// An averaged span can still exceed the averaged frame - a span that
+			// ran in only some of the frames divides by all of them for its
+			// width and by its own count for its start - and a bar drawn past
+			// the right edge lands on top of whatever is beside it. A flamegraph
+			// that lies about a width is worse than one that clips.
+			const float left = origin.x + std::clamp(span.StartMilliseconds * scale, 0.0f, graphWidth);
+			const float room = std::max(origin.x + graphWidth - left, 1.0f);
+			const float width = std::clamp(span.Milliseconds * scale, 1.0f, room);
 			const float top = origin.y + static_cast<float>(span.Depth) * rowHeight;
 
 			const ImVec2 upper(left, top);

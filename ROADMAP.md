@@ -258,8 +258,32 @@ The milestone headings below are development labels. Not in line with project ve
       segments against 1296 for three times the reach, and nothing within 160
       studs looks any different.
 - [_] in "Start" with 4 clients running, tons of network activity for no character movement, quickhash / caching / signature not working properly or other bug
-- [_] in flamegraph, simulation needs more granularity, HUGE chunk missing.
-- [_] in flamegraph, when average over 250ms is selected, the flamegraph bars can over-expand into other bars.
+- [x] in flamegraph, simulation needs more granularity, HUGE chunk missing. The
+      premise was not what it looked like: `ecs::Scheduler` already opens a span
+      per system and per phase, and the serial path shows all of it. What
+      vanished was the **parallel** path - `Universe::Tick` dispatches worlds to
+      pinned workers and `FrameGraph::Push` refuses an off-thread span, so with
+      more than one world the whole of `simulation` was one opaque bar. The
+      schedulers had timed themselves all along, so the fix is to report what
+      they measured after the batch joins, named by world. A four-world capture
+      that read `worlds (pinned workers) 23.935` now reads
+      `client.world.2 · step-particles 10.653`, `client.world ·
+      script-heartbeat 9.393`, and so on.
+- [x] and the bug that found: nothing called `Scheduler::ClearTimings` on the
+      world path. `World::Tick` calls `RunPhases` directly rather than
+      `Scheduler::Tick`, and `ClearTimings`' own header warns that a caller
+      splitting the frame that way has to do it itself. Nothing did, so
+      `Timings()` had accumulated since process start and the studio's systems
+      tab was showing a lifetime total labelled as a frame.
+- [x] in flamegraph, when average over 250ms is selected, the bars over-expand
+      into other bars. The average summed spans keyed on (depth, name) and
+      divided by the **frame count**, but a span can open several times in one
+      frame - a world owing two ticks, N worlds at one depth - so a span seen k
+      times published k times its width with a left edge k times too far along.
+      Duration still divides by frames, because what a span costs *per frame* is
+      the useful figure; the start divides by occurrences. Plus a clamp in the
+      layout, because an averaged span can still exceed an averaged frame and a
+      bar drawn past the right edge lands on its neighbours.
 - [_] content needs more granularity, big chunk is not listed (optimise when you find)
 - [_] pump events lags sometimes for some reason (e.g. user inputs, changing window size, etc). make pump events more granular by adding per-event-name.
 - [_] mouse movement seems to also cause pump events to increase lots

@@ -60,6 +60,20 @@ namespace engine::world {
 
 		const uint64_t started = core::Clock::Nanoseconds();
 
+		// **Once per batch, and nothing was doing it.** `Scheduler::Tick` clears
+		// the per-system timings for you; this path calls `RunPhases` directly
+		// instead, and `Scheduler::ClearTimings`' own header says a caller that
+		// splits the frame that way has to do it itself "or timings from earlier
+		// frames remain in the overlay totals". Nothing did, so `Timings()` had
+		// been accumulating since the process started - the studio's systems
+		// tab was showing a lifetime total and calling it a frame, and it grew
+		// forever.
+		//
+		// Before the loop rather than inside it, so a world owing three ticks
+		// reports what the whole batch cost. That is the number the frame graph
+		// wants: the bar is one frame's worth of this world.
+		Scheduler_.ClearTimings();
+
 		try {
 			for (int tick = 0; tick < ticks; tick++) {
 				// Cleared at the *start* of a tick rather than the end, so

@@ -763,6 +763,46 @@ namespace engine::world {
 			core::FrameGraph::Report(
 				"worlds (pinned workers)", core::ProfileCategory::ECS, batch.BusyMilliseconds
 			);
+
+			// **And what was inside it, which is the half that was missing.**
+			// The bar above says how much work the tick contained and nothing
+			// about what the work was: every span a system opened ran on a
+			// worker, the frame graph refuses those, and so the most expensive
+			// thing in a frame appeared as one opaque block. With four worlds
+			// that is most of `simulation`.
+			//
+			// The schedulers timed themselves - `Scheduler::Timings` is
+			// accumulated per system while they ran - so this is reporting a
+			// measurement rather than taking one. Named by world so two worlds
+			// running the same system are two rows and not one; a driver with
+			// one world gets the system name alone, because the prefix would be
+			// noise on every line.
+			for (size_t at = 0; at < ActiveList.size(); at++) {
+				World *world = ActiveList[at];
+				if (world == nullptr || OwedList[at] == 0) {
+					continue;
+				}
+
+				const bool many = ActiveList.size() > 1;
+				const std::string_view label = world->Name().Text();
+				for (const ecs::Scheduler::Timing &timing : world->Systems().Timings()) {
+					if (!(timing.Milliseconds > 0.0f)) {
+						continue;
+					}
+
+					std::string named;
+					if (many) {
+						named.reserve(label.size() + timing.Name.size() + 2);
+						named.append(label).append(" · ").append(timing.Name);
+					} else {
+						named.assign(timing.Name);
+					}
+
+					core::FrameGraph::ReportNamed(
+						"system", named, core::ProfileCategory::ECS, timing.Milliseconds
+					);
+				}
+			}
 		} else {
 			ENGINE_PROFILE_CAT("worlds (serial)", engine::core::ProfileCategory::ECS);
 			for (const size_t index : order) {

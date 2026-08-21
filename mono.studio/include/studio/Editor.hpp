@@ -5436,6 +5436,24 @@ namespace studio {
 			// Whether this span has already been counted into a summary, so a
 			// held frame is not summed twice.
 			bool Reported = false;
+
+			// How many times this name at this depth was seen across the
+			// averaging interval.
+			//
+			// **Not the same as the frame count, which is what the average used
+			// to divide by.** A span may open several times in one frame -
+			// `World::Tick` once per world, a phase once per owed tick - so
+			// summing over an interval and dividing by *frames* published a bar
+			// that many times too wide, with a left edge that many times too far
+			// along. That is the "bars over-expand into other bars" report, and
+			// it only shows with averaging on because a single frame divides by
+			// one.
+			//
+			// The duration still divides by frames, because the useful figure
+			// for a span that runs three times a frame is what it costs *per
+			// frame*. The start divides by this instead: a mean start rather
+			// than a sum of them.
+			uint32_t Occurrences = 0;
 		};
 
 		// What the frame-graph panel is showing, and when it changes.
