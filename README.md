@@ -59,6 +59,7 @@ Development builds and media are still in the discord server below.
 ## Version
 
 Current Version: **v0.18.0**
+Project Start Date: **1st August 2026**
 
 Versions are `v[major].[minor].[patch]`. Everything before `1.0.0` is a
 pre-release with no compatibility promise.

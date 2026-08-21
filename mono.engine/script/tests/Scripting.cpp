@@ -5716,7 +5716,6 @@ TEST_CASE("javascript reads the same CFrame members", "[scripting][cframe][js]")
 	)");
 }
 
-
 // --- the Vector3 surface, brought up to Roblox's ------------------------------
 //
 // **The type a port touches first, and it had five members.** `Dot`, `Cross`
