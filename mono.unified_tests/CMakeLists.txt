@@ -1,10 +1,11 @@
-# mono.unified_tests - both halves of replication in one process.
+# mono.unified_tests - every arrangement of this engine's halves in one process.
 #
-# A diagnostic product, not a shipping one: it hosts the server's placeholder
-# world and the client's replicated world in one address space and hands the
-# authority's messages straight to the replica, so a blank scene can be blamed
-# on a stage rather than on "the network". `include/unified/Harness.hpp` says
-# what it does and does not prove.
+# A diagnostic product, not a shipping one. It hosts the server's world and the
+# client's replicated world in one address space, with the middle being whatever
+# `unified::Arrangement` says - nothing at all, a real `net` link, a link that
+# loses datagrams - and with `cdn` content and `network` discovery alongside.
+# `include/unified/Crossing.hpp` says what it does and does not prove, and
+# `include/unified/Reports.hpp` says why it holds every other module's report.
 #
 # **This declares the tier escape `D00008` reserved, and it is the first real
 # user of it.** A `client`-tier target may not link `Mono::server`; this one
@@ -14,8 +15,14 @@
 # this one has a user, and it is this line. Single-player is still not it: that
 # edge belongs in `mono.client/CMakeLists.txt` and is still not declared there.
 #
+# **Everything below arrives transitively through the two products above, and is
+# named anyway.** A module that includes `<cdn/Publisher.hpp>` and does not
+# declare `Mono::cdn` compiles until the day `mono.client` stops linking it, at
+# which point the break is in a file that never changed. The link line is the
+# same either way; what is different is whether it says so.
+#
 # The library exists for the same reason `mono.client`'s does - a test binary
-# needs something to link, and `tests/` here drives the harness directly.
+# needs something to link, and `tests/` here drives the crossings directly.
 
 mono_add_library(unified_tests
 	TIER client
@@ -28,6 +35,15 @@ mono_add_library(unified_tests
 		Engine::examples
 		Engine::replication
 
+		# The wire, for the arrangements that have one: loopback transports, a
+		# real handshake, `Packet` framing and `LossyTransport`.
+		Engine::net
+
+		# The publication a relayed route is fetched out of, and the key that
+		# signs its manifest.
+		Engine::assets
+		Engine::delivery
+
 		# The seam under test. `BuildReplicatedWorld` and
 		# `RecordReplicatedTick` are the functions `--connect` runs, so this
 		# reports what a real client would draw rather than an imitation of it.
@@ -35,9 +51,16 @@ mono_add_library(unified_tests
 		# cost and is the price of not writing a second draw pass.
 		Mono::client
 
-		# The world being replicated. `server` tier, from a `client`-tier
-		# target: the escape below.
+		# The world being replicated, and the relay that answers a client's
+		# route requests out of this host's own content. `server` tier, from a
+		# `client`-tier target: the escape below.
 		Mono::server
+
+		# Where the content behind that relay comes from.
+		Mono::cdn
+
+		# The beacon and the directory, for the discovery axis.
+		Mono::network
 	ALLOW_TIER_ESCAPE Mono::server
 )
 

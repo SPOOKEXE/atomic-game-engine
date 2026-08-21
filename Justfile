@@ -745,16 +745,85 @@ materials count="100": (build "contentimport")
 serve *args: (build "cdn")
     ./{{build}}/cdn/cdn {{args}}
 
-# A server and a client in one process, with no network between them.
+# Every arrangement of a client and a server in one process.
 #
-# The diagnostic for "the replicated world is empty". `--connect` puts a
-# handshake, a socket, framing, encryption and a bandwidth budget between the
-# thing that serialises and the thing that draws, and a blank scene is equally
-# consistent with any of them. This cuts all of it and prints a column per
-# stage, so the first column that stops making sense is the answer.
+# The diagnostic for "the replicated world is empty", and the place the modules
+# are made to agree with each other. `--arrangement direct` cuts the handshake,
+# the socket, the framing, the encryption and the bandwidth budget out of the
+# middle and prints a column per stage, so the first column that stops making
+# sense is the answer. The other eleven put those back one axis at a time and
+# add content and discovery beside them.
+#
+# Every module's own report is printed underneath, and then the claims that
+# span two of them - which is the part no module's suite can check, because no
+# module links the other end of its own seams.
+#
+#   just unified                              # the bisection, one screen of it
+#   just unified --all                        # all twelve, one line each
+#   just unified --arrangement lossy+relayed  # content over a link that loses
+#
 # mono.unified_tests/AGENTS.md says how to read it.
 unified *args: (build "unified_tests")
     ./{{build}}/unified_tests/unified_tests {{args}}
+
+# Every arrangement, soaked, with the heap profiler watching.
+#
+# **`just heap-soak`'s question asked of the seams rather than of a scene.**
+# That one runs the client on five scenes and asks whether drawing a world
+# leaks; this runs every way the halves can be wired and asks whether *crossing*
+# one does. They find different things: a leak in the relay's reassembly or in
+# a session's retransmission buffer is invisible to a client that is not
+# connected to anything, and is what this catches.
+#
+# **One process per arrangement, deliberately.** A single process running all
+# twelve in turn has one heap history with twelve different workloads in it, and
+# a slope fitted across that is fitted across the changeovers. Separate
+# processes give each arrangement a history of its own.
+#
+# The arrangements come from the program rather than from a list here, so an
+# axis added to `unified::Arrangement` is soaked without this recipe changing.
+#
+# Not part of `just check`: at the default it is five minutes, and a check
+# somebody skips is a check that is not run.
+#
+# Arguments are positional, as every recipe's are here.
+#
+#   just unified-soak                # twelve arrangements, 25s each
+#   just unified-soak 60             # twelve minutes
+#   just unified-soak 30 4096 10     # tighter limit, longer warm-up
+unified-soak seconds="25" limit="8192" warmup="8" entities="64": (build "unified_tests")
+    #!/usr/bin/env bash
+    set -uo pipefail
+    mkdir -p .cache
+    program="{{build}}/unified_tests/unified_tests"
+    failed=""
+    for arrangement in $("$program" --list-arrangements); do
+        report=".cache/heap-unified-$arrangement.txt"
+        log=".cache/heap-unified-$arrangement.log"
+        echo "--- $arrangement: {{seconds}}s, failing above {{limit}} B/s after a {{warmup}}s warm-up"
+        # Bounded, because this recipe cannot report a hang otherwise.
+        timeout $(( {{seconds}} + 120 )) "$program" \
+            --arrangement "$arrangement" --entities {{entities}} --seconds {{seconds}} --quiet \
+            --heap-report "$report" --heap-growth-limit {{limit}} --heap-warmup {{warmup}} \
+            > "$log" 2>&1
+        status=$?
+        if [ $status -eq 3 ]; then
+            echo "LEAK in $arrangement:"
+            grep "heap:" "$log" | tail -20
+            failed="$failed $arrangement"
+        elif [ $status -ne 0 ]; then
+            echo "FAIL: $arrangement exited $status (124 means it never exited at all)"
+            tail -20 "$log"
+            failed="$failed $arrangement"
+        else
+            grep -h "heap: steady\|heap: .* live\|agrees with every other" "$log" | tail -3
+        fi
+    done
+    if [ -n "$failed" ]; then
+        echo "unified-soak FAILED:$failed - reports in .cache/heap-unified-*.txt"
+        exit 1
+    fi
+    echo "unified ok - every arrangement reached a steady state, reports in .cache/heap-unified-*.txt"
 
 # Two runs of one scene, compared byte for byte.
 #

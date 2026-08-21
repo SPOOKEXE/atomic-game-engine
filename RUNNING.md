@@ -1844,6 +1844,102 @@ given entity count actually holds a given tick rate.
 
 ---
 
+## Every arrangement of the halves *(v0.18)*
+
+```sh
+just unified                              # the bisection, one screen of it
+just unified --all                        # all twelve, one line each
+just unified --arrangement lossy+relayed  # content over a link that loses
+```
+
+`unified_tests` holds a server and a client in **one process** and lets you
+choose what goes between them. It answers two questions that a pair of real
+programs cannot.
+
+**Which stage lost the world.** `--arrangement direct` hands the authority's
+byte vectors straight to the replica: no socket, no framing, no cipher, no
+acknowledgement window, no MTU. The table it prints is a column per stage -
+produced, sent, applied, drawn - so the first column that stops making sense is
+the answer. A blank scene here is above `net`; a blank scene against a real
+server and a full one here is below it.
+
+**Whether the modules agree with each other.** Underneath the table it prints
+every module's own report - `replication`'s authority and replica, `net`'s
+sessions and links, `cdn`'s publication, `server`'s relay, `client`'s content
+link, `network`'s beacon and directory, and `core`'s heap - and then the claims
+that span two of them. Those are the ones no module's own suite can make,
+because the tier system stops each module linking the other end of its seams:
+
+```
+contradictions
+  client/server      the relay answered 12 route(s) in full and the client reassembled 11
+```
+
+### The three axes
+
+| axis | values | what it adds |
+|---|---|---|
+| transport | `direct`, `loopback`, `lossy` | nothing, a real `net` link, a link that drops datagrams |
+| content | `relayed` | a `cdn` publication, a `server` relay, a `client` link |
+| discovery | `advertised` | a `network` beacon announcing and a directory collecting |
+
+Names join with `+` in any order, and `--all` runs the whole cross product -
+twelve of them. `--list-arrangements` prints the names, which is how
+`just unified-soak` stays in step with the axes rather than holding a copy.
+
+### Options
+
+| option | what it does |
+|---|---|
+| `--arrangement NAME` | one arrangement; `direct` unless given |
+| `--all` | every arrangement in turn, one summary line each |
+| `--list-arrangements` | print the names and exit |
+| `--entities N` | rows in the placeholder world (64) |
+| `--scene PATH` | author the server's world from a scene script instead |
+| `--ticks N` | ticks after the join (120) |
+| `--seconds N` | run on wall clock instead, for the heap axis |
+| `--tick-rate HZ` | the authority's rate (30) |
+| `--frames-per-tick N` | frames drawn per tick (4) |
+| `--delay-ticks N` | the snapshot buffer's delay (2) |
+| `--drop N,N,...` | ordinals to lose silently |
+| `--quiet` | the reports only, no line per tick |
+| `--heap-report PATH` | write the heap profile when the run ends |
+| `--heap-growth-limit BYTES` | exit 3 when a tag climbs faster than this |
+| `--heap-warmup SECONDS` | readings to leave out of the growth fit (10) |
+
+`--drop` numbers different things per transport, because a transport can only
+lose what it carries: outgoing **messages** under `direct`, datagram **arrival
+numbers** under `lossy`. `loopback` drops nothing - it exists to add framing and
+nothing else. A `lossy` run with no `--drop` uses a built-in set that lands
+inside the join, so the reliable channel's retransmission is exercised rather
+than merely available.
+
+The exit code is `0` when every arrangement joined and no module contradicted
+another, `1` when one did, and `3` when a heap tag ran away.
+
+### Soaking the seams *(v0.18)*
+
+```sh
+just unified-soak                # twelve arrangements, 25s each
+just unified-soak 60             # twelve minutes
+just unified-soak 30 4096 10     # tighter limit, longer warm-up
+```
+
+`just heap-soak` asks whether drawing a world leaks. This asks whether
+*crossing* one does, which is a different question with different answers: a
+leak in a session's retransmission buffer or in the relay's reassembly is
+invisible to a client that is not connected to anything.
+
+One process per arrangement, deliberately - a single process running all twelve
+in turn has one heap history with twelve workloads in it, and a slope fitted
+across that is fitted across the changeovers. Reports land in
+`.cache/heap-unified-<arrangement>.txt` whether the run passes or fails.
+
+Not part of `just check`: at the default it is five minutes, and a check
+somebody skips is a check that is not run.
+
+---
+
 ## Proving which server a client reached
 
 ```sh
