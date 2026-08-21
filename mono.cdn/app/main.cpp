@@ -32,6 +32,7 @@
 #include <engine/core/Paths.hpp>
 #include <engine/delivery/Source.hpp>
 
+#include <array>
 #include <cdn/Dashboard.hpp>
 #include <cdn/DiscordPresence.hpp>
 #include <cdn/Origin.hpp>

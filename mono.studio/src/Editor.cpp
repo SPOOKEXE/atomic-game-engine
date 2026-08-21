@@ -33,6 +33,7 @@
 #include <spdlog/sinks/base_sink.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <client/Replicated.hpp>
 #include <client/Scene.hpp>

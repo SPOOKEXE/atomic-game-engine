@@ -14,6 +14,7 @@
 #include <engine/scene/Components.hpp>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cdn/Publisher.hpp>
 #include <client/Replicated.hpp>

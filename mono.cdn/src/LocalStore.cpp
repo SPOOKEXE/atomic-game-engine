@@ -4,6 +4,7 @@
 #include <engine/core/Log.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cdn/LocalStore.hpp>
 #include <cstdlib>
 #include <fstream>
