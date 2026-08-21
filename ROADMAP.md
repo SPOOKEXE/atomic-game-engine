@@ -49,10 +49,13 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] when you delete a mirror (surfacecamera), it does not clean up the image it was displaying so it becomes a ghost image
 - [x] content.deliver is 0.038ms even though no assets are changing? we should be caching these assets and whatnot
 - [x] in Renderer::RenderView there are a bunch of big gaps
+- [_]
 
 - [_] ensure we benchmark critical systems (network, multiplayer, physics, particles, etc)
 
 ---
+
+### v0.19
 
 - [_] build out proper code architecture documents (AGENTS.md, docs/CODE_FORMAT.md, docs/CODE_QUALITY.md) => CODE_ARCH.md
 - [_] DOMAIN DRIVEN DESIGN & HEXAGONAL ARCHITECTURE
@@ -66,13 +69,13 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] choose networking backend (quic, tcp, udp, etc) for each engine feature like replication and whatnot.
 - [_] deferred catchup
 
-### v0.19
+### v0.20
 
 - [x] thoroughly implement every user-interface element, including `SurfaceGui` and `BillboardGui` - `SurfaceGui` gains `ZOffset`, `MaxDistance`, `ClipsDescendants` and `Active`, and `BillboardGui` gains `Active`, `Brightness`, `ClipsDescendants`, `CurrentDistance`, `DistanceStep`, `ExtentsOffsetWorldSpace`, `SizeOffset` and `PlayerToHideFrom`; new classes `UIGradient`, `UITableLayout`, `UIPageLayout` and `UIDragDetector`; `ScrollingFrame` completed with `ScrollingEnabled`, `AutomaticCanvasSize`, the two `ScrollBarInset`s, `VerticalScrollBarPosition`, `ElasticBehavior`, the three bar images and `AbsoluteCanvasSize`/`AbsoluteWindowSize`, plus wheel and thumb-drag input; `RichText`, `MaxVisibleGraphemes`, `ContentText`, `TextBounds` and `TextFits` on every text class; `Interactable`, the four `NextSelection*`, `SelectionOrder` and `SelectionImageObject` on `GuiObject`; `HoverImage`, `PressedImage` and `ResampleMode` on the image classes; `Enabled` and `ApplyStrokeMode` on `UIStroke`. Laid out, drawn by both backends, saved, replicated, bound and in the Properties panel. `D00129` carries the members that need a subsystem this engine has not got (filed as `D00120`, renumbered at v0.17 - that number was already a retired entry)
 - [_] build out all remaining roblox surfaces with available underlying surface
 - [_] port many particle features from unity to here (https://docs.unity3d.com/6000.5/Documentation/ScriptReference/ParticleSystem.html)
 
-### v0.20
+### v0.21
 
 - [_] finish portals so lighting, physics, projection, clipping and geometry crossing the seam are seamless
 - [_] ensure per-mesh render capabilities, global lighting render capabilities, camera lighting render capabilities, etc. compute shaders, post-processing, etc.
@@ -83,7 +86,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] render pipeline nodes for above
 - [_] plan the entire rendering system to a visual compositor system like Unity. https://docs.unity3d.com/Manual/scriptable-render-pipeline-introduction.html https://docs.unity3d.com/Packages/com.unity.visual-compositor@0.27/manual/nodes.html
 
-### v0.21
+### v0.22
 
 - [_] build out default plugins (move all topbar tools and stuff to plugins as a "Default Studio" plugin)
 - [_] build out plugin function suite (create dropdown, edit toolbar, edit viewport, edit script editors, etc)
@@ -91,7 +94,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] add a universe loading widget - shows cdns the universe has and asks to allow permission, also http enabled property if changed
 - [_] add tabs to the universe importer: general, assets, permissions, cdn, misc with all or per-world breakdown
 
-### v0.22
+### v0.23
 
 - [_] default R6 base character (capsule collider)
 - [_] gtlf default character (unreal)
