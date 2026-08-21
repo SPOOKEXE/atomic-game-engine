@@ -45,6 +45,8 @@
 #include <iterator>
 #include <optional>
 #include <string>
+#include <tuple>
+#include <type_traits>
 #include <unordered_map>
 #include <vector>
 
@@ -12331,8 +12333,17 @@ namespace engine::render {
 			// portal-light edge is what guarantees that node has already run.
 			// The nearest ready mouths win the two slots; empty slots stay
 			// zeroed in `uniforms` and bind the fallback texel.
-			std::array<SDL_GPUTextureSamplerBinding, lightingBindings.size() + MAX_SEAM_LIGHTS>
-				spillBindings{};
+			// **The size comes from the type, not from `lightingBindings.size()`.**
+			// That call is `constexpr` and never reads the object, so GCC and
+			// Clang fold it - but the object itself cannot be `constexpr`, since
+			// its elements are this frame's textures and samplers. MSVC requires
+			// the object and refuses: `error C2975: '_Size': invalid template
+			// argument for 'std::array', expected compile-time constant
+			// expression`. `tuple_size_v` asks the type and never mentions the
+			// object at all.
+			constexpr size_t SPILL_BINDINGS =
+				std::tuple_size_v<std::remove_cvref_t<decltype(lightingBindings)>> + MAX_SEAM_LIGHTS;
+			std::array<SDL_GPUTextureSamplerBinding, SPILL_BINDINGS> spillBindings{};
 			std::copy(lightingBindings.begin(), lightingBindings.end(), spillBindings.begin());
 
 			std::array<const Impl::SeamLightTarget *, scene::MAX_SURFACES> ready{};
