@@ -7,6 +7,7 @@
 #include <engine/scene/Components.hpp>
 #include <engine/ui/Fonts.hpp>
 #include <engine/ui/Metrics.hpp>
+#include <engine/ui/Prompts.hpp>
 #include <engine/ui/Theme.hpp>
 
 #include <SDL3/SDL_video.h>
@@ -2480,35 +2481,35 @@ namespace studio {
 			ImGui::OpenPopup("Rename Scene");
 		}
 
-		if (FilePrompt("Save Game As", PathBuffer, "Save", GAME_FILES, false)) {
+		if (engine::ui::FilePrompt("Save Game As", PathBuffer, "Save", GAME_FILES, false)) {
 			SaveGame(std::filesystem::path(PathBuffer));
 			AskingSaveAs = false;
 		} else if (!ImGui::IsPopupOpen("Save Game As")) {
 			AskingSaveAs = false;
 		}
 
-		if (FilePrompt("Open Game", PathBuffer, "Open", GAME_FILES, true)) {
+		if (engine::ui::FilePrompt("Open Game", PathBuffer, "Open", GAME_FILES, true)) {
 			OpenGame(std::filesystem::path(PathBuffer));
 			AskingOpen = false;
 		} else if (!ImGui::IsPopupOpen("Open Game")) {
 			AskingOpen = false;
 		}
 
-		if (FilePrompt("Sync Rojo Project", PathBuffer, "Sync", ROJO_FILES, true)) {
+		if (engine::ui::FilePrompt("Sync Rojo Project", PathBuffer, "Sync", ROJO_FILES, true)) {
 			SyncRojo(std::filesystem::path(PathBuffer));
 			AskingRojo = false;
 		} else if (!ImGui::IsPopupOpen("Sync Rojo Project")) {
 			AskingRojo = false;
 		}
 
-		if (FilePrompt("Sync Rojo Universe", PathBuffer, "Sync", ROJO_FILES, true)) {
+		if (engine::ui::FilePrompt("Sync Rojo Universe", PathBuffer, "Sync", ROJO_FILES, true)) {
 			SyncRojoWorlds(std::filesystem::path(PathBuffer));
 			AskingRojoUniverse = false;
 		} else if (!ImGui::IsPopupOpen("Sync Rojo Universe")) {
 			AskingRojoUniverse = false;
 		}
 
-		if (FilePrompt("Export World", PathBuffer, "Export", WORLD_FILES, false)) {
+		if (engine::ui::FilePrompt("Export World", PathBuffer, "Export", WORLD_FILES, false)) {
 			ExportActiveWorld(std::filesystem::path(PathBuffer));
 			AskingExport = false;
 		} else if (!ImGui::IsPopupOpen("Export World")) {
@@ -2520,21 +2521,21 @@ namespace studio {
 		// reader refuses each in the other's place, so the two exports write
 		// different extensions and say which they are - see
 		// `game::WORLD_EXTENSION`, where the same distinction is spelled out.
-		if (FilePrompt("Export Universe", PathBuffer, "Export", GAME_FILES, false)) {
+		if (engine::ui::FilePrompt("Export Universe", PathBuffer, "Export", GAME_FILES, false)) {
 			ExportUniverse(std::filesystem::path(PathBuffer));
 			AskingExportUniverse = false;
 		} else if (!ImGui::IsPopupOpen("Export Universe")) {
 			AskingExportUniverse = false;
 		}
 
-		if (FilePrompt("Import Universe", PathBuffer, "Import", GAME_FILES, true)) {
+		if (engine::ui::FilePrompt("Import Universe", PathBuffer, "Import", GAME_FILES, true)) {
 			ImportUniverseFile(std::filesystem::path(PathBuffer));
 			AskingImportUniverse = false;
 		} else if (!ImGui::IsPopupOpen("Import Universe")) {
 			AskingImportUniverse = false;
 		}
 
-		if (FilePrompt("Import World", PathBuffer, "Import", WORLD_FILES, true)) {
+		if (engine::ui::FilePrompt("Import World", PathBuffer, "Import", WORLD_FILES, true)) {
 			ImportWorldFile(std::filesystem::path(PathBuffer));
 			AskingImport = false;
 		} else if (!ImGui::IsPopupOpen("Import World")) {

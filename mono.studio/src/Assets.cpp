@@ -25,7 +25,7 @@
 // - **Add folder…**, which browses and takes everything under a directory.
 //
 // The typed-path field is gone. It was there because there was no portable file
-// dialog - and there is one, `studio::FilePrompt`, which six other dialogs in
+// dialog - and there is one, `ui::FilePrompt`, which six other dialogs in
 // this editor already use. Keeping a text field beside a browser would be two
 // places to say the same thing.
 
@@ -35,6 +35,7 @@
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/ui/Metrics.hpp>
+#include <engine/ui/Prompts.hpp>
 #include <engine/ui/Theme.hpp>
 
 #include <algorithm>
@@ -159,10 +160,10 @@ namespace studio {
 		// `assetc` decides what it can bake and `Publish` decides what kind a
 		// name is, and a dialog that hid a format the pipeline would have handled
 		// would be a third opinion about what content is.
-		if (FilePrompt(ADD_FILE, AssetBrowsePath, "Import", {}, true)) {
+		if (engine::ui::FilePrompt(ADD_FILE, AssetBrowsePath, "Import", {}, true)) {
 			ImportAssetPath(AssetBrowsePath);
 		}
-		if (FolderPrompt(ADD_FOLDER, AssetBrowsePath, "Import all")) {
+		if (engine::ui::FolderPrompt(ADD_FOLDER, AssetBrowsePath, "Import all")) {
 			ImportAssetPath(AssetBrowsePath);
 		}
 

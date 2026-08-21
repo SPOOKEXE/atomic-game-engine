@@ -7,20 +7,19 @@
 // whether somebody can find their game file.
 
 #include <engine/testing/Suite.hpp>
+#include <engine/ui/Browse.hpp>
 
 #include <catch2/catch_test_macros.hpp>
-
-#include <studio/Browse.hpp>
 
 #include <fstream>
 #include <random>
 
-TEST_SUITE_ID("studio.browse")
+TEST_SUITE_ID("engine.ui.browse")
 
-using studio::BrowseDirectory;
-using studio::BrowseEntry;
-using studio::Listing;
-using studio::MatchesExtension;
+using engine::ui::BrowseDirectory;
+using engine::ui::BrowseEntry;
+using engine::ui::Listing;
+using engine::ui::MatchesExtension;
 
 namespace {
 	// A throwaway tree to list.
@@ -32,7 +31,7 @@ namespace {
 			// other's files. Not a process id: `getpid` is POSIX, and Windows
 			// spells it `_getpid` behind <process.h>.
 			Root = std::filesystem::temp_directory_path() /
-				   ("studio-browse-" + std::to_string(std::random_device{}()));
+				   ("ui-browse-" + std::to_string(std::random_device{}()));
 			std::filesystem::remove_all(Root);
 			std::filesystem::create_directories(Root);
 		}

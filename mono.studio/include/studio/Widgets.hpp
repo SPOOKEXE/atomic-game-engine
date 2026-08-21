@@ -13,6 +13,7 @@
 // test does.
 
 #include <engine/core/Name.hpp>
+#include <engine/ui/Fields.hpp>
 
 #include <string>
 #include <vector>
@@ -35,20 +36,12 @@ namespace studio {
 	// @return A NUL-terminated view of the interned text.
 	const char *Label(const engine::core::Name &name, const char *fallback = "");
 
-	// A single-line text field bound to a `std::string`.
-	//
-	// The string grows as the field does, through imgui's resize callback, so
-	// there is no fixed buffer and no truncation at a length nobody chose.
-	//
-	// @param label  The imgui label, `##`-prefixed to hide it.
-	// @param text   The string to edit, in place.
-	// @param hint   Placeholder text shown while the field is empty.
-	// @param secret Whether to draw the characters as dots. For a shared
-	//        secret somebody pastes into a preferences page - it hides the
-	//        value from a shoulder or a screen recording and does nothing else,
-	//        because the string itself is stored in the clear either way.
-	// @return `true` on a frame the text changed.
-	bool TextField(const char *label, std::string &text, const char *hint = nullptr, bool secret = false);
+	// **`TextField` is `engine/ui/Fields.hpp`, since v0.18**, re-exported here
+	// so that the editor's thirty-two call sites keep reading as the editor's
+	// own vocabulary. `mono.launcher` is the second caller and there is one
+	// definition; `CodeField` below is the one that stayed, because it needs a
+	// caret out and an insertion in and only a script editor wants that.
+	using engine::ui::TextField;
 
 	// The caret of a code field, and a change to apply to it.
 	//
@@ -128,54 +121,12 @@ namespace studio {
 	// @return `true` on the frame the caller should act on `buffer`.
 	bool PathPrompt(const char *title, const char *label, std::string &buffer, const char *accept);
 
-	// A modal that browses for a file, rather than asking for one to be typed.
-	//
-	// **Beside `PathPrompt` rather than replacing it**, because two of the eight
-	// dialogs ask for a *name* - New World and Rename Scene - and a folder tree
-	// is no help at all with those. The six that take a path get this; the two
-	// that take a name keep the field.
-	//
-	// Same shape as `PathPrompt` otherwise: opened by `OpenPopup` on the title,
-	// returns true on the frame it is confirmed, and leaves `path` holding the
-	// answer. See `studio/Browse.hpp` for why this is an imgui browser and not a
-	// native dialog.
-	//
-	// @param title      The popup id, which is also its heading.
-	// @param path       The path, in and out. Its folder is where browsing
-	//                   starts.
-	// @param accept     What the confirm button says.
-	// @param extensions Which suffixes to list, lowercase and with the dot.
-	//                   Empty lists every file.
-	// @param mustExist  Whether the accept button refuses a path that is not
-	//                   there. Open refuses; Save As does not, because naming a
-	//                   file that does not exist yet is the whole point of it.
-	// @return `true` on the frame it is confirmed.
-	bool FilePrompt(
-		const char *title,
-		std::string &path,
-		const char *accept,
-		const std::vector<std::string> &extensions,
-		bool mustExist
-	);
-
-	// A modal that browses for a *folder* rather than a file.
-	//
-	// **Beside `FilePrompt` rather than a flag on it**, because the two differ
-	// in more than a filter: a file dialog returns what is selected in the list
-	// and a folder dialog returns where the list *is*. Folding them together
-	// would mean a click on a row meaning "descend" in one mode and "choose" in
-	// the other, from the same widget, which is how a dialog gets a mode nobody
-	// can see.
-	//
-	// Files are listed, greyed, and not selectable - a folder browser that hid
-	// them would make it impossible to tell an empty folder from the right one.
-	//
-	// @param title  The popup id, which is also its heading.
-	// @param path   The folder, in and out. Where browsing starts.
-	// @param accept What the confirm button says.
-	// @return `true` on the frame it is confirmed.
-	// @since v0.10
-	bool FolderPrompt(const char *title, std::string &path, const char *accept);
+	// **`FilePrompt` and `FolderPrompt` are `engine/ui/Prompts.hpp`, since
+	// v0.18.** They sat here while this editor was their only caller;
+	// `mono.launcher` is the second, and a dialog copied into a second program
+	// is a second set of keyboard behaviours. `PathPrompt` above stays, because
+	// the two dialogs it serves ask for a *name* rather than a path and a
+	// folder tree is no help at all with those.
 
 	// A case-insensitive subsequence match, with exact and prefix hits promoted.
 	//

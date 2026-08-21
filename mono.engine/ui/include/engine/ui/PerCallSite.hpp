@@ -12,10 +12,17 @@
 // This is the one place that pattern is written, so a fourth widget that needs
 // it gets the tested version rather than a fourth transcription.
 //
-// **Deliberately not on `Editor`.** None of this is world state, none of it
+// **Public here since v0.18, having been a private header of `mono.studio`.**
+// `ui::FilePrompt` moved into this module for `Browse.hpp`'s reason and brought
+// its per-title state with it, so the pattern had to become reachable. Nothing
+// about it was ever editor-specific.
+//
+// **Deliberately not on any one program's state.** None of this is world state, none of it
 // survives a frame boundary in any meaningful sense, and none of it is worth
 // 120 more bytes on a class that already has too many members. It is the same
 // judgement `ui::InstallThemeSettings` makes for one value.
+//
+// @tier L12 · client
 //
 // The table is a vector scanned linearly rather than a map: the number of call
 // sites for any one widget is the number of places somebody wrote it in the
@@ -26,7 +33,7 @@
 #include <utility>
 #include <vector>
 
-namespace studio {
+namespace engine::ui {
 
 	// The state this call site has, creating it on first use.
 	//

@@ -1,10 +1,10 @@
-#include <studio/Browse.hpp>
+#include <engine/ui/Browse.hpp>
 
 #include <algorithm>
 #include <cctype>
 #include <system_error>
 
-namespace studio {
+namespace engine::ui {
 
 	namespace {
 		// Lowercases ASCII only, which is what a file suffix is.
@@ -36,9 +36,8 @@ namespace studio {
 		return false;
 	}
 
-	Listing BrowseDirectory(
-		const std::filesystem::path &directory, const std::vector<std::string> &extensions
-	) {
+	Listing
+	BrowseDirectory(const std::filesystem::path &directory, const std::vector<std::string> &extensions) {
 		Listing listing;
 
 		std::error_code code;
@@ -77,12 +76,13 @@ namespace studio {
 
 		listing.Directory = where;
 
-		if (const std::filesystem::path parent = where.parent_path();
-			!parent.empty() && parent != where) {
+		if (const std::filesystem::path parent = where.parent_path(); !parent.empty() && parent != where) {
 			listing.Parent = parent;
 		}
 
-		std::filesystem::directory_iterator walk(where, std::filesystem::directory_options::skip_permission_denied, code);
+		std::filesystem::directory_iterator walk(
+			where, std::filesystem::directory_options::skip_permission_denied, code
+		);
 		if (code) {
 			listing.Error = "cannot read this folder: " + code.message();
 			return listing;

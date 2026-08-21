@@ -2,6 +2,15 @@
 
 // Listing a directory, for the file dialogs.
 //
+// **Here rather than in `mono.studio`, since v0.18.** The editor wrote this and
+// was its only caller until `mono.launcher` needed to pick a game file, a
+// content store and a cache directory out of the same tree. What the two share
+// is not a widget - one browses in a modal over a docked editor, the other in a
+// launcher form - it is the *rules*: what counts as hidden, how rows sort, that
+// an unreadable entry is skipped rather than fatal, and that a suffix filter is
+// case-insensitive. Those are one fact, and rule 2 is about one fact having one
+// home.
+//
 // **An imgui browser over `std::filesystem` rather than a vendored native
 // dialog**, and the reason is not that a native one would be hard. `mono.vendor`
 // holds nothing for this, and every candidate brings a platform surface with it:
@@ -26,7 +35,7 @@
 #include <string>
 #include <vector>
 
-namespace studio {
+namespace engine::ui {
 
 	// One row in a listing.
 	//
@@ -72,9 +81,9 @@ namespace studio {
 	// would be a browser that fails in exactly the places somebody most needs to
 	// look around.
 	//
-	// Hidden entries - a leading dot - are omitted. The studio's own paths do
-	// not need them and a first listing full of `.git` and `.cache` is a listing
-	// nobody can find anything in.
+	// Hidden entries - a leading dot - are omitted. Neither caller's paths need
+	// them and a first listing full of `.git` and `.cache` is a listing nobody
+	// can find anything in.
 	//
 	// @param directory Where to list. A path that is not a directory lists its
 	//                  parent, so a browser opened on a file's path shows the
@@ -84,9 +93,8 @@ namespace studio {
 	//                   never filtered out, or there would be no way to reach a
 	//                   folder containing what you want.
 	// @return The listing. Check `Error` for why an empty one is empty.
-	Listing BrowseDirectory(
-		const std::filesystem::path &directory, const std::vector<std::string> &extensions = {}
-	);
+	Listing
+	BrowseDirectory(const std::filesystem::path &directory, const std::vector<std::string> &extensions = {});
 
 	// Whether a name matches a suffix filter, case-insensitively.
 	//
