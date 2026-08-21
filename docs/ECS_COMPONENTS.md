@@ -4,15 +4,16 @@
 columns come from `ecs::Components` at runtime; the purpose column comes from
 `mono.tools/componentdoc/purposes.md`, which is where to write.
 
-**Two kinds of component are deliberately absent.** Ones a *program*
-registers rather than the engine: `mono.server` has two and `mono.client` one,
-and linking a program library into a build tool to document three rows is the
-worse trade. And ones registered lazily under the compiler's spelling of the
-type, by `Components::Of<T>()` at first use rather than by an explicit name -
-those appear here only if something this tool links happens to touch them.
-`WorldTime` below is one that does. A component in that state is a defect
-rather than a category: decision 21 says a name that crosses a save file is a
-string, and the compiler's spelling is not stable across compilers.
+**Components a *program* registers rather than the engine are absent**:
+`mono.server` has two and `mono.client` one, and linking a program library into
+a build tool to document three rows is the worse trade.
+
+A component registered by `Components::Of<T>()` rather than under an explicit
+name would appear here under the compiler's spelling of its type, in an
+`(unprefixed)` section. **That section being absent is the check**: such a name
+is stable within one build and nothing wider, and decision 21 says a name that
+crosses a save file is a string somebody chose. Four components were in that
+state until v0.19.
 
 | Column | Meaning |
 |---|---|
@@ -24,20 +25,17 @@ string, and the compiler's spelling is not stable across compilers.
 | wire | bytes in the compact replication form. Blank means the wire carries `Write`'s bytes unchanged |
 
 
-## `(unprefixed)`
-
-| component | size | align | save | raw | pad | wire | what it is for |
-|---|---|---|---|---|---|---|---|
-| `WorldTime` | 32 | 8 | yes | yes | . | . | Per-world singleton clock: simulated seconds elapsed, the fixed tick delta, completed ticks, and the frame's wall delta and interpolation alpha. |
-
 ## `ecs`
 
 | component | size | align | save | raw | pad | wire | what it is for |
 |---|---|---|---|---|---|---|---|
 | `ecs.AttributeTable` | 56 | 8 | yes | . | . | . | Per-world singleton holding every instance attribute a game has set, as a map per entity keyed by interned attribute name. |
+| `ecs.DirtyBits` | 8 | 8 | yes | yes | . | . | One row's changed-component bits, one bit per column position in its archetype's sorted set, so marking a write is an index the store already holds. |
 | `ecs.Hierarchy` | 40 | 8 | yes | yes | . | 8 | Parent, first and last child and both sibling links for one instance, which is how the instance tree is stored rather than as a child vector per node. |
 | `ecs.InstanceClass` | 4 | 4 | yes | . | . | . | Which registered class an entity was created as, so `ClassName` and `:IsA` are a column read rather than a lookup in a side index. |
 | `ecs.InstanceName` | 4 | 4 | yes | . | . | . | An instance's name, interned, so a thousand parts called "Part" cost one string and comparing two names is an integer compare. Names are not unique. |
+| `ecs.NotArchivable` | 0 | 1 | . | . | . | . | A tag meaning this instance is left out of a save. `Archivable` is `!Has<NotArchivable>`, which is the same fact read the cheap way round. |
+| `ecs.WorldTime` | 32 | 8 | yes | yes | . | . | Per-world singleton clock: simulated seconds elapsed, the fixed tick delta, completed ticks, and the frame's wall delta and interpolation alpha. |
 
 ## `effects`
 
@@ -111,6 +109,7 @@ string, and the compiler's spelling is not stable across compilers.
 |---|---|---|---|---|---|---|---|
 | `physics.PhysicsClock` | 48 | 8 | yes | . | yes | . | Per-world singleton physics clock: the step rate, simulated time owed but not yet spent, the running step's length, and which step of the tick it is. |
 | `physics.PhysicsWorld` | 1240 | 8 | yes | . | . | . | Per-world singleton holding the broadphase grids, collider proxies, contact manifolds and solver arrays that one physics step builds and walks. |
+| `physics.PoppercamState` | 8 | 8 | yes | yes | . | . | Per-world singleton holding the blocker the camera pass last faded, so the next call clears exactly that one and nothing else. |
 
 ## `replication`
 
@@ -156,6 +155,7 @@ string, and the compiler's spelling is not stable across compilers.
 | `scene.PlayerTeam` | 8 | 8 | yes | yes | . | . | On a `Player`: which `Team` instance it belongs to. A player on no team simply has no row. |
 | `scene.PlayersService` | 24 | 8 | yes | yes | . | . | On the single `Players` service instance: the admission cap, the next auto-assigned user id, the default respawn delay, and whether characters load automatically. |
 | `scene.Portal` | 16 | 8 | yes | yes | . | . | On a portal pane: the part it leads to, which world's contents it shows, and whether it is on. A missing destination falls back to behaving as a mirror. |
+| `scene.PortalProxy` | 8 | 8 | yes | yes | . | . | A piece of the far room, made and unmade inside a single tick, so a body standing in a portal has the other side's floor under it. Never replicated. |
 | `scene.PortalTransit` | 8 | 4 | yes | yes | . | . | How many times a body has been through a portal seam and what yaw the last crossing turned it by. `CrossPortals` writes it and it travels with the body. |
 | `scene.PortalTransitSeen` | 4 | 4 | yes | yes | . | . | Which `PortalTransit::Serial` this viewer has already snapped its interpolation for, so one crossing is corrected once and never twice. |
 | `scene.PostProcessing` | 4 | 4 | yes | . | . | . | Resource: the fragment shader that replaces the engine's own tonemap for this world. An invalid name leaves the default pass in place. |
@@ -170,6 +170,7 @@ string, and the compiler's spelling is not stable across compilers.
 | `scene.Simulated` | 0 | 1 | . | . | . | . | Tag meaning physics owns this body's motion. `Anchored = false` adds it and `Anchored = true` removes it; every dynamic query filters on its presence. |
 | `scene.Sound` | 20 | 4 | yes | . | yes | . | What a sound is rather than a sound playing: asset name, volume, roll-off distances, looped and playing. The client's mixer walks these rows every frame. |
 | `scene.SpawnLocation` | 16 | 4 | yes | yes | . | . | On a spawn pad: which team colour it serves, whether it takes anyone regardless, and whether it is a spawn at all. `FindSpawn` reads all three. |
+| `scene.Sun` | 24 | 4 | yes | yes | . | . | Per-world singleton directional light: the direction it shines and the ambient standing in for sky on the faces it misses. |
 | `scene.Surface` | 4 | 4 | yes | . | . | . | The physical material name a part feels like, resolved against the world's `SurfaceTable` once per contact. Separate, on purpose, from what the part looks like. |
 | `scene.SurfaceAppearance` | 36 | 4 | yes | . | . | . | The six texture maps, shader name, alpha mode and cutoff a drawable is rendered with. `ResolveMaterials` writes it and the G-buffer pass reads it. |
 | `scene.SurfaceBounces` | 4 | 4 | yes | yes | . | . | Resource: how deep a mirror may show another mirror, or zero to let the engine decide. Set through the `workspace.SurfaceBounces` property. |
@@ -210,4 +211,4 @@ string, and the compiler's spelling is not stable across compilers.
 
 ---
 
-129 components registered by the engine, 0 without a purpose line.
+134 components registered by the engine, 0 without a purpose line.

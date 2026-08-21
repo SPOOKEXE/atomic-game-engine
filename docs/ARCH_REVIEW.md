@@ -202,40 +202,88 @@ directory either.
 
 `docs/ECS_COMPONENTS.md` is now generated from the registry by `just
 components`, and `just components-check` fails if a component has no purpose
-line. **129 engine-registered components, all documented.** What the generated
-table immediately showed:
+line. **134 engine-registered components, all documented** - 129 when the tool
+landed, plus the five that had no name to be found under until D1 gave them one.
+What the generated table immediately showed:
 
 - **Zero components are saved, raw-serialised and padded together.** That trio
   leaks uninitialised padding into `.agame` files. Clean today, and now checked
   every time the catalogue regenerates.
-- **Three of 129 have a compact wire form**: `scene.Transform` (10 of 28 bytes),
+- **Three of 134 have a compact wire form**: `scene.Transform` (10 of 28 bytes),
   `scene.Motion` (12 of 24), `ecs.Hierarchy` (8 of 40). Everything else
   replicates at full width.
-- **Two tags exist**, `scene.Simulated` and `script.Disabled`. The zero-cost
-  query marker is barely used.
+- **Three tags exist**, `scene.Simulated`, `script.Disabled` and
+  `ecs.NotArchivable`. The zero-cost query marker is barely used.
 - The three largest rows are `effects.ParticleEmitter` (1264 B),
   `physics.PhysicsWorld` (1240 B) and `effects.Trail` (1152 B).
 
-### D1. `WorldTime` is saved under the compiler's spelling **[verified]**
+### D1. Six components had no name, and the table was never closed **[verified, fixed]**
 
-It appears in the catalogue with no module prefix, `save: yes`, `raw: yes`. It
-is registered by `Components::Of<T>()` rather than by an explicit string, so the
-name in a `.agame` is `__PRETTY_FUNCTION__`'s output. Decision 21 and root
-`AGENTS.md` rule 4 both say a name that crosses a save file is a stable string,
-and the compiler's spelling is stable within one build and nothing wider.
+Two roadmap entries that turned out to be one job in a fixed order.
 
-`PortalProxy`, `NotArchivable` and `DirtyBits` are **[reported]** to be in the
-same state; they did not appear in the catalogue because nothing the tool links
-touches them, which is itself the symptom.
+**The names.** `WorldTime`, `NotArchivable` and `DirtyBits` (`ecs`),
+`PortalProxy` (`scene`), `PoppercamState` (`physics`) and `Sun` (`scene`) were
+all registered by `Components::Of<T>()` at first use, under the compiler's
+spelling of the type. All six reach a `.agame`. Decision 21 and rule 4 both say
+a name that crosses a file is a string somebody chose, and
+`__PRETTY_FUNCTION__`'s output is stable within one build and nothing wider.
 
-**Do:** register all four explicitly. It is a save-format break, and
-`ROADMAP.md` is pre-release.
+Order was the whole difficulty. `Adopt` aborts on an explicit registration that
+arrives *after* an automatic one - a type has one name - so each had to be
+registered before its own first use. `Store`'s constructor calls
+`RegisterInstanceComponents` and then immediately does `SetResource(WorldTime{})`,
+which is how close some of these were.
 
-### D2. `Components::Seal()` is never called outside a test **[reported]**
+**Naming `scene.PortalProxy` switched a live rule back on.**
+`replication/src/Defaults.cpp:212` has tested for that exact string in
+`LocalToTheClient` since portals landed, and the string never matched, so every
+proxy was replicated. The comment beside the test says what that costs: a proxy
+is made and unmade inside one tick, so replicating one is a create and a destroy
+per proxy per tick on the wire, describing geometry the client already has on
+the other side of the pane. **That branch was dead code and is now live.**
 
-`ecs/Components.hpp:11-17` describes a determinism guarantee that rests on the
-table being closed before any world ticks in parallel. Its only caller is a
-test, so the guarantee is unenforced in every shipped binary.
+**The seal.** `Components::Seal()` closes the table; registering afterwards is
+refused. Its only caller was a test, so the determinism guarantee
+`just determinism` and `just replay-check` rest on was switched on in no shipped
+binary. `mono.client` and `mono.server` now seal after `Initialise`.
+
+Three programs deliberately do not, each for its own reason:
+
+- **`mono.studio`** calls `LoadPlugins()` every time a game file is opened
+  (`Editor.cpp:2737`), and a plugin registers a schema. Sealing would break
+  opening a second file.
+- **`mono.launcher`** never touches `ecs`. The call would do nothing.
+- **`mono.unified_tests`** is a harness; a test binary registering its own types
+  is the point of one.
+
+**Sealing found two more bugs on its first run, which is the argument for it.**
+`physics::PoppercamState` was registered mid-tick by the camera pass installing
+its own resource. And `mono.client` **never called `RegisterPhysicsComponents`
+at all** - the server does it from `Simulation.cpp:251` and the studio from
+`Editor.cpp:611`, and the client alone relied on `physics::Prepare` reaching it
+when the first world was given physics, during the run. Both are fixed.
+`RegisterClientComponents`'s own comment already described this failure for
+`client::DrawList` at v0.7; it was the same bug twice more.
+
+**Evidence.** All 43 staged example scenes run headless to exit 0 with the seal
+and the abort live, and report no late registration. The server runs clean plain
+and with `--worlds-per-host 3 --chatter`. `just determinism` and
+`just replay-check` are byte-identical. 43/43 suites pass. The catalogue is 134
+components, all documented, and the `(unprefixed)` section it used to carry is
+gone.
+
+**A script that declares a component after the seal gets a clean refusal, not a
+crash.** `Schemas::Register` checks `Components::Sealed()` and returns
+`Status::Sealed`, whose own comment is the reason. That path was designed for
+this and had nothing switching it on. No shipped script calls
+`World.DefineComponent`; a game that wants one must declare it before the first
+tick, which is now a stated constraint rather than an accident.
+
+**The rule is checked.** `just determinism` and `just replay-check` already ran
+the server, so that half was covered. `just client-smoke` has joined
+`just check` for the client half, because five of the six late registrations
+lived there and no suite can find them: a lazily-registered resource only
+appears when the pass that uses it runs against a real scene.
 
 ### D3. Component changes worth making **[reported]**
 

@@ -117,4 +117,19 @@ namespace engine::physics {
 	//
 	// @param scheduler The world's scheduler.
 	void RegisterCharacterSystems(ecs::Scheduler &scheduler);
+
+	// Registers the components this module owns.
+	//
+	// **One, and it self-installed until v0.19.** `UpdatePoppercam` keeps a
+	// resource holding the blocker it last faded, and it created that resource
+	// on first use - which meant the component was registered mid-tick, under
+	// the compiler's spelling of a type declared in an anonymous namespace in
+	// `Characters.cpp`. Registration order fixes component ids and ids fix
+	// archetype iteration order, so a type first seen during a tick takes an id
+	// decided by whichever world happened to reach that pass first.
+	//
+	// Nothing caught it because nothing could: `Components::Seal` is what
+	// catches a late registration and it had no caller outside a test. The
+	// programs seal now, and this is the registration that lets them.
+	void RegisterCharacterComponents();
 }

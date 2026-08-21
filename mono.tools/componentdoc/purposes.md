@@ -22,7 +22,9 @@ the fact a reader most needs and the one the table cannot show.
 
 ## `ecs`, `world`, and the modules above `scene`
 
-WorldTime | Per-world singleton clock: simulated seconds elapsed, the fixed tick delta, completed ticks, and the frame's wall delta and interpolation alpha.
+ecs.WorldTime | Per-world singleton clock: simulated seconds elapsed, the fixed tick delta, completed ticks, and the frame's wall delta and interpolation alpha.
+ecs.DirtyBits | One row's changed-component bits, one bit per column position in its archetype's sorted set, so marking a write is an index the store already holds.
+ecs.NotArchivable | A tag meaning this instance is left out of a save. `Archivable` is `!Has<NotArchivable>`, which is the same fact read the cheap way round.
 ecs.AttributeTable | Per-world singleton holding every instance attribute a game has set, as a map per entity keyed by interned attribute name.
 ecs.Hierarchy | Parent, first and last child and both sibling links for one instance, which is how the instance tree is stored rather than as a child vector per node.
 ecs.InstanceClass | Which registered class an entity was created as, so `ClassName` and `:IsA` are a column read rather than a lookup in a side index.
@@ -36,6 +38,7 @@ effects.Trail | A trail following two attachments: its authored colour, transpar
 examples.Orbit | Demo-only component that carries an entity round a fixed centre at a set radius, height, starting phase and angular speed.
 examples.Spin | Demo-only component that turns an entity at a fixed rate about its local X, Y and Z axes.
 graph.PipelineSet | Per-world singleton holding the named render pipeline documents a game file carried. A legacy load path: `game` reads it once and then removes it.
+physics.PoppercamState | Per-world singleton holding the blocker the camera pass last faded, so the next call clears exactly that one and nothing else.
 physics.PhysicsClock | Per-world singleton physics clock: the step rate, simulated time owed but not yet spent, the running step's length, and which step of the tick it is.
 physics.PhysicsWorld | Per-world singleton holding the broadphase grids, collider proxies, contact manifolds and solver arrays that one physics step builds and walks.
 replication.SnapshotBuffer | Per-world singleton on a replicated world: a ring of received poses per entity plus the render clock, sampled at a fixed delay behind the newest tick.
@@ -86,6 +89,7 @@ scene.PlayerRespawn | Present only between losing a character and gaining the ne
 scene.PlayerTeam | On a `Player`: which `Team` instance it belongs to. A player on no team simply has no row.
 scene.PlayersService | On the single `Players` service instance: the admission cap, the next auto-assigned user id, the default respawn delay, and whether characters load automatically.
 scene.Portal | On a portal pane: the part it leads to, which world's contents it shows, and whether it is on. A missing destination falls back to behaving as a mirror.
+scene.PortalProxy | A piece of the far room, made and unmade inside a single tick, so a body standing in a portal has the other side's floor under it. Never replicated.
 scene.PortalTransit | How many times a body has been through a portal seam and what yaw the last crossing turned it by. `CrossPortals` writes it and it travels with the body.
 scene.PortalTransitSeen | Which `PortalTransit::Serial` this viewer has already snapped its interpolation for, so one crossing is corrected once and never twice.
 scene.PostProcessing | Resource: the fragment shader that replaces the engine's own tonemap for this world. An invalid name leaves the default pass in place.
@@ -101,6 +105,7 @@ scene.Simulated | Tag meaning physics owns this body's motion. `Anchored = false
 scene.Sound | What a sound is rather than a sound playing: asset name, volume, roll-off distances, looped and playing. The client's mixer walks these rows every frame.
 scene.SpawnLocation | On a spawn pad: which team colour it serves, whether it takes anyone regardless, and whether it is a spawn at all. `FindSpawn` reads all three.
 scene.Surface | The physical material name a part feels like, resolved against the world's `SurfaceTable` once per contact. Separate, on purpose, from what the part looks like.
+scene.Sun | Per-world singleton directional light: the direction it shines and the ambient standing in for sky on the faces it misses.
 scene.SurfaceAppearance | The six texture maps, shader name, alpha mode and cutoff a drawable is rendered with. `ResolveMaterials` writes it and the G-buffer pass reads it.
 scene.SurfaceBounces | Resource: how deep a mirror may show another mirror, or zero to let the engine decide. Set through the `workspace.SurfaceBounces` property.
 scene.SurfaceCamera | On a mirror or portal pane: render-texture size, redraw cap, tag filter, post-grade, which face it projects off and which surface slot it writes.

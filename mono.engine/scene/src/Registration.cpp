@@ -17,6 +17,7 @@
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Shaders.hpp>
+#include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/SurfaceTable.hpp>
 #include <engine/scene/Tagging.hpp>
@@ -657,6 +658,31 @@ namespace engine::scene {
 		// Added at the end of this list rather than beside `ServiceComponent`,
 		// per the ordering note above: a component id decides column order, and
 		// inserting one in the middle reorders iteration across the engine.
+		// **`Sun` is a resource nothing registered, and it registered itself on
+		// first read.** A world's directional light is a per-world resource, so
+		// the first `store.Resource<Sun>()` minted an id under the compiler's
+		// spelling of the type - the same failure `client::DrawList` had at v0.7
+		// and `physics::PoppercamState` had until v0.19. It reaches a `.agame`,
+		// which is rule 4: a name that crosses a file is a string somebody
+		// chose.
+		//
+		// Found by sealing the table and running all forty-three example scenes;
+		// it was the only one left after the other four were named.
+		ecs::Components::Register<Sun>("scene.Sun");
+
+		// **`PortalProxy` had no name until v0.19, and that made a live rule
+		// dead.** `replication/src/Defaults.cpp` has tested for
+		// `"scene.PortalProxy"` in `LocalToTheClient` since portals landed, and
+		// the component was registering under the compiler's spelling of the
+		// type - so the string never matched and every proxy was replicated.
+		// The comment beside that test says what it costs: a proxy is made and
+		// unmade inside one tick, so replicating one is a create and a destroy
+		// per proxy per tick on the wire, describing geometry the client
+		// already has on the other side of the pane.
+		//
+		// Named here, so the rule that was always meant to apply now does.
+		ecs::Components::Register<PortalProxy>("scene.PortalProxy");
+
 		ecs::Components::Register<Transform>("scene.Transform", TransformWire());
 		ecs::Components::Register<PreviousTransform>("scene.PreviousTransform");
 		ecs::Components::Register<Bounds>("scene.Bounds");

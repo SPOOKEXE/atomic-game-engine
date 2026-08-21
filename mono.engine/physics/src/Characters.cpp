@@ -329,6 +329,14 @@ namespace engine::physics {
 		return woken;
 	}
 
+	void RegisterCharacterComponents() {
+		// Named `physics.` rather than left to `TypeNameOf`, for rule 4's
+		// reason: the automatic name is the compiler's spelling and this type
+		// lives in an anonymous namespace, so the spelling is neither stable
+		// across compilers nor meaningful to a reader of a snapshot.
+		ecs::Components::Register<PoppercamState>("physics.PoppercamState");
+	}
+
 	void RegisterCharacterSystems(ecs::Scheduler &scheduler) {
 		// **Before everything else in the phase, because everything else needs
 		// the link it makes.** `Player.Character = model` is the assignment a

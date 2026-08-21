@@ -308,12 +308,47 @@ TEST_CASE("every ecs component is classified rather than left to a prefix", "[re
 
 		INFO("component: " << name);
 
-		// `ecs.AttributeTable` is the one deliberately left out, and for the
-		// reason the catalogues are: it holds a map, so it is not trivially
-		// copyable and cannot be *signed*. A non-trivial component that should
-		// cross needs `Observed` and a matching `Store::Observe`, which is a
-		// decision per component and belongs in the host that wants it.
-		const bool excluded = name == "ecs.AttributeTable";
+		// The ones deliberately left out, each for its own reason. This list is
+		// the "or" half of the rule above: a component here has been decided
+		// about and decided against, which is a different thing from one nobody
+		// looked at.
+		//
+		// - `ecs.AttributeTable` holds a map, so it is not trivially copyable
+		//   and cannot be *signed*. A non-trivial component that should cross
+		//   needs `Observed` and a matching `Store::Observe`, which is a
+		//   decision per component and belongs in the host that wants it.
+		//
+		// - `ecs.DirtyBits` is each store's own bookkeeping about its own
+		//   writes, one bit per column position in *its* archetype. The far
+		//   side's archetypes are its own, so the bits would not even mean the
+		//   same positions - and it is what the replication pass reads to
+		//   decide what to send, which makes sending it circular.
+		//
+		// - `ecs.WorldTime` is a resource, not a component on an entity.
+		//   Interest filters entities, so a resource can only cross whole,
+		//   which is the argument `script.SourceCache` is kept off the wire by.
+		//   A replica advances its own clock from the ticks it is given.
+		//
+		// - `ecs.NotArchivable` is a save-time tag and only whoever writes the
+		//   file reads it. A client does not save, and the studio owns the
+		//   world it saves rather than replicating it back.
+		//
+		// The three after the first were invisible to this loop until v0.19,
+		// because they registered under the compiler's spelling of their type
+		// rather than a name - so they did not start with `ecs.` and this walk
+		// skipped them. Naming them is what let this test ask the question.
+		constexpr std::string_view NEVER_CROSSES[] = {
+			"ecs.AttributeTable",
+			"ecs.DirtyBits",
+			"ecs.WorldTime",
+			"ecs.NotArchivable",
+		};
+
+		bool excluded = false;
+		for (const std::string_view named : NEVER_CROSSES) {
+			excluded = excluded || name == named;
+		}
+
 		CHECK((excluded || Row(name) != nullptr));
 	}
 }

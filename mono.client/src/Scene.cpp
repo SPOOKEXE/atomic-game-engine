@@ -16,6 +16,7 @@
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/physics/Characters.hpp>
+#include <engine/physics/Pipeline.hpp>
 #include <engine/physics/Query.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Attachments.hpp>
@@ -1678,6 +1679,20 @@ namespace client {
 	}
 
 	void RegisterClientComponents() {
+		// **The simulation's components, registered here because this program
+		// was the only one not doing it.** `mono.server` calls this from
+		// `Simulation.cpp` and `mono.studio` from `Editor.cpp`; the client
+		// relied on `physics::Prepare` reaching `RegisterPhysicsComponents` the
+		// first time a world was given physics, which happens *during the run*
+		// rather than at start-up.
+		//
+		// That was invisible until the component table started being sealed:
+		// registering a type mid-run takes an id decided by whichever world got
+		// there first, which is the nondeterminism `Components::Seal` exists to
+		// refuse. The same paragraph below about `DrawList` is this failure at
+		// v0.7, one component earlier.
+		engine::physics::RegisterPhysicsComponents();
+
 		// **A `DrawList` is derived state, and its serialisation says so by
 		// writing nothing.**
 		//

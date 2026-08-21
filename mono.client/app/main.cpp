@@ -5,6 +5,7 @@
 #include <engine/core/Config.hpp>
 #include <engine/core/Flags.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/ecs/Components.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Settings.hpp>
 #include <engine/render/DebugPanels.hpp>
@@ -363,6 +364,26 @@ int main(int argc, char **argv) {
 		ENGINE_ERROR("client failed to start");
 		return 1;
 	}
+
+	// **The component table closes here, and this is what makes the determinism
+	// promise real rather than intended.** Registration order fixes component
+	// ids, ids identify archetypes, and archetypes are iterated in id order -
+	// so two runs that register the same types in a different order visit rows
+	// in a different order, and a floating-point sum over those rows diverges.
+	// `Components::Seal` is what pins it, and until v0.19 its only caller was a
+	// test, which meant the guarantee `just determinism` and `just replay-check`
+	// rest on was not switched on in any shipped binary.
+	//
+	// **After `Initialise`, because that is what registers everything.** Every
+	// module's `Register*Components` runs during start-up, and a `Store`'s
+	// constructor registers the instance components on the way past. Sealing
+	// before that would close an empty table.
+	//
+	// **A script that declares a component after this gets a clean refusal, not
+	// a crash.** `Schemas::Register` checks `Components::Sealed()` and returns
+	// `Status::Sealed`, whose own comment is the reason above. That path was
+	// built for this and had nothing switching it on.
+	engine::ecs::Components::Seal();
 
 	return client.Run();
 }

@@ -6,6 +6,7 @@
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/physics/Broadphase.hpp>
+#include <engine/physics/Characters.hpp>
 #include <engine/physics/Clock.hpp>
 #include <engine/physics/Continuous.hpp>
 #include <engine/physics/Integrate.hpp>
@@ -110,6 +111,12 @@ namespace engine::physics {
 		ecs::Components::Register<PhysicsWorld>(
 			PHYSICS_WORLD_COMPONENT, WritePhysicsWorlds, ReadPhysicsWorlds
 		);
+
+		// **The character pass's own resource, which used to install itself.**
+		// It is declared in `Characters.cpp` and cannot be named from here, so
+		// it registers itself through an entry point rather than on first touch.
+		// See `RegisterCharacterComponents`.
+		RegisterCharacterComponents();
 
 		ecs::Components::Register<PhysicsClock>(
 			PHYSICS_CLOCK_COMPONENT, WritePhysicsClocks, ReadPhysicsClocks

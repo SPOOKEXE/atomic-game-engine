@@ -562,7 +562,7 @@ luau-lsp:
 # `.githooks/pre-push` does for you - because that is the half that has gone
 # uncompilable three times while being described as the standard, twice inside
 # v0.15 alone, and a check nobody runs stops being true.
-check: format-check build test-all test-architecture shader-check check-one-node-graph bindings-check components-check typecheck typecheck-editor determinism replay-check orphan-check
+check: format-check build test-all test-architecture shader-check check-one-node-graph bindings-check components-check typecheck typecheck-editor determinism replay-check client-smoke orphan-check
     @echo "check ok - format, build, tests, architecture, shaders, bindings, typecheck, editor, determinism, replay, orphans"
 
 # Run the launcher - the window that starts any of the others.
@@ -646,6 +646,17 @@ studio-smoke game="" out=".cache/studio-smoke.bmp" meshes=".cache/studio-meshes.
 # router was right, the events were right, and the last hop was missing.
 #
 # Not part of `just check`: it needs a GPU, for `studio-smoke`'s reason.
+# **In `just check` since v0.19, and the reason is the component table.** The
+# programs seal it after start-up, so a component registered during a tick now
+# aborts rather than quietly taking an id that depends on which world got there
+# first. `just determinism` and `just replay-check` already run the *server*, so
+# that half was covered; nothing in the umbrella check ran the *client*, and the
+# client is where five of the six late registrations found at v0.19 lived.
+#
+# A suite cannot replace this. `Store` construction and `RegisterSceneComponents`
+# happen in a test too, but a lazily-registered resource only appears when the
+# pass that uses it runs against a real scene - which is what this recipe does
+# and what a unit test deliberately does not.
 client-smoke: (build "client")
     #!/usr/bin/env bash
     set -euo pipefail
