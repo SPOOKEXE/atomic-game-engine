@@ -1317,6 +1317,22 @@ The pair is what `--max-fps` is for, and it does nothing without `--uncapped` -
 with the wait on, the display is already the limiter and a second one fighting
 it produces judder rather than a lower number.
 
+**Running a demo without them is what a bottleneck looks like when there is
+none.** Bare, `EditableMesh.luau` reports a mean frame of 7.8 ms with a 34 ms
+tail and reads as choking; with the pair it is 1.3 ms, and uncapped with no
+ceiling at all it is 0.26 ms - a quarter of a millisecond of actual work behind
+eight of waiting. The whole difference is the `submit` span, which is the CPU
+sitting on the vblank, and it is worst on a scene that is *not* busy: with only
+one frame in flight there is nothing queued to cover a missed interval, so
+missing by a hair costs a whole one.
+
+`--frames-in-flight` is the other end of that and is **not** the cure - measured
+on this machine the tail grew with the queue rather than shrank, 35 ms at one,
+52 at two, 69 at three, because a deeper queue means a longer stall when a
+present is late. It is here for parity with the studio, which has had it since
+v0.14, and because it is the first knob anybody reaches for. Reach for
+`--uncapped` instead.
+
 Everything shared lives in `_common.sh` and `_common.bat`; a scene script is a
 header, a filename and its own flags. They call CMake rather than `just`, so the
 two halves cannot drift apart, and they resolve the repository from their own
@@ -1333,6 +1349,7 @@ because it builds before it runs and a plain `cmd` window has no compiler in it;
 --graph                          Open the F5 frame graph at startup
 --uncapped                       Present without waiting for vblank
 --max-fps N                      Hold this frame rate; needs --uncapped
+--frames-in-flight N             Frames the CPU may queue ahead of the GPU, 1 to 3
 --verbose                        Log at trace level
 --force-serial-compute           Run parallel dispatches on one thread
 --worlds N                       Worlds to simulate and composite (default 1)

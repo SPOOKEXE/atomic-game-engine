@@ -129,6 +129,31 @@ namespace client {
 		// the display.
 		bool Uncapped = false;
 
+		// How many frames the CPU may queue ahead of the GPU, 1 to 3.
+		//
+		// **A latency choice rather than a throughput one**, and
+		// `render::Renderer::Initialise` carries the argument. It is a flag
+		// because the cost is a thing to *feel*: at one,
+		// `SDL_SubmitGPUCommandBuffer` blocks until the GPU has finished the
+		// previous frame, so the frame rate is the GPU's and the wait shows up
+		// as time in the `submit` span; at two the CPU runs ahead and the
+		// picture is a frame further behind the mouse.
+		//
+		// **What one costs is worst on a scene that is not busy at all.** With
+		// nothing queued behind it, a frame that misses a vblank by a hair waits
+		// out the whole next interval - so a scene doing a quarter of a
+		// millisecond of work reads as a steady stream of 34 ms frames with a
+		// 0.08 ms median underneath, which is a stutter and not a bottleneck.
+		// Measured on `examples/Cube.luau`, which is one spinning cube.
+		//
+		// The default matches the studio's, so the two programs feel the same
+		// until somebody asks otherwise. `mono.studio` has had this flag since
+		// v0.14; this is the same one, on the program the demo scenes are
+		// actually run with.
+		//
+		// @since v0.18
+		int FramesInFlight = 1;
+
 		// The frame rate to hold, or zero for none.
 		//
 		// **The other half of `Uncapped`, not a contradiction of it.** Turning

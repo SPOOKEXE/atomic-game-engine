@@ -101,7 +101,7 @@ namespace client {
 
 		// Null when headless, which is what puts the renderer in that mode - the
 		// same call the editor makes, for the same reason.
-		if (!Renderer.Initialise(Window)) {
+		if (!Renderer.Initialise(Window, static_cast<uint32_t>(Settings.FramesInFlight))) {
 			return false;
 		}
 

@@ -63,6 +63,7 @@ int main(int argc, char **argv) {
 	arguments.Flag("net", "Open the F4 network panel at startup (needs --connect)");
 	arguments.Flag("graph", "Open the F5 frame graph at startup");
 	arguments.Flag("uncapped", "Present without waiting for vblank");
+	arguments.Value("frames-in-flight", "N", "Frames the CPU may queue ahead of the GPU: 1 (default) to 3");
 	arguments.Flag("headless", "Run with no window (needs --frames)");
 	arguments.Value("max-fps", "N", "Hold this frame rate. Needs --uncapped; 0 is no limit");
 	arguments.Flag("verbose", "Log at trace level");
@@ -193,6 +194,8 @@ int main(int argc, char **argv) {
 	options.ShowNetwork = options.ShowNetwork || arguments.Has("net");
 	options.ShowFrameGraph = options.ShowFrameGraph || arguments.Has("graph");
 	options.Uncapped = options.Uncapped || arguments.Has("uncapped");
+	options.FramesInFlight =
+		static_cast<int>(arguments.GetInteger("frames-in-flight", options.FramesInFlight));
 	options.Headless = arguments.Has("headless");
 
 	// **Refused rather than run**, because a headless client has no window to
