@@ -1832,6 +1832,24 @@ namespace client {
 			NextFrameAt += period;
 		}
 
+		// Everything from here to EndFrame is one frame's worth of spans. The
+		// panels below draw the *previous* frame's, because this one has not
+		// finished being measured.
+		//
+		// **Opened before the wait rather than after it, which is what puts the
+		// wait on the graph.** `Editor::Run` has done it this way since the
+		// editor's own frame was found to be mostly invisible; the client kept
+		// the older order and had the same hole. `WaitForFrame` blocks on the
+		// display, so with vertical sync on it is the largest single thing in a
+		// frame - and opening the frame after it meant the span was recorded
+		// into no frame at all and dropped. A snapshot of a spinning cube
+		// reported an 8.4 ms mean frame with `acquire swapchain` nowhere in it.
+		//
+		// `Idle` is the honest category for a thread that is asleep, which is
+		// what lets the panel keep leading with busy time while the graph
+		// accounts for the whole frame.
+		FrameGraph::BeginFrame();
+
 		// **The display is waited for before the input is read**, for the reason
 		// `Editor::Run` gives at length: the swapchain wait is most of a frame
 		// with vertical sync on, and doing it after the pump means every frame is
@@ -1840,14 +1858,13 @@ namespace client {
 		//
 		// A failure means minimised or mid-resize. The result gates presentation
 		// below after simulation and external services have continued.
-		const bool renderingActive = Renderer.WaitForFrame();
+		bool renderingActive = false;
+		{
+			ENGINE_PROFILE_CAT("wait for frame", engine::core::ProfileCategory::Idle);
+			renderingActive = Renderer.WaitForFrame();
+		}
 
 		const float delta = Clock.Tick();
-
-		// Everything from here to EndFrame is one frame's worth of spans. The
-		// panels below draw the *previous* frame's, because this one has not
-		// finished being measured.
-		FrameGraph::BeginFrame();
 
 		PumpEvents();
 
