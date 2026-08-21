@@ -321,7 +321,7 @@ The milestone headings below are development labels. Not in line with project ve
       same panel. **One-time cost:** the stored ini key changes, so existing
       saved layouts undock these panels once. `ViewportIdentity` is what
       `SetWindowFocus` and `FindWindowByName` must now be given.
-- [_] some studio ui stretches - more vscode-ey
+- [_] some studio ui stretches instead of scales with aspect
 - [x] physics bugs with the character (in playground steps, you phase through
       blocks, doesn't do bounds properly). `scene::StepCharacters` hard-assigns
       `Motion::Linear.X/Z` every `PreSimulation` - right for responsiveness, and
