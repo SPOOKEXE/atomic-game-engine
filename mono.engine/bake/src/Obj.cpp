@@ -1,3 +1,4 @@
+#include <engine/core/Chars.hpp>
 #include "Importers.hpp"
 
 #include <algorithm>
@@ -64,7 +65,7 @@ namespace engine::bake {
 			// locale-dependent: a machine set to a comma decimal separator
 			// would silently read `1.5` as `1`, and every model imported on it
 			// would be the wrong shape.
-			const auto result = std::from_chars(text.data(), text.data() + text.size(), out);
+			const auto result = core::FromChars(text.data(), text.data() + text.size(), out);
 			return result.ec == std::errc() && std::isfinite(out);
 		}
 

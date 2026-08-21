@@ -1,3 +1,4 @@
+#include <engine/core/Chars.hpp>
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/game/Values.hpp>
 
@@ -69,7 +70,7 @@ namespace engine::game {
 					return false;
 				}
 
-				const auto result = std::from_chars(piece.data(), piece.data() + piece.size(), out[found]);
+				const auto result = core::FromChars(piece.data(), piece.data() + piece.size(), out[found]);
 				if (result.ec != std::errc{} || result.ptr != piece.data() + piece.size()) {
 					return false;
 				}
@@ -102,7 +103,7 @@ namespace engine::game {
 			if (piece.empty()) {
 				return false;
 			}
-			const auto result = std::from_chars(piece.data(), piece.data() + piece.size(), out);
+			const auto result = core::FromChars(piece.data(), piece.data() + piece.size(), out);
 			return result.ec == std::errc{} && result.ptr == piece.data() + piece.size();
 		}
 	}

@@ -63,6 +63,22 @@ if(MONO_BUILD_CLIENT)
 		message(FATAL_ERROR "mono.vendor/sdl is missing. Run `just setup`.")
 	endif()
 
+	# **SDL's 2D renderer is not built, and nothing here has ever used it.**
+	# `SDL_Renderer` is the sprite-and-rectangle API; this engine draws through
+	# `SDL_GPU`, which is a separate subsystem depending only on `SDL_VIDEO`, and
+	# the Dear ImGui backend we compile is `imgui_impl_sdlgpu3` rather than
+	# `imgui_impl_sdlrenderer3`. A repository-wide search for `SDL_Renderer`,
+	# `SDL_CreateRenderer` and `SDL_RenderPresent` across every first-party
+	# module finds nothing.
+	#
+	# Turning it off removes every render driver with it - D3D9, D3D11, D3D12,
+	# Metal, Vulkan, OpenGL and OpenGL ES - which is a smaller library for
+	# nothing given up. It also removes `src/render/opengles2/SDL_render_gles2.c`,
+	# which is where the Windows release build stopped: MSVC's C compiler rejects
+	# it with a run of `C2065: 'tex_coord': undeclared identifier`, in a file
+	# nothing in this engine would have called into.
+	set(SDL_RENDER      OFF CACHE BOOL "" FORCE)
+
 	set(SDL_SHARED      ON  CACHE BOOL "" FORCE)
 	set(SDL_STATIC      OFF CACHE BOOL "" FORCE)
 	set(SDL_TEST        OFF CACHE BOOL "" FORCE)

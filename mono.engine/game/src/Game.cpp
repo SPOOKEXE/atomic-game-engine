@@ -1,4 +1,5 @@
 #include <engine/bakegraph/Document.hpp>
+#include <engine/core/Chars.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
@@ -676,7 +677,7 @@ namespace engine::game {
 				return fallback;
 			}
 			double value = 0.0;
-			if (std::from_chars(text.data(), text.data() + text.size(), value).ec != std::errc{}) {
+			if (core::FromChars(text.data(), text.data() + text.size(), value).ec != std::errc{}) {
 				return fallback;
 			}
 			return value;

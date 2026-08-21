@@ -1,3 +1,4 @@
+#include <engine/core/Chars.hpp>
 #include "Utf8.hpp"
 
 #include <engine/gui/RichText.hpp>
@@ -356,7 +357,7 @@ namespace engine::gui {
 					} else if (key == "transparency") {
 						float fade = 0.0f;
 						const auto *end = value.data() + value.size();
-						if (std::from_chars(value.data(), end, fade).ptr != end) {
+						if (core::FromChars(value.data(), end, fade).ptr != end) {
 							return refuse();
 						}
 						style.Transparency = std::clamp(fade, 0.0f, 1.0f);
