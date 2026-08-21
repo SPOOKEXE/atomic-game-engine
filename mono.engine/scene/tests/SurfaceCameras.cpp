@@ -2270,6 +2270,79 @@ TEST_CASE("nothing larger than a hole is drawn through it", "[scene][surfacecame
 	CHECK_FALSE(overhanging.Fits);
 }
 
+TEST_CASE("a one-way portal refuses the way it does not face", "[scene][surfacecameras]") {
+	// **A door you can walk into and not out of.** `Portal::Bidirectional` off
+	// leaves the pane drawing, cutting and lighting exactly as it was and
+	// refuses one thing: a crossing that starts behind the face. In front means
+	// the side the face's normal points at, which is the side the pane shows its
+	// image on and the side `SeamCarries` calls "not yet through".
+	Mirror mirror;
+
+	const Entity far =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	mirror.World.Set<Transform>(far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f})});
+	mirror.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+
+	// The fixture's pane has its `Front` face outward along -Z, so a body
+	// walking from `z = +1` to `z = -1` is entering the *back* of it. That is
+	// the case a one-way mouth exists to refuse.
+	const auto walk = [&] {
+		const Entity walker =
+			mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Walker");
+		mirror.World.Set<Transform>(walker, Transform{CFrame(Vector3{0.0f, 0.0f, -1.0f})});
+		mirror.World.Set<engine::scene::PreviousTransform>(
+			walker, engine::scene::PreviousTransform{CFrame(Vector3{0.0f, 0.0f, 1.0f})}
+		);
+		mirror.World.Set<engine::scene::Motion>(
+			walker, engine::scene::Motion{Vector3{0.0f, 0.0f, -16.0f}, Vector3::Zero}
+		);
+		return walker;
+	};
+
+	SECTION("both ways by default") {
+		mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+		(void)walk();
+		CHECK(engine::scene::CrossPortals(mirror.World) == 1);
+	}
+
+	SECTION("one way refuses the back") {
+		engine::scene::Portal portal{far};
+		portal.Bidirectional = false;
+		mirror.World.Set<engine::scene::Portal>(mirror.Reflection, portal);
+
+		const Entity walker = walk();
+		CHECK(engine::scene::CrossPortals(mirror.World) == 0);
+
+		// Left where it was, rather than stopped at the plane. A one-way mouth
+		// is not a wall - it is a hole this body is not going through.
+		const auto *placed = mirror.World.Get<Transform>(walker);
+		REQUIRE(placed != nullptr);
+		CHECK_THAT(placed->Frame.Position.Z, Catch::Matchers::WithinAbs(-1.0f, 1e-4f));
+	}
+
+	SECTION("one way still admits the front") {
+		engine::scene::Portal portal{far};
+		portal.Bidirectional = false;
+		mirror.World.Set<engine::scene::Portal>(mirror.Reflection, portal);
+
+		// The same walk, the other way round.
+		const Entity walker =
+			mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Walker");
+		mirror.World.Set<Transform>(walker, Transform{CFrame(Vector3{0.0f, 0.0f, 1.0f})});
+		mirror.World.Set<engine::scene::PreviousTransform>(
+			walker, engine::scene::PreviousTransform{CFrame(Vector3{0.0f, 0.0f, -1.0f})}
+		);
+		mirror.World.Set<engine::scene::Motion>(
+			walker, engine::scene::Motion{Vector3{0.0f, 0.0f, 16.0f}, Vector3::Zero}
+		);
+
+		CHECK(engine::scene::CrossPortals(mirror.World) == 1);
+		const auto *placed = mirror.World.Get<Transform>(walker);
+		REQUIRE(placed != nullptr);
+		CHECK(std::abs(placed->Frame.Position.X - 100.0f) < 15.0f);
+	}
+}
+
 TEST_CASE("a rig is cut in one piece or not at all", "[scene][surfacecameras]") {
 	// **The reported "character split in half in a portal".** Whether a row may
 	// be cut is "does it fit the aperture", and a character is a dozen drawn

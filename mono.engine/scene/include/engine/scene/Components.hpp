@@ -1299,13 +1299,35 @@ namespace engine::scene {
 		// @since v0.16
 		bool Enabled = true;
 
+		// Whether this mouth may be entered from behind as well as from in
+		// front.
+		//
+		// **True is what a portal has always been and is what a pair wants.**
+		// The map carries this pane's front hemisphere to the far pane's back
+		// one and its back to the far pane's front, so a two-way mouth is one
+		// rigid map that is its own inverse - walk through and walk back and you
+		// are where you started.
+		//
+		// False is the one-way door: an entrance you can walk into but not out
+		// of, or an exit that drops you into a room whose own pane you must not
+		// be pulled back through. The pane still draws from both sides - what is
+		// refused is the crossing, and only the crossing, because a mouth that
+		// vanished when you walked round it would read as a rendering fault
+		// rather than as a rule.
+		//
+		// In front means on the side the face's normal points at, which is the
+		// side `SeamCarries` calls "not yet through".
+		//
+		// @since v0.19
+		bool Bidirectional = true;
+
 		// Explicit padding, for the reason every other `Reserved` gives.
 		//
-		// An `Entity` is eight bytes, a `Name` is four and `Enabled` is one, so
-		// the type's own alignment leaves three the compiler inserted and nobody
-		// declared. `Column::Write` sends `sizeof(T)` bytes and does not know which
-		// of them a member claimed.
-		uint8_t Reserved[3] = {};
+		// An `Entity` is eight bytes, a `Name` is four and the two flags are one
+		// each, so the type's own alignment leaves two the compiler inserted and
+		// nobody declared. `Column::Write` sends `sizeof(T)` bytes and does not
+		// know which of them a member claimed.
+		uint8_t Reserved[2] = {};
 	};
 
 	// The frustum a surface camera renders through, fitted to its pane.

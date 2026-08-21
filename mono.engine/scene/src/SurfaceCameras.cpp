@@ -913,6 +913,7 @@ namespace engine::scene {
 				seam.Surface = camera.Surface;
 				seam.TagFilter = camera.TagFilter;
 				seam.Crosses = portal.DestinationWorld.IsValid();
+				seam.Bidirectional = portal.Bidirectional;
 
 				seams.push_back(seam);
 			});
@@ -1019,6 +1020,20 @@ namespace engine::scene {
 				SeamTransform candidate;
 				float at = 1.0f;
 				if (!CrossingOf(seam, from, to, candidate, at)) {
+					continue;
+				}
+
+				// **A one-way mouth is entered from in front and from nowhere
+				// else.** In front is the side the face's normal points at,
+				// which is the side `SeamCarries` calls "not yet through" - so
+				// this is the same sign that decides which way the body is
+				// going, asked of where the step began.
+				//
+				// Refused here rather than where the seam is gathered, because
+				// the pane still draws, still cuts a body standing in it and
+				// still lights the room behind it. What a one-way door refuses
+				// is being walked through backwards.
+				if (!seam.Bidirectional && SeamOffset(seam, from) < 0.0f) {
 					continue;
 				}
 

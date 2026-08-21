@@ -1354,6 +1354,16 @@ walks the lap on rails instead. What is left of `docs/retired/DEFERRED.md` D0011
 seam on the frame you cross, which needs the portal chain rendered inside the
 frame, deepest first.
 
+**`Bidirectional` off makes it a one-way door.** By default a mouth may be
+entered from either side and the pair's map is its own inverse - walk through
+and walk back and you are where you started. Turn it off and only a body that
+enters *in front* crosses, where in front is the side the face's normal points
+at: the side the pane shows its image on. That is an entrance you cannot walk
+back out of, or an exit you cannot be pulled back into. Nothing else changes -
+the pane still draws from both sides, still cuts a body standing in it and still
+lights the room behind it, because a mouth that vanished when you walked round
+it would read as a rendering fault rather than as a rule.
+
 **A pane must be one part and it should be white.** One part because the
 rectangle a surface camera is fitted to and the rectangle `CrossPortals` tests
 against is that part's face - a hole built out of several is several holes

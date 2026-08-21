@@ -754,6 +754,16 @@ namespace engine::scene {
 		// stand-in - in *this* world, a metre behind the pane they were walking
 		// into - instead of handing them to whoever owns the crossing.
 		bool Crosses = false;
+
+		// Whether a body may enter this mouth from behind, from
+		// `Portal::Bidirectional`.
+		//
+		// **The crossing only.** The pane draws from both sides whatever this
+		// says, because a mouth that vanished when you walked round it would
+		// read as a rendering fault rather than as a rule.
+		//
+		// @since v0.19
+		bool Bidirectional = true;
 	};
 
 	// The map from one side of a seam to the far side.

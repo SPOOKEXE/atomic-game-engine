@@ -370,7 +370,17 @@ The milestone headings below are development labels. Not in line with project ve
       backslash-escaped, or a Windows path would paste as a parse error.
 - [_] change Terrain demo to be procedural infinite generation, also spawn character on top of terrain
 - [_] optimise Authority::DetectRows and missing gap post Authority::Publish. ReplicationStress in release build.
-- [_] add a "bidirection" bool mode for portals, when enabled, you can enter from both sides, when disabled, you can only enter from entry side
+- [x] add a `Bidirectional` bool to portals: on, a mouth may be entered from
+      either side; off, only from in front. In front is the side the face's
+      normal points at - the side the pane shows its image on, and the side
+      `SeamCarries` calls "not yet through". **Refused at the crossing and
+      nowhere else**: the pane still draws from both sides, still cuts a body
+      standing in it and still lights the room behind it, because a mouth that
+      vanished when you walked round it would read as a rendering fault rather
+      than as a rule. It fits in the two bytes `Portal::Reserved` was already
+      declaring, so the row is the same size it was. Three cases, plus a
+      two-crate probe: with it on both crates cross, with it off only the one
+      that approaches the face does.
 - [x] when character sits in middle of portal, teleporting between both sides.
       Two defects, one each. **The crossing had no hysteresis of any kind**:
       `CrossPortals` maps the previous frame through the seam for the renderer's

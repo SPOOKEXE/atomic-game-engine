@@ -2107,6 +2107,7 @@ namespace engine::scene {
 			ecs::Classes::Computed(portalClass, DestinationProperty());
 			ecs::Classes::Computed(portalClass, DestinationWorldProperty());
 			ecs::Classes::Property<&Portal::Enabled>(portalClass, "Enabled");
+			ecs::Classes::Property<&Portal::Bidirectional>(portalClass, "Bidirectional");
 
 			// The sound's six. All plain fields, which is unusual enough here
 			// to be worth saying: nothing about a sound is a doubled
