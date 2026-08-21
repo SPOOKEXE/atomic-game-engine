@@ -248,6 +248,8 @@ The milestone headings below are development labels. Not in line with project ve
 
 ---
 
+- [_] optimise Authority::DetectRows and missing gap post Authority::Publish. ReplicationStress in release build.
+- [_] add a "bidirection" bool mode for portals, when enabled, you can enter from both sides, when disabled, you can only enter from entry side
 - [_] add a "Play Here" button (spawns character at camera position)
 - [_] input textbox not working
 - [_] allow creating worlds even when scene is running in studio
