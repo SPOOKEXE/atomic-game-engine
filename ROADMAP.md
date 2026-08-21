@@ -239,6 +239,7 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### v0.21
 
+- [_] find a way to (easily) and thoroughly test rendering steps and ensure they produce the right image with right projections
 - [_] finish portals so lighting, physics, projection, clipping and geometry crossing the seam are seamless
 - [_] ensure per-mesh render capabilities, global lighting render capabilities, camera lighting render capabilities, etc. compute shaders, post-processing, etc.
 - [_] simplify and strip old rendering code that is not part of the node system. Everything should be in the node system.
