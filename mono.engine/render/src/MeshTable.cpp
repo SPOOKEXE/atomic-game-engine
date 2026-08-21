@@ -272,25 +272,12 @@ namespace engine::render {
 
 			// Intern asset names at the renderer boundary.
 			entry.Textures.push_back(submesh.Texture.empty() ? core::Name() : core::Name(submesh.Texture));
-			// **Named, rather than braced into the call.** `push_back({...})` on
-			// a vector of `std::array` is a copy-list-initialisation that has to
-			// reach the array's one member - the C array inside it - and MSVC
-			// refuses it with `error C2665: no overloaded function could convert
-			// all the argument types`, on a line that reads correctly. Adding
-			// the inner pair of braces does not settle it either; that was tried
-			// and MSVC reported the same error against `{{...}}`.
-			//
-			// A local of the named type is direct-list-initialisation, where
-			// there is no conversion for a compiler to decline, and then an
-			// ordinary `push_back` of an lvalue. GCC, Clang and mingw-w64 all
-			// take it, which is the whole point of writing it this way.
-			const std::array<float, 4> colour{
+			entry.Colours.push_back({
 				submesh.BaseColour[0],
 				submesh.BaseColour[1],
 				submesh.BaseColour[2],
 				submesh.BaseColour[3],
-			};
-			entry.Colours.push_back(colour);
+			});
 		}
 
 		std::copy(

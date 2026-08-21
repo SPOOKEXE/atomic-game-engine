@@ -21,6 +21,7 @@
 #include <engine/nodegraph/Preview.hpp>
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
