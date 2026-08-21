@@ -322,8 +322,25 @@ The milestone headings below are development labels. Not in line with project ve
       saved layouts undock these panels once. `ViewportIdentity` is what
       `SetWindowFocus` and `FindWindowByName` must now be given.
 - [_] some studio ui stretches - more vscode-ey
-- [_] physics bugs with the character (in playground steps, you phase through blocks, doesn't do bounds properly)
-- [_] character physics bugs and movement in weird directions and stuff
+- [x] physics bugs with the character (in playground steps, you phase through
+      blocks, doesn't do bounds properly). `scene::StepCharacters` hard-assigns
+      `Motion::Linear.X/Z` every `PreSimulation` - right for responsiveness, and
+      it throws away the solver's contact impulse unintegrated. The only
+      resistance left is position correction, capped at 3 m/s, and a default
+      `WalkSpeed` of 16 beats it better than five to one, so a character leans
+      through a wall over twenty ticks. The continuous sweep never catches it
+      because that asks the *tunnelling* question - a 0.267 step against a 0.5
+      half-extent never qualifies. `physics::ClipCharacterVelocity` now runs
+      immediately after the controller and takes the into-surface component out
+      of the intent before the integrator sees it. **Measured: walks to the block
+      face at z -14.400 and stays; before, it passed clean through all four.**
+      It stops rather than climbs - there is no step-up in the controller, and
+      that is a feature rather than part of this.
+- [_] character physics bugs and movement in weird directions and stuff.
+      **Partly.** The same overwrite is behind it and the clip above fixes the
+      walking-into-things half. What is not addressed is direction: a walk
+      intent is world-space and nothing turns it, which is the portal item
+      below. Reopen with a specific case if it still misbehaves on flat ground.
 - [_] check character physics with portals, i think normal objects are fine but the character
 - [_] when character sits in portal, character split in half
 - [x] add moving cubes in tunnels for lighting test too. A lit drifter pair
