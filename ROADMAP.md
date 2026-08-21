@@ -248,7 +248,8 @@ The milestone headings below are development labels. Not in line with project ve
 
 ---
 
-- [_] when you upload a asset in studio, it doesn't process it in studio for local store
+- [_] when you upload a asset in studio, it doesn't process it in studio for local store.
+- [_] check cdn processes obj files (dropped in studio)
 - [_] add dev build and release builds to github release (two separate tags Release and Dev -O1 but keep things like heap profiler), then you have per-version ones as well
 - [_] ground grid should expand way further
 - [_] in "Start" with 4 clients running, tons of network activity for no character movement, quickhash / caching / signature not working properly or other bug
