@@ -95,24 +95,6 @@ jobs:
     continue-on-error: ${{ matrix.optional }}
     timeout-minutes: 180
 
-    # **Pinned rather than left to ccache's default, because the default is not
-    # the same path on every runner.** ccache resolves its directory from
-    # `XDG_CACHE_HOME` on Linux and from `~/Library/Caches` on macOS, and a
-    # `path:` below that named the wrong one would restore nothing, report
-    # nothing, and look exactly like a cache that was simply cold. One name, set
-    # here, used by the cache step and by ccache alike.
-    #
-    # It is also where `--set-config` writes, so the settings below travel with
-    # the cache rather than living on a machine that is deleted at the end of
-    # the job.
-    #
-    # `runner.temp` rather than a path under the checkout or one reached with
-    # `..`: it is absolute on every runner, it is not somewhere `actions/checkout`
-    # will clean, and `actions/cache` globs its `path:` - so a `..` in one is a
-    # thing that may or may not resolve depending on the version. Harmless on
-    # Windows, which installs no ccache and never reads this.
-    env:
-      CCACHE_DIR: ${{ runner.temp }}/ccache
     strategy:
       fail-fast: false
       matrix:
@@ -219,6 +201,35 @@ jobs:
       # the Windows build compiles and has never shipped. Adding a caching layer
       # with a compiler-flag precondition to the one platform nobody runs is how
       # an optional build becomes a flaky one.
+      # **Pinned rather than left to ccache's default, because the default is not
+      # the same path on every runner.** ccache resolves its directory from
+      # `XDG_CACHE_HOME` on Linux and from `~/Library/Caches` on macOS, and a
+      # `path:` below that named the wrong one would restore nothing, report
+      # nothing, and look exactly like a cache that was simply cold. One name,
+      # set here, used by the cache step and by ccache alike.
+      #
+      # It is also where `--set-config` writes, so the settings below travel
+      # with the cache rather than living on a machine that is deleted at the
+      # end of the job.
+      #
+      # `RUNNER_TEMP` rather than a path under the checkout or one reached with
+      # `..`: it is absolute on every runner, it is not somewhere
+      # `actions/checkout` will clean, and `actions/cache` globs its `path:` -
+      # so a `..` in one is a thing that may or may not resolve depending on the
+      # version.
+      #
+      # **A step rather than the job's `env:`, because the `runner` context does
+      # not exist there.** `jobs.<id>.env` may only read `github`, `needs`,
+      # `strategy`, `matrix`, `vars`, `inputs` and `secrets`; a `runner` in it
+      # is not a value that comes out empty, it is a file GitHub refuses to
+      # parse, and the whole workflow fails in zero seconds saying only
+      # "workflow file issue". The `$RUNNER_TEMP` variable is the same value and
+      # is readable in any step.
+      - name: Pin the compiler cache directory
+        if: runner.os != 'Windows'
+        shell: bash
+        run: echo "CCACHE_DIR=$RUNNER_TEMP/ccache" >> "$GITHUB_ENV"
+
       - name: Restore the compiler cache
         if: runner.os != 'Windows'
         uses: actions/cache@v4
