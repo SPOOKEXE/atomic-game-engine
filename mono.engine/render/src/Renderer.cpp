@@ -7666,6 +7666,22 @@ namespace engine::render {
 		return nullptr;
 	}
 
+	float Renderer::ResourcePreviewAspect(core::Name pipeline, core::Name resource, size_t slot) const {
+		if (State == nullptr || !pipeline.IsValid() || !resource.IsValid()) {
+			return 0.0f;
+		}
+		const ResourcePreviewRoute route{pipeline, resource, slot};
+		for (const Impl::ResourcePreviewTarget &preview : State->ResourcePreviews) {
+			if (preview.Route == route) {
+				if (preview.Height == 0) {
+					return 0.0f;
+				}
+				return static_cast<float>(preview.Width) / static_cast<float>(preview.Height);
+			}
+		}
+		return 0.0f;
+	}
+
 	bool Renderer::CaptureSceneTexture(size_t slot, const core::Name &name) {
 		if (State == nullptr || State->Device == nullptr || !name.IsValid()) {
 			return false;

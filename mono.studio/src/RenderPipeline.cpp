@@ -141,6 +141,16 @@ namespace studio {
 					return found == RenderPipelinePreviewTextures.end() ? nullptr : found->second;
 				}
 			);
+			// **What shape those pictures are, because they are not square.** A
+			// node's thumbnail slot is, and `PreviewImage` says so - but these
+			// are the renderer's own retained copies of graph resources, which
+			// keep the resource's shape. A full-screen target's preview is as
+			// wide as the screen, and drawn into the square slot it came out
+			// squashed by about 1.78. See `nodegraph::Editor::Aspects`.
+			RenderPipelineCanvas.Aspects([this](uint64_t key) {
+				const auto found = RenderPipelinePreviewAspects.find(key);
+				return found == RenderPipelinePreviewAspects.end() ? 0.0f : found->second;
+			});
 			RenderPipelineCanvas.Signals.Changed = [this] { RenderPipelineDirty = true; };
 			RenderPipelineCanvasReady = true;
 		}
@@ -227,6 +237,7 @@ namespace studio {
 		if (ImGui::BeginChild("##render-pipeline-canvas", ImVec2(std::max(room.x - side, side), room.y))) {
 			RenderPipelinePreviewEvaluator.Run(RenderPipelineGraph);
 			RenderPipelinePreviewTextures.clear();
+			RenderPipelinePreviewAspects.clear();
 			const double previewNow = Clock.Now();
 			const bool refreshPreviews = previewNow >= RenderPipelinePreviewNext;
 			if (refreshPreviews) {
@@ -293,9 +304,13 @@ namespace studio {
 											  RenderPipelineInstalledName, resource->Name, previewSlot
 										  );
 					if (texture != nullptr) {
-						RenderPipelinePreviewTextures[engine::nodegraph::PictureKey(
+						const uint64_t key = engine::nodegraph::PictureKey(
 							RenderPipelinePreviewEvaluator.RanAt(canvasNode.Id), canvasType->PreviewPort
-						)] = texture;
+						);
+						RenderPipelinePreviewTextures[key] = texture;
+						RenderPipelinePreviewAspects[key] = Renderer.ResourcePreviewAspect(
+							RenderPipelineInstalledName, resource->Name, previewSlot
+						);
 					}
 				}
 			}

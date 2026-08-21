@@ -96,6 +96,26 @@ namespace engine::nodegraph {
 			Sink = std::move(sink);
 		}
 
+		// How wide each preview is against its height, for a host whose pictures
+		// are not square.
+		//
+		// **`PreviewImage` is square by contract and a host may still hand back
+		// something else.** That type says "Pixels a side. Square, because a
+		// node's thumbnail slot is", and a host that goes through `Images` with
+		// a texture it already had is not bound by it - the studio's render
+		// pipeline previews are 16:9, because what they show is a render target.
+		// Drawn into the square slot they came out squashed by 1.78.
+		//
+		// Optional, and absent means square, which is what every caller that
+		// honours `PreviewImage` already produces. A picture wider than the slot
+		// is fitted inside it and centred, so nothing is distorted and nothing
+		// escapes the node.
+		//
+		// @param sink Answers width over height for a key, or 0 for "square".
+		void Aspects(std::function<float(uint64_t)> sink) {
+			Aspect = std::move(sink);
+		}
+
 		// Draws and drives the graph inside the current ImGui window.
 		void Draw(Graph &graph);
 
@@ -387,5 +407,6 @@ namespace engine::nodegraph {
 
 		const Evaluator *Watching = nullptr;
 		ImageSink Sink;
+		std::function<float(uint64_t)> Aspect;
 	};
 }

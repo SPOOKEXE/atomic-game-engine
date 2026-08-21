@@ -165,11 +165,26 @@ namespace studio {
 			return projection;
 		}
 
-		// The camera this panel is looking through, as it stands *now* - which
-		// is after `DriveCamera` and is therefore the camera `PresentWorld` is
-		// about to render with.
+		// **The camera this panel's picture was actually taken with**, which is
+		// not the same as the one it is looking through now.
+		//
+		// This used to read the live camera and say it was "the camera
+		// `PresentWorld` is about to render with". That is true of exactly one
+		// panel per frame: `Renderer::Render` owns the whole frame, so the
+		// studio draws one panel and round-robins, and every other panel is
+		// showing a texture from an earlier frame. Projecting an overlay from
+		// the live camera onto an older picture put the selection outline beside
+		// the part it outlines - about 26 pixels on a 1600-pixel panel at 90
+		// degrees a second, on every frame the panel did not draw, which is a
+		// gizmo that shakes while the camera moves and settles when it stops.
+		//
+		// Falls back to the live camera until the first render, where there is
+		// no texture for it to disagree with.
 		const ViewportState *extra = ExtraAt(viewport);
 		CFrame frame = extra != nullptr ? extra->Frame : CameraFrame;
+		if (slot.Presented) {
+			frame = slot.PresentedFrame;
+		}
 
 		// **The lens does not need `PresentWorld`'s far-plane adjustment.** For
 		// a perspective matrix the divide is by `w = -z_view`, which depends on
@@ -178,6 +193,13 @@ namespace studio {
 		// frame alone. Reproducing `FarPlane = max(FarPlane, reach * 40)` here
 		// would be a second copy of a number that cannot affect the answer.
 		engine::scene::Camera lens;
+		if (slot.Presented && slot.PresentedFieldOfView > 0.0f) {
+			// The lens the picture was taken with, for the same reason as the
+			// frame above: a followed camera's field of view is its own, and
+			// reading this frame's while the texture holds last frame's is the
+			// same mismatch one dimension along.
+			lens.FieldOfViewRadians = slot.PresentedFieldOfView;
+		}
 
 		const WorldId shown = ViewportWorld(viewport);
 		const Entity follow = extra != nullptr ? extra->Follow : FollowCamera;

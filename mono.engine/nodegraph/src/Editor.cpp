@@ -840,7 +840,32 @@ namespace engine::nodegraph {
 			}
 
 			if (handle != nullptr) {
-				draw->AddImage(reinterpret_cast<ImTextureID>(handle), slot, slotFar);
+				// **Fitted inside the slot rather than stretched across it.** The
+				// slot is square because `PreviewImage` is, and a host that
+				// supplies a texture of its own need not be - the studio's render
+				// pipeline previews are 16:9 and were squashed by 1.78. See
+				// `Editor::Aspects`; absent, this is one and the fit is the whole
+				// slot, which is exactly what it used to do.
+				ImVec2 near = slot;
+				ImVec2 far = slotFar;
+				const float aspect =
+					Aspect ? Aspect(PictureKey(
+								 Watching != nullptr ? Watching->RanAt(node.Id) : 0,
+								 type->PreviewPort.empty()
+									 ? (type->Outputs.empty() ? std::string() : type->Outputs.front().Name)
+									 : type->PreviewPort
+							 ))
+						   : 0.0f;
+				if (aspect > 0.0f && std::abs(aspect - 1.0f) > 0.001f) {
+					const float side = slotFar.x - slot.x;
+					const float width = aspect >= 1.0f ? side : side * aspect;
+					const float height = aspect >= 1.0f ? side / aspect : side;
+					near.x = slot.x + (side - width) * 0.5f;
+					near.y = slot.y + (side - height) * 0.5f;
+					far.x = near.x + width;
+					far.y = near.y + height;
+				}
+				draw->AddImage(reinterpret_cast<ImTextureID>(handle), near, far);
 			} else {
 				// **A frame of the same size rather than nothing.** The slot is
 				// reserved by the layout either way, and an empty node body

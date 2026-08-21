@@ -402,7 +402,17 @@ The milestone headings below are development labels. Not in line with project ve
       mistake - it shows one room with another room's wall through it, which
       reads as the *portal* being wrong. `away(n)` gives each exhibit a depth
       lane, so an exhibit may be as wide as its trick needs.
-- [_] selection boxes are misaligned
+- [x] selection boxes are misaligned. `ProjectionFor` read the *live* camera and
+      its comment said that was "the camera `PresentWorld` is about to render
+      with" - true of exactly one panel per frame. `Renderer::Render` owns the
+      whole frame, so the studio draws one panel and round-robins, and every
+      other panel shows a texture from an earlier frame while its overlay was
+      projected from the camera as it stands now. About 26 pixels of skew on a
+      1600-pixel panel at 90 degrees a second, which is a gizmo that shakes while
+      the camera moves and settles when it stops. `PresentWorld` records the
+      camera and lens it actually rendered each panel with; the overlay projects
+      from that. A replica still overrides it, because a replica renders through
+      its own `ActiveCamera`.
 - [x] when pressing CTRL and scaling a part, scale both sides at same time.
       `ScaleSide::Both` already existed as a *preference*, so the only way to
       reach it was to go and change a setting. Ctrl now inverts it at the grab.
@@ -416,7 +426,15 @@ The milestone headings below are development labels. Not in line with project ve
       same panel. **One-time cost:** the stored ini key changes, so existing
       saved layouts undock these panels once. `ViewportIdentity` is what
       `SetWindowFocus` and `FindWindowByName` must now be given.
-- [_] some studio ui stretches instead of scales with aspect
+- [x] some studio ui stretches instead of scales with aspect. The real
+      distortion was the node-graph previews. `PreviewImage` is square by
+      contract - "Pixels a side. Square, because a node's thumbnail slot is" -
+      and the studio's render-pipeline previews go through the same sink with a
+      texture of the renderer's own, which keeps the *resource's* shape: a
+      full-screen target's preview is as wide as the screen and was squashed into
+      the square slot by about 1.78. The canvas takes an optional aspect now and
+      fits the picture inside the slot rather than stretching it across.
+      Optional, so every caller that honours `PreviewImage` is unchanged.
 - [x] physics bugs with the character (in playground steps, you phase through
       blocks, doesn't do bounds properly). `scene::StepCharacters` hard-assigns
       `Motion::Linear.X/Z` every `PreSimulation` - right for responsiveness, and

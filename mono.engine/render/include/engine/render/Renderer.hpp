@@ -1691,6 +1691,20 @@ namespace engine::render {
 		// The most recently refreshed retained copy, or null before its first frame.
 		void *ResourcePreviewTexture(core::Name pipeline, core::Name resource, size_t slot = 0) const;
 
+		// How wide that copy is against its height.
+		//
+		// **A preview keeps the resource's own shape**, capped at 256 on its
+		// long side, so a full-screen target's preview is as wide as the screen
+		// - and a caller that drew it into a square slot squashed it. The
+		// node-graph canvas is such a caller; `nodegraph::Editor::Aspects` is
+		// what this feeds.
+		//
+		// @param pipeline The installed graph that owns the image.
+		// @param resource The graph image.
+		// @param slot     The viewport that produced it.
+		// @return Width over height, or 0 when there is no such preview.
+		float ResourcePreviewAspect(core::Name pipeline, core::Name resource, size_t slot = 0) const;
+
 		// Keeps a copy of what a scene slot currently holds, under a name.
 		//
 		// **A slot is scratch and this is how a picture outlives it.** There are

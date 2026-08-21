@@ -3856,6 +3856,28 @@ namespace studio {
 			// Whether this panel drew at all this frame. A closed panel returns
 			// early and leaves this false.
 			bool Drawn = false;
+
+			// The camera this panel's texture was last *rendered* with.
+			//
+			// **Not the camera it is looking through now, and the difference is
+			// the misaligned selection box.** `Renderer::Render` owns the whole
+			// frame, so the studio draws one panel per frame and round-robins;
+			// a panel that did not have its turn is showing a texture from an
+			// earlier frame. The overlay is drawn on top of that texture every
+			// frame, and projecting it from the live camera aimed it at a
+			// picture that was never taken - at 90 degrees a second on a
+			// 1600-pixel panel, about 26 pixels of skew on every frame the panel
+			// did not draw.
+			//
+			// Written by `PresentWorld` for the panel it renders, read by
+			// `ProjectionFor` for every panel. `Presented` stays false until the
+			// first render, where falling back to the live camera is right
+			// because there is no texture to disagree with.
+			//@{
+			engine::core::CFrame PresentedFrame;
+			float PresentedFieldOfView = 0.0f;
+			bool Presented = false;
+			//@}
 		};
 
 		// How many extra panels a fresh editor starts with, beyond the main one.
@@ -4920,6 +4942,11 @@ namespace studio {
 		engine::nodegraph::Canvas RenderPipelineCanvas;
 		engine::nodegraph::Evaluator RenderPipelinePreviewEvaluator;
 		std::unordered_map<uint64_t, void *> RenderPipelinePreviewTextures;
+
+		// The shape of each of those pictures, width over height. See
+		// `nodegraph::Editor::Aspects`: a graph resource's preview keeps the
+		// resource's shape and a node's slot is square.
+		std::unordered_map<uint64_t, float> RenderPipelinePreviewAspects;
 		std::unordered_map<uint32_t, size_t> RenderPipelineRenderedSlots;
 		engine::graph::PipelineDocument RenderPipelineBasis;
 		WorldId RenderPipelineWorld;

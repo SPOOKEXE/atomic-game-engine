@@ -1771,6 +1771,19 @@ namespace studio {
 			});
 		}
 
+		// **Remembered for the overlay, which is drawn on this texture every
+		// frame and not only on the frames that make it.** See
+		// `OverlaySlot::PresentedFrame`: the studio round-robins one panel a
+		// frame, so projecting a gizmo from the *live* camera aims it at a
+		// picture that was never taken. Written here, after `eye` and `lens`
+		// have settled and before anything renders with them.
+		if (DrawingViewport < Overlays.size()) {
+			OverlaySlot &slot = Overlays[DrawingViewport];
+			slot.PresentedFrame = eye;
+			slot.PresentedFieldOfView = lens.FieldOfViewRadians;
+			slot.Presented = true;
+		}
+
 		// PreRender runs whether or not the simulation did: it is the phase
 		// that turns state into something to draw, and an edited world's state
 		// changes without a tick.
