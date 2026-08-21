@@ -48,14 +48,15 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] when you delete a mirror (surfacecamera), it does not clean up the image it was displaying so it becomes a ghost image
 - [x] content.deliver is 0.038ms even though no assets are changing? we should be caching these assets and whatnot
 - [x] in Renderer::RenderView there are a bunch of big gaps
-- [_] rename mono.unified_server_client to mono.unified_tests which imports all the mono reports into the code so it can fully test all features with all variations between clients, servers, cdn, networking, engine, etc. This one focused more on CROSS communication and management, NOT per-mono specific systems and such.
 - [x] fix renderer stuff with gpu sync
 - [x] proper fps management with millis
 - [_] fix runaway memory allocation
 - [_] add heap profiler for dev builds and in flamegraph with graph visualisation
 - [_] make the heap profiler super granular throughout code
 - [_] add a automatic test/benchmark that picks up long-term runaway allocations via heap profiler (simulate 5 minutes of running different scenes).
-- [_] add to mono.unified_server_client / mono.unified_tests
+
+- [_] rename mono.unified_server_client to mono.unified_tests which imports all the mono reports into the code so it can fully test all features with all variations between clients, servers, cdn, networking, engine, etc. This one focused more on CROSS communication and management, NOT per-mono specific systems and such.
+- [_] add heap profiler to mono.unified_server_client / mono.unified_tests
 
 - [_] ensure we benchmark critical systems (network, multiplayer, physics, particles, etc)
 
