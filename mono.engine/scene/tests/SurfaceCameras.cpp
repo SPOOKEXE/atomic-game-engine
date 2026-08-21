@@ -2270,6 +2270,83 @@ TEST_CASE("nothing larger than a hole is drawn through it", "[scene][surfacecame
 	CHECK_FALSE(overhanging.Fits);
 }
 
+TEST_CASE("a rig is cut in one piece or not at all", "[scene][surfacecameras]") {
+	// **The reported "character split in half in a portal".** Whether a row may
+	// be cut is "does it fit the aperture", and a character is a dozen drawn
+	// rows: standing in an opening its torso is comfortably inside the rectangle
+	// and its feet sit on the bottom edge, where the box overhangs. Asked per
+	// row that is yes for the torso and no for the feet, and a row that answers
+	// no is drawn *whole* rather than cut - so the body is clipped at the plane
+	// from the waist up and pushed through the wall from the ankles down.
+	Mirror mirror;
+	const Entity far =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	mirror.World.Set<Transform>(far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f})});
+	mirror.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+
+	// The pane is eight by four and a half. A torso in the middle of it fits; a
+	// foot on the bottom edge reaches four-nine and does not.
+	const auto torso = [] {
+		engine::scene::DrawInstance row;
+		row.Frame = CFrame(Vector3{0.0f, 1.0f, -0.2f});
+		row.HalfExtent = Vector3{0.6f, 1.2f, 0.4f};
+		return row;
+	};
+	const auto foot = [] {
+		engine::scene::DrawInstance row;
+		row.Frame = CFrame(Vector3{0.0f, -4.5f, -0.2f});
+		row.HalfExtent = Vector3{0.3f, 0.4f, 0.5f};
+		return row;
+	};
+
+	SECTION("two loose bodies keep their own answers") {
+		std::vector<engine::scene::DrawInstance> drawn{torso(), foot()};
+
+		// One copy, one cut: exactly the split, and it is correct for two rows
+		// that are two different objects.
+		CHECK(engine::scene::CutAndCloneSeams(mirror.World, drawn) == 1);
+		CHECK(drawn[0].SeamNormal != Vector3{});
+		CHECK(drawn[1].SeamNormal == Vector3{});
+	}
+
+	SECTION("two limbs of one rig are cut together") {
+		std::vector<engine::scene::DrawInstance> drawn{torso(), foot()};
+		drawn[0].Rig = 7;
+		drawn[1].Rig = 7;
+
+		// Both, because one part of the body is through the opening and the
+		// body is one thing. The foot's few centimetres past the rim are worth
+		// less than the rig being in one piece.
+		CHECK(engine::scene::CutAndCloneSeams(mirror.World, drawn) == 2);
+		CHECK(drawn[0].SeamNormal != Vector3{});
+		CHECK(drawn[1].SeamNormal != Vector3{});
+	}
+
+	SECTION("a rig with nothing through the hole is refused whole") {
+		std::vector<engine::scene::DrawInstance> drawn{foot(), foot()};
+		drawn[0].Rig = 9;
+		drawn[1].Rig = 9;
+		drawn[1].Frame = CFrame(Vector3{0.0f, -4.6f, -0.2f});
+
+		CHECK(engine::scene::CutAndCloneSeams(mirror.World, drawn) == 0);
+		CHECK(drawn[0].SeamNormal == Vector3{});
+		CHECK(drawn[1].SeamNormal == Vector3{});
+	}
+
+	SECTION("two rigs do not answer for each other") {
+		std::vector<engine::scene::DrawInstance> drawn{torso(), foot()};
+		drawn[0].Rig = 1;
+		drawn[1].Rig = 2;
+
+		// The torso's rig fits and the foot's does not, which is the loose case
+		// again - a grouping that leaked between rigs would cut both.
+		CHECK(engine::scene::CutAndCloneSeams(mirror.World, drawn) == 1);
+		CHECK(drawn[0].SeamNormal != Vector3{});
+		CHECK(drawn[1].SeamNormal == Vector3{});
+	}
+}
+
 TEST_CASE("the near plane and the clip follow the eye into a hole", "[scene][surfacecameras]") {
 	// **What makes the last hand's width of an approach seamless.** A near plane
 	// is a floor on how close geometry may be drawn, so walking up to a pane with

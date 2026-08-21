@@ -570,8 +570,14 @@ TEST_CASE("the seam a row is cut at moves its signature", "[scene][drawinstance]
 	// four-byte word, so a four-aligned `Vector3` lands immediately after them
 	// and opens nothing. A fourth byte-sized field would still fit; a fifth is
 	// what would widen the row.
+	//
+	// **And it survived `Rig`, which is the first eight-aligned field on the
+	// type and therefore the first that could not.** The hole it opens is
+	// declared as `Reserved` and zeroed rather than left to the compiler, so
+	// the bytes exist and are known. That is the fix this assert asks for, not
+	// an exception to it.
 	static_assert(
-		sizeof(DrawInstance) == offsetof(DrawInstance, SeamLight) + sizeof(DrawInstance::SeamLight),
+		sizeof(DrawInstance) == offsetof(DrawInstance, Rig) + sizeof(DrawInstance::Rig),
 		"DrawInstance has grown padding. scene::SignatureOf is field-wise and is unaffected, "
 		"but anything reading this type as bytes is now reading uninitialised memory."
 	);

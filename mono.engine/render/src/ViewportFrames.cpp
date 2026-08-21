@@ -33,7 +33,9 @@ namespace engine::render {
 							*bounds,
 							*visual,
 							store.Get<scene::SurfaceAppearance>(child),
-							store.Get<scene::Tags>(child)
+							store.Get<scene::Tags>(child),
+							nullptr,
+							store.Get<scene::CharacterLimb>(child)
 						)
 					);
 				}

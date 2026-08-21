@@ -1259,6 +1259,22 @@ namespace engine::scene {
 		const bool fillsPane =
 			std::abs(firstReach - firstLength) <= SNUG && std::abs(secondReach - secondLength) <= SNUG;
 
+		// **Of the whole body rather than of this row, when the two differ.**
+		// The caller passes a rig's box for a limb - see `FitBoxOf` - because
+		// this is decided per drawn row and a character is a dozen of them: a
+		// rig standing in an opening has its root and its head comfortably
+		// inside the rectangle and its feet sitting on the bottom edge, where
+		// the box overhangs by a few centimetres. Asked of each row, that
+		// answers yes for most of the rig and no for the parts on the rim - and
+		// a row that answers no is drawn *whole* rather than cut, so the body is
+		// clipped at the plane from the waist up and pushed through the wall
+		// from the ankles down. That is "character split in half", and it is a
+		// question about the body that the row cannot answer.
+		//
+		// The rule itself is unchanged and has to be. What it refuses is the
+		// room: a floor slab or a wall beside the pane straddles the plane by
+		// the sphere test and reaches metres past the rectangle, and a copy of
+		// one landing in the room next door is the artefact it exists for.
 		cut.Fits = span(seam.Normal) > std::abs(offset.Dot(seam.Normal)) + SNUG &&
 				   firstReach <= firstLength + SNUG && secondReach <= secondLength + SNUG && !fillsPane;
 
@@ -1266,6 +1282,81 @@ namespace engine::scene {
 	}
 
 	namespace {
+		// Whether one rig may be cut by one hole.
+		//
+		// **Because "does this fit the aperture" is a question about a body**,
+		// and a character is a dozen drawn rows. See `DrawInstance::Rig`. A rig
+		// standing in an opening has its root and its head comfortably inside
+		// the rectangle and its feet sitting on the bottom edge, where the box
+		// overhangs by a few centimetres. Asked of each row, that answers yes
+		// for most of the rig and no for the parts on the rim - and a row that
+		// answers no is drawn *whole* rather than cut, so the body is clipped at
+		// the plane from the waist up and pushed through the wall from the
+		// ankles down. That is "character split in half".
+		//
+		// **Any row, not every row.** The union of a rig's boxes is bigger than
+		// every one of them, so a rule stated against it refuses the whole rig
+		// the moment one toe crosses the rim - which ends the split by drawing
+		// nothing through the hole at all. What is wanted is the opposite: a rig
+		// with a part inside the opening is a body walking through it, and the
+		// few centimetres of foot that hang past the rim are worth less than the
+		// body being in one piece.
+		//
+		// Nothing else is affected. A row that names no rig is one thing, keeps
+		// its own answer, and the room-sized slab this rule exists to refuse is
+		// not a character.
+		struct RigFit {
+			uint64_t Rig = 0;
+			bool Fits = false;
+		};
+
+		// Collects, for one hole, which rigs in a draw list may be cut by it.
+		void GatherRigFits(
+			const PortalSeam &seam,
+			const SeamTransform &through,
+			std::span<const DrawInstance> rows,
+			std::vector<RigFit> &fits
+		) {
+			fits.clear();
+			for (const DrawInstance &row : rows) {
+				if (row.Rig == 0) {
+					continue;
+				}
+
+				const bool fitted = CutOfSeam(seam, through, row.Frame, row.HalfExtent).Fits;
+
+				RigFit *found = nullptr;
+				for (RigFit &candidate : fits) {
+					if (candidate.Rig == row.Rig) {
+						found = &candidate;
+						break;
+					}
+				}
+				if (found == nullptr) {
+					fits.push_back(RigFit{row.Rig, fitted});
+					continue;
+				}
+				found->Fits = found->Fits || fitted;
+			}
+		}
+
+		// The rig's answer for this row, or null when the row is its own body.
+		//
+		// A vector and a linear find rather than a map: a world has a handful of
+		// characters in it, this runs once a frame, and hashing an entity id per
+		// row costs more than reading five of them.
+		const bool *RigAnswer(const std::vector<RigFit> &fits, const DrawInstance &row) {
+			if (row.Rig == 0) {
+				return nullptr;
+			}
+			for (const RigFit &fit : fits) {
+				if (fit.Rig == row.Rig) {
+					return &fit.Fits;
+				}
+			}
+			return nullptr;
+		}
+
 		// The far half of one drawn row, cut to the far side of the hole.
 		//
 		// **One rule for both sides of the file**, which is the whole reason it
@@ -1292,6 +1383,7 @@ namespace engine::scene {
 			const SeamTransform &through,
 			const DrawInstance &row,
 			const Vector3 &light,
+			const bool *rigFits,
 			SeamCut &cut,
 			DrawInstance &ghost
 		) {
@@ -1334,7 +1426,14 @@ namespace engine::scene {
 			// does not fit cannot be cut by a single plane without slicing the
 			// part of it that hangs past the rim, where the hole is not - such a
 			// body is drawn whole on both sides instead.
+			// **The planes come from the seam and the answer may come from the
+			// rig.** `CutOfSeam` derives both from one call, and for a limb the
+			// `Fits` half of it is replaced by the body's - see `RigFit`, which
+			// is why a character is admitted or refused in one piece.
 			cut = CutOfSeam(seam, through, row.Frame, row.HalfExtent);
+			if (rigFits != nullptr) {
+				cut.Fits = *rigFits;
+			}
 			if (!cut.Fits) {
 				return false;
 			}
@@ -2109,12 +2208,23 @@ namespace engine::scene {
 		const Vector3 sun = SunOf(store).Direction;
 		size_t appended = 0;
 
+		// One answer per rig per hole, taken before the walk. Inside it this
+		// would be a pass over the whole list per row. See `RigFit`.
+		std::vector<std::vector<RigFit>> fits(seams.size());
+		for (size_t at = 0; at < seams.size(); at++) {
+			GatherRigFits(seams[at], SeamMapping(seams[at]), source, fits[at]);
+		}
+
 		for (const DrawInstance &row : source) {
-			for (const PortalSeam &seam : seams) {
+			for (size_t at = 0; at < seams.size(); at++) {
+				const PortalSeam &seam = seams[at];
 				const SeamTransform through = SeamMapping(seam);
+
 				SeamCut cut;
 				DrawInstance ghost;
-				if (!FarHalfOfRow(seam, through, row, through.Rotate(sun), cut, ghost)) {
+				if (!FarHalfOfRow(
+						seam, through, row, through.Rotate(sun), RigAnswer(fits[at], row), cut, ghost
+					)) {
 					continue;
 				}
 
@@ -2293,8 +2403,17 @@ namespace engine::scene {
 		// the copies - a body near two facing panes would fill the buffer.
 		const size_t drawn = out.size();
 
+		// One answer per rig per hole, taken before the walk. See `RigFit`.
+		std::vector<std::vector<RigFit>> fits(seams.size());
+		for (size_t at = 0; at < seams.size(); at++) {
+			GatherRigFits(
+				seams[at], SeamMapping(seams[at]), std::span<const DrawInstance>(out.data(), drawn), fits[at]
+			);
+		}
+
 		for (size_t index = 0; index < drawn; index++) {
-			for (const PortalSeam &seam : seams) {
+			for (size_t at = 0; at < seams.size(); at++) {
+				const PortalSeam &seam = seams[at];
 				const SeamTransform through = SeamMapping(seam);
 				SeamCut cut;
 				DrawInstance ghost;
@@ -2303,7 +2422,15 @@ namespace engine::scene {
 				// may reallocate and because the original's row is written as
 				// well as read. A reference taken here would dangle on the first
 				// growth.
-				if (!FarHalfOfRow(seam, through, out[index], through.Rotate(sun), cut, ghost)) {
+				if (!FarHalfOfRow(
+						seam,
+						through,
+						out[index],
+						through.Rotate(sun),
+						RigAnswer(fits[at], out[index]),
+						cut,
+						ghost
+					)) {
 					continue;
 				}
 
@@ -2481,6 +2608,33 @@ namespace engine::scene {
 		};
 		std::vector<Resize> resized;
 
+		// Whose walk intent has to turn with them, and by what.
+		//
+		// **`Humanoid::MoveDirection` is world-space and nothing maps it**,
+		// which is the whole of "normal objects are fine but the character".
+		// A crate keeps the velocity this pass carries through the seam; a
+		// character has its horizontal velocity reassigned from
+		// `MoveDirection` on the very next tick, so the carry survives zero
+		// ticks and the body walks out of the far pane aimed the way it was
+		// aimed in the room it left. `PortalTransit::Turn` is written below and
+		// only ever reaches a *viewer's* camera - on a server-simulated
+		// character that is a different machine.
+		struct TurnedIntent {
+			ecs::Entity Steering;
+			SeamTransform Through;
+		};
+		std::vector<TurnedIntent> turnedIntents;
+
+		// Which humanoid steers which body, gathered once.
+		//
+		// The same question is asked by `ResizeCrosser`, which may walk for it
+		// because a crossing that resizes is rare. Asked inside the walk below
+		// it would be an `Each` opened inside an `Each` on every crossing.
+		std::vector<std::pair<ecs::Entity, ecs::Entity>> steering;
+		store.Each<const Character>([&](ecs::Entity, const Character &character) {
+			steering.push_back({character.Root, character.Humanoid});
+		});
+
 		// **Anything with a velocity, not only a character.** A portal that
 		// swallowed people and refused a thrown crate would be a portal with a
 		// footnote, and the arithmetic does not care which it is. Anchored
@@ -2573,6 +2727,31 @@ namespace engine::scene {
 					// position through the same map keeps the whole tick, just
 					// expressed in the room the body is now in, so it walks out
 					// of the far pane at the speed it walked into the near one.
+					// **Clamped to the side it is leaving from, first.** The
+					// map is rigid, so a previous frame on the entry side of
+					// this pane arrives on the *far* side of the destination
+					// pane - behind it, by construction. The renderer wants
+					// that; the next tick does not. `NearestCrossing` re-runs
+					// from scratch every tick against the segment from here to
+					// there, so a `was` behind the far pane makes the next
+					// segment straddle it and the body crosses straight back,
+					// and then again, forever. That is the reported "sits in
+					// the middle of a portal and teleports between both sides",
+					// and it survives even with nothing steering the body.
+					//
+					// Only the component along the normal moves. The tick's
+					// sideways motion is kept, so what the renderer draws is a
+					// body emerging from the pane rather than one standing
+					// still - which is the whole reason this frame is mapped
+					// instead of collapsed onto the new placement.
+					const float leaving = SeamOffset(hole, before.Frame.Position) * side;
+					if (leaving < LANDING_CLEARANCE) {
+						before.Frame = CFrame{
+							before.Frame.Position + hole.Normal * (side * (LANDING_CLEARANCE - leaving)),
+							before.Frame.Rotation()
+						};
+					}
+
 					before.Frame = through.Place(before.Frame);
 
 					// **And the body itself, when the two ends are not the same
@@ -2583,6 +2762,26 @@ namespace engine::scene {
 					// a deferred command with a heap copy behind it.
 					if (through.Scale != 1.0f) {
 						resized.push_back(Resize{entity, through.Scale});
+					}
+
+					// **And the walk intent, for the reason the velocity above
+					// is mapped.** A rig keeps its humanoid on the model beside
+					// the parts; a scripted character keeps it on the part
+					// itself, which is the fallback. Deferred with the rest:
+					// this writes a component on an entity the walk is not
+					// standing on.
+					ecs::Entity steered = ecs::NULL_ENTITY;
+					for (const auto &[root, humanoid] : steering) {
+						if (root == entity) {
+							steered = humanoid;
+							break;
+						}
+					}
+					if (steered == ecs::NULL_ENTITY && store.Has<Humanoid>(entity)) {
+						steered = entity;
+					}
+					if (steered != ecs::NULL_ENTITY) {
+						turnedIntents.push_back(TurnedIntent{steered, through});
 					}
 
 					// **And the turn is written down, because the eye that has
@@ -2676,6 +2875,18 @@ namespace engine::scene {
 		// per crossing when a crossing is already over.
 		for (const Resize &change : resized) {
 			ResizeCrosser(store, change.Body, change.Scale);
+		}
+
+		// **`Rotate`, not `Carry`.** A walk direction is a unit vector and a
+		// scaled hole would otherwise hand the controller an intent longer or
+		// shorter than one, which `StepCharacters` multiplies by `WalkSpeed` -
+		// so a shrinking pair would make a character sprint. The speed is a
+		// length and is scaled by `ResizeCrosser` above, which is where that
+		// belongs.
+		for (const TurnedIntent &turn : turnedIntents) {
+			if (Humanoid *humanoid = store.GetMutable<Humanoid>(turn.Steering)) {
+				humanoid->MoveDirection = turn.Through.Rotate(humanoid->MoveDirection);
+			}
 		}
 
 		return crossed;

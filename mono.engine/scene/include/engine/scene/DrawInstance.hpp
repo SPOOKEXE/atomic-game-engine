@@ -36,6 +36,7 @@
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Color3.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Enums.hpp>
 
@@ -237,6 +238,34 @@ namespace engine::scene {
 		//
 		// @since v0.15
 		core::Vector3 SeamLight{0.0f, 0.0f, 0.0f};
+
+		// Which rig this row is a limb of, or zero for a row that is one thing.
+		//
+		// **A seam has to be able to cut a body once rather than a dozen
+		// times.** Whether a row may be cut by a hole is "does it fit the
+		// aperture", and a character is a dozen drawn rows: standing in a
+		// doorway, its root and its head are comfortably inside the rectangle
+		// and its feet sit on the bottom edge, where the box overhangs. Asked
+		// per row, that answers yes for most of the rig and no for the parts on
+		// the rim - and a row that answers no is drawn *whole* rather than cut,
+		// so the body is clipped at the plane from the waist up and pushed
+		// through the wall from the ankles down. `CutAndCloneSeams` asks the
+		// question once per rig instead, of the box that holds all of it.
+		//
+		// `ecs::Entity::Id` rather than the handle, so this header keeps its
+		// present dependencies. Nothing here dereferences it: it is an identity
+		// to group by and the value is never looked up.
+		//
+		// **Explicit, because an `ecs::Entity` is eight-byte aligned and every
+		// field above this one is four.** The compiler would open a four-byte
+		// hole here on its own, and a hole is uninitialised bytes in a type the
+		// surface cache reads as bytes - see the padding assertion in this
+		// module's tests. Named and zeroed, it is four bytes with a known value
+		// instead. `CharacterLimb::Reserved` exists for the same reason.
+		uint32_t Reserved = 0;
+
+		// @since v0.19
+		uint64_t Rig = 0;
 	};
 
 	// Fills the fields a collector reads straight off the world's components.
@@ -279,7 +308,8 @@ namespace engine::scene {
 		const Visual &visual,
 		const SurfaceAppearance *appearance,
 		const Tags *tags,
-		const LocalTransparency *local = nullptr
+		const LocalTransparency *local = nullptr,
+		const CharacterLimb *limb = nullptr
 	) {
 		DrawInstance instance;
 		instance.Frame = frame;
@@ -313,6 +343,13 @@ namespace engine::scene {
 		if (local != nullptr && local->Value != 0.0f) {
 			instance.Transparency = local->Value;
 		}
+		// See `DrawInstance::Rig`. A limb names the root it hangs off, and every
+		// limb of one character names the same one, which is the grouping a seam
+		// needs. A row that is not a limb is its own body and needs no group.
+		if (limb != nullptr) {
+			instance.Rig = limb->Root.Id;
+		}
+
 		instance.Surface = visual.Surface;
 		instance.CastShadow = visual.CastShadow;
 

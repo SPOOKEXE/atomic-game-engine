@@ -53,6 +53,7 @@ namespace client {
 	using engine::ecs::Store;
 	using engine::scene::ActiveCamera;
 	using engine::scene::Bounds;
+	using engine::scene::CharacterLimb;
 	using engine::scene::DrawInstance;
 	using engine::scene::LocalTransparency;
 	using engine::scene::PreviousTransform;
@@ -305,71 +306,159 @@ namespace client {
 				// is handed columns and no entity; a component that only some
 				// rows had could not be read here at all without walking the
 				// world a second time.
-				written = store.EachBatchParallel<
-					const Transform,
-					const PreviousTransform,
-					const Bounds,
-					const Visual,
-					const SurfaceAppearance,
-					const Tags,
-					const LocalTransparency,
-					const Rendered>(
-					[out, capacity, alpha](
-						size_t first,
-						size_t rows,
-						const Transform *transforms,
-						const PreviousTransform *previous,
-						const Bounds *bounds,
-						const Visual *visuals,
-						const SurfaceAppearance *appearances,
-						const Tags *tags,
-						const LocalTransparency *locals,
-						const Rendered *
-					) {
-						// The count came from a different query than the one
-						// being walked. They agree, and this is what happens if
-						// they ever stop: instances go missing and the number on
-						// the panel drops, rather than a worker writing past the
-						// end of the buffer.
-						if (first >= capacity) {
-							return;
-						}
-						rows = std::min(rows, capacity - first);
+				// **One writer, two walks.** A limb has to carry the rig it
+				// belongs to - see `DrawInstance::Rig`, which is what lets a
+				// portal cut a character in one piece instead of a dozen times -
+				// and `CharacterLimb` is on some drawable rows and not others.
+				// A batched parallel walk has no entity and therefore no
+				// optional join, so the query is split on the component instead
+				// and each half is a walk with a required column list. Every
+				// other field is written by the same function in both.
+				const auto write = [out, capacity, alpha](
+									   size_t base,
+									   size_t first,
+									   size_t rows,
+									   const Transform *transforms,
+									   const PreviousTransform *previous,
+									   const Bounds *bounds,
+									   const Visual *visuals,
+									   const SurfaceAppearance *appearances,
+									   const Tags *tags,
+									   const LocalTransparency *locals,
+									   const CharacterLimb *limbs
+								   ) {
+					// The count came from a different query than the one being
+					// walked. They agree, and this is what happens if they ever
+					// stop: instances go missing and the number on the panel
+					// drops, rather than a worker writing past the end of the
+					// buffer.
+					const size_t at = base + first;
+					if (at >= capacity) {
+						return;
+					}
+					rows = std::min(rows, capacity - at);
 
-						for (size_t row = 0; row < rows; row++) {
-							// Interpolated, not the tick position. At 300 fps
-							// against a 60 Hz tick, drawing tick positions shows
-							// each one five times and then jumps - which reads as
-							// a frame-rate problem rather than as a tick-rate one.
-							//
-							// NLerp, not Lerp. The endpoints are one simulation
-							// tick apart - a few degrees at most - and over an arc
-							// that short the two agree to well inside a pixel.
-							// Lerp's constant angular speed costs an acos and
-							// three sin calls per entity, which on this loop was
-							// the single most expensive thing in the frame.
-							//
-							// A `CFrame` and a half-extent, not a matrix: this is
-							// what the world knows, and `render` is what turns it
-							// into something a GPU binds.
-							//
-							// The fields come from `scene::MakeDrawInstance`, which
-							// is the only place that list is written - the
-							// replicated collector fills the same row from a
-							// snapshot. Both components are required columns of
-							// *this* query, so the addresses are always good.
-							out[first + row] = engine::scene::MakeDrawInstance(
-								previous[row].Frame.NLerp(transforms[row].Frame, alpha),
-								bounds[row],
-								visuals[row],
-								&appearances[row],
-								&tags[row],
-								&locals[row]
-							);
-						}
-					},
-					DRAW_LIST_GRAIN
-				);
+					for (size_t row = 0; row < rows; row++) {
+						// Interpolated, not the tick position. At 300 fps
+						// against a 60 Hz tick, drawing tick positions shows
+						// each one five times and then jumps - which reads as
+						// a frame-rate problem rather than as a tick-rate one.
+						//
+						// NLerp, not Lerp. The endpoints are one simulation
+						// tick apart - a few degrees at most - and over an arc
+						// that short the two agree to well inside a pixel.
+						// Lerp's constant angular speed costs an acos and
+						// three sin calls per entity, which on this loop was
+						// the single most expensive thing in the frame.
+						//
+						// A `CFrame` and a half-extent, not a matrix: this is
+						// what the world knows, and `render` is what turns it
+						// into something a GPU binds.
+						//
+						// The fields come from `scene::MakeDrawInstance`, which
+						// is the only place that list is written - the
+						// replicated collector fills the same row from a
+						// snapshot. Both components are required columns of
+						// *this* query, so the addresses are always good.
+						out[at + row] = engine::scene::MakeDrawInstance(
+							previous[row].Frame.NLerp(transforms[row].Frame, alpha),
+							bounds[row],
+							visuals[row],
+							&appearances[row],
+							&tags[row],
+							&locals[row],
+							limbs == nullptr ? nullptr : &limbs[row]
+						);
+					}
+				};
+
+				const size_t loose = store
+										 .Query<
+											 const Transform,
+											 const PreviousTransform,
+											 const Bounds,
+											 const Visual,
+											 const SurfaceAppearance,
+											 const Tags,
+											 const LocalTransparency>()
+										 .With<Rendered>()
+										 .Without<CharacterLimb>()
+										 .EachBatchParallel(
+											 [&write](
+												 size_t first,
+												 size_t rows,
+												 const Transform *transforms,
+												 const PreviousTransform *previous,
+												 const Bounds *bounds,
+												 const Visual *visuals,
+												 const SurfaceAppearance *appearances,
+												 const Tags *tags,
+												 const LocalTransparency *locals
+											 ) {
+												 write(
+													 0,
+													 first,
+													 rows,
+													 transforms,
+													 previous,
+													 bounds,
+													 visuals,
+													 appearances,
+													 tags,
+													 locals,
+													 nullptr
+												 );
+											 },
+											 DRAW_LIST_GRAIN
+										 );
+
+				// After the loose rows, so the two halves cannot overlap. Their
+				// order relative to each other is not a promise anything reads -
+				// `EachBatch` already says a batch boundary is not a unit
+				// anybody declared - and within each half it is as deterministic
+				// as it was.
+				const size_t rigged = store
+										  .Query<
+											  const Transform,
+											  const PreviousTransform,
+											  const Bounds,
+											  const Visual,
+											  const SurfaceAppearance,
+											  const Tags,
+											  const LocalTransparency,
+											  const CharacterLimb>()
+										  .With<Rendered>()
+										  .EachBatchParallel(
+											  [&write, loose](
+												  size_t first,
+												  size_t rows,
+												  const Transform *transforms,
+												  const PreviousTransform *previous,
+												  const Bounds *bounds,
+												  const Visual *visuals,
+												  const SurfaceAppearance *appearances,
+												  const Tags *tags,
+												  const LocalTransparency *locals,
+												  const CharacterLimb *limbs
+											  ) {
+												  write(
+													  loose,
+													  first,
+													  rows,
+													  transforms,
+													  previous,
+													  bounds,
+													  visuals,
+													  appearances,
+													  tags,
+													  locals,
+													  limbs
+												  );
+											  },
+											  DRAW_LIST_GRAIN
+										  );
+
+				written = loose + rigged;
 			}
 
 			{
@@ -1622,9 +1711,26 @@ namespace client {
 		});
 		scheduler.Add("sync-rendered", Phase::PreRender, SyncVisibility);
 		scheduler.Add("aim-surface-cameras", Phase::PreRender, AimSurfaces);
-		scheduler.Add("collect-instances", Phase::PreRender, CollectInstances);
+
+		// **Before the collection, and it was not.** Everything these two
+		// install in `PreRender` produces what the draw list is built *from*:
+		// `character.pose` puts a rig's limbs on its root, `resolve-attachments`
+		// puts an emitter where its part is, `camera-control` settles the eye
+		// the surfaces were just aimed at. A phase runs its systems in the order
+		// they were added, so with these registered after `collect-instances`
+		// every one of them was published a frame late - a character's limbs
+		// drawn where the root was last frame, which is the judder that reads as
+		// a rig lagging its own body.
+		//
+		// Three comments already asserted this order and none of them was true:
+		// the `PreRender` half of `resolve-attachments` says "first in this
+		// phase", `physics::RegisterCharacterSystems` says the pose runs before
+		// the draw list is built, and `camera-control` says `PlaceCamera` sees
+		// this frame's distance.
 		InstallEffects(store, scheduler, DEFAULT_PARTICLE_POOL);
 		InstallControls(store, scheduler);
+
+		scheduler.Add("collect-instances", Phase::PreRender, CollectInstances);
 		return true;
 	}
 
@@ -1841,14 +1947,20 @@ namespace client {
 		// drawn at all and `collect-instances` reads the `Visual` this writes,
 		// so a mirror aimed after collection would publish last frame's answer.
 		scheduler.Add("aim-surface-cameras", Phase::PreRender, AimSurfaces);
-		scheduler.Add("collect-instances", Phase::PreRender, CollectInstances);
 
 		// **The same three systems `BuildScriptedWorld` installs, from the same
 		// place.** This is the argument `aim-surface-cameras` already makes one
 		// line up, arriving again: the studio, `--game` and an imported world all
 		// come through here, and a world with emitters and no step is a world
 		// whose effects are authored, saved, loaded and then motionless.
+		//
+		// **And before the collection, for the reason `BuildScriptedWorld`
+		// gives at length**: what these install in `PreRender` is what the draw
+		// list is built from, and a phase runs its systems in the order they
+		// were added.
 		InstallEffects(store, scheduler, DEFAULT_PARTICLE_POOL);
 		InstallControls(store, scheduler);
+
+		scheduler.Add("collect-instances", Phase::PreRender, CollectInstances);
 	}
 }

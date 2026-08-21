@@ -163,7 +163,17 @@ namespace client {
 					// from the local collector that made these two drift.
 					drawList->Instances.push_back(
 						engine::scene::MakeDrawInstance(
-							interpolated.value_or(transform.Frame), bounds, visual, appearance, tags, local
+							interpolated.value_or(transform.Frame),
+							bounds,
+							visual,
+							appearance,
+							tags,
+							local,
+							// Which rig this row belongs to, so a portal cuts a
+							// replicated character in one piece. Optional like
+							// the two above it, and for the same reason: most
+							// rows are not a limb of anything.
+							store.Get<engine::scene::CharacterLimb>(entity)
 						)
 					);
 				}

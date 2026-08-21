@@ -371,14 +371,48 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] change Terrain demo to be procedural infinite generation, also spawn character on top of terrain
 - [_] optimise Authority::DetectRows and missing gap post Authority::Publish. ReplicationStress in release build.
 - [_] add a "bidirection" bool mode for portals, when enabled, you can enter from both sides, when disabled, you can only enter from entry side
-- [_] when character sits in middle of portal, teleporting between both sides
-- [_] character physics bugs and movement in weird directions and stuff.
-      **Partly.** The same overwrite is behind it and the clip above fixes the
-      walking-into-things half. What is not addressed is direction: a walk
-      intent is world-space and nothing turns it, which is the portal item
-      below. Reopen with a specific case if it still misbehaves on flat ground.
-- [_] check character physics with portals, i think normal objects are fine but the character
-- [_] when character sits in portal, character split in half
+- [x] when character sits in middle of portal, teleporting between both sides.
+      Two defects, one each. **The crossing had no hysteresis of any kind**:
+      `CrossPortals` maps the previous frame through the seam for the renderer's
+      benefit, and `SeamMapping` carries a pane's front hemisphere to the far
+      pane's *back* one - so the mapped `was` is behind the far plane by
+      construction, the next tick's segment straddles it, and the body crosses
+      straight back, forever. The map now clamps that frame to the side it is
+      leaving from first, along the normal only, so the tick's sideways motion
+      is kept and the renderer still draws a body emerging from the pane. The
+      other half is the walk intent below. Measured on
+      `scratchpad/CharPortalPing2.luau`: a three-tick ping-pong that ran to the
+      end of every run became one crossing at t=54 and a body standing still in
+      the far room for the remaining twenty-six ticks.
+- [x] character physics bugs and movement in weird directions and stuff. The
+      clip above fixed walking into things; this fixed direction.
+- [x] check character physics with portals - normal objects are fine and the
+      character is not. **The reporter's instinct was exactly right and the
+      reason is one line.** `CrossPortals` maps a body's velocity through the
+      seam, and for a crate that carry is what walks it out of the far pane. For
+      a character it survives zero ticks: `StepCharacters` reassigns `Linear.X`
+      and `Linear.Z` from `Humanoid::MoveDirection`, which is **world-space and
+      mapped by nothing**. `PortalTransit::Turn` is written on every crossing
+      and its only consumer turns the *viewer's* camera, which on a
+      server-simulated character is a different machine. The intent now turns
+      with the body, gathered inside the walk and applied after it like every
+      other cross-entity write in that pass. `Rotate` and not `Carry`: a walk
+      direction is a unit vector, and a shrinking pair would otherwise hand the
+      controller an intent longer than one and make the character sprint.
+- [x] when character sits in portal, character split in half. Whether a row may
+      be cut by a hole is "does it fit the aperture", and **a character is a
+      dozen drawn rows**: standing in an opening its torso is comfortably inside
+      the rectangle and its feet sit on the bottom edge, where the box
+      overhangs. Asked per row that is yes for the torso and no for the feet,
+      and a row that answers no is drawn *whole* rather than cut - so the body
+      is clipped at the plane from the waist up and pushed through the wall from
+      the ankles down. A drawn row now carries the rig it belongs to and the
+      question is asked once per rig. **Any row, not every row**: the union of a
+      rig's boxes is bigger than all of them, so a rule stated against it
+      refuses the whole character the moment one toe crosses the rim, which ends
+      the split by drawing nothing at all. The rule itself is unchanged, which
+      is what keeps refusing the room-sized slab it exists for. Four cases in
+      `engine.scene.surfacecameras`, two of which fail without the fix.
 - [x] add dev and release builds to the github release. Two archives per
       platform per version rather than two release pages: the shipped one from
       `release` (-O3, no heap profiler) and `atomic-<version>-<platform>-dev`
