@@ -415,8 +415,37 @@ namespace engine::ecs {
 			return;
 		}
 
+		// **The walk is bounded, and the bound is not paranoia.** A sibling list
+		// is a linked list of entity handles, and a `NextSibling` that points
+		// back into the list is a walk that never ends. `DestroyInstance` and
+		// `DetachFromTree` both collect what this hands them into a vector
+		// first, so the symptom is not a hang: it is a vector that doubles until
+		// the allocator refuses, which was measured at a single sixteen-gigabyte
+		// request and `std::bad_alloc` out of a studio Play session.
+		//
+		// A list cannot be longer than the entities that could be in it, so
+		// anything past that is a cycle rather than a long list. The ceiling is
+		// recomputed per call because the directory grows.
+		const size_t ceiling = state.Directory.Capacity() + state.Directory.PredictedCapacity() + 1;
+		size_t stepped = 0;
+
 		Entity child = node->FirstChild;
 		while (child != NULL_ENTITY) {
+			if (++stepped > ceiling) {
+				// Loud, because the tree is corrupt and every later walk of it
+				// is wrong in a way that will not name this moment. The two
+				// handles are what a reader needs: the parent whose list loops,
+				// and the child it came back round to.
+				ENGINE_ERROR(
+					"ecs: the children of {} form a cycle - the walk returned to {} after {} steps. "
+					"The list is truncated here so the caller does not collect it forever.",
+					instance.Id,
+					child.Id,
+					stepped - 1
+				);
+				return;
+			}
+
 			// Read before the body runs, so a body that reparents or destroys
 			// the child it was handed does not lose its place in the list.
 			const Hierarchy *link = NodeOf(state, child);
