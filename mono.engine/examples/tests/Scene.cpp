@@ -1127,7 +1127,11 @@ namespace {
 
 		store.Each<const engine::scene::EditableMesh>([&](Entity, const engine::scene::EditableMesh &mesh) {
 			for (const engine::core::Vector3 &at : mesh.Positions) {
-				points.push_back({at.X, at.Y, at.Z});
+				// Doubly braced for `render/MeshTable.cpp`'s reason: a single
+				// pair needs brace elision that MSVC does not do here. This one
+				// is in a test, so no release build has ever compiled it and
+				// only a Windows `dev` build would have found it.
+				points.push_back({{at.X, at.Y, at.Z}});
 			}
 		});
 

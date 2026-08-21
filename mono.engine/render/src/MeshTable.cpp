@@ -272,12 +272,18 @@ namespace engine::render {
 
 			// Intern asset names at the renderer boundary.
 			entry.Textures.push_back(submesh.Texture.empty() ? core::Name() : core::Name(submesh.Texture));
-			entry.Colours.push_back({
+			// **Two pairs of braces, and the inner one is not optional.** The
+			// outer initialises the `std::array` and the inner its one member,
+			// the C array inside it. A single pair relies on brace elision in a
+			// *copy*-list-initialisation, which GCC and Clang accept and MSVC
+			// refuses outright - `error C2665: no overloaded function could
+			// convert all the argument types`, on a line that reads correctly.
+			entry.Colours.push_back({{
 				submesh.BaseColour[0],
 				submesh.BaseColour[1],
 				submesh.BaseColour[2],
 				submesh.BaseColour[3],
-			});
+			}});
 		}
 
 		std::copy(
