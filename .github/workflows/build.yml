@@ -136,6 +136,15 @@ jobs:
       # SDL picks its backends at configure time from what it finds. A runner
       # without these produces a client that builds and then opens no window,
       # which is a failure a long way from its cause.
+      #
+      # **Nine X11 components are a hard error rather than a missing backend**,
+      # and `sdlchecks.cmake` calls `SDL_missing_dependency` for each: XCURSOR,
+      # XDBE, XINPUT, XFIXES, XSYNC, XRANDR, XSCRNSAVER, XSHAPE and XTEST. Every
+      # one but the last is covered by a package already listed here - Xdbe,
+      # XSync and XShape all live in libxext - so `libxtst-dev` is the only name
+      # that has to appear for its own sake, and without it the configure stops
+      # at "Couldn't find dependency package for XTEST" after a hundred
+      # successful feature checks.
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
@@ -143,7 +152,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             ninja-build \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
-            libxfixes-dev libxss-dev libxkbcommon-dev \
+            libxfixes-dev libxss-dev libxkbcommon-dev libxtst-dev \
             libwayland-dev wayland-protocols libdecor-0-dev \
             libasound2-dev libpulse-dev libudev-dev libdbus-1-dev libibus-1.0-dev
 
