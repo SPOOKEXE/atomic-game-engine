@@ -1,11 +1,14 @@
+#include <engine/core/FrameGraph.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/net/Packet.hpp>
+#include <engine/parallel/Jobs.hpp>
 #include <engine/replication/Authority.hpp>
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -486,7 +489,84 @@ namespace engine::replication {
 		}
 	}
 
+	// Signs one slot: hashes its gathered runs, merges against last tick, and
+	// records what moved.
+	//
+	// **Touches nothing outside the signature it is given**, which is what makes
+	// it safe to run a dozen of these at once. It reads the store's columns
+	// through the pointers `Resign`'s first pass collected and writes only into
+	// this slot.
+	void Authority::SignSlot(Signature &signature) {
+		const auto began = std::chrono::steady_clock::now();
+
+		signature.Hashed.clear();
+		for (const Signature::Run &run : signature.Runs) {
+			for (size_t row = 0; row < run.Rows; row++) {
+				signature.Hashed.emplace_back(
+					run.Entities[row].Id, HashBytes(run.Values + row * signature.Stride, signature.Stride)
+				);
+			}
+		}
+
+		// `EachRuns` visits table by table, not id order, and the merge below
+		// needs id order to walk `signature.Hashes` alongside it.
+		//
+		// On the entity id alone rather than on the whole pair. Ids are unique
+		// within this list, so the hash beside one is never reached as a
+		// tie-break - and the default comparison for a pair loads and compares
+		// it anyway, on every comparison of the sort.
+		//
+		// **Tested for order before being put in it, because most ticks are
+		// already in order.** A table holds its rows in the order the entities
+		// arrived and tables are visited in id order, so a scene that has not
+		// created or destroyed anything since it was built hands this back
+		// ascending - and a sort would spend a few thousand comparisons
+		// discovering that. The test is one linear pass with no swaps and no
+		// recursion; a world that has churned pays it on top of a sort it was
+		// paying anyway.
+		const auto byId = [](const std::pair<uint64_t, uint64_t> &left,
+							 const std::pair<uint64_t, uint64_t> &right) { return left.first < right.first; };
+		if (!std::is_sorted(signature.Hashed.begin(), signature.Hashed.end(), byId)) {
+			std::sort(signature.Hashed.begin(), signature.Hashed.end(), byId);
+		}
+
+		// A merge against `Hashed`, which is now sorted the same way
+		// `signature.Hashes` already is. `previous` only ever moves forward, so
+		// an entity the candidate set skipped past - it departed since last tick
+		// - is left behind rather than copied into `Next`, which is what used to
+		// need a second pass over the whole map to find.
+		signature.Next.clear();
+		signature.Next.reserve(signature.Hashed.size());
+		size_t previous = 0;
+		for (const auto &[id64, hash] : signature.Hashed) {
+			while (previous < signature.Hashes.size() && signature.Hashes[previous].first < id64) {
+				previous++;
+			}
+
+			const bool known = previous < signature.Hashes.size() && signature.Hashes[previous].first == id64;
+			if (!known || signature.Hashes[previous].second != hash) {
+				signature.Changed.push_back(id64);
+			}
+			signature.Next.emplace_back(id64, hash);
+		}
+		signature.Hashes.swap(signature.Next);
+
+		signature.Milliseconds = static_cast<float>(
+			std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count()
+		);
+	}
+
 	void Authority::Resign(ecs::Store &store) {
+		// --- what to sign, on the thread that owns the store -----------------
+		//
+		// `Store::EachRuns` walks the archetype tables and may only be called by
+		// the owning thread, so this pass collects the column blocks and the
+		// next one does the work. Gathering is a handful of table lookups a
+		// slot; signing is every carrier of every signed component, which at
+		// twelve thousand parts was measured as a dozen even costs of about
+		// 0.3 ms and most of `Authority::Publish`.
+		ResignWork.clear();
+
 		for (size_t slot = 0; slot < Components.size(); slot++) {
 			if (Detection[slot] != ChangeDetection::Signature) {
 				continue;
@@ -494,6 +574,7 @@ namespace engine::replication {
 
 			Signature &signature = Signatures[slot];
 			signature.Changed.clear();
+			signature.Runs.clear();
 
 			// Resolved by `Survey` a moment ago rather than looked up again
 			// here: `Components::Find` takes the registry's process-wide mutex,
@@ -517,87 +598,55 @@ namespace engine::replication {
 				continue;
 			}
 
-			// One span per component, not one for the whole loop - `Resign`
-			// used to be a single frame no capture could see inside: twenty
-			// components signed for one 39%-of-the-tick line gives a reader no
-			// way to tell whether that is one expensive component or several
-			// cheap ones. The name is stable for the life of the run, so this
-			// is the `_STABLE` form rather than the copying one.
-			ENGINE_PROFILE_DYNAMIC_STABLE(
-				"Authority::Resign::slot", Components[slot].Text(), core::ProfileCategory::Network
-			);
-
-			// This slot's actual carriers, hashed straight out of the column -
-			// not `Bearing` filtered down to them and not read back through
-			// `GetComponent`. `Bearing` is the union of every replicated
-			// component's carriers, and a scene usually declares far more
-			// replicated component types than any one entity has: walking
-			// `Bearing` here would spend a miss on every entity that does not
-			// happen to carry *this* component. `EachRuns` instead visits only
-			// the archetype tables that do, chunk by chunk, and hands back the
-			// raw column alongside the entities - so a component nothing in the
-			// scene carries costs one table lookup and touches no entity at
+			// This slot's actual carriers - not `Bearing` filtered down to them
+			// and not read back through `GetComponent`. `Bearing` is the union
+			// of every replicated component's carriers, and a scene usually
+			// declares far more replicated component types than any one entity
+			// has: walking `Bearing` here would spend a miss on every entity
+			// that does not happen to carry *this* component. `EachRuns` visits
+			// only the archetype tables that do, chunk by chunk, and hands back
+			// the raw column alongside the entities - so a component nothing in
+			// the scene carries costs one table lookup and touches no entity at
 			// all, and hashing a populated one reads contiguous memory instead
 			// of paying a directory lookup and an archetype fetch per entity.
-			ResignHashed.clear();
-			store.EachRuns(id, [this, &descriptor](const ecs::Entity *entities, void *values, size_t rows) {
-				const auto *bytes = static_cast<const std::byte *>(values);
-				for (size_t row = 0; row < rows; row++) {
-					ResignHashed.emplace_back(
-						entities[row].Id, HashBytes(bytes + row * descriptor.Size, descriptor.Size)
-					);
+			signature.Stride = descriptor.Size;
+			store.EachRuns(id, [&signature](const ecs::Entity *entities, void *values, size_t rows) {
+				signature.Runs.push_back(
+					Signature::Run{entities, static_cast<const std::byte *>(values), rows}
+				);
+			});
+
+			ResignWork.push_back(slot);
+		}
+
+		// --- the signing, spread across whatever workers there are -----------
+		//
+		// A grain of one because a slot is the unit: they are within a factor of
+		// two of each other in cost, and a component nothing carries returns
+		// immediately. `Jobs::For` runs the whole span inline when it is nested
+		// inside another batch or when serial compute is forced, so this is the
+		// same work in the same order on a machine that cannot spread it.
+		{
+			ENGINE_PROFILE_CAT("Authority::Resign::sign", core::ProfileCategory::Network);
+			parallel::Jobs::For(ResignWork.size(), 1, [this](size_t begin, size_t end) {
+				for (size_t at = begin; at < end; at++) {
+					SignSlot(Signatures[ResignWork[at]]);
 				}
 			});
-			// `EachRuns` visits table by table, not id order, and the merge
-			// below needs id order to walk `signature.Hashes` alongside it.
-			//
-			// On the entity id alone rather than on the whole pair. Ids are
-			// unique within this list, so the hash beside one is never reached
-			// as a tie-break - and the default comparison for a pair loads and
-			// compares it anyway, on every comparison of the sort.
-			//
-			// **Tested for order before being put in it, because most ticks are
-			// already in order.** A table holds its rows in the order the
-			// entities arrived and tables are visited in id order, so a scene
-			// that has not created or destroyed anything since it was built
-			// hands this back ascending - and a sort would spend a few thousand
-			// comparisons discovering that. The test is one linear pass with no
-			// swaps and no recursion; a world that has churned pays it on top of
-			// a sort it was paying anyway.
-			const auto byId = [](const std::pair<uint64_t, uint64_t> &left,
-								 const std::pair<uint64_t, uint64_t> &right) {
-				return left.first < right.first;
-			};
-			if (!std::is_sorted(ResignHashed.begin(), ResignHashed.end(), byId)) {
-				std::sort(ResignHashed.begin(), ResignHashed.end(), byId);
-			}
+		}
 
-			// A merge against `ResignHashed`, which is now sorted the same way
-			// `signature.Hashes` already is. `previous` only ever moves forward,
-			// so an entity the candidate set skipped past - it departed since
-			// last tick - is left behind rather than copied into `next`, which
-			// is what used to need a second pass over the whole map to find.
-			// **A member rather than a local, for the reason `ResignHashed` is
-			// one.** This is built and swapped in once per signed slot per tick,
-			// so a local was an allocation and a free per component per tick for
-			// a vector whose size barely moves. The swap leaves last tick's
-			// buffer here, which the next slot clears and fills again.
-			ResignNext.clear();
-			ResignNext.reserve(ResignHashed.size());
-			size_t previous = 0;
-			for (const auto &[id64, hash] : ResignHashed) {
-				while (previous < signature.Hashes.size() && signature.Hashes[previous].first < id64) {
-					previous++;
-				}
-
-				const bool known =
-					previous < signature.Hashes.size() && signature.Hashes[previous].first == id64;
-				if (!known || signature.Hashes[previous].second != hash) {
-					signature.Changed.push_back(id64);
-				}
-				ResignNext.emplace_back(id64, hash);
-			}
-			signature.Hashes.swap(ResignNext);
+		// --- the per-component rows, put back on the graph -------------------
+		//
+		// A span opened by a worker is dropped, so the breakdown is reported
+		// here instead, from the timings the workers took. Same rows, same
+		// names, same category as when this was a loop with a span in it.
+		for (const size_t slot : ResignWork) {
+			core::FrameGraph::ReportNamed(
+				"Authority::Resign::slot",
+				Components[slot].Text(),
+				core::ProfileCategory::Network,
+				Signatures[slot].Milliseconds
+			);
 		}
 	}
 
