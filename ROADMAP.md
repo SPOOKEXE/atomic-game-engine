@@ -216,9 +216,32 @@ The milestone headings below are development labels. Not in line with project ve
 
 - [_] fix viewport image size stretch fix
 - [_] in MipProbe scene, when you fly camera around the mesh is being projected incorrectly (windows) [RELATED TO VIEWPORT IMAGE SIZE FIX, VERIFIED ISSUE ON LINUX]
+      **Not the projection, and that is checked rather than assumed.** MipProbe
+      was captured headless at 1600x400, 800x800 and 400x1600 and the red box
+      measures 9.50% of width at 1:1 and 2.12% at 4:1, with its height fraction
+      unchanged at 16-17%. That is the 4x narrowing a correctly widened
+      horizontal field of view gives, so the client's static projection is
+      right. What is left to look at is the studio path: `ActiveCamera` is one
+      resource per *world* and `SetViewportSize` writes it per *panel*
+      (`Editor.cpp:1844`), while the studio round-robins one panel per frame -
+      so two views of one scene at different sizes take turns owning the aspect
+      that culling and mirror fitting run against. `Renderer::Render` projects
+      from `SceneTarget` and is unaffected, which is why a still picture cannot
+      show it and flying the camera can.
 - [_] when a viewport in a side-by-side is closed, the open one should fill
-- [_] make the ground grid static
-- [_] make the ground grid fade off in the distance
+- [x] make the ground grid static. The line *positions* were already pinned by
+      `SnapDown`; what slid was which lines were drawn heavy. `major` came from
+      the loop index, and the loop runs outward from a camera-snapped origin, so
+      the heavy lines moved one cell every time the camera crossed one.
+      `IsMajorLine` now decides from the world coordinate. Measured over 20 m of
+      camera travel the old rule produced five different sets of heavy world
+      lines and the new one produces a single set.
+- [x] make the ground grid fade off in the distance. The fade existed and could
+      not work: `ImDrawList::AddLine` takes one colour, so a line had one alpha
+      along its whole length and the grid stopped at a hard rectangle whatever
+      that alpha was. Each line is now drawn in eight pieces, each faded by the
+      radial distance from the camera to its own middle rather than by how far
+      sideways the line sat. Roughly 1,300 segments a panel rather than 13,000.
 - [_] input textbox not working
 - [_] allow creating worlds even when scene is running in studio
 - [_] when character sits in middle of portal, teleporting between both sides
@@ -226,7 +249,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] when play is pressed, ensure a viewport is opened
 - [_] NonEuclidean.luau spawn is wrong spot
 - [_] NonEuclidean.luau has multiple overlapping things
-- [_] selection boxes are misaligned (windows)
+- [_] selection boxes are misaligned
 - [_] when pressing CTRL and scaling a part, scale both sides at same time
 - [_] add a (ACTIVE) scene_name
 - [_] some studio ui stretches - more vscode-ey
@@ -250,6 +273,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] plan the entire rendering system to a visual compositor system like Unity. https://docs.unity3d.com/Manual/scriptable-render-pipeline-introduction.html https://docs.unity3d.com/Packages/com.unity.visual-compositor@0.27/manual/nodes.html
 - [_] viewport indictator direction gizmo (select and lock to certain directions)
 - [_] 3d cursor and camera orbit options under gizmo
+- [_] ensure full parallel/vectorised (i.e. get all active scenes => build entity list => update gpu resident => batch render)
 
 ### v0.22
 

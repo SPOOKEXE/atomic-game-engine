@@ -57,10 +57,45 @@ namespace studio {
 		constexpr float GRID_THICKNESS = 1.0f;
 		constexpr float AXIS_THICKNESS = 1.6f;
 
+		// How many pieces each grid line is drawn in.
+		//
+		// **A line has one colour, which is why this number exists.**
+		// `ImDrawList::AddLine` takes a single `ImU32`, so a line drawn whole
+		// has one alpha along its entire length - and a grid of those ends at a
+		// hard rectangle wherever the lines stop, whatever the alpha. Cutting
+		// each line into pieces and fading each piece by its own distance is
+		// what turns that rectangle into a horizon.
+		//
+		// Eight rather than one per cell: the fade is a smooth ramp, so the eye
+		// cannot see the joins, and eighty-one lines at eight pieces is about
+		// thirteen hundred segments a panel rather than thirteen thousand.
+		constexpr int GRID_PIECES = 8;
+
 		// Snaps a coordinate down to the grid, so the lines stay put in the
 		// world while the camera moves rather than sliding along with it.
 		float SnapDown(float value, float step) {
 			return std::floor(value / step) * step;
+		}
+
+		// Whether a line at this world coordinate is one of the heavy ones.
+		//
+		// **From the world coordinate and never from the loop index**, which is
+		// the bug this replaced. The loop runs outward from a camera-snapped
+		// origin, so `index % GRID_MAJOR` marked a different set of world lines
+		// every time the camera crossed a cell: the heavy lines jumped a cell
+		// sideways as you flew, which reads as the whole grid sliding even
+		// though every thin line was standing still.
+		//
+		// `std::lround` rather than a cast, because the coordinate is a
+		// multiple of `GRID_STEP` computed in floating point and truncating
+		// `-4.0f/4.0f` that arrives as `-0.9999999` gives 0 rather than -1 -
+		// which would put two heavy lines side by side at the origin.
+		//
+		// @param coordinate A world X or Z that a grid line sits on.
+		// @return `true` when the line should be drawn heavy.
+		bool IsMajorLine(float coordinate) {
+			const long cell = std::lround(coordinate / GRID_STEP);
+			return cell % GRID_MAJOR == 0;
 		}
 
 		// A colour that fades with distance from the camera, so the grid has a
@@ -68,6 +103,33 @@ namespace studio {
 		ImU32 GridColour(float fade, bool major) {
 			const float alpha = std::clamp(fade, 0.0f, 1.0f) * (major ? 0.5f : 0.25f);
 			return ImGui::GetColorU32(ImVec4(0.6f, 0.65f, 0.75f, alpha));
+		}
+
+		// How visible a piece of grid is, from where its middle is.
+		//
+		// **Radial distance rather than distance along one axis**, which is the
+		// other half of why the grid ended in a rectangle: fading a whole line
+		// by how far sideways it sat meant the piece directly in front of the
+		// camera and the piece a hundred and sixty metres away were drawn at the
+		// same alpha.
+		//
+		// Squared distance compared against a squared reach, so this costs no
+		// square root on a path that runs a few thousand times a frame. The
+		// ramp is the square of the linear one, which falls off faster near the
+		// edge and is what makes the last cells disappear rather than stop.
+		//
+		// @param dx    Metres from the camera along X.
+		// @param dz    Metres from the camera along Z.
+		// @param reach Metres at which the grid has faded out entirely.
+		// @return A fade in [0, 1].
+		float GridFade(float dx, float dz, float reach) {
+			const float distanceSquared = dx * dx + dz * dz;
+			const float reachSquared = reach * reach;
+			if (distanceSquared >= reachSquared) {
+				return 0.0f;
+			}
+			const float linear = 1.0f - distanceSquared / reachSquared;
+			return linear * linear;
 		}
 	}
 
@@ -345,16 +407,39 @@ namespace studio {
 				const float originZ = SnapDown(eye.Z, GRID_STEP);
 				const float reach = GRID_RADIUS * GRID_STEP;
 
+				// One line, cut into pieces, each faded by where its own middle
+				// is. See `GRID_PIECES` and `GridFade` for why a whole line
+				// cannot do this.
+				//
+				// `along` is the axis the line runs down and `across` is the
+				// coordinate that picks the line, so the same lambda draws both
+				// directions and there is one copy of the fading to be wrong in.
+				const auto fadedLine = [&](float across, bool alongZ) {
+					const bool major = IsMajorLine(across);
+					const float centre = alongZ ? originZ : originX;
+					const float span = (2.0f * reach) / static_cast<float>(GRID_PIECES);
+
+					for (int piece = 0; piece < GRID_PIECES; piece++) {
+						const float start = centre - reach + span * static_cast<float>(piece);
+						const float end = start + span;
+						const float middle = (start + end) * 0.5f;
+
+						const float dx = alongZ ? across - eye.X : middle - eye.X;
+						const float dz = alongZ ? middle - eye.Z : across - eye.Z;
+						const float fade = GridFade(dx, dz, reach);
+						if (fade <= 0.0f) {
+							continue;
+						}
+
+						const Vector3 from =
+							alongZ ? Vector3{across, 0.0f, start} : Vector3{start, 0.0f, across};
+						const Vector3 to = alongZ ? Vector3{across, 0.0f, end} : Vector3{end, 0.0f, across};
+						segment(from, to, GridColour(fade, major), GRID_THICKNESS);
+					}
+				};
+
 				for (int step = -GRID_RADIUS; step <= GRID_RADIUS; step++) {
 					const float offset = static_cast<float>(step) * GRID_STEP;
-
-					// Fade with distance from the camera so the grid ends in a
-					// horizon rather than a rectangle.
-					const float fade =
-						1.0f - std::abs(static_cast<float>(step)) / static_cast<float>(GRID_RADIUS);
-					const bool major = step % GRID_MAJOR == 0;
-					const ImU32 colour = GridColour(fade, major);
-
 					const float x = originX + offset;
 					const float z = originZ + offset;
 
@@ -363,20 +448,10 @@ namespace studio {
 					// leaves a grey line showing through a coloured one, which
 					// reads as the axis being the wrong colour.
 					if (std::abs(x) > 0.001f) {
-						segment(
-							Vector3{x, 0.0f, originZ - reach},
-							Vector3{x, 0.0f, originZ + reach},
-							colour,
-							GRID_THICKNESS
-						);
+						fadedLine(x, true);
 					}
 					if (std::abs(z) > 0.001f) {
-						segment(
-							Vector3{originX - reach, 0.0f, z},
-							Vector3{originX + reach, 0.0f, z},
-							colour,
-							GRID_THICKNESS
-						);
+						fadedLine(z, false);
 					}
 				}
 
