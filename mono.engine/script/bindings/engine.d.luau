@@ -1341,6 +1341,7 @@ end
 
 declare extern type SpawnLocation extends Part with
 	Enabled: boolean
+	Forced: boolean
 	Neutral: boolean
 	TeamColor: Color3
 end

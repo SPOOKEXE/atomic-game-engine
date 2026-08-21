@@ -738,9 +738,10 @@ namespace engine::scene {
 		// not replay - the same rule `UpdateRespawns` keeps about its deadline.
 		ecs::Entity own = ecs::NULL_ENTITY;
 		ecs::Entity neutral = ecs::NULL_ENTITY;
+		ecs::Entity forced = ecs::NULL_ENTITY;
 
 		store.EachDescendant(workspace, [&](ecs::Entity candidate) {
-			if (own != ecs::NULL_ENTITY || !IsSpawn(store, candidate)) {
+			if (forced != ecs::NULL_ENTITY || !IsSpawn(store, candidate)) {
 				return;
 			}
 
@@ -752,6 +753,22 @@ namespace engine::scene {
 			// this class would have had" rather than "not a spawn".
 			const SpawnLocation *pad = store.Get<SpawnLocation>(candidate);
 			if (pad != nullptr && !pad->Enabled) {
+				return;
+			}
+
+			// **Before team matching and before tree order.** A forced pad is
+			// the scene saying "here", and the rules below are the ones it is
+			// overriding - see `SpawnLocation::Forced`. Still after `Enabled`,
+			// which is checked above, so turning one off gives the ordinary
+			// rules back.
+			if (pad != nullptr && pad->Forced) {
+				forced = candidate;
+				return;
+			}
+
+			if (own != ecs::NULL_ENTITY) {
+				// A team pad is already settled; the walk continues only because
+				// a forced pad later in the tree still outranks it.
 				return;
 			}
 
@@ -769,7 +786,9 @@ namespace engine::scene {
 			}
 		});
 
-		const ecs::Entity spawn = own != ecs::NULL_ENTITY ? own : neutral;
+		const ecs::Entity spawn = forced != ecs::NULL_ENTITY ? forced
+								  : own != ecs::NULL_ENTITY	 ? own
+															 : neutral;
 		if (spawn == ecs::NULL_ENTITY) {
 			return {};
 		}

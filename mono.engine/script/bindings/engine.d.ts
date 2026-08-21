@@ -1145,6 +1145,7 @@ declare interface Part extends BasePart {
 
 declare interface SpawnLocation extends Part {
 	Enabled: boolean;
+	Forced: boolean;
 	Neutral: boolean;
 	TeamColor: Color3;
 }

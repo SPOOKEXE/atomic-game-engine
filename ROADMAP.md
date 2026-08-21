@@ -251,7 +251,12 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] when you upload a asset in studio, it doesn't process it in studio for local store.
 - [_] check cdn processes obj files (dropped in studio)
 - [_] add dev build and release builds to github release (two separate tags Release and Dev -O1 but keep things like heap profiler), then you have per-version ones as well
-- [_] ground grid should expand way further
+- [x] ground grid should expand way further. 40 cells was 160 studs, which ends
+      well inside a baseplate. 120 cells is 480. Tripling the radius does not
+      triple the cost: past the old 40-cell band only the heavy lines continue,
+      one in five, so the far two thirds costs a fifth of what it would - 1808
+      segments against 1296 for three times the reach, and nothing within 160
+      studs looks any different.
 - [_] in "Start" with 4 clients running, tons of network activity for no character movement, quickhash / caching / signature not working properly or other bug
 - [_] in flamegraph, simulation needs more granularity, HUGE chunk missing.
 - [_] in flamegraph, when average over 250ms is selected, the flamegraph bars can over-expand into other bars.
@@ -263,11 +268,22 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] when setting keybinds, disable input after keybind sets (it runs immediately after)
 - [_] keybinds do not set properly (changes other keybinds)
 - [_] add (selectable) text in the control (mcp) that tells you how to add as a mcp (and a section to tell models how to add it). add claude/codex/prompt tabs to hold these.
-- [_] add a spawn location that forces character to spawn at it (SpawnLocationComponent with a enabled flag too).
+- [x] add a spawn location that forces character to spawn at it.
+      `SpawnLocation::Forced`, checked before team matching and before tree
+      order, and still subject to the `Enabled` flag that was already there so
+      turning one off gives the ordinary rules back. Taken from the struct's
+      explicit `Reserved` padding, so the row is the same size and every pad
+      written before this reads back with it false. Bound as a script property.
 - [_] change Terrain demo to be procedural infinite generation, also spawn character on top of terrain
 - [_] optimise Authority::DetectRows and missing gap post Authority::Publish. ReplicationStress in release build.
 - [_] add a "bidirection" bool mode for portals, when enabled, you can enter from both sides, when disabled, you can only enter from entry side
-- [_] add a "Play Here" button (spawns character at camera position)
+- [x] add a "Play Here" button. Beside Play in the transport. **A forced pad
+      rather than a teleport after the fact:** a character is built by
+      `LoadCharacter` from whatever `FindSpawn` answers, so moving it afterwards
+      is a visible frame in the wrong place plus a race with the joining client.
+      The pad is one reused instance named `PlayHere` and is `NotArchivable`, so
+      pressing it twenty times leaves one pad and a saved `.agame` never carries
+      somebody's old one.
 - [x] input textbox not working. `gui::Type` was called by `mono.client` and by
       nothing in `mono.studio`, so a `TextBox` in a studio viewport took focus
       from a click, showed a caret and then ignored the keyboard - the editor was
@@ -389,7 +405,7 @@ The milestone headings below are development labels. Not in line with project ve
       against - `AdornmentView.cpp:18` states exactly that - so it draws over
       geometry always, and a drag is simply when that gets noticed. Making it
       occlude means the grid becomes a depth-tested node in the render graph
-      rather than a draw list, which is real work and not a flag.
+      rather than a drawlist, which is real work and not a flag.
 
 ### v0.20
 

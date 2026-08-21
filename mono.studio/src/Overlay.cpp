@@ -48,7 +48,25 @@ namespace studio {
 		// origin.** A grid anchored at the origin disappears the moment
 		// somebody flies away from it, which is exactly when they most need to
 		// know which way is up.
-		constexpr int GRID_RADIUS = 40;
+		//
+		// **160 studs was not far enough to fly in.** At the old radius of 40
+		// the grid ended well inside a baseplate, so anything built at any scale
+		// stood on nothing. 120 cells is 480 studs, three times the reach.
+		constexpr int GRID_RADIUS = 120;
+
+		// Where the grid stops drawing every line and draws only the heavy ones.
+		//
+		// **Tripling the radius must not triple the segment count.** Every line
+		// is drawn in pieces so it can fade (see `GRID_PIECES`), so the cost is
+		// lines times pieces and a naive 120-cell grid is three times the work
+		// for a region that is mostly faded out anyway. Past this many cells
+		// only the majors continue, which is one line in five - so the far half
+		// of the grid costs a fifth of what it would, and what it draws is the
+		// part still readable at that distance.
+		//
+		// The near band keeps the old radius exactly, so nothing within 160
+		// studs looks any different from before.
+		constexpr int GRID_DENSE = 40;
 
 		// Metres per cell, and per heavy cell.
 		constexpr float GRID_STEP = 4.0f;
@@ -449,10 +467,16 @@ namespace studio {
 					// that would sit under them are skipped.** Drawing both
 					// leaves a grey line showing through a coloured one, which
 					// reads as the axis being the wrong colour.
-					if (std::abs(x) > 0.001f) {
+					// Past the dense band, only the heavy lines continue. See
+					// `GRID_DENSE`.
+					if (std::abs(step) > GRID_DENSE && !IsMajorLine(x) && !IsMajorLine(z)) {
+						continue;
+					}
+
+					if (std::abs(x) > 0.001f && (std::abs(step) <= GRID_DENSE || IsMajorLine(x))) {
 						fadedLine(x, true);
 					}
-					if (std::abs(z) > 0.001f) {
+					if (std::abs(z) > 0.001f && (std::abs(step) <= GRID_DENSE || IsMajorLine(z))) {
 						fadedLine(z, false);
 					}
 				}

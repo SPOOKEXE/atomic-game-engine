@@ -131,6 +131,7 @@
 				{"name": "Density", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.PhysicsProperties"], "writes": ["scene.PhysicsProperties"]},
 				{"name": "Elasticity", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.PhysicsProperties"], "writes": ["scene.PhysicsProperties"]},
 				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.SpawnLocation"], "writes": ["scene.SpawnLocation"]},
+				{"name": "Forced", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.SpawnLocation"], "writes": ["scene.SpawnLocation"]},
 				{"name": "Friction", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.PhysicsProperties"], "writes": ["scene.PhysicsProperties"]},
 				{"name": "LinearDamping", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.RigidBody"], "writes": ["scene.RigidBody"]},
 				{"name": "LocalTransparency", "type": "float", "kind": "computed", "bytes": 4, "writable": false, "reads": ["scene.LocalTransparency"], "writes": []},

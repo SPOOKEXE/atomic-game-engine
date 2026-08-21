@@ -4544,6 +4544,23 @@ namespace studio {
 			return ViewportIdentityScratch.c_str();
 		}
 
+		// Starts Play with the character spawned where the focused viewport is
+		// looking.
+		//
+		// **A forced spawn pad rather than a teleport after the fact.** A
+		// character is built by `LoadCharacter` from whatever `FindSpawn`
+		// answers; moving it afterwards is a visible frame in the wrong place
+		// plus a race with the client that is joining. This puts the answer
+		// where `FindSpawn` will read it and then starts the run normally.
+		//
+		// The pad is one instance named `PlayHere`, reused rather than made
+		// afresh, so pressing this twenty times leaves one pad and not twenty -
+		// and it is `NotArchivable`, so it is a thing the editor put in the
+		// world rather than a thing the scene now contains.
+		//
+		// @param world The scene to start.
+		void PlayFromCamera(engine::world::WorldId world);
+
 		// Makes the editor hold `extras` panels beyond the main one.
 		//
 		// **One call for five containers, because they are one thing indexed

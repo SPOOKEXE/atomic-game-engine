@@ -1821,6 +1821,29 @@ namespace studio {
 			SetRunMode(scope, mode == RunMode::Play ? RunMode::Edit : RunMode::Play);
 		}
 		ImGui::SameLine();
+
+		// **Play, starting where you are looking rather than where the pad is.**
+		// Testing something built a long way from the spawn meant playing, then
+		// walking there, every time - or moving the pad, which is an edit to the
+		// scene for a decision that is not about the scene.
+		//
+		// **A forced pad rather than a teleport after the fact.** A character is
+		// built by `LoadCharacter` from whatever `FindSpawn` answers, and moving
+		// it afterwards is a frame of it standing somewhere else plus a race
+		// with the client that is joining. `SpawnLocation::Forced` is the scene
+		// saying "here", which is exactly what this button means, and it goes
+		// through the same door every other spawn does.
+		//
+		// Disabled while running, because it starts a run.
+		ImGui::BeginDisabled(running);
+		if (ImGui::Button("Play Here")) {
+			PlayFromCamera(scope);
+		}
+		ImGui::EndDisabled();
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Play, with the character spawned where this viewport is looking");
+		}
+		ImGui::SameLine();
 		if (RunButton("Run", mode == RunMode::Server, engine::ui::AccentColour())) {
 			SetRunMode(scope, mode == RunMode::Server ? RunMode::Edit : RunMode::Server);
 		}

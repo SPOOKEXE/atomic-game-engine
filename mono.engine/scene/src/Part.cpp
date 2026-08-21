@@ -2074,6 +2074,12 @@ namespace engine::scene {
 			ecs::Classes::Property<&SpawnLocation::Neutral>(spawnLocation, "Neutral");
 			ecs::Classes::Property<&SpawnLocation::Enabled>(spawnLocation, "Enabled");
 
+			// **Not a Roblox property, and named so it reads as one anyway.**
+			// Roblox has no way to say "spawn here specifically" - the closest
+			// is turning every other pad off - so this is an addition rather
+			// than a match. `SpawnLocation::Forced` carries the argument.
+			ecs::Classes::Property<&SpawnLocation::Forced>(spawnLocation, "Forced");
+
 			ecs::Classes::Computed(cameraClass, FieldOfViewProperty());
 			ecs::Classes::Property<&Camera::NearPlane>(cameraClass, "NearPlaneZ");
 			ecs::Classes::Property<&Camera::FarPlane>(cameraClass, "FarPlaneZ");

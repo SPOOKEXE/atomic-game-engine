@@ -4,6 +4,7 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/game/CollisionContent.hpp>
 #include <engine/gui/Registration.hpp>
@@ -24,6 +25,7 @@
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/Teams.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/SourceCache.hpp>
@@ -3385,6 +3387,69 @@ namespace studio {
 				id, wanted ? engine::world::WorldState::Active : engine::world::WorldState::Suspended
 			);
 		}
+	}
+
+	void Editor::PlayFromCamera(WorldId world) {
+		if (Universe == nullptr || !world.IsValid() || IsRunning(world)) {
+			return;
+		}
+
+		// The eye of the panel the button was pressed in, which is what "here"
+		// means. The main viewport keeps its camera on the editor and the extras
+		// keep theirs on their own state, which `ExtraAt` is the split for.
+		const ViewportState *extra = ExtraAt(FocusedViewport);
+		const engine::core::CFrame eye = extra != nullptr ? extra->Frame : CameraFrame;
+
+		// **On the ground under the eye rather than at it.** A camera is flown
+		// and is usually well above head height; spawning a character at the
+		// lens drops it, which reads as the button missing. The pad sits at the
+		// eye's horizontal position, and `LoadCharacter` puts the body on top of
+		// the pad the way it does for any other spawn.
+		engine::core::CFrame place;
+		place.Position = engine::core::Vector3{eye.Position.X, eye.Position.Y, eye.Position.Z};
+
+		Universe->Enter(world, [&](Store &store) {
+			const Entity workspace = engine::scene::WorkspaceOf(store);
+			if (workspace == NULL_ENTITY) {
+				return;
+			}
+
+			// Reused rather than made afresh, so pressing this twenty times
+			// leaves one pad. Found by name under the workspace, which is where
+			// the last press put it.
+			static const Name padName("PlayHere");
+			Entity pad = NULL_ENTITY;
+			store.EachDescendant(workspace, [&](Entity candidate) {
+				if (pad == NULL_ENTITY && store.InstanceNameOf(candidate) == padName) {
+					pad = candidate;
+				}
+			});
+
+			if (pad == NULL_ENTITY) {
+				pad = store.CreateInstance(engine::scene::SpawnLocationClass(), "PlayHere");
+				if (pad == NULL_ENTITY) {
+					return;
+				}
+				store.SetParent(pad, workspace);
+
+				// **Not saved with the scene.** It is a thing the editor put in
+				// the world to answer one press, not a thing the author placed -
+				// and a `.agame` that came back with somebody's old Play Here
+				// pad in it would be this button editing the file.
+				store.Set(pad, engine::ecs::NotArchivable{});
+			}
+
+			store.Set(pad, engine::scene::Transform{place});
+
+			if (auto *spawn = store.GetMutable<engine::scene::SpawnLocation>(pad); spawn != nullptr) {
+				spawn->Enabled = true;
+				spawn->Neutral = true;
+				spawn->Forced = true;
+			}
+		});
+
+		SetRunMode(world, RunMode::Play);
+		Say("playing from the camera");
 	}
 
 	void Editor::SetRunMode(WorldId world, RunMode mode) {
