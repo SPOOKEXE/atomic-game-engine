@@ -894,7 +894,31 @@ namespace studio {
 				Dragging.GrabbedPoint = grabbedPoint;
 				Dragging.Centre = centre;
 				Dragging.Mode = mode;
-				Dragging.Sides = ScaleSides;
+
+				// **Ctrl scales from the centre, and it is a modifier rather
+				// than a second preference.** `ScaleSide` already carried
+				// `Both`, so symmetric scaling existed and the only way to reach
+				// it was to go and change a setting - which is the wrong shape
+				// for something wanted for one drag and not the next.
+				//
+				// `BothHalf` rather than `Both`, because that is the one whose
+				// *size* lands on the snap step: `Both` moves each face by the
+				// increment so the part grows by twice it, which makes a
+				// snapped drag produce sizes off the grid. `Config.hpp` states
+				// both, and this picks the one a person dragging with snap on
+				// means.
+				//
+				// **Inverts rather than sets**, so somebody who has made
+				// centre-scaling their default still has a modifier: it gives
+				// them the single face back.
+				//
+				// Read once, at the grab. A modifier sampled every frame would
+				// change what a drag means half way through it, and the
+				// increment already applied would have been applied the other
+				// way.
+				const bool centred = ScaleSides != ScaleSide::Side;
+				const bool wantsCentre = ImGui::GetIO().KeyCtrl ? !centred : centred;
+				Dragging.Sides = wantsCentre ? ScaleSide::BothHalf : ScaleSide::Side;
 				Dragging.Pivots = PivotEditing && mode != ToolMode::Scale;
 
 				Universe->Enter(world, [&](Store &store) {

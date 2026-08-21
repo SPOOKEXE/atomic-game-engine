@@ -3812,6 +3812,10 @@ namespace studio {
 			std::string Title;
 		};
 
+		// Where `ViewportIdentity` builds its answer. One buffer because the
+		// only callers use the result immediately.
+		std::string ViewportIdentityScratch;
+
 		// What one viewport panel handed the overlay pass this frame.
 		//
 		// **The overlay is deferred rather than drawn where the panel is, and
@@ -4477,6 +4481,67 @@ namespace studio {
 		//         an index that is not a panel.
 		const char *ViewportTitle(size_t index) const {
 			return index == 0 || index > Extras.size() ? "Viewport" : Extras[index - 1].Title.c_str();
+		}
+
+		// What a panel's tab reads, which is not its identity.
+		//
+		// **The scene it is showing, and which one is being edited.** With four
+		// viewports open the tabs said "Viewport", "Viewport 2", "Viewport 3",
+		// "Viewport 4" and nothing said which scene any of them held - so the
+		// only way to find the one you wanted was to click each in turn.
+		//
+		// **imgui's `###` is what makes this legal.** A window's identity is its
+		// title, which is why `ViewportState::Title` is minted once and never
+		// changed; everything before `###` is drawn and everything from it is
+		// hashed, so the text can change every frame while the window, its dock
+		// node and the saved layout stay the same panel.
+		//
+		// `ViewportTitle` remains the identity and is what `SetWindowFocus` and
+		// `FindWindowByName` must be given - `ImHashStr` restarts at `###`, so a
+		// lookup by the bare identity would hash to something else. Use
+		// `ViewportIdentity` for those.
+		//
+		// @param index 0 is the main viewport, 1..`Extras.size()` the others.
+		// @return A string to hand `ImGui::Begin`. Rebuilt per call.
+		std::string ViewportLabel(size_t index) {
+			const char *identity = ViewportTitle(index);
+			const engine::world::WorldId world = ViewportWorld(index);
+
+			std::string shown;
+			if (Universe != nullptr && world.IsValid()) {
+				const engine::core::Name name = Universe->NameOf(world);
+				if (name.IsValid()) {
+					shown = std::string(name.Text());
+				}
+			}
+			if (shown.empty()) {
+				// A panel with no world says what it is rather than nothing at
+				// all, which is what an empty tab would read as.
+				shown = identity;
+			}
+
+			// **The world being edited, marked rather than inferred.** Every
+			// unpinned panel follows `Active`, so more than one tab can carry
+			// this and that is correct - they are all showing the active scene.
+			if (world.IsValid() && world == Active) {
+				shown += " (ACTIVE)";
+			}
+
+			return shown + "###" + identity;
+		}
+
+		// The string to give `SetWindowFocus` or `FindWindowByName` for a panel.
+		//
+		// **Not `ViewportTitle`.** `ImHashStr` restarts its hash at `###`, so
+		// the id of a window opened as `Scene###Viewport 2` is the hash of
+		// `###Viewport 2` and not of `Viewport 2`. Any prefix hashes the same,
+		// so this is the shortest one that does.
+		//
+		// @param index 0 is the main viewport, 1..`Extras.size()` the others.
+		// @return A string valid until the next call for the same index.
+		const char *ViewportIdentity(size_t index) {
+			ViewportIdentityScratch = std::string("###") + ViewportTitle(index);
+			return ViewportIdentityScratch.c_str();
 		}
 
 		// Makes the editor hold `extras` panels beyond the main one.

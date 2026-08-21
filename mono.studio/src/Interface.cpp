@@ -837,7 +837,8 @@ namespace studio {
 		// once when the panel is and then never changes - a name that moved
 		// would be a panel the saved layout has never heard of. See
 		// `ViewportState::Title`.
-		const char *title = ViewportTitle(index);
+		const std::string label = ViewportLabel(index);
+		const char *title = label.c_str();
 		bool *open = second ? &extra->Open : &ShowViewport;
 		engine::render::SceneTarget &target = second ? extra->Target : WorldTarget;
 
@@ -1731,7 +1732,7 @@ namespace studio {
 		}
 
 		for (size_t index = 0; index < 1 + Extras.size(); index++) {
-			const ImGuiWindow *window = ImGui::FindWindowByName(ViewportTitle(index));
+			const ImGuiWindow *window = ImGui::FindWindowByName(ViewportIdentity(index));
 			if (window == nullptr) {
 				continue;
 			}

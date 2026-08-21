@@ -248,6 +248,7 @@ The milestone headings below are development labels. Not in line with project ve
 
 ---
 
+- [_] content needs more granularity, big chunk is not listed (optimise when you find)
 - [_] pump events lags sometimes for some reason (e.g. user inputs, changing window size, etc). make pump events more granular by adding per-event-name.
 - [_] mouse movement seems to also cause pump events to increase lots
 - [_] in flamegraph, add a "Event Scheduler" where you can setup a rule that auto-pauses the flamegraph when conditions are met (e.g. when pump events hit >2ms, i can force a pause on that flamegraph to see the cause).
@@ -261,15 +262,42 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] add a "bidirection" bool mode for portals, when enabled, you can enter from both sides, when disabled, you can only enter from entry side
 - [_] add a "Play Here" button (spawns character at camera position)
 - [_] input textbox not working
-- [_] allow creating worlds even when scene is running in studio
+- [x] allow creating worlds even when scene is running in studio. The refusal
+      was correct when written and its reason had since gone: it said "the
+      snapshot Stop restores was taken before the run began", which was true of
+      `Universe::Save`. `WorldRun::Snapshot` is a *world document* now and
+      `StopWorld` destroys and rebuilds exactly the world it names, so a scene
+      created during a run is in no snapshot. Also safe against the tick -
+      `Universe::Tick` blocks and the button is pressed while the interface
+      draws. Removal keeps its own guard.
 - [_] when character sits in middle of portal, teleporting between both sides
-- [_] live instances listed items get cutoff in list
-- [_] when play is pressed, ensure a viewport is opened
+- [x] live instances listed items get cutoff in list. The table was
+      `SizingStretchProp` and the action column took 0.22 of the panel while
+      holding `View`, `+ Player` and `Stop` side by side - a proportional width
+      cannot be right for a cell whose content has a fixed size. It is
+      `WidthFixed` now, measured from the labels rather than a pixel guess.
+- [x] when play is pressed, ensure a viewport is opened. Nothing in
+      `SetRunMode`/`BeginRun` opened one, so Play with every panel closed
+      started a server and a client and drew nothing. It now calls
+      `ShowWorldInViewport`, the same path the Live Instances "View" button
+      uses, so it reuses an open panel or reopens the main one and only makes a
+      new panel when every one is spoken for.
 - [_] NonEuclidean.luau spawn is wrong spot
 - [_] NonEuclidean.luau has multiple overlapping things
 - [_] selection boxes are misaligned
-- [_] when pressing CTRL and scaling a part, scale both sides at same time
-- [_] add a (ACTIVE) scene_name
+- [x] when pressing CTRL and scaling a part, scale both sides at same time.
+      `ScaleSide::Both` already existed as a *preference*, so the only way to
+      reach it was to go and change a setting. Ctrl now inverts it at the grab.
+      `BothHalf` rather than `Both`, because that is the one whose resulting
+      *size* lands on the snap step. Read once, at the grab, so a modifier
+      cannot change what a drag means half way through it.
+- [x] add a (ACTIVE) scene_name. Viewport tabs read the scene they show, and
+      the one being edited is marked. imgui keys a window on its title, which is
+      why they were fixed strings; `###` splits the two, so the text can change
+      every frame while the window, its dock node and the saved layout stay the
+      same panel. **One-time cost:** the stored ini key changes, so existing
+      saved layouts undock these panels once. `ViewportIdentity` is what
+      `SetWindowFocus` and `FindWindowByName` must now be given.
 - [_] some studio ui stretches - more vscode-ey
 - [_] physics bugs with the character (in playground steps, you phase through blocks, doesn't do bounds properly)
 - [_] character physics bugs and movement in weird directions and stuff
@@ -278,8 +306,28 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] add moving cubes in tunnels for lighting test too
 - [_] sometimes when starting playground, the baseplate is rotated 45 degrees?
 - [_] crossworldseam demo is not setup properly
-- [_] surfacecamera lighting is really dark, they should reflect real world light as well
-- [_] ground grid "enables always on top" when moving/scaling something, otherwise its not "always on top"
+- [x] surfacecamera lighting is really dark. **Measured: a mirrored floor read
+      0.21 of the same floor seen directly.** The main view is deferred and ends
+      at the `tonemap` node; a mirror is forward - `mirror-capture` runs
+      `opaque.frag` straight into the surface texture and nothing encoded it,
+      because there is no `mirror-tonemap` node the way there is a
+      `portal-tonemap` one. The pane then read that linear value back as a
+      display colour and the frame's tonemap encoded it again, and a linear
+      value through that round trip comes out about a fifth as bright.
+      Encoding at capture makes the round trip an identity: **0.21 to 0.93**,
+      the residue being the SSAO and seam spill a surface pass genuinely does
+      not get. Flagged per draw rather than done unconditionally, because
+      `portal-capture` runs the same shader and already has its own tonemap
+      node - portal captures are byte-compared and visually identical.
+- [_] ground grid "enables always on top" when moving/scaling something,
+      otherwise its not "always on top". **Diagnosed, and it is bigger than it
+      looks.** `ShowGrid` is a plain preference and nothing touches it during a
+      drag, so the grid draws identically either way. What is true is that the
+      grid is an imgui overlay and an overlay has no depth buffer to test
+      against - `AdornmentView.cpp:18` states exactly that - so it draws over
+      geometry always, and a drag is simply when that gets noticed. Making it
+      occlude means the grid becomes a depth-tested node in the render graph
+      rather than a draw list, which is real work and not a flag.
 
 ### v0.20
 

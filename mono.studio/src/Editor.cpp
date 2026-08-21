@@ -3414,6 +3414,23 @@ namespace studio {
 			return;
 		}
 
+		// **A run nobody can see is the commonest way to think Play is
+		// broken.** Every viewport can be closed - a panel shut from its title
+		// bar stays shut - so pressing Play with none open started a server and
+		// a client and drew nothing, with only the status line to say anything
+		// had happened.
+		//
+		// `ShowWorldInViewport` is the same call the Live Instances "View"
+		// button makes: it reuses an open panel showing this world, reopens the
+		// main one, or takes a free panel, and only makes a new one when every
+		// panel is spoken for. So this brings the run forward without ever
+		// stealing a scene somebody was watching.
+		//
+		// After `BeginRun` rather than before, because a run that would not
+		// snapshot returns above and should not rearrange anybody's panels on
+		// its way out.
+		(void)ShowWorldInViewport(world);
+
 		Say(std::string(Describe(mode)) + " started in '" + label + "'");
 	}
 

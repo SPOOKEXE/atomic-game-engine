@@ -10666,8 +10666,13 @@ namespace engine::render {
 						// the near-plane hack, and moved when the camera was re-aimed but
 						// not when the floor was.
 						const core::Vector3 surfaceEye = capturedView.Frame.Position;
-						const LightingUniforms surfaceLighting =
+						// **Every draw in this pass leaves display-encoded**, because
+						// every one of them lands in the surface texture and the pane
+						// reads that back as a display colour. See `Encode` in
+						// `opaque.frag` for the round trip and the measurement.
+						LightingUniforms surfaceLighting =
 							lightingFrom(surfaceWorldLighting, surfaceEye, 0.0f, 1.0f);
+						surfaceLighting.Mirror.z = 1.0f;
 
 						const ShadowBinding shadow = shadowBinding();
 
@@ -10785,9 +10790,12 @@ namespace engine::render {
 										lightViewProjection,
 										level->Sampling,
 									};
+									// Into the same surface texture, so encoded like
+									// everything else here.
 									LightingUniforms levelLighting =
 										lightingAt(surfaceEye, 1.0f, shown.ImageOpacity);
 									levelLighting.Mirror.x = static_cast<float>(shown.Effect);
+									levelLighting.Mirror.z = 1.0f;
 
 									SDL_PushGPUVertexUniformData(command, 0, &levelFrame, sizeof(levelFrame));
 									bindSurface(level->Colour);
@@ -10839,6 +10847,17 @@ namespace engine::render {
 								// composite rather than on the render, so switching one
 								// costs no redraw of the texture.
 								mirrorLighting.Mirror.x = static_cast<float>(shown.Effect);
+
+								// **This capture is sampled, not presented, so it has to
+								// leave here display-encoded.** The pane reads the surface
+								// texture as a display colour and the frame's own tonemap
+								// encodes the result again; a linear capture through that
+								// round trip measured 0.0588 against 0.2843 for the same
+								// floor seen directly. `portal-capture` gets the same
+								// treatment from a `portal-tonemap` node instead, which is
+								// why this is a flag rather than something the shader does
+								// unconditionally. See `Encode` in `opaque.frag`.
+								mirrorLighting.Mirror.z = 1.0f;
 
 								SDL_PushGPUVertexUniformData(command, 0, &mirrorFrame, sizeof(mirrorFrame));
 								bindSurface(shown.Texture[shown.Slot ^ 1u]);
