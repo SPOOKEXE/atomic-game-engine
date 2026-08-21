@@ -253,6 +253,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] when pressing CTRL and scaling a part, scale both sides at same time
 - [_] add a (ACTIVE) scene_name
 - [_] some studio ui stretches - more vscode-ey
+- [_] physics bugs with the character (in playground steps, you phase through blocks, doesn't do bounds properly)
 
 ### v0.20
 
