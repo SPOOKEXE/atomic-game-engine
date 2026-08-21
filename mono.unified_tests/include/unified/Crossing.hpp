@@ -183,8 +183,10 @@ namespace unified {
 		//
 		// **The first place a blank scene shows.** Equal counts and an empty
 		// draw list is a drawing problem; unequal counts is a replication one.
+		//@{
 		size_t ServerEntities = 0;
 		size_t ClientEntities = 0;
+		//@}
 
 		// Rows the client's draw pass produced on the last frame of this tick.
 		//
@@ -201,9 +203,11 @@ namespace unified {
 		// is the network's lag, and store against drawn is the snapshot
 		// buffer's delay. Store equal to drawn on every frame is the judder
 		// `D00010` was opened for.
+		//@{
 		float ServerX = 0.0f;
 		float ClientX = 0.0f;
 		float DrawnX = 0.0f;
+		//@}
 
 		// How far behind the newest received tick the world was drawn.
 		double Behind = 0.0;

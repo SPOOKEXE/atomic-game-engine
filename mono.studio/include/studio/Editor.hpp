@@ -31,9 +31,9 @@
 #include <engine/assets/Texture.hpp>
 #include <engine/control/Server.hpp>
 #include <engine/control/Surface.hpp>
-#include <engine/core/HeapProfile.hpp>
 #include <engine/core/Clock.hpp>
 #include <engine/core/FrameGraph.hpp>
+#include <engine/core/HeapProfile.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/delivery/Client.hpp>
@@ -47,6 +47,10 @@
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Input.hpp>
+#include <engine/nodegraph/Editor.hpp>
+#include <engine/nodegraph/Evaluate.hpp>
+#include <engine/nodegraph/Graph.hpp>
+#include <engine/nodegraph/Preview.hpp>
 #include <engine/render/AdornmentGeometry.hpp>
 #include <engine/render/DebugPanels.hpp>
 #include <engine/render/FrameStatistics.hpp>
@@ -74,10 +78,6 @@
 #include <functional>
 #include <memory>
 #include <nlohmann/json_fwd.hpp>
-#include <engine/nodegraph/Editor.hpp>
-#include <engine/nodegraph/Evaluate.hpp>
-#include <engine/nodegraph/Graph.hpp>
-#include <engine/nodegraph/Preview.hpp>
 #include <optional>
 #include <span>
 #include <string>
@@ -2313,7 +2313,8 @@ namespace studio {
 		// the one being drawn, and the one it replaced - which is released
 		// between frames, because a texture dropped while a draw list still
 		// names it is a use-after-free on the GPU.
-		void *NodeDemoOrbitImage(uint64_t key, const std::function<bool(engine::nodegraph::PreviewImage &)> &make);
+		void *
+		NodeDemoOrbitImage(uint64_t key, const std::function<bool(engine::nodegraph::PreviewImage &)> &make);
 
 		// Releases every preview texture. Called when the cache is dropped and
 		// when the graph is replaced - a texture per result would otherwise be a

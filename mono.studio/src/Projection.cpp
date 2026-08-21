@@ -1,10 +1,9 @@
-#include <studio/Projection.hpp>
-
-#include <cmath>
-
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/mat3x3.hpp>
 #include <glm/vec4.hpp>
+
+#include <cmath>
+#include <studio/Projection.hpp>
 
 namespace studio {
 
@@ -92,14 +91,13 @@ namespace studio {
 
 		// Y is flipped because NDC counts upwards from the centre and a panel
 		// counts downwards from its top edge.
-		panel = ImageMin + glm::vec2((ndc.x * 0.5f + 0.5f) * ImageSize.x,
-									 (1.0f - (ndc.y * 0.5f + 0.5f)) * ImageSize.y);
+		panel = ImageMin +
+				glm::vec2((ndc.x * 0.5f + 0.5f) * ImageSize.x, (1.0f - (ndc.y * 0.5f + 0.5f)) * ImageSize.y);
 		return true;
 	}
 
-	bool PanelProjection::ProjectSegment(
-		Vector3 from, Vector3 to, glm::vec2 &outFrom, glm::vec2 &outTo
-	) const {
+	bool
+	PanelProjection::ProjectSegment(Vector3 from, Vector3 to, glm::vec2 &outFrom, glm::vec2 &outTo) const {
 		if (!IsValid()) {
 			return false;
 		}
@@ -133,8 +131,10 @@ namespace studio {
 
 		const auto toPanel = [this](const glm::vec4 &clip) {
 			const glm::vec2 ndc(clip.x / clip.w, clip.y / clip.w);
-			return ImageMin + glm::vec2((ndc.x * 0.5f + 0.5f) * ImageSize.x,
-										(1.0f - (ndc.y * 0.5f + 0.5f)) * ImageSize.y);
+			return ImageMin +
+				   glm::vec2(
+					   (ndc.x * 0.5f + 0.5f) * ImageSize.x, (1.0f - (ndc.y * 0.5f + 0.5f)) * ImageSize.y
+				   );
 		};
 
 		outFrom = toPanel(a);
@@ -172,8 +172,7 @@ namespace studio {
 		const glm::vec3 from = glm::vec3(nearPoint) / nearPoint.w;
 		const glm::vec3 to = glm::vec3(farPoint) / farPoint.w;
 
-		const Vector3 direction =
-			Vector3{to.x - from.x, to.y - from.y, to.z - from.z}.Unit();
+		const Vector3 direction = Vector3{to.x - from.x, to.y - from.y, to.z - from.z}.Unit();
 
 		return Ray(Eye, direction);
 	}

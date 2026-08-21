@@ -79,13 +79,16 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 	REQUIRE(shadow->Outputs.size() == 1);
 	CHECK(shadow->Outputs.front().Type == "render.image");
 	for (const char *kind : {"portal-capture", "portal-tonemap", "portal-overlay", "mirror-overlay"}) {
-		const engine::nodegraph::NodeType *pass = engine::nodegraph::NodeTypes::Find(std::string("render.pass.") + kind);
+		const engine::nodegraph::NodeType *pass =
+			engine::nodegraph::NodeTypes::Find(std::string("render.pass.") + kind);
 		REQUIRE(pass != nullptr);
 		CHECK_FALSE(pass->PreviewPort.empty());
 	}
 }
 
-TEST_CASE("mirror feedback and its bounded recursion are saved as node policy", "[studio][pipeline][mirror]") {
+TEST_CASE(
+	"mirror feedback and its bounded recursion are saved as node policy", "[studio][pipeline][mirror]"
+) {
 	const PipelineDocument basis = DefaultPbrDocument();
 	engine::nodegraph::Graph canvas;
 	std::string error;
@@ -324,5 +327,7 @@ TEST_CASE("the IMAGE socket rejects a non-image before save", "[studio][pipeline
 	const engine::nodegraph::NodeId tonemap = canvas.Add("render.pass.tonemap", 200.0f, 0.0f);
 	REQUIRE(entities != engine::nodegraph::NO_NODE);
 	REQUIRE(tonemap != engine::nodegraph::NO_NODE);
-	CHECK(canvas.Connect(entities, "entities", tonemap, "colour") == engine::nodegraph::LinkResult::TypeMismatch);
+	CHECK(
+		canvas.Connect(entities, "entities", tonemap, "colour") == engine::nodegraph::LinkResult::TypeMismatch
+	);
 }

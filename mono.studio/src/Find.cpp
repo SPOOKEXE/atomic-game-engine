@@ -54,9 +54,7 @@ namespace studio {
 				return false;
 			}
 
-			const auto lower = [](unsigned char value) {
-				return static_cast<char>(std::tolower(value));
-			};
+			const auto lower = [](unsigned char value) { return static_cast<char>(std::tolower(value)); };
 
 			for (size_t start = 0; start + needle.size() <= haystack.size(); start++) {
 				bool same = true;
@@ -75,12 +73,7 @@ namespace studio {
 		}
 	}
 
-	bool MatchesQuery(
-		const Store &store,
-		Entity instance,
-		const FindQuery &query,
-		std::string &matched
-	) {
+	bool MatchesQuery(const Store &store, Entity instance, const FindQuery &query, std::string &matched) {
 		const engine::ecs::ClassId id = store.ClassOf(instance);
 		if (!id.IsValid()) {
 			// Not an instance - an entity some module keeps for its own storage.

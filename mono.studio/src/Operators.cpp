@@ -1,7 +1,6 @@
+#include <algorithm>
 #include <studio/Operators.hpp>
 #include <studio/Widgets.hpp>
-
-#include <algorithm>
 #include <utility>
 
 namespace studio {

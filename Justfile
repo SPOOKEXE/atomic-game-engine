@@ -1004,7 +1004,17 @@ docs-check: (build "docgen") docs
 # Every first-party .cpp and .hpp. The directory list is explicit rather than
 # `find .` so that mono.vendor/ is never touched - reformatting a submodule
 # turns every future update into a conflict.
-mono_sources := "mono.engine mono.client mono.server mono.unified_tests mono.cdn mono.launcher mono.network mono.discord mono.tools mono.build"
+# Every directory holding first-party C++, and `mono.vendor` is the only one
+# left out - their code, their style, and reformatting it would make every
+# future bump a merge conflict.
+#
+# **`mono.studio` was missing until v0.18.0 and that was not deliberate.** It is
+# the largest first-party module in the repository and it had never been
+# formatted or checked, so the drift had been accumulating for as long as the
+# list has existed: 722 violations across 49 files the first time it was asked.
+# A list that is a subset of what it claims to cover is worse than a shorter
+# claim, because `format-check ok` reads as "the tree is formatted".
+mono_sources := "mono.engine mono.client mono.server mono.studio mono.unified_tests mono.cdn mono.launcher mono.network mono.discord mono.tools mono.build"
 
 # Finding it is two problems, not one.
 #

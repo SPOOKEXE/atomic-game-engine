@@ -107,21 +107,27 @@ namespace unified {
 		// The two sessions, server end and client end. `Engine::replication`.
 		//
 		// Absent under `Transport::Direct`, which has no session at all.
+		//@{
 		std::optional<engine::replication::Session::Statistics> ServerSession;
 		std::optional<engine::replication::Session::Statistics> ClientSession;
+		//@}
 
 		// The two links. `Engine::net`.
 		//
 		// Absent under `Transport::Direct`.
+		//@{
 		std::optional<engine::net::ConnectionStats> ServerLink;
 		std::optional<engine::net::ConnectionStats> ClientLink;
+		//@}
 
 		// What each end's lossy wrapper did to what reached it. `Engine::net`.
 		//
 		// `ToClient` is the wrapper on the client's end, so it is the one that
 		// loses what the server sent. Absent unless `Transport::Lossy`.
+		//@{
 		std::optional<engine::net::LossStatistics> ToClient;
 		std::optional<engine::net::LossStatistics> ToServer;
+		//@}
 
 		// What the process allocated. `Engine::core`.
 		//
@@ -153,9 +159,11 @@ namespace unified {
 		std::optional<client::ContentLink::Counters> Link;
 
 		// Entities each side held, and rows drawn, on the last tick.
+		//@{
 		size_t ServerEntities = 0;
 		size_t ClientEntities = 0;
 		size_t Drawn = 0;
+		//@}
 
 		// --- network ---------------------------------------------------------
 

@@ -119,6 +119,9 @@ namespace unified {
 		// @return The name.
 		std::string Name() const;
 
+		// Whether two arrangements describe the same run.
+		//
+		// @return `true` when every knob matches.
 		bool operator==(const Arrangement &) const = default;
 	};
 

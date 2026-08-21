@@ -146,8 +146,7 @@ namespace studio {
 						// trivial legitimately totals zero steps.
 						ImGui::TextDisabled("-");
 					} else {
-						const float share =
-							static_cast<float>(cost.Steps) / static_cast<float>(total);
+						const float share = static_cast<float>(cost.Steps) / static_cast<float>(total);
 
 						char label[32];
 						std::snprintf(label, sizeof(label), "%.0f%%", static_cast<double>(share) * 100.0);

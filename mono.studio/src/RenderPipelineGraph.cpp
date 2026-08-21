@@ -1,11 +1,11 @@
 #include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/Schedule.hpp>
+#include <engine/nodegraph/Registry.hpp>
+#include <engine/nodegraph/Types.hpp>
 
 #include <algorithm>
 #include <array>
 #include <charconv>
-#include <engine/nodegraph/Registry.hpp>
-#include <engine/nodegraph/Types.hpp>
 #include <studio/RenderPipelineGraph.hpp>
 #include <tuple>
 #include <unordered_map>
@@ -221,7 +221,8 @@ namespace studio {
 			return nullptr;
 		}
 
-		Name UniqueNodeName(const engine::nodegraph::Node &node, Name kind, std::unordered_set<uint32_t> &used) {
+		Name
+		UniqueNodeName(const engine::nodegraph::Node &node, Name kind, std::unordered_set<uint32_t> &used) {
 			const std::string base = node.Label.empty() ? std::string(kind.Text()) : node.Label;
 			Name candidate(base);
 			uint32_t suffix = 2;
@@ -281,7 +282,9 @@ namespace studio {
 					type.PreviewPort = std::string(port.Name.Text());
 					type.Preview = [](const std::any &, engine::nodegraph::PreviewImage &) { return false; };
 					type.Widgets.push_back(engine::nodegraph::Toggle(PREVIEW_ENABLED, "Preview", true));
-					type.Widgets.push_back(engine::nodegraph::Toggle(PREVIEW_REVERSE, "Reverse spectrum", false));
+					type.Widgets.push_back(
+						engine::nodegraph::Toggle(PREVIEW_REVERSE, "Reverse spectrum", false)
+					);
 					break;
 				}
 			}
@@ -296,7 +299,9 @@ namespace studio {
 					: spec.Scope == NodeScope::View ? 1
 													: 2
 				),
-				engine::nodegraph::Select("queue", "Queue", {"auto", "cpu", "graphics", "compute", "transfer"}, 0),
+				engine::nodegraph::Select(
+					"queue", "Queue", {"auto", "cpu", "graphics", "compute", "transfer"}, 0
+				),
 				engine::nodegraph::Select("async", "Async", {"auto", "allow", "serial"}, 0),
 			};
 			type.Widgets.insert(type.Widgets.end(), commonWidgets.begin(), commonWidgets.end());
@@ -305,7 +310,9 @@ namespace studio {
 				// still culls by frustum on the CPU, and the renderer's gbuffer
 				// pass adds the depth-pyramid test on the GPU.
 				type.Widgets.push_back(
-					engine::nodegraph::Select("culling", "Culling", {"inherit", "none", "frustum", "occlusion"}, 0)
+					engine::nodegraph::Select(
+						"culling", "Culling", {"inherit", "none", "frustum", "occlusion"}, 0
+					)
 				);
 			}
 			if (spec.Kind == Name("cull-distance")) {
@@ -315,7 +322,9 @@ namespace studio {
 				type.Widgets.push_back(engine::nodegraph::Text("mask", "Tag mask", "0"));
 			}
 			if (spec.Kind == Name("mirror-capture")) {
-				type.Widgets.push_back(engine::nodegraph::Select("feedback", "Feedback", {"last-frame", "flat"}, 0));
+				type.Widgets.push_back(
+					engine::nodegraph::Select("feedback", "Feedback", {"last-frame", "flat"}, 0)
+				);
 				type.Widgets.push_back(engine::nodegraph::Number("max-recursion", "Max recursion", 3));
 			}
 			if (spec.Kind == Name("raster") || spec.Kind == Name("dispatch")) {
@@ -371,8 +380,9 @@ namespace studio {
 		}
 	}
 
-	bool
-	LoadRenderPipelineGraph(const PipelineDocument &document, engine::nodegraph::Graph &graph, std::string &error) {
+	bool LoadRenderPipelineGraph(
+		const PipelineDocument &document, engine::nodegraph::Graph &graph, std::string &error
+	) {
 		using namespace engine::graph;
 		RegisterRenderPipelineNodeTypes();
 		graph.Clear();
@@ -639,7 +649,8 @@ namespace studio {
 
 			for (const PortSpec &port : spec.Inputs) {
 				Name target;
-				if (const engine::nodegraph::Link *link = graph.LinkInto(node.Id, std::string(port.Name.Text()));
+				if (const engine::nodegraph::Link *link =
+						graph.LinkInto(node.Id, std::string(port.Name.Text()));
 					link != nullptr) {
 					const engine::nodegraph::Node *producer = graph.Find(link->From);
 					if (producer != nullptr) {

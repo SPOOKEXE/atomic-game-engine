@@ -74,12 +74,7 @@ namespace studio {
 	//
 	// @since v0.15
 	ViewportCanvas CanvasForViewport(
-		float panelX,
-		float panelY,
-		float panelWidth,
-		float panelHeight,
-		float pointerX,
-		float pointerY
+		float panelX, float panelY, float panelWidth, float panelHeight, float pointerX, float pointerY
 	);
 
 	// Which panel should show a world.

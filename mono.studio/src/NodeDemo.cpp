@@ -38,6 +38,11 @@
 // @tier client
 
 #include <engine/assets/Texture.hpp>
+#include <engine/nodegraph/Editor.hpp>
+#include <engine/nodegraph/Inspect.hpp>
+#include <engine/nodegraph/Layout.hpp>
+#include <engine/nodegraph/Preview.hpp>
+#include <engine/nodegraph/Serialize.hpp>
 #include <engine/ui/Metrics.hpp>
 #include <engine/ui/Theme.hpp>
 
@@ -47,14 +52,9 @@
 #include <cstring>
 #include <fstream>
 #include <imgui.h>
-#include <studio/DemoNodes.hpp>
-#include <engine/nodegraph/Editor.hpp>
-#include <engine/nodegraph/Inspect.hpp>
-#include <engine/nodegraph/Layout.hpp>
-#include <engine/nodegraph/Preview.hpp>
-#include <engine/nodegraph/Serialize.hpp>
 #include <sstream>
 #include <string>
+#include <studio/DemoNodes.hpp>
 #include <studio/Editor.hpp>
 #include <vector>
 
@@ -107,7 +107,8 @@ namespace studio {
 		DropNodeDemoImages();
 	}
 
-	void *Editor::NodeDemoImage(uint64_t key, const std::function<bool(engine::nodegraph::PreviewImage &)> &make) {
+	void *
+	Editor::NodeDemoImage(uint64_t key, const std::function<bool(engine::nodegraph::PreviewImage &)> &make) {
 		// **Held under the hash the payload was computed at**, so panning and
 		// zooming cost a lookup, an edit makes a new key rather than overwriting
 		// the old one, and two nodes computing the same thing share one texture.
@@ -140,8 +141,9 @@ namespace studio {
 		return handle;
 	}
 
-	void *
-	Editor::NodeDemoOrbitImage(uint64_t key, const std::function<bool(engine::nodegraph::PreviewImage &)> &make) {
+	void *Editor::NodeDemoOrbitImage(
+		uint64_t key, const std::function<bool(engine::nodegraph::PreviewImage &)> &make
+	) {
 		// Already showing it. An orbit that came to rest costs a comparison a
 		// frame and nothing else.
 		if (key == NodeDemoOrbitKey && NodeDemoOrbitName.IsValid()) {
@@ -262,7 +264,8 @@ namespace studio {
 
 	std::string Editor::ExportNodeDemoImage(engine::nodegraph::NodeId id) {
 		const engine::nodegraph::Node *node = NodeDemoGraph.Find(id);
-		const engine::nodegraph::NodeType *type = node == nullptr ? nullptr : engine::nodegraph::NodeTypes::Find(node->Type);
+		const engine::nodegraph::NodeType *type =
+			node == nullptr ? nullptr : engine::nodegraph::NodeTypes::Find(node->Type);
 		if (type == nullptr) {
 			return "nothing selected";
 		}
@@ -316,9 +319,11 @@ namespace studio {
 		if (NodeDemoGraph.Nodes().empty() && NodeDemoLast.empty()) {
 			studio::BuildDemoGraph(NodeDemoGraph);
 			NodeDemoCanvas.Observe(&NodeDemoRunner);
-			NodeDemoCanvas.Images([this](
-									  uint64_t key, const std::function<bool(engine::nodegraph::PreviewImage &)> &make
-								  ) { return NodeDemoImage(key, make); });
+			NodeDemoCanvas.Images(
+				[this](uint64_t key, const std::function<bool(engine::nodegraph::PreviewImage &)> &make) {
+					return NodeDemoImage(key, make);
+				}
+			);
 
 			// What the canvas cannot decide for itself: when an edit becomes an
 			// undo step, and what "run this one again" means.
@@ -806,7 +811,8 @@ namespace studio {
 	}
 
 	void Editor::DrawNodeDemoInspector() {
-		if (const engine::nodegraph::GroupId frame = NodeDemoCanvas.SelectedGroup(); frame != engine::nodegraph::NO_GROUP) {
+		if (const engine::nodegraph::GroupId frame = NodeDemoCanvas.SelectedGroup();
+			frame != engine::nodegraph::NO_GROUP) {
 			const engine::nodegraph::Group *group = NodeDemoGraph.FindGroup(frame);
 			if (group != nullptr) {
 				ImGui::TextUnformatted(group->Title.c_str());
@@ -904,14 +910,15 @@ namespace studio {
 		what.Type = type;
 		what.Graph = &NodeDemoGraph;
 		what.Runner = &NodeDemoRunner;
-		what.Images = [this](uint64_t key, const std::function<bool(engine::nodegraph::PreviewImage &)> &make) {
-			return NodeDemoImage(key, make);
-		};
-		what.Orbit = [this](uint64_t key, const std::function<bool(engine::nodegraph::PreviewImage &)> &make) {
-			return NodeDemoOrbitImage(key, make);
-		};
+		what.Images = [this](
+						  uint64_t key, const std::function<bool(engine::nodegraph::PreviewImage &)> &make
+					  ) { return NodeDemoImage(key, make); };
+		what.Orbit = [this](
+						 uint64_t key, const std::function<bool(engine::nodegraph::PreviewImage &)> &make
+					 ) { return NodeDemoOrbitImage(key, make); };
 
-		if (const engine::nodegraph::InspectorFn *draw = engine::nodegraph::Inspectors::For(what); draw != nullptr) {
+		if (const engine::nodegraph::InspectorFn *draw = engine::nodegraph::Inspectors::For(what);
+			draw != nullptr) {
 			(*draw)(what);
 		}
 
@@ -943,7 +950,9 @@ namespace studio {
 			);
 			ImGui::BeginDisabled(NodeDemoTypeName[0] == '\0');
 			if (ImGui::Button("save as type")) {
-				NodeDemoGraph.Remember(NodeDemoTypeName, engine::nodegraph::SaveSubtree(NodeDemoGraph, node->Id));
+				NodeDemoGraph.Remember(
+					NodeDemoTypeName, engine::nodegraph::SaveSubtree(NodeDemoGraph, node->Id)
+				);
 				NodeDemoSaid = std::string("filed \"") + NodeDemoTypeName + "\" under Custom";
 				NodeDemoTypeName[0] = '\0';
 				CommitNodeDemo();

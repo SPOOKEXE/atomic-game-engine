@@ -172,7 +172,11 @@ TEST_CASE("confirming a picker writes the property", "[studio][properties]") {
 	// The write itself. **This is the assertion the editor was missing**: it
 	// returned `false` and the panel carried on as though a property had been
 	// set.
-	CHECK(engine::game::WriteProperty(store, part, *mesh, studio::ChosenContentValue(mesh->Type, "props/fox.amesh")));
+	CHECK(
+		engine::game::WriteProperty(
+			store, part, *mesh, studio::ChosenContentValue(mesh->Type, "props/fox.amesh")
+		)
+	);
 
 	// And it landed where the renderer reads it, not merely somewhere.
 	// `client::CollectInstances` copies `Visual::Mesh` into the draw list, so a
@@ -239,7 +243,11 @@ TEST_CASE("every content row the picker serves round-trips", "[studio][propertie
 		// not one is a row this table should not carry.
 		REQUIRE(ContentKindOfProperty(descriptor->Spelling) != AssetKind::Unknown);
 
-		CHECK(engine::game::WriteProperty(store, instance, *descriptor, studio::ChosenContentValue(descriptor->Type, "chosen.asset")));
+		CHECK(
+			engine::game::WriteProperty(
+				store, instance, *descriptor, studio::ChosenContentValue(descriptor->Type, "chosen.asset")
+			)
+		);
 
 		engine::game::PropertyValue read;
 		REQUIRE(engine::game::ReadProperty(store, instance, *descriptor, read));
@@ -248,7 +256,11 @@ TEST_CASE("every content row the picker serves round-trips", "[studio][propertie
 		// **"Clear" is the same path with an empty string**, and it has to reach
 		// the store too - a part with no mesh is a plain part, and a Clear that
 		// silently did nothing would be indistinguishable from one that worked.
-		CHECK(engine::game::WriteProperty(store, instance, *descriptor, studio::ChosenContentValue(descriptor->Type, "")));
+		CHECK(
+			engine::game::WriteProperty(
+				store, instance, *descriptor, studio::ChosenContentValue(descriptor->Type, "")
+			)
+		);
 		REQUIRE(engine::game::ReadProperty(store, instance, *descriptor, read));
 		CHECK_FALSE(read.Name.IsValid());
 	}

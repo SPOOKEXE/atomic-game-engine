@@ -63,7 +63,9 @@ int main(int argc, char **argv) {
 	arguments.Value("capture", "PATH", "Write the viewport's world to a BMP and carry on");
 	arguments.Value("capture-world", "NAME", "Point --capture at this scene rather than the active one");
 	arguments.Value("profile-snapshot", "PATH", "Write a frame-graph snapshot when the run ends");
-	arguments.Value("heap-report", "PATH", "Write a heap profile when the run ends, and sample while running");
+	arguments.Value(
+		"heap-report", "PATH", "Write a heap profile when the run ends, and sample while running"
+	);
 	arguments.Value("frames-in-flight", "N", "Frames the CPU may queue ahead of the GPU: 1 (default) to 3");
 	arguments.Value("idle-close", "SECONDS", "Close an empty world after this long (default 300)");
 	arguments.Value("run", "MODE", "Start in edit, server or play (default edit)");

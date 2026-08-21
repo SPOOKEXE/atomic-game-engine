@@ -41,6 +41,7 @@
 #include <engine/scene/Part.hpp>
 #include <engine/ui/Metrics.hpp>
 #include <engine/ui/Theme.hpp>
+
 #include <imgui.h>
 #include <studio/Editor.hpp>
 #include <studio/Widgets.hpp>
@@ -48,9 +49,9 @@
 namespace studio {
 
 	using engine::core::Name;
-	using studio::Availability;
 	using engine::ecs::Entity;
 	using engine::ecs::Store;
+	using studio::Availability;
 
 	namespace {
 		// The gap between two groups on the strip.
@@ -84,8 +85,7 @@ namespace studio {
 		// **The reason on the disabled button, which is the one place somebody
 		// looks.** A greyed control with no explanation is the failure
 		// `Availability` carries a string to avoid.
-		if (!can.Ready && !can.Reason.empty() &&
-			ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+		if (!can.Ready && !can.Reason.empty() && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
 			ImGui::SetTooltip("%s", can.Reason.c_str());
 		}
 	}
@@ -202,9 +202,7 @@ namespace studio {
 					after.Type = engine::ecs::PropertyType::CFrame;
 					after.CFrame = identity;
 
-					Commands->RecordProperty(
-						SelectionWorld, instance, key, before, after, "Reset Pivot"
-					);
+					Commands->RecordProperty(SelectionWorld, instance, key, before, after, "Reset Pivot");
 				}
 				written++;
 			}
@@ -515,9 +513,7 @@ namespace studio {
 
 		Divider();
 
-		ImGui::TextDisabled(
-			Selection.empty() ? "Goes under the scene." : "Goes under what is selected."
-		);
+		ImGui::TextDisabled(Selection.empty() ? "Goes under the scene." : "Goes under what is selected.");
 
 		Divider();
 

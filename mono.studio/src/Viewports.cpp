@@ -5,12 +5,7 @@ namespace studio {
 	using engine::world::WorldId;
 
 	ViewportCanvas CanvasForViewport(
-		float panelX,
-		float panelY,
-		float panelWidth,
-		float panelHeight,
-		float pointerX,
-		float pointerY
+		float panelX, float panelY, float panelWidth, float panelHeight, float pointerX, float pointerY
 	) {
 		return ViewportCanvas{
 			panelWidth,

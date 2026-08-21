@@ -9,8 +9,9 @@
 #include <engine/assets/Builtin.hpp>
 #include <engine/testing/Suite.hpp>
 
-#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
+
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <studio/AssetCatalogue.hpp>
@@ -79,14 +80,15 @@ TEST_CASE("the engine's own assets are listed with no store at all", "[assets][c
 		REQUIRE_FALSE(entry.Source.empty());
 	}
 
-	REQUIRE(std::is_sorted(engine.begin(), engine.end(), [](const CatalogueEntry &l, const CatalogueEntry &r) {
-		return l.Name < r.Name;
-	}));
+	REQUIRE(
+		std::is_sorted(engine.begin(), engine.end(), [](const CatalogueEntry &l, const CatalogueEntry &r) {
+			return l.Name < r.Name;
+		})
+	);
 }
 
 TEST_CASE("a directory with no manifest lists nothing and says so", "[assets][catalogue]") {
-	const std::filesystem::path empty =
-		std::filesystem::temp_directory_path() / "atomic-catalogue-empty";
+	const std::filesystem::path empty = std::filesystem::temp_directory_path() / "atomic-catalogue-empty";
 	std::filesystem::create_directories(empty);
 
 	REQUIRE(DirectoryAssets(empty, "somewhere").empty());
@@ -128,14 +130,16 @@ TEST_CASE("a tab per readable source, and none for the others", "[assets][catalo
 	// would put a nameless empty list in front of somebody.
 	sources.Sources.push_back(Directory("broken", ""));
 
-	sources.Sources.push_back(Source{
-		.Name = "origin",
-		.Kind = SourceKind::Http,
-		.Location = "127.0.0.1:9080",
-		.Enabled = true,
-		.Role = SourceRole::Both,
-		.IngestKey = {},
-	});
+	sources.Sources.push_back(
+		Source{
+			.Name = "origin",
+			.Kind = SourceKind::Http,
+			.Location = "127.0.0.1:9080",
+			.Enabled = true,
+			.Role = SourceRole::Both,
+			.IngestKey = {},
+		}
+	);
 
 	const std::vector<CatalogueTab> tabs = BuildCatalogue(sources);
 

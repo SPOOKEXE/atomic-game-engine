@@ -38,9 +38,8 @@
 //
 // @tier client
 
-#include <imgui.h>
-
 #include <cstdint>
+#include <imgui.h>
 
 namespace studio {
 
@@ -81,14 +80,12 @@ namespace studio {
 		const ImVec2 corner = ImGui::GetCursorScreenPos();
 
 		RowAction action = RowAction::None;
-		if (ImGui::Selectable(
-				"##row", selected, ImGuiSelectableFlags_AllowDoubleClick, ImVec2(0.0f, side)
-			)) {
+		if (ImGui::Selectable("##row", selected, ImGuiSelectableFlags_AllowDoubleClick, ImVec2(0.0f, side))) {
 			// **Both answer, and only the second says `Confirmed`.** A picker
 			// that reported the double alone would make a single click select
 			// nothing, which reads as a list that ignores you.
-			action = ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) ? RowAction::Confirmed
-																		: RowAction::Chose;
+			action =
+				ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) ? RowAction::Confirmed : RowAction::Chose;
 		}
 
 		body(corner);

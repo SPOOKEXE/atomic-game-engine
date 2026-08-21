@@ -20,12 +20,11 @@
 #include <engine/world/Bus.hpp>
 #include <engine/world/Postbox.hpp>
 
+#include <cstdio>
 #include <imgui.h>
+#include <string>
 #include <studio/Editor.hpp>
 #include <studio/Widgets.hpp>
-
-#include <cstdio>
-#include <string>
 #include <vector>
 
 namespace studio {
@@ -57,9 +56,9 @@ namespace studio {
 		// because a world that has spent its allowance is already dropping
 		// requests and the useful moment to notice is before that.
 		void DrawBudget(const BusBudget &budget) {
-			const float fraction = budget.PerTick == 0
-									   ? 0.0f
-									   : static_cast<float>(budget.Spent) / static_cast<float>(budget.PerTick);
+			const float fraction =
+				budget.PerTick == 0 ? 0.0f
+									: static_cast<float>(budget.Spent) / static_cast<float>(budget.PerTick);
 
 			char label[64];
 			std::snprintf(label, sizeof(label), "%u / %u this tick", budget.Spent, budget.PerTick);
@@ -169,7 +168,9 @@ namespace studio {
 				// --- what this world has asked for ---------------------------
 				if (pending.empty()) {
 					ImGui::TextDisabled("outbox empty");
-				} else if (ImGui::BeginTable("##outbox", 5, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+				} else if (ImGui::BeginTable(
+							   "##outbox", 5, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp
+						   )) {
 					ImGui::TableSetupColumn("bus");
 					ImGui::TableSetupColumn("operation");
 					ImGui::TableSetupColumn("key");
@@ -199,7 +200,9 @@ namespace studio {
 				// --- what reached it at the last barrier ---------------------
 				if (arrived.empty()) {
 					ImGui::TextDisabled("inbox empty");
-				} else if (ImGui::BeginTable("##inbox", 5, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+				} else if (ImGui::BeginTable(
+							   "##inbox", 5, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp
+						   )) {
 					ImGui::TableSetupColumn("bus");
 					ImGui::TableSetupColumn("key");
 					ImGui::TableSetupColumn("from");
@@ -224,7 +227,8 @@ namespace studio {
 							ImGui::TextDisabled("%s", engine::world::Describe(delivery.Status));
 						} else {
 							ImGui::TextColored(
-								ImVec4(0.9f, 0.4f, 0.35f, 1.0f), "%s",
+								ImVec4(0.9f, 0.4f, 0.35f, 1.0f),
+								"%s",
 								engine::world::Describe(delivery.Status)
 							);
 						}

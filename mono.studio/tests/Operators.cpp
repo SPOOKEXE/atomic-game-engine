@@ -14,11 +14,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <studio/Keybinds.hpp>
-#include <studio/Operators.hpp>
-
 #include <span>
 #include <string>
+#include <studio/Keybinds.hpp>
+#include <studio/Operators.hpp>
 
 TEST_SUITE_ID("studio.operators")
 
@@ -30,20 +29,12 @@ using studio::OperatorTable;
 namespace {
 	// An operator that is always available and counts how often it ran.
 	Operator Counting(Action id, std::string_view name, int &runs) {
-		return Operator{
-			id, name, "", [] { return Availability::Yes(); }, [&runs] { runs++; }
-		};
+		return Operator{id, name, "", [] { return Availability::Yes(); }, [&runs] { runs++; }};
 	}
 
 	// An operator that refuses, with a reason.
 	Operator Refusing(Action id, std::string_view name, std::string reason, int &runs) {
-		return Operator{
-			id,
-			name,
-			"",
-			[reason] { return Availability::No(reason); },
-			[&runs] { runs++; }
-		};
+		return Operator{id, name, "", [reason] { return Availability::No(reason); }, [&runs] { runs++; }};
 	}
 }
 

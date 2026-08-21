@@ -37,12 +37,12 @@
 #include <algorithm>
 #include <client/Replicated.hpp>
 #include <client/Scene.hpp>
+#include <imgui.h>
 #include <numbers>
 #include <optional>
-#include <utility>
-#include <imgui.h>
 #include <studio/Editor.hpp>
 #include <studio/PlayLink.hpp>
+#include <utility>
 
 TEST_SUITE_ID("studio.playlink")
 
@@ -1047,9 +1047,9 @@ TEST_CASE("one client viewport walks and the others let go", "[studio][playlink]
 	for (int client = 0; client < 2; client++) {
 		auto link = std::make_unique<PlayLink>();
 		std::string error;
-		REQUIRE(link->Start(
-			*editor.Universe, authority, TICK_RATE, error, "client " + std::to_string(client + 1)
-		));
+		REQUIRE(
+			link->Start(*editor.Universe, authority, TICK_RATE, error, "client " + std::to_string(client + 1))
+		);
 		run.Links.push_back(std::move(link));
 	}
 	editor.Runs.push_back(std::move(run));
@@ -1500,9 +1500,7 @@ TEST_CASE("a character through a portal takes the client's camera round with it"
 		store.SetInstanceName(farPane, "FarPane");
 		store.SetParent(farPane, workspace);
 
-		const Entity hole = store.CreateInstance(
-			engine::ecs::Classes::Find(Name("SurfaceCamera")), "Hole"
-		);
+		const Entity hole = store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "Hole");
 
 		engine::scene::SurfaceCamera target;
 		target.Face = engine::scene::NormalId::Back;
@@ -1567,10 +1565,7 @@ TEST_CASE("a character through a portal takes the client's camera round with it"
 		const auto *went = store.Get<engine::scene::PortalTransit>(root);
 		REQUIRE(went != nullptr);
 		CHECK(went->Serial >= 1u);
-		CHECK_THAT(
-			went->Turn,
-			Catch::Matchers::WithinAbs(-std::numbers::pi_v<float> / 2.0f, 1e-3f)
-		);
+		CHECK_THAT(went->Turn, Catch::Matchers::WithinAbs(-std::numbers::pi_v<float> / 2.0f, 1e-3f));
 	});
 
 	// **The point of the case.** The client never simulated the crossing and
@@ -1594,10 +1589,7 @@ TEST_CASE("a character through a portal takes the client's camera round with it"
 		CHECK(camera->SeenTransit == arrived->Serial);
 
 		INFO("client yaw " << camera->Angles.Y);
-		CHECK_THAT(
-			camera->Angles.Y,
-			Catch::Matchers::WithinAbs(-std::numbers::pi_v<float> / 2.0f, 1e-3f)
-		);
+		CHECK_THAT(camera->Angles.Y, Catch::Matchers::WithinAbs(-std::numbers::pi_v<float> / 2.0f, 1e-3f));
 	});
 }
 

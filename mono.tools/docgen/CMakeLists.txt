@@ -133,6 +133,22 @@ foreach(root IN ITEMS
 	# public headers four programs include is one whose headers are checked for
 	# coverage.
 	"${CMAKE_SOURCE_DIR}/mono.discord"
+	# Discovery, the unified harness and the two test mains, added at v0.18.0.
+	# **Listed because they have public headers and for no other reason** - which
+	# is `mono.studio`'s rule, applied to the three members it had never been
+	# applied to. `mono.network` in particular is a member four programs include,
+	# and its headers were the only ones in the repository that nothing checked.
+	#
+	# `mono.unified_tests` is a diagnostic harness rather than a product and is
+	# still not shipped; that decides what goes in a release archive and has
+	# nothing to say about whether its headers describe themselves.
+	#
+	# `mono.build` is the two test mains. `engine/testing/Suite.hpp` is included
+	# by every suite in the repository, so it is about as public as a header
+	# here gets.
+	"${CMAKE_SOURCE_DIR}/mono.network"
+	"${CMAKE_SOURCE_DIR}/mono.unified_tests"
+	"${CMAKE_SOURCE_DIR}/mono.build"
 	"${CMAKE_SOURCE_DIR}/mono.tools")
 	# An input Doxygen cannot read is a warning, and `docs-check` fails on
 	# warnings - so a checkout that legitimately does not have one of these yet

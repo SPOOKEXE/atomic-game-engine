@@ -222,7 +222,6 @@ namespace studio {
 		return confirmed;
 	}
 
-
 	bool FuzzyMatch(std::string_view query, std::string_view candidate, int &score) {
 		score = 0;
 

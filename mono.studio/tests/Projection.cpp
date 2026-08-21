@@ -22,11 +22,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
-
-#include <studio/Projection.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 #include <cmath>
-#include <glm/gtc/quaternion.hpp>
+#include <studio/Projection.hpp>
 
 TEST_SUITE_ID("studio.projection")
 
@@ -158,8 +157,11 @@ TEST_CASE("a ray has unit length, so a hit distance is a distance", "[studio][pr
 	// The corners, where a direction taken from a single near-plane point
 	// rather than from two would be furthest wrong.
 	for (const glm::vec2 at :
-		 {glm::vec2(0.0f, 0.0f), glm::vec2(800.0f, 0.0f), glm::vec2(0.0f, 400.0f),
-		  glm::vec2(800.0f, 400.0f), glm::vec2(400.0f, 200.0f)}) {
+		 {glm::vec2(0.0f, 0.0f),
+		  glm::vec2(800.0f, 0.0f),
+		  glm::vec2(0.0f, 400.0f),
+		  glm::vec2(800.0f, 400.0f),
+		  glm::vec2(400.0f, 200.0f)}) {
 		const Ray ray = panel.PanelToRay(at);
 		CHECK_THAT(ray.Direction.Magnitude(), WithinAbs(1.0f, TIGHT));
 	}
@@ -318,9 +320,7 @@ TEST_CASE("dragging an axis reads the point on it nearest the cursor", "[studio]
 	const Ray ray(Vector3{0.0f, 0.0f, 0.0f}, Vector3{0.0f, 0.0f, -1.0f});
 
 	float along = 123.0f;
-	REQUIRE(studio::ClosestPointOnAxis(
-		Vector3{0.0f, 0.0f, -3.0f}, Vector3{1.0f, 0.0f, 0.0f}, ray, along
-	));
+	REQUIRE(studio::ClosestPointOnAxis(Vector3{0.0f, 0.0f, -3.0f}, Vector3{1.0f, 0.0f, 0.0f}, ray, along));
 
 	CHECK_THAT(along, WithinAbs(0.0f, TIGHT));
 }
@@ -332,9 +332,7 @@ TEST_CASE("an offset cursor reads an offset distance along the axis", "[studio][
 	const Ray ray(Vector3{2.0f, 0.0f, 0.0f}, Vector3{0.0f, 0.0f, -1.0f});
 
 	float along = 0.0f;
-	REQUIRE(studio::ClosestPointOnAxis(
-		Vector3{0.0f, 0.0f, -3.0f}, Vector3{1.0f, 0.0f, 0.0f}, ray, along
-	));
+	REQUIRE(studio::ClosestPointOnAxis(Vector3{0.0f, 0.0f, -3.0f}, Vector3{1.0f, 0.0f, 0.0f}, ray, along));
 
 	CHECK_THAT(along, WithinAbs(2.0f, TIGHT));
 }
@@ -346,16 +344,14 @@ TEST_CASE("an axis pointing at the eye is refused rather than flung", "[studio][
 	const Ray ray(Vector3{0.0f, 0.0f, 0.0f}, Vector3{0.0f, 0.0f, -1.0f});
 
 	float along = 0.0f;
-	CHECK_FALSE(studio::ClosestPointOnAxis(
-		Vector3{0.0f, 0.0f, -3.0f}, Vector3{0.0f, 0.0f, -1.0f}, ray, along
-	));
+	CHECK_FALSE(
+		studio::ClosestPointOnAxis(Vector3{0.0f, 0.0f, -3.0f}, Vector3{0.0f, 0.0f, -1.0f}, ray, along)
+	);
 
 	// And the near-parallel case, which is the one somebody actually reaches by
 	// turning the camera rather than by aiming exactly.
 	const Vector3 nearlyAligned = Vector3{0.004f, 0.0f, -1.0f}.Unit();
-	CHECK_FALSE(studio::ClosestPointOnAxis(
-		Vector3{0.0f, 0.0f, -3.0f}, nearlyAligned, ray, along
-	));
+	CHECK_FALSE(studio::ClosestPointOnAxis(Vector3{0.0f, 0.0f, -3.0f}, nearlyAligned, ray, along));
 }
 
 TEST_CASE("a ray meets a plane in front of it", "[studio][projection]") {
@@ -363,9 +359,7 @@ TEST_CASE("a ray meets a plane in front of it", "[studio][projection]") {
 	const Ray ray(Vector3{0.0f, 0.0f, 0.0f}, Vector3{0.0f, 0.0f, -1.0f});
 
 	Vector3 point;
-	REQUIRE(studio::IntersectRayPlane(
-		Vector3{0.0f, 0.0f, -5.0f}, Vector3{0.0f, 0.0f, 1.0f}, ray, point
-	));
+	REQUIRE(studio::IntersectRayPlane(Vector3{0.0f, 0.0f, -5.0f}, Vector3{0.0f, 0.0f, 1.0f}, ray, point));
 
 	CHECK_THAT(point.X, WithinAbs(0.0f, TIGHT));
 	CHECK_THAT(point.Y, WithinAbs(0.0f, TIGHT));
@@ -378,9 +372,7 @@ TEST_CASE("a ray meets a ground plane it is angled at", "[studio][projection]") 
 	const Ray ray(Vector3{0.0f, 2.0f, 0.0f}, Vector3{0.0f, -1.0f, -1.0f}.Unit());
 
 	Vector3 point;
-	REQUIRE(studio::IntersectRayPlane(
-		Vector3{0.0f, 0.0f, 0.0f}, Vector3{0.0f, 1.0f, 0.0f}, ray, point
-	));
+	REQUIRE(studio::IntersectRayPlane(Vector3{0.0f, 0.0f, 0.0f}, Vector3{0.0f, 1.0f, 0.0f}, ray, point));
 
 	CHECK_THAT(point.Y, WithinAbs(0.0f, TIGHT));
 	CHECK_THAT(point.Z, WithinAbs(-2.0f, TIGHT));
@@ -392,18 +384,14 @@ TEST_CASE("a ray along a plane is refused rather than crossing far away", "[stud
 	const Ray ray(Vector3{0.0f, 1.0f, 0.0f}, Vector3{0.0f, 0.0f, -1.0f});
 
 	Vector3 point;
-	CHECK_FALSE(studio::IntersectRayPlane(
-		Vector3{0.0f, 0.0f, 0.0f}, Vector3{0.0f, 1.0f, 0.0f}, ray, point
-	));
+	CHECK_FALSE(studio::IntersectRayPlane(Vector3{0.0f, 0.0f, 0.0f}, Vector3{0.0f, 1.0f, 0.0f}, ray, point));
 }
 
 TEST_CASE("a plane behind the eye is not what the cursor is pointing at", "[studio][projection]") {
 	const Ray ray(Vector3{0.0f, 0.0f, 0.0f}, Vector3{0.0f, 0.0f, -1.0f});
 
 	Vector3 point;
-	CHECK_FALSE(studio::IntersectRayPlane(
-		Vector3{0.0f, 0.0f, 5.0f}, Vector3{0.0f, 0.0f, 1.0f}, ray, point
-	));
+	CHECK_FALSE(studio::IntersectRayPlane(Vector3{0.0f, 0.0f, 5.0f}, Vector3{0.0f, 0.0f, 1.0f}, ray, point));
 }
 
 TEST_CASE("a box reaches to its corner along a slope's normal", "[studio][projection]") {

@@ -215,9 +215,7 @@ namespace studio {
 
 		if (!CommandHistory.empty()) {
 			ImGui::Spacing();
-			ImGui::TextDisabled(
-				"%zu command(s) this session · up and down walk them", CommandHistory.size()
-			);
+			ImGui::TextDisabled("%zu command(s) this session · up and down walk them", CommandHistory.size());
 		}
 
 		ImGui::End();

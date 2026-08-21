@@ -85,9 +85,8 @@ namespace studio {
 
 		RenderPipelineWorld = world;
 		RenderPipelineName = selected;
-		RenderPipelineInstalledName = engine::core::Name(
-			std::string(selected.Text()) + "#" + std::to_string(world.Index)
-		);
+		RenderPipelineInstalledName =
+			engine::core::Name(std::string(selected.Text()) + "#" + std::to_string(world.Index));
 		RenderPipelineBasis = document;
 		RenderPipelineLoaded = engine::graph::Write(document);
 		RenderPipelineDirty = false;
@@ -239,10 +238,9 @@ namespace studio {
 			std::string previewError;
 			const auto renderedSlot = RenderPipelineRenderedSlots.find(RenderPipelineWorld.Index);
 			const auto installedPipeline = PipelineSelected.find(RenderPipelineWorld.Index);
-			const bool previewSourceReady =
-				renderedSlot != RenderPipelineRenderedSlots.end() &&
-				installedPipeline != PipelineSelected.end() &&
-				installedPipeline->second == RenderPipelineInstalledName;
+			const bool previewSourceReady = renderedSlot != RenderPipelineRenderedSlots.end() &&
+											installedPipeline != PipelineSelected.end() &&
+											installedPipeline->second == RenderPipelineInstalledName;
 			const size_t previewSlot = previewSourceReady ? renderedSlot->second : 0;
 			if (SaveRenderPipelineGraph(
 					RenderPipelineGraph, RenderPipelineBasis, previewDocument, previewError
@@ -251,7 +249,8 @@ namespace studio {
 					engine::graph::PipelineDocumentStatus::Ok) {
 				for (size_t index = 0; index < RenderPipelineGraph.Nodes().size(); index++) {
 					const engine::nodegraph::Node &canvasNode = RenderPipelineGraph.Nodes()[index];
-					const engine::nodegraph::NodeType *canvasType = engine::nodegraph::NodeTypes::Find(canvasNode.Type);
+					const engine::nodegraph::NodeType *canvasType =
+						engine::nodegraph::NodeTypes::Find(canvasNode.Type);
 					const engine::graph::Node *renderNode =
 						previewGraph.Find(engine::graph::NodeId{static_cast<uint32_t>(index + 1)});
 					if (canvasType == nullptr || canvasType->PreviewPort.empty() || renderNode == nullptr) {
@@ -289,10 +288,10 @@ namespace studio {
 						);
 					}
 					void *texture = resource == nullptr
-								? nullptr
-								: Renderer.ResourcePreviewTexture(
-									  RenderPipelineInstalledName, resource->Name, previewSlot
-								  );
+										? nullptr
+										: Renderer.ResourcePreviewTexture(
+											  RenderPipelineInstalledName, resource->Name, previewSlot
+										  );
 					if (texture != nullptr) {
 						RenderPipelinePreviewTextures[engine::nodegraph::PictureKey(
 							RenderPipelinePreviewEvaluator.RanAt(canvasNode.Id), canvasType->PreviewPort

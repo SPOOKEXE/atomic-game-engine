@@ -20,6 +20,11 @@
 //   and a 2× interface scale.
 
 #include <engine/assets/Texture.hpp>
+#include <engine/nodegraph/Evaluate.hpp>
+#include <engine/nodegraph/Graph.hpp>
+#include <engine/nodegraph/Preview.hpp>
+#include <engine/nodegraph/Registry.hpp>
+#include <engine/nodegraph/Types.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/ui/Metrics.hpp>
 #include <engine/ui/Theme.hpp>
@@ -31,13 +36,8 @@
 #include <cstdint>
 #include <functional>
 #include <imgui.h>
-#include <studio/DemoNodes.hpp>
-#include <engine/nodegraph/Evaluate.hpp>
-#include <engine/nodegraph/Graph.hpp>
-#include <engine/nodegraph/Preview.hpp>
-#include <engine/nodegraph/Registry.hpp>
-#include <engine/nodegraph/Types.hpp>
 #include <string>
+#include <studio/DemoNodes.hpp>
 #include <studio/Editor.hpp>
 #include <studio/RenderPipelineGraph.hpp>
 #include <thread>
