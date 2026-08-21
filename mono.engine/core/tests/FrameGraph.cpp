@@ -999,3 +999,90 @@ TEST_CASE("turning folding on clears what the last capture accumulated", "[frame
 
 	FrameGraph::SetFoldingEnabled(false);
 }
+
+// --- the event scheduler -----------------------------------------------------
+//
+// The rules are process-wide, the same as the collector, so every case here
+// disarms on the way out.
+
+namespace {
+	struct Armed {
+		explicit Armed(std::vector<engine::core::FrameTrigger> rules) : Rules(std::move(rules)) {
+			FrameGraph::SetTriggers(Rules);
+			FrameGraph::ClearTrigger();
+		}
+		~Armed() {
+			FrameGraph::SetTriggers({});
+			FrameGraph::ClearTrigger();
+		}
+
+		std::vector<engine::core::FrameTrigger> Rules;
+	};
+
+	// A frame containing one span that takes at least `milliseconds`.
+	void SlowFrame(std::string_view name, int milliseconds) {
+		FrameGraph::BeginFrame();
+		{
+			ENGINE_PROFILE_DYNAMIC("rule", name, ProfileCategory::Engine);
+			std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));
+		}
+		FrameGraph::EndFrame();
+	}
+}
+
+TEST_CASE("a rule stops the graph on the frame that meets it", "[framegraph]") {
+	Collecting collecting;
+	Armed armed({engine::core::FrameTrigger{.Name = "slow", .Threshold = 1.0f}});
+
+	REQUIRE(FrameGraph::Triggered() == nullptr);
+
+	SlowFrame("slow", 3);
+
+	const engine::core::FrameTriggerHit *hit = FrameGraph::Triggered();
+	REQUIRE(hit != nullptr);
+	REQUIRE(hit->Subject == "slow");
+	REQUIRE(hit->Reading > 1.0f);
+}
+
+TEST_CASE("the latch holds past the frame that set it", "[framegraph]") {
+	Collecting collecting;
+	Armed armed({engine::core::FrameTrigger{.Name = "slow", .Threshold = 1.0f}});
+
+	SlowFrame("slow", 3);
+	REQUIRE(FrameGraph::Triggered() != nullptr);
+
+	// **The point of the latch.** A reader looks a few times a second and the
+	// spike is one frame; a hit that cleared itself on the next frame would be
+	// gone before anything saw it.
+	FrameGraph::BeginFrame();
+	FrameGraph::EndFrame();
+	REQUIRE(FrameGraph::Triggered() != nullptr);
+
+	FrameGraph::ClearTrigger();
+	REQUIRE(FrameGraph::Triggered() == nullptr);
+}
+
+TEST_CASE("an under rule waits for the span rather than firing without it", "[framegraph]") {
+	Collecting collecting;
+	Armed armed({engine::core::FrameTrigger{
+		.Name = "absent",
+		.Test = engine::core::TriggerTest::Below,
+		.Threshold = 1000.0f,
+	}});
+
+	// The span never runs, so there is no reading. Read as a zero this would
+	// fire on every frame, which is the bug the optional exists to prevent.
+	SlowFrame("something else", 1);
+	REQUIRE(FrameGraph::Triggered() == nullptr);
+
+	SlowFrame("absent", 1);
+	REQUIRE(FrameGraph::Triggered() != nullptr);
+}
+
+TEST_CASE("a rule that is off does not fire", "[framegraph]") {
+	Collecting collecting;
+	Armed armed({engine::core::FrameTrigger{.Name = "slow", .Threshold = 1.0f, .Enabled = false}});
+
+	SlowFrame("slow", 3);
+	REQUIRE(FrameGraph::Triggered() == nullptr);
+}

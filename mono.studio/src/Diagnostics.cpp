@@ -294,6 +294,21 @@ namespace studio {
 			view.Frames = 0;
 		};
 
+		// **The graph pauses itself on the frame the rule fired**, which is the
+		// frame worth reading. What is taken here is that frame rather than
+		// whatever an interval was accumulating: a mean over 250 ms with one bad
+		// frame in it is exactly the picture the rule exists to replace.
+		if (!view.Paused) {
+			if (const engine::core::FrameTriggerHit *hit = FrameGraph::Triggered(); hit != nullptr) {
+				snapshot(view.Spans);
+				readScalars();
+				forget();
+				view.Paused = true;
+				view.PausedByRule = true;
+				view.Fired = *hit;
+			}
+		}
+
 		if (!view.Paused) {
 			if (interval <= 0.0f) {
 				// Every frame, which is what this panel always did.
@@ -405,6 +420,12 @@ namespace studio {
 		if (ImGui::Button(view.Paused ? "Resume" : "Pause")) {
 			view.Paused = !view.Paused;
 
+			// Resuming disarms the latch, so the next matching frame stops the
+			// graph again. Pausing by hand clears the label rather than leaving
+			// a stale rule named beside a pause nobody's rule took.
+			view.PausedByRule = false;
+			FrameGraph::ClearTrigger();
+
 			// Resuming starts the next interval from now rather than from
 			// whenever it was due when the pause began - otherwise a graph
 			// paused for a minute republishes on the frame it is resumed and
@@ -459,7 +480,15 @@ namespace studio {
 		if (view.Paused) {
 			ImGui::SameLine();
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
-			ImGui::TextUnformatted("- paused");
+			if (view.PausedByRule) {
+				ImGui::Text(
+					"- stopped: %s was %.2f ms",
+					view.Fired.Subject.c_str(),
+					static_cast<double>(view.Fired.Reading)
+				);
+			} else {
+				ImGui::TextUnformatted("- paused");
+			}
 			ImGui::PopStyleColor();
 		} else if (interval > 0.0f && view.Average) {
 			ImGui::SameLine();
@@ -532,6 +561,166 @@ namespace studio {
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
 			ImGui::TextUnformatted("Preferences > Compute > force serial compute keeps every span");
 			ImGui::PopStyleColor();
+		}
+
+		// --- the event scheduler ---------------------------------------------
+		//
+		// **Rules live here and run in `FrameGraph::EndFrame`.** This panel
+		// samples four times a second at its shortest interval, and the frame a
+		// rule is written for is one frame long, so a rule tested here would
+		// miss almost every spike it was written to catch. What is here is the
+		// writing of them.
+		//
+		// Folded away by default: most sessions never write one, and an empty
+		// table above the flame graph would push the thing somebody opened the
+		// panel for off the screen.
+		if (ImGui::CollapsingHeader(view.Triggers.empty() ? "Event scheduler" : "Event scheduler (armed)")) {
+			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+			ImGui::TextWrapped(
+				"A rule stops the graph on the frame that meets it, so the picture left on "
+				"screen is the bad frame rather than an average that contains it."
+			);
+			ImGui::PopStyleColor();
+
+			bool changed = false;
+			size_t remove = view.Triggers.size();
+
+			for (size_t index = 0; index < view.Triggers.size(); index++) {
+				engine::core::FrameTrigger &rule = view.Triggers[index];
+				ImGui::PushID(static_cast<int>(index));
+
+				changed |= ImGui::Checkbox("##on", &rule.Enabled);
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip(
+						"A rule that is off is kept, so it can be armed again without retyping."
+					);
+				}
+
+				// **The names come from `core` rather than from a table here.**
+				// The preferences file writes the same words, and two tables
+				// that have to agree are one commit from disagreeing - a rule
+				// that loads as a different subject than it was saved as.
+				ImGui::SameLine();
+				ImGui::SetNextItemWidth(engine::ui::Scaled(110.0f));
+				const std::string subject(engine::core::GetTriggerSubjectName(rule.Subject));
+				if (ImGui::BeginCombo("##subject", subject.c_str())) {
+					for (size_t at = 0; at <= static_cast<size_t>(engine::core::TriggerSubject::Dropped);
+						 at++) {
+						const auto option = static_cast<engine::core::TriggerSubject>(at);
+						const std::string name(engine::core::GetTriggerSubjectName(option));
+						if (ImGui::Selectable(name.c_str(), option == rule.Subject)) {
+							rule.Subject = option;
+							changed = true;
+						}
+					}
+					ImGui::EndCombo();
+				}
+
+				// Only the subjects that name something get a name to edit. A
+				// field that is ignored is one somebody fills in and then
+				// wonders why the rule does not fire.
+				if (rule.Subject == engine::core::TriggerSubject::Span ||
+					rule.Subject == engine::core::TriggerSubject::SpanSelf) {
+					ImGui::SameLine();
+					ImGui::SetNextItemWidth(engine::ui::Scaled(160.0f));
+
+					std::vector<char> buffer(128, '\0');
+					std::snprintf(buffer.data(), buffer.size(), "%s", rule.Name.c_str());
+					if (ImGui::InputTextWithHint("##name", "span name", buffer.data(), buffer.size())) {
+						rule.Name = buffer.data();
+						changed = true;
+					}
+
+					// **The names in the frame, offered rather than typed.** A
+					// rule matches exactly, and `pump events` typed as `pump
+					// event` is a rule that never fires and says nothing about
+					// why. The list is what was published, which is what a
+					// person is looking at when they write the rule.
+					ImGui::SameLine();
+					if (ImGui::BeginCombo("##pick", "", ImGuiComboFlags_NoPreview)) {
+						for (const HeldSpan &span : spans) {
+							if (ImGui::Selectable(span.Name.c_str())) {
+								rule.Name = span.Name;
+								changed = true;
+							}
+						}
+						ImGui::EndCombo();
+					}
+				} else if (rule.Subject == engine::core::TriggerSubject::Category) {
+					ImGui::SameLine();
+					ImGui::SetNextItemWidth(engine::ui::Scaled(120.0f));
+					const std::string current(engine::core::GetCategoryName(rule.Category));
+					if (ImGui::BeginCombo("##category", current.c_str())) {
+						for (size_t at = 0; at < static_cast<size_t>(ProfileCategory::Count); at++) {
+							const auto category = static_cast<ProfileCategory>(at);
+							const std::string name(engine::core::GetCategoryName(category));
+							if (ImGui::Selectable(name.c_str(), category == rule.Category)) {
+								rule.Category = category;
+								changed = true;
+							}
+						}
+						ImGui::EndCombo();
+					}
+				}
+
+				ImGui::SameLine();
+				ImGui::SetNextItemWidth(engine::ui::Scaled(70.0f));
+				const std::string test(engine::core::GetTriggerTestName(rule.Test));
+				if (ImGui::BeginCombo("##test", test.c_str())) {
+					for (const engine::core::TriggerTest option :
+						 {engine::core::TriggerTest::Above, engine::core::TriggerTest::Below}) {
+						const std::string name(engine::core::GetTriggerTestName(option));
+						if (ImGui::Selectable(name.c_str(), option == rule.Test)) {
+							rule.Test = option;
+							changed = true;
+						}
+					}
+					ImGui::EndCombo();
+				}
+
+				ImGui::SameLine();
+				ImGui::SetNextItemWidth(engine::ui::Scaled(90.0f));
+				const bool counting = rule.Subject == engine::core::TriggerSubject::Dropped;
+				if (ImGui::InputFloat(
+						"##threshold", &rule.Threshold, 0.0f, 0.0f, counting ? "%.0f" : "%.2f ms"
+					)) {
+					changed = true;
+				}
+
+				ImGui::SameLine();
+				if (ImGui::Button("x")) {
+					remove = index;
+				}
+
+				ImGui::PopID();
+			}
+
+			if (remove < view.Triggers.size()) {
+				view.Triggers.erase(view.Triggers.begin() + static_cast<ptrdiff_t>(remove));
+				changed = true;
+			}
+
+			if (ImGui::Button("Add rule")) {
+				// Seeded with the case this was built for rather than with an
+				// empty row: a rule with no name matches no span, and a first
+				// row that does nothing teaches nothing about what a rule is.
+				view.Triggers.push_back(
+					engine::core::FrameTrigger{
+						.Name = "pump events",
+						.Subject = engine::core::TriggerSubject::Span,
+						.Test = engine::core::TriggerTest::Above,
+						.Threshold = 2.0f,
+					}
+				);
+				changed = true;
+			}
+
+			// Pushed only when something moved. The list is copied on the way
+			// in, and copying it every repaint would be a per-frame allocation
+			// to say nothing changed.
+			if (changed) {
+				FrameGraph::SetTriggers(view.Triggers);
+			}
 		}
 
 		if (spans.empty()) {

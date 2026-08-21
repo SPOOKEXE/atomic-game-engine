@@ -251,6 +251,92 @@ namespace engine::core {
 	// @since v0.16
 	bool WriteFoldedStacks(const std::filesystem::path &path, const FoldedStacks &totals);
 
+	// How a rule compares a reading with its threshold.
+	//
+	// @since v0.19
+	enum class TriggerTest : uint8_t {
+		Above, // The reading is greater than the threshold.
+		Below, // The reading is less than the threshold.
+	};
+
+	// What a rule reads out of a completed frame.
+	//
+	// @since v0.19
+	enum class TriggerSubject : uint8_t {
+		// Total inclusive milliseconds of every span named `Name`. A frame
+		// that did not run the span is not a reading at all rather than a
+		// reading of zero, so an `under` rule waits for the span rather than
+		// firing on the first frame without it.
+		Span,
+		SpanSelf, // The same, self time only, and absent the same way.
+		Category, // `CategoryMilliseconds(Category)`.
+		Frame,	  // `FrameMilliseconds()`.
+		Unmarked, // `UnmarkedMilliseconds()`.
+		Dropped,  // `Dropped()`, as a count rather than a duration.
+	};
+
+	// One condition that stops the graph when a frame meets it.
+	//
+	// **Deliberately one comparison and no expression language.** Every rule
+	// anybody has asked for is "this number got too big"; a grammar would be a
+	// second thing to learn for the same answer, and a rule nobody can read at
+	// a glance is one nobody trusts when it fires.
+	//
+	// @since v0.19
+	struct FrameTrigger {
+		// The span name to total, exactly. Ignored unless `Subject` is `Span`
+		// or `SpanSelf`.
+		//
+		// Owned rather than a view: a rule outlives the frame that named it,
+		// and the panel's text field is edited under it.
+		std::string Name;
+
+		// Which category to read. Ignored unless `Subject` is `Category`.
+		ProfileCategory Category = ProfileCategory::Engine;
+
+		TriggerSubject Subject = TriggerSubject::Span;
+		TriggerTest Test = TriggerTest::Above;
+
+		// Milliseconds, or a count for `Dropped`.
+		float Threshold = 0.0f;
+
+		// A rule that is off is kept rather than removed, so somebody may
+		// switch one on for a run without retyping it.
+		bool Enabled = true;
+	};
+
+	// Returns the name a rule's subject is written under, in a file and in the
+	// panel's list. Stable: preferences are matched against it.
+	//
+	// @since v0.19
+	std::string_view GetTriggerSubjectName(TriggerSubject subject);
+
+	// Returns the name a rule's comparison is written under. Stable, for the
+	// same reason.
+	//
+	// @since v0.19
+	std::string_view GetTriggerTestName(TriggerTest test);
+
+	// What fired, and what the reading was.
+	//
+	// @since v0.19
+	struct FrameTriggerHit {
+		// Index into the list that was armed. The list may have been edited
+		// since, which is why the name below is copied rather than looked up.
+		size_t Rule = 0;
+
+		// The reading that met the condition.
+		float Reading = 0.0f;
+
+		// The threshold it met.
+		float Threshold = 0.0f;
+
+		// What the rule was reading, spelled for a person. The span name for a
+		// span rule, the category name for a category rule, and the subject's
+		// own name otherwise.
+		std::string Subject;
+	};
+
 	// Collects one thread's nested scopes into a bounded per-frame tree and
 	// short spike history for the in-game overlay.
 	//
@@ -477,6 +563,41 @@ namespace engine::core {
 		// @return False if no history is retained, the file cannot be opened, or
 		//         writing does not complete successfully.
 		static bool WriteSnapshot(const std::filesystem::path &path);
+
+		// --- triggers --------------------------------------------------------
+		//
+		// **A rule cannot be evaluated by a panel, and that is the whole design
+		// decision.** A panel draws once per repaint and, at the 250 ms interval
+		// it offers, samples four times a second - so the 12 ms `pump events` in
+		// one frame out of fifteen is gone before anything looks at it. That is
+		// the exact failure this exists to fix. So a rule runs in `EndFrame`,
+		// where the tree is still in hand, and it latches.
+
+		// Replaces the armed rules.
+		//
+		// Evaluated at the end of every collected frame, on the collecting
+		// thread, before the frame is published - so a rule that fires does so
+		// on the frame a reader is about to be shown.
+		//
+		// @param triggers The rules. Copied. An empty list disarms.
+		// @since v0.19
+		static void SetTriggers(std::span<const FrameTrigger> triggers);
+
+		// Returns the rule that fired, or `nullptr`.
+		//
+		// **A latch, not a poll.** The reader looks a few times a second and the
+		// spike is one frame long; a reader asking "is anything wrong now" would
+		// answer no on the frame after every hit worth catching. Stays set until
+		// `ClearTrigger`, and while it is set no further rule is evaluated - the
+		// frame that fired is the frame being kept, and overwriting it with the
+		// next one would lose it.
+		//
+		// @since v0.19
+		static const FrameTriggerHit *Triggered();
+
+		// Disarms the latch so the next matching frame can set it again.
+		// @since v0.19
+		static void ClearTrigger();
 
 		// --- folded stacks ---------------------------------------------------
 		//

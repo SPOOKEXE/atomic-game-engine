@@ -5540,6 +5540,30 @@ namespace studio {
 			size_t SummedDropped = 0;
 			uint32_t Frames = 0;
 			//@}
+
+			// --- the scheduler ------------------------------------------------
+			//
+			// Rules that stop the graph on the frame that meets them. Edited
+			// here and pushed to `FrameGraph::SetTriggers`, which is where they
+			// are evaluated - a rule tested by this panel would sample four
+			// times a second and miss the one frame it was written for.
+
+			// The armed rules, in the order they were written.
+			std::vector<engine::core::FrameTrigger> Triggers;
+
+			// What fired, copied out of the latch when the pause was taken.
+			//
+			// Copied rather than pointed at: the panel says what fired for as
+			// long as it stays paused, and `ClearTrigger` runs the moment the
+			// pause is released.
+			engine::core::FrameTriggerHit Fired;
+
+			// Whether this pause was taken by a rule rather than by the button.
+			bool PausedByRule = false;
+
+			// Whether the rule list is open. Folded away by default, because
+			// most sessions never write one.
+			bool ShowTriggers = false;
 		};
 
 		// What the frame-graph panel is showing. Held across frames, which is

@@ -8,6 +8,7 @@
 #include <deque>
 #include <fstream>
 #include <map>
+#include <optional>
 #include <string>
 #include <thread>
 #include <utility>
@@ -155,6 +156,14 @@ namespace engine::core {
 			// --- folded stacks ------------------------------------------------
 			bool Folding = false;
 			FoldedStacks Folded;
+
+			// --- triggers -----------------------------------------------------
+			//
+			// Owned by the collecting thread, the same as everything above:
+			// armed from it, evaluated in `EndFrame`, read from it.
+			std::vector<FrameTrigger> Triggers;
+			FrameTriggerHit Hit;
+			bool Latched = false;
 			size_t FoldedFrameCount = 0;
 		};
 
@@ -378,6 +387,34 @@ namespace engine::core {
 		constexpr size_t WORST_FRAME_SPANS = 6;
 	}
 
+	std::string_view GetTriggerSubjectName(TriggerSubject subject) {
+		switch (subject) {
+		case TriggerSubject::Span:
+			return "span";
+		case TriggerSubject::SpanSelf:
+			return "span self";
+		case TriggerSubject::Category:
+			return "category";
+		case TriggerSubject::Frame:
+			return "frame";
+		case TriggerSubject::Unmarked:
+			return "unmarked";
+		case TriggerSubject::Dropped:
+			return "dropped";
+		}
+		return "?";
+	}
+
+	std::string_view GetTriggerTestName(TriggerTest test) {
+		switch (test) {
+		case TriggerTest::Above:
+			return "over";
+		case TriggerTest::Below:
+			return "under";
+		}
+		return "?";
+	}
+
 	std::string_view GetCategoryName(ProfileCategory category) {
 		switch (category) {
 		case ProfileCategory::Engine:
@@ -564,6 +601,131 @@ namespace engine::core {
 		return out.good();
 	}
 
+	namespace {
+
+		// Reads what one rule asks for out of the frame that has just been
+		// measured.
+		//
+		// `state.Building` is still the frame being described - `EndFrame` calls
+		// this before the publish swap - and the category totals and the idle
+		// accounting are already in it.
+		//
+		// @param state The collector, mid-`EndFrame`.
+		// @param rule  What to read.
+		// @param total The frame's wall clock, which is not published yet.
+		// @return The reading, in milliseconds or a count for `Dropped`, or
+		//         nothing when the rule names a span this frame did not run.
+		//
+		// **Nothing rather than zero for an absent span, and it is the `under`
+		// rules that need it.** "`pump events` under 1 ms" is a question about a
+		// frame that pumped events; answering it with the zero of a frame that
+		// did not would stop the graph on the first frame where nothing
+		// happened, which is every frame before the one somebody is waiting for.
+		std::optional<float> ReadTrigger(const State &state, const FrameTrigger &rule, float total) {
+			switch (rule.Subject) {
+			case TriggerSubject::Span:
+			case TriggerSubject::SpanSelf: {
+				// Totalled over every occurrence rather than taking the
+				// worst, because a span that opens forty times in a bad
+				// frame is a bad frame even when no single one of the forty
+				// is slow. That is the reported case exactly: `pump events`
+				// is one span per event.
+				float found = 0.0f;
+				bool ran = false;
+				for (const FrameSpan &span : state.Building) {
+					if (span.Name == rule.Name) {
+						found +=
+							rule.Subject == TriggerSubject::Span ? span.Milliseconds : span.SelfMilliseconds;
+						ran = true;
+					}
+				}
+				if (!ran) {
+					return std::nullopt;
+				}
+				return found;
+			}
+
+			case TriggerSubject::Category:
+				return state.PublishedCategories[static_cast<size_t>(rule.Category)];
+
+			case TriggerSubject::Frame:
+				return total;
+
+			case TriggerSubject::Unmarked:
+				return state.PublishedUnmarked;
+
+			case TriggerSubject::Dropped:
+				return static_cast<float>(state.DroppedThisFrame.load(std::memory_order_relaxed));
+			}
+			return 0.0f;
+		}
+
+		// What a rule was reading, spelled for whoever reads the hit.
+		std::string DescribeTrigger(const FrameTrigger &rule) {
+			switch (rule.Subject) {
+			case TriggerSubject::Span:
+				return rule.Name;
+			case TriggerSubject::SpanSelf:
+				return rule.Name + " (self)";
+			case TriggerSubject::Category:
+				return std::string(GetCategoryName(rule.Category));
+			case TriggerSubject::Frame:
+				return "frame";
+			case TriggerSubject::Unmarked:
+				return "unmarked";
+			case TriggerSubject::Dropped:
+				return "dropped spans";
+			}
+			return "";
+		}
+
+		// Arms the latch on the first rule this frame meets.
+		//
+		// First rather than worst: the rules are a list somebody wrote in an
+		// order, and a reader who is told two things fired at once has to work
+		// out which one they care about. One rule, one reading, one frame.
+		void EvaluateTriggers(State &state, float total) {
+			for (size_t index = 0; index < state.Triggers.size(); index++) {
+				const FrameTrigger &rule = state.Triggers[index];
+				if (!rule.Enabled) {
+					continue;
+				}
+
+				const std::optional<float> reading = ReadTrigger(state, rule, total);
+				if (!reading.has_value()) {
+					continue;
+				}
+
+				const bool met =
+					rule.Test == TriggerTest::Above ? *reading > rule.Threshold : *reading < rule.Threshold;
+				if (!met) {
+					continue;
+				}
+
+				state.Hit.Rule = index;
+				state.Hit.Reading = *reading;
+				state.Hit.Threshold = rule.Threshold;
+				state.Hit.Subject = DescribeTrigger(rule);
+				state.Latched = true;
+				return;
+			}
+		}
+	}
+
+	void FrameGraph::SetTriggers(std::span<const FrameTrigger> triggers) {
+		State &state = Get();
+		state.Triggers.assign(triggers.begin(), triggers.end());
+	}
+
+	const FrameTriggerHit *FrameGraph::Triggered() {
+		const State &state = Get();
+		return state.Latched ? &state.Hit : nullptr;
+	}
+
+	void FrameGraph::ClearTrigger() {
+		Get().Latched = false;
+	}
+
 	void FrameGraph::SetFoldingEnabled(bool enabled) {
 		auto &state = Get();
 		if (enabled) {
@@ -682,6 +844,18 @@ namespace engine::core {
 		if (state.Folding) {
 			AccumulateFoldedStacks(state.Building, state.Folded);
 			state.FoldedFrameCount++;
+		}
+
+		// **Here, and not in the panel.** The panel samples four times a second
+		// at the shortest interval it offers; the frame a rule is written for is
+		// one frame long. Where the tree still exists is the only place a rule
+		// can see the frame that broke it.
+		//
+		// Before the swap, so `Building` is the frame being described, and after
+		// the category totals and `AccumulateIdleMilliseconds` so a rule may
+		// read either.
+		if (!state.Triggers.empty() && !state.Latched) {
+			EvaluateTriggers(state, total);
 		}
 
 		state.Published.swap(state.Building);

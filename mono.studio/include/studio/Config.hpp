@@ -46,6 +46,7 @@
 //
 // @tier client
 
+#include <engine/core/FrameGraph.hpp>
 #include <engine/ui/Theme.hpp>
 
 #include <cstddef>
@@ -274,6 +275,17 @@ namespace studio {
 		bool ShowAssets = false;
 		bool ShowControl = false;
 		//@}
+
+		// The frame graph's auto-pause rules, armed at start-up.
+		//
+		// **Kept because a rule is written for a spike that has not happened
+		// yet.** Somebody arms "pump events over 2 ms" precisely because they
+		// cannot make the spike happen on demand, and a rule that has to be
+		// retyped every session is one that is not armed when the spike
+		// arrives.
+		//
+		// @since v0.19
+		std::vector<engine::core::FrameTrigger> FrameGraphRules;
 
 		// Which of the shipped worlds a new game opens with, by key.
 		//

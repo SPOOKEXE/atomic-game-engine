@@ -336,7 +336,19 @@ The milestone headings below are development labels. Not in line with project ve
       than a frame: it decides whether the editor may drop to its idle rate. The
       loop sets a flag and the clock is read once per pump. The per-event spans
       above are what will say whether anything else remains.
-- [_] in flamegraph, add a "Event Scheduler" where you can setup a rule that auto-pauses the flamegraph when conditions are met (e.g. when pump events hit >2ms, i can force a pause on that flamegraph to see the cause).
+- [x] in flamegraph, add an "Event Scheduler" that auto-pauses on a rule.
+      **The design decision is where a rule runs.** A rule tested by the panel
+      would sample four times a second at the shortest interval it offers, and
+      the frame it is written for is one frame long - which is the exact failure
+      the feature exists to fix. So a rule is evaluated in
+      `FrameGraph::EndFrame`, where the tree is still in hand, and it latches:
+      a reader that asked "is anything wrong now" would answer no on the frame
+      after every hit worth catching. One comparison per rule and no expression
+      language, because every rule anybody has asked for is "this number got too
+      big". An `under` rule waits for its span rather than firing on a frame
+      that never ran it. Rules persist in the preferences file, spelled in the
+      same words the panel shows, and are armed at start-up whether or not the
+      panel is open.
 - [x] in discord presence tab, add a list of templating replacement words. Five
       tokens, each with what it means and **what it says right now**, because a
       name and a description leave somebody guessing whether `{instances}`

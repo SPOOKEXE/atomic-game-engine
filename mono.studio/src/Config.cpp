@@ -316,6 +316,63 @@ namespace studio {
 			ShowControl = Flag(*panels, "control", ShowControl);
 		}
 
+		// **Words rather than numbers, and matched against the same names the
+		// panel shows.** A rule written as `{"subject": 2}` is a file nobody can
+		// read or hand-edit, and an enum that gains a value in the middle would
+		// silently turn every saved rule into a different one.
+		//
+		// A rule naming a subject this build does not know is dropped rather
+		// than defaulted: an unrecognised word means the file came from a
+		// different version, and arming a rule that watches something other
+		// than what it says is worse than not arming it.
+		if (const auto rules = document.find("frameGraphRules");
+			rules != document.end() && rules->is_array()) {
+			FrameGraphRules.clear();
+			for (const json &entry : *rules) {
+				if (!entry.is_object()) {
+					continue;
+				}
+
+				engine::core::FrameTrigger rule;
+				rule.Name = Words(entry, "span", "");
+				rule.Threshold = Number(entry, "threshold", 0.0f);
+				rule.Enabled = Flag(entry, "enabled", true);
+
+				const std::string subject = Words(entry, "subject", "");
+				bool known = false;
+				for (size_t at = 0; at <= static_cast<size_t>(engine::core::TriggerSubject::Dropped); at++) {
+					const auto option = static_cast<engine::core::TriggerSubject>(at);
+					if (subject == engine::core::GetTriggerSubjectName(option)) {
+						rule.Subject = option;
+						known = true;
+						break;
+					}
+				}
+				if (!known) {
+					continue;
+				}
+
+				// The comparison defaults rather than drops: a missing or
+				// misspelled `test` still leaves a rule that says what it
+				// watches, and "over" is what every rule anybody writes means.
+				const std::string test = Words(entry, "test", "");
+				if (test == engine::core::GetTriggerTestName(engine::core::TriggerTest::Below)) {
+					rule.Test = engine::core::TriggerTest::Below;
+				}
+
+				const std::string category = Words(entry, "category", "");
+				for (size_t at = 0; at < static_cast<size_t>(engine::core::ProfileCategory::Count); at++) {
+					const auto option = static_cast<engine::core::ProfileCategory>(at);
+					if (category == engine::core::GetCategoryName(option)) {
+						rule.Category = option;
+						break;
+					}
+				}
+
+				FrameGraphRules.push_back(std::move(rule));
+			}
+		}
+
 		// **A missing array and an empty one are different answers.** Absent is
 		// a file written before the preference existed and means "use the
 		// catalogue's defaults"; present and empty is somebody who unticked
@@ -434,6 +491,24 @@ namespace studio {
 			}
 		}
 
+		// A rule per line, spelled the way the panel spells it. `span` and
+		// `category` are written whatever the subject is: a rule switched from
+		// a span to a frame keeps the name it had, so switching back does not
+		// mean typing it again.
+		json frameGraphRules = json::array();
+		for (const engine::core::FrameTrigger &rule : FrameGraphRules) {
+			frameGraphRules.push_back(
+				json{
+					{"subject", engine::core::GetTriggerSubjectName(rule.Subject)},
+					{"span", rule.Name},
+					{"category", engine::core::GetCategoryName(rule.Category)},
+					{"test", engine::core::GetTriggerTestName(rule.Test)},
+					{"threshold", rule.Threshold},
+					{"enabled", rule.Enabled},
+				}
+			);
+		}
+
 		json document{
 			{"scale", Scale},
 			{"showGrid", ShowGrid},
@@ -453,6 +528,7 @@ namespace studio {
 				 {"assets", ShowAssets},
 				 {"control", ShowControl},
 			 }},
+			{"frameGraphRules", std::move(frameGraphRules)},
 			{"panelColours", std::move(panelColours)},
 			{"discord",
 			 json{
@@ -558,6 +634,12 @@ namespace studio {
 
 		ShowGrid = Prefs.ShowGrid;
 		ShowControl = Prefs.ShowControl;
+
+		// Armed here rather than when the panel first draws, because the panel
+		// may never be opened and a rule is worth arming either way - the point
+		// of one is catching a frame nobody was watching for.
+		FrameGraphState.Triggers = Prefs.FrameGraphRules;
+		engine::core::FrameGraph::SetTriggers(FrameGraphState.Triggers);
 		ControlPortField = Prefs.ControlPort;
 		SnapEnabled = Prefs.SnapEnabled;
 		SnapDistance = Prefs.SnapDistance;
@@ -621,6 +703,7 @@ namespace studio {
 		// true without every toggle having to write a file.
 		Prefs.ShowGrid = ShowGrid;
 		Prefs.ShowControl = ShowControl;
+		Prefs.FrameGraphRules = FrameGraphState.Triggers;
 		Prefs.ShowStatistics = ShowStatistics;
 		Prefs.ShowFrameGraph = ShowFrameGraph;
 		Prefs.ShowHeap = ShowHeap;

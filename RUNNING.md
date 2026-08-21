@@ -1628,6 +1628,33 @@ went with it".
 Collection only runs while the panel is open, so `F8` with `F5` closed has
 nothing to write and says so rather than leaving a zero-byte file.
 
+#### Stopping the graph on the bad frame
+
+In the studio's frame-graph panel, **Event scheduler** arms rules that pause the
+graph on the frame that meets one. The reported case is a pump that lags now and
+then:
+
+| Field | Set to |
+|---|---|
+| subject | `span` |
+| name | `pump events` |
+| test | `over` |
+| threshold | `2` |
+
+The next frame whose `pump events` spans total more than 2 ms freezes the panel
+with *that* frame on it, and the pause label says what fired and what it read.
+**Resume** disarms the latch, so the next bad frame stops it again.
+
+A rule is evaluated where the frame is collected, not where it is drawn. That is
+the whole reason the feature exists: the panel samples four times a second at its
+shortest interval, and the frame you are hunting is one frame long. Subjects are
+a span's inclusive or self time, a category's self time, the whole frame, the
+unmarked remainder, or the dropped-span count. Rules are saved with the rest of
+your preferences and armed at start-up, whether or not the panel is open.
+
+An `under` rule waits for its span rather than firing on a frame that never ran
+it: "`pump events` under 1 ms" is a question about a frame that pumped events.
+
 ### Measuring rather than watching
 
 ```sh
