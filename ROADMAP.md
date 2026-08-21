@@ -259,9 +259,11 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] when character sits in portal, character split in half
 - [_] add moving cubes in tunnels for lighting test too
 - [_] sometimes when starting playground, the baseplate is rotated 45 degrees?
-- [_] `/home/declan/Documents/GitHub/BLADEBORNE_UNIFIED/game` port and also studio place `/home/declan/Documents/Bladeborne Floor 0.rbxl`
 - [_] crossworldseam demo is not setup properly
 - [_] surfacecamera lighting is really dark, they should reflect real world light as well
+- [_] ground grid "enables always on top" when moving/scaling something, otherwise its not "always on top"
+
+- [_] `/home/declan/Documents/GitHub/BLADEBORNE_UNIFIED/game` port and also studio place `/home/declan/Documents/Bladeborne Floor 0.rbxl`
 
 ### v0.20
 
