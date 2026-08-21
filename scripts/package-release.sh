@@ -118,7 +118,17 @@ case $platform in
 		# MSVC keeps debug information in a .pdb beside the binary rather than
 		# inside it, so there is nothing to strip and the .pdb simply does not
 		# ship.
-		find "$work/$name" -name '*.pdb' -delete
+		#
+		# **`.ilk` goes with it, and it is the larger half by a long way.** That
+		# is the incremental linker's database - state for the *next* link, of no
+		# use to anything that runs the program. The first MSVC build to get this
+		# far shipped 795.7 MB of them beside 106.9 MB of actual executable:
+		# `studio.ilk` alone was 271 MB against a 35.8 MB `studio.exe`, and the
+		# archive was three and a half times the size it needed to be.
+		#
+		# It was never noticed because no MSVC build had ever reached the
+		# packaging step before v0.18.0. A mingw build produces none of these.
+		find "$work/$name" \( -name '*.pdb' -o -name '*.ilk' \) -delete
 
 		# **A GCC build of the same platform is the other case, and it does not
 		# look like one until you weigh it.** mingw-w64 puts DWARF *inside* the
