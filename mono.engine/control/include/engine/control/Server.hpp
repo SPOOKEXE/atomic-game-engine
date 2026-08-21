@@ -15,6 +15,17 @@
 
 namespace engine::control {
 
+	// The port a program opens when it is told to listen and given no number.
+	//
+	// **Here because there were three of these and they disagreed.** The
+	// editor's `--mcp-port` help said 8738, the panel's field offered 8720 and
+	// `mcpbridge` dialled 8730, so somebody who followed the help got a bridge
+	// talking to a closed port and an editor talking to nobody. `.mcp.json` and
+	// `RUNNING.md` both say 8738, so 8738 is the one that was right.
+	//
+	// @since v0.19
+	inline constexpr uint16_t DEFAULT_PORT = 8738;
+
 	// A listener with one client.
 	//
 	// @since v0.8

@@ -12,6 +12,14 @@ add_executable(mcpbridge app/main.cpp)
 target_link_libraries(mcpbridge PRIVATE
 	Engine::core
 	Vendor::asio)
+
+# **The header without the library, deliberately.** All this needs from `control`
+# is `DEFAULT_PORT`, and that number existing in one place is the whole point of
+# it - three copies is how the editor came to advertise a port the bridge did not
+# dial. Linking the module would drag `ecs` and `world` into a byte pump that has
+# no idea what a world is, so it takes the include path and no symbols.
+target_include_directories(mcpbridge PRIVATE
+	"${CMAKE_SOURCE_DIR}/mono.engine/control/include")
 target_compile_options(mcpbridge PRIVATE ${MONO_COMPILE_OPTIONS})
 
 set_target_properties(mcpbridge PROPERTIES

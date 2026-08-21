@@ -25,6 +25,7 @@
 // lifecycle management work: killing the bridge does not touch the editor, and
 // closing the editor ends the bridge.
 
+#include <engine/control/Server.hpp>
 #include <engine/core/Arguments.hpp>
 
 #include <array>
@@ -71,7 +72,11 @@ int main(int argc, char **argv) {
 	engine::core::Arguments arguments(
 		"mcpbridge", "atomic - carries Model Context Protocol between stdio and a running editor."
 	);
-	arguments.Value("port", "PORT", "The editor's --mcp-port (default 8730)");
+	arguments.Value(
+		"port",
+		"PORT",
+		"The editor's --mcp-port (default " + std::to_string(engine::control::DEFAULT_PORT) + ")"
+	);
 	arguments.Value("host", "ADDRESS", "Where the editor is listening (default 127.0.0.1)");
 
 	const engine::core::Arguments::Result parsed = arguments.Parse(argc, argv);
@@ -92,7 +97,7 @@ int main(int argc, char **argv) {
 		return 0;
 	}
 
-	const auto port = static_cast<uint16_t>(arguments.GetInteger("port", 8730));
+	const auto port = static_cast<uint16_t>(arguments.GetInteger("port", engine::control::DEFAULT_PORT));
 	const std::string host(arguments.Get("host").value_or("127.0.0.1"));
 
 	asio::io_context context;

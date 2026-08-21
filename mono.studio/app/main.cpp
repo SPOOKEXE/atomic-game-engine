@@ -6,6 +6,7 @@
 // worth of globbed sources cannot be driven by one.
 
 #include <engine/assets/ContentPolicy.hpp>
+#include <engine/control/Server.hpp>
 #include <engine/core/Arguments.hpp>
 #include <engine/core/Config.hpp>
 #include <engine/core/Flags.hpp>
@@ -76,7 +77,14 @@ int main(int argc, char **argv) {
 	);
 
 	// The control surface. Off unless asked for - see `Options::ControlPort`.
-	arguments.Value("mcp-port", "PORT", "Listen for Model Context Protocol on 127.0.0.1:PORT (default 8738)");
+	// The number is read from the one constant rather than written, so the help
+	// cannot drift from what a bare `--mcp-port` opens.
+	arguments.Value(
+		"mcp-port",
+		"PORT",
+		"Listen for Model Context Protocol on 127.0.0.1:PORT (default " +
+			std::to_string(engine::control::DEFAULT_PORT) + ")"
+	);
 	arguments.Value("override-assets-directory", "DIR", "Read shaders and data from here");
 
 	const auto parsed = arguments.Parse(argc, argv);

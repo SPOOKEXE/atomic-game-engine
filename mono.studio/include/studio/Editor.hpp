@@ -5274,7 +5274,7 @@ namespace studio {
 		// starts with.** A half-typed number must not be the port a restart
 		// would use, and `Settings.ControlPort` is negative for "do not listen"
 		// - a state a text field cannot express while it is being typed in.
-		int ControlPortField = 8720;
+		int ControlPortField = engine::control::DEFAULT_PORT;
 
 		// The editor's own delivery client, built from `Content`.
 		//

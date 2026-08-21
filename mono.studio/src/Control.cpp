@@ -16,8 +16,12 @@
 // frame loop, because `Universe::Enter` aborts on a foreign one.
 
 #include <engine/core/Log.hpp>
+#include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
 
+#include <algorithm>
+#include <cfloat>
+#include <filesystem>
 #include <imgui.h>
 #include <nlohmann/json.hpp>
 #include <string>
@@ -27,6 +31,71 @@ namespace studio {
 
 	using engine::control::Tool;
 	using nlohmann::json;
+
+	namespace {
+
+		// Where `mcpbridge` is, spelled the way somebody would have to type it.
+		//
+		// **A guess that is checked.** The bridge stages beside this program -
+		// `<stage>/studio/studio` and `<stage>/tools/mcpbridge` - so the path is
+		// derivable, and a derived path that turns out not to exist is worse
+		// than no path at all in a block somebody is about to paste into a
+		// config file. When it is not there the bare name is offered instead,
+		// which is right for anyone who installed the tools on their PATH.
+		std::string BridgePath() {
+			const std::filesystem::path staged = engine::core::Paths::Base().parent_path() / "tools" /
+												 engine::core::Paths::Program("mcpbridge");
+
+			std::error_code failed;
+			if (std::filesystem::exists(staged, failed)) {
+				return std::filesystem::absolute(staged, failed).string();
+			}
+			return engine::core::Paths::Program("mcpbridge").string();
+		}
+
+		// A path as it has to appear inside a quoted JSON or TOML string.
+		//
+		// **Windows is the whole reason.** A staged path there is
+		// `C:\...\tools\mcpbridge.exe`, and a backslash inside a JSON string
+		// starts an escape - pasted as it stands it is not valid JSON, and the
+		// client reports a parse error rather than anything about this editor.
+		// TOML basic strings take the same doubling, so one function covers both.
+		std::string Quoted(const std::string &path) {
+			std::string escaped;
+			escaped.reserve(path.size());
+			for (const char letter : path) {
+				if (letter == '\\' || letter == '"') {
+					escaped.push_back('\\');
+				}
+				escaped.push_back(letter);
+			}
+			return escaped;
+		}
+
+		// A block of text somebody is meant to copy.
+		//
+		// An input rather than `TextUnformatted` because the job is selecting
+		// it: imgui text cannot be dragged over, and a config block that has to
+		// be retyped by hand is one that gets retyped wrong. Read-only, so the
+		// buffer is never written and `text` may be a temporary this frame.
+		//
+		// @param id    The imgui identity, and half of the copy button's.
+		// @param text  What to show.
+		// @param lines How tall to draw it.
+		void Snippet(const char *id, std::string text, int lines) {
+			const ImVec2 size(
+				-FLT_MIN,
+				ImGui::GetTextLineHeight() * static_cast<float>(lines) +
+					ImGui::GetStyle().FramePadding.y * 2.0f
+			);
+			ImGui::InputTextMultiline(id, text.data(), text.size() + 1, size, ImGuiInputTextFlags_ReadOnly);
+
+			const std::string button = std::string("Copy##") + id;
+			if (ImGui::Button(button.c_str())) {
+				ImGui::SetClipboardText(text.c_str());
+			}
+		}
+	}
 
 	void Editor::StartControl() {
 		// **The port field is seeded whether or not the server starts**, because
@@ -351,6 +420,110 @@ namespace studio {
 
 		if (ImGui::Button(running ? "Stop" : "Start", ImVec2(120.0f, 0.0f))) {
 			ToggleControl();
+		}
+
+		ImGui::Spacing();
+		ImGui::Spacing();
+
+		// **How to attach, in the window that knows the port.** The two facts a
+		// config file needs are where the bridge is and which port it should
+		// dial, and both are known here and nowhere in the documentation - a
+		// page cannot say what port this editor bound when it was given zero.
+		//
+		// The port shown is the bound one while it is listening, and the field's
+		// otherwise, so a block copied before pressing Start still says what
+		// Start will open.
+		ImGui::SeparatorText("Attach a model");
+
+		const unsigned short port =
+			running ? ControlServer.Port() : static_cast<unsigned short>(std::max(0, ControlPortField));
+		const std::string bridge = BridgePath();
+
+		ImGui::TextWrapped(
+			"A model speaks stdio and this is a socket, so mcpbridge sits between them. "
+			"It is started by the model's client, not from here."
+		);
+
+		if (port == 0) {
+			// Zero is "the operating system picks", and it has not picked yet.
+			// Writing 0 into somebody's config file would be a port that is
+			// never listened on.
+			ImGui::TextDisabled("Start the server to see the port it was given.");
+		} else if (ImGui::BeginTabBar("##attach")) {
+			if (ImGui::BeginTabItem("Claude")) {
+				ImGui::TextWrapped("Once, from anywhere:");
+				Snippet(
+					"##claude-cli",
+					"claude mcp add atomic-studio -- \"" + bridge + "\" --port " + std::to_string(port),
+					1
+				);
+
+				ImGui::Spacing();
+				ImGui::TextWrapped("Or per project, as .mcp.json beside the game file:");
+				Snippet(
+					"##claude-json",
+					"{\n"
+					"  \"mcpServers\": {\n"
+					"    \"atomic-studio\": {\n"
+					"      \"type\": \"stdio\",\n"
+					"      \"command\": \"" +
+						Quoted(bridge) +
+						"\",\n"
+						"      \"args\": [\"--port\", \"" +
+						std::to_string(port) +
+						"\"]\n"
+						"    }\n"
+						"  }\n"
+						"}",
+					10
+				);
+				ImGui::EndTabItem();
+			}
+
+			if (ImGui::BeginTabItem("Codex")) {
+				ImGui::TextWrapped("In ~/.codex/config.toml:");
+				Snippet(
+					"##codex-toml",
+					"[mcp_servers.atomic-studio]\n"
+					"command = \"" +
+						Quoted(bridge) +
+						"\"\n"
+						"args = [\"--port\", \"" +
+						std::to_string(port) + "\"]",
+					3
+				);
+				ImGui::EndTabItem();
+			}
+
+			// **For handing to a model rather than to a config file.** Somebody
+			// whose client has no config they can reach still has a model in
+			// front of them, and that model can run the command itself if it is
+			// told what the thing is and where.
+			if (ImGui::BeginTabItem("Prompt")) {
+				ImGui::TextWrapped("Paste this to a model that can edit your MCP config:");
+				Snippet(
+					"##prompt",
+					"The Atomic editor is running with a Model Context Protocol server on\n"
+					"127.0.0.1:" +
+						std::to_string(port) +
+						". Add it to my MCP configuration as \"atomic-studio\": it is a\n"
+						"stdio server, the command is \"" +
+						bridge +
+						"\" and its\n"
+						"arguments are --port " +
+						std::to_string(port) +
+						". Do not start the editor yourself; it is\n"
+						"already open, and the bridge exits when it cannot reach one. Once it is\n"
+						"attached, call tools/list - it offers " +
+						std::to_string(ControlSurface.Count()) +
+						" tools for reading and editing\n"
+						"the open worlds.",
+					8
+				);
+				ImGui::EndTabItem();
+			}
+
+			ImGui::EndTabBar();
 		}
 
 		ImGui::Spacing();

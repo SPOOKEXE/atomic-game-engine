@@ -337,8 +337,25 @@ The milestone headings below are development labels. Not in line with project ve
       loop sets a flag and the clock is read once per pump. The per-event spans
       above are what will say whether anything else remains.
 - [_] in flamegraph, add a "Event Scheduler" where you can setup a rule that auto-pauses the flamegraph when conditions are met (e.g. when pump events hit >2ms, i can force a pause on that flamegraph to see the cause).
-- [_] in discord presence tab, add a list of templating replacement words (e.g. {world} {instances}), etc.
-- [_] add (selectable) text in the control (mcp) that tells you how to add as a mcp (and a section to tell models how to add it). add claude/codex/prompt tabs to hold these.
+- [x] in discord presence tab, add a list of templating replacement words. Five
+      tokens, each with what it means and **what it says right now**, because a
+      name and a description leave somebody guessing whether `{instances}`
+      counts the world or the selection and the answer is one function away. A
+      row copies itself. The names are checked against `Editor::DiscordFacts`
+      by hand for now: `Fill` resolves an unknown token to nothing rather than
+      to itself, so a listed-but-unpublished token would offer a word that
+      silently deletes itself.
+- [x] add selectable text in the control (mcp) panel saying how to attach, with
+      claude/codex/prompt tabs. Read-only inputs rather than labels, because the
+      job is dragging over them, and a config block that has to be retyped gets
+      retyped wrong. The Prompt tab is the "tell a model" half: it names the
+      port, the bridge and the tool count, and says not to start the editor.
+      **And it fixed the port.** There were three defaults and they disagreed -
+      the editor's help said 8738, its panel offered 8720, `mcpbridge` dialled
+      8730 - so following the help got a bridge talking to a closed port. One
+      `engine::control::DEFAULT_PORT` now, at 8738, which is what `.mcp.json`
+      and `RUNNING.md` already said. Paths inside the JSON and TOML blocks are
+      backslash-escaped, or a Windows path would paste as a parse error.
 - [_] change Terrain demo to be procedural infinite generation, also spawn character on top of terrain
 - [_] optimise Authority::DetectRows and missing gap post Authority::Publish. ReplicationStress in release build.
 - [_] add a "bidirection" bool mode for portals, when enabled, you can enter from both sides, when disabled, you can only enter from entry side
