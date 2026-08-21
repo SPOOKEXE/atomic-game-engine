@@ -248,6 +248,7 @@ The milestone headings below are development labels. Not in line with project ve
 
 ---
 
+- [_] in discord presence tab, add a list of templating replacement words (e.g. {world} {instances}), etc.
 - [_] when setting keybinds, disable input after keybind sets (it runs immediately after)
 - [_] keybinds do not set properly (changes other keybinds)
 - [_] add (selectable) text in the control (mcp) that tells you how to add as a mcp (and a section to tell models how to add it). add claude/codex/prompt tabs to hold these.
