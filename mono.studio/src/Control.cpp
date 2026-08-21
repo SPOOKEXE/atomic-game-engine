@@ -17,6 +17,7 @@
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
+
 #include <imgui.h>
 #include <nlohmann/json.hpp>
 #include <string>
@@ -24,8 +25,8 @@
 
 namespace studio {
 
-	using nlohmann::json;
 	using engine::control::Tool;
+	using nlohmann::json;
 
 	void Editor::StartControl() {
 		// **The port field is seeded whether or not the server starts**, because
@@ -73,155 +74,177 @@ namespace studio {
 	void Editor::RegisterControlTools() {
 		Editor *editor = this;
 
-		ControlSurface.Add(Tool{
-			"engine_info",
-			"The editor's own state: which game is open, whether it has unsaved changes, how many "
-			"frames have been drawn, which scene is active and what is selected.",
-			[] { return json{{"type", "object"}}; },
-			[editor](const json &, std::string &) {
-				json worlds = json::array();
-				for (const WorldId id : editor->Universe->Worlds()) {
-					worlds.push_back(std::string(editor->Universe->NameOf(id).Text()));
-				}
-
-				return json{
-					{"game",
-					 json{
-						 {"name", std::string(editor->GameName.Text())},
-						 {"path", editor->GamePath.string()},
-						 {"modified", editor->Modified},
-					 }},
-					{"editor",
-					 json{
-						 {"headless", editor->Settings.Headless},
-						 {"framesDrawn", editor->FramesDrawn},
-						 {"activeWorld", std::string(editor->Universe->NameOf(editor->Active).Text())},
-						 {"selection", editor->Selection.size()},
-					 }},
-					{"universe", json{{"worlds", std::move(worlds)}, {"count", editor->Universe->Count()}}},
-					{"control",
-					 json{
-						 {"port", editor->ControlServer.Port()},
-						 {"served", editor->ControlServer.Served()},
-					 }},
-				};
-			},
-		});
-
-		ControlSurface.Add(Tool{
-			"world_run",
-			"Starts or stops one scene. `play` runs both halves in this process, `server` runs only "
-			"Script instances, and `edit` stops it and restores the snapshot taken when it started - "
-			"which is what makes running a scene non-destructive.",
-			[] {
-				return json{
-					{"type", "object"},
-					{"properties",
-					 json{
-						 {"world", json{{"type", "string"}, {"description", "Which scene. Defaults to the active one."}}},
-						 {"mode", json{{"type", "string"}, {"enum", json::array({"edit", "server", "play"})}}},
-					 }},
-					{"required", json::array({"mode"})},
-				};
-			},
-			[editor](const json &arguments, std::string &failure) -> json {
-				const WorldId world = editor->ControlWorld(arguments, failure);
-				if (!failure.empty()) {
-					return nullptr;
-				}
-
-				const std::string mode = arguments.value("mode", std::string("edit"));
-				RunMode wanted = RunMode::Edit;
-				if (mode == "play") {
-					wanted = RunMode::Play;
-				} else if (mode == "server") {
-					wanted = RunMode::Server;
-				} else if (mode != "edit") {
-					failure = "mode must be edit, server or play";
-					return nullptr;
-				}
-
-				editor->SetRunMode(world, wanted);
-				return json{
-					{"world", std::string(editor->Universe->NameOf(world).Text())},
-					{"mode", Describe(editor->ModeOf(world))},
-				};
-			},
-		});
-
-		ControlSurface.Add(Tool{
-			"selection_get",
-			"What is selected in the editor right now.",
-			[] { return json{{"type", "object"}}; },
-			[editor](const json &, std::string &) {
-				json ids = json::array();
-				for (const Entity instance : editor->Selection) {
-					ids.push_back(instance.Id);
-				}
-				return json{
-					{"world", std::string(editor->Universe->NameOf(editor->SelectionWorld).Text())},
-					{"instances", std::move(ids)},
-				};
-			},
-		});
-
-		ControlSurface.Add(Tool{
-			"select",
-			"Selects instances in a scene, replacing whatever was selected.",
-			[] {
-				return json{
-					{"type", "object"},
-					{"properties",
-					 json{
-						 {"world", json{{"type", "string"}}},
-						 {"ids", json{{"type", "array"}, {"items", json{{"type", "integer"}}}}},
-					 }},
-				};
-			},
-			[editor](const json &arguments, std::string &failure) -> json {
-				const WorldId world = editor->ControlWorld(arguments, failure);
-				if (!failure.empty()) {
-					return nullptr;
-				}
-
-				editor->ClearSelection();
-				if (arguments.contains("ids") && arguments["ids"].is_array()) {
-					for (const json &id : arguments["ids"]) {
-						editor->Select(world, Entity(id.get<uint64_t>()), true);
+		ControlSurface.Add(
+			Tool{
+				"engine_info",
+				"The editor's own state: which game is open, whether it has unsaved changes, how many "
+				"frames have been drawn, which scene is active and what is selected.",
+				[] { return json{{"type", "object"}}; },
+				[editor](const json &, std::string &) {
+					json worlds = json::array();
+					for (const WorldId id : editor->Universe->Worlds()) {
+						worlds.push_back(std::string(editor->Universe->NameOf(id).Text()));
 					}
-				}
 
-				json ids = json::array();
-				for (const Entity instance : editor->Selection) {
-					ids.push_back(instance.Id);
-				}
-				return json{{"instances", std::move(ids)}};
-			},
-		});
+					return json{
+						{"game",
+						 json{
+							 {"name", std::string(editor->GameName.Text())},
+							 {"path", editor->GamePath.string()},
+							 {"modified", editor->Modified},
+						 }},
+						{"editor",
+						 json{
+							 {"headless", editor->Settings.Headless},
+							 {"framesDrawn", editor->FramesDrawn},
+							 {"activeWorld", std::string(editor->Universe->NameOf(editor->Active).Text())},
+							 {"selection", editor->Selection.size()},
+						 }},
+						{"universe",
+						 json{{"worlds", std::move(worlds)}, {"count", editor->Universe->Count()}}},
+						{"control",
+						 json{
+							 {"port", editor->ControlServer.Port()},
+							 {"served", editor->ControlServer.Served()},
+						 }},
+					};
+				},
+			}
+		);
 
-		ControlSurface.Add(Tool{
-			"log_tail",
-			"The tail of the output panel: the engine log and everything scripts have printed.",
-			[] {
-				return json{
-					{"type", "object"},
-					{"properties", json{{"lines", json{{"type", "integer"}, {"description", "From the end. Default 50."}}}}},
-				};
-			},
-			[editor](const json &arguments, std::string &) {
-				const auto wanted = static_cast<size_t>(std::max(1, arguments.value("lines", 50)));
-				const size_t from = editor->Output.size() > wanted ? editor->Output.size() - wanted : 0;
+		ControlSurface.Add(
+			Tool{
+				"world_run",
+				"Starts or stops one scene. `play` runs both halves in this process, `server` runs only "
+				"Script instances, and `edit` stops it and restores the snapshot taken when it started - "
+				"which is what makes running a scene non-destructive.",
+				[] {
+					return json{
+						{"type", "object"},
+						{"properties",
+						 json{
+							 {"world",
+							  json{
+								  {"type", "string"},
+								  {"description", "Which scene. Defaults to the active one."}
+							  }},
+							 {"mode",
+							  json{{"type", "string"}, {"enum", json::array({"edit", "server", "play"})}}},
+						 }},
+						{"required", json::array({"mode"})},
+					};
+				},
+				[editor](const json &arguments, std::string &failure) -> json {
+					const WorldId world = editor->ControlWorld(arguments, failure);
+					if (!failure.empty()) {
+						return nullptr;
+					}
 
-				json lines = json::array();
-				for (size_t index = from; index < editor->Output.size(); index++) {
-					lines.push_back(json{
-						{"text", editor->Output[index].Text},
-						{"level", static_cast<int>(editor->Output[index].Level)},
-					});
-				}
-				return json{{"lines", std::move(lines)}, {"total", editor->Output.size()}};
-			},
-		});
+					const std::string mode = arguments.value("mode", std::string("edit"));
+					RunMode wanted = RunMode::Edit;
+					if (mode == "play") {
+						wanted = RunMode::Play;
+					} else if (mode == "server") {
+						wanted = RunMode::Server;
+					} else if (mode != "edit") {
+						failure = "mode must be edit, server or play";
+						return nullptr;
+					}
+
+					editor->SetRunMode(world, wanted);
+					return json{
+						{"world", std::string(editor->Universe->NameOf(world).Text())},
+						{"mode", Describe(editor->ModeOf(world))},
+					};
+				},
+			}
+		);
+
+		ControlSurface.Add(
+			Tool{
+				"selection_get",
+				"What is selected in the editor right now.",
+				[] { return json{{"type", "object"}}; },
+				[editor](const json &, std::string &) {
+					json ids = json::array();
+					for (const Entity instance : editor->Selection) {
+						ids.push_back(instance.Id);
+					}
+					return json{
+						{"world", std::string(editor->Universe->NameOf(editor->SelectionWorld).Text())},
+						{"instances", std::move(ids)},
+					};
+				},
+			}
+		);
+
+		ControlSurface.Add(
+			Tool{
+				"select",
+				"Selects instances in a scene, replacing whatever was selected.",
+				[] {
+					return json{
+						{"type", "object"},
+						{"properties",
+						 json{
+							 {"world", json{{"type", "string"}}},
+							 {"ids", json{{"type", "array"}, {"items", json{{"type", "integer"}}}}},
+						 }},
+					};
+				},
+				[editor](const json &arguments, std::string &failure) -> json {
+					const WorldId world = editor->ControlWorld(arguments, failure);
+					if (!failure.empty()) {
+						return nullptr;
+					}
+
+					editor->ClearSelection();
+					if (arguments.contains("ids") && arguments["ids"].is_array()) {
+						for (const json &id : arguments["ids"]) {
+							editor->Select(world, Entity(id.get<uint64_t>()), true);
+						}
+					}
+
+					json ids = json::array();
+					for (const Entity instance : editor->Selection) {
+						ids.push_back(instance.Id);
+					}
+					return json{{"instances", std::move(ids)}};
+				},
+			}
+		);
+
+		ControlSurface.Add(
+			Tool{
+				"log_tail",
+				"The tail of the output panel: the engine log and everything scripts have printed.",
+				[] {
+					return json{
+						{"type", "object"},
+						{"properties",
+						 json{
+							 {"lines",
+							  json{{"type", "integer"}, {"description", "From the end. Default 50."}}}
+						 }},
+					};
+				},
+				[editor](const json &arguments, std::string &) {
+					const auto wanted = static_cast<size_t>(std::max(1, arguments.value("lines", 50)));
+					const size_t from = editor->Output.size() > wanted ? editor->Output.size() - wanted : 0;
+
+					json lines = json::array();
+					for (size_t index = from; index < editor->Output.size(); index++) {
+						lines.push_back(
+							json{
+								{"text", editor->Output[index].Text},
+								{"level", static_cast<int>(editor->Output[index].Level)},
+							}
+						);
+					}
+					return json{{"lines", std::move(lines)}, {"total", editor->Output.size()}};
+				},
+			}
+		);
 	}
 
 	WorldId Editor::ControlWorld(const json &arguments, std::string &failure) {
@@ -295,9 +318,7 @@ namespace studio {
 			ImGui::SameLine();
 			ImGui::Text("on 127.0.0.1:%u", ControlServer.Port());
 
-			ImGui::Text(
-				"client: %s", ControlServer.IsConnected() ? "connected" : "none attached"
-			);
+			ImGui::Text("client: %s", ControlServer.IsConnected() ? "connected" : "none attached");
 			ImGui::Text("requests answered: %zu", ControlServer.Served());
 		} else {
 			ImGui::TextDisabled("not listening");

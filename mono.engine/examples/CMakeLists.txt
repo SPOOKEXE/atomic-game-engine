@@ -30,6 +30,14 @@ mono_add_library(examples
 		# only `Part` refused a shipped example with "not a registered class".
 		Engine::gui
 
+		# L8, `shared`. **The third class tree, for `gui`'s reason exactly.**
+		# `Magic.luau` builds a `ParticleEmitter` per authored emitter and
+		# `Particles.luau` is nothing but emitters, beams and trails, so
+		# `LoadScene` has to register them - without it a shipped example threw
+		# "'ParticleEmitter' is not a registered class" out of its heartbeat in
+		# every program but the client, which registered them on its own path.
+		Engine::effects
+
 		Engine::script
 )
 

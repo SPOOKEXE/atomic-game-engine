@@ -9,6 +9,8 @@
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
+#include <iterator>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -28,6 +30,8 @@ namespace engine::render {
 			return "systems";
 		case ProfilerTab::Counters:
 			return "counters";
+		case ProfilerTab::Heap:
+			return "heap";
 		case ProfilerTab::Count:
 			break;
 		}
@@ -849,6 +853,267 @@ namespace engine::render {
 			return MeasureChars(widest + 1 + 5, scale) + 4 * scale;
 		}
 
+		// Columns for the heap tree. Wider names than the flamegraph's, because a
+		// tag path is read by its leaf and the leaf is at the end of the indent.
+		constexpr size_t HEAP_NAME_FIELD = 24;
+		constexpr size_t HEAP_BYTES_FIELD = 10; // 1023.99 MiB
+		constexpr size_t HEAP_BLOCKS_FIELD = 8;
+		constexpr size_t HEAP_RATE_FIELD = 11; // -1023.99 MiB/s
+
+		// How tall the live-bytes plot is, in text rows.
+		//
+		// Six, because the shape being read is "flat, sawtooth or ramp" and
+		// three pixels of amplitude cannot show the difference between the first
+		// two. It is the tallest single thing on the tab and it is meant to be:
+		// the tree below says where the bytes are, and only this says whether
+		// they are going anywhere.
+		constexpr int HEAP_PLOT_ROWS = 6;
+
+		// Renders a byte count to three significant figures, the way somebody
+		// reads one. Signed, because a growth figure can be negative and
+		// "-2.10 MiB/s" is the reading that says a subsystem is giving memory
+		// back.
+		std::string FormatBytes(double bytes) {
+			const char *const units[] = {"B", "KiB", "MiB", "GiB", "TiB"};
+			size_t unit = 0;
+			while ((bytes >= 1024.0 || bytes <= -1024.0) && unit + 1 < std::size(units)) {
+				bytes /= 1024.0;
+				unit++;
+			}
+			return Format(unit == 0 ? "%.0f %s" : "%.2f %s", bytes, units[unit]);
+		}
+
+		// The live-bytes plot: one filled column per pixel of width.
+		//
+		// **An area rather than a line, and drawn from the newest reading on the
+		// right.** A line one pixel wide is invisible against a panel this dark
+		// at any sane alpha, and a plot that filled from the left would have a
+		// run's first minute anchored to the left edge and the present moment
+		// drifting - so the thing being watched would move while being watched.
+		void
+		DrawHeapPlot(OverlayImage &image, const DebugPanelData &data, int x, int y, int width, int height) {
+			image.Blend(x, y, width, height, 255, 255, 255, TRACK_ALPHA);
+
+			const std::span<const core::HeapSample> history = data.HeapHistory;
+			if (history.size() < 2 || width <= 0 || height <= 0) {
+				return;
+			}
+
+			// Scaled to the window's own peak rather than to the process peak,
+			// because a run that allocated 900 MB once and settled at 20 would
+			// otherwise plot as a flat line along the bottom for the rest of it.
+			int64_t peak = 1;
+			for (const core::HeapSample &sample : history) {
+				peak = std::max(peak, sample.LiveBytes);
+			}
+
+			const int scale = data.Scale;
+			const auto readings = static_cast<int>(history.size());
+
+			for (int column = 0; column < width; column += scale) {
+				// **Right-aligned, so the count is taken from the right edge
+				// and clamped there.** Written as `history.size() - 1 - n` with
+				// the bounds test after it, this was correct only because
+				// integer division truncates towards zero on the one column
+				// where the numerator goes negative - which is not a property
+				// anybody should have to re-derive to read a plot.
+				const int fromRight = std::clamp((width - scale - column) / scale, 0, readings - 1);
+				const auto index = static_cast<size_t>(readings - 1 - fromRight);
+
+				const auto share = static_cast<double>(history[index].LiveBytes) / static_cast<double>(peak);
+				const int filled = std::clamp(static_cast<int>(share * height), 1, height);
+				image.Blend(x + column, y + height - filled, scale, filled, 120, 190, 240, 150);
+			}
+
+			// The window's peak, so the plot's height is a number rather than a
+			// shape. Drawn last and over the fill, in the corner the newest
+			// readings are least likely to reach.
+			DebugText::Draw(
+				image,
+				x + scale * 2,
+				y + scale,
+				FormatBytes(static_cast<double>(peak)),
+				TEXT_DIM.R,
+				TEXT_DIM.G,
+				TEXT_DIM.B,
+				scale
+			);
+		}
+
+		// The heap tab: the totals, the plot, then the tag tree.
+		void
+		DrawHeap(OverlayImage &image, const DebugPanelData &data, int x, int y, int width, int available) {
+			const int scale = data.Scale;
+			const int rowHeight = DebugText::LineHeight(scale);
+
+			if (!data.HeapCompiledIn) {
+				// Not an empty tree. Every figure would read zero, and a heap
+				// panel reporting no bytes is a much more alarming thing than
+				// one saying it was left out of this build.
+				DebugText::Draw(
+					image,
+					x,
+					y,
+					"HEAP PROFILER NOT COMPILED IN - CONFIGURE WITH MONO_HEAP_PROFILE=ON",
+					TEXT_DIM.R,
+					TEXT_DIM.G,
+					TEXT_DIM.B,
+					scale
+				);
+				return;
+			}
+
+			const core::HeapTotals &totals = data.Heap;
+			int cursor = y;
+
+			// The process line. Overhead is named because it is the profiler's
+			// own cost and a `dev` footprint is wrong by exactly that much when
+			// compared against a shipped one.
+			DebugText::Draw(
+				image,
+				x,
+				cursor,
+				Format(
+					"LIVE %s IN %s BLOCKS   PEAK %s   HEADERS %s",
+					FormatBytes(static_cast<double>(totals.LiveBytes)).c_str(),
+					Grouped(static_cast<double>(totals.LiveBlocks)).c_str(),
+					FormatBytes(static_cast<double>(totals.PeakBytes)).c_str(),
+					FormatBytes(static_cast<double>(totals.OverheadBytes)).c_str()
+				),
+				TEXT.R,
+				TEXT.G,
+				TEXT.B,
+				scale
+			);
+			cursor += rowHeight;
+
+			// What the run is doing *now*, which is the whole question this tab
+			// exists for. The process slope is the first history entry's own,
+			// fitted by the caller over the same window as every other row.
+			const double processRate = data.HeapGrowth.empty() ? 0.0 : data.HeapGrowth.front().BytesPerSecond;
+			const bool dropped = totals.DroppedScopes > 0 || totals.ForeignFrees > 0;
+			DebugText::Draw(
+				image,
+				x,
+				cursor,
+				Format(
+					"TAGS %u   WORST %s/S OVER %.0fS%s",
+					totals.Nodes,
+					FormatBytes(processRate).c_str(),
+					data.HeapHistorySeconds,
+					dropped ? "   TAGS DROPPED!" : ""
+				),
+				dropped ? TEXT_WARN.R : TEXT_DIM.R,
+				dropped ? TEXT_WARN.G : TEXT_DIM.G,
+				dropped ? TEXT_WARN.B : TEXT_DIM.B,
+				scale
+			);
+			cursor += rowHeight;
+
+			const int plotHeight = rowHeight * HEAP_PLOT_ROWS;
+			if (cursor + plotHeight <= y + available) {
+				DrawHeapPlot(image, data, x, cursor, width, plotHeight);
+				cursor += plotHeight + rowHeight / 2;
+			}
+
+			DebugText::Draw(
+				image,
+				x,
+				cursor,
+				PadRight("TAG", HEAP_NAME_FIELD) + " " + PadLeft("LIVE", HEAP_BYTES_FIELD) + " " +
+					PadLeft("SELF", HEAP_BYTES_FIELD) + " " + PadLeft("BLOCKS", HEAP_BLOCKS_FIELD) + " " +
+					PadLeft("GROWTH", HEAP_RATE_FIELD),
+				TEXT_DIM.R,
+				TEXT_DIM.G,
+				TEXT_DIM.B,
+				scale
+			);
+			cursor += rowHeight;
+
+			if (data.HeapRows.empty()) {
+				DebugText::Draw(
+					image,
+					x,
+					cursor,
+					"NO TAGGED ALLOCATIONS - EVERY BYTE IS UNTAGGED",
+					TEXT_DIM.R,
+					TEXT_DIM.G,
+					TEXT_DIM.B,
+					scale
+				);
+				return;
+			}
+
+			// The rate for a node, looked up by index. The report is short - it
+			// is the tracked nodes that cleared a byte floor - so a scan beats
+			// building a map per repaint.
+			const auto rateOf = [&](uint32_t node) {
+				for (const core::HeapGrowth &entry : data.HeapGrowth) {
+					if (entry.Node == node) {
+						return entry.BytesPerSecond;
+					}
+				}
+				return 0.0;
+			};
+
+			const auto live = static_cast<double>(std::max<int64_t>(totals.LiveBytes, 1));
+
+			int skipped = 0;
+			for (const core::HeapTreeRow &row : data.HeapRows) {
+				if (skipped < data.Scroll) {
+					skipped++;
+					continue;
+				}
+				if (cursor + rowHeight > y + available) {
+					break;
+				}
+
+				// `Depth` is one for a top-level tag - `TreeRows` never emits
+				// the root - so the indent is one level less than the depth.
+				// Guarded rather than assumed: this struct is filled by a
+				// caller, and an unsigned zero less one is a very wide indent.
+				const uint32_t level = row.Depth > 0 ? row.Depth - 1 : 0;
+				std::string name(std::min(level, MAXIMUM_INDENT) * 2, ' ');
+				name.append(row.Name);
+
+				const double rate = rateOf(row.Node);
+				const double share = static_cast<double>(row.InclusiveBytes) / live;
+
+				// The share bar sits behind the row rather than in a column of
+				// its own: the numbers are already five fields wide, and what
+				// the bar adds is proportion at a glance, which does not need
+				// its own space to say.
+				const int barWidth = std::clamp(static_cast<int>(share * width), 0, width);
+				image.Blend(x, cursor - scale, barWidth, rowHeight, 96, 190, 130, 26);
+
+				// A dash rather than a zero for a tag that is not moving, so the
+				// column reads as a list of suspects rather than a wall of
+				// zeroes with the answer buried in it.
+				const std::string growth =
+					std::abs(rate) < 64.0 ? std::string("-") : FormatBytes(rate) + "/s";
+
+				const auto colour = rate > 64.0 * 1024.0  ? TEXT_BAD
+									: rate > 4.0 * 1024.0 ? TEXT_WARN
+														  : Shade(TEXT, row.Depth - 1);
+
+				DebugText::Draw(
+					image,
+					x,
+					cursor,
+					PadRight(std::move(name), HEAP_NAME_FIELD) + " " +
+						PadLeft(FormatBytes(static_cast<double>(row.InclusiveBytes)), HEAP_BYTES_FIELD) +
+						" " + PadLeft(FormatBytes(static_cast<double>(row.SelfBytes)), HEAP_BYTES_FIELD) +
+						" " + PadLeft(Grouped(static_cast<double>(row.LiveBlocks)), HEAP_BLOCKS_FIELD) + " " +
+						PadLeft(growth, HEAP_RATE_FIELD),
+					colour.R,
+					colour.G,
+					colour.B,
+					scale
+				);
+				cursor += rowHeight;
+			}
+		}
+
 		void DrawCategories(OverlayImage &image, const DebugPanelData &data, int x, int y, int width) {
 			const int scale = data.Scale;
 			const int lineHeight = DebugText::LineHeight(scale);
@@ -1176,6 +1441,14 @@ namespace engine::render {
 				case ProfilerTab::Counters:
 					bodyRows = static_cast<int>(data.Counters.size()) - std::max(data.Scroll, 0);
 					break;
+				case ProfilerTab::Heap:
+					// Two heading lines, the plot, the column header, then the
+					// tree. The plot is counted here rather than left to
+					// overflow, because it is drawn before the rows and a panel
+					// sized for the rows alone would clip the tree away entirely.
+					bodyRows = static_cast<int>(data.HeapRows.size()) - std::max(data.Scroll, 0) +
+							   HEAP_PLOT_ROWS + 4;
+					break;
 				case ProfilerTab::Count:
 					break;
 				}
@@ -1257,6 +1530,11 @@ namespace engine::render {
 			case ProfilerTab::Counters: {
 				ENGINE_PROFILE_CAT("row list", core::ProfileCategory::Render);
 				DrawRows(image, data, padding, bodyTop, bodyWidth, available);
+				break;
+			}
+			case ProfilerTab::Heap: {
+				ENGINE_PROFILE_CAT("heap panel", core::ProfileCategory::Render);
+				DrawHeap(image, data, padding, bodyTop, bodyWidth, available);
 				break;
 			}
 			case ProfilerTab::Count:

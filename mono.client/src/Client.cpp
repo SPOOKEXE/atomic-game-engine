@@ -49,6 +49,7 @@
 namespace client {
 
 	using engine::core::FrameGraph;
+	using engine::core::HeapProfile;
 	using engine::core::Metrics;
 	using engine::input::Action;
 	using engine::render::ProfilerTab;
@@ -101,7 +102,7 @@ namespace client {
 
 		// Null when headless, which is what puts the renderer in that mode - the
 		// same call the editor makes, for the same reason.
-		if (!Renderer.Initialise(Window)) {
+		if (!Renderer.Initialise(Window, static_cast<uint32_t>(Settings.FramesInFlight))) {
 			return false;
 		}
 
@@ -171,6 +172,21 @@ namespace client {
 		// `--profile-snapshot` and nothing else recorded nothing, then reported
 		// that it could not write the document.
 		FrameGraph::SetEnabled(Settings.ShowFrameGraph || !Settings.ProfileSnapshot.empty());
+
+		// **Sampled from the start of the run rather than from when the panel
+		// opens, whenever a report was asked for.** A slope is only as good as
+		// the window under it, and a leak's first minute is the one that says
+		// whether it starts at zero or at whatever the level load left behind.
+		HeapProfile::SetSamplingEnabled(
+			Settings.ShowFrameGraph || !Settings.HeapReport.empty() || Settings.HeapGrowthLimit > 0.0
+		);
+		if (!HeapProfile::IsCompiledIn() &&
+			(!Settings.HeapReport.empty() || Settings.HeapGrowthLimit > 0.0)) {
+			ENGINE_WARN(
+				"--heap-report was given and this build has no allocator hooks. Configure with "
+				"MONO_HEAP_PROFILE=ON, or use the dev preset."
+			);
+		}
 		return FinishStartup();
 	}
 
@@ -438,6 +454,16 @@ namespace client {
 			return;
 		}
 
+		// **Named in pieces rather than as one bar, because "content costs
+		// 3 seconds" is not an answer.** The three things under here are a
+		// delivery client resolving and verifying bundles, a demand scan over
+		// the worlds, and a decode-and-upload of whatever finished - and they
+		// stall for entirely different reasons. The whole of this used to have
+		// no span at all, so the frame a game finished loading in read as a
+		// three-second hole between `pump events` and `simulation`, which is
+		// exactly the shape a missing span has and exactly how it was reported.
+		ENGINE_PROFILE_CAT("content", engine::core::ProfileCategory::Assets);
+
 		if (!ContentRequested && Content->Ready()) {
 			ContentRequested = true;
 
@@ -467,11 +493,15 @@ namespace client {
 		// collected and everything already asked for is dropped. What survives is
 		// almost always nothing.
 		if (ContentRequested) {
+			ENGINE_PROFILE_CAT("content.demand", engine::core::ProfileCategory::Assets);
 			RequestWantedContent();
 		}
 
-		// Apply completions between frames, outside render passes.
-		Content->Pump();
+		{
+			// Apply completions between frames, outside render passes.
+			ENGINE_PROFILE_CAT("content.deliver", engine::core::ProfileCategory::Assets);
+			Content->Pump();
+		}
 
 		// **How much decoding and uploading one frame will do**, and the same
 		// allowance the studio's own intake uses for the same reason: content
@@ -481,6 +511,8 @@ namespace client {
 		// it is bytes rather than a count and why the first arrival is always
 		// admitted.
 		ContentBudget.Begin();
+
+		ENGINE_PROFILE_CAT("content.intake", engine::core::ProfileCategory::Assets);
 
 		size_t kept = 0;
 		for (const engine::delivery::RequestId id : ContentPending) {
@@ -529,9 +561,12 @@ namespace client {
 
 			if (asset->Kind == engine::assets::AssetKind::Mesh) {
 				engine::assets::MeshData mesh;
-				if (!engine::assets::Mesh::Read(reader, mesh)) {
-					ENGINE_WARN("content: {} is not a mesh this engine reads", asset->Name);
-					continue;
+				{
+					ENGINE_PROFILE_CAT("mesh decode", engine::core::ProfileCategory::Assets);
+					if (!engine::assets::Mesh::Read(reader, mesh)) {
+						ENGINE_WARN("content: {} is not a mesh this engine reads", asset->Name);
+						continue;
+					}
 				}
 				// **A mesh's own sheets, asked for at the one point their names
 				// are readable.** `Submesh::Texture` lives in the mesh file, so
@@ -573,7 +608,10 @@ namespace client {
 					// client and a server disagreeing about where a player is
 					// standing.
 					engine::scene::CollisionShapes arrived;
-					engine::game::AddCollisionShapes(arrived, name, mesh);
+					{
+						ENGINE_PROFILE_CAT("mesh collision", engine::core::ProfileCategory::Assets);
+						engine::game::AddCollisionShapes(arrived, name, mesh);
+					}
 
 					const auto record = [&name, triangles, &sheets, &arrived](engine::ecs::Store &store) {
 						engine::scene::RecordMesh(store, name, triangles, sheets);
@@ -589,12 +627,18 @@ namespace client {
 				}
 			} else if (asset->Kind == engine::assets::AssetKind::Texture) {
 				engine::assets::TextureData image;
-				if (!engine::assets::Texture::Read(reader, image)) {
-					ENGINE_WARN("content: {} is not a texture this engine reads", asset->Name);
-					continue;
+				{
+					ENGINE_PROFILE_CAT("texture decode", engine::core::ProfileCategory::Assets);
+					if (!engine::assets::Texture::Read(reader, image)) {
+						ENGINE_WARN("content: {} is not a texture this engine reads", asset->Name);
+						continue;
+					}
 				}
-				if (Renderer.AddTexture(name, image)) {
-					ContentTextures++;
+				{
+					ENGINE_PROFILE_CAT("texture upload", engine::core::ProfileCategory::Assets);
+					if (Renderer.AddTexture(name, image)) {
+						ContentTextures++;
+					}
 				}
 
 				// **Flipbook layout is world data, not renderer state**, exactly
@@ -677,6 +721,7 @@ namespace client {
 				// on the device thread, and a buffer converted per voice would pay
 				// for it again for every part playing a footstep. `DecodeAudio` picks
 				// its decoder from the bytes rather than from the name - Sounds.hpp.
+				ENGINE_PROFILE_CAT("audio decode", engine::core::ProfileCategory::Assets);
 				std::optional<engine::audio::SampleBuffer> samples = DecodeAudio(asset->Bytes);
 				if (!samples) {
 					ENGINE_WARN("content: {} is not audio this engine decodes", asset->Name);
@@ -1703,6 +1748,14 @@ namespace client {
 			// Collection is off until something asks for it, so opening the
 			// panel is what turns it on.
 			FrameGraph::SetEnabled(Settings.ShowFrameGraph);
+
+			// **Not turned off with the panel when a report was asked for.**
+			// Closing F5 mid-run would otherwise throw away the window the
+			// report is fitted over, and the panel is the natural thing to
+			// close once you have seen the shape you were looking for.
+			HeapProfile::SetSamplingEnabled(
+				Settings.ShowFrameGraph || !Settings.HeapReport.empty() || Settings.HeapGrowthLimit > 0.0
+			);
 			ProfilerScroll = 0;
 		}
 
@@ -1745,6 +1798,72 @@ namespace client {
 		if (Actions.Fired(Action::WriteProfilerSnapshot)) {
 			WriteSnapshot();
 		}
+	}
+
+	int Client::CheckHeapGrowth() {
+		if (Settings.HeapGrowthLimit <= 0.0) {
+			return 0;
+		}
+
+		if (!HeapProfile::IsCompiledIn()) {
+			// **Not silently passing.** A soak that cannot measure anything and
+			// exits 0 is the worst outcome available: the check goes green
+			// forever and nobody looks at it again.
+			ENGINE_ERROR("--heap-growth-limit needs the allocator hooks. Configure MONO_HEAP_PROFILE=ON.");
+			return EXIT_RUNAWAY_HEAP;
+		}
+
+		const double retained = HeapProfile::HistorySeconds();
+		const double window = retained - Settings.HeapWarmupSeconds;
+		if (window < MINIMUM_GROWTH_WINDOW_SECONDS) {
+			ENGINE_ERROR(
+				"heap: {:.0f}s of readings less a {:.0f}s warm-up leaves nothing to fit a slope to. Run "
+				"for longer than {:.0f}s.",
+				retained,
+				Settings.HeapWarmupSeconds,
+				Settings.HeapWarmupSeconds + MINIMUM_GROWTH_WINDOW_SECONDS
+			);
+			return EXIT_RUNAWAY_HEAP;
+		}
+
+		const std::vector<engine::core::HeapGrowth> runaway =
+			HeapProfile::Runaway(Settings.HeapGrowthLimit, window);
+		if (runaway.empty()) {
+			ENGINE_INFO(
+				"heap: steady over {:.0f}s - nothing climbing faster than {:.0f} B/s",
+				window,
+				Settings.HeapGrowthLimit
+			);
+			return 0;
+		}
+
+		for (const engine::core::HeapGrowth &entry : runaway) {
+			ENGINE_ERROR(
+				"heap: '{}' climbed {:.0f} B/s (fit {:.2f}) from {:.2f} MiB to {:.2f} MiB",
+				entry.Path,
+				entry.BytesPerSecond,
+				entry.Fit,
+				static_cast<double>(entry.FirstBytes) / (1024.0 * 1024.0),
+				static_cast<double>(entry.LastBytes) / (1024.0 * 1024.0)
+			);
+		}
+		ENGINE_ERROR("heap: {} tag(s) over the growth limit", runaway.size());
+		return EXIT_RUNAWAY_HEAP;
+	}
+
+	void Client::RefreshHeapReport() {
+		HeapTotals = HeapProfile::Totals();
+
+		// A floor, so the tree is the subsystems worth a row rather than every
+		// tag that ever held a string. The growth report keeps its own, higher
+		// floor: a tag that never reaches a megabyte cannot be the leak that
+		// matters, however convincing its slope.
+		constexpr int64_t TREE_FLOOR = 16 * 1024;
+		constexpr int64_t GROWTH_FLOOR = 256 * 1024;
+
+		HeapRows = HeapProfile::TreeRows(TREE_FLOOR);
+		HeapGrowth = HeapProfile::Growth(0.0, GROWTH_FLOOR);
+		HeapHistory = HeapProfile::History();
 	}
 
 	void Client::WriteSnapshot() {
@@ -1803,6 +1922,32 @@ namespace client {
 			NextFrameAt += period;
 		}
 
+		// Everything from here to EndFrame is one frame's worth of spans. The
+		// panels below draw the *previous* frame's, because this one has not
+		// finished being measured.
+		//
+		// **Opened before the wait rather than after it, which is what puts the
+		// wait on the graph.** `Editor::Run` has done it this way since the
+		// editor's own frame was found to be mostly invisible; the client kept
+		// the older order and had the same hole. `WaitForFrame` blocks on the
+		// display, so with vertical sync on it is the largest single thing in a
+		// frame - and opening the frame after it meant the span was recorded
+		// into no frame at all and dropped. A snapshot of a spinning cube
+		// reported an 8.4 ms mean frame with `acquire swapchain` nowhere in it.
+		//
+		// `Idle` is the honest category for a thread that is asleep, which is
+		// what lets the panel keep leading with busy time while the graph
+		// accounts for the whole frame.
+		FrameGraph::BeginFrame();
+
+		// **A heap tag over the whole frame, and it is not a profiling scope.**
+		// The frame is not a span - `BeginFrame`/`EndFrame` bound it instead -
+		// so without this every allocation in the loop that no finer scope
+		// covers lands in the same untagged pile as the process's static
+		// initialisers. Separating "the loop is holding something" from "startup
+		// held something" is most of what makes the tree readable.
+		ENGINE_HEAP_SCOPE("client.frame");
+
 		// **The display is waited for before the input is read**, for the reason
 		// `Editor::Run` gives at length: the swapchain wait is most of a frame
 		// with vertical sync on, and doing it after the pump means every frame is
@@ -1811,22 +1956,27 @@ namespace client {
 		//
 		// A failure means minimised or mid-resize. The result gates presentation
 		// below after simulation and external services have continued.
-		const bool renderingActive = Renderer.WaitForFrame();
+		bool renderingActive = false;
+		{
+			ENGINE_PROFILE_CAT("wait for frame", engine::core::ProfileCategory::Idle);
+			renderingActive = Renderer.WaitForFrame();
+		}
 
 		const float delta = Clock.Tick();
 
-		// Everything from here to EndFrame is one frame's worth of spans. The
-		// panels below draw the *previous* frame's, because this one has not
-		// finished being measured.
-		FrameGraph::BeginFrame();
-
-		PumpEvents();
+		{
+			ENGINE_HEAP_SCOPE("client.events");
+			PumpEvents();
+		}
 
 		// **Before the simulation and outside every pass.** Content becoming
 		// visible mid-tick is `AGENTS.md` rule 5's desync, and content
 		// registering mid-frame is an upload into a buffer a render pass may be
 		// reading.
-		PumpContent();
+		{
+			ENGINE_HEAP_SCOPE("client.content");
+			PumpContent();
+		}
 
 		// Simulation and rendering advance at different rates, and this is
 		// where they separate. The frame runs as fast as the display and the
@@ -1865,12 +2015,18 @@ namespace client {
 		// After the tick and the replica's apply, so what a script set this
 		// frame is heard this frame rather than next. Before presentation
 		// because presentation is where the frame stops being about state.
-		PumpSounds();
+		{
+			ENGINE_HEAP_SCOPE("client.sounds");
+			PumpSounds();
+		}
 
 		// Beside the audio pump: neither is part of the tick, and a presence
 		// update that landed a frame later on a slower machine changes nothing
 		// a recorded run has to reproduce.
-		PumpDiscord(engine::core::Clock::Seconds());
+		{
+			ENGINE_HEAP_SCOPE("client.discord");
+			PumpDiscord(engine::core::Clock::Seconds());
+		}
 
 		// A hidden, minimised, or resizing window has no frame to consume. The
 		// simulation, replication, content delivery, and audio above continue,
@@ -1898,6 +2054,25 @@ namespace client {
 		int pixelHeight = Settings.Height;
 		if (Window != nullptr) {
 			SDL_GetWindowSizeInPixels(Window, &pixelWidth, &pixelHeight);
+		}
+
+		// **The window's logical size as well as its pixel one, because the
+		// interface needs the first and the attachment is the second.** SDL
+		// reports the pointer in logical units, so a canvas laid out in anything
+		// else hit-tests one place and draws another; the texture the interface
+		// lands in is pixels. On a display whose density is one they are the
+		// same number, which is exactly why the difference went unnoticed.
+		//
+		// **Read every frame rather than taken from `Options`.** `Settings.Width`
+		// is what the window was *asked* for at start-up and is never written
+		// again - so every `UDim2` offset in the game, and every hit test, was
+		// against the launch size for the rest of the session. The world has
+		// always been drawn at the live size, so resizing the window stretched
+		// the interface against a scene that had not stretched.
+		int windowWidth = Settings.Width;
+		int windowHeight = Settings.Height;
+		if (Window != nullptr) {
+			SDL_GetWindowSize(Window, &windowWidth, &windowHeight);
 		}
 
 		{
@@ -2129,7 +2304,10 @@ namespace client {
 			}
 		}
 
-		Statistics.Record(Clock.Now(), delta);
+		{
+			ENGINE_HEAP_SCOPE("client.statistics");
+			Statistics.Record(Clock.Now(), delta);
+		}
 
 		// **Advanced with the frame it will be drawn against.** Accumulated from
 		// the frame delta rather than read from a wall clock, so a run that
@@ -2223,6 +2401,12 @@ namespace client {
 				panels.DroppedSpans = FrameGraph::Dropped();
 				panels.Systems = SystemTimings;
 				panels.Counters = counters;
+				panels.HeapCompiledIn = HeapProfile::IsCompiledIn();
+				panels.Heap = HeapTotals;
+				panels.HeapRows = HeapRows;
+				panels.HeapGrowth = HeapGrowth;
+				panels.HeapHistory = HeapHistory;
+				panels.HeapHistorySeconds = HeapProfile::HistorySeconds();
 				// Asked of the world, not read back off the command line. The
 				// number that matters is what the world actually holds, and
 				// the day something spawns or destroys an entity those two
@@ -2273,7 +2457,10 @@ namespace client {
 		// Counted rather than read off the option, because `--connect` adds a
 		// view the option does not know about. Two views drawn on top of each
 		// other is two scenes inside one, which reads as a rendering fault.
-		Views.Compose(Views.Count() > 1 ? Settings.ViewSpacing : 0.0f);
+		{
+			ENGINE_HEAP_SCOPE("client.compose");
+			Views.Compose(Views.Count() > 1 ? Settings.ViewSpacing : 0.0f);
+		}
 		// **The world's own interface, compiled here.** The studio does this
 		// per viewport panel because a panel *is* a canvas; a client has one
 		// canvas, which is the window.
@@ -2327,6 +2514,8 @@ namespace client {
 		const engine::world::WorldId interfaceWorld = InterfaceWorld();
 
 		if (interfaceWorld.IsValid()) {
+			ENGINE_HEAP_SCOPE("client.interface");
+
 			engine::gui::CompileRequest request;
 			std::span<const engine::gui::GuiEvent> interfaceEvents;
 
@@ -2343,8 +2532,8 @@ namespace client {
 			// see `CompileRequest::Seconds`.
 			request.Seconds = engine::core::Clock::Seconds();
 
-			request.Display.Width = static_cast<float>(Settings.Width);
-			request.Display.Height = static_cast<float>(Settings.Height);
+			request.Display.Width = static_cast<float>(windowWidth);
+			request.Display.Height = static_cast<float>(windowHeight);
 
 			// Fed back from the previous frame's routing, deliberately: the
 			// hover comes from the list a compile produced, so a compile
@@ -2503,6 +2692,9 @@ namespace client {
 					Interface.Submit(
 						InterfaceList.Commands(),
 						engine::core::Vector2{request.Display.Width, request.Display.Height},
+						engine::core::Vector2{
+							static_cast<float>(pixelWidth), static_cast<float>(pixelHeight)
+						},
 						store
 					);
 					hook = &Interface;
@@ -2568,8 +2760,10 @@ namespace client {
 		engine::render::SceneTarget target{};
 		const engine::render::SceneTarget *sceneTarget = nullptr;
 		if (!Settings.Capture.empty()) {
-			target.Width = static_cast<uint32_t>(Settings.Width);
-			target.Height = static_cast<uint32_t>(Settings.Height);
+			// The window's real size rather than the one it was asked for, so a
+			// capture taken after a resize is the picture on screen.
+			target.Width = static_cast<uint32_t>(pixelWidth);
+			target.Height = static_cast<uint32_t>(pixelHeight);
 			sceneTarget = &target;
 		}
 
@@ -2596,6 +2790,8 @@ namespace client {
 		// somebody looked at it. This loop presents *every* simulated world
 		// already - a world the player is not looking at still ticks - so the
 		// far list is this frame's by the time we get here.
+		ENGINE_HEAP_SCOPE("client.draw list");
+
 		Foreign.clear();
 		std::span<const engine::scene::DrawInstance> drawn = Views.Instances();
 
@@ -2625,6 +2821,7 @@ namespace client {
 		// **`--surface-bounces` wins where it was given.** A session pinning the
 		// number is somebody measuring or comparing, and a world quietly taking
 		// it back on the next frame is the shape of an afternoon lost.
+		ENGINE_HEAP_SCOPE("client.lighting");
 		Universe_->Enter(Rendered, [this](engine::ecs::Store &lit, engine::ecs::Scheduler &) {
 			Renderer.SetLighting(engine::scene::LightingOf(lit));
 
@@ -2657,6 +2854,7 @@ namespace client {
 		// **Only for the world being drawn.** A shader is a pipeline, and a
 		// pipeline built for a world nothing is presenting is video memory held
 		// for a frame that is not being rendered.
+		ENGINE_HEAP_SCOPE("client.shaders");
 		Universe_->Enter(Rendered, [this](engine::ecs::Store &shaded, engine::ecs::Scheduler &) {
 			const size_t changed = Shaders.Refresh(shaded);
 			const engine::core::Name wantedPostProcess = engine::scene::PostProcessShaderOf(shaded);
@@ -2757,10 +2955,13 @@ namespace client {
 		// identical reason: only the world actually being drawn pays for an
 		// upload, and a steady scene - nothing mid-edit - costs one walk and
 		// an integer compare per `EditableMesh`.
-		Universe_->Enter(Rendered, [this](engine::ecs::Store &shaded, engine::ecs::Scheduler &) {
-			(void)EditableMeshes.Refresh(shaded, Renderer);
-			(void)EditableImages.Refresh(shaded, Renderer);
-		});
+		{
+			ENGINE_HEAP_SCOPE("client.editable");
+			Universe_->Enter(Rendered, [this](engine::ecs::Store &shaded, engine::ecs::Scheduler &) {
+				(void)EditableMeshes.Refresh(shaded, Renderer);
+				(void)EditableImages.Refresh(shaded, Renderer);
+			});
+		}
 
 		engine::render::View view;
 		view.CameraFrame = Views.CameraFrame();
@@ -2785,7 +2986,10 @@ namespace client {
 		view.Portals = Portals;
 		view.Pipeline = PipelineSelected;
 		view.World = Rendered.IsValid() ? Rendered.Index : 0;
-		LastFrame = Renderer.Render(std::span<const engine::render::View>(&view, 1), Overlay, hook);
+		{
+			ENGINE_HEAP_SCOPE("client.submit");
+			LastFrame = Renderer.Render(std::span<const engine::render::View>(&view, 1), Overlay, hook);
+		}
 
 		// **After the frame rather than before it**, so the capture is of a
 		// frame whose scene texture exists - the studio's own capture states
@@ -2797,8 +3001,22 @@ namespace client {
 			Renderer.RequestSceneCapture(Settings.Capture);
 		}
 
-		FrameGraph::EndFrame();
+		{
+			ENGINE_HEAP_SCOPE("client.endframe");
+			FrameGraph::EndFrame();
+		}
 		ENGINE_PROFILE_FRAME();
+
+		// **After the frame's work rather than before it**, so a reading covers
+		// whole frames. Sampling between the simulation and the draw would catch
+		// every scratch buffer the renderer holds for the length of one frame
+		// and report the sawtooth as the shape of the heap.
+		{
+			ENGINE_HEAP_SCOPE("client.heap sample");
+			if (HeapProfile::SampleIfDue()) {
+				RefreshHeapReport();
+			}
+		}
 
 		// **Presented, or simply drawn when there is nowhere to present.** A
 		// headless renderer never presents by design, so counting presents alone
@@ -2815,6 +3033,7 @@ namespace client {
 		// meshes is thousands, so a run whose triangle count did not move is one
 		// where every `MeshId` resolved to the fallback.
 		using engine::core::Metrics;
+		ENGINE_HEAP_SCOPE("client.counters");
 		Metrics::Count("render.triangles", static_cast<double>(LastFrame.Triangles));
 		Metrics::Count("render.draw-calls", static_cast<double>(LastFrame.DrawCalls));
 		Metrics::Count("render.upload-bytes", static_cast<double>(LastFrame.UploadedBytes));
@@ -2931,7 +3150,26 @@ namespace client {
 			}
 		}
 
-		return 0;
+		// Beside the frame graph and for the same reason: the tag tree describes
+		// what the world was holding, and a report written after teardown
+		// describes an empty one.
+		if (!Settings.HeapReport.empty()) {
+			const engine::core::HeapTotals heap = HeapProfile::Totals();
+			ENGINE_INFO(
+				"heap: {:.1f} MiB live in {} block(s), {:.1f} MiB peak, {} tag(s)",
+				static_cast<double>(heap.LiveBytes) / (1024.0 * 1024.0),
+				heap.LiveBlocks,
+				static_cast<double>(heap.PeakBytes) / (1024.0 * 1024.0),
+				heap.Nodes
+			);
+			if (HeapProfile::WriteReport(Settings.HeapReport)) {
+				ENGINE_INFO("heap report written to {}", Settings.HeapReport.string());
+			} else {
+				ENGINE_ERROR("could not write {}", Settings.HeapReport.string());
+			}
+		}
+
+		return CheckHeapGrowth();
 	}
 
 	engine::render::NetworkStatistics Client::SampleNetwork() {

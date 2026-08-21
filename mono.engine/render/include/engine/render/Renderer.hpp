@@ -249,9 +249,11 @@ namespace engine::render {
 		// Cross-world captures use the destination world's lighting and local
 		// lights. Mirrors and same-world captures leave this disabled and inherit
 		// the view's current lighting.
+		//@{
 		scene::WorldLighting Lighting;
 		std::vector<SceneLight> Lights;
 		bool OverrideLighting = false;
+		//@}
 	};
 
 	// One same-world portal, as the recursive pass needs it.
@@ -884,23 +886,29 @@ namespace engine::render {
 		// Resource traffic declared by the graph after world and view scopes are
 		// expanded for this frame. QueueTransferBytes is visibility traffic across
 		// logical queues, not necessarily a physical memory copy.
+		//@{
 		uint64_t ScheduledReadBytes = 0;
 		uint64_t ScheduledWriteBytes = 0;
 		uint64_t QueueTransferBytes = 0;
+		//@}
 
 		// Bytes actually copied from CPU staging memory, and the dedicated SDL
 		// copy command buffers that carried them. Unlike the scheduled figures
 		// above, these are observed backend traffic for this frame. A command
 		// buffer is submitted without a fence so the GPU can consume uploads
 		// while the CPU continues recording render and compute passes.
+		//@{
 		uint64_t UploadedBytes = 0;
 		uint32_t UploadCommandBuffers = 0;
+		//@}
 
 		// Compute work recorded this frame, and how often an async-eligible
 		// dispatch was safe to submit on its own command buffer before any
 		// dependency-bound work entered the main stream.
+		//@{
 		uint32_t ComputeDispatches = 0;
 		uint32_t AsyncComputeCommandBuffers = 0;
+		//@}
 
 		// Later-transfer command buffers submitted after the main buffer:
 		// resource previews and captures download through them, so on SDL's
@@ -1019,6 +1027,17 @@ namespace engine::render {
 		// @return `false` for an invalid mesh, a full table or a failed upload.
 		bool AddMesh(const core::Name &name, const assets::MeshData &mesh);
 
+		// Sends every mesh `AddMesh` has accumulated to the device.
+		//
+		// `Render` does this itself, so a caller inside the frame loop never
+		// needs it. It is for the paths that read the geometry without drawing a
+		// frame first.
+		//
+		// @return `false` with no device, or when the upload failed. The table
+		//         keeps what it had, so a failure is a frame drawn with the old
+		//         geometry rather than with none.
+		bool FlushMeshes();
+
 		// A registered mesh's own half-extent, in mesh space.
 		//
 		// **So an editor can make `Size` mean the mesh's proportions.** Since
@@ -1112,20 +1131,43 @@ namespace engine::render {
 		// @param slot     Which renderer target owns the image, or `ANY_VIEWPORT`.
 		void Inspect(core::Name resource, size_t slot = ANY_VIEWPORT);
 
+		// Which resource is currently being previewed.
+		//
+		// @return The authored resource `Inspect` was last given, or an empty
+		//         `Name` when nothing is being downloaded.
 		core::Name Inspecting() const;
 
+		// One completed preview download.
 		struct ReadbackImage {
 			// The authored resource and renderer target this image came from.
 			//@{
 			core::Name Source;
 			size_t Slot = ANY_VIEWPORT;
 			//@}
+			// The image's size in pixels.
+			//@{
 			uint32_t Width = 0;
 			uint32_t Height = 0;
+			//@}
+
+			// The pixels themselves, borrowed from the renderer's staging
+			// memory. **Valid until the next `Render`**, which is why this is a
+			// span rather than a vector: a copy per frame for a panel that
+			// usually is not open would be the whole cost of the feature.
 			std::span<const uint32_t> Pixels;
+
+			// The four channels' distributions, filled for four-byte colour
+			// resources and left empty for anything else.
 			ImageHistogram Histogram;
+
+			// How many frames old this image is. A preview is deliberately
+			// allowed to lag rather than stall the GPU, so a panel showing one
+			// says how far behind it is.
 			uint64_t Age = 0;
 
+			// Whether this holds an image at all.
+			//
+			// @return `true` when the size is non-zero and pixels are present.
 			bool IsValid() const {
 				return Width > 0 && Height > 0 && !Pixels.empty();
 			}
@@ -1137,8 +1179,10 @@ namespace engine::render {
 		// GPU execution time and CPU command-recording wall time for each
 		// physical pass, in microseconds and keyed by Name::Id. GPU results lag
 		// until the query pool resolves; wall time is from the latest Render.
+		//@{
 		const std::unordered_map<uint32_t, double> &PassTimings() const;
 		const std::unordered_map<uint32_t, double> &PassWallTimes() const;
+		//@}
 
 		// Whether this backend can produce GPU timestamps.
 		bool Timed() const;
@@ -1365,9 +1409,11 @@ namespace engine::render {
 
 		// The current directional-light settings, for a temporary nested view
 		// that must restore the enclosing world's lighting.
+		//@{
 		core::Vector3 SunDirection() const;
 		core::Color3 SunAmbient() const;
 		core::Color3 SunColor() const;
+		//@}
 
 		// The backend handle for a registered texture, for an interface pass to
 		// sample.

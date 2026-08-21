@@ -36,13 +36,43 @@ set(MONO_VENDOR "${CMAKE_SOURCE_DIR}/mono.vendor")
 option(MONO_OPTIMISE_VENDOR "Build third-party code optimised, whatever the build type" ON)
 
 if(MONO_OPTIMISE_VENDOR AND NOT MSVC)
+	# An append is enough here: GCC and Clang honour the last `-O` on the line.
 	set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -O2")
 	set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O2")
 elseif(MONO_OPTIMISE_VENDOR AND MSVC)
-	# `/Od` is in the Debug defaults and the later flag wins, so this is an
-	# append rather than a replacement here too.
-	set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} /O2")
-	set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /O2")
+	# **A replacement, and it used to be an append. That one word broke every
+	# Windows build this repository has ever done.**
+	#
+	# MSVC's Debug defaults are `/Zi /Ob0 /Od /RTC1`, and `/RTC1` with `/O2` is
+	# not merely redundant - the compiler refuses the command line outright:
+	#
+	#   cl : Command line error D8016 : '/RTC1' and '/O2' are incompatible
+	#
+	# **And it is not only Debug builds that carry these.** `try_compile` runs
+	# with no build type, so CMake falls back to the Debug flags for it - the
+	# `-MDd` on those command lines is the giveaway. So an appended `/O2` made
+	# every feature check in every vendored project fail, in a `release` build
+	# that never compiles a Debug object: SDL alone reported 77 checks failed and
+	# none succeeded, including `SDL_CPU_X64` on an x64 machine. What reached a
+	# human was a `#error` about a joystick define, sixty files downstream.
+	#
+	# It stayed invisible because the branch above is the one that runs here. GCC
+	# takes the last `-O` and carries on, so the same idea is correct on Linux
+	# and fatal on Windows, and only one of the two is built every day.
+	foreach(lang C CXX)
+		set(flags "${CMAKE_${lang}_FLAGS_DEBUG}")
+		string(REGEX REPLACE "/RTC[1csu]+" "" flags "${flags}")
+		string(REPLACE "/Od" "" flags "${flags}")
+		string(REPLACE "/Ob0" "" flags "${flags}")
+		string(REGEX REPLACE " +" " " flags "${flags}")
+		string(STRIP "${flags}" flags)
+
+		# `/Ob1` rather than leaving inlining at the default, to match what
+		# `/O2` expects now that `/Ob0` is gone.
+		set(CMAKE_${lang}_FLAGS_DEBUG "${flags} /O2 /Ob1")
+	endforeach()
+	unset(flags)
+	unset(lang)
 endif()
 
 if(NOT EXISTS "${MONO_VENDOR}/glm/CMakeLists.txt")
@@ -63,13 +93,46 @@ if(MONO_BUILD_CLIENT)
 		message(FATAL_ERROR "mono.vendor/sdl is missing. Run `just setup`.")
 	endif()
 
+	# **SDL's 2D renderer is not built, and nothing here has ever used it.**
+	# `SDL_Renderer` is the sprite-and-rectangle API; this engine draws through
+	# `SDL_GPU`, which is a separate subsystem depending only on `SDL_VIDEO`, and
+	# the Dear ImGui backend we compile is `imgui_impl_sdlgpu3` rather than
+	# `imgui_impl_sdlrenderer3`. A repository-wide search for `SDL_Renderer`,
+	# `SDL_CreateRenderer` and `SDL_RenderPresent` across every first-party
+	# module finds nothing.
+	#
+	# Turning it off removes every render driver with it - D3D9, D3D11, D3D12,
+	# Metal, Vulkan, OpenGL and OpenGL ES - which is a smaller library for
+	# nothing given up. It also removes `src/render/opengles2/SDL_render_gles2.c`,
+	# which is where the Windows release build stopped: MSVC's C compiler rejects
+	# it with a run of `C2065: 'tex_coord': undeclared identifier`, in a file
+	# nothing in this engine would have called into.
+	set(SDL_RENDER      OFF CACHE BOOL "" FORCE)
+
 	set(SDL_SHARED      ON  CACHE BOOL "" FORCE)
 	set(SDL_STATIC      OFF CACHE BOOL "" FORCE)
-	set(SDL_TEST        OFF CACHE BOOL "" FORCE)
 	set(SDL_TESTS       OFF CACHE BOOL "" FORCE)
 	set(SDL_EXAMPLES    OFF CACHE BOOL "" FORCE)
 	set(SDL_INSTALL     OFF CACHE BOOL "" FORCE)
-	set(SDL_DISABLE_PCH ON  CACHE BOOL "" FORCE)
+
+	# **`SDL_TEST_LIBRARY`, and it used to be spelled `SDL_TEST`.** Upstream
+	# renamed it and the old name went on being set here, which is the quiet
+	# kind of stale: a `set(... CACHE ... FORCE)` on a variable no project reads
+	# is not an error, so nothing said anything and `libSDL3_test.a` was built by
+	# every client configure. Nothing in this repository links it - it is the
+	# harness SDL's own test programs use, and `SDL_TESTS` above already declines
+	# those.
+	#
+	# It defaults ON, so the rename silently turned it back on rather than
+	# leaving it where it was put.
+	set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
+
+	# `SDL_DISABLE_PCH` was here and is gone rather than corrected, because there
+	# is nothing to correct it to: this SDL calls `target_precompile_headers`
+	# unconditionally and offers no option over it. A setting that reads as "we
+	# turned the precompiled header off" while the compile line carries `/Yu` is
+	# worse than no setting at all.
+
 	add_subdirectory("${MONO_VENDOR}/sdl" EXCLUDE_FROM_ALL)
 endif()
 
@@ -140,6 +203,20 @@ target_include_directories(vendor_asio SYSTEM INTERFACE "${MONO_VENDOR}/asio/inc
 target_compile_definitions(vendor_asio INTERFACE ASIO_STANDALONE ASIO_NO_DEPRECATED)
 find_package(Threads REQUIRED)
 target_link_libraries(vendor_asio INTERFACE Threads::Threads)
+
+# **The Windows socket libraries, named rather than left to the compiler.**
+# asio's IOCP backend calls `AcceptEx` and `GetAcceptExSockaddrs`, which live in
+# mswsock, and the rest of Winsock in ws2_32. asio asks for both with
+# `#pragma comment(lib, ...)`, which is an MSVC extension - GCC parses it and
+# does nothing. So a mingw-w64 build compiles all 964 objects and then fails at
+# the link of `server.exe` with two undefined references and nothing naming a
+# missing library.
+#
+# Costs MSVC nothing: it links the same two either way, and a library named
+# twice is linked once.
+if(WIN32)
+	target_link_libraries(vendor_asio INTERFACE ws2_32 mswsock)
+endif()
 
 # --- nlohmann/json ------------------------------------------------------------
 # JSON, for the one thing in this repository that speaks it: `mono.studio`'s
@@ -252,53 +329,6 @@ if(MONO_BUILD_CLIENT)
 	# imgui_demo.cpp is deliberately absent. It is a third of the library by
 	# size, it is a showcase rather than a dependency, and adding it later is
 	# one line if somebody wants the demo window while building an inspector.
-
-	# --- nodegraph ------------------------------------------------------------
-	# A typed node graph and an ImGui canvas over it. Ours, developed in this
-	# repository as `studio/NodeGraph.hpp` and moved out by D00113 so that the
-	# render pipeline editor and `Engine::bakegraph`'s pipeline documents extend
-	# one library instead of starting a third.
-	#
-	# **Declared here although upstream ships a CMakeLists, which is the unusual
-	# call.** That file builds its own `nodegraph_imgui` out of whatever ImGui it
-	# finds, because the common case for a template is a checkout with no build
-	# system in it. Adding it here would put a second copy of every ImGui symbol
-	# on the link line of anything that linked both - a duplicate-symbol error
-	# rather than a slow build - and there is no option that makes it consume an
-	# existing one. It also configures a test binary and an SDL3 demo, neither of
-	# which this repository wants built.
-	#
-	# Two targets, because upstream keeps the same seam: the library knows no
-	# node types, and the set it ships is a demo a host opts into.
-	add_library(vendor_nodegraph STATIC EXCLUDE_FROM_ALL
-		"${MONO_VENDOR}/nodegraph/cpp/src/Types.cpp"
-		"${MONO_VENDOR}/nodegraph/cpp/src/Registry.cpp"
-		"${MONO_VENDOR}/nodegraph/cpp/src/Graph.cpp"
-		"${MONO_VENDOR}/nodegraph/cpp/src/Layout.cpp"
-		"${MONO_VENDOR}/nodegraph/cpp/src/Evaluate.cpp"
-		"${MONO_VENDOR}/nodegraph/cpp/src/Serialize.cpp"
-		"${MONO_VENDOR}/nodegraph/cpp/src/Preview.cpp"
-		"${MONO_VENDOR}/nodegraph/cpp/src/Inspect.cpp"
-		"${MONO_VENDOR}/nodegraph/cpp/src/Editor.cpp"
-		"${MONO_VENDOR}/nodegraph/cpp/src/Inspectors.cpp"
-	)
-	add_library(Vendor::nodegraph ALIAS vendor_nodegraph)
-
-	# SYSTEM for imgui's reason above: the `ci` preset builds first-party code
-	# with -Werror and a vendored header must never be able to fail it.
-	target_include_directories(vendor_nodegraph SYSTEM PUBLIC
-		"${MONO_VENDOR}/nodegraph/cpp/include")
-	target_link_libraries(vendor_nodegraph PUBLIC vendor_imgui)
-	target_compile_features(vendor_nodegraph PUBLIC cxx_std_20)
-
-	# The demo node set - terrain fields, a colouriser and two slow async nodes.
-	# Separate because it is content rather than library: what links it is
-	# `mono.studio`'s Demo Nodes panel, and a node editor with its own vocabulary
-	# links `Vendor::nodegraph` and none of this.
-	add_library(vendor_nodegraph_nodes STATIC EXCLUDE_FROM_ALL
-		"${MONO_VENDOR}/nodegraph/cpp/demo/Nodes.cpp")
-	add_library(Vendor::nodegraph_nodes ALIAS vendor_nodegraph_nodes)
-	target_link_libraries(vendor_nodegraph_nodes PUBLIC vendor_nodegraph)
 endif()
 
 # --- Catch2 -----------------------------------------------------------------
@@ -367,6 +397,28 @@ if(MONO_BUILD_CLIENT)
 	# governs first-party targets and should not be extended to a vendored one:
 	# a new warning in a future GCC must not turn into a failed engine build.
 	set(SHADERC_ENABLE_WERROR_COMPILE OFF CACHE BOOL "" FORCE)
+
+	# **The dynamic C runtime, because everything else here uses it.**
+	#
+	# shaderc defaults this off, and off means it sets `CMAKE_MSVC_RUNTIME_LIBRARY`
+	# to the *static* runtime for its own targets. glslang is added by this file
+	# a few lines below rather than by shaderc, so it takes CMake's default and
+	# gets the dynamic one - and linking `glslc` then fails with a screenful of
+	#
+	#   error LNK2038: mismatch detected for 'RuntimeLibrary': value
+	#   'MD_DynamicRelease' doesn't match value 'MT_StaticRelease' in main.cc.obj
+	#
+	# one line per object in glslang. Two runtimes in one process is the thing
+	# LNK2038 exists to refuse, so this is a real conflict rather than a warning
+	# to suppress.
+	#
+	# Dynamic rather than making glslang static, because dynamic is what the rest
+	# of this build already is: SDL is a shared library here, and MSVC's default
+	# for everything else is `/MD`. Aligning the odd one out is one line;
+	# aligning everything else to it is not.
+	#
+	# MSVC-only in effect - the option does nothing on any other toolchain.
+	set(SHADERC_ENABLE_SHARED_CRT     ON  CACHE BOOL "" FORCE)
 
 	# SPIRV-Headers, SPIRV-Tools and glslang are added here rather than by
 	# shaderc's own third_party/CMakeLists.txt, which guards SPIRV-Tools and

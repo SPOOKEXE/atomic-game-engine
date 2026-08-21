@@ -74,7 +74,7 @@ namespace {
 			PartDesc floor;
 			floor.Size = Vector3{200.0f, 4.0f, 200.0f};
 			floor.Frame = CFrame(Vector3{0.0f, -2.0f, 0.0f});
-			floor.Anchored = true;
+			floor.Simulated = false;
 			Floor = MakePart(World, floor);
 			World.SetParent(Floor, engine::scene::WorkspaceOf(World));
 
@@ -182,7 +182,7 @@ namespace {
 
 			PartDesc subject;
 			subject.Frame = CFrame(Vector3{0.0f, 0.0f, 0.0f});
-			subject.Anchored = true;
+			subject.Simulated = false;
 			Subject = MakePart(World, subject);
 			World.SetParent(Subject, engine::scene::WorkspaceOf(World));
 
@@ -203,7 +203,7 @@ namespace {
 			PartDesc wall;
 			wall.Size = Vector3{4.0f, 4.0f, 0.2f};
 			wall.Frame = CFrame(Vector3{0.0f, 0.0f, at});
-			wall.Anchored = true;
+			wall.Simulated = false;
 			const Entity entity = MakePart(World, wall);
 			World.SetParent(entity, engine::scene::WorkspaceOf(World));
 			Reindex();

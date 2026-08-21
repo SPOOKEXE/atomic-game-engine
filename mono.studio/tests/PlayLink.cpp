@@ -37,12 +37,12 @@
 #include <algorithm>
 #include <client/Replicated.hpp>
 #include <client/Scene.hpp>
+#include <imgui.h>
 #include <numbers>
 #include <optional>
-#include <utility>
-#include <imgui.h>
 #include <studio/Editor.hpp>
 #include <studio/PlayLink.hpp>
+#include <utility>
 
 TEST_SUITE_ID("studio.playlink")
 
@@ -636,7 +636,7 @@ TEST_CASE("a played character walks where the keyboard points it", "[studio][pla
 		engine::scene::PartDesc floor;
 		floor.Size = Vector3{200.0f, 4.0f, 200.0f};
 		floor.Frame = CFrame(Vector3{0.0f, -2.0f, 0.0f});
-		floor.Anchored = true;
+		floor.Simulated = false;
 
 		const Entity ground = engine::scene::MakePart(store, floor);
 		store.SetInstanceName(ground, "SpawnLocation");
@@ -912,7 +912,7 @@ TEST_CASE("a client viewport hands its keyboard to the character", "[studio][pla
 		engine::scene::PartDesc floor;
 		floor.Size = Vector3{200.0f, 4.0f, 200.0f};
 		floor.Frame = CFrame(Vector3{0.0f, -2.0f, 0.0f});
-		floor.Anchored = true;
+		floor.Simulated = false;
 
 		const Entity ground = engine::scene::MakePart(store, floor);
 		store.SetInstanceName(ground, "SpawnLocation");
@@ -1033,7 +1033,7 @@ TEST_CASE("one client viewport walks and the others let go", "[studio][playlink]
 		engine::scene::PartDesc floor;
 		floor.Size = Vector3{200.0f, 4.0f, 200.0f};
 		floor.Frame = CFrame(Vector3{0.0f, -2.0f, 0.0f});
-		floor.Anchored = true;
+		floor.Simulated = false;
 
 		const Entity ground = engine::scene::MakePart(store, floor);
 		store.SetInstanceName(ground, "SpawnLocation");
@@ -1047,9 +1047,9 @@ TEST_CASE("one client viewport walks and the others let go", "[studio][playlink]
 	for (int client = 0; client < 2; client++) {
 		auto link = std::make_unique<PlayLink>();
 		std::string error;
-		REQUIRE(link->Start(
-			*editor.Universe, authority, TICK_RATE, error, "client " + std::to_string(client + 1)
-		));
+		REQUIRE(
+			link->Start(*editor.Universe, authority, TICK_RATE, error, "client " + std::to_string(client + 1))
+		);
 		run.Links.push_back(std::move(link));
 	}
 	editor.Runs.push_back(std::move(run));
@@ -1232,7 +1232,7 @@ TEST_CASE("a client that leaves takes its character with it", "[studio][playlink
 		engine::scene::PartDesc floor;
 		floor.Size = Vector3{200.0f, 4.0f, 200.0f};
 		floor.Frame = CFrame(Vector3{0.0f, -2.0f, 0.0f});
-		floor.Anchored = true;
+		floor.Simulated = false;
 
 		const Entity ground = engine::scene::MakePart(store, floor);
 		store.SetInstanceName(ground, "SpawnLocation");
@@ -1466,7 +1466,7 @@ TEST_CASE("a character through a portal takes the client's camera round with it"
 		engine::scene::PartDesc floor;
 		floor.Size = Vector3{400.0f, 4.0f, 400.0f};
 		floor.Frame = CFrame(Vector3{0.0f, -2.0f, 0.0f});
-		floor.Anchored = true;
+		floor.Simulated = false;
 
 		const Entity ground = engine::scene::MakePart(store, floor);
 		store.SetInstanceName(ground, "SpawnLocation");
@@ -1479,7 +1479,7 @@ TEST_CASE("a character through a portal takes the client's camera round with it"
 		engine::scene::PartDesc near_;
 		near_.Size = Vector3{16.0f, 9.0f, 0.4f};
 		near_.Frame = CFrame(Vector3{0.0f, 4.5f, -6.0f});
-		near_.Anchored = true;
+		near_.Simulated = false;
 
 		const Entity nearPane = engine::scene::MakePart(store, near_);
 		store.SetInstanceName(nearPane, "NearPane");
@@ -1494,15 +1494,13 @@ TEST_CASE("a character through a portal takes the client's camera round with it"
 		far_.Size = Vector3{16.0f, 9.0f, 0.4f};
 		far_.Frame = CFrame(Vector3{100.0f, 4.5f, 0.0f}) *
 					 CFrame::Angles(0.0f, std::numbers::pi_v<float> / 2.0f, 0.0f);
-		far_.Anchored = true;
+		far_.Simulated = false;
 
 		const Entity farPane = engine::scene::MakePart(store, far_);
 		store.SetInstanceName(farPane, "FarPane");
 		store.SetParent(farPane, workspace);
 
-		const Entity hole = store.CreateInstance(
-			engine::ecs::Classes::Find(Name("SurfaceCamera")), "Hole"
-		);
+		const Entity hole = store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "Hole");
 
 		engine::scene::SurfaceCamera target;
 		target.Face = engine::scene::NormalId::Back;
@@ -1567,10 +1565,7 @@ TEST_CASE("a character through a portal takes the client's camera round with it"
 		const auto *went = store.Get<engine::scene::PortalTransit>(root);
 		REQUIRE(went != nullptr);
 		CHECK(went->Serial >= 1u);
-		CHECK_THAT(
-			went->Turn,
-			Catch::Matchers::WithinAbs(-std::numbers::pi_v<float> / 2.0f, 1e-3f)
-		);
+		CHECK_THAT(went->Turn, Catch::Matchers::WithinAbs(-std::numbers::pi_v<float> / 2.0f, 1e-3f));
 	});
 
 	// **The point of the case.** The client never simulated the crossing and
@@ -1594,10 +1589,7 @@ TEST_CASE("a character through a portal takes the client's camera round with it"
 		CHECK(camera->SeenTransit == arrived->Serial);
 
 		INFO("client yaw " << camera->Angles.Y);
-		CHECK_THAT(
-			camera->Angles.Y,
-			Catch::Matchers::WithinAbs(-std::numbers::pi_v<float> / 2.0f, 1e-3f)
-		);
+		CHECK_THAT(camera->Angles.Y, Catch::Matchers::WithinAbs(-std::numbers::pi_v<float> / 2.0f, 1e-3f));
 	});
 }
 

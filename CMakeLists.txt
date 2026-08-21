@@ -5,10 +5,35 @@
 # declared is mono.build/MonoLibrary.cmake.
 
 cmake_minimum_required(VERSION 3.24)
+
+# The version, from the one file that holds it.
+#
+# `VERSION` in the repository root is the source of truth, and everything else
+# derives: `project(VERSION)` below, `engine::core::Version()` and therefore
+# every program's `--version`, the names the release workflow gives its
+# artifacts, and the tag it refuses to publish when the two disagree. A number
+# spelled in two places is a number that will be bumped in one of them.
+#
+# Read here rather than passed to `project()` from a variable somebody sets,
+# because `project()` cannot read a file and this has to run before it.
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" MONO_VERSION LIMIT_COUNT 1)
+string(STRIP "${MONO_VERSION}" MONO_VERSION)
+if(NOT MONO_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+	message(FATAL_ERROR
+		"VERSION holds '${MONO_VERSION}', which is not major.minor.patch.\n"
+		"  docs/RELEASING.md is what that file means.")
+endif()
+
 project(atomic
-	VERSION 0.4.0
+	VERSION ${MONO_VERSION}
 	DESCRIPTION "A 3D game engine for Roblox developers"
 	LANGUAGES C CXX)
+
+# Editing VERSION has to re-run the configure, or `project(VERSION)` keeps the
+# number from whenever the cache was written and `--version` reports a build
+# that no longer exists. Only settable after project().
+set_property(DIRECTORY APPEND
+	PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -26,6 +51,21 @@ option(MONO_BUILD_TESTS  "Build the test binaries"     ON)
 option(MONO_BUILD_BENCH  "Build the benchmark binaries" OFF)
 option(MONO_TRACY        "Compile in the Tracy client" ON)
 option(MONO_WERROR       "Treat warnings as errors"    OFF)
+
+# The heap profiler's allocator hooks - core/HeapProfile.hpp.
+#
+# On by default and off in `release`, which is the opposite of how the two
+# optimisation-ish switches above are arranged, and deliberately: a developer
+# build should be able to answer "what is holding this memory" without being
+# reconfigured first, and a shipped build should not pay a 32-byte header on
+# every allocation in the process.
+#
+# **It cannot be a runtime switch.** A block allocated with no header and freed
+# through the tracking `operator delete` would have four words of somebody
+# else's memory read as its header, so the decision is made once for a whole
+# program. `bench` turns it back on over `release`, because the runaway
+# benchmark is the one measurement that needs both the optimiser and the hooks.
+option(MONO_HEAP_PROFILE "Track every allocation and attribute it to a tag" ON)
 
 # Off by default, and the `release` preset is the one place it goes back on.
 #
@@ -217,12 +257,21 @@ endif()
 # so it configures only where both exist. Under the `server` preset there is no
 # client to link and this is absent rather than stubbed.
 if(MONO_BUILD_CLIENT AND MONO_BUILD_SERVER)
-	add_subdirectory(mono.unified_server_client)
+	add_subdirectory(mono.unified_tests)
 
 	# The editor. Needs the renderer to draw with and the server library to host
 	# with, so like the harness above it configures only where both exist -
 	# under the `server` preset there is nothing here to build.
 	add_subdirectory(mono.studio)
+endif()
+
+# The front door. `MONO_BUILD_CLIENT` alone, and outside the block above on
+# purpose: it links a renderer and Dear ImGui but neither the client library nor
+# the server one, so it needs a graphics stack and nothing else. A tree with a
+# client and no server still gets a launcher - with the Host mode greyed out and
+# saying why, which is what `Descriptions::Failure` is for.
+if(MONO_BUILD_CLIENT)
+	add_subdirectory(mono.launcher)
 endif()
 
 # The content origin. `shared` tier rather than `server`, so the tier rule

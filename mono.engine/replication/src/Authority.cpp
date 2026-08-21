@@ -1,12 +1,16 @@
+#include <engine/core/FrameGraph.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/net/Packet.hpp>
+#include <engine/parallel/Jobs.hpp>
 #include <engine/replication/Authority.hpp>
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
+#include <cstring>
 #include <limits>
 #include <span>
 #include <utility>
@@ -33,16 +37,53 @@ namespace engine::replication {
 			return {writer.Bytes().begin(), writer.Bytes().end()};
 		}
 
+		// FNV-1a's mixing step, taken eight bytes at a time.
+		//
+		// **A byte at a time was most of what `Resign` cost on a wide
+		// component.** Every step of this chain waits on the multiply in the one
+		// before it, so the length of the input is a latency in cycles rather
+		// than a throughput: a 64-byte component was 64 dependent multiplies per
+		// carrier per tick, and `Resign` signs every carrier of every signed
+		// slot every tick. A word at a time is the same chain eight times
+		// shorter.
+		//
+		// **Still exact for equal-length inputs, which is the only property this
+		// caller needs.** Each step is a xor followed by a multiply by an odd
+		// constant, and both are invertible modulo 2^64 - so two inputs of the
+		// same size that differ anywhere produce different hashes, and a signed
+		// component's size is fixed. There is no collision rate to reason about.
+		//
+		// The value is process-local: it is compared against last tick's hash of
+		// the same component and against nothing else. Nothing here is written
+		// to a file or put on a wire, so this may change whenever it is worth
+		// changing - unlike `Audit`'s digest, which two machines have to agree
+		// on.
 		uint64_t HashBytes(const void *bytes, size_t count) {
 			constexpr uint64_t OFFSET = 1469598103934665603ull;
 			constexpr uint64_t PRIME = 1099511628211ull;
 
 			const auto *cursor = static_cast<const unsigned char *>(bytes);
 			uint64_t hash = OFFSET;
-			for (size_t index = 0; index < count; index++) {
-				hash ^= cursor[index];
-				hash *= PRIME;
+
+			// `memcpy` rather than a cast through `uint64_t *`: a column is
+			// aligned to its component and not to eight, and an unaligned load
+			// through a pointer of the wrong type is undefined rather than
+			// merely slow. A fixed-size copy compiles to one load.
+			size_t index = 0;
+			for (; index + sizeof(uint64_t) <= count; index += sizeof(uint64_t)) {
+				uint64_t word = 0;
+				std::memcpy(&word, cursor + index, sizeof(word));
+				hash = (hash ^ word) * PRIME;
 			}
+
+			// At most seven bytes, gathered into one zero-padded word so the
+			// tail costs one more step rather than one per byte.
+			if (index < count) {
+				uint64_t word = 0;
+				std::memcpy(&word, cursor + index, count - index);
+				hash = (hash ^ word) * PRIME;
+			}
+
 			return hash;
 		}
 
@@ -347,12 +388,23 @@ namespace engine::replication {
 			// to. See `Audit.hpp`.
 			Resolved.clear();
 			ResolvedNames.clear();
+
+			// **The same ids a third time, indexed by slot rather than
+			// compacted.** `Detection`, `Signatures` and `Suppressors` are all
+			// keyed by slot, so a pass over them cannot use `Resolved`'s indices
+			// - and `Resign` was calling `Components::Find` again to get back
+			// what this loop already has. That call takes the component
+			// registry's process-wide mutex, once per signed slot per tick, on
+			// the thread every other world is also publishing from.
+			ResolvedSlots.assign(Components.size(), ecs::ComponentId{});
+
 			for (size_t slot = 0; slot < Components.size(); slot++) {
 				const ecs::ComponentId id = ecs::Components::Find(Components[slot]);
 				if (!id.IsValid()) {
 					continue;
 				}
 
+				ResolvedSlots[slot] = id;
 				Resolved.push_back(id);
 				ResolvedNames.push_back(Components[slot]);
 
@@ -392,16 +444,42 @@ namespace engine::replication {
 
 		{
 			ENGINE_PROFILE_CAT("Authority::FindBearing", core::ProfileCategory::Network);
+
+			// **One pass over the archetype tables, not a test per entity.**
+			// `EachEntity` walks the directory - every live slot of both regions -
+			// and `HasComponent` is a directory lookup, an archetype fetch and a
+			// binary search over that archetype's set. An entity carrying a
+			// replicated component paid for one of those and an entity carrying none
+			// paid for one *per declared slot*, which is the case that hurts: a
+			// world's parts are replicated and its folders, scripts, values and
+			// services are not, and every one of them was tested against the whole
+			// table before being dropped.
+			//
+			// Whether a component is present is a property of the archetype, so
+			// `EachMatchingAny` answers it once per table per slot and hands back
+			// whole id arrays. Measured on `bench_replication`'s survey ladder at ten
+			// thousand entities: a scene where nothing carries a replicated component
+			// went from 151 ns an entity to nothing measurable, and one where
+			// everything does went from 18 to about 5.
+			//
+			// **The union and not a merge, which is why this is an `ecs` call rather
+			// than a loop over `EachRuns` here.** Asking per component visits an
+			// entity once for each replicated component it carries, so the sort below
+			// would be over carrier rows instead of entities and would need a
+			// `unique` after it - four replicated components on every entity is four
+			// times the sort, which measured *worse* than the per-entity test it
+			// replaced. A table carries an entity once however many of the components
+			// it holds.
 			Bearing.clear();
-			store.EachEntity([this, &store](ecs::Entity entity) {
-				for (const ecs::ComponentId id : Resolved) {
-					if (store.HasComponent(entity, id)) {
-						Bearing.push_back(entity.Id);
-						return;
-					}
+			store.EachMatchingAny(Resolved, [this](const ecs::Entity *entities, size_t rows) {
+				for (size_t row = 0; row < rows; row++) {
+					Bearing.push_back(entities[row].Id);
 				}
 			});
 
+			// Tables are filled as entities arrive in them, so this comes out in
+			// table order and not id order. `Prioritise` and `Refine` index into it
+			// with `std::lower_bound`.
 			std::sort(Bearing.begin(), Bearing.end());
 		}
 
@@ -411,7 +489,84 @@ namespace engine::replication {
 		}
 	}
 
+	// Signs one slot: hashes its gathered runs, merges against last tick, and
+	// records what moved.
+	//
+	// **Touches nothing outside the signature it is given**, which is what makes
+	// it safe to run a dozen of these at once. It reads the store's columns
+	// through the pointers `Resign`'s first pass collected and writes only into
+	// this slot.
+	void Authority::SignSlot(Signature &signature) {
+		const auto began = std::chrono::steady_clock::now();
+
+		signature.Hashed.clear();
+		for (const Signature::Run &run : signature.Runs) {
+			for (size_t row = 0; row < run.Rows; row++) {
+				signature.Hashed.emplace_back(
+					run.Entities[row].Id, HashBytes(run.Values + row * signature.Stride, signature.Stride)
+				);
+			}
+		}
+
+		// `EachRuns` visits table by table, not id order, and the merge below
+		// needs id order to walk `signature.Hashes` alongside it.
+		//
+		// On the entity id alone rather than on the whole pair. Ids are unique
+		// within this list, so the hash beside one is never reached as a
+		// tie-break - and the default comparison for a pair loads and compares
+		// it anyway, on every comparison of the sort.
+		//
+		// **Tested for order before being put in it, because most ticks are
+		// already in order.** A table holds its rows in the order the entities
+		// arrived and tables are visited in id order, so a scene that has not
+		// created or destroyed anything since it was built hands this back
+		// ascending - and a sort would spend a few thousand comparisons
+		// discovering that. The test is one linear pass with no swaps and no
+		// recursion; a world that has churned pays it on top of a sort it was
+		// paying anyway.
+		const auto byId = [](const std::pair<uint64_t, uint64_t> &left,
+							 const std::pair<uint64_t, uint64_t> &right) { return left.first < right.first; };
+		if (!std::is_sorted(signature.Hashed.begin(), signature.Hashed.end(), byId)) {
+			std::sort(signature.Hashed.begin(), signature.Hashed.end(), byId);
+		}
+
+		// A merge against `Hashed`, which is now sorted the same way
+		// `signature.Hashes` already is. `previous` only ever moves forward, so
+		// an entity the candidate set skipped past - it departed since last tick
+		// - is left behind rather than copied into `Next`, which is what used to
+		// need a second pass over the whole map to find.
+		signature.Next.clear();
+		signature.Next.reserve(signature.Hashed.size());
+		size_t previous = 0;
+		for (const auto &[id64, hash] : signature.Hashed) {
+			while (previous < signature.Hashes.size() && signature.Hashes[previous].first < id64) {
+				previous++;
+			}
+
+			const bool known = previous < signature.Hashes.size() && signature.Hashes[previous].first == id64;
+			if (!known || signature.Hashes[previous].second != hash) {
+				signature.Changed.push_back(id64);
+			}
+			signature.Next.emplace_back(id64, hash);
+		}
+		signature.Hashes.swap(signature.Next);
+
+		signature.Milliseconds = static_cast<float>(
+			std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count()
+		);
+	}
+
 	void Authority::Resign(ecs::Store &store) {
+		// --- what to sign, on the thread that owns the store -----------------
+		//
+		// `Store::EachRuns` walks the archetype tables and may only be called by
+		// the owning thread, so this pass collects the column blocks and the
+		// next one does the work. Gathering is a handful of table lookups a
+		// slot; signing is every carrier of every signed component, which at
+		// twelve thousand parts was measured as a dozen even costs of about
+		// 0.3 ms and most of `Authority::Publish`.
+		ResignWork.clear();
+
 		for (size_t slot = 0; slot < Components.size(); slot++) {
 			if (Detection[slot] != ChangeDetection::Signature) {
 				continue;
@@ -419,8 +574,12 @@ namespace engine::replication {
 
 			Signature &signature = Signatures[slot];
 			signature.Changed.clear();
+			signature.Runs.clear();
 
-			const ecs::ComponentId id = ecs::Components::Find(Components[slot]);
+			// Resolved by `Survey` a moment ago rather than looked up again
+			// here: `Components::Find` takes the registry's process-wide mutex,
+			// and this loop runs once per signed slot per tick.
+			const ecs::ComponentId id = ResolvedSlots[slot];
 			if (!id.IsValid()) {
 				continue;
 			}
@@ -439,62 +598,55 @@ namespace engine::replication {
 				continue;
 			}
 
-			// One span per component, not one for the whole loop - `Resign`
-			// used to be a single frame no capture could see inside: twenty
-			// components signed for one 39%-of-the-tick line gives a reader no
-			// way to tell whether that is one expensive component or several
-			// cheap ones. The name is stable for the life of the run, so this
-			// is the `_STABLE` form rather than the copying one.
-			ENGINE_PROFILE_DYNAMIC_STABLE(
-				"Authority::Resign::slot", Components[slot].Text(), core::ProfileCategory::Network
-			);
-
-			// This slot's actual carriers, hashed straight out of the column -
-			// not `Bearing` filtered down to them and not read back through
-			// `GetComponent`. `Bearing` is the union of every replicated
-			// component's carriers, and a scene usually declares far more
-			// replicated component types than any one entity has: walking
-			// `Bearing` here would spend a miss on every entity that does not
-			// happen to carry *this* component. `EachRuns` instead visits only
-			// the archetype tables that do, chunk by chunk, and hands back the
-			// raw column alongside the entities - so a component nothing in the
-			// scene carries costs one table lookup and touches no entity at
+			// This slot's actual carriers - not `Bearing` filtered down to them
+			// and not read back through `GetComponent`. `Bearing` is the union
+			// of every replicated component's carriers, and a scene usually
+			// declares far more replicated component types than any one entity
+			// has: walking `Bearing` here would spend a miss on every entity
+			// that does not happen to carry *this* component. `EachRuns` visits
+			// only the archetype tables that do, chunk by chunk, and hands back
+			// the raw column alongside the entities - so a component nothing in
+			// the scene carries costs one table lookup and touches no entity at
 			// all, and hashing a populated one reads contiguous memory instead
 			// of paying a directory lookup and an archetype fetch per entity.
-			ResignHashed.clear();
-			store.EachRuns(id, [this, &descriptor](const ecs::Entity *entities, void *values, size_t rows) {
-				const auto *bytes = static_cast<const std::byte *>(values);
-				for (size_t row = 0; row < rows; row++) {
-					ResignHashed.emplace_back(
-						entities[row].Id, HashBytes(bytes + row * descriptor.Size, descriptor.Size)
-					);
+			signature.Stride = descriptor.Size;
+			store.EachRuns(id, [&signature](const ecs::Entity *entities, void *values, size_t rows) {
+				signature.Runs.push_back(
+					Signature::Run{entities, static_cast<const std::byte *>(values), rows}
+				);
+			});
+
+			ResignWork.push_back(slot);
+		}
+
+		// --- the signing, spread across whatever workers there are -----------
+		//
+		// A grain of one because a slot is the unit: they are within a factor of
+		// two of each other in cost, and a component nothing carries returns
+		// immediately. `Jobs::For` runs the whole span inline when it is nested
+		// inside another batch or when serial compute is forced, so this is the
+		// same work in the same order on a machine that cannot spread it.
+		{
+			ENGINE_PROFILE_CAT("Authority::Resign::sign", core::ProfileCategory::Network);
+			parallel::Jobs::For(ResignWork.size(), 1, [this](size_t begin, size_t end) {
+				for (size_t at = begin; at < end; at++) {
+					SignSlot(Signatures[ResignWork[at]]);
 				}
 			});
-			// `EachRuns` visits table by table, not id order, and the merge
-			// below needs id order to walk `signature.Hashes` alongside it.
-			std::sort(ResignHashed.begin(), ResignHashed.end());
+		}
 
-			// A merge against `ResignHashed`, which is now sorted the same way
-			// `signature.Hashes` already is. `previous` only ever moves forward,
-			// so an entity the candidate set skipped past - it departed since
-			// last tick - is left behind rather than copied into `next`, which
-			// is what used to need a second pass over the whole map to find.
-			std::vector<std::pair<uint64_t, uint64_t>> next;
-			next.reserve(signature.Hashes.size());
-			size_t previous = 0;
-			for (const auto &[id64, hash] : ResignHashed) {
-				while (previous < signature.Hashes.size() && signature.Hashes[previous].first < id64) {
-					previous++;
-				}
-
-				const bool known =
-					previous < signature.Hashes.size() && signature.Hashes[previous].first == id64;
-				if (!known || signature.Hashes[previous].second != hash) {
-					signature.Changed.push_back(id64);
-				}
-				next.emplace_back(id64, hash);
-			}
-			signature.Hashes.swap(next);
+		// --- the per-component rows, put back on the graph -------------------
+		//
+		// A span opened by a worker is dropped, so the breakdown is reported
+		// here instead, from the timings the workers took. Same rows, same
+		// names, same category as when this was a loop with a span in it.
+		for (const size_t slot : ResignWork) {
+			core::FrameGraph::ReportNamed(
+				"Authority::Resign::slot",
+				Components[slot].Text(),
+				core::ProfileCategory::Network,
+				Signatures[slot].Milliseconds
+			);
 		}
 	}
 
@@ -517,6 +669,8 @@ namespace engine::replication {
 		core::ByteWriter compact;
 		std::vector<std::byte> decoded;
 
+		const ecs::ComponentId hierarchyId = ecs::Components::Of<ecs::Hierarchy>();
+
 		for (const core::Name name : Components) {
 			const ecs::ComponentId id = ecs::Components::Find(name);
 			if (!id.IsValid()) {
@@ -531,6 +685,35 @@ namespace engine::replication {
 			for (const ecs::Entity entity : entities) {
 				const void *value = store.GetComponent(entity, id);
 				if (value == nullptr) {
+					continue;
+				}
+
+				// **The tree is built, not copied, for `WriteComponents`'
+				// reason.** `ecs.Hierarchy` crosses as a parent handle alone, so
+				// a snapshot that copied the component would carry a node with
+				// no child list and the far side would load a world whose
+				// parents have no children. Every entity in `entities` was
+				// created above before any component was set, so the parent of
+				// anything in this set is already here to hang it from.
+				if (id == hierarchyId) {
+					const auto *node = static_cast<const ecs::Hierarchy *>(value);
+
+					// **Both ends given a blank node before either is linked.**
+					// `SetParent` refuses a row with none, and this loop reaches
+					// entities in `entities` order - so a child ahead of its
+					// parent would otherwise be dropped from the snapshot's
+					// tree. Blank rather than copied, because the links being
+					// rebuilt are exactly the ones not to carry over.
+					static const ecs::Hierarchy BLANK{};
+					if (!scratch.Has<ecs::Hierarchy>(entity)) {
+						scratch.SetComponent(entity, id, &BLANK);
+					}
+					if (node->Parent != ecs::NULL_ENTITY && scratch.Alive(node->Parent) &&
+						!scratch.Has<ecs::Hierarchy>(node->Parent)) {
+						scratch.SetComponent(node->Parent, id, &BLANK);
+					}
+
+					(void)scratch.SetParent(entity, node->Parent);
 					continue;
 				}
 

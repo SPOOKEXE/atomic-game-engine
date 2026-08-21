@@ -1437,6 +1437,57 @@ TEST_CASE("a run of losses still converges", "[replication]") {
 	}
 }
 
+TEST_CASE("only the parent crosses, and the replica builds its own links", "[replication]") {
+	// **`ecs.Hierarchy` is a structure, not a value.** `Parent` is what an
+	// author decided; `FirstChild`, `LastChild`, `NextSibling` and
+	// `PreviousSibling` are an index the store that owns the tree maintains.
+	// They used to cross verbatim, which wrote one store's index into another
+	// store's tree - and a replica's sibling list came to contain itself. The
+	// walk that collects it allocated until the allocator refused: measured as a
+	// single sixteen-gigabyte request out of a studio Play session.
+	//
+	// Now only the parent crosses and the far side calls `SetParent`, which
+	// refuses a cycle outright - see `IsDescendantOf` in `SetParent`.
+	Pair pair;
+	pair.Authority_.Replicate(Name("ecs.Hierarchy"));
+	pair.Authority_.Replicate(Name("ecs.InstanceName"), ChangeDetection::Signature);
+
+	REQUIRE(pair.Join());
+
+	const Entity parent = pair.Server.CreateInstance(HolderClass(), "Parent");
+	std::vector<Entity> children;
+	for (int index = 0; index < 3; index++) {
+		const Entity child = pair.Server.CreateInstance(CarriedClass(), "C" + std::to_string(index));
+		REQUIRE(pair.Server.SetParent(child, parent));
+		children.push_back(child);
+	}
+
+	pair.Tick();
+	pair.Tick();
+
+	// The links the replica built for itself, in the order the sender has them.
+	std::vector<Entity> seen;
+	pair.Client.EachChild(parent, [&seen](Entity child) { seen.push_back(child); });
+	CHECK(seen == children);
+
+	// **And the walk terminates**, which is the property the crash was about.
+	// A list that contained itself would not have got here.
+	CHECK(seen.size() == 3);
+
+	// Re-parenting on the server moves it on the client, rather than leaving the
+	// row in two lists at once.
+	const Entity other = pair.Server.CreateInstance(HolderClass(), "Other");
+	REQUIRE(pair.Server.SetParent(children[1], other));
+	pair.Tick();
+	pair.Tick();
+
+	CHECK(pair.Client.ParentOf(children[1]) == other);
+
+	std::vector<Entity> after;
+	pair.Client.EachChild(parent, [&after](Entity child) { after.push_back(child); });
+	CHECK(after == std::vector<Entity>{children[0], children[2]});
+}
+
 TEST_CASE("a destroyed entity leaves the replica's tree walkable", "[replication]") {
 	// **The repair may not be left to the delta that follows.** A destroy rides
 	// the reliable channel and the corrected links ride the delta, and the two

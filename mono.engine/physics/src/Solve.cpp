@@ -27,9 +27,37 @@
 #include <utility>
 #include <vector>
 
+// `_mm_prefetch` lives here, and only MSVC needs it.
+#if defined(_MSC_VER) && !defined(__clang__)
+#include <xmmintrin.h>
+#endif
+
 namespace engine::physics {
 
 	namespace {
+
+		// One cache line asked for early. **A hint and nothing else** - it changes
+		// no result, so a toolchain with no way to spell it does nothing and the
+		// solver is correct and slower.
+		//
+		// Three spellings because there is no portable one. GCC and Clang have
+		// `__builtin_prefetch`, asked for through `__has_builtin` rather than
+		// assumed - the nested `#if` is the form `ecs/TypeDescriptor.hpp` uses, and
+		// it is nested because `__has_builtin(x)` on a compiler that does not
+		// define `__has_builtin` expands to `0(0)` and is a preprocessor error
+		// rather than a false. MSVC has `_mm_prefetch` and no builtin, which is
+		// what stopped the Windows release build at `error C3861`.
+		inline void Prefetch([[maybe_unused]] const void *address) {
+#if defined(__has_builtin)
+#if __has_builtin(__builtin_prefetch)
+			__builtin_prefetch(address);
+			return;
+#endif
+#endif
+#if defined(_MSC_VER) && !defined(__clang__)
+			_mm_prefetch(static_cast<const char *>(address), _MM_HINT_T0);
+#endif
+		}
 		// The group id for a manifold that contributes no rows at all.
 		//
 		// A trigger, or a pair the solver could not move either half of. Marked
@@ -258,17 +286,26 @@ namespace engine::physics {
 			const scene::RigidBody *body,
 			const scene::Collider *collider,
 			const scene::PhysicsProperties *physical,
-			bool unanchored
+			bool simulated
 		) {
-			// **Anchored is asked first, and it used to be asked by omission.**
-			// Until v0.15 an anchored part had no `RigidBody` at all, so a null
-			// pointer here meant "the world may not move this" and the infinite
-			// mass below was the right answer to it. Every part carries one now
-			// - it is what the part weighs, not whether it may be pushed - so
-			// the question is asked through `scene::Anchored` instead. Left as
-			// it was, every anchored floor in every scene became a dynamic body
-			// and the things standing on it fell through.
-			if (!unanchored || body == nullptr || collider == nullptr) {
+			// **Whether the world may move it is asked first, and it used to be
+			// asked by omission.** Until v0.15 an anchored part had no
+			// `RigidBody` at all, so a null pointer here meant "the world may
+			// not move this" and the infinite mass below was the right answer to
+			// it. Every part carries one now - it is what the part weighs, not
+			// whether it may be pushed - so the question is asked through
+			// `scene::Simulated` instead. Left as it was, every anchored floor
+			// in every scene became a dynamic body and the things standing on it
+			// fell through.
+			//
+			// **A sleeping body arrives here with `simulated` true**, and that
+			// is deliberate rather than an oversight. It has no `scene::Motion`,
+			// so the broad phase has it in the static index, but it is a real
+			// body with a real mass and the wake pass below needs it recognised
+			// as one - `body.Asleep` is gated on `Movable`, which is what this
+			// returns. Test `Motion` here instead and a settled crate becomes a
+			// wall that nothing can ever wake.
+			if (!simulated || body == nullptr || collider == nullptr) {
 				// Not a body at all - `scene::Enums` is explicit that this is
 				// not the same as a static one. It still stops things, which is
 				// exactly what an infinite mass does.
@@ -320,8 +357,8 @@ namespace engine::physics {
 				// row somebody else may be writing, and a hint has no result -
 				// but it is also a line pulled in that this worker will not use.
 				if (at + 1 < last) {
-					__builtin_prefetch(&bodies[rows[at + 1].First]);
-					__builtin_prefetch(&bodies[rows[at + 1].Second]);
+					Prefetch(&bodies[rows[at + 1].First]);
+					Prefetch(&bodies[rows[at + 1].Second]);
 				}
 
 				SolverBody &first = bodies[row.First];
@@ -526,7 +563,7 @@ namespace engine::physics {
 				}
 
 				const BodyFacts facts =
-					FactsFor(rigid, collider, physical, !reader.Has<scene::Anchored>(body.Owner));
+					FactsFor(rigid, collider, physical, reader.Has<scene::Simulated>(body.Owner));
 				body.InverseMass = facts.InverseMass;
 				body.InverseInertia = facts.InverseInertia;
 				body.Movable = facts.Dynamic;

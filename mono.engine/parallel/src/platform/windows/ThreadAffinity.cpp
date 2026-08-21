@@ -1,8 +1,27 @@
 #include "ThreadAffinity.hpp"
 
-#define WIN32_LEAN_AND_MEAN
 #include <algorithm>
 #include <cstddef>
+#include <limits>
+
+// Windows.h defines min and max as macros, which breaks anything that names
+// std::min - or, as it did here, `std::numeric_limits<WORD>::max()`. The
+// expansion leaves `(...)()` behind and MSVC reports it as `error C2059: syntax
+// error: ')'` on a line that has nothing wrong with it.
+//
+// **mingw-w64 compiles this file without the guard, which is why it survived.**
+// `just preset=windows-cross build` builds every Windows platform file on
+// Linux and this one was clean, so the only thing that ever saw the macro was
+// the MSVC runner - and that runner is `continue-on-error`, so it said so into
+// a log nobody had a reason to open. `mono.discord/src/platform/windows/Socket.cpp`
+// carries the same guard and a comment claiming every platform file does; this
+// is the file that made that untrue.
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
 
 namespace engine::parallel::platform {

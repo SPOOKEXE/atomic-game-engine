@@ -4,6 +4,7 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Enums.hpp>
 #include <engine/ecs/Property.hpp>
+#include <engine/effects/Registration.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
@@ -192,6 +193,21 @@ namespace engine::examples {
 		// Idempotent, and the cost of a scene that uses neither is one
 		// already-registered check.
 		gui::RegisterGuiClasses();
+
+		// **The third tree, and it went missing the same way the two above did.**
+		// `ParticleEmitter`, `Beam` and `Trail` live in `effects` and were
+		// registered by `client::BuildScriptedWorld` alone - so a scene that made
+		// one loaded in the client and refused everywhere else that shares this
+		// entry point, with "'ParticleEmitter' is not a registered class" thrown
+		// out of a heartbeat rather than out of the load. `Magic.luau` is what
+		// found it; `Particles.luau` and `StressParticles.luau` had the same hole
+		// under them and no test to fall in it.
+		//
+		// Registered here rather than left to each program for the reason the
+		// paragraph above gives: one entry point that every program shares is the
+		// only place a class tree can be registered once and be true for all of
+		// them.
+		effects::RegisterEffectClasses();
 
 		RegisterExampleComponents();
 

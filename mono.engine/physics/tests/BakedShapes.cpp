@@ -48,11 +48,11 @@ using engine::physics::PhysicsWorld;
 using engine::physics::PreparePhysicsWorld;
 using engine::physics::Raycast;
 using engine::physics::SyncBroadphase;
-using engine::scene::Anchored;
 using engine::scene::Collider;
 using engine::scene::CollisionShapes;
 using engine::scene::Motion;
 using engine::scene::ShapeKind;
+using engine::scene::Simulated;
 using engine::scene::Transform;
 
 namespace {
@@ -103,9 +103,9 @@ namespace {
 		collider.Extent = Vector3{1.0f, 1.0f, 1.0f};
 		store.Set<Collider>(part, collider);
 
-		if (anchored) {
-			store.Set<Anchored>(part, Anchored{});
-		} else {
+		// Static is the absence of both, so the anchored branch stores nothing.
+		if (!anchored) {
+			store.Set<Simulated>(part, Simulated{});
 			store.Set<Motion>(part, Motion{});
 		}
 		return part;
@@ -119,9 +119,8 @@ namespace {
 		collider.Extent = half;
 		store.Set<Collider>(part, collider);
 
-		if (anchored) {
-			store.Set<Anchored>(part, Anchored{});
-		} else {
+		if (!anchored) {
+			store.Set<Simulated>(part, Simulated{});
 			store.Set<Motion>(part, Motion{});
 		}
 		return part;

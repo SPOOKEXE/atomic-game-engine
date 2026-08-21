@@ -230,6 +230,85 @@ TEST_CASE("coincident points are welded before anything counts them", "[convexhu
 	CHECK(hull.Faces.size() == 6);
 }
 
+TEST_CASE("a near-coincident pair welds across a cell boundary", "[convexhull]") {
+	// **The case the weld grid can get wrong and the scan could not.** Cells are
+	// one weld distance across, so two points closer together than that can
+	// still land in different cells - and a grid that only looked in its own
+	// cell would keep both. Each corner here is snapped onto a cell edge and its
+	// twin sits a quarter of a weld below it, which puts the pair in adjacent
+	// cells on two axes at once.
+	//
+	// A flat cloud is used deliberately: a coplanar set has no faces, so every
+	// surviving point is a corner and `Points.size()` is the welded count
+	// itself rather than something a hull build could have discarded for its
+	// own reasons.
+	const float weld = engine::collision::HULL_WELD_DISTANCE;
+	const std::vector<Vector3> quad{
+		Vector3{-1.0f, 0.0f, -1.0f},
+		Vector3{1.0f, 0.0f, -1.0f},
+		Vector3{1.0f, 0.0f, 1.0f},
+		Vector3{-1.0f, 0.0f, 1.0f},
+	};
+
+	std::vector<Vector3> pairs;
+	for (const Vector3 &corner : quad) {
+		const Vector3 onEdge{
+			std::floor(corner.X / weld) * weld,
+			0.0f,
+			std::floor(corner.Z / weld) * weld,
+		};
+		pairs.push_back(onEdge);
+		pairs.push_back(Vector3{onEdge.X - weld * 0.25f, 0.0f, onEdge.Z - weld * 0.25f});
+	}
+
+	const ConvexHull hull = BuildConvexHull(pairs);
+	CHECK(hull.Points.size() == 4);
+}
+
+TEST_CASE("points past the weld distance are both kept", "[convexhull]") {
+	// The other side of the same boundary. Welding is a distance test and the
+	// grid only decides which candidates to test, so a pair further apart than
+	// the weld has to survive - otherwise the grid would be rounding geometry to
+	// its own cells, which is a collider that does not match the model.
+	const float weld = engine::collision::HULL_WELD_DISTANCE;
+	const std::vector<Vector3> spread{
+		Vector3{-1.0f, 0.0f, -1.0f},
+		Vector3{1.0f, 0.0f, -1.0f},
+		Vector3{1.0f, 0.0f, 1.0f},
+		Vector3{-1.0f, 0.0f, 1.0f},
+		Vector3{-1.0f + weld * 4.0f, 0.0f, -1.0f},
+	};
+
+	const ConvexHull hull = BuildConvexHull(spread);
+	CHECK(hull.Points.size() == 5);
+}
+
+TEST_CASE("a large distinct cloud still welds", "[convexhull]") {
+	// **The size the quadratic weld could not survive.** Every point here is
+	// distinct, so the scan it replaced compared each against everything kept
+	// before it - twenty thousand points is two hundred million distance tests,
+	// which measured at over a tenth of a second inside the frame a model
+	// arrived in. This case is here so the shape of that loop cannot come back
+	// unnoticed; the assertion is on the answer, and the runner's timing on the
+	// suite is what shows the cost.
+	std::vector<Vector3> cloud;
+	cloud.reserve(20000);
+	for (uint32_t index = 0; index < 20000; index++) {
+		// A deterministic spiral on a sphere - no two points coincide, and the
+		// hull of it is the sphere.
+		const float t = static_cast<float>(index) / 20000.0f;
+		const float z = 1.0f - 2.0f * t;
+		const float radius = std::sqrt(std::max(0.0f, 1.0f - z * z));
+		const float angle = static_cast<float>(index) * 2.399963f;
+		cloud.push_back(Vector3{radius * std::cos(angle), radius * std::sin(angle), z});
+	}
+
+	const ConvexHull hull = BuildConvexHull(cloud);
+	CHECK(hull.Points.size() > 3);
+	CHECK(hull.Points.size() <= MAXIMUM_HULL_POINTS);
+	CHECK(SupportDistance(hull, Vector3{1.0f, 0.0f, 0.0f}) == Approx(1.0f).margin(0.05f));
+}
+
 TEST_CASE("a point that is not a number never reaches the build", "[convexhull]") {
 	// One infinity makes every plane test meaningless: the offset becomes a NaN,
 	// every point compares "not outside" against it, and the result is a hull

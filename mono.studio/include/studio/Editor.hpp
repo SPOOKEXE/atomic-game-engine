@@ -33,7 +33,9 @@
 #include <engine/control/Surface.hpp>
 #include <engine/core/Clock.hpp>
 #include <engine/core/FrameGraph.hpp>
+#include <engine/core/HeapProfile.hpp>
 #include <engine/core/Name.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/delivery/Client.hpp>
 #include <engine/delivery/IntakeBudget.hpp>
 #include <engine/delivery/Uploader.hpp>
@@ -45,6 +47,10 @@
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Input.hpp>
+#include <engine/nodegraph/Editor.hpp>
+#include <engine/nodegraph/Evaluate.hpp>
+#include <engine/nodegraph/Graph.hpp>
+#include <engine/nodegraph/Preview.hpp>
 #include <engine/render/AdornmentGeometry.hpp>
 #include <engine/render/DebugPanels.hpp>
 #include <engine/render/FrameStatistics.hpp>
@@ -72,13 +78,10 @@
 #include <functional>
 #include <memory>
 #include <nlohmann/json_fwd.hpp>
-#include <nodegraph/Editor.hpp>
-#include <nodegraph/Evaluate.hpp>
-#include <nodegraph/Graph.hpp>
-#include <nodegraph/Preview.hpp>
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <studio/AssetCatalogue.hpp>
 #include <studio/CodeMetrics.hpp>
 #include <studio/Commands.hpp>
@@ -253,7 +256,7 @@ namespace studio {
 		Server,
 
 		// Both halves in one process, the arrangement `HostRole::OfBoth`
-		// describes and `mono.unified_server_client` proves. Roblox's "Play".
+		// describes and `mono.unified_tests` proves. Roblox's "Play".
 		Play,
 	};
 
@@ -393,6 +396,15 @@ namespace studio {
 		// `ui::InterfaceSettings::Scale`.
 		float Scale = 1.0f;
 
+		// Whether `--scale` was given, rather than `Scale` merely holding a
+		// number.
+		//
+		// **A run that named a scale outranks the preferences file and the
+		// display both.** Without this there is no way to tell "the default" from
+		// "one point zero, deliberately", so either the flag would be ignored or
+		// the saved preference would be.
+		bool ScaleAuthored = false;
+
 		// -1 runs until the window is closed. A frame budget is what makes the
 		// editor usable from a test or a CI job - and what lets a capture be
 		// taken of a known frame rather than of whenever somebody looked.
@@ -462,6 +474,16 @@ namespace studio {
 		//
 		// Implies the frame graph: collection is off unless something is
 		// reading it.
+		// Write a heap report here when the run ends. Empty writes none.
+		//
+		// Turning it on turns heap sampling on, exactly as `ProfileSnapshot`
+		// turns frame collection on.
+		//
+		// @since v0.18
+		std::filesystem::path HeapReport;
+
+		// Where to write one frame's span tree, and the switch that turns frame
+		// collection on at all. Empty means neither.
 		std::filesystem::path ProfileSnapshot;
 
 		// How long a world with nobody in it keeps ticking before it closes.
@@ -734,7 +756,7 @@ namespace studio {
 	// A node's picture, as the texture the renderer takes.
 	//
 	// **A free function because it is the seam, and a seam is the thing to
-	// test.** `nodegraph::PreviewImage` promises red first and the top row first
+	// test.** `engine::nodegraph::PreviewImage` promises red first and the top row first
 	// at four bytes a pixel, which is exactly `TextureFormat::RGBA8` - and
 	// nothing in either repository would notice the day that stopped being true,
 	// because a wrongly-ordered thumbnail is a picture that still draws.
@@ -745,7 +767,7 @@ namespace studio {
 	//         payload nobody taught the library to draw produces.
 	//
 	// @since v0.15
-	bool NodePreviewTexture(const nodegraph::PreviewImage &image, engine::assets::TextureData &out);
+	bool NodePreviewTexture(const engine::nodegraph::PreviewImage &image, engine::assets::TextureData &out);
 
 	// The window, the renderer, the interface and the game.
 	//
@@ -795,6 +817,12 @@ namespace studio {
 		// client's overlay does; only the drawing differs.
 		void DrawStatistics();
 		void DrawFrameGraph();
+
+		// Draws the heap panel: the totals, live bytes over time, and the tag
+		// tree. Returns immediately when the panel is closed.
+		//
+		// @since v0.18
+		void DrawHeap();
 
 		// Records the frame time and turns span collection on or off.
 		//
@@ -2134,6 +2162,19 @@ namespace studio {
 		// @param body  The draw call.
 		// @since v0.13
 		template <typename Body> void Skinned(const char *panel, Body &&body) {
+			// **One bar per panel, from the one place every panel goes through.**
+			// The sixteen tool panels were a single `tools` span - about half of
+			// `build interface` - so "which panel costs that" had no answer
+			// short of adding a span and rebuilding. A panel that is closed
+			// costs its early return and reads as zero, which is the reading
+			// that says the list is not the problem.
+			//
+			// The title is a literal owned for the life of the process, so the
+			// stable form is right and nothing is copied per frame.
+			ENGINE_PROFILE_DYNAMIC_STABLE(
+				"panel", std::string_view(panel), engine::core::ProfileCategory::Render
+			);
+
 			const engine::ui::ScopedColours skin(PanelColoursFor(panel));
 			body();
 		}
@@ -2225,12 +2266,12 @@ namespace studio {
 		// The selected node's knobs, as real widgets.
 		//
 		// **The same `WidgetSpec` the canvas paints and hit-tests from**, which
-		// is the third consumer `nodegraph/Layout.hpp` promises: a knob that existed
+		// is the third consumer `engine/nodegraph/Layout.hpp` promises: a knob that existed
 		// here and not on the node, or took a different range, would be two
 		// declarations of one thing.
 		//
 		// @return Whether anything was changed.
-		bool DrawNodeDemoWidgets(nodegraph::Node &node);
+		bool DrawNodeDemoWidgets(engine::nodegraph::Node &node);
 
 		// Writes one node's picture beside the graph file, as a PNG.
 		//
@@ -2239,7 +2280,7 @@ namespace studio {
 		// link, and a stored-block encoder needs nothing linked at all.
 		//
 		// @return What to say about it, either way.
-		std::string ExportNodeDemoImage(nodegraph::NodeId node);
+		std::string ExportNodeDemoImage(engine::nodegraph::NodeId node);
 
 		// Snapshot undo over the demo graph.
 		//
@@ -2260,7 +2301,7 @@ namespace studio {
 		// to a result rather than to a node, so two nodes computing one thing
 		// share a texture and an edit makes a new key instead of overwriting a
 		// live one.
-		void *NodeDemoImage(uint64_t key, const std::function<bool(nodegraph::PreviewImage &)> &make);
+		void *NodeDemoImage(uint64_t key, const std::function<bool(engine::nodegraph::PreviewImage &)> &make);
 
 		// The 3-D view's picture, which is one texture rather than a table of
 		// them.
@@ -2272,7 +2313,8 @@ namespace studio {
 		// the one being drawn, and the one it replaced - which is released
 		// between frames, because a texture dropped while a draw list still
 		// names it is a use-after-free on the GPU.
-		void *NodeDemoOrbitImage(uint64_t key, const std::function<bool(nodegraph::PreviewImage &)> &make);
+		void *
+		NodeDemoOrbitImage(uint64_t key, const std::function<bool(engine::nodegraph::PreviewImage &)> &make);
 
 		// Releases every preview texture. Called when the cache is dropped and
 		// when the graph is replaced - a texture per result would otherwise be a
@@ -2600,6 +2642,15 @@ namespace studio {
 
 		// Which texture names have been asked for, by `core::Name::Id`.
 		std::unordered_set<uint32_t> ContentAsked;
+
+		// The names the open worlds carry, refilled once per content pump.
+		//
+		// A member rather than a local in `RequestShownContent` so the buffer's
+		// capacity survives the frame. The answer is recomputed from scratch
+		// every pump - there is nothing cheap to observe that would say when a
+		// world's content names changed - so the allocation was the one part of
+		// that which did not have to be paid again.
+		std::vector<engine::core::Name> WantedContent;
 
 		// Queues every file in the local store's `raw/` for every write source.
 		void UploadStore();
@@ -4774,9 +4825,9 @@ namespace studio {
 		// `PipelineSet`. It reloads when the world or selected pipeline changes,
 		// never while a gesture is in progress.
 		//@{
-		nodegraph::Graph RenderPipelineGraph;
-		nodegraph::Canvas RenderPipelineCanvas;
-		nodegraph::Evaluator RenderPipelinePreviewEvaluator;
+		engine::nodegraph::Graph RenderPipelineGraph;
+		engine::nodegraph::Canvas RenderPipelineCanvas;
+		engine::nodegraph::Evaluator RenderPipelinePreviewEvaluator;
 		std::unordered_map<uint64_t, void *> RenderPipelinePreviewTextures;
 		std::unordered_map<uint32_t, size_t> RenderPipelineRenderedSlots;
 		engine::graph::PipelineDocument RenderPipelineBasis;
@@ -4836,6 +4887,48 @@ namespace studio {
 		// publish, and when the content sources are edited - which is exactly
 		// when the answer can have changed.
 		std::vector<CatalogueTab> AssetTabs;
+
+		// Bumped whenever `AssetTabs` is replaced.
+		//
+		// What makes the cached row list below safe: it holds pointers into a
+		// tab's entries, and a rebuilt catalogue moves them. Comparing the
+		// number is how the cache learns that without having to be told by every
+		// caller that rebuilds.
+		uint64_t AssetTabsRevision = 1;
+
+		// The catalogue rows the assets panel is drawing: filtered, then sorted.
+		//
+		// **Cached, because filtering and sorting the whole catalogue every
+		// frame was half of `build interface`.** `ImGuiListClipper` already
+		// bounds how many rows are *drawn*, but the list it clips has to exist
+		// first - so a store of two thousand assets paid two thousand fuzzy
+		// matches and a sort with string comparisons at the frame rate to
+		// produce a list identical to the previous frame's. Sorting by the
+		// address column made it worse still: the comparator builds a hex string
+		// per comparison.
+		//
+		// Rebuilt when the tab, the filter, the sort order or the catalogue
+		// changes - which is exactly when the answer can differ.
+		//@{
+		std::vector<const CatalogueEntry *> AssetRows;
+		const void *AssetRowsTab = nullptr;
+		std::string AssetRowsFilter;
+		uint64_t AssetRowsRevision = 0;
+		//@}
+
+		// The tab bar's imgui ids, one per entry in `AssetTabs`.
+		//
+		// Built with the tabs rather than with the frame: they are a function of
+		// the catalogue alone. See `AssetTabsRevision`.
+		//@{
+		std::vector<std::string> AssetTabLabels;
+		uint64_t AssetTabLabelsRevision = 0;
+		//@}
+
+		// The local store's root, as text, for the line the assets panel draws.
+		//
+		// Fixed for the run, and `std::filesystem::path::string()` allocates.
+		std::string AssetRootText;
 
 		// What the person typed into a picker's filter.
 		std::string PickerFilter;
@@ -4990,10 +5083,10 @@ namespace studio {
 		// containers and nothing else.
 		//@{
 		bool ShowNodeDemo = false;
-		nodegraph::Graph NodeDemoGraph;
-		nodegraph::Canvas NodeDemoCanvas;
-		nodegraph::Evaluator NodeDemoRunner;
-		nodegraph::RunReport NodeDemoReport;
+		engine::nodegraph::Graph NodeDemoGraph;
+		engine::nodegraph::Canvas NodeDemoCanvas;
+		engine::nodegraph::Evaluator NodeDemoRunner;
+		engine::nodegraph::RunReport NodeDemoReport;
 
 		// The signature the demo last evaluated at, so dragging a node does not
 		// recompute a graph that has not changed.
@@ -5202,6 +5295,17 @@ namespace studio {
 		//@{
 		bool ShowStatistics = false;
 		bool ShowFrameGraph = false;
+
+		// Where the live bytes are, and whether they are climbing.
+		//
+		// **A separate panel from the frame graph rather than a tab in it**,
+		// unlike the client's overlay, because in the editor there is room for
+		// both at once and the two are read together: a frame that got slower
+		// and a heap that got larger at the same moment is one finding, and
+		// alternating between two tabs to see it is how somebody misses it.
+		//
+		// @since v0.18
+		bool ShowHeap = false;
 		//@}
 
 		// Frame times, sampled every frame so the panel has history the moment
@@ -5216,14 +5320,38 @@ namespace studio {
 		// afterwards. Every feature below holds spans across frames, so every
 		// one of them needs the string rather than the view.
 		struct HeldSpan {
+			// The span's name, owned rather than viewed. See the note above -
+			// this copy is the whole reason the type exists.
 			std::string Name;
+
+			// Where it sits in the tree: how deep, and which span opened it.
+			//@{
 			uint32_t Depth = 0;
 			uint32_t Parent = 0;
+			//@}
+
+			// When it opened and how long it was open, in milliseconds from the
+			// start of the frame.
+			//@{
 			float StartMilliseconds = 0.0f;
 			float Milliseconds = 0.0f;
+			//@}
+
+			// The same duration with its children taken out, and the part of it
+			// spent waiting. **Both are what a reader actually wants**: a span
+			// that is wide because its children are wide is not the one to look
+			// at, and one that is wide because it blocked is a different problem
+			// from one that is wide because it worked.
+			//@{
 			float SelfMilliseconds = 0.0f;
 			float IdleMilliseconds = 0.0f;
+			//@}
+
+			// Which colour band it draws in.
 			engine::core::ProfileCategory Category = engine::core::ProfileCategory::Engine;
+
+			// Whether this span has already been counted into a summary, so a
+			// held frame is not summed twice.
 			bool Reported = false;
 		};
 
@@ -5278,7 +5406,41 @@ namespace studio {
 			//@}
 		};
 
+		// What the frame-graph panel is showing. Held across frames, which is
+		// what `HeldSpan` above exists for.
 		FrameGraphView FrameGraphState;
+
+		// What the heap panel is showing, refreshed when a reading is taken
+		// rather than when the panel repaints.
+		//
+		// **Because fitting a slope is a pass over the whole retained window.**
+		// The editor repaints at the display's rate and a reading is taken once
+		// a second, so doing this on the drawing path would run the fit sixty
+		// times for every sample it had to fit.
+		//
+		// @since v0.18
+		struct HeapView {
+			// The tag tree flattened for drawing, heaviest child first.
+			std::vector<engine::core::HeapTreeRow> Rows;
+
+			// The growth report, steepest slope first.
+			std::vector<engine::core::HeapGrowth> Growth;
+
+			// Live megabytes per retained reading, oldest first - the shape
+			// `ImGui::PlotLines` takes directly. Megabytes rather than bytes
+			// because a float loses whole kilobytes above sixteen million and
+			// the plot is read as a shape.
+			std::vector<float> Plot;
+
+			// The process totals, as of the reading `Plot` ends on.
+			engine::core::HeapTotals Totals;
+
+			// Seconds the plot and the growth figures cover.
+			double HistorySeconds = 0.0;
+		};
+
+		// What the heap panel is currently drawing.
+		HeapView HeapState;
 
 		// Whether the next frame rebuilds the default arrangement. Set from the
 		// View menu and acted on at the top of the frame, because rearranging a

@@ -1,6 +1,7 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/core/SecureWipe.hpp>
 
+#include <array>
 #include <cctype>
 #include <cryptopp/hmac.h>
 #include <cryptopp/misc.h>

@@ -37,6 +37,15 @@
 
 #include <engine/core/types/Vector2.hpp>
 #include <engine/gui/DrawList.hpp>
+
+// **`InterfacePass` and not just `Renderer`.** `SetSpatialViewportSource` names
+// `render::InterfaceImage`, which is declared there rather than in the
+// renderer's own header. It compiled without this line for as long as the
+// editor was the only consumer, because `mono.studio` reaches
+// `render/InterfacePass.hpp` first through its own includes - and the day a
+// second program included this one on its own, every use of the type in this
+// header failed at once. That program was `mono.launcher`, at v0.18.
+#include <engine/render/InterfacePass.hpp>
 #include <engine/render/Renderer.hpp>
 
 #include <functional>
@@ -177,10 +186,35 @@ namespace engine::ui {
 		//         camera.
 		bool WantsKeyboard() const;
 
+		// Hands the world-space interface pass this frame's list.
+		//
+		// @param list         This frame's compiled list.
+		// @param canvas       The size the list was laid out against.
+		// @param targetPixels The attachment's real size in device pixels, which
+		//        is what the screen-space scissor is scaled by. See
+		//        `render::InterfacePass::Submit` - the two are not the same
+		//        number wherever a caller lays out in logical units.
+		// @param store        The world the collectors are in.
+		// @param seconds      The clock a slide or a rubber band is measured
+		//        against.
 		void SubmitSpatial(
-			const gui::DrawList &list, const core::Vector2 &canvas, ecs::Store &store, double seconds
+			const gui::DrawList &list,
+			const core::Vector2 &canvas,
+			const core::Vector2 &targetPixels,
+			ecs::Store &store,
+			double seconds
 		);
 
+		// Says how to resolve a `ViewportFrame` that is drawn on a canvas in the
+		// world rather than on the screen.
+		//
+		// **A callback rather than a dependency.** This module would otherwise
+		// have to know how viewport frames are rendered, which is
+		// `render::ViewportFrames`' business and sits above it.
+		//
+		// @param resolve Hands back the texture for one frame's entity. Held
+		//        until replaced, so it must outlive the interface or capture by
+		//        value.
 		void SetSpatialViewportSource(std::function<render::InterfaceImage(ecs::Entity)> resolve);
 
 		// --- render::FrameOverlayHook ---------------------------------------

@@ -63,6 +63,7 @@ int main(int argc, char **argv) {
 	arguments.Flag("net", "Open the F4 network panel at startup (needs --connect)");
 	arguments.Flag("graph", "Open the F5 frame graph at startup");
 	arguments.Flag("uncapped", "Present without waiting for vblank");
+	arguments.Value("frames-in-flight", "N", "Frames the CPU may queue ahead of the GPU: 1 (default) to 3");
 	arguments.Flag("headless", "Run with no window (needs --frames)");
 	arguments.Value("max-fps", "N", "Hold this frame rate. Needs --uncapped; 0 is no limit");
 	arguments.Flag("verbose", "Log at trace level");
@@ -83,13 +84,20 @@ int main(int argc, char **argv) {
 	);
 	arguments.Value("width", "PX", "Window width (default 1280)");
 	arguments.Value("height", "PX", "Window height (default 720)");
-	arguments.Value("profiler-tab", "NAME", "frame, categories, systems or counters");
+	arguments.Value("profiler-tab", "NAME", "frame, categories, systems, counters or heap");
 
 	arguments.Value("script", "PATH", "Luau script to run at startup (v0.6)");
 	arguments.Value("game", "PATH", "Game file to play single-player (.agame)");
 	arguments.Value("enable-profiler", "SECONDS", "Wait for a Tracy profiler before starting");
 	arguments.Value("profile-seconds", "SECONDS", "Run for this long, then exit");
 	arguments.Value("profile-snapshot", "PATH", "Write a frame-graph snapshot when the run ends");
+	arguments.Value(
+		"heap-report", "PATH", "Write a heap profile when the run ends, and sample while running"
+	);
+	arguments.Value("heap-growth-limit", "BYTES_PER_SECOND", "Exit 3 if a tag climbs faster than this");
+	arguments.Value(
+		"heap-warmup", "SECONDS", "Leave this much of the start out of the growth fit (default 10)"
+	);
 	arguments.Value("override-assets-directory", "DIR", "Read shaders and data from here");
 	arguments.Value("connect", "HOST:PORT", "Replicate a world from this server, beside the demo");
 	arguments.Flag("browse", "Look for a server announcing itself on this subnet instead of naming one");
@@ -138,8 +146,16 @@ int main(int argc, char **argv) {
 		std::fprintf(stderr, "%s\n\n%s", parsed.Error.c_str(), arguments.Help().c_str());
 		return 2;
 	}
+	if (parsed.VersionRequested) {
+		std::fputs(arguments.VersionLine().c_str(), stdout);
+		return 0;
+	}
 	if (parsed.HelpRequested) {
 		std::fputs(arguments.Help().c_str(), stdout);
+		return 0;
+	}
+	if (parsed.DescribeRequested) {
+		std::fputs(arguments.Describe().c_str(), stdout);
 		return 0;
 	}
 
@@ -189,6 +205,8 @@ int main(int argc, char **argv) {
 	options.ShowNetwork = options.ShowNetwork || arguments.Has("net");
 	options.ShowFrameGraph = options.ShowFrameGraph || arguments.Has("graph");
 	options.Uncapped = options.Uncapped || arguments.Has("uncapped");
+	options.FramesInFlight =
+		static_cast<int>(arguments.GetInteger("frames-in-flight", options.FramesInFlight));
 	options.Headless = arguments.Has("headless");
 
 	// **Refused rather than run**, because a headless client has no window to
@@ -205,6 +223,11 @@ int main(int argc, char **argv) {
 	if (auto snapshot = arguments.Get("profile-snapshot")) {
 		options.ProfileSnapshot = std::filesystem::path(*snapshot);
 	}
+	if (auto report = arguments.Get("heap-report")) {
+		options.HeapReport = std::filesystem::path(*report);
+	}
+	options.HeapGrowthLimit = arguments.GetNumber("heap-growth-limit", 0.0);
+	options.HeapWarmupSeconds = arguments.GetNumber("heap-warmup", options.HeapWarmupSeconds);
 
 	if (arguments.Has("enable-profiler")) {
 		options.ProfilerWaitSeconds = arguments.GetNumber("enable-profiler", 10.0);

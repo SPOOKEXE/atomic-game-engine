@@ -14,7 +14,7 @@ REM   set PORT=9100        (then run it)             a different port
 REM   set SCENE=Slide.luau (then run it)             a different world
 REM   set PRESET=release   (then run it)             the shipped numbers
 REM
-REM This is not mono.unified_server_client: that harness cuts `net` out of the
+REM This is not mono.unified_tests: that harness cuts `net` out of the
 REM middle, and this puts the socket, the handshake and the cipher back - and
 REM adds the thing neither of them had, more than one player.
 REM

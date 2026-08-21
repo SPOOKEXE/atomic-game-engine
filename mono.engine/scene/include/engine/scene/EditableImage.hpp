@@ -61,8 +61,12 @@ namespace engine::scene {
 	//
 	// @since v0.18
 	struct EditableImage {
+		// The image's size in pixels. `Resize` is what changes these, so that
+		// `Pixels` below cannot disagree with them.
+		//@{
 		uint32_t Width = DEFAULT_EDITABLE_IMAGE_SIZE;
 		uint32_t Height = DEFAULT_EDITABLE_IMAGE_SIZE;
+		//@}
 
 		// `Width * Height * 4` bytes, R-G-B-A per pixel.
 		//

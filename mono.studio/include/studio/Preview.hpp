@@ -115,7 +115,6 @@ namespace studio {
 	// wearing it. Everything else in a store - a texture, a GIF, audio, a script
 	// - either has pixels already or has none to have.
 	constexpr bool PreviewIsRendered(engine::assets::AssetKind kind) {
-		return kind == engine::assets::AssetKind::Mesh ||
-			   kind == engine::assets::AssetKind::Material;
+		return kind == engine::assets::AssetKind::Mesh || kind == engine::assets::AssetKind::Material;
 	}
 }

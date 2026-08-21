@@ -83,6 +83,8 @@ namespace loadtest {
 
 	// What one virtual client did, gathered when the run ends.
 	struct SessionReport {
+		// How far this client got. Read first: every timing below is zero for a
+		// session that never reached the stage it measures.
 		Stage Final = Stage::Dialling;
 
 		// Seconds from the first datagram to admission and to the join. Zero for

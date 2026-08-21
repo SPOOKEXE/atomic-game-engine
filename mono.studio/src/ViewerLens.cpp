@@ -8,8 +8,8 @@ namespace studio {
 		// tomorrow should be a compile error here rather than a silent widening
 		// of what counts as "the author touched it".
 		bool Same(const engine::scene::Camera &left, const engine::scene::Camera &right) {
-			return left.FieldOfViewRadians == right.FieldOfViewRadians &&
-				   left.NearPlane == right.NearPlane && left.FarPlane == right.FarPlane;
+			return left.FieldOfViewRadians == right.FieldOfViewRadians && left.NearPlane == right.NearPlane &&
+				   left.FarPlane == right.FarPlane;
 		}
 	}
 

@@ -1,5 +1,6 @@
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Random.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/SparseSet.hpp>
 #include <engine/ecs/Store.hpp>
@@ -100,6 +101,50 @@ TEST_CASE("entities and components come back", "[ecs]") {
 	REQUIRE(restored.CountMatching<Spot>() == 64);
 	REQUIRE(restored.CountMatching<Spot, Push>() == 32);
 	REQUIRE(SpotsIn(restored) == SpotsIn(source));
+}
+
+TEST_CASE("a tree survives a snapshot, links and order and all", "[ecs]") {
+	// **The guard on `ecs.Hierarchy` having a wire format.** Replication sends
+	// only the parent handle and the far side rebuilds its own child lists from
+	// it, because one store's `FirstChild` and `NextSibling` are an index into
+	// that store and writing them into another one is how a sibling list comes
+	// to contain itself.
+	//
+	// A snapshot must not do that. `Column::Write` uses `TypeDescriptor::Write`
+	// and never `Wire` - `WireFormat`'s own header says a lossy form must not
+	// reach one - so a saved world carries the whole node and comes back with
+	// its tree intact. If that ever stopped being true, an `.agame` would open
+	// with every instance a root and nothing would say so until somebody looked
+	// in the explorer.
+	engine::ecs::Classes::RegisterInstanceRoot();
+
+	Store source("source");
+	const Entity parent = source.CreateInstance(engine::ecs::Classes::RegisterInstanceRoot(), "Parent");
+
+	std::vector<Entity> children;
+	for (int index = 0; index < 4; index++) {
+		const Entity child =
+			source.CreateInstance(engine::ecs::Classes::RegisterInstanceRoot(), "C" + std::to_string(index));
+		REQUIRE(source.SetParent(child, parent));
+		children.push_back(child);
+	}
+
+	Store restored("restored");
+	REQUIRE(Transfer(source, restored));
+
+	// Every link, not merely the parent: a walk that finds the children is what
+	// the explorer, the destroy and the replication capture all do.
+	std::vector<Entity> seen;
+	restored.EachChild(parent, [&seen](Entity child) { seen.push_back(child); });
+	REQUIRE(seen == children);
+
+	for (const Entity child : children) {
+		CHECK(restored.ParentOf(child) == parent);
+	}
+
+	// And the order, which is what `GetChildren` publishes to a script.
+	CHECK(restored.FindFirstChild(parent, "C0") == children[0]);
+	CHECK(restored.FindFirstChild(parent, "C3") == children[3]);
 }
 
 TEST_CASE("entity handles stay valid across a restore", "[ecs]") {

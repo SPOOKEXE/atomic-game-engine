@@ -40,11 +40,10 @@
 //
 // @tier L12 · client
 
-#include <studio/Keybinds.hpp>
-
 #include <functional>
 #include <string>
 #include <string_view>
+#include <studio/Keybinds.hpp>
 #include <vector>
 
 namespace studio {
@@ -104,7 +103,7 @@ namespace studio {
 	//
 	// @since v0.7
 	class OperatorTable {
-	public:
+	  public:
 		// Registers one operator.
 		//
 		// **Refuses a second operator for one `Action`**, rather than replacing
@@ -160,7 +159,7 @@ namespace studio {
 		// @return Pointers into `All`, stable until the next `Add`.
 		std::vector<const Operator *> Matching(std::string_view query) const;
 
-	private:
+	  private:
 		std::vector<Operator> Registered;
 	};
 }

@@ -30,6 +30,14 @@ mono_add_library(core
 	DEFINES
 		$<$<BOOL:${MONO_TRACY}>:ENGINE_TRACY>
 
+		# Public, and this is the one define in the engine that has to be.
+		# `ENGINE_HEAP_SCOPE` expands to a live object or to nothing depending
+		# on it, so a module compiled with it off and linked against a core
+		# compiled with it on would push tags nothing pops. Every module links
+		# `core`, so putting it here is what makes the answer the same
+		# everywhere.
+		$<$<BOOL:${MONO_HEAP_PROFILE}>:MONO_HEAP_PROFILE>
+
 		# glm settings belong here rather than in render, because CFrame is L1
 		# and the two must agree about handedness and clip space. A projection
 		# matrix built under a different GLM_FORCE_ is a depth buffer that is
@@ -42,3 +50,13 @@ mono_add_library(core
 if(UNIX AND NOT APPLE)
 	target_link_libraries(engine_core PRIVATE ${CMAKE_DL_LIBS})
 endif()
+
+# The version string, for `Version()` and nothing else.
+#
+# On the one source file rather than in DEFINES above, because DEFINES land on
+# the target and every module in the engine links `core` - so a bump would
+# recompile the whole engine to change one literal. Scoped here it rebuilds one
+# file. `CMAKE_CONFIGURE_DEPENDS` on the root VERSION file is what makes editing
+# it reach this at all; the root CMakeLists.txt sets that.
+set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/src/Version.cpp"
+	PROPERTIES COMPILE_DEFINITIONS "MONO_VERSION=\"${PROJECT_VERSION}\"")

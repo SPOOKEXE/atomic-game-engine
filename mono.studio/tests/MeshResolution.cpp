@@ -38,16 +38,16 @@
 
 #include <string>
 #include <string_view>
-#include <studio/Preview.hpp>
 #include <studio/Assets.hpp>
+#include <studio/Preview.hpp>
 #include <vector>
 
 TEST_SUITE_ID("studio.meshresolution")
 
+using engine::assets::BUILTIN_MESH_COUNT;
 using engine::assets::BuiltinFromName;
 using engine::assets::BuiltinMesh;
 using engine::assets::BuiltinName;
-using engine::assets::BUILTIN_MESH_COUNT;
 using engine::core::Name;
 using engine::ecs::Classes;
 using engine::ecs::Entity;
@@ -127,7 +127,9 @@ TEST_CASE("a built-in id is never fetched", "[studio][mesh]") {
 	// And a store id must not be mistaken for one, or a published mesh would be
 	// silently replaced by a primitive.
 	BuiltinMesh ignored = BuiltinMesh::Cube;
-	CHECK_FALSE(BuiltinFromName("7d64f772f71528d2a0c60089970422b5f9b938807cc70b49c285f266bed87e5d.amesh", ignored));
+	CHECK_FALSE(
+		BuiltinFromName("7d64f772f71528d2a0c60089970422b5f9b938807cc70b49c285f266bed87e5d.amesh", ignored)
+	);
 	CHECK_FALSE(BuiltinFromName("props/fox.amesh", ignored));
 	CHECK_FALSE(BuiltinFromName("", ignored));
 }
@@ -184,8 +186,10 @@ TEST_CASE("two parts naming one id share it", "[studio][mesh]") {
 
 	// The same interned id, not two equal strings. `core::Name` is the identity
 	// the renderer hashes, so this is the assertion that says "one entry".
-	CHECK(store.Get<engine::scene::Visual>(first)->Mesh.Id() ==
-		  store.Get<engine::scene::Visual>(second)->Mesh.Id());
+	CHECK(
+		store.Get<engine::scene::Visual>(first)->Mesh.Id() ==
+		store.Get<engine::scene::Visual>(second)->Mesh.Id()
+	);
 
 	// Counting them is a walk over one column, which is what makes "instance
 	// them by counting the number we need" a thing a scene can do.
@@ -214,9 +218,11 @@ TEST_CASE("an unknown id is not silently a cube", "[studio][mesh]") {
 	const PropertyDescriptor *mesh = DescriptorFor(store, part, "MeshId");
 	REQUIRE(mesh != nullptr);
 
-	REQUIRE(engine::game::WriteProperty(
-		store, part, *mesh, studio::ChosenContentValue(mesh->Type, "nobody/published/this.amesh")
-	));
+	REQUIRE(
+		engine::game::WriteProperty(
+			store, part, *mesh, studio::ChosenContentValue(mesh->Type, "nobody/published/this.amesh")
+		)
+	);
 
 	CHECK(store.Get<engine::scene::Visual>(part)->Mesh == Name("nobody/published/this.amesh"));
 	CHECK(engine::scene::TrianglesOf(store, Name("nobody/published/this.amesh")) == 0);

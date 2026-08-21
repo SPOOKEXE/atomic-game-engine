@@ -847,3 +847,141 @@ TEST_CASE("the network panel does not overlap the statistics panel", "[panels][n
 	REQUIRE(networkLeft < WIDTH);
 	REQUIRE(statisticsRight < networkLeft);
 }
+
+// --- the heap tab ----------------------------------------------------------
+//
+// Every case here builds the rows by hand rather than reading
+// `core::HeapProfile`. The panel takes borrowed spans precisely so that it can
+// be drawn from a test with no allocator hooks and no run behind it, and a case
+// that read the live tree would pass or fail on what the rest of the binary
+// happened to have allocated.
+
+TEST_CASE("the heap tab says so when the hooks are not compiled in", "[panels][heap]") {
+	OverlayImage image;
+	image.Resize(640, 480);
+
+	DebugPanelData data;
+	data.ShowFrameGraph = true;
+	data.Tab = ProfilerTab::Heap;
+	data.HeapCompiledIn = false;
+
+	// A `release` build has no hooks, so every figure would read zero - and a
+	// heap panel reporting no bytes is a much more alarming thing than one
+	// saying it was left out of this build.
+	DrawDebugPanels(image, data);
+	REQUIRE(image.IsDirty());
+}
+
+TEST_CASE("the heap tab draws a tree and a plot", "[panels][heap]") {
+	const std::vector<engine::core::HeapTreeRow> rows{
+		{.Node = 1,
+		 .Name = "render",
+		 .Depth = 1,
+		 .InclusiveBytes = 12 << 20,
+		 .SelfBytes = 1 << 20,
+		 .LiveBlocks = 40},
+		{.Node = 2,
+		 .Name = "meshes",
+		 .Depth = 2,
+		 .InclusiveBytes = 11 << 20,
+		 .SelfBytes = 11 << 20,
+		 .LiveBlocks = 900},
+	};
+
+	const std::vector<engine::core::HeapSample> history{
+		{.Seconds = 0.0, .LiveBytes = 4 << 20, .LiveBlocks = 100},
+		{.Seconds = 1.0, .LiveBytes = 8 << 20, .LiveBlocks = 400},
+		{.Seconds = 2.0, .LiveBytes = 13 << 20, .LiveBlocks = 940},
+	};
+
+	const std::vector<engine::core::HeapGrowth> growth{
+		{.Path = "render;meshes", .Node = 2, .BytesPerSecond = 4.5e6, .Fit = 0.99},
+	};
+
+	OverlayImage image;
+	image.Resize(640, 480);
+
+	DebugPanelData data;
+	data.ShowFrameGraph = true;
+	data.Tab = ProfilerTab::Heap;
+	data.HeapCompiledIn = true;
+	data.HeapRows = rows;
+	data.HeapHistory = history;
+	data.HeapGrowth = growth;
+	data.HeapHistorySeconds = 2.0;
+	data.Heap.LiveBytes = 13 << 20;
+	data.Heap.LiveBlocks = 940;
+	data.Heap.PeakBytes = 20 << 20;
+	data.Heap.Nodes = 3;
+
+	DrawDebugPanels(image, data);
+	REQUIRE(image.IsDirty());
+}
+
+TEST_CASE("a heap history of one reading does not divide by a zero window", "[panels][heap]") {
+	const std::vector<engine::core::HeapSample> history{
+		{.Seconds = 4.0, .LiveBytes = 1 << 20, .LiveBlocks = 10},
+	};
+
+	OverlayImage image;
+	image.Resize(640, 480);
+
+	DebugPanelData data;
+	data.ShowFrameGraph = true;
+	data.Tab = ProfilerTab::Heap;
+	data.HeapCompiledIn = true;
+	data.HeapHistory = history;
+
+	// The first second of any run, and the plot needs two points to be a
+	// plot. It draws the frame and nothing in it rather than reaching past
+	// the end of a one-element span.
+	DrawDebugPanels(image, data);
+	REQUIRE(image.IsDirty());
+}
+
+TEST_CASE("a heap tag holding nothing does not scale the plot to zero", "[panels][heap]") {
+	const std::vector<engine::core::HeapSample> history{
+		{.Seconds = 0.0, .LiveBytes = 0, .LiveBlocks = 0},
+		{.Seconds = 1.0, .LiveBytes = 0, .LiveBlocks = 0},
+	};
+
+	OverlayImage image;
+	image.Resize(640, 480);
+
+	DebugPanelData data;
+	data.ShowFrameGraph = true;
+	data.Tab = ProfilerTab::Heap;
+	data.HeapCompiledIn = true;
+	data.HeapHistory = history;
+
+	// The plot's height is a share of the window's own peak, and a window of
+	// zeroes has a peak of zero. A divide there would be the panel taking the
+	// process down over a heap that is empty, which is the least alarming
+	// state a heap can be in.
+	DrawDebugPanels(image, data);
+	REQUIRE(image.IsDirty());
+}
+
+TEST_CASE("scrolling past the last heap row draws the header and stops", "[panels][heap]") {
+	const std::vector<engine::core::HeapTreeRow> rows{
+		{.Node = 1,
+		 .Name = "render",
+		 .Depth = 1,
+		 .InclusiveBytes = 1 << 20,
+		 .SelfBytes = 1 << 20,
+		 .LiveBlocks = 4},
+	};
+
+	OverlayImage image;
+	image.Resize(640, 480);
+
+	DebugPanelData data;
+	data.ShowFrameGraph = true;
+	data.Tab = ProfilerTab::Heap;
+	data.HeapCompiledIn = true;
+	data.HeapRows = rows;
+	data.Scroll = 500;
+
+	DrawDebugPanels(image, data);
+	REQUIRE(image.IsDirty());
+}

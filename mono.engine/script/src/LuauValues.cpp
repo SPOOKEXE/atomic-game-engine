@@ -3,11 +3,14 @@
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Color3.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/script/Datatypes.hpp>
 
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <lualib.h>
 #include <numbers>
+#include <string_view>
 
 namespace engine::script {
 
@@ -26,6 +29,131 @@ namespace engine::script {
 			const auto z = static_cast<float>(luaL_optnumber(state, 3, 0.0));
 
 			*PushVector3(state) = Vector3{x, y, z};
+			return 1;
+		}
+
+		// `Vector3.FromNormalId(Enum.NormalId.Top)` - a face of a box as the
+		// direction it points.
+		//
+		// **Capitalised, because Roblox capitalises these two and not `new`.**
+		// It reads as an inconsistency and is one, but it is Roblox's, and a
+		// second spelling of one constructor is the duplicate `AGENTS.md` calls
+		// the most expensive kind of debt.
+		//
+		// The face-to-direction mapping is `script::DirectionOfNormalId`, shared
+		// with the JavaScript surface so the two cannot drift.
+		int Vector3FromNormalId(lua_State *state) {
+			core::Name member;
+			Vector3 direction;
+
+			if (!ReadEnumValue(state, 1, core::Name("NormalId"), member) ||
+				!DirectionOfNormalId(member, direction)) {
+				luaL_errorL(state, "FromNormalId needs an Enum.NormalId");
+			}
+
+			*PushVector3(state) = direction;
+			return 1;
+		}
+
+		// `Vector3.FromAxis(Enum.Axis.Y)`.
+		int Vector3FromAxis(lua_State *state) {
+			core::Name member;
+			Vector3 direction;
+
+			if (!ReadEnumValue(state, 1, core::Name("Axis"), member) || !DirectionOfAxis(member, direction)) {
+				luaL_errorL(state, "FromAxis needs an Enum.Axis");
+			}
+
+			*PushVector3(state) = direction;
+			return 1;
+		}
+
+		// --- the methods a script calls with a colon -------------------------
+		//
+		// The vector is argument one, because `v:Dot(other)` passes it there.
+		// Each one is `core::Vector3`'s own arithmetic and none of it is
+		// implemented here: the JavaScript surface calls the same functions, so
+		// the two languages cannot answer differently about the same vector.
+
+		int Vector3Abs(lua_State *state) {
+			*PushVector3(state) = CheckVector3(state, 1).Abs();
+			return 1;
+		}
+
+		int Vector3Ceil(lua_State *state) {
+			*PushVector3(state) = CheckVector3(state, 1).Ceil();
+			return 1;
+		}
+
+		int Vector3Floor(lua_State *state) {
+			*PushVector3(state) = CheckVector3(state, 1).Floor();
+			return 1;
+		}
+
+		int Vector3Sign(lua_State *state) {
+			*PushVector3(state) = CheckVector3(state, 1).Sign();
+			return 1;
+		}
+
+		int Vector3Cross(lua_State *state) {
+			*PushVector3(state) = CheckVector3(state, 1).Cross(CheckVector3(state, 2));
+			return 1;
+		}
+
+		int Vector3Dot(lua_State *state) {
+			lua_pushnumber(state, CheckVector3(state, 1).Dot(CheckVector3(state, 2)));
+			return 1;
+		}
+
+		// `v:Angle(other)` is unsigned, from zero to pi. `v:Angle(other, axis)`
+		// is signed by which side of `axis` the turn goes, which is what a
+		// steering routine actually needs - the unsigned form cannot tell left
+		// from right.
+		int Vector3Angle(lua_State *state) {
+			const Vector3 self = CheckVector3(state, 1);
+			const Vector3 other = CheckVector3(state, 2);
+
+			if (lua_touserdatatagged(state, 3, TAG_VECTOR3) != nullptr) {
+				lua_pushnumber(state, self.Angle(other, CheckVector3(state, 3)));
+				return 1;
+			}
+
+			lua_pushnumber(state, self.Angle(other));
+			return 1;
+		}
+
+		// The epsilon is left to `core::Vector3::FuzzyEq` when a script omits
+		// it, rather than repeated here: a default written down twice is a
+		// default that means two things the first time one of them moves.
+		int Vector3FuzzyEq(lua_State *state) {
+			const Vector3 self = CheckVector3(state, 1);
+			const Vector3 other = CheckVector3(state, 2);
+
+			if (lua_isnoneornil(state, 3)) {
+				lua_pushboolean(state, self.FuzzyEq(other));
+				return 1;
+			}
+
+			lua_pushboolean(state, self.FuzzyEq(other, static_cast<float>(luaL_checknumber(state, 3))));
+			return 1;
+		}
+
+		int Vector3Lerp(lua_State *state) {
+			const Vector3 self = CheckVector3(state, 1);
+			const Vector3 goal = CheckVector3(state, 2);
+			const auto alpha = static_cast<float>(luaL_checknumber(state, 3));
+
+			*PushVector3(state) = self.Lerp(goal, alpha);
+			return 1;
+		}
+
+		int Vector3Max(lua_State *state) {
+			*PushVector3(state) = CheckVector3(state, 1).Max(CheckVector3(state, 2));
+			return 1;
+		}
+
+		int Vector3Min(lua_State *state) {
+			*PushVector3(state) = CheckVector3(state, 1).Min(CheckVector3(state, 2));
 			return 1;
 		}
 
@@ -74,6 +202,33 @@ namespace engine::script {
 				}
 				*PushVector3(state) = value.Unit();
 				return 1;
+			}
+
+			// **`__index` is a function, so a method has to be handed back as a
+			// closure** - there is no table behind it for Luau to find one in.
+			// `RayIndex` does the same for `PointAt`. A fresh closure per access
+			// is what Luau's `lua_pushcfunction` costs, and a table cached in the
+			// registry would trade that for a second place the member list
+			// lives; this list is short and read once per call site in practice.
+			static const luaL_Reg METHODS[] = {
+				{"Abs", Vector3Abs},
+				{"Ceil", Vector3Ceil},
+				{"Floor", Vector3Floor},
+				{"Sign", Vector3Sign},
+				{"Cross", Vector3Cross},
+				{"Dot", Vector3Dot},
+				{"Angle", Vector3Angle},
+				{"FuzzyEq", Vector3FuzzyEq},
+				{"Lerp", Vector3Lerp},
+				{"Max", Vector3Max},
+				{"Min", Vector3Min},
+			};
+
+			for (const luaL_Reg &method : METHODS) {
+				if (std::strcmp(field, method.name) == 0) {
+					lua_pushcfunction(state, method.func, method.name);
+					return 1;
+				}
 			}
 
 			luaL_errorL(state, "Vector3 has no member '%s'", field);
@@ -147,8 +302,54 @@ namespace engine::script {
 			const auto x = static_cast<float>(luaL_optnumber(state, 1, 0.0));
 			const auto y = static_cast<float>(luaL_optnumber(state, 2, 0.0));
 			const auto z = static_cast<float>(luaL_optnumber(state, 3, 0.0));
+			const Vector3 position{x, y, z};
 
-			*PushCFrame(state) = CFrame{Vector3{x, y, z}};
+			// **Roblox's other two arities, told apart by how many numbers
+			// arrived.** Seven is a position and a quaternion; twelve is a
+			// position and a row-major rotation matrix. Counting arguments
+			// rather than asking for a mode is what Roblox does, and a script
+			// that serialised a CFrame with `GetComponents` hands the twelve
+			// straight back here.
+			// **Twelve tested before seven**, because `>= 7` matches a
+			// twelve-argument call too and would swallow it: the rotation matrix
+			// form would silently read its first four numbers as a quaternion
+			// and produce a frame nothing complained about.
+			const int given = lua_gettop(state);
+
+			if (given >= 12) {
+				// Row-major, as `GetComponents` reports them, so the columns
+				// `FromMatrix` wants are the strided reads below.
+				const auto at = [state](int index) {
+					return static_cast<float>(luaL_checknumber(state, index));
+				};
+				*PushCFrame(state) = CFrame::FromMatrix(
+					position, Vector3{at(4), at(7), at(10)}, Vector3{at(5), at(8), at(11)}
+				);
+				return 1;
+			}
+
+			if (given >= 7) {
+				const auto qx = static_cast<float>(luaL_checknumber(state, 4));
+				const auto qy = static_cast<float>(luaL_checknumber(state, 5));
+				const auto qz = static_cast<float>(luaL_checknumber(state, 6));
+				const auto qw = static_cast<float>(luaL_checknumber(state, 7));
+
+				CFrame frame;
+				frame.Position = position;
+				frame.QuaternionX = qx;
+				frame.QuaternionY = qy;
+				frame.QuaternionZ = qz;
+				frame.QuaternionW = qw;
+
+				// **Normalised on the way in.** A caller writing four numbers by
+				// hand almost never writes a unit quaternion, and every function
+				// on this type documents that it expects one - an unnormalised
+				// rotation silently scales whatever it transforms.
+				*PushCFrame(state) = frame.Orthonormalize();
+				return 1;
+			}
+
+			*PushCFrame(state) = CFrame{position};
 			return 1;
 		}
 
@@ -160,12 +361,76 @@ namespace engine::script {
 		// math.rad(90), 0)`; a binding that quietly took degrees here would
 		// turn every one of those into a rotation 57 times too small, and the
 		// scene would look wrong rather than fail.
-		int CFrameAngles(lua_State *state) {
-			const auto pitch = static_cast<float>(luaL_checknumber(state, 1));
-			const auto yaw = static_cast<float>(luaL_checknumber(state, 2));
-			const auto roll = static_cast<float>(luaL_checknumber(state, 3));
+		// `CFrame.Angles(rx, ry, rz)` and `CFrame.fromEulerAnglesXYZ(rx, ry, rz)`.
+		//
+		// **X, then Y, then Z, which is what these two names mean in Roblox and
+		// is not what this bound until v0.18.** It called `CFrame::Angles`,
+		// which composes Y-X-Z - Roblox's `fromOrientation` - so a script pasted
+		// from Roblox turned the wrong way whenever it named two axes at once.
+		// One axis at a time is identical under either order, which is why it
+		// went unnoticed.
+		int CFrameEulerXYZ(lua_State *state) {
+			const auto rx = static_cast<float>(luaL_checknumber(state, 1));
+			const auto ry = static_cast<float>(luaL_checknumber(state, 2));
+			const auto rz = static_cast<float>(luaL_checknumber(state, 3));
 
-			*PushCFrame(state) = CFrame::Angles(pitch, yaw, roll);
+			*PushCFrame(state) = CFrame::FromEulerAnglesXYZ(rx, ry, rz);
+			return 1;
+		}
+
+		// `CFrame.fromEulerAnglesYXZ` and `CFrame.fromOrientation`, which Roblox
+		// spells two ways for one function. This is the order `BasePart.
+		// Orientation` round-trips through, in Roblox and here.
+		int CFrameEulerYXZ(lua_State *state) {
+			const auto rx = static_cast<float>(luaL_checknumber(state, 1));
+			const auto ry = static_cast<float>(luaL_checknumber(state, 2));
+			const auto rz = static_cast<float>(luaL_checknumber(state, 3));
+
+			*PushCFrame(state) = CFrame::Angles(rx, ry, rz);
+			return 1;
+		}
+
+		int CFrameFromAxisAngle(lua_State *state) {
+			const Vector3 axis = CheckVector3(state, 1);
+			const auto angle = static_cast<float>(luaL_checknumber(state, 2));
+
+			*PushCFrame(state) = CFrame::FromAxisAngle(axis, angle);
+			return 1;
+		}
+
+		// `CFrame.fromMatrix(position, vX, vY, vZ)`.
+		//
+		// The fourth argument is accepted and ignored, as Roblox's is optional:
+		// a third basis vector is fully determined by the first two, and honouring
+		// a caller's disagreeing one would be honouring a basis that is not a
+		// rotation. `CFrame::FromMatrix` derives it.
+		int CFrameFromMatrix(lua_State *state) {
+			const Vector3 position = CheckVector3(state, 1);
+			const Vector3 right = CheckVector3(state, 2);
+			const Vector3 up = CheckVector3(state, 3);
+
+			*PushCFrame(state) = CFrame::FromMatrix(position, right, up);
+			return 1;
+		}
+
+		int CFrameFromRotationBetween(lua_State *state) {
+			const Vector3 from = CheckVector3(state, 1);
+			const Vector3 to = CheckVector3(state, 2);
+
+			*PushCFrame(state) = CFrame::FromRotationBetweenVectors(from, to);
+			return 1;
+		}
+
+		// `CFrame.lookAlong(at, direction, up)` - `lookAt` given a direction
+		// rather than a target, which is the form a caller holding a velocity
+		// already has.
+		int CFrameLookAlong(lua_State *state) {
+			const Vector3 at = CheckVector3(state, 1);
+			const Vector3 direction = CheckVector3(state, 2);
+			const Vector3 up = lua_touserdatatagged(state, 3, TAG_VECTOR3) != nullptr ? CheckVector3(state, 3)
+																					  : Vector3::YAxis;
+
+			*PushCFrame(state) = CFrame::LookAt(at, at + direction, up);
 			return 1;
 		}
 
@@ -207,14 +472,240 @@ namespace engine::script {
 			return 1;
 		}
 
+		// `CFrame + Vector3` and `CFrame - Vector3`, which Roblox has and which
+		// move a frame without turning it.
+		//
+		// **Translation only, and that is the distinction from `*`.** `frame *
+		// CFrame.new(offset)` moves by the offset expressed in the frame's own
+		// space; this moves by it in world space. The two agree only for an
+		// unrotated frame, which is exactly the case a test would use if nobody
+		// had thought about it.
+		int CFrameAdd(lua_State *state) {
+			const CFrame &frame = CheckCFrame(state, 1);
+			CFrame moved = frame;
+			moved.Position = frame.Position + CheckVector3(state, 2);
+
+			*PushCFrame(state) = moved;
+			return 1;
+		}
+
+		int CFrameSubtract(lua_State *state) {
+			const CFrame &frame = CheckCFrame(state, 1);
+			CFrame moved = frame;
+			moved.Position = frame.Position - CheckVector3(state, 2);
+
+			*PushCFrame(state) = moved;
+			return 1;
+		}
+
+		// --- CFrame methods ---------------------------------------------------
+		//
+		// **Held in one table in the registry rather than pushed as a fresh
+		// closure per lookup.** `frame:Inverse()` in a per-frame loop would
+		// otherwise allocate a C closure on every call, and CFrame maths is
+		// exactly the thing scripts do in loops. `CFrameIndex` reads the table;
+		// `OpenValues` builds it once.
+
+		int CFrameInverse(lua_State *state) {
+			*PushCFrame(state) = CheckCFrame(state, 1).Inverse();
+			return 1;
+		}
+
+		int CFrameOrthonormalize(lua_State *state) {
+			*PushCFrame(state) = CheckCFrame(state, 1).Orthonormalize();
+			return 1;
+		}
+
+		int CFrameLerpMethod(lua_State *state) {
+			const CFrame &from = CheckCFrame(state, 1);
+			const CFrame &to = CheckCFrame(state, 2);
+			const auto alpha = static_cast<float>(luaL_checknumber(state, 3));
+
+			// `Lerp` and not `NLerp`, because Roblox's is constant angular speed
+			// and a script asking to interpolate over a second wants that. The
+			// cheap one is for the interpolator between two ticks, which is C++.
+			*PushCFrame(state) = from.Lerp(to, alpha);
+			return 1;
+		}
+
+		int CFrameToWorldSpaceMethod(lua_State *state) {
+			*PushCFrame(state) = CheckCFrame(state, 1).ToWorldSpace(CheckCFrame(state, 2));
+			return 1;
+		}
+
+		int CFrameToObjectSpaceMethod(lua_State *state) {
+			*PushCFrame(state) = CheckCFrame(state, 1).ToObjectSpace(CheckCFrame(state, 2));
+			return 1;
+		}
+
+		int CFramePointToWorld(lua_State *state) {
+			*PushVector3(state) = CheckCFrame(state, 1).PointToWorldSpace(CheckVector3(state, 2));
+			return 1;
+		}
+
+		int CFramePointToObject(lua_State *state) {
+			*PushVector3(state) = CheckCFrame(state, 1).PointToObjectSpace(CheckVector3(state, 2));
+			return 1;
+		}
+
+		int CFrameVectorToWorld(lua_State *state) {
+			*PushVector3(state) = CheckCFrame(state, 1).VectorToWorldSpace(CheckVector3(state, 2));
+			return 1;
+		}
+
+		int CFrameVectorToObject(lua_State *state) {
+			*PushVector3(state) = CheckCFrame(state, 1).VectorToObjectSpace(CheckVector3(state, 2));
+			return 1;
+		}
+
+		// Twelve return values, as Roblox's does. Not a table: the call site is
+		// `local x, y, z, r00 = frame:GetComponents()`, and a table would be an
+		// allocation plus twelve index operations to reach the same numbers.
+		int CFrameGetComponents(lua_State *state) {
+			const std::array<float, 12> parts = CheckCFrame(state, 1).GetComponents();
+			for (const float part : parts) {
+				lua_pushnumber(state, part);
+			}
+			return static_cast<int>(parts.size());
+		}
+
+		int CFrameToEulerXYZ(lua_State *state) {
+			const Vector3 angles = CheckCFrame(state, 1).ToEulerAnglesXYZ();
+			lua_pushnumber(state, angles.X);
+			lua_pushnumber(state, angles.Y);
+			lua_pushnumber(state, angles.Z);
+			return 3;
+		}
+
+		// `ToEulerAnglesYXZ` and `ToOrientation`, one function under two Roblox
+		// names. This is the order `BasePart.Orientation` uses.
+		int CFrameToEulerYXZ(lua_State *state) {
+			const Vector3 angles = CheckCFrame(state, 1).ToAngles();
+			lua_pushnumber(state, angles.X);
+			lua_pushnumber(state, angles.Y);
+			lua_pushnumber(state, angles.Z);
+			return 3;
+		}
+
+		int CFrameToAxisAngleMethod(lua_State *state) {
+			Vector3 axis;
+			float angle = 0.0f;
+			CheckCFrame(state, 1).ToAxisAngle(axis, angle);
+
+			*PushVector3(state) = axis;
+			lua_pushnumber(state, angle);
+			return 2;
+		}
+
+		int CFrameFuzzyEqMethod(lua_State *state) {
+			const CFrame &frame = CheckCFrame(state, 1);
+			const CFrame &other = CheckCFrame(state, 2);
+
+			// Roblox's default epsilon. Named rather than spelled inline so the
+			// two runtimes cannot drift apart on it.
+			constexpr float DEFAULT_EPSILON = 1.0e-5f;
+			const auto epsilon = static_cast<float>(luaL_optnumber(state, 3, DEFAULT_EPSILON));
+
+			lua_pushboolean(state, frame.FuzzyEq(other, epsilon) ? 1 : 0);
+			return 1;
+		}
+
+		int CFrameAngleBetweenMethod(lua_State *state) {
+			lua_pushnumber(state, CheckCFrame(state, 1).AngleBetween(CheckCFrame(state, 2)));
+			return 1;
+		}
+
+		const luaL_Reg CFRAME_METHODS[] = {
+			{"Inverse", CFrameInverse},
+			{"Orthonormalize", CFrameOrthonormalize},
+			{"Lerp", CFrameLerpMethod},
+			{"ToWorldSpace", CFrameToWorldSpaceMethod},
+			{"ToObjectSpace", CFrameToObjectSpaceMethod},
+			{"PointToWorldSpace", CFramePointToWorld},
+			{"PointToObjectSpace", CFramePointToObject},
+			{"VectorToWorldSpace", CFrameVectorToWorld},
+			{"VectorToObjectSpace", CFrameVectorToObject},
+			{"GetComponents", CFrameGetComponents},
+			// Roblox's lower-case alias for the same twelve numbers.
+			{"components", CFrameGetComponents},
+			{"ToEulerAnglesXYZ", CFrameToEulerXYZ},
+			{"ToEulerAnglesYXZ", CFrameToEulerYXZ},
+			{"ToOrientation", CFrameToEulerYXZ},
+			{"ToAxisAngle", CFrameToAxisAngleMethod},
+			{"FuzzyEq", CFrameFuzzyEqMethod},
+			{"AngleBetween", CFrameAngleBetweenMethod},
+			{nullptr, nullptr},
+		};
+
+		// The registry key the table above is parked under.
+		constexpr const char *CFRAME_METHOD_TABLE = "engine.cframe.methods";
+
 		int CFrameIndex(lua_State *state) {
 			const CFrame &value = CheckCFrame(state, 1);
 			const char *field = luaL_checkstring(state, 2);
+			const std::string_view name(field);
 
-			if (std::string_view(field) == "Position" || std::string_view(field) == "p") {
+			// `p` alongside `Position` for the reason `Vector3` accepts `x`: it
+			// is the spelling a long-standing Roblox habit reaches for, and a
+			// silent nil is a worse answer than an alias.
+			if (name == "Position" || name == "p") {
 				*PushVector3(state) = value.Position;
 				return 1;
 			}
+
+			// The rotation alone, at the origin. Roblox's `CFrame.Rotation`.
+			if (name == "Rotation") {
+				*PushCFrame(state) = value.RotationOnly();
+				return 1;
+			}
+
+			if (name == "X" || name == "x") {
+				lua_pushnumber(state, value.Position.X);
+				return 1;
+			}
+			if (name == "Y" || name == "y") {
+				lua_pushnumber(state, value.Position.Y);
+				return 1;
+			}
+			if (name == "Z" || name == "z") {
+				lua_pushnumber(state, value.Position.Z);
+				return 1;
+			}
+
+			// **Six names for three columns, because Roblox has six.**
+			// `RightVector`/`UpVector` and `XVector`/`YVector` are the same
+			// directions under two spellings; `LookVector` and `ZVector` are the
+			// pair that differ, one being the negation of the other. A script
+			// reading all three columns wants the `*Vector` set and should not
+			// have to know which one to negate.
+			if (name == "RightVector" || name == "XVector") {
+				*PushVector3(state) = value.RightVector();
+				return 1;
+			}
+			if (name == "UpVector" || name == "YVector") {
+				*PushVector3(state) = value.UpVector();
+				return 1;
+			}
+			if (name == "LookVector") {
+				*PushVector3(state) = value.LookVector();
+				return 1;
+			}
+			if (name == "ZVector") {
+				*PushVector3(state) = value.ZVector();
+				return 1;
+			}
+
+			// A method, from the one table built at open time. Missing keys fall
+			// through to the error below rather than returning nil, which is
+			// what turns `frame:Inverze()` into a line number instead of
+			// "attempt to call a nil value".
+			lua_getfield(state, LUA_REGISTRYINDEX, CFRAME_METHOD_TABLE);
+			lua_getfield(state, -1, field);
+			if (!lua_isnil(state, -1)) {
+				lua_remove(state, -2);
+				return 1;
+			}
+			lua_pop(state, 2);
 
 			luaL_errorL(state, "CFrame has no member '%s'", field);
 		}
@@ -281,6 +772,39 @@ namespace engine::script {
 			return 1;
 		}
 
+		// **The vector has to be on the left, and that is not an oversight.**
+		// Luau calls `__div` whichever operand carried the metatable, so `2 / v`
+		// arrives here too - and Roblox's operator table has no `number /
+		// Vector3` row. Answering one would be inventing arithmetic rather than
+		// matching it, so `CheckVector3` refuses the first argument and names the
+		// type. `2 * v` is different: Roblox does define it, and `Vector3Mul`
+		// handles it.
+		int Vector3Div(lua_State *state) {
+			const Vector3 left = CheckVector3(state, 1);
+
+			if (lua_isnumber(state, 2)) {
+				*PushVector3(state) = left / static_cast<float>(lua_tonumber(state, 2));
+				return 1;
+			}
+
+			*PushVector3(state) = left / CheckVector3(state, 2);
+			return 1;
+		}
+
+		// `//`, which floors each quotient - the same thing Luau's `//` does to
+		// two numbers, applied per component.
+		int Vector3Idiv(lua_State *state) {
+			const Vector3 left = CheckVector3(state, 1);
+
+			if (lua_isnumber(state, 2)) {
+				*PushVector3(state) = (left / static_cast<float>(lua_tonumber(state, 2))).Floor();
+				return 1;
+			}
+
+			*PushVector3(state) = (left / CheckVector3(state, 2)).Floor();
+			return 1;
+		}
+
 		// Registers one value type: a metatable carrying `__index` and a global
 		// table carrying the constructors.
 		void Install(
@@ -293,7 +817,9 @@ namespace engine::script {
 			lua_CFunction equal = nullptr,
 			lua_CFunction add = nullptr,
 			lua_CFunction subtract = nullptr,
-			lua_CFunction negate = nullptr
+			lua_CFunction negate = nullptr,
+			lua_CFunction divide = nullptr,
+			lua_CFunction floorDivide = nullptr
 		) {
 			luaL_newmetatable(state, name);
 
@@ -316,6 +842,8 @@ namespace engine::script {
 				{"__add", add},
 				{"__sub", subtract},
 				{"__unm", negate},
+				{"__div", divide},
+				{"__idiv", floorDivide},
 			};
 
 			for (const auto &entry : METAMETHODS) {
@@ -579,12 +1107,34 @@ namespace engine::script {
 	}
 
 	void OpenValues(lua_State *state) {
-		static const luaL_Reg vectorConstructors[] = {{"new", Vector3New}, {nullptr, nullptr}};
+		static const luaL_Reg vectorConstructors[] = {
+			{"new", Vector3New},
+			{"FromNormalId", Vector3FromNormalId},
+			{"FromAxis", Vector3FromAxis},
+			{nullptr, nullptr}
+		};
 		static const luaL_Reg colorConstructors[] = {
 			{"new", Color3New}, {"fromRGB", Color3FromRgb}, {nullptr, nullptr}
 		};
 		static const luaL_Reg frameConstructors[] = {
-			{"new", CFrameNew}, {"Angles", CFrameAngles}, {"lookAt", CFrameLookAt}, {nullptr, nullptr}
+			{"new", CFrameNew},
+
+			// **`Angles` is X-Y-Z, which is what Roblox means by it.** Until
+			// v0.18 this name was bound to `CFrame::Angles`, the Y-X-Z
+			// composition, so a pasted script turned the wrong way whenever it
+			// named two axes at once. The Y-X-Z one is still here under the two
+			// names Roblox gives it.
+			{"Angles", CFrameEulerXYZ},
+			{"fromEulerAnglesXYZ", CFrameEulerXYZ},
+			{"fromEulerAnglesYXZ", CFrameEulerYXZ},
+			{"fromOrientation", CFrameEulerYXZ},
+
+			{"lookAt", CFrameLookAt},
+			{"lookAlong", CFrameLookAlong},
+			{"fromAxisAngle", CFrameFromAxisAngle},
+			{"fromMatrix", CFrameFromMatrix},
+			{"fromRotationBetweenVectors", CFrameFromRotationBetween},
+			{nullptr, nullptr}
 		};
 
 		Install(
@@ -597,13 +1147,44 @@ namespace engine::script {
 			Vector3Equal,
 			Vector3Add,
 			Vector3Sub,
-			Vector3Unm
+			Vector3Unm,
+			Vector3Div,
+			Vector3Idiv
 		);
 		Install(state, "Color3", Color3Index, nullptr, colorConstructors, nullptr, Color3Equal);
-		Install(state, "CFrame", CFrameIndex, nullptr, frameConstructors, CFrameMultiply, CFrameEqual);
+		// The method table, parked in the registry before anything can index a
+		// CFrame. `CFrameIndex` reads it; building it once is what keeps
+		// `frame:Inverse()` in a loop from allocating a closure per call.
+		lua_newtable(state);
+		for (const luaL_Reg *entry = CFRAME_METHODS; entry->name != nullptr; entry++) {
+			lua_pushcfunction(state, entry->func, entry->name);
+			lua_setfield(state, -2, entry->name);
+		}
+		lua_setfield(state, LUA_REGISTRYINDEX, CFRAME_METHOD_TABLE);
+
+		Install(
+			state,
+			"CFrame",
+			CFrameIndex,
+			nullptr,
+			frameConstructors,
+			CFrameMultiply,
+			CFrameEqual,
+			CFrameAdd,
+			CFrameSubtract
+		);
+
+		// `CFrame.identity`, a value on the constructor table rather than a
+		// function. Roblox has it, and `CFrame.new()` is not the same thing to
+		// read: one says "no transform" and the other says "a transform I am
+		// about to fill in".
+		lua_getglobal(state, "CFrame");
+		*PushCFrame(state) = CFrame();
+		lua_setfield(state, -2, "identity");
+		lua_pop(state, 1);
 
 		// **Lowercase, because Roblox's are.** Every other member of this
-		// vocabulary is capitalised and these two are not, which reads as a
+		// vocabulary is capitalised and these five are not, which reads as a
 		// mistake until you try to run a script written elsewhere. The rule
 		// `scene/Part.cpp` states for the class tree is the rule here: a second
 		// spelling of one constant is the duplicate `AGENTS.md` calls the most
@@ -613,6 +1194,9 @@ namespace engine::script {
 		// these attach to.
 		SetVectorConstant(state, "Vector3", "zero", core::Vector3::Zero);
 		SetVectorConstant(state, "Vector3", "one", core::Vector3::One);
+		SetVectorConstant(state, "Vector3", "xAxis", core::Vector3::XAxis);
+		SetVectorConstant(state, "Vector3", "yAxis", core::Vector3::YAxis);
+		SetVectorConstant(state, "Vector3", "zAxis", core::Vector3::ZAxis);
 	}
 
 	const char *Describe(HostTag tag) {

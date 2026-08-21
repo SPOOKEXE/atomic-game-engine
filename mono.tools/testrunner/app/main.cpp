@@ -83,8 +83,16 @@ int main(int argc, char **argv) {
 		std::fprintf(stderr, "%s\n\n%s", parsed.Error.c_str(), arguments.Help().c_str());
 		return 2;
 	}
+	if (parsed.VersionRequested) {
+		std::fputs(arguments.VersionLine().c_str(), stdout);
+		return 0;
+	}
 	if (parsed.HelpRequested) {
 		std::fputs(arguments.Help().c_str(), stdout);
+		return 0;
+	}
+	if (parsed.DescribeRequested) {
+		std::fputs(arguments.Describe().c_str(), stdout);
 		return 0;
 	}
 

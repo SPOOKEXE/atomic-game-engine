@@ -359,9 +359,7 @@ TEST_CASE("a fresh editor can fetch from the store on this machine", "[studio][c
 
 	// The store this machine's client publishes to and reads from, first.
 	CHECK(settings.Usable().front().Kind == engine::delivery::SourceKind::Directory);
-	CHECK(
-		settings.Usable().front().Location == cdn::DefaultLocalPaths().Processed.string()
-	);
+	CHECK(settings.Usable().front().Location == cdn::DefaultLocalPaths().Processed.string());
 
 	// **The key that can verify it.** Trusting the development identity is what
 	// makes the local folder usable with nothing typed; it verifies only what

@@ -38,11 +38,11 @@ using engine::physics::PhysicsWorld;
 using engine::physics::PreparePhysicsWorld;
 using engine::physics::SweepFastBodies;
 using engine::physics::SyncBroadphase;
-using engine::scene::Anchored;
 using engine::scene::BodyKind;
 using engine::scene::Collider;
 using engine::scene::Motion;
 using engine::scene::RigidBody;
+using engine::scene::Simulated;
 using engine::scene::Transform;
 
 namespace {
@@ -61,8 +61,9 @@ namespace {
 		PreparePhysicsWorld(*store, 4.0f);
 
 		const Entity wall = store->Create();
+		// No `Simulated` and no `Motion`. A wall is static by carrying nothing,
+		// which is the whole of the v0.18 polarity.
 		store->Set<Transform>(wall, Transform{CFrame{Vector3{4.0f, 0.0f, 0.0f}}});
-		store->Set<Anchored>(wall, Anchored{});
 
 		Collider pane;
 		pane.Extent = Vector3{thickness, 5.0f, 5.0f};
@@ -79,6 +80,12 @@ namespace {
 		Motion motion;
 		motion.Linear = Vector3{speed, 0.0f, 0.0f};
 		store.Set<Motion>(body, motion);
+
+		// **The tag as well as the `Motion`.** `SweepFastBodies` asks whether the
+		// world may move this, and a row with a velocity and no tag is the state
+		// nothing owns - it would be skipped, and every case in this file would
+		// pass by measuring a body that was never swept.
+		store.Set<Simulated>(body, Simulated{});
 
 		RigidBody rigid;
 		rigid.Kind = BodyKind::Dynamic;
@@ -199,8 +206,10 @@ TEST_CASE("an anchored body is never swept", "[continuous]") {
 	Store &store = *owned;
 	SyncBroadphase(store);
 
+	// Keeps its `Motion` and loses the tag, which is exactly the state this case
+	// is about: something with a velocity that the world may not move.
 	const Entity platform = Bullet(store, 300.0f);
-	store.Set<Anchored>(platform, Anchored{});
+	store.Remove<Simulated>(platform);
 
 	// Placed by hand, as a script or an animation would.
 	store.Set<Transform>(platform, Transform{CFrame{Vector3{3.9f, 0.0f, 0.0f}}});
@@ -220,7 +229,6 @@ TEST_CASE("a trigger does not stop anything", "[continuous]") {
 
 	const Entity gate = store.Create();
 	store.Set<Transform>(gate, Transform{CFrame{Vector3{4.0f, 0.0f, 0.0f}}});
-	store.Set<Anchored>(gate, Anchored{});
 	Collider pane;
 	pane.Extent = Vector3{0.05f, 5.0f, 5.0f};
 	pane.Trigger = true;

@@ -7,16 +7,19 @@
 #include <engine/scene/Components.hpp>
 #include <engine/ui/Fonts.hpp>
 #include <engine/ui/Metrics.hpp>
+#include <engine/ui/Prompts.hpp>
 #include <engine/ui/Theme.hpp>
 
 #include <SDL3/SDL_video.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <span>
+#include <string_view>
 #include <studio/Editor.hpp>
 #include <studio/Keybinds.hpp>
 #include <studio/Widgets.hpp>
@@ -73,18 +76,38 @@ namespace studio {
 		constexpr const char *SETTINGS = "Preferences###Studio Settings";
 		constexpr const char *STATISTICS = "Statistics";
 		constexpr const char *FRAMEGRAPH = "Frame Graph";
+		constexpr const char *HEAP = "Heap";
 
 		// The rest, which have no constant of their own because only this list
 		// and their own `Begin` ever name them. Spelled here rather than
 		// hoisted into a dozen more constants: a name used twice in one file is
 		// not the drift a constant prevents.
 		constexpr const char *SKINNABLE[]{
-			VIEWPORT,	   VIEWPORT2,		 EXPLORER,			WORLDS,
-			INSTANCES,	   PROPERTIES,		 SCRIPTS,			OUTPUT,
-			"Command Bar", SETTINGS,		 STATISTICS,		FRAMEGRAPH,
-			"History",	   "Assets",		 "Render Pipeline", "World Lighting",
-			"Network",	   "Team Create",	 "Control (MCP)",	"Plugins",
-			"Bus",		   "Find Instances", "Script Profile",	"Changes",
+			VIEWPORT,
+			VIEWPORT2,
+			EXPLORER,
+			WORLDS,
+			INSTANCES,
+			PROPERTIES,
+			SCRIPTS,
+			OUTPUT,
+			"Command Bar",
+			SETTINGS,
+			STATISTICS,
+			FRAMEGRAPH,
+			HEAP,
+			"History",
+			"Assets",
+			"Render Pipeline",
+			"World Lighting",
+			"Network",
+			"Team Create",
+			"Control (MCP)",
+			"Plugins",
+			"Bus",
+			"Find Instances",
+			"Script Profile",
+			"Changes",
 			"Debugger",
 		};
 
@@ -158,6 +181,7 @@ namespace studio {
 			ImGui::DockBuilderDockWindow(SETTINGS, rightLower);
 			ImGui::DockBuilderDockWindow(STATISTICS, rightLower);
 			ImGui::DockBuilderDockWindow(FRAMEGRAPH, bottom);
+			ImGui::DockBuilderDockWindow(HEAP, bottom);
 			ImGui::DockBuilderDockWindow("Render Pipeline", bottom);
 
 			ImGui::DockBuilderFinish(dockspace);
@@ -179,7 +203,10 @@ namespace studio {
 			return NONE;
 		}
 
-		const auto found = Prefs.PanelColours.find(panel);
+		// `string_view` rather than the pointer, which is what reaches the
+		// transparent comparator instead of constructing a key. See
+		// `Preferences::PanelColours`.
+		const auto found = Prefs.PanelColours.find(std::string_view(panel));
 		return found == Prefs.PanelColours.end() ? NONE : found->second;
 	}
 
@@ -340,6 +367,13 @@ namespace studio {
 		{
 			ENGINE_PROFILE_CAT("frame graph", engine::core::ProfileCategory::Render);
 			Skinned(FRAMEGRAPH, [&] { DrawFrameGraph(); });
+		}
+
+		// Beside it, and the same argument: a panel that walks the tag tree and
+		// draws a row per tag scales with what it is measuring.
+		{
+			ENGINE_PROFILE_CAT("heap panel", engine::core::ProfileCategory::Render);
+			Skinned(HEAP, [&] { DrawHeap(); });
 		}
 
 		// v0.10's panels. Each returns immediately when closed, which is what
@@ -915,8 +949,15 @@ namespace studio {
 		const float reportedDensity = Window != nullptr ? SDL_GetWindowPixelDensity(Window) : 1.0f;
 		const float density = reportedDensity > 0.0f ? reportedDensity : 1.0f;
 
-		target.Width = static_cast<uint32_t>(std::max(size.x, 1.0f) * density);
-		target.Height = static_cast<uint32_t>(std::max(size.y, 1.0f) * density);
+		// **Rounded rather than truncated.** The image is drawn at the panel's
+		// float size and the target is an integer count of pixels, so truncating
+		// throws away up to a pixel on each axis independently - which is a
+		// slightly different aspect in the camera than in the rectangle the
+		// picture lands in, and therefore a slight stretch and a gizmo that does
+		// not sit on the thing it is drawn for. Rounding halves that error and
+		// costs nothing.
+		target.Width = static_cast<uint32_t>(std::lround(std::max(size.x, 1.0f) * density));
+		target.Height = static_cast<uint32_t>(std::lround(std::max(size.y, 1.0f) * density));
 
 		// **The texture the renderer holds now, and it is usually this frame's
 		// picture rather than the last one's.** imgui records its draw lists
@@ -2459,35 +2500,35 @@ namespace studio {
 			ImGui::OpenPopup("Rename Scene");
 		}
 
-		if (FilePrompt("Save Game As", PathBuffer, "Save", GAME_FILES, false)) {
+		if (engine::ui::FilePrompt("Save Game As", PathBuffer, "Save", GAME_FILES, false)) {
 			SaveGame(std::filesystem::path(PathBuffer));
 			AskingSaveAs = false;
 		} else if (!ImGui::IsPopupOpen("Save Game As")) {
 			AskingSaveAs = false;
 		}
 
-		if (FilePrompt("Open Game", PathBuffer, "Open", GAME_FILES, true)) {
+		if (engine::ui::FilePrompt("Open Game", PathBuffer, "Open", GAME_FILES, true)) {
 			OpenGame(std::filesystem::path(PathBuffer));
 			AskingOpen = false;
 		} else if (!ImGui::IsPopupOpen("Open Game")) {
 			AskingOpen = false;
 		}
 
-		if (FilePrompt("Sync Rojo Project", PathBuffer, "Sync", ROJO_FILES, true)) {
+		if (engine::ui::FilePrompt("Sync Rojo Project", PathBuffer, "Sync", ROJO_FILES, true)) {
 			SyncRojo(std::filesystem::path(PathBuffer));
 			AskingRojo = false;
 		} else if (!ImGui::IsPopupOpen("Sync Rojo Project")) {
 			AskingRojo = false;
 		}
 
-		if (FilePrompt("Sync Rojo Universe", PathBuffer, "Sync", ROJO_FILES, true)) {
+		if (engine::ui::FilePrompt("Sync Rojo Universe", PathBuffer, "Sync", ROJO_FILES, true)) {
 			SyncRojoWorlds(std::filesystem::path(PathBuffer));
 			AskingRojoUniverse = false;
 		} else if (!ImGui::IsPopupOpen("Sync Rojo Universe")) {
 			AskingRojoUniverse = false;
 		}
 
-		if (FilePrompt("Export World", PathBuffer, "Export", WORLD_FILES, false)) {
+		if (engine::ui::FilePrompt("Export World", PathBuffer, "Export", WORLD_FILES, false)) {
 			ExportActiveWorld(std::filesystem::path(PathBuffer));
 			AskingExport = false;
 		} else if (!ImGui::IsPopupOpen("Export World")) {
@@ -2499,21 +2540,21 @@ namespace studio {
 		// reader refuses each in the other's place, so the two exports write
 		// different extensions and say which they are - see
 		// `game::WORLD_EXTENSION`, where the same distinction is spelled out.
-		if (FilePrompt("Export Universe", PathBuffer, "Export", GAME_FILES, false)) {
+		if (engine::ui::FilePrompt("Export Universe", PathBuffer, "Export", GAME_FILES, false)) {
 			ExportUniverse(std::filesystem::path(PathBuffer));
 			AskingExportUniverse = false;
 		} else if (!ImGui::IsPopupOpen("Export Universe")) {
 			AskingExportUniverse = false;
 		}
 
-		if (FilePrompt("Import Universe", PathBuffer, "Import", GAME_FILES, true)) {
+		if (engine::ui::FilePrompt("Import Universe", PathBuffer, "Import", GAME_FILES, true)) {
 			ImportUniverseFile(std::filesystem::path(PathBuffer));
 			AskingImportUniverse = false;
 		} else if (!ImGui::IsPopupOpen("Import Universe")) {
 			AskingImportUniverse = false;
 		}
 
-		if (FilePrompt("Import World", PathBuffer, "Import", WORLD_FILES, true)) {
+		if (engine::ui::FilePrompt("Import World", PathBuffer, "Import", WORLD_FILES, true)) {
 			ImportWorldFile(std::filesystem::path(PathBuffer));
 			AskingImport = false;
 		} else if (!ImGui::IsPopupOpen("Import World")) {

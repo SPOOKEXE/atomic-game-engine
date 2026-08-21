@@ -57,6 +57,7 @@ namespace studio {
 		// wants them - which is what the Keybinds page is for.
 		ShowStatistics,
 		ShowFrameGraph,
+		ShowHeap,
 
 		// The four manipulators.
 		//
@@ -114,9 +115,9 @@ namespace studio {
 		// which is what `IsBound` reads.
 		ImGuiKey Key = ImGuiKey_None;
 
-		bool Ctrl = false;   // Whether Ctrl is held with it.
-		bool Shift = false;  // Whether Shift is held with it.
-		bool Alt = false;    // Whether Alt is held with it.
+		bool Ctrl = false;	// Whether Ctrl is held with it.
+		bool Shift = false; // Whether Shift is held with it.
+		bool Alt = false;	// Whether Alt is held with it.
 
 		// Whether this chord names a key at all.
 		//

@@ -395,7 +395,12 @@ namespace engine::graph {
 	//
 	// @since v0.11
 	struct NodeParameter {
+		// What the setting is called, interned.
 		core::Name Key{};
+
+		// Its value as text. **Text and not a variant**, because a parameter
+		// crosses a saved graph document and a type tag there would be a second
+		// thing to keep in step with the node that reads it.
 		std::string Value{};
 	};
 

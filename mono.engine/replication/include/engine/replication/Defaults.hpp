@@ -13,7 +13,7 @@
 //
 // **This was written out three times and one copy had already drifted.**
 // `DEFERRED.md` D00018 recorded the table appearing in `mono.server`,
-// `mono.unified_server_client` and `mono.studio`, and said all three agreed -
+// `mono.unified_tests` and `mono.studio`, and said all three agreed -
 // "which is the only reason this is an entry and not a bug". By v0.13 that was
 // true of two of them: `mono.server` and `mono.studio` still matched row for
 // row, and the diagnostic harness was missing `scene.Camera`,

@@ -10,12 +10,10 @@
 #include <engine/ui/Theme.hpp>
 
 #include <imgui.h>
-
+#include <string>
 #include <studio/Editor.hpp>
 #include <studio/Keybinds.hpp>
 #include <studio/Widgets.hpp>
-
-#include <string>
 
 namespace studio {
 
@@ -44,21 +42,20 @@ namespace studio {
 						   PathBuffer = GamePath.string();
 					   }});
 
-		Operators.Add({Action::Save,
-					   "Save",
-					   "Write the game to its file",
-					   [this] {
-						   return Modified ? Availability::Yes()
-										   : Availability::No("nothing has changed");
-					   },
-					   [this] {
-						   if (GamePath.empty()) {
-							   AskingSaveAs = true;
-							   PathBuffer = GamePath.string();
-						   } else {
-							   SaveGame(GamePath);
-						   }
-					   }});
+		Operators.Add(
+			{Action::Save,
+			 "Save",
+			 "Write the game to its file",
+			 [this] { return Modified ? Availability::Yes() : Availability::No("nothing has changed"); },
+			 [this] {
+				 if (GamePath.empty()) {
+					 AskingSaveAs = true;
+					 PathBuffer = GamePath.string();
+				 } else {
+					 SaveGame(GamePath);
+				 }
+			 }}
+		);
 
 		Operators.Add({Action::SaveAs, "Save As", "Write the game somewhere new", always, [this] {
 						   AskingSaveAs = true;
@@ -71,91 +68,101 @@ namespace studio {
 		// reason the toolbar gives at length: with runs per world, a transport
 		// that always described the active world was describing the wrong one
 		// half the time.
-		Operators.Add({Action::Play,
-					   "Play",
-					   "Run the server and a client in this process",
-					   [this] {
-						   return ViewportWorld(FocusedViewport).IsValid()
-									? Availability::Yes()
-									: Availability::No("this viewport has no scene");
-					   },
-					   [this] {
-						   const engine::world::WorldId scope = ViewportWorld(FocusedViewport);
-						   SetRunMode(
-							   scope, ModeOf(scope) == RunMode::Play ? RunMode::Edit : RunMode::Play
-						   );
-					   }});
+		Operators.Add(
+			{Action::Play,
+			 "Play",
+			 "Run the server and a client in this process",
+			 [this] {
+				 return ViewportWorld(FocusedViewport).IsValid()
+							? Availability::Yes()
+							: Availability::No("this viewport has no scene");
+			 },
+			 [this] {
+				 const engine::world::WorldId scope = ViewportWorld(FocusedViewport);
+				 SetRunMode(scope, ModeOf(scope) == RunMode::Play ? RunMode::Edit : RunMode::Play);
+			 }}
+		);
 
-		Operators.Add({Action::RunServer,
-					   "Run",
-					   "Run the server's scripts only",
-					   [this] {
-						   return ViewportWorld(FocusedViewport).IsValid()
-									? Availability::Yes()
-									: Availability::No("this viewport has no scene");
-					   },
-					   [this] {
-						   const engine::world::WorldId scope = ViewportWorld(FocusedViewport);
-						   SetRunMode(
-							   scope,
-							   ModeOf(scope) == RunMode::Server ? RunMode::Edit : RunMode::Server
-						   );
-					   }});
+		Operators.Add(
+			{Action::RunServer,
+			 "Run",
+			 "Run the server's scripts only",
+			 [this] {
+				 return ViewportWorld(FocusedViewport).IsValid()
+							? Availability::Yes()
+							: Availability::No("this viewport has no scene");
+			 },
+			 [this] {
+				 const engine::world::WorldId scope = ViewportWorld(FocusedViewport);
+				 SetRunMode(scope, ModeOf(scope) == RunMode::Server ? RunMode::Edit : RunMode::Server);
+			 }}
+		);
 
-		Operators.Add({Action::Stop,
-					   "Stop",
-					   "Stop and restore the scene as it was",
-					   [this] {
-						   return AnyRunning() ? Availability::Yes()
-											   : Availability::No("nothing is running");
-					   },
-					   [this] { EndAllRuns(); }});
+		Operators.Add(
+			{Action::Stop,
+			 "Stop",
+			 "Stop and restore the scene as it was",
+			 [this] { return AnyRunning() ? Availability::Yes() : Availability::No("nothing is running"); },
+			 [this] { EndAllRuns(); }}
+		);
 
 		// --- editing --------------------------------------------------------
 
-		Operators.Add({Action::Undo,
-					   "Undo",
-					   "Reverse the last edit",
-					   [this] {
-						   return Commands != nullptr && Commands->CanUndo()
-									? Availability::Yes()
-									: Availability::No("there is nothing to undo");
-					   },
-					   [this] { UndoEdit(); }});
+		Operators.Add(
+			{Action::Undo,
+			 "Undo",
+			 "Reverse the last edit",
+			 [this] {
+				 return Commands != nullptr && Commands->CanUndo()
+							? Availability::Yes()
+							: Availability::No("there is nothing to undo");
+			 },
+			 [this] { UndoEdit(); }}
+		);
 
-		Operators.Add({Action::Redo,
-					   "Redo",
-					   "Reapply the last undone edit",
-					   [this] {
-						   return Commands != nullptr && Commands->CanRedo()
-									? Availability::Yes()
-									: Availability::No("there is nothing to redo");
-					   },
-					   [this] { RedoEdit(); }});
+		Operators.Add(
+			{Action::Redo,
+			 "Redo",
+			 "Reapply the last undone edit",
+			 [this] {
+				 return Commands != nullptr && Commands->CanRedo()
+							? Availability::Yes()
+							: Availability::No("there is nothing to redo");
+			 },
+			 [this] { RedoEdit(); }}
+		);
 
-		Operators.Add({Action::Duplicate,
-					   "Duplicate",
-					   "Copy the selection beside itself",
-					   [this] { return NeedsSelection(!Selection.empty()); },
-					   [this] { DuplicateSelection(); }});
+		Operators.Add(
+			{Action::Duplicate,
+			 "Duplicate",
+			 "Copy the selection beside itself",
+			 [this] { return NeedsSelection(!Selection.empty()); },
+			 [this] { DuplicateSelection(); }}
+		);
 
-		Operators.Add({Action::Delete,
-					   "Delete",
-					   "Delete the selection",
-					   [this] { return NeedsSelection(!Selection.empty()); },
-					   [this] { DeleteSelection(); }});
+		Operators.Add(
+			{Action::Delete,
+			 "Delete",
+			 "Delete the selection",
+			 [this] { return NeedsSelection(!Selection.empty()); },
+			 [this] { DeleteSelection(); }}
+		);
 
-		Operators.Add({Action::SelectNone,
-					   "Select None",
-					   "Clear the selection",
-					   [this] { return NeedsSelection(!Selection.empty()); },
-					   [this] { ClearSelection(); }});
+		Operators.Add(
+			{Action::SelectNone,
+			 "Select None",
+			 "Clear the selection",
+			 [this] { return NeedsSelection(!Selection.empty()); },
+			 [this] { ClearSelection(); }}
+		);
 
-		Operators.Add({Action::Rename,
-					   "Rename",
-					   "Rename the selected instance",
-					   [this] { return NeedsSelection(!Selection.empty()); },
-					   [this] { BeginRename(Selection.empty() ? Entity{} : Selection.front()); }});
+		Operators.Add(
+			{Action::Rename,
+			 "Rename",
+			 "Rename the selected instance",
+			 [this] { return NeedsSelection(!Selection.empty()); },
+			 [this] { BeginRename(Selection.empty() ? Entity{} : Selection.front()); }}
+		);
 
 		// --- the manipulators -----------------------------------------------
 		//
@@ -170,9 +177,7 @@ namespace studio {
 		// which is the wrong way round for a person who selects with the tool
 		// already in hand.
 		const auto tool = [this, always](Action id, const char *name, const char *what, ToolMode mode) {
-			Operators.Add({id, name, what, always, [this, mode] {
-							   CurrentTool = mode;
-						   }});
+			Operators.Add({id, name, what, always, [this, mode] { CurrentTool = mode; }});
 		};
 
 		tool(Action::ToolSelect, "Select Tool", "Click to select, with no handles", ToolMode::Select);
@@ -188,6 +193,9 @@ namespace studio {
 
 		Operators.Add({Action::ShowFrameGraph, "Frame Graph", "Show where the frame went", always, [this] {
 						   ShowFrameGraph = true;
+					   }});
+		Operators.Add({Action::ShowHeap, "Heap", "Show where the memory went", always, [this] {
+						   ShowHeap = true;
 					   }});
 
 		Operators.Add({Action::CommandPalette, "Command Palette", "Find and run any command", always, [this] {
@@ -300,8 +308,7 @@ namespace studio {
 				// **The reason, where a shortcut would go when there is one.**
 				// A greyed row that does not say why is a row somebody clicks
 				// twice before giving up. See `Operators.hpp`.
-				const std::string right =
-					state.Ready ? Keybinds::Of(op->Id).Text() : state.Reason;
+				const std::string right = state.Ready ? Keybinds::Of(op->Id).Text() : state.Reason;
 
 				if (!right.empty()) {
 					ImGui::SameLine();

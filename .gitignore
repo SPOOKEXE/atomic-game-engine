@@ -28,6 +28,7 @@ package-lock.json
 # Nothing outside mono.vendor/ should ever be a third-party source tree.
 build/
 out/
+dist/
 __pycache__/
 *.pyc
 .opencode/

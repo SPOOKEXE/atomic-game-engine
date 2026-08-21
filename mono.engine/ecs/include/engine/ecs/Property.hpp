@@ -61,17 +61,26 @@ namespace engine::ecs {
 		Declare(owner, descriptor);
 	}
 
-	template <auto Member, auto Low, auto High>
+	template <auto Member, Bound Low, Bound High>
 	void Classes::ClampedProperty(ClassId owner, std::string_view name) {
 		using Component = typename MemberOf<decltype(Member)>::Class;
 		using Value = typename MemberOf<decltype(Member)>::Type;
 
+		// **`Bound` carries a float, so the member has to be one.** This replaces
+		// the older check that the bounds were spelled in the member's own type,
+		// and it buys the same thing: a clamp against a range that is not the one
+		// written at the call is the failure worth refusing, and a member of some
+		// other type reaching this would get one through a conversion nobody
+		// wrote. A clamped integer property would need its own bound type, and
+		// there has never been one.
 		static_assert(
-			std::is_same_v<decltype(Low), Value> && std::is_same_v<decltype(High), Value>,
-			"the bounds must be the member's own type - an implicit conversion here would clamp "
-			"against a range that is not the one written at the call"
+			std::is_same_v<Value, float>,
+			"ClampedProperty's bounds are floats - a member of another type needs a bound type of "
+			"its own rather than a conversion nobody wrote"
 		);
-		static_assert(Low <= High, "the bounds are the wrong way round, so every write would be refused");
+		static_assert(
+			Low.Value() <= High.Value(), "the bounds are the wrong way round, so every write would be refused"
+		);
 
 		PropertyDescriptor descriptor;
 		descriptor.Name = core::Name(name);
@@ -99,7 +108,7 @@ namespace engine::ecs {
 			if (component == nullptr) {
 				return false;
 			}
-			component->*Member = std::clamp(*static_cast<const Value *>(value), Low, High);
+			component->*Member = std::clamp(*static_cast<const Value *>(value), Low.Value(), High.Value());
 			return true;
 		};
 

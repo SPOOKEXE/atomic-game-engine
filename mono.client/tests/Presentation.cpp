@@ -131,7 +131,7 @@ TEST_CASE("particle light properties reach the render batch", "[client][presenta
 	universe.Enter(world, [](Store &store) {
 		const Entity workspace = engine::scene::InstallServices(store);
 		engine::scene::PartDesc parentDescription;
-		parentDescription.Anchored = true;
+		parentDescription.Simulated = false;
 		const Entity parent = engine::scene::MakePart(store, parentDescription);
 		store.SetParent(parent, workspace);
 
@@ -176,7 +176,7 @@ TEST_CASE("a detached particle frame stops pointing into the world", "[client][p
 	universe.Enter(world, [](Store &store) {
 		const Entity workspace = engine::scene::InstallServices(store);
 		engine::scene::PartDesc parentDescription;
-		parentDescription.Anchored = true;
+		parentDescription.Simulated = false;
 		const Entity parent = engine::scene::MakePart(store, parentDescription);
 		store.SetParent(parent, workspace);
 
@@ -1308,14 +1308,14 @@ TEST_CASE("a cross-world pane is handed every row of the world it names", "[clie
 		engine::scene::PartDesc pane;
 		pane.Size = Vector3{10.0f, 8.0f, 0.4f};
 		pane.Frame = engine::core::CFrame(Vector3{0.0f, 4.0f, 0.0f});
-		pane.Anchored = true;
+		pane.Simulated = false;
 		const Entity block = engine::scene::MakePart(store, pane);
 		store.SetParent(block, workspace);
 
 		engine::scene::PartDesc stand;
 		stand.Size = pane.Size;
 		stand.Frame = engine::core::CFrame(Vector3{0.0f, 4.0f, -0.6f});
-		stand.Anchored = true;
+		stand.Simulated = false;
 		const Entity beyond = engine::scene::MakePart(store, stand);
 		store.SetParent(beyond, workspace);
 
@@ -1423,7 +1423,7 @@ TEST_CASE("a cross-world pane in a client's view leads to that client's rooms", 
 			engine::scene::PartDesc slab;
 			slab.Size = Vector3{10.0f, 8.0f, 0.4f};
 			slab.Frame = engine::core::CFrame(Vector3{0.0f, 4.0f, 0.0f});
-			slab.Anchored = true;
+			slab.Simulated = false;
 			const Entity block = engine::scene::MakePart(store, slab);
 			store.SetInstanceName(block, "PortalBlock");
 			store.SetParent(block, workspace);
@@ -1431,7 +1431,7 @@ TEST_CASE("a cross-world pane in a client's view leads to that client's rooms", 
 			engine::scene::PartDesc stand;
 			stand.Size = slab.Size;
 			stand.Frame = engine::core::CFrame(Vector3{0.0f, 4.0f, -0.6f});
-			stand.Anchored = true;
+			stand.Simulated = false;
 			const Entity beyond = engine::scene::MakePart(store, stand);
 			store.SetParent(beyond, workspace);
 			if (auto *look = store.GetMutable<engine::scene::Visual>(beyond)) {
@@ -1444,7 +1444,7 @@ TEST_CASE("a cross-world pane in a client's view leads to that client's rooms", 
 			engine::scene::PartDesc body;
 			body.Size = Vector3{2.0f, 5.0f, 2.0f};
 			body.Frame = engine::core::CFrame(Vector3{markerX, 2.5f, -6.0f});
-			body.Anchored = true;
+			body.Simulated = false;
 			const Entity marker = engine::scene::MakePart(store, body);
 			store.SetInstanceName(marker, "Occupant");
 			store.SetParent(marker, workspace);
@@ -1563,7 +1563,7 @@ TEST_CASE("a hole's picture leaves out the far pane and the stand-in", "[client]
 			engine::scene::PartDesc slab;
 			slab.Size = Vector3{10.0f, 8.0f, 0.4f};
 			slab.Frame = engine::core::CFrame(Vector3{0.0f, 4.0f, 0.0f});
-			slab.Anchored = true;
+			slab.Simulated = false;
 			const Entity block = engine::scene::MakePart(store, slab);
 			store.SetInstanceName(block, "PortalBlock");
 			store.SetParent(block, workspace);
@@ -1571,7 +1571,7 @@ TEST_CASE("a hole's picture leaves out the far pane and the stand-in", "[client]
 			engine::scene::PartDesc stand;
 			stand.Size = slab.Size;
 			stand.Frame = engine::core::CFrame(Vector3{0.0f, 4.0f, -0.6f});
-			stand.Anchored = true;
+			stand.Simulated = false;
 			const Entity beyond = engine::scene::MakePart(store, stand);
 			store.SetParent(beyond, workspace);
 

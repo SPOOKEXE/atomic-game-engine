@@ -82,7 +82,7 @@ namespace {
 		PartDesc desc;
 		desc.Frame = CFrame(where);
 		desc.Size = Vector3{12.0f, 2.0f, 12.0f};
-		desc.Anchored = true;
+		desc.Simulated = false;
 		desc.Class = klass;
 
 		const Entity pad = MakePart(store, desc);

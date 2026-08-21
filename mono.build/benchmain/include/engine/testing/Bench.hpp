@@ -142,6 +142,17 @@ namespace engine::testing {
 
 	// Registration object. A namespace-scope static, one per macro use.
 	struct BenchDeclaration {
+		// Registers one benchmark as a side effect of being constructed.
+		//
+		// @param suite      Which suite it belongs to, for selective runs.
+		// @param name       What the row is called in the report.
+		// @param iterations How many times the body runs per sample. The
+		//        divisor for a per-call figure, so a body doing one cheap thing
+		//        needs a large number here to rise above timer noise.
+		// @param body       The work being measured.
+		// @param unit       What one iteration counts as, which decides whether
+		//        the report divides by `iterations` or by something the body
+		//        knows about.
 		BenchDeclaration(
 			std::string_view suite,
 			std::string_view name,
@@ -154,8 +165,15 @@ namespace engine::testing {
 	};
 }
 
+// Token pasting, in the two steps it takes.
+//
+// **Two macros because one does not work.** `a##b` pastes its arguments before
+// they are expanded, so a single macro given `__LINE__` produces the identifier
+// `MonoBench__LINE__`. The outer one expands first and the inner one pastes.
+//@{
 #define ENGINE_BENCH_CONCAT_(a, b) a##b
 #define ENGINE_BENCH_CONCAT(a, b) ENGINE_BENCH_CONCAT_(a, b)
+//@}
 
 // Declares a benchmark whose body runs `iterations` times per sample.
 //

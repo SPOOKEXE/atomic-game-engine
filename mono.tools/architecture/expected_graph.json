@@ -201,6 +201,7 @@
         "collision",
         "core",
         "ecs",
+        "effects",
         "gui",
         "parallel",
         "physics",
@@ -259,6 +260,26 @@
       ],
       "requires": "MONO_BUILD_CLIENT"
     },
+    "launcher": {
+      "tier": "client",
+      "links": [
+        "assets",
+        "collision",
+        "core",
+        "ecs",
+        "effects",
+        "graph",
+        "gui",
+        "msl",
+        "parallel",
+        "render",
+        "resources",
+        "scene",
+        "spatial",
+        "ui"
+      ],
+      "requires": "MONO_BUILD_CLIENT"
+    },
     "linecount": {
       "tier": "shared",
       "links": [
@@ -303,6 +324,11 @@
         "core",
         "net"
       ]
+    },
+    "nodegraph": {
+      "tier": "client",
+      "links": [],
+      "requires": "MONO_BUILD_CLIENT"
     },
     "parallel": {
       "tier": "shared",
@@ -393,6 +419,7 @@
         "delivery",
         "discord",
         "ecs",
+        "effects",
         "examples",
         "game",
         "graph",
@@ -444,6 +471,7 @@
         "msl",
         "net",
         "network",
+        "nodegraph",
         "parallel",
         "physics",
         "render",
@@ -483,7 +511,7 @@
       ],
       "requires": "MONO_BUILD_CLIENT"
     },
-    "unified_server_client": {
+    "unified_tests": {
       "tier": "client",
       "links": [
         "assets",
@@ -575,6 +603,26 @@
       ],
       "requires": "MONO_BUILD_CLIENT"
     },
+    "launcher": {
+      "tier": "client",
+      "links": [
+        "assets",
+        "collision",
+        "core",
+        "ecs",
+        "effects",
+        "graph",
+        "gui",
+        "msl",
+        "parallel",
+        "render",
+        "resources",
+        "scene",
+        "spatial",
+        "ui"
+      ],
+      "requires": "MONO_BUILD_CLIENT"
+    },
     "server": {
       "tier": "server",
       "links": [
@@ -587,6 +635,7 @@
         "delivery",
         "discord",
         "ecs",
+        "effects",
         "examples",
         "game",
         "graph",
@@ -628,6 +677,7 @@
         "msl",
         "net",
         "network",
+        "nodegraph",
         "parallel",
         "physics",
         "render",
@@ -642,7 +692,7 @@
       ],
       "requires": "MONO_BUILD_CLIENT"
     },
-    "unified_server_client": {
+    "unified_tests": {
       "tier": "client",
       "links": [
         "assets",

@@ -188,12 +188,30 @@ REM build should show what it is compiling and nothing else. It is safe to
 REM re-run every time - CMake reuses the cache and does nothing when no
 REM CMakeLists.txt has changed.
 REM
+REM **Loud when CI is set, and that is not a preference.** On a hosted runner
+REM this script's output is the only copy of the build anybody will ever see,
+REM and the vendored SDL configure decides there what its feature checks found.
+REM With the redirect in place a `#error SDL_JOYSTICK_RAWINPUT requires
+REM SDL_JOYSTICK_DINPUT || SDL_JOYSTICK_XINPUT` arrives with no way to tell
+REM whether the header check failed or never ran - not one `Performing Test`
+REM line reaches the log. A person at a keyboard can just re-run it; a runner
+REM cannot be asked.
+REM
+REM `MONO_CONFIGURE_VERBOSE` does the same thing deliberately, for when the
+REM machine that needs to see it is this one.
+REM
 REM The build is by directory rather than by preset, which is the one place
 REM these two lines are not symmetrical, and the reason is in run-studio.bat:
 REM `--build --preset` reads CMakePresets.json out of the working directory and
 REM has no `-S` to say otherwise, so it works only when the script is run from
 REM the repository root. The directory is derived from the preset name anyway.
+if defined CI goto :configure_loud
+if defined MONO_CONFIGURE_VERBOSE goto :configure_loud
 cmake -S "%ROOT%" --preset "%PRESET%" >nul
+goto :configure_checked
+:configure_loud
+cmake -S "%ROOT%" --preset "%PRESET%"
+:configure_checked
 if not errorlevel 1 goto :configured
 >&2 echo configure failed. Re-run it to see why:
 >&2 echo   cmake -S "%ROOT%" --preset "%PRESET%"

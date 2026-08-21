@@ -1,6 +1,7 @@
 #include "ThreadAffinity.hpp"
 
 #include <engine/core/Clock.hpp>
+#include <engine/core/HeapProfile.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/parallel/Jobs.hpp>
@@ -173,6 +174,13 @@ namespace engine::parallel {
 		}
 
 		void WorkerLoop(unsigned workerIndex) {
+			// **The whole thread, not each batch.** A heap tag is per thread, so
+			// opening one here means everything a worker ever allocates is
+			// attributed to the pool rather than landing in the untagged pile
+			// beside the process's static initialisers - which is where a leak
+			// on a job thread would otherwise be invisible.
+			ENGINE_HEAP_SCOPE("jobs.worker");
+
 			auto &pool = Get();
 			uint64_t seen = 0;
 

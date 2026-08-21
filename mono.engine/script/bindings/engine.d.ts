@@ -25,7 +25,24 @@ declare interface Vector3 {
 	add(other: Vector3): Vector3;
 	sub(other: Vector3): Vector3;
 	mul(other: Vector3 | number): Vector3;
+	div(other: Vector3 | number): Vector3;
+	// `//` in Luau: each quotient floored.
+	idiv(other: Vector3 | number): Vector3;
+	// Unary minus, which is an operator in Luau and has no method form there.
+	neg(): Vector3;
 	Equals(other: Vector3): boolean;
+	Abs(): Vector3;
+	Ceil(): Vector3;
+	Floor(): Vector3;
+	Sign(): Vector3;
+	Cross(other: Vector3): Vector3;
+	Dot(other: Vector3): number;
+	// Unsigned without an axis, signed by which side of `axis` the turn goes with one.
+	Angle(other: Vector3, axis?: Vector3): number;
+	FuzzyEq(other: Vector3, epsilon?: number): boolean;
+	Lerp(goal: Vector3, alpha: number): Vector3;
+	Max(vector: Vector3): Vector3;
+	Min(vector: Vector3): Vector3;
 }
 
 declare interface Color3 {
@@ -37,15 +54,66 @@ declare interface Color3 {
 
 declare interface CFrame {
 	readonly Position: Vector3;
+	readonly X: number;
+	readonly Y: number;
+	readonly Z: number;
+
+	// This frame's rotation at the world origin.
+	readonly Rotation: CFrame;
+
+	// The three basis columns. `XVector`/`YVector` are the same directions as
+	// `RightVector`/`UpVector`; `ZVector` is the negation of `LookVector`.
+	readonly RightVector: Vector3;
+	readonly UpVector: Vector3;
+	readonly LookVector: Vector3;
+	readonly XVector: Vector3;
+	readonly YVector: Vector3;
+	readonly ZVector: Vector3;
+
+	// **Methods, where Luau writes operators.** JavaScript has no operator
+	// overloading, so `a.mul(b)` is the honest spelling rather than pretending
+	// the language has something it does not.
 	mul(other: CFrame): CFrame;
+	mul(point: Vector3): Vector3;
+	add(offset: Vector3): CFrame;
+	sub(offset: Vector3): CFrame;
+
+	Inverse(): CFrame;
+	Orthonormalize(): CFrame;
+	Lerp(goal: CFrame, alpha: number): CFrame;
+	ToWorldSpace(other: CFrame): CFrame;
+	ToObjectSpace(other: CFrame): CFrame;
+	PointToWorldSpace(point: Vector3): Vector3;
+	PointToObjectSpace(point: Vector3): Vector3;
+	VectorToWorldSpace(direction: Vector3): Vector3;
+	VectorToObjectSpace(direction: Vector3): Vector3;
+	AngleBetween(other: CFrame): number;
+	FuzzyEq(other: CFrame, epsilon?: number): boolean;
+
+	// **Arrays, where Luau returns several values.** Same reason as the methods
+	// above: JavaScript has no multiple return.
+	GetComponents(): number[];
+	components(): number[];
+	ToEulerAnglesXYZ(): [number, number, number];
+	ToEulerAnglesYXZ(): [number, number, number];
+	ToOrientation(): [number, number, number];
+	ToAxisAngle(): [Vector3, number];
 }
 
 declare const Vector3: {
 	new: (x?: number, y?: number, z?: number) => Vector3;
 
+	// Capitalised, because Roblox capitalises these two. The Luau half carries
+	// the argument.
+	FromNormalId: (normal: Enum.NormalId) => Vector3;
+	FromAxis: (axis: Enum.Axis) => Vector3;
+
 	// Lowercase, because Roblox's are. The Luau half carries the argument.
 	readonly zero: Vector3;
 	readonly one: Vector3;
+	readonly xAxis: Vector3;
+	readonly yAxis: Vector3;
+	readonly zAxis: Vector3;
 };
 
 declare const Color3: {
@@ -58,10 +126,36 @@ declare const CFrame: {
 	new: {
 		(x?: number, y?: number, z?: number): CFrame;
 		(position: Vector3): CFrame;
+		(x: number, y: number, z: number, qX: number, qY: number, qZ: number, qW: number): CFrame;
+		(
+			x: number, y: number, z: number,
+			r00: number, r01: number, r02: number,
+			r10: number, r11: number, r12: number,
+			r20: number, r21: number, r22: number
+		): CFrame;
 	};
-	// Radians, because Roblox's is radians -- while `Orientation` is degrees.
-	Angles: (pitch: number, yaw: number, roll: number) => CFrame;
+
+	// The identity: no turn, at the origin.
+	identity: CFrame;
+
+	// Radians, because Roblox's is radians - while `Orientation` is degrees.
+	//
+	// X, then Y, then Z, which is what Roblox means by `Angles` and by
+	// `fromEulerAnglesXYZ`. Until v0.18 this name was bound to the Y-X-Z
+	// composition, so a pasted script turned the wrong way when it named two
+	// axes at once.
+	Angles: (rx: number, ry: number, rz: number) => CFrame;
+	fromEulerAnglesXYZ: (rx: number, ry: number, rz: number) => CFrame;
+
+	// Y, then X, then Z. The order `BasePart.Orientation` round-trips through.
+	fromEulerAnglesYXZ: (rx: number, ry: number, rz: number) => CFrame;
+	fromOrientation: (rx: number, ry: number, rz: number) => CFrame;
+
 	lookAt: (from: Vector3, to: Vector3, up?: Vector3) => CFrame;
+	lookAlong: (at: Vector3, direction: Vector3, up?: Vector3) => CFrame;
+	fromAxisAngle: (axis: Vector3, angle: number) => CFrame;
+	fromMatrix: (position: Vector3, vX: Vector3, vY: Vector3, vZ?: Vector3) => CFrame;
+	fromRotationBetweenVectors: (from: Vector3, to: Vector3) => CFrame;
 };
 
 // --- signals ---------------------------------------------------------------
@@ -323,6 +417,13 @@ declare interface FocusLostSignal {
 
 declare interface RaycastParams {
 	CollisionGroup: string;
+
+	// The most entities an overlap or a cast will report. Ignored by `Raycast`,
+	// which reports one hit or none.
+	//
+	// A result exactly this long may have been truncated, which is the author's
+	// own instruction rather than a silent loss. Clamped to 65536.
+	MaxParts: number;
 }
 
 declare const RaycastParams: {
@@ -347,6 +448,7 @@ declare namespace Enum {
 	interface ApplyStrokeMode extends EnumItem { readonly __enum: "ApplyStrokeMode"; }
 	interface AspectType extends EnumItem { readonly __enum: "AspectType"; }
 	interface AutomaticSize extends EnumItem { readonly __enum: "AutomaticSize"; }
+	interface Axis extends EnumItem { readonly __enum: "Axis"; }
 	interface BorderMode extends EnumItem { readonly __enum: "BorderMode"; }
 	interface CameraType extends EnumItem { readonly __enum: "CameraType"; }
 	interface ContextActionResult extends EnumItem { readonly __enum: "ContextActionResult"; }
@@ -413,6 +515,11 @@ declare namespace Enum {
 		readonly X: AutomaticSize;
 		readonly Y: AutomaticSize;
 		readonly XY: AutomaticSize;
+	};
+	const Axis: {
+		readonly X: Axis;
+		readonly Y: Axis;
+		readonly Z: Axis;
 	};
 	const BorderMode: {
 		readonly Outline: BorderMode;
@@ -1652,6 +1759,11 @@ declare interface Workspace extends Service {
 	MaxSurfaces: number;
 	SurfaceBounces: number;
 	Raycast(origin: Vector3, direction: Vector3, params?: RaycastParams): RaycastResult | null;
+	RaycastThroughPortals(origin: Vector3, direction: Vector3, params?: RaycastParams): RaycastResult | null;
+	OverlapBox(centre: Vector3, size: Vector3, params?: RaycastParams): Instance[];
+	OverlapSphere(centre: Vector3, radius: number, params?: RaycastParams): Instance[];
+	BlockCast(from: CFrame, size: Vector3, motion: Vector3, params?: RaycastParams): Instance[];
+	SphereCast(from: Vector3, radius: number, motion: Vector3, params?: RaycastParams): Instance[];
 }
 
 declare interface Lighting extends Service {

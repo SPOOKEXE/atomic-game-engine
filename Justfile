@@ -73,6 +73,7 @@ client: (build "client")
 server: (build "server")
 cdn: (build "cdn")
 studio: (build "studio")
+launcher: (build "launcher")
 
 # Only the suites a change could have affected, by cascading signature hash.
 test: build
@@ -492,6 +493,18 @@ luau-lsp:
 check: format-check build test-all test-architecture shader-check check-one-node-graph bindings-check typecheck typecheck-editor determinism replay-check orphan-check
     @echo "check ok - format, build, tests, architecture, shaders, bindings, typecheck, editor, determinism, replay, orphans"
 
+# Run the launcher - the window that starts any of the others.
+#
+# **Builds only itself, and that is worth knowing before the first run.** This
+# launcher links none of the programs it starts; it finds them staged beside it
+# and asks each one what it accepts. So a `just launch` in a tree where nothing
+# else has been built opens a window with every mode greyed out and the reason
+# on each row. `just build` first, or build the one program the mode needs.
+#
+# `just launch --mode cdn` opens straight onto a mode.
+launch *args: (build "launcher")
+    ./{{build}}/launcher/launcher {{args}}
+
 # Run the client. `just run --stats` passes flags straight through.
 run *args: (build "client")
     ./{{build}}/client/client {{args}}
@@ -614,6 +627,87 @@ client-smoke: (build "client")
 client-exit: (build "client")
     ./scripts/client-exit-test.sh ./{{build}}/client/client
 
+# Run several scenes for five minutes and fail if the heap keeps climbing.
+#
+# **The check that turns "the client feels heavier after a while" into an exit
+# code.** A leak is not a spike: it is a slope, and no frame profiler can show
+# one because every individual frame looks fine. `core::HeapProfile` samples
+# live bytes per tag once a second, fits a least-squares line to each tag over
+# the run less its warm-up, and the client exits 3 naming any tag whose line
+# both climbs faster than `limit` and actually *fits* one - a level load is a
+# step, and a step is not a leak.
+#
+# **Five scenes at a minute each, and it is a minute of wall clock rather than
+# of simulation.** Headless the client runs several thousand frames a second,
+# so a minute here is a quarter of a million frames and an hour of ordinary
+# play in frame terms, while the simulation still ticks a real 60 Hz. Both axes
+# are exercised because leaks live on both: a per-frame one and a per-tick one
+# are different bugs.
+#
+# The scenes are chosen to be different from each other rather than to be
+# heavy - particles, portals, meshes, interface and physics allocate in
+# different places, and a soak of one scene five times is one code path five
+# times.
+#
+# **`--heap-warmup` is not slack in the limit, and raising the limit is not a
+# substitute for it.** Content arrives over the first several seconds and the
+# world settles after it; fitting a line through that start drags it through
+# everything after. If a scene needs longer to settle, give it longer.
+#
+# Not part of `just check`, for `client-smoke`'s reason: it needs a GPU, and a
+# build container with none would fail a check about memory for a reason that
+# is not about memory.
+#
+# The reports are kept in `.cache/heap-<scene>.txt` whether the run passes or
+# fails - a soak that went green is the baseline the next one is read against.
+#
+# Arguments are positional, as every recipe's are here - `seconds=300` after a
+# recipe name is a string called "seconds=300", not a named argument, and the
+# run that taught that lesson passed it to `--profile-seconds` and soaked for
+# however long the timeout was.
+#
+#   just heap-soak                         # five scenes, a minute each
+#   just heap-soak 300                     # five minutes each, so twenty-five
+#   just heap-soak 60 8192 15 "Stress"     # one scene, everything spelled out
+heap-soak seconds="60" limit="8192" warmup="15" scenes="Rings Particles Meshes Interface StressPhysics": (build "client")
+    #!/usr/bin/env bash
+    set -uo pipefail
+    mkdir -p .cache
+    failed=""
+    for scene in {{scenes}}; do
+        path="{{build}}/assets/examples/$scene.luau"
+        if [ ! -f "$path" ]; then
+            echo "FAIL: no staged scene at $path"
+            exit 1
+        fi
+        report=".cache/heap-$scene.txt"
+        echo "--- $scene: {{seconds}}s, failing above {{limit}} B/s after a {{warmup}}s warm-up"
+        # Bounded, because this recipe cannot report a hang otherwise. The frame
+        # budget is effectively unreachable; `--profile-seconds` is what ends it.
+        timeout $(( {{seconds}} + 120 )) ./{{build}}/client/client \
+            --headless --frames 1000000000 --profile-seconds {{seconds}} \
+            --width 640 --height 360 --script "$path" \
+            --heap-report "$report" --heap-growth-limit {{limit}} --heap-warmup {{warmup}} \
+            > ".cache/heap-$scene.log" 2>&1
+        status=$?
+        if [ $status -eq 3 ]; then
+            echo "LEAK in $scene:"
+            grep "heap:" ".cache/heap-$scene.log" | tail -20
+            failed="$failed $scene"
+        elif [ $status -ne 0 ]; then
+            echo "FAIL: $scene exited $status (124 means it never exited at all)"
+            tail -20 ".cache/heap-$scene.log"
+            failed="$failed $scene"
+        else
+            grep -h "heap: steady\|heap: .* live" ".cache/heap-$scene.log" | tail -2
+        fi
+    done
+    if [ -n "$failed" ]; then
+        echo "heap-soak FAILED:$failed - reports in .cache/heap-*.txt"
+        exit 1
+    fi
+    echo "heap ok - every scene reached a steady state, reports in .cache/heap-*.txt"
+
 # Drag the editor's window and check it is still alive afterwards.
 #
 # **The one bug class a headless run cannot reach.** The viewport shows last
@@ -651,16 +745,85 @@ materials count="100": (build "contentimport")
 serve *args: (build "cdn")
     ./{{build}}/cdn/cdn {{args}}
 
-# A server and a client in one process, with no network between them.
+# Every arrangement of a client and a server in one process.
 #
-# The diagnostic for "the replicated world is empty". `--connect` puts a
-# handshake, a socket, framing, encryption and a bandwidth budget between the
-# thing that serialises and the thing that draws, and a blank scene is equally
-# consistent with any of them. This cuts all of it and prints a column per
-# stage, so the first column that stops making sense is the answer.
-# mono.unified_server_client/AGENTS.md says how to read it.
-unified *args: (build "unified_server_client")
-    ./{{build}}/unified_server_client/unified_server_client {{args}}
+# The diagnostic for "the replicated world is empty", and the place the modules
+# are made to agree with each other. `--arrangement direct` cuts the handshake,
+# the socket, the framing, the encryption and the bandwidth budget out of the
+# middle and prints a column per stage, so the first column that stops making
+# sense is the answer. The other eleven put those back one axis at a time and
+# add content and discovery beside them.
+#
+# Every module's own report is printed underneath, and then the claims that
+# span two of them - which is the part no module's suite can check, because no
+# module links the other end of its own seams.
+#
+#   just unified                              # the bisection, one screen of it
+#   just unified --all                        # all twelve, one line each
+#   just unified --arrangement lossy+relayed  # content over a link that loses
+#
+# mono.unified_tests/AGENTS.md says how to read it.
+unified *args: (build "unified_tests")
+    ./{{build}}/unified_tests/unified_tests {{args}}
+
+# Every arrangement, soaked, with the heap profiler watching.
+#
+# **`just heap-soak`'s question asked of the seams rather than of a scene.**
+# That one runs the client on five scenes and asks whether drawing a world
+# leaks; this runs every way the halves can be wired and asks whether *crossing*
+# one does. They find different things: a leak in the relay's reassembly or in
+# a session's retransmission buffer is invisible to a client that is not
+# connected to anything, and is what this catches.
+#
+# **One process per arrangement, deliberately.** A single process running all
+# twelve in turn has one heap history with twelve different workloads in it, and
+# a slope fitted across that is fitted across the changeovers. Separate
+# processes give each arrangement a history of its own.
+#
+# The arrangements come from the program rather than from a list here, so an
+# axis added to `unified::Arrangement` is soaked without this recipe changing.
+#
+# Not part of `just check`: at the default it is five minutes, and a check
+# somebody skips is a check that is not run.
+#
+# Arguments are positional, as every recipe's are here.
+#
+#   just unified-soak                # twelve arrangements, 25s each
+#   just unified-soak 60             # twelve minutes
+#   just unified-soak 30 4096 10     # tighter limit, longer warm-up
+unified-soak seconds="25" limit="8192" warmup="8" entities="64": (build "unified_tests")
+    #!/usr/bin/env bash
+    set -uo pipefail
+    mkdir -p .cache
+    program="{{build}}/unified_tests/unified_tests"
+    failed=""
+    for arrangement in $("$program" --list-arrangements); do
+        report=".cache/heap-unified-$arrangement.txt"
+        log=".cache/heap-unified-$arrangement.log"
+        echo "--- $arrangement: {{seconds}}s, failing above {{limit}} B/s after a {{warmup}}s warm-up"
+        # Bounded, because this recipe cannot report a hang otherwise.
+        timeout $(( {{seconds}} + 120 )) "$program" \
+            --arrangement "$arrangement" --entities {{entities}} --seconds {{seconds}} --quiet \
+            --heap-report "$report" --heap-growth-limit {{limit}} --heap-warmup {{warmup}} \
+            > "$log" 2>&1
+        status=$?
+        if [ $status -eq 3 ]; then
+            echo "LEAK in $arrangement:"
+            grep "heap:" "$log" | tail -20
+            failed="$failed $arrangement"
+        elif [ $status -ne 0 ]; then
+            echo "FAIL: $arrangement exited $status (124 means it never exited at all)"
+            tail -20 "$log"
+            failed="$failed $arrangement"
+        else
+            grep -h "heap: steady\|heap: .* live\|agrees with every other" "$log" | tail -3
+        fi
+    done
+    if [ -n "$failed" ]; then
+        echo "unified-soak FAILED:$failed - reports in .cache/heap-unified-*.txt"
+        exit 1
+    fi
+    echo "unified ok - every arrangement reached a steady state, reports in .cache/heap-unified-*.txt"
 
 # Two runs of one scene, compared byte for byte.
 #
@@ -757,7 +920,7 @@ check-cdn-is-bare:
         || (echo "FAIL: the server was built into a cdn-only preset" && exit 1)
     @echo "cdn contains no graphics stack and nothing else's program"
 
-# There is one node graph in this repository and it is `mono.vendor/nodegraph`.
+# There is one node graph in this repository and it is `mono.engine/nodegraph`.
 #
 # **The rule `D00113` spent two versions carrying.** That entry was open because
 # this design existed twice - the editor's `studio/NodeGraph.hpp` and the
@@ -771,22 +934,32 @@ check-cdn-is-bare:
 # anybody noticing until the first divergence - which is exactly what AGENTS.md
 # rule 6 says to make the build check rather than leave in somebody's memory.
 #
-# Extend the library where it lives. `mono.vendor/nodegraph` is ours, it takes a
-# pull request, and this repository pins whatever commit it lands on.
+# Extend the library where it lives. `mono.engine/nodegraph` is ours: it was a
+# vendored submodule against a separate repository until v0.18.0 and is a
+# first-party engine module now, so extending it is an edit here rather than a
+# pull request against somewhere else.
+#
+# The studio's Demo Nodes set is not a second implementation. It registers types
+# through that module's public `NodeTypes::Register` and implements none of the
+# model, which is the seam this rule is protecting rather than one it forbids.
 check-one-node-graph:
     #!/usr/bin/env bash
     set -euo pipefail
-    found=$(grep -rlE 'namespace[[:space:]]+nodegraph[[:space:]]*\{' \
+    # `(engine::)?` because the module's own namespace is `engine::nodegraph`
+    # since v0.18.0, and a second implementation would plausibly be spelled
+    # either way. Its own directory is the one place the name is allowed.
+    found=$(grep -rlE 'namespace[[:space:]]+(engine::)?nodegraph[[:space:]]*\{' \
         --include='*.hpp' --include='*.cpp' \
-        mono.build mono.cdn mono.client mono.discord mono.engine mono.network \
-        mono.server mono.studio mono.tools mono.unified_server_client || true)
+        mono.build mono.cdn mono.client mono.discord mono.engine mono.launcher mono.network \
+        mono.server mono.studio mono.tools mono.unified_tests \
+        | grep -v '^mono\.engine/nodegraph/' || true)
     if [ -n "$found" ]; then
         echo "FAIL: a second node graph implementation, in first-party code:"
         echo "$found" | sed 's/^/  /'
-        echo "The one this repository has is mono.vendor/nodegraph. Extend it there."
+        echo "The one this repository has is mono.engine/nodegraph. Extend it there."
         exit 1
     fi
-    echo "one node graph, and it is vendored"
+    echo "one node graph, and it is engine/nodegraph"
 
 # The API reference, from the comments already in the headers.
 #
@@ -831,7 +1004,17 @@ docs-check: (build "docgen") docs
 # Every first-party .cpp and .hpp. The directory list is explicit rather than
 # `find .` so that mono.vendor/ is never touched - reformatting a submodule
 # turns every future update into a conflict.
-mono_sources := "mono.engine mono.client mono.server mono.unified_server_client mono.cdn mono.network mono.discord mono.tools mono.build"
+# Every directory holding first-party C++, and `mono.vendor` is the only one
+# left out - their code, their style, and reformatting it would make every
+# future bump a merge conflict.
+#
+# **`mono.studio` was missing until v0.18.0 and that was not deliberate.** It is
+# the largest first-party module in the repository and it had never been
+# formatted or checked, so the drift had been accumulating for as long as the
+# list has existed: 722 violations across 49 files the first time it was asked.
+# A list that is a subset of what it claims to cover is worse than a shorter
+# claim, because `format-check ok` reads as "the tree is formatted".
+mono_sources := "mono.engine mono.client mono.server mono.studio mono.unified_tests mono.cdn mono.launcher mono.network mono.discord mono.tools mono.build"
 
 # Finding it is two problems, not one.
 #

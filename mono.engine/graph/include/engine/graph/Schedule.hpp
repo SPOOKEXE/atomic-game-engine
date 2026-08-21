@@ -29,6 +29,10 @@ namespace engine::graph {
 		Transfer,
 	};
 
+	// One line naming a queue, for a message a person reads.
+	//
+	// @param queue The queue.
+	// @return Its name. Never null, and never empty.
 	const char *Describe(ExecutionQueue queue);
 
 	// Whether work on a separate device queue may overlap another branch.
@@ -38,6 +42,10 @@ namespace engine::graph {
 		Serial,
 	};
 
+	// One line naming a policy, for a message a person reads.
+	//
+	// @param policy The policy.
+	// @return Its name. Never null, and never empty.
 	const char *Describe(AsyncPolicy policy);
 
 	// Which visibility domain a draw pass asks the renderer to use. Dedicated
@@ -50,19 +58,37 @@ namespace engine::graph {
 		Occlusion,
 	};
 
+	// One line naming a culling mode, for a message a person reads.
+	//
+	// @param mode The mode.
+	// @return Its name. Never null, and never empty.
 	const char *Describe(CullingMode mode);
 
 	// One node after dependency and queue classification.
 	struct ScheduledNode {
+		// The authored node this classification is about.
 		NodeId Node;
+
+		// Which queue its work belongs on, decided here rather than by the
+		// backend so the schedule reads the same on a device with one queue and
+		// a device with three.
 		ExecutionQueue Queue = ExecutionQueue::Graphics;
+
+		// What the author asked for about overlapping. `AsyncEligible` below is
+		// what the scheduler concluded, and the two are deliberately separate:
+		// asking is not the same as being allowed.
 		AsyncPolicy Async = AsyncPolicy::Automatic;
+
+		// Which visibility domain a draw pass asked for, or `Inherit` to take
+		// the one the frame is already using.
 		CullingMode Culling = CullingMode::Inherit;
 
 		// Compute workgroups. Raster, CPU, and transfer nodes leave these at one.
+		//@{
 		uint32_t GroupsX = 1;
 		uint32_t GroupsY = 1;
 		uint32_t GroupsZ = 1;
+		//@}
 
 		// Whether this node may overlap another queue in its wave.
 		bool AsyncEligible = false;
@@ -70,6 +96,8 @@ namespace engine::graph {
 
 	// Nodes in one wave have no dependency on one another.
 	struct ExecutionWave {
+		// The nodes in this wave. Order within a wave carries no meaning, which
+		// is what "no dependency on one another" amounts to.
 		std::vector<ScheduledNode> Nodes;
 
 		// True when the wave contains work for more than one queue. This is
@@ -77,23 +105,55 @@ namespace engine::graph {
 		bool Concurrent = false;
 	};
 
+	// A whole graph reduced to waves that must run in order.
+	//
+	// This is the device-free half: it says what depends on what and which work
+	// could overlap. `FrameExecutionPlan` is what turns it into the invocations
+	// and the traffic one frame actually has.
 	struct ExecutionSchedule {
+		// The waves, in the order they must run. Everything in one wave may run
+		// at once; nothing in wave N may start before wave N-1 has finished.
 		std::vector<ExecutionWave> Waves;
 
+		// Empties the schedule so one instance can be recompiled in place.
 		void Clear() {
 			Waves.clear();
 		}
 	};
 
+	// Why a graph could not be scheduled.
+	//
+	// **Named rather than a bool**, because each of these is a mistake in an
+	// authored graph and `CompileSchedule` hands back the offending node beside
+	// it - a person needs both to know what to change.
 	enum class ScheduleStatus : uint8_t {
+		// The schedule was produced.
 		Ok,
+
+		// The graph itself did not hold together well enough to walk.
 		InvalidGraph,
+
+		// A node reads a resource nothing writes, so its input would be
+		// whatever the last frame left behind.
 		MissingProducer,
+
+		// A dependency crosses a scope that cannot carry it - a frame node
+		// waiting on something produced once per view has no single answer to
+		// wait for.
 		ScopeDependency,
+
+		// The dependencies form a loop, so no order exists.
 		Cycle,
+
+		// An authored hint contradicts itself, such as demanding a queue the
+		// node's own work cannot run on.
 		InvalidHint,
 	};
 
+	// One line naming a status, for a message a person reads.
+	//
+	// @param status What went wrong.
+	// @return Its name. Never null, and never empty.
 	const char *Describe(ScheduleStatus status);
 
 	// Derives data dependencies, a stable topological order, and independent

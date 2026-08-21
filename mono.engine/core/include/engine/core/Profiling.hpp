@@ -1,10 +1,31 @@
 #pragma once
 
-// The engine profiler. One macro feeds both consumers:
+// The engine profiler. One macro feeds three consumers:
 //
 //   - Tracy, for the real thing - a second process, every thread, full history.
 //   - FrameGraph, for the in-game F5 overlay, which has to work with nothing
 //     attached and on a machine that is not the developer's.
+//   - HeapProfile, for what the span *allocated* rather than what it cost.
+//
+// **The heap tag is on this macro rather than on a macro of its own, and that
+// is what makes the heap profiler granular at all.** These scopes are already
+// placed where the work is, several hundred of them across the engine, and a
+// second family of macros beside them would be a second set of placements to
+// keep in step - which is the shape of a thing that is right on the day it is
+// written and wrong a month later. `ENGINE_HEAP_SCOPE` still exists, for the
+// places that allocate and are not worth timing.
+//
+// `ENGINE_PROFILE_DYNAMIC` tags with its **fallback literal** and not its
+// runtime name. A tag tree node is never removed, so a caller naming a zone per
+// script chunk would fill the tree and every tag after it would be charged to
+// an ancestor. `ENGINE_PROFILE_DYNAMIC_STABLE` does pass its name through,
+// because its callers name a bounded set - the scheduler names its systems -
+// and the tag tree copies what it is given rather than keeping the view.
+//
+// Heap tags are pushed whether or not anything is collecting, which the frame
+// scopes are not. Allocation happens whether or not the panel is open, and a
+// tree that only knew about the bytes taken since somebody pressed F5 would
+// answer the wrong question at the moment it was asked.
 //
 // The planned userland profiler is a different thing entirely. It belongs at
 // L13 and shares no code with this engine profiler.
@@ -12,6 +33,7 @@
 // @tier L0 · shared
 
 #include <engine/core/FrameGraph.hpp>
+#include <engine/core/HeapProfile.hpp>
 
 #if defined(ENGINE_TRACY)
 #include <tracy/Tracy.hpp>
@@ -49,6 +71,7 @@
 // @param category ProfileCategory used by FrameGraph.
 #define ENGINE_PROFILE_CAT(name, category)                                                                   \
 	ZoneNamedN(ENGINE_PROFILE_CONCAT(engineProfileZone_, __LINE__), name, true);                             \
+	ENGINE_HEAP_SCOPE(name);                                                                                 \
 	::engine::core::FrameGraph::Scope ENGINE_PROFILE_CONCAT(engineProfileScope_, __LINE__) {                 \
 		name, category                                                                                       \
 	}
@@ -75,6 +98,7 @@
 			ENGINE_PROFILE_CONCAT(engineProfileZone_, __LINE__).Name((view).data(), (view).size());          \
 		}                                                                                                    \
 	} while (0);                                                                                             \
+	ENGINE_HEAP_SCOPE(fallback);                                                                             \
 	::engine::core::FrameGraph::CopiedScope ENGINE_PROFILE_CONCAT(engineProfileScope_, __LINE__) {           \
 		fallback, view, category                                                                             \
 	}
@@ -101,6 +125,7 @@
 			ENGINE_PROFILE_CONCAT(engineProfileZone_, __LINE__).Name((view).data(), (view).size());          \
 		}                                                                                                    \
 	} while (0);                                                                                             \
+	ENGINE_HEAP_SCOPE(view);                                                                                 \
 	::engine::core::FrameGraph::Scope ENGINE_PROFILE_CONCAT(engineProfileScope_, __LINE__) {                 \
 		view, category                                                                                       \
 	}
@@ -122,6 +147,7 @@
 // @param name Stable name used by FrameGraph.
 // @param category ProfileCategory used by FrameGraph.
 #define ENGINE_PROFILE_CAT(name, category)                                                                   \
+	ENGINE_HEAP_SCOPE(name);                                                                                 \
 	::engine::core::FrameGraph::Scope ENGINE_PROFILE_CONCAT(engineProfileScope_, __LINE__) {                 \
 		name, category                                                                                       \
 	}
@@ -135,6 +161,7 @@
 // @param view Runtime string view copied by FrameGraph when collected.
 // @param category ProfileCategory used by FrameGraph.
 #define ENGINE_PROFILE_DYNAMIC(fallback, view, category)                                                     \
+	ENGINE_HEAP_SCOPE(fallback);                                                                             \
 	::engine::core::FrameGraph::CopiedScope ENGINE_PROFILE_CONCAT(engineProfileScope_, __LINE__) {           \
 		fallback, view, category                                                                             \
 	}
@@ -149,6 +176,7 @@
 // @param view Runtime string view backed by stable caller-owned storage.
 // @param category ProfileCategory used by FrameGraph.
 #define ENGINE_PROFILE_DYNAMIC_STABLE(fallback, view, category)                                              \
+	ENGINE_HEAP_SCOPE(view);                                                                                 \
 	::engine::core::FrameGraph::Scope ENGINE_PROFILE_CONCAT(engineProfileScope_, __LINE__) {                 \
 		view, category                                                                                       \
 	}

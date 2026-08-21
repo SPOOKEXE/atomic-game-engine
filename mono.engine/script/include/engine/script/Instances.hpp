@@ -137,7 +137,7 @@ namespace engine::script {
 	// A script the host must not run.
 	//
 	// **A tag rather than a bool**, so a disabled script is in a different
-	// archetype and the run loop never visits it. `Anchored` makes the same
+	// archetype and the run loop never visits it. `Simulated` makes the same
 	// trade in `scene`, for the same reason: presence is a query, a flag is a
 	// branch on every row.
 	//

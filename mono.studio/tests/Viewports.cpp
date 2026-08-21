@@ -22,8 +22,8 @@
 TEST_SUITE_ID("studio.viewports")
 
 using engine::world::WorldId;
-using studio::ChooseViewportFor;
 using studio::CanvasForViewport;
+using studio::ChooseViewportFor;
 using studio::NO_VIEWPORT;
 using studio::PanelView;
 
@@ -34,15 +34,16 @@ namespace {
 	constexpr WorldId CLIENT{2};
 }
 
-TEST_CASE("game UI uses each panel's logical size instead of its GPU allocation", "[studio][viewports][gui]") {
+TEST_CASE(
+	"game UI uses each panel's logical size instead of its GPU allocation", "[studio][viewports][gui]"
+) {
 	const studio::ViewportCanvas left = CanvasForViewport(12.0f, 30.0f, 841.0f, 674.0f, 432.0f, 367.0f);
 	CHECK(left.Width == 841.0f);
 	CHECK(left.Height == 674.0f);
 	CHECK(left.PointerX == 420.0f);
 	CHECK(left.PointerY == 337.0f);
 
-	const studio::ViewportCanvas right =
-		CanvasForViewport(853.0f, 30.0f, 729.0f, 674.0f, 1217.5f, 367.0f);
+	const studio::ViewportCanvas right = CanvasForViewport(853.0f, 30.0f, 729.0f, 674.0f, 1217.5f, 367.0f);
 	CHECK(right.Width == 729.0f);
 	CHECK(right.Height == 674.0f);
 	CHECK(right.PointerX == 364.5f);

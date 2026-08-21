@@ -5,6 +5,7 @@
 #include <engine/control/Server.hpp>
 #include <engine/control/Surface.hpp>
 #include <engine/core/Clock.hpp>
+#include <engine/core/HeapProfile.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/delivery/Source.hpp>
 #include <engine/ecs/Scheduler.hpp>
@@ -110,8 +111,10 @@ namespace server {
 		// overwrite them either: a scene authored to solve at 30 should solve
 		// at 30 whoever hosts it. `world::WorldSettings` documents what the two
 		// numbers mean.
+		//@{
 		double PhysicsTickRate = 0.0;
 		double ReplicationTickRate = 0.0;
+		//@}
 
 		// Entities in the placeholder world, until there is a game file to load
 		// one from.
@@ -220,6 +223,21 @@ namespace server {
 		//
 		// @since v0.18
 		uint64_t ProfileWindowTicks = 0;
+
+		// Write a heap report here when the run ends. Empty writes none.
+		//
+		// Turning it on turns heap sampling on, for the reason `ProfilePath`
+		// turns frame collection on: a run given the flag and nothing else would
+		// retain no readings and then report that it had nothing to fit a slope
+		// to.
+		//
+		// **The server is the process this matters most on.** A client is
+		// restarted when somebody closes it; a host runs for days, so a leak
+		// that is a rounding error over a session is the thing that ends the
+		// process over a weekend.
+		//
+		// @since v0.18
+		std::filesystem::path HeapReport;
 
 		// Host the world in a universe that permits several. Named worlds are
 		// the unit a supervisor grants and revokes; one is simply the common

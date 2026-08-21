@@ -56,6 +56,24 @@ make room lets a flood push out exactly the sessions somebody is looking at,
 which is the outcome the cap exists to prevent rather than a gentler version of
 it.
 
+## The key ring is a cost multiplier a stranger controls
+
+`Decode` is handed every key this process holds, because a frame does not say
+which one it was tagged under and the section below explains why it must not.
+So a tagged advert costs one MAC attempt per key before it can be refused.
+`network.bench.discovery` prices that: **384 ns against the one key that
+verifies, 20.1 us against a ring of sixty-four that do not.** The multiplier is
+chosen by whoever is sending, not by whoever is listening, and the sending costs
+nothing.
+
+An untagged advert costs the same whatever the ring holds - 73 ns either way -
+so every public announcement, which is nearly all subnet traffic, is unaffected.
+What is affected is a process holding a lot of keys, and the answer available
+today is not to hold a lot: **give a browser the keys for the sessions a person
+cares about, not every key it has ever been told.** A per-frame key hint would
+remove the trial and reintroduce the oracle, so this is a bound on the caller
+rather than something fixable here.
+
 ## Ordinals reach a wire, so the lists are append-only
 
 `Reach`, `Access`, `Purpose`, and the rendezvous `MessageKind`. A value may be

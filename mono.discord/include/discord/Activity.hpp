@@ -57,6 +57,9 @@ namespace discord {
 		// Where it goes. `https://` only; Discord refuses anything else.
 		std::string Url;
 
+		// Whether two buttons say the same thing and go to the same place.
+		//
+		// @return `true` when both fields match.
 		bool operator==(const Button &) const = default;
 	};
 
@@ -106,6 +109,12 @@ namespace discord {
 		// @return `true` when every field a person would see is empty.
 		bool IsEmpty() const;
 
+		// Whether two activities would show identically.
+		//
+		// **What decides whether an update is sent at all.** The link is rate
+		// limited, so a presence that has not changed must not be resent.
+		//
+		// @return `true` when every field matches.
 		bool operator==(const Activity &) const = default;
 	};
 

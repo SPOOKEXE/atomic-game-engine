@@ -1,9 +1,9 @@
-#include <assetc/Bake.hpp>
-#include <cdn/LocalStore.hpp>
 #include <engine/assets/AssetKind.hpp>
 #include <engine/assets/Builtin.hpp>
 
 #include <algorithm>
+#include <assetc/Bake.hpp>
+#include <cdn/LocalStore.hpp>
 #include <studio/AssetCatalogue.hpp>
 #include <utility>
 
@@ -18,12 +18,14 @@ namespace studio {
 		constexpr const char *ENGINE_SOURCE = "engine";
 
 		void SortByName(std::vector<CatalogueEntry> &entries) {
-			std::sort(entries.begin(), entries.end(), [](const CatalogueEntry &left, const CatalogueEntry &right) {
-				// The source breaks the tie, so the merged list puts the two
-				// origins holding one name next to each other rather than in
-				// whatever order the tabs happened to be walked.
-				return left.Name != right.Name ? left.Name < right.Name : left.Source < right.Source;
-			});
+			std::sort(
+				entries.begin(), entries.end(), [](const CatalogueEntry &left, const CatalogueEntry &right) {
+					// The source breaks the tie, so the merged list puts the two
+					// origins holding one name next to each other rather than in
+					// whatever order the tabs happened to be walked.
+					return left.Name != right.Name ? left.Name < right.Name : left.Source < right.Source;
+				}
+			);
 		}
 	}
 
@@ -35,26 +37,30 @@ namespace studio {
 
 		for (uint8_t index = 0; index < engine::assets::BUILTIN_MESH_COUNT; index++) {
 			const auto builtin = static_cast<engine::assets::BuiltinMesh>(index);
-			entries.push_back(CatalogueEntry{
-				.Name = std::string(engine::assets::BuiltinName(builtin)),
-				.Kind = engine::assets::AssetKind::Mesh,
-				// **Left zero deliberately.** A built-in has no content address
-				// because it has no content - nothing fetches one - and
-				// inventing a digest for it would be a value that looks like it
-				// could be looked up. `RefreshPickerContents` says the same.
-				.Root = {},
-				.Source = ENGINE_SOURCE,
-			});
+			entries.push_back(
+				CatalogueEntry{
+					.Name = std::string(engine::assets::BuiltinName(builtin)),
+					.Kind = engine::assets::AssetKind::Mesh,
+					// **Left zero deliberately.** A built-in has no content address
+					// because it has no content - nothing fetches one - and
+					// inventing a digest for it would be a value that looks like it
+					// could be looked up. `RefreshPickerContents` says the same.
+					.Root = {},
+					.Source = ENGINE_SOURCE,
+				}
+			);
 		}
 
 		for (uint8_t index = 0; index < engine::assets::BUILTIN_TEXTURE_COUNT; index++) {
 			const auto builtin = static_cast<engine::assets::BuiltinTexture>(index);
-			entries.push_back(CatalogueEntry{
-				.Name = std::string(engine::assets::BuiltinName(builtin)),
-				.Kind = engine::assets::AssetKind::Texture,
-				.Root = {},
-				.Source = ENGINE_SOURCE,
-			});
+			entries.push_back(
+				CatalogueEntry{
+					.Name = std::string(engine::assets::BuiltinName(builtin)),
+					.Kind = engine::assets::AssetKind::Texture,
+					.Root = {},
+					.Source = ENGINE_SOURCE,
+				}
+			);
 		}
 
 		SortByName(entries);
@@ -73,19 +79,22 @@ namespace studio {
 
 		std::vector<CatalogueEntry> entries;
 		for (const cdn::PublishedEntry &published : cdn::PublishedContents(paths)) {
-			entries.push_back(CatalogueEntry{
-				.Name = published.Name,
-				.Kind = published.Kind,
-				.Root = published.Root,
-				.Source = std::string(source),
-			});
+			entries.push_back(
+				CatalogueEntry{
+					.Name = published.Name,
+					.Kind = published.Kind,
+					.Root = published.Root,
+					.Source = std::string(source),
+				}
+			);
 		}
 
 		SortByName(entries);
 		return entries;
 	}
 
-	std::vector<CatalogueEntry> RawFolderAssets(const std::filesystem::path &folder, std::string_view source) {
+	std::vector<CatalogueEntry>
+	RawFolderAssets(const std::filesystem::path &folder, std::string_view source) {
 		std::vector<CatalogueEntry> entries;
 
 		std::error_code failure;
@@ -116,13 +125,15 @@ namespace studio {
 			}
 
 			const std::string name = assetc::BakedName(relative);
-			entries.push_back(CatalogueEntry{
-				.Name = name,
-				.Kind = engine::assets::KindOfName(name),
-				.Root = {},
-				.Source = std::string(source),
-				.Unbaked = relative,
-			});
+			entries.push_back(
+				CatalogueEntry{
+					.Name = name,
+					.Kind = engine::assets::KindOfName(name),
+					.Root = {},
+					.Source = std::string(source),
+					.Unbaked = relative,
+				}
+			);
 		}
 
 		SortByName(entries);
@@ -140,11 +151,13 @@ namespace studio {
 		case ListingOutcome::NotAsked:
 			return "not asked yet - Refresh asks this origin what it holds";
 		case ListingOutcome::NoKey:
-			return "no key for this origin here - listing needs the same key an upload uses, on the Content page";
+			return "no key for this origin here - listing needs the same key an upload uses, on the Content "
+				   "page";
 		case ListingOutcome::Unreachable:
 			return "no answer from this origin - it may be down, or the address may be wrong";
 		case ListingOutcome::NotOffered:
-			return "this origin does not list its contents - enumeration is switched off there, or it is an older build";
+			return "this origin does not list its contents - enumeration is switched off there, or it is an "
+				   "older build";
 		case ListingOutcome::Refused:
 			return "this origin refused the key - listing uses the same key an upload does";
 		case ListingOutcome::Unreadable:
@@ -161,12 +174,14 @@ namespace studio {
 		// engine's assets and nothing else.
 		tabs.push_back(CatalogueTab{.Title = "All", .Origin = CatalogueOrigin::All});
 
-		tabs.push_back(CatalogueTab{
-			.Title = ENGINE_SOURCE,
-			.Origin = CatalogueOrigin::Engine,
-			.Entries = EngineAssets(),
-			.Note = "generated in every process - no store, no publish, no fetch",
-		});
+		tabs.push_back(
+			CatalogueTab{
+				.Title = ENGINE_SOURCE,
+				.Origin = CatalogueOrigin::Engine,
+				.Entries = EngineAssets(),
+				.Note = "generated in every process - no store, no publish, no fetch",
+			}
+		);
 
 		for (const Source &source : sources.Sources) {
 			// **Disabled and write-only rows are left out, and an invalid one
@@ -221,8 +236,8 @@ namespace studio {
 			}
 
 			CatalogueTab tab;
-			tab.Title = folder.filename().empty() ? folder.generic_string()
-												  : folder.filename().generic_string();
+			tab.Title =
+				folder.filename().empty() ? folder.generic_string() : folder.filename().generic_string();
 			tab.Origin = CatalogueOrigin::Raw;
 			tab.Location = folder.generic_string();
 			tab.Entries = RawFolderAssets(folder, tab.Title);

@@ -270,30 +270,6 @@
 	path = mono.vendor/tomlplusplus
 	url = https://github.com/marzer/tomlplusplus.git
 	branch = master
-; The node graph, and the one vendor here that is ours. `mono.studio` grew a
-; second implementation of this design at v0.14 for the Demo Nodes panel;
-; `docs/DEFERRED.md` D00113 said what to do about it and this is that - the
-; editor's copy went upstream and comes back as a dependency, so the render
-; pipeline editor and `Engine::bakegraph`'s pipeline documents extend one
-; library rather than starting a third.
-;
-; MIT, which `mono.vendor/AGENTS.md` asks about before anything else.
-;
-; **The library is under `cpp/`, and there is a JavaScript sibling beside it.**
-; `MonoVendor.cmake` names the sources it wants; nothing here builds the page.
-;
-; It ships a CMakeLists and we do not use it, which is the unusual call for a
-; vendor with one. `MonoVendor.cmake` has the reason: upstream compiles its own
-; copy of Dear ImGui, and a second imgui in this build is a duplicate-symbol
-; link error rather than a slow build.
-;
-; main, because upstream cuts no release branch - glm's situation, and the
-; superproject pins the SHA regardless.
-[submodule "mono.vendor/nodegraph"]
-	path = mono.vendor/nodegraph
-	url = https://github.com/SPOOKEXE/node-graph-template.git
-	branch = main
-	shallow = true
 ; SPIR-V to MSL, and it is the other half of shaderc rather than a second
 ; compiler. glslc turns this engine's GLSL into SPIR-V and SDL's Metal backend
 ; takes MSL or a metallib and never SPIR-V, so without a translator a macOS

@@ -69,10 +69,14 @@ namespace engine::physics {
 				scene::Transform &transform,
 				const scene::Motion &motion,
 				const scene::Collider &collider) {
-				// **Anchored bodies are not swept.** Whatever moves one is not
-				// the integrator, so the motion this step would reconstruct did
-				// not happen.
-				if (reader.Has<scene::Anchored>(entity)) {
+				// **Static bodies are not swept.** Whatever moves one is not the
+				// integrator, so the motion this step would reconstruct did not
+				// happen.
+				//
+				// A sleeping body has no `scene::Motion` and so never reaches
+				// here at all; this is asking the other question, and it is the
+				// one a row with a `Motion` it should not have had would fail.
+				if (!reader.Has<scene::Simulated>(entity)) {
 					return;
 				}
 

@@ -26,8 +26,8 @@ TEST_SUITE_ID("studio.hierarchy")
 
 using engine::core::Name;
 using engine::core::Random;
-using engine::ecs::ClassId;
 using engine::ecs::Classes;
+using engine::ecs::ClassId;
 using engine::ecs::Entity;
 using engine::ecs::InstanceName;
 using engine::ecs::NULL_ENTITY;
@@ -156,8 +156,7 @@ TEST_CASE("an open node's children follow it, in insertion order", "[studio][hie
 	// they were parented in, and `Terrain` after both because a subtree is
 	// emitted before the next sibling.
 	CHECK(
-		Names(view) ==
-		std::vector<std::string>{"Workspace", "Model", "Handle", "Grip", "Terrain", "Lighting"}
+		Names(view) == std::vector<std::string>{"Workspace", "Model", "Handle", "Grip", "Terrain", "Lighting"}
 	);
 
 	CHECK(RowNamed(view, "Workspace")->Depth == 0);
@@ -227,7 +226,9 @@ TEST_CASE("a reveal opens the path to an instance without widening a filter", "[
 	request.Reveal = reveal;
 
 	REQUIRE(view.Rebuild(scene.World, request));
-	CHECK(Names(view) == std::vector<std::string>{"Workspace", "Model", "Handle", "Grip", "Terrain", "Lighting"});
+	CHECK(
+		Names(view) == std::vector<std::string>{"Workspace", "Model", "Handle", "Grip", "Terrain", "Lighting"}
+	);
 
 	// The same reveal against a filter that excludes it. The path is opened,
 	// because that costs nothing and is what the author asked for; the row
@@ -438,8 +439,7 @@ TEST_CASE("a deep chain flattens in order and reports its depths", "[studio][hie
 
 	std::vector<engine::ecs::Entity> chain;
 	for (int level = 0; level < 24; level++) {
-		const engine::ecs::Entity made =
-			world.CreateInstance(part, "Level" + std::to_string(level));
+		const engine::ecs::Entity made = world.CreateInstance(part, "Level" + std::to_string(level));
 		if (!chain.empty()) {
 			world.SetParent(made, chain.back());
 		}
@@ -602,9 +602,8 @@ TEST_CASE("the compiled rows are what a plain walk of the tree would draw", "[st
 	for (int index = 0; index < 120; index++) {
 		// A quarter of the names repeat, so the filter has something to match
 		// in more than one branch and at more than one depth.
-		const Entity made = world.CreateInstance(
-			part, (index % 4 == 0 ? "Marked" : "Node") + std::to_string(index)
-		);
+		const Entity made =
+			world.CreateInstance(part, (index % 4 == 0 ? "Marked" : "Node") + std::to_string(index));
 		if (index > 0 && Random::Bits(static_cast<uint32_t>(index), 811) % 5 != 0) {
 			world.SetParent(made, nodes[Random::Bits(static_cast<uint32_t>(index), 812) % nodes.size()]);
 		}
@@ -639,9 +638,7 @@ TEST_CASE("the compiled rows are what a plain walk of the tree would draw", "[st
 			if (!isOpen(at)) {
 				return;
 			}
-			world.EachChild(at, [&](Entity child) {
-				self(child, static_cast<uint16_t>(depth + 1), self);
-			});
+			world.EachChild(at, [&](Entity child) { self(child, static_cast<uint16_t>(depth + 1), self); });
 		};
 		world.EachRoot([&](Entity root) { walk(root, 0, walk); });
 
@@ -696,9 +693,7 @@ TEST_CASE("the compiled rows are what a plain walk of the tree would draw", "[st
 			if (!below || !(isOpen(at) || below)) {
 				return;
 			}
-			world.EachChild(at, [&](Entity child) {
-				self(child, static_cast<uint16_t>(depth + 1), self);
-			});
+			world.EachChild(at, [&](Entity child) { self(child, static_cast<uint16_t>(depth + 1), self); });
 		};
 
 		request.Filter = "Marked";
@@ -810,8 +805,8 @@ TEST_CASE("a shift-click range is what the eye sees between two rows", "[studio]
 
 		// Whatever survived the filter, a range over it never includes a row
 		// the filter removed - because the rows are the range.
-		for (const HierarchyRow &row : studio::RowsBetween(view, view.Rows().front().Instance,
-														  view.Rows().back().Instance)) {
+		for (const HierarchyRow &row :
+			 studio::RowsBetween(view, view.Rows().front().Instance, view.Rows().back().Instance)) {
 			CHECK(view.RowOf(row.Instance) != HierarchyView::NO_ROW);
 		}
 	}
@@ -888,8 +883,11 @@ TEST_CASE("IsUnder is reflexive and stops at the root", "[studio][hierarchy]") {
 	CHECK_FALSE(view.IsUnder(NULL_ENTITY, scene.Workspace));
 
 	// And it agrees with the store, which is the thing it is standing in for.
-	CHECK(view.IsUnder(scene.Grip, scene.Workspace) ==
-		  scene.World.IsDescendantOf(scene.Grip, scene.Workspace));
-	CHECK(view.IsUnder(scene.Lighting, scene.Workspace) ==
-		  scene.World.IsDescendantOf(scene.Lighting, scene.Workspace));
+	CHECK(
+		view.IsUnder(scene.Grip, scene.Workspace) == scene.World.IsDescendantOf(scene.Grip, scene.Workspace)
+	);
+	CHECK(
+		view.IsUnder(scene.Lighting, scene.Workspace) ==
+		scene.World.IsDescendantOf(scene.Lighting, scene.Workspace)
+	);
 }

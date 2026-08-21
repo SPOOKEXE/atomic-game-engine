@@ -50,11 +50,25 @@ namespace engine::render {
 	// stretch needs the source aspect or source-pixel insets. `Cell` identifies
 	// the current frame of an animated sheet.
 	struct InterfaceImage {
+		// The backend's texture handle, opaque here so this header needs no
+		// device type.
 		void *Texture = nullptr;
+
+		// Which frame of an animated sheet to draw. A still image leaves this
+		// at the whole texture.
 		FlipbookCell Cell;
+
+		// The upper texture coordinate of the used region, so an atlas entry
+		// draws its own rectangle rather than the whole page.
 		core::Vector2 UVMax{1.0f, 1.0f};
+
+		// The source's size in pixels. See the note above: every scale mode
+		// except stretch needs it, so it travels with the handle rather than
+		// being looked up again per draw.
+		//@{
 		uint32_t Width = 0;
 		uint32_t Height = 0;
+		//@}
 	};
 
 	// Draws a compiled `gui::DrawList` into the render target selected by the
@@ -126,9 +140,25 @@ namespace engine::render {
 		// the frame boundary would dangle the first time an element was added.
 		//
 		// @param list   This frame's compiled list.
-		// @param canvas The target size in pixels, which the vertex shader
-		//        divides by.
-		void Submit(const gui::DrawList &list, const core::Vector2 &canvas, ecs::Store &store);
+		// @param canvas The size the list was laid out against, which the vertex
+		//        shader divides by. **Not necessarily pixels**: the studio lays
+		//        a viewport's game interface out against the panel's *logical*
+		//        size, because that is the space imgui reports the pointer in
+		//        and a canvas that disagreed with the pointer would hit-test one
+		//        place and draw another.
+		// @param targetPixels The attachment's real size in device pixels. The
+		//        vertex shader's output is normalised, so drawing is right
+		//        whatever the ratio - but the GPU scissor is not normalised, and
+		//        this is what `Record` scales it by. On a display where the two
+		//        differ, passing the canvas twice clips the interface to a
+		//        fraction of the target. Zero or below falls back to the canvas.
+		// @param store The world the spatial collectors are read from.
+		void Submit(
+			const gui::DrawList &list,
+			const core::Vector2 &canvas,
+			const core::Vector2 &targetPixels,
+			ecs::Store &store
+		);
 
 		// Uploads this frame's vertices and indices.
 		//
@@ -227,6 +257,9 @@ namespace engine::render {
 		InterfaceMesh Mesh;
 		gui::DrawList Pending;
 		core::Vector2 Canvas;
+
+		// The attachment's real size in device pixels. See `Submit`.
+		core::Vector2 TargetPixels;
 		struct SpatialCollector {
 			ecs::Entity Collector;
 			gui::SpatialCanvas Canvas;

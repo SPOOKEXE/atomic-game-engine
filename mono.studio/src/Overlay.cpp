@@ -283,12 +283,36 @@ namespace studio {
 				ImVec2(slot.X, slot.Y), ImVec2(slot.X + slot.Width, slot.Y + slot.Height), true
 			);
 
+			// **`PushClipRect` is a scissor, not a reject.** It stops the pixels
+			// reaching the explorer and does nothing about the vertices: an
+			// `AddLine` for a segment entirely off the side of the panel still
+			// builds its geometry, still grows the draw list, and is still
+			// walked again by `ImGui::Render` in `ui.end`. The grid alone
+			// submits a hundred and sixty-three segments per viewport per frame
+			// - more than every panel in the editor put together - and a camera
+			// looking along the ground has most of them off one edge.
+			//
+			// A trivial reject: both ends past the same edge means no part of
+			// the segment is inside, so nothing visible can be dropped. A
+			// segment that straddles the panel is kept whatever its endpoints
+			// are, which is why this tests the edges separately rather than
+			// testing whether either end is inside.
+			const float leftEdge = slot.X;
+			const float rightEdge = slot.X + slot.Width;
+			const float topEdge = slot.Y;
+			const float bottomEdge = slot.Y + slot.Height;
+
 			const auto segment = [&](Vector3 from, Vector3 to, ImU32 colour, float thickness) {
 				glm::vec2 a{};
 				glm::vec2 b{};
-				if (panel.ProjectSegment(from, to, a, b)) {
-					list->AddLine(ImVec2(a.x, a.y), ImVec2(b.x, b.y), colour, thickness);
+				if (!panel.ProjectSegment(from, to, a, b)) {
+					return;
 				}
+				if ((a.x < leftEdge && b.x < leftEdge) || (a.x > rightEdge && b.x > rightEdge) ||
+					(a.y < topEdge && b.y < topEdge) || (a.y > bottomEdge && b.y > bottomEdge)) {
+					return;
+				}
+				list->AddLine(ImVec2(a.x, a.y), ImVec2(b.x, b.y), colour, thickness);
 			};
 
 			// **Not over a client replica.** The grid is authoring furniture:

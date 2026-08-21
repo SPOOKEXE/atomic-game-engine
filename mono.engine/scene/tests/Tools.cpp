@@ -108,7 +108,7 @@ namespace {
 
 		PartDesc desc;
 		desc.Size = Vector3{0.5f, 0.5f, 2.0f};
-		desc.Anchored = false;
+		desc.Simulated = true;
 
 		const Entity handle = MakePart(store, desc);
 		REQUIRE(handle != NULL_ENTITY);
@@ -278,7 +278,7 @@ TEST_CASE("an anchored handle is not unanchored by being carried", "[scene][tool
 	const Entity tool = world.Store_.CreateInstance(ToolClass(), "Torch");
 	PartDesc desc;
 	desc.Size = Vector3{0.5f, 0.5f, 2.0f};
-	desc.Anchored = true;
+	desc.Simulated = false;
 
 	const Entity handle = MakePart(world.Store_, desc);
 	world.Store_.SetInstanceName(handle, engine::scene::TOOL_HANDLE_NAME);
@@ -289,7 +289,7 @@ TEST_CASE("an anchored handle is not unanchored by being carried", "[scene][tool
 	REQUIRE(UnequipTool(world.Store_, tool));
 
 	CHECK(world.Store_.Get<Motion>(handle) == nullptr);
-	CHECK(world.Store_.Has<engine::scene::Anchored>(handle));
+	CHECK_FALSE(world.Store_.Has<engine::scene::Simulated>(handle));
 }
 
 TEST_CASE("one hand holds one tool", "[scene][tools]") {

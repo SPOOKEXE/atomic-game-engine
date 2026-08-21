@@ -74,16 +74,22 @@ namespace engine::scene {
 
 		// Whether the world may move it.
 		//
-		// **This decides whether the `scene::Anchored` tag and `Motion` exist
+		// **This decides whether the `scene::Simulated` tag and `Motion` exist
 		// on the entity at all**, rather than setting a flag the physics step
-		// reads. An anchored part therefore lands in a different archetype, and
-		// the dynamic queries skip it with a `Without` - which is the ECS-native
-		// form of the optimisation and strictly better than a branch per row per
-		// tick.
+		// reads. A static part therefore lands in a different archetype, and the
+		// dynamic queries name the tag as a positive term - which is the
+		// ECS-native form of the optimisation and strictly better than a branch
+		// per row per tick.
+		//
+		// **False by default, which is the flip at v0.18.** This was `Anchored`
+		// and also defaulted false, so the default part was *dynamic* and every
+		// static one carried a tag. Static is the overwhelming majority of a
+		// scene, so the majority now stores nothing and a caller that wants a
+		// simulated part asks for one.
 		//
 		// `RigidBody` is on every part either way, since v0.15: what a part
 		// weighs is not the world's decision about whether it may move it.
-		bool Anchored = false;
+		bool Simulated = false;
 	};
 
 	// The `Part` class id.

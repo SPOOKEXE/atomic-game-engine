@@ -62,6 +62,7 @@
 #include "ScriptCall.hpp"
 #include "ServiceSurface.hpp"
 
+#include <engine/core/Chars.hpp>
 #include <engine/core/Random.hpp>
 
 #include <algorithm>
@@ -478,7 +479,7 @@ namespace engine::script {
 				const std::string_view run = Text.substr(start, At - start);
 				double value = 0.0;
 				const std::from_chars_result read =
-					std::from_chars(run.data(), run.data() + run.size(), value);
+					core::FromChars(run.data(), run.data() + run.size(), value);
 
 				if (read.ec == std::errc::result_out_of_range) {
 					// **Out of a double's range is malformed, not infinity.**

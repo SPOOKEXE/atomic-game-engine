@@ -30,8 +30,8 @@
 
 #include <imgui.h>
 #include <imgui_internal.h>
-#include <studio/AssetRow.hpp>
 #include <string>
+#include <studio/AssetRow.hpp>
 #include <vector>
 
 TEST_SUITE_ID("studio.assetrow")
@@ -223,9 +223,7 @@ TEST_CASE("a click on a row chooses it", "[studio][assetrow]") {
 	Context context;
 
 	const auto run = [](const Mouse &mouse, RowAction &action) {
-		Frame(mouse, [&] {
-			action = DrawAssetRow(false, SIDE, [](ImVec2) {});
-		});
+		Frame(mouse, [&] { action = DrawAssetRow(false, SIDE, [](ImVec2) {}); });
 	};
 
 	RowAction action = RowAction::None;
@@ -275,8 +273,7 @@ TEST_CASE("a click on the picture is a click on the row", "[studio][assetrow]") 
 	Frame(Mouse{}, [&] {
 		const ImGuiStyle &style = ImGui::GetStyle();
 		picture = ImVec2(
-			WINDOW_X + style.WindowPadding.x + SIDE * 0.5f,
-			WINDOW_Y + style.WindowPadding.y + SIDE * 0.5f
+			WINDOW_X + style.WindowPadding.x + SIDE * 0.5f, WINDOW_Y + style.WindowPadding.y + SIDE * 0.5f
 		);
 		row();
 	});
@@ -301,9 +298,7 @@ TEST_CASE("the old row shape did deliver its clicks", "[studio][assetrow]") {
 	bool clicked = false;
 	const auto row = [&] {
 		const ImVec2 start = ImGui::GetCursorPos();
-		if (ImGui::Selectable(
-				"##row", false, ImGuiSelectableFlags_AllowDoubleClick, ImVec2(0.0f, SIDE)
-			)) {
+		if (ImGui::Selectable("##row", false, ImGuiSelectableFlags_AllowDoubleClick, ImVec2(0.0f, SIDE))) {
 			clicked = true;
 		}
 		ImGui::SetCursorPos(start);
@@ -330,9 +325,7 @@ TEST_CASE("a click beside the list chooses nothing", "[studio][assetrow]") {
 	Context context;
 
 	RowAction action = RowAction::Chose;
-	const auto row = [&] {
-		action = DrawAssetRow(false, SIDE, [](ImVec2) {});
-	};
+	const auto row = [&] { action = DrawAssetRow(false, SIDE, [](ImVec2) {}); };
 
 	// Below the row, inside the window. A picker whose empty space selected the
 	// last row would confirm something nobody pointed at.

@@ -1,5 +1,6 @@
 #include <engine/core/Arguments.hpp>
 
+#include <cstdio>
 #include <docgen/Filter.hpp>
 #include <fstream>
 #include <iostream>
@@ -18,8 +19,16 @@ int main(int argc, char **argv) {
 	);
 
 	const auto parsed = arguments.Parse(argc, argv);
+	if (parsed.VersionRequested) {
+		std::cout << arguments.VersionLine();
+		return 0;
+	}
 	if (parsed.HelpRequested) {
 		std::cout << arguments.Help();
+		return 0;
+	}
+	if (parsed.DescribeRequested) {
+		std::fputs(arguments.Describe().c_str(), stdout);
 		return 0;
 	}
 	if (!parsed.Ok) {

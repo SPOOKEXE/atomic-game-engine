@@ -3,6 +3,7 @@
 #include <engine/core/Bytes.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cryptopp/osrng.h>
 #include <network/Rendezvous.hpp>
 #include <utility>

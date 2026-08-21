@@ -13,7 +13,7 @@
 #   SCENE=Slide.luau scripts/demos/run-local-server.sh
 #   PRESET=release scripts/demos/run-local-server.sh
 #
-# **This is not `mono.unified_server_client`**, and the difference is the whole
+# **This is not `mono.unified_tests`**, and the difference is the whole
 # reason to run it. That harness cuts `net` out of the middle to prove the
 # serialise/deserialise seam; this puts the socket, the handshake, the cipher and
 # the bandwidth budget back, and adds the thing neither of them had - more than

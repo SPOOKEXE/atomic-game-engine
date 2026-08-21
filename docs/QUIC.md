@@ -236,7 +236,7 @@ both of those true and should check the second one has not quietly changed.**
    reorders, and is how the hand-rolled stack was proved.
 4. Rewire `replication::Session`, `Listener` and `Connector`, then
    `mono.server`, `mono.client`, `mono.studio`,
-   `mono.unified_server_client`, and `mono.network`'s discovery.
+   `mono.unified_tests`, and `mono.network`'s discovery.
 5. Update `mono.tools/architecture/expected_graph.json` and let the tier check
    pass.
 6. Only then delete, with the suites and benchmarks that go with each deletion.

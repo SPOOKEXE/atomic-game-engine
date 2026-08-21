@@ -321,11 +321,34 @@ generation, and `Store::Apply` right to merge the two. The proper fix is in
 `ecs`, and until it lands this line is what keeps the one minting path this
 module owns closed.
 
-**`Anchored` decides presence, never a flag.** An anchored part carries no
-`RigidBody` and no `Motion`, so it lands in a different archetype and no dynamic
-query ever visits it. A reviewer should refuse a change that adds a `Static`
-body to anchored parts "for uniformity": uniformity here costs a row visit per
-static part per tick, forever, and static geometry is most of a world.
+**Whether the world may move a part is presence, never a flag.** The component
+is `scene::Simulated` and a part that carries it is one the solver may move; a
+static part carries neither it nor `Motion`, so it lands in a different archetype
+and no dynamic query ever visits it. A reviewer should refuse a change that adds
+a `Static` body to static parts "for uniformity": uniformity here costs a row
+visit per static part per tick, forever, and static geometry is most of a world.
+
+**Absence is static, and the polarity is deliberate.** Until v0.18 the tag was
+`Anchored` and marked the immovable ones, which meant `BasePart`'s class set had
+to list a component to reach the safe default and every placed thing in a scene
+carried one. The majority case now stores nothing. Refuse a change that puts
+`Simulated` back in a class set: that makes every part dynamic on creation, and
+the failure is a scene that looks right until something leans on a wall.
+
+**`RigidBody` is on a part either way**, and has been since v0.15. It is what an
+author typed - a mass and two drags - not the world's decision about whether it
+may be pushed. Refuse a change that removes it when a part is anchored.
+
+**`Simulated` is not `Motion`, and a sleeping body is why.** `physics::Publish`
+takes `Motion` away when a body falls asleep and leaves the tag on, so
+`!Has<Motion>` means "static *or* asleep" and only the tag tells them apart. Both
+take an infinite mass in the solve; only one of them can be woken. Refuse a
+change that tests `Motion` where the question is whether the world may move
+something - `physics::FactsFor` is the one that has to get this right, and a
+settled crate becoming a permanent wall is the failure.
+
+Roblox's `Anchored` is the negation of the tag, and `scene::AnchoredProperty` is
+the only place in the engine that inversion is spelled. Refuse a second one.
 
 ## The splits are load-bearing, and each has a reason
 

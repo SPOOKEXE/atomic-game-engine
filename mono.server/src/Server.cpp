@@ -879,7 +879,7 @@ namespace server {
 		}
 
 		// **One table, and it is `replication`'s.** This was written out here,
-		// in `mono.unified_server_client` and in `mono.studio`, and D00018 said
+		// in `mono.unified_tests` and in `mono.studio`, and D00018 said
 		// all three agreed - which was true of this one and the studio's and
 		// not of the harness, whose own comment claimed it was duplicated from
 		// here. Nothing in the build compared them. `DefaultReplicatedComponents`
@@ -1941,11 +1941,16 @@ namespace server {
 			// could not be shot - and nothing reported it, because a hit test
 			// against an empty candidate list is an ordinary miss.
 			//
-			// `scene::Anchored` is the question actually being asked, and it is
-			// asked as an exclusion: an anchored part carries the tag, so this
-			// skips the static geometry the old predicate was aiming at and
-			// skips nothing else. `Static` is skipped for the same reason one
-			// layer in: it is a body that does not move.
+			// `scene::Simulated` is the question actually being asked, and since
+			// v0.18 it is asked positively: a part the world may move carries
+			// the tag, so this records exactly those and skips the static
+			// geometry the old predicate was aiming at. `Static` is skipped for
+			// the same reason one layer in: it is a body that does not move.
+			//
+			// **A sleeping body keeps the tag**, which is the whole of the fix
+			// above surviving the polarity change: it loses `scene::Motion` and
+			// nothing else, so a player standing still is still in the rewind
+			// history and can still be shot.
 			//
 			// **It was the absence of `RigidBody` until v0.15**, when that
 			// component became the author's numbers rather than the world's
@@ -1955,7 +1960,7 @@ namespace server {
 				ENGINE_PROFILE_CAT("Server::Rewind", engine::core::ProfileCategory::Network);
 				if (History.Begin(store.Time().Tick)) {
 					store.Query<const engine::scene::Transform, const engine::scene::RigidBody>()
-						.Without<engine::scene::Anchored>()
+						.With<engine::scene::Simulated>()
 						.Each([this](
 								  engine::ecs::Entity entity,
 								  const engine::scene::Transform &placement,
@@ -2292,6 +2297,19 @@ namespace server {
 			engine::core::FrameGraph::SetFoldingEnabled(true);
 		}
 
+		// From the first tick rather than from when somebody asks, because a
+		// slope is only as good as the window under it and a host's first
+		// minute is when it decides what it is going to hold.
+		if (!Settings.HeapReport.empty()) {
+			engine::core::HeapProfile::SetSamplingEnabled(true);
+			if (!engine::core::HeapProfile::IsCompiledIn()) {
+				ENGINE_WARN(
+					"--heap-report was given and this build has no allocator hooks. Configure with "
+					"MONO_HEAP_PROFILE=ON, or use the dev preset."
+				);
+			}
+		}
+
 		if (Settings.ControlPort >= 0) {
 			ControlSurface.AddUniverseTools(Worlds());
 			if (ControlServer.Start(static_cast<uint16_t>(Settings.ControlPort))) {
@@ -2458,6 +2476,11 @@ namespace server {
 				engine::core::FrameGraph::WriteFolded(window);
 			}
 
+			// After the tick, so a reading covers whole ticks. Sampling inside
+			// one would catch every scratch buffer the simulation holds for the
+			// length of a tick and report the sawtooth as the shape of the heap.
+			engine::core::HeapProfile::SampleIfDue();
+
 			if (Settings.MaximumTicks >= 0 && ticks >= static_cast<uint64_t>(Settings.MaximumTicks)) {
 				break;
 			}
@@ -2566,6 +2589,22 @@ namespace server {
 				relayed->Flagged,
 				relayed->Deferred
 			);
+		}
+
+		if (!Settings.HeapReport.empty()) {
+			const engine::core::HeapTotals heap = engine::core::HeapProfile::Totals();
+			ENGINE_INFO(
+				"heap: {:.1f} MiB live in {} block(s), {:.1f} MiB peak, {} tag(s)",
+				static_cast<double>(heap.LiveBytes) / (1024.0 * 1024.0),
+				heap.LiveBlocks,
+				static_cast<double>(heap.PeakBytes) / (1024.0 * 1024.0),
+				heap.Nodes
+			);
+			if (engine::core::HeapProfile::WriteReport(Settings.HeapReport)) {
+				ENGINE_INFO("heap: report written to '{}'", Settings.HeapReport.string());
+			} else {
+				ENGINE_ERROR("heap: nothing to write to '{}'", Settings.HeapReport.string());
+			}
 		}
 
 		if (!Settings.ProfilePath.empty()) {

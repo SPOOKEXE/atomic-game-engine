@@ -18,6 +18,9 @@
 // So it is a free function with its own suite, and the panel is a reader over
 // what it returns.
 
+#include <engine/game/Game.hpp>
+#include <engine/ui/Theme.hpp>
+
 #include <algorithm>
 #include <fstream>
 #include <imgui.h>
@@ -26,9 +29,6 @@
 #include <studio/Editor.hpp>
 #include <studio/Widgets.hpp>
 #include <vector>
-
-#include <engine/game/Game.hpp>
-#include <engine/ui/Theme.hpp>
 
 namespace studio {
 
@@ -197,23 +197,21 @@ namespace studio {
 		ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.35f, 1.0f), "-%zu", removed);
 		if (DiffCoarse) {
 			ImGui::SameLine();
-			ImGui::TextColored(
-				ImVec4(0.85f, 0.55f, 0.2f, 1.0f), "· too large to align, showing the block"
-			);
+			ImGui::TextColored(ImVec4(0.85f, 0.55f, 0.2f, 1.0f), "· too large to align, showing the block");
 		}
 
 		if (ImGui::BeginChild("##diff-rows")) {
 			for (const DiffLine &line : DiffRows) {
 				switch (line.Kind) {
-					case DiffKind::Added:
-						ImGui::TextColored(ImVec4(0.45f, 0.8f, 0.45f, 1.0f), "+ %s", line.Text.c_str());
-						break;
-					case DiffKind::Removed:
-						ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.35f, 1.0f), "- %s", line.Text.c_str());
-						break;
-					case DiffKind::Same:
-						ImGui::TextDisabled("  %s", line.Text.c_str());
-						break;
+				case DiffKind::Added:
+					ImGui::TextColored(ImVec4(0.45f, 0.8f, 0.45f, 1.0f), "+ %s", line.Text.c_str());
+					break;
+				case DiffKind::Removed:
+					ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.35f, 1.0f), "- %s", line.Text.c_str());
+					break;
+				case DiffKind::Same:
+					ImGui::TextDisabled("  %s", line.Text.c_str());
+					break;
 				}
 			}
 		}

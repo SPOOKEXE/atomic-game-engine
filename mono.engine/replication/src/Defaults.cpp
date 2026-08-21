@@ -130,7 +130,7 @@ namespace engine::replication {
 		// found no write site for, at v0.18, and reverted it the same day.**
 		// `scene.Visual` and `scene.Bounds` passed that search and are exactly
 		// as write-once as `scene.Transform` looked from the same angle - and
-		// `mono.unified_server_client/tests/Harness.cpp` still failed five cases,
+		// `mono.unified_tests/tests/Harness.cpp` still failed five cases,
 		// because a real system reaches both through `Store::GetMutable<T>` and
 		// `Store::EachBatch<T>`, which hand out raw column pointers and set no
 		// bit *by design* - the cost that path exists to avoid is exactly the

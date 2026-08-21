@@ -453,5 +453,5 @@ local elapsed = 0
 game:GetService("RunService").Heartbeat:Connect(function(delta: number)
 	elapsed += delta
 	swinger.CFrame = CFrame.new(Vector3.new(20, 1.5, -20))
-		* CFrame.Angles(0, elapsed * 2.5, math.sin(elapsed * 3) * 0.8)
+		* CFrame.fromOrientation(0, elapsed * 2.5, math.sin(elapsed * 3) * 0.8)
 end)

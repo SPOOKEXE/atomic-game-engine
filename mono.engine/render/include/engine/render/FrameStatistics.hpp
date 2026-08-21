@@ -61,6 +61,26 @@ namespace engine::render {
 		// Length of the rolling sample window, in seconds.
 		static constexpr double WINDOW_SECONDS = 20.0;
 
+		// Samples the window will hold, whatever `WINDOW_SECONDS` asks for.
+		//
+		// **Seconds alone is not a bound on memory, and at an uncapped frame
+		// rate it is not a small one.** How many samples twenty seconds holds is
+		// the frame rate, so a headless client running at several thousand
+		// frames a second filled this to **2 MiB** - measured by the heap
+		// profiler, still climbing at 48 KiB a second forty seconds into a run,
+		// for a panel nobody had open. That is the same shape `FrameGraph`'s
+		// retained window had and it is fixed the same way: bound the storage,
+		// and let the window depth be what fits.
+		//
+		// Sixteen thousand samples is 256 KiB and covers the full twenty seconds
+		// at any frame rate up to about 800 - which is every rate a person is
+		// actually watching the panel at. Above that the window is the most
+		// recent 16,384 frames instead, `SampleCount` says how many that is, and
+		// every figure the panel shows is over what was kept.
+		//
+		// @since v0.18
+		static constexpr size_t MAXIMUM_SAMPLES = 16384;
+
 		// Records one positive frame duration and removes samples older than the window.
 		//
 		// @param now          Current monotonic time, in seconds.
@@ -109,6 +129,15 @@ namespace engine::render {
 		}
 
 	  private:
+		// Retires the oldest sample, taking its contribution out of every
+		// running total.
+		//
+		// **One place, because there are two reasons to retire one** - it fell
+		// out of the time window, or the window is full - and the bookkeeping
+		// either one needs is identical and easy to get subtly wrong. A sum
+		// that is not decremented is a mean that drifts upward forever.
+		void DropOldest();
+
 		struct Sample {
 			double Time = 0.0;
 			float Delta = 0.0f;

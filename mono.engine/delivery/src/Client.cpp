@@ -41,6 +41,24 @@ namespace engine::delivery {
 		// socket and a decompression buffer.
 		constexpr size_t MAXIMUM_BUNDLES_IN_FLIGHT = 4;
 
+		// How many bundles a local store may be read out of in one pump.
+		//
+		// **One, because a store read is not a fetch and the two cost the caller
+		// entirely different things.** A wire fetch is a socket: four of them in
+		// flight cost this thread almost nothing, which is what
+		// `MAXIMUM_BUNDLES_IN_FLIGHT` is sized for. A `dir:` source has no wire,
+		// so `Start` reads the file, verifies every member against the signed
+		// manifest and writes them all to the cache before it returns - measured
+		// at about 10 ms a bundle in `release` on this repository's own store.
+		// Four of those is a 40 ms frame, which is the hitch a game shows while
+		// it loads, and it is the frame the editor and every dev build take.
+		//
+		// The cost of one is that a local load takes more pumps. That is the
+		// trade the whole intake path already makes: `IntakeBudget` spends
+		// latency to keep a frame's work bounded, and this is the same currency
+		// one layer down.
+		constexpr size_t MAXIMUM_STORE_BUNDLES_PER_PUMP = 1;
+
 		std::string ToHex(std::span<const std::byte> bytes) {
 			static constexpr char DIGITS[] = "0123456789abcdef";
 			std::string hex;
@@ -557,18 +575,44 @@ namespace engine::delivery {
 			}
 
 			void DriveBundles() {
-				size_t active = 0;
+				// **What the cap counts is bundles admitted this pump, not
+				// sockets open.** A local store has no wire: `Start` reads it,
+				// verifies every member and writes them to the cache before it
+				// returns, and it used to report that as "nothing in flight" - so
+				// `active` never moved and the cap never bit. Every queued bundle
+				// was therefore read, hashed and cached in one pump, which on a
+				// `dir:` source is the whole working set in the frame that
+				// noticed it. That is the freeze a game shows while its meshes
+				// load, and it is the reason this counts work rather than
+				// sockets.
+				size_t admitted = 0;
 				for (BundleJob &job : Jobs) {
 					if (job.Active) {
-						++active;
+						++admitted;
 					}
 				}
 
+				size_t read = 0;
 				for (BundleJob &job : Jobs) {
-					if (!job.Active && active < MAXIMUM_BUNDLES_IN_FLIGHT) {
-						if (Start(job)) {
-							++active;
-						}
+					if (job.Active || admitted >= MAXIMUM_BUNDLES_IN_FLIGHT) {
+						continue;
+					}
+
+					// **The store allowance is passed in rather than checked
+					// here**, so a spent one stops store reads without also
+					// stopping a wire fetch that costs this thread nothing. Which
+					// kind a job turns out to be is not knowable until `Start`
+					// has walked its sources.
+					switch (Start(job, read < MAXIMUM_STORE_BUNDLES_PER_PUMP)) {
+					case StartOutcome::Fetching:
+						++admitted;
+						break;
+					case StartOutcome::Completed:
+						++admitted;
+						++read;
+						break;
+					case StartOutcome::Idle:
+						break;
 					}
 				}
 				Transfer->Pump();
@@ -585,12 +629,40 @@ namespace engine::delivery {
 				}
 			}
 
-			// @return Whether a fetch is now in flight for this job.
-			bool Start(BundleJob &job) {
+			// What one attempt to start a bundle job actually did.
+			//
+			// `Fetching` and `Completed` both count against
+			// `MAXIMUM_BUNDLES_IN_FLIGHT`, because both spent this pump's
+			// allowance - one on a socket and one on a synchronous read of the
+			// whole bundle. Only `Idle` is free.
+			enum class StartOutcome {
+				// A wire fetch is in flight and will be picked up by `Advance`.
+				Fetching,
+
+				// A local store answered inside this call: the bundle is already
+				// read, verified, cached and split.
+				Completed,
+
+				// Nothing happened - the transfer client is full, or every source
+				// has been walked and the job abandoned.
+				Idle,
+			};
+
+			// @param mayReadStore Whether this pump still has room for a
+			//                     synchronous store read. A store source reached
+			//                     with this false is left for the next pump
+			//                     rather than skipped, because skipping it would
+			//                     burn a perfectly good origin over a budget.
+			// @return What the attempt did. See `StartOutcome`.
+			StartOutcome Start(BundleJob &job, bool mayReadStore) {
 				while (job.SourceIndex < Sources.size()) {
 					Resolved &source = Sources[job.SourceIndex];
 
 					if (source.Store) {
+						if (!mayReadStore) {
+							return StartOutcome::Idle;
+						}
+
 						// A local store has no wire, so there is nothing to
 						// compress and no group to expand - the chunks are read
 						// and the assets fall out of them. Same manifest, same
@@ -602,8 +674,8 @@ namespace engine::delivery {
 								Tally.TransferredBytes += payload->size();
 								Tally.ExpandedBytes += payload->size();
 								++Tally.Bundles;
-								Split(*bundle, *payload);
-								return false;
+								Split(*bundle, *payload, true);
+								return StartOutcome::Completed;
 							}
 						}
 						++Tally.SourceFailures;
@@ -626,15 +698,15 @@ namespace engine::delivery {
 					job.Fetch = source.Fetcher->Submit(source.Address, request, source.Host);
 					if (job.Fetch.IsValid()) {
 						job.Active = true;
-						return true;
+						return StartOutcome::Fetching;
 					}
 					// The transfer client is full. Left for the next pump
 					// rather than skipping the source, which would burn a
 					// perfectly good origin because this end was busy.
-					return false;
+					return StartOutcome::Idle;
 				}
 				Abandon(job.Bundle);
-				return false;
+				return StartOutcome::Idle;
 			}
 
 			// @return Whether the job is finished and should be dropped.
@@ -687,7 +759,7 @@ namespace engine::delivery {
 
 				Tally.ExpandedBytes += payload->size();
 				++Tally.Bundles;
-				Split(*bundle, *payload);
+				Split(*bundle, *payload, false);
 				return true;
 			}
 
@@ -719,7 +791,20 @@ namespace engine::delivery {
 			// The other members land in the cache as a consequence of one being
 			// asked for, which is the whole of "the game progressively builds"
 			// seen from this end.
-			void Split(const assets::BundleEntry &bundle, const std::vector<std::byte> &payload) {
+			//
+			// @param verified Whether the payload has already been checked
+			//                 against the signed manifest member by member.
+			//                 `ChunkStore::ReadAsset` does exactly that on the
+			//                 way out of a local store, over the same slices in
+			//                 the same order, so hashing them a second time here
+			//                 is the same answer for the same bytes - about a
+			//                 fifth of a local bundle's cost, measured. It is
+			//                 false for anything off a wire, where this is the
+			//                 only check there is.
+			void
+			Split(const assets::BundleEntry &bundle, const std::vector<std::byte> &payload, bool verified) {
+				ENGINE_PROFILE_CAT("delivery.split", core::ProfileCategory::Assets);
+
 				for (const assets::ContentHash &member : bundle.Assets) {
 					const assets::AssetEntry *const asset = Known->FindByRoot(member);
 					if (asset == nullptr) {
@@ -733,14 +818,20 @@ namespace engine::delivery {
 					const std::span<const std::byte> bytes(
 						payload.data() + slice->Offset, static_cast<size_t>(slice->Bytes)
 					);
-					if (!assets::VerifyAsset(*asset, bytes)) {
-						++Tally.VerificationFailures;
-						ENGINE_WARN("delivery: '{}' did not verify against the signed manifest", asset->Name);
-						continue;
+					if (!verified) {
+						ENGINE_PROFILE_CAT("delivery.verify", core::ProfileCategory::Assets);
+						if (!assets::VerifyAsset(*asset, bytes)) {
+							++Tally.VerificationFailures;
+							ENGINE_WARN(
+								"delivery: '{}' did not verify against the signed manifest", asset->Name
+							);
+							continue;
+						}
 					}
 
 					Delivered.emplace_back(member, std::vector<std::byte>(bytes.begin(), bytes.end()));
 					if (Cached) {
+						ENGINE_PROFILE_CAT("delivery.cache", core::ProfileCategory::Assets);
 						Cached->Store(*asset, bytes);
 					}
 				}

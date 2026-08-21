@@ -44,13 +44,20 @@ namespace engine::scene {
 	struct CollisionShapes {
 		// One named convex hull.
 		struct HullRow {
+			// What the authored shape is called. The key the linear search
+			// below compares.
 			core::Name Name;
+
+			// The hull itself.
 			collision::ConvexHull Shape;
 		};
 
 		// One named triangle mesh.
 		struct MeshRow {
+			// What the authored shape is called.
 			core::Name Name;
+
+			// The mesh itself.
 			collision::TriangleMesh Shape;
 		};
 

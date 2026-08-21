@@ -24,7 +24,7 @@
 // one of the three is being asked at a time.
 //
 // The inspector's middle is the only part that varies by node type, and it is
-// dispatched through `nodegraph::Inspectors` rather than switched on here.
+// dispatched through `engine::nodegraph::Inspectors` rather than switched on here.
 // Around it the panel draws what every type has: a name, how long it took, its
 // knobs and its ports - drawn from `WidgetsOf`/`InputsOf`/`OutputsOf` so a
 // compressed node shows the interface it derived rather than the empty
@@ -38,6 +38,11 @@
 // @tier client
 
 #include <engine/assets/Texture.hpp>
+#include <engine/nodegraph/Editor.hpp>
+#include <engine/nodegraph/Inspect.hpp>
+#include <engine/nodegraph/Layout.hpp>
+#include <engine/nodegraph/Preview.hpp>
+#include <engine/nodegraph/Serialize.hpp>
 #include <engine/ui/Metrics.hpp>
 #include <engine/ui/Theme.hpp>
 
@@ -47,28 +52,23 @@
 #include <cstring>
 #include <fstream>
 #include <imgui.h>
-#include <nodegraph/Demo.hpp>
-#include <nodegraph/Editor.hpp>
-#include <nodegraph/Inspect.hpp>
-#include <nodegraph/Layout.hpp>
-#include <nodegraph/Preview.hpp>
-#include <nodegraph/Serialize.hpp>
 #include <sstream>
 #include <string>
+#include <studio/DemoNodes.hpp>
 #include <studio/Editor.hpp>
 #include <vector>
 
 namespace studio {
 
 	void ApplyNodeChrome() {
-		nodegraph::Chrome &chrome = nodegraph::HostChrome();
+		engine::nodegraph::Chrome &chrome = engine::nodegraph::HostChrome();
 		chrome.Muted = engine::ui::MutedColour();
 		chrome.Accent = engine::ui::AccentColour();
 		chrome.Warning = engine::ui::WarningColour();
 		chrome.Scale = engine::ui::Scaled(1.0f);
 	}
 
-	bool NodePreviewTexture(const nodegraph::PreviewImage &image, engine::assets::TextureData &out) {
+	bool NodePreviewTexture(const engine::nodegraph::PreviewImage &image, engine::assets::TextureData &out) {
 		if (!image.Valid()) {
 			return false;
 		}
@@ -107,7 +107,8 @@ namespace studio {
 		DropNodeDemoImages();
 	}
 
-	void *Editor::NodeDemoImage(uint64_t key, const std::function<bool(nodegraph::PreviewImage &)> &make) {
+	void *
+	Editor::NodeDemoImage(uint64_t key, const std::function<bool(engine::nodegraph::PreviewImage &)> &make) {
 		// **Held under the hash the payload was computed at**, so panning and
 		// zooming cost a lookup, an edit makes a new key rather than overwriting
 		// the old one, and two nodes computing the same thing share one texture.
@@ -115,7 +116,7 @@ namespace studio {
 			return found->second;
 		}
 
-		nodegraph::PreviewImage image;
+		engine::nodegraph::PreviewImage image;
 		engine::assets::TextureData texture;
 		if (!make(image) || !NodePreviewTexture(image, texture)) {
 			// **Remembered as null rather than retried.** A payload with no
@@ -140,15 +141,16 @@ namespace studio {
 		return handle;
 	}
 
-	void *
-	Editor::NodeDemoOrbitImage(uint64_t key, const std::function<bool(nodegraph::PreviewImage &)> &make) {
+	void *Editor::NodeDemoOrbitImage(
+		uint64_t key, const std::function<bool(engine::nodegraph::PreviewImage &)> &make
+	) {
 		// Already showing it. An orbit that came to rest costs a comparison a
 		// frame and nothing else.
 		if (key == NodeDemoOrbitKey && NodeDemoOrbitName.IsValid()) {
 			return NodeDemoOrbitHandle;
 		}
 
-		nodegraph::PreviewImage image;
+		engine::nodegraph::PreviewImage image;
 		engine::assets::TextureData texture;
 		if (!make(image) || !NodePreviewTexture(image, texture)) {
 			NodeDemoOrbitKey = key;
@@ -205,7 +207,7 @@ namespace studio {
 		// called from every gesture that might have changed something, and most
 		// of them did not - a drag that moved a node one pixel and back is not
 		// an undo step.
-		std::string now = nodegraph::Save(NodeDemoGraph);
+		std::string now = engine::nodegraph::Save(NodeDemoGraph);
 		if (now == NodeDemoLast) {
 			return;
 		}
@@ -226,7 +228,7 @@ namespace studio {
 
 	void Editor::RestoreNodeDemo(const std::string &document) {
 		std::string error;
-		if (!nodegraph::Load(document, NodeDemoGraph, error)) {
+		if (!engine::nodegraph::Load(document, NodeDemoGraph, error)) {
 			NodeDemoSaid = error;
 			return;
 		}
@@ -234,7 +236,7 @@ namespace studio {
 		// **The selection is dropped rather than repointed.** `Load` hands out
 		// new ids, so a held one names a different node - which is worse than
 		// nothing selected, because it looks like it worked.
-		NodeDemoCanvas.Select(nodegraph::NO_NODE);
+		NodeDemoCanvas.Select(engine::nodegraph::NO_NODE);
 		NodeDemoSignature = 0;
 	}
 
@@ -260,23 +262,24 @@ namespace studio {
 		RestoreNodeDemo(NodeDemoLast);
 	}
 
-	std::string Editor::ExportNodeDemoImage(nodegraph::NodeId id) {
-		const nodegraph::Node *node = NodeDemoGraph.Find(id);
-		const nodegraph::NodeType *type = node == nullptr ? nullptr : nodegraph::NodeTypes::Find(node->Type);
+	std::string Editor::ExportNodeDemoImage(engine::nodegraph::NodeId id) {
+		const engine::nodegraph::Node *node = NodeDemoGraph.Find(id);
+		const engine::nodegraph::NodeType *type =
+			node == nullptr ? nullptr : engine::nodegraph::NodeTypes::Find(node->Type);
 		if (type == nullptr) {
 			return "nothing selected";
 		}
 
 		// The first output that makes a picture. A node with several is asking
 		// for a port picker, which is a dialog for a thing nobody does twice.
-		nodegraph::PreviewImage image;
-		for (const nodegraph::PortSpec &port : type->Outputs) {
+		engine::nodegraph::PreviewImage image;
+		for (const engine::nodegraph::PortSpec &port : type->Outputs) {
 			const std::any *payload = NodeDemoRunner.Output(id, port.Name);
-			if (payload != nullptr && nodegraph::PictureOf(type, port.Type, *payload, image) &&
+			if (payload != nullptr && engine::nodegraph::PictureOf(type, port.Type, *payload, image) &&
 				image.Valid()) {
 				break;
 			}
-			image = nodegraph::PreviewImage{};
+			image = engine::nodegraph::PreviewImage{};
 		}
 		if (!image.Valid()) {
 			return "that node has produced no picture";
@@ -288,7 +291,7 @@ namespace studio {
 			return "could not write " + path;
 		}
 
-		const std::vector<uint8_t> encoded = nodegraph::EncodePng(image);
+		const std::vector<uint8_t> encoded = engine::nodegraph::EncodePng(image);
 		out.write(
 			reinterpret_cast<const char *>(encoded.data()), static_cast<std::streamsize>(encoded.size())
 		);
@@ -314,16 +317,18 @@ namespace studio {
 		// that answers a question occasionally - and a graph built before the
 		// node types were registered would be an empty one.
 		if (NodeDemoGraph.Nodes().empty() && NodeDemoLast.empty()) {
-			nodegraph::BuildDemoGraph(NodeDemoGraph);
+			studio::BuildDemoGraph(NodeDemoGraph);
 			NodeDemoCanvas.Observe(&NodeDemoRunner);
-			NodeDemoCanvas.Images([this](
-									  uint64_t key, const std::function<bool(nodegraph::PreviewImage &)> &make
-								  ) { return NodeDemoImage(key, make); });
+			NodeDemoCanvas.Images(
+				[this](uint64_t key, const std::function<bool(engine::nodegraph::PreviewImage &)> &make) {
+					return NodeDemoImage(key, make);
+				}
+			);
 
 			// What the canvas cannot decide for itself: when an edit becomes an
 			// undo step, and what "run this one again" means.
 			NodeDemoCanvas.Signals.Changed = [this] { CommitNodeDemo(); };
-			NodeDemoCanvas.Signals.Rerun = [this](nodegraph::NodeId) {
+			NodeDemoCanvas.Signals.Rerun = [this](engine::nodegraph::NodeId) {
 				// **The whole cache and not one entry.** A result is keyed by a
 				// hash of the node *and everything above it*, so "recompute this
 				// one" would have to invalidate every hash that folded it in -
@@ -335,7 +340,7 @@ namespace studio {
 			};
 
 			NodeDemoSignature = 0;
-			NodeDemoLast = nodegraph::Save(NodeDemoGraph);
+			NodeDemoLast = engine::nodegraph::Save(NodeDemoGraph);
 		}
 
 		DrawNodeDemoBar();
@@ -415,15 +420,15 @@ namespace studio {
 				NodeDemoGraph.Clear();
 				NodeDemoRunner.Forget();
 				DropNodeDemoImages();
-				NodeDemoCanvas.Select(nodegraph::NO_NODE);
+				NodeDemoCanvas.Select(engine::nodegraph::NO_NODE);
 				NodeDemoSignature = 0;
 				CommitNodeDemo();
 			}
 			if (ImGui::MenuItem("Reset to the demo graph")) {
-				nodegraph::BuildDemoGraph(NodeDemoGraph);
+				studio::BuildDemoGraph(NodeDemoGraph);
 				NodeDemoRunner.Forget();
 				DropNodeDemoImages();
-				NodeDemoCanvas.Select(nodegraph::NO_NODE);
+				NodeDemoCanvas.Select(engine::nodegraph::NO_NODE);
 				NodeDemoSignature = 0;
 				CommitNodeDemo();
 			}
@@ -433,12 +438,12 @@ namespace studio {
 			ImGui::InputText("##path", NodeDemoPath, sizeof(NodeDemoPath));
 
 			if (ImGui::MenuItem("Save")) {
-				// **Written as the text `nodegraph::Save` produces**, which is three
+				// **Written as the text `engine::nodegraph::Save` produces**, which is three
 				// flat lists and no parser - a graph anybody can read in a diff
 				// and hand-edit without a schema.
 				std::ofstream out(NodeDemoPath, std::ios::binary | std::ios::trunc);
 				if (out) {
-					out << nodegraph::Save(NodeDemoGraph);
+					out << engine::nodegraph::Save(NodeDemoGraph);
 					NodeDemoSaid = std::string("saved ") + NodeDemoPath;
 				} else {
 					NodeDemoSaid = std::string("could not write ") + NodeDemoPath;
@@ -451,14 +456,14 @@ namespace studio {
 					held << in.rdbuf();
 
 					std::string error;
-					if (nodegraph::Load(held.str(), NodeDemoGraph, error)) {
+					if (engine::nodegraph::Load(held.str(), NodeDemoGraph, error)) {
 						NodeDemoRunner.Forget();
 						DropNodeDemoImages();
-						NodeDemoCanvas.Select(nodegraph::NO_NODE);
+						NodeDemoCanvas.Select(engine::nodegraph::NO_NODE);
 						NodeDemoSignature = 0;
 						NodeDemoPast.clear();
 						NodeDemoFuture.clear();
-						NodeDemoLast = nodegraph::Save(NodeDemoGraph);
+						NodeDemoLast = engine::nodegraph::Save(NodeDemoGraph);
 						NodeDemoSaid = std::string("loaded ") + NodeDemoPath;
 					} else {
 						NodeDemoSaid = error;
@@ -472,7 +477,7 @@ namespace studio {
 
 			// A real PNG, written by `EncodePng` - stored deflate blocks, so
 			// nothing new is linked for it.
-			const std::vector<nodegraph::NodeId> &chosen = NodeDemoCanvas.Selection();
+			const std::vector<engine::nodegraph::NodeId> &chosen = NodeDemoCanvas.Selection();
 			if (ImGui::MenuItem("Export the selected node's picture", nullptr, false, chosen.size() == 1)) {
 				NodeDemoSaid = ExportNodeDemoImage(chosen.front());
 			}
@@ -593,7 +598,7 @@ namespace studio {
 	}
 
 	void Editor::DrawNodeDemoCrumbs() {
-		const std::vector<nodegraph::NodeId> &path = NodeDemoCanvas.Path();
+		const std::vector<engine::nodegraph::NodeId> &path = NodeDemoCanvas.Path();
 		if (path.empty()) {
 			// **Nothing at the root, rather than a bar reading "Root".** A row
 			// that is always there and only ever says one thing is a row of
@@ -606,7 +611,7 @@ namespace studio {
 		}
 
 		for (size_t depth = 0; depth < path.size(); depth++) {
-			const nodegraph::Node *node = NodeDemoGraph.Find(path[depth]);
+			const engine::nodegraph::Node *node = NodeDemoGraph.Find(path[depth]);
 			ImGui::SameLine();
 			ImGui::TextDisabled("/");
 			ImGui::SameLine();
@@ -702,7 +707,7 @@ namespace studio {
 			}
 			return haystack.find(needle) != std::string::npos;
 		};
-		const auto matches = [&wanted](const nodegraph::NodeType &type) {
+		const auto matches = [&wanted](const engine::nodegraph::NodeType &type) {
 			if (wanted.empty()) {
 				return true;
 			}
@@ -724,7 +729,7 @@ namespace studio {
 			ImGui::SetNextItemOpen(true, ImGuiCond_Once);
 			if (ImGui::CollapsingHeader("Custom")) {
 				std::string dropped;
-				for (const nodegraph::Graph::Template &held : NodeDemoGraph.Templates()) {
+				for (const engine::nodegraph::Graph::Template &held : NodeDemoGraph.Templates()) {
 					if (!matchesName(held.Name)) {
 						continue;
 					}
@@ -751,9 +756,9 @@ namespace studio {
 			}
 		}
 
-		for (const std::string &category : nodegraph::NodeTypes::Categories()) {
+		for (const std::string &category : engine::nodegraph::NodeTypes::Categories()) {
 			size_t survived = 0;
-			for (const nodegraph::NodeType &type : nodegraph::NodeTypes::All()) {
+			for (const engine::nodegraph::NodeType &type : engine::nodegraph::NodeTypes::All()) {
 				survived += !type.Hidden && type.Category == category && matches(type) ? 1 : 0;
 			}
 			if (survived == 0) {
@@ -767,7 +772,7 @@ namespace studio {
 				continue;
 			}
 
-			for (const nodegraph::NodeType &type : nodegraph::NodeTypes::All()) {
+			for (const engine::nodegraph::NodeType &type : engine::nodegraph::NodeTypes::All()) {
 				if (type.Hidden || type.Category != category || !matches(type)) {
 					continue;
 				}
@@ -789,8 +794,8 @@ namespace studio {
 					// **Placed in the middle of the view rather than at the
 					// origin**, so adding a node while panned somewhere else does
 					// not put it off screen with no clue where it went.
-					const nodegraph::NodeId made = NodeDemoGraph.Add(type.Id, 0.0f, 0.0f);
-					if (made != nodegraph::NO_NODE) {
+					const engine::nodegraph::NodeId made = NodeDemoGraph.Add(type.Id, 0.0f, 0.0f);
+					if (made != engine::nodegraph::NO_NODE) {
 						NodeDemoGraph.Find(made)->Owner = NodeDemoCanvas.Inside();
 						NodeDemoCanvas.Select(made);
 						NodeDemoCanvas.Centre(NodeDemoGraph, made);
@@ -806,8 +811,9 @@ namespace studio {
 	}
 
 	void Editor::DrawNodeDemoInspector() {
-		if (const nodegraph::GroupId frame = NodeDemoCanvas.SelectedGroup(); frame != nodegraph::NO_GROUP) {
-			const nodegraph::Group *group = NodeDemoGraph.FindGroup(frame);
+		if (const engine::nodegraph::GroupId frame = NodeDemoCanvas.SelectedGroup();
+			frame != engine::nodegraph::NO_GROUP) {
+			const engine::nodegraph::Group *group = NodeDemoGraph.FindGroup(frame);
 			if (group != nullptr) {
 				ImGui::TextUnformatted(group->Title.c_str());
 				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
@@ -823,7 +829,7 @@ namespace studio {
 			}
 		}
 
-		const std::vector<nodegraph::NodeId> &chosen = NodeDemoCanvas.Selection();
+		const std::vector<engine::nodegraph::NodeId> &chosen = NodeDemoCanvas.Selection();
 		if (chosen.empty()) {
 			ImGui::TextDisabled("select a node");
 			ImGui::Spacing();
@@ -843,11 +849,11 @@ namespace studio {
 			return;
 		}
 
-		nodegraph::Node *node = NodeDemoGraph.Find(chosen.front());
+		engine::nodegraph::Node *node = NodeDemoGraph.Find(chosen.front());
 		if (node == nullptr) {
 			return;
 		}
-		const nodegraph::NodeType *type = nodegraph::NodeTypes::Find(node->Type);
+		const engine::nodegraph::NodeType *type = engine::nodegraph::NodeTypes::Find(node->Type);
 		if (type == nullptr) {
 			ImGui::TextDisabled("%s", node->Type.c_str());
 			ImGui::TextWrapped("no node type of that name is registered");
@@ -870,12 +876,12 @@ namespace studio {
 			CommitNodeDemo();
 		}
 
-		const nodegraph::NodeStatus status = NodeDemoRunner.Status(node->Id);
+		const engine::nodegraph::NodeStatus status = NodeDemoRunner.Status(node->Id);
 
 		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
 		if (status.Cached) {
 			ImGui::Text("%s  ·  cache hit", node->Type.c_str());
-		} else if (status.State == nodegraph::NodeState::Done) {
+		} else if (status.State == engine::nodegraph::NodeState::Done) {
 			ImGui::Text("%s  ·  %.1f ms", node->Type.c_str(), status.Milliseconds);
 		} else {
 			ImGui::TextUnformatted(node->Type.c_str());
@@ -887,7 +893,7 @@ namespace studio {
 			ImGui::TextWrapped("%s", type->Subtitle.c_str());
 			ImGui::PopStyleColor();
 		}
-		if (status.State == nodegraph::NodeState::Failed) {
+		if (status.State == engine::nodegraph::NodeState::Failed) {
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
 			ImGui::TextUnformatted("it raised");
 			ImGui::PopStyleColor();
@@ -899,19 +905,20 @@ namespace studio {
 		// with its inputs beside it, an async one gets its stages, and a readout
 		// gets its number - and a node type added tomorrow gets whichever of
 		// those fits what it produced, with nothing here changing.
-		nodegraph::Inspection what;
+		engine::nodegraph::Inspection what;
 		what.Node = node;
 		what.Type = type;
 		what.Graph = &NodeDemoGraph;
 		what.Runner = &NodeDemoRunner;
-		what.Images = [this](uint64_t key, const std::function<bool(nodegraph::PreviewImage &)> &make) {
-			return NodeDemoImage(key, make);
-		};
-		what.Orbit = [this](uint64_t key, const std::function<bool(nodegraph::PreviewImage &)> &make) {
-			return NodeDemoOrbitImage(key, make);
-		};
+		what.Images = [this](
+						  uint64_t key, const std::function<bool(engine::nodegraph::PreviewImage &)> &make
+					  ) { return NodeDemoImage(key, make); };
+		what.Orbit = [this](
+						 uint64_t key, const std::function<bool(engine::nodegraph::PreviewImage &)> &make
+					 ) { return NodeDemoOrbitImage(key, make); };
 
-		if (const nodegraph::InspectorFn *draw = nodegraph::Inspectors::For(what); draw != nullptr) {
+		if (const engine::nodegraph::InspectorFn *draw = engine::nodegraph::Inspectors::For(what);
+			draw != nullptr) {
 			(*draw)(what);
 		}
 
@@ -943,7 +950,9 @@ namespace studio {
 			);
 			ImGui::BeginDisabled(NodeDemoTypeName[0] == '\0');
 			if (ImGui::Button("save as type")) {
-				NodeDemoGraph.Remember(NodeDemoTypeName, nodegraph::SaveSubtree(NodeDemoGraph, node->Id));
+				NodeDemoGraph.Remember(
+					NodeDemoTypeName, engine::nodegraph::SaveSubtree(NodeDemoGraph, node->Id)
+				);
 				NodeDemoSaid = std::string("filed \"") + NodeDemoTypeName + "\" under Custom";
 				NodeDemoTypeName[0] = '\0';
 				CommitNodeDemo();
@@ -956,7 +965,7 @@ namespace studio {
 			// and it is why `Promotion::Exposed` is a flag rather than a delete.
 			if (ImGui::TreeNode("exposed parameters")) {
 				bool changed = false;
-				for (nodegraph::Promotion &promotion : node->Promoted) {
+				for (engine::nodegraph::Promotion &promotion : node->Promoted) {
 					ImGui::PushID(promotion.Key.c_str());
 					if (ImGui::Checkbox(promotion.Label.c_str(), &promotion.Exposed)) {
 						changed = true;
@@ -972,7 +981,7 @@ namespace studio {
 
 		// --- its knobs --------------------------------------------------------
 
-		if (!nodegraph::WidgetsOf(*node).empty()) {
+		if (!engine::nodegraph::WidgetsOf(*node).empty()) {
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
 			ImGui::SeparatorText(node->Compressed() ? "promoted parameters" : "parameters");
 			ImGui::PopStyleColor();
@@ -988,15 +997,15 @@ namespace studio {
 		ImGui::SeparatorText("ports");
 		ImGui::PopStyleColor();
 
-		if (nodegraph::InputsOf(*node).empty() && nodegraph::OutputsOf(*node).empty()) {
+		if (engine::nodegraph::InputsOf(*node).empty() && engine::nodegraph::OutputsOf(*node).empty()) {
 			ImGui::TextDisabled("none - this node is a note");
 		}
 
 		for (int side = 0; side < 2; side++) {
-			const std::vector<nodegraph::PortSpec> ports =
-				side == 0 ? nodegraph::InputsOf(*node) : nodegraph::OutputsOf(*node);
-			for (const nodegraph::PortSpec &port : ports) {
-				const nodegraph::DataType *carried = nodegraph::DataTypes::Find(port.Type);
+			const std::vector<engine::nodegraph::PortSpec> ports =
+				side == 0 ? engine::nodegraph::InputsOf(*node) : engine::nodegraph::OutputsOf(*node);
+			for (const engine::nodegraph::PortSpec &port : ports) {
+				const engine::nodegraph::DataType *carried = engine::nodegraph::DataTypes::Find(port.Type);
 				const ImVec4 tint = carried != nullptr
 										? ImVec4(carried->Tint.R, carried->Tint.G, carried->Tint.B, 1.0f)
 										: ImVec4(0.62f, 0.64f, 0.70f, 1.0f);
@@ -1020,10 +1029,10 @@ namespace studio {
 				// Whether anything is on it, which is the question a port table
 				// is usually being read to answer.
 				if (side == 0) {
-					nodegraph::NodeId held = nodegraph::NO_NODE;
+					engine::nodegraph::NodeId held = engine::nodegraph::NO_NODE;
 					std::string heldPort;
 					const bool real =
-						nodegraph::Actual(NodeDemoGraph, node->Id, port.Name, true, held, heldPort);
+						engine::nodegraph::Actual(NodeDemoGraph, node->Id, port.Name, true, held, heldPort);
 					if (!real || NodeDemoGraph.LinkInto(held, heldPort) == nullptr) {
 						ImGui::SameLine();
 						ImGui::TextDisabled("unconnected");
@@ -1033,25 +1042,25 @@ namespace studio {
 		}
 	}
 
-	bool Editor::DrawNodeDemoWidgets(nodegraph::Node &node) {
+	bool Editor::DrawNodeDemoWidgets(engine::nodegraph::Node &node) {
 		bool touched = false;
 
 		// **The node's interface and not its type's.** A compressed node's knobs
 		// are the ones it promoted out of its contents, and every read and write
 		// here goes through `ValueOf`/`SetValue` so it lands on the node inside
 		// rather than on the fold's own empty map.
-		for (const nodegraph::WidgetSpec &spec : nodegraph::WidgetsOf(node)) {
-			nodegraph::Value value = nodegraph::ValueOf(NodeDemoGraph, node.Id, spec);
+		for (const engine::nodegraph::WidgetSpec &spec : engine::nodegraph::WidgetsOf(node)) {
+			engine::nodegraph::Value value = engine::nodegraph::ValueOf(NodeDemoGraph, node.Id, spec);
 			if (value.Kind != spec.Kind) {
 				value = spec.Default;
 			}
-			const nodegraph::Value before = value;
+			const engine::nodegraph::Value before = value;
 
 			ImGui::PushID(spec.Key.c_str());
 			ImGui::SetNextItemWidth(-1.0f);
 
 			switch (spec.Kind) {
-			case nodegraph::WidgetKind::Slider: {
+			case engine::nodegraph::WidgetKind::Slider: {
 				auto shown = static_cast<float>(value.Number);
 				if (ImGui::SliderFloat(
 						spec.Label.c_str(),
@@ -1065,7 +1074,7 @@ namespace studio {
 				}
 				break;
 			}
-			case nodegraph::WidgetKind::Number: {
+			case engine::nodegraph::WidgetKind::Number: {
 				auto shown = static_cast<float>(value.Number);
 				if (ImGui::DragFloat(spec.Label.c_str(), &shown, static_cast<float>(spec.Step))) {
 					value.Number = static_cast<double>(shown);
@@ -1073,7 +1082,7 @@ namespace studio {
 				}
 				break;
 			}
-			case nodegraph::WidgetKind::Toggle: {
+			case engine::nodegraph::WidgetKind::Toggle: {
 				bool shown = value.Flag;
 				if (ImGui::Checkbox(spec.Label.c_str(), &shown)) {
 					value.Flag = shown;
@@ -1081,7 +1090,7 @@ namespace studio {
 				}
 				break;
 			}
-			case nodegraph::WidgetKind::Select: {
+			case engine::nodegraph::WidgetKind::Select: {
 				// **A combo over the schema's options**, which is the same list
 				// the canvas cycles through on a click. A second copy here is
 				// how the two would come to disagree about what "volcanic" is.
@@ -1096,7 +1105,7 @@ namespace studio {
 				}
 				break;
 			}
-			case nodegraph::WidgetKind::Text: {
+			case engine::nodegraph::WidgetKind::Text: {
 				char held[128];
 				std::snprintf(held, sizeof(held), "%s", value.Text.c_str());
 				if (ImGui::InputText(spec.Label.c_str(), held, sizeof(held))) {
@@ -1105,7 +1114,7 @@ namespace studio {
 				}
 				break;
 			}
-			case nodegraph::WidgetKind::Colour: {
+			case engine::nodegraph::WidgetKind::Colour: {
 				float rgb[3] = {value.Tint.R, value.Tint.G, value.Tint.B};
 				if (ImGui::ColorEdit3(spec.Label.c_str(), rgb)) {
 					value.Tint.R = rgb[0];
@@ -1118,7 +1127,7 @@ namespace studio {
 			}
 
 			if (!(value == before)) {
-				nodegraph::SetValue(NodeDemoGraph, node.Id, spec.Key, value);
+				engine::nodegraph::SetValue(NodeDemoGraph, node.Id, spec.Key, value);
 			}
 			ImGui::PopID();
 		}
@@ -1152,18 +1161,18 @@ namespace studio {
 		// so leaving the tab needs no notification.
 		NodeDemoCanvas.Highlight.clear();
 
-		for (const nodegraph::DataType &type : nodegraph::DataTypes::All()) {
+		for (const engine::nodegraph::DataType &type : engine::nodegraph::DataTypes::All()) {
 			// Who uses it, which is what turns the table from a list of names
 			// into something worth opening: a type nothing carries is a type
 			// somebody registered and forgot.
-			std::vector<nodegraph::NodeId> users;
-			for (const nodegraph::Node &node : NodeDemoGraph.Nodes()) {
-				const nodegraph::NodeType *declared = nodegraph::NodeTypes::Find(node.Type);
+			std::vector<engine::nodegraph::NodeId> users;
+			for (const engine::nodegraph::Node &node : NodeDemoGraph.Nodes()) {
+				const engine::nodegraph::NodeType *declared = engine::nodegraph::NodeTypes::Find(node.Type);
 				if (declared == nullptr) {
 					continue;
 				}
-				const auto carries = [&type](const std::vector<nodegraph::PortSpec> &ports) {
-					for (const nodegraph::PortSpec &port : ports) {
+				const auto carries = [&type](const std::vector<engine::nodegraph::PortSpec> &ports) {
+					for (const engine::nodegraph::PortSpec &port : ports) {
 						if (port.Type == type.Id) {
 							return true;
 						}
@@ -1212,10 +1221,10 @@ namespace studio {
 			}
 			ImGui::PopStyleColor();
 
-			for (const nodegraph::NodeId id : users) {
-				const nodegraph::Node *node = NodeDemoGraph.Find(id);
-				const nodegraph::NodeType *declared =
-					node == nullptr ? nullptr : nodegraph::NodeTypes::Find(node->Type);
+			for (const engine::nodegraph::NodeId id : users) {
+				const engine::nodegraph::Node *node = NodeDemoGraph.Find(id);
+				const engine::nodegraph::NodeType *declared =
+					node == nullptr ? nullptr : engine::nodegraph::NodeTypes::Find(node->Type);
 				if (declared == nullptr) {
 					continue;
 				}

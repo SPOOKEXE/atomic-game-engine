@@ -5,6 +5,7 @@
 #include <engine/assets/ContentPolicy.hpp>
 #include <engine/audio/Device.hpp>
 #include <engine/core/Clock.hpp>
+#include <engine/core/HeapProfile.hpp>
 #include <engine/delivery/Client.hpp>
 #include <engine/delivery/IntakeBudget.hpp>
 #include <engine/ecs/Scheduler.hpp>
@@ -129,6 +130,31 @@ namespace client {
 		// the display.
 		bool Uncapped = false;
 
+		// How many frames the CPU may queue ahead of the GPU, 1 to 3.
+		//
+		// **A latency choice rather than a throughput one**, and
+		// `render::Renderer::Initialise` carries the argument. It is a flag
+		// because the cost is a thing to *feel*: at one,
+		// `SDL_SubmitGPUCommandBuffer` blocks until the GPU has finished the
+		// previous frame, so the frame rate is the GPU's and the wait shows up
+		// as time in the `submit` span; at two the CPU runs ahead and the
+		// picture is a frame further behind the mouse.
+		//
+		// **What one costs is worst on a scene that is not busy at all.** With
+		// nothing queued behind it, a frame that misses a vblank by a hair waits
+		// out the whole next interval - so a scene doing a quarter of a
+		// millisecond of work reads as a steady stream of 34 ms frames with a
+		// 0.08 ms median underneath, which is a stutter and not a bottleneck.
+		// Measured on `examples/Cube.luau`, which is one spinning cube.
+		//
+		// The default matches the studio's, so the two programs feel the same
+		// until somebody asks otherwise. `mono.studio` has had this flag since
+		// v0.14; this is the same one, on the program the demo scenes are
+		// actually run with.
+		//
+		// @since v0.18
+		int FramesInFlight = 1;
+
 		// The frame rate to hold, or zero for none.
 		//
 		// **The other half of `Uncapped`, not a contradiction of it.** Turning
@@ -168,6 +194,40 @@ namespace client {
 		// Turning it on turns the frame graph on: recording every span is real
 		// work and `--graph` is otherwise the only thing that asks for it.
 		std::filesystem::path ProfileSnapshot;
+
+		// Write a heap report here when the run ends. Empty writes none.
+		//
+		// Turning it on turns heap sampling on, for the reason
+		// `ProfileSnapshot` turns frame collection on: a run given the flag and
+		// nothing else would retain no readings and then report that it had
+		// nothing to fit a slope to.
+		//
+		// @since v0.18
+		std::filesystem::path HeapReport;
+
+		// Fail the run when a tag climbs faster than this, in bytes a second.
+		// Zero checks nothing.
+		//
+		// **What makes a leak a build failure rather than a thing somebody
+		// notices.** The run exits `EXIT_RUNAWAY_HEAP` and names every tag that
+		// tripped it, so a soak across several scenes is one command with an
+		// exit code rather than five reports for a person to read.
+		//
+		// Turning it on turns heap sampling on.
+		//
+		// @since v0.18
+		double HeapGrowthLimit = 0.0;
+
+		// Seconds at the start of the run left out of the growth fit.
+		//
+		// **A level loading is a step, and a step at the start of a window drags
+		// a straight line through everything after it.** Ten seconds is enough
+		// for the demo scenes here to have fetched their content and settled;
+		// a scene that takes longer needs a longer warm-up rather than a higher
+		// limit.
+		//
+		// @since v0.18
+		double HeapWarmupSeconds = 10.0;
 
 		// Read staged data from here instead of from beside the binary.
 		std::filesystem::path AssetsDirectory;
@@ -425,6 +485,29 @@ namespace client {
 
 		void PumpEvents();
 		void Step();
+		// Exit code for a run whose heap kept climbing, and for one that was
+		// asked to check and could not.
+		//
+		// Distinct from 1 and 2, which a client already uses for a failed
+		// startup and a bad command line: a soak recipe has to be able to tell
+		// "this build leaks" from "this build would not start".
+		static constexpr int EXIT_RUNAWAY_HEAP = 3;
+
+		// Below this many seconds of readings a slope is noise. Six, because a
+		// least-squares fit over five points is as answerable to one outlier as
+		// to the trend.
+		static constexpr double MINIMUM_GROWTH_WINDOW_SECONDS = 6.0;
+
+		// Reports whether any tag outran `Options::HeapGrowthLimit`, naming each
+		// one. Returns the process exit code.
+		int CheckHeapGrowth();
+
+		// Rebuilds the heap tree, history and growth report the F5 panel draws.
+		//
+		// Called when a reading is taken - once a second - rather than when the
+		// panel repaints, which is twenty times a second.
+		void RefreshHeapReport();
+
 		void WriteSnapshot();
 
 		// Opens the socket, creates the replica world and joins.
@@ -1059,6 +1142,19 @@ namespace client {
 		Compositor Views;
 
 		std::vector<engine::render::SystemTiming> SystemTimings;
+
+		// The heap tree and growth report, refreshed when a reading is taken
+		// rather than when the panel repaints.
+		//
+		// **Because fitting a slope is a pass over the whole retained window.**
+		// The panel repaints twenty times a second and a reading is taken once,
+		// so doing this on the drawing path would run the fit four hundred times
+		// for every sample it had to fit - and the heap panel would then be the
+		// most expensive thing in the frame it is reporting on.
+		std::vector<engine::core::HeapTreeRow> HeapRows;
+		std::vector<engine::core::HeapGrowth> HeapGrowth;
+		std::vector<engine::core::HeapSample> HeapHistory;
+		engine::core::HeapTotals HeapTotals;
 
 		bool Running = false;
 		int64_t FramesDrawn = 0;

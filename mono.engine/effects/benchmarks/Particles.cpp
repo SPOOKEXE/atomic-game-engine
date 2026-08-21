@@ -126,7 +126,7 @@ namespace particle_bench {
 		const engine::ecs::ClassId emitterClass = engine::ecs::Classes::Find(Name("ParticleEmitter"));
 
 		engine::scene::PartDesc desc;
-		desc.Anchored = true;
+		desc.Simulated = false;
 
 		for (size_t index = 0; index < count; index++) {
 			// Spread over a grid so the scene is a world rather than a point. The

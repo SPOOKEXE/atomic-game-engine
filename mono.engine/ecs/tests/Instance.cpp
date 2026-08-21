@@ -604,6 +604,49 @@ TEST_CASE("EachChild survives the body reparenting what it was handed", "[ecs]")
 	REQUIRE(ChildNames(store, to).size() == 6);
 }
 
+TEST_CASE("a sibling list that loops is truncated rather than walked forever", "[ecs]") {
+	// **A corrupt tree must cost a warning, not the machine.** The sibling list
+	// is a chain of entity handles, and `Hierarchy` is a replicated component -
+	// so a replica holds each entity's links as they arrived, and a set of links
+	// from different ticks can name a list that comes back round to itself.
+	//
+	// The walk used to have no bound. `DestroyInstance` and `DetachFromTree`
+	// both collect what `EachChild` hands them into a vector before touching
+	// anything, so the symptom was not a hang: it was a vector doubling until
+	// the allocator refused. Measured out of a studio Play session as a single
+	// sixteen-gigabyte request and `std::bad_alloc`, after about eighty craters
+	// of `Magic.luau`.
+	const Tree &tree = Classes_();
+	Store store("test");
+
+	const Entity model = store.CreateInstance(tree.Model);
+	const Entity first = store.CreateInstance(tree.Part, "First");
+	const Entity second = store.CreateInstance(tree.Part, "Second");
+	store.SetParent(first, model);
+	store.SetParent(second, model);
+
+	// The loop, written the way a delta would leave one: the last child names
+	// the first as its next sibling. Written through the component rather than
+	// through `SetParent`, because the tree API cannot produce this and that is
+	// the point - it arrives from outside.
+	Hierarchy *tail = store.GetMutable<Hierarchy>(second);
+	REQUIRE(tail != nullptr);
+	tail->NextSibling = first;
+
+	size_t visited = 0;
+	store.EachChild(model, [&visited](Entity) { visited++; });
+
+	// Bounded by what could be in the list at all, so the walk ends. The exact
+	// number is not the assertion - that it is finite is.
+	CHECK(visited > 0);
+	CHECK(visited < 100000);
+
+	// And the thing the crash was actually made of: a caller that collects.
+	// This is what allocated sixteen gigabytes.
+	store.DestroyInstance(model);
+	CHECK_FALSE(store.Alive(model));
+}
+
 // --- destroying -----------------------------------------------------------
 
 TEST_CASE("destroying an instance takes its whole subtree", "[ecs]") {

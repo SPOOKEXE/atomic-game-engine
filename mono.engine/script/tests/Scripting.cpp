@@ -3529,6 +3529,212 @@ TEST_CASE("javascript casts the same ray", "[scripting][raycast][js]") {
 	)");
 }
 
+// --- volume queries ---------------------------------------------------------
+
+TEST_CASE("a script asks what is inside a volume", "[scripting][raycast]") {
+	// **Against the exact shapes, as the raycast is.** `physics::OverlapSphere`
+	// is the one that tests the shape rather than its bound, which is the whole
+	// difference from the `spatial::` function of the same name - a cylinder
+	// standing in the corner of its own box is reported by that one from a metre
+	// away and by this one only when the sphere really reaches it.
+	RegisterClasses();
+	Store store("script_test");
+	engine::physics::RegisterPhysicsComponents();
+	engine::physics::PreparePhysicsWorld(store);
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local function block(name, at)
+			local part = Instance.new('Part')
+			part.Name = name
+			part.Anchored = true
+			part.Size = Vector3.new(2, 2, 2)
+			part.Position = at
+			part.Parent = workspace
+			return part
+		end
+
+		block('Near', Vector3.new(0, 0, 0))
+		block('AlsoNear', Vector3.new(3, 0, 0))
+		block('Far', Vector3.new(60, 0, 0))
+	)");
+
+	// The broad-phase index is rebuilt by a system and this test runs no
+	// scheduler, so it is synced directly - a query against a stale index finds
+	// nothing, which reads as the binding failing rather than the index being
+	// empty.
+	engine::physics::SyncBroadphase(store);
+
+	MustRun(*runtime, R"(
+		local function names(found)
+			local out = {}
+			for _, part in found do
+				table.insert(out, part.Name)
+			end
+			table.sort(out)
+			return table.concat(out, ',')
+		end
+
+		-- `size` is the full extent, as a part's `Size` is, so this box reaches
+		-- five studs each way and not ten.
+		local box = workspace:OverlapBox(Vector3.new(0, 0, 0), Vector3.new(10, 10, 10))
+		assert(names(box) == 'AlsoNear,Near', 'box found ' .. names(box))
+
+		local sphere = workspace:OverlapSphere(Vector3.new(0, 0, 0), 5)
+		assert(names(sphere) == 'AlsoNear,Near', 'sphere found ' .. names(sphere))
+
+		-- Nothing out there, and an empty array rather than nil: "no parts" is
+		-- an answer, where a raycast's nil means "no hit".
+		local empty = workspace:OverlapSphere(Vector3.new(0, 500, 0), 1)
+		assert(#empty == 0, 'a sphere in open air found ' .. #empty)
+
+		-- A cast reaches what a stationary overlap at the same place does not.
+		-- `Far` is 60 studs away and the sweep travels 70.
+		local swept = workspace:SphereCast(Vector3.new(0, 0, 0), 1, Vector3.new(70, 0, 0))
+		assert(string.find(names(swept), 'Far') ~= nil, 'the sweep missed Far: ' .. names(swept))
+
+		local blocks = workspace:BlockCast(CFrame.new(0, 0, 0), Vector3.new(2, 2, 2), Vector3.new(70, 0, 0))
+		assert(string.find(names(blocks), 'Far') ~= nil, 'the block sweep missed Far: ' .. names(blocks))
+	)");
+}
+
+TEST_CASE("MaxParts caps a volume query", "[scripting][raycast]") {
+	// **A cap is not optional, unlike in Roblox.** The engine writes into a span
+	// the caller owns, so somebody has to choose its size and it cannot be the
+	// script - an uncapped `OverlapSphere` over a stress scene would build a
+	// table of half a million entries inside a tick.
+	RegisterClasses();
+	Store store("script_test");
+	engine::physics::RegisterPhysicsComponents();
+	engine::physics::PreparePhysicsWorld(store);
+
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		for index = 1, 8 do
+			local part = Instance.new('Part')
+			part.Anchored = true
+			part.Size = Vector3.new(1, 1, 1)
+			part.Position = Vector3.new(index * 1.5, 0, 0)
+			part.Parent = workspace
+		end
+	)");
+
+	engine::physics::SyncBroadphase(store);
+
+	MustRun(*runtime, R"(
+		local all = workspace:OverlapSphere(Vector3.new(6, 0, 0), 20)
+		assert(#all == 8, 'expected all eight, got ' .. #all)
+
+		local params = RaycastParams.new()
+		params.MaxParts = 3
+		assert(params.MaxParts == 3, 'MaxParts did not round-trip')
+
+		local capped = workspace:OverlapSphere(Vector3.new(6, 0, 0), 20, params)
+		assert(#capped == 3, 'the cap did not take: ' .. #capped)
+	)");
+
+	// Refused rather than clamped to one. Zero is not a smaller query, it is one
+	// that can never report anything, and a script that computed one has a bug
+	// that a silently empty result would hide behind an ordinary miss.
+	CHECK_FALSE(runtime->Run("RaycastParams.new().MaxParts = 0"));
+}
+
+TEST_CASE("javascript asks the same volume questions", "[scripting][raycast][js]") {
+	// The two runtimes answer the same six methods with the same shapes. This is
+	// the half that used to be missing entirely.
+	RegisterClasses();
+	Store store("script_test");
+	engine::physics::RegisterPhysicsComponents();
+	engine::physics::PreparePhysicsWorld(store);
+
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	MustRun(*runtime, R"(
+		function block(name, x) {
+			const part = Instance.new('Part');
+			part.Name = name;
+			part.Anchored = true;
+			part.Size = Vector3.new(2, 2, 2);
+			part.Position = Vector3.new(x, 0, 0);
+			part.Parent = workspace;
+		}
+
+		block('Near', 0);
+		block('AlsoNear', 3);
+		block('Far', 60);
+	)");
+
+	engine::physics::SyncBroadphase(store);
+
+	MustRun(*runtime, R"(
+		function names(found) {
+			return found.map(function (part) { return part.Name; }).sort().join(',');
+		}
+
+		const box = workspace.OverlapBox(Vector3.new(0, 0, 0), Vector3.new(10, 10, 10));
+		if (names(box) !== 'AlsoNear,Near') throw new Error('box found ' + names(box));
+
+		const sphere = workspace.OverlapSphere(Vector3.new(0, 0, 0), 5);
+		if (names(sphere) !== 'AlsoNear,Near') throw new Error('sphere found ' + names(sphere));
+
+		if (workspace.OverlapSphere(Vector3.new(0, 500, 0), 1).length !== 0) {
+			throw new Error('a sphere in open air found something');
+		}
+
+		const swept = workspace.SphereCast(Vector3.new(0, 0, 0), 1, Vector3.new(70, 0, 0));
+		if (names(swept).indexOf('Far') < 0) throw new Error('the sweep missed Far: ' + names(swept));
+
+		const blocks = workspace.BlockCast(
+			CFrame.new(0, 0, 0), Vector3.new(2, 2, 2), Vector3.new(70, 0, 0)
+		);
+		if (names(blocks).indexOf('Far') < 0) throw new Error('the block sweep missed Far');
+
+		const params = RaycastParams.new();
+		params.MaxParts = 1;
+		if (params.MaxParts !== 1) throw new Error('MaxParts did not round-trip');
+		const capped = workspace.OverlapSphere(Vector3.new(0, 0, 0), 5, params);
+		if (capped.length !== 1) throw new Error('the cap did not take: ' + capped.length);
+	)");
+
+	// Refused rather than clamped, exactly as the Luau half refuses it.
+	CHECK_FALSE(runtime->Run("RaycastParams.new().MaxParts = 0;"));
+}
+
+TEST_CASE("a javascript hit reports the surface it touched", "[scripting][raycast][js]") {
+	// **`engine.d.ts` has declared `RaycastResult.Material` since the file
+	// existed and this half never set it**, so a TypeScript author reading it
+	// typechecked and got `undefined` with nothing anywhere saying the two
+	// disagreed. The Luau half has always set it; this holds them together.
+	RegisterClasses();
+	Store store("script_test");
+	engine::physics::RegisterPhysicsComponents();
+	engine::physics::PreparePhysicsWorld(store);
+
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	MustRun(*runtime, R"(
+		const wall = Instance.new('Part');
+		wall.Anchored = true;
+		wall.Size = Vector3.new(10, 10, 1);
+		wall.Position = Vector3.new(0, 0, -10);
+		wall.Parent = workspace;
+	)");
+
+	engine::physics::SyncBroadphase(store);
+
+	MustRun(*runtime, R"(
+		const hit = workspace.Raycast(Vector3.new(0, 0, 0), Vector3.new(0, 0, -50));
+		if (hit === null) throw new Error('the ray found nothing');
+
+		// A part nobody gave a surface reads back an empty string, which is the
+		// same nothing an unregistered name has always meant. The field being
+		// present at all is what this case is for.
+		if (typeof hit.Material !== 'string') throw new Error('Material was ' + typeof hit.Material);
+	)");
+}
+
 // --- the surface camera -----------------------------------------------------
 
 TEST_CASE("SurfaceSize turns a camera into one that renders to a texture", "[scripting][surface]") {
@@ -5344,4 +5550,342 @@ TEST_CASE("javascript keeps its world awake too", "[scripting]") {
 		npc.LetWorldSleep();
 		if (npc.IsKeepingWorldAwake()) { throw new Error('withdrawing should release it'); }
 	)");
+}
+
+// --- CFrame parity ----------------------------------------------------------
+//
+// v0.18 brought the script-facing CFrame up to Roblox's surface. The cases here
+// are the ones a wrong answer still looks reasonable in - a rotation that turns
+// the wrong way is not a crash, it is a scene that is subtly not what the author
+// drew, and nothing reports it.
+
+TEST_CASE("CFrame.Angles is Roblox's XYZ order", "[scripting][cframe]") {
+	// **The defect this test exists for.** `CFrame.Angles` was bound to
+	// `core::CFrame::Angles`, which composes Y-X-Z - Roblox's `fromOrientation`
+	// - while Roblox's `Angles` is an alias for `fromEulerAnglesXYZ` and
+	// composes X-Y-Z. A single-axis turn is identical under either, which is why
+	// eighteen versions of the engine did not notice.
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		-- Two axes at once, which is where the orders must disagree.
+		local xyz = CFrame.Angles(0.5, 0.9, 0)
+		local yxz = CFrame.fromOrientation(0.5, 0.9, 0)
+		assert(xyz:AngleBetween(yxz) > 0.1, 'the two orders agree - Angles is still YXZ')
+
+		-- And each name reaches the composition it claims.
+		assert(CFrame.fromEulerAnglesXYZ(0.5, 0.9, 0):AngleBetween(xyz) < 1e-5, 'Angles is not XYZ')
+		assert(CFrame.fromEulerAnglesYXZ(0.5, 0.9, 0):AngleBetween(yxz) < 1e-5, 'fromOrientation is not YXZ')
+
+		-- One axis at a time is the same either way, which is the other half of
+		-- the claim: a port that only ever turned about Y was never affected.
+		assert(CFrame.Angles(0, 0.7, 0):AngleBetween(CFrame.fromOrientation(0, 0.7, 0)) < 1e-5)
+	)");
+}
+
+TEST_CASE("a script reads every CFrame member", "[scripting][cframe]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local function near(a, b, what)
+			assert(math.abs(a - b) < 1e-4, what .. ': ' .. tostring(a) .. ' vs ' .. tostring(b))
+		end
+		local function dot(a, b) return a.X * b.X + a.Y * b.Y + a.Z * b.Z end
+
+		local f = CFrame.new(3, -1, 8) * CFrame.Angles(0.3, -0.8, 1.2)
+
+		near(f.X, 3, 'X') near(f.Y, -1, 'Y') near(f.Z, 8, 'Z')
+		near(f.p.X, 3, 'p')
+		near(f.Rotation.Position.Magnitude, 0, 'Rotation keeps a position')
+
+		-- The basis is a rotation, so the columns are unit and perpendicular.
+		near(dot(f.RightVector, f.UpVector), 0, 'basis not perpendicular')
+		near(dot(f.XVector, f.RightVector), 1, 'XVector is not RightVector')
+		near(dot(f.YVector, f.UpVector), 1, 'YVector is not UpVector')
+
+		-- The one pair that differ: Roblox's ZVector is +Z, LookVector is -Z.
+		near(dot(f.ZVector, f.LookVector), -1, 'ZVector is not the negation of LookVector')
+
+		local p = Vector3.new(2, 5, -4)
+		near(f:PointToObjectSpace(f:PointToWorldSpace(p)).X, p.X, 'point round trip')
+		near(f:VectorToObjectSpace(f:VectorToWorldSpace(p)).Y, p.Y, 'vector round trip')
+
+		local other = CFrame.new(1, 2, 3) * CFrame.Angles(1, 0.2, -0.4)
+		near(f:ToObjectSpace(f:ToWorldSpace(other)):AngleBetween(other), 0, 'frame round trip')
+
+		near(f:Inverse():AngleBetween(f.Rotation:Inverse()), 0, 'Inverse')
+		near(f:Lerp(f, 0.5):AngleBetween(f), 0, 'Lerp to itself')
+		near(f:Orthonormalize():AngleBetween(f), 0, 'Orthonormalize')
+		assert(f:FuzzyEq(f, 1e-5), 'FuzzyEq on itself')
+		assert(not f:FuzzyEq(other, 1e-5), 'FuzzyEq on a different frame')
+
+		local rx, ry, rz = f:ToEulerAnglesXYZ()
+		near(CFrame.fromEulerAnglesXYZ(rx, ry, rz):AngleBetween(f.Rotation), 0, 'ToEulerAnglesXYZ')
+		local ox, oy, oz = f:ToOrientation()
+		near(CFrame.fromOrientation(ox, oy, oz):AngleBetween(f.Rotation), 0, 'ToOrientation')
+		local axis, angle = f:ToAxisAngle()
+		near(CFrame.fromAxisAngle(axis, angle):AngleBetween(f.Rotation), 0, 'ToAxisAngle')
+
+		-- Twelve values, and the twelve-argument `new` takes them straight back.
+		near(select('#', f:GetComponents()), 12, 'GetComponents count')
+		near(CFrame.new(f:GetComponents()):AngleBetween(f), 0, 'twelve-argument new')
+		near(select('#', f:components()), 12, 'components alias')
+
+		-- Translation only, which is the whole difference from `*`.
+		near((f + Vector3.new(1, 0, 0)).X, 4, 'add')
+		near((f - Vector3.new(1, 0, 0)).X, 2, 'subtract')
+
+		near(CFrame.identity.Position.Magnitude, 0, 'identity')
+		near(CFrame.lookAlong(Vector3.new(0, 0, 0), Vector3.new(0, 0, -1)).LookVector.Z, -1, 'lookAlong')
+		near(CFrame.fromRotationBetweenVectors(Vector3.new(1, 0, 0), Vector3.new(0, 1, 0))
+			:VectorToWorldSpace(Vector3.new(1, 0, 0)).Y, 1, 'fromRotationBetweenVectors')
+
+		-- A skewed basis is orthonormalised rather than trusted, or the result
+		-- is a rotation that also scales.
+		near(CFrame.fromMatrix(Vector3.new(0, 0, 0), Vector3.new(2, 0, 0), Vector3.new(0.3, 4, 0))
+			.RightVector.Magnitude, 1, 'fromMatrix')
+
+		-- The quaternion arity, normalised on the way in.
+		near(CFrame.new(0, 0, 0, 0, 0, 0, 5):AngleBetween(CFrame.identity), 0, 'quaternion new')
+	)");
+
+	// A misspelled member is a named error rather than a nil that fails one line
+	// later as "attempt to call a nil value".
+	CHECK_FALSE(runtime->Run("local _ = CFrame.new().Inverze"));
+}
+
+TEST_CASE("javascript reads the same CFrame members", "[scripting][cframe][js]") {
+	// The two runtimes carry one surface. Where the languages differ - operators
+	// and multiple return - JavaScript gets the honest spelling rather than a
+	// pretence: `add`/`sub` for `+`/`-`, and arrays for the several-value
+	// returns.
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	MustRun(*runtime, R"(
+		function near(a, b, what) {
+			if (Math.abs(a - b) > 1e-4) throw new Error(what + ': ' + a + ' vs ' + b);
+		}
+		function dot(a, b) { return a.X * b.X + a.Y * b.Y + a.Z * b.Z; }
+
+		const xyz = CFrame.Angles(0.5, 0.9, 0);
+		const yxz = CFrame.fromOrientation(0.5, 0.9, 0);
+		if (xyz.AngleBetween(yxz) < 0.1) throw new Error('the two orders agree');
+		near(CFrame.fromEulerAnglesXYZ(0.5, 0.9, 0).AngleBetween(xyz), 0, 'Angles is not XYZ');
+
+		const f = CFrame.new(3, -1, 8).mul(CFrame.Angles(0.3, -0.8, 1.2));
+		near(f.X, 3, 'X');
+		near(f.Rotation.Position.Magnitude, 0, 'Rotation keeps a position');
+		near(dot(f.RightVector, f.UpVector), 0, 'basis not perpendicular');
+		near(dot(f.ZVector, f.LookVector), -1, 'ZVector');
+
+		const p = Vector3.new(2, 5, -4);
+		near(f.PointToObjectSpace(f.PointToWorldSpace(p)).X, p.X, 'point round trip');
+		near(f.VectorToObjectSpace(f.VectorToWorldSpace(p)).Y, p.Y, 'vector round trip');
+
+		const other = CFrame.new(1, 2, 3).mul(CFrame.Angles(1, 0.2, -0.4));
+		near(f.ToObjectSpace(f.ToWorldSpace(other)).AngleBetween(other), 0, 'frame round trip');
+		near(f.Lerp(f, 0.5).AngleBetween(f), 0, 'Lerp');
+		near(f.Orthonormalize().AngleBetween(f), 0, 'Orthonormalize');
+		if (!f.FuzzyEq(f, 1e-5)) throw new Error('FuzzyEq on itself');
+		if (f.FuzzyEq(other, 1e-5)) throw new Error('FuzzyEq on a different frame');
+
+		const parts = f.GetComponents();
+		if (parts.length !== 12) throw new Error('GetComponents length ' + parts.length);
+		near(parts[0], 3, 'GetComponents x');
+		near(CFrame.new.apply(null, parts).AngleBetween(f), 0, 'twelve-argument new');
+
+		const angles = f.ToEulerAnglesXYZ();
+		if (angles.length !== 3) throw new Error('ToEulerAnglesXYZ length');
+		near(CFrame.fromEulerAnglesXYZ(angles[0], angles[1], angles[2]).AngleBetween(f.Rotation), 0, 'XYZ');
+
+		const pair = f.ToAxisAngle();
+		near(CFrame.fromAxisAngle(pair[0], pair[1]).AngleBetween(f.Rotation), 0, 'ToAxisAngle');
+
+		near(f.add(Vector3.new(1, 0, 0)).X, 4, 'add');
+		near(f.sub(Vector3.new(1, 0, 0)).X, 2, 'sub');
+		near(CFrame.identity.Position.Magnitude, 0, 'identity');
+		near(CFrame.lookAlong(Vector3.new(0, 0, 0), Vector3.new(0, 0, -1)).LookVector.Z, -1, 'lookAlong');
+		near(CFrame.fromMatrix(Vector3.new(0, 0, 0), Vector3.new(2, 0, 0), Vector3.new(0.3, 4, 0))
+			.RightVector.Magnitude, 1, 'fromMatrix');
+	)");
+}
+
+// --- the Vector3 surface, brought up to Roblox's ------------------------------
+//
+// **The type a port touches first, and it had five members.** `Dot`, `Cross`
+// and `Unit` are the top three lines of every aiming routine, `Floor` is how a
+// grid snap is written and `/` is how a direction is scaled - all of them
+// errored at run time on a script that typechecked clean, because the
+// declarations describe a value type that `bindings-check` cannot see into.
+//
+// Both languages, because the roadmap's gate is that a member lands in both or
+// it is not done - and because the two had already drifted: `Vector3.zero.Unit`
+// threw in Luau and answered the zero vector in JavaScript.
+
+TEST_CASE("Vector3 carries the methods a Roblox script calls", "[scripting]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local a = Vector3.new(1, 2, 3)
+		local b = Vector3.new(4, 5, 6)
+
+		assert(a:Dot(b) == 32, 'Dot')
+		assert(Vector3.xAxis:Cross(Vector3.yAxis) == Vector3.zAxis, 'Cross follows the right hand')
+		assert(a:Lerp(b, 0.5) == Vector3.new(2.5, 3.5, 4.5), 'Lerp')
+
+		-- Each component on its own, so the answer is usually neither operand.
+		assert(a:Max(b) == b and a:Min(b) == a, 'Max and Min')
+		assert(
+			Vector3.new(1, 2, 1):Max(Vector3.new(2, 1, 2)) == Vector3.new(2, 2, 2),
+			'Max is component-wise rather than the longer vector'
+		)
+
+		local rough = Vector3.new(-2.6, 5.1, 8.8)
+		assert(rough:Abs() == Vector3.new(2.6, 5.1, 8.8), 'Abs')
+		assert(rough:Ceil() == Vector3.new(-2, 6, 9), 'Ceil')
+		assert(rough:Floor() == Vector3.new(-3, 5, 8), 'Floor rounds down, not toward zero')
+		assert(Vector3.new(-2.6, 5.1, 0):Sign() == Vector3.new(-1, 1, 0), 'Sign, and zero has none')
+
+		assert(math.abs(Vector3.xAxis:Angle(Vector3.zAxis) - math.pi / 2) < 1e-5, 'Angle')
+		assert(math.abs(Vector3.xAxis:Angle(-Vector3.xAxis) - math.pi) < 1e-5, 'a half turn is pi')
+
+		-- Without an axis a steering routine knows how far off it is and not
+		-- which way to turn, which is the whole reason the argument exists.
+		assert(Vector3.xAxis:Angle(Vector3.zAxis, Vector3.yAxis) < 0, 'the axis signs the angle')
+		assert(Vector3.xAxis:Angle(Vector3.zAxis, -Vector3.yAxis) > 0, 'and the other way round')
+
+		assert(Vector3.one:FuzzyEq(Vector3.one + Vector3.one * 1e-7), 'FuzzyEq default epsilon')
+		assert(not Vector3.one:FuzzyEq(Vector3.new(1, 1, 2)), 'FuzzyEq is not everything-equals')
+		assert(Vector3.one:FuzzyEq(Vector3.new(1, 1, 2), 2), 'an explicit epsilon is honoured')
+	)");
+
+	// A name that is not a member is still an error rather than a nil call,
+	// which is what makes a typo say where it is.
+	CHECK_FALSE(runtime->Run("return Vector3.new():Abz()"));
+}
+
+TEST_CASE("Vector3 carries the five constants and the two named constructors", "[scripting]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		assert(Vector3.xAxis == Vector3.new(1, 0, 0), 'xAxis')
+		assert(Vector3.yAxis == Vector3.new(0, 1, 0), 'yAxis')
+		assert(Vector3.zAxis == Vector3.new(0, 0, 1), 'zAxis')
+
+		assert(Vector3.FromNormalId(Enum.NormalId.Top) == Vector3.yAxis, 'FromNormalId')
+
+		-- **Front is -Z in this engine and in Roblox**, and it is the entry a
+		-- hand-written table gets backwards - silently, because nothing about a
+		-- face is checkable once it has become a direction.
+		assert(Vector3.FromNormalId(Enum.NormalId.Front) == Vector3.new(0, 0, -1), 'Front is -Z')
+		assert(Vector3.FromAxis(Enum.Axis.Z) == Vector3.zAxis, 'FromAxis')
+	)");
+
+	// A member of the wrong enum is refused rather than read as whatever it
+	// happens to be called.
+	CHECK_FALSE(runtime->Run("return Vector3.FromAxis(Enum.NormalId.Top)"));
+	CHECK_FALSE(runtime->Run("return Vector3.FromNormalId('Sideways')"));
+}
+
+TEST_CASE("Vector3 divides the way Roblox's operator table says", "[scripting]") {
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		assert((Vector3.new(10, 9, 8) / 2) == Vector3.new(5, 4.5, 4), 'a scalar quotient')
+		assert(
+			(Vector3.new(10, 9, 8) / Vector3.new(2, 3, 4)) == Vector3.new(5, 3, 2),
+			'a component-wise quotient'
+		)
+
+		assert((Vector3.new(10, 9, 8) // 4) == Vector3.new(2, 2, 2), 'floor division by a scalar')
+		assert((Vector3.new(-5, 5, 0) // 2) == Vector3.new(-3, 2, 0), 'floor division rounds down')
+		assert(
+			(Vector3.new(10, 9, 8) // Vector3.new(3, 3, 3)) == Vector3.new(3, 3, 2),
+			'component-wise floor division'
+		)
+	)");
+
+	// **`2 * v` is in Roblox's operator table and `2 / v` is not.** Luau hands
+	// `__div` both operand orders, so answering one here would be inventing
+	// arithmetic no script written elsewhere can rely on.
+	CHECK_FALSE(runtime->Run("return 2 / Vector3.new(1, 2, 3)"));
+}
+
+TEST_CASE("javascript reaches the same Vector3 surface", "[scripting][js]") {
+	// The roadmap's gate: a member lands in both languages or it is not done.
+	// The operators are methods here because JavaScript has no overloading, and
+	// `div`, `idiv` and `neg` are the three that had no method at all.
+	RegisterClasses();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	MustRun(*runtime, R"(
+		const check = (ok, what) => { if (!ok) throw new Error(what); };
+
+		const a = Vector3.new(1, 2, 3);
+		const b = Vector3.new(4, 5, 6);
+
+		check(a.Dot(b) === 32, 'Dot');
+		check(Vector3.xAxis.Cross(Vector3.yAxis).Equals(Vector3.zAxis), 'Cross');
+		check(a.Lerp(b, 0.5).Equals(Vector3.new(2.5, 3.5, 4.5)), 'Lerp');
+		check(a.Max(b).Equals(b) && a.Min(b).Equals(a), 'Max and Min');
+
+		const rough = Vector3.new(-2.6, 5.1, 8.8);
+		check(rough.Abs().Equals(Vector3.new(2.6, 5.1, 8.8)), 'Abs');
+		check(rough.Ceil().Equals(Vector3.new(-2, 6, 9)), 'Ceil');
+		check(rough.Floor().Equals(Vector3.new(-3, 5, 8)), 'Floor rounds down');
+		check(Vector3.new(-2.6, 5.1, 0).Sign().Equals(Vector3.new(-1, 1, 0)), 'Sign');
+
+		check(Math.abs(Vector3.xAxis.Angle(Vector3.zAxis) - Math.PI / 2) < 1e-5, 'Angle');
+		check(Vector3.xAxis.Angle(Vector3.zAxis, Vector3.yAxis) < 0, 'the axis signs the angle');
+
+		check(Vector3.one.FuzzyEq(Vector3.new(1, 1, 1 + 1e-7)), 'FuzzyEq default epsilon');
+		check(!Vector3.one.FuzzyEq(Vector3.new(1, 1, 2)), 'FuzzyEq is not everything-equals');
+		check(Vector3.one.FuzzyEq(Vector3.new(1, 1, 2), 2), 'an explicit epsilon is honoured');
+
+		check(a.div(2).Equals(Vector3.new(0.5, 1, 1.5)), 'div by a scalar');
+		check(a.div(a).Equals(Vector3.one), 'div component-wise');
+		check(Vector3.new(10, 9, 8).idiv(4).Equals(Vector3.new(2, 2, 2)), 'idiv');
+		check(Vector3.new(-5, 5, 0).idiv(2).Equals(Vector3.new(-3, 2, 0)), 'idiv rounds down');
+		check(a.neg().Equals(Vector3.new(-1, -2, -3)), 'neg');
+
+		check(Vector3.xAxis.Equals(Vector3.new(1, 0, 0)), 'xAxis');
+		check(Vector3.yAxis.Equals(Vector3.new(0, 1, 0)), 'yAxis');
+		check(Vector3.zAxis.Equals(Vector3.new(0, 0, 1)), 'zAxis');
+
+		check(Vector3.FromNormalId(Enum.NormalId.Top).Equals(Vector3.yAxis), 'FromNormalId');
+		check(Vector3.FromNormalId(Enum.NormalId.Front).Equals(Vector3.new(0, 0, -1)), 'Front is -Z');
+		check(Vector3.FromAxis(Enum.Axis.Z).Equals(Vector3.zAxis), 'FromAxis');
+	)");
+}
+
+TEST_CASE("both languages refuse the Unit of a zero vector", "[scripting][js]") {
+	// **This is what drift looks like when nothing tests one half.** Luau threw
+	// and JavaScript handed back the zero vector, so one script moved a part in
+	// one language and left it where it was in the other. Roblox answers three
+	// NaNs, which is the third answer and the one that surfaces as geometry
+	// vanishing somewhere unrelated; being told is better than either.
+	RegisterClasses();
+	Store store("script_test");
+
+	for (const Language language : {Language::Luau, Language::JavaScript}) {
+		const auto runtime = MakeRuntime(store, language);
+		const bool ok = language == Language::Luau ? runtime->Run("return Vector3.new(0, 0, 0).Unit")
+												   : runtime->Run("const nowhere = Vector3.zero.Unit;");
+
+		CHECK_FALSE(ok);
+		CHECK(runtime->LastError().find("zero vector") != std::string::npos);
+	}
 }
