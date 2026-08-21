@@ -202,9 +202,13 @@ local function remembering(field: any): any
 		end
 	end
 
-	function proxy.edits(_self: any): any
-		return editsProxy
-	end
+	-- **Substituted on the field rather than wrapped in a method**, because
+	-- `HeightField` reaches for it both ways. `Chunker` asks `field:edits()`,
+	-- which returns this; `HeightField.heightAt` reads `self._edits` directly,
+	-- and a method override alone would have left that one path sampling the
+	-- real list. That path is the one `Magic.luau`'s `groundAt` runs on every
+	-- projectile every frame, so it is the one that mattered most.
+	proxy._edits = editsProxy
 
 	-- The uncached answer, for `TerrainRuntime.audit` and nothing else.
 	function proxy.trueDeltaAt(x: number, z: number): number

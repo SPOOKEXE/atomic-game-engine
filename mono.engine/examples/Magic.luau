@@ -147,8 +147,22 @@ local builder = TerrainRuntime.new(field, CHUNK, terrainRoot)
 
 -- The top surface of a column. A block at integer height `h` occupies
 -- [h, h + 1), so its surface is one above its index.
+-- Where the ground is, including whatever has been blown out of it.
+--
+-- **Asked of the builder's field rather than the bare one, and that is not a
+-- tidying.** `TerrainRuntime` wraps the height field in one that remembers the
+-- noise - which cannot change - and the dug depth, which it folds forward on
+-- each crater. The bare field recomputes about sixty octaves of noise per call
+-- and walks every crater filed near the column, so this got slower with every
+-- shot fired.
+--
+-- It is called per projectile per frame, twice: once to arm and once to test
+-- for impact. At two hundred craters with five lanes in the air that was enough
+-- to trip the Luau step budget inside `Noise.luau`, which reads as the scene
+-- freezing rather than as a sampler being asked too much.
+local terrain = builder.field
 local function groundAt(x: number, z: number): number
-	return field:solidTopAt(x, z, field:heightAt(x, z)) + 1
+	return terrain:solidTopAt(x, z, terrain:heightAt(x, z)) + 1
 end
 
 local function plain(value: Vector3)
