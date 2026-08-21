@@ -118,10 +118,33 @@ namespace studio {
 			return cell % GRID_MAJOR == 0;
 		}
 
+		// How much of its strength the grid keeps while nothing is being
+		// dragged.
+		//
+		// **Because an overlay cannot be hidden by the scene and this is the
+		// half of that which is fixable.** The grid is drawn after the world
+		// with no depth buffer to test against - `AdornmentView.cpp` states the
+		// same limit for adornments - so it draws over the geometry it should be
+		// under, and what a person notices is that it shouts across a scene they
+		// are looking at rather than placing things in. While a handle is held
+		// it is the thing being read: where the origin is, how big a stud is,
+		// whether the part has landed on a line. So it is faint by default and
+		// whole for the length of a drag.
+		//
+		// It is not occlusion and does not pretend to be. Occlusion needs the
+		// grid to become a depth-tested node in the render graph rather than a
+		// draw list, which `ROADMAP.md` carries the design for.
+		constexpr float GRID_IDLE = 0.45f;
+
 		// A colour that fades with distance from the camera, so the grid has a
 		// horizon instead of ending in a hard rectangle.
-		ImU32 GridColour(float fade, bool major) {
-			const float alpha = std::clamp(fade, 0.0f, 1.0f) * (major ? 0.5f : 0.25f);
+		//
+		// @param fade    The distance fade, from `GridFade`.
+		// @param major   Whether this is one of the heavy lines.
+		// @param dragged Whether a handle is being held right now.
+		ImU32 GridColour(float fade, bool major, bool dragged) {
+			const float alpha =
+				std::clamp(fade, 0.0f, 1.0f) * (major ? 0.5f : 0.25f) * (dragged ? 1.0f : GRID_IDLE);
 			return ImGui::GetColorU32(ImVec4(0.6f, 0.65f, 0.75f, alpha));
 		}
 
@@ -444,6 +467,12 @@ namespace studio {
 			const bool authoring = !IsReplicaWorld(shown);
 
 			if (ShowGrid && authoring) {
+				// A handle held anywhere counts, not one held in this panel. A
+				// drag is watched from whichever viewport shows the axis best,
+				// and a grid that brightened in one panel and not the other
+				// would be two answers to one question.
+				const bool dragged = Dragging.Axis >= 0 || SurfaceDragging.Active;
+
 				const Vector3 eye = panel.Eye;
 				const float originX = SnapDown(eye.X, GRID_STEP);
 				const float originZ = SnapDown(eye.Z, GRID_STEP);
@@ -476,7 +505,7 @@ namespace studio {
 						const Vector3 from =
 							alongZ ? Vector3{across, 0.0f, start} : Vector3{start, 0.0f, across};
 						const Vector3 to = alongZ ? Vector3{across, 0.0f, end} : Vector3{end, 0.0f, across};
-						segment(from, to, GridColour(fade, major), GRID_THICKNESS);
+						segment(from, to, GridColour(fade, major, dragged), GRID_THICKNESS);
 					}
 				};
 
@@ -510,19 +539,19 @@ namespace studio {
 				segment(
 					Vector3{originX - reachAxis, 0.0f, 0.0f},
 					Vector3{originX + reachAxis, 0.0f, 0.0f},
-					ImGui::GetColorU32(ImVec4(0.85f, 0.30f, 0.32f, 0.65f)),
+					ImGui::GetColorU32(ImVec4(0.85f, 0.30f, 0.32f, dragged ? 0.65f : 0.65f * GRID_IDLE)),
 					AXIS_THICKNESS
 				);
 				segment(
 					Vector3{0.0f, 0.0f, originZ - reachAxis},
 					Vector3{0.0f, 0.0f, originZ + reachAxis},
-					ImGui::GetColorU32(ImVec4(0.32f, 0.50f, 0.90f, 0.65f)),
+					ImGui::GetColorU32(ImVec4(0.32f, 0.50f, 0.90f, dragged ? 0.65f : 0.65f * GRID_IDLE)),
 					AXIS_THICKNESS
 				);
 				segment(
 					Vector3{0.0f, 0.0f, 0.0f},
 					Vector3{0.0f, GRID_STEP, 0.0f},
-					ImGui::GetColorU32(ImVec4(0.45f, 0.85f, 0.40f, 0.65f)),
+					ImGui::GetColorU32(ImVec4(0.45f, 0.85f, 0.40f, dragged ? 0.65f : 0.65f * GRID_IDLE)),
 					AXIS_THICKNESS
 				);
 			}

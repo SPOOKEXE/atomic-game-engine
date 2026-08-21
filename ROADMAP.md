@@ -446,17 +446,48 @@ The milestone headings below are development labels. Not in line with project ve
       a mirror control in the same scene that draws no image at all in any of
       eight variants tried, while `MirrorCorridor` works in the same build -
       that one did not reduce to a scene cause and needs an engine look.
-- [_] ground grid "enables always on top" when moving/scaling something,
-      otherwise its not "always on top". **Diagnosed, and it is bigger than it
-      looks.** `ShowGrid` is a plain preference and nothing touches it during a
-      drag, so the grid draws identically either way. What is true is that the
-      grid is an imgui overlay and an overlay has no depth buffer to test
-      against - `AdornmentView.cpp:18` states exactly that - so it draws over
-      geometry always, and a drag is simply when that gets noticed. Making it
-      occlude means the grid becomes a depth-tested node in the render graph
-      rather than a drawlist, which is real work and not a flag.
-- [_] fix viewport image size stretch fix
-- [_] in MipProbe scene, when you fly camera around the mesh is being projected incorrectly (windows) [RELATED TO VIEWPORT IMAGE SIZE FIX, VERIFIED ISSUE ON LINUX]
+- [~] ground grid "enables always on top" when moving/scaling something,
+      otherwise its not "always on top". **The half that is a flag is done; the
+      half that is occlusion is a render-graph node and is specified below.**
+      The grid is an imgui overlay and an overlay is drawn after the world with
+      no depth buffer to test against - `AdornmentView.cpp` states the same
+      limit for adornments - so it draws over geometry always and there is no
+      switch that changes that. What a person notices is that it shouts across
+      a scene they are looking at, and that while a handle is held it is the
+      thing being read. So it is drawn at `GRID_IDLE` strength by default and
+      whole for the length of a drag, axes included. That is not occlusion and
+      the comment says so.
+      **What true occlusion needs**, for whoever picks it up: a node in the
+      render graph rather than a draw list. A line-list pipeline with depth test
+      `LESS_OR_EQUAL` and depth write off, drawn into the lit colour target with
+      the gbuffer's depth attached - the same shape the forward `mirror-capture`
+      and `portal-capture` passes already have, so the plumbing exists. A
+      vertex buffer of world positions and colours uploaded per view per frame,
+      because the grid is camera-anchored: `SnapDown(eye.X, GRID_STEP)` centres
+      it on the camera and `GridFade` fades it radially from the eye, so it
+      cannot be a per-world draw-list append the way `AppendSurfaceFaceMarkers`
+      is. Per view, not per world, is the whole cost of the item.
+- [~] fix viewport image size stretch. **Measured, and the projection is not
+      it.** `MipProbe`, one build, two window shapes, everything else equal: the
+      marker post is 71 x 119 pixels at 720x720 and 68 x 119 at 1440x720. The
+      height is identical and the pixel scale is identical, which is exactly
+      what `glm::perspective` promises - a fixed vertical field of view widened
+      horizontally - and the three pixels of width are the box turning slightly
+      in perspective because it sits off to one side. The remaining width is
+      the *image* growing, not the subject stretching.
+      Checked and cleared along the way: `ActiveCamera::AspectRatio` has one
+      writer, `scene::SetViewportSize`, and both the client and the studio call
+      it for every simulated world before `Present`, so nothing renders against
+      the default square any more. The panel image is drawn to `SceneExtent`'s
+      UVs and letterboxes uniformly on the frame a resize has not landed yet,
+      so it cannot stretch either.
+      What is left needs a case: a window size, a screenshot, and what the
+      subject should have looked like. The measurement above says a still frame
+      at two shapes is right, so whatever remains is either about *flying* - a
+      transition rather than a state - or about a density this machine does not
+      have.
+- [~] in MipProbe scene, when you fly camera around the mesh is being projected
+      incorrectly (windows). Same measurement, same answer, above.
       **Not the projection, and that is checked rather than assumed.** MipProbe
       was captured headless at 1600x400, 800x800 and 400x1600 and the red box
       measures 9.50% of width at 1:1 and 2.12% at 4:1, with its height fraction
