@@ -265,6 +265,15 @@ if(MONO_BUILD_CLIENT AND MONO_BUILD_SERVER)
 	add_subdirectory(mono.studio)
 endif()
 
+# The front door. `MONO_BUILD_CLIENT` alone, and outside the block above on
+# purpose: it links a renderer and Dear ImGui but neither the client library nor
+# the server one, so it needs a graphics stack and nothing else. A tree with a
+# client and no server still gets a launcher - with the Host mode greyed out and
+# saying why, which is what `Descriptions::Failure` is for.
+if(MONO_BUILD_CLIENT)
+	add_subdirectory(mono.launcher)
+endif()
+
 # The content origin. `shared` tier rather than `server`, so the tier rule
 # itself - not a guard here - is what keeps a graphics stack off its link line.
 # repo_layout.md §11.

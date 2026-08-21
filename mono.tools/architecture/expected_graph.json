@@ -260,6 +260,26 @@
       ],
       "requires": "MONO_BUILD_CLIENT"
     },
+    "launcher": {
+      "tier": "client",
+      "links": [
+        "assets",
+        "collision",
+        "core",
+        "ecs",
+        "effects",
+        "graph",
+        "gui",
+        "msl",
+        "parallel",
+        "render",
+        "resources",
+        "scene",
+        "spatial",
+        "ui"
+      ],
+      "requires": "MONO_BUILD_CLIENT"
+    },
     "linecount": {
       "tier": "shared",
       "links": [
@@ -574,6 +594,26 @@
         "script",
         "spatial",
         "world"
+      ],
+      "requires": "MONO_BUILD_CLIENT"
+    },
+    "launcher": {
+      "tier": "client",
+      "links": [
+        "assets",
+        "collision",
+        "core",
+        "ecs",
+        "effects",
+        "graph",
+        "gui",
+        "msl",
+        "parallel",
+        "render",
+        "resources",
+        "scene",
+        "spatial",
+        "ui"
       ],
       "requires": "MONO_BUILD_CLIENT"
     },

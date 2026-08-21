@@ -125,6 +125,10 @@ foreach(root IN ITEMS
 	# rather than a cost of doing so.
 	"${CMAKE_SOURCE_DIR}/mono.studio"
 	"${CMAKE_SOURCE_DIR}/mono.cdn"
+	# The launcher, added at v0.18. Listed for `mono.studio`'s reason, and with
+	# one of its own: this is the program a person opens first, so the headers
+	# describing what it will and will not do are the ones most worth checking.
+	"${CMAKE_SOURCE_DIR}/mono.launcher"
 	# Presence, added at v0.17. Listed for `mono.studio`'s reason: a member with
 	# public headers four programs include is one whose headers are checked for
 	# coverage.

@@ -73,6 +73,7 @@ client: (build "client")
 server: (build "server")
 cdn: (build "cdn")
 studio: (build "studio")
+launcher: (build "launcher")
 
 # Only the suites a change could have affected, by cascading signature hash.
 test: build
@@ -492,6 +493,18 @@ luau-lsp:
 check: format-check build test-all test-architecture shader-check check-one-node-graph bindings-check typecheck typecheck-editor determinism replay-check orphan-check
     @echo "check ok - format, build, tests, architecture, shaders, bindings, typecheck, editor, determinism, replay, orphans"
 
+# Run the launcher - the window that starts any of the others.
+#
+# **Builds only itself, and that is worth knowing before the first run.** This
+# launcher links none of the programs it starts; it finds them staged beside it
+# and asks each one what it accepts. So a `just launch` in a tree where nothing
+# else has been built opens a window with every mode greyed out and the reason
+# on each row. `just build` first, or build the one program the mode needs.
+#
+# `just launch --mode cdn` opens straight onto a mode.
+launch *args: (build "launcher")
+    ./{{build}}/launcher/launcher {{args}}
+
 # Run the client. `just run --stats` passes flags straight through.
 run *args: (build "client")
     ./{{build}}/client/client {{args}}
@@ -859,7 +872,7 @@ check-one-node-graph:
     set -euo pipefail
     found=$(grep -rlE 'namespace[[:space:]]+nodegraph[[:space:]]*\{' \
         --include='*.hpp' --include='*.cpp' \
-        mono.build mono.cdn mono.client mono.discord mono.engine mono.network \
+        mono.build mono.cdn mono.client mono.discord mono.engine mono.launcher mono.network \
         mono.server mono.studio mono.tools mono.unified_server_client || true)
     if [ -n "$found" ]; then
         echo "FAIL: a second node graph implementation, in first-party code:"
@@ -912,7 +925,7 @@ docs-check: (build "docgen") docs
 # Every first-party .cpp and .hpp. The directory list is explicit rather than
 # `find .` so that mono.vendor/ is never touched - reformatting a submodule
 # turns every future update into a conflict.
-mono_sources := "mono.engine mono.client mono.server mono.unified_server_client mono.cdn mono.network mono.discord mono.tools mono.build"
+mono_sources := "mono.engine mono.client mono.server mono.unified_server_client mono.cdn mono.launcher mono.network mono.discord mono.tools mono.build"
 
 # Finding it is two problems, not one.
 #

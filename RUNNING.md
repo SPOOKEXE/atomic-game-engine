@@ -320,6 +320,7 @@ mains over the parts of it they need.
 
 | You want to | Run | Adds, over the engine |
 |---|---|---|
+| Pick one of the below without remembering its flags | `launcher` *(v0.18)* | a window, and nothing else |
 | Run a script with nothing else in the way | `atomic` *(v0.6)* | nothing |
 | Build a game | `studio` *(v0.7)* | the editor: explorer, properties, script editor, run and play |
 | See something on screen | `client` | window, input, renderer, and the client half of networking |
@@ -339,6 +340,80 @@ is for.
 `client --help`, `server --help` and `studio --help` print their own options,
 generated from the option declarations, so they cannot drift from what the
 program accepts.
+
+**`--describe` prints the same table as JSON** *(v0.18)*, and every program in
+the tree answers it because `core::Arguments` declares the flag itself. It
+carries both settings surfaces - the options, and `core::Flags`' declared table -
+and it is what the launcher builds its screens out of.
+
+```sh
+./client --describe | jq '.options[] | select(.takesValue) | .name'
+```
+
+---
+
+## The launcher *(v0.18)*
+
+```sh
+just launch                  # the front screen
+just launch --mode cdn       # straight onto one mode
+```
+
+A window with one button per mode - Play, Join, Host, Studio, Serve content -
+and, behind each, a form holding **every option and every setting that program
+declared**. Nothing is filtered out; it is split across three tabs:
+
+| Tab | What is on it |
+|---|---|
+| Common | The four to seven options that decide what the run *is*, filled in |
+| All options | Every option the program declared, grouped by name prefix |
+| Engine settings | `core::Flags`' table, written as `--flag NAME=VALUE` |
+
+Both option tabs edit the same rows, so a value typed on one is the value on the
+other. The search box above the tabs filters all three at once, and each group
+header carries its hit count so a collapsed group still says how much is inside.
+
+An option whose value is a `PATH` or a `DIR` gets a browse button - a page for a
+file, a folder for a folder, and the folder one picks **several at a time**: tick
+three and confirm, and the option gets three rows. The ticks survive walking into
+another parent, so the folders do not have to be siblings. `+` gives an option
+another value by hand and `-` takes a row away.
+
+Ctrl+Enter launches, Escape goes back.
+
+It shows the command line it will run, in full, above the Launch button, with a
+Copy next to it. That line is the same list it hands the child, so pasting it
+into a terminal reproduces the run exactly.
+
+**It links none of the programs it starts.** It finds them staged beside it -
+`<stage>/client/client` and so on - asks each one `--describe`, and spawns the
+one you picked. So it needs them built:
+
+```sh
+just build                   # everything, then every mode is available
+just build cdn && just launch --mode cdn    # or one program and its mode
+```
+
+A mode whose program is not staged is greyed out with the reason on the row,
+which is the ordinary state under the `server` and `cdn` presets. Each row also
+shows its program's version - two different versions in one tree means a
+half-rebuilt tree, and that is worth seeing before the run rather than after.
+
+Host and Serve content keep the launcher up: it reports whether the child is
+running, how long for, and how it ended, and offers Stop, Kill and Restart. Play,
+Join and Studio hand the display over and the launcher minimises until the child
+exits.
+
+The launcher has its own few options:
+
+```sh
+./launcher --mode host --width 1400 --height 900 --scale 1.25
+./launcher --headless --frames 5     # for a smoke test; needs a frame budget
+```
+
+Forms live as long as the window. There are no saved profiles - `--config PATH`
+is on every mode's form like any other option, and a settings file is the thing
+that already does that job.
 
 ---
 
