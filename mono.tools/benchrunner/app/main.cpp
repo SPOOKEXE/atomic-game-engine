@@ -204,6 +204,10 @@ int main(int argc, char **argv) {
 		std::fputs(arguments.Help().c_str(), stdout);
 		return 0;
 	}
+	if (parsed.DescribeRequested) {
+		std::fputs(arguments.Describe().c_str(), stdout);
+		return 0;
+	}
 
 	const auto build = arguments.Get("build");
 	if (!build) {

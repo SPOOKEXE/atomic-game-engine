@@ -90,6 +90,10 @@ int main(int argc, char **argv) {
 		std::fputs(arguments.Help().c_str(), stdout);
 		return 0;
 	}
+	if (parsed.DescribeRequested) {
+		std::fputs(arguments.Describe().c_str(), stdout);
+		return 0;
+	}
 
 	// Applied before the first preference, keybind, recent-project or layout
 	// read. This is one override for the whole editor rather than a test mode

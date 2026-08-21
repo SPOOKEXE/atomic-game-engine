@@ -87,6 +87,10 @@ int main(int argc, char **argv) {
 		std::fputs(arguments.Help().c_str(), stdout);
 		return 0;
 	}
+	if (parsed.DescribeRequested) {
+		std::fputs(arguments.Describe().c_str(), stdout);
+		return 0;
+	}
 
 	const auto port = static_cast<uint16_t>(arguments.GetInteger("port", 8730));
 	const std::string host(arguments.Get("host").value_or("127.0.0.1"));

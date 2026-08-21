@@ -242,6 +242,10 @@ int main(int argc, char **argv) {
 		std::printf("%s", arguments.Help().c_str());
 		return 0;
 	}
+	if (parsed.DescribeRequested) {
+		std::fputs(arguments.Describe().c_str(), stdout);
+		return 0;
+	}
 
 	const engine::core::ConfigReport configured = engine::core::Config::Apply(arguments);
 	if (!configured.Ok) {

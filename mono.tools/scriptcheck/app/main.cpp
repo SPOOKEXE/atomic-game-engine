@@ -105,6 +105,10 @@ int main(int argc, char **argv) {
 	if (!parsed.Ok || parsed.HelpRequested) {
 		return parsed.Ok ? 0 : 2;
 	}
+	if (parsed.DescribeRequested) {
+		std::fputs(arguments.Describe().c_str(), stdout);
+		return 0;
+	}
 
 	const std::vector<std::string_view> &scripts = arguments.Positional();
 	if (scripts.empty()) {

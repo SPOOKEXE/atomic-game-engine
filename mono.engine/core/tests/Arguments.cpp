@@ -177,3 +177,37 @@ TEST_CASE("version is declared without being asked for", "[arguments]") {
 	REQUIRE(line_out.back() == '\n');
 	REQUIRE(line_out.find_first_of("0123456789") != std::string::npos);
 }
+
+TEST_CASE("describe carries what a form needs and help conveys by layout", "[arguments]") {
+	auto arguments = Declared();
+	CommandLine line{"--describe"};
+
+	const auto result = arguments.Parse(line.Count(), line.Values());
+	REQUIRE(result.Ok);
+	REQUIRE(result.DescribeRequested);
+
+	const std::string json = arguments.Describe();
+
+	// The two facts a launcher cannot get out of `Help()` without parsing its
+	// column layout: whether an option takes a value, and what that value is
+	// called. Everything else in this object is a convenience.
+	REQUIRE(json.find(R"({"name":"stats","takesValue":false,"valueName":"")") != std::string::npos);
+	REQUIRE(json.find(R"({"name":"frames","takesValue":true,"valueName":"N")") != std::string::npos);
+
+	// Both surfaces are present even when the settings table is empty, so a
+	// reader never has to distinguish "no settings" from "old program".
+	REQUIRE(json.find(R"("settings":[)") != std::string::npos);
+	REQUIRE(json.back() == '\n');
+}
+
+TEST_CASE("describe escapes what a description may legally contain", "[arguments]") {
+	Arguments arguments("client", "Test harness");
+	arguments.Value("path", "PATH", R"(Use "quotes" and a \backslash)");
+
+	const std::string json = arguments.Describe();
+
+	// A description is prose somebody wrote, so it is the field that eventually
+	// contains a quote. Emitting it raw produces JSON that parses into the
+	// wrong shape rather than failing, which is the worse of the two outcomes.
+	REQUIRE(json.find(R"(Use \"quotes\" and a \\backslash)") != std::string::npos);
+}

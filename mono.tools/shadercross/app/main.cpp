@@ -2,6 +2,7 @@
 #include <engine/msl/Translate.hpp>
 
 #include <cstdint>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -78,6 +79,10 @@ int main(int argc, char **argv) {
 	}
 	if (parsed.HelpRequested) {
 		std::cout << arguments.Help();
+		return 0;
+	}
+	if (parsed.DescribeRequested) {
+		std::fputs(arguments.Describe().c_str(), stdout);
 		return 0;
 	}
 	if (!parsed.Ok) {

@@ -32,6 +32,7 @@
 #include <engine/script/Vocabulary.hpp>
 
 #include <algorithm>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -3800,6 +3801,10 @@ int main(int argc, char **argv) {
 	}
 	if (!parsed.Ok || parsed.HelpRequested) {
 		return parsed.Ok ? 0 : 2;
+	}
+	if (parsed.DescribeRequested) {
+		std::fputs(arguments.Describe().c_str(), stdout);
+		return 0;
 	}
 
 	// Registering the classes is what populates the table: a manifest generated

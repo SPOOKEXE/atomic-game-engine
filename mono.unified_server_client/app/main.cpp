@@ -98,6 +98,10 @@ int main(int argc, char **argv) {
 		std::fputs(arguments.Help().c_str(), stdout);
 		return 0;
 	}
+	if (parsed.DescribeRequested) {
+		std::fputs(arguments.Describe().c_str(), stdout);
+		return 0;
+	}
 
 	// **Before anything starts a world or a job.** The flag is read on every
 	// dispatch, so setting it late would leave the frames before it with the

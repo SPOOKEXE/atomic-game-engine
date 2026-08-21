@@ -42,6 +42,9 @@ namespace engine::core {
 			// Set when `--version` or `-version` was given. The caller decides
 			// what to do with it, for `HelpRequested`'s reason.
 			bool VersionRequested = false;
+			// Set when `--describe` was given. The caller decides, for
+			// `HelpRequested`'s reason.
+			bool DescribeRequested = false;
 			// A diagnostic for the first parse error, or empty when `Ok` is true.
 			std::string Error;
 		};
@@ -100,6 +103,27 @@ namespace engine::core {
 
 		// Builds usage text from the program summary and option declarations.
 		std::string Help() const;
+
+		// The same truth `Help` prints, as JSON another program can read.
+		//
+		// **`--help` is for a person and this is for a program, and the two
+		// cannot be the same string.** `mono.launcher` builds a screen per mode
+		// out of whatever the program it is about to spawn actually accepts, so
+		// it needs the option's value name and whether it takes one - facts the
+		// help text conveys by *layout*, which is the part a parser gets wrong
+		// first and quietly. Generating both from `Options` is what keeps a
+		// launcher screen from being a second, stale copy of this table.
+		//
+		// It carries both settings surfaces, because a program has two: the
+		// options declared here, and `core::Flags`' declared table, which is
+		// read from a config file, the environment and `--flag NAME=VALUE`.
+		// Whatever has been declared by the time this is called is included, so
+		// call it after the program's `Declare` calls and before nothing in
+		// particular - it reads and changes nothing.
+		//
+		// @return One JSON object, newline terminated.
+		// @since v0.18
+		std::string Describe() const;
 
 		// The one line `--version` prints: the program name and the engine
 		// version, newline terminated.

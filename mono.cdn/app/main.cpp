@@ -202,6 +202,10 @@ int main(int argc, char **argv) {
 		std::fputs(arguments.Help().c_str(), stdout);
 		return 0;
 	}
+	if (parsed.DescribeRequested) {
+		std::fputs(arguments.Describe().c_str(), stdout);
+		return 0;
+	}
 	if (arguments.Has("verbose")) {
 		engine::core::Log::SetLevel(engine::core::LogLevel::Trace);
 	}
