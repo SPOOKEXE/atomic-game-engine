@@ -214,7 +214,8 @@ The milestone headings below are development labels. Not in line with project ve
 
 ---
 
-- [_] fix viewport stretch fix
+- [_] fix viewport image size stretch fix
+- [_] in MipProbe scene, when you fly camera around the mesh is being projected incorrectly (windows) [RELATED TO VIEWPORT IMAGE SIZE FIX, VERIFIED ISSUE ON LINUX]
 - [_] when a viewport in a side-by-side is closed, the open one should fill
 - [_] make the ground grid static
 - [_] make the ground grid fade off in the distance
@@ -226,7 +227,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] when play is pressed, ensure a viewport is opened
 - [_] NonEuclidean.luau spawn is wrong spot
 - [_] NonEuclidean.luau has multiple overlapping things
-- [_] selection boxes are misaligned
+- [_] selection boxes are misaligned (windows)
 - [_] when pressing CTRL and scaling a part, scale both sides at same time
 - [_] add a (ACTIVE) scene_name
 - [_] some studio ui stretches - more vscode-ey
@@ -250,7 +251,6 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] plan the entire rendering system to a visual compositor system like Unity. https://docs.unity3d.com/Manual/scriptable-render-pipeline-introduction.html https://docs.unity3d.com/Packages/com.unity.visual-compositor@0.27/manual/nodes.html
 - [_] viewport indictator direction gizmo (select and lock to certain directions)
 - [_] 3d cursor and camera orbit options under gizmo
-- [_] in MipProbe scene, when you fly camera around the mesh is being projected incorrectly
 
 ### v0.22
 
