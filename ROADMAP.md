@@ -242,6 +242,12 @@ The milestone headings below are development labels. Not in line with project ve
       that alpha was. Each line is now drawn in eight pieces, each faded by the
       radial distance from the camera to its own middle rather than by how far
       sideways the line sat. Roughly 1,300 segments a panel rather than 13,000.
+- [_] add a batch moveto/setcframe system (e.g. skygrid to move them all at once)
+- [_] do similar for batched moveto/setcframe in other systems
+- [_] `/home/declan/Documents/GitHub/BLADEBORNE_UNIFIED/game` port and also studio place `/home/declan/Documents/Bladeborne Floor 0.rbxl`. Turn this into a demo file.
+
+---
+
 - [_] input textbox not working
 - [_] allow creating worlds even when scene is running in studio
 - [_] when character sits in middle of portal, teleporting between both sides
@@ -262,8 +268,6 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] crossworldseam demo is not setup properly
 - [_] surfacecamera lighting is really dark, they should reflect real world light as well
 - [_] ground grid "enables always on top" when moving/scaling something, otherwise its not "always on top"
-
-- [_] `/home/declan/Documents/GitHub/BLADEBORNE_UNIFIED/game` port and also studio place `/home/declan/Documents/Bladeborne Floor 0.rbxl`
 
 ### v0.20
 
