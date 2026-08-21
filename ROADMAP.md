@@ -212,6 +212,23 @@ The milestone headings below are development labels. Not in line with project ve
       which has `studio --mcp-port` bare defaulting to 8720 while its own help
       says 8738, and give `mcpbridge` a suite - it has none.
 
+---
+
+- [_] fix viewport stretch fix
+- [_] when a viewport in a side-by-side is closed, the open one should fill
+- [_] make the ground grid static
+- [_] make the ground grid fade off in the distance
+- [_] input textbox not working
+- [_] allow creating worlds even when scene is running in studio
+- [_] character is buggy
+- [_] when character sits in middle of portal, teleporting between both sides
+- [_] live instances listed items get cutoff in list
+- [_] when play is pressed, ensure a viewport is opened
+- [_] NonEuclidean.luau spawn is wrong spot
+- [_] NonEuclidean.luau has multiple overlapping things
+- [_] selection boxes are misaligned
+- [_] when pressing CTRL and scaling a part, scale both sides at same time
+
 ### v0.20
 
 - [x] thoroughly implement every user-interface element, including `SurfaceGui` and `BillboardGui` - `SurfaceGui` gains `ZOffset`, `MaxDistance`, `ClipsDescendants` and `Active`, and `BillboardGui` gains `Active`, `Brightness`, `ClipsDescendants`, `CurrentDistance`, `DistanceStep`, `ExtentsOffsetWorldSpace`, `SizeOffset` and `PlayerToHideFrom`; new classes `UIGradient`, `UITableLayout`, `UIPageLayout` and `UIDragDetector`; `ScrollingFrame` completed with `ScrollingEnabled`, `AutomaticCanvasSize`, the two `ScrollBarInset`s, `VerticalScrollBarPosition`, `ElasticBehavior`, the three bar images and `AbsoluteCanvasSize`/`AbsoluteWindowSize`, plus wheel and thumb-drag input; `RichText`, `MaxVisibleGraphemes`, `ContentText`, `TextBounds` and `TextFits` on every text class; `Interactable`, the four `NextSelection*`, `SelectionOrder` and `SelectionImageObject` on `GuiObject`; `HoverImage`, `PressedImage` and `ResampleMode` on the image classes; `Enabled` and `ApplyStrokeMode` on `UIStroke`. Laid out, drawn by both backends, saved, replicated, bound and in the Properties panel. `D00129` carries the members that need a subsystem this engine has not got (filed as `D00120`, renumbered at v0.17 - that number was already a retired entry)
@@ -228,6 +245,9 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] (dynamic) ambient occulusion, screen-space, fog, atmosphere, clouds, global illumination, displacement maps (make it rendering only but not physical)
 - [_] render pipeline nodes for above
 - [_] plan the entire rendering system to a visual compositor system like Unity. https://docs.unity3d.com/Manual/scriptable-render-pipeline-introduction.html https://docs.unity3d.com/Packages/com.unity.visual-compositor@0.27/manual/nodes.html
+- [_] viewport indictator direction gizmo (select and lock to certain directions)
+- [_] 3d cursor and camera orbit options under gizmo
+- [_] in MipProbe scene, when you fly camera around the mesh is being projected incorrectly
 
 ### v0.22
 
@@ -264,3 +284,5 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] level-of-details (4 different meshes version, auto-decimate version, smart-triangle-reduction-version thinking of nanite triangle surface area)
 - [_] project demos: space engineers asteroids + planets full demo, blackhole simulator (warp space, warp visual, etc), huge medieval battle full ai war, ai magic battle with tons of particles and explosions and whatnot, user interface (copy bladeborne's for demo?)
 - [_] datastores (sqlite, mongo, supabase, etc - make a selection with local and remote setups)
+- [_] html-based ui creation (html-script?)
+- [_] import blender files in asset explorer
