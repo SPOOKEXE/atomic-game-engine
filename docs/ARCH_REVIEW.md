@@ -413,10 +413,49 @@ the 50.6 s above.
    anonymous-namespace collisions, which is a morning's work.
 3. **`-g1` instead of full debug info** at `CMakeLists.txt:149`. Measured 36%
    off the heaviest translation units, and objects 4 to 5 times smaller.
-4. **`spdlog/spdlog.h` out of `core/Log.hpp:9`.** 0.60 s times 252 objects, and
-   **29 of those includers use no log macro at all**. E1 removed the largest
-   single path to spdlog; this removes the rest. It is the same fix as E1, one
-   level down, and it is the biggest single win left in the headers.
+4. ~~**`spdlog/spdlog.h` out of `core/Log.hpp:9`.**~~ **Done, and the survey's
+   estimate was five times too big.** `Log.hpp` preprocessed from **118,383
+   lines to 22,842**, an 81% cut, and `<string_view>` rather than fmt is now its
+   floor - `spdlog/fmt/bundled/base.h` is 7,373 lines on its own.
+
+   Measured rather than extrapolated: 23 real translation units that include it,
+   compiled `-fsyntax-only` with ccache disabled, minimum of three runs, against
+   the old header restored from git.
+
+   | | CPU |
+   |---|---|
+   | old, `spdlog.h` in the header | 16.88 CPU-s |
+   | new, `fmt/base.h` | **12.22 CPU-s** |
+
+   **27.6% off any translation unit that logs**, or 0.20 CPU-s each. 152 objects
+   record `Log.hpp` in their dependencies, so about **31 CPU-s off a cold
+   build** - not the 151 predicted here before. Two reasons for the gap: E1
+   already removed the largest transitive path, taking the includer count from
+   252 to 152, and the 0.60 s per object was not the marginal cost.
+
+   **The inner-loop framing is the one that matters.** 31 CPU-s is under 2% of a
+   clean build and ccache erases it on any rebuild. What ccache cannot erase is
+   the first compile after a header changes, and there this is 27.6% off all
+   152.
+
+   The shape: `Log.hpp` includes only fmt's `base.h`, which declares
+   `format_string`, `format_args` and `make_format_args` and nothing that
+   formats. `Log::Emit` packs the arguments and hands them to `Log::Write`,
+   which formats in `Log.cpp`. Compile-time format checking is kept -
+   `fmt::format_string<Ts...>` still rejects a mismatched `{}` at the call site
+   - and all 707 call sites still type-check with no change to any of them.
+
+   `spdlog::logger` is forward-declared so `Log::Logger()` can still be offered
+   to the one thing that installs a sink. Two files complete the type
+   themselves, `mono.studio/src/Editor.cpp` and `core/tests/Log.cpp`, and that
+   they have to is the invariant working rather than a gap in it.
+
+   **`Log::Enabled` is new and the macros deliberately do not use it.** They
+   evaluate their arguments whether the level is on or not, exactly as they did
+   when they called spdlog directly. Guarding them closes G1's "a disabled
+   statement still evaluates its arguments" and is one line, but it silently
+   stops running any argument with a side effect - so it is its own change with
+   its own review rather than a rider on this one.
 5. **Split `render/src/Renderer.cpp`.** About 22 s off wall clock, because one
    31.2 s translation unit cannot be split across cores. See C2 - the same
    change fixes the architecture problem.

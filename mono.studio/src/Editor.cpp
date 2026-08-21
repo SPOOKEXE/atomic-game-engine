@@ -30,6 +30,12 @@
 #include <engine/ui/Theme.hpp>
 
 #include <SDL3/SDL.h>
+// `Log.hpp` forward-declares `spdlog::logger` so that the rest of the tree does
+// not acquire spdlog for the sake of a log macro. This file is one of the two
+// that genuinely wants the type - `PanelSink` below installs itself into
+// `Log::Logger().sinks()` - so it completes it here. `logger.h` rather than
+// `spdlog.h`: the whole front end is not needed to reach a sink list.
+#include <spdlog/logger.h>
 #include <spdlog/sinks/base_sink.h>
 
 #include <algorithm>

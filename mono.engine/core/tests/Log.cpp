@@ -3,6 +3,15 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+// **The only include of spdlog outside `Log.cpp`, and it is here on purpose.**
+// `Log.hpp` forward-declares `spdlog::logger` so that the two hundred and fifty
+// translation units which only want to log do not pay for the library. A caller
+// that wants to do something *with* the logger - install a sink, as
+// `mono.studio` does, or call a method on it, as the first case below does -
+// completes the type itself. That this file has to is the invariant working,
+// not a gap in it.
+#include <spdlog/spdlog.h>
+
 TEST_SUITE_ID("engine.core.log")
 
 using engine::core::Log;

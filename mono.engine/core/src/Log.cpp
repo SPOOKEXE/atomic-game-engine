@@ -1,7 +1,9 @@
 #include <engine/core/Log.hpp>
 
 #include <spdlog/sinks/stdout_color_sinks.h>
+#include <spdlog/spdlog.h>
 
+#include <iterator>
 #include <memory>
 
 namespace engine::core {
@@ -10,6 +12,23 @@ namespace engine::core {
 		std::shared_ptr<spdlog::logger> &Instance() {
 			static std::shared_ptr<spdlog::logger> logger;
 			return logger;
+		}
+
+		// One mapping, used by `SetLevel`, `Enabled` and `Write` alike. It was
+		// a switch inside `SetLevel` when that was the only caller; three
+		// copies of a four-way mapping is how two of them end up disagreeing.
+		spdlog::level::level_enum Severity(LogLevel level) {
+			switch (level) {
+			case LogLevel::Trace:
+				return spdlog::level::trace;
+			case LogLevel::Info:
+				return spdlog::level::info;
+			case LogLevel::Warning:
+				return spdlog::level::warn;
+			case LogLevel::Error:
+				return spdlog::level::err;
+			}
+			return spdlog::level::info;
 		}
 	}
 
@@ -25,22 +44,26 @@ namespace engine::core {
 	}
 
 	void Log::SetLevel(LogLevel level) {
-		auto spdlogLevel = spdlog::level::info;
-		switch (level) {
-		case LogLevel::Trace:
-			spdlogLevel = spdlog::level::trace;
-			break;
-		case LogLevel::Info:
-			spdlogLevel = spdlog::level::info;
-			break;
-		case LogLevel::Warning:
-			spdlogLevel = spdlog::level::warn;
-			break;
-		case LogLevel::Error:
-			spdlogLevel = spdlog::level::err;
-			break;
+		Logger().set_level(Severity(level));
+	}
+
+	bool Log::Enabled(LogLevel level) {
+		return Logger().should_log(Severity(level));
+	}
+
+	void Log::Write(LogLevel level, fmt::string_view format, fmt::format_args arguments) {
+		const spdlog::level::level_enum severity = Severity(level);
+		spdlog::logger &logger = Logger();
+		if (!logger.should_log(severity)) {
+			return;
 		}
-		Logger().set_level(spdlogLevel);
+
+		// **Into a stack buffer rather than a `std::string`.** `fmt::memory_buffer`
+		// carries 500 bytes inline, so the common line costs no allocation at
+		// all, and spdlog is handed a view of it rather than a second copy.
+		fmt::memory_buffer message;
+		fmt::vformat_to(std::back_inserter(message), format, arguments);
+		logger.log(severity, spdlog::string_view_t(message.data(), message.size()));
 	}
 
 	spdlog::logger &Log::Logger() {
