@@ -463,6 +463,7 @@ The milestone headings below are development labels. Not in line with project ve
       geometry always, and a drag is simply when that gets noticed. Making it
       occlude means the grid becomes a depth-tested node in the render graph
       rather than a drawlist, which is real work and not a flag.
+- [_] explore the idea of having the active scene entities resident on the gpu always and we just have a compute timer on the gpu 24/7. this way, when the scene changes, we tell the gpu what changed. also doing a 2-way sync is easy with signatures/hashes with cpu-gpu, this way we have no swapchain waiting, we just compute at a given interval. sort of like "replication" to the gpu. same for particles, ui, entites, studio, etc.
 
 ### v0.20
 
