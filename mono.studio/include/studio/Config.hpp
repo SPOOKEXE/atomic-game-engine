@@ -270,6 +270,7 @@ namespace studio {
 		//@{
 		bool ShowStatistics = false;
 		bool ShowFrameGraph = false;
+		bool ShowHeap = false;
 		bool ShowAssets = false;
 		bool ShowControl = false;
 		//@}

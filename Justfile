@@ -614,6 +614,87 @@ client-smoke: (build "client")
 client-exit: (build "client")
     ./scripts/client-exit-test.sh ./{{build}}/client/client
 
+# Run several scenes for five minutes and fail if the heap keeps climbing.
+#
+# **The check that turns "the client feels heavier after a while" into an exit
+# code.** A leak is not a spike: it is a slope, and no frame profiler can show
+# one because every individual frame looks fine. `core::HeapProfile` samples
+# live bytes per tag once a second, fits a least-squares line to each tag over
+# the run less its warm-up, and the client exits 3 naming any tag whose line
+# both climbs faster than `limit` and actually *fits* one - a level load is a
+# step, and a step is not a leak.
+#
+# **Five scenes at a minute each, and it is a minute of wall clock rather than
+# of simulation.** Headless the client runs several thousand frames a second,
+# so a minute here is a quarter of a million frames and an hour of ordinary
+# play in frame terms, while the simulation still ticks a real 60 Hz. Both axes
+# are exercised because leaks live on both: a per-frame one and a per-tick one
+# are different bugs.
+#
+# The scenes are chosen to be different from each other rather than to be
+# heavy - particles, portals, meshes, interface and physics allocate in
+# different places, and a soak of one scene five times is one code path five
+# times.
+#
+# **`--heap-warmup` is not slack in the limit, and raising the limit is not a
+# substitute for it.** Content arrives over the first several seconds and the
+# world settles after it; fitting a line through that start drags it through
+# everything after. If a scene needs longer to settle, give it longer.
+#
+# Not part of `just check`, for `client-smoke`'s reason: it needs a GPU, and a
+# build container with none would fail a check about memory for a reason that
+# is not about memory.
+#
+# The reports are kept in `.cache/heap-<scene>.txt` whether the run passes or
+# fails - a soak that went green is the baseline the next one is read against.
+#
+# Arguments are positional, as every recipe's are here - `seconds=300` after a
+# recipe name is a string called "seconds=300", not a named argument, and the
+# run that taught that lesson passed it to `--profile-seconds` and soaked for
+# however long the timeout was.
+#
+#   just heap-soak                         # five scenes, a minute each
+#   just heap-soak 300                     # five minutes each, so twenty-five
+#   just heap-soak 60 8192 15 "Stress"     # one scene, everything spelled out
+heap-soak seconds="60" limit="8192" warmup="15" scenes="Rings Particles Meshes Interface StressPhysics": (build "client")
+    #!/usr/bin/env bash
+    set -uo pipefail
+    mkdir -p .cache
+    failed=""
+    for scene in {{scenes}}; do
+        path="{{build}}/assets/examples/$scene.luau"
+        if [ ! -f "$path" ]; then
+            echo "FAIL: no staged scene at $path"
+            exit 1
+        fi
+        report=".cache/heap-$scene.txt"
+        echo "--- $scene: {{seconds}}s, failing above {{limit}} B/s after a {{warmup}}s warm-up"
+        # Bounded, because this recipe cannot report a hang otherwise. The frame
+        # budget is effectively unreachable; `--profile-seconds` is what ends it.
+        timeout $(( {{seconds}} + 120 )) ./{{build}}/client/client \
+            --headless --frames 1000000000 --profile-seconds {{seconds}} \
+            --width 640 --height 360 --script "$path" \
+            --heap-report "$report" --heap-growth-limit {{limit}} --heap-warmup {{warmup}} \
+            > ".cache/heap-$scene.log" 2>&1
+        status=$?
+        if [ $status -eq 3 ]; then
+            echo "LEAK in $scene:"
+            grep "heap:" ".cache/heap-$scene.log" | tail -20
+            failed="$failed $scene"
+        elif [ $status -ne 0 ]; then
+            echo "FAIL: $scene exited $status (124 means it never exited at all)"
+            tail -20 ".cache/heap-$scene.log"
+            failed="$failed $scene"
+        else
+            grep -h "heap: steady\|heap: .* live" ".cache/heap-$scene.log" | tail -2
+        fi
+    done
+    if [ -n "$failed" ]; then
+        echo "heap-soak FAILED:$failed - reports in .cache/heap-*.txt"
+        exit 1
+    fi
+    echo "heap ok - every scene reached a steady state, reports in .cache/heap-*.txt"
+
 # Drag the editor's window and check it is still alive afterwards.
 #
 # **The one bug class a headless run cannot reach.** The viewport shows last

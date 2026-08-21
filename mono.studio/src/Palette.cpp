@@ -189,6 +189,9 @@ namespace studio {
 		Operators.Add({Action::ShowFrameGraph, "Frame Graph", "Show where the frame went", always, [this] {
 						   ShowFrameGraph = true;
 					   }});
+		Operators.Add({Action::ShowHeap, "Heap", "Show where the memory went", always, [this] {
+						   ShowHeap = true;
+					   }});
 
 		Operators.Add({Action::CommandPalette, "Command Palette", "Find and run any command", always, [this] {
 						   ShowPalette = true;

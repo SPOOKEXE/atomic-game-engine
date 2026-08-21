@@ -5,6 +5,29 @@
 
 namespace engine::render {
 
+	void FrameStatistics::DropOldest() {
+		if (Count == 0) {
+			return;
+		}
+
+		const float leaving = Ring[Head].Delta;
+
+		// The pair this sample formed with the one after it goes with it.
+		if (Count >= 2) {
+			ChangeSum -= std::abs(Ring[IndexOf(1)].Delta - leaving);
+		}
+		DeltaSum -= leaving;
+
+		// It may have been the best or the worst frame in the window, and there
+		// is no way to know what the next one is without looking.
+		if (leaving == Worst || leaving == Best) {
+			ExtremesStale = true;
+		}
+
+		Head = (Head + 1) % Ring.size();
+		Count--;
+	}
+
 	void FrameStatistics::Record(double now, float deltaSeconds) {
 		// A zero delta is the first frame, or a clock that did not move. Either
 		// way it would divide to infinity.
@@ -13,17 +36,27 @@ namespace engine::render {
 		}
 
 		if (Count == Ring.size()) {
-			// Full. Doubling and re-linearising, so the oldest sample is at
-			// index zero again and the wrap arithmetic stays simple. How many
-			// samples twenty seconds holds depends on the frame rate, so the
-			// size cannot be picked up front - but it settles after a second or
-			// two and never grows again.
-			std::vector<Sample> grown(Ring.empty() ? 256 : Ring.size() * 2);
-			for (size_t offset = 0; offset < Count; offset++) {
-				grown[offset] = Ring[IndexOf(offset)];
+			if (Ring.size() < MAXIMUM_SAMPLES) {
+				// Doubling and re-linearising, so the oldest sample is at index
+				// zero again and the wrap arithmetic stays simple. How many
+				// samples twenty seconds holds depends on the frame rate, so
+				// the size cannot be picked up front.
+				const size_t grownSize =
+					std::min(Ring.empty() ? size_t{256} : Ring.size() * 2, MAXIMUM_SAMPLES);
+				std::vector<Sample> grown(grownSize);
+				for (size_t offset = 0; offset < Count; offset++) {
+					grown[offset] = Ring[IndexOf(offset)];
+				}
+				Ring.swap(grown);
+				Head = 0;
+			} else {
+				// At the cap. The window becomes the most recent
+				// `MAXIMUM_SAMPLES` frames rather than the last twenty seconds,
+				// which is a trade only an uncapped frame rate ever makes - see
+				// the constant's own comment for the two megabytes it was
+				// costing before.
+				DropOldest();
 			}
-			Ring.swap(grown);
-			Head = 0;
 		}
 
 		// Before the sample lands, while the one it follows is still the newest.
@@ -44,23 +77,8 @@ namespace engine::render {
 			Best = std::min(Best, deltaSeconds);
 		}
 
-		while (Count > 0 && now - Ring[Head].Time > WINDOW_SECONDS) {
-			const float leaving = Ring[Head].Delta;
-
-			// The pair this sample formed with the one after it goes with it.
-			if (Count >= 2) {
-				ChangeSum -= std::abs(Ring[IndexOf(1)].Delta - leaving);
-			}
-			DeltaSum -= leaving;
-
-			// It may have been the best or the worst frame in the window, and
-			// there is no way to know what the next one is without looking.
-			if (leaving == Worst || leaving == Best) {
-				ExtremesStale = true;
-			}
-
-			Head = (Head + 1) % Ring.size();
-			Count--;
+		while (Count > 1 && now - Ring[Head].Time > WINDOW_SECONDS) {
+			DropOldest();
 		}
 
 		// **The window is never emptied by that loop, and the sums below it are

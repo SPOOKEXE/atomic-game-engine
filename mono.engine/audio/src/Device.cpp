@@ -1,4 +1,5 @@
 #include <engine/audio/Device.hpp>
+#include <engine/core/HeapProfile.hpp>
 #include <engine/core/Log.hpp>
 
 #include <SDL3/SDL.h>
@@ -133,6 +134,11 @@ namespace engine::audio {
 				if (additional <= 0) {
 					return;
 				}
+				// SDL's own thread, which no frame scope reaches. Without this
+				// the mixer's buffers are untagged and a leak in them looks like
+				// a leak in the program's static initialisers.
+				ENGINE_HEAP_SCOPE("audio.feed");
+
 				auto *device = static_cast<SdlDevice *>(self);
 
 				const int frameBytes =

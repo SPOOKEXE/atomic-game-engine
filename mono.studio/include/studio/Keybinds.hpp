@@ -57,6 +57,7 @@ namespace studio {
 		// wants them - which is what the Keybinds page is for.
 		ShowStatistics,
 		ShowFrameGraph,
+		ShowHeap,
 
 		// The four manipulators.
 		//

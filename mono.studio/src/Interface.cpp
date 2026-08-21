@@ -75,6 +75,7 @@ namespace studio {
 		constexpr const char *SETTINGS = "Preferences###Studio Settings";
 		constexpr const char *STATISTICS = "Statistics";
 		constexpr const char *FRAMEGRAPH = "Frame Graph";
+		constexpr const char *HEAP = "Heap";
 
 		// The rest, which have no constant of their own because only this list
 		// and their own `Begin` ever name them. Spelled here rather than
@@ -83,7 +84,7 @@ namespace studio {
 		constexpr const char *SKINNABLE[]{
 			VIEWPORT,	   VIEWPORT2,		 EXPLORER,			WORLDS,
 			INSTANCES,	   PROPERTIES,		 SCRIPTS,			OUTPUT,
-			"Command Bar", SETTINGS,		 STATISTICS,		FRAMEGRAPH,
+			"Command Bar", SETTINGS,		 STATISTICS,		FRAMEGRAPH,		HEAP,
 			"History",	   "Assets",		 "Render Pipeline", "World Lighting",
 			"Network",	   "Team Create",	 "Control (MCP)",	"Plugins",
 			"Bus",		   "Find Instances", "Script Profile",	"Changes",
@@ -160,6 +161,7 @@ namespace studio {
 			ImGui::DockBuilderDockWindow(SETTINGS, rightLower);
 			ImGui::DockBuilderDockWindow(STATISTICS, rightLower);
 			ImGui::DockBuilderDockWindow(FRAMEGRAPH, bottom);
+			ImGui::DockBuilderDockWindow(HEAP, bottom);
 			ImGui::DockBuilderDockWindow("Render Pipeline", bottom);
 
 			ImGui::DockBuilderFinish(dockspace);
@@ -345,6 +347,13 @@ namespace studio {
 		{
 			ENGINE_PROFILE_CAT("frame graph", engine::core::ProfileCategory::Render);
 			Skinned(FRAMEGRAPH, [&] { DrawFrameGraph(); });
+		}
+
+		// Beside it, and the same argument: a panel that walks the tag tree and
+		// draws a row per tag scales with what it is measuring.
+		{
+			ENGINE_PROFILE_CAT("heap panel", engine::core::ProfileCategory::Render);
+			Skinned(HEAP, [&] { DrawHeap(); });
 		}
 
 		// v0.10's panels. Each returns immediately when closed, which is what

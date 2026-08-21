@@ -311,6 +311,7 @@ namespace studio {
 		if (const auto panels = document.find("panels"); panels != document.end() && panels->is_object()) {
 			ShowStatistics = Flag(*panels, "statistics", ShowStatistics);
 			ShowFrameGraph = Flag(*panels, "frameGraph", ShowFrameGraph);
+			ShowHeap = Flag(*panels, "heap", ShowHeap);
 			ShowAssets = Flag(*panels, "assets", ShowAssets);
 			ShowControl = Flag(*panels, "control", ShowControl);
 		}
@@ -448,6 +449,7 @@ namespace studio {
 			 json{
 				 {"statistics", ShowStatistics},
 				 {"frameGraph", ShowFrameGraph},
+				 {"heap", ShowHeap},
 				 {"assets", ShowAssets},
 				 {"control", ShowControl},
 			 }},
@@ -586,6 +588,7 @@ namespace studio {
 		// one run.
 		ShowStatistics = ShowStatistics || Prefs.ShowStatistics;
 		ShowFrameGraph = ShowFrameGraph || Prefs.ShowFrameGraph;
+		ShowHeap = ShowHeap || Prefs.ShowHeap;
 		ShowAssets = ShowAssets || Prefs.ShowAssets;
 
 		ContentSourcesPath = ConfigPath("cdn.json");
@@ -620,6 +623,7 @@ namespace studio {
 		Prefs.ShowControl = ShowControl;
 		Prefs.ShowStatistics = ShowStatistics;
 		Prefs.ShowFrameGraph = ShowFrameGraph;
+		Prefs.ShowHeap = ShowHeap;
 		Prefs.ShowAssets = ShowAssets;
 		Prefs.ControlPort = ControlPortField;
 		Prefs.SnapEnabled = SnapEnabled;

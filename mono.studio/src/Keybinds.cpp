@@ -85,6 +85,7 @@ namespace studio {
 			 Scope::Global, {}},
 			{Action::ShowFrameGraph, "panel.framegraph", "Frame Graph", "Show where the frame went",
 			 Scope::Global, {}},
+			{Action::ShowHeap, "panel.heap", "Heap", "Show where the memory went", Scope::Global, {}},
 
 			{Action::CommandPalette, "panel.palette", "Command Palette", "Find and run any command",
 			 Scope::Global, {}},

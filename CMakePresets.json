@@ -39,7 +39,8 @@
         "MONO_BUILD_CDN": "ON",
         "MONO_BUILD_TESTS": "OFF",
         "MONO_TRACY": "ON",
-        "MONO_OPTIMISE": "ON"
+        "MONO_OPTIMISE": "ON",
+        "MONO_HEAP_PROFILE": "OFF"
       }
     },
     {
@@ -83,7 +84,8 @@
       "cacheVariables": {
         "MONO_BUILD_BENCH": "ON",
         "MONO_BUILD_TESTS": "OFF",
-        "MONO_BUILD_CDN": "OFF"
+        "MONO_BUILD_CDN": "OFF",
+        "MONO_HEAP_PROFILE": "ON"
       }
     }
   ],

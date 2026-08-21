@@ -549,6 +549,8 @@ namespace studio {
 		ImGui::Checkbox("Statistics", &ShowStatistics);
 		ImGui::SameLine();
 		ImGui::Checkbox("Frame Graph", &ShowFrameGraph);
+		ImGui::SameLine();
+		ImGui::Checkbox("Heap", &ShowHeap);
 
 		Divider();
 

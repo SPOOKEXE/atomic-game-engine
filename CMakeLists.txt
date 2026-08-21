@@ -52,6 +52,21 @@ option(MONO_BUILD_BENCH  "Build the benchmark binaries" OFF)
 option(MONO_TRACY        "Compile in the Tracy client" ON)
 option(MONO_WERROR       "Treat warnings as errors"    OFF)
 
+# The heap profiler's allocator hooks - core/HeapProfile.hpp.
+#
+# On by default and off in `release`, which is the opposite of how the two
+# optimisation-ish switches above are arranged, and deliberately: a developer
+# build should be able to answer "what is holding this memory" without being
+# reconfigured first, and a shipped build should not pay a 32-byte header on
+# every allocation in the process.
+#
+# **It cannot be a runtime switch.** A block allocated with no header and freed
+# through the tracking `operator delete` would have four words of somebody
+# else's memory read as its header, so the decision is made once for a whole
+# program. `bench` turns it back on over `release`, because the runaway
+# benchmark is the one measurement that needs both the optimiser and the hooks.
+option(MONO_HEAP_PROFILE "Track every allocation and attribute it to a tag" ON)
+
 # Off by default, and the `release` preset is the one place it goes back on.
 #
 # First-party code is built at -O0 so that a profile measures what the engine

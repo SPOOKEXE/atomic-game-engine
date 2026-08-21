@@ -31,6 +31,7 @@
 #include <engine/assets/Texture.hpp>
 #include <engine/control/Server.hpp>
 #include <engine/control/Surface.hpp>
+#include <engine/core/HeapProfile.hpp>
 #include <engine/core/Clock.hpp>
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/Name.hpp>
@@ -473,6 +474,14 @@ namespace studio {
 		//
 		// Implies the frame graph: collection is off unless something is
 		// reading it.
+		// Write a heap report here when the run ends. Empty writes none.
+		//
+		// Turning it on turns heap sampling on, exactly as `ProfileSnapshot`
+		// turns frame collection on.
+		//
+		// @since v0.18
+		std::filesystem::path HeapReport;
+
 		std::filesystem::path ProfileSnapshot;
 
 		// How long a world with nobody in it keeps ticking before it closes.
@@ -806,6 +815,12 @@ namespace studio {
 		// client's overlay does; only the drawing differs.
 		void DrawStatistics();
 		void DrawFrameGraph();
+
+		// Draws the heap panel: the totals, live bytes over time, and the tag
+		// tree. Returns immediately when the panel is closed.
+		//
+		// @since v0.18
+		void DrawHeap();
 
 		// Records the frame time and turns span collection on or off.
 		//
@@ -5277,6 +5292,17 @@ namespace studio {
 		//@{
 		bool ShowStatistics = false;
 		bool ShowFrameGraph = false;
+
+		// Where the live bytes are, and whether they are climbing.
+		//
+		// **A separate panel from the frame graph rather than a tab in it**,
+		// unlike the client's overlay, because in the editor there is room for
+		// both at once and the two are read together: a frame that got slower
+		// and a heap that got larger at the same moment is one finding, and
+		// alternating between two tabs to see it is how somebody misses it.
+		//
+		// @since v0.18
+		bool ShowHeap = false;
 		//@}
 
 		// Frame times, sampled every frame so the panel has history the moment
@@ -5354,6 +5380,38 @@ namespace studio {
 		};
 
 		FrameGraphView FrameGraphState;
+
+		// What the heap panel is showing, refreshed when a reading is taken
+		// rather than when the panel repaints.
+		//
+		// **Because fitting a slope is a pass over the whole retained window.**
+		// The editor repaints at the display's rate and a reading is taken once
+		// a second, so doing this on the drawing path would run the fit sixty
+		// times for every sample it had to fit.
+		//
+		// @since v0.18
+		struct HeapView {
+			// The tag tree flattened for drawing, heaviest child first.
+			std::vector<engine::core::HeapTreeRow> Rows;
+
+			// The growth report, steepest slope first.
+			std::vector<engine::core::HeapGrowth> Growth;
+
+			// Live megabytes per retained reading, oldest first - the shape
+			// `ImGui::PlotLines` takes directly. Megabytes rather than bytes
+			// because a float loses whole kilobytes above sixteen million and
+			// the plot is read as a shape.
+			std::vector<float> Plot;
+
+			// The process totals, as of the reading `Plot` ends on.
+			engine::core::HeapTotals Totals;
+
+			// Seconds the plot and the growth figures cover.
+			double HistorySeconds = 0.0;
+		};
+
+		// What the heap panel is currently drawing.
+		HeapView HeapState;
 
 		// Whether the next frame rebuilds the default arrangement. Set from the
 		// View menu and acted on at the top of the frame, because rearranging a

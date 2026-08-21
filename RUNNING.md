@@ -1359,7 +1359,7 @@ because it builds before it runs and a plain `cmd` window has no compiler in it;
 --frames N                       Exit after N presented frames
 --width PX                       Window width (default 1280)
 --height PX                      Window height (default 720)
---profiler-tab NAME              frame, categories, systems or counters
+--profiler-tab NAME              frame, categories, systems, counters or heap
 --script PATH                    Luau or JavaScript scene to run at startup
 --game PATH                      Game file to play single-player (.agame)
 --connect HOST:PORT               Replicate a world from this server
@@ -1372,6 +1372,9 @@ because it builds before it runs and a plain `cmd` window has no compiler in it;
 --enable-profiler SECONDS        Wait for a Tracy profiler before starting
 --profile-seconds SECONDS        Run for this long, then exit
 --profile-snapshot PATH          Write a frame-graph snapshot when the run ends
+--heap-report PATH               Write a heap profile when the run ends
+--heap-growth-limit BYTES_PER_S  Exit 3 if a tag's live bytes climb faster than this
+--heap-warmup SECONDS            Leave this much of the start out of the growth fit
 --override-assets-directory DIR  Read shaders and data from here
 --help                           Show this text
 ```
@@ -1398,6 +1401,53 @@ simulated, its scripts run with both roles true, and there is no socket and no
 server library involved - single-player is the format and a VM, not a server
 hosted in this process. Given both `--game` and `--script`, the game file wins
 and the client says so rather than choosing quietly.
+
+### The heap *(v0.18)*
+
+The `heap` view is the one tab that is not about the last frame, and that is why
+it is arranged the other way up: a plot of live bytes over minutes first, then
+the tag tree under it. A frame that is fast and forty megabytes heavier than the
+one before it reads as healthy on every other view here.
+
+Tags come from the `ENGINE_PROFILE` scopes the flamegraph is already made of, so
+a row on one has a row on the other. `LIVE` is a tag and everything under it;
+`SELF` is that tag alone; `GROWTH` is a least-squares slope over the readings,
+sampled once a second. A dash means the tag is not moving.
+
+**A slope alone is not a leak, which is what the `--heap-growth-limit` check is
+careful about.** A world loading its content is a step, and a step has a large
+slope; a leak is a line. The check requires both a rate and a *fit* - see
+`HeapProfile::RUNAWAY_FIT` - and `--heap-warmup` keeps the load out of the
+window altogether.
+
+```sh
+./client --headless --frames 1000000 --profile-seconds 120 \
+    --script Rings.luau --heap-report heap.txt
+```
+
+writes the totals, the forty heaviest tags and the growth of each. Adding
+`--heap-growth-limit 8192` makes the run exit 3 and name every tag over it,
+which is what `just heap-soak` is built on.
+
+The hooks are compiled in by `MONO_HEAP_PROFILE`, which is on in every preset
+but `release` - a shipped build does not pay a 24-byte header on every
+allocation. A `release` client says so rather than showing an empty tree.
+
+### Soaking for leaks *(v0.18)*
+
+```sh
+just heap-soak                         # five scenes, a minute each
+just heap-soak 300                     # five minutes each, so twenty-five
+just heap-soak 60 8192 15 "Stress"     # one scene, everything spelled out
+```
+
+Arguments are positional. A minute of wall clock is about a quarter of a million
+headless frames and a real 60 Hz of ticks, so both axes a leak can live on are
+exercised; the reports are left in `.cache/heap-<scene>.txt` whether the run
+passes or fails, because a green soak is the baseline the next one is read
+against.
+
+Not part of `just check`: it needs a GPU, for `just client-smoke`'s reason.
 
 ### Benchmarks
 
@@ -1460,15 +1510,15 @@ instead of vanishing for one.
 | Key | Does |
 |---|---|
 | **F3** | frame counter - FPS now, and min/avg/max over the last twenty seconds |
-| **F5** | frame graph - last frame's scope tree |
+| **F5** | frame graph - last frame's scope tree, and the heap |
 | **F6** / **F7** | next / previous frame-graph view |
 | **PgUp** / **PgDn** | scroll a graph taller than the panel |
 | **-** / **=** | shallower / deeper flamegraph |
 | **F8** | write `frame-graph-snapshot.txt` beside the binary |
 | **Esc** | quit |
 
-The four frame-graph views are the flamegraph, time by category, per-system cost
-from the scheduler, and whatever was written to the metrics sink.
+The five frame-graph views are the flamegraph, time by category, per-system cost
+from the scheduler, whatever was written to the metrics sink, and the heap.
 
 #### Reading the flamegraph
 

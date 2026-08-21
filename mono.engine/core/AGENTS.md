@@ -41,11 +41,50 @@ a write-only sink with no reader in this module.
 Do not add a `Metrics::Get(name)`. The moment a subsystem reads another
 subsystem's counter, the sink has become a global variable with extra steps.
 
-## There are two profilers and this is one of them
+## There are three profilers and two of them are here
 
-`Profiling.hpp` is the *engine* profiler - Tracy zones, plus the `FrameGraph`
-scope tree the F5 overlay draws. The userland profiler is a Luau CPU sampler and
-lives in `script/src/profiling/`. They share no code and should not grow any.
+`Profiling.hpp` is the *engine* profiler, and one macro feeds three consumers -
+Tracy zones, the `FrameGraph` scope tree the F5 overlay draws, and a
+`HeapProfile` tag. The userland profiler is a Luau CPU sampler and lives in
+`script/src/profiling/`. It shares no code with these and should not grow any.
+
+**The heap tag is on `ENGINE_PROFILE` rather than on a macro of its own, and
+that is the whole reason the heap profiler is granular.** Several hundred scopes
+are already placed where the work is; a second family of macros beside them
+would be a second set of placements to keep in step, which is right on the day
+it is written and wrong a month later. `ENGINE_HEAP_SCOPE` is for what allocates
+and is not worth timing - a worker thread, an audio callback.
+
+## A heap tag names a subsystem, never an instance of one
+
+The tag tree is bounded and **never removes a node**. So a caller naming a tag
+per script chunk, per entity or per asset fills it, and everything after that is
+charged to an ancestor and counted in `HeapTotals::DroppedScopes`.
+
+That is why `ENGINE_PROFILE_DYNAMIC` tags with its *fallback literal* and not
+with the runtime name it hands `FrameGraph`. `ENGINE_PROFILE_DYNAMIC_STABLE`
+does pass its name through, because its callers name a bounded set - the
+scheduler names its systems - and the tree copies what it is given rather than
+keeping the view. Copying is not an optimisation to remove: a borrowed view
+would need storage living as long as the *process*, and a scheduler's names live
+only as long as their world.
+
+## The allocator hooks are a compile-time decision and cannot be a runtime one
+
+A block allocated with no header and freed through the tracking
+`operator delete` would have four words of somebody else's memory read as its
+header. `MONO_HEAP_PROFILE` therefore decides once, for a whole program, and
+there is deliberately no switch that turns headers off in a running process.
+What *is* runtime is sampling, which only costs a walk of the tag tree.
+
+**Nothing in `HeapProfile.cpp` may have a constructor.** It is reached from
+inside `operator new`, so the first allocation in the process happens before any
+dynamic initialiser could have run. Every global there is `constinit`, and that
+is load-bearing rather than decorative: written without it, the tag tree's
+`std::atomic` members were *dynamically* initialised and zeroed out every
+allocation an earlier translation unit's static constructor had already made.
+The symptom was a process holding 1689 live blocks and a tag tree that had only
+ever seen 123 of them.
 
 ## The frame graph is about the frames you are not looking at
 
@@ -55,9 +94,12 @@ cannot show, because the panel repaints faster than a person can read:
 - `RecentMaximum` - the worst single reading over the last 300 frames. A
   *reading*, not a total: a span that opens six times a frame contributes its
   worst of the six, so the number compares with the per-frame figure beside it.
-- the retained window - five seconds, bounded by frames as well as by time,
-  because at a few thousand frames a second the time bound alone decides the
-  memory.
+- the retained window - five seconds, bounded by frames *and* by readings.
+  Seconds alone is not a bound on memory: how many frames five seconds holds is
+  the frame rate. `MAXIMUM_HISTORY_READINGS` is the figure that actually decides
+  what the window costs, and it is the one that binds first above a thousand
+  frames a second - so the window is shallower there and `HistorySeconds` says
+  so rather than assuming.
 - `WriteSnapshot` - percentiles per span, then the worst frames and what was in
   each.
 

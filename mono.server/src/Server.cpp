@@ -2297,6 +2297,19 @@ namespace server {
 			engine::core::FrameGraph::SetFoldingEnabled(true);
 		}
 
+		// From the first tick rather than from when somebody asks, because a
+		// slope is only as good as the window under it and a host's first
+		// minute is when it decides what it is going to hold.
+		if (!Settings.HeapReport.empty()) {
+			engine::core::HeapProfile::SetSamplingEnabled(true);
+			if (!engine::core::HeapProfile::IsCompiledIn()) {
+				ENGINE_WARN(
+					"--heap-report was given and this build has no allocator hooks. Configure with "
+					"MONO_HEAP_PROFILE=ON, or use the dev preset."
+				);
+			}
+		}
+
 		if (Settings.ControlPort >= 0) {
 			ControlSurface.AddUniverseTools(Worlds());
 			if (ControlServer.Start(static_cast<uint16_t>(Settings.ControlPort))) {
@@ -2463,6 +2476,11 @@ namespace server {
 				engine::core::FrameGraph::WriteFolded(window);
 			}
 
+			// After the tick, so a reading covers whole ticks. Sampling inside
+			// one would catch every scratch buffer the simulation holds for the
+			// length of a tick and report the sawtooth as the shape of the heap.
+			engine::core::HeapProfile::SampleIfDue();
+
 			if (Settings.MaximumTicks >= 0 && ticks >= static_cast<uint64_t>(Settings.MaximumTicks)) {
 				break;
 			}
@@ -2571,6 +2589,22 @@ namespace server {
 				relayed->Flagged,
 				relayed->Deferred
 			);
+		}
+
+		if (!Settings.HeapReport.empty()) {
+			const engine::core::HeapTotals heap = engine::core::HeapProfile::Totals();
+			ENGINE_INFO(
+				"heap: {:.1f} MiB live in {} block(s), {:.1f} MiB peak, {} tag(s)",
+				static_cast<double>(heap.LiveBytes) / (1024.0 * 1024.0),
+				heap.LiveBlocks,
+				static_cast<double>(heap.PeakBytes) / (1024.0 * 1024.0),
+				heap.Nodes
+			);
+			if (engine::core::HeapProfile::WriteReport(Settings.HeapReport)) {
+				ENGINE_INFO("heap: report written to '{}'", Settings.HeapReport.string());
+			} else {
+				ENGINE_ERROR("heap: nothing to write to '{}'", Settings.HeapReport.string());
+			}
 		}
 
 		if (!Settings.ProfilePath.empty()) {
