@@ -3,6 +3,7 @@
 #include <engine/core/HeapProfile.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <deque>
 #include <fstream>
@@ -63,7 +64,16 @@ namespace engine::core {
 			bool Enabled = false;
 			bool Recording = false;
 
-			std::thread::id Owner;
+			// **Atomic for the reason `ecs::Store`'s owner is**, and the two
+			// should stay the same shape. One thread writes this at
+			// `BeginRecording` and every job worker reads it below to decide
+			// whether a span is theirs; a plain `std::thread::id` read
+			// concurrently with that write is a data race by the letter of the
+			// standard even where it happens to be benign. Relaxed on both
+			// sides: nothing is published through it, and a worker that reads
+			// a stale owner for one span drops a span it would have dropped.
+			std::atomic<std::thread::id> Owner;
+
 			uint64_t FrameStartNanoseconds = 0;
 
 			// Built during the frame.
@@ -87,7 +97,13 @@ namespace engine::core {
 			float PublishedUnmarked = 0.0f;
 			float PublishedCategories[static_cast<size_t>(ProfileCategory::Count)] = {};
 
-			size_t DroppedThisFrame = 0;
+			// **Incremented from worker threads**, which is the whole reason
+			// the counter exists - a span opened off the owning thread is
+			// counted rather than locked for. Concurrent `++` on a plain
+			// `size_t` is a data race, and one that loses counts silently,
+			// which for a counter whose only job is to say "the overlay is
+			// under-reporting" is the worst possible failure.
+			std::atomic<size_t> DroppedThisFrame{0};
 			size_t PublishedDropped = 0;
 
 			// --- history ------------------------------------------------------
@@ -452,13 +468,13 @@ namespace engine::core {
 		// ran before the switch, and published it would read as one enormous
 		// frame with three spans in it.
 		state.Recording = true;
-		state.Owner = std::this_thread::get_id();
+		state.Owner.store(std::this_thread::get_id(), std::memory_order_relaxed);
 		state.FrameStartNanoseconds = Clock::Nanoseconds();
 		state.Building.clear();
 		state.Open.clear();
 		state.Depth = 0;
 		state.BuildingNameCount = 0;
-		state.DroppedThisFrame = 0;
+		state.DroppedThisFrame.store(0, std::memory_order_relaxed);
 
 		// Reserving once, on the first enabled frame, keeps the allocation out
 		// of every subsequent measurement.
@@ -670,7 +686,7 @@ namespace engine::core {
 
 		state.Published.swap(state.Building);
 		state.PublishedMilliseconds = total;
-		state.PublishedDropped = state.DroppedThisFrame;
+		state.PublishedDropped = state.DroppedThisFrame.load(std::memory_order_relaxed);
 		// The names go with the spans that view into them.
 		state.PublishedNames.swap(state.BuildingNames);
 		state.BuildingNameCount = 0;
@@ -953,8 +969,8 @@ namespace engine::core {
 		//
 		// Not depth-tracked either: the depth belongs to the owning thread's
 		// stack, and a worker moving it would corrupt that thread's nesting.
-		if (std::this_thread::get_id() != state.Owner) {
-			state.DroppedThisFrame++;
+		if (std::this_thread::get_id() != state.Owner.load(std::memory_order_relaxed)) {
+			state.DroppedThisFrame.fetch_add(1, std::memory_order_relaxed);
 			return NOT_RECORDING;
 		}
 
@@ -962,7 +978,7 @@ namespace engine::core {
 		// so the matching close moves it back - otherwise every sibling after a
 		// dropped span is recorded one level too deep.
 		if (state.Depth >= MAXIMUM_DEPTH || state.Building.size() >= MAXIMUM_SPANS) {
-			state.DroppedThisFrame++;
+			state.DroppedThisFrame.fetch_add(1, std::memory_order_relaxed);
 			state.Depth++;
 			return DEPTH_ONLY;
 		}
@@ -1035,7 +1051,7 @@ namespace engine::core {
 		std::string_view fallback, std::string_view name, ProfileCategory category
 	) {
 		auto &state = Get();
-		if (!state.Recording || std::this_thread::get_id() != state.Owner) {
+		if (!state.Recording || std::this_thread::get_id() != state.Owner.load(std::memory_order_relaxed)) {
 			Index = Push(name, category);
 			return;
 		}
@@ -1066,8 +1082,8 @@ namespace engine::core {
 		// The same owner rule `Push` applies, and for the same reason. What is
 		// different is only where the number came from: a producer that cannot
 		// record its own span hands the duration to whoever can.
-		if (std::this_thread::get_id() != state.Owner) {
-			state.DroppedThisFrame++;
+		if (std::this_thread::get_id() != state.Owner.load(std::memory_order_relaxed)) {
+			state.DroppedThisFrame.fetch_add(1, std::memory_order_relaxed);
 			return;
 		}
 
@@ -1076,12 +1092,12 @@ namespace engine::core {
 		// it to zero would put a plausible bar on the graph instead of a
 		// missing one.
 		if (!(milliseconds >= 0.0f)) {
-			state.DroppedThisFrame++;
+			state.DroppedThisFrame.fetch_add(1, std::memory_order_relaxed);
 			return;
 		}
 
 		if (state.Depth >= MAXIMUM_DEPTH || state.Building.size() >= MAXIMUM_SPANS) {
-			state.DroppedThisFrame++;
+			state.DroppedThisFrame.fetch_add(1, std::memory_order_relaxed);
 			return;
 		}
 
@@ -1111,7 +1127,8 @@ namespace engine::core {
 		std::string_view fallback, std::string_view name, ProfileCategory category, float milliseconds
 	) {
 		auto &state = Get();
-		if (!state.Recording || std::this_thread::get_id() != state.Owner || name.empty()) {
+		if (!state.Recording || std::this_thread::get_id() != state.Owner.load(std::memory_order_relaxed) ||
+			name.empty()) {
 			Report(fallback, category, milliseconds);
 			return;
 		}

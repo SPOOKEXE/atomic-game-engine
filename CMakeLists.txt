@@ -150,6 +150,42 @@ else()
 	endif()
 endif()
 
+# The compiler cache, if there is one.
+#
+# **Measured at v0.19 as the largest single build-time win available**, and by a
+# wide margin: a clean build is 172.6 s wall and 2912 CPU-seconds, of which 2373
+# are vendor - code that is identical between every preset and every clean
+# rebuild, and that a cache therefore hits on almost every time. `docs/
+# ARCH_REVIEW.md` §E carries the numbers.
+#
+# **Set before the first `add_subdirectory` on purpose.** A compiler launcher is
+# read when a target is created, so a line further down would cover the engine
+# and miss the vendor tree, which is the 56% that matters most.
+#
+# **Absent is not an error.** Nobody should have to install a tool to build this
+# repository, and a configure that failed on a missing cache would be a worse
+# trade than a slower build. But absence is *reported*, because a cache that
+# quietly stopped being used is indistinguishable from one that never was - the
+# same argument `just typecheck` makes about a check that passes by having
+# nothing to do.
+option(MONO_CCACHE "Use ccache or sccache when one is installed" ON)
+
+if(MONO_CCACHE)
+	find_program(MONO_COMPILER_CACHE NAMES ccache sccache)
+	if(MONO_COMPILER_CACHE)
+		set(CMAKE_C_COMPILER_LAUNCHER   "${MONO_COMPILER_CACHE}")
+		set(CMAKE_CXX_COMPILER_LAUNCHER "${MONO_COMPILER_CACHE}")
+		message(STATUS "compiler cache: ${MONO_COMPILER_CACHE}")
+	else()
+		# Named rather than hinted at, because "install ccache" is not obvious
+		# to somebody who has never seen a build take three minutes without one.
+		message(STATUS
+			"compiler cache: none found. `sudo apt install ccache` (or `brew install ccache`) "
+			"is worth roughly 150 s of a 172.6 s clean build. Configure with -DMONO_CCACHE=OFF "
+			"to stop asking.")
+	endif()
+endif()
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/mono.build")
 include(MonoVendor)
 

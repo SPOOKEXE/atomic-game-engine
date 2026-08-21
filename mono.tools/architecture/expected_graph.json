@@ -69,12 +69,14 @@
     },
     "assets": {
       "tier": "shared",
+      "layer": 8,
       "links": [
         "core"
       ]
     },
     "audio": {
       "tier": "client",
+      "layer": 12,
       "links": [
         "core"
       ],
@@ -82,6 +84,10 @@
     },
     "bake": {
       "tier": "shared",
+      "layer": 9,
+      "lateral": [
+        "bakegraph"
+      ],
       "links": [
         "assets",
         "bakegraph",
@@ -90,6 +96,7 @@
     },
     "bakegraph": {
       "tier": "shared",
+      "layer": 9,
       "links": [
         "core"
       ]
@@ -140,12 +147,14 @@
     },
     "collision": {
       "tier": "shared",
+      "layer": 5,
       "links": [
         "core"
       ]
     },
     "control": {
       "tier": "shared",
+      "layer": 13,
       "links": [
         "core",
         "ecs",
@@ -155,10 +164,15 @@
     },
     "core": {
       "tier": "shared",
+      "layer": 1,
       "links": []
     },
     "delivery": {
       "tier": "shared",
+      "layer": 11,
+      "lateral": [
+        "net"
+      ],
       "links": [
         "assets",
         "core",
@@ -167,6 +181,7 @@
     },
     "discord": {
       "tier": "shared",
+      "layer": 11,
       "links": [
         "core"
       ]
@@ -179,6 +194,7 @@
     },
     "ecs": {
       "tier": "shared",
+      "layer": 3,
       "links": [
         "core",
         "parallel"
@@ -186,6 +202,7 @@
     },
     "effects": {
       "tier": "shared",
+      "layer": 8,
       "links": [
         "collision",
         "core",
@@ -197,6 +214,7 @@
     },
     "examples": {
       "tier": "shared",
+      "layer": 10,
       "links": [
         "collision",
         "core",
@@ -213,6 +231,7 @@
     },
     "game": {
       "tier": "shared",
+      "layer": 10,
       "links": [
         "assets",
         "bakegraph",
@@ -231,6 +250,7 @@
     },
     "graph": {
       "tier": "shared",
+      "layer": 9,
       "links": [
         "collision",
         "core",
@@ -242,6 +262,7 @@
     },
     "gui": {
       "tier": "shared",
+      "layer": 7,
       "links": [
         "core",
         "ecs",
@@ -250,6 +271,7 @@
     },
     "input": {
       "tier": "client",
+      "layer": 12,
       "links": [
         "collision",
         "core",
@@ -309,17 +331,20 @@
     },
     "msl": {
       "tier": "client",
+      "layer": 11,
       "links": [],
       "requires": "MONO_BUILD_CLIENT"
     },
     "net": {
       "tier": "shared",
+      "layer": 11,
       "links": [
         "core"
       ]
     },
     "network": {
       "tier": "shared",
+      "layer": 12,
       "links": [
         "core",
         "net"
@@ -327,17 +352,20 @@
     },
     "nodegraph": {
       "tier": "client",
+      "layer": 11,
       "links": [],
       "requires": "MONO_BUILD_CLIENT"
     },
     "parallel": {
       "tier": "shared",
+      "layer": 2,
       "links": [
         "core"
       ]
     },
     "physics": {
       "tier": "shared",
+      "layer": 8,
       "links": [
         "collision",
         "core",
@@ -349,6 +377,7 @@
     },
     "render": {
       "tier": "client",
+      "layer": 12,
       "links": [
         "assets",
         "collision",
@@ -367,6 +396,7 @@
     },
     "replication": {
       "tier": "shared",
+      "layer": 12,
       "links": [
         "assets",
         "core",
@@ -378,6 +408,7 @@
     },
     "resources": {
       "tier": "client",
+      "layer": 11,
       "links": [
         "core"
       ],
@@ -385,6 +416,7 @@
     },
     "scene": {
       "tier": "shared",
+      "layer": 7,
       "links": [
         "collision",
         "core",
@@ -395,6 +427,7 @@
     },
     "script": {
       "tier": "shared",
+      "layer": 9,
       "links": [
         "collision",
         "core",
@@ -442,6 +475,7 @@
     },
     "spatial": {
       "tier": "shared",
+      "layer": 6,
       "links": [
         "core"
       ]
@@ -494,6 +528,10 @@
     },
     "ui": {
       "tier": "client",
+      "layer": 12,
+      "lateral": [
+        "render"
+      ],
       "links": [
         "assets",
         "collision",
@@ -549,6 +587,7 @@
     },
     "world": {
       "tier": "shared",
+      "layer": 4,
       "links": [
         "core",
         "ecs",

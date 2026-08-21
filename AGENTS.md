@@ -74,12 +74,24 @@ passes, and is wrong.
 ### 1. The layer stack is not negotiable
 
 Every module sits at a height, and **a layer may see every layer below it and
-none above it.** The heights are in the design notes; the enforcement is in
-`mono.build/MonoLibrary.cmake`, which fails at configure time with the
-offending edge named.
+none above it.** [`docs/CODE_ARCH.md`](docs/CODE_ARCH.md) is the map: the stack,
+the tiers, the dependency rule and what is allowed to cross it.
 
-If a change needs an edge that the tier check refuses, that is the design
-telling you something. The fix is almost never `ALLOW_TIER_ESCAPE`.
+**Two checks, and they catch different things.** The tier rule is enforced by
+`mono.build/MonoLibrary.cmake` at configure time, which fails the build with the
+offending edge named - that is client, server and shared. The *layer* rule is
+enforced by `mono.tools/architecture/CheckTargetGraph.cmake` under `just
+test-architecture`, which reads the `layer` on every module in
+`expected_graph.json` and refuses an edge that does not run downward. Until v0.19
+only the first existed and this paragraph claimed both.
+
+**Sideways is allowed only where it is named.** Three edges in this repository
+run to a module at their own layer, each for a reason written beside it, and
+each listed in that module's `lateral` array. Adding a fourth is a diff a
+reviewer sees rather than a rule quietly widening.
+
+If a change needs an edge either check refuses, that is the design telling you
+something. The fix is almost never `ALLOW_TIER_ESCAPE`.
 
 ### 2. The ECS owns the storage
 

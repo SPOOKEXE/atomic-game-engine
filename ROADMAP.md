@@ -39,21 +39,164 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### v0.19
 
-- [_] build out proper code architecture documents (AGENTS.md, docs/CODE_FORMAT.md, docs/CODE_QUALITY.md) => CODE_ARCH.md.
-- [_] DOMAIN DRIVEN DESIGN & HEXAGONAL ARCHITECTURE.
-- [_] check if we need to move files / classes / structures around in the codebase to properly fit (mainly focus on engine).
-- [_] properly make a ECS component document list so i can see all components and what they're for.
-- [_] clean up all ECS components that exist and find better ways to represent stuff (e.g. merge, split, rename).
-- [_] think plan for future features as well listed in roadmap and plan for them now.
-- [_] improve build times (flamegraph => optimise).
-- [_] check all asynchronous points, all parallel points, etc and ensure they are implemented nicely and are good
-- [_] scan through all seriel loops and see if we can improve any with parallel / vectorised
-- [_] update AGENTS.md in root and subdirectories
-- [_] quic implementation.
-- [_] choose networking backend (quic, tcp, udp, etc) for each engine feature like replication and whatnot.
-- [_] build out a full logging, metrics, etc so we can track what the engine is doing in dev builds effectively.
-- [_] add more MCP integrations in engine for models to use.
-- [_] e.g. "does this component property make sense here?", "if not, where should it belong? a physics component? a transform component? a mesh component? new component?".
+- [x] build out proper code architecture documents => `docs/CODE_ARCH.md`. The
+      layer stack, tiers, the dependency rule and what crosses it, what each
+      program links, where a new thing goes, and what is checked by what. It is
+      the in-tree half of `repo_layout.md`, which is cited sixty-two times by
+      section number from CMake, from public headers and from
+      `THIRD_PARTY_NOTICES.md`, and which has never been in this repository.
+- [x] DOMAIN DRIVEN DESIGN & HEXAGONAL ARCHITECTURE - `docs/CODE_ARCH.md` §8 and
+      §9. A module is a bounded context; the primary port is an ECS column
+      rather than an interface; the four cases where two modules claim one noun
+      (`world`, `graph`, `ui`, `net`) are written down; the test of the hexagon
+      is the `server` preset, which configures with no client at all.
+- [x] properly make a ECS component document list - `docs/ECS_COMPONENTS.md`,
+      **generated** from `ecs::Components` by `just components`. 129
+      engine-registered components, each with its size, whether it is a tag,
+      whether a save can carry it, whether replication has a compact form, and
+      one written line saying what it is for. `just components-check` fails when
+      a registered component has no purpose line, so the list cannot drift.
+- [x] choose networking backend for each engine feature - `docs/CODE_ARCH.md`
+      §10. Ten features, what each actually needs, and what it should be on.
+      The finding: sixteen TCP connections and one shared UDP reliable window
+      are both workarounds for not having streams.
+- [x] the layer rule is enforced. `expected_graph.json` carries a `layer` on
+      thirty modules and `CheckTargetGraph.cmake` refuses an upward edge, an
+      unnamed same-layer edge and any edge into the program band. Six fixtures
+      under `mono.tools/architecture/tests/` check that the check still bites.
+      `AGENTS.md` rule 1 was the headline rule and was previously unchecked.
+- [x] the review itself - `docs/ARCH_REVIEW.md`. Findings from a full pass, each
+      marked as reproduced or as reported, so nothing here is acted on without
+      being checked first.
+- [_] check if we need to move files / classes / structures around. **Analysed,
+      not applied** - `docs/ARCH_REVIEW.md` §C. The five with arguments:
+      `nodegraph` is linked only by `studio` and belongs in it; `RenderView` is
+      5,485 lines and splits by node family; `script` is 33k and should be four
+      modules behind the VM-free port it already has; `mono.client` uses three
+      modules it does not declare; `SurfaceCameras.cpp` is 4,108 lines that lift
+      out. `mono.libraries/` should **not** be created yet - there are two
+      leaves and the bar is three.
+- [_] clean up all ECS components. **Analysed, not applied** -
+      `docs/ARCH_REVIEW.md` §D. 35 misplaced fields, 6 merges, 12 splits, 10
+      renames. `WorldTime` is saved under the compiler's spelling of its type,
+      which rule 4 forbids, and three more are reported to be.
+- [_] scan through all serial loops for parallel or vectorised work. **Audited,
+      not applied** - `docs/ARCH_REVIEW.md` §F. The first one is not a
+      parallelisation at all: the client runs eight full store walks per world
+      per frame and discards the result.
+- [_] update AGENTS.md in root and subdirectories. **Six done**: root,
+      `mono.engine` (was a one-line stub), `mono.engine/control` (the only
+      module of 29 without one), and `game`, `scene` and `render`, each of which
+      asserted an invariant the code had outgrown. Nine more are listed in
+      `docs/ARCH_REVIEW.md` §B as still wrong.
+- [_] improve build times. **Measured, two fixes applied.** `Clock.hpp` went
+      from 82,779 preprocessed lines to 422 and reaches 264 of 479 translation
+      units; `Store.hpp` from 120,696 to 82,358 across 253. The ranked list of
+      what is left is `docs/ARCH_REVIEW.md` §E, and the top entry is installing
+      ccache, worth about 150 s of a 172.6 s clean build.
+- [_] check all asynchronous and parallel points. **Audited** -
+      `docs/ARCH_REVIEW.md` §A and §F. `core::FrameGraph`'s owner and dropped
+      counter were racy and are fixed; `graph::NodeCatalogue` hands out pointers
+      its mutex does not protect and is open.
+- [_] add more MCP integrations. **One added**: `engine_components`, because
+      `component_list` deliberately covers only what a game declared, so a model
+      could not ask what storage the engine has. The module graph, a test
+      runner, script tools and a log tool are still missing.
+- [_] build out a full logging, metrics, etc so we can track what the engine is
+      doing in dev builds effectively. **Audited, not built** -
+      `docs/ARCH_REVIEW.md` §G. Logging is 101 lines with no categories, no
+      dynamic level and no free disabled statement, and thirteen modules never
+      call it. `core::Metrics` has no read side at all.
+- [_] quic implementation. **Scoped, not started.** `docs/CODE_ARCH.md` §10.1
+      has the seam analysis: `net::Transport` is a real port and
+      `replication::Session` already holds one, so the open question is the
+      layer above - `Session` owns a `Link`, a reliable pair and its cipher
+      pair as members, and QUIC supplies all four itself.
+- [_] think plan for future features as well listed in roadmap and plan for them
+      now. **Partly** - the component gaps v0.21 and v0.23 imply are recorded in
+      `docs/ARCH_REVIEW.md` §D4 (no `Skeleton`, `Bone`, `Animator`,
+      `Constraint`, `Terrain`, `LevelOfDetail`, `Fog` or `Atmosphere` type
+      exists), and the `persistence`/`ledger` layer problem in
+      `docs/CODE_ARCH.md` §4.2 - both L5 and L6 were reserved for them and are
+      now occupied.
+
+- [_] make the four unchecked architecture rules checked. `docs/CODE_ARCH.md`
+      §11 lists them in value order and they are the third category rule 6
+      refuses to allow: a module keeping a private copy of data the ECS owns; a
+      pointer inside anything that crosses a world boundary; a `Name` serialised
+      as its `Id()` rather than its string; a header in `include/` that only its
+      own module includes. The layer rule was in that list until this version
+      and took an afternoon, so the estimate is not speculative.
+- [_] finish the `AGENTS.md` sweep. Nine files still assert something false and
+      are named with line numbers in `docs/ARCH_REVIEW.md` §B: `parallel`
+      (claims `process/` and `ipc/` do not exist, they have since v0.2, and
+      misidentifies the join's serialisation point), `launcher` (six decisions
+      are already in `Interface.cpp`), `mono.client` (four of its headers are
+      included by `mono.studio`, and its largest single piece of logic,
+      `PumpContent`, is not mentioned at all), `script`, `mono.server`. Plus
+      `docs/QUIC.md:55` calling `net` L2 when it is L11, `README.md:34` saying
+      "four rules" when there are six, and `docgen/pages/Modules.md` listing ten
+      of twenty-nine engine modules.
+- [_] call `Components::Seal()` at start-up in every program. `ecs/
+      Components.hpp:11-17` describes a determinism guarantee that rests on the
+      table being closed before any world ticks in parallel, and the only caller
+      is a test - so the guarantee is unenforced in every shipped binary. This
+      is the smallest item on this list and the one with the worst failure mode.
+- [_] register `WorldTime`, `PortalProxy`, `NotArchivable` and `DirtyBits` under
+      explicit names. They are minted by `Components::Of<T>()` from the
+      compiler's spelling of the type and they reach `.agame` files, which
+      decision 21 and rule 4 both forbid: the spelling is stable within one
+      build and nothing wider. A save-format break, and the repository is
+      pre-release.
+- [_] decide where `persistence` and `ledger` go before something needs them.
+      `docs/CODE_ARCH.md` §4.2: the design reserved L5 and L6 for them, the
+      built tree put `collision` and `spatial` there, and decision 7 still says
+      the datastore surface is server-only. Deciding now costs a paragraph;
+      deciding when the module arrives costs renumbering eleven modules.
+- [_] the three small structural fixes with no argument against them. Declare
+      `Engine::assets`, `Engine::graph` and `Engine::script` in
+      `mono.client/CMakeLists.txt` - all three are used from public headers and
+      arrive transitively today, which is the exact failure that file already
+      documents happening once at `:40-45`. Move `nodegraph` into `mono.studio`
+      - it is `client` tier, carries imgui and four concurrency headers, and
+      exactly one target links it. State the lifetime contract on
+      `NodeCatalogue::Find` that `All` already carries, and say in it that the
+      mutex does not extend past the return.
+- [_] split `Renderer::RenderView`. It is 5,485 lines inside a 13,517-line
+      translation unit, holds its node handlers as lambdas, and calls
+      `SDL_BeginGPURenderPass` inline in eighteen places - which is what makes
+      those passes invisible to the render graph. Splitting it by node family,
+      into files that each implement `GraphRunner` for one family, is the same
+      change as fixing the build cost: that one file is 31.2 s of a 172.6 s
+      build and cannot be split across cores. `D00016`.
+- [_] the rest of the measured build wins, in `docs/ARCH_REVIEW.md` §E2's order.
+      `UNITY_BUILD` for `release` and `ci` is 51 to 73% of first-party compile
+      CPU and is blocked by about nine anonymous-namespace collisions. `-g1` is
+      36% off the heaviest translation units. Taking `spdlog/spdlog.h` out of
+      `core/Log.hpp` is the same fix `Store.hpp` and `Clock.hpp` just had, one
+      level down, and twenty-nine of its includers use no log macro at all.
+      Precompiled headers measured at only 11%, so they rank below unity builds
+      rather than above - which is the opposite of the usual intuition and the
+      reason it was measured.
+- [_] the four correctness findings that are open. `docs/ARCH_REVIEW.md` §A3 to
+      §A5: an unbounded `JS_ExecutePendingJob` loop that hangs the host inside
+      one tick and is not caught by the step budget because both interrupt
+      handlers zero their counter on trip; `Client`'s copy of
+      `scene::InputState`'s mouse behaviour, which is last-write-wins across
+      worlds and is rule 2 exactly; and fifteen call sites that discard
+      `CommandQueue::Post`'s result while recording the state as landed, so a
+      dropped `Open` is a permanently silent voice.
+- [_] the eight-walks-per-world-per-frame content scan.
+      `mono.client/src/Client.cpp:495-498` runs `CollectWantedContent`
+      unconditionally every frame, which is eight full store passes per world,
+      and discards essentially all of it in the steady state. Live on every
+      default run. Not a parallelisation - work that should not happen.
+- [_] a component catalogue and a module graph in the MCP surface.
+      `engine_components` landed this version; the module graph, the layer table
+      and a test runner are the next three a model working on this engine
+      obviously wants and cannot get. Also fix the three port mismatches, one of
+      which has `studio --mcp-port` bare defaulting to 8720 while its own help
+      says 8738, and give `mcpbridge` a suite - it has none.
 
 ### v0.20
 

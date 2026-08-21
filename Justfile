@@ -128,11 +128,54 @@ linecount *args: (build "linecount")
 
 # The architecture test on its own - the target graph against the expectation.
 # Needs a configure, not a build: it reads what CMake emitted.
+#
+# Then the fixtures, and they are the half worth explaining. This check walks an
+# expectation and reports what it finds wrong; an expectation it fails to parse
+# walks as zero entries and reports success, so the check is the one in the
+# repository that can go green by doing nothing. Each directory under
+# `mono.tools/architecture/tests/` is a graph and an expectation that must fail,
+# with the message it must produce in its own `expect` file, plus one `clean`
+# pair that must pass so that "everything fails" is not how the suite goes green.
 test-architecture:
+    #!/usr/bin/env bash
+    set -euo pipefail
     cmake --preset {{preset}} > /dev/null
     cmake -DGRAPH={{build}}/target-graph.json \
           -DEXPECTED=mono.tools/architecture/expected_graph.json \
           -P mono.tools/architecture/CheckTargetGraph.cmake
+
+    failures=0
+    for fixture in mono.tools/architecture/tests/*/; do
+        name=$(basename "$fixture")
+        want=$(cat "$fixture/expect")
+        set +e
+        out=$(cmake -DGRAPH="$fixture/graph.json" -DEXPECTED="$fixture/expected.json" \
+                    -P mono.tools/architecture/CheckTargetGraph.cmake 2>&1)
+        code=$?
+        set -e
+
+        if [ -z "$want" ]; then
+            if [ "$code" -ne 0 ]; then
+                echo "fixture '$name' should pass and did not:"
+                printf '%s\n' "$out" | sed 's/^/    /'
+                failures=$((failures + 1))
+            fi
+        elif [ "$code" -eq 0 ]; then
+            echo "fixture '$name' should fail and passed. The check has stopped catching it."
+            failures=$((failures + 1))
+        elif ! printf '%s' "$out" | grep -qF "$want"; then
+            echo "fixture '$name' failed for the wrong reason. Wanted: $want"
+            printf '%s\n' "$out" | sed 's/^/    /'
+            failures=$((failures + 1))
+        fi
+    done
+
+    if [ "$failures" -ne 0 ]; then
+        echo "architecture fixtures: $failures wrong"
+        exit 1
+    fi
+    count=$(find mono.tools/architecture/tests -mindepth 1 -maxdepth 1 -type d | wc -l)
+    echo "-- architecture fixtures ok - $count fixture(s)"
 
 # Every first-party object against the header dependencies ninja recorded for it.
 #
@@ -280,6 +323,35 @@ shader-check: build
         exit 0
     fi
     ./{{build}}/tools/shadercheck --quiet "$stage"
+
+# Regenerate the ECS component catalogue.
+#
+# **Generated because a hand-written list of a hundred and twenty-nine
+# components is wrong within a month, and wrong quietly.** Everything mechanical
+# about a component - its registered name, its size, whether it is a tag,
+# whether it can be saved, whether it has a compact wire form, whether it has
+# padding a raw writer would leak into a file - is already in `ecs::Components`.
+# The tool walks that table.
+#
+# The one thing the table cannot know is what a component is *for*, so that
+# lives in `mono.tools/componentdoc/purposes.md`, one line per component, and
+# **that is the file to edit.** `docs/ECS_COMPONENTS.md` is output.
+#
+# The tool builds in a `server` preset as well as a `dev` one: every module it
+# links is `shared`, which is correct rather than incidental - a dedicated
+# server holds the same components a client does.
+components: (build "componentdoc")
+    ./{{build}}/tools/componentdoc
+
+# The catalogue against the registry, and the registry against the purposes.
+#
+# Three ways to fail, and the third is the one worth having: the checked-in
+# catalogue is stale; a purpose line names a component nothing registers, which
+# is what a rename leaves behind; or a registered component has no purpose line,
+# which is what adding one leaves behind. Without the third, adding a component
+# would regenerate a row reading "undocumented" and nothing would object.
+components-check: (build "componentdoc")
+    ./{{build}}/tools/componentdoc --check
 
 # Regenerate the scripting manifest and the type declarations.
 #
@@ -490,7 +562,7 @@ luau-lsp:
 # `.githooks/pre-push` does for you - because that is the half that has gone
 # uncompilable three times while being described as the standard, twice inside
 # v0.15 alone, and a check nobody runs stops being true.
-check: format-check build test-all test-architecture shader-check check-one-node-graph bindings-check typecheck typecheck-editor determinism replay-check orphan-check
+check: format-check build test-all test-architecture shader-check check-one-node-graph bindings-check components-check typecheck typecheck-editor determinism replay-check orphan-check
     @echo "check ok - format, build, tests, architecture, shaders, bindings, typecheck, editor, determinism, replay, orphans"
 
 # Run the launcher - the window that starts any of the others.

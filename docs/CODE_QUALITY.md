@@ -57,12 +57,22 @@ cmake --preset ci && cmake --build .cache/build/ci -j
 
 ## 2 · Architecture
 
-- [ ] **Does every new dependency edge go downward?** The tier check catches
-      client/server mistakes; it does not catch L3 including L7. Check the
-      layer heights by hand.
+- [ ] **Does every new dependency edge go downward?** Both halves are checked
+      now, so this is a question about intent rather than about compliance: the
+      tier check catches client/server at configure time, and
+      `just test-architecture` catches L3 including L7. What neither can tell
+      you is whether the edge should exist at all.
+- [ ] **If the edge runs sideways, is it named and argued?** A module may link
+      a sibling at its own layer only where its `lateral` array in
+      `expected_graph.json` says so, and the reason belongs in a comment beside
+      the edge. There are three; `docs/CODE_ARCH.md` §6.1 lists them.
 - [ ] **Is a new module recorded in
-      `mono.tools/architecture/expected_graph.json`?** The architecture test
-      fails otherwise, and that failure is the point.
+      `mono.tools/architecture/expected_graph.json`, with a `layer`?** The
+      architecture test fails otherwise, and that failure is the point. A module
+      with no layer is the program band, and nothing with a layer may link it.
+- [ ] **Is a new ECS component in `mono.tools/componentdoc/purposes.md`?**
+      `just components-check` fails otherwise. It is one line saying what the
+      component is for; everything mechanical is generated.
 - [ ] **Does anything new cross a world boundary as a pointer?** It must be a
       copy, and the copy must be describable as a schema.
 - [ ] **Is there now a second way to do something that already existed?** Two

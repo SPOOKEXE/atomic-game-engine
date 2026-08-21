@@ -74,9 +74,11 @@ mono_add_library(game
 		# engine's own mesh format; `bake` holds the glTF, OBJ and PMX readers.
 		# A server links this target and has no business decoding a PMX.
 		#
-		# **Nothing here opens a file or a socket.** A caller hands over bytes it
-		# already has - the client from `delivery`, a server from the store it is
-		# already serving - so the trust boundary stays where it was.
+		# **Nothing here fetches.** This module does open files - a `.agame` is
+		# read and written through a path a caller named - but nothing behind a
+		# content id is resolved here. Those bytes arrive already in hand: the
+		# client's from `delivery`, a server's from the store it is already
+		# serving, so the trust boundary stays where it was.
 		Engine::collision
 		Engine::assets
 )

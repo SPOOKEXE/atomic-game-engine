@@ -34,6 +34,7 @@
 #include <engine/core/Clock.hpp>
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/HeapProfile.hpp>
+#include <engine/core/Log.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/delivery/Client.hpp>

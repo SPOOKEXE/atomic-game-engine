@@ -9,6 +9,7 @@ endif()
 
 # Documentation and binding tools.
 add_subdirectory(bindings)
+add_subdirectory(componentdoc)
 add_subdirectory(docgen)
 
 # Script type checker over generated declarations.

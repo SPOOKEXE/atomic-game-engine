@@ -15,6 +15,7 @@
 #include <engine/control/Surface.hpp>
 #include <engine/core/FrameGraph.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Components.hpp>
 #include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Schema.hpp>
 
@@ -666,6 +667,57 @@ namespace engine::control {
 					names.push_back(std::string(worlds->NameOf(id).Text()));
 				}
 				return json{{"worlds", std::move(names)}, {"count", worlds->Count()}};
+			},
+		});
+
+		// **The engine's own components, which `component_list` deliberately does
+		// not show.** That tool reads `ecs::Schemas`, which is what a *game*
+		// declared for itself; the engine's hundred and twenty-nine are reached
+		// as properties through `instance_get`, and only where a class exposes
+		// one. So a model could not ask what storage a world actually has, and
+		// the answer was "read the C++".
+		//
+		// Every field here comes from the registry rather than from a list kept
+		// beside it, for `componentdoc`'s reason: a hand-maintained copy of a
+		// generated fact is the one that goes stale. `docs/ECS_COMPONENTS.md` is
+		// the same table with a written purpose per row, which this cannot carry
+		// because the purpose lives in a file and not in the process.
+		//
+		// **Takes no world**, unlike its neighbours. The component table is
+		// per-process and sealed before any world ticks; asking it about a
+		// particular scene would imply it could differ between two, which is
+		// exactly the belief `Components::Seal` exists to prevent.
+		Add(Tool{
+			"engine_components",
+			"Every component type this engine registers, with its size, whether it is a tag, "
+			"whether a save file can carry it and whether replication has a compact form for it. "
+			"A component is the storage under the class tree: an instance is an entity and a class "
+			"is a set of these. Use component_list instead for the components a game declared for "
+			"itself, and instance_get to read one off a particular instance.",
+			[] { return json{{"type", "object"}}; },
+			[](const json &, std::string &) {
+				json out = json::array();
+				for (uint32_t index = 0; index < static_cast<uint32_t>(ecs::Components::Count()); index++) {
+					const ecs::TypeDescriptor &type = ecs::Components::Describe(ecs::ComponentId(index));
+					const std::string name(type.Name.Text());
+					const size_t dot = name.find('.');
+
+					out.push_back(
+						json{
+							{"name", name},
+							{"module", dot == std::string::npos ? std::string() : name.substr(0, dot)},
+							{"bytes", type.Size},
+							{"tag", type.Kind == ecs::ComponentKind::Tag},
+							{"saved", type.Serialisable},
+							{"wireBytes", type.Wire.Present() ? type.Wire.Size : 0},
+						}
+					);
+				}
+
+				std::sort(out.begin(), out.end(), [](const json &a, const json &b) {
+					return a.at("name").get<std::string>() < b.at("name").get<std::string>();
+				});
+				return json{{"components", std::move(out)}, {"count", ecs::Components::Count()}};
 			},
 		});
 

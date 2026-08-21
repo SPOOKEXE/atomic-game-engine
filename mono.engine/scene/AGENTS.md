@@ -599,11 +599,20 @@ mute with nothing in the file saying why.
 
 ## Not here yet, so do not add half of one
 
-- **No systems.** `IntegrateMotion`, `SyncBroadphase` and the rest of
-  `v02v03v04.md` §3.5 belong to `physics` at L8, which reads these components
-  and is not read by them. This module holds the data and one resolver.
-  `ResolveActiveCamera` is here because a camera's matrices are a function of a
-  camera and nothing else.
+- **No simulation systems.** `IntegrateMotion`, `SyncBroadphase` and the rest
+  of `v02v03v04.md` §3.5 belong to `physics` at L8, which reads these components
+  and is not read by them.
+
+  Two systems *are* registered here, and the line between them and the ones
+  above is worth stating rather than leaving to be rediscovered:
+  `RegisterGravitySystem` (`Gravity.hpp:62`) and `RegisterOwnershipSystem`
+  (`Ownership.hpp:101`). Both compute a property of a row from that row and its
+  ancestors and from nothing else - no broadphase, no pairs, no solver, no other
+  module's components - which is the same argument `ResolveActiveCamera` makes
+  about a camera's matrices being a function of a camera. A system that has to
+  see a second module's data is the kind that does not belong here.
+
+  This bullet read "No systems" until v0.19, by which time there were two.
 - **No world AABB, and no `Ray` anything.** `core::AABB`, `core::Ray` and
   `core::RayHit` exist now - they landed with `spatial`, the module that gave
   them a consumer - and none of them belongs in a component here. A world AABB

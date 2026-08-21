@@ -1,0 +1,11 @@
+{
+  "options": {},
+  "modules": {
+    "bottom": { "tier": "shared", "links": [] },
+    "middle": { "tier": "shared", "links": [ "bottom" ] },
+    "sibling": { "tier": "shared", "links": [ "bottom" ] }
+  },
+  "programs": {
+    "app": { "tier": "shared", "links": [ "middle" ] }
+  }
+}

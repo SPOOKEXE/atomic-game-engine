@@ -27,7 +27,6 @@
 //
 // @tier L3 · shared
 
-#include <engine/core/Log.hpp>
 #include <engine/ecs/ChangeChannel.hpp>
 #include <engine/ecs/Column.hpp>
 #include <engine/ecs/Components.hpp>

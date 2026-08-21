@@ -1,0 +1,493 @@
+# Architecture review, v0.19
+
+**What a full pass over the tree found, and what was done about it.** This is a
+findings register, not a reference: `docs/CODE_ARCH.md` is where the rules live,
+and anything here that gets fixed should leave this file and appear there or in
+the relevant `AGENTS.md`.
+
+Every finding carries a `file:line`. Findings marked **[verified]** were
+reproduced directly - the file was read, the number measured, or the check run.
+Findings marked **[reported]** came from the survey pass and are recorded with
+their citation but were not independently reproduced. Do not act on a
+**[reported]** finding without checking it first; root `AGENTS.md` is explicit
+that a plausible explanation which happens to be wrong costs more than none.
+
+---
+
+## A · Correctness
+
+### A1. `core::FrameGraph`'s owner and dropped counter were racy **[verified, fixed]**
+
+`State` is a single `static` instance (`core/src/FrameGraph.cpp:145`). Its
+`std::thread::id Owner` was written by the recording thread and read by every
+job worker, and `DroppedThisFrame` was incremented concurrently by workers.
+`ecs::Store` hit the identical problem and made its owner atomic, with the
+argument written at `ecs/include/engine/ecs/Store.hpp:125-135`; `FrameGraph` did
+not follow. Reached in a real frame by any `ENGINE_PROFILE` inside an
+`EachParallel` body.
+
+Both are now `std::atomic`, relaxed on every access. `core` and `ecs` suites
+pass.
+
+### A2. `graph::NodeCatalogue` hands out pointers the lock does not protect **[verified, open]**
+
+`Find` returns `&table.Specs[index]` and `All` returns a span into `Specs`, both
+after releasing the mutex (`graph/src/PipelineCatalogue.cpp:151-163`). A later
+`Register` does `push_back` **and** `std::sort`, so the pointer can dangle or
+silently refer to a different kind.
+
+The lifetime contract is documented for `All`
+(`PipelineCatalogue.hpp:283`, "Valid until the next `Register`") and not for
+`Find`. That contract is only safe single-threaded, and the mutex makes the type
+look stronger than it is.
+
+**Not urgent, and the reason matters.** Registration is init-only in production:
+`mono.client/src/Scene.cpp:1625` and `mono.studio/src/RenderPipelineGraph.cpp:238`
+call `RegisterRenderNodeKinds` once each, and nothing else registers outside
+tests. The hazard is the documented intent that "a game may correct a built-in"
+(`PipelineCatalogue.hpp:263`), which would put a `Register` after a `Find`.
+
+**Do:** state the same lifetime contract on `Find` that `All` carries, and say
+in it that the mutex does not extend past the return. If runtime registration
+ever becomes real, the table has to stop being a sorted vector first.
+
+### A3. Unbounded microtask loop in the JavaScript host **[reported]**
+
+`script/src/JavaScriptRuntime.cpp:226-235` drains `JS_ExecutePendingJob` without
+a bound, so a self-re-enqueuing microtask hangs the host inside one tick. The
+step budget does not catch it because both interrupt handlers zero their counter
+on trip (`JavaScriptRuntime.cpp:38`, `LuauRuntime.cpp:91`), giving every job a
+fresh budget. The same reset makes `StepsTaken()` report `0` for the script that
+used the most, which is a second bug in the same three lines.
+
+### A4. `scene::InputState` mouse behaviour is last-write-wins across worlds **[reported]**
+
+`mono.client/include/client/Client.hpp:826-832` keeps a copy of
+`scene::InputState::Behaviour` and `MouseIconEnabled`. It is written once per
+world per frame (`Client.cpp:1490-1491`), so with `--worlds 2` or `--connect` a
+script in world 0 setting `MouseBehavior` is overwritten by whichever world was
+entered last. **This is root `AGENTS.md` rule 2 exactly**: the ECS owns the fact,
+the copy cannot represent "per world", and therefore cannot be right.
+
+### A5. `CommandQueue::Post`'s result is discarded at every call site **[reported]**
+
+`mono.client/src/Sounds.cpp` discards the return at all fifteen sites while
+recording the state as landed. A dropped `Open` burst is a permanently silent
+voice that is never repaired and never logged.
+
+---
+
+## B · Documented invariants that were false
+
+The pattern is the finding. Five module documents asserted invariants the code
+had outgrown, and each was stated absolutely enough that a reader would have
+trusted it.
+
+| Where | Claimed | Actually | Status |
+|---|---|---|---|
+| `game/AGENTS.md:137`, `game/CMakeLists.txt:77` | "Nothing here opens a file or a socket" | `Game.hpp` takes a `std::filesystem::path` in six places; `Game.cpp:17` includes `<fstream>` | **fixed** - narrowed to "nothing here fetches", which is the load-bearing half |
+| `scene/AGENTS.md:600` | "No systems" | `RegisterGravitySystem` and `RegisterOwnershipSystem` register two | **fixed** - narrowed to "no simulation systems", with the line between them stated |
+| `render/AGENTS.md:5` | "No SDL GPU type in a public header" | true of `Renderer.hpp`; false for `MeshTable.hpp:22-23` and `TextureTable.hpp` | **fixed** - split into the absolute claim (no SDL *header*) and the two named exceptions |
+| `render/AGENTS.md:194-232` | six named passes, `PassRecorder`, `PassOrder`, `render::Pass`, `graph::StandardPipeline`, `Pipeline::Validate` | **none of the five names exists.** The render-graph system arrived and replaced them; `render/tests/Passes.cpp:3` says so | **fixed** - rewritten to describe `graph::NodeRunner` and `render::GraphRunner` |
+| `render/AGENTS.md:309` | geometry lives in `Primitives.hpp`, checked by `tests/Primitives.cpp` | neither exists; the shapes are inline in `src/Renderer.cpp` and `src/InterfacePass.cpp`, unchecked | **fixed** - recorded as a gap |
+| root `AGENTS.md:77-80` vs `docs/CODE_QUALITY.md:60-62` | one said the build enforces layer heights, the other said check by hand | the second was right | **fixed** - the build now enforces it, and both say so |
+
+**Still open and [reported]:**
+
+- `parallel/AGENTS.md` claims `process/` and `ipc/` do not exist yet. They have
+  since v0.2, and the file misidentifies the join's serialisation point as
+  `Jobs.cpp:103` when it is `:219`.
+- `launcher/AGENTS.md` says "do not move a decision into `Interface.cpp`". Six
+  are already there: `Interface.cpp:42-46`, `:186-197`, `:383-412`, `:543`.
+- `mono.client/AGENTS.md:5-9` says the directory holds attachments and the test
+  is whether a second program would want them. `mono.studio` already includes
+  four of its headers.
+- `script/AGENTS.md:10` carries one stale claim.
+- `mono.server/AGENTS.md` is stale on rewind and silent on both networking and
+  content.
+- `docs/QUIC.md:55` calls `net` L2. It is L11.
+- `README.md:34` says "four rules"; there are six.
+- `docgen/pages/Modules.md` lists ten of the engine's twenty-nine modules.
+
+---
+
+## C · Things in the wrong place
+
+### C1. `nodegraph` is in the wrong monorepo member **[verified]**
+
+It is `client`-tier, sits in `mono.engine/`, links nothing first-party, uses
+`std::thread`, `std::atomic`, `std::condition_variable` and `imgui.h`, and
+**exactly one thing in the repository links it: `studio`**. It is an editor
+widget library.
+
+**Do:** move it to `mono.studio/nodegraph/`. It is a rename plus a row in
+`expected_graph.json`, and it takes an imgui-carrying target out of
+`mono.engine/`.
+
+### C2. `Renderer::RenderView` is 5,485 lines **[verified]**
+
+`render/src/Renderer.cpp:8032-13516`, inside a 13,517-line translation unit -
+two fifths of the module in one function. It holds its node handlers as lambdas
+and calls `SDL_BeginGPURenderPass` inline in eighteen places, which is what makes
+those passes invisible to the render graph.
+
+**It is simultaneously the module's build cost and its architecture problem**,
+because one enormous translation unit cannot be split across cores. Splitting
+`RenderView` by node family, into files that each implement `GraphRunner` for
+one family, fixes both with one change. That is the argument for doing it as one
+change rather than two.
+
+### C3. `mono.client` uses three modules it does not declare **[reported]**
+
+`Engine::assets`, `Engine::graph` and `Engine::script` are included from
+**public** headers - `client/Client.hpp:5`, `:14`, `:30`; `client/Scene.hpp:26`;
+`client/Replicated.hpp:78` - and appear nowhere in
+`mono.client/CMakeLists.txt`'s `DEPS`. They arrive transitively today. The same
+file already documents this exact failure happening once before, at
+`CMakeLists.txt:40-45`.
+
+**This is the highest-value small fix in the list**: three lines, and it stops a
+future break landing in `mono.client` rather than where the change was made.
+
+### C4. `mono.client` is a de-facto shared library **[reported]**
+
+`mono.studio/include/studio/Editor.hpp:71-73` and `src/Editor.cpp:38` include
+four `client/` headers. Either the charter in `mono.client/AGENTS.md` is wrong,
+or those four belong in `mono.engine/`. `EditableMeshes.cpp:67-151` is the
+clearest case: a pure `EditableMesh -> MeshData` transform with no device in it.
+
+### C5. `script` is 32,981 lines and should be four modules **[reported]**
+
+The survey bucketed all 88 files and the totals sum exactly. It is **not** an
+object model problem - the object model is 1,465 lines, because `ecs::Classes`
+already owns it. It is binding glue: **17,342 lines, 52.6%**, split Luau 9,954
+and JavaScript 7,388.
+
+The seam already exists: `ScriptCall.hpp` and `ServiceSurface.hpp` are a VM-free
+port with two adapters behind it, and there are **zero VM types in any `script`
+public header** (verified by the survey: `grep -c lua_State
+include/engine/script/Runtime.hpp` is 0).
+
+Proposed split: `script` (L9 shared, ~15.6k, **no vendor at all**),
+`script.luau` (L10, ~11k), `script.js` (L10, ~8.2k), `script.host` (L11, ~200
+lines of factory). That also deletes the bespoke 60-line CMake closure walk
+`mono_check_script_vm_naming`, which currently enforces the rule by filename.
+
+### C6. Smaller misplacements **[reported]**
+
+- `scene/src/SurfaceCameras.cpp` is 4,108 lines of portal and mirror maths, 36%
+  of `scene`'s code budget. Lifts out cleanly as its own L7 module.
+- `spatial::CollisionGroups` is a naming registry and a policy matrix, tagged
+  `@tier L2` in a module that is L6.
+- `ecs` carries a second bounded context - `Classes`, `Instance`, `Attributes`,
+  the Roblox object model - that its `AGENTS.md` never acknowledges. That is why
+  `Store.hpp` is 2,318 lines.
+- `HttpService.cpp:80-660` is a 580-line hand-written JSON parser while
+  nlohmann is vendored and used forty lines away in `SourceMap.cpp:5`.
+- `input::Action`'s thirteen members are all profiler and HUD intents, in an
+  engine module.
+
+### C7. `mono.libraries/` should **not** be created yet **[verified]**
+
+Decision 22 reserves it for leaves. Measured, there are two: `collision` (STL
+plus `core/types` only) and `spatial` (the same, plus `core::Name`). `msl`
+carries SPIRV-Cross and `nodegraph` carries imgui and four concurrency headers,
+so neither qualifies. `repo_layout.md` §4.1 sets the bar at three. This entry
+exists so the next person to notice `collision` is a leaf does not create the
+directory either.
+
+---
+
+## D · ECS components
+
+`docs/ECS_COMPONENTS.md` is now generated from the registry by `just
+components`, and `just components-check` fails if a component has no purpose
+line. **129 engine-registered components, all documented.** What the generated
+table immediately showed:
+
+- **Zero components are saved, raw-serialised and padded together.** That trio
+  leaks uninitialised padding into `.agame` files. Clean today, and now checked
+  every time the catalogue regenerates.
+- **Three of 129 have a compact wire form**: `scene.Transform` (10 of 28 bytes),
+  `scene.Motion` (12 of 24), `ecs.Hierarchy` (8 of 40). Everything else
+  replicates at full width.
+- **Two tags exist**, `scene.Simulated` and `script.Disabled`. The zero-cost
+  query marker is barely used.
+- The three largest rows are `effects.ParticleEmitter` (1264 B),
+  `physics.PhysicsWorld` (1240 B) and `effects.Trail` (1152 B).
+
+### D1. `WorldTime` is saved under the compiler's spelling **[verified]**
+
+It appears in the catalogue with no module prefix, `save: yes`, `raw: yes`. It
+is registered by `Components::Of<T>()` rather than by an explicit string, so the
+name in a `.agame` is `__PRETTY_FUNCTION__`'s output. Decision 21 and root
+`AGENTS.md` rule 4 both say a name that crosses a save file is a stable string,
+and the compiler's spelling is stable within one build and nothing wider.
+
+`PortalProxy`, `NotArchivable` and `DirtyBits` are **[reported]** to be in the
+same state; they did not appear in the catalogue because nothing the tool links
+touches them, which is itself the symptom.
+
+**Do:** register all four explicitly. It is a save-format break, and
+`ROADMAP.md` is pre-release.
+
+### D2. `Components::Seal()` is never called outside a test **[reported]**
+
+`ecs/Components.hpp:11-17` describes a determinism guarantee that rests on the
+table being closed before any world ticks in parallel. Its only caller is a
+test, so the guarantee is unenforced in every shipped binary.
+
+### D3. Component changes worth making **[reported]**
+
+The survey produced 35 specific misplaced fields, 6 merges, 12 splits and 10
+renames. The ones with the clearest arguments:
+
+1. Add `scene.PortalTransitSeen` and `scene.RenderedSignature` to
+   `LocalToTheClient` (`replication/src/Defaults.cpp:190`). The first is a live
+   bug: the authority's transit serial defeats the client's own portal snap at
+   `Interpolation.cpp:55`.
+2. Add `scene.TextContent` and `scene.ShaderSource` to `CannotBeSigned`
+   (`Defaults.cpp:172`). Both carry hand-written `Write`/`Read` pairs so they
+   can cross, and both are silently dropped by the `!Trivial` gate at `:404`.
+3. Split `physics::PhysicsWorld` (`PhysicsWorld.hpp:535`): about forty members,
+   about thirty-four of them per-step scratch, **all serialised**.
+4. Split `TrailHistory` out of `effects::Trail`: 448 hot bytes inside a
+   1068-byte saved row.
+5. Add `effects.` to `SHARED_PREFIXES`. Particles, beams and trails never reach
+   a client.
+6. Delete `scene::QuickHash` (`Components.hpp:1569`): no readers, no writers,
+   repo-wide.
+7. Move `scene::Visual::Locked` to a studio tag; its only reader is
+   `Overlay.cpp:1264`.
+8. Extract a shared `RenderMaterial`. `LightEmission`, `LightInfluence`,
+   `Brightness`, `ZOffset` and `Additive` are duplicated across seven
+   components.
+9. Split `Humanoid`: `Height` and `Radius` to `Collider`, `Health` to its own
+   component. `ROADMAP.md` v0.23 asks for this anyway.
+10. Replace `SpawnLocation::TeamColour` with an entity handle. `PlayerTeam`
+    already does it correctly.
+
+### D4. Components the roadmap needs and that do not exist **[reported]**
+
+No `Skeleton`, `Bone`, `Animator`, `Constraint`, `Terrain`, `LevelOfDetail`,
+`Fog` or `Atmosphere` type exists anywhere. v0.21 and v0.23 both need several.
+
+---
+
+## E · Build time
+
+Measured on this machine, `release` preset, 24 cores, GCC 13.3. Another job was
+stealing about 420% CPU throughout, so every wall-clock number below is a
+pessimistic bound.
+
+| | |
+|---|---|
+| clean build from empty | **172.6 s** wall, 2912 CPU-s, 8.5 GB build directory |
+| configure, first / re-run | 17.6 s / 1.06 s |
+| null build | 0.09 to 0.15 s |
+| touch a leaf header, one dependant | 7.3 s, almost all archive and link |
+| touch `ecs/Store.hpp`, 206 objects | **50.6 s** |
+| touch `core/Log.hpp`, 252 objects | **57.0 s** |
+| touch `core/Name.hpp`, 342 objects | **65.3 s** |
+| studio link, cold / warm | 43.3 s / 2.87 s |
+
+Vendor is 2373 of 4206 CPU-s. Of first-party cost, **72% is the frontend** -
+which is to say parsing headers, which is why the include fixes below are worth
+more than they look. The slowest four translation units are
+`render/src/Renderer.cpp` at **31.2 s**, `ecs/src/Schema.cpp` at 22.2,
+`studio/src/RojoSync.cpp` at 20.0 and `studio/src/Editor.cpp` at 19.6. The last
+13 s of a build is near-serial: studio objects, then `libstudio_lib.a`, then
+`studio`.
+
+**No ccache or sccache is installed and no preset enables one.**
+
+### E1. Two unused includes in headers everything sees **[verified, fixed]**
+
+Measured with the real compile flags, as preprocessed lines. This number is
+independent of machine load, unlike wall clock.
+
+| Header | Before | After | Reaches |
+|---|---|---|---|
+| `ecs/Store.hpp` - included `core/Log.hpp`, used nothing from it | 120,696 | **82,358** | 253 TUs |
+| `core/Clock.hpp` - included `<chrono>`, declares no chrono type | 82,779 | **422** | 264 TUs |
+
+`Clock.hpp` is the striking one: a 99.5% cut on a header two thirds of the tree
+includes. `<chrono>` was dragging `std::vformat_to` instantiation into hundreds
+of translation units that never format anything, measured at **86 CPU-s**.
+
+Four files were relying on a transitive include and now include it themselves:
+`physics/src/Portals.cpp`, `script/src/JsEcs.cpp`,
+`studio/include/studio/Editor.hpp` (all for `Log.hpp`) and `core/src/Clock.cpp`
+(for `<chrono>`, which its implementation genuinely uses). **All 43 suites
+pass.**
+
+The clean-build effect was not re-measured; the machine was loaded and the noise
+band was wider than the expected effect. Someone on a quiet machine should time
+`touch mono.engine/ecs/include/engine/ecs/Store.hpp` before and after, against
+the 50.6 s above.
+
+### E2. The ranked list of what is left
+
+1. ~~**Install ccache and set `CMAKE_CXX_COMPILER_LAUNCHER`.**~~ **Wired at
+   v0.19**, `CMakeLists.txt`. `MONO_CCACHE` is on by default, finds `ccache` or
+   `sccache`, and sets both launchers **before the first `add_subdirectory`** so
+   the vendor tree is covered - that is the 2373 of 4206 CPU-seconds that
+   matters most. A missing cache is reported at configure time and is not an
+   error, because nobody should have to install a tool to build this repository.
+   Verified with a logging shim: 1,136 ninja rules carry the launcher and every
+   compile routes through it.
+
+   **The binary is still not installed on this machine.** `sudo apt install
+   ccache`, and the next clean build should fall from 172.6 s toward the 20 s
+   or so of link and staging that a cache cannot remove. Nothing else on this
+   list is close to that ratio.
+2. **`UNITY_BUILD` for `release` and `ci`**, at `MonoLibrary.cmake:315`.
+   Measured at **51 to 73%** of first-party compile CPU. Blocked by about nine
+   anonymous-namespace collisions, which is a morning's work.
+3. **`-g1` instead of full debug info** at `CMakeLists.txt:149`. Measured 36%
+   off the heaviest translation units, and objects 4 to 5 times smaller.
+4. **`spdlog/spdlog.h` out of `core/Log.hpp:9`.** 0.60 s times 252 objects, and
+   **29 of those includers use no log macro at all**. E1 removed the largest
+   single path to spdlog; this removes the rest. It is the same fix as E1, one
+   level down, and it is the biggest single win left in the headers.
+5. **Split `render/src/Renderer.cpp`.** About 22 s off wall clock, because one
+   31.2 s translation unit cannot be split across cores. See C2 - the same
+   change fixes the architecture problem.
+6. Precompiled headers at `MonoLibrary.cmake:353`. Measured at only **11%**, so
+   this ranks below unity builds rather than above them, which is the opposite
+   of the usual intuition and the reason it was measured.
+7. Mark vendor includes `SYSTEM` at `MonoLibrary.cmake:344-348`. Unmeasured.
+8. Cache the vendored `glslc` output. About 600 CPU-s.
+9. `Justfile:68` reconfigures every build, and `_stage_shaders` has no declared
+   output so it is always dirty. That is the whole of the 0.09 s null build, so
+   it costs nothing today, but it hides a real null build behind a fake one.
+
+### E3. Two more headers of E1's kind **[verified, not applied]**
+
+- `core/types/AABB.hpp:41` includes `CFrame.hpp` for one function,
+  `FromOrientedBox` at `:96`, with three call sites repo-wide. `AABB.hpp`
+  preprocesses to 74,013 lines and `CFrame.hpp` to 73,891, so **`AABB` is
+  essentially all `CFrame`**, and every consumer pays for
+  `<glm/gtc/quaternion.hpp>`. Moving `FromOrientedBox` to a free function beside
+  `CFrame` would make `AABB.hpp` nearly free, the way `Clock.hpp` now is.
+- `mono.client/include/client/Scene.hpp:27` pulls `render/Renderer.hpp` (1,823
+  lines, plus glm) into a header with direct fan-in 18, which
+  `studio/Editor.hpp:73` includes at fan-in 43. Paid about sixty times.
+- `mono.client/include/client/Settings.hpp:35` includes the whole 1,194-line
+  `Client.hpp` and its 186-header closure solely to name `Options`. `Options`
+  should be its own header.
+
+## F · Parallelism
+
+**The engine is far less concurrent than a reader would guess, and that is
+mostly correct.** Networking has 17 concurrency primitives across 5 files.
+`scene`, `world`, `game`, `assets`, `bake` and `bakegraph` contain **no thread,
+mutex, future or condition variable at all**. The two real defects found are A1
+and A2 above.
+
+Loops worth changing, all **[reported]**:
+
+1. `mono.client/src/Client.cpp:495-498` calls `RequestWantedContent`
+   unconditionally every frame, which runs **eight full store walks per world**
+   (`ContentDemand.cpp:27-70`) and discards essentially all of it in the steady
+   state. Live on every default run. **This is work that should not happen, not
+   work to parallelise.**
+2. `replication::Authority::Publish`'s per-client loop
+   (`Authority.cpp:1750`, N = 64 to 200 clients x 10k entities) is blocked first
+   by a process-wide mutex taken at `Authority.cpp:1493`.
+3. `mono.client/src/Replicated.cpp:127-170` is the serial twin of a loop already
+   parallelised: `CollectInstances` uses `EachBatchParallel` with grain 1024 at
+   `Scene.cpp:281-345`. The blocker is the per-entity `Sample` and three `Get`s,
+   not the loop shape.
+4. `physics/src/BroadPhase.cpp:80-131`, N about 4,000, safely parallelisable
+   because the pair set is sorted and uniqued afterwards.
+5. `scene/src/Visibility.cpp:112` uses a single hash chain over every row every
+   frame, when `DrawInstance.cpp:64-79` already measured that exact problem and
+   fixed it with four lanes.
+
+Three fetch-path costs sit inside the tick barrier: `delivery/src/Cache.cpp:189`
+rescans the whole cache directory per stored asset; `assets/src/Manifest.cpp:221`
+and `:247` make bundle splitting O(M squared x A), and the comment there
+predicts it and says "that is the moment to add an index";
+`assets/src/ChunkStore.cpp:143` and `:158` hash every chunk twice.
+
+**Measure in `release` before acting on any of these.** The `dev` preset is
+`-O0` and a timing from it means nothing.
+
+---
+
+## G · Observability
+
+### G1. Logging is 101 lines and thirteen modules never use it **[reported]**
+
+`core/Log.hpp` plus `Log.cpp` is the whole facility: four levels, four macros,
+one hard-coded stdout sink. No compile-time filtering (`SPDLOG_ACTIVE_LEVEL` is
+unset), no categories, no thread id in the pattern (`Log.cpp:23`), no source
+location, no correlation id, no throttling, and **a disabled statement still
+evaluates its arguments**.
+
+707 call sites, of which eight are `ENGINE_TRACE`. `net`, `network`, `scene`,
+`spatial`, `collision`, `resources`, `graph`, `nodegraph`, `bake`, `msl`,
+`input`, `gui` and `effects` log nothing at all.
+
+No assert facility exists, despite `core/AGENTS.md:12`.
+
+### G2. `core::Metrics` is write-only **[reported]**
+
+Sum-only, with no `Get`, no gauge and no histogram. Four separate counter
+implementations exist across the tree and nothing exports out of process. The
+headless server never drains its counters.
+
+`core::FrameGraph` by contrast is solid - 65k spans, five seconds of history in
+a 2 MiB ring, snapshot percentiles - but it is single-threaded by design, so
+parallel compute drops every worker span. That is what A1's counter exists to
+report, which is why A1 mattered.
+
+**The shape of the fix, in order:** give a disabled log statement zero argument
+evaluation; add a category to the macro; make the level dynamic per category;
+give `Metrics` a read side; drain it on the server.
+
+### G3. MCP **[partly fixed]**
+
+`mono.tools/mcpbridge` is a 183-line byte pump over `engine::control`, which
+speaks five JSON-RPC methods with no `resources/*` and no `prompts/*`. Ten
+shared tools plus five editor tools; the server registers nothing server-shaped.
+
+**Added this pass:** `engine_components`, which answers what storage the engine
+actually has. `component_list` deliberately covers only what a *game* declared
+(`Tools.cpp:869`), so a model could not previously ask that question at all.
+
+Still missing, in rough value order: the module graph and layer table; a test
+runner; script tools; a log tool outside the editor. Three port mismatches are
+**[reported]**, including `studio --mcp-port` bare defaulting to 8720 while its
+own help says 8738, and the bridge has no tests.
+
+---
+
+## H · What changed this pass
+
+- `docs/CODE_ARCH.md`, new. The layer stack, tiers, the dependency rule,
+  domain-driven design and ports-and-adapters as this engine does them, the
+  transport-per-feature table, and what is checked by what.
+- **The layer rule is now enforced.** `expected_graph.json` carries a `layer` on
+  all 30 layered modules, and `CheckTargetGraph.cmake` refuses an edge that does
+  not run downward, a same-layer edge not named in a `lateral` array, and any
+  edge from a layered module into the program band. Zero violations at HEAD.
+- **The architecture check is itself checked**, by six fixtures under
+  `mono.tools/architecture/tests/` - five that must fail with a named message
+  and one that must pass. It is the one check in the repository that could go
+  green by parsing nothing.
+- `docs/ECS_COMPONENTS.md`, new and generated. `mono.tools/componentdoc`, `just
+  components`, `just components-check`, folded into `just check`.
+- `mono.engine/AGENTS.md` was a one-line stub and is now the module table and
+  the invariants common to all of them.
+- `mono.engine/control/AGENTS.md`, new. It was the only module of 29 without
+  one.
+- `game`, `scene` and `render` `AGENTS.md` corrected where they were false.
+- Root `AGENTS.md` and `docs/CODE_QUALITY.md` reconciled on layer enforcement.
+- `core::FrameGraph`'s data races fixed.
+- `ecs/Store.hpp` stopped including `core/Log.hpp` (120,696 preprocessed lines to
+  82,358, across 253 translation units) and `core/Clock.hpp` stopped including
+  `<chrono>` (82,779 to **422**, across 264). All 43 suites pass.
+- `engine_components` added to the MCP surface.
+- The compiler cache is wired, on by default, and reported when absent.

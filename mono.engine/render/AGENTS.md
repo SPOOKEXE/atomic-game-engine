@@ -2,14 +2,33 @@
 
 L12, `client` tier. Absent from the server binary entirely.
 
-## No SDL GPU type in a public header
+## No SDL GPU header in a public header, and no SDL GPU type in `Renderer.hpp`
 
-`Renderer.hpp` names `struct SDL_Window;` as a forward declaration and nothing
-else. Everything else is behind the pimpl in `Renderer.cpp`.
+Two claims, and they are not the same claim. Keeping them apart is the point,
+because one is absolute and the other has two named exceptions.
 
-That is what lets a caller hand this module a frame without acquiring a graphics
-API, and it is what will let the L9 render graph sit on top of this without
-inheriting SDL's vocabulary.
+**No public header includes an SDL header.** That is what keeps this module's
+build cost off every consumer, and it holds everywhere with no exceptions.
+
+**`Renderer.hpp` names `struct SDL_Window;` as a forward declaration and
+nothing else.** `Renderer.hpp:721` states the consequence at the type: `Device`
+is an `SDL_GPUDevice *` and `ColourFormat` an `SDL_GPUTextureFormat`, and
+neither name appears. That is what lets a caller hand this module a frame
+without acquiring a graphics API.
+
+**`MeshTable.hpp` and `TextureTable.hpp` are the exceptions, and they are
+deliberate.** Both forward-declare `SDL_GPUDevice`, `SDL_GPUBuffer` and
+`SDL_GPUTexture` and hand them out - `MeshTable.hpp:140` takes a device,
+`MeshTable.hpp:242` returns a buffer. A resident-resource table is a handle to
+a device object and there is nothing else for it to be; hiding it behind an
+opaque integer would buy a caller nothing and cost a lookup per draw. Their
+callers are inside this module and `mono.studio`, both of which already speak
+SDL.
+
+Until v0.19 this section claimed the first sentence for every public header,
+which was true of `Renderer.hpp` and false of the module. If a third header
+grows an SDL type, the question to answer here is why it is not a fourth
+mistake.
 
 ## What crosses into this module is `scene`, and the conversion happens here
 
@@ -191,45 +210,47 @@ frame pacing. One texture upload per frame, and only while a panel is open.
 
 Do not reimplement them over an immediate-mode UI library.
 
-## Six passes are not an architecture either
+## The pass list is gone. A pipeline is a graph, and this module runs its nodes
 
-`Renderer::Render` is a shadow pass, a surface pass, an opaque pass, a
-transparent pass, an overlay pass and an interface pass, submitted in that order
-by a function that knows all six by name. It is enough to prove the
-staged-shader path, the depth buffer, an offscreen target and the swapchain, and
-that is all it claims to be.
+**Until v0.15 `Renderer::Render` submitted six passes by name** - shadow,
+surface, opaque, transparent, overlay, interface - and this section described a
+`render::Pass` enum, a `PassOrder()`, a `PassRecorder` and a
+`graph::StandardPipeline` kept in step with it by `tests/Passes.cpp`. None of
+those five names exists in the tree. The render-node system that section said
+"when it arrives, this class becomes the backend those nodes compile to"
+arrived, and this is that backend.
 
-**The sixth draws nothing this module owns.** `interface` is a
-`FrameOverlayHook`, which is what lets `mono.engine/ui` record an editor's
-chrome into this frame without Dear ImGui appearing anywhere in the engine. A
-game runs five.
+**The seam is `graph::NodeRunner` and this module's adapter is
+`render::GraphRunner`.** `graph/RenderGraph.hpp:47` states it from the other
+side: the graph is executed through a `NodeRunner` the caller supplies, so
+`render` implements one over SDL. `graph` knows the order, the resources and
+which node reads a target nothing wrote; this module knows how to draw one. The
+edge runs `render` to `graph` and never back, which is what §6.2 of
+`docs/CODE_ARCH.md` means by `graph` not depending on `render`.
 
-**`mono.engine/graph` describes that order and does not execute it.**
-`graph::StandardPipeline` is the same six stages as data, and
-`Pipeline::Validate` catches the one mistake that matters - a stage reading a
-target nothing earlier wrote.
+**What `tests/Passes.cpp` checks now is acceptance, not order.** Its own header
+says it: "The renderer no longer has a parallel enum or fixed pass list. A
+pipeline is accepted only when every enabled node has a backend implementation."
+A node enabled in a document with nothing here to draw it fails without a
+device. That is the check that replaced the two-lists-in-step one, and it is
+strictly better: the old one could only catch a seventh entry added to one side.
 
-**Keeping the two in step is a check, not a convention.** `render::Pass` and
-`PassOrder()` name this module's six in submission order, and
-`tests/Passes.cpp` compares them against that pipeline's stage names, in order,
-with no device. A seventh stage on one side and not the other fails the build.
-`PassRecorder` walks the same list as `Render` submits and refuses to go
-backwards, which is the half a headless test cannot see.
+**The hole the old section named is still the hole.** A pass drawn by calling
+`SDL_BeginGPURenderPass` inline is invisible to the graph, and
+`src/Renderer.cpp` still does that in eighteen places inside `RenderView`. That
+function runs from `Renderer.cpp:8032` to `:13516` - 5,485 lines, two fifths of
+the module - and holds its node handlers as lambdas inside itself, which is the
+same failure the old `PassRecorder` note described, one layer up. `D00016`.
 
-**Do not write the count into that test.** This section said "five" until v0.7
-added `interface` and then said something false for a release; `tests/Passes.cpp`
-compares the two descriptions against each other and neither against a number,
-which is why it did not rot with the prose.
+**It is also why this module is slow to build.** One 13,517-line translation
+unit with a 5,485-line function in it cannot be split across cores, so the whole
+module waits on one compile. Splitting `RenderView` by node family, into files
+that implement `GraphRunner` for a family each, fixes the build cost and the
+architecture with one change - which is the argument for doing it as one.
 
-**So: enter every pass through `PassRecorder`, and add its stage to
-`StandardPipeline` in the same change.** The first is what the check hangs on -
-a pass drawn by calling `SDL_BeginGPURenderPass` inline is invisible to all of
-the above, and that is the one hole left. See `D00016`.
-
-The render-node system is where passes become nodes and the description becomes
-the execution. When it arrives, this class becomes the backend those nodes
-compile to - so do not grow the hand-rolled list further in the meantime. Two
-competing ways to describe a frame is worse than either.
+**So: a new way of drawing is a node with a backend here, and never an inline
+render pass.** Adding the second is what makes the graph a description of some
+of the frame rather than of the frame.
 
 ## The textures this module owns, and what each pass may assume
 
@@ -306,9 +327,13 @@ That reads as the renderer dropping triangles at random. It shipped that way
 once and was diagnosed from a screenshot rather than from the symptom
 description.
 
-The geometry lives in `Primitives.hpp` rather than inside `Renderer.cpp` for one
-reason: so `tests/Primitives.cpp` can assert this for all twelve triangles
-without a GPU. Any mesh added there gets the same check.
+**Geometry that can be asserted without a GPU should live where a test can reach
+it.** `AdornmentGeometry.hpp` is the module's example: it is a public header
+precisely so `tests/AdornmentGeometry.cpp` can check every triangle it emits
+with no device. This section previously pointed at a `Primitives.hpp` and a
+`tests/Primitives.cpp`, and neither exists - the built-in shapes are back inside
+`src/Renderer.cpp` and `src/InterfacePass.cpp`, where nothing checks their
+winding. That is a gap, not a decision.
 
 ## SDL's clip space is Y-up. Do not "fix" it
 

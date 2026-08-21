@@ -20,6 +20,7 @@
 
 #include "JsBindings.hpp"
 
+#include <engine/core/Log.hpp>
 #include <engine/ecs/Schema.hpp>
 
 #include <algorithm>
