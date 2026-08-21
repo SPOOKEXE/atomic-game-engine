@@ -152,15 +152,41 @@ endif()
 
 # The compiler cache, if there is one.
 #
-# **Measured at v0.19 as the largest single build-time win available**, and by a
-# wide margin: a clean build is 172.6 s wall and 2912 CPU-seconds, of which 2373
-# are vendor - code that is identical between every preset and every clean
-# rebuild, and that a cache therefore hits on almost every time. `docs/
-# ARCH_REVIEW.md` §E carries the numbers.
+# **The largest single build-time win available, measured rather than assumed.**
+# A clean build of the `dev` preset against an empty cache is 3508 CPU-seconds;
+# the same build in the same directory against a warm one is **197**, on 1894 of
+# 1894 direct hits. **A factor of eighteen**, for a tool nobody has to think
+# about again. Wall clock fell from 186 s to 21.5 s across those runs, but the
+# machine was differently loaded and CPU-seconds is the figure that does not
+# depend on that. `docs/ARCH_REVIEW.md` §E carries the rest.
 #
 # **Set before the first `add_subdirectory` on purpose.** A compiler launcher is
 # read when a target is created, so a line further down would cover the engine
-# and miss the vendor tree, which is the 56% that matters most.
+# and miss the vendor tree - which is 2373 of 4206 CPU-seconds and therefore
+# most of what a cache is for.
+#
+# **`CCACHE_SLOPPINESS`, because otherwise a sixth of the build is skipped
+# silently.** SDL and glslang both call `target_precompile_headers` in their own
+# CMake, and ccache refuses to cache a compile that uses one unless sloppiness
+# says it may - 331 of 1896 calls, reported as "Could not use precompiled
+# header" and easy to never notice. Setting it took the uncacheable count to
+# zero and a warm build from 310 CPU-seconds to 197, and all 43 suites pass on a
+# build where every object came out of the cache.
+#
+# `time_macros` is the half of that setting worth justifying, and it is safe
+# here for a checkable reason: no `__DATE__` or `__TIME__` appears anywhere in
+# this repository, first-party or in the vendored sources of the two targets
+# that carry a PCH. There is no timestamp to go stale.
+#
+# Two calls per build still report as errors, and they are the two PCH
+# *generation* steps - ccache cannot parse a header as a source, so it passes
+# them to the compiler untouched. Correct, and 0.11% of the build.
+#
+# Passed through `cmake -E env` rather than left to each developer's
+# `ccache.conf`, so the setting travels with the build. A machine-local config
+# would make the cache behave differently depending on who ran it, which is the
+# third category of rule `AGENTS.md` rule 6 refuses to allow. `sccache` reads no
+# such variable and is wrapped plainly.
 #
 # **Absent is not an error.** Nobody should have to install a tool to build this
 # repository, and a configure that failed on a missing cache would be a worse
@@ -173,8 +199,17 @@ option(MONO_CCACHE "Use ccache or sccache when one is installed" ON)
 if(MONO_CCACHE)
 	find_program(MONO_COMPILER_CACHE NAMES ccache sccache)
 	if(MONO_COMPILER_CACHE)
-		set(CMAKE_C_COMPILER_LAUNCHER   "${MONO_COMPILER_CACHE}")
-		set(CMAKE_CXX_COMPILER_LAUNCHER "${MONO_COMPILER_CACHE}")
+		if(MONO_COMPILER_CACHE MATCHES "ccache")
+			set(MONO_CACHE_LAUNCHER
+				"${CMAKE_COMMAND}" -E env
+				"CCACHE_SLOPPINESS=pch_defines,time_macros"
+				"${MONO_COMPILER_CACHE}")
+		else()
+			set(MONO_CACHE_LAUNCHER "${MONO_COMPILER_CACHE}")
+		endif()
+
+		set(CMAKE_C_COMPILER_LAUNCHER   ${MONO_CACHE_LAUNCHER})
+		set(CMAKE_CXX_COMPILER_LAUNCHER ${MONO_CACHE_LAUNCHER})
 		message(STATUS "compiler cache: ${MONO_COMPILER_CACHE}")
 	else()
 		# Named rather than hinted at, because "install ccache" is not obvious

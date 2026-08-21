@@ -328,19 +328,61 @@ the 50.6 s above.
 
 ### E2. The ranked list of what is left
 
-1. ~~**Install ccache and set `CMAKE_CXX_COMPILER_LAUNCHER`.**~~ **Wired at
-   v0.19**, `CMakeLists.txt`. `MONO_CCACHE` is on by default, finds `ccache` or
+1. ~~**Install ccache and set `CMAKE_CXX_COMPILER_LAUNCHER`.**~~ **Done at
+   v0.19, and measured.** `MONO_CCACHE` is on by default, finds `ccache` or
    `sccache`, and sets both launchers **before the first `add_subdirectory`** so
    the vendor tree is covered - that is the 2373 of 4206 CPU-seconds that
    matters most. A missing cache is reported at configure time and is not an
    error, because nobody should have to install a tool to build this repository.
-   Verified with a logging shim: 1,136 ninja rules carry the launcher and every
-   compile routes through it.
 
-   **The binary is still not installed on this machine.** `sudo apt install
-   ccache`, and the next clean build should fall from 172.6 s toward the 20 s
-   or so of link and staging that a cache cannot remove. Nothing else on this
-   list is close to that ratio.
+   Measured on this machine, `dev` preset, same build directory both times, at a
+   load average of 18 to 24 - so the wall figures are pessimistic bounds and the
+   CPU figures are the robust ones:
+
+   | | wall | CPU | hits | load |
+   |---|---|---|---|---|
+   | clean, empty cache | 186.0 s | 3508 CPU-s | 0 of 1565 | 18-24 |
+   | clean, warm, PCH not cached | 28.6 s | 310 CPU-s | 1565 of 1565 | 18-24 |
+   | clean, warm, PCH cached | **21.5 s** | **197 CPU-s** | **1894 of 1894** | 8-15 |
+
+   **A factor of eighteen in CPU**, 3508 down to 197. The wall figures fell from
+   186 s to 21.5 s but the machine was differently loaded across those runs, so
+   the CPU column is the one to quote; the survey's estimate of "about 150 s"
+   off a clean build was right either way. Cache footprint is 0.7 GiB for one
+   preset.
+
+   **All 43 suites pass on a build where every object came out of the cache**,
+   which is the check the sloppiness change below needed and not a formality.
+
+   **Two things a reader should know before trusting that number.**
+
+   `hash_dir` is on by default, so a debug build in a *different* directory does
+   not share entries with this one - the measurement is deliberately
+   same-directory for that reason, and a cross-preset figure would have been
+   measuring `hash_dir` rather than ccache. With six presets at roughly 0.6 GiB
+   each and a 5 GiB default `max_size`, the cache will begin evicting and the
+   hit rate will quietly fall. `ccache --max-size 20G` is the cheap insurance,
+   and it is a machine setting rather than something this repository should set.
+
+   **A sixth of the build was being skipped silently.** ccache reported 331 of
+   1896 calls as uncacheable, every one of them "Could not use precompiled
+   header": SDL and glslang both call `target_precompile_headers` in their own
+   CMake, and ccache declines a PCH compile unless `sloppiness` permits it. The
+   launcher now passes `CCACHE_SLOPPINESS=pch_defines,time_macros` through
+   `cmake -E env`, so the setting travels with the build rather than depending
+   on each developer's `ccache.conf` - a cache that behaves differently
+   depending on who ran it is exactly the third category rule 6 refuses.
+   `time_macros` is the half worth justifying and it is safe here for a
+   checkable reason: **no `__DATE__` or `__TIME__` appears anywhere in this
+   repository**, first-party or in the vendored sources of the two targets that
+   carry a PCH.
+
+   Setting it took the uncacheable count from 331 to **zero** and a warm build
+   from 310 CPU-seconds to 197. Two calls still report as errors and always
+   will: they are the two PCH *generation* steps, where ccache cannot parse a
+   header as a source and passes the call to the compiler untouched. Correct,
+   and 0.11% of the build.
+
 2. **`UNITY_BUILD` for `release` and `ci`**, at `MonoLibrary.cmake:315`.
    Measured at **51 to 73%** of first-party compile CPU. Blocked by about nine
    anonymous-namespace collisions, which is a morning's work.

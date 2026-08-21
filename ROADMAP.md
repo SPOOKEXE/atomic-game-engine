@@ -169,6 +169,16 @@ The milestone headings below are development labels. Not in line with project ve
       into files that each implement `GraphRunner` for one family, is the same
       change as fixing the build cost: that one file is 31.2 s of a 172.6 s
       build and cannot be split across cores. `D00016`.
+- [x] the compiler cache. `MONO_CCACHE` finds `ccache` or `sccache` and sets
+      both launchers before the first `add_subdirectory`, so the vendor tree is
+      covered - that is 2373 of 4206 CPU-seconds. Measured on one machine, same
+      build directory: a clean build went from **3508 CPU-seconds to 197**, on
+      1894 of 1894 direct hits, with all 43 suites passing on a build where
+      every object came from the cache. A sixth of the calls were being skipped
+      silently because SDL and glslang carry precompiled headers and ccache
+      declines those unless sloppiness permits it, so the launcher passes
+      `CCACHE_SLOPPINESS` through `cmake -E env` rather than leaving it to each
+      developer's config.
 - [_] the rest of the measured build wins, in `docs/ARCH_REVIEW.md` §E2's order.
       `UNITY_BUILD` for `release` and `ci` is 51 to 73% of first-party compile
       CPU and is blocked by about nine anonymous-namespace collisions. `-g1` is
