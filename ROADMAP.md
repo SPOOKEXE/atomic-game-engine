@@ -248,6 +248,7 @@ The milestone headings below are development labels. Not in line with project ve
 
 ---
 
+- [_] in flamegraph, when average over 250ms is selected, the flamegraph bars can over-expand into other bars.
 - [_] content needs more granularity, big chunk is not listed (optimise when you find)
 - [_] pump events lags sometimes for some reason (e.g. user inputs, changing window size, etc). make pump events more granular by adding per-event-name.
 - [_] mouse movement seems to also cause pump events to increase lots
