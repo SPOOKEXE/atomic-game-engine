@@ -248,6 +248,7 @@ The milestone headings below are development labels. Not in line with project ve
 
 ---
 
+- [_] add a "Play Here" button (spawns character at camera position)
 - [_] input textbox not working
 - [_] allow creating worlds even when scene is running in studio
 - [_] when character sits in middle of portal, teleporting between both sides
