@@ -197,6 +197,40 @@ jobs:
           set PRESET=release
           scripts\build-windows.bat
 
+      # **Why a build failed, when the machine that failed is not one anybody can
+      # log into.** CMake records every `try_compile` it ran - the source, the
+      # command line and the compiler's own output - in a configure log, and
+      # nothing else does. The Windows build spent three rounds being diagnosed
+      # from a `#error` sixty files downstream of the check that actually failed,
+      # because that file is the one thing the runner never kept.
+      #
+      # `if: failure()` so a green build says nothing, and `continue-on-error` so
+      # a missing log never turns a build failure into two.
+      - name: What the configure decided
+        if: failure()
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -u
+          root=.cache/build/release/CMakeFiles
+          for name in CMakeConfigureLog.yaml CMakeError.log CMakeOutput.log; do
+            if [ -f "$root/$name" ]; then
+              echo "===== $root/$name ====="
+              # Capped: the configure log carries every probe and runs to
+              # megabytes, and the first failure is the one that matters.
+              head -c 400000 "$root/$name"
+              echo
+            fi
+          done
+          sdl=.cache/build/release/mono.vendor/sdl/CMakeFiles
+          for name in CMakeError.log CMakeOutput.log; do
+            if [ -f "$sdl/$name" ]; then
+              echo "===== $sdl/$name ====="
+              head -c 200000 "$sdl/$name"
+              echo
+            fi
+          done
+
       - name: Package
         shell: bash
         run: scripts/package-release.sh .cache/build/release "${{ needs.version.outputs.version }}" "${{ matrix.platform }}" dist
