@@ -178,7 +178,11 @@ The milestone headings below are development labels. Not in line with project ve
       silently because SDL and glslang carry precompiled headers and ccache
       declines those unless sloppiness permits it, so the launcher passes
       `CCACHE_SLOPPINESS` through `cmake -E env` rather than leaving it to each
-      developer's config.
+      developer's config. The lookup is `NO_CACHE`, so installing ccache after
+      a build directory already exists is picked up by the next configure rather
+      than needing a wipe - `find_program` caching its own "not found" would
+      have made the advice in the status message wrong for the exact person it
+      is written for. CI keeps its cache between runs on Linux and macOS.
 - [_] the rest of the measured build wins, in `docs/ARCH_REVIEW.md` §E2's order.
       `UNITY_BUILD` for `release` and `ci` is 51 to 73% of first-party compile
       CPU and is blocked by about nine anonymous-namespace collisions. `-g1` is

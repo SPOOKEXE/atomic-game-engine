@@ -383,6 +383,31 @@ the 50.6 s above.
    header as a source and passes the call to the compiler untouched. Correct,
    and 0.11% of the build.
 
+   **The lookup uses `NO_CACHE`, and that line is what stops the feature being a
+   trap.** `find_program` normally writes its answer into `CMakeCache.txt` and
+   never looks again, so the obvious sequence - clone, build, read the message
+   saying to install ccache, install it, build again - would hand back the
+   cached "not found" and no speedup, with nothing to say why. Verified: the
+   entry no longer appears in `CMakeCache.txt` and a re-configure picks up a
+   newly installed cache with no wipe.
+
+   **CI keeps a cache between runs**, `.github/workflows/build.yml`. A runner is
+   a fresh machine every time, so before this every CI build was the 3508
+   CPU-second column. `actions/cache` rather than a marketplace ccache action,
+   for the reason that workflow already gives about vcvars: a first-party
+   mechanism whose behaviour is written down in the file beats one whose is
+   written down elsewhere. `CCACHE_DIR` is pinned to `runner.temp` because
+   ccache's default differs between Linux and macOS and a `path:` naming the
+   wrong one would restore nothing and look exactly like a cold cache. Stats are
+   printed on every run, not only on failure, because a hit rate that fell to
+   zero and stayed there is a regression worth seeing in a green build.
+
+   **Linux and macOS only.** ccache works with MSVC but only where debug info is
+   `/Z7` rather than `/Zi`, and that workflow's own comments record that the
+   Windows build compiles and has never shipped. Adding a caching layer with a
+   compiler-flag precondition to the one platform nobody runs is how an optional
+   build becomes a flaky one.
+
 2. **`UNITY_BUILD` for `release` and `ci`**, at `MonoLibrary.cmake:315`.
    Measured at **51 to 73%** of first-party compile CPU. Blocked by about nine
    anonymous-namespace collisions, which is a morning's work.

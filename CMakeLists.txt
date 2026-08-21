@@ -197,7 +197,15 @@ endif()
 option(MONO_CCACHE "Use ccache or sccache when one is installed" ON)
 
 if(MONO_CCACHE)
-	find_program(MONO_COMPILER_CACHE NAMES ccache sccache)
+	# **`NO_CACHE`, and this is the line that stops the whole feature from being
+	# a trap.** `find_program` normally writes its answer into `CMakeCache.txt`
+	# and never looks again, so the obvious sequence - clone, build, read the
+	# message below saying to install ccache, install it, build again - would
+	# hand back the cached "not found" and no speedup, with nothing to say why.
+	# Re-running the search each configure costs a PATH walk on a step that
+	# takes about a second, which is not a price worth a failure mode nobody
+	# could diagnose.
+	find_program(MONO_COMPILER_CACHE NAMES ccache sccache NO_CACHE)
 	if(MONO_COMPILER_CACHE)
 		if(MONO_COMPILER_CACHE MATCHES "ccache")
 			set(MONO_CACHE_LAUNCHER
@@ -216,8 +224,9 @@ if(MONO_CCACHE)
 		# to somebody who has never seen a build take three minutes without one.
 		message(STATUS
 			"compiler cache: none found. `sudo apt install ccache` (or `brew install ccache`) "
-			"is worth roughly 150 s of a 172.6 s clean build. Configure with -DMONO_CCACHE=OFF "
-			"to stop asking.")
+			"turns a 3508 CPU-second clean build into 197. Re-run the configure afterwards and "
+			"it is picked up; no need to delete anything. Configure with -DMONO_CCACHE=OFF to "
+			"stop asking.")
 	endif()
 endif()
 
