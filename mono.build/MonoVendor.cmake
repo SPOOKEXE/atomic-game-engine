@@ -398,6 +398,28 @@ if(MONO_BUILD_CLIENT)
 	# a new warning in a future GCC must not turn into a failed engine build.
 	set(SHADERC_ENABLE_WERROR_COMPILE OFF CACHE BOOL "" FORCE)
 
+	# **The dynamic C runtime, because everything else here uses it.**
+	#
+	# shaderc defaults this off, and off means it sets `CMAKE_MSVC_RUNTIME_LIBRARY`
+	# to the *static* runtime for its own targets. glslang is added by this file
+	# a few lines below rather than by shaderc, so it takes CMake's default and
+	# gets the dynamic one - and linking `glslc` then fails with a screenful of
+	#
+	#   error LNK2038: mismatch detected for 'RuntimeLibrary': value
+	#   'MD_DynamicRelease' doesn't match value 'MT_StaticRelease' in main.cc.obj
+	#
+	# one line per object in glslang. Two runtimes in one process is the thing
+	# LNK2038 exists to refuse, so this is a real conflict rather than a warning
+	# to suppress.
+	#
+	# Dynamic rather than making glslang static, because dynamic is what the rest
+	# of this build already is: SDL is a shared library here, and MSVC's default
+	# for everything else is `/MD`. Aligning the odd one out is one line;
+	# aligning everything else to it is not.
+	#
+	# MSVC-only in effect - the option does nothing on any other toolchain.
+	set(SHADERC_ENABLE_SHARED_CRT     ON  CACHE BOOL "" FORCE)
+
 	# SPIRV-Headers, SPIRV-Tools and glslang are added here rather than by
 	# shaderc's own third_party/CMakeLists.txt, which guards SPIRV-Tools and
 	# glslang with `if (NOT TARGET ...)` precisely so a parent can supply them.
