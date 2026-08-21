@@ -221,7 +221,6 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] make the ground grid fade off in the distance
 - [_] input textbox not working
 - [_] allow creating worlds even when scene is running in studio
-- [_] character is buggy
 - [_] when character sits in middle of portal, teleporting between both sides
 - [_] live instances listed items get cutoff in list
 - [_] when play is pressed, ensure a viewport is opened
