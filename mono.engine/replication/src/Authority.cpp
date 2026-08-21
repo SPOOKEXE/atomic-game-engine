@@ -620,6 +620,8 @@ namespace engine::replication {
 		core::ByteWriter compact;
 		std::vector<std::byte> decoded;
 
+		const ecs::ComponentId hierarchyId = ecs::Components::Of<ecs::Hierarchy>();
+
 		for (const core::Name name : Components) {
 			const ecs::ComponentId id = ecs::Components::Find(name);
 			if (!id.IsValid()) {
@@ -634,6 +636,35 @@ namespace engine::replication {
 			for (const ecs::Entity entity : entities) {
 				const void *value = store.GetComponent(entity, id);
 				if (value == nullptr) {
+					continue;
+				}
+
+				// **The tree is built, not copied, for `WriteComponents`'
+				// reason.** `ecs.Hierarchy` crosses as a parent handle alone, so
+				// a snapshot that copied the component would carry a node with
+				// no child list and the far side would load a world whose
+				// parents have no children. Every entity in `entities` was
+				// created above before any component was set, so the parent of
+				// anything in this set is already here to hang it from.
+				if (id == hierarchyId) {
+					const auto *node = static_cast<const ecs::Hierarchy *>(value);
+
+					// **Both ends given a blank node before either is linked.**
+					// `SetParent` refuses a row with none, and this loop reaches
+					// entities in `entities` order - so a child ahead of its
+					// parent would otherwise be dropped from the snapshot's
+					// tree. Blank rather than copied, because the links being
+					// rebuilt are exactly the ones not to carry over.
+					static const ecs::Hierarchy BLANK{};
+					if (!scratch.Has<ecs::Hierarchy>(entity)) {
+						scratch.SetComponent(entity, id, &BLANK);
+					}
+					if (node->Parent != ecs::NULL_ENTITY && scratch.Alive(node->Parent) &&
+						!scratch.Has<ecs::Hierarchy>(node->Parent)) {
+						scratch.SetComponent(node->Parent, id, &BLANK);
+					}
+
+					(void)scratch.SetParent(entity, node->Parent);
 					continue;
 				}
 

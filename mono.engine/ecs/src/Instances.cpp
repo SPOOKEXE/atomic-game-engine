@@ -129,6 +129,33 @@ namespace engine::ecs {
 		// than stepping over it because the links *out of* a freed row are gone
 		// with the row: there is no way to reach what followed it, and guessing
 		// would invent an order the author never wrote.
+		// One entity handle: the parent, and nothing derived from it.
+		constexpr uint32_t WIRE_HIERARCHY_BYTES = 8;
+
+		void WriteHierarchies(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *nodes = static_cast<const Hierarchy *>(source);
+			for (size_t index = 0; index < count; index++) {
+				writer.WriteUInt64(nodes[index].Parent.Id);
+			}
+		}
+
+		// **Total over its input, as `WireFormat::Read` requires.** Every bit
+		// pattern arrives from a peer, and any of them is a parent handle this
+		// store may or may not know - which is the receiver's problem to solve
+		// and not a decode failure.
+		//
+		// The derived links are cleared rather than left alone. A caller that
+		// takes this value writes it nowhere near a live tree: `WriteComponents`
+		// reads `Parent` out and calls `SetParent`, and leaving stale handles in
+		// the other four fields would only be a trap for the next reader.
+		void ReadHierarchies(core::ByteReader &reader, void *destination, size_t count) {
+			auto *nodes = static_cast<Hierarchy *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				nodes[index] = Hierarchy{};
+				nodes[index].Parent = Entity(reader.ReadUInt64());
+			}
+		}
+
 		Entity RepairChildren(StoreState &state, Entity parent) {
 			const Hierarchy *host = NodeOf(state, parent);
 			if (host == nullptr) {
@@ -215,7 +242,27 @@ namespace engine::ecs {
 		// serialisation is the right one**: an `Entity` is a directory index and
 		// a snapshot restores the directory exactly, so a handle inside a
 		// component still means the same entity on the far side.
-		Components::Register<Hierarchy>("ecs.Hierarchy");
+		// **Only the parent crosses a wire, and the other four handles must
+		// not.** `Hierarchy` is not a value, it is a structure: `Parent` is what
+		// an author decided, and `FirstChild`, `LastChild`, `NextSibling` and
+		// `PreviousSibling` are an index the store that owns the tree
+		// maintains. Sending them writes one store's index into another store's
+		// tree, which was measured doing exactly the damage that invites: a
+		// replica whose sibling list came back round to itself, and an
+		// `EachChild` collecting it into a sixteen-gigabyte vector until the
+		// allocator refused.
+		//
+		// The far side rebuilds its own links from `Parent` through
+		// `SetParent`, so what it needs is the parent and nothing else. Four
+		// handles a row is also thirty-two bytes a row not sent.
+		//
+		// **`Save` and `Load` are untouched by this.** `Column::Write` uses
+		// `TypeDescriptor::Write`, never `Wire` - see `WireFormat`'s own header
+		// on why a lossy form must not reach a snapshot - so a `.agame` still
+		// carries the whole node.
+		Components::Register<Hierarchy>(
+			"ecs.Hierarchy", WireFormat{WriteHierarchies, ReadHierarchies, WIRE_HIERARCHY_BYTES}
+		);
 
 		// **`InstanceClass` reads like the same case and is the opposite one.**
 		// A `ClassId` is a *registration* index, and nothing restores the class

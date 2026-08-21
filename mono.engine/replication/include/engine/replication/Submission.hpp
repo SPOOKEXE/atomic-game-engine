@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <functional>
 #include <span>
+#include <vector>
 
 namespace engine::ecs {
 	class Store;
@@ -29,6 +30,17 @@ namespace engine::replication {
 	// What writing a delta did.
 	//
 	// @since v0.13
+	// A parent a delta named that a store could not link yet.
+	//
+	// @since v0.18
+	struct DeferredParent {
+		// The instance whose parent was named.
+		ecs::Entity Child;
+
+		// What it should hang from once that entity exists.
+		ecs::Entity Parent;
+	};
+
 	struct WriteOutcome {
 		// How it went. `Ok` for a write that landed, in whole or in part.
 		ApplyStatus Status = ApplyStatus::Ok;
@@ -45,6 +57,20 @@ namespace engine::replication {
 		// Zero whenever no filter was given. See `Authority::SetOwnership` for
 		// what a non-zero figure means on an inbound delta.
 		size_t Refused = 0;
+
+		// Parents this delta named that could not be linked yet, in read order.
+		//
+		// **Not a failure and not to be dropped.** `ecs.Hierarchy` crosses as a
+		// parent handle and nothing else, and a child's may arrive in the same
+		// delta that creates its parent or one before it - so "the parent is not
+		// here" is an ordinary tick. `Replica` keeps these and retries them,
+		// bounded by `HOLD_DELTAS`, which is the bound it already holds an
+		// arriving entity for.
+		//
+		// Empty on almost every delta: it costs a vector nobody allocates into.
+		//
+		// @since v0.18
+		std::vector<DeferredParent> Deferred;
 	};
 
 	// Writes a delta's component values into a world.

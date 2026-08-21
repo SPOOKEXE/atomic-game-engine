@@ -252,6 +252,23 @@ namespace engine::replication {
 			// link delivering more late than useful.
 			uint64_t Stale = 0;
 
+			// Parents named by a delta that never turned up.
+			//
+			// **A number that should stay at zero.** `ecs.Hierarchy` crosses as
+			// a parent handle and the tree is rebuilt from it, so a parent that
+			// has not arrived within `HOLD_DELTAS` leaves its child unparented
+			// - visible in the wrong place rather than invisible, which is the
+			// better of the two, but wrong either way. A figure that climbs
+			// means the sender is emitting children of rows this replica is not
+			// being sent: an interest filter that admits one half of a pair, or
+			// two builds that disagree about what is replicated.
+			//
+			// Also counted when the wait list is full, which is the same fault
+			// arriving faster.
+			//
+			// @since v0.18
+			uint64_t Orphaned = 0;
+
 			// Audits checked against this replica's own copy.
 			//
 			// @since v0.15
@@ -359,6 +376,19 @@ namespace engine::replication {
 		// simply missing - which is the worse of the two failures, because
 		// nothing says it happened.
 		static constexpr uint64_t HOLD_DELTAS = 8;
+
+		// The most entities that may be waiting at once.
+		//
+		// **A bound on the list as well as on each entry's age**, because the
+		// two fail differently: an entry ages out because its tick never
+		// completed, and the list grows because many of them did not. A sender
+		// emitting parents this replica will never have - an interest filter
+		// that hides them, a build that disagrees - would otherwise be a vector
+		// that only grows.
+		//
+		// Generous against what a real tick carries: a delta names a few
+		// hundred rows and almost none of them defer.
+		static constexpr size_t MAXIMUM_DEFERRED = 4096;
 
 		// Notes one part's arrival and says whether its tick is now held whole.
 		//
