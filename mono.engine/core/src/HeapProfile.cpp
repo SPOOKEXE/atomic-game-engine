@@ -11,7 +11,6 @@
 #include <fstream>
 #include <functional>
 #include <iterator>
-#include <mutex>
 #include <new>
 #include <string>
 #include <vector>
@@ -258,7 +257,45 @@ namespace engine::core {
 		};
 
 		constinit SampleHistory Recorded;
-		constinit std::mutex HistoryLock;
+
+		// **A spin flag rather than a `std::mutex`, for `CreationLock`'s reason
+		// and because on one toolchain the mutex does not compile at all.**
+		//
+		// `constinit std::mutex` is accepted by libstdc++ on Linux, where
+		// `std::mutex`'s default constructor is constexpr because the underlying
+		// `pthread_mutex_t` has a constant initialiser. That is a property of
+		// one standard library on one platform, not of the language: the same
+		// declaration built for Windows with mingw-w64, whose libstdc++ is
+		// backed by winpthreads, is rejected with "does not have a constant
+		// initializer". The `constinit` was doing its job - it refused the file
+		// rather than let a constructor into a translation unit that
+		// `operator new` reaches - and the answer is to not want one.
+		//
+		// `std::atomic_flag` is constant-initialised on every platform, which is
+		// why `CreationLock` above is already one. The sections it guards are
+		// bounded and short - a ring-buffer copy, or the `malloc` of the history
+		// buffers when sampling is turned on - and contention is between a
+		// sampler and a panel reading it, so spinning costs nothing worth
+		// measuring.
+		constinit std::atomic_flag HistoryLock{};
+
+		// RAII over the flag, so the bodies below read as they did under
+		// `std::lock_guard` and every early return among them still releases.
+		struct HistoryGuard {
+			HistoryGuard() {
+				while (HistoryLock.test_and_set(std::memory_order_acquire)) {
+					// Contended only when the sampler and a reader of the
+					// history meet, which is twice a second against a frame.
+				}
+			}
+			~HistoryGuard() {
+				HistoryLock.clear(std::memory_order_release);
+			}
+
+			HistoryGuard(const HistoryGuard &) = delete;
+			HistoryGuard &operator=(const HistoryGuard &) = delete;
+		};
+
 		constinit std::atomic<bool> Sampling{false};
 
 		// When the next `SampleIfDue` reading is due, on `Clock`'s monotonic
@@ -676,7 +713,7 @@ namespace engine::core {
 			return;
 		}
 
-		const std::lock_guard<std::mutex> guard(HistoryLock);
+		const HistoryGuard guard;
 		if (enabled == Sampling.load(std::memory_order_relaxed)) {
 			return;
 		}
@@ -708,7 +745,7 @@ namespace engine::core {
 			return;
 		}
 
-		const std::lock_guard<std::mutex> guard(HistoryLock);
+		const HistoryGuard guard;
 		if (!EnsureHistory()) {
 			return;
 		}
@@ -760,7 +797,7 @@ namespace engine::core {
 	}
 
 	std::vector<HeapSample> HeapProfile::History() {
-		const std::lock_guard<std::mutex> guard(HistoryLock);
+		const HistoryGuard guard;
 
 		std::vector<HeapSample> readings;
 		if (Recorded.Readings == nullptr) {
@@ -775,7 +812,7 @@ namespace engine::core {
 	}
 
 	double HeapProfile::HistorySeconds() {
-		const std::lock_guard<std::mutex> guard(HistoryLock);
+		const HistoryGuard guard;
 		if (Recorded.Readings == nullptr || Recorded.Count < 2) {
 			return 0.0;
 		}
@@ -784,7 +821,7 @@ namespace engine::core {
 	}
 
 	void HeapProfile::ResetHistory() {
-		const std::lock_guard<std::mutex> guard(HistoryLock);
+		const HistoryGuard guard;
 		Recorded.Head = 0;
 		Recorded.Count = 0;
 	}
@@ -801,7 +838,7 @@ namespace engine::core {
 		size_t readings = 0;
 
 		{
-			const std::lock_guard<std::mutex> guard(HistoryLock);
+			const HistoryGuard guard;
 			if (Recorded.Readings == nullptr || Recorded.Count < 2) {
 				return report;
 			}

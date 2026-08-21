@@ -141,6 +141,20 @@ target_compile_definitions(vendor_asio INTERFACE ASIO_STANDALONE ASIO_NO_DEPRECA
 find_package(Threads REQUIRED)
 target_link_libraries(vendor_asio INTERFACE Threads::Threads)
 
+# **The Windows socket libraries, named rather than left to the compiler.**
+# asio's IOCP backend calls `AcceptEx` and `GetAcceptExSockaddrs`, which live in
+# mswsock, and the rest of Winsock in ws2_32. asio asks for both with
+# `#pragma comment(lib, ...)`, which is an MSVC extension - GCC parses it and
+# does nothing. So a mingw-w64 build compiles all 964 objects and then fails at
+# the link of `server.exe` with two undefined references and nothing naming a
+# missing library.
+#
+# Costs MSVC nothing: it links the same two either way, and a library named
+# twice is linked once.
+if(WIN32)
+	target_link_libraries(vendor_asio INTERFACE ws2_32 mswsock)
+endif()
+
 # --- nlohmann/json ------------------------------------------------------------
 # JSON, for the one thing in this repository that speaks it: `mono.studio`'s
 # control server answers Model Context Protocol, which is JSON-RPC 2.0.

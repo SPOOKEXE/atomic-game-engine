@@ -104,16 +104,22 @@ targets optimised (`MONO_OPTIMISE=ON`), tests off, Tracy compiled in.
 
 | Platform | Files |
 |---|---|
-| Linux x86_64 | `atomic-<version>-linux-x86_64.tar.gz`, `atomic-client-<version>-linux-x86_64.AppImage`, `atomic-studio-<version>-linux-x86_64.AppImage` |
+| Linux x86_64 | `atomic-<version>-linux-x86_64.tar.gz`, `atomic-client-<version>-linux-x86_64.AppImage`, `atomic-studio-<version>-linux-x86_64.AppImage`, `atomic-launcher-<version>-linux-x86_64.AppImage` |
 | Windows x86_64 | `atomic-<version>-windows-x86_64.zip` |
 | macOS arm64 | `atomic-<version>-macos-arm64.tar.gz` |
 
-Each archive holds the staged directory of all four programs - `client/`,
-`studio/`, `server/`, `cdn/` - beside `LICENSE`, `THIRD_PARTY_NOTICES.md`,
-`README.md` and a `VERSION` file. The trees are not merged into a shared
-`bin/lib` layout on purpose: `mono_add_program` builds each one to be runnable
-where it sits, and flattening them would put four copies of `libSDL3` and four
-disagreeing `shaders/render/` directories in one place.
+Each archive holds the staged directory of all five programs - `client/`,
+`studio/`, `server/`, `cdn/`, `launcher/` - beside `LICENSE`,
+`THIRD_PARTY_NOTICES.md`, `README.md` and a `VERSION` file. The trees are not
+merged into a shared `bin/lib` layout on purpose: `mono_add_program` builds each
+one to be runnable where it sits, and flattening them would put five copies of
+`libSDL3` and four disagreeing `shaders/render/` directories in one place.
+
+**The launcher depends on that layout being exactly this.**
+`launcher::StageRoot` takes the parent of the directory the running binary is
+in and looks for `<root>/client/client` beneath it, so the archive root is the
+stage root and an unpacked tarball is a working front door. A launcher shipped
+on its own would start, find nothing beside it, and grey out every mode.
 
 `unified_tests` is not shipped. It is a diagnostic harness, and
 `RUNNING.md` is where it is described.
@@ -157,15 +163,66 @@ So both are `continue-on-error` in the workflow: they upload whatever they
 manage to build, and neither holds up a Linux release. When one of them has been
 run by a person and works, drop its `optional: true` from the matrix.
 
+### Building for Windows without a Windows machine
+
+`mono.build/Toolchain-mingw64.cmake` cross-compiles all five programs to
+Windows x86_64 from Linux with mingw-w64. It is not the supported path -
+`scripts/build-windows.bat` with MSVC is, and the `windows-2022` runner is what
+publishes - but it is the only way to find out on a Linux machine whether a
+change compiles and links for Windows at all.
+
+```sh
+# The native glslc first. A cross build's own shaderc is built for the target
+# and cannot run on the machine doing the building, so the preset borrows this
+# one; it is where the preset's default MONO_GLSLC points.
+cmake --preset release
+cmake --build --preset release --target glslc_exe
+
+cmake --preset windows-cross
+cmake --build --preset windows-cross
+scripts/package-release.sh .cache/build/windows-cross <version> windows-x86_64 dist
+```
+
+Needs `mingw-w64` and `wine` installed. Wine is not there to test anything: it
+runs `shadercross`, which is a build-time tool of ours that a cross build
+produces as a `.exe`. See the toolchain file's own header for the rest.
+
+**Two portability bugs were found by trying this, and both were real on MSVC's
+side of the fence too.** `constinit std::mutex` in `HeapProfile.cpp`, which
+compiles under libstdc++ on glibc only because `pthread_mutex_t` happens to have
+a constant initialiser, and which was a latent violation of that file's own
+"nothing here may have a constructor" invariant. And asio's `AcceptEx`,
+requested through `#pragma comment(lib, "mswsock")` - an MSVC extension that GCC
+parses and ignores - which the MSVC link had only ever found by luck of the
+compiler.
+
+The binaries are otherwise unexercised: `--version` on each is all that has been
+run, under wine. Nothing has opened a window on Windows.
+
 ### AppImage
 
-Only `client` and `studio` get one. `server` and `cdn` are daemons, and an
-AppImage of a daemon is a tarball with a mount step in front of it.
+Three of the five get one: `client`, `studio` and `launcher`. `server` and `cdn`
+are daemons driven entirely by command-line flags, and an AppImage of a daemon
+is a tarball with a mount step in front of it. They are in the tarball, and they
+are inside the launcher image described below.
 
 They work without a wrapper because `engine::core::Paths::Base()` resolves from
 the running executable rather than the working directory, and each program is
 linked with `INSTALL_RPATH "$ORIGIN"` - so the staged tree runs unchanged from a
-squashfs mount at a path nothing could have predicted.
+squashfs mount at a path nothing could have predicted. Command-line arguments
+reach the program in every case, because `AppRun` forwards `"$@"`.
+
+**The launcher's image carries the other four, and has to.** Its whole job is
+starting programs beside it, so an image holding only the launcher would open a
+window with every mode greyed out. Inside the AppDir each stage goes to
+`usr/<program>/`, which puts the launcher at `usr/launcher/launcher` and makes
+`usr` the stage root its siblings are found under - the same shape as the
+tarball, for the same reason. That makes it the single-file way to get
+everything: about 36 MB against 14 MB for the client alone.
+
+Note that the stages are never merged into one `usr/bin`. Four of them carry
+their own `libSDL3.so` and their own `shaders/render/`, compiled from different
+modules, and flattening them would leave one of each.
 
 One known limit: the mount is read only. `client --profile-snapshot` writes
 `frame-graph-snapshot.txt` beside the binary and that write fails inside an

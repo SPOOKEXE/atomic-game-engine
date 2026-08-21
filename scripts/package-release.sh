@@ -12,8 +12,11 @@
 # What goes in: the staged directory of every program, as it stands. Nothing is
 # rearranged into a bin/lib/share shape, because each staged tree is already
 # runnable where it sits - `mono_add_program` builds it that way and
-# `Paths::Base()` reads it that way - and flattening them would put four
+# `Paths::Base()` reads it that way - and flattening them would put five
 # copies of libSDL3 in one directory and four `shaders/render/` that disagree.
+# The launcher needs that shape for a second reason: it locates the programs it
+# starts at `<archive root>/<program>/<program>`, so the layout is what makes an
+# unpacked tarball a working front door rather than five unrelated directories.
 #
 # On Linux it also writes the AppImages. See scripts/package-appimage.sh.
 #
@@ -34,13 +37,23 @@ outdir=${4:?output directory}
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
-# The four products. `unified_tests` is a diagnostic harness rather than
+# The five products. `unified_tests` is a diagnostic harness rather than
 # a product and is deliberately not here; RUNNING.md is where it is described.
-programs="client studio server cdn"
+#
+# The launcher travels with the other four rather than instead of them, and the
+# archive layout is what makes it work. `launcher::StageRoot` takes the parent
+# of the directory the running binary sits in and looks for `<root>/client/client`
+# under it - which is exactly the shape below, one directory per program with
+# the archive root as their common parent. So the launcher started out of an
+# unpacked tarball finds all four; a launcher shipped on its own would open a
+# window with every mode greyed out.
+programs="client studio server cdn launcher"
 
 # The programs that link `Engine::examples`, and therefore the ones the demo
 # scenes have to travel with. `cdn` does not, and a copy of them in its
-# directory would be a claim that it can run one.
+# directory would be a claim that it can run one. Neither does `launcher`: it
+# starts other programs and opens no scene itself, and each child resolves the
+# scenes from its own directory.
 scene_programs="client studio server"
 
 name="atomic-$version-$platform"
@@ -106,6 +119,44 @@ case $platform in
 		# inside it, so there is nothing to strip and the .pdb simply does not
 		# ship.
 		find "$work/$name" -name '*.pdb' -delete
+
+		# **A GCC build of the same platform is the other case, and it does not
+		# look like one until you weigh it.** mingw-w64 puts DWARF *inside* the
+		# PE exactly as it does inside an ELF, so the .pdb sweep above finds
+		# nothing and every binary ships its debug information: `studio.exe` is
+		# 1227 MB unstripped.
+		#
+		# That needs a strip that understands PE. A Linux host's own `strip` is
+		# configured for ELF and refuses the file, so the cross one is looked
+		# for first and the plain name is the fallback for a Windows runner,
+		# where it is whatever MSYS provides.
+		#
+		# Not fatal when there is none, and not fatal when it fails: an MSVC
+		# build has nothing here to remove and must not be held up over a tool
+		# it does not need. It says so on the way past rather than silently
+		# producing an archive twenty times the size it should be.
+		windows_strip=${STRIP:-}
+		if [ -z "$windows_strip" ]; then
+			for candidate in x86_64-w64-mingw32-strip strip; do
+				if command -v "$candidate" > /dev/null 2>&1; then
+					windows_strip=$candidate
+					break
+				fi
+			done
+		fi
+
+		if [ -z "$windows_strip" ]; then
+			echo "no strip found - shipping Windows binaries as they are." >&2
+		else
+			for program in $programs; do
+				directory="$work/$name/$program"
+				for binary in "$directory/$program.exe" "$directory"/*.dll; do
+					[ -f "$binary" ] || continue
+					"$windows_strip" --strip-debug "$binary" ||
+						echo "  $windows_strip could not strip $binary" >&2
+				done
+			done
+		fi
 		;;
 	*)
 		for program in $programs; do
@@ -143,9 +194,18 @@ echo "$archive"
 # From the staged copy rather than from `$build`, so the AppImages carry the
 # same stripped binaries the tarball does. Pointed at the build tree they were
 # 171 MB and 214 MB for no reason anybody wanted.
+#
+# Three images, and the third is the whole engine. `client` and `studio` are
+# each one windowed program and stand alone. `launcher` carries the other four
+# with it, because a launcher that cannot see them is a window with every mode
+# greyed out - package-appimage.sh explains the AppDir shape that makes
+# `StageRoot` find them. `server` and `cdn` get none: they are daemons, they are
+# inside the launcher image already, and they are in the tarball above.
 case $platform in
 	linux-*)
 		"$root/scripts/package-appimage.sh" client "$work/$name/client" "$version" "$absolute"
 		"$root/scripts/package-appimage.sh" studio "$work/$name/studio" "$version" "$absolute"
+		"$root/scripts/package-appimage.sh" launcher "$work/$name/launcher" "$version" "$absolute" \
+			"$work/$name/client" "$work/$name/studio" "$work/$name/server" "$work/$name/cdn"
 		;;
 esac
