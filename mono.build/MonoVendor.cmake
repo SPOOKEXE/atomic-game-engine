@@ -36,13 +36,43 @@ set(MONO_VENDOR "${CMAKE_SOURCE_DIR}/mono.vendor")
 option(MONO_OPTIMISE_VENDOR "Build third-party code optimised, whatever the build type" ON)
 
 if(MONO_OPTIMISE_VENDOR AND NOT MSVC)
+	# An append is enough here: GCC and Clang honour the last `-O` on the line.
 	set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -O2")
 	set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O2")
 elseif(MONO_OPTIMISE_VENDOR AND MSVC)
-	# `/Od` is in the Debug defaults and the later flag wins, so this is an
-	# append rather than a replacement here too.
-	set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} /O2")
-	set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /O2")
+	# **A replacement, and it used to be an append. That one word broke every
+	# Windows build this repository has ever done.**
+	#
+	# MSVC's Debug defaults are `/Zi /Ob0 /Od /RTC1`, and `/RTC1` with `/O2` is
+	# not merely redundant - the compiler refuses the command line outright:
+	#
+	#   cl : Command line error D8016 : '/RTC1' and '/O2' are incompatible
+	#
+	# **And it is not only Debug builds that carry these.** `try_compile` runs
+	# with no build type, so CMake falls back to the Debug flags for it - the
+	# `-MDd` on those command lines is the giveaway. So an appended `/O2` made
+	# every feature check in every vendored project fail, in a `release` build
+	# that never compiles a Debug object: SDL alone reported 77 checks failed and
+	# none succeeded, including `SDL_CPU_X64` on an x64 machine. What reached a
+	# human was a `#error` about a joystick define, sixty files downstream.
+	#
+	# It stayed invisible because the branch above is the one that runs here. GCC
+	# takes the last `-O` and carries on, so the same idea is correct on Linux
+	# and fatal on Windows, and only one of the two is built every day.
+	foreach(lang C CXX)
+		set(flags "${CMAKE_${lang}_FLAGS_DEBUG}")
+		string(REGEX REPLACE "/RTC[1csu]+" "" flags "${flags}")
+		string(REPLACE "/Od" "" flags "${flags}")
+		string(REPLACE "/Ob0" "" flags "${flags}")
+		string(REGEX REPLACE " +" " " flags "${flags}")
+		string(STRIP "${flags}" flags)
+
+		# `/Ob1` rather than leaving inlining at the default, to match what
+		# `/O2` expects now that `/Ob0` is gone.
+		set(CMAKE_${lang}_FLAGS_DEBUG "${flags} /O2 /Ob1")
+	endforeach()
+	unset(flags)
+	unset(lang)
 endif()
 
 if(NOT EXISTS "${MONO_VENDOR}/glm/CMakeLists.txt")
