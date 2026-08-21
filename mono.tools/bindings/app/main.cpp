@@ -856,7 +856,20 @@ declare extern type UserInputServiceType with
 	MouseDeltaSensitivity: number
 	read KeyboardEnabled: boolean
 	read MouseEnabled: boolean
-
+)LUAU"
+		// **Two literals rather than one, and they are concatenated by the
+		// compiler.** MSVC caps a single string literal at 16380 bytes and
+		// truncates the rest with `error C2026: string too big` - a *warning*
+		// in shape, an error in effect, and one that would have shipped a
+		// half-written declaration file if it had been the former. GCC and
+		// Clang have no such cap, which is why this was only ever a problem
+		// on the platform nobody builds daily.
+		//
+		// Adjacent literals are joined at translation phase 6, so the string
+		// this produces is byte for byte the one it produced before - which
+		// `just bindings-check` proves by regenerating every artefact and
+		// comparing. Do not rejoin them.
+		R"LUAU(
 	-- **Present and always false.** There is no gamepad, touch surface, headset
 	-- or motion sensor anywhere in `engine::input`, and a Roblox place branches
 	-- on these to pick a control scheme - a missing property raises where a
@@ -1570,7 +1583,9 @@ declare extern type HttpService with
 	-- infinity, and for anything with no JSON form - an `Instance`, a function,
 	-- a `Vector3`, a `Color3` or a `CFrame`.
 	function JSONEncode(self, value: any): string
-
+)LUAU"
+		// Split for the reason the first of these gives: MSVC's 16380-byte cap.
+		R"LUAU(
 	-- Arrays come back **one-based**, which is what `#` and `ipairs` mean.
 	-- `null` becomes `nil`. Raises on malformed text, on text after the value,
 	-- and on a number a double cannot hold.
@@ -2640,7 +2655,9 @@ declare interface InputObject {
 	readonly Position: Vector3;
 	readonly Delta: Vector3;
 }
-
+)TS"
+		// Split for the reason the first of these gives: MSVC's 16380-byte cap.
+		R"TS(
 // What `InputBegan`, `InputEnded` and `InputChanged` call a handler with.
 //
 // Its own type rather than `PropertyChangedSignal`, which passes nothing.
