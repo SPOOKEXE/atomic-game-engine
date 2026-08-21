@@ -3797,6 +3797,14 @@ namespace studio {
 			// a tab beside it rather than as a floating window over the scene.
 			unsigned DockInto = 0;
 
+			// Whether this panel has already been undocked since it closed.
+			//
+			// **So the undock happens once and not every frame.** A closed panel
+			// is still visited by `DrawViewport`, and re-docking it to nothing on
+			// every one of those frames would fight a person dragging its tab
+			// back in from the saved layout. Cleared the moment it reopens.
+			bool Undocked = false;
+
 			// A `Camera` instance this view looks through, or null for the free
 			// camera. See `Editor::FollowCamera`.
 			Entity Follow;

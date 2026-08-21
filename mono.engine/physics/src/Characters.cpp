@@ -375,7 +375,23 @@ namespace engine::physics {
 	// @param store The world.
 	// @return How many characters were clipped.
 	size_t ClipCharacterVelocity(ecs::Store &store) {
-		PhysicsWorld *world = PreparedWorldMutable(store);
+		// **Silent like `WakeMovingCharacters`, and guarded the same way.**
+		// `PreparedWorldMutable` complains once per call by design - a world
+		// with no solver produces no contacts at all, so `WorldResource.cpp`
+		// would rather say so every tick than let one startup line scroll away.
+		// That is right for a step that needs a solver and wrong for this one:
+		// a client's own world is presented and never simulated, and this pass
+		// runs on it through `character.control` like every other. Asking the
+		// loud accessor put `physics has no PhysicsWorld resource` in the log
+		// sixty times a second for a world that was never meant to have one.
+		//
+		// The name lookup first, for the reason that file gives: the typed
+		// lookup would *register* the resource under the compiler's spelling in
+		// the act of finding it missing.
+		if (!PhysicsWorldRegistered()) {
+			return 0;
+		}
+		PhysicsWorld *world = store.ResourceMutable<PhysicsWorld>();
 		if (world == nullptr) {
 			return 0;
 		}

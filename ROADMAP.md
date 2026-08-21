@@ -228,7 +228,13 @@ The milestone headings below are development labels. Not in line with project ve
       that culling and mirror fitting run against. `Renderer::Render` projects
       from `SceneTarget` and is unaffected, which is why a still picture cannot
       show it and flying the camera can.
-- [_] when a viewport in a side-by-side is closed, the open one should fill
+- [x] when a viewport in a side-by-side is closed, the open one should fill.
+      imgui deletes a dock node whose windows have gone, but its guard is
+      `window->DockId != node->ID` - and when a docked window stops being
+      submitted imgui stores that same id on the window, so the two match and
+      the auto-delete declines. The empty leaf kept its half of the split. The
+      panel undocks itself once on the frame it closes, remembering the node in
+      `DockInto` so reopening lands back beside its sibling.
 - [x] make the ground grid static. The line *positions* were already pinned by
       `SnapDown`; what slid was which lines were drawn heavy. `major` came from
       the loop index, and the loop runs outward from a camera-snapped origin, so
@@ -257,7 +263,19 @@ The milestone headings below are development labels. Not in line with project ve
       one in five, so the far two thirds costs a fifth of what it would - 1808
       segments against 1296 for three times the reach, and nothing within 160
       studs looks any different.
-- [_] in "Start" with 4 clients running, tons of network activity for no character movement, quickhash / caching / signature not working properly or other bug
+- [x] in "Start" with 4 clients running, tons of network activity for no
+      character movement. **Change detection was fine - zero rows detected at
+      rest.** `mono.client/src/Replicated.cpp` registered `gui` and `script`
+      classes and not `scene`'s, so every `Part` a snapshot named arrived
+      untyped. `ecs.InstanceClass` crosses as a class *name*, a replica that
+      cannot resolve it stores an empty one, and the anti-entropy audit then
+      disputes every group it looks at - which re-arms the recovery walk to
+      re-send every row of every entity every few ticks, for ever, over a
+      difference no amount of re-sending can fix. Measured on `loadtest` with
+      four clients and nothing moving: **91,507 B/s to 16,964, minus 81%**;
+      disputes 600 to 4; untyped-class warnings 553 to 0. `mono.studio` calls it
+      and the registry is process-wide, which is exactly why the editor never
+      showed it. `mono.tools/loadtest` had the same gap.
 - [x] in flamegraph, simulation needs more granularity, HUGE chunk missing. The
       premise was not what it looked like: `ecs::Scheduler` already opens a span
       per system and per phase, and the serial path shows all of it. What
@@ -289,8 +307,23 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] mouse movement seems to also cause pump events to increase lots
 - [_] in flamegraph, add a "Event Scheduler" where you can setup a rule that auto-pauses the flamegraph when conditions are met (e.g. when pump events hit >2ms, i can force a pause on that flamegraph to see the cause).
 - [_] in discord presence tab, add a list of templating replacement words (e.g. {world} {instances}), etc.
-- [_] when setting keybinds, disable input after keybind sets (it runs immediately after)
-- [_] keybinds do not set properly (changes other keybinds)
+- [x] when setting keybinds, disable input after keybind sets. Binding is a key
+      press and `IsKeyPressed(key, false)` is true for the whole frame, so the
+      press that assigned Ctrl+D was still true when the dispatcher ran later in
+      the same frame and duplicated the selection. `Fired` refuses on the frame a
+      binding changed - the whole dispatcher, because the press may also be
+      somebody else's chord, and a frame in which no shortcut fires is not one
+      anybody notices.
+- [x] keybinds do not set properly (changes other keybinds). The `Action` enum
+      and the `DEFAULTS` table are two lists of the same things in two places and
+      they disagreed: the enum puts `ShowStatistics/ShowFrameGraph/ShowHeap`
+      before the four tools, the table puts the tools first. `IndexOf` cast the
+      enum to a subscript, so seven rows were cross-wired and binding "Select
+      Tool" wrote onto the frame graph's row. The counts matched, so it compiled
+      clean, and the suite missed it because it only covers the prefix where the
+      two orders agree. `IndexOf` builds its map from what each row says it
+      binds, so the two can never disagree again. Two regression tests, proved to
+      fail against the old code.
 - [_] add (selectable) text in the control (mcp) that tells you how to add as a mcp (and a section to tell models how to add it). add claude/codex/prompt tabs to hold these.
 - [x] add a spawn location that forces character to spawn at it.
       `SpawnLocation::Forced`, checked before team matching and before tree

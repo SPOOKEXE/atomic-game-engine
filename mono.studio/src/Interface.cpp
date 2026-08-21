@@ -846,7 +846,37 @@ namespace studio {
 			// Nothing asks for a texture, so the renderer releases the one it
 			// had. A closed panel should not go on costing its pixels.
 			target = engine::render::SceneTarget{};
+
+			// **And the empty half of the split goes with it.** imgui deletes a
+			// dock node whose windows have gone, but the guard it uses is
+			// `window->DockId != node->ID` - and when a docked window stops
+			// being submitted imgui stores that same node id on the window as
+			// `save_dock_id`, so the two match and the auto-delete declines.
+			// The leaf survives with nothing in it and keeps its half of the
+			// split, which is the hole a closed side-by-side leaves.
+			//
+			// Undocking the window is what lets `DockContextRemoveNode` fold the
+			// sibling up into the parent. The node it was in is remembered in
+			// `DockInto` first, so reopening this panel lands back beside the
+			// one it used to share a split with rather than floating.
+			//
+			// Once, on the frame it closes: `DockBuilderDockWindow` every frame
+			// would fight a person trying to drag the closed panel's tab back in
+			// from the layout.
+			if (extra != nullptr && !extra->Undocked) {
+				if (const ImGuiWindow *window = ImGui::FindWindowByName(ViewportIdentity(index));
+					window != nullptr && window->DockId != 0) {
+					extra->DockInto = window->DockId;
+					ImGui::DockBuilderDockWindow(ViewportIdentity(index), 0);
+				}
+				extra->Undocked = true;
+			}
 			return;
+		}
+
+		// Reopened, so the next close undocks again.
+		if (extra != nullptr) {
+			extra->Undocked = false;
 		}
 
 		// A panel opened from another's tab strip joins that strip, once. See

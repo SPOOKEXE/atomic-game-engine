@@ -207,6 +207,28 @@ namespace client {
 		// what to run by asking whether a row is a `LocalScript`.
 		//
 		// Both calls register their components first and both are idempotent.
+		//
+		// **And `scene`'s classes, which were the ones actually missing.** The
+		// paragraph above is exactly right about why an unresolved class name
+		// matters and then registers `gui` and `script` and stops - so every
+		// `Part`, `SpawnLocation` and `Model` a snapshot named arrived untyped,
+		// with `ecs: 'Workspace' is not a class registered here` in the log to
+		// say so.
+		//
+		// **It cost 81% of a replica's traffic**, and the path is worth stating
+		// because nothing about it looks like bandwidth. `ecs.InstanceClass`
+		// crosses as a class *name*; a replica that cannot resolve the name
+		// stores an empty one, so the row reads 13 bytes on the authority and 4
+		// here. The anti-entropy audit compares the two, disputes the group,
+		// and a dispute re-arms the recovery walk - which then re-sends every
+		// row of every entity every few ticks, for ever, over a difference no
+		// amount of re-sending can fix. Measured on `loadtest` with four
+		// clients and nothing moving: 91,507 B/s before, 16,964 after.
+		//
+		// `mono.studio` calls this and the registry is process-wide, which is
+		// exactly why the editor never showed it.
+		engine::scene::RegisterSceneClasses();
+
 		(void)engine::gui::RegisterGuiClasses();
 		(void)engine::script::ScriptClass();
 
