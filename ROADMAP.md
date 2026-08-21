@@ -229,6 +229,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] selection boxes are misaligned
 - [_] when pressing CTRL and scaling a part, scale both sides at same time
 - [_] add a (ACTIVE) scene_name
+- [_] some studio ui stretches - more vscode-ey
 
 ### v0.20
 
