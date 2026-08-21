@@ -903,7 +903,9 @@ namespace studio {
 			// reporting no bytes is a much more alarming thing than one saying
 			// it was left out of this build.
 			ImGui::TextUnformatted("The allocator hooks are not compiled into this build.");
-			ImGui::TextUnformatted("Configure with MONO_HEAP_PROFILE=ON, or use the dev preset.");
+			ImGui::TextUnformatted(
+				"Configure with MONO_HEAP_PROFILE=ON, the dev preset, or the -dev archive of this release."
+			);
 			ImGui::End();
 			return;
 		}

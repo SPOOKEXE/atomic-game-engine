@@ -242,7 +242,7 @@ namespace {
 		if (!HeapProfile::IsCompiledIn()) {
 			ENGINE_ERROR(
 				"--heap-growth-limit was given and this build has no allocator hooks. Configure with "
-				"MONO_HEAP_PROFILE=ON, or use the dev preset."
+				"MONO_HEAP_PROFILE=ON, the dev preset, or the -dev archive of this release."
 			);
 			return EXIT_RUNAWAY_HEAP;
 		}
@@ -428,7 +428,7 @@ int main(int argc, char **argv) {
 		if (!HeapProfile::IsCompiledIn()) {
 			ENGINE_WARN(
 				"a heap option was given and this build has no allocator hooks. Configure with "
-				"MONO_HEAP_PROFILE=ON, or use the dev preset."
+				"MONO_HEAP_PROFILE=ON, the dev preset, or the -dev archive of this release."
 			);
 		}
 		HeapProfile::SetSamplingEnabled(true);

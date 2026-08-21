@@ -39,6 +39,7 @@ jobs:
       version: ${{ steps.pick.outputs.version }}
       release: ${{ steps.pick.outputs.release }}
       prerelease: ${{ steps.pick.outputs.prerelease }}
+      matrix: ${{ steps.pick.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
 
@@ -79,14 +80,42 @@ jobs:
             *)   prerelease=false ;;
           esac
 
+          # **The build matrix is decided here, because a job cannot decide it
+          # for itself.** `jobs.<id>.if` cannot see the `matrix` context - only
+          # a step can - so "build the dev flavour on a tag and not on a branch
+          # push" has to be a matrix that is shorter on a branch push. It is
+          # written out rather than filtered, because a two-entry list twice is
+          # shorter than the expression that would trim one.
+          #
+          # `dev` is the same tree from the `dist-dev` preset: -O1, heap
+          # profiler compiled in. It doubles an hour-long matrix, which is why
+          # it runs for a tag only - nothing publishes it otherwise.
+          shipped='
+            {"platform":"linux-x86_64","runner":"ubuntu-24.04","optional":false,"flavour":"release","preset":"release"},
+            {"platform":"windows-x86_64","runner":"windows-2022","optional":true,"flavour":"release","preset":"release"},
+            {"platform":"macos-arm64","runner":"macos-14","optional":true,"flavour":"release","preset":"release"}'
+          diagnostic='
+            {"platform":"linux-x86_64","runner":"ubuntu-24.04","optional":false,"flavour":"dev","preset":"dist-dev"},
+            {"platform":"windows-x86_64","runner":"windows-2022","optional":true,"flavour":"dev","preset":"dist-dev"},
+            {"platform":"macos-arm64","runner":"macos-14","optional":true,"flavour":"dev","preset":"dist-dev"}'
+
+          if [ "$release" = true ]; then
+            matrix="{\"include\":[$shipped,$diagnostic]}"
+          else
+            matrix="{\"include\":[$shipped]}"
+          fi
+          matrix=$(printf '%s' "$matrix" | tr -d '\n' | tr -s ' ')
+
           echo "version=$version"       >> "$GITHUB_OUTPUT"
           echo "release=$release"       >> "$GITHUB_OUTPUT"
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "matrix=$matrix"         >> "$GITHUB_OUTPUT"
           echo "building $version (release=$release)"
+          echo "$matrix"
 
   build:
     needs: version
-    name: ${{ matrix.platform }}
+    name: ${{ matrix.platform }} ${{ matrix.flavour }}
     runs-on: ${{ matrix.runner }}
     # Linux is the platform this engine is developed on and its failure is a
     # real failure. Windows compiles but has never shipped, and macOS has never
@@ -97,17 +126,11 @@ jobs:
 
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - platform: linux-x86_64
-            runner: ubuntu-24.04
-            optional: false
-          - platform: windows-x86_64
-            runner: windows-2022
-            optional: true
-          - platform: macos-arm64
-            runner: macos-14
-            optional: true
+      # Decided by the `version` job. See the comment there: a job-level `if`
+      # cannot read the `matrix` context, so the flavour that only ships with a
+      # tag is expressed as a matrix with fewer entries rather than as a
+      # condition on the job.
+      matrix: ${{ fromJSON(needs.version.outputs.matrix) }}
 
     steps:
       - uses: actions/checkout@v4
@@ -230,14 +253,18 @@ jobs:
         shell: bash
         run: echo "CCACHE_DIR=$RUNNER_TEMP/ccache" >> "$GITHUB_ENV"
 
+      # **Keyed by flavour as well as platform.** The two flavours compile the
+      # same files with different flags, so they share no objects; one key for
+      # both would be two builds evicting each other's entries all day and
+      # reporting a hit rate that never recovers.
       - name: Restore the compiler cache
         if: runner.os != 'Windows'
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/ccache
-          key: ccache-${{ matrix.platform }}-${{ github.sha }}
+          key: ccache-${{ matrix.platform }}-${{ matrix.flavour }}-${{ github.sha }}
           restore-keys: |
-            ccache-${{ matrix.platform }}-
+            ccache-${{ matrix.platform }}-${{ matrix.flavour }}-
 
       # `content` rather than the default `mtime`: a runner checks out fresh
       # every time, so a compiler's mtime says nothing about whether it is the
@@ -259,8 +286,8 @@ jobs:
       - name: Build
         if: runner.os != 'Windows'
         run: |
-          cmake --preset release
-          cmake --build --preset release
+          cmake --preset ${{ matrix.preset }}
+          cmake --build --preset ${{ matrix.preset }}
 
       # **Always, and not only on failure.** A cache that stopped being used is
       # indistinguishable from one that never was, which is the argument
@@ -283,7 +310,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: cmd
         run: |
-          set PRESET=release
+          set PRESET=${{ matrix.preset }}
           scripts\build-windows.bat
 
       # **Why a build failed, when the machine that failed is not one anybody can
@@ -301,7 +328,7 @@ jobs:
         shell: bash
         run: |
           set -u
-          root=.cache/build/release/CMakeFiles
+          root=.cache/build/${{ matrix.preset }}/CMakeFiles
           for name in CMakeConfigureLog.yaml CMakeError.log CMakeOutput.log; do
             if [ -f "$root/$name" ]; then
               echo "===== $root/$name ====="
@@ -311,7 +338,7 @@ jobs:
               echo
             fi
           done
-          sdl=.cache/build/release/mono.vendor/sdl/CMakeFiles
+          sdl=.cache/build/${{ matrix.preset }}/mono.vendor/sdl/CMakeFiles
           for name in CMakeError.log CMakeOutput.log; do
             if [ -f "$sdl/$name" ]; then
               echo "===== $sdl/$name ====="
@@ -322,11 +349,17 @@ jobs:
 
       - name: Package
         shell: bash
-        run: scripts/package-release.sh .cache/build/release "${{ needs.version.outputs.version }}" "${{ matrix.platform }}" dist
+        run: |
+          scripts/package-release.sh \
+            .cache/build/${{ matrix.preset }} \
+            "${{ needs.version.outputs.version }}" \
+            "${{ matrix.platform }}" \
+            dist \
+            "${{ matrix.flavour == 'dev' && 'dev' || '' }}"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: dist-${{ matrix.platform }}
+          name: dist-${{ matrix.platform }}-${{ matrix.flavour }}
           path: dist/
           if-no-files-found: error
 

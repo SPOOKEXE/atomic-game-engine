@@ -238,7 +238,7 @@ namespace client {
 			(!Settings.HeapReport.empty() || Settings.HeapGrowthLimit > 0.0)) {
 			ENGINE_WARN(
 				"--heap-report was given and this build has no allocator hooks. Configure with "
-				"MONO_HEAP_PROFILE=ON, or use the dev preset."
+				"MONO_HEAP_PROFILE=ON, the dev preset, or the -dev archive of this release."
 			);
 		}
 		return FinishStartup();

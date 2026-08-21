@@ -79,6 +79,21 @@ option(MONO_HEAP_PROFILE "Track every allocation and attribute it to a tag" ON)
 # measurement with cost we are not going to change.
 option(MONO_OPTIMISE     "Optimise first-party targets" OFF)
 
+# What `MONO_OPTIMISE` means, when it is on.
+#
+# **Three levels, and the middle one exists for the shipped diagnostic build.**
+# `release` wants 3 for the reason the branch below argues at length. `dist-dev`
+# wants 1: it is the build somebody runs when the shipped one misbehaves, so it
+# keeps the heap profiler and the frame pointer, and an optimiser that inlines
+# less leaves a stack that a report can name functions from. `-O0` is not the
+# alternative - a build nobody can play is a build nobody reports from.
+#
+# A string rather than a second option, because "which level" has more than two
+# answers and a `MONO_OPTIMISE_LIGHTLY` boolean beside `MONO_OPTIMISE` would be
+# two switches that can disagree.
+set(MONO_OPTIMISE_LEVEL "3" CACHE STRING "Optimisation level for first-party targets when MONO_OPTIMISE is on")
+set_property(CACHE MONO_OPTIMISE_LEVEL PROPERTY STRINGS 1 2 3)
+
 # On: compile shaders with the glslc built from mono.vendor/shaderc. Off: find
 # one on PATH.
 #
@@ -108,6 +123,10 @@ if(MSVC)
 	endif()
 	if(NOT MONO_OPTIMISE)
 		list(APPEND MONO_COMPILE_OPTIONS /Od)
+	elseif(NOT MONO_OPTIMISE_LEVEL STREQUAL "3")
+		# MSVC has no scale to map a level onto: /O2 is its maximum and the
+		# build type already supplies it, so anything below the top is /O1.
+		list(APPEND MONO_COMPILE_OPTIONS /O1)
 	endif()
 	# No /O3 exists. /O2 is already MSVC's maximum and the build type supplies
 	# it, so the optimised branch below has no MSVC counterpart rather than a
@@ -146,7 +165,15 @@ else()
 		# Note what this does NOT claim: determinism here is same-binary, as
 		# ROADMAP.md v0.2 says. Two builds at different optimisation levels are
 		# two different binaries and were never promised to agree.
-		list(APPEND MONO_COMPILE_OPTIONS -O3)
+		list(APPEND MONO_COMPILE_OPTIONS -O${MONO_OPTIMISE_LEVEL})
+
+		# Kept below the top level, where the point of the build is a report
+		# somebody can act on. -O3 omits it and the argument above is about
+		# speed; a level chosen for diagnosis is choosing the other side of
+		# that trade.
+		if(NOT MONO_OPTIMISE_LEVEL STREQUAL "3")
+			list(APPEND MONO_COMPILE_OPTIONS -fno-omit-frame-pointer)
+		endif()
 	endif()
 endif()
 
@@ -397,5 +424,9 @@ message(STATUS "  programs   client=${MONO_BUILD_CLIENT} server=${MONO_BUILD_SER
 message(STATUS "  tracy      ${MONO_TRACY}")
 message(STATUS "  tests      ${MONO_BUILD_TESTS}")
 message(STATUS "  benchmarks ${MONO_BUILD_BENCH}")
-message(STATUS "  optimised  ${MONO_OPTIMISE}")
+if(MONO_OPTIMISE)
+	message(STATUS "  optimised  ON (-O${MONO_OPTIMISE_LEVEL})")
+else()
+	message(STATUS "  optimised  OFF")
+endif()
 message(STATUS "")

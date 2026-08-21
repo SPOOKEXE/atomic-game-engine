@@ -89,6 +89,15 @@
       }
     },
     {
+      "name": "dist-dev",
+      "inherits": "release",
+      "displayName": "dist-dev: the shipped build with the diagnostics left in, at -O1",
+      "cacheVariables": {
+        "MONO_OPTIMISE_LEVEL": "1",
+        "MONO_HEAP_PROFILE": "ON"
+      }
+    },
+    {
       "name": "windows-cross",
       "inherits": "release",
       "displayName": "windows-cross: release, built for Windows from Linux with mingw-w64",
@@ -124,6 +133,10 @@
     {
       "name": "bench",
       "configurePreset": "bench"
+    },
+    {
+      "name": "dist-dev",
+      "configurePreset": "dist-dev"
     },
     {
       "name": "windows-cross",

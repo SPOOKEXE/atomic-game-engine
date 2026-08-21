@@ -379,7 +379,21 @@ The milestone headings below are development labels. Not in line with project ve
       below. Reopen with a specific case if it still misbehaves on flat ground.
 - [_] check character physics with portals, i think normal objects are fine but the character
 - [_] when character sits in portal, character split in half
-- [_] add dev build and release builds to github release (two separate tags Release and Dev -O1 but keep things like heap profiler), then you have per-version ones as well
+- [x] add dev and release builds to the github release. Two archives per
+      platform per version rather than two release pages: the shipped one from
+      `release` (-O3, no heap profiler) and `atomic-<version>-<platform>-dev`
+      from the new `dist-dev` preset (-O1, frame pointer kept,
+      `MONO_HEAP_PROFILE=ON`). **The diagnostics cannot be a runtime switch** -
+      a block allocated with no profiler header and freed through the tracking
+      `operator delete` reads four words of somebody else's memory - so the
+      shipped build answers `--heap-report` with "this build has no allocator
+      hooks", and until now the only answer to "it leaks" was "build the engine
+      yourself". `-O1` because a build nobody can play is a build nobody
+      reports from. `MONO_OPTIMISE` grew a level rather than a second boolean
+      beside it. The dev flavour builds for a tag only, and the matrix is
+      emitted by the `version` job because `jobs.<id>.if` cannot read the
+      `matrix` context. Verified end to end on Linux: the dev archive unpacks,
+      runs, and writes a 123-tag heap report the shipped binary refuses.
 - [_] crossworldseam demo is not setup properly. **Half done.** The command in
       the file's own header omitted `--view-spacing 0`, so following it
       composited the two worlds 40 apart: two 80-stud floors z-fighting in a
