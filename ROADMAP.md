@@ -369,7 +369,33 @@ The milestone headings below are development labels. Not in line with project ve
       and `RUNNING.md` already said. Paths inside the JSON and TOML blocks are
       backslash-escaped, or a Windows path would paste as a parse error.
 - [_] change Terrain demo to be procedural infinite generation, also spawn character on top of terrain
-- [_] optimise Authority::DetectRows and missing gap post Authority::Publish. ReplicationStress in release build.
+- [x] optimise the replication publish path, `ReplicationStress` in a release
+      build. **Measured before assumed, and the profile moved the target.**
+      761 ticks of twenty thousand moving parts: `Authority::DetectRows` is
+      0.69 ms a tick, and the two passes either side of it are bigger -
+      `Authority::Score` was 2.38 and `Publish`'s own unnamed self time was
+      1.44.
+      **Score keeps a cursor now.** It answers "which entity is this candidate
+      for" with a `lower_bound` over the twenty-thousand-entry `Bearing`, which
+      is fifteen probes at fifteen unrelated addresses, once per changed row -
+      three hundred thousand cache misses a tick to find an entry usually one
+      along from the last one. Candidates arrive ascending within a component
+      (`Signature::Changed` is a merge over sorted ids, `EachChangedRuns` visits
+      tables in id order, `OutstandingSet` holds its rows ascending), so the
+      search gallops from a cursor and a slot boundary resets it. A list that is
+      not ordered at all still gets the right answer from a gallop that
+      degenerates to the binary search it replaces. Two runs each side:
+      1858/1772 ms against 1569/1577/1491, so **2.38 to 2.02 ms a tick, -15%**.
+      **And the gap is named.** `Authority::Record`, `EmitAudit`, the packer's
+      identity permutation and the snapshot release had no spans, so `Publish`
+      arrived as 1.44 ms a tick doing nothing anybody could see. `Publish` self
+      is 0.75 now and `Authority::Record` - the acknowledgement bookkeeping - is
+      0.48 of what it was hiding.
+      What is left is not in this module. `Server::SurveyVisibility` is 3.30 ms
+      a tick and `Score`'s remainder is the host's `Priority` hook, which for
+      `mono.server` is an occlusion raycast per entity: twenty thousand of them
+      a tick, memoised to once per entity and no cheaper than that. Both are
+      `mono.server`'s to answer.
 - [x] add a `Bidirectional` bool to portals: on, a mouth may be entered from
       either side; off, only from in front. In front is the side the face's
       normal points at - the side the pane shows its image on, and the side

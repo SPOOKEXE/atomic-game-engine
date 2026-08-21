@@ -902,10 +902,51 @@ namespace engine::replication {
 			// every score stored below has been through `std::isfinite`.
 			Scores.assign(Bearing.size(), std::numeric_limits<float>::quiet_NaN());
 
+			// **A cursor rather than a binary search from the ends, and on a
+			// full scene it is most of what this pass cost.** A `lower_bound`
+			// over twenty thousand entities is fifteen probes at fifteen
+			// unrelated addresses, and there is one candidate per changed row -
+			// so a scene where everything moves paid three hundred thousand
+			// cache misses a tick to answer a question whose answer was one
+			// entry along from the last one.
+			//
+			// Candidates arrive in ascending entity order within a component:
+			// `Signature::Changed` is built by a merge over sorted ids,
+			// `EachChangedRuns` visits tables in id order, and the recovery pass
+			// walks an `OutstandingSet` that holds its rows ascending. So the
+			// cursor walks forward with them and the search galloping from it
+			// touches the line it is already on. A slot boundary resets the ids,
+			// which is what the backwards test catches - and a candidate list
+			// that is not ordered at all still gets the right answer, from a
+			// gallop that degenerates to the binary search this replaces.
+			size_t cursor = 0;
+			uint64_t previousId = 0;
+
 			for (Candidate &candidate : Candidates) {
-				const auto found = std::lower_bound(Bearing.begin(), Bearing.end(), candidate.Entity.Id);
+				if (candidate.Entity.Id < previousId) {
+					cursor = 0;
+				}
+				previousId = candidate.Entity.Id;
+
+				// The bracket, doubled until it passes the wanted id. `low` is
+				// the last index known to be below it; `high` is one past the
+				// first that is not.
+				size_t low = cursor;
+				size_t step = 1;
+				while (low + step < Bearing.size() && Bearing[low + step] < candidate.Entity.Id) {
+					low += step;
+					step *= 2;
+				}
+				const size_t high = std::min(low + step + 1, Bearing.size());
+
+				const auto found = std::lower_bound(
+					Bearing.begin() + static_cast<ptrdiff_t>(low),
+					Bearing.begin() + static_cast<ptrdiff_t>(high),
+					candidate.Entity.Id
+				);
 				const bool known = found != Bearing.end() && *found == candidate.Entity.Id;
 				const size_t slot = known ? static_cast<size_t>(found - Bearing.begin()) : 0;
+				cursor = static_cast<size_t>(found - Bearing.begin());
 
 				if (known && !std::isnan(Scores[slot])) {
 					candidate.Hint = Scores[slot];
@@ -1760,11 +1801,14 @@ namespace engine::replication {
 
 			// Released a tick after the cursor reached the end, because `Unsent`
 			// is called after `Publish` has returned and may put it back.
-			for (Staged &staged : client.Snapshots) {
-				if (!staged.Bytes.empty() && staged.Sent >= staged.Bytes.size()) {
-					staged.Bytes.clear();
-					staged.Bytes.shrink_to_fit();
-					staged.Sent = 0;
+			{
+				ENGINE_PROFILE_CAT("Authority::ReleaseSnapshots", core::ProfileCategory::Network);
+				for (Staged &staged : client.Snapshots) {
+					if (!staged.Bytes.empty() && staged.Sent >= staged.Bytes.size()) {
+						staged.Bytes.clear();
+						staged.Bytes.shrink_to_fit();
+						staged.Sent = 0;
+					}
 				}
 			}
 
@@ -1895,9 +1939,18 @@ namespace engine::replication {
 			client.Repairing.clear();
 
 			if (!delta.Components.empty()) {
-				Order.resize(Candidates.size());
-				for (size_t position = 0; position < Order.size(); position++) {
-					Order[position] = static_cast<uint32_t>(position);
+				// **Named, because `Publish`'s self time was the largest thing
+				// in this file that nothing accounted for.** The passes below
+				// are where a tick goes once the rows are gathered - the
+				// acknowledgement bookkeeping, the audit, and the identity
+				// permutation the packer sorts - and none of the three had a
+				// span, so they arrived as "Publish, 1.4 ms, doing what".
+				{
+					ENGINE_PROFILE_CAT("Authority::Order", core::ProfileCategory::Network);
+					Order.resize(Candidates.size());
+					for (size_t position = 0; position < Order.size(); position++) {
+						Order[position] = static_cast<uint32_t>(position);
+					}
 				}
 
 				Placement placed = Pack(client, delta, Settings_.MessagesPerTick);
@@ -1911,13 +1964,19 @@ namespace engine::replication {
 					placed = Pack(client, delta, Settings_.MessagesPerTick);
 				}
 
-				Record(client, placed, tick);
+				{
+					ENGINE_PROFILE_CAT("Authority::Record", core::ProfileCategory::Network);
+					Record(client, placed, tick);
+				}
 			}
 
 			// Last, so that the byte budget turns this away before it turns
 			// away anything that matters. A lost audit costs one rotation and a
 			// lost delta costs a client its agreement with the world.
-			EmitAudit(store, handle, client, tick);
+			{
+				ENGINE_PROFILE_CAT("Authority::EmitAudit", core::ProfileCategory::Network);
+				EmitAudit(store, handle, client, tick);
+			}
 
 			for (const std::vector<std::byte> &message : client.Outgoing) {
 				Stats_.Bytes += message.size();
