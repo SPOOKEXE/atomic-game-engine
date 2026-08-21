@@ -50,10 +50,12 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] in Renderer::RenderView there are a bunch of big gaps
 - [x] fix renderer stuff with gpu sync
 - [x] proper fps management with millis
-- [_] fix runaway memory allocation
+- [x] magic demo micro-optimisations with stalling replication (heaps better)
+- [x] fix runaway memory allocation
 - [_] add heap profiler for dev builds and in flamegraph with graph visualisation
 - [_] make the heap profiler super granular throughout code
 - [_] add a automatic test/benchmark that picks up long-term runaway allocations via heap profiler (simulate 5 minutes of running different scenes).
+- [_] mono.launcher (run singleplayer game, host game on server, join server, run studio, run cdn, etc). [launcher opens] => select mode => different options per each (e.g. cdn - select folder, ip, lan-only, remote-mode, etc). Plan and ask user questions first.
 
 - [_] rename mono.unified_server_client to mono.unified_tests which imports all the mono reports into the code so it can fully test all features with all variations between clients, servers, cdn, networking, engine, etc. This one focused more on CROSS communication and management, NOT per-mono specific systems and such.
 - [_] add heap profiler to mono.unified_server_client / mono.unified_tests
@@ -64,17 +66,17 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### v0.19
 
-- [_] build out proper code architecture documents (AGENTS.md, docs/CODE_FORMAT.md, docs/CODE_QUALITY.md) => CODE_ARCH.md
-- [_] DOMAIN DRIVEN DESIGN & HEXAGONAL ARCHITECTURE
-- [_] check if we need to move files / classes / structures around in the codebase to properly fit (mainly focus on engine)
-- [_] properly make a ECS component document list so i can see all components and what they're for
+- [_] build out proper code architecture documents (AGENTS.md, docs/CODE_FORMAT.md, docs/CODE_QUALITY.md) => CODE_ARCH.md.
+- [_] DOMAIN DRIVEN DESIGN & HEXAGONAL ARCHITECTURE.
+- [_] check if we need to move files / classes / structures around in the codebase to properly fit (mainly focus on engine).
+- [_] properly make a ECS component document list so i can see all components and what they're for.
 - [_] clean up all ECS components that exist and find better ways to represent stuff (e.g. merge, split, rename).
-- [_] think plan for future features as well listed in roadmap and plan for them now
-- [_] improve build times (flamegraph => optimise)
-- [_] mono.launcher (run singleplayer game, host game on server, join server, run studio, run cdn, etc)
-- [_] quic implementation
+- [_] think plan for future features as well listed in roadmap and plan for them now.
+- [_] improve build times (flamegraph => optimise).
+- [_] quic implementation.
 - [_] choose networking backend (quic, tcp, udp, etc) for each engine feature like replication and whatnot.
-- [_] deferred catchup
+- [_] build out a full logging, metrics, etc so we can track what the engine is doing in dev builds effectively.
+- [_] add more MCP integrations in engine for models to use.
 
 ### v0.20
 
