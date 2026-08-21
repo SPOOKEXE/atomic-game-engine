@@ -228,6 +228,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] NonEuclidean.luau has multiple overlapping things
 - [_] selection boxes are misaligned
 - [_] when pressing CTRL and scaling a part, scale both sides at same time
+- [_] add a (ACTIVE) scene_name
 
 ### v0.20
 
