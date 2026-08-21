@@ -488,6 +488,30 @@ namespace studio {
 		// Said whenever it is on rather than only when spans are dropped,
 		// because the whole risk of the switch is reading a number taken with it
 		// and treating it as the engine's real cost.
+		// **Ahead of the serial-compute line, because it is the larger of the
+		// two and neither excuses the other.** `just studio` builds the `dev`
+		// preset, which compiles the engine at `-O0` and leaves the vendored
+		// code at `-O2` - the right trade for a build somebody iterates on, and
+		// the wrong one to read a profile from. Measured on one scene, one
+		// display, one frame, `dev` against `release`: `convert instances`
+		// 11.99 ms against 0.179, `graph.light-bounds` 10.18 against 0.120,
+		// `sync rendered` 26.5 against 0.74.
+		//
+		// Nothing said so, so the panel looked like a normal frame with a
+		// plausible distribution and every conclusion drawn from it was about
+		// the compiler rather than the engine. `preset=release just studio` is
+		// the fix, and this is the line that says to.
+#if defined(__OPTIMIZE__) || (defined(_MSC_VER) && defined(NDEBUG))
+		constexpr bool optimised = true;
+#else
+		constexpr bool optimised = false;
+#endif
+		if (!optimised) {
+			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
+			ImGui::TextUnformatted("unoptimised build - every figure here is tens of times its shipped cost");
+			ImGui::PopStyleColor();
+		}
+
 		if (engine::parallel::ForceSerialCompute()) {
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
 			ImGui::TextUnformatted("serial compute is on - these timings are not the shipped cost");

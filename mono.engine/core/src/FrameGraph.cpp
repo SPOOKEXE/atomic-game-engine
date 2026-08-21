@@ -170,6 +170,26 @@ namespace engine::core {
 		// Reduces the frame just recorded to one worst reading per span, then
 		// feeds both consumers. Called from EndFrame on the spans about to be
 		// published, so nothing walks the tree twice.
+		// Whether this binary was compiled with optimisation on.
+		//
+		// GCC and Clang define `__OPTIMIZE__` for any `-O` above zero and leave
+		// it undefined at `-O0`. MSVC has no equivalent, so `NDEBUG` stands in -
+		// it is a weaker question, and the answer it gives is the right one for
+		// the presets this repository ships.
+		constexpr bool OptimisedBuild() {
+#if defined(_MSC_VER)
+#if defined(NDEBUG)
+			return true;
+#else
+			return false;
+#endif
+#elif defined(__OPTIMIZE__)
+			return true;
+#else
+			return false;
+#endif
+		}
+
 		void RecordHistory(
 			State &state, float frameMilliseconds, float idleMilliseconds, uint64_t nowNanoseconds
 		) {
@@ -665,6 +685,24 @@ namespace engine::core {
 
 		char line[512];
 		out << "atomic frame graph snapshot\n";
+
+		// **Said first, because every number below it is wrong without it.**
+		// The `dev` preset compiles the engine at `-O0` while the vendored code
+		// keeps `-O2`, which is the right trade for a build you iterate on and
+		// the wrong one to read a profile from. Measured on one scene, the same
+		// display, the same frame, `dev` against `release`: `convert instances`
+		// 11.99 ms against 0.179, `graph.light-bounds` 10.18 against 0.120,
+		// `sync rendered` 26.5 against 0.74. Between thirty and eighty times,
+		// span by span.
+		//
+		// A reader without this line sees a plausible-looking frame and spends a
+		// day optimising the compiler's missing inliner. The panel already warns
+		// about forced serial compute for exactly this reason and this is the
+		// larger of the two.
+		if (!OptimisedBuild()) {
+			out << "WARNING  this build is unoptimised - every figure below is "
+				   "tens of times its shipped cost\n";
+		}
 		std::snprintf(
 			line,
 			sizeof(line),
