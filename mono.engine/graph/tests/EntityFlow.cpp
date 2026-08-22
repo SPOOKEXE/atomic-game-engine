@@ -376,3 +376,16 @@ TEST_CASE("authored entity nodes execute as one composable flow", "[graph][entit
 	CHECK(result.Count == 2);
 	CHECK(Vec(entities.Get(Name("ordered"))) == std::vector<uint32_t>{0, 3});
 }
+
+TEST_CASE("a GPU-only node is outside the entity flow", "[graph][entity-flow]") {
+	RenderGraph graph;
+	const auto previous = graph.AddResource({.Name = Name("last-frame"), .Kind = ResourceKind::Colour});
+	const Node node{.Name = Name("last-frame"), .Kind = Name("last-frame"), .Writes = {previous}};
+	EntityFlow entities;
+	Viewpoints viewpoints;
+
+	// The renderer handles this node later. The CPU entity walk sees every
+	// per-view node, so "not mine" must be a quiet result rather than a warning
+	// repeated once per viewport per frame.
+	CHECK_FALSE(RunEntityNode(graph, node, {}, Viewpoint{}, 1.0f, entities, viewpoints).Handled);
+}

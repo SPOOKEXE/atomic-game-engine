@@ -6,15 +6,19 @@
 #include <cstddef>
 
 namespace engine::physics {
+	namespace {
+		float InitialGridCellSize(float requested) {
+			return requested > 0.0f ? requested : spatial::HashGrid::DEFAULT_CELL_SIZE;
+		}
+	}
 
 	PhysicsWorld::PhysicsWorld(float cellSize)
-		: DynamicIndex(cellSize), StaticIndex(cellSize),
+		: DynamicIndex(InitialGridCellSize(cellSize)), StaticIndex(InitialGridCellSize(cellSize)),
 		  // **A size at or below zero means "measure it"**, which is what
-		  // `PreparePhysicsWorld`'s default already passed and what
-		  // `spatial::HashGrid`'s constructor already treats as "use the
-		  // default". The two readings agree: an unconfigured world starts at
-		  // the default and then sizes itself on its first sync, and a
-		  // configured one keeps what the author named.
+		  // `PreparePhysicsWorld`'s default already passed. Resolve that sentinel
+		  // before the grids, where zero is invalid and correctly diagnostic. An
+		  // unconfigured world starts at the default and sizes itself on its first
+		  // sync; a configured one keeps what the author named.
 		  MeasureCells(!(cellSize > 0.0f)) {}
 
 	bool PhysicsWorld::Sleeping(ecs::Entity entity) const {

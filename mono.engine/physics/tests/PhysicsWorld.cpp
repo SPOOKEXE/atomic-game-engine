@@ -63,12 +63,12 @@ TEST_CASE("a world takes the cell size it was given", "[physics][physicsworld]")
 	CHECK(PipelineInternals::DynamicIndex(mutableWorld).CellSize() == Approx(2.0f));
 	CHECK(PipelineInternals::StaticIndex(mutableWorld).CellSize() == Approx(2.0f));
 
-	// A cell size at or below zero is refused by the grid in favour of its own
-	// default, because the alternative is a division by zero reaching every
-	// later query as a NaN. That is what makes zero usable as "the default" at
-	// the `PreparePhysicsWorld` boundary.
+	// Zero means "measure on the first sync" at the physics boundary. The grids
+	// still start at their valid default instead of receiving that sentinel as
+	// though an author had configured it.
 	const PhysicsWorld defaulted{0.0f};
 	CHECK(defaulted.CellSize() == Approx(HashGrid::DEFAULT_CELL_SIZE));
+	CHECK(defaulted.CellSizeMeasured());
 }
 
 TEST_CASE("marking the static set dirty is sticky until something clears it", "[physics][physicsworld]") {

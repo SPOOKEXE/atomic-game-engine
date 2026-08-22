@@ -239,8 +239,14 @@ namespace engine::graph {
 
 		const core::Name output = firstResource(node.Writes, ResourceKind::Entities);
 		const std::string_view kind = node.Kind.Text();
-		if (!output.IsValid() || (kind != "entities" && kind != "cull-frustum" && kind != "cull-distance" &&
-								  kind != "filter-tag" && kind != "order-draw")) {
+		if (!output.IsValid()) {
+			// The render walk offers every per-view node here before the GPU
+			// records it. A node producing no entity list belongs to that later
+			// half, so it is outside this flow rather than malformed inside it.
+			return {};
+		}
+		if (kind != "entities" && kind != "cull-frustum" && kind != "cull-distance" && kind != "filter-tag" &&
+			kind != "order-draw") {
 			// The node stays in the graph, runs every frame, and produces
 			// nothing. A pipeline missing half its objects looks exactly like
 			// one whose cull is too aggressive.

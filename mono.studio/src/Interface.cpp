@@ -2011,10 +2011,23 @@ namespace studio {
 		// picture in front of you and silently changes a different one.
 		ImGui::SetNextItemWidth(180.0f * Settings.Scale);
 		const Name shownName = Universe->NameOf(shown);
-		if (ImGui::BeginCombo("##scene", shownName.IsValid() ? Label(shownName) : "(no scene)")) {
+		// Active is a choice-state marker, so it belongs on the selector's rows
+		// and preview. Putting it on the viewport tab confuses the scene being
+		// shown with the scene an edit command will target.
+		const auto selectorLabel = [&](WorldId world, const Name &name) {
+			std::string label = name.IsValid() ? std::string(Label(name)) : "?";
+			if (world.IsValid() && world == Active) {
+				label += " (ACTIVE)";
+			}
+			return label;
+		};
+		const std::string shownLabel =
+			shown.IsValid() ? selectorLabel(shown, shownName) : std::string("(no scene)");
+		if (ImGui::BeginCombo("##scene", shownLabel.c_str())) {
 			for (const WorldId id : Universe->Worlds()) {
 				const Name name = Universe->NameOf(id);
-				if (ImGui::Selectable(name.IsValid() ? Label(name) : "?", id == shown)) {
+				const std::string itemLabel = selectorLabel(id, name);
+				if (ImGui::Selectable(itemLabel.c_str(), id == shown)) {
 					RetargetEditingViewport(reporting, id);
 				}
 			}

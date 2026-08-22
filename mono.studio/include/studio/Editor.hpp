@@ -4593,7 +4593,7 @@ namespace studio {
 
 		// What a panel's tab reads, which is not its identity.
 		//
-		// **The scene it is showing, and which one is being edited.** With four
+		// **The scene it is showing.** With four
 		// viewports open the tabs said "Viewport", "Viewport 2", "Viewport 3",
 		// "Viewport 4" and nothing said which scene any of them held - so the
 		// only way to find the one you wanted was to click each in turn.
@@ -4627,14 +4627,6 @@ namespace studio {
 				// all, which is what an empty tab would read as.
 				shown = identity;
 			}
-
-			// **The world being edited, marked rather than inferred.** Every
-			// unpinned panel follows `Active`, so more than one tab can carry
-			// this and that is correct - they are all showing the active scene.
-			if (world.IsValid() && world == Active) {
-				shown += " (ACTIVE)";
-			}
-
 			return shown + "###" + identity;
 		}
 
