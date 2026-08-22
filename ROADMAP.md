@@ -389,16 +389,6 @@ The milestone headings below are development labels. Not in line with project ve
       collide and the field is the floor, from the same function the mesh was
       built from. Measured walking east at 16 studs a second across 320 studs of
       hills, the root sits exactly half a body above the field the whole way.
-- [_] bake collision geometry for a run-time `EditableMesh`. The engine gap the
-      Terrain demo works around: `client::EditableMeshUploader` hands the mesh
-      to the renderer and registers nothing with `scene::CollisionShapes`, so a
-      script that builds geometry builds something that can be seen and not
-      touched. `game::AddCollisionShapes` already turns an `assets::MeshData`
-      into a hull and a triangle soup and the uploader already has the
-      `MeshData` in hand, so the client end is small. The server end is not: it
-      has no uploader at all, and a heightfield built by a script on a host that
-      solves has no collision on the machine that decides where anybody is
-      standing.
 - [x] optimise the replication publish path, `ReplicationStress` in a release
       build. **Measured before assumed, and the profile moved the target.**
       761 ticks of twenty thousand moving parts: `Authority::DetectRows` is
@@ -561,6 +551,20 @@ The milestone headings below are development labels. Not in line with project ve
       incorrectly (windows). The same investigation, the same negative result,
       above. The moving-camera case is the one this report adds and it is the
       second bullet.
+- [_] bake collision geometry for a run-time `EditableMesh`. The engine gap the
+      Terrain demo works around: `client::EditableMeshUploader` hands the mesh
+      to the renderer and registers nothing with `scene::CollisionShapes`, so a
+      script that builds geometry builds something that can be seen and not
+      touched. `game::AddCollisionShapes` already turns an `assets::MeshData`
+      into a hull and a triangle soup and the uploader already has the
+      `MeshData` in hand, so the client end is small. The server end is not: it
+      has no uploader at all, and a heightfield built by a script on a host that
+      solves has no collision on the machine that decides where anybody is
+      standing.
+
+
+### v0.20
+
 - [_] add a batch moveto/setcframe system (e.g. skygrid to move them all at once)
 - [_] do similar for batched moveto/setcframe in other systems
 - [_] `/home/declan/Documents/GitHub/BLADEBORNE_UNIFIED/game` port and also studio place `/home/declan/Documents/Bladeborne Floor 0.rbxl`. Turn this into a demo file.
@@ -695,13 +699,13 @@ The milestone headings below are development labels. Not in line with project ve
       which has `studio --mcp-port` bare defaulting to 8720 while its own help
       says 8738, and give `mcpbridge` a suite - it has none.
 
-### v0.20
+### v0.21
 
 - [x] thoroughly implement every user-interface element, including `SurfaceGui` and `BillboardGui` - `SurfaceGui` gains `ZOffset`, `MaxDistance`, `ClipsDescendants` and `Active`, and `BillboardGui` gains `Active`, `Brightness`, `ClipsDescendants`, `CurrentDistance`, `DistanceStep`, `ExtentsOffsetWorldSpace`, `SizeOffset` and `PlayerToHideFrom`; new classes `UIGradient`, `UITableLayout`, `UIPageLayout` and `UIDragDetector`; `ScrollingFrame` completed with `ScrollingEnabled`, `AutomaticCanvasSize`, the two `ScrollBarInset`s, `VerticalScrollBarPosition`, `ElasticBehavior`, the three bar images and `AbsoluteCanvasSize`/`AbsoluteWindowSize`, plus wheel and thumb-drag input; `RichText`, `MaxVisibleGraphemes`, `ContentText`, `TextBounds` and `TextFits` on every text class; `Interactable`, the four `NextSelection*`, `SelectionOrder` and `SelectionImageObject` on `GuiObject`; `HoverImage`, `PressedImage` and `ResampleMode` on the image classes; `Enabled` and `ApplyStrokeMode` on `UIStroke`. Laid out, drawn by both backends, saved, replicated, bound and in the Properties panel. `D00129` carries the members that need a subsystem this engine has not got (filed as `D00120`, renumbered at v0.17 - that number was already a retired entry)
 - [_] build out all remaining roblox surfaces with available underlying surface
 - [_] port many particle features from unity to here (https://docs.unity3d.com/6000.5/Documentation/ScriptReference/ParticleSystem.html)
 
-### v0.21
+### v0.22
 
 - [_] find a way to (easily) and thoroughly test rendering steps and ensure they produce the right image with right projections
 - [_] finish portals so lighting, physics, projection, clipping and geometry crossing the seam are seamless
@@ -716,7 +720,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] 3d cursor and camera orbit options under gizmo
 - [_] ensure full parallel/vectorised (i.e. get all active scenes => build entity list => update gpu resident => batch render all cameras in every scene)
 
-### v0.22
+### v0.23
 
 - [_] build out default plugins (move all topbar tools and stuff to plugins as a "Default Studio" plugin)
 - [_] build out plugin function suite (create dropdown, edit toolbar, edit viewport, edit script editors, etc)
@@ -724,7 +728,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] add a universe loading widget - shows cdns the universe has and asks to allow permission, also http enabled property if changed
 - [_] add tabs to the universe importer: general, assets, permissions, cdn, misc with all or per-world breakdown
 
-### v0.23
+### v0.24
 
 - [_] default R6 base character (capsule collider)
 - [_] gtlf default character (unreal)
