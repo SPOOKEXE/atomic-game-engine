@@ -579,24 +579,51 @@ The milestone headings below are development labels. Not in line with project ve
       Verified: a crate dropped on a script-built floor rests on it, slides down
       its slopes and settles in a trough; a character walks 323 studs across the
       Terrain demo's mountains with a worst penetration of 0.45 studs.
-- [_] a character can end up stuck in the air after a launch. Found while
-      walking the Terrain demo end to end: after being thrown up by a contact -
-      a chunk arriving under it, most likely - a character comes to rest with
-      **nothing under it** (`GroundCharacters` reports `nothing`), five studs
-      above the field, descending at 0.001 studs a tick rather than at
-      gravity's. Not falling and not moving: the horizontal drive is written
-      every tick and ignored, which reads as the solver having rested the body
-      and `WakeMovingCharacters` not waking it. Everything before the launch is
-      correct, so this is a sleep/wake interaction rather than a collision one.
-- [_] convex sweeps against a triangle mesh. `SweepConvex` is a GJK query over
-      support functions and a triangle soup is not convex, so `ShapeInstance`
-      demotes a `Mesh` collider to its bound for every sweep - which means
-      `SweepFastBodies` and `ClipCharacterVelocity` cannot see mesh terrain at
-      all. The contact path already solves the same problem in `MeshPair`, by
-      gathering the triangles overlapping a box and pairing against each; a
-      sweep wants the same gather over the swept envelope. Until then a
-      character is stopped at a cliff by a *ray*, which is a line and misses
-      anything narrower than the body.
+- [x] a character can end up stuck in the air after a launch. Not sleep and
+      wake, which is what it looked like: `SweepFastBodies` built its candidates
+      through the three-argument `ShapeInstance` constructor, which has nowhere
+      to put a hull or a soup, so every baked collider it swept against was
+      demoted to the part's extent. A terrain chunk's extent is a box the height
+      of its tallest point, so its roof is the mountain top laid flat over the
+      whole chunk, and a body falling fast enough to be swept was clamped just
+      short of that roof with nothing under it. Nothing touched, so no contact
+      resolved it and no impulse cancelled the fall: gravity kept adding to a
+      velocity that no longer moved anything, and the next tick clamped it
+      against the same roof a fraction sooner - which is the 0.001 studs a tick.
+      Fixed by reading the shapes `SyncBroadphase` has already resolved,
+      `PipelineInternals::StaticShapes`, by the same subscript as the records -
+      correct and one fewer `Store::Get` pair per candidate.
+      The second half was the same walk falling *through* the landscape after
+      about ninety seconds. On a face too steep to walk, `ClipCharacterVelocity`
+      projected the drive across the face and nothing removed the overlap: a
+      character's velocity is hard-assigned every tick so the solver's impulse
+      is discarded, and position correction is capped at
+      `MAXIMUM_CORRECTION_SPEED`, which a ten-stud-a-second slide beats. The
+      overlap accumulated until the ground probe - a ray from a step above the
+      feet - started *inside* the hill, found nothing, and reported the
+      landscape as absent. Fixed by pushing the body back out along the face
+      normal by the burial measured perpendicular to the surface: away from a
+      cliff rather than up it, and only ever outward.
+      Verified: the Terrain demo walks 2 498 studs in 12 000 ticks with a worst
+      penetration of 0.45 studs, never stuck and never through.
+- [x] convex sweeps against a triangle mesh. `SweepConvex` dispatches on the
+      fixed shape: a soup gathers the triangles overlapping the swept envelope
+      through `collision::OverlapTriangles` and sweeps the mover against each
+      one as a three-point hull, keeping the earliest, which is the same shape
+      `MeshPair` gives the contact path. The gather, the triangle budget and the
+      envelope are shared between the two through `ShapeSupport.hpp` rather than
+      written twice.
+      **The normal is the triangle's own plane, not the direction between the
+      closest points.** A body already touching the mesh - which for a character
+      walking on terrain is every tick - separates by nothing, and the general
+      sweep answers that with the reverse of the motion, because between two
+      convex shapes there is nothing better to say. Against a soup there is. The
+      made-up normal cost a character walking three studs from its spawn and
+      stopping against what looked like a vertical wall, which was the ground it
+      was standing on.
+      Verified: five cases in `physics/tests/ConvexQuery.cpp`, four of which
+      fail when the mesh walk is taken out, plus the two character bugs above
+      that this uncovered.
 - [_] add a batch moveto/setcframe system (e.g. skygrid to move them all at once)
 - [_] do similar for batched moveto/setcframe in other systems
 - [_] `~/Documents/GitHub/BLADEBORNE_UNIFIED/game` port and also studio place `~/Documents/Bladeborne Floor 0.rbxl`. Turn this into a demo file.

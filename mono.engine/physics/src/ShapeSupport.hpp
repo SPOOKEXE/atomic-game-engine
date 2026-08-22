@@ -19,6 +19,7 @@
 // name, and one expression for all six pairs. It is why the cylinder cases are
 // additions to the box-box machinery rather than a second approach.
 
+#include <engine/core/types/AABB.hpp>
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/physics/Shapes.hpp>
@@ -141,4 +142,56 @@ namespace engine::physics {
 	// @param vector A world-space direction.
 	// @return The same direction in `frame`'s local axes.
 	core::Vector3 ToLocalVector(const core::CFrame &frame, const core::Vector3 &vector);
+
+	// How many triangles of one mesh a single query may examine.
+	//
+	// **A limit and not a budget**: a body resting on terrain touches four, a
+	// body teleported inside a mountain touches thousands, and the second must
+	// reach a limit rather than an allocator. Past it the triangles examined are
+	// the first this many the overlap reported, which is ascending by triangle
+	// index - so the answer is a function of the mesh rather than of the order a
+	// walk happened to take.
+	//
+	// Shared by the contact path and the sweep, because it is the same argument
+	// about the same mesh and two numbers would be two answers to "why did it
+	// stop at sixty-four".
+	inline constexpr size_t MAXIMUM_MESH_TRIANGLES = 64;
+
+	// The world-space box a shape reaches, whatever kind it is.
+	//
+	// **A hull is measured by its own points and everything else by its
+	// extent**, which is the one thing `ShapeWorldBounds` cannot do on its own:
+	// a hull's `Extent` is not read - `Shapes.hpp` says so - so a hull asked
+	// through the extent path would answer with whatever the author left there.
+	//
+	// @param shape The placed collider.
+	// @return The axis-aligned box that contains it.
+	// @since v0.19
+	core::AABB ShapeReach(const ShapeInstance &shape);
+
+	// One triangle of a mesh, as a hull the general search can take.
+	//
+	// **A hull of three points, filled into a buffer the caller owns.** A
+	// triangle is convex, so its support function is the same scan a hull's is -
+	// and building it per triangle rather than baking one hull per triangle is
+	// what keeps a terrain mesh from being a hundred thousand `ConvexHull`
+	// objects.
+	//
+	// **Filled rather than returned, and that is not a style choice.** A
+	// `ShapeInstance` holds a *pointer* to its hull, so a function returning the
+	// two together by value hands back an instance pointing at the temporary it
+	// was built in - which reads correctly, compiles, and is a use-after-free on
+	// every call. The caller owns the hull and the pointer never leaves its
+	// frame.
+	//
+	// A three-point hull has no faces, so `FaceTowards` gives its support
+	// *point* and the manifold against it is a single contact. That is correct
+	// for a triangle: three points cannot hold a box flat on their own, and what
+	// holds it flat is the several triangles under it each contributing one.
+	//
+	// @param mesh     The mesh to read from.
+	// @param triangle Its index, as `OverlapTriangles` reports one.
+	// @param hull     Filled with the triangle's three points.
+	// @since v0.19
+	void FillTriangleHull(const collision::TriangleMesh &mesh, size_t triangle, collision::ConvexHull &hull);
 }

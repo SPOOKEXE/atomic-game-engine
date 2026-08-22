@@ -10,6 +10,7 @@
 #include <engine/physics/Continuous.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Shapes.hpp>
+#include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/spatial/HashGrid.hpp>
 #include <engine/spatial/Query.hpp>
@@ -48,6 +49,29 @@ namespace engine::physics {
 			return;
 		}
 
+		// **The shapes the sync already resolved, by the same subscript as the
+		// records.** This walk used to build its own `ShapeInstance` out of a
+		// `Store::Get` pair per candidate, through the three-argument
+		// constructor - which has nowhere to put a hull or a soup, so every
+		// baked collider it swept against was demoted to the part's bound.
+		//
+		// What that cost was a character stuck in mid-air. A terrain chunk is
+		// sixty-four studs of heightfield in a box the height of its tallest
+		// point, so the bound's roof is the mountain top laid flat over the
+		// whole chunk. A body falling fast enough to be admitted here was
+		// clamped just short of that roof, ten studs above anything anybody can
+		// see, and stayed: nothing was actually touching, so no contact
+		// resolved it and no impulse cancelled its fall, gravity kept adding to
+		// a velocity that never moved anything, and the next tick clamped it
+		// against the same roof a fraction sooner.
+		//
+		// See `PlacedCollider`, which carries the measurement for why the
+		// resolution is done once in the sync rather than per candidate here.
+		const std::vector<PlacedCollider> &shapes = PipelineInternals::StaticShapes(*world);
+		if (shapes.size() != records.size()) {
+			return;
+		}
+
 		const float delta = PhysicsStepSeconds(store);
 		if (!(delta > 0.0f)) {
 			return;
@@ -63,6 +87,12 @@ namespace engine::physics {
 		// is running, which the ECS allows: a read is not a structural change.
 		const ecs::Store &reader = store;
 		uint64_t swept = 0;
+
+		// The baked table, once for the walk. Every *candidate*'s shape is
+		// already resolved above; this is only for the moving body, whose frame
+		// has to be wound back to where the step started and so cannot be the
+		// one the sync placed.
+		const scene::CollisionShapes *baked = scene::CollisionShapesOf(store);
 
 		store.Each<scene::Transform, const scene::Motion, const scene::Collider>(
 			[&](ecs::Entity entity,
@@ -112,7 +142,17 @@ namespace engine::physics {
 					return;
 				}
 
-				const ShapeInstance moving{from, collider.Extent, collider.Shape};
+				// **The mover's own hull, and deliberately not its soup.** A
+				// hull has a support function and sweeps exactly; a triangle
+				// soup has none, so a moving mesh left unresolved falls back to
+				// the part's bound - which is the conservative direction for
+				// the body whose tunnelling this pass exists to stop.
+				const collision::ConvexHull *movingHull =
+					baked != nullptr && collider.Shape == scene::ShapeKind::Hull
+						? baked->FindHull(collider.Geometry)
+						: nullptr;
+
+				const ShapeInstance moving{from, collider.Extent, collider.Shape, movingHull, nullptr};
 
 				// **The earliest hit, with the entity id breaking a tie.** The
 				// grid walk's order is a function of the index rather than of
@@ -132,22 +172,21 @@ namespace engine::physics {
 				const ColliderRecord self{entity, collider.Layer, collider.Mask};
 
 				for (size_t at = 0; at < found.Written; at++) {
-					const ColliderRecord &other = records[static_cast<size_t>(candidates[at])];
+					const auto which = static_cast<size_t>(candidates[at]);
+					const ColliderRecord &other = records[which];
 					if (other.Owner == entity || !PairAdmitted(self, other)) {
 						continue;
 					}
 
-					const scene::Transform *placed = reader.Get<scene::Transform>(other.Owner);
-					const scene::Collider *shape = reader.Get<scene::Collider>(other.Owner);
-					if (placed == nullptr || shape == nullptr || shape->Trigger) {
+					const PlacedCollider &fixed = shapes[which];
+					if (fixed.Trigger) {
 						// **A trigger is never swept against.** It reports and
 						// never pushes, so stopping a body at one would be a
 						// wall made of something that is not there.
 						continue;
 					}
 
-					const ShapeInstance fixed{placed->Frame, shape->Extent, shape->Shape};
-					const ConvexSweep hit = SweepConvex(moving, travelled, fixed);
+					const ConvexSweep hit = SweepConvex(moving, travelled, fixed.Shape);
 					if (!hit.Hit) {
 						continue;
 					}

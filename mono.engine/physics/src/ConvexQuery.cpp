@@ -1,5 +1,7 @@
 #include "ConvexQuery.hpp"
 
+#include <engine/collision/TriangleMesh.hpp>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -728,82 +730,226 @@ namespace engine::physics {
 		return best;
 	}
 
-	ConvexSweep
-	SweepConvex(const ShapeInstance &moving, const core::Vector3 &motion, const ShapeInstance &fixed) {
-		ConvexSweep answer;
+	namespace {
+		// The sweep against one convex shape, which is what conservative
+		// advancement is written against.
+		//
+		// Split out at v0.19 so that `SweepConvex` can route a triangle mesh to
+		// the walk below without recursing into itself.
+		ConvexSweep SweepConvexOnly(
+			const ShapeInstance &moving, const core::Vector3 &motion, const ShapeInstance &fixed
+		) {
+			ConvexSweep answer;
 
-		const float travel = motion.Magnitude();
-		if (!(travel > CONVEX_EPSILON)) {
-			// No motion is an overlap question, and answering it here rather
-			// than dividing by the travel keeps the caller from having to ask
-			// two different functions depending on how fast something is going.
-			const ConvexSeparation still = ClosestPoints(moving, fixed);
-			if (still.Overlapping || still.Distance <= SWEEP_SKIN) {
-				answer.Hit = true;
-				answer.Fraction = 0.0f;
-				answer.Position = still.OnSecond;
-				answer.Normal = (still.OnFirst - still.OnSecond).Unit();
+			const float travel = motion.Magnitude();
+			if (!(travel > CONVEX_EPSILON)) {
+				// No motion is an overlap question, and answering it here rather
+				// than dividing by the travel keeps the caller from having to ask
+				// two different functions depending on how fast something is going.
+				const ConvexSeparation still = ClosestPoints(moving, fixed);
+				if (still.Overlapping || still.Distance <= SWEEP_SKIN) {
+					answer.Hit = true;
+					answer.Fraction = 0.0f;
+					answer.Position = still.OnSecond;
+					answer.Normal = (still.OnFirst - still.OnSecond).Unit();
+				}
+				return answer;
 			}
+
+			const core::Vector3 direction = motion * (1.0f / travel);
+
+			// The shape is re-placed rather than the query being told about the
+			// motion, because a support function takes a frame and this is the one
+			// thing a frame can express exactly.
+			ShapeInstance advanced = moving;
+			float covered = 0.0f;
+
+			for (size_t advance = 0; advance < SWEEP_ADVANCES; advance++) {
+				// **The position moves and the rotation does not**, which is the
+				// stated limit of this sweep. Built by copying the frame and
+				// replacing its position rather than by composing two frames,
+				// because composing would apply the rotation to the offset and walk
+				// the shape along a line that is not the motion.
+				core::CFrame placed = moving.Frame;
+				placed.Position = moving.Frame.Position + direction * covered;
+				advanced = ShapeInstance{placed, moving.Extent, moving.Shape};
+
+				const ConvexSeparation gap = ClosestPoints(advanced, fixed);
+				if (gap.Overlapping || gap.Distance <= SWEEP_SKIN) {
+					answer.Hit = true;
+					answer.Fraction = std::clamp(covered / travel, 0.0f, 1.0f);
+					answer.Position = gap.OnSecond;
+
+					// **From the fixed shape toward the mover**, which is the
+					// direction a contact would push it and the opposite of the
+					// direction it was travelling in. Taken from the two closest
+					// points rather than from the motion, because a glancing hit
+					// pushes sideways.
+					const core::Vector3 apart = gap.OnFirst - gap.OnSecond;
+					answer.Normal =
+						apart.MagnitudeSquared() > CONVEX_EPSILON ? apart.Unit() : direction * -1.0f;
+					return answer;
+				}
+
+				// **How fast the gap can possibly close**, which is the whole of
+				// conservative advancement: the two closest points approach at most
+				// at the speed of the motion projected onto the line between them,
+				// so the gap cannot vanish before that much of the motion is spent.
+				const core::Vector3 toward = (gap.OnSecond - gap.OnFirst).Unit();
+				const float closing = direction.Dot(toward);
+				if (closing <= CONVEX_EPSILON) {
+					// Moving away from the nearest feature, or along it. Nothing
+					// ahead can bring these two together.
+					return answer;
+				}
+
+				// Every step is a *lower* bound on the time of impact, so the walk
+				// approaches a contact from before it and never steps past one.
+				covered += gap.Distance / closing;
+				if (covered > travel) {
+					return answer;
+				}
+			}
+
+			// The advance budget, which a grazing approach reaches. See
+			// `SWEEP_ADVANCES` for why answering "no hit" is the conservative half
+			// there and would not be for a head-on approach.
 			return answer;
 		}
 
-		const core::Vector3 direction = motion * (1.0f / travel);
-
-		// The shape is re-placed rather than the query being told about the
-		// motion, because a support function takes a frame and this is the one
-		// thing a frame can express exactly.
-		ShapeInstance advanced = moving;
-		float covered = 0.0f;
-
-		for (size_t advance = 0; advance < SWEEP_ADVANCES; advance++) {
-			// **The position moves and the rotation does not**, which is the
-			// stated limit of this sweep. Built by copying the frame and
-			// replacing its position rather than by composing two frames,
-			// because composing would apply the rotation to the offset and walk
-			// the shape along a line that is not the motion.
-			core::CFrame placed = moving.Frame;
-			placed.Position = moving.Frame.Position + direction * covered;
-			advanced = ShapeInstance{placed, moving.Extent, moving.Shape};
-
-			const ConvexSeparation gap = ClosestPoints(advanced, fixed);
-			if (gap.Overlapping || gap.Distance <= SWEEP_SKIN) {
-				answer.Hit = true;
-				answer.Fraction = std::clamp(covered / travel, 0.0f, 1.0f);
-				answer.Position = gap.OnSecond;
-
-				// **From the fixed shape toward the mover**, which is the
-				// direction a contact would push it and the opposite of the
-				// direction it was travelling in. Taken from the two closest
-				// points rather than from the motion, because a glancing hit
-				// pushes sideways.
-				const core::Vector3 apart = gap.OnFirst - gap.OnSecond;
-				answer.Normal = apart.MagnitudeSquared() > CONVEX_EPSILON ? apart.Unit() : direction * -1.0f;
+		// The sweep against a triangle mesh, one triangle at a time.
+		//
+		// **A soup is not convex, so the walk above has no answer for one.**
+		// `Support` returns zero reach for `ShapeKind::Mesh` - `ShapeSupport.cpp`
+		// says so and calls the case unreachable - which means a sweep against
+		// mesh terrain separated from everything and reported no hit at all.
+		// What that cost is everything built on sweeping: `SweepFastBodies`
+		// could not stop a bullet at a terrain wall and `ClipCharacterVelocity`
+		// could not stop a walk at a mountainside, on any world whose ground is
+		// a mesh.
+		//
+		// **The same shape of answer the contact path already gives.**
+		// `MeshPair` gathers the triangles a body's box overlaps and pairs
+		// against each as a three-point hull; this gathers the triangles the
+		// *swept* box overlaps and sweeps against each. One gather, one convex
+		// query per triangle, and the earliest hit wins.
+		//
+		// **Ties broken by triangle index**, for the reason `SweepFastBodies`
+		// gives about entity ids: two triangles sharing an edge answer the same
+		// fraction for a body arriving at that edge, and which of them a walk
+		// reached first is a property of the mesh's build rather than of the
+		// scene. The lower index is the one that is the same on two runs.
+		ConvexSweep
+		SweepMeshShape(const ShapeInstance &moving, const core::Vector3 &motion, const ShapeInstance &mesh) {
+			ConvexSweep answer;
+			if (mesh.Mesh == nullptr) {
 				return answer;
 			}
 
-			// **How fast the gap can possibly close**, which is the whole of
-			// conservative advancement: the two closest points approach at most
-			// at the speed of the motion projected onto the line between them,
-			// so the gap cannot vanish before that much of the motion is spent.
-			const core::Vector3 toward = (gap.OnSecond - gap.OnFirst).Unit();
-			const float closing = direction.Dot(toward);
-			if (closing <= CONVEX_EPSILON) {
-				// Moving away from the nearest feature, or along it. Nothing
-				// ahead can bring these two together.
-				return answer;
+			// The whole of the motion, not just where it starts: a body that
+			// crosses six triangles in one step has to be tested against all
+			// six, and a gather around the starting pose alone would find the
+			// ones it is already standing on.
+			core::CFrame ended = moving.Frame;
+			ended.Position = moving.Frame.Position + motion;
+			const ShapeInstance arrived{ended, moving.Extent, moving.Shape, moving.Hull, moving.Mesh};
+
+			const core::AABB world = ShapeReach(moving).Union(ShapeReach(arrived));
+			const core::Vector3 corners[8] = {
+				core::Vector3{world.Minimum.X, world.Minimum.Y, world.Minimum.Z},
+				core::Vector3{world.Maximum.X, world.Minimum.Y, world.Minimum.Z},
+				core::Vector3{world.Minimum.X, world.Maximum.Y, world.Minimum.Z},
+				core::Vector3{world.Maximum.X, world.Maximum.Y, world.Minimum.Z},
+				core::Vector3{world.Minimum.X, world.Minimum.Y, world.Maximum.Z},
+				core::Vector3{world.Maximum.X, world.Minimum.Y, world.Maximum.Z},
+				core::Vector3{world.Minimum.X, world.Maximum.Y, world.Maximum.Z},
+				core::Vector3{world.Maximum.X, world.Maximum.Y, world.Maximum.Z},
+			};
+
+			// Into the mesh's own space, because its triangles are in that space
+			// and moving one box there is cheaper than moving every triangle out
+			// of it - `MeshPair` makes the same trade for the same reason.
+			core::AABB local;
+			for (size_t index = 0; index < 8; index++) {
+				const core::Vector3 point = ToLocalPoint(mesh.Frame, corners[index]);
+				const core::AABB one{point, point};
+				local = index == 0 ? one : local.Union(one);
 			}
 
-			// Every step is a *lower* bound on the time of impact, so the walk
-			// approaches a contact from before it and never steps past one.
-			covered += gap.Distance / closing;
-			if (covered > travel) {
-				return answer;
+			std::array<uint32_t, MAXIMUM_MESH_TRIANGLES> reached{};
+			const size_t count = collision::OverlapTriangles(*mesh.Mesh, local, reached);
+
+			// Reused across the walk, so a body over sixty triangles allocates
+			// its three points once rather than sixty times.
+			collision::ConvexHull triangle;
+			uint32_t nearest = 0;
+
+			for (size_t at = 0; at < count; at++) {
+				FillTriangleHull(*mesh.Mesh, reached[at], triangle);
+				const ShapeInstance placed{
+					mesh.Frame, core::Vector3::Zero, scene::ShapeKind::Hull, &triangle, nullptr
+				};
+
+				ConvexSweep hit = SweepConvexOnly(moving, motion, placed);
+				if (!hit.Hit) {
+					continue;
+				}
+
+				// **The triangle's own plane, not the direction between the two
+				// closest points.** A body that is already touching the mesh -
+				// which for a character walking on terrain is every tick - gives
+				// a separation of nothing, and the general sweep answers that
+				// with the reverse of the motion, because between two convex
+				// shapes there is nothing better to say. Against a soup there
+				// is: a triangle is a plane and its normal is the direction the
+				// surface pushes.
+				//
+				// What the made-up normal cost was a character walking three
+				// studs from its spawn and stopping against what looked like a
+				// vertical wall - the ground it was standing on, reported as
+				// `(-1, 0, 0)` because that is where it had come from.
+				//
+				// **Flipped to face the approach**, so a soup resists whichever
+				// side a body arrives from. A one-sided rule would let anything
+				// under a floor rise through it, and a heightfield's underside
+				// is where a body that has already gone wrong ends up.
+				const collision::Triangle corners = mesh.Mesh->TriangleAt(reached[at]);
+				const core::Vector3 plane =
+					mesh.Frame.VectorToWorldSpace((corners.B - corners.A).Cross(corners.C - corners.A));
+				if (plane.MagnitudeSquared() > CONVEX_EPSILON) {
+					const core::Vector3 outward = plane.Unit();
+					hit.Normal = outward.Dot(motion) > 0.0f ? outward * -1.0f : outward;
+				}
+
+				if (!answer.Hit || hit.Fraction < answer.Fraction ||
+					(hit.Fraction == answer.Fraction && reached[at] < nearest)) {
+					answer = hit;
+					nearest = reached[at];
+				}
 			}
+
+			return answer;
+		}
+	}
+
+	ConvexSweep
+	SweepConvex(const ShapeInstance &moving, const core::Vector3 &motion, const ShapeInstance &fixed) {
+		// **A mesh is the one kind that is not a convex query.** Everything else
+		// - box, sphere, cylinder, hull - has a support function, and
+		// conservative advancement is written against exactly that. See
+		// `SweepMeshShape`.
+		//
+		// A *moving* mesh is not routed here and is not an oversight: nothing in
+		// this engine sweeps one. `SweepFastBodies` sweeps bodies that move fast
+		// and `ClipCharacterVelocity` sweeps a character, and both of those are
+		// boxes - a triangle soup is the shape of a world rather than of a thing
+		// in it. Should one ever move, it arrives here as its own bound, which
+		// `ShapeInstance` states as the behaviour for a kind with nothing to
+		// answer with.
+		if (fixed.Shape == scene::ShapeKind::Mesh) {
+			return SweepMeshShape(moving, motion, fixed);
 		}
 
-		// The advance budget, which a grazing approach reaches. See
-		// `SWEEP_ADVANCES` for why answering "no hit" is the conservative half
-		// there and would not be for a head-on approach.
-		return answer;
+		return SweepConvexOnly(moving, motion, fixed);
 	}
 }

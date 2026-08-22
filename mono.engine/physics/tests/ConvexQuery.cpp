@@ -1,3 +1,4 @@
+#include <engine/collision/TriangleMesh.hpp>
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/scene/Enums.hpp>
@@ -13,6 +14,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <vector>
 
 TEST_SUITE_ID("engine.physics.convexquery")
 // The exact pairs are the oracle every case here is checked against.
@@ -338,4 +341,133 @@ TEST_CASE("a sweep never steps past the contact it was called to find", "[convex
 			Box(Vector3{motion.X * hit.Fraction, height, 0.0f}, Vector3{0.5f, 0.5f, 0.5f});
 		CHECK_FALSE(PenetrationBetween(stopped, wall).Depth > 1e-3f);
 	}
+}
+
+// --- sweeping a triangle mesh -------------------------------------------------
+//
+// **A soup is not convex, so conservative advancement has no answer for one on
+// its own.** `Support` reports zero reach for `ShapeKind::Mesh`, which makes a
+// mesh behave as a single point at its own frame - so a sweep against terrain
+// answered about a point in the middle of it and a bullet went through a
+// hillside as if it were not there.
+//
+// **Every case here puts the triangles somewhere the frame is not**, which is
+// what separates the walk from the point it replaced: a mesh whose geometry sits
+// on its own origin gives the same answer either way, and the whole failure was
+// that the geometry is elsewhere.
+
+namespace {
+	// A flat floor of two triangles, four metres square, `height` above the
+	// mesh's own origin.
+	engine::collision::TriangleMesh Floor(float height) {
+		const std::vector<Vector3> points{
+			Vector3{-2.0f, height, -2.0f},
+			Vector3{2.0f, height, -2.0f},
+			Vector3{-2.0f, height, 2.0f},
+			Vector3{2.0f, height, 2.0f},
+		};
+		const std::vector<uint32_t> indices{0, 2, 1, 1, 2, 3};
+		return engine::collision::BuildTriangleMesh(points, indices);
+	}
+
+	// A wall of two triangles in the YZ plane, `x` from the mesh's own origin.
+	engine::collision::TriangleMesh Wall(float x) {
+		const std::vector<Vector3> points{
+			Vector3{x, -2.0f, -2.0f},
+			Vector3{x, 2.0f, -2.0f},
+			Vector3{x, -2.0f, 2.0f},
+			Vector3{x, 2.0f, 2.0f},
+		};
+		const std::vector<uint32_t> indices{0, 2, 1, 1, 2, 3};
+		return engine::collision::BuildTriangleMesh(points, indices);
+	}
+
+	ShapeInstance MeshAt(const engine::collision::TriangleMesh &mesh, const Vector3 &at) {
+		return ShapeInstance{
+			CFrame(at), Vector3{0.5f, 0.5f, 0.5f}, engine::scene::ShapeKind::Mesh, nullptr, &mesh
+		};
+	}
+}
+
+TEST_CASE("a sweep stops at a triangle and not at the mesh's origin", "[convexquery]") {
+	// The wall's triangles stand six metres along X from the mesh's own frame,
+	// which is at the origin. A metre cube travelling twenty metres has to stop
+	// at the triangles - a version that answered about the frame would stop at
+	// half a metre.
+	const engine::collision::TriangleMesh wall = Wall(6.0f);
+	const ShapeInstance fixed = MeshAt(wall, Vector3::Zero);
+	const ShapeInstance bullet = Box(Vector3{0.0f, 0.0f, 0.0f}, Vector3{0.5f, 0.5f, 0.5f});
+
+	const ConvexSweep hit = SweepConvex(bullet, Vector3{20.0f, 0.0f, 0.0f}, fixed);
+	REQUIRE(hit.Hit);
+
+	// A triangle has no thickness, so the leading face reaches the plane when
+	// the centre is at 5.5 - which is 5.5 of the twenty metres.
+	CHECK(hit.Fraction == Approx(5.5f / 20.0f).margin(3e-3f));
+	CHECK(hit.Normal.X == Approx(-1.0f).margin(5e-2f));
+}
+
+TEST_CASE("a sweep lands on a triangle mesh floor", "[convexquery]") {
+	// The case a character is: falling onto ground that is a soup rather than a
+	// slab. The floor is three metres below the mesh's frame.
+	const engine::collision::TriangleMesh floor = Floor(-3.0f);
+	const ShapeInstance ground = MeshAt(floor, Vector3::Zero);
+	const ShapeInstance falling = Box(Vector3{0.0f, 6.0f, 0.0f}, Vector3{0.5f, 0.5f, 0.5f});
+
+	const ConvexSweep hit = SweepConvex(falling, Vector3{0.0f, -20.0f, 0.0f}, ground);
+	REQUIRE(hit.Hit);
+
+	// Its underside meets the plane when the centre is at -2.5, which is 8.5 of
+	// the twenty metres. The frame it would have stopped at is at 5.5.
+	CHECK(hit.Fraction == Approx(8.5f / 20.0f).margin(3e-3f));
+	CHECK(hit.Normal.Y == Approx(1.0f).margin(5e-2f));
+}
+
+TEST_CASE("a sweep through a mesh's frame with no triangle there misses", "[convexquery]") {
+	// **The half that says this is a gather and not a bound.** The body passes
+	// straight through the mesh's own origin and through the middle of its
+	// bound, and there is no triangle within three metres of either.
+	const engine::collision::TriangleMesh floor = Floor(-3.0f);
+	const ShapeInstance ground = MeshAt(floor, Vector3::Zero);
+
+	const ShapeInstance across = Box(Vector3{-8.0f, 0.0f, 0.0f}, Vector3{0.5f, 0.5f, 0.5f});
+	CHECK_FALSE(SweepConvex(across, Vector3{16.0f, 0.0f, 0.0f}, ground).Hit);
+}
+
+TEST_CASE("a sweep past the edge of a mesh misses", "[convexquery]") {
+	// Beyond where the triangles reach, along the plane they lie in. A bound
+	// would still be four metres square here; the triangles are what answer.
+	const engine::collision::TriangleMesh floor = Floor(0.0f);
+	const ShapeInstance ground = MeshAt(floor, Vector3::Zero);
+
+	const ShapeInstance beside = Box(Vector3{-8.0f, 0.0f, 6.0f}, Vector3{0.5f, 0.5f, 0.5f});
+	CHECK_FALSE(SweepConvex(beside, Vector3{16.0f, 0.0f, 0.0f}, ground).Hit);
+}
+
+TEST_CASE("a sweep against a mesh takes the earliest triangle", "[convexquery]") {
+	// Two walls in one mesh, four metres apart. The walk tests every triangle
+	// the swept box overlaps, so the answer has to be the nearer of them rather
+	// than whichever the gather listed last.
+	const std::vector<Vector3> points{
+		Vector3{4.0f, -2.0f, -2.0f},
+		Vector3{4.0f, 2.0f, -2.0f},
+		Vector3{4.0f, -2.0f, 2.0f},
+		Vector3{4.0f, 2.0f, 2.0f},
+		Vector3{8.0f, -2.0f, -2.0f},
+		Vector3{8.0f, 2.0f, -2.0f},
+		Vector3{8.0f, -2.0f, 2.0f},
+		Vector3{8.0f, 2.0f, 2.0f},
+	};
+
+	// The far wall's triangles are listed *first*, so a walk that kept the last
+	// hit rather than the earliest would answer with the far one.
+	const std::vector<uint32_t> indices{4, 6, 5, 5, 6, 7, 0, 2, 1, 1, 2, 3};
+	const engine::collision::TriangleMesh both = engine::collision::BuildTriangleMesh(points, indices);
+
+	const ShapeInstance fixed = MeshAt(both, Vector3::Zero);
+	const ShapeInstance bullet = Box(Vector3{0.0f, 0.0f, 0.0f}, Vector3{0.5f, 0.5f, 0.5f});
+
+	const ConvexSweep hit = SweepConvex(bullet, Vector3{20.0f, 0.0f, 0.0f}, fixed);
+	REQUIRE(hit.Hit);
+	CHECK(hit.Fraction == Approx(3.5f / 20.0f).margin(3e-3f));
 }

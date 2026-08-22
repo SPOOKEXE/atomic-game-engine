@@ -2,6 +2,7 @@
 
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/scene/Components.hpp>
 #include <engine/scene/Enums.hpp>
 
 #include <glm/gtc/quaternion.hpp>
@@ -168,6 +169,35 @@ namespace engine::physics {
 			(Shape == scene::ShapeKind::Mesh && Mesh == nullptr)) {
 			Shape = scene::ShapeKind::Box;
 		}
+	}
+
+	core::AABB ShapeReach(const ShapeInstance &shape) {
+		if (shape.Hull != nullptr) {
+			return core::AABB::FromOrientedBox(
+				shape.Frame,
+				core::Vector3{
+					std::max(std::abs(shape.Hull->Bounds.Minimum.X), std::abs(shape.Hull->Bounds.Maximum.X)),
+					std::max(std::abs(shape.Hull->Bounds.Minimum.Y), std::abs(shape.Hull->Bounds.Maximum.Y)),
+					std::max(std::abs(shape.Hull->Bounds.Minimum.Z), std::abs(shape.Hull->Bounds.Maximum.Z)),
+				}
+			);
+		}
+
+		scene::Collider described;
+		described.Shape = shape.Shape;
+		described.Extent = shape.Extent;
+		return ShapeWorldBounds(described, shape.Frame);
+	}
+
+	void FillTriangleHull(const collision::TriangleMesh &mesh, size_t triangle, collision::ConvexHull &hull) {
+		const collision::Triangle corners = mesh.TriangleAt(triangle);
+
+		hull.Points.assign({corners.A, corners.B, corners.C});
+		hull.Faces.clear();
+		hull.Loops.clear();
+		hull.Bounds = core::AABB{corners.A, corners.A}
+						  .Union(core::AABB{corners.B, corners.B})
+						  .Union(core::AABB{corners.C, corners.C});
 	}
 
 	core::Vector3 ToLocalPoint(const core::CFrame &frame, const core::Vector3 &point) {

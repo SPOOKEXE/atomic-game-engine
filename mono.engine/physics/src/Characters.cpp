@@ -648,15 +648,61 @@ namespace engine::physics {
 						// would accumulate a fall the snap has to undo every
 						// tick, which is the jitter this replaces.
 						motion->Linear.Y = 0.0f;
-					} else if (speed > 1e-4f && !jumping) {
+					} else if (!jumping) {
 						// **Too steep to walk up, so it is not walked into.**
 						// The drive keeps only what runs across the face and
 						// the vertical stays gravity's, so a character pressing
 						// into a cliff slides down it rather than burrowing
 						// through. Not rescaled: pushing into a wall should
 						// cost speed.
-						motion->Linear.X = along.X;
-						motion->Linear.Z = along.Z;
+						if (speed > 1e-4f) {
+							motion->Linear.X = along.X;
+							motion->Linear.Z = along.Z;
+						}
+
+						// **And back out of the face, along the face.**
+						//
+						// Projecting the walk is not enough on its own, and the
+						// reason is at the top of this function: a character's
+						// velocity is hard-assigned every tick, so the solver's
+						// contact impulse is thrown away unintegrated and the
+						// only thing left resolving an overlap is position
+						// correction, capped at `MAXIMUM_CORRECTION_SPEED`. A
+						// body sliding across a hillside at ten studs a second
+						// gains depth faster than three metres a second takes
+						// it away, and the projection is onto the face under
+						// the *feet* while the face it is pressing into is the
+						// one in front - so a little is left pointing in every
+						// tick and it accumulates.
+						//
+						// What that cost was a character walking into a
+						// mountain and out of the world. The probe above is a
+						// ray from a step over the feet: once the feet are a
+						// full step under the surface, the ray starts *inside*
+						// the hill, points down, and finds nothing - so the
+						// slide stops, the ground is reported as absent, and
+						// the body falls through a solid landscape for ever.
+						// Measured, it took about ninety seconds of walking.
+						//
+						// **Along the normal and never straight up**, which is
+						// what separates this from the snap above: a push along
+						// the face of a cliff moves a body *away* from the
+						// cliff, where a vertical one would walk it up. The
+						// distance is the vertical burial scaled by the face's
+						// own tilt, which is that burial measured perpendicular
+						// to the surface - the whole overlap on flat ground,
+						// and nothing at all on a vertical wall, where a
+						// downward ray has nothing to say anyway.
+						//
+						// **Only ever outward.** A negative lift is a body
+						// above the surface, and pulling it down onto a slope
+						// it cannot stand on is the sticky cliff this is meant
+						// to prevent.
+						if (lift > 1e-4f) {
+							if (scene::Transform *moved = store.GetMutable<scene::Transform>(body)) {
+								moved->Frame.Position = moved->Frame.Position + face * (lift * face.Y);
+							}
+						}
 					}
 				}
 
@@ -799,6 +845,23 @@ namespace engine::physics {
 					// along the travel, so a zero fraction is skipped rather
 					// than taken as the earliest.
 					if (hit.Fraction <= 1e-4f) {
+						continue;
+					}
+
+					// **Ground is not a wall, and telling them apart is what
+					// keeps a walk moving.** Since v0.19 a sweep can see a
+					// triangle mesh - before that a mesh collider was demoted to
+					// its bound and this pass never hit terrain at all - and the
+					// first thing it sees is the ground the character is walking
+					// *on*: a surface rising a few centimetres over one step is
+					// a hit at a real fraction with a floor's normal. Clipping
+					// on that stopped a character three studs from its spawn.
+					//
+					// What the ground does to a walk is handled above, by the
+					// projection onto the face and the snap onto it. This pass
+					// is for the other question: is the step about to enter
+					// something it has to go around.
+					if (hit.Normal.Y > MINIMUM_WALKABLE_NORMAL) {
 						continue;
 					}
 
