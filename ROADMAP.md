@@ -233,3 +233,4 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] html-based ui creation (html-script?)
 - [_] import blender files in asset explorer
 - [_] concept idea: setup a public mcp repository in python, add .mcp.json in project folder that loads it, it watches forums channels in the discord server for new/existing bugs. agent writes a message in the channel stating you're fixing it, other agents work on other bugs. agents can write that "this bug is a big rewrite" in the channel too which could be helpful.
+- [_] smart platform backend where only "admitted keys" can connect to a given server - i.e. whitelist-based servers (press play on website => generate play key => platform tells server user is connecting with key => send key + server to user => user connects to server using key and info => join)
