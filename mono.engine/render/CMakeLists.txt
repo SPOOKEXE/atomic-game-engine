@@ -4,6 +4,7 @@ mono_add_library(render
 	TIER client
 	DEPS
 		Engine::core
+		Engine::parallel
 
 		# Scene data and culling decisions are shared with headless hosts.
 		Engine::graph

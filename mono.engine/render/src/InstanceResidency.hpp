@@ -61,6 +61,12 @@ namespace engine::render {
 			const InstanceKey &key, const scene::DrawInstance &source, const MeshEntry &mesh, uint32_t &slot
 		);
 
+		bool Probe(
+			const InstanceKey &key, const scene::DrawInstance &source, const MeshEntry &mesh, uint32_t &slot
+		) const;
+
+		void Touch(uint32_t slot);
+
 		void EndFrame();
 
 		void MarkAllDirty();
@@ -70,6 +76,10 @@ namespace engine::render {
 		std::span<const InstanceUploadRange> DirtyRanges();
 
 		const GpuInstance &Row(uint32_t slot) const;
+
+		std::span<const GpuInstance> PackedRows() const {
+			return Packed;
+		}
 
 		uint32_t SlotCount() const {
 			return static_cast<uint32_t>(Entries.size());
@@ -97,7 +107,6 @@ namespace engine::render {
 
 		struct Entry {
 			InstanceKey Key;
-			GpuInstance Packed;
 			PackingSource Source;
 			float Transparency = 0.0f;
 			float AlphaCutoff = 0.5f;
@@ -122,6 +131,7 @@ namespace engine::render {
 
 		std::unordered_map<InstanceKey, uint32_t, InstanceKeyHash> Slots;
 		std::vector<Entry> Entries;
+		std::vector<GpuInstance> Packed;
 		std::vector<uint32_t> Free;
 		std::vector<uint32_t> Dirty;
 		std::vector<InstanceUploadRange> Ranges;

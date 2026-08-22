@@ -48,6 +48,23 @@ TEST_CASE("an exact source row reuses its packed resident slot", "[render][resid
 	CHECK(rows.DirtyCount() == 0);
 }
 
+TEST_CASE("probing an absent source does not touch another resident row", "[render][residency]") {
+	InstanceResidency rows;
+	DrawInstance source;
+	MeshEntry mesh;
+
+	rows.BeginFrame();
+	rows.Upsert(Key(1), ToGpu(source, mesh), source, mesh);
+	rows.EndFrame();
+	rows.AcknowledgeDirty();
+
+	rows.BeginFrame();
+	uint32_t slot = 0;
+	CHECK_FALSE(rows.Probe(Key(2), source, mesh, slot));
+	rows.EndFrame();
+	CHECK(rows.LiveCount() == 0);
+}
+
 TEST_CASE("source and mesh packing inputs invalidate exact resident reuse", "[render][residency]") {
 	InstanceResidency rows;
 	DrawInstance source;
@@ -103,6 +120,9 @@ TEST_CASE("reordering keeps resident slots and only changes indices", "[render][
 	const uint32_t second = rows.Upsert(Key(2), Row(2.0f));
 	rows.EndFrame();
 	REQUIRE(rows.DirtyCount() == 2);
+	REQUIRE(rows.PackedRows().size() == rows.SlotCount());
+	CHECK(&rows.Row(first) == rows.PackedRows().data() + first);
+	CHECK(&rows.Row(second) == rows.PackedRows().data() + second);
 
 	rows.BeginFrame();
 	CHECK(rows.Upsert(Key(2), Row(2.0f)) == second);
@@ -217,4 +237,5 @@ TEST_CASE("token residency retires rows after the whole camera batch omits them"
 	// from every camera in frame two.
 	rows.BeginFrame(3);
 	CHECK(rows.LiveCount() == 1);
+	CHECK(rows.PackedRows().size() == 1);
 }

@@ -973,11 +973,11 @@ namespace engine::render {
 		uint64_t QueueTransferBytes = 0;
 		//@}
 
-		// Bytes actually copied from CPU staging memory, and the dedicated SDL
+		// Bytes actually copied from CPU staging memory, and any dedicated SDL
 		// copy command buffers that carried them. Unlike the scheduled figures
-		// above, these are observed backend traffic for this frame. A command
-		// buffer is submitted without a fence so the GPU can consume uploads
-		// while the CPU continues recording render and compute passes.
+		// above, these are observed backend traffic for this frame. Ordinary frame
+		// uploads are recorded into the main buffer, so a non-zero buffer count
+		// identifies a transfer that could not join the batch.
 		//@{
 		uint64_t UploadedBytes = 0;
 		uint32_t UploadCommandBuffers = 0;

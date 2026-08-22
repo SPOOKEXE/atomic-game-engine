@@ -23,6 +23,7 @@
 #include <engine/graph/Cull.hpp>
 #include <engine/graph/EntityFlow.hpp>
 #include <engine/graph/Shadow.hpp>
+#include <engine/parallel/Jobs.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Tagging.hpp>
@@ -1402,7 +1403,7 @@ namespace engine::render {
 	//
 	// **A private phase of `Begin` rather than a node**, because nothing here
 	// touches the device queue: the copy pass it stages for is submitted by
-	// `SubmitUploads`, which is what the `upload-instances` node calls.
+	// `RecordUploads`, which is what the `upload-instances` node calls.
 	void ViewRecording::PackInstances() {
 		Impl *const State = this->State;
 		const core::CFrame &cameraFrame = Request.CameraFrame;
@@ -1434,10 +1435,12 @@ namespace engine::render {
 		State->SlotTags.resize(uploadCount);
 		State->SlotSeam.resize(uploadCount);
 		State->SlotSeamLight.resize(uploadCount);
+		State->SlotInstanceKey.resize(sceneCount);
+		State->SlotInstanceCurrent.resize(sceneCount);
 		State->SceneSlotOfSource.resize(ownCount);
 
 		const core::Name viewWorld = Request.Source->WorldName;
-		const auto record = [&](uint32_t drawSlot, const scene::DrawInstance &instance, uint32_t fallback) {
+		const auto probe = [&](uint32_t drawSlot, const scene::DrawInstance &instance, uint32_t fallback) {
 			const MeshEntry &mesh = State->Meshes.Resolve(instance.Mesh);
 			State->SlotMesh[drawSlot] = &mesh;
 			State->SlotTexture[drawSlot] = instance.Texture;
@@ -1459,33 +1462,69 @@ namespace engine::render {
 			State->SlotSeamLight[drawSlot] =
 				glm::vec4{instance.SeamLight.X, instance.SeamLight.Y, instance.SeamLight.Z, 0.0f};
 
-			const InstanceKey key{
+			InstanceKey &key = State->SlotInstanceKey[drawSlot];
+			key = InstanceKey{
 				instance.SourceWorld.IsValid() ? instance.SourceWorld : viewWorld,
 				instance.Source,
 				instance.Variant,
 				instance.Source == 0 ? fallback + 1u : 0u,
 			};
-			uint32_t residentSlot = 0;
-			if (!residency.Reuse(key, instance, mesh, residentSlot)) {
-				residentSlot = residency.Upsert(key, ToGpu(instance, mesh), instance, mesh);
-			}
+			uint32_t residentSlot = std::numeric_limits<uint32_t>::max();
+			State->SlotInstanceCurrent[drawSlot] = residency.Probe(key, instance, mesh, residentSlot);
 			target.InstanceIndices[drawSlot] = residentSlot;
 		};
+		const auto finishResident =
+			[&](uint32_t drawSlot, const scene::DrawInstance &instance, const MeshEntry &mesh) {
+				if (State->SlotInstanceCurrent[drawSlot] != 0) {
+					residency.Touch(target.InstanceIndices[drawSlot]);
+					return;
+				}
+				target.InstanceIndices[drawSlot] =
+					residency.Upsert(State->SlotInstanceKey[drawSlot], ToGpu(instance, mesh), instance, mesh);
+			};
 
 		{
 			ENGINE_PROFILE_CAT("resolve resident instances", core::ProfileCategory::Render);
 			{
 				ENGINE_PROFILE_CAT("resident.scene", core::ProfileCategory::Render);
-				for (uint32_t index = 0; index < State->SceneOrder.size(); index++) {
-					const uint32_t source = State->SceneOrder[index];
-					record(index, State->SceneInstances[source], source);
-					State->SceneSlotOfSource[source] = index;
+				// At 100,000 resident rows this probe and metadata pass measured 10.9 ms
+				// serial in release. Sixteen thousand rows leaves far more work than the
+				// job system's measured handover. Smaller scenes keep probe and finalize
+				// adjacent so the parallel design adds no second traversal.
+				constexpr size_t RESIDENT_GRAIN = 4096;
+				constexpr size_t RESIDENT_PARALLEL_MINIMUM = 16'384;
+				if (State->SceneOrder.size() < RESIDENT_PARALLEL_MINIMUM) {
+					for (uint32_t index = 0; index < State->SceneOrder.size(); index++) {
+						const uint32_t source = State->SceneOrder[index];
+						const scene::DrawInstance &instance = State->SceneInstances[source];
+						probe(index, instance, source);
+						State->SceneSlotOfSource[source] = index;
+						finishResident(index, instance, *State->SlotMesh[index]);
+					}
+				} else {
+					parallel::Jobs::For(
+						State->SceneOrder.size(),
+						RESIDENT_GRAIN,
+						[&](size_t begin, size_t end) {
+							for (size_t index = begin; index < end; index++) {
+								const uint32_t source = State->SceneOrder[index];
+								probe(static_cast<uint32_t>(index), State->SceneInstances[source], source);
+							}
+						},
+						RESIDENT_PARALLEL_MINIMUM
+					);
+					for (uint32_t index = 0; index < State->SceneOrder.size(); index++) {
+						const uint32_t source = State->SceneOrder[index];
+						State->SceneSlotOfSource[source] = index;
+						finishResident(index, State->SceneInstances[source], *State->SlotMesh[index]);
+					}
 				}
 			}
 			{
 				ENGINE_PROFILE_CAT("resident.foreign", core::ProfileCategory::Render);
 				for (uint32_t index = ownCount; index < sceneCount; index++) {
-					record(index, State->SceneInstances[index], index);
+					probe(index, State->SceneInstances[index], index);
+					finishResident(index, State->SceneInstances[index], *State->SlotMesh[index]);
 				}
 			}
 			{
@@ -1676,10 +1715,13 @@ namespace engine::render {
 					return;
 				}
 				auto *rows = static_cast<GpuInstance *>(mapped);
+				const std::span<const GpuInstance> packed = residency.PackedRows();
 				for (const InstanceUploadRange &range : residency.DirtyRanges()) {
-					for (uint32_t offset = 0; offset < range.Count; offset++) {
-						rows[range.First + offset] = residency.Row(range.First + offset);
-					}
+					std::memcpy(
+						rows + range.First,
+						packed.data() + range.First,
+						static_cast<size_t>(range.Count) * sizeof(GpuInstance)
+					);
 				}
 				SDL_UnmapGPUTransferBuffer(State->Device, State->InstanceTransfer);
 			}
@@ -1994,6 +2036,7 @@ namespace engine::render {
 			// textures. The fences below therefore move to that second buffer.
 			if (!SDL_SubmitGPUCommandBuffer(command)) {
 				ENGINE_ERROR("SDL_SubmitGPUCommandBuffer: {}", SDL_GetError());
+				State->CompleteInstanceUploads(false);
 				State->Timestamps.Abandon(timingSlot);
 				if (timingSlot < VulkanTimestamps::SLOTS) {
 					State->PendingMarks[timingSlot].clear();
@@ -2004,6 +2047,7 @@ namespace engine::render {
 				State->DropDownloads();
 				return;
 			}
+			State->CompleteInstanceUploads(true);
 
 			if (SDL_GPUCommandBuffer *downloads = State->DownloadCommand; downloads != nullptr) {
 				State->DownloadCommand = nullptr;

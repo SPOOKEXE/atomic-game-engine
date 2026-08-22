@@ -355,12 +355,12 @@ namespace engine::render {
 		// @return Always `true`; a CPU node cannot fail the frame here.
 		bool FinishCpuNode(const graph::RunContext &context);
 
-		// Stages and submits the frame's uploads, once. Every node that draws
+		// Records the frame's staged uploads, once. Every node that draws
 		// instances, ribbons or the overlay calls it first.
 		//
-		// @return `false` when a map, a copy pass or the submit failed, which
+		// @return `false` when a map or copy pass failed, which
 		//         fails the frame rather than drawing from a stale buffer.
-		bool SubmitUploads();
+		bool RecordUploads();
 
 		// Builds the per-draw lighting block from world lighting and the camera
 		// a pass is drawing from.
@@ -575,14 +575,14 @@ namespace engine::render {
 		//
 		// **A phase of `Begin` rather than a node**, because nothing in it
 		// touches the device queue: it fills the mapped transfer buffer and
-		// builds the occlusion plan, and `SubmitUploads` is what sends them.
+		// builds the occlusion plan, and `RecordUploads` records their copies.
 		void PackInstances();
 
 		// Ends a view that cannot draw: the batch owner drops its downloads, and
 		// a lone view submits what it has so the buffer is not leaked.
 		void EndIncompleteView();
 
-		// Whether the frame's uploads have already gone across.
-		bool UploadsSubmitted = false;
+		// Whether the frame's uploads have already been recorded.
+		bool UploadsRecorded = false;
 	};
 }

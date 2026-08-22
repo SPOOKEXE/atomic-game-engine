@@ -70,25 +70,39 @@ namespace engine::render {
 	bool InstanceResidency::Reuse(
 		const InstanceKey &key, const scene::DrawInstance &source, const MeshEntry &mesh, uint32_t &slot
 	) {
+		const bool current = Probe(key, source, mesh, slot);
+		if (slot < Entries.size()) {
+			Touch(slot);
+		}
+		return current;
+	}
+
+	bool InstanceResidency::Probe(
+		const InstanceKey &key, const scene::DrawInstance &source, const MeshEntry &mesh, uint32_t &slot
+	) const {
 		static_assert(offsetof(scene::DrawInstance, Mesh) == sizeof(PackingSource));
 		static_assert(
 			offsetof(scene::DrawInstance, AlphaCutoff) ==
 			offsetof(scene::DrawInstance, Transparency) + sizeof(float)
 		);
 		static_assert(offsetof(Entry, AlphaCutoff) == offsetof(Entry, Transparency) + sizeof(float));
+		slot = std::numeric_limits<uint32_t>::max();
 		const auto found = Slots.find(key);
 		if (found == Slots.end()) {
 			return false;
 		}
 
 		slot = found->second;
-		Entry &entry = Entries[slot];
-		entry.Seen = Frame;
+		const Entry &entry = Entries[slot];
 		return entry.SourceKnown && std::memcmp(&entry.Source, &source, sizeof(entry.Source)) == 0 &&
 			   std::memcmp(&entry.Transparency, &source.Transparency, sizeof(float) * 2) == 0 &&
 			   entry.Alpha == source.Alpha && entry.Resample == source.Resample &&
 			   std::memcmp(&entry.MeshCentre, &mesh.Centre, sizeof(core::Vector3)) == 0 &&
 			   std::memcmp(&entry.MeshExtent, &mesh.Extent, sizeof(core::Vector3)) == 0;
+	}
+
+	void InstanceResidency::Touch(uint32_t slot) {
+		Entries[slot].Seen = Frame;
 	}
 
 	uint32_t InstanceResidency::Upsert(
@@ -101,8 +115,8 @@ namespace engine::render {
 		if (found != Slots.end()) {
 			Entry &entry = Entries[found->second];
 			entry.Seen = Frame;
-			if (std::memcmp(&entry.Packed, &row, sizeof(row)) != 0) {
-				entry.Packed = row;
+			if (std::memcmp(&Packed[found->second], &row, sizeof(row)) != 0) {
+				Packed[found->second] = row;
 				MarkDirty(found->second);
 			}
 			entry.SourceKnown = source != nullptr && mesh != nullptr;
@@ -137,11 +151,12 @@ namespace engine::render {
 		if (slot == std::numeric_limits<uint32_t>::max()) {
 			slot = static_cast<uint32_t>(Entries.size());
 			Entries.emplace_back();
+			Packed.emplace_back();
 		}
 
 		Entry &entry = Entries[slot];
 		entry.Key = key;
-		entry.Packed = row;
+		Packed[slot] = row;
 		entry.Seen = Frame;
 		entry.Occupied = true;
 		entry.SourceKnown = source != nullptr && mesh != nullptr;
@@ -189,6 +204,7 @@ namespace engine::render {
 
 		while (!Entries.empty() && !Entries.back().Occupied) {
 			Entries.pop_back();
+			Packed.pop_back();
 		}
 		std::erase_if(Dirty, [&](uint32_t slot) {
 			return slot >= Entries.size() || !Entries[slot].Occupied;
@@ -238,7 +254,7 @@ namespace engine::render {
 	}
 
 	const GpuInstance &InstanceResidency::Row(uint32_t slot) const {
-		return Entries[slot].Packed;
+		return Packed[slot];
 	}
 
 	void InstanceResidency::MarkDirty(uint32_t slot) {

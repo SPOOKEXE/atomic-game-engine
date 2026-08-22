@@ -40,6 +40,7 @@ namespace instance_bench {
 		std::vector<DrawInstance> Source;
 		std::vector<DrawInstance> Previous;
 		std::vector<GpuInstance> Packed;
+		std::vector<GpuInstance> Staged;
 		std::vector<InstanceKey> Keys;
 		MeshEntry Mesh;
 		InstanceResidency Residency;
@@ -48,6 +49,7 @@ namespace instance_bench {
 			Source.resize(count);
 			Previous.resize(count);
 			Packed.resize(count);
+			Staged.resize(count);
 			Keys.resize(count);
 			const Name world("bench.world");
 			for (size_t index = 0; index < count; index++) {
@@ -159,4 +161,19 @@ BENCH("Reuse · 10,000 unchanged source rows", 10'000) {
 		Consume(rows.Residency.Reuse(rows.Keys[index], rows.Source[index], rows.Mesh, slot));
 	}
 	rows.Residency.EndFrame();
+}
+
+BENCH("Stage scalar · whole 10,000-row pool", 1) {
+	Rows &rows = RowsOf(10'000);
+	for (uint32_t slot = 0; slot < rows.Residency.SlotCount(); slot++) {
+		rows.Staged[slot] = rows.Residency.Row(slot);
+	}
+	Consume(rows.Staged.data());
+}
+
+BENCH("Stage contiguous · whole 10,000-row pool", 1) {
+	Rows &rows = RowsOf(10'000);
+	const std::span<const GpuInstance> packed = rows.Residency.PackedRows();
+	std::memcpy(rows.Staged.data(), packed.data(), packed.size_bytes());
+	Consume(rows.Staged.data());
 }

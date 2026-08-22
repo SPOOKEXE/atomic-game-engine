@@ -2,7 +2,7 @@
 //
 // **Included by every vertex stage that binds the instance stream**, so the
 // arithmetic exists once rather than once per pass. `opaque.vert` and
-// `shadow.vert` read the same forty bytes and drew different pictures from
+// `shadow.vert` read the same forty-eight bytes and drew different pictures from
 // them the day one of them was edited and the other was not.
 //
 // The C++ side is `render/src/InstancePacking.hpp`. The two decodes have to
@@ -11,32 +11,43 @@
 // matrix the old layout uploaded, and this half is the same three steps in the
 // same order.
 
-// SDL assigns vertex storage buffers to set zero for SPIR-V. The first is the
-// stable forty-eight-byte row pool; the second is this draw order's uint slots.
-layout(set = 0, binding = 0) readonly buffer InstanceRows { uint words[]; } residentInstances;
-layout(set = 0, binding = 1) readonly buffer InstanceIndices { uint slots[]; } drawInstances;
-
 #ifndef GPU_INSTANCE_WORDS
 #define GPU_INSTANCE_WORDS 12
 #endif
 
-uint InstanceWord(uint part) {
-	uint resident = drawInstances.slots[gl_InstanceIndex];
-	return residentInstances.words[resident * uint(GPU_INSTANCE_WORDS) + part];
+#if GPU_INSTANCE_WORDS != 12
+#error GPU instance row declarations must change together
+#endif
+
+// SDL assigns vertex storage buffers to set zero for SPIR-V. The first is the
+// stable forty-eight-byte row pool; the second is this draw order's uint slots.
+// Three aligned vectors make the generated program issue three row loads. A
+// scalar word helper issued fifteen row loads and re-read the indirection for
+// every call in the unoptimised SPIR-V the build actually stages.
+struct InstanceRow {
+	uvec4 Transform0;
+	uvec4 Transform1;
+	uvec4 Appearance;
+};
+layout(set = 0, binding = 0) readonly buffer InstanceRows { InstanceRow rows[]; } residentInstances;
+layout(set = 0, binding = 1) readonly buffer InstanceIndices { uint slots[]; } drawInstances;
+
+InstanceRow LoadInstance() {
+	return residentInstances.rows[drawInstances.slots[gl_InstanceIndex]];
 }
 
-vec3 InstancePosition() {
+vec3 InstancePosition(InstanceRow instance) {
 	return vec3(
-		uintBitsToFloat(InstanceWord(0)),
-		uintBitsToFloat(InstanceWord(1)),
-		uintBitsToFloat(InstanceWord(2)));
+		uintBitsToFloat(instance.Transform0.x),
+		uintBitsToFloat(instance.Transform0.y),
+		uintBitsToFloat(instance.Transform0.z));
 }
 
-vec3 InstanceScale() {
+vec3 InstanceScale(InstanceRow instance) {
 	return vec3(
-		uintBitsToFloat(InstanceWord(5)),
-		uintBitsToFloat(InstanceWord(6)),
-		uintBitsToFloat(InstanceWord(7)));
+		uintBitsToFloat(instance.Transform1.y),
+		uintBitsToFloat(instance.Transform1.z),
+		uintBitsToFloat(instance.Transform1.w));
 }
 
 // The rotation as a unit quaternion, `xyz` vector part and `w` scalar.
@@ -45,10 +56,10 @@ vec3 InstanceScale() {
 // independently land off the unit sphere, and a quaternion off the unit sphere
 // is a rotation *and* a scale - so skipping this would show up as geometry
 // breathing rather than as a rotation being slightly wrong.
-vec4 InstanceRotation() {
+vec4 InstanceRotation(InstanceRow instance) {
 	vec4 raw = vec4(
-		unpackSnorm2x16(InstanceWord(3)),
-		unpackSnorm2x16(InstanceWord(4)));
+		unpackSnorm2x16(instance.Transform0.w),
+		unpackSnorm2x16(instance.Transform1.x));
 	float square = dot(raw, raw);
 	return square > 1e-12 ? raw * inversesqrt(square) : vec4(0.0, 0.0, 0.0, 1.0);
 }
@@ -64,8 +75,8 @@ vec3 RotateByQuaternion(vec4 quaternion, vec3 point) {
 }
 
 // The world position of one mesh vertex under this instance.
-vec3 InstanceWorldPosition(vec4 quaternion, vec3 meshPosition) {
-	return RotateByQuaternion(quaternion, meshPosition * InstanceScale()) + InstancePosition();
+vec3 InstanceWorldPosition(vec4 quaternion, vec3 scale, vec3 position, vec3 meshPosition) {
+	return RotateByQuaternion(quaternion, meshPosition * scale) + position;
 }
 
 // The world-space normal, corrected for the instance's non-uniform scale.
@@ -78,8 +89,7 @@ vec3 InstanceWorldPosition(vec4 quaternion, vec3 meshPosition) {
 // A zero axis keeps the old rule rather than dividing: the degenerate scale
 // multiplies instead, which drives that component to zero exactly as
 // `InverseScaleSquared`'s guard used to.
-vec3 InstanceWorldNormal(vec4 quaternion, vec3 meshNormal) {
-	vec3 scale = InstanceScale();
+vec3 InstanceWorldNormal(vec4 quaternion, vec3 scale, vec3 meshNormal) {
 	bvec3 usable = greaterThan(scale * scale, vec3(1e-12));
 	vec3 divisor = mix(vec3(1.0), scale, usable);
 	vec3 factor = mix(scale, 1.0 / divisor, usable);
@@ -87,20 +97,20 @@ vec3 InstanceWorldNormal(vec4 quaternion, vec3 meshNormal) {
 }
 
 // The instance's colour and alpha.
-vec4 InstanceColour() {
-	return unpackUnorm4x8(InstanceWord(8));
+vec4 InstanceColour(InstanceRow instance) {
+	return unpackUnorm4x8(instance.Appearance.x);
 }
 
-uint InstanceAppearance() {
-	return InstanceWord(9);
+uint InstanceAppearance(InstanceRow instance) {
+	return instance.Appearance.y;
 }
 
-vec3 InstanceSurfaceColour() {
-	return unpackUnorm4x8(InstanceWord(10)).rgb;
+vec3 InstanceSurfaceColour(InstanceRow instance) {
+	return unpackUnorm4x8(instance.Appearance.z).rgb;
 }
 
-vec4 InstanceEmission() {
-	vec4 packed = unpackUnorm4x8(InstanceWord(11));
+vec4 InstanceEmission(InstanceRow instance) {
+	vec4 packed = unpackUnorm4x8(instance.Appearance.w);
 	packed.a *= 16.0;
 	return packed;
 }

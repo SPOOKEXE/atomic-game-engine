@@ -31,10 +31,10 @@ namespace engine::render {
 			const auto enterNamedPass = [&recording](
 											core::Name name, SDL_GPUCommandBuffer *recordedCommand = nullptr
 										) { recording.EnterNamedPass(name, recordedCommand); };
-			const auto submitUploads = [&recording] { return recording.SubmitUploads(); };
+			const auto recordUploads = [&recording] { return recording.RecordUploads(); };
 
 			enterNamedPass(context.Name);
-			return submitUploads();
+			return recordUploads();
 		});
 	}
 }

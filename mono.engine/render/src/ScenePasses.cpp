@@ -64,7 +64,7 @@ namespace engine::render {
 			// The batch owner drops any recorded downloads with the frame.
 			State->BatchFailed = true;
 		} else {
-			SDL_SubmitGPUCommandBuffer(command);
+			State->CompleteInstanceUploads(SDL_SubmitGPUCommandBuffer(command));
 			State->DropDownloads();
 		}
 	}
@@ -151,7 +151,7 @@ namespace engine::render {
 		return true;
 	}
 
-	bool ViewRecording::SubmitUploads() {
+	bool ViewRecording::RecordUploads() {
 		Impl *const State = this->State;
 		FrameResult &result = Result;
 		OverlayImage &overlay = *Request.Overlay;
@@ -160,22 +160,22 @@ namespace engine::render {
 		const uint32_t uploadCount = UploadCount;
 		const uint32_t particleCount = ParticleCount;
 		const uint32_t ribbonCount = RibbonCount;
-		bool &uploadsSubmitted = UploadsSubmitted;
+		bool &uploadsRecorded = UploadsRecorded;
 
-		if (uploadsSubmitted) {
+		if (uploadsRecorded) {
 			return true;
 		}
 
 		const bool uploadInstances = haveInstances;
 		if (!uploadInstances && !uploadOverlay && particleCount == 0 && ribbonCount == 0) {
-			uploadsSubmitted = true;
+			uploadsRecorded = true;
 			return true;
 		}
 
 		// **Past the early-out, so it names work rather than a null check.**
-		// Eight `SDL_UploadToGPUBuffer` calls, a transfer-buffer map and a
-		// command submit, all inside whichever graph node happened to be the
-		// first to need them - and only the overlay staging had a span.
+		// Multiple `SDL_UploadToGPUBuffer` calls and a transfer-buffer map all
+		// live inside whichever graph node first needs them, so keep the whole
+		// record phase visible rather than timing only overlay staging.
 		ENGINE_PROFILE_CAT("submit uploads", core::ProfileCategory::Render);
 
 		OverlayImage::Region overlayRegion;
@@ -202,15 +202,10 @@ namespace engine::render {
 			SDL_UnmapGPUTransferBuffer(State->Device, State->OverlayTransfer);
 		}
 
-		SDL_GPUCommandBuffer *uploadCommand = SDL_AcquireGPUCommandBuffer(State->Device);
-		if (uploadCommand == nullptr) {
-			ENGINE_ERROR("upload: SDL_AcquireGPUCommandBuffer: {}", SDL_GetError());
-			return false;
-		}
+		SDL_GPUCommandBuffer *const uploadCommand = Command;
 		SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(uploadCommand);
 		if (copy == nullptr) {
 			ENGINE_ERROR("upload instances: SDL_BeginGPUCopyPass: {}", SDL_GetError());
-			SDL_CancelGPUCommandBuffer(uploadCommand);
 			return false;
 		}
 
@@ -219,7 +214,6 @@ namespace engine::render {
 			Impl::InstanceWorld *const world = State->ActiveInstanceWorld;
 			if (world == nullptr) {
 				SDL_EndGPUCopyPass(copy);
-				SDL_CancelGPUCommandBuffer(uploadCommand);
 				return false;
 			}
 			for (const InstanceUploadRange &range : world->Instances.DirtyRanges()) {
@@ -313,25 +307,23 @@ namespace engine::render {
 		}
 
 		SDL_EndGPUCopyPass(copy);
-		if (!SDL_SubmitGPUCommandBuffer(uploadCommand)) {
-			ENGINE_ERROR("upload: SDL_SubmitGPUCommandBuffer: {}", SDL_GetError());
-			return false;
-		}
-		if (uploadInstances && State->ActiveInstanceWorld != nullptr) {
+		if (uploadInstances && State->ActiveInstanceWorld != nullptr &&
+			State->ActiveInstanceWorld->Instances.DirtyCount() > 0) {
+			State->TrackInstanceUpload(*State->ActiveInstanceWorld);
 			State->ActiveInstanceWorld->Instances.AcknowledgeDirty();
 		}
 
-		// No fence here. Resource cycling gives each later view a fresh
-		// destination while its draw commands retain the version they bound.
-		// The GPU can consume this copy while the CPU records the main command
-		// buffer, and queue submission order makes every draw see its upload.
+		// The copy is in the frame's main command buffer, before every draw that
+		// reads it. This keeps a render batch one submission and makes the graph's
+		// GPU timestamps measure the transfer rather than two adjacent marks in a
+		// different command buffer. Resource cycling still gives each later view
+		// a fresh target-local index stream.
 		if (uploadOverlay) {
 			State->OverlayUninitialised = false;
 			overlay.MarkUploaded();
 		}
 		result.UploadedBytes += uploadedBytes;
-		result.UploadCommandBuffers++;
-		uploadsSubmitted = true;
+		uploadsRecorded = true;
 		return true;
 	}
 

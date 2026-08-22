@@ -1650,7 +1650,7 @@ namespace engine::render {
 			if (State->BatchTimingSlot < VulkanTimestamps::SLOTS) {
 				State->PendingMarks[State->BatchTimingSlot].clear();
 			}
-			SDL_SubmitGPUCommandBuffer(State->BatchCommand);
+			State->CompleteInstanceUploads(SDL_SubmitGPUCommandBuffer(State->BatchCommand));
 			State->BatchCommand = nullptr;
 
 			// A failed batch never reached the final view's submit, so any

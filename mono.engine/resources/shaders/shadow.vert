@@ -7,7 +7,7 @@ layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec2 inTexCoord;
 
-// The same storage decode `opaque.vert` includes. The two stages read the same forty bytes,
+// The same storage decode `opaque.vert` includes. The two stages read the same forty-eight bytes,
 // and the day one of them was edited and the other was not is the day a shadow
 // stopped matching the body casting it.
 #include "instance.glsl"
@@ -28,11 +28,16 @@ layout(location = 2) flat out uint outAppearance;
 layout(location = 3) flat out float outInstanceAlpha;
 
 void main() {
-	vec4 world = vec4(InstanceWorldPosition(InstanceRotation(), inPosition), 1.0);
+	InstanceRow instance = LoadInstance();
+	vec4 rotation = InstanceRotation(instance);
+	vec4 world = vec4(
+		InstanceWorldPosition(rotation, InstanceScale(instance), InstancePosition(instance), inPosition),
+		1.0
+	);
 
 	outWorldPosition = world.xyz;
 	outTexCoord = inTexCoord;
-	outAppearance = InstanceAppearance();
-	outInstanceAlpha = InstanceColour().a;
+	outAppearance = InstanceAppearance(instance);
+	outInstanceAlpha = InstanceColour(instance).a;
 	gl_Position = light.ViewProjection * world;
 }

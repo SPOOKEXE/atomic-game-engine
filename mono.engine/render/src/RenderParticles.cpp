@@ -3,7 +3,7 @@
 // **Each world's pool lives on the device and is stepped there.** `particle-step.comp`
 // writes the instance stream on its own submission before the frame's command
 // buffer is recorded, which is why the transparent node uploads no particle
-// data at all - see the note in `ViewRecording::SubmitUploads`.
+// data at all - see the note in `ViewRecording::RecordUploads`.
 
 #include "DisplayColour.hpp"
 #include "RenderTypes.hpp"

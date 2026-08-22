@@ -851,7 +851,7 @@ namespace engine::render {
 			const auto enterNamedPass = [&recording](
 											core::Name name, SDL_GPUCommandBuffer *recordedCommand = nullptr
 										) { recording.EnterNamedPass(name, recordedCommand); };
-			const auto submitUploads = [&recording] { return recording.SubmitUploads(); };
+			const auto recordUploads = [&recording] { return recording.RecordUploads(); };
 			const auto lightingAt = [&recording](
 										const core::Vector3 &eye, float surfaceMode, float imageOpacity
 									) { return recording.LightingAt(eye, surfaceMode, imageOpacity); };
@@ -868,7 +868,7 @@ namespace engine::render {
 								   ) { return recording.DrawImage(source, target, load, reverseSpectrum); };
 
 			ENGINE_PROFILE_CAT("mirror overlay pass", core::ProfileCategory::Render);
-			if (!submitUploads()) {
+			if (!recordUploads()) {
 				return false;
 			}
 			enterNamedPass(context.Name);

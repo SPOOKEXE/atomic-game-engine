@@ -41,16 +41,19 @@ void main() {
 	// scale and the translation separately, so the position is one quaternion
 	// rotate and an add - and the normal is the same rotate against a reciprocal
 	// scale, which is what the old `inInverseScaleSquared` float4 was for.
-	vec4 rotation = InstanceRotation();
+	InstanceRow instance = LoadInstance();
+	vec3 position = InstancePosition(instance);
+	vec3 scale = InstanceScale(instance);
+	vec4 rotation = InstanceRotation(instance);
 
-	outNormal = InstanceWorldNormal(rotation, inNormal);
-	outColour = InstanceColour();
+	outNormal = InstanceWorldNormal(rotation, scale, inNormal);
+	outColour = InstanceColour(instance);
 	outTexCoord = inTexCoord;
-	outAppearance = InstanceAppearance();
-	outSurfaceColour = InstanceSurfaceColour();
-	outEmission = InstanceEmission();
+	outAppearance = InstanceAppearance(instance);
+	outSurfaceColour = InstanceSurfaceColour(instance);
+	outEmission = InstanceEmission(instance);
 
-	vec4 world = vec4(InstanceWorldPosition(rotation, inPosition), 1.0);
+	vec4 world = vec4(InstanceWorldPosition(rotation, scale, position, inPosition), 1.0);
 	outWorldPosition = world.xyz;
 
 	// Divide in the fragment to preserve perspective-correct interpolation.

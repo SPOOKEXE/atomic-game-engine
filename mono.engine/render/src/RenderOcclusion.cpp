@@ -147,7 +147,7 @@ namespace engine::render {
 				ready;
 
 		// One transfer stages everything the CPU writes, packed back to back in
-		// the order `submitUploads` copies it out: arguments, candidates, run
+		// the order `RecordUploads` copies it out: arguments, candidates, run
 		// table, argument runs, count zeros.
 		const uint32_t staged = argCount * 2 * COMMAND_BYTES + candidateCount * CANDIDATE_BYTES +
 								runCount * static_cast<uint32_t>(sizeof(uint32_t)) +

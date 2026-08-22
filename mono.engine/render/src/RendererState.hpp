@@ -718,6 +718,8 @@ namespace engine::render {
 		// Which way the sun comes from for each slot, or a zero vector for the
 		// world's own. `scene::DrawInstance::SeamLight` carries the argument.
 		std::vector<glm::vec4> SlotSeamLight;
+		std::vector<InstanceKey> SlotInstanceKey;
+		std::vector<uint8_t> SlotInstanceCurrent;
 
 		SDL_GPUBuffer *InstanceBuffer = nullptr;
 		SDL_GPUTransferBuffer *InstanceTransfer = nullptr;
@@ -740,6 +742,11 @@ namespace engine::render {
 		};
 		std::vector<InstanceWorld> InstanceWorlds;
 		InstanceWorld *ActiveInstanceWorld = nullptr;
+		struct PendingInstanceUpload {
+			uint64_t Id = 0;
+			core::Name Name;
+		};
+		std::vector<PendingInstanceUpload> PendingInstanceUploads;
 
 		// --- occlusion culling ------------------------------------------------
 		//
@@ -1215,6 +1222,28 @@ namespace engine::render {
 			InstanceWorlds.back().Id = id;
 			InstanceWorlds.back().Name = name;
 			return InstanceWorlds.back();
+		}
+
+		void TrackInstanceUpload(const InstanceWorld &world) {
+			const auto found = std::find_if(
+				PendingInstanceUploads.begin(),
+				PendingInstanceUploads.end(),
+				[&](const PendingInstanceUpload &pending) {
+					return pending.Id == world.Id && pending.Name == world.Name;
+				}
+			);
+			if (found == PendingInstanceUploads.end()) {
+				PendingInstanceUploads.push_back({world.Id, world.Name});
+			}
+		}
+
+		void CompleteInstanceUploads(bool submitted) {
+			if (!submitted) {
+				for (const PendingInstanceUpload &pending : PendingInstanceUploads) {
+					InstanceWorldFor(pending.Id, pending.Name).Instances.MarkAllDirty();
+				}
+			}
+			PendingInstanceUploads.clear();
 		}
 
 		// Scene targets that have been replaced but may still be referenced.
