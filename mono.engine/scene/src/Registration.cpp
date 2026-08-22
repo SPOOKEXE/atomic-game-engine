@@ -350,6 +350,7 @@ namespace engine::scene {
 			auto *catalogues = static_cast<TextureCatalogue *>(destination);
 			for (size_t index = 0; index < count; index++) {
 				catalogues[index].Flipbooks.clear();
+				catalogues[index].Revision = 0;
 			}
 		}
 

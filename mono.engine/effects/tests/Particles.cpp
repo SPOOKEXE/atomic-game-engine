@@ -394,6 +394,48 @@ TEST_CASE("distance emission follows parent travel rather than frame time", "[ef
 	CHECK(Frame(store, 0.0f).Emitted == 6);
 }
 
+TEST_CASE("reparenting refreshes an emitter's cached frame", "[effects]") {
+	Store store("effects_test");
+	const Entity emitter = MakeEmitter(store);
+	Frame(store, 0.0f);
+
+	engine::scene::PartDesc desc;
+	desc.Frame = CFrame{Vector3{12.0f, 3.0f, -7.0f}};
+	desc.Simulated = false;
+	const Entity destination = engine::scene::MakePart(store, desc);
+
+	store.ClearChanges();
+	REQUIRE(store.SetParent(emitter, destination));
+	engine::effects::RefreshEmitters(store);
+
+	const uint32_t slot = store.Get<EmitterSlot>(emitter)->Index;
+	REQUIRE(slot != NO_SLOT);
+	const auto &frame = store.Resource<ParticleSystem>()->Blocks[slot].Frame;
+	CHECK(frame.Position == desc.Frame.Position);
+}
+
+TEST_CASE("moving an attachment refreshes its emitter's cached frame", "[effects]") {
+	Store store("effects_test");
+	const Entity emitter = MakeEmitter(store);
+	const Entity part = store.ParentOf(emitter);
+	const Entity point = store.CreateInstance(engine::scene::AttachmentClass(), "EmitterPoint");
+	REQUIRE(store.SetParent(point, part));
+	store.GetMutable<engine::scene::Attachment>(point)->Frame = CFrame{Vector3{0.0f, 2.0f, 0.0f}};
+	REQUIRE(store.SetParent(emitter, point));
+	Frame(store, 0.0f);
+
+	store.ClearChanges();
+	auto *transform = store.GetMutable<engine::scene::Transform>(part);
+	REQUIRE(transform != nullptr);
+	transform->Frame.Position.X = 9.0f;
+	Frame(store, 0.0f);
+
+	const uint32_t slot = store.Get<EmitterSlot>(emitter)->Index;
+	REQUIRE(slot != NO_SLOT);
+	const auto &frame = store.Resource<ParticleSystem>()->Blocks[slot].Frame;
+	CHECK(frame.Position == Vector3{9.0f, 2.0f, 0.0f});
+}
+
 TEST_CASE("a disabled emitter accepts a burst and clear invalidates its block", "[effects]") {
 	Store store("effects_test");
 	const Entity emitter = MakeEmitter(store);
@@ -648,6 +690,35 @@ TEST_CASE("an emitter adopts the frame count its texture states", "[effects]") {
 	CHECK(highest == 23);
 }
 
+TEST_CASE("an existing emitter adopts texture facts when content arrives", "[effects]") {
+	Store store("effects_test");
+	const Entity emitter = MakeEmitter(store);
+	const engine::core::Name texture("effects/late.atex");
+
+	Settings(store, emitter).Texture = texture;
+	Settings(store, emitter).Flipbook = FlipbookLayout::Grid8x8;
+	Frame(store, 0.0f);
+
+	const uint32_t slot = store.Get<EmitterSlot>(emitter)->Index;
+	REQUIRE(slot != NO_SLOT);
+	const auto *system = store.Resource<ParticleSystem>();
+	REQUIRE(system->Blocks[slot].Frames == 64);
+	REQUIRE(system->Blocks[slot].FlipbookRate == 12.0f);
+
+	// The emitter row stays untouched. The catalogue revision alone must
+	// invalidate playback values cached before the content pump knew the file.
+	store.ClearChanges();
+	REQUIRE(
+		engine::scene::RecordTexture(
+			store, texture, engine::scene::FlipbookFacts{.Side = 8, .Frames = 24, .FrameRate = 30.0f}
+		)
+	);
+	engine::effects::RefreshEmitters(store);
+
+	CHECK(system->Blocks[slot].Frames == 24);
+	CHECK(system->Blocks[slot].FlipbookRate == 30.0f);
+}
+
 TEST_CASE("what the emitter says beats what the texture says", "[effects]") {
 	// **An author overriding a number means it.** The texture is the default,
 	// not the authority - a scene deliberately playing the first eight cells of
@@ -776,6 +847,7 @@ TEST_CASE("a destroyed emitter gives its block row back", "[effects]") {
 	// list this was twenty-one, and `MAX_EMITTER_SLOTS` was therefore a cap on
 	// emitters ever made rather than on emitters emitting at once.
 	CHECK(system->Blocks.size() == 2);
+	CHECK(system->FrameParents.size() == system->Blocks.size());
 
 	// And the surviving emitter still has its own row and is still emitting.
 	CHECK(system->Statistics.Blocks == 1);

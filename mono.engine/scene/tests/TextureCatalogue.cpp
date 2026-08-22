@@ -104,12 +104,14 @@ TEST_CASE("re-recording a texture replaces what was there", "[scene][texturecata
 	CHECK(facts.Side == 4);
 	CHECK(facts.Frames == 12);
 	CHECK(facts.FrameRate == 30.0f);
+	CHECK(TexturesOf(store).Revision == 2);
 }
 
 TEST_CASE("an invalid name records nothing", "[scene][texturecatalogue]") {
 	Store store = Fresh("texturecatalogue.invalid");
 	CHECK_FALSE(RecordTexture(store, Name(), Fox()));
 	CHECK(TexturesOf(store).Flipbooks.empty());
+	CHECK(TexturesOf(store).Revision == 0);
 }
 
 TEST_CASE("the catalogue is derived and does not persist", "[scene][texturecatalogue]") {
@@ -126,5 +128,6 @@ TEST_CASE("the catalogue is derived and does not persist", "[scene][texturecatal
 
 	// What the registered reader does to a fresh instance.
 	copy.Flipbooks.clear();
+	copy.Revision = 0;
 	CHECK(copy.Find(Name("effects/fox_dance.atex")).Side == 0);
 }

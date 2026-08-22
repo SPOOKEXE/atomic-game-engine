@@ -229,6 +229,8 @@ namespace engine::effects {
 			auto *systems = static_cast<ParticleSystem *>(destination);
 			for (size_t index = 0; index < count; index++) {
 				systems[index].Blocks.clear();
+				systems[index].FrameParents.clear();
+				systems[index].TextureRevision = 0;
 				systems[index].Free.clear();
 				systems[index].Used = 0;
 				systems[index].Statistics = {};

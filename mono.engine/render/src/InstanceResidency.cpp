@@ -1,10 +1,13 @@
 #include "InstanceResidency.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
 #include <limits>
+#include <type_traits>
 
 namespace engine::render {
+	static_assert(std::is_standard_layout_v<scene::DrawInstance>);
 
 	size_t InstanceKeyHash::operator()(const InstanceKey &key) const noexcept {
 		size_t hash = std::hash<core::Name>{}(key.World);
@@ -52,6 +55,48 @@ namespace engine::render {
 	}
 
 	uint32_t InstanceResidency::Upsert(const InstanceKey &key, const GpuInstance &row) {
+		return Upsert(key, row, nullptr, nullptr);
+	}
+
+	uint32_t InstanceResidency::Upsert(
+		const InstanceKey &key,
+		const GpuInstance &row,
+		const scene::DrawInstance &source,
+		const MeshEntry &mesh
+	) {
+		return Upsert(key, row, &source, &mesh);
+	}
+
+	bool InstanceResidency::Reuse(
+		const InstanceKey &key, const scene::DrawInstance &source, const MeshEntry &mesh, uint32_t &slot
+	) {
+		static_assert(offsetof(scene::DrawInstance, Mesh) == sizeof(PackingSource));
+		static_assert(
+			offsetof(scene::DrawInstance, AlphaCutoff) ==
+			offsetof(scene::DrawInstance, Transparency) + sizeof(float)
+		);
+		static_assert(offsetof(Entry, AlphaCutoff) == offsetof(Entry, Transparency) + sizeof(float));
+		const auto found = Slots.find(key);
+		if (found == Slots.end()) {
+			return false;
+		}
+
+		slot = found->second;
+		Entry &entry = Entries[slot];
+		entry.Seen = Frame;
+		return entry.SourceKnown && std::memcmp(&entry.Source, &source, sizeof(entry.Source)) == 0 &&
+			   std::memcmp(&entry.Transparency, &source.Transparency, sizeof(float) * 2) == 0 &&
+			   entry.Alpha == source.Alpha && entry.Resample == source.Resample &&
+			   std::memcmp(&entry.MeshCentre, &mesh.Centre, sizeof(core::Vector3)) == 0 &&
+			   std::memcmp(&entry.MeshExtent, &mesh.Extent, sizeof(core::Vector3)) == 0;
+	}
+
+	uint32_t InstanceResidency::Upsert(
+		const InstanceKey &key,
+		const GpuInstance &row,
+		const scene::DrawInstance *source,
+		const MeshEntry *mesh
+	) {
 		const auto found = Slots.find(key);
 		if (found != Slots.end()) {
 			Entry &entry = Entries[found->second];
@@ -59,6 +104,23 @@ namespace engine::render {
 			if (std::memcmp(&entry.Packed, &row, sizeof(row)) != 0) {
 				entry.Packed = row;
 				MarkDirty(found->second);
+			}
+			entry.SourceKnown = source != nullptr && mesh != nullptr;
+			if (entry.SourceKnown) {
+				entry.Source = PackingSource{
+					source->Frame,
+					source->HalfExtent,
+					source->Tint,
+					source->SurfaceColour,
+					source->EmissiveTint,
+					source->EmissiveStrength,
+				};
+				entry.Transparency = source->Transparency;
+				entry.AlphaCutoff = source->AlphaCutoff;
+				entry.Alpha = source->Alpha;
+				entry.Resample = source->Resample;
+				entry.MeshCentre = mesh->Centre;
+				entry.MeshExtent = mesh->Extent;
 			}
 			return found->second;
 		}
@@ -82,6 +144,23 @@ namespace engine::render {
 		entry.Packed = row;
 		entry.Seen = Frame;
 		entry.Occupied = true;
+		entry.SourceKnown = source != nullptr && mesh != nullptr;
+		if (entry.SourceKnown) {
+			entry.Source = PackingSource{
+				source->Frame,
+				source->HalfExtent,
+				source->Tint,
+				source->SurfaceColour,
+				source->EmissiveTint,
+				source->EmissiveStrength,
+			};
+			entry.Transparency = source->Transparency;
+			entry.AlphaCutoff = source->AlphaCutoff;
+			entry.Alpha = source->Alpha;
+			entry.Resample = source->Resample;
+			entry.MeshCentre = mesh->Centre;
+			entry.MeshExtent = mesh->Extent;
+		}
 		Slots.emplace(key, slot);
 		Live++;
 		MarkDirty(slot);

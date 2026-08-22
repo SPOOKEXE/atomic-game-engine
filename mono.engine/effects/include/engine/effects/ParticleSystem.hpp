@@ -529,6 +529,16 @@ namespace engine::effects {
 		// One per live emitter.
 		std::vector<EmitterBlock> Blocks;
 
+		// The immediate parent used to resolve each block's cached frame.
+		//
+		// Kept beside rather than inside `EmitterBlock`: the device and particle
+		// step never read it, and growing their hot row made the earlier cached
+		// spawn-plan experiment slower. The index is the block index.
+		std::vector<ecs::Entity> FrameParents;
+
+		// The texture catalogue revision already reflected in `Blocks`.
+		uint64_t TextureRevision = 0;
+
 		// Rows of `Blocks` whose emitter has gone, waiting to be handed to the
 		// next one that arrives.
 		//

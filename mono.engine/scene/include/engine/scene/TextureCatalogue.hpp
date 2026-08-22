@@ -72,6 +72,13 @@ namespace engine::scene {
 	//
 	// @since v0.10
 	struct TextureCatalogue {
+		// Advances whenever recorded texture facts may have changed.
+		//
+		// Consumers cache derived playback values for thousands of emitters, so
+		// one catalogue revision lets a steady frame skip one hash lookup per
+		// emitter without missing a texture that arrived after the world did.
+		uint64_t Revision = 0;
+
 		// Flipbook facts per texture, keyed by `core::Name::Id`.
 		//
 		// The id rather than the `Name`, matching `MeshCatalogue::Triangles`: a

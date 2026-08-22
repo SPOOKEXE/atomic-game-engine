@@ -29,7 +29,7 @@
 // | Frame · 1,000 emitters · 5,000 particles | 0.50 us |
 // | Frame · 10,000 emitters · 50,000 particles | 21.3 us |
 // | **Frame · 100,000 emitters · 500,000 particles** | **583 us** |
-// | Refresh only · 100,000 emitters | 304 us |
+// | Refresh only · 100,000 emitters | 184 us |
 // | Step only · 100,000 emitters · 500,000 particles | 290 us |
 // | Step at zero delta · 100,000 emitters | 285 us |
 //
@@ -44,7 +44,9 @@
 //   Gating that on `Store::Changed<ParticleEmitter>` remains the single largest
 //   optimisation in the module. The old 522 to 192 us comparison actually
 //   measured 65,535 emitters because the former uint16 slot cap silently refused
-//   the rest. At the true 100,000 target the gated refresh is 304 us.
+//   the rest. The authored gate alone measured 304 us at the true 100,000
+//   target. Caching steady parent frames and texture playback reduced it to
+//   184 us.
 // - **The spawn half really is free.** "Step at zero delta" ages nothing and
 //   spawns nothing and costs 285 us, which is within noise of the full step's
 //   290 us. So the entire cost of the step is the walk and the per-particle

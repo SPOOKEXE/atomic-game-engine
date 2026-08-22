@@ -338,20 +338,25 @@ namespace engine::effects {
 		// to one and not the other is a difference that only shows on the frame
 		// an emitter is first enabled.
 		// **Compared before it is written, and the comparison is the point.**
-		// Every one of these seven is a word the device reads, and this runs for
-		// every emitter every tick - so writing them unconditionally would make
-		// `EmitterBlock::Revision` advance every frame and the renderer re-upload
-		// a hundred thousand records that had not moved. Seven compares against
-		// ninety-six bytes staged is not a close call.
+		// Every one of these seven is a word the device reads. A steady emitter
+		// returns before resolving its texture; writing values unconditionally
+		// would make `EmitterBlock::Revision` advance every frame and the
+		// renderer re-upload a hundred thousand records that had not moved.
+		// Seven compares against ninety-six bytes staged is not a close call.
 		//
 		// @param authoredChanged Whether the emitter row changed since the last refresh.
+		// @param catalogueChanged Whether recorded texture facts may have changed.
 		// @return Whether anything the device reads actually changed.
 		bool ApplyPlayback(
 			const ecs::Store &store,
 			const ParticleEmitter &emitter,
 			EmitterBlock &block,
-			bool authoredChanged = true
+			bool authoredChanged = true,
+			bool catalogueChanged = true
 		) {
+			if (!authoredChanged && !catalogueChanged) {
+				return false;
+			}
 			const scene::FlipbookFacts facts = scene::FlipbookOf(store, emitter.Texture);
 			const float rate = ResolvedRate(emitter, facts);
 			const uint8_t frames = ResolvedFrames(emitter, facts);
@@ -527,22 +532,27 @@ namespace engine::effects {
 		}
 	}
 
-	core::CFrame EmitterFrame(const ecs::Store &store, ecs::Entity emitter) {
-		const ecs::Entity parent = store.ParentOf(emitter);
-		if (parent == ecs::NULL_ENTITY) {
+	namespace {
+		core::CFrame FrameOfParent(const ecs::Store &store, ecs::Entity parent) {
+			if (parent == ecs::NULL_ENTITY) {
+				return {};
+			}
+
+			// The attachment first, because an emitter on an attachment is the
+			// arrangement every authored effect uses - a rocket's exhaust hangs off a
+			// point on the rocket, not off the rocket's centre.
+			if (const scene::Attachment *point = store.Get<scene::Attachment>(parent)) {
+				return point->WorldFrame;
+			}
+			if (const scene::Transform *placement = store.Get<scene::Transform>(parent)) {
+				return placement->Frame;
+			}
 			return {};
 		}
+	}
 
-		// The attachment first, because an emitter on an attachment is the
-		// arrangement every authored effect uses - a rocket's exhaust hangs off a
-		// point on the rocket, not off the rocket's centre.
-		if (const scene::Attachment *point = store.Get<scene::Attachment>(parent)) {
-			return point->WorldFrame;
-		}
-		if (const scene::Transform *placement = store.Get<scene::Transform>(parent)) {
-			return placement->Frame;
-		}
-		return {};
+	core::CFrame EmitterFrame(const ecs::Store &store, ecs::Entity emitter) {
+		return FrameOfParent(store, store.ParentOf(emitter));
 	}
 
 	namespace {
@@ -601,6 +611,8 @@ namespace engine::effects {
 		// pass from 522 us to 74 us at a hundred thousand emitters. What it costs
 		// is a dirty-bit column on the emitter table, which is one bit a row.
 		store.Observe<ParticleEmitter>();
+		store.Observe<scene::Transform>();
+		store.Observe<scene::Attachment>();
 	}
 
 	namespace {
@@ -682,6 +694,26 @@ namespace engine::effects {
 			return 0;
 		}
 
+		const scene::TextureCatalogue *catalogue = store.Resource<scene::TextureCatalogue>();
+		const uint64_t textureRevision = catalogue == nullptr ? 0 : catalogue->Revision;
+		const bool catalogueChanged = system->TextureRevision != textureRevision;
+		system->TextureRevision = textureRevision;
+
+		// Parent frames are stable far more often than emitters spawn. Gather the
+		// moved rows once, then leave every unchanged block's cached frame alone.
+		// A sorted id list stays cheap both for the ordinary empty case and for a
+		// world moving many parents at once.
+		static thread_local std::vector<uint64_t> movedParents;
+		movedParents.clear();
+		store.EachChanged<scene::Transform>([](ecs::Entity entity, scene::Transform &) {
+			movedParents.push_back(entity.Id);
+		});
+		store.EachChanged<scene::Attachment>([](ecs::Entity entity, scene::Attachment &) {
+			movedParents.push_back(entity.Id);
+		});
+		std::sort(movedParents.begin(), movedParents.end());
+		movedParents.erase(std::unique(movedParents.begin(), movedParents.end()), movedParents.end());
+
 		// **The block index lives on the emitter's own row**, as a component, so
 		// finding an emitter's block is a column read rather than a search. That
 		// is the same reason `ActiveCamera` names an entity rather than being
@@ -762,8 +794,10 @@ namespace engine::effects {
 						// The original comparison was **522 us unconditional against
 						// 192 us gated**. It unknowingly stopped at the former 65,535
 						// slot cap. With the cap removed, the gated refresh over the
-						// roadmap's true 100,000 emitters measures 304 us in the
-						// `bench` preset on the same 24-thread machine.
+						// roadmap's true 100,000 emitters measured 304 us in the
+						// `bench` preset on the same 24-thread machine. Caching
+						// steady parent frames and texture playback brought that to
+						// 184 us.
 						//
 						// `ecs::ChangeChannel` is the mechanism and `Observe` in
 						// `InstallParticles` is what turns it on. What it costs is
@@ -779,22 +813,29 @@ namespace engine::effects {
 							block.Longest = std::max(emitter.Lifetime.Maximum, 0.0f);
 							block.CurveRevision++;
 						}
-						if (ApplyPlayback(store, emitter, block, authoredChanged)) {
+						if (ApplyPlayback(store, emitter, block, authoredChanged, catalogueChanged)) {
 							block.Revision++;
 						}
 
-						// Where the emitter is now. An emitter on an `Attachment`
-						// takes the attachment's resolved world frame; one on a part
-						// takes the part's. Neither is a walk - both are one column
-						// read on the parent, and `ResolveAttachments` has already run.
-						const core::CFrame frame = EmitterFrame(store, entity);
-						if (!SameFrame(frame, block.Frame)) {
-							if (emitter.Enabled && emitter.RateOverDistance > 0.0f) {
-								block.Pending += (frame.Position - block.Frame.Position).Magnitude() *
-												 emitter.RateOverDistance;
+						// Resolve the parent frame only when the relationship changed
+						// or the observed Transform or Attachment row moved. The
+						// steady path is one retained-entity comparison and a binary
+						// search rather than two sparse-column lookups per emitter.
+						const ecs::Entity parent = store.ParentOf(entity);
+						const bool parentChanged = system->FrameParents[slot.Index] != parent;
+						const bool parentMoved =
+							std::binary_search(movedParents.begin(), movedParents.end(), parent.Id);
+						if (parentChanged || parentMoved) {
+							const core::CFrame frame = FrameOfParent(store, parent);
+							if (!SameFrame(frame, block.Frame)) {
+								if (emitter.Enabled && emitter.RateOverDistance > 0.0f) {
+									block.Pending += (frame.Position - block.Frame.Position).Magnitude() *
+													 emitter.RateOverDistance;
+								}
+								block.Frame = frame;
+								block.Revision++;
 							}
-							block.Frame = frame;
-							block.Revision++;
+							system->FrameParents[slot.Index] = parent;
 						}
 						return;
 					}
@@ -854,7 +895,8 @@ namespace engine::effects {
 					block.Pending = emitter.Enabled && emitter.Rate > 0.0f ? 1.0f : 0.0f;
 					SampleCurves(emitter, block.Curves);
 					ApplyPlayback(store, emitter, block);
-					block.Frame = EmitterFrame(store, entity);
+					const ecs::Entity parent = store.ParentOf(entity);
+					block.Frame = FrameOfParent(store, parent);
 
 					// **The generation is carried over and advanced, not reset**,
 					// which is the whole point of it: whatever the last tenant of
@@ -875,9 +917,11 @@ namespace engine::effects {
 						block.CurveRevision = previous.CurveRevision + 1;
 						slot.Index = reused;
 						system->Blocks[reused] = block;
+						system->FrameParents[reused] = parent;
 					} else {
 						slot.Index = static_cast<uint32_t>(system->Blocks.size());
 						system->Blocks.push_back(block);
+						system->FrameParents.push_back(parent);
 					}
 				}
 			);

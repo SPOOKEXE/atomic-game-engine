@@ -43,6 +43,23 @@ namespace engine::render {
 		void BeginFrame(uint64_t token);
 
 		uint32_t Upsert(const InstanceKey &key, const GpuInstance &row);
+		uint32_t Upsert(
+			const InstanceKey &key,
+			const GpuInstance &row,
+			const scene::DrawInstance &source,
+			const MeshEntry &mesh
+		);
+
+		// Reuses a packed slot when every input to `ToGpu` matches exactly.
+		//
+		// @param key    Stable row identity.
+		// @param source Current scene row.
+		// @param mesh   Current resolved mesh.
+		// @param slot   Receives the resident slot whenever the key exists.
+		// @return Whether the packed row is already current.
+		bool Reuse(
+			const InstanceKey &key, const scene::DrawInstance &source, const MeshEntry &mesh, uint32_t &slot
+		);
 
 		void EndFrame();
 
@@ -67,14 +84,39 @@ namespace engine::render {
 		}
 
 	  private:
+		// The contiguous prefix of DrawInstance consumed by ToGpu. The layout
+		// assertion in InstanceResidency.cpp keeps the bulk comparison honest.
+		struct PackingSource {
+			core::CFrame Frame;
+			core::Vector3 HalfExtent;
+			core::Color3 Tint;
+			core::Color3 SurfaceColour;
+			core::Color3 EmissiveTint;
+			float EmissiveStrength = 1.0f;
+		};
+
 		struct Entry {
 			InstanceKey Key;
 			GpuInstance Packed;
+			PackingSource Source;
+			float Transparency = 0.0f;
+			float AlphaCutoff = 0.5f;
+			core::Vector3 MeshCentre;
+			core::Vector3 MeshExtent;
 			uint64_t Seen = 0;
+			scene::AlphaMode Alpha = scene::AlphaMode::Opaque;
+			scene::SurfaceResampleMode Resample = scene::SurfaceResampleMode::Default;
 			bool Occupied = false;
 			bool Dirty = false;
+			bool SourceKnown = false;
 		};
 
+		uint32_t Upsert(
+			const InstanceKey &key,
+			const GpuInstance &row,
+			const scene::DrawInstance *source,
+			const MeshEntry *mesh
+		);
 		void MarkDirty(uint32_t slot);
 		void ReleaseUnseen();
 

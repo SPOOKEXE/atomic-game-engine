@@ -2,6 +2,7 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/graph/Cull.hpp>
 #include <engine/graph/EntityFlow.hpp>
+#include <engine/graph/Shadow.hpp>
 
 #include <algorithm>
 
@@ -13,6 +14,7 @@ namespace engine::graph {
 		// whole of this file. A steady scene settles to zero.
 		for (EntityList &list : Lists) {
 			list.Indices.clear();
+			list.WholeDrawList = false;
 		}
 		Live = 0;
 	}
@@ -22,10 +24,11 @@ namespace engine::graph {
 		into.assign(indices.begin(), indices.end());
 	}
 
-	std::vector<uint32_t> &EntityFlow::Open(core::Name name) {
+	std::vector<uint32_t> &EntityFlow::Open(core::Name name, bool wholeDrawList) {
 		for (size_t index = 0; index < Live; index++) {
 			if (Lists[index].Name == name) {
 				Lists[index].Indices.clear();
+				Lists[index].WholeDrawList = wholeDrawList;
 				return Lists[index].Indices;
 			}
 		}
@@ -35,10 +38,11 @@ namespace engine::graph {
 			EntityList &list = Lists[Live++];
 			list.Name = name;
 			list.Indices.clear();
+			list.WholeDrawList = wholeDrawList;
 			return list.Indices;
 		}
 
-		Lists.push_back(EntityList{name, {}});
+		Lists.push_back(EntityList{name, {}, wholeDrawList});
 		Live = Lists.size();
 		return Lists.back().Indices;
 	}
@@ -59,6 +63,24 @@ namespace engine::graph {
 			}
 		}
 		return false;
+	}
+
+	bool EntityFlow::IsWholeDrawList(core::Name name) const {
+		for (size_t index = 0; index < Live; index++) {
+			if (Lists[index].Name == name) {
+				return Lists[index].WholeDrawList;
+			}
+		}
+		return false;
+	}
+
+	void EntityFlow::MarkWholeDrawList(core::Name name, bool wholeDrawList) {
+		for (size_t index = 0; index < Live; index++) {
+			if (Lists[index].Name == name) {
+				Lists[index].WholeDrawList = wholeDrawList;
+				return;
+			}
+		}
 	}
 
 	void Viewpoints::Clear() {
@@ -261,6 +283,7 @@ namespace engine::graph {
 
 		const core::Name input = firstResource(node.Reads, ResourceKind::Entities);
 		std::span<const uint32_t> source = entities.Get(input);
+		const bool wholeSource = entities.IsWholeDrawList(input);
 		std::vector<uint32_t> aliasedSource;
 		if (input == output) {
 			aliasedSource.assign(source.begin(), source.end());
@@ -268,13 +291,26 @@ namespace engine::graph {
 		}
 		std::vector<uint32_t> &into = entities.Open(output);
 
-		EntityNodeRun result{.Handled = true, .Output = output};
+		EntityNodeRun result;
+		result.Handled = true;
+		result.Output = output;
+		bool wholeOutput = false;
 		if (kind == "entities") {
 			AllEntities(instances.size(), into);
+			wholeOutput = true;
 		} else if (kind == "cull-frustum") {
 			const std::string *mode = node.Parameter(core::Name("culling"));
 			if (mode != nullptr && *mode == "none") {
 				into.assign(source.begin(), source.end());
+				wholeOutput = wholeSource;
+			} else if (wholeSource) {
+				result.BoundedAll = true;
+				CullAndBound(
+					instances,
+					Frustum::FromViewProjection(ViewProjectionOf(viewpointFor(node.Reads), aspect)),
+					into,
+					result.Bounds
+				);
 			} else {
 				FilterByFrustum(
 					instances,
@@ -284,19 +320,18 @@ namespace engine::graph {
 				);
 			}
 		} else if (kind == "cull-distance") {
-			FilterByDistance(
-				instances,
-				source,
-				viewpointFor(node.Reads).Frame.Position,
-				node.Number(core::Name("radius"), 0.0f),
-				into
-			);
+			const float radius = node.Number(core::Name("radius"), 0.0f);
+			FilterByDistance(instances, source, viewpointFor(node.Reads).Frame.Position, radius, into);
+			wholeOutput = wholeSource && radius <= 0.0f;
 		} else if (kind == "filter-tag") {
-			FilterByTag(instances, source, node.Integer(core::Name("mask"), 0), into);
+			const uint32_t mask = node.Integer(core::Name("mask"), 0);
+			FilterByTag(instances, source, mask, into);
+			wholeOutput = wholeSource && mask == 0;
 		} else {
 			result.Ordered = true;
 			result.Opaque = OrderEntities(instances, source, viewpointFor(node.Reads).Frame.Position, into);
 		}
+		entities.MarkWholeDrawList(output, wholeOutput);
 
 		result.Count = into.size();
 

@@ -12,6 +12,7 @@
 // exactly what a node editor invites somebody to do.
 
 #include <engine/graph/EntityFlow.hpp>
+#include <engine/graph/Shadow.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -316,6 +317,7 @@ TEST_CASE("authored entity nodes execute as one composable flow", "[graph][entit
 	const auto camera = resource("camera", ResourceKind::Camera);
 	const auto all = resource("all", ResourceKind::Entities);
 	const auto tagged = resource("tagged", ResourceKind::Entities);
+	const auto culled = resource("culled", ResourceKind::Entities);
 	const auto near = resource("near", ResourceKind::Entities);
 	const auto ordered = resource("ordered", ResourceKind::Entities);
 
@@ -334,6 +336,19 @@ TEST_CASE("authored entity nodes execute as one composable flow", "[graph][entit
 
 	Node source{.Name = Name("entities"), .Kind = Name("entities"), .Writes = {all}};
 	CHECK(RunEntityNode(graph, source, instances, fallback, 1.0f, entities, viewpoints).Count == 4);
+	CHECK(entities.IsWholeDrawList(Name("all")));
+
+	Node frustum{
+		.Name = Name("frustum"),
+		.Kind = Name("cull-frustum"),
+		.Reads = {all, camera},
+		.Writes = {culled},
+	};
+	const engine::graph::EntityNodeRun culledRun =
+		RunEntityNode(graph, frustum, instances, fallback, 1.0f, entities, viewpoints);
+	CHECK(culledRun.BoundedAll);
+	CHECK(culledRun.Bounds == engine::graph::BoundsOfAll(instances));
+	CHECK_FALSE(entities.IsWholeDrawList(Name("culled")));
 
 	Node tag{
 		.Name = Name("characters"),
@@ -344,6 +359,12 @@ TEST_CASE("authored entity nodes execute as one composable flow", "[graph][entit
 	};
 	CHECK(RunEntityNode(graph, tag, instances, fallback, 1.0f, entities, viewpoints).Count == 3);
 	CHECK(Vec(entities.Get(Name("tagged"))) == std::vector<uint32_t>{0, 1, 3});
+	frustum.Name = Name("filtered-frustum");
+	frustum.Reads = {tagged, camera};
+	const engine::graph::EntityNodeRun filteredCull =
+		RunEntityNode(graph, frustum, instances, fallback, 1.0f, entities, viewpoints);
+	CHECK_FALSE(filteredCull.BoundedAll);
+	CHECK_FALSE(entities.IsWholeDrawList(Name("culled")));
 
 	// Reading and writing one list is legal and must not clear the source before
 	// the filter sees it.

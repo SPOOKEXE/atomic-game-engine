@@ -579,6 +579,12 @@ namespace engine::render {
 		std::vector<scene::DrawInstance> DrawableForeign;
 
 		std::vector<uint32_t> SceneOrder;
+
+		// Inverse of `SceneOrder`, from an own-world source row to its packed
+		// scene slot. The camera range contains a subset of those exact rows, so
+		// it can reuse their resident slots instead of resolving and packing each
+		// visible instance a second time.
+		std::vector<uint32_t> SceneSlotOfSource;
 		SDL_GPUGraphicsPipeline *ImagePipeline = nullptr;
 		SDL_GPUGraphicsPipeline *OverlayPipeline = nullptr;
 

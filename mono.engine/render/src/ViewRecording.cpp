@@ -528,7 +528,7 @@ namespace engine::render {
 
 		const float cameraAspect = static_cast<float>(sceneWidth) / static_cast<float>(sceneHeight);
 		cameraMatrix = scene::ResolveCamera(cameraFrame, drawCamera, cameraAspect).ViewProjection;
-		sceneBounds = graph::BoundsOfAll(instances);
+		bool sceneBoundsReady = false;
 
 		graph::EntityFlow &entityFlow = State->GraphEntities;
 		graph::Viewpoints &viewpoints = State->GraphViewpoints;
@@ -568,6 +568,10 @@ namespace engine::render {
 				if (!run.Handled) {
 					continue;
 				}
+				if (run.BoundedAll) {
+					sceneBounds = run.Bounds;
+					sceneBoundsReady = true;
+				}
 				visibleCount = run.Output.IsValid() ? run.Count : visibleCount;
 				if (run.Ordered) {
 					opaqueCount = run.Opaque;
@@ -577,6 +581,9 @@ namespace engine::render {
 				cpuNodeWall[node->Name.Id()] +=
 					std::chrono::duration<double, std::micro>(ended - started).count();
 			}
+		}
+		if (!sceneBoundsReady) {
+			sceneBounds = graph::BoundsOfAll(instances);
 		}
 
 		const std::span<const uint32_t> ordered = entityFlow.Get(orderedEntities);
@@ -1427,6 +1434,7 @@ namespace engine::render {
 		State->SlotTags.resize(uploadCount);
 		State->SlotSeam.resize(uploadCount);
 		State->SlotSeamLight.resize(uploadCount);
+		State->SceneSlotOfSource.resize(ownCount);
 
 		const core::Name viewWorld = Request.Source->WorldName;
 		const auto record = [&](uint32_t drawSlot, const scene::DrawInstance &instance, uint32_t fallback) {
@@ -1457,21 +1465,50 @@ namespace engine::render {
 				instance.Variant,
 				instance.Source == 0 ? fallback + 1u : 0u,
 			};
-			target.InstanceIndices[drawSlot] = residency.Upsert(key, ToGpu(instance, mesh));
+			uint32_t residentSlot = 0;
+			if (!residency.Reuse(key, instance, mesh, residentSlot)) {
+				residentSlot = residency.Upsert(key, ToGpu(instance, mesh), instance, mesh);
+			}
+			target.InstanceIndices[drawSlot] = residentSlot;
 		};
 
 		{
 			ENGINE_PROFILE_CAT("resolve resident instances", core::ProfileCategory::Render);
-			for (uint32_t index = 0; index < State->SceneOrder.size(); index++) {
-				const uint32_t source = State->SceneOrder[index];
-				record(index, State->SceneInstances[source], source);
+			{
+				ENGINE_PROFILE_CAT("resident.scene", core::ProfileCategory::Render);
+				for (uint32_t index = 0; index < State->SceneOrder.size(); index++) {
+					const uint32_t source = State->SceneOrder[index];
+					record(index, State->SceneInstances[source], source);
+					State->SceneSlotOfSource[source] = index;
+				}
 			}
-			for (uint32_t index = ownCount; index < sceneCount; index++) {
-				record(index, State->SceneInstances[index], index);
+			{
+				ENGINE_PROFILE_CAT("resident.foreign", core::ProfileCategory::Render);
+				for (uint32_t index = ownCount; index < sceneCount; index++) {
+					record(index, State->SceneInstances[index], index);
+				}
 			}
-			for (uint32_t index = 0; index < State->DrawOrder.size(); index++) {
-				const uint32_t source = State->DrawOrder[index];
-				record(cameraBase + index, State->VisibleInstances[source], source);
+			{
+				ENGINE_PROFILE_CAT("resident.camera", core::ProfileCategory::Render);
+				for (uint32_t index = 0; index < State->DrawOrder.size(); index++) {
+					const uint32_t source = State->DrawOrder[index];
+					const uint32_t drawSlot = cameraBase + index;
+					const uint32_t sceneSlot = State->SceneSlotOfSource[source];
+					target.InstanceIndices[drawSlot] = target.InstanceIndices[sceneSlot];
+					State->SlotMesh[drawSlot] = State->SlotMesh[sceneSlot];
+					State->SlotTexture[drawSlot] = State->SlotTexture[sceneSlot];
+					State->SlotNormalMap[drawSlot] = State->SlotNormalMap[sceneSlot];
+					State->SlotRoughnessMap[drawSlot] = State->SlotRoughnessMap[sceneSlot];
+					State->SlotOcclusionMap[drawSlot] = State->SlotOcclusionMap[sceneSlot];
+					State->SlotHeightMap[drawSlot] = State->SlotHeightMap[sceneSlot];
+					State->SlotMetalnessMap[drawSlot] = State->SlotMetalnessMap[sceneSlot];
+					State->SlotEmissiveMap[drawSlot] = State->SlotEmissiveMap[sceneSlot];
+					State->SlotResample[drawSlot] = State->SlotResample[sceneSlot];
+					State->SlotShader[drawSlot] = State->SlotShader[sceneSlot];
+					State->SlotTags[drawSlot] = State->SlotTags[sceneSlot];
+					State->SlotSeam[drawSlot] = State->SlotSeam[sceneSlot];
+					State->SlotSeamLight[drawSlot] = State->SlotSeamLight[sceneSlot];
+				}
 			}
 		}
 

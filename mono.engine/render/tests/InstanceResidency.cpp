@@ -13,6 +13,9 @@ using engine::render::GpuInstance;
 using engine::render::InstanceKey;
 using engine::render::InstanceResidency;
 using engine::render::InstanceUploadRange;
+using engine::render::MeshEntry;
+using engine::render::ToGpu;
+using engine::scene::DrawInstance;
 
 namespace {
 	GpuInstance Row(float x) {
@@ -24,6 +27,73 @@ namespace {
 	InstanceKey Key(uint64_t source, uint64_t variant = 0) {
 		return InstanceKey{Name("residency.world"), source, variant, 0};
 	}
+}
+
+TEST_CASE("an exact source row reuses its packed resident slot", "[render][residency]") {
+	InstanceResidency rows;
+	DrawInstance source;
+	source.Source = 1;
+	MeshEntry mesh;
+
+	rows.BeginFrame();
+	const uint32_t original = rows.Upsert(Key(1), ToGpu(source, mesh), source, mesh);
+	rows.EndFrame();
+	rows.AcknowledgeDirty();
+
+	rows.BeginFrame();
+	uint32_t reused = 0;
+	CHECK(rows.Reuse(Key(1), source, mesh, reused));
+	rows.EndFrame();
+	CHECK(reused == original);
+	CHECK(rows.DirtyCount() == 0);
+}
+
+TEST_CASE("source and mesh packing inputs invalidate exact resident reuse", "[render][residency]") {
+	InstanceResidency rows;
+	DrawInstance source;
+	source.Source = 1;
+	MeshEntry mesh;
+
+	rows.BeginFrame();
+	rows.Upsert(Key(1), ToGpu(source, mesh), source, mesh);
+	rows.EndFrame();
+	rows.AcknowledgeDirty();
+
+	rows.BeginFrame();
+	uint32_t slot = 0;
+	source.Frame.Position.X = 4.0f;
+	CHECK_FALSE(rows.Reuse(Key(1), source, mesh, slot));
+	rows.Upsert(Key(1), ToGpu(source, mesh), source, mesh);
+	rows.EndFrame();
+	CHECK(rows.DirtyCount() == 1);
+	rows.AcknowledgeDirty();
+
+	rows.BeginFrame();
+	mesh.Extent.X = 2.0f;
+	CHECK_FALSE(rows.Reuse(Key(1), source, mesh, slot));
+	rows.Upsert(Key(1), ToGpu(source, mesh), source, mesh);
+	rows.EndFrame();
+	CHECK(rows.DirtyCount() == 1);
+}
+
+TEST_CASE("metadata changes reuse a resident GPU row", "[render][residency]") {
+	InstanceResidency rows;
+	DrawInstance source;
+	source.Source = 1;
+	MeshEntry mesh;
+
+	rows.BeginFrame();
+	const uint32_t original = rows.Upsert(Key(1), ToGpu(source, mesh), source, mesh);
+	rows.EndFrame();
+	rows.AcknowledgeDirty();
+
+	rows.BeginFrame();
+	uint32_t slot = 0;
+	source.Texture = Name("changed.texture");
+	CHECK(rows.Reuse(Key(1), source, mesh, slot));
+	rows.EndFrame();
+	CHECK(rows.DirtyCount() == 0);
+	CHECK(slot == original);
 }
 
 TEST_CASE("reordering keeps resident slots and only changes indices", "[render][residency]") {

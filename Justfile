@@ -731,9 +731,9 @@ edit *args: (build "studio")
 # plate and says nothing.
 studio-smoke game="" out=".cache/studio-smoke.bmp" meshes=".cache/studio-meshes.bmp": (build "studio")
     @rm -f {{out}} {{meshes}}
-    ./{{build}}/studio/studio --headless --frames 12 --run play         {{ if game == "" { "" } else { "--game " + game } }}         --capture {{out}} --width 960 --height 540
+    ./{{build}}/studio/studio --headless --frames 60 --run play         {{ if game == "" { "" } else { "--game " + game } }}         --capture {{out}} --width 960 --height 540
     @test -s {{out}} || (echo "FAIL: the headless editor wrote no capture" && exit 1)
-    ./{{build}}/studio/studio --headless --frames 700 --run play         --capture-world Assets --capture {{meshes}} --width 1280 --height 900
+    ./{{build}}/studio/studio --headless --frames 700 --run play         --capture-world MeshGrid --capture {{meshes}} --width 1280 --height 900
     @test -s {{meshes}} || (echo "FAIL: the headless editor wrote no mesh capture" && exit 1)
     @echo "studio ok - loaded, played and rendered with no display, into {{out}} and {{meshes}}"
 
