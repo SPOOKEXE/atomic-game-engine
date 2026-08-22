@@ -168,6 +168,9 @@ The milestone headings below are development labels. Not in line with project ve
       obviously wants and cannot get. Also fix the three port mismatches, one of
       which has `studio --mcp-port` bare defaulting to 8720 while its own help
       says 8738, and give `mcpbridge` a suite - it has none.
+
+---
+
 - [_] explore the idea of having the active scene entities resident on the gpu always and we just have a compute timer on the gpu 24/7. this way, when the scene changes, we tell the gpu what changed. also doing a 2-way sync is easy with signatures/hashes with cpu-gpu, this way we have no swapchain waiting, we just compute at a given interval. sort of like "replication" to the gpu. same for particles, ui, entites, studio, etc.
 
 ### v0.21

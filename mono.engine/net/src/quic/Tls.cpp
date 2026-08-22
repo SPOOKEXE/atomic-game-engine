@@ -635,10 +635,6 @@ namespace engine::net::quic {
 	// --- the server's side ---------------------------------------------------
 
 	bool Tls::OnClientHello(std::span<const std::byte> body, std::span<const std::byte> whole) {
-		if (LocalParameters.empty()) {
-			return Refuse(ALERT_INTERNAL_ERROR, "the transport parameters were not set");
-		}
-
 		Reader reader{body};
 		if (reader.U16() != VERSION_LEGACY) {
 			return Refuse(ALERT_PROTOCOL_VERSION, "the legacy version is not 1.2");
@@ -841,6 +837,23 @@ namespace engine::net::quic {
 		Events.push_back({Event::Kind::PeerParameters, Level::Handshake, RemoteParameters, {}});
 		Events.push_back({Event::Kind::ReadKey, Level::Handshake, {}, ClientHandshakeSecret});
 		Events.push_back({Event::Kind::WriteKey, Level::Handshake, {}, ServerHandshakeSecret});
+
+		// **The handshake stops here.** The rest of the flight carries this end's
+		// transport parameters, and they are not knowable yet: see
+		// `NeedsParameters`. The caller applies the events above - which is what
+		// tells its transport what the client asked for - supplies this end's,
+		// and calls `Resume`.
+		Phase = Stage::AwaitingParameters;
+		return true;
+	}
+
+	bool Tls::Resume() {
+		if (Phase != Stage::AwaitingParameters) {
+			return Refuse(ALERT_INTERNAL_ERROR, "the handshake was not waiting for parameters");
+		}
+		if (LocalParameters.empty()) {
+			return Refuse(ALERT_INTERNAL_ERROR, "the transport parameters were not set");
+		}
 
 		// EncryptedExtensions, Certificate, CertificateVerify and Finished go out
 		// together. One `Send` rather than four, because they are one flight and

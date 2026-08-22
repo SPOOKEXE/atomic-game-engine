@@ -40,13 +40,31 @@ namespace {
 		//@}
 
 		std::vector<std::byte> PeerParameters;
+		std::vector<std::byte> Local;
 		bool Complete = false;
 
 		// What the peer must be given next, with the level it belongs at.
 		std::vector<std::pair<Level, std::vector<std::byte>>> Outbound;
 
 		// Applies everything the handshake asked for, and keeps the bytes.
+		//
+		// A server pauses after the ServerHello to be told its own transport
+		// parameters, because it cannot know them until it has read the client's
+		// - `Tls::NeedsParameters` is the argument. Here they are a constant, so
+		// the pause is answered immediately; a real transport answers it by
+		// encoding what its peer just asked for.
 		void Drain() {
+			Apply();
+			while (Stack->NeedsParameters()) {
+				Stack->SetTransportParameters(Local);
+				if (!Stack->Resume()) {
+					return;
+				}
+				Apply();
+			}
+		}
+
+		void Apply() {
 			for (const Tls::Event &event : Stack->Pending()) {
 				switch (event.What) {
 				case Tls::Event::Kind::Send:
@@ -138,7 +156,7 @@ namespace {
 		serverSide.Seed = Seed(1);
 		serverSide.HasSeed = true;
 		server.Stack.emplace(Tls::Role::Server, serverSide);
-		server.Stack->SetTransportParameters(Parameters(0xa0));
+		server.Local = Parameters(0xa0);
 
 		TlsSettings clientSide;
 		clientSide.PinIdentity = pin;
@@ -253,7 +271,7 @@ TEST_CASE("a client refuses a server it did not pin", "[net][quic][tls]") {
 	serverSide.Seed = Seed(2);
 	serverSide.HasSeed = true;
 	server.Stack.emplace(Tls::Role::Server, serverSide);
-	server.Stack->SetTransportParameters(Parameters(0xa0));
+	server.Local = Parameters(0xa0);
 
 	TlsSettings clientSide;
 	clientSide.PinIdentity = true;
@@ -391,7 +409,7 @@ TEST_CASE("a server refuses a client that speaks another protocol", "[net][quic]
 	serverSide.HasSeed = true;
 	serverSide.Protocol = "atomic/1";
 	server.Stack.emplace(Tls::Role::Server, serverSide);
-	server.Stack->SetTransportParameters(Parameters(0xa0));
+	server.Local = Parameters(0xa0);
 
 	TlsSettings clientSide;
 	clientSide.PinIdentity = false;

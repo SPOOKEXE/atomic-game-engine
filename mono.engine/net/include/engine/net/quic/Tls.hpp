@@ -251,12 +251,39 @@ namespace engine::net::quic {
 		//
 		// They travel inside the handshake - in the ClientHello for a client and
 		// in EncryptedExtensions for a server - which is what binds them to the
-		// key exchange. Must be set before `Begin` on a client and before the
-		// first `Receive` on a server.
+		// key exchange.
+		//
+		// A client sets them before `Begin`. **A server cannot**, and
+		// `NeedsParameters` is why.
 		//
 		// @param parameters The encoded parameters, from the transport.
 		// @since v0.19
 		void SetTransportParameters(std::span<const std::byte> parameters);
+
+		// Whether the handshake is waiting for this end's transport parameters.
+		//
+		// **Only ever true on a server, and only once.** A server's parameters
+		// depend on the client's - RFC 9368's version information names the
+		// version in force, and a transport does not know which that is until it
+		// has read what the client offered - so the handshake stops after the
+		// ServerHello, hands the client's parameters over, and waits to be told
+		// this end's before it writes EncryptedExtensions. Encoding them any
+		// earlier produces a chosen version of zero, which the far end rejects as
+		// malformed with nothing saying which of the two ends was wrong.
+		//
+		// @return `true` when `SetTransportParameters` and then `Resume` are what
+		//         the caller owes it.
+		// @since v0.19
+		bool NeedsParameters() const {
+			return Phase == Stage::AwaitingParameters;
+		}
+
+		// Writes the server's flight, once its parameters are known.
+		//
+		// @return `false` when the handshake was not waiting, or was refused
+		//         while writing.
+		// @since v0.19
+		bool Resume();
 
 		// Produces the ClientHello. Clients only.
 		//
@@ -364,6 +391,7 @@ namespace engine::net::quic {
 	  private:
 		enum class Stage : uint8_t {
 			Fresh,
+			AwaitingParameters,
 			AwaitingServerHello,
 			AwaitingServerHandshake,
 			AwaitingClientFinished,
