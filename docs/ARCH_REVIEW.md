@@ -105,7 +105,8 @@ trusted it.
 - `script/AGENTS.md:10` carries one stale claim.
 - `mono.server/AGENTS.md` is stale on rewind and silent on both networking and
   content.
-- `docs/QUIC.md:55` calls `net` L2. It is L11.
+- ~~`docs/QUIC.md:55` calls `net` L2. It is L11.~~ Fixed at v0.19, with the
+  same line gaining `Vendor::ngtcp2`.
 - `README.md:34` says "four rules"; there are six.
 - `docgen/pages/Modules.md` lists ten of the engine's twenty-nine modules.
 

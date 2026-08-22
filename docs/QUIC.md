@@ -1,13 +1,28 @@
 # QUIC
 
-**This is the *how*. `docs/DEFERRED.md` D00014 is the *whether* and the
-*when*.** That entry holds the decision open behind a named trigger; this
-document is what somebody reads on the day the trigger fires, so that the work
-starts from a survey rather than from a search engine.
+**This was the *how*, and at v0.19 it is also the *what happened*.**
+`docs/DEFERRED.md` D00014 is the *whether* and the *when*; this document was
+written so that the day the trigger fired started from a survey rather than
+from a search engine. It did, and §12 records what the survey turned out to be
+right and wrong about.
 
-Everything below was checked against the libraries as they are in August 2026,
-not as D00014 described them in v0.13. **Three of that entry's conclusions have
-moved**, and they are called out where they occur.
+Everything in §1 to §11 was checked against the libraries as they are in August
+2026, not as D00014 described them in v0.13. **Three of that entry's
+conclusions have moved**, and they are called out where they occur. §12 is
+newer than all of it and is the part to read first.
+
+---
+
+## 0. Where this stands
+
+| Stage (§8) | State |
+|---|---|
+| 1. Vendor ngtcp2 and a TLS backend | **done** - ngtcp2 v1.25.0 as a submodule, `ENABLE_LIB_ONLY`; the TLS backend is in tree |
+| 2. The crypto seam | **done** - `net/quic/Crypto.hpp`, checked against RFC 9001 Appendix A |
+| 3. A QUIC session beside the old one, proved over `LossyTransport` | **done** - `net/quic/Connection.hpp`, twenty cases plus one over real sockets |
+| 4. Rewire `Session`, `Listener`, `Connector`, then the programs | **done for `mono.server` and `mono.client`**, behind `--quic`. `mono.studio`, `mono.unified_tests` and `mono.network`'s discovery are unmoved |
+| 5. `expected_graph.json` and the tier check | **nothing to change** - the graph records first-party links and ngtcp2 is a vendor |
+| 6. Delete | **not started, and deliberately.** `Datagram` is still the default wire, so both stacks are live and §9's second look at `CongestionControl` has not been taken |
 
 ---
 
@@ -52,8 +67,8 @@ them arrive with it.
 
 ## 2. What is here now, and what QUIC replaces
 
-`engine::net` is L2 `shared` and links `Engine::core`, `Vendor::asio` and
-`Vendor::cryptopp`. Reading the table below as a delete list is premature: see
+`engine::net` is L11 `shared` and links `Engine::core`, `Vendor::asio`,
+`Vendor::cryptopp` and, since v0.19, `Vendor::ngtcp2`. Reading the table below as a delete list is premature: see
 §8, which is explicit that nothing is deleted until the replacement is proved
 beside it.
 
@@ -284,6 +299,8 @@ housekeeping.** ngtcp2 does allow a custom congestion controller.
 
 ## 11. Open questions
 
+These were the questions before the work. §12 answers three of them.
+
 - Does AWS-LC's pre-generated build actually configure and link with no Go and
   no Perl, on Linux, Windows and macOS, as a submodule?
 - One stream per channel, or one stream per message? Streams are cheap but not
@@ -291,6 +308,95 @@ housekeeping.** ngtcp2 does allow a custom congestion controller.
 - Does the Copa controller stay (§9)?
 - Does `mono.network`'s discovery carry a QUIC connection id, or keep its own
   identity and hand one over at connect time?
+
+---
+
+## 12. What was built, and where the survey was wrong
+
+### The TLS decision went to the fallback, and the reason is §11's first question
+
+§4 said to try AWS-LC first and keep the in-tree TLS 1.3 as the fallback. **The
+fallback is what shipped.** AWS-LC's whole case rests on a claim - that its
+pre-generated build files configure with no Go and no Perl - which §11 lists as
+an open question and §10 says to verify on all three platforms *before*
+building anything on it. Verifying it on one platform proves nothing about the
+other two, and a transport standing on an unverified claim is a transport that
+has to be rebuilt when the claim fails.
+
+So `net/quic/Tls.hpp` is a TLS 1.3 handshake over Crypto++: X25519, one
+signature scheme, two cipher suites, RFC 7250 raw public keys, and no 0-RTT.
+**What it gives up is exactly what §4 says it gives up** - it will not talk to a
+browser or to curl, so the HTTP/3 half of D00014's second-consumer argument is
+not served. What it keeps is `mono.vendor/AGENTS.md`'s rule, unargued-with: a
+fresh clone still needs CMake, Ninja and a C++ compiler and nothing else.
+
+It is TLS on the wire rather than a private protocol wearing the name - RFC
+8446's messages and key schedule, RFC 9001's levels - so replacing it with a
+certificate-verifying backend later changes which object fills the interface
+and not one line of the transport above it.
+
+### One stream per message kind, which is narrower than §11 asked
+
+§11 asked "one stream per channel, or one stream per message". The answer is
+neither: **one stream per `MessageKind`**, which is §10's own table read
+literally. `replication::QuicRouteFor` is the mapping. A stream per message
+would be a stream per snapshot chunk; a stream per *channel* would put the join
+snapshot and a structural change back in one ordering, which is the stall the
+whole exercise is about.
+
+They are **sender-owned unidirectional** streams, and the channel number is the
+first byte the stream ever carries. Deriving it from the stream id instead
+would hold only while both ends opened their streams in the same order and
+never skipped one, which nothing would report the breaking of.
+
+### Copa stays, because nothing has argued for taking Cubic's latency
+
+§9's second look has not been taken and the controller is untouched. It is not
+on any path a QUIC session runs, so nothing was deleted; what §9 asks for is a
+deliberate decision, and the honest state is that nobody has made it.
+
+### The three mismatches were the three mismatches
+
+§5 named them and §10 predicted they would be where a subtle bug lives. Both
+were right, and the bug was the first kind §10 describes: Crypto++'s `ChaCha` is
+the original cipher with a 64-bit nonce, and RFC 9001 §5.4.4 wants the IETF
+variant's 96. The two are different functions of the same key. It was caught by
+RFC 9001 Appendix A's published vectors rather than by a handshake failing to
+complete, which is the whole reason those vectors are in the suite.
+
+### Two things the survey did not know to warn about
+
+- **ngtcp2 does not copy stream or CRYPTO data.** It keeps pointers into what
+  it was handed until the peer acknowledges. So the outbound buffers are a
+  deque of chunks that is never re-seated; a container that moved its elements
+  would leave the retransmission queue aimed at freed memory, and it would show
+  as a corrupted resend rather than as a crash.
+- **A server cannot encode its transport parameters until it has read the
+  client's.** RFC 9368's version information carries the version in force and
+  ngtcp2 fills it in when the remote parameters are decoded, so parameters
+  encoded beside `ngtcp2_conn_server_new` carry a chosen version of zero and
+  the far end rejects them as malformed with nothing saying which end was
+  wrong. The handshake therefore stops after the ServerHello and waits to be
+  told - `Tls::NeedsParameters`.
+
+### The identity binding, which §6 did not have a name for
+
+§6 says the pinning must survive and does not say what an identity *claim* is
+signed over once `AdmissionTranscript` is gone. It is a TLS exporter, RFC 8446
+§7.5, derived from the same transcript as the traffic secrets - so a signature
+captured from one connection proves nothing on another and a relay holding one
+handshake with each side cannot carry the claim across.
+`replication::SessionPort::Binding` is the seam and both wires fill it.
+
+### What is left
+
+- The deletions (§8 step 6), which wait on `Datagram` stopping being the
+  default.
+- `mono.studio`, `mono.unified_tests` and `mono.network`'s discovery.
+- §9's decision about Copa.
+- §11's last question, which the discovery work will answer.
+- HTTP/3, which the in-tree TLS gives up and which is the half of D00014's
+  second-consumer argument that is now unserved.
 
 ---
 

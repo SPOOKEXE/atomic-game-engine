@@ -3,6 +3,34 @@
 L12, `shared` tier. What the server tells a client, and what the client does
 with it. `net` carries the bytes; this decides what they mean.
 
+## There are two wires and one interface
+
+`SessionPort` is what a session is, `Session` is the datagram one this module
+has had since v0.3, and `QuicSession` is the QUIC one added at v0.19.
+`ListenerSettings::Wire` and `ConnectorSettings::Wire` choose, they must match,
+and there is no negotiation between them - a client speaking one at a server
+speaking the other gets no answer, which is a connection that fails rather than
+a server running two protocols where the second is the one nobody tests.
+
+**A second implementation rather than one class with two modes**, and
+`SessionPort.hpp` carries the argument. What matters for anyone changing this
+module is the consequence: **nothing above the session may name either
+implementation.** `Authority`, `Replica`, `Prediction` and every message format
+are the same on both wires, and a case that only one of them can pass is a case
+that says nothing about whether the swap is honest - which is why
+`tests/QuicWire.cpp` deliberately runs the datagram suites' own cases.
+
+**A client's identity claim is signed over `SessionPort::Binding` and never
+over anything else.** The datagram wire fills it with the admission transcript
+and QUIC with a TLS exporter; both are values only the two ends of *this*
+session can compute. A claim signed over something reproducible elsewhere is a
+signature a relay can carry across from another connection, which is the whole
+of what `D00006` was about.
+
+**`Datagram` is still the default and both stacks are live.** That is temporary
+by design - `net/AGENTS.md` and `docs/QUIC.md` §8 say why - and until it ends, a
+change to one wire is a question about the other.
+
 ## The server is authoritative and the client is a replica
 
 Not a peer, not a cache, not a mirror that may disagree politely. The server's

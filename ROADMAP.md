@@ -39,11 +39,64 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### v0.19
 
-- [_] quic implementation. **Scoped, not started.** `docs/CODE_ARCH.md` §10.1
-      has the seam analysis: `net::Transport` is a real port and
-      `replication::Session` already holds one, so the open question is the
-      layer above - `Session` owns a `Link`, a reliable pair and its cipher
-      pair as members, and QUIC supplies all four itself.
+- [x] quic implementation. **Built, proved and wired behind `--quic`.** ngtcp2
+      v1.25.0 is vendored `lib/`-only, the packet protection is
+      `net/quic/Crypto.hpp` checked against RFC 9001 Appendix A, and the
+      handshake is a TLS 1.3 stack in tree. `docs/QUIC.md` §0 is the staging
+      table and §12 is what the survey got right and wrong; `docs/DEFERRED.md`
+      D00014 is closed.
+
+      **The TLS decision went to the fallback**, which §4 ranked second. AWS-LC's
+      whole case rests on its pre-generated build files needing no Go and no
+      Perl - a claim §11 lists as an open question and §10 says to verify on all
+      three platforms *before* building on it. Verifying it on one proves
+      nothing about the other two. So the backend is X25519, two suites, Ed25519
+      and RFC 7250 raw public keys over Crypto++, and the fresh-clone rule
+      survives unargued-with. **What it costs is interoperability and therefore
+      HTTP/3**, which is the cdn half of D00014's second-consumer argument and
+      is now the one thing that got worse.
+
+      **`docs/CODE_ARCH.md` §10.1's open question is answered and it is the
+      first of the two**: `replication::SessionPort` with two implementations,
+      not a `Session` whose four members become optional. That would be one
+      class with two modes and a branch in every method that only one
+      configuration runs, which is §8's "two overlapping reliability stacks is
+      worse than either" applied inside a type. Channels are sender-owned
+      unidirectional streams, one per `MessageKind` - §10's table read literally
+      - so a join snapshot and a door opening stop sharing an ordering.
+
+      Three things survive the swap: `BytesPerTick` as a ceiling above the
+      controller, Copa itself (deleting it is a decision to take Cubic's latency
+      and belongs in a commit that says so), and `ConnectionStats` refilled from
+      ngtcp2 with `SendsOverBudget` keeping its one meaning.
+
+      Two findings the survey could not have carried. **ngtcp2 does not copy
+      stream or CRYPTO data** - it holds pointers until the peer acknowledges,
+      so the outbound buffers are a deque that is never re-seated and a vector
+      would corrupt a retransmission rather than crash. **A server cannot encode
+      its transport parameters until it has read the client's** - RFC 9368's
+      version information is filled in when the remote parameters are decoded,
+      so parameters encoded beside `ngtcp2_conn_server_new` carry a chosen
+      version of zero and the far end calls them malformed with nothing saying
+      which end was wrong.
+
+      The one real bug was §10's prediction exactly: Crypto++'s `ChaCha` is the
+      64-bit-nonce original where RFC 9001 §5.4.4 wants the IETF variant's 96,
+      and the published vectors caught it where "the handshake does not
+      complete" would have said nothing.
+
+      Verified over the loopback, over a link losing fifteen percent, over two
+      real UDP sockets, and end to end: a headless client joins a `--quic`
+      server with 4097 entities. 362 suites green, `just determinism` and
+      `just replay-check` byte-identical.
+- [_] quic: retire the datagram stack. **Deliberately not done.** `Datagram` is
+      still the default wire, so `Packet`, `Reliability`, `Handshake`, `Cookie`
+      and `ConnectionId` are all live and nothing may be deleted -
+      `docs/QUIC.md` §8 is explicit that the order is prove, rewire, then
+      delete, with every commit green. What is left of step 4 is
+      `mono.studio`, `mono.unified_tests` and `mono.network`'s discovery, and
+      §11's last question - whether discovery carries a QUIC connection id or
+      keeps its own - is what the discovery half turns on.
 
 - [_] check if we need to move files / classes / structures around. **Analysed,
       not applied** - `docs/ARCH_REVIEW.md` §C. The five with arguments:

@@ -256,19 +256,64 @@ asio is `VENDOR`, never `VENDOR_PUBLIC`. No public header here names a socket, a
 `io_context` or an `error_code`. That is what keeps a transport swappable and
 what stops asio reaching every module that links this.
 
+## `quic/` is a second stack, and both are live
+
+`quic/` holds a QUIC transport - ngtcp2 underneath, `quic/Crypto.hpp` and
+`quic/Tls.hpp` above it, both first-party. It arrived at v0.19 **beside** the
+datagram stack rather than instead of it, and `replication::WireKind` chooses.
+`docs/QUIC.md` is the survey, the staging and the account of what the survey got
+wrong.
+
+**Two overlapping reliability stacks is worse than either, so this state is
+temporary by design.** Nothing is deleted while `Datagram` is the default; the
+day it stops being, `Packet`, `Reliability`, `Handshake`, `Cookie` and
+`ConnectionId` go with it and each takes its suite and its benchmark. Until
+then, **a change to one stack is a question about the other**: a rule that holds
+here and not there is a rule one of them has lost.
+
+Three things survive the swap and are the reason they are not on the delete
+list:
+
+- **`LinkSettings::BytesPerTick`**, as a ceiling *above* the congestion
+  controller. The two answer different questions - a game may refuse to spend
+  more than N on one player on a path that would carry ten times that, because
+  a hundred players on one host is a hundred of these and the operator's bill is
+  not a function of what the path can take.
+- **`net::CongestionControl`.** Copa is a delay-based controller tuned for input
+  latency and ngtcp2's default is Cubic. Deleting it is a decision to take
+  Cubic's latency and belongs in a commit that says so.
+- **`ConnectionStats`**, refilled from ngtcp2. `SendsOverBudget` keeps its one
+  meaning - a number somebody configured being enforced - because `render`'s
+  panel and `D00007` are both phrased against it.
+
+**No vendor type in a public header applies to ngtcp2 hardest.** A QUIC
+connection is ngtcp2 all the way through, so `quic/Connection.hpp` holds a pimpl
+and every `ngtcp2_` name stays inside one translation unit. The crypto and the
+handshake beside it name none at all, which is what lets `docs/QUIC.md` §4's
+decision be revisited without the transport noticing.
+
+**The nonce discipline is inverted here and that is not a weakening.**
+`quic::Seal` takes its nonce as an argument, which `Cipher` refuses to do. It is
+safe for one reason and the reason is not care: a QUIC nonce is the packet
+number exclusive-ORed into a derived IV, packet numbers within a key phase do
+not repeat by construction of the transport, and the key phase changes before
+the space could be exhausted. **The uniqueness is the transport's invariant
+rather than the cipher's**, which is exactly why it is a second surface beside
+`Cipher` and not a widening of it - and why nothing that is not the transport
+may call it.
+
 ## Not here yet
 
 - **The transports.** A loopback and an asio UDP socket, both driving `Link`.
 - **Reliability.** The acknowledgement window is carried and recorded; nothing
   resends against it yet.
-- **Binding the agreement to a server identity.** The stream is encrypted and
-  the exchange is unauthenticated, and those are two different things: a peer
-  knows it is talking to *something* that completed X25519, not that it is
-  talking to this server. So the traffic is safe against a listener and not
+- ~~**Binding the agreement to a server identity.**~~ Closed. On the datagram
+  wire it is a signature over the admission transcript; under QUIC it is RFC
+  7250's raw public key inside the handshake, checked against
+  `ConnectorSettings::ServerIdentity`. The argument is unchanged and worth
+  keeping: an unauthenticated agreement is safe against a listener and not
   against a relay, which can hold one exchange with each side and read
-  everything. `Handshake.hpp` carries the `TODO(D00006)`. A static server key and
-  a signature over the transcript is the shape; where the key comes from and who
-  trusts it is a deployment question.
+  everything.
 - `upstream/`, `downstream/`, `predict/` - replication, v0.3's remaining items.
 - `http/`, `websocket/` - userland networking and the origin's asset serving,
   which is what `mono.cdn`'s streaming waits on.
@@ -276,6 +321,10 @@ what stops asio reaching every module that links this.
   rate-limits and has no answer for two peers that cannot see each other.
 - **Interest management and lag compensation**, both later and both with their
   own plans.
+- **HTTP/3**, which `quic/` could carry and the in-tree TLS gives up. It is the
+  half of `D00014`'s second-consumer argument that is now unserved, and it comes
+  back with a certificate-verifying backend rather than with new transport
+  work.
 
 ## `http/` is a content protocol, not a web framework
 

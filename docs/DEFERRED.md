@@ -589,7 +589,41 @@ about how this submodule is bumped, not a version waiting to be reached.
 - **The second is that an empty world is not always an idle one.** NPCs on a route, a shop restocking, a round counting down. So the timeout became one of three answers - `world::IdleSleep` - with `Never` for a 24/7 world spelled as an enum member rather than as a very large number, and a ten-minute ceiling the decision clamps to rather than trusting a host to remember. And `scene::AwakeWorld` is the half a host cannot work out for itself: a script attaches a claim to the entity that needs the world running, so the claim dies with the entity instead of outliving whatever set it.
 - **Reopen trigger. *Lifetime* is closed at v0.13** - the policy is hoisted, both hosts call it, and the server's caller is behind a flag whose absence is the old behaviour. *Placement* - which host a world runs on, and what happens when it dies - is unchanged and is the whole of what this entry is now: more than one world hosted by something that is not a test harness and not a single-process editor. That is a deployment.
 
-### [_] D00014
+### [x] D00014
+
+**Closed at v0.19, and closed by being built rather than by being argued out
+of.** ngtcp2 is vendored, the crypto seam and a TLS 1.3 handshake are in
+`mono.engine/net/quic/`, a QUIC session runs beside the datagram one behind
+`ListenerSettings::Wire`, and `mono.server` and `mono.client` both take
+`--quic`. **`docs/QUIC.md` §0 is the staging table and §12 is what the survey
+got right and wrong**; what belongs here is which of this entry's own arguments
+were answered.
+
+- **Per-stream loss recovery** - answered. One stream per `MessageKind`, which
+  is `docs/CODE_ARCH.md` §10's table read literally rather than one stream per
+  reliability class. A join snapshot and a structural change no longer share an
+  ordering.
+- **TLS 1.3** - answered, and by the option this entry listed third: a minimal
+  in-tree stack over `D00006`'s primitives with RFC 7250 raw public keys.
+  `docs/QUIC.md` §4 recommended AWS-LC first and §11 listed its build claim as
+  an open question; a transport standing on an unverified claim is one that has
+  to be rebuilt when the claim fails, so the fallback was taken and the
+  fresh-clone rule survives unargued-with.
+- **A delivery signal for unreliable traffic** - answered.
+  `quic::Connection::Statistics::DatagramsAcknowledged` is the counter this
+  entry says the hand-rolled stack structurally cannot have without a second
+  ack path.
+- **The second consumer** - **not** answered, and this is the one thing that got
+  worse rather than better. The in-tree TLS gives up interoperability, so it
+  gives up HTTP/3, so the cdn half of the argument is unserved. A
+  certificate-verifying backend would restore it and changes only which object
+  fills `quic::Tls`'s interface.
+- **`net::CongestionControl` on the delete list** - untouched. It is on no path
+  a QUIC session runs, and what §9 asks for is a deliberate decision about
+  taking Cubic's latency rather than housekeeping. Nobody has made it.
+
+The paragraphs below are as they were written and are the reasoning that got
+here.
 
 **Congestion control shipped at v0.15 without QUIC, which takes this entry's
 first and heaviest argument away from it.** The rest of the argument is intact

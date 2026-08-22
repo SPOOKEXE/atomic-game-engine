@@ -557,6 +557,26 @@ own members. Deciding whether that is a second `Session` implementation behind a
 new interface, or a `Session` whose reliability pieces become optional, is the
 first design question of the work rather than the last.
 
+**Answered at v0.19, and it is the first of the two.**
+`replication::SessionPort` is the interface; `replication::Session` and
+`replication::QuicSession` are the two implementations, and
+`ListenerSettings::Wire` chooses. The argument against the second option is in
+`SessionPort.hpp`: a `Session` whose four members become optional is one class
+with two modes, and every method on it grows a branch that only one
+configuration exercises - which is `docs/QUIC.md` §8's "two overlapping
+reliability stacks is worse than either" applied inside a single type. Those
+members are not incidental state, they *are* the design, and a QUIC session does
+not have a different version of them, it has none.
+
+What the interface deliberately excludes is as much of the answer as what it
+holds. No `AdoptKeys`, because QUIC's keys are the handshake's own and one
+implementation would refuse it for ever. No `net::Link`, because reaching
+through a session to a link is being coupled to one reliability design - the
+three things every consumer actually wanted from it (the round trip, the send
+allowance, whether the link is up) are named on the port instead, and
+`Connector::Link()` is now a pointer that is null under QUIC so the absence is
+something a caller looks at rather than walks into.
+
 `net::http::Client` is the other port, and it already has a non-socket
 implementation in the content relay - so HTTP/3 fits behind it after one
 widening, for stream identity.
