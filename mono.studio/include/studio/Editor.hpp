@@ -3375,14 +3375,13 @@ namespace studio {
 		// a list assembled from what is in the world is also what makes a
 		// deleted emitter stop being drawn.
 		//@{
+		// Boundary copies retained between frames. The stores own the source
+		// rows; Studio owns only these one-frame snapshots, whose capacity stays
+		// warm when a million-row scene is presented repeatedly.
+		std::vector<engine::scene::DrawInstance> DrawnInstances;
+		std::vector<engine::scene::DrawInstance> ForeignInstances;
 		client::ParticleFrame Particles;
 
-		// Whether this frame has already advanced the particle simulation.
-		//
-		// **Because a frame is several `Render` calls here and one pool.** Each
-		// open viewport is drawn by its own call, and the particles belong to the
-		// world rather than to any of the cameras looking at it.
-		bool ParticleStepped = false;
 		std::vector<engine::effects::RibbonVertex> RibbonVertices;
 		std::vector<engine::effects::RibbonRun> RibbonRuns;
 		std::vector<engine::render::SceneLight> Lights;
@@ -3538,6 +3537,14 @@ namespace studio {
 		// @param world The scene to ask about.
 		// @return `true` when some run owns it as a replica.
 		bool IsReplicaWorld(WorldId world) const;
+
+		// The world whose visual state backs a viewport.
+		//
+		// A local replica supplies its camera, input and interface, but its linked
+		// authority owns the scene and effects uploaded to the shared renderer.
+		// The authority can change while a link follows a teleport, so this is
+		// resolved from the link rather than cached on the viewport.
+		WorldId VisualWorldOf(WorldId world) const;
 
 		// Where an edit made in this world lands.
 		//

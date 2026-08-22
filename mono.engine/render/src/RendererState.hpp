@@ -1038,19 +1038,13 @@ namespace engine::render {
 			float Delta = 0.0f;
 			//@}
 
-			// Which batch list the instance stream currently holds.
+			// Which batch list the device stream held on its last preparation.
 			//
-			// **A frame has several views and one pool.** A mirror and the room
-			// it reflects are two views of the same particles, and stepping for
-			// each would age them twice a frame. Every caller in the engine gives
-			// its views the same batch list - the client collects once and hands
-			// the span to each - so the second view's draw ranges are the ones
-			// already in the buffer and there is nothing to redo.
-			//
-			// That is what makes `View::ParticleDelta` the caller's declaration
-			// of which view advances time: a repeat view passes zero and is
-			// skipped, and a view that genuinely brought its own emitters is
-			// caught here and re-staged whatever it passed.
+			// The enclosing `ParticleWorld` handles cameras within one render
+			// frame. This pair handles the next frame: a paused world whose batch
+			// storage and count are unchanged needs neither a restage nor a compute
+			// dispatch, while a caller that rebuilt its list at another address is
+			// brought current even with a zero delta.
 			//@{
 			const ParticleBatch *StagedFrom = nullptr;
 			size_t StagedCount = 0;
@@ -1065,6 +1059,14 @@ namespace engine::render {
 			uint64_t Id = 0;
 			core::Name Name;
 			ParticlePool Pool;
+
+			// One prepared scene shared by every camera for this logical world in
+			// the current renderer frame. The first view stages and advances it;
+			// later views reuse both its material groups and device output.
+			uint64_t PreparedFrame = 0;
+			uint32_t PreparedCount = 0;
+			std::vector<ParticleBatch> PreparedBatches;
+			std::vector<ParticleGroup> PreparedGroups;
 
 			// Written by this world's compute step and read as its vertex stream.
 			// There is no transfer buffer: these rows never live on the host.
@@ -1141,7 +1143,6 @@ namespace engine::render {
 			SDL_GPURenderPass *pass,
 			const glm::mat4 &viewProjection,
 			const core::CFrame &eye,
-			std::span<const ParticleBatch> batches,
 			uint64_t &triangles
 		);
 

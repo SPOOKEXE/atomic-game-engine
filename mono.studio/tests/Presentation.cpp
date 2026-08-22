@@ -23,6 +23,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <client/Scene.hpp>
 #include <studio/Presentation.hpp>
 
@@ -37,6 +38,7 @@ using engine::world::Universe;
 using engine::world::WorldId;
 using engine::world::WorldSettings;
 using engine::world::WorldState;
+using studio::AppendReplicaVisualInstances;
 using studio::PresentationAlpha;
 
 namespace {
@@ -111,6 +113,67 @@ TEST_CASE("a world being ticked keeps its accumulator", "[studio][presentation]"
 	// world that was simulating perfectly well. `engine::world::Ticks` is what
 	// stopped that being a guess each caller makes.
 	CHECK(PresentationAlpha(true, WorldState::Idle, MIDWAY) == MIDWAY);
+}
+
+// --- the hosted client visual scene -----------------------------------------
+
+TEST_CASE("a hosted client view keeps one copy of authority rows", "[studio][presentation]") {
+	const Name replicaWorld("studio.presentation.replica");
+
+	engine::scene::DrawInstance authority;
+	authority.Source = 42;
+	authority.Frame.Position.X = 4.0f;
+
+	engine::scene::DrawInstance replica = authority;
+	replica.Frame.Position.X = 3.5f;
+
+	std::vector<engine::scene::DrawInstance> merged;
+	merged.push_back(authority);
+	AppendReplicaVisualInstances(replicaWorld, {&replica, 1}, merged);
+
+	REQUIRE(merged.size() == 1);
+	CHECK(merged[0].Frame.Position.X == 4.0f);
+}
+
+TEST_CASE("a hosted client view appends only client-local rows", "[studio][presentation]") {
+	const Name replicaWorld("studio.presentation.replica");
+
+	engine::scene::DrawInstance authority;
+	authority.Source = 10;
+
+	engine::scene::DrawInstance replicated = authority;
+	replicated.SourceWorld = replicaWorld;
+
+	engine::scene::DrawInstance local;
+	local.Source = 0x8000'0000ull;
+	local.Variant = 2;
+
+	const std::array replica{replicated, local};
+	std::vector<engine::scene::DrawInstance> merged;
+	merged.push_back(authority);
+	AppendReplicaVisualInstances(replicaWorld, replica, merged);
+
+	REQUIRE(merged.size() == 2);
+	CHECK(merged[0].Source == authority.Source);
+	CHECK(merged[1].Source == local.Source);
+	CHECK(merged[1].Variant == local.Variant);
+	CHECK(merged[1].SourceWorld == replicaWorld);
+}
+
+TEST_CASE("anonymous replica rows cannot duplicate a published authority scene", "[studio][presentation]") {
+	const Name replicaWorld("studio.presentation.replica");
+
+	engine::scene::DrawInstance authority;
+	authority.Source = 0;
+	engine::scene::DrawInstance replica = authority;
+	replica.Frame.Position.X = 8.0f;
+
+	std::vector<engine::scene::DrawInstance> merged;
+	merged.push_back(authority);
+	AppendReplicaVisualInstances(replicaWorld, {&replica, 1}, merged);
+
+	REQUIRE(merged.size() == 1);
+	CHECK(merged[0].Frame.Position.X == authority.Frame.Position.X);
 }
 
 // --- the chain the predicate is the end of -----------------------------------

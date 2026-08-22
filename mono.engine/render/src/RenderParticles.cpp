@@ -777,6 +777,11 @@ namespace engine::render {
 
 	uint32_t Renderer::Impl::PrepareParticles(const render::View &view) {
 		ActiveParticleWorld = &ParticleWorldFor(view.World, view.WorldName);
+		if (ActiveParticleWorld->PreparedFrame == FrameCounter) {
+			ParticleGroups = ActiveParticleWorld->PreparedGroups;
+			return ActiveParticleWorld->PreparedCount;
+		}
+
 		ParticlePool &Particles = ActiveParticleWorld->Pool;
 		ParticleGroups.clear();
 		Particles.Records = 0;
@@ -1006,6 +1011,11 @@ namespace engine::render {
 			Particles.StagedCount = batches.size();
 		}
 
+		ActiveParticleWorld->PreparedFrame = FrameCounter;
+		ActiveParticleWorld->PreparedCount = written;
+		ActiveParticleWorld->PreparedBatches.assign(batches.begin(), batches.end());
+		ActiveParticleWorld->PreparedGroups = ParticleGroups;
+
 		return written;
 	}
 
@@ -1014,12 +1024,12 @@ namespace engine::render {
 		SDL_GPURenderPass *pass,
 		const glm::mat4 &viewProjection,
 		const core::CFrame &eye,
-		std::span<const render::ParticleBatch> batches,
 		uint64_t &triangles
 	) {
 		if (ParticlePipeline == nullptr || ActiveParticleWorld == nullptr || ParticleGroups.empty()) {
 			return 0;
 		}
+		const std::span<const render::ParticleBatch> batches = ActiveParticleWorld->PreparedBatches;
 
 		// The camera's axes, once for the frame rather than once per group: a
 		// billboard is turned by the same three vectors whatever emitter it came

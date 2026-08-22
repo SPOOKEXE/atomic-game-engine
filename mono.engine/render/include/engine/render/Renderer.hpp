@@ -482,8 +482,9 @@ namespace engine::render {
 	// finished instances straight into the sorted draw stream, so what has to
 	// cross is the block - its frame, its drag, its curves, its run of the pool -
 	// and not half a million particles. The block is the caller's and is read
-	// during the call; nothing is retained past `Render`, exactly as the draw
-	// list is not.
+	// during the call. Batch state is copied only so later cameras in that same
+	// call can draw the already-prepared pool; its block pointer is never read
+	// after `Render` returns.
 	//
 	// @since v0.10
 	struct ParticleBatch {
@@ -643,12 +644,12 @@ namespace engine::render {
 		// happens on the tick, and the two agree because both are rates per
 		// second.
 		//
-		// **Nonzero on one view per logical world and zero on its other views.** A
-		// mirror and the room it reflects are two pictures of the same particles,
-		// so passing the frame's step to each would age them once per camera. Two
-		// different worlds own different pools and each may advance once. Zero
-		// draws what that world's step already wrote, which is also what a paused
-		// view wants.
+		// **Consumed by the first view of this logical world in one `Render`
+		// call.** A mirror, a surface camera and the room are several pictures of
+		// the same particles, so the renderer prepares the pool once and later
+		// cameras reuse it even when they repeat this value. Two different worlds
+		// own different pools and each may advance once. Zero draws the last
+		// prepared state, which is also what a paused view wants.
 		float ParticleDelta = 0.0f;
 
 		// How many blocks the world's pool has ever handed out, from

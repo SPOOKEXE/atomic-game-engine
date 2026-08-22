@@ -33,7 +33,12 @@
 //
 // @tier L13 · client
 
+#include <engine/core/Name.hpp>
+#include <engine/scene/DrawInstance.hpp>
 #include <engine/world/Enums.hpp>
+
+#include <span>
+#include <vector>
 
 namespace studio {
 
@@ -59,4 +64,23 @@ namespace studio {
 	//         for one that is not.
 	// @since v0.11
 	float PresentationAlpha(bool advancing, engine::world::WorldState state, float accumulator);
+
+	// Appends a replica's client-local rows to the authority scene Studio has
+	// already copied for a hosted client viewport.
+	//
+	// Authority rows define shared visual state. Rows in the authoritative ECS
+	// identity range are interpolation copies and are omitted; predicted rows
+	// are client-local and are appended under the replica's world name so their
+	// entity ids cannot collide with the authority's resident slots.
+	//
+	// The ECS identity range makes this a linear scan with no entity hash table:
+	// every authoritative or anonymous row is already represented by the
+	// authority scene and only predicted identities belong to the client.
+	//
+	// @since v0.19
+	void AppendReplicaVisualInstances(
+		engine::core::Name replicaWorld,
+		std::span<const engine::scene::DrawInstance> replica,
+		std::vector<engine::scene::DrawInstance> &authority
+	);
 }

@@ -1809,6 +1809,7 @@ namespace studio {
 		}
 
 		const WorldId shown = drawingSecond ? (extra->World.IsValid() ? extra->World : Active) : Active;
+		const WorldId visual = VisualWorldOf(shown);
 
 		// **Resolved before anything presents, because `PreRender` reads it.**
 		// It used to be worked out after the present call, which was harmless
@@ -1916,20 +1917,21 @@ namespace studio {
 			});
 		}
 
-		// **And the same for a world that is not a replica, which is the half
-		// the rule above was written for and did not cover.** `AimReplicaViewer`
-		// and `EnsureViewerCamera` are the two ways this editor names an eye -
-		// one per world kind - and only the first was on this side of `Present`.
-		// The second ran after it, so `aim-surface-cameras` reflected through
-		// whatever `ActiveCamera` had been left pointing at.
+		// **The visual world always receives the resolved eye before it presents.**
+		// An authored panel resolves directly into that world. A hosted client
+		// first resolves its local camera above, then mirrors that camera into the
+		// authority whose scene, particles and surface cameras it shares.
 		//
-		// With one viewport that is last frame's eye, which reads as a mirror
-		// lagging by a frame. **With two it is the other viewport's camera**,
-		// because the studio round-robins one panel per frame and the last to
-		// run wins: a mirror in one panel then tracks the camera somebody is
-		// flying in the other, and stops moving when they stop.
-		if (shown.IsValid() && !IsReplicaWorld(shown)) {
-			EnsureViewerCamera(DrawingViewport, shown, eye, lens, follow);
+		// Writing it later gives one viewport last frame's reflection. **With two
+		// it gives one viewport the other viewport's camera**, because the studio
+		// round-robins one panel per frame and the last to run wins: a mirror in
+		// one panel then tracks the camera somebody is flying in the other, and
+		// stops moving when they stop.
+		if (visual.IsValid()) {
+			// A hosted client keeps its camera in the replica, but surface cameras
+			// and every other visual system run in the authority. Install the same
+			// eye there before PreRender so all cameras read one scene.
+			EnsureViewerCamera(DrawingViewport, visual, eye, lens, follow);
 		}
 
 		// **How wide this panel is, which no world can work out for itself.**
@@ -1947,13 +1949,25 @@ namespace studio {
 		// `target` is this panel's requested size rather than the block-rounded
 		// allocation behind it, which is the same number `Renderer::Render`
 		// projects with - see `render::SceneExtent` for why the two differ.
-		if (shown.IsValid() && target.IsValid()) {
-			Universe->Enter(shown, [&](Store &store) {
+		if (visual.IsValid() && target.IsValid()) {
+			Universe->Enter(visual, [&](Store &store) {
 				(void)engine::scene::SetViewportSize(store, target.Width, target.Height);
 			});
 		}
 
-		if (shown.IsValid()) {
+		// The replica still presents its local camera, predicted rows and UI. The
+		// authority is then presented from that resolved eye and supplies the one
+		// shared visual scene. Presenting is PreRender only, so this does not tick
+		// either world twice.
+		if (shown.IsValid() && shown != visual) {
+			Universe->Present(
+				shown,
+				frameSeconds,
+				PresentationAlpha(Advancing, Universe->StateOf(shown), Universe->AlphaOf(shown))
+			);
+		}
+
+		if (visual.IsValid()) {
 			// **The render gate rides along with it**, because
 			// `client::InstallPresentation` registers `sync-rendered` in this
 			// same phase. That is what makes an edited world work at all: it
@@ -1982,10 +1996,10 @@ namespace studio {
 			// after a scene first builds itself, so this is a walk of an empty
 			// vector.
 			for (size_t index = 0; index < PendingFrame.size(); index++) {
-				if (PendingFrame[index] != shown) {
+				if (PendingFrame[index] != visual) {
 					continue;
 				}
-				if (FrameWorldContents(shown)) {
+				if (FrameWorldContents(visual)) {
 					PendingFrame.erase(PendingFrame.begin() + static_cast<ptrdiff_t>(index));
 				}
 				break;
@@ -1993,19 +2007,15 @@ namespace studio {
 
 			ENGINE_PROFILE_CAT("world present", engine::core::ProfileCategory::ECS);
 			Universe->Present(
-				shown,
+				visual,
 				frameSeconds,
-				PresentationAlpha(Advancing, Universe->StateOf(shown), Universe->AlphaOf(shown))
+				PresentationAlpha(Advancing, Universe->StateOf(visual), Universe->AlphaOf(visual))
 			);
 		}
 
 		const std::vector<engine::scene::DrawInstance> *instances = nullptr;
-		std::vector<engine::scene::DrawInstance> drawn;
-
-		// Whatever *other* worlds this panel's portals look into. Kept apart
-		// from `drawn` all the way to the renderer - see `Renderer::Render`'s
-		// `foreign` argument for what joining them costs.
-		std::vector<engine::scene::DrawInstance> foreign;
+		DrawnInstances.clear();
+		ForeignInstances.clear();
 
 		// **Cleared before the world is asked, not inside the ask.** A viewport
 		// with no world would otherwise keep whatever the last world it drew
@@ -2014,44 +2024,24 @@ namespace studio {
 		// panel is empty.
 		Surfaces.clear();
 		Particles.Clear();
-		ParticleStepped = false;
 		RibbonVertices.clear();
 		RibbonRuns.clear();
 		Lights.clear();
 
-		if (shown.IsValid()) {
-			const Name selectedProfile = Universe->SettingsOf(shown).RenderingProfile;
-			Universe->Enter(shown, [&, selectedProfile](Store &store) {
+		if (visual.IsValid()) {
+			const Name selectedProfile = Universe->SettingsOf(visual).RenderingProfile;
+			Universe->Enter(visual, [&, selectedProfile](Store &store) {
 				// Lighting is authored per world and Studio presents worlds without
 				// going through client::Client. Resolve it here so editing the
 				// service changes this viewport on the same frame.
 				Renderer.SetLighting(engine::scene::LightingOf(store));
 
-				if (DrawingViewport < GuiLists.size() && target.IsValid()) {
-					(void)ViewportImages.Render(
-						Renderer, store, GuiLists[DrawingViewport].Commands(), PreviewSlot() + 1
-					);
-					// **The canvas in points and the target in pixels, both
-					// stated.** They are the panel's logical size and the
-					// texture that panel was allocated at, and on a display
-					// whose density is not one they are different numbers. See
-					// `InterfacePass::Submit`.
-					GameInterface.Submit(
-						GuiLists[DrawingViewport].Commands(),
-						GuiLists[DrawingViewport].Commands().CanvasSize,
-						engine::core::Vector2{
-							static_cast<float>(target.Width), static_cast<float>(target.Height)
-						},
-						store,
-						GuiLists[DrawingViewport].Signature()
-					);
-				}
 				if (const auto *list = store.Resource<client::DrawList>()) {
 					// Copied out rather than borrowed. The renderer's call
 					// happens outside `Enter`, and a span into a store nobody
 					// is inside is a pointer across a boundary that rule 3
 					// exists to keep closed.
-					drawn = list->Instances;
+					DrawnInstances = list->Instances;
 				}
 
 				// **The surface cameras, which the studio was never asking
@@ -2213,12 +2203,47 @@ namespace studio {
 					(void)engine::scene::RefreshEditableMeshCollision(store);
 				}
 
-				if (PipelineSelected.find(shown.Index) == PipelineSelected.end()) {
-					PipelineSelected[shown.Index] = client::InstallRenderingProfiles(
-						RenderingProfiles, Renderer, shown.Index, selectedProfile
+				if (PipelineSelected.find(visual.Index) == PipelineSelected.end()) {
+					PipelineSelected[visual.Index] = client::InstallRenderingProfiles(
+						RenderingProfiles, Renderer, visual.Index, selectedProfile
 					);
 				}
 			});
+		}
+
+		if (shown.IsValid()) {
+			Universe->Enter(shown, [&](Store &store) {
+				// The interface is client-local even when its scene is authority-backed.
+				// It is submitted from the replica store before that store boundary
+				// closes; only copied draw rows leave the boundary.
+				if (DrawingViewport < GuiLists.size() && target.IsValid()) {
+					(void)ViewportImages.Render(
+						Renderer, store, GuiLists[DrawingViewport].Commands(), PreviewSlot() + 1
+					);
+					// Canvas points and target pixels differ on a scaled display.
+					GameInterface.Submit(
+						GuiLists[DrawingViewport].Commands(),
+						GuiLists[DrawingViewport].Commands().CanvasSize,
+						engine::core::Vector2{
+							static_cast<float>(target.Width), static_cast<float>(target.Height)
+						},
+						store,
+						GuiLists[DrawingViewport].Signature()
+					);
+				}
+
+				if (shown != visual) {
+					if (const auto *list = store.Resource<client::DrawList>()) {
+						ENGINE_PROFILE_CAT("merge client visuals", engine::core::ProfileCategory::Render);
+						AppendReplicaVisualInstances(
+							Universe->NameOf(shown), list->Instances, DrawnInstances
+						);
+					}
+				}
+			});
+		}
+
+		if (visual.IsValid()) {
 
 			// **The far world draws itself first, and this is the step that was
 			// missing.** `Universe::Present` is what runs `PreRender`, and
@@ -2247,7 +2272,7 @@ namespace studio {
 			// Immediately before the attach, because the attach reads exactly
 			// what this produces - and outside the `Enter` above, for the reason
 			// the attach gives.
-			PresentPortalDestinations(shown, frameSeconds);
+			PresentPortalDestinations(visual, frameSeconds);
 
 			// **Outside the `Enter`, because it enters other worlds.** A portal
 			// naming another scene needs that scene's draw list, and
@@ -2264,17 +2289,18 @@ namespace studio {
 			// the pane, and so on the end of this world's own rows. The second
 			// of those is what a cross-world portal was missing, and missing it
 			// is what made one draw only from A into B and never back.
-			(void)client::AttachForeignSurfaces(*Universe, shown, drawn, foreign, Surfaces);
+			(void)client::AttachForeignSurfaces(
+				*Universe, visual, DrawnInstances, ForeignInstances, Surfaces
+			);
 
-			instances = &drawn;
+			instances = &DrawnInstances;
 		}
 
-		// **Nothing here.** The viewer camera is placed before `Present`, above,
-		// because `aim-surface-cameras` runs in that phase and reflects through
-		// what it names. A replica gets `client::AimReplicaViewer` instead, for
-		// the same reason and in the same place - a replica may not mint an
-		// authoritative entity, so its viewpoint comes out of the predicted
-		// range.
+		// **Nothing here.** Both the local client camera and the authority viewer
+		// are placed before their respective `Present` calls above, because
+		// `aim-surface-cameras` runs in that phase and reflects through what it
+		// names. Moving either after presentation makes the surface view one frame
+		// stale.
 		//
 		// **`DrawingViewport` below chooses the surface textures as well as the
 		// scene target, and the mirrors need it to.** The views collected above
@@ -2288,8 +2314,8 @@ namespace studio {
 		// flying either camera moved the mirrors in both windows.
 
 		engine::core::Name selectedPipeline;
-		if (shown.IsValid()) {
-			const auto found = PipelineSelected.find(shown.Index);
+		if (visual.IsValid()) {
+			const auto found = PipelineSelected.find(visual.Index);
 			if (found != PipelineSelected.end()) {
 				selectedPipeline = found->second;
 			}
@@ -2305,22 +2331,20 @@ namespace studio {
 		view.ParticleSeams = Particles.Seams;
 		view.ParticlePool = Particles.Pool;
 		view.ParticleBlocks = Particles.BlockCount;
-		// **Once a frame and not once a viewport.** The editor draws each open
-		// viewport with its own `Render`, and the pool is the world's rather than
-		// a camera's - passing the step to each would age every particle as many
-		// times as there are panels open. See `View::ParticleDelta`.
-		view.ParticleDelta = ParticleStepped ? 0.0f : frameSeconds;
-		ParticleStepped = true;
+		// Every surface and nested camera in this render reads the same prepared
+		// authority pool. `Renderer::PrepareParticles` consumes the delta on the
+		// first view for this logical world and reuses that result for the rest.
+		view.ParticleDelta = frameSeconds;
 		view.RibbonVertices = RibbonVertices;
 		view.RibbonRuns = RibbonRuns;
 		view.Lights = Lights;
 		view.Target = target.IsValid() ? &target : nullptr;
 		view.Slot = DrawingViewport;
-		view.Foreign = foreign;
+		view.Foreign = ForeignInstances;
 		view.Portals = Portals;
 		view.Pipeline = selectedPipeline;
-		view.World = shown.IsValid() ? shown.Index : 0;
-		view.WorldName = shown.IsValid() ? Universe->NameOf(shown) : engine::core::Name{};
+		view.World = visual.IsValid() ? visual.Index : 0;
+		view.WorldName = visual.IsValid() ? Universe->NameOf(visual) : engine::core::Name{};
 
 		// **The grid is drawn by the renderer now and not by the overlay**, so
 		// that the geometry in front of it hides it. `ConfigureGroundGrid`
@@ -3485,6 +3509,21 @@ namespace studio {
 
 	bool Editor::IsReplicaWorld(WorldId world) const {
 		return RunForReplica(world) != nullptr;
+	}
+
+	WorldId Editor::VisualWorldOf(WorldId world) const {
+		if (!world.IsValid()) {
+			return world;
+		}
+
+		for (const WorldRun &run : Runs) {
+			for (const std::unique_ptr<PlayLink> &link : run.Links) {
+				if (link != nullptr && link->ReplicaWorld() == world) {
+					return link->AuthorityWorld();
+				}
+			}
+		}
+		return world;
 	}
 
 	EditAuthority Editor::AuthorityOf(WorldId world) const {

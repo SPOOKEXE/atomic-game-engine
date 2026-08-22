@@ -161,7 +161,6 @@ namespace engine::render {
 			SDL_GPUCommandBuffer *const command = recording.Command;
 			const core::CFrame &cameraFrame = recording.Request.CameraFrame;
 			FrameOverlayHook *const gameInterfaceHook = recording.Request.GameInterfaceHook;
-			const std::span<const ParticleBatch> particles = recording.Request.Particles;
 			const std::span<const effects::RibbonRun> ribbonRuns = recording.Request.RibbonRuns;
 			const scene::Camera &drawCamera = recording.DrawCamera;
 			const uint32_t sceneWidth = recording.SceneWidth;
@@ -435,7 +434,7 @@ namespace engine::render {
 				// backend operation, not another fixed pass label in this body.
 				if (particleCount > 0) {
 					result.DrawCalls += State->DrawParticles(
-						command, pass, frameUniforms.ViewProjection, cameraFrame, particles, result.Triangles
+						command, pass, frameUniforms.ViewProjection, cameraFrame, result.Triangles
 					);
 				}
 
