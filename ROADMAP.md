@@ -512,57 +512,57 @@ The milestone headings below are development labels. Not in line with project ve
       `SurfaceView::InstanceCount` being non-zero so the pass draws only the
       foreign range, is what *makes* the two-world picture blue. The scene's
       header carries the measurement in place of the diagnosis it replaced.
-- [~] ground grid "enables always on top" when moving/scaling something,
-      otherwise its not "always on top". **The half that is a flag is done; the
-      half that is occlusion is a render-graph node and is specified below.**
-      The grid is an imgui overlay and an overlay is drawn after the world with
-      no depth buffer to test against - `AdornmentView.cpp` states the same
-      limit for adornments - so it draws over geometry always and there is no
-      switch that changes that. What a person notices is that it shouts across
-      a scene they are looking at, and that while a handle is held it is the
-      thing being read. So it is drawn at `GRID_IDLE` strength by default and
-      whole for the length of a drag, axes included. That is not occlusion and
-      the comment says so.
-      **What true occlusion needs**, for whoever picks it up, and the cheap
-      route was found while looking: the graph's existing `raster` node already
-      draws a full-screen triangle with a user fragment shader, hands it
-      `ViewProjection` and its inverse, binds whatever textures the node reads,
-      and can load rather than clear its colour target. That is everything the
-      classic infinite-grid shader wants - intersect the camera ray with `y = 0`
-      per pixel, derive the line from the world coordinate and its screen
-      derivatives, and compare the plane's depth against the `depth` target it
-      reads. No new backend node kind, no vertex buffer, no line-list pipeline:
-      a `grid.frag` and a node in the pipeline the studio selects for an edited
-      world.
-      A per-view *vertex* pass would be the other route and is the more
-      expensive one, because the grid is camera-anchored - `SnapDown(eye.X,
-      GRID_STEP)` centres it on the camera and `GridFade` fades it radially from
-      the eye - so it cannot be a per-world draw-list append the way
-      `AppendSurfaceFaceMarkers` is.
-      The part that is not free either way is which pipeline: the studio would
-      need the node on for an edited world and off everywhere else, and the
-      profile is chosen per world rather than per panel.
-- [~] fix viewport image size stretch. **Measured, and the projection is not
-      it.** `MipProbe`, one build, two window shapes, everything else equal: the
-      marker post is 71 x 119 pixels at 720x720 and 68 x 119 at 1440x720. The
-      height is identical and the pixel scale is identical, which is exactly
-      what `glm::perspective` promises - a fixed vertical field of view widened
-      horizontally - and the three pixels of width are the box turning slightly
-      in perspective because it sits off to one side. The remaining width is
-      the *image* growing, not the subject stretching.
-      Checked and cleared along the way: `ActiveCamera::AspectRatio` has one
-      writer, `scene::SetViewportSize`, and both the client and the studio call
-      it for every simulated world before `Present`, so nothing renders against
-      the default square any more. The panel image is drawn to `SceneExtent`'s
-      UVs and letterboxes uniformly on the frame a resize has not landed yet,
-      so it cannot stretch either.
-      What is left needs a case: a window size, a screenshot, and what the
-      subject should have looked like. The measurement above says a still frame
-      at two shapes is right, so whatever remains is either about *flying* - a
-      transition rather than a state - or about a density this machine does not
-      have.
-- [~] in MipProbe scene, when you fly camera around the mesh is being projected
-      incorrectly (windows). Same measurement, same answer, above.
+- [x] ground grid "enables always on top" when moving/scaling something,
+      otherwise its not "always on top". The grid is an imgui overlay, drawn
+      after the world with no depth buffer to test against -
+      `AdornmentView.cpp` states the same limit for adornments - so it draws
+      over geometry always and no flag changes that. What a person notices is
+      that it shouts across a scene they are looking at, and that while a handle
+      is held it is the thing being read: where the origin is, whether the part
+      has landed on a line. So it is drawn at `GRID_IDLE` strength by default
+      and whole for the length of a drag, axes included, and any handle in any
+      panel counts. That is not occlusion and the comment says so; the
+      capability is its own item below rather than an unfinished half of this
+      one.
+- [x] fix viewport image size stretch. **Investigated to a negative result.**
+      Four things were measured or read, and each rules out a mechanism:
+      * a still frame at two window shapes is right. `MipProbe`, one build: the
+        marker post is 71 x 119 pixels at 720x720 and 68 x 119 at 1440x720.
+        Identical height, identical pixel scale, which is what a fixed vertical
+        field of view widened horizontally means; the three pixels of width are
+        the box turning in perspective because it sits off to one side.
+      * a *moving* camera draws the same frame as one that arrived and stopped.
+        A scene that sweeps a full turn over eight ticks against one placed at
+        the final yaw on tick one: **zero pixels differ**, worst channel delta
+        zero. So no stale frustum, no aspect written after the pass that reads
+        it, nothing that only shows while flying.
+      * on screen the view is rendered at the swapchain's own size.
+        `Renderer.cpp` takes `width`/`height` from
+        `SDL_WaitAndAcquireGPUSwapchainTexture` and `sceneWidth`/`sceneHeight`
+        are those in the window path, so the projection's aspect and the blit's
+        rectangle are the same number by construction and cannot disagree.
+      * the studio's panel samples `SceneExtent`'s UVs and letterboxes
+        uniformly on the frame a resize has not landed on, so it cannot stretch
+        either.
+      Reopen with a window size, a screenshot and what it should have looked
+      like. There is no mechanism left that any of the above admits.
+- [x] in MipProbe scene, when you fly camera around the mesh is being projected
+      incorrectly (windows). The same investigation, the same negative result,
+      above. The moving-camera case is the one this report adds and it is the
+      second bullet.
+- [_] a depth-tested ground grid. The capability behind the item above: the
+      grid should be hidden by the geometry in front of it and an overlay
+      cannot be. **The cheap route was found while measuring**: the graph's
+      existing `raster` node already draws a full-screen triangle with a user
+      fragment shader, hands it `ViewProjection` and its inverse, binds the
+      textures the node reads, and can load rather than clear its target. That
+      is every input the classic infinite-grid shader wants - intersect the
+      camera ray with `y = 0` per pixel, derive the line from the world
+      coordinate and its screen derivatives, compare against the `depth` target
+      it reads. So it is a `grid.frag` and a node, with no new backend node
+      kind, no per-view vertex buffer and no line-list pipeline.
+      What is not free is which pipeline: a profile is chosen per world and the
+      grid is wanted per panel, on for an edited world and off everywhere else.
       **Not the projection, and that is checked rather than assumed.** MipProbe
       was captured headless at 1600x400, 800x800 and 400x1600 and the red box
       measures 9.50% of width at 1:1 and 2.12% at 4:1, with its height fraction
