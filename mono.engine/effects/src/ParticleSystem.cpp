@@ -344,24 +344,45 @@ namespace engine::effects {
 		// a hundred thousand records that had not moved. Seven compares against
 		// ninety-six bytes staged is not a close call.
 		//
+		// @param authoredChanged Whether the emitter row changed since the last refresh.
 		// @return Whether anything the device reads actually changed.
-		bool ApplyPlayback(const ecs::Store &store, const ParticleEmitter &emitter, EmitterBlock &block) {
+		bool ApplyPlayback(
+			const ecs::Store &store,
+			const ParticleEmitter &emitter,
+			EmitterBlock &block,
+			bool authoredChanged = true
+		) {
 			const scene::FlipbookFacts facts = scene::FlipbookOf(store, emitter.Texture);
 			const float rate = ResolvedRate(emitter, facts);
 			const uint8_t frames = ResolvedFrames(emitter, facts);
 
-			if (block.Acceleration == emitter.Acceleration && block.Drag == emitter.Drag &&
-				block.Locked == emitter.LockedToPart && block.Flipbook == emitter.Flipbook &&
-				block.FlipbookPlayback == emitter.FlipbookPlayback && block.FlipbookRate == rate &&
-				block.Frames == frames) {
+			const bool authoredSame =
+				!authoredChanged ||
+				(block.Acceleration == emitter.Acceleration && block.Drag == emitter.Drag &&
+				 block.MaxSpeed == emitter.MaxSpeed && block.NoiseStrength == emitter.NoiseStrength &&
+				 block.NoiseFrequency == emitter.NoiseFrequency &&
+				 block.NoiseScrollSpeed == emitter.NoiseScrollSpeed &&
+				 block.RadialAcceleration == emitter.RadialAcceleration &&
+				 block.TangentialAcceleration == emitter.TangentialAcceleration &&
+				 block.Locked == emitter.LockedToPart && block.Flipbook == emitter.Flipbook &&
+				 block.FlipbookPlayback == emitter.FlipbookPlayback);
+			if (authoredSame && block.FlipbookRate == rate && block.Frames == frames) {
 				return false;
 			}
 
-			block.Acceleration = emitter.Acceleration;
-			block.Drag = emitter.Drag;
-			block.Locked = emitter.LockedToPart;
-			block.Flipbook = emitter.Flipbook;
-			block.FlipbookPlayback = emitter.FlipbookPlayback;
+			if (authoredChanged) {
+				block.Acceleration = emitter.Acceleration;
+				block.Drag = emitter.Drag;
+				block.MaxSpeed = emitter.MaxSpeed;
+				block.NoiseStrength = emitter.NoiseStrength;
+				block.NoiseFrequency = emitter.NoiseFrequency;
+				block.NoiseScrollSpeed = emitter.NoiseScrollSpeed;
+				block.RadialAcceleration = emitter.RadialAcceleration;
+				block.TangentialAcceleration = emitter.TangentialAcceleration;
+				block.Locked = emitter.LockedToPart;
+				block.Flipbook = emitter.Flipbook;
+				block.FlipbookPlayback = emitter.FlipbookPlayback;
+			}
 			block.FlipbookRate = rate;
 			block.Frames = frames;
 			return true;
@@ -613,11 +634,44 @@ namespace engine::effects {
 		// Rate times the longest life it can draw, rounded up, plus one - the
 		// plus one is what stops an emitter at exactly one particle a second with
 		// a one-second life from oscillating between zero and one slot.
-		uint32_t BlockSizeFor(const ParticleEmitter &emitter, uint32_t ceiling) {
-			const float wanted = std::max(emitter.Rate, 0.0f) * std::max(emitter.Lifetime.Maximum, 0.0f);
-			const auto slots = static_cast<uint32_t>(std::ceil(wanted)) + 1;
+		uint32_t BlockSizeFor(const ParticleEmitter &emitter, uint32_t requested, uint32_t ceiling) {
+			const float rate = std::max({emitter.Rate, emitter.RateOverDistance, 0.0f});
+			const float steady = rate * std::max(emitter.Lifetime.Maximum, 0.0f);
+			uint32_t slots = std::max(static_cast<uint32_t>(std::ceil(steady)) + 1, requested);
+			if (emitter.MaxParticles > 0) {
+				slots = std::min(slots, static_cast<uint32_t>(emitter.MaxParticles));
+			}
 			return std::clamp(slots, 1u, ceiling);
 		}
+	}
+
+	bool EmitParticles(ecs::Store &store, ecs::Entity emitter, uint32_t count) {
+		if (store.Get<ParticleEmitter>(emitter) == nullptr) {
+			return false;
+		}
+		EmitterSlot *slot = store.GetMutable<EmitterSlot>(emitter);
+		if (slot == nullptr || count == 0) {
+			return slot != nullptr;
+		}
+
+		const ParticleSystem *system = store.Resource<ParticleSystem>();
+		const uint32_t ceiling = system == nullptr ? 4096u : system->BlockCeiling;
+		const uint64_t requested = static_cast<uint64_t>(slot->Requested) + count;
+		slot->Requested = static_cast<uint32_t>(std::min<uint64_t>(requested, ceiling));
+		return true;
+	}
+
+	bool ClearParticles(ecs::Store &store, ecs::Entity emitter) {
+		if (store.Get<ParticleEmitter>(emitter) == nullptr) {
+			return false;
+		}
+		EmitterSlot *slot = store.GetMutable<EmitterSlot>(emitter);
+		if (slot == nullptr) {
+			return false;
+		}
+		slot->Requested = 0;
+		slot->ClearRequested = true;
+		return true;
 	}
 
 	size_t RefreshEmitters(ecs::Store &store) {
@@ -655,12 +709,41 @@ namespace engine::effects {
 					// block back. One that is off and still has particles keeps it,
 					// because disabling must not kill what is already in the air -
 					// `ParticleEmitter::Enabled` carries the argument.
-					const bool holds = slot.Index != NO_SLOT && slot.Index < system->Blocks.size();
+					bool holds = slot.Index != NO_SLOT && slot.Index < system->Blocks.size();
+					if (!holds && slot.ClearRequested) {
+						slot.ClearRequested = false;
+					}
 					if (holds) {
 						EmitterBlock &block = system->Blocks[slot.Index];
 						block.Reserved = 1;
 
-						if (!emitter.Enabled && block.Live == 0) {
+						// Capacity is storage, not just a birth-time check. Reclaiming on a
+						// limit edit is what lets a raised limit grow the run and what makes
+						// a lowered one invalidate device rows outside the new run.
+						if (block.ParticleLimit != emitter.MaxParticles) {
+							system->Free.emplace_back(block.First, block.Capacity);
+							block.Capacity = 0;
+							block.Owner = ecs::NULL_ENTITY;
+							block.Reserved = 0;
+							slot.Index = NO_SLOT;
+							slot.ClearRequested = false;
+							holds = false;
+						}
+					}
+					if (holds) {
+						EmitterBlock &block = system->Blocks[slot.Index];
+
+						if (slot.ClearRequested) {
+							block.Generation++;
+							block.Revision++;
+							block.Live = 0;
+							block.Spawned = 0;
+							block.Pending = 0.0f;
+							block.Idle = 0.0f;
+							slot.ClearRequested = false;
+						}
+
+						if (!emitter.Enabled && slot.Requested == 0 && block.Live == 0) {
 							system->Free.emplace_back(block.First, block.Capacity);
 							block.Capacity = 0;
 							block.Owner = ecs::NULL_ENTITY;
@@ -676,13 +759,11 @@ namespace engine::effects {
 						// thousand emitters that is 6.4 million evaluations a frame
 						// for tables that almost never change.
 						//
-						// Measured before and after, `bench` preset, 24 threads, at
-						// the roadmap's 100,000 emitters and 500,000 particles:
-						// **522 us unconditional against 192 us gated**, taking the
-						// whole frame from 738 us to 389 us. The refresh pass was 70
-						// per cent of the frame and is now half of it - the remaining
-						// 192 us is the archetype walk itself and the scalar copies,
-						// which is what a walk over a hundred thousand rows costs.
+						// The original comparison was **522 us unconditional against
+						// 192 us gated**. It unknowingly stopped at the former 65,535
+						// slot cap. With the cap removed, the gated refresh over the
+						// roadmap's true 100,000 emitters measures 304 us in the
+						// `bench` preset on the same 24-thread machine.
 						//
 						// `ecs::ChangeChannel` is the mechanism and `Observe` in
 						// `InstallParticles` is what turns it on. What it costs is
@@ -692,12 +773,13 @@ namespace engine::effects {
 						// boundary between them. That is invisible for an authored
 						// property and would matter for a curve driven per frame,
 						// which is a thing to drive through `Brightness` instead.
-						if (store.Changed<ParticleEmitter>(entity)) {
+						const bool authoredChanged = store.Changed<ParticleEmitter>(entity);
+						if (authoredChanged) {
 							SampleCurves(emitter, block.Curves);
 							block.Longest = std::max(emitter.Lifetime.Maximum, 0.0f);
 							block.CurveRevision++;
 						}
-						if (ApplyPlayback(store, emitter, block)) {
+						if (ApplyPlayback(store, emitter, block, authoredChanged)) {
 							block.Revision++;
 						}
 
@@ -707,18 +789,22 @@ namespace engine::effects {
 						// read on the parent, and `ResolveAttachments` has already run.
 						const core::CFrame frame = EmitterFrame(store, entity);
 						if (!SameFrame(frame, block.Frame)) {
+							if (emitter.Enabled && emitter.RateOverDistance > 0.0f) {
+								block.Pending += (frame.Position - block.Frame.Position).Magnitude() *
+												 emitter.RateOverDistance;
+							}
 							block.Frame = frame;
 							block.Revision++;
 						}
 						return;
 					}
 
-					if (!emitter.Enabled) {
+					if (!emitter.Enabled && slot.Requested == 0) {
 						return;
 					}
 
 					uint32_t first = 0;
-					const uint32_t wanted = BlockSizeFor(emitter, system->BlockCeiling);
+					const uint32_t wanted = BlockSizeFor(emitter, slot.Requested, system->BlockCeiling);
 					// **The ceiling is on rows in use, not rows ever made** - which
 					// is what `MAX_EMITTER_SLOTS` has always claimed to be. A free
 					// row costs nothing to take, so it is only a fresh one that has
@@ -750,6 +836,7 @@ namespace engine::effects {
 					block.Owner = entity;
 					block.Reserved = 1;
 					block.Longest = std::max(emitter.Lifetime.Maximum, 0.0f);
+					block.ParticleLimit = emitter.MaxParticles;
 
 					// **A fresh block owes one particle immediately.**
 					//
@@ -764,7 +851,7 @@ namespace engine::effects {
 					// starts" true at every rate. It is not free particles: the debt
 					// is subtracted like any other, so the *steady* rate is unchanged
 					// and only the first particle moves.
-					block.Pending = 1.0f;
+					block.Pending = emitter.Enabled && emitter.Rate > 0.0f ? 1.0f : 0.0f;
 					SampleCurves(emitter, block.Curves);
 					ApplyPlayback(store, emitter, block);
 					block.Frame = EmitterFrame(store, entity);
@@ -786,10 +873,10 @@ namespace engine::effects {
 						// agree with a record describing the emitter that has gone.
 						block.Revision = previous.Revision + 1;
 						block.CurveRevision = previous.CurveRevision + 1;
-						slot.Index = static_cast<uint16_t>(reused);
+						slot.Index = reused;
 						system->Blocks[reused] = block;
 					} else {
-						slot.Index = static_cast<uint16_t>(system->Blocks.size());
+						slot.Index = static_cast<uint32_t>(system->Blocks.size());
 						system->Blocks.push_back(block);
 					}
 				}
@@ -866,6 +953,36 @@ namespace engine::effects {
 		// often carries none.
 		constexpr size_t SPAWN_GRAIN = 8;
 		constexpr size_t SPAWN_MINIMUM = 64;
+
+		Vector3 ProceduralForce(const EmitterBlock &block, const ParticleState &state) {
+			Vector3 force;
+			const Vector3 radial = (state.Position - block.Frame.Position).Unit();
+			if (block.RadialAcceleration != 0.0f) {
+				force = force + radial * block.RadialAcceleration;
+			}
+			if (block.TangentialAcceleration != 0.0f) {
+				const Vector3 up = block.Frame.VectorToWorldSpace(Vector3::YAxis);
+				force = force + up.Cross(radial).Unit() * block.TangentialAcceleration;
+			}
+
+			if (block.NoiseStrength != 0.0f) {
+				const Vector3 point = state.Position * block.NoiseFrequency;
+				const float phase = state.Age * block.NoiseScrollSpeed;
+				force = force + Vector3{
+									std::sin(point.Y * 1.7f + point.Z * 2.3f + phase),
+									std::sin(point.Z * 1.3f + point.X * 2.1f + phase * 1.11f),
+									std::sin(point.X * 1.9f + point.Y * 1.5f + phase * 1.23f),
+								} * block.NoiseStrength;
+			}
+			return force;
+		}
+
+		Vector3 LimitedVelocity(const Vector3 &velocity, float maximum) {
+			if (maximum <= 0.0f || velocity.MagnitudeSquared() <= maximum * maximum) {
+				return velocity;
+			}
+			return velocity.Unit() * maximum;
+		}
 	}
 
 	ParticleStatistics StepParticles(ecs::Store &store, float delta) {
@@ -922,7 +1039,7 @@ namespace engine::effects {
 							continue;
 						}
 
-						const auto slot = static_cast<uint16_t>(index);
+						const auto slot = static_cast<uint32_t>(index);
 						const float scaled = delta;
 
 						// **The block's own terms, resolved once rather than per
@@ -973,7 +1090,8 @@ namespace engine::effects {
 							// step happens: a frame after a stall is a tenth of a
 							// second.
 							state.Velocity = state.Velocity * damping;
-							state.Velocity = state.Velocity + push;
+							state.Velocity = state.Velocity + (push + ProceduralForce(block, state) * scaled);
+							state.Velocity = LimitedVelocity(state.Velocity, block.MaxSpeed);
 
 							ParticleInstance &instance = instances[row];
 							if (block.Locked) {
@@ -1100,8 +1218,8 @@ namespace engine::effects {
 			// sequentially exactly once. Leave it alone unless a measurement
 			// says otherwise; these three are the ones already taken.
 			uint32_t births = 0;
-			store.Each<const ParticleEmitter, const EmitterSlot>(
-				[&](ecs::Entity entity, const ParticleEmitter &emitter, const EmitterSlot &slot) {
+			store.Each<const ParticleEmitter, EmitterSlot>(
+				[&](ecs::Entity entity, const ParticleEmitter &emitter, EmitterSlot &slot) {
 					if (slot.Index == NO_SLOT || slot.Index >= blocks.size()) {
 						return;
 					}
@@ -1123,20 +1241,20 @@ namespace engine::effects {
 						block.Spawned = 0;
 					}
 
-					if (!emitter.Enabled) {
-						return;
-					}
-
 					// **The accumulator stays here**, on the thread that owns the
 					// world. It is the emitter's own debt and it has to advance
 					// on every tick whether or not it comes due, so it is not
 					// part of what dispatches.
-					block.Pending += emitter.Rate * delta * std::max(emitter.TimeScale, 0.0f);
-					const auto owed = static_cast<uint32_t>(block.Pending);
+					if (emitter.Enabled) {
+						block.Pending += emitter.Rate * delta * std::max(emitter.TimeScale, 0.0f);
+					}
+					const auto accumulated = static_cast<uint32_t>(block.Pending);
+					const uint32_t owed = accumulated + slot.Requested;
 					if (owed == 0) {
 						return;
 					}
-					block.Pending -= static_cast<float>(owed);
+					block.Pending -= static_cast<float>(accumulated);
+					slot.Requested = 0;
 
 					SpawnPlan plan;
 					plan.Block = slot.Index;
@@ -1215,7 +1333,7 @@ namespace engine::effects {
 						const uint32_t bornSize =
 							PackParticleSize(block.Curves.Size[0], block.Curves.Size[0]);
 						const uint32_t bornColour = WithAlpha(block.Curves.Colour[0], block.Curves.Alpha[0]);
-						const auto bornSlot = static_cast<uint16_t>(plan.Block);
+						const uint32_t bornSlot = plan.Block;
 
 						for (uint32_t spawn = 0; spawn < plan.Owed; spawn++) {
 							// **A ring when the device owns the pool, a prefix

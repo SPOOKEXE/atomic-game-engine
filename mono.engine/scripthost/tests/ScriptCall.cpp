@@ -24,6 +24,8 @@
 
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/effects/ParticleSystem.hpp>
+#include <engine/effects/Registration.hpp>
 #include <engine/scene/Audio.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Input.hpp>
@@ -258,6 +260,12 @@ namespace {
 		REQUIRE(engine::scene::RecordMesh(store, engine::core::Name("props/anvil.amesh"), 3));
 	}
 
+	void Particles(Store &store) {
+		engine::effects::RegisterEffectClasses();
+		REQUIRE(engine::ecs::Classes::Find(engine::core::Name("ParticleEmitter")).IsValid());
+		engine::effects::InstallParticles(store, 128);
+	}
+
 	// One key held down, so the first beat is its press edge.
 	void KeyHeld(Store &store) {
 		engine::scene::InputState input;
@@ -366,6 +374,16 @@ TEST_CASE("a neutral method answers the same in both languages", "[scripting][sc
 	// against a literal as well as against the other language so that a method
 	// broken identically in both still fails.
 	const std::vector<ParityCase> CASES = {
+		{"ParticleEmitter accepts one-shot bursts and clearing",
+		 [](Language language) {
+			 return Let(language, "emitter", "Instance.new('ParticleEmitter')") +
+					"emitter.Enabled = false\n" + Send(language, "emitter", "Emit(7)") +
+					Send(language, "emitter", "Clear()") + Say(language, "emitter.Enabled");
+		 },
+		 "false",
+		 0,
+		 Particles},
+
 		{"GetPivot reads a placement",
 		 [](Language language) {
 			 return APart(language) + "part.Position = Vector3.new(3, 4, 5)\n" +
@@ -557,16 +575,7 @@ TEST_CASE("a neutral method answers the same in both languages", "[scripting][sc
 	};
 
 	for (const ParityCase &probe : CASES) {
-		INFO(probe.Name);
-
-		const std::string luau = Answer(Language::Luau, probe.Body(Language::Luau), probe.Beats);
-		const std::string javascript =
-			Answer(Language::JavaScript, probe.Body(Language::JavaScript), probe.Beats);
-
-		INFO(luau);
-		INFO(javascript);
-		CHECK(luau == javascript);
-		CHECK(luau == std::string(probe.Expected));
+		Both(probe);
 	}
 }
 

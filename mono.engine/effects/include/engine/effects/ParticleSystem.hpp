@@ -83,26 +83,18 @@ namespace engine::effects {
 
 	// How many emitters one world may have live at once.
 	//
-	// **65,535, which is below `ROADMAP.md`'s hundred thousand, and that is a
-	// deliberate limit rather than an oversight.** `ParticleInstance::Slot` is
-	// sixteen bits because thirty-two would make the instance thirty-six bytes -
-	// four more across half a million particles is two megabytes a frame of extra
-	// upload to address emitters that are not on screen.
-	//
-	// What the roadmap's number actually asks for is a hundred thousand emitters
-	// *existing*, and a world may hold any number: an emitter without a block
-	// emits nothing and costs one skipped row. Blocks are handed out to the
-	// emitters that are enabled and in view, so the cap is on how many are
-	// *emitting at once* - and a scene with sixty-five thousand of those has half
-	// a million particles before it runs out, which is the other limit.
+	// The roadmap's hundred thousand simultaneous emitters, with headroom for
+	// authored scenes above the benchmark. The particle stream already had a
+	// four-byte slot word, previously split into a uint16 and padding, so this
+	// limit costs no additional per-particle storage.
 	//
 	// **Running out is logged once and then silent**, because a message per
 	// emitter per frame at this count is a log nobody can read. `Statistics::
 	// EmittersRefused` is the number to look at.
-	inline constexpr uint32_t MAX_EMITTER_SLOTS = 65535;
+	inline constexpr uint32_t MAX_EMITTER_SLOTS = 1000000;
 
 	// What no emitter's slot is.
-	inline constexpr uint16_t NO_SLOT = 0xFFFF;
+	inline constexpr uint32_t NO_SLOT = 0xFFFFFFFFu;
 
 	// One emitter's curves, sampled flat.
 	//
@@ -177,16 +169,23 @@ namespace engine::effects {
 	//
 	// @since v0.10
 	struct EmitterSlot {
+		// One-shot births requested by `ParticleEmitter:Emit`. Kept on the ECS
+		// row so a script call and the simulation do not own two queues.
+		uint32_t Requested = 0;
+
 		// Which block, or `NO_SLOT` when this emitter has none.
 		//
 		// **Not serialised as a meaningful value** - see `Registration.cpp`. A
 		// block index is a position in one process's pool, which is rule 4's
 		// hazard exactly: restoring it would point an emitter at whatever block
 		// happened to take that number.
-		uint16_t Index = NO_SLOT;
+		uint32_t Index = NO_SLOT;
+
+		// Whether the next refresh invalidates every particle in the block.
+		bool ClearRequested = false;
 
 		// Explicit padding, for the reason every other `Reserved` gives.
-		uint16_t Reserved = 0;
+		uint8_t Reserved[3] = {};
 	};
 
 	// Where an emitter emits from, in world space.
@@ -263,6 +262,21 @@ namespace engine::effects {
 
 		// How fast speed is shed, as a fraction per second.
 		float Drag = 0.0f;
+
+		// The authored capacity ceiling that sized this block. A change releases
+		// and reclaims the run so raising the ceiling can actually add rows.
+		int32_t ParticleLimit = 0;
+
+		// Device-stepped forces and velocity ceiling. These are one value per
+		// emitter, not fields repeated on every particle.
+		//@{
+		float MaxSpeed = 0.0f;
+		float NoiseStrength = 0.0f;
+		float NoiseFrequency = 0.5f;
+		float NoiseScrollSpeed = 0.0f;
+		float RadialAcceleration = 0.0f;
+		float TangentialAcceleration = 0.0f;
+		//@}
 
 		// Which tenancy of this run of the pool the block is on.
 		//
@@ -525,8 +539,8 @@ namespace engine::effects {
 		// a `push_back` - so a game doing what a game does, one emitter per
 		// explosion and muzzle flash and footstep, walked a row per effect it
 		// had ever played on every tick, held three hundred-odd bytes for each,
-		// and after 65,535 of them refused to emit anything again for the rest
-		// of the process. None of that is visible in a scene that builds its
+		// and after it reached the fixed row cap refused to emit anything again
+		// for the rest of the process. None of that is visible in a scene that builds its
 		// emitters once, which is every scene in `examples/`.
 		//
 		// Indices rather than pointers, because `Blocks` moves when it grows.
@@ -601,6 +615,21 @@ namespace engine::effects {
 	// @param store    The world.
 	// @param capacity How many particles it may hold at once.
 	void InstallParticles(ecs::Store &store, uint32_t capacity);
+
+	// Queues a one-shot emission on an emitter, including one that is disabled.
+	//
+	// @param store   The world.
+	// @param emitter The ParticleEmitter instance.
+	// @param count   How many particles to request.
+	// @return False when the entity is not a ParticleEmitter.
+	bool EmitParticles(ecs::Store &store, ecs::Entity emitter, uint32_t count);
+
+	// Clears every live particle owned by an emitter on the next refresh.
+	//
+	// @param store   The world.
+	// @param emitter The ParticleEmitter instance.
+	// @return False when the entity is not a ParticleEmitter.
+	bool ClearParticles(ecs::Store &store, ecs::Entity emitter);
 
 	// Hands out and reclaims blocks, and refreshes each one from its emitter.
 	//

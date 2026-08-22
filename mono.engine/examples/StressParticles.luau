@@ -323,6 +323,78 @@ do
 	flung.Color = ColorSequence.new(Color3.new(1, 0.4, 0.7))
 end
 
+-- Shared force modules stay on the emitter's resident parameter row. Three
+-- emitters begin with no speed, so their shape is made by exactly one force:
+-- away from the centre, around local up, or through scrolling noise.
+do
+	local host = bay("Forces", Color3.new(0.25, 0.45, 0.55))
+	local colours = {
+		Color3.new(1, 0.35, 0.2),
+		Color3.new(0.3, 1, 0.5),
+		Color3.new(0.35, 0.55, 1),
+	}
+
+	for index = 1, 3 do
+		local point = Instance.new("Attachment")
+		point.CFrame = CFrame.new(Vector3.new((index - 2) * 2.5, 3, 0))
+		point.Parent = host
+
+		local emitter = baseline(point, `Force{index}`)
+		emitter.Shape = Enum.ParticleEmitterShape.Sphere
+		emitter.ShapeStyle = Enum.ParticleEmitterShapeStyle.Surface
+		emitter.Speed = NumberRange.new(0, 0)
+		emitter.Lifetime = NumberRange.new(3, 3)
+		emitter.Color = ColorSequence.new(colours[index])
+		if index == 1 then
+			emitter.RadialAcceleration = 8
+		elseif index == 2 then
+			emitter.TangentialAcceleration = 10
+		else
+			emitter.NoiseStrength = 12
+			emitter.NoiseFrequency = 0.8
+			emitter.NoiseScrollSpeed = 2
+		end
+	end
+end
+
+-- A deliberately excessive acceleration held to one metre per second. The
+-- short plume is the visible assertion that MaxSpeed is applied after forces.
+do
+	local emitter = baseline(bay("MaxSpeed", Color3.new(0.55, 0.3, 0.2)), "Limited")
+	emitter.Acceleration = Vector3.new(0, 100, 0)
+	emitter.Speed = NumberRange.new(0, 0)
+	emitter.MaxSpeed = 1
+	emitter.Lifetime = NumberRange.new(4, 4)
+	emitter.Color = ColorSequence.new(Color3.new(1, 0.75, 0.2))
+end
+
+-- Disabled continuous emission with explicit bursts. MaxParticles makes the
+-- ring exactly twenty-four rows, and Clear removes it between pulses.
+local burst = baseline(bay("EmitClear", Color3.new(0.5, 0.2, 0.5)), "Burst")
+burst.Enabled = false
+burst.Rate = 0
+burst.MaxParticles = 24
+burst.Lifetime = NumberRange.new(4, 4)
+burst.Speed = NumberRange.new(5, 9)
+burst.Shape = Enum.ParticleEmitterShape.Sphere
+burst.ShapeStyle = Enum.ParticleEmitterShapeStyle.Surface
+burst.ShapeInOut = Enum.ParticleEmitterShapeInOut.Outward
+burst.Additive = true
+burst.Color = ColorSequence.new(Color3.new(1, 0.25, 0.8))
+
+-- No time rate at all. This emitter can only leave a trail when its parent
+-- moves, which makes RateOverDistance distinguishable from ordinary emission.
+local distanceHost = bay("RateOverDistance", Color3.new(0.2, 0.5, 0.35))
+local distanceOrigin = distanceHost.Position
+local distance = baseline(distanceHost, "DistanceTrail")
+distance.Rate = 0
+distance.RateOverDistance = 12
+distance.MaxParticles = 240
+distance.Lifetime = NumberRange.new(3, 3)
+distance.Speed = NumberRange.new(0, 0)
+distance.Size = NumberSequence.new(0.35, 0.05)
+distance.Color = ColorSequence.new(Color3.new(0.25, 1, 0.65))
+
 -- --- the spam ----------------------------------------------------------------
 --
 -- **`HOSTS x HOSTS` visible parts on the baseplate, five emitters in each.**
@@ -435,6 +507,7 @@ workspace.CurrentCamera = camera
 -- scenes exist to keep honest.
 
 local elapsed = 0
+local burstPhase = -1
 
 RunService.Heartbeat:Connect(function(delta: number)
 	elapsed += delta
@@ -448,4 +521,21 @@ RunService.Heartbeat:Connect(function(delta: number)
 	-- A second on, a second off. Slow enough to watch the pool release the
 	-- block and slow enough to see it come back.
 	pulsed.Enabled = (math.floor(elapsed) % 2) == 0
+
+	-- The green host sweeps six metres while its zero-rate emitter leaves a
+	-- distance-sampled trail behind it.
+	distanceHost.CFrame = CFrame.new(Vector3.new(distanceOrigin.X, 0.5, BAY_ROW_Z))
+		* CFrame.new(Vector3.new(math.sin(elapsed * 1.5) * 3, 0, 0))
+
+	-- One burst, one clear, then repeat. Calls happen only on phase changes so a
+	-- slow frame cannot queue the same transition twice.
+	local phase = math.floor(elapsed) % 4
+	if phase ~= burstPhase then
+		if phase == 0 then
+			burst:Emit(24)
+		elseif phase == 2 then
+			burst:Clear()
+		end
+		burstPhase = phase
+	end
 end)

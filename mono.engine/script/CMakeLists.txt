@@ -29,6 +29,7 @@ mono_add_library(script
 	DEPS
 		Engine::core
 		Engine::ecs
+		Engine::effects
 		Engine::scene
 
 		# L7, `shared`. **The same edge as `scene`, one dimension down.** A

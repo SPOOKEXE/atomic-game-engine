@@ -1062,6 +1062,7 @@ declare interface Instance {
 	IsDescendantOf(ancestor: Instance): boolean;
 	IsAncestorOf(descendant: Instance): boolean;
 	ClearAllChildren(): void;
+	Emit(count: number): void;
 	GetPivot(): CFrame;
 	PivotTo(target: CFrame): void;
 	BulkMoveTo(parts: Instance[], placements: CFrame[]): void;
@@ -1406,8 +1407,15 @@ declare interface ParticleEmitter extends Instance {
 	LightEmission: number;
 	LightInfluence: number;
 	LockedToPart: boolean;
+	MaxParticles: number;
+	MaxSpeed: number;
+	NoiseFrequency: number;
+	NoiseScrollSpeed: number;
+	NoiseStrength: number;
 	Orientation: Enum.ParticleOrientation;
+	RadialAcceleration: number;
 	Rate: number;
+	RateOverDistance: number;
 	RotSpeed: NumberRange;
 	Rotation: NumberRange;
 	Shape: Enum.ParticleEmitterShape;
@@ -1418,6 +1426,7 @@ declare interface ParticleEmitter extends Instance {
 	Speed: NumberRange;
 	SpreadAngle: Vector2;
 	Squash: NumberSequence;
+	TangentialAcceleration: number;
 	Texture: string;
 	TimeScale: number;
 	Transparency: NumberSequence;

@@ -91,8 +91,12 @@ const uint PARAM_CELLS = 14u;
 const uint PARAM_PLAYBACK = 15u;  // 0 loop, 1 one-shot, 2 ping-pong
 const uint PARAM_RATE = 16u;  // flipbook frames a second
 const uint PARAM_GENERATION = 17u;  // which tenancy of the pool rows this is
-// Eighteen to twenty-three are spare, deliberately: a field added here would
-// otherwise shift the table's stride and silently reinterpret every record.
+const uint PARAM_MAX_SPEED = 18u;
+const uint PARAM_NOISE_STRENGTH = 19u;
+const uint PARAM_NOISE_FREQUENCY = 20u;
+const uint PARAM_NOISE_SCROLL = 21u;
+const uint PARAM_RADIAL = 22u;
+const uint PARAM_TANGENTIAL = 23u;
 
 // The four sixteen-sample curves, in a table indexed by block. Declared as
 // words rather than floats because the colour curve is packed RGB and the other
@@ -152,6 +156,30 @@ vec3 TurnedBy(vec4 turn, vec3 value) {
 	vec3 axis = turn.xyz;
 	vec3 crossed = cross(axis, value) + turn.w * value;
 	return value + 2.0 * cross(axis, crossed);
+}
+
+vec3 ProceduralForce(uint base, vec3 position, float age, vec3 origin, vec4 turn) {
+	vec3 force = vec3(0.0);
+	vec3 fromOrigin = position - origin;
+	vec3 radial = dot(fromOrigin, fromOrigin) > 0.0 ? normalize(fromOrigin) : vec3(0.0);
+	force += radial * BlockFloat(base, PARAM_RADIAL);
+
+	vec3 tangent = cross(TurnedBy(turn, vec3(0.0, 1.0, 0.0)), radial);
+	if (dot(tangent, tangent) > 0.0) {
+		force += normalize(tangent) * BlockFloat(base, PARAM_TANGENTIAL);
+	}
+
+	float strength = BlockFloat(base, PARAM_NOISE_STRENGTH);
+	if (strength != 0.0) {
+		vec3 point = position * BlockFloat(base, PARAM_NOISE_FREQUENCY);
+		float phase = age * BlockFloat(base, PARAM_NOISE_SCROLL);
+		force += vec3(
+			sin(point.y * 1.7 + point.z * 2.3 + phase),
+			sin(point.z * 1.3 + point.x * 2.1 + phase * 1.11),
+			sin(point.x * 1.9 + point.y * 1.5 + phase * 1.23)
+		) * strength;
+	}
+	return force;
 }
 
 // Where one age falls in a sixteen-sample curve. One cursor serves all four,
@@ -338,7 +366,7 @@ void main() {
 		uint stateAt = (first + at) * STATE_WORDS;
 		uint instanceAt = (destination + at) * INSTANCE_WORDS;
 
-		instances.words[instanceAt + INSTANCE_SLOT] = block & 0xFFFFu;
+		instances.words[instanceAt + INSTANCE_SLOT] = block;
 
 		// **The generation before the lifetime**, because a row this block has
 		// only just been handed may hold a live particle of whoever had it last.
@@ -373,7 +401,16 @@ void main() {
 		// Drag, then acceleration, then position - semi-implicit Euler, which is
 		// what `physics::Integrate` uses and what stops a drag term diverging on
 		// the long step a frame after a stall.
-		velocity = velocity * damping + push;
+		vec3 rememberedPosition = vec3(
+			uintBitsToFloat(states.words[stateAt + STATE_POSITION]),
+			uintBitsToFloat(states.words[stateAt + STATE_POSITION + 1u]),
+			uintBitsToFloat(states.words[stateAt + STATE_POSITION + 2u])
+		);
+		velocity = velocity * damping + push + ProceduralForce(base, rememberedPosition, age, origin, turn) * delta;
+		float maximum = BlockFloat(base, PARAM_MAX_SPEED);
+		if (maximum > 0.0 && dot(velocity, velocity) > maximum * maximum) {
+			velocity = normalize(velocity) * maximum;
+		}
 
 		states.words[stateAt + STATE_VELOCITY] = floatBitsToUint(velocity.x);
 		states.words[stateAt + STATE_VELOCITY + 1u] = floatBitsToUint(velocity.y);
@@ -396,11 +433,7 @@ void main() {
 
 			position = origin + TurnedBy(turn, offset);
 		} else {
-			position = vec3(
-				uintBitsToFloat(states.words[stateAt + STATE_POSITION]),
-				uintBitsToFloat(states.words[stateAt + STATE_POSITION + 1u]),
-				uintBitsToFloat(states.words[stateAt + STATE_POSITION + 2u])
-			) + velocity * delta;
+			position = rememberedPosition + velocity * delta;
 		}
 
 		states.words[stateAt + STATE_POSITION] = floatBitsToUint(position.x);

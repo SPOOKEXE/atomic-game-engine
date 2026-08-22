@@ -6,7 +6,10 @@
 // screenshot: a block whose live prefix is off by one loses a particle somewhere
 // off camera, and the frame looks fine.
 
+#include <engine/core/Bytes.hpp>
+#include <engine/ecs/Components.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/ecs/TypeDescriptor.hpp>
 #include <engine/effects/ParticleSystem.hpp>
 #include <engine/effects/Registration.hpp>
 #include <engine/parallel/Jobs.hpp>
@@ -160,7 +163,7 @@ TEST_CASE("an emitter gets a block sized by its own rate and lifetime", "[effect
 	Frame(store, 0.0f);
 
 	const auto *system = store.Resource<ParticleSystem>();
-	const uint16_t slot = store.Get<EmitterSlot>(emitter)->Index;
+	const uint32_t slot = store.Get<EmitterSlot>(emitter)->Index;
 	REQUIRE(slot != NO_SLOT);
 
 	// Rate times the longest life, rounded up, plus one - the plus one is what
@@ -368,6 +371,125 @@ TEST_CASE("acceleration moves a particle and drag slows it", "[effects]") {
 	// Semi-implicit Euler, so it has fallen - the exact distance is the
 	// integrator's and is not what this pins.
 	REQUIRE(fallen.Y < born.Y);
+}
+
+TEST_CASE("distance emission follows parent travel rather than frame time", "[effects]") {
+	Store store("effects_test");
+	const Entity emitter = MakeEmitter(store);
+
+	Settings(store, emitter).Rate = 0.0f;
+	Settings(store, emitter).RateOverDistance = 2.0f;
+	Settings(store, emitter).Lifetime = NumberRange{10.0f, 10.0f};
+	Settings(store, emitter).Speed = NumberRange{0.0f, 0.0f};
+
+	CHECK(Frame(store, 0.0f).Emitted == 0);
+
+	const Entity part = store.ParentOf(emitter);
+	auto *transform = store.GetMutable<engine::scene::Transform>(part);
+	REQUIRE(transform != nullptr);
+	transform->Frame.Position.X += 3.0f;
+
+	// Two particles per metre over three metres, with no elapsed time. A
+	// time-rate implementation would emit none here.
+	CHECK(Frame(store, 0.0f).Emitted == 6);
+}
+
+TEST_CASE("a disabled emitter accepts a burst and clear invalidates its block", "[effects]") {
+	Store store("effects_test");
+	const Entity emitter = MakeEmitter(store);
+
+	Settings(store, emitter).Enabled = false;
+	Settings(store, emitter).Rate = 0.0f;
+	Settings(store, emitter).Lifetime = NumberRange{10.0f, 10.0f};
+
+	REQUIRE(engine::effects::EmitParticles(store, emitter, 5));
+	CHECK(Frame(store, 0.0f).Emitted == 5);
+	CHECK(store.Resource<ParticleSystem>()->Statistics.Live == 5);
+
+	REQUIRE(engine::effects::ClearParticles(store, emitter));
+	Frame(store, 0.0f);
+	CHECK(store.Resource<ParticleSystem>()->Statistics.Live == 0);
+	CHECK(store.Get<EmitterSlot>(emitter)->Index == NO_SLOT);
+}
+
+TEST_CASE("changing MaxParticles reclaims the block at the new capacity", "[effects]") {
+	Store store("effects_test");
+	const Entity emitter = MakeEmitter(store);
+
+	Settings(store, emitter).Enabled = false;
+	Settings(store, emitter).Rate = 0.0f;
+	Settings(store, emitter).MaxParticles = 2;
+	REQUIRE(engine::effects::EmitParticles(store, emitter, 8));
+	CHECK(Frame(store, 0.0f).Emitted == 2);
+
+	const uint32_t firstSlot = store.Get<EmitterSlot>(emitter)->Index;
+	REQUIRE(firstSlot != NO_SLOT);
+	CHECK(store.Resource<ParticleSystem>()->Blocks[firstSlot].Capacity == 2);
+
+	Settings(store, emitter).MaxParticles = 6;
+	REQUIRE(engine::effects::EmitParticles(store, emitter, 6));
+	CHECK(Frame(store, 0.0f).Emitted == 6);
+
+	const uint32_t grownSlot = store.Get<EmitterSlot>(emitter)->Index;
+	REQUIRE(grownSlot != NO_SLOT);
+	CHECK(store.Resource<ParticleSystem>()->Blocks[grownSlot].Capacity == 6);
+}
+
+TEST_CASE("resident force modules accelerate and cap a particle", "[effects]") {
+	Store store("effects_test");
+	const Entity emitter = MakeEmitter(store);
+
+	Settings(store, emitter).Rate = 60.0f;
+	Settings(store, emitter).Lifetime = NumberRange{10.0f, 10.0f};
+	Settings(store, emitter).Speed = NumberRange{0.0f, 0.0f};
+	Settings(store, emitter).Shape = ParticleShape::Sphere;
+	Settings(store, emitter).RadialAcceleration = 20.0f;
+	Settings(store, emitter).TangentialAcceleration = 10.0f;
+	Settings(store, emitter).NoiseStrength = 5.0f;
+	Settings(store, emitter).NoiseFrequency = 0.75f;
+	Settings(store, emitter).NoiseScrollSpeed = 2.0f;
+	Settings(store, emitter).MaxSpeed = 1.0f;
+
+	Frame(store, 0.1f);
+	Frame(store, 0.1f);
+
+	const auto *system = store.Resource<ParticleSystem>();
+	REQUIRE(system->Statistics.Live > 0);
+	const float speed = system->States[0].Velocity.Magnitude();
+	CHECK(speed > 0.9f);
+	CHECK(speed <= 1.001f);
+}
+
+TEST_CASE("particle force controls survive component serialisation", "[effects]") {
+	engine::effects::RegisterEffectComponents();
+
+	ParticleEmitter emitter;
+	emitter.RateOverDistance = 7.0f;
+	emitter.MaxParticles = 321;
+	emitter.MaxSpeed = 12.0f;
+	emitter.NoiseStrength = 3.0f;
+	emitter.NoiseFrequency = 0.25f;
+	emitter.NoiseScrollSpeed = -2.0f;
+	emitter.RadialAcceleration = 4.0f;
+	emitter.TangentialAcceleration = -5.0f;
+
+	const auto component = engine::ecs::Components::Find(engine::core::Name("effects.ParticleEmitter"));
+	const engine::ecs::TypeDescriptor &type = engine::ecs::Components::Describe(component);
+	engine::core::ByteWriter writer;
+	type.Write(writer, &emitter, 1);
+
+	ParticleEmitter restored;
+	engine::core::ByteReader reader(writer.Bytes());
+	type.Read(reader, &restored, 1);
+
+	CHECK(restored.RateOverDistance == 7.0f);
+	CHECK(restored.MaxParticles == 321);
+	CHECK(restored.MaxSpeed == 12.0f);
+	CHECK(restored.NoiseStrength == 3.0f);
+	CHECK(restored.NoiseFrequency == 0.25f);
+	CHECK(restored.NoiseScrollSpeed == -2.0f);
+	CHECK(restored.RadialAcceleration == 4.0f);
+	CHECK(restored.TangentialAcceleration == -5.0f);
 }
 
 TEST_CASE("a spawn point lands inside the parent's own volume", "[effects]") {

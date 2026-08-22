@@ -123,9 +123,17 @@ namespace engine::effects {
 				writer.WriteFloat(emitter.SpreadAngle.Y);
 
 				writer.WriteName(emitter.Texture);
+				writer.WriteInt32(emitter.MaxParticles);
 
 				writer.WriteFloat(emitter.Rate);
+				writer.WriteFloat(emitter.RateOverDistance);
 				writer.WriteFloat(emitter.Drag);
+				writer.WriteFloat(emitter.MaxSpeed);
+				writer.WriteFloat(emitter.NoiseStrength);
+				writer.WriteFloat(emitter.NoiseFrequency);
+				writer.WriteFloat(emitter.NoiseScrollSpeed);
+				writer.WriteFloat(emitter.RadialAcceleration);
+				writer.WriteFloat(emitter.TangentialAcceleration);
 				writer.WriteFloat(emitter.VelocityInheritance);
 				writer.WriteFloat(emitter.LightEmission);
 				writer.WriteFloat(emitter.LightInfluence);
@@ -172,9 +180,17 @@ namespace engine::effects {
 				emitter.SpreadAngle.Y = reader.ReadFloat();
 
 				emitter.Texture = reader.ReadName();
+				emitter.MaxParticles = reader.ReadInt32();
 
 				emitter.Rate = reader.ReadFloat();
+				emitter.RateOverDistance = reader.ReadFloat();
 				emitter.Drag = reader.ReadFloat();
+				emitter.MaxSpeed = reader.ReadFloat();
+				emitter.NoiseStrength = reader.ReadFloat();
+				emitter.NoiseFrequency = reader.ReadFloat();
+				emitter.NoiseScrollSpeed = reader.ReadFloat();
+				emitter.RadialAcceleration = reader.ReadFloat();
+				emitter.TangentialAcceleration = reader.ReadFloat();
 				emitter.VelocityInheritance = reader.ReadFloat();
 				emitter.LightEmission = reader.ReadFloat();
 				emitter.LightInfluence = reader.ReadFloat();
@@ -227,7 +243,9 @@ namespace engine::effects {
 		void ReadSlots(core::ByteReader &, void *destination, size_t count) {
 			auto *slots = static_cast<EmitterSlot *>(destination);
 			for (size_t index = 0; index < count; index++) {
+				slots[index].Requested = 0;
 				slots[index].Index = NO_SLOT;
+				slots[index].ClearRequested = false;
 			}
 		}
 	}

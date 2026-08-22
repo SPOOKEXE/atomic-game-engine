@@ -449,6 +449,7 @@
         "collision",
         "core",
         "ecs",
+        "effects",
         "gui",
         "parallel",
         "physics",

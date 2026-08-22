@@ -2080,7 +2080,7 @@ namespace engine::ecs {
 		// loads cleanly and runs the wrong programs. Same shape as 3, one type
 		// along, and refused for the same reason: a length prefix read as a
 		// four-byte id consumes the values behind it.
-		static constexpr uint32_t SNAPSHOT_VERSION = 5;
+		static constexpr uint32_t SNAPSHOT_VERSION = 6;
 
 		// The number of tables this world holds.
 		//

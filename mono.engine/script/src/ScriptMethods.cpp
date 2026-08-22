@@ -53,6 +53,7 @@
 
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/effects/ParticleSystem.hpp>
 #include <engine/scene/Awake.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/EditableImage.hpp>
@@ -67,6 +68,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <span>
 #include <string>
@@ -888,9 +890,25 @@ namespace engine::script {
 			call.ReturnBoolean(scene::SetVertexColor(call.World(), call.Subject(), id, colour, alpha));
 		}
 
-		// `editableMesh:Clear()`
+		// `editableMesh:Clear()` or `particleEmitter:Clear()`
 		void EditableMeshClear(ScriptCall &call) {
+			if (call.World().Get<effects::ParticleEmitter>(call.Subject()) != nullptr) {
+				call.ReturnBoolean(effects::ClearParticles(call.World(), call.Subject()));
+				return;
+			}
 			call.ReturnBoolean(scene::ClearEditableMesh(call.World(), call.Subject()));
+		}
+
+		// `particleEmitter:Emit(count)`
+		void ParticleEmitterEmit(ScriptCall &call) {
+			const double requested = call.AsNumber(0);
+			if (!std::isfinite(requested) || requested < 0.0 || requested > 4294967295.0 ||
+				std::floor(requested) != requested) {
+				call.Raise("Emit needs a non-negative whole particle count");
+			}
+			if (!effects::EmitParticles(call.World(), call.Subject(), static_cast<uint32_t>(requested))) {
+				call.Raise("Emit needs a ParticleEmitter");
+			}
 		}
 
 		// Raises unless the subject is an `EditableImage` - the four methods
@@ -976,7 +994,7 @@ namespace engine::script {
 		// catalogue: a method table is a map from a name to a callable and no
 		// entry can be reached before another. Grouped by what they do, so a
 		// reader can see that the four attribute calls arrived together.
-		constexpr std::array<InstanceMethod, 52> SCRIPT_METHODS{{
+		constexpr std::array<InstanceMethod, 53> SCRIPT_METHODS{{
 			{"GetPivot", GetPivot},
 			{"PivotTo", PivotTo},
 			{"BulkMoveTo", BulkMoveTo},
@@ -991,6 +1009,7 @@ namespace engine::script {
 			{"SetVertexUV", EditableMeshSetVertexUV},
 			{"SetVertexColor", EditableMeshSetVertexColor},
 			{"Clear", EditableMeshClear},
+			{"Emit", ParticleEmitterEmit},
 
 			{"Resize", EditableImageResize},
 			{"DrawRectangle", EditableImageDrawRectangle},

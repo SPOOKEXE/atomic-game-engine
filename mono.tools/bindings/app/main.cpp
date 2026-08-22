@@ -2009,6 +2009,7 @@ declare task: {
 				out << "\tfunction IsDescendantOf(self, ancestor: Instance): boolean\n";
 				out << "\tfunction IsAncestorOf(self, descendant: Instance): boolean\n";
 				out << "\tfunction ClearAllChildren(self): ()\n";
+				out << "\tfunction Emit(self, count: number): ()\n";
 
 				// **The pivot pair, declared on `Instance` rather than on
 				// `PVInstance`.** Roblox puts them on the latter and the binding
@@ -3562,6 +3563,7 @@ declare const task: {
 				out << "\tIsDescendantOf(ancestor: Instance): boolean;\n";
 				out << "\tIsAncestorOf(descendant: Instance): boolean;\n";
 				out << "\tClearAllChildren(): void;\n";
+				out << "\tEmit(count: number): void;\n";
 
 				// The pivot pair, matching the Luau half and declared in the
 				// same place for the same reason.

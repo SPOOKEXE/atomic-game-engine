@@ -26,29 +26,28 @@
 //
 // | Row | Cost |
 // |---|---|
-// | Frame · 1,000 emitters · 5,000 particles | 0.53 us |
-// | Frame · 10,000 emitters · 50,000 particles | 21.7 us |
-// | **Frame · 100,000 emitters · 500,000 particles** | **389 us** |
-// | Refresh only · 100,000 emitters | 192 us |
-// | Step only · 100,000 emitters · 500,000 particles | 198 us |
-// | Step at zero delta · 100,000 emitters | 198 us |
+// | Frame · 1,000 emitters · 5,000 particles | 0.50 us |
+// | Frame · 10,000 emitters · 50,000 particles | 21.3 us |
+// | **Frame · 100,000 emitters · 500,000 particles** | **583 us** |
+// | Refresh only · 100,000 emitters | 304 us |
+// | Step only · 100,000 emitters · 500,000 particles | 290 us |
+// | Step at zero delta · 100,000 emitters | 285 us |
 //
-// **The roadmap's number holds with room to spare: 389 microseconds is 2.3 per
-// cent of a 60 Hz frame.** The scaling from 10,000 to 100,000 is 18x for 10x the
-// work, which is close enough to linear that nothing quadratic is hiding in it.
+// **The roadmap's number holds with room to spare: 583 microseconds is 3.5 per
+// cent of a 60 Hz frame.** The scaling from 10,000 to 100,000 is 27x for 10x the
+// work. That cache cost is visible, but it remains far below quadratic growth.
 //
 // **Two findings came out of this suite rather than out of reading the code.**
 //
-// - **The refresh pass was 70 per cent of the frame**, at 522 us against a whole
-//   frame of 738. It was re-sampling four curves per emitter per frame - 6.4
-//   million `Evaluate` calls - for tables that almost never change. Gating that
-//   on `Store::Changed<ParticleEmitter>` took the pass to 192 us and the frame to
-//   389. That gate is the single largest optimisation in the module and it was
-//   invisible until it was measured; the comment in `RefreshEmitters` had
-//   originally argued the other way.
+// - **The refresh pass used to be 70 per cent of the frame.** It was re-sampling
+//   four curves per emitter per frame for tables that almost never change.
+//   Gating that on `Store::Changed<ParticleEmitter>` remains the single largest
+//   optimisation in the module. The old 522 to 192 us comparison actually
+//   measured 65,535 emitters because the former uint16 slot cap silently refused
+//   the rest. At the true 100,000 target the gated refresh is 304 us.
 // - **The spawn half really is free.** "Step at zero delta" ages nothing and
-//   spawns nothing and costs 198 us, which is within noise of the full step's
-//   198 us. So the entire cost of the step is the walk and the per-particle
+//   spawns nothing and costs 285 us, which is within noise of the full step's
+//   290 us. So the entire cost of the step is the walk and the per-particle
 //   arithmetic, and the serial spawn loop - the one deliberate serialisation in
 //   the module - does not appear in the measurement at all. That is the
 //   justification `StepParticles` claims for it, confirmed rather than asserted.

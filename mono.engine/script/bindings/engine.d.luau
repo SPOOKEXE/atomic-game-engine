@@ -1262,6 +1262,7 @@ declare extern type Instance with
 	function IsDescendantOf(self, ancestor: Instance): boolean
 	function IsAncestorOf(self, descendant: Instance): boolean
 	function ClearAllChildren(self): ()
+	function Emit(self, count: number): ()
 	function GetPivot(self): CFrame
 	function PivotTo(self, target: CFrame): ()
 	function BulkMoveTo(self, parts: { Instance }, placements: { CFrame }): ()
@@ -1606,8 +1607,15 @@ declare extern type ParticleEmitter extends Instance with
 	LightEmission: number
 	LightInfluence: number
 	LockedToPart: boolean
+	MaxParticles: number
+	MaxSpeed: number
+	NoiseFrequency: number
+	NoiseScrollSpeed: number
+	NoiseStrength: number
 	Orientation: Enum_ParticleOrientation
+	RadialAcceleration: number
 	Rate: number
+	RateOverDistance: number
 	RotSpeed: NumberRange
 	Rotation: NumberRange
 	Shape: Enum_ParticleEmitterShape
@@ -1618,6 +1626,7 @@ declare extern type ParticleEmitter extends Instance with
 	Speed: NumberRange
 	SpreadAngle: Vector2
 	Squash: NumberSequence
+	TangentialAcceleration: number
 	Texture: string
 	TimeScale: number
 	Transparency: NumberSequence

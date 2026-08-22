@@ -41,9 +41,8 @@ namespace engine::render {
 		constexpr uint32_t PARTICLE_BIRTH_WORDS = PARTICLE_STATE_WORDS + 1;
 		constexpr uint32_t PARTICLE_SEAM_WORDS = 20;
 
-		// The block's parameters, in a table indexed by block. Eighteen words used
-		// and six spare, deliberately: a field added here would otherwise change
-		// the stride and silently reinterpret every record already on the device.
+		// The block's parameters, in a table indexed by block. The six tail words
+		// carry the optional force modules without widening a particle row.
 		constexpr uint32_t PARTICLE_PARAM_WORDS = 24;
 		constexpr uint32_t PARTICLE_PARAM_ROTATION = 0;
 		constexpr uint32_t PARTICLE_PARAM_POSITION = 4;
@@ -56,6 +55,12 @@ namespace engine::render {
 		constexpr uint32_t PARTICLE_PARAM_PLAYBACK = 15;
 		constexpr uint32_t PARTICLE_PARAM_RATE = 16;
 		constexpr uint32_t PARTICLE_PARAM_GENERATION = 17;
+		constexpr uint32_t PARTICLE_PARAM_MAX_SPEED = 18;
+		constexpr uint32_t PARTICLE_PARAM_NOISE_STRENGTH = 19;
+		constexpr uint32_t PARTICLE_PARAM_NOISE_FREQUENCY = 20;
+		constexpr uint32_t PARTICLE_PARAM_NOISE_SCROLL = 21;
+		constexpr uint32_t PARTICLE_PARAM_RADIAL = 22;
+		constexpr uint32_t PARTICLE_PARAM_TANGENTIAL = 23;
 
 		// The four curves, in a second table indexed by block. Words rather than
 		// floats because the colour curve is packed RGB and the other three are
@@ -114,7 +119,7 @@ namespace engine::render {
 			"the four curves must fit inside one row of the table"
 		);
 		static_assert(
-			PARTICLE_PARAM_GENERATION < PARTICLE_PARAM_WORDS,
+			PARTICLE_PARAM_TANGENTIAL < PARTICLE_PARAM_WORDS,
 			"the parameters must fit inside one row of the table"
 		);
 
@@ -156,6 +161,12 @@ namespace engine::render {
 			words[PARTICLE_PARAM_CELLS] = cells;
 			words[PARTICLE_PARAM_PLAYBACK] = static_cast<uint32_t>(block.FlipbookPlayback);
 			PutFloat(words, PARTICLE_PARAM_RATE, block.FlipbookRate);
+			PutFloat(words, PARTICLE_PARAM_MAX_SPEED, block.MaxSpeed);
+			PutFloat(words, PARTICLE_PARAM_NOISE_STRENGTH, block.NoiseStrength);
+			PutFloat(words, PARTICLE_PARAM_NOISE_FREQUENCY, block.NoiseFrequency);
+			PutFloat(words, PARTICLE_PARAM_NOISE_SCROLL, block.NoiseScrollSpeed);
+			PutFloat(words, PARTICLE_PARAM_RADIAL, block.RadialAcceleration);
+			PutFloat(words, PARTICLE_PARAM_TANGENTIAL, block.TangentialAcceleration);
 		}
 
 		// Fills one row of the curve table.
