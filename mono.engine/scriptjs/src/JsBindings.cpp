@@ -313,7 +313,7 @@ namespace engine::script {
 		}
 		case PropertyType::Enum:
 			// A string is accepted as well as an `EnumItem`, because
-			// `part.AlphaMode = "Clip"` is what a migrating script
+			// `part.AlphaMode = "Transparency"` is what a migrating script
 			// already contains. A member of the *wrong* enum is refused,
 			// which is the error a bare string could never have caught.
 			return ReadEnumValueImpl(context, value, enumName, *static_cast<Name *>(out));

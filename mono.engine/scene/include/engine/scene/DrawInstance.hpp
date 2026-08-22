@@ -68,6 +68,9 @@ namespace engine::scene {
 
 		// Flat multiplier over the material.
 		core::Color3 Tint{1.0f, 1.0f, 1.0f};
+		core::Color3 SurfaceColour{1.0f, 1.0f, 1.0f};
+		core::Color3 EmissiveTint{1.0f, 1.0f, 1.0f};
+		float EmissiveStrength = 1.0f;
 
 		// Which mesh, by name. Invalid means the consumer's default.
 		core::Name Mesh;
@@ -95,6 +98,7 @@ namespace engine::scene {
 		core::Name RoughnessMap;
 		core::Name OcclusionMap;
 		core::Name HeightMap;
+		core::Name MetalnessMap;
 		core::Name EmissiveMap;
 		//@}
 
@@ -136,6 +140,10 @@ namespace engine::scene {
 		// of it. See `SortForDrawing`.
 		float Transparency = 0.0f;
 
+		// The texture alpha threshold used by `AlphaMode::Transparency` when the
+		// part itself is opaque.
+		float AlphaCutoff = 0.5f;
+
 		// Which surface texture this instance shows, or -1 for none.
 		//
 		// **A mirror, and nothing more general than that.** A surface camera
@@ -167,9 +175,9 @@ namespace engine::scene {
 		// **From `SurfaceAppearance::Mode`, and it is here rather than derived
 		// from `Transparency` because they answer different questions.**
 		// `Transparency` is how see-through the *part* is and puts it in the
-		// sorted pass; this is what the *texture's* alpha means, and `Clip` is
-		// the mode that keeps a hair card opaque and out of that pass entirely.
+		// sorted pass; this is what the texture's alpha means.
 		AlphaMode Alpha = AlphaMode::Opaque;
+		SurfaceResampleMode Resample = SurfaceResampleMode::Default;
 
 		// **`Movable` was here and is gone.** It said whether an instance was a
 		// thing in the world rather than the world, because the pass that copies
@@ -348,14 +356,20 @@ namespace engine::scene {
 		instance.Mesh = visual.Mesh;
 
 		if (appearance != nullptr) {
+			instance.SurfaceColour = appearance->Colour;
+			instance.EmissiveTint = appearance->EmissiveTint;
+			instance.EmissiveStrength = appearance->EmissiveStrength;
 			instance.Texture = appearance->ColourMap;
 			instance.NormalMap = appearance->NormalMap;
 			instance.RoughnessMap = appearance->RoughnessMap;
 			instance.OcclusionMap = appearance->OcclusionMap;
 			instance.HeightMap = appearance->HeightMap;
+			instance.MetalnessMap = appearance->MetalnessMap;
 			instance.EmissiveMap = appearance->EmissiveMap;
 			instance.Shader = appearance->Shader;
 			instance.Alpha = appearance->Mode;
+			instance.AlphaCutoff = appearance->AlphaCutoff;
+			instance.Resample = appearance->Resample;
 		}
 
 		instance.TagMask = tags != nullptr ? tags->Mask : 0u;

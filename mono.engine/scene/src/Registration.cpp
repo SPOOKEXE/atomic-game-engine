@@ -596,6 +596,17 @@ namespace engine::scene {
 
 				writer.WriteFloat(appearances[index].AlphaCutoff);
 				writer.WriteUInt8(static_cast<uint8_t>(appearances[index].Mode));
+
+				// Appended so prior field offsets never move.
+				writer.WriteName(appearances[index].MetalnessMap);
+				writer.WriteFloat(appearances[index].Colour.R);
+				writer.WriteFloat(appearances[index].Colour.G);
+				writer.WriteFloat(appearances[index].Colour.B);
+				writer.WriteFloat(appearances[index].EmissiveTint.R);
+				writer.WriteFloat(appearances[index].EmissiveTint.G);
+				writer.WriteFloat(appearances[index].EmissiveTint.B);
+				writer.WriteFloat(appearances[index].EmissiveStrength);
+				writer.WriteUInt8(static_cast<uint8_t>(appearances[index].Resample));
 			}
 		}
 
@@ -652,9 +663,19 @@ namespace engine::scene {
 				// reason: a cast of an out-of-range byte produces a value no
 				// switch handles, and every consumer downstream then reads
 				// something the type says cannot exist.
-				appearances[index].Mode = mode <= static_cast<uint8_t>(AlphaMode::Blend)
+				appearances[index].Mode = mode <= static_cast<uint8_t>(AlphaMode::Opaque)
 											  ? static_cast<AlphaMode>(mode)
 											  : AlphaMode::Opaque;
+				appearances[index].MetalnessMap = reader.ReadName();
+				appearances[index].Colour = {reader.ReadFloat(), reader.ReadFloat(), reader.ReadFloat()};
+				appearances[index].EmissiveTint = {
+					reader.ReadFloat(), reader.ReadFloat(), reader.ReadFloat()
+				};
+				appearances[index].EmissiveStrength = reader.ReadFloat();
+				const uint8_t resample = reader.ReadUInt8();
+				appearances[index].Resample = resample <= static_cast<uint8_t>(SurfaceResampleMode::Pixelated)
+												  ? static_cast<SurfaceResampleMode>(resample)
+												  : SurfaceResampleMode::Default;
 			}
 		}
 

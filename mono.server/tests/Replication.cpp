@@ -1291,14 +1291,20 @@ TEST_CASE("a client's click is a shot the server resolves and everybody sees", "
 	REQUIRE(victim.Connect(shooter.Port));
 	REQUIRE(victim.Join(400));
 
-	for (int tick = 0; tick < 200; tick++) {
-		shooter.Tick();
-		victim.Tick();
-		std::this_thread::sleep_for(std::chrono::milliseconds(4));
-	}
+	Settle(victim);
+	Settle(shooter);
 
 	REQUIRE(shooter.Mine != engine::ecs::NULL_ENTITY);
 	REQUIRE(victim.Mine != engine::ecs::NULL_ENTITY);
+
+	// Resolve the victim once the initial snapshot is settled. The root entity
+	// is the stable target the rest of this test needs.
+	const Entity victimCharacter = engine::scene::CharacterOf(shooter.World, victim.Mine);
+	REQUIRE(victimCharacter != engine::ecs::NULL_ENTITY);
+	const Character *rig = shooter.World.Get<Character>(victimCharacter);
+	REQUIRE(rig != nullptr);
+	const Entity victimRoot = rig->Root;
+	REQUIRE(shooter.World.Get<Visual>(victimRoot) != nullptr);
 
 	// **The shooter walks away first**, so that its own body is nowhere near the
 	// ray. Both characters spawn at the same `SpawnLocation`, and the shooter's
@@ -1307,17 +1313,6 @@ TEST_CASE("a client's click is a shot the server resolves and everybody sees", "
 	// below would never know the difference.
 	shooter.LookAlong(0.0f);
 	shooter.Hold({engine::scene::KeyCode::W}, 120, &victim);
-
-	// The victim's body, as the shooter's replica holds it. Found through the
-	// join notice rather than by position, because a `Player` is what a client
-	// is told about and the character hangs off it.
-	const Entity victimCharacter = engine::scene::CharacterOf(shooter.World, victim.Mine);
-	REQUIRE(victimCharacter != engine::ecs::NULL_ENTITY);
-
-	const Character *rig = shooter.World.Get<Character>(victimCharacter);
-	REQUIRE(rig != nullptr);
-	const Entity victimRoot = rig->Root;
-	REQUIRE(shooter.World.Get<Visual>(victimRoot) != nullptr);
 
 	const engine::core::Color3 before = shooter.World.Get<Visual>(victimRoot)->Tint;
 

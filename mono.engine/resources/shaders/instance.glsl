@@ -2,7 +2,7 @@
 //
 // **Included by every vertex stage that binds the instance stream**, so the
 // arithmetic exists once rather than once per pass. `opaque.vert` and
-// `shadow.vert` read the same thirty-six bytes and drew different pictures from
+// `shadow.vert` read the same forty bytes and drew different pictures from
 // them the day one of them was edited and the other was not.
 //
 // The C++ side is `render/src/InstancePacking.hpp`. The two decodes have to
@@ -12,12 +12,12 @@
 // same order.
 
 // SDL assigns vertex storage buffers to set zero for SPIR-V. The first is the
-// stable thirty-six-byte row pool; the second is this draw order's uint slots.
+// stable forty-eight-byte row pool; the second is this draw order's uint slots.
 layout(set = 0, binding = 0) readonly buffer InstanceRows { uint words[]; } residentInstances;
 layout(set = 0, binding = 1) readonly buffer InstanceIndices { uint slots[]; } drawInstances;
 
 #ifndef GPU_INSTANCE_WORDS
-#define GPU_INSTANCE_WORDS 9
+#define GPU_INSTANCE_WORDS 12
 #endif
 
 uint InstanceWord(uint part) {
@@ -89,4 +89,18 @@ vec3 InstanceWorldNormal(vec4 quaternion, vec3 meshNormal) {
 // The instance's colour and alpha.
 vec4 InstanceColour() {
 	return unpackUnorm4x8(InstanceWord(8));
+}
+
+uint InstanceAppearance() {
+	return InstanceWord(9);
+}
+
+vec3 InstanceSurfaceColour() {
+	return unpackUnorm4x8(InstanceWord(10)).rgb;
+}
+
+vec4 InstanceEmission() {
+	vec4 packed = unpackUnorm4x8(InstanceWord(11));
+	packed.a *= 16.0;
+	return packed;
 }

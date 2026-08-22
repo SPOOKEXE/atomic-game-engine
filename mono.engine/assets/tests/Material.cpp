@@ -115,7 +115,7 @@ TEST_CASE("a name past the ceiling is refused rather than written", "[assets]") 
 	CHECK(writer.Bytes().empty());
 }
 
-TEST_CASE("a material round-trips all five maps", "[assets]") {
+TEST_CASE("a material round-trips the version 2 PBR maps", "[assets]") {
 	// The four `ROADMAP.md` v0.10 published and nothing could name until the
 	// G-buffer existed to sample them.
 	MaterialData written;
@@ -196,6 +196,52 @@ TEST_CASE("a material round-trips its emissive map", "[assets]") {
 
 	CHECK(read.ColourMap == written.ColourMap);
 	CHECK(read.EmissiveMap == written.EmissiveMap);
+}
+
+TEST_CASE("a material round-trips its metalness map", "[assets]") {
+	MaterialData written;
+	written.ColourMap = "metal/colour.atex";
+	written.MetalnessMap = "metal/metalness.atex";
+
+	ByteWriter writer;
+	REQUIRE(Material::Write(writer, written));
+
+	ByteReader reader(writer.Bytes());
+	MaterialData read;
+	REQUIRE(Material::Read(reader, read));
+	CHECK(read.MetalnessMap == written.MetalnessMap);
+}
+
+TEST_CASE("a version 3 material is one with no metalness map", "[assets]") {
+	ByteWriter writer;
+	writer.WriteUInt32(Material::MAGIC);
+	writer.WriteUInt16(3);
+	writer.WriteString("materials/colour.atex");
+	writer.WriteString("materials/normal.atex");
+	writer.WriteString("materials/roughness.atex");
+	writer.WriteString("materials/occlusion.atex");
+	writer.WriteString("materials/height.atex");
+	writer.WriteString("materials/emissive.atex");
+
+	ByteReader reader(writer.Bytes());
+	MaterialData read;
+	read.MetalnessMap = "not overwritten";
+	REQUIRE(Material::Read(reader, read));
+	CHECK(read.EmissiveMap == "materials/emissive.atex");
+	CHECK(read.MetalnessMap.empty());
+}
+
+TEST_CASE("every material map obeys the name ceiling", "[assets]") {
+	MaterialData input;
+	input.EmissiveMap = std::string(Material::MAXIMUM_NAME + 1, 'e');
+	ByteWriter writer;
+	CHECK_FALSE(Material::Write(writer, input));
+	CHECK(writer.Bytes().empty());
+
+	input.EmissiveMap.clear();
+	input.MetalnessMap = std::string(Material::MAXIMUM_NAME + 1, 'm');
+	CHECK_FALSE(Material::Write(writer, input));
+	CHECK(writer.Bytes().empty());
 }
 
 TEST_CASE("a version 2 material is one with no emissive map", "[assets]") {

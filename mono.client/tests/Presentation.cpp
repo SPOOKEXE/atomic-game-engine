@@ -660,9 +660,14 @@ TEST_CASE("a material assigned without a tick reaches the draw list", "[client][
 
 	const Name asset("materials/oak.amat");
 	const Name colour("materials/oak_Color.atex");
+	const Name metalness("materials/oak_Metalness.atex");
 
-	universe.Enter(world, [&asset, &colour](Store &store) {
-		REQUIRE(engine::scene::RecordMaterial(store, asset, engine::scene::MaterialMaps{.Colour = colour}));
+	universe.Enter(world, [&asset, &colour, &metalness](Store &store) {
+		REQUIRE(
+			engine::scene::RecordMaterial(
+				store, asset, engine::scene::MaterialMaps{.Colour = colour, .Metalness = metalness}
+			)
+		);
 
 		const Entity crate = store.FindFirstChild(engine::scene::WorkspaceOf(store), "Crate");
 		const Entity material = store.CreateInstance(engine::scene::MaterialClass(), "Oak");
@@ -675,10 +680,11 @@ TEST_CASE("a material assigned without a tick reaches the draw list", "[client][
 
 	REQUIRE(Drawn(universe, world) == 1);
 
-	universe.Enter(world, [&colour](Store &store) {
+	universe.Enter(world, [&colour, &metalness](Store &store) {
 		// The component the resolve pass writes...
 		const Entity crate = store.FindFirstChild(engine::scene::WorkspaceOf(store), "Crate");
 		CHECK(store.Get<engine::scene::SurfaceAppearance>(crate)->ColourMap == colour);
+		CHECK(store.Get<engine::scene::SurfaceAppearance>(crate)->MetalnessMap == metalness);
 
 		// ...and the copy of it the renderer actually samples, which is the half
 		// that decides whether anything looks different on screen.
@@ -686,6 +692,7 @@ TEST_CASE("a material assigned without a tick reaches the draw list", "[client][
 		REQUIRE(list != nullptr);
 		REQUIRE(list->Instances.size() == 1);
 		CHECK(list->Instances[0].Texture == colour);
+		CHECK(list->Instances[0].MetalnessMap == metalness);
 	});
 }
 

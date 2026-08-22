@@ -62,7 +62,7 @@ namespace engine::script {
 			return 1;
 		}
 
-		// `Enum.AlphaMode.Clip` - the second lookup.
+		// `Enum.AlphaMode.Transparency` - the second lookup.
 		//
 		// A metatable rather than a prebuilt table of members, so an enum
 		// extended after the VM opened is still reachable. A game registering
@@ -168,7 +168,7 @@ namespace engine::script {
 			return true;
 		}
 
-		// A bare string, because `part.AlphaMode = "Clip"` is what Roblox
+		// A bare string, because `part.AlphaMode = "Transparency"` is what Roblox
 		// accepts and what a migrating script already contains. Whether the
 		// member exists is `Store::SetProperty`'s check, so there is one answer
 		// rather than two.

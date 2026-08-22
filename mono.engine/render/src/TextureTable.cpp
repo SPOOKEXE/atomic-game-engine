@@ -49,6 +49,15 @@ namespace engine::render {
 			return false;
 		}
 
+		sampler.min_filter = SDL_GPU_FILTER_NEAREST;
+		sampler.mag_filter = SDL_GPU_FILTER_NEAREST;
+		sampler.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
+		NearestSampler = SDL_CreateGPUSampler(Device, &sampler);
+		if (NearestSampler == nullptr) {
+			ENGINE_ERROR("texture table: pixel sampler: {}", SDL_GetError());
+			return false;
+		}
+
 		// **Uploaded here rather than lazily**, so the first frame that draws an
 		// untextured part costs a lookup and not a create-and-copy - and so a
 		// device that cannot make a 64-pixel texture fails at start-up rather
@@ -101,6 +110,9 @@ namespace engine::render {
 			if (SharedSampler != nullptr) {
 				SDL_ReleaseGPUSampler(Device, SharedSampler);
 			}
+			if (NearestSampler != nullptr) {
+				SDL_ReleaseGPUSampler(Device, NearestSampler);
+			}
 		}
 
 		Textures.clear();
@@ -108,6 +120,7 @@ namespace engine::render {
 		DefaultHandle = nullptr;
 		MissingHandle = nullptr;
 		SharedSampler = nullptr;
+		NearestSampler = nullptr;
 		UploadedBytes = 0;
 		Device = nullptr;
 	}

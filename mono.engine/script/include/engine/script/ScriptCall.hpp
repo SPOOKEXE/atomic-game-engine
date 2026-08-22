@@ -291,7 +291,7 @@ namespace engine::script {
 		// binds keys only.
 		//
 		// **An `EnumItem` or a bare string**, which is the same latitude a
-		// property with `PropertyType::Enum` gives: `part.AlphaMode = "Clip"` is
+		// property with `PropertyType::Enum` gives: `part.AlphaMode = "Transparency"` is
 		// what a migrating script already contains, and refusing it here would
 		// make input the one surface that is stricter than the rest.
 		//

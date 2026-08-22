@@ -391,6 +391,18 @@ TEST_CASE("a material may name no texture at all", "[assetc][bake]") {
 	CHECK(ReadMaterial(scratch.Out() / "materials/blank.amat").ColourMap.empty());
 }
 
+TEST_CASE("a material's metalness map is rewritten to the baked texture", "[assetc][bake]") {
+	const Scratch scratch("material-metalness");
+	scratch.Write("materials/steel_Metalness.bmp", BMP);
+	scratch.Write("materials/steel.mat", std::string_view("metalness = steel_Metalness.bmp\n"));
+
+	const Report report = Baked(scratch, Settings{});
+	REQUIRE(report.Failures == 0);
+	CHECK(
+		ReadMaterial(scratch.Out() / "materials/steel.amat").MetalnessMap == "materials/steel_Metalness.atex"
+	);
+}
+
 TEST_CASE("a material's reference cannot escape the input tree", "[assetc][bake]") {
 	// The same refusal a model's texture reference gets, and for the same
 	// reason: a name that resolves outside the tree names something no publisher

@@ -1420,7 +1420,9 @@ namespace engine::render {
 		State->SlotRoughnessMap.resize(uploadCount);
 		State->SlotOcclusionMap.resize(uploadCount);
 		State->SlotHeightMap.resize(uploadCount);
+		State->SlotMetalnessMap.resize(uploadCount);
 		State->SlotEmissiveMap.resize(uploadCount);
+		State->SlotResample.resize(uploadCount);
 		State->SlotShader.resize(uploadCount);
 		State->SlotTags.resize(uploadCount);
 		State->SlotSeam.resize(uploadCount);
@@ -1435,7 +1437,9 @@ namespace engine::render {
 			State->SlotRoughnessMap[drawSlot] = instance.RoughnessMap;
 			State->SlotOcclusionMap[drawSlot] = instance.OcclusionMap;
 			State->SlotHeightMap[drawSlot] = instance.HeightMap;
+			State->SlotMetalnessMap[drawSlot] = instance.MetalnessMap;
 			State->SlotEmissiveMap[drawSlot] = instance.EmissiveMap;
+			State->SlotResample[drawSlot] = instance.Resample;
 			State->SlotShader[drawSlot] = instance.Shader;
 			State->SlotTags[drawSlot] = instance.TagMask;
 			State->SlotSeam[drawSlot] = glm::vec4{

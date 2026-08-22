@@ -757,7 +757,7 @@ namespace client {
 				// at all. `ResolveMaterials` turns one into a texture name on a
 				// part, in `shared`, so a headless server resolves the same
 				// materials the client does.
-				// **All five, built once and recorded together.** A material is
+				// **All seven, built once and recorded together.** A material is
 				// one thing; recording its colour and forgetting its normals
 				// would draw a part textured and flat, which reads as the normal
 				// map being broken rather than absent.
@@ -767,6 +767,7 @@ namespace client {
 					.Roughness = engine::core::Name(material.RoughnessMap),
 					.Occlusion = engine::core::Name(material.OcclusionMap),
 					.Height = engine::core::Name(material.HeightMap),
+					.Metalness = engine::core::Name(material.MetalnessMap),
 					.Emissive = engine::core::Name(material.EmissiveMap),
 				};
 

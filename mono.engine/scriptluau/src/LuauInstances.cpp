@@ -549,7 +549,7 @@ namespace engine::script {
 			// An `EnumItem`, not a string - that is the whole difference
 			// this type buys. The value is an interned `Name` exactly as
 			// `PropertyType::Name` is; what changes is that userland gets a
-			// value it can compare against `Enum.AlphaMode.Clip` and be
+			// value it can compare against `Enum.AlphaMode.Transparency` and be
 			// told when it is wrong.
 			PushEnumItem(state, enumName, *static_cast<const Name *>(bytes));
 			return true;
@@ -638,7 +638,7 @@ namespace engine::script {
 			return false;
 		case PropertyType::Enum:
 			// **A string is accepted as well as an `EnumItem`**, because
-			// `part.AlphaMode = "Clip"` is what Roblox accepts and what a
+			// `part.AlphaMode = "Transparency"` is what Roblox accepts and what a
 			// migrating script already contains. What is refused is a
 			// member of the *wrong* enum, which is the error a bare string
 			// could never have caught.

@@ -261,6 +261,10 @@ namespace engine::render {
 			return SharedSampler;
 		}
 
+		SDL_GPUSampler *PixelSampler() const {
+			return NearestSampler;
+		}
+
 		// How many textures are registered.
 		size_t Count() const {
 			return Textures.size();
@@ -337,6 +341,7 @@ namespace engine::render {
 
 		SDL_GPUDevice *Device = nullptr;
 		SDL_GPUSampler *SharedSampler = nullptr;
+		SDL_GPUSampler *NearestSampler = nullptr;
 
 		// The default, outside `Textures` on purpose - see `Default()`. Its
 		// bytes are not counted against `MAXIMUM_BYTES`: it is sixteen kilobytes

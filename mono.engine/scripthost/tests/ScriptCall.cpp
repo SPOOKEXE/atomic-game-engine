@@ -1346,7 +1346,7 @@ TEST_CASE("a service property is live in both languages", "[scripting][scriptcal
 		 Windowed},
 
 		// **A bare string where an `EnumItem` is expected**, which is the same
-		// latitude `part.AlphaMode = "Clip"` has and which `ScriptCall::ReadEnum`
+		// latitude `part.AlphaMode = "Transparency"` has and which `ScriptCall::ReadEnum`
 		// gives both languages from one reader.
 		{"and takes a bare member name",
 		 [](Language language) {

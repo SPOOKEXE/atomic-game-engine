@@ -32,6 +32,9 @@ layout(location = 4) out vec2 outTexCoord;
 // position and not the view one**, because a light's range is in metres and a
 // view-space distance would make it depend on where the camera is.
 layout(location = 5) out vec3 outWorldPosition;
+layout(location = 6) flat out uint outAppearance;
+layout(location = 7) flat out vec3 outSurfaceColour;
+layout(location = 8) flat out vec4 outEmission;
 
 void main() {
 	// **No model matrix is built.** The instance row carries the rotation, the
@@ -43,6 +46,9 @@ void main() {
 	outNormal = InstanceWorldNormal(rotation, inNormal);
 	outColour = InstanceColour();
 	outTexCoord = inTexCoord;
+	outAppearance = InstanceAppearance();
+	outSurfaceColour = InstanceSurfaceColour();
+	outEmission = InstanceEmission();
 
 	vec4 world = vec4(InstanceWorldPosition(rotation, inPosition), 1.0);
 	outWorldPosition = world.xyz;

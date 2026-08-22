@@ -682,7 +682,9 @@ namespace engine::render {
 		std::vector<core::Name> SlotRoughnessMap;
 		std::vector<core::Name> SlotOcclusionMap;
 		std::vector<core::Name> SlotHeightMap;
+		std::vector<core::Name> SlotMetalnessMap;
 		std::vector<core::Name> SlotEmissiveMap;
+		std::vector<scene::SurfaceResampleMode> SlotResample;
 
 		// Which shader each slot asks for, or an invalid name for the engine's.
 		//
@@ -809,7 +811,9 @@ namespace engine::render {
 				   SlotRoughnessMap[next] == SlotRoughnessMap[slot] &&
 				   SlotOcclusionMap[next] == SlotOcclusionMap[slot] &&
 				   SlotHeightMap[next] == SlotHeightMap[slot] &&
-				   SlotEmissiveMap[next] == SlotEmissiveMap[slot] && SlotShader[next] == SlotShader[slot] &&
+				   SlotMetalnessMap[next] == SlotMetalnessMap[slot] &&
+				   SlotEmissiveMap[next] == SlotEmissiveMap[slot] &&
+				   SlotResample[next] == SlotResample[slot] && SlotShader[next] == SlotShader[slot] &&
 				   SlotSeam[next] == SlotSeam[slot] && SlotSeamLight[next] == SlotSeamLight[slot];
 		}
 

@@ -181,7 +181,7 @@ state until v0.19.
 | `scene.SpawnLocation` | 16 | 4 | yes | yes | . | . | On a spawn pad: which team colour it serves, whether it takes anyone regardless, and whether it is a spawn at all. `FindSpawn` reads all three. |
 | `scene.Sun` | 24 | 4 | yes | yes | . | . | Per-world singleton directional light: the direction it shines and the ambient standing in for sky on the faces it misses. |
 | `scene.Surface` | 4 | 4 | yes | . | . | . | The physical material name a part feels like, resolved against the world's `SurfaceTable` once per contact. Separate, on purpose, from what the part looks like. |
-| `scene.SurfaceAppearance` | 36 | 4 | yes | . | . | . | The six texture maps, shader name, alpha mode and cutoff a drawable is rendered with. `ResolveMaterials` writes it and the G-buffer pass reads it. |
+| `scene.SurfaceAppearance` | 68 | 4 | yes | . | . | . | The seven texture maps, shader name, alpha mode and cutoff a drawable is rendered with. `ResolveMaterials` writes it and the PBR paths read it. |
 | `scene.SurfaceBounces` | 4 | 4 | yes | yes | . | . | Resource: how deep a mirror may show another mirror, or zero to let the engine decide. Set through the `workspace.SurfaceBounces` property. |
 | `scene.SurfaceCamera` | 20 | 4 | yes | yes | . | . | On a mirror or portal pane: render-texture size, redraw cap, tag filter, post-grade, which face it projects off and which surface slot it writes. |
 | `scene.SurfaceLens` | 84 | 4 | yes | yes | . | . | The off-axis frustum, oblique clip plane and pane mapping `AimSurfaceCameras` fits to a mirror or portal every frame. Derived from where the local eye stands, never authored. |

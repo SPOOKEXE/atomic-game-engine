@@ -840,7 +840,7 @@ namespace engine::scene {
 	// what that shape cannot express. A dense column of mostly-invalid names is
 	// sixteen bytes an entity and no branches.
 	//
-	// **The other four maps are here now, and the rule they were held back by is
+	// **The data maps are here now, and the rule they were held back by is
 	// the reason they could arrive.** They were deliberately absent rather than
 	// declared and ignored, because a field nothing reads is half a feature
 	// somebody would reasonably assume worked. v0.11's G-buffer is the pass that
@@ -873,6 +873,7 @@ namespace engine::scene {
 		core::Name RoughnessMap = {};
 		core::Name OcclusionMap = {};
 		core::Name HeightMap = {};
+		core::Name MetalnessMap = {};
 
 		// What this surface emits with no light on it. Invalid means nothing,
 		// which is what almost every surface emits.
@@ -894,20 +895,25 @@ namespace engine::scene {
 		// @since v0.15
 		core::Name Shader = {};
 
+		// A multiplier distinct from the part colour. Keeping both is what lets
+		// Overlay reveal the part below a coloured surface.
+		core::Color3 Colour{1.0f, 1.0f, 1.0f};
+
+		// Emission is tinted and scaled per surface. The map remains optional.
+		core::Color3 EmissiveTint{1.0f, 1.0f, 1.0f};
+		float EmissiveStrength = 1.0f;
+
 		// Below this alpha a fragment is discarded rather than blended, when
 		// `Mode` is `Clip`.
 		float AlphaCutoff = 0.5f;
 
 		// How the alpha channel of `ColourMap` is treated.
 		//
-		// **Three modes and not a bool**, because the third is the one a
-		// character model needs: hair and eyelashes are authored as cut-out
-		// planes, and blending them costs a per-pane sort that a discard does
-		// not.
-		AlphaMode Mode = AlphaMode::Opaque;
+		AlphaMode Mode = AlphaMode::Overlay;
+		SurfaceResampleMode Resample = SurfaceResampleMode::Default;
 
 		// Explicit padding, for the reason every other `Reserved` gives.
-		uint8_t Reserved[3] = {};
+		uint8_t Reserved[2] = {};
 	};
 
 	// Which material an instance names.

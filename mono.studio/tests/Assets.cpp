@@ -33,6 +33,9 @@ TEST_CASE("the properties that name content are the ones that get a picker", "[s
 	// class shows them.
 	CHECK(ContentKindOfProperty("MeshId") == AssetKind::Mesh);
 	CHECK(ContentKindOfProperty("TextureID") == AssetKind::Texture);
+	CHECK(ContentKindOfProperty("NormalMap") == AssetKind::Texture);
+	CHECK(ContentKindOfProperty("RoughnessMap") == AssetKind::Texture);
+	CHECK(ContentKindOfProperty("MetalnessMap") == AssetKind::Texture);
 
 	// **The aliases are gone with the properties they named.** `BasePart.Mesh`
 	// and `BasePart.ColorMap` were removed at v0.10 - geometry from a file is

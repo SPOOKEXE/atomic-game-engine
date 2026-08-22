@@ -222,6 +222,15 @@ namespace engine::render {
 		glm::vec4 FogColour{0.0f, 0.0f, 0.0f, 0.0f};
 		glm::vec4 Fog{100000.0f, 100001.0f, 0.0f, 0.0f};
 		glm::vec4 Eye{0.0f, 0.0f, 0.0f, 0.0f};
+
+		// x: whether a metalness map is present.
+		glm::vec4 MaterialExtra{0.0f, 0.0f, 0.0f, 0.0f};
+	};
+
+	struct ShadowUniforms {
+		glm::vec4 Plane{0.0f, 0.0f, 0.0f, 0.0f};
+		glm::vec4 Material{1.0f, 0.0f, 0.0f, 0.0f};
+		glm::vec4 Flipbook{1.0f, 0.0f, 0.0f, 0.0f};
 	};
 
 	// How many portal mouths may project their light field in one frame.

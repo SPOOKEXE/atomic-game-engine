@@ -88,7 +88,7 @@ local built = Instance.new("MeshPart")
 built.Name = "ProbePyramid"
 built.Anchored = true
 built.Size = Vector3.new(10, 10, 10)
-built.Position = Vector3.new(14, 5, 0)
+built.Position = Vector3.new(0, 5, 0)
 built.MeshId = mesh.ContentId
 built.Parent = workspace
 
@@ -96,9 +96,16 @@ local control = Instance.new("Part")
 control.Name = "ProbeControl"
 control.Anchored = true
 control.Size = Vector3.new(4, 10, 4)
-control.Position = Vector3.new(22, 5, 0)
+control.Position = Vector3.new(-4, 5, 0)
 control.Color = Color3.fromRGB(40, 255, 40)
 control.Parent = workspace
+
+local camera = Instance.new("Camera")
+camera.Name = "ProbeViewer"
+camera.FieldOfView = 60
+camera.CFrame = CFrame.lookAt(Vector3.new(18, 14, 18), Vector3.new(-2, 5, 0))
+camera.Parent = workspace
+workspace.CurrentCamera = camera
 
 print("editable-mesh probe: " .. tostring(mesh.TriangleCount) .. " triangle(s) built")
 PROBE
@@ -124,14 +131,14 @@ local floor = Instance.new("Part")
 floor.Name = "Floor"
 floor.Anchored = true
 floor.Size = Vector3.new(80, 1, 80)
-floor.Position = Vector3.new(14, -0.5, 0)
+floor.Position = Vector3.new(-2, -0.5, 0)
 floor.Color = Color3.fromRGB(118, 120, 126)
 floor.Parent = workspace
 
 local camera = Instance.new("Camera")
 camera.Name = "Viewer"
 camera.FieldOfView = 60
-camera.CFrame = CFrame.lookAt(Vector3.new(32, 14, 32), Vector3.new(16, 5, 0))
+camera.CFrame = CFrame.lookAt(Vector3.new(18, 14, 18), Vector3.new(-2, 5, 0))
 camera.Parent = workspace
 workspace.CurrentCamera = camera
 HEAD
@@ -147,13 +154,13 @@ timeout --signal=KILL 120 "$build/client/client" \
 	--script "$out/editable-mesh/Probe.luau" --frames 30 --capture "$shot_client" > /dev/null 2>&1 || true
 
 # **`--run server`, so the viewport shows the authored world rather than a play
-# client's replica**, and 200 frames because a Rojo sync, eight worlds and the
+# client's replica**, and 60 frames because a Rojo sync, three worlds and the
 # editor's own layout all settle before the picture is worth taking.
 echo "capturing the editor"
 timeout --signal=KILL 240 "$build/studio/studio" \
-	--headless --frames 200 --run server \
+	--headless --frames 60 --run server \
 	--rojo "$out/editable-mesh/default.project.json" \
-	--capture-world SkyGrid --capture "$shot_studio" \
+	--capture-world Rings --capture "$shot_studio" \
 	--width 1600 --height 900 --config-root "$out/editable-mesh/config" > /dev/null 2>&1 || true
 
 for shot in "$shot_client" "$shot_studio"; do

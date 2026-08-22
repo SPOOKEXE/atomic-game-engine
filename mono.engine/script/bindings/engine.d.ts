@@ -500,9 +500,10 @@ declare namespace Enum {
 	interface ZIndexBehavior extends EnumItem { readonly __enum: "ZIndexBehavior"; }
 
 	const AlphaMode: {
+		readonly Overlay: AlphaMode;
+		readonly Transparency: AlphaMode;
+		readonly TintMask: AlphaMode;
 		readonly Opaque: AlphaMode;
-		readonly Clip: AlphaMode;
-		readonly Blend: AlphaMode;
 	};
 	const AnimationPriority: {
 		readonly Core: AnimationPriority;
@@ -1146,12 +1147,16 @@ declare interface BasePart extends PVInstance {
 	CustomPhysicalProperties: boolean;
 	Density: number;
 	Elasticity: number;
+	EmissiveStrength: number;
+	EmissiveTint: Color3;
 	Friction: number;
 	LinearDamping: number;
 	readonly LocalTransparency: number;
 	Locked: boolean;
 	readonly Mass: number;
+	ResampleMode: Enum.ResamplerMode;
 	Size: Vector3;
+	SurfaceColor: Color3;
 	Transparency: number;
 	Visible: boolean;
 }
@@ -1174,7 +1179,13 @@ declare interface Tool extends Model {
 }
 
 declare interface MeshPart extends BasePart {
+	EmissiveMap: string;
+	HeightMap: string;
 	MeshId: string;
+	MetalnessMap: string;
+	NormalMap: string;
+	OcclusionMap: string;
+	RoughnessMap: string;
 	TextureID: string;
 	readonly TrianglesCount: number;
 }

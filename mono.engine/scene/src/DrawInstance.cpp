@@ -122,7 +122,13 @@ namespace engine::scene {
 			// the same image", and a texture swap, a tag change or an alpha mode
 			// change all produce a different one.
 			b = MixSignature(b, Pair(instance.Texture.Id(), static_cast<uint32_t>(instance.TagMask)));
-			c = MixSignature(c, Pair(static_cast<uint32_t>(instance.Alpha), 0u));
+			c = MixSignature(
+				c,
+				Pair(
+					static_cast<uint32_t>(instance.Alpha) | (static_cast<uint32_t>(instance.Resample) << 8u),
+					BitsOf(instance.AlphaCutoff)
+				)
+			);
 
 			// Material maps and shader selection are visible state too. Omitting one
 			// lets a cached mirror keep the old material after streamed content or a
@@ -130,6 +136,21 @@ namespace engine::scene {
 			d = MixSignature(d, Pair(instance.NormalMap.Id(), instance.RoughnessMap.Id()));
 			a = MixSignature(a, Pair(instance.OcclusionMap.Id(), instance.HeightMap.Id()));
 			b = MixSignature(b, Pair(instance.EmissiveMap.Id(), instance.Shader.Id()));
+			c = MixSignature(c, Pair(instance.MetalnessMap.Id(), BitsOf(instance.EmissiveStrength)));
+			d = MixSignature(
+				d,
+				Pair(
+					BitsOf(instance.SurfaceColour.R),
+					BitsOf(instance.SurfaceColour.G) ^ BitsOf(instance.SurfaceColour.B)
+				)
+			);
+			a = MixSignature(
+				a,
+				Pair(
+					BitsOf(instance.EmissiveTint.R),
+					BitsOf(instance.EmissiveTint.G) ^ BitsOf(instance.EmissiveTint.B)
+				)
+			);
 
 			// **And where it is cut, which is half of what a straddling body
 			// looks like.** A seam plane that moved changes which half of the

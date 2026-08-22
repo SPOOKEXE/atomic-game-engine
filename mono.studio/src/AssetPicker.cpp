@@ -74,6 +74,12 @@ namespace studio {
 			// the halves to drift.
 			{"MeshId", AssetKind::Mesh},
 			{"TextureID", AssetKind::Texture},
+			{"NormalMap", AssetKind::Texture},
+			{"RoughnessMap", AssetKind::Texture},
+			{"MetalnessMap", AssetKind::Texture},
+			{"OcclusionMap", AssetKind::Texture},
+			{"HeightMap", AssetKind::Texture},
+			{"EmissiveMap", AssetKind::Texture},
 
 			// `ParticleEmitter`, `Beam` and `Trail` all spell it this way, and
 			// all three mean the same thing - which is why the key is the

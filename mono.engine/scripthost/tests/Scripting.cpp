@@ -790,16 +790,16 @@ TEST_CASE("an enum property takes a member and refuses a stranger", "[scripting]
 	// migrating script contains, and refuses everything else.
 	MustRun(*runtime, R"(
 		local part = Instance.new('Part')
-		part.AlphaMode = Enum.AlphaMode.Clip
+		part.AlphaMode = Enum.AlphaMode.Transparency
 
 		assert(typeof(part.AlphaMode) == 'EnumItem', typeof(part.AlphaMode))
-		assert(part.AlphaMode == Enum.AlphaMode.Clip, 'the value did not round-trip')
-		assert(part.AlphaMode.Name == 'Clip')
+		assert(part.AlphaMode == Enum.AlphaMode.Transparency, 'the value did not round-trip')
+		assert(part.AlphaMode.Name == 'Transparency')
 		assert(part.AlphaMode.EnumType == 'AlphaMode')
 
 		-- A bare string too, because that is what a migrating script contains.
-		part.AlphaMode = 'Blend'
-		assert(part.AlphaMode == Enum.AlphaMode.Blend, 'a string did not resolve')
+		part.AlphaMode = 'TintMask'
+		assert(part.AlphaMode == Enum.AlphaMode.TintMask, 'a string did not resolve')
 	)");
 
 	// The typo `PropertyType::Name` could never have caught.
@@ -821,14 +821,14 @@ TEST_CASE("javascript reaches the same enum through its own spelling", "[scripti
 
 	MustRun(*runtime, R"(
 		const part = Instance.new('Part');
-		part.AlphaMode = Enum.AlphaMode.Clip;
+		part.AlphaMode = Enum.AlphaMode.Transparency;
 
-		if (!part.AlphaMode.Equals(Enum.AlphaMode.Clip)) throw new Error('did not round-trip');
-		if (part.AlphaMode.Name !== 'Clip') throw new Error('wrong name');
+		if (!part.AlphaMode.Equals(Enum.AlphaMode.Transparency)) throw new Error('did not round-trip');
+		if (part.AlphaMode.Name !== 'Transparency') throw new Error('wrong name');
 		if (part.AlphaMode.EnumType !== 'AlphaMode') throw new Error('wrong enum');
 
-		part.AlphaMode = 'Blend';
-		if (!part.AlphaMode.Equals(Enum.AlphaMode.Blend)) throw new Error('a string did not resolve');
+		part.AlphaMode = 'TintMask';
+		if (!part.AlphaMode.Equals(Enum.AlphaMode.TintMask)) throw new Error('a string did not resolve');
 	)");
 
 	// The same two refusals the Luau side gets, from the same storage check.

@@ -225,6 +225,10 @@ TEST_CASE("a hair of transparency is treated as opaque", "[scene][drawinstance]"
 
 	DrawInstance solid;
 	CHECK_FALSE(engine::scene::IsTransparent(solid));
+
+	DrawInstance texturedGlass;
+	texturedGlass.Transparency = 0.25f;
+	CHECK(engine::scene::IsTransparent(texturedGlass));
 }
 
 TEST_CASE("an empty list orders to nothing", "[scene][drawinstance]") {
@@ -610,7 +614,10 @@ TEST_CASE("every field a surface can see moves the signature", "[scene][drawinst
 	CHECK(moved([](DrawInstance &i) { i.RoughnessMap = Name("drawinstance_test.Roughness"); }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.OcclusionMap = Name("drawinstance_test.Occlusion"); }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.HeightMap = Name("drawinstance_test.Height"); }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.MetalnessMap = Name("drawinstance_test.Metalness"); }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.EmissiveMap = Name("drawinstance_test.Emissive"); }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.AlphaCutoff = 0.25f; }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.Alpha = engine::scene::AlphaMode::Transparency; }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.Shader = Name("drawinstance_test.Shader"); }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.Surface = 0; }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.CastShadow = false; }) != unchanged);
@@ -628,8 +635,15 @@ TEST_CASE("a draw instance carries every authored material map", "[scene][drawin
 	appearance.RoughnessMap = Name("drawinstance_test.Roughness");
 	appearance.OcclusionMap = Name("drawinstance_test.Occlusion");
 	appearance.HeightMap = Name("drawinstance_test.Height");
+	appearance.MetalnessMap = Name("drawinstance_test.Metalness");
 	appearance.EmissiveMap = Name("drawinstance_test.Emissive");
 	appearance.Shader = Name("drawinstance_test.Shader");
+	appearance.AlphaCutoff = 0.375f;
+	appearance.Mode = engine::scene::AlphaMode::Transparency;
+	appearance.Colour = {0.2f, 0.4f, 0.8f};
+	appearance.EmissiveTint = {1.0f, 0.25f, 0.1f};
+	appearance.EmissiveStrength = 4.0f;
+	appearance.Resample = engine::scene::SurfaceResampleMode::Pixelated;
 
 	const DrawInstance instance =
 		engine::scene::MakeDrawInstance(CFrame{}, Bounds{}, Visual{}, &appearance, nullptr, 41);
@@ -638,8 +652,15 @@ TEST_CASE("a draw instance carries every authored material map", "[scene][drawin
 	CHECK(instance.RoughnessMap == appearance.RoughnessMap);
 	CHECK(instance.OcclusionMap == appearance.OcclusionMap);
 	CHECK(instance.HeightMap == appearance.HeightMap);
+	CHECK(instance.MetalnessMap == appearance.MetalnessMap);
 	CHECK(instance.EmissiveMap == appearance.EmissiveMap);
 	CHECK(instance.Shader == appearance.Shader);
+	CHECK(instance.AlphaCutoff == appearance.AlphaCutoff);
+	CHECK(instance.Alpha == appearance.Mode);
+	CHECK(instance.SurfaceColour == appearance.Colour);
+	CHECK(instance.EmissiveTint == appearance.EmissiveTint);
+	CHECK(instance.EmissiveStrength == appearance.EmissiveStrength);
+	CHECK(instance.Resample == appearance.Resample);
 }
 
 TEST_CASE("a signature depends on how many instances there are and their order", "[scene][drawinstance]") {

@@ -153,7 +153,7 @@ namespace engine::script {
 
 				// **An `EnumItem` crosses as its member's name.** That is the
 				// same latitude `ReadEnumValue` already gives everywhere else -
-				// `part.AlphaMode = "Clip"` is accepted, so a host that takes
+				// `part.AlphaMode = "Transparency"` is accepted, so a host that takes
 				// `Enum.FinishRecordingOperation.Commit` and a host that takes
 				// `"Commit"` should not be two hosts.
 				//

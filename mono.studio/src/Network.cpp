@@ -481,7 +481,7 @@ namespace studio {
 				if (!engine::assets::Material::Read(reader, material)) {
 					continue;
 				}
-				// **All five, built once and recorded together.** A material is
+				// **All seven, built once and recorded together.** A material is
 				// one thing; recording its colour and forgetting its normals
 				// would draw a part textured and flat, which reads as the normal
 				// map being broken rather than absent.
@@ -491,6 +491,7 @@ namespace studio {
 					.Roughness = engine::core::Name(material.RoughnessMap),
 					.Occlusion = engine::core::Name(material.OcclusionMap),
 					.Height = engine::core::Name(material.HeightMap),
+					.Metalness = engine::core::Name(material.MetalnessMap),
 					.Emissive = engine::core::Name(material.EmissiveMap),
 				};
 				EachOpenWorld([&name, &maps](engine::ecs::Store &store) {

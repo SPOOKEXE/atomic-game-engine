@@ -415,7 +415,7 @@ namespace engine::render {
 
 		// **One sampler and no uniform buffer - `interface.frag`'s own
 		// shape**, matching exactly what `Initialise` declares for it below,
-		// and not `opaque.frag`'s nine and three. This is the contract a
+		// and not `opaque.frag`'s ten and three. This is the contract a
 		// `ShaderScript` meant for an `ImageLabel` is written against; see
 		// this method's own header. The clip rectangle `Record` pushes
 		// reaches the fragment stage through SDL's push-constant path rather

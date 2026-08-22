@@ -56,7 +56,13 @@ TEST_CASE("every place content can be named is collected", "[client][contentdema
 	Store store = Fresh("contentdemand.all");
 
 	const Entity part = store.Create();
-	store.Set(part, engine::scene::SurfaceAppearance{.ColourMap = Name("part.atex")});
+	store.Set(
+		part,
+		engine::scene::SurfaceAppearance{
+			.ColourMap = Name("part.atex"),
+			.MetalnessMap = Name("part-metalness.atex"),
+		}
+	);
 
 	const Entity label = store.Create();
 	engine::gui::Picture badge;
@@ -98,6 +104,7 @@ TEST_CASE("every place content can be named is collected", "[client][contentdema
 	client::CollectWantedContent(store, wanted);
 
 	CHECK(Holds(wanted, "part.atex"));
+	CHECK(Holds(wanted, "part-metalness.atex"));
 	CHECK(Holds(wanted, "label.atex"));
 	CHECK(Holds(wanted, "spark.atex"));
 	CHECK(Holds(wanted, "bolt.atex"));

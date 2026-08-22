@@ -677,9 +677,10 @@ end
 
 declare Enum: {
 	AlphaMode: {
+		Overlay: Enum_AlphaMode,
+		Transparency: Enum_AlphaMode,
+		TintMask: Enum_AlphaMode,
 		Opaque: Enum_AlphaMode,
-		Clip: Enum_AlphaMode,
-		Blend: Enum_AlphaMode,
 	},
 	AnimationPriority: {
 		Core: Enum_AnimationPriority,
@@ -1346,12 +1347,16 @@ declare extern type BasePart extends PVInstance with
 	CustomPhysicalProperties: boolean
 	Density: number
 	Elasticity: number
+	EmissiveStrength: number
+	EmissiveTint: Color3
 	Friction: number
 	LinearDamping: number
 	read LocalTransparency: number
 	Locked: boolean
 	read Mass: number
+	ResampleMode: Enum_ResamplerMode
 	Size: Vector3
+	SurfaceColor: Color3
 	Transparency: number
 	Visible: boolean
 end
@@ -1374,7 +1379,13 @@ declare extern type Tool extends Model with
 end
 
 declare extern type MeshPart extends BasePart with
+	EmissiveMap: string
+	HeightMap: string
 	MeshId: string
+	MetalnessMap: string
+	NormalMap: string
+	OcclusionMap: string
+	RoughnessMap: string
 	TextureID: string
 	read TrianglesCount: number
 end

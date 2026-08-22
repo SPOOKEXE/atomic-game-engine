@@ -151,7 +151,11 @@ namespace engine::render {
 				SDL_GPUTexture *const roughness = dataMap(SlotRoughnessMap[slot]);
 				SDL_GPUTexture *const occlusion = dataMap(SlotOcclusionMap[slot]);
 				SDL_GPUTexture *const height = dataMap(SlotHeightMap[slot]);
+				SDL_GPUTexture *const metalness = dataMap(SlotMetalnessMap[slot]);
 				SDL_GPUTexture *const emissive = dataMap(SlotEmissiveMap[slot]);
+				SDL_GPUSampler *const materialSampler =
+					SlotResample[slot] == scene::SurfaceResampleMode::Pixelated ? Textures.PixelSampler()
+																				: Textures.Sampler();
 				SDL_GPUSampler *const fallbackSampler =
 					surfaceSampler != nullptr ? surfaceSampler : Textures.Sampler();
 				SDL_GPUSampler *const sampledShadowSampler =
@@ -172,15 +176,16 @@ namespace engine::render {
 				const SDL_GPUTextureSamplerBinding samplers[] = {
 					{shadow != nullptr ? shadow : FallbackTexture, sampledShadowSampler},
 					{surface != nullptr ? surface : FallbackTexture, fallbackSampler},
-					{sampled != nullptr ? sampled : FallbackTexture, Textures.Sampler()},
+					{sampled != nullptr ? sampled : FallbackTexture, materialSampler},
 					{BeamTexture != nullptr ? BeamTexture : FallbackTexture, sampledBeamSampler},
-					{normal != nullptr ? normal : FallbackTexture, Textures.Sampler()},
-					{roughness != nullptr ? roughness : FallbackTexture, Textures.Sampler()},
-					{occlusion != nullptr ? occlusion : FallbackTexture, Textures.Sampler()},
-					{emissive != nullptr ? emissive : FallbackTexture, Textures.Sampler()},
-					{height != nullptr ? height : FallbackTexture, Textures.Sampler()},
+					{normal != nullptr ? normal : FallbackTexture, materialSampler},
+					{roughness != nullptr ? roughness : FallbackTexture, materialSampler},
+					{occlusion != nullptr ? occlusion : FallbackTexture, materialSampler},
+					{emissive != nullptr ? emissive : FallbackTexture, materialSampler},
+					{height != nullptr ? height : FallbackTexture, materialSampler},
+					{metalness != nullptr ? metalness : FallbackTexture, materialSampler},
 				};
-				SDL_BindGPUFragmentSamplers(pass, 0, samplers, 9);
+				SDL_BindGPUFragmentSamplers(pass, 0, samplers, 10);
 
 				LightingUniforms uniforms = *lighting;
 
@@ -206,6 +211,7 @@ namespace engine::render {
 					occlusion != nullptr ? 1.0f : 0.0f,
 					emissive != nullptr ? 1.0f : 0.0f,
 				};
+				uniforms.MaterialExtra = glm::vec4{metalness != nullptr ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f};
 
 				// **The cell is per draw, not per instance**, which is the whole
 				// simplification: a sheet plays on the clock rather than on
@@ -249,11 +255,28 @@ namespace engine::render {
 				// half drawn whole into the shadow map casts a whole body's shadow,
 				// so the near half of somebody in a doorway would darken the floor as
 				// if none of them had gone through. `shadow.frag` takes the plane and
-				// discards on the same test `opaque.frag` makes; it is one `vec4`
-				// per draw and no samplers, which is why this is a push of its own
-				// rather than the whole lighting block.
-				const glm::vec4 plane = SlotSeam[slot];
-				SDL_PushGPUFragmentUniformData(command, 0, &plane, sizeof(plane));
+				// discards on the same test `opaque.frag` makes. It also binds the
+				// colour map so a clipped surface casts its authored silhouette, but
+				// still needs only the compact shadow block rather than all lighting.
+				SDL_GPUTexture *const found = Textures.Find(texture);
+				const TextureChoice choice =
+					ChooseTexture(found != nullptr, texture.IsValid(), Textures.Expecting(texture));
+				SDL_GPUTexture *const sampled = choice == TextureChoice::Named	   ? found
+												: choice == TextureChoice::Missing ? Textures.Missing()
+																				   : Textures.Default();
+				const SDL_GPUTextureSamplerBinding sampler{
+					sampled != nullptr ? sampled : FallbackTexture,
+					SlotResample[slot] == scene::SurfaceResampleMode::Pixelated ? Textures.PixelSampler()
+																				: Textures.Sampler(),
+				};
+				SDL_BindGPUFragmentSamplers(pass, 0, &sampler, 1);
+
+				ShadowUniforms uniforms;
+				uniforms.Plane = SlotSeam[slot];
+				uniforms.Material.x = colour[3];
+				const FlipbookCell cell = Textures.CellOf(texture, AnimationSeconds);
+				uniforms.Flipbook = glm::vec4{cell.Scale, cell.OffsetU, cell.OffsetV, 0.0f};
+				SDL_PushGPUFragmentUniformData(command, 0, &uniforms, sizeof(uniforms));
 			}
 
 			if (indirect != nullptr) {

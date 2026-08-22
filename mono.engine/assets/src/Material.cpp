@@ -5,7 +5,8 @@ namespace engine::assets {
 	bool Material::Write(core::ByteWriter &writer, const MaterialData &data) {
 		if (!data.IsValid() || data.ColourMap.size() > MAXIMUM_NAME || data.NormalMap.size() > MAXIMUM_NAME ||
 			data.RoughnessMap.size() > MAXIMUM_NAME || data.OcclusionMap.size() > MAXIMUM_NAME ||
-			data.HeightMap.size() > MAXIMUM_NAME) {
+			data.HeightMap.size() > MAXIMUM_NAME || data.EmissiveMap.size() > MAXIMUM_NAME ||
+			data.MetalnessMap.size() > MAXIMUM_NAME) {
 			return false;
 		}
 
@@ -23,6 +24,7 @@ namespace engine::assets {
 		writer.WriteString(data.OcclusionMap);
 		writer.WriteString(data.HeightMap);
 		writer.WriteString(data.EmissiveMap);
+		writer.WriteString(data.MetalnessMap);
 		return true;
 	}
 
@@ -58,6 +60,7 @@ namespace engine::assets {
 		std::string_view occlusion;
 		std::string_view height;
 		std::string_view emissive;
+		std::string_view metalness;
 		if (version >= 2) {
 			normal = reader.ReadString();
 			roughness = reader.ReadString();
@@ -81,12 +84,20 @@ namespace engine::assets {
 			}
 		}
 
+		if (version >= 4) {
+			metalness = reader.ReadString();
+			if (reader.Failed() || metalness.size() > MAXIMUM_NAME) {
+				return false;
+			}
+		}
+
 		out.ColourMap.assign(colour);
 		out.NormalMap.assign(normal);
 		out.RoughnessMap.assign(roughness);
 		out.OcclusionMap.assign(occlusion);
 		out.HeightMap.assign(height);
 		out.EmissiveMap.assign(emissive);
+		out.MetalnessMap.assign(metalness);
 		return true;
 	}
 }

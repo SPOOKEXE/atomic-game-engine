@@ -316,7 +316,7 @@ TEST_CASE("a replica draws the surface appearance and tags it was sent", "[clien
 
 	SurfaceAppearance appearance;
 	appearance.ColourMap = engine::core::Name("replicated_test.FoxTexture");
-	appearance.Mode = engine::scene::AlphaMode::Clip;
+	appearance.Mode = engine::scene::AlphaMode::Transparency;
 	appearance.AlphaCutoff = 0.4f;
 
 	replica.SpawnSurfaced(sent, appearance, 0b101);
@@ -327,7 +327,7 @@ TEST_CASE("a replica draws the surface appearance and tags it was sent", "[clien
 
 	CHECK(drawn.Mesh == sent.Mesh);
 	CHECK(drawn.Texture == appearance.ColourMap);
-	CHECK(drawn.Alpha == engine::scene::AlphaMode::Clip);
+	CHECK(drawn.Alpha == engine::scene::AlphaMode::Transparency);
 
 	// **The mask crosses and the names do not.** A `TagTable` is a resource and
 	// resources have no wire form, so a replica cannot say what bit one is -

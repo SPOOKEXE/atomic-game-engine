@@ -1,7 +1,7 @@
 // What the packed instance row costs in accuracy.
 //
 // **The whole point of these cases is the size of a number, not a boolean.**
-// `GpuInstance` went from ninety-six bytes to thirty-six by quantising the
+// `GpuInstance` went from ninety-six bytes to forty by quantising the
 // rotation to four sixteen-bit codes and the colour to RGBA8, and "is that
 // visible" is a question with an answer in metres. So the reference here is the
 // matrix the old layout uploaded, rebuilt inline, and every case measures how far
@@ -37,10 +37,14 @@ using engine::render::EncodeSnorm16;
 using engine::render::GpuInstance;
 using engine::render::MeshEntry;
 using engine::render::ModelMatrixOf;
+using engine::render::PackAppearance;
 using engine::render::PackColour;
 using engine::render::PackRotation;
 using engine::render::ToGpu;
+using engine::render::UnpackAlphaCutoff;
+using engine::render::UnpackAlphaMode;
 using engine::render::UnpackColour;
+using engine::render::UnpackResampleMode;
 using engine::render::UnpackRotation;
 using engine::scene::DrawInstance;
 
@@ -342,17 +346,48 @@ TEST_CASE("transparency reaches the row as alpha", "[render][instancepacking]") 
 	CHECK(UnpackColour(ToGpu(ghost, UnitMesh()).Colour).a == Approx(0.25f).margin(1.0 / 255.0));
 }
 
-TEST_CASE("the row is thirty-six bytes with nothing hidden in it", "[render][instancepacking]") {
+TEST_CASE("alpha mode and cutoff share one pinned resident word", "[render][instancepacking]") {
+	const uint32_t clipped = PackAppearance(engine::scene::AlphaMode::Transparency, 0.5f);
+	CHECK((clipped & 0xFFu) == 1u);
+	CHECK(((clipped >> 8u) & 0xFFu) == 128u);
+	CHECK(UnpackAlphaMode(clipped) == engine::scene::AlphaMode::Transparency);
+	CHECK(UnpackAlphaCutoff(clipped) == Approx(0.5f).margin(1.0f / 255.0f));
+
+	CHECK(UnpackAlphaCutoff(PackAppearance(engine::scene::AlphaMode::Opaque, -2.0f)) == 0.0f);
+	CHECK(UnpackAlphaCutoff(PackAppearance(engine::scene::AlphaMode::TintMask, 2.0f)) == 1.0f);
+	CHECK(UnpackAlphaMode(0xFFu) == engine::scene::AlphaMode::Opaque);
+
+	DrawInstance instance;
+	instance.Alpha = engine::scene::AlphaMode::Transparency;
+	instance.AlphaCutoff = 0.25f;
+	instance.Resample = engine::scene::SurfaceResampleMode::Pixelated;
+	instance.SurfaceColour = {0.2f, 0.4f, 0.8f};
+	instance.EmissiveTint = {1.0f, 0.25f, 0.1f};
+	instance.EmissiveStrength = 4.0f;
+	const GpuInstance row = ToGpu(instance, UnitMesh());
+	CHECK(UnpackAlphaMode(row.Appearance) == instance.Alpha);
+	CHECK(UnpackAlphaCutoff(row.Appearance) == Approx(instance.AlphaCutoff).margin(1.0f / 255.0f));
+	CHECK(UnpackResampleMode(row.Appearance) == instance.Resample);
+	const glm::vec4 surface = UnpackColour(row.SurfaceColour);
+	CHECK(surface.r == Approx(instance.SurfaceColour.R).margin(1.0f / 255.0f));
+	CHECK(surface.g == Approx(instance.SurfaceColour.G).margin(1.0f / 255.0f));
+	CHECK(surface.b == Approx(instance.SurfaceColour.B).margin(1.0f / 255.0f));
+	const glm::vec4 emission = UnpackColour(row.Emission);
+	CHECK(emission.r == Approx(instance.EmissiveTint.R).margin(1.0f / 255.0f));
+	CHECK(emission.g == Approx(instance.EmissiveTint.G).margin(1.0f / 255.0f));
+	CHECK(emission.b == Approx(instance.EmissiveTint.B).margin(1.0f / 255.0f));
+	CHECK(emission.a * 16.0f == Approx(instance.EmissiveStrength).margin(16.0f / 255.0f));
+}
+
+TEST_CASE("the row is forty-eight bytes with nothing hidden in it", "[render][instancepacking]") {
 	// **The number three other places depend on and only one of them is checked
 	// by a compiler.** The vertex buffer description takes `sizeof(GpuInstance)`,
 	// the late-instance buffer takes it as an element stride, and
-	// `occlusion-cull.comp` spells it as `INSTANCE_WORDS = 9u` - a GLSL constant
-	// no C++ build can see. A row that grew would keep compiling and would copy
-	// eight ninths of each survivor into the late buffer, which draws as
-	// geometry smeared across the scene.
-	static_assert(sizeof(GpuInstance) == 36);
+	// `occlusion-cull.comp` receives `GPU_INSTANCE_WORDS` from this declaration,
+	// so a row that grows without updating it stops the build.
+	static_assert(sizeof(GpuInstance) == 48);
 	static_assert(sizeof(GpuInstance) % sizeof(uint32_t) == 0);
-	CHECK(sizeof(GpuInstance) / sizeof(uint32_t) == 9);
+	CHECK(sizeof(GpuInstance) / sizeof(uint32_t) == 12);
 
 	// Every field four-aligned and packed end to end, so the offsets the vertex
 	// attribute table states are the offsets the fields have.
@@ -360,6 +395,9 @@ TEST_CASE("the row is thirty-six bytes with nothing hidden in it", "[render][ins
 	CHECK(offsetof(GpuInstance, Rotation) == 12);
 	CHECK(offsetof(GpuInstance, Scale) == 20);
 	CHECK(offsetof(GpuInstance, Colour) == 32);
+	CHECK(offsetof(GpuInstance, Appearance) == 36);
+	CHECK(offsetof(GpuInstance, SurfaceColour) == 40);
+	CHECK(offsetof(GpuInstance, Emission) == 44);
 
 	// **Two and two thirds times smaller than what it replaced.** The old row was
 	// a `mat4`, an RGBA float4 and an inverse-scale float4. At a hundred thousand

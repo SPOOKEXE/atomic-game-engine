@@ -6,6 +6,9 @@ layout(location = 2) in vec4 inLightPosition;
 layout(location = 3) in vec4 inSurfacePosition;
 layout(location = 4) in vec2 inTexCoord;
 layout(location = 5) in vec3 inWorldPosition;
+layout(location = 6) flat in uint inAppearance;
+layout(location = 7) flat in vec3 inSurfaceColour;
+layout(location = 8) flat in vec4 inEmission;
 
 layout(location = 0) out vec4 outColour;
 
@@ -27,6 +30,7 @@ layout(set = 2, binding = 5) uniform sampler2D roughnessMap;
 layout(set = 2, binding = 6) uniform sampler2D occlusionMap;
 layout(set = 2, binding = 7) uniform sampler2D emissiveMap;
 layout(set = 2, binding = 8) uniform sampler2D heightMap;
+layout(set = 2, binding = 9) uniform sampler2D metalnessMap;
 
 layout(set = 3, binding = 0) uniform Lighting {
 	vec4 Direction;
@@ -97,6 +101,9 @@ layout(set = 3, binding = 0) uniform Lighting {
 	// x: start distance. y: complete distance.
 	vec4 Fog;
 	vec4 Eye;
+
+	// x: 1 when a metalness map is present.
+	vec4 MaterialExtra;
 } lighting;
 
 // The tonemap, for a pass whose output is sampled rather than presented.
@@ -575,15 +582,22 @@ void main() {
 	float roughness = lighting.Material.y > 0.5 ? texture(roughnessMap, cellUv).r : 0.65;
 	roughness = clamp(roughness, 0.045, 1.0);
 	float occlusion = lighting.Material.z > 0.5 ? texture(occlusionMap, cellUv).r : 1.0;
-	vec3 emissive = lighting.Material.w > 0.5 ? texture(emissiveMap, cellUv).rgb : vec3(0.0);
+	vec3 emissive = lighting.Material.w > 0.5
+		? texture(emissiveMap, cellUv).rgb * inEmission.rgb * inEmission.a
+		: vec3(0.0);
+	float metalness = lighting.MaterialExtra.x > 0.5 ? texture(metalnessMap, cellUv).r : 0.0;
+	metalness = clamp(metalness, 0.0, 1.0);
 
 	// Cut-out before anything else is computed. A hair card is authored as a
 	// plane with a mask, and discarding is what keeps it opaque and out of the
 	// sorted pass - see `scene::AlphaMode`.
-	float alpha = inColour.a * sampled.a * lighting.BaseColour.a;
-	if (lighting.Surface.y > 0.0 && alpha < lighting.Surface.y) {
+	uint alphaMode = inAppearance & 0xFFu;
+	float cutoff = float((inAppearance >> 8u) & 0xFFu) / 255.0;
+	float materialAlpha = sampled.a * lighting.BaseColour.a;
+	if (alphaMode == 1u && inColour.a >= 0.98 && materialAlpha < cutoff) {
 		discard;
 	}
+	float alpha = alphaMode == 1u ? inColour.a * materialAlpha : inColour.a;
 
 	// **The seam, before any shading is computed.** A fragment on the far side of
 	// the plane this instance was cut at belongs to the other half of the body,
@@ -600,7 +614,13 @@ void main() {
 		discard;
 	}
 
-	vec3 albedo = inColour.rgb * sampled.rgb * lighting.BaseColour.rgb;
+	vec3 mappedColour = sampled.rgb * lighting.BaseColour.rgb;
+	vec3 albedo = inColour.rgb * mappedColour * inSurfaceColour;
+	if (alphaMode == 0u) {
+		albedo = mix(inColour.rgb, albedo, materialAlpha);
+	} else if (alphaMode == 2u) {
+		albedo = inColour.rgb * mappedColour * mix(vec3(1.0), inSurfaceColour, materialAlpha);
+	}
 
 	// Ambient is unshadowed and direct light is not, which is what makes a
 	// shadow dark rather than black.
@@ -610,15 +630,18 @@ void main() {
 	float shadow = min(ShadowFactor(normal, toLight), BeamFactor());
 	vec3 viewDirection = normalize(lighting.Eye.xyz - inWorldPosition);
 	vec3 halfway = normalize(viewDirection + toLight);
-	vec3 fresnel = FresnelSchlick(max(dot(halfway, viewDirection), 0.0), vec3(0.04));
+	vec3 baseReflectance = mix(vec3(0.04), albedo, metalness);
+	vec3 fresnel = FresnelSchlick(max(dot(halfway, viewDirection), 0.0), baseReflectance);
 	float distribution = DistributionGGX(normal, halfway, roughness);
 	float geometry = GeometrySchlickGGX(max(dot(normal, viewDirection), 0.0), roughness) *
 		GeometrySchlickGGX(lambert, roughness);
 	vec3 specular = distribution * geometry * fresnel /
 		max(4.0 * max(dot(normal, viewDirection), 0.0) * lambert, 1e-4);
-	vec3 ambient = albedo * (lighting.Ambient.rgb + lighting.OutdoorAmbient.rgb * sky) * occlusion;
-	vec3 direct = (albedo * (1.0 - fresnel) * lambert + specular) * lighting.Direct.rgb * shadow;
-	vec3 lit = ambient + direct + albedo * LocalLight(normal) + emissive;
+	vec3 diffuse = albedo * (1.0 - fresnel) * (1.0 - metalness);
+	vec3 ambientAlbedo = mix(albedo, baseReflectance, metalness);
+	vec3 ambient = ambientAlbedo * (lighting.Ambient.rgb + lighting.OutdoorAmbient.rgb * sky) * occlusion;
+	vec3 direct = (diffuse * lambert + specular) * lighting.Direct.rgb * shadow;
+	vec3 lit = ambient + direct + diffuse * LocalLight(normal) + emissive;
 	lit = mix(lit, lighting.FogColour.rgb, FogFactor());
 
 	// **A portal pane reads the sub-render by screen position**, which is the

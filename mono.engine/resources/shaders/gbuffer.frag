@@ -7,6 +7,9 @@ layout(location = 0) in vec3 inNormal;
 layout(location = 1) in vec4 inColour;
 layout(location = 4) in vec2 inTexCoord;
 layout(location = 5) in vec3 inWorldPosition;
+layout(location = 6) flat in uint inAppearance;
+layout(location = 7) flat in vec3 inSurfaceColour;
+layout(location = 8) flat in vec4 inEmission;
 
 layout(location = 0) out vec4 outAlbedo;
 layout(location = 1) out vec4 outNormal;
@@ -25,6 +28,7 @@ layout(set = 2, binding = 5) uniform sampler2D roughnessMap;
 layout(set = 2, binding = 6) uniform sampler2D occlusionMap;
 layout(set = 2, binding = 7) uniform sampler2D emissiveMap;
 layout(set = 2, binding = 8) uniform sampler2D heightMap;
+layout(set = 2, binding = 9) uniform sampler2D metalnessMap;
 
 layout(set = 3, binding = 0) uniform Lighting {
 	vec4 Direction;
@@ -42,6 +46,7 @@ layout(set = 3, binding = 0) uniform Lighting {
 	vec4 FogColour;
 	vec4 Fog;
 	vec4 Eye;
+	vec4 MaterialExtra;
 } lighting;
 
 mat3 CotangentFrame(vec3 normal, vec3 position, vec2 uv) {
@@ -68,10 +73,13 @@ void main() {
 		cellUv = localUv * lighting.Flipbook.x + lighting.Flipbook.yz;
 	}
 	vec4 sampled = lighting.Surface.x > 0.5 ? texture(colourMap, cellUv) : vec4(1.0);
-	float alpha = inColour.a * sampled.a * lighting.BaseColour.a;
-	if (lighting.Surface.y > 0.0 && alpha < lighting.Surface.y) {
+	uint alphaMode = inAppearance & 0xFFu;
+	float cutoff = float((inAppearance >> 8u) & 0xFFu) / 255.0;
+	float materialAlpha = sampled.a * lighting.BaseColour.a;
+	if (alphaMode == 1u && inColour.a >= 0.98 && materialAlpha < cutoff) {
 		discard;
 	}
+	float alpha = alphaMode == 1u ? inColour.a * materialAlpha : inColour.a;
 	if (dot(lighting.SeamPlane.xyz, lighting.SeamPlane.xyz) > 0.0 &&
 		dot(inWorldPosition, lighting.SeamPlane.xyz) < lighting.SeamPlane.w) {
 		discard;
@@ -84,10 +92,20 @@ void main() {
 
 	float roughness = lighting.Material.y > 0.5 ? texture(roughnessMap, cellUv).r : 0.65;
 	float materialOcclusion = lighting.Material.z > 0.5 ? texture(occlusionMap, cellUv).r : 1.0;
-	vec3 emissive = lighting.Material.w > 0.5 ? texture(emissiveMap, cellUv).rgb : vec3(0.0);
+	vec3 emissive = lighting.Material.w > 0.5
+		? texture(emissiveMap, cellUv).rgb * inEmission.rgb * inEmission.a
+		: vec3(0.0);
+	float metalness = lighting.MaterialExtra.x > 0.5 ? texture(metalnessMap, cellUv).r : 0.0;
 
-	outAlbedo = vec4(inColour.rgb * sampled.rgb * lighting.BaseColour.rgb, alpha);
+	vec3 mappedColour = sampled.rgb * lighting.BaseColour.rgb;
+	vec3 albedo = inColour.rgb * mappedColour * inSurfaceColour;
+	if (alphaMode == 0u) {
+		albedo = mix(inColour.rgb, albedo, materialAlpha);
+	} else if (alphaMode == 2u) {
+		albedo = inColour.rgb * mappedColour * mix(vec3(1.0), inSurfaceColour, materialAlpha);
+	}
+	outAlbedo = vec4(albedo, alpha);
 	outNormal = vec4(normal * 0.5 + 0.5, 1.0);
-	outMaterial = vec4(clamp(roughness, 0.045, 1.0), 0.0, materialOcclusion, 0.0);
+	outMaterial = vec4(clamp(roughness, 0.045, 1.0), clamp(metalness, 0.0, 1.0), materialOcclusion, 0.0);
 	outEmissive = vec4(emissive, 1.0);
 }

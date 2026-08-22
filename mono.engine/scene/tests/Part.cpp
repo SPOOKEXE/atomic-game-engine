@@ -599,6 +599,19 @@ TEST_CASE("a MeshPart is a BasePart with Roblox's vocabulary", "[scene][part]") 
 	REQUIRE(Write(store, part, "TextureID", Name("props/fox.atex")));
 	CHECK(Read<Name>(store, part, "TextureID") == Name("props/fox.atex"));
 
+	REQUIRE(Write(store, part, "NormalMap", Name("props/fox_normal.atex")));
+	CHECK(Read<Name>(store, part, "NormalMap") == Name("props/fox_normal.atex"));
+	REQUIRE(Write(store, part, "RoughnessMap", Name("props/fox_roughness.atex")));
+	CHECK(Read<Name>(store, part, "RoughnessMap") == Name("props/fox_roughness.atex"));
+	REQUIRE(Write(store, part, "MetalnessMap", Name("props/fox_metalness.atex")));
+	CHECK(Read<Name>(store, part, "MetalnessMap") == Name("props/fox_metalness.atex"));
+	REQUIRE(Write(store, part, "OcclusionMap", Name("props/fox_occlusion.atex")));
+	CHECK(Read<Name>(store, part, "OcclusionMap") == Name("props/fox_occlusion.atex"));
+	REQUIRE(Write(store, part, "HeightMap", Name("props/fox_height.atex")));
+	CHECK(Read<Name>(store, part, "HeightMap") == Name("props/fox_height.atex"));
+	REQUIRE(Write(store, part, "EmissiveMap", Name("props/fox_emissive.atex")));
+	CHECK(Read<Name>(store, part, "EmissiveMap") == Name("props/fox_emissive.atex"));
+
 	// **One spelling and not two.** `Mesh` and `ColorMap` were aliases of these
 	// on `BasePart` and are gone: two names for one field is the duplication
 	// `AGENTS.md` calls the most expensive kind, and it had already cost the
@@ -635,7 +648,7 @@ TEST_CASE("a plain Part names no mesh and no texture", "[scene][part]") {
 
 	// And the alpha pair stays, because a `Material` on a `Part` samples a
 	// texture whose alpha has to be interpreted.
-	CHECK(Read<Name>(store, part, "AlphaMode") == Name("Opaque"));
+	CHECK(Read<Name>(store, part, "AlphaMode") == Name("Overlay"));
 }
 
 TEST_CASE("AlphaMode is an enum, so a misspelling is refused", "[scene][part]") {
@@ -644,18 +657,29 @@ TEST_CASE("AlphaMode is an enum, so a misspelling is refused", "[scene][part]") 
 
 	const Entity part = store.CreateInstance(engine::ecs::Classes::Find(Name("MeshPart")), "Hair");
 
-	CHECK(Read<Name>(store, part, "AlphaMode") == Name("Opaque"));
+	CHECK(Read<Name>(store, part, "AlphaMode") == Name("Overlay"));
 
 	// `Clip` is the mode a character model needs: hair and eyelashes are cut-out
 	// planes, and blending them costs a sort a discard does not.
-	REQUIRE(Write(store, part, "AlphaMode", Name("Clip")));
-	CHECK(Read<Name>(store, part, "AlphaMode") == Name("Clip"));
+	REQUIRE(Write(store, part, "AlphaMode", Name("Transparency")));
+	CHECK(Read<Name>(store, part, "AlphaMode") == Name("Transparency"));
 
 	CHECK_FALSE(Write(store, part, "AlphaMode", Name("Clpi")));
-	CHECK(Read<Name>(store, part, "AlphaMode") == Name("Clip"));
+	CHECK(Read<Name>(store, part, "AlphaMode") == Name("Transparency"));
 
 	REQUIRE(Write(store, part, "AlphaCutoff", 0.25f));
 	CHECK(Read<float>(store, part, "AlphaCutoff") == 0.25f);
+
+	const engine::core::Color3 surfaceColour{0.2f, 0.4f, 0.8f};
+	const engine::core::Color3 emissiveTint{1.0f, 0.25f, 0.1f};
+	REQUIRE(Write(store, part, "SurfaceColor", surfaceColour));
+	REQUIRE(Write(store, part, "EmissiveTint", emissiveTint));
+	REQUIRE(Write(store, part, "EmissiveStrength", 3.5f));
+	REQUIRE(Write(store, part, "ResampleMode", Name("Pixelated")));
+	CHECK(Read<engine::core::Color3>(store, part, "SurfaceColor") == surfaceColour);
+	CHECK(Read<engine::core::Color3>(store, part, "EmissiveTint") == emissiveTint);
+	CHECK(Read<float>(store, part, "EmissiveStrength") == 3.5f);
+	CHECK(Read<Name>(store, part, "ResampleMode") == Name("Pixelated"));
 
 	// Clamped, for `Transparency`'s reason: a cutoff outside zero to one is a
 	// surface that is entirely there or entirely gone.

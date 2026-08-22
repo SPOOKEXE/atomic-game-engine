@@ -1594,7 +1594,7 @@ namespace engine::render {
 		// the build. Neither is this class's concern - it builds the pipelines a
 		// `scene::DrawInstance::Shader` naming this resolves to.
 		//
-		// **The module must declare what `opaque.frag` declares**: nine fragment
+		// **The module must declare what `opaque.frag` declares**: ten fragment
 		// samplers and three uniform buffers, in those slots. A shader object
 		// carries those counts rather than the pipeline doing so, so a module
 		// that declares different ones binds and silently samples nothing - the

@@ -1,7 +1,7 @@
 #pragma once
 
 // The per-instance row the vertex stream carries, and the quantisation that
-// makes it thirty-six bytes instead of ninety-six.
+// makes it forty bytes instead of ninety-six.
 //
 // **A file of its own so the error is measurable without a device.** The whole
 // argument for this layout is that a rotation survives eight bytes and a colour
@@ -144,11 +144,42 @@ namespace engine::render {
 		return glm::vec4{channel(0), channel(8), channel(16), channel(24)};
 	}
 
+	// Alpha mode in the low byte and cutoff as UNORM8 in the next one.
+	inline uint32_t PackAppearance(
+		scene::AlphaMode mode,
+		float cutoff,
+		scene::SurfaceResampleMode resample = scene::SurfaceResampleMode::Default
+	) {
+		const uint32_t threshold =
+			static_cast<uint32_t>(std::lround(std::clamp(cutoff, 0.0f, 1.0f) * 255.0f));
+		return static_cast<uint32_t>(mode) | (threshold << 8) | (static_cast<uint32_t>(resample) << 16);
+	}
+
+	inline scene::AlphaMode UnpackAlphaMode(uint32_t packed) {
+		const uint32_t mode = packed & 0xFFu;
+		return mode <= static_cast<uint32_t>(scene::AlphaMode::Opaque) ? static_cast<scene::AlphaMode>(mode)
+																	   : scene::AlphaMode::Opaque;
+	}
+
+	inline float UnpackAlphaCutoff(uint32_t packed) {
+		return static_cast<float>((packed >> 8) & 0xFFu) / 255.0f;
+	}
+
+	inline scene::SurfaceResampleMode UnpackResampleMode(uint32_t packed) {
+		return ((packed >> 16u) & 0xFFu) == static_cast<uint32_t>(scene::SurfaceResampleMode::Pixelated)
+				   ? scene::SurfaceResampleMode::Pixelated
+				   : scene::SurfaceResampleMode::Default;
+	}
+
+	inline uint32_t PackEmission(const core::Color3 &tint, float strength) {
+		return PackColour(glm::vec4{tint.R, tint.G, tint.B, std::clamp(strength, 0.0f, 16.0f) / 16.0f});
+	}
+
 	// One instance as the vertex shader reads it.
 	//
 	// Private GPU layout; scene data must not expose device types.
 	//
-	// **Thirty-six bytes, down from ninety-six, and the shape is why.** The old
+	// **Forty-eight bytes, down from ninety-six, and the shape is why.** The old
 	// row carried a `mat4`, an RGBA float4 and a float4 of inverse squared
 	// scales. Every one of those was derived from three things a `DrawInstance`
 	// already holds separately - a `CFrame`, a half-extent and a tint - and the
@@ -179,6 +210,11 @@ namespace engine::render {
 
 		// Colour and alpha, RGBA8 with red in the low byte.
 		uint32_t Colour = 0xFFFFFFFFu;
+
+		// Alpha mode in the low byte and clip cutoff as UNORM8 above it.
+		uint32_t Appearance = PackAppearance(scene::AlphaMode::Opaque, 0.5f);
+		uint32_t SurfaceColour = 0xFFFFFFFFu;
+		uint32_t Emission = PackEmission(core::Color3{1.0f, 1.0f, 1.0f}, 1.0f);
 	};
 
 	// How many 32-bit words one row is.
@@ -197,9 +233,9 @@ namespace engine::render {
 	// stops the configure with a message saying so, rather than drifting.
 	//
 	// @since v0.19
-	inline constexpr size_t GPU_INSTANCE_WORDS = 9;
+	inline constexpr size_t GPU_INSTANCE_WORDS = 12;
 
-	// **Thirty-six and not forty, which is worth pinning rather than leaving to
+	// **Forty-eight bytes, pinned rather than left to
 	// whatever the compiler laid out.** Every member is four-byte aligned and
 	// there is no interior hole, so this is exactly the sum of the fields. The
 	// stride reaches the device as a storage-buffer word count and as the C++
@@ -300,6 +336,11 @@ namespace engine::render {
 		gpu.Colour = PackColour(
 			glm::vec4{instance.Tint.R, instance.Tint.G, instance.Tint.B, 1.0f - instance.Transparency}
 		);
+		gpu.Appearance = PackAppearance(instance.Alpha, instance.AlphaCutoff, instance.Resample);
+		gpu.SurfaceColour = PackColour(
+			glm::vec4{instance.SurfaceColour.R, instance.SurfaceColour.G, instance.SurfaceColour.B, 1.0f}
+		);
+		gpu.Emission = PackEmission(instance.EmissiveTint, instance.EmissiveStrength);
 		return gpu;
 	}
 }

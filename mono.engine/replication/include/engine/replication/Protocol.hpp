@@ -110,7 +110,7 @@ namespace engine::replication {
 	// exists to remove, arriving anyway. Refused at the door instead: this is
 	// also the number `network::Advert::Protocol` carries, so two builds that
 	// disagree here do not appear joinable in a browser either.
-	inline constexpr uint16_t PROTOCOL_VERSION = 10;
+	inline constexpr uint16_t PROTOCOL_VERSION = 11;
 
 	// Which half of a join a snapshot chunk belongs to.
 	//

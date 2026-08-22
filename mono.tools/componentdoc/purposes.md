@@ -115,7 +115,7 @@ scene.Sound | What a sound is rather than a sound playing: asset name, volume, r
 scene.SpawnLocation | On a spawn pad: which team colour it serves, whether it takes anyone regardless, and whether it is a spawn at all. `FindSpawn` reads all three.
 scene.Surface | The physical material name a part feels like, resolved against the world's `SurfaceTable` once per contact. Separate, on purpose, from what the part looks like.
 scene.Sun | Per-world singleton directional light: the direction it shines and the ambient standing in for sky on the faces it misses.
-scene.SurfaceAppearance | The six texture maps, shader name, alpha mode and cutoff a drawable is rendered with. `ResolveMaterials` writes it and the G-buffer pass reads it.
+scene.SurfaceAppearance | The seven texture maps, shader name, alpha mode and cutoff a drawable is rendered with. `ResolveMaterials` writes it and the PBR paths read it.
 scene.SurfaceBounces | Resource: how deep a mirror may show another mirror, or zero to let the engine decide. Set through the `workspace.SurfaceBounces` property.
 scene.SurfaceCamera | On a mirror or portal pane: render-texture size, redraw cap, tag filter, post-grade, which face it projects off and which surface slot it writes.
 scene.SurfaceLens | The off-axis frustum, oblique clip plane and pane mapping `AimSurfaceCameras` fits to a mirror or portal every frame. Derived from where the local eye stands, never authored.

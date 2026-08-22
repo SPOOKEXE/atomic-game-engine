@@ -87,6 +87,12 @@ TEST_CASE("a mesh part's content rows all get a picker", "[studio][properties]")
 	for (const auto &[property, kind] : {
 			 std::pair<std::string_view, AssetKind>{"MeshId", AssetKind::Mesh},
 			 std::pair<std::string_view, AssetKind>{"TextureID", AssetKind::Texture},
+			 std::pair<std::string_view, AssetKind>{"NormalMap", AssetKind::Texture},
+			 std::pair<std::string_view, AssetKind>{"RoughnessMap", AssetKind::Texture},
+			 std::pair<std::string_view, AssetKind>{"MetalnessMap", AssetKind::Texture},
+			 std::pair<std::string_view, AssetKind>{"OcclusionMap", AssetKind::Texture},
+			 std::pair<std::string_view, AssetKind>{"HeightMap", AssetKind::Texture},
+			 std::pair<std::string_view, AssetKind>{"EmissiveMap", AssetKind::Texture},
 		 }) {
 		INFO(property);
 		const Row row = Inspect(store, part, property);
@@ -212,7 +218,7 @@ TEST_CASE("a picker value with no type is refused", "[studio][properties]") {
 }
 
 TEST_CASE("every content row the picker serves round-trips", "[studio][properties]") {
-	// **All five, because the failure was per-property and looked per-class.**
+	// **All seven, because the failure was per-property and looked per-class.**
 	// One test on `MeshId` would have passed the day somebody fixed meshes and
 	// left `Image` on an `ImageLabel` doing nothing - which is how the aliases
 	// this file's first case describes went wrong the first time.
@@ -227,6 +233,12 @@ TEST_CASE("every content row the picker serves round-trips", "[studio][propertie
 	for (const Row &row : {
 			 Row{"MeshPart", "MeshId"},
 			 Row{"MeshPart", "TextureID"},
+			 Row{"MeshPart", "NormalMap"},
+			 Row{"MeshPart", "RoughnessMap"},
+			 Row{"MeshPart", "MetalnessMap"},
+			 Row{"MeshPart", "OcclusionMap"},
+			 Row{"MeshPart", "HeightMap"},
+			 Row{"MeshPart", "EmissiveMap"},
 			 Row{"Material", "MaterialId"},
 			 Row{"Sound", "SoundId"},
 		 }) {

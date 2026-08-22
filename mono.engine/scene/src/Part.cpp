@@ -847,6 +847,46 @@ namespace engine::scene {
 			return property;
 		}
 
+		const core::Name &ResamplerModeEnum() {
+			static const core::Name name("ResamplerMode");
+			return name;
+		}
+
+		PropertyDescriptor ResampleModeProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("ResampleMode");
+			property.Type = PropertyType::Enum;
+			property.EnumName = ResamplerModeEnum();
+			property.Size = sizeof(core::Name);
+			property.Kind = PropertyKind::Field;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<SurfaceAppearance>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) {
+				const auto *appearance = store.Get<SurfaceAppearance>(instance);
+				if (appearance == nullptr) {
+					return false;
+				}
+				*static_cast<core::Name *>(out) =
+					ecs::EnumTable::MemberAt(ResamplerModeEnum(), static_cast<size_t>(appearance->Resample));
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) {
+				auto *appearance = store.GetMutable<SurfaceAppearance>(instance);
+				if (appearance == nullptr) {
+					return false;
+				}
+				size_t ordinal = 0;
+				if (!ecs::EnumTable::OrdinalOf(
+						ResamplerModeEnum(), *static_cast<const core::Name *>(value), ordinal
+					)) {
+					return false;
+				}
+				appearance->Resample = static_cast<SurfaceResampleMode>(ordinal);
+				return true;
+			};
+			return property;
+		}
+
 		// Which tags a surface camera draws, as a name a script writes.
 		//
 		// **The property is a name and the storage is a bit**, which is the
@@ -1803,9 +1843,13 @@ namespace engine::scene {
 			ecs::EnumTable::Register(SurfaceEffectEnum().Text(), effects);
 
 			// The alpha modes, by the same rule: a member list registered once
-			// so a script setting `.AlphaMode = "Clip"` is checked against it.
+			// so a script setting `.AlphaMode = "Transparency"` is checked against it.
 			ecs::EnumTable::Register(
-				AlphaModeEnum().Text(), std::array<std::string_view, 3>{"Opaque", "Clip", "Blend"}
+				AlphaModeEnum().Text(),
+				std::array<std::string_view, 4>{"Overlay", "Transparency", "TintMask", "Opaque"}
+			);
+			ecs::EnumTable::Register(
+				ResamplerModeEnum().Text(), std::array<std::string_view, 2>{"Default", "Pixelated"}
 			);
 
 			// The collider shapes. **In `ShapeKind`'s own declaration order**,
@@ -2438,6 +2482,12 @@ namespace engine::scene {
 				basePart, "AlphaCutoff"
 			);
 			ecs::Classes::Computed(basePart, AlphaModeProperty());
+			ecs::Classes::Property<&SurfaceAppearance::Colour>(basePart, "SurfaceColor");
+			ecs::Classes::Property<&SurfaceAppearance::EmissiveTint>(basePart, "EmissiveTint");
+			ecs::Classes::ClampedProperty<&SurfaceAppearance::EmissiveStrength, 0.0f, 16.0f>(
+				basePart, "EmissiveStrength"
+			);
+			ecs::Classes::Computed(basePart, ResampleModeProperty());
 
 			// **`Transparency` has a field to project onto now**, and it arrived
 			// with the sorted pass that makes it mean something rather than
@@ -2509,6 +2559,12 @@ namespace engine::scene {
 			// storage decision and not a vocabulary one.
 			ecs::Classes::Property<&Visual::Mesh>(meshPart, "MeshId");
 			ecs::Classes::Property<&SurfaceAppearance::ColourMap>(meshPart, "TextureID");
+			ecs::Classes::Property<&SurfaceAppearance::NormalMap>(meshPart, "NormalMap");
+			ecs::Classes::Property<&SurfaceAppearance::RoughnessMap>(meshPart, "RoughnessMap");
+			ecs::Classes::Property<&SurfaceAppearance::MetalnessMap>(meshPart, "MetalnessMap");
+			ecs::Classes::Property<&SurfaceAppearance::OcclusionMap>(meshPart, "OcclusionMap");
+			ecs::Classes::Property<&SurfaceAppearance::HeightMap>(meshPart, "HeightMap");
+			ecs::Classes::Property<&SurfaceAppearance::EmissiveMap>(meshPart, "EmissiveMap");
 
 			// Mesh metadata belongs to MeshPart, not every BasePart.
 			ecs::Classes::Computed(meshPart, TrianglesCountProperty());

@@ -215,6 +215,7 @@ namespace assetc {
 			std::string Occlusion;
 			std::string Height;
 			std::string Emissive;
+			std::string Metalness;
 		};
 
 		MaterialKeys MaterialKeysOf(std::span<const std::byte> bytes) {
@@ -265,6 +266,8 @@ namespace assetc {
 					out.Height = value;
 				} else if (key == "emissive") {
 					out.Emissive = value;
+				} else if (key == "metalness") {
+					out.Metalness = value;
 				}
 			}
 			return out;
@@ -380,7 +383,7 @@ namespace assetc {
 				// rule is a material that resolves to nothing on a machine nobody
 				// tested.
 				//
-				// **One rule for all five**, so a normal map outside the tree
+				// **One rule for all seven**, so a normal map outside the tree
 				// fails exactly as a colour map does. Written as a loop over
 				// pointers rather than five copies for that reason: five copies
 				// is five places for the rule to drift.
@@ -391,6 +394,7 @@ namespace assetc {
 					{&keys.Occlusion, &material.OcclusionMap},
 					{&keys.Height, &material.HeightMap},
 					{&keys.Emissive, &material.EmissiveMap},
+					{&keys.Metalness, &material.MetalnessMap},
 				};
 
 				for (const auto &[named, into] : maps) {

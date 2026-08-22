@@ -47,6 +47,7 @@ namespace client {
 				Want(out, appearance.RoughnessMap);
 				Want(out, appearance.OcclusionMap);
 				Want(out, appearance.HeightMap);
+				Want(out, appearance.MetalnessMap);
 				Want(out, appearance.EmissiveMap);
 			}
 		);

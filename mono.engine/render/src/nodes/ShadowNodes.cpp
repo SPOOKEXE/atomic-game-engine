@@ -82,8 +82,9 @@ namespace engine::render {
 				// Two draws because the two runs are not adjacent - the surface
 				// partition sits between them. The second is empty in every scene
 				// with no mirror in it, which is almost all of them.
-				// Depth only, so no samplers and no fragment uniforms - the null
-				// lighting pointer is what says so.
+				// Depth only, with the colour sampler and compact fragment state that
+				// let clipped surfaces cast their authored silhouette. The null
+				// lighting pointer selects that path.
 				uint64_t shadowTriangles = 0;
 				if (reflectedCasters > 0) {
 					result.DrawCalls += State->DrawSlots(
