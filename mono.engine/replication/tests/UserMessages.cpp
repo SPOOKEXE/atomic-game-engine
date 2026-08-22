@@ -378,7 +378,7 @@ TEST_CASE("a quiet link still acknowledges, so its window never stalls", "[repli
 	// Well past the default keep-alive, and past the resend limit that would
 	// have been reached if nothing acknowledged.
 	for (int round = 0; round < 12; ++round) {
-		INFO("round " << round << " state " << engine::net::Describe(pair.Client->Link().State()));
+		INFO("round " << round << " state " << engine::net::Describe(pair.Client->Link()->State()));
 		REQUIRE(pair.Client->SendUser(Bytes("edit " + std::to_string(round)), pair.Now));
 		quiet(90);
 	}
@@ -387,5 +387,5 @@ TEST_CASE("a quiet link still acknowledges, so its window never stalls", "[repli
 
 	// The link is still up rather than timed out, which is the other half of
 	// what a keep-alive is for.
-	CHECK(pair.Client->Link().State() == engine::net::ConnectionState::Connected);
+	CHECK(pair.Client->Link()->State() == engine::net::ConnectionState::Connected);
 }

@@ -45,6 +45,43 @@ namespace engine::replication {
 		: Transport_(&transport), Peer_(peer), Link_(id, nowSeconds, settings.Link),
 		  Sender(settings.Reliability), Receiver(settings.Reliability) {}
 
+	void Session::Advance(double nowSeconds) {
+		// **One call, because the two were never usefully separate.** A caller
+		// that aged the timers and forgot the budget spent two ticks' worth
+		// inside one, and every caller made both in the same place anyway.
+		Link_.Advance(nowSeconds);
+		Link_.ResetBudget();
+	}
+
+	bool Session::Live() const {
+		return Link_.State() != net::ConnectionState::Disconnected;
+	}
+
+	void Session::Disconnect(double nowSeconds) {
+		(void)nowSeconds;
+		Link_.Close(net::DisconnectReason::Requested);
+	}
+
+	float Session::RoundTripMilliseconds() const {
+		return Link_.Stats().RoundTripMilliseconds;
+	}
+
+	size_t Session::SendAllowanceBytes() const {
+		return static_cast<size_t>(Link_.Stats().SendAllowanceBytes);
+	}
+
+	void Session::SetBinding(std::span<const std::byte> binding) {
+		Binding_.assign(binding.begin(), binding.end());
+	}
+
+	bool Session::Binding(std::span<std::byte> out) const {
+		if (Binding_.empty() || out.size() != Binding_.size()) {
+			return false;
+		}
+		std::copy(Binding_.begin(), Binding_.end(), out.begin());
+		return true;
+	}
+
 	void Session::ClearInbound() {
 		Inbound_.clear();
 	}

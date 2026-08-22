@@ -286,7 +286,7 @@ namespace engine::net::quic {
 		  HandshakeSecret(other.HandshakeSecret), ClientHandshakeSecret(other.ClientHandshakeSecret),
 		  ServerHandshakeSecret(other.ServerHandshakeSecret),
 		  ClientApplicationSecret(other.ClientApplicationSecret),
-		  ServerApplicationSecret(other.ServerApplicationSecret),
+		  ServerApplicationSecret(other.ServerApplicationSecret), ExporterSecret(other.ExporterSecret),
 		  LocalParameters(std::move(other.LocalParameters)),
 		  RemoteParameters(std::move(other.RemoteParameters)), Incoming(std::move(other.Incoming)),
 		  Events(std::move(other.Events)), AlertCode(other.AlertCode), Reason(other.Reason) {
@@ -317,6 +317,7 @@ namespace engine::net::quic {
 			ServerHandshakeSecret = other.ServerHandshakeSecret;
 			ClientApplicationSecret = other.ClientApplicationSecret;
 			ServerApplicationSecret = other.ServerApplicationSecret;
+			ExporterSecret = other.ExporterSecret;
 			LocalParameters = std::move(other.LocalParameters);
 			RemoteParameters = std::move(other.RemoteParameters);
 			Incoming = std::move(other.Incoming);
@@ -329,6 +330,22 @@ namespace engine::net::quic {
 		return *this;
 	}
 
+	bool Tls::Export(std::string_view label, std::span<std::byte> out) const {
+		if (Phase != Stage::Done) {
+			return false;
+		}
+		// RFC 8446 §7.5: a per-label secret, then an expansion over the hash of
+		// the caller's context - empty here, because the label is the whole of
+		// what separates two callers.
+		std::array<std::byte, SECRET_BYTES> derived{};
+		if (!ExpandLabel(ExporterSecret, label, Digest({}), derived)) {
+			return false;
+		}
+		const bool written = ExpandLabel(derived, "exporter", Digest({}), out);
+		core::SecureWipe(derived);
+		return written;
+	}
+
 	void Tls::Wipe() {
 		core::SecureWipe(EphemeralSecret);
 		core::SecureWipe(Settings.Seed);
@@ -337,6 +354,7 @@ namespace engine::net::quic {
 		core::SecureWipe(ServerHandshakeSecret);
 		core::SecureWipe(ClientApplicationSecret);
 		core::SecureWipe(ServerApplicationSecret);
+		core::SecureWipe(ExporterSecret);
 	}
 
 	bool Tls::Refuse(uint8_t alert, const char *reason) {
@@ -430,6 +448,10 @@ namespace engine::net::quic {
 
 		ClientApplicationSecret = DeriveSecret(master, "c ap traffic");
 		ServerApplicationSecret = DeriveSecret(master, "s ap traffic");
+		// The exporter secret comes off the same transcript as the traffic
+		// secrets, which is what makes an exported value a fact about *this*
+		// handshake rather than about the key that signed it.
+		ExporterSecret = DeriveSecret(master, "exp master");
 		core::SecureWipe(derived);
 	}
 

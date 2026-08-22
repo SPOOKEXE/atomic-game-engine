@@ -66,6 +66,7 @@
 #include <cstdint>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace engine::net::quic {
@@ -376,6 +377,24 @@ namespace engine::net::quic {
 			return ChosenHeader;
 		}
 
+		// Derives a value both ends can compute and nobody else can.
+		//
+		// RFC 8446 §7.5's exporter. **What it is for is binding something to
+		// this connection**: a client's identity claim is signed over an
+		// exported value, so a signature captured from one connection proves
+		// nothing on another, and a relay that holds one handshake with each
+		// side cannot carry the claim across. The hand-rolled stack got the same
+		// property out of `AdmissionTranscript`, which QUIC has no equivalent of
+		// - this is what replaces it.
+		//
+		// @param label The exporter label. Two callers with different labels get
+		//        unrelated values from one connection.
+		// @param out   Where the value goes.
+		// @return `false` before the handshake completes, or when `out` is
+		//         longer than one expansion can produce.
+		// @since v0.19
+		bool Export(std::string_view label, std::span<std::byte> out) const;
+
 		// The peer's Ed25519 public key, as it proved possession of it.
 		//
 		// **On a client this is the identity check's subject and not its
@@ -447,6 +466,7 @@ namespace engine::net::quic {
 		std::array<std::byte, SECRET_BYTES> ServerHandshakeSecret{};
 		std::array<std::byte, SECRET_BYTES> ClientApplicationSecret{};
 		std::array<std::byte, SECRET_BYTES> ServerApplicationSecret{};
+		std::array<std::byte, SECRET_BYTES> ExporterSecret{};
 		//@}
 
 		std::vector<std::byte> LocalParameters;

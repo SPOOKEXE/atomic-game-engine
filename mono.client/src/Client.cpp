@@ -3265,7 +3265,7 @@ namespace client {
 		network.Joined = Connection->Joined();
 		network.AppliedTick = Connection->Applied();
 
-		const engine::net::ConnectionStats &link = Connection->Link().Stats();
+		const engine::net::ConnectionStats link = Connection->LinkStats();
 		network.ReceivedBytes = link.BytesReceived;
 		network.SentBytes = link.BytesSent;
 		network.RoundTripMilliseconds = link.RoundTripMilliseconds;

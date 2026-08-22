@@ -3,19 +3,23 @@
 // @tier L12 · shared
 
 #include <engine/ecs/Store.hpp>
+#include <engine/net/ConnectionStats.hpp>
 #include <engine/net/Cookie.hpp>
 #include <engine/net/Endpoint.hpp>
 #include <engine/net/Handshake.hpp>
 #include <engine/net/Transport.hpp>
 #include <engine/replication/Admission.hpp>
 #include <engine/replication/Prediction.hpp>
+#include <engine/replication/QuicSession.hpp>
 #include <engine/replication/Replica.hpp>
 #include <engine/replication/Session.hpp>
+#include <engine/replication/SessionPort.hpp>
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <span>
 #include <vector>
@@ -26,6 +30,27 @@ namespace engine::replication {
 	//
 	// @since v0.3
 	struct ConnectorSettings {
+		// Which transport this connector runs on.
+		//
+		// **Must match the server's.** There is no negotiation and there should
+		// not be: a client speaking one protocol at a server speaking the other
+		// gets no answer, which is a connection that fails rather than a server
+		// running two stacks - and the second one is the one nobody tests.
+		//
+		// @since v0.19
+		WireKind Wire = WireKind::Datagram;
+
+		// How a QUIC session is configured, when `Wire` says QUIC.
+		//
+		// **`ServerIdentity` is copied into it**, so a caller pins the server in
+		// one place whichever wire it is on. Under QUIC that pin becomes the
+		// RFC 7250 raw public key the TLS handshake checks; under the datagram
+		// wire it is the signature over the admission transcript. Same key,
+		// same guarantee, different mechanism.
+		//
+		// @since v0.19
+		QuicSessionSettings Quic;
+
 		// The server's public key, or nothing to accept any server.
 		// @since v0.9
 		std::optional<assets::PublicKey> ServerIdentity;
@@ -210,10 +235,25 @@ namespace engine::replication {
 
 		// The link's state machine.
 		//
-		// @return The link.
-		net::Link &Link() {
-			return Wire.Link();
-		}
+		// **Datagram wire only, and null under QUIC.** A QUIC connection has no
+		// `net::Link`: its lifecycle, its acknowledgements and its window are
+		// the transport's own, and `docs/QUIC.md` §6 keeps only `BytesPerTick`
+		// out of that type. A pointer rather than a reference so the absence is
+		// something a caller has to look at rather than something it walks into.
+		//
+		// @return The link, or null when this connector runs on QUIC.
+		net::Link *Link();
+
+		// The counters a debug panel reads, whichever wire this is on.
+		//
+		// **What `Link()` used to be for**, and it works on both: the bytes, the
+		// round trip and the loss are facts about a connection rather than about
+		// a framing, so they are refilled from whichever transport is underneath
+		// rather than reached for through a type only one of them has.
+		//
+		// @return The statistics.
+		// @since v0.19
+		net::ConnectionStats LinkStats() const;
 
 		// What this connection has done.
 		//
@@ -259,9 +299,17 @@ namespace engine::replication {
 		void Consume(std::span<const std::byte> datagram, double nowSeconds);
 		void Refuse();
 
+		void Settle(double nowSeconds);
+
 		net::Transport *Transport_;
 
-		Session Wire;
+		// Whichever session this connector's wire produces. See
+		// `SessionPort.hpp` for why there are two of them and one interface.
+		std::unique_ptr<SessionPort> Wire;
+
+		// The same object as `Wire` when the wire is QUIC, and null otherwise.
+		QuicSession *Quic = nullptr;
+
 		Replica Replica_;
 		Prediction Prediction_;
 

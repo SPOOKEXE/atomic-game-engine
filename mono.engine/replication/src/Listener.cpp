@@ -4,6 +4,7 @@
 #include <engine/replication/Listener.hpp>
 
 #include <algorithm>
+#include <array>
 #include <utility>
 
 namespace engine::replication {
@@ -45,7 +46,16 @@ namespace engine::replication {
 				return false;
 			}
 
-			if (!assets::VerifySessionTranscript(peer->Transcript, claim.Signature, claim.Key)) {
+			Binding binding{};
+			if (!peer->Wire->Binding(binding)) {
+				// Nothing to check against. Under QUIC that means the handshake
+				// has not finished, which is a claim that arrived too early
+				// rather than one that failed.
+				Stats_.Refused++;
+				return false;
+			}
+
+			if (!assets::VerifySessionTranscript(binding, claim.Signature, claim.Key)) {
 				ENGINE_WARN("replication: a client's identity claim did not verify - dropping it.");
 				Stats_.Refused++;
 				return false;
@@ -270,19 +280,21 @@ namespace engine::replication {
 		Peer peer;
 		peer.Where = from;
 		peer.PublicKey = answer.PublicKey;
-		peer.Transcript = transcript;
 		peer.Client = Authority_.Admit();
-		peer.Wire = std::make_unique<Session>(
+
+		auto session = std::make_unique<Session>(
 			*Transport_, from, net::ConnectionId{NextConnection++, 1}, nowSeconds, Settings.Session
 		);
+		session->Link().CompleteHandshake(nowSeconds);
+		session->SetBinding(transcript);
 
-		peer.Wire->Link().CompleteHandshake(nowSeconds);
-
-		if (!peer.Wire->AdoptKeys(std::move(*keys))) {
+		if (!session->AdoptKeys(std::move(*keys))) {
 			Authority_.Remove(peer.Client);
 			Stats_.Refused++;
 			return;
 		}
+		peer.Wire = std::move(session);
+		peer.Announced = true;
 
 		Frame(peer.Welcome, welcome);
 		if (peer.Welcome.empty()) {
@@ -346,6 +358,103 @@ namespace engine::replication {
 		}
 	}
 
+	void Listener::Deliver(Peer &peer) {
+		for (const std::vector<std::byte> &message : peer.Wire->Inbound()) {
+			// **Routed before the authority sees it.** A user message is
+			// not this module's, and handing one to `Authority::Receive`
+			// parses fine and then falls off the end of its switch - so the
+			// message would look delivered while a refusal counter an
+			// operator reads climbed.
+			if (PeekMessageKind(message) == MessageKind::User) {
+				if (UserMessages) {
+					core::ByteReader reader(message);
+					Message read;
+					if (ReadMessage(reader, read)) {
+						UserMessages(peer.Client, read.User.Bytes);
+					}
+				}
+				continue;
+			}
+			Authority_.Receive(peer.Client, message);
+		}
+		peer.Wire->ClearInbound();
+	}
+
+	void Listener::Announce(Peer &peer) {
+		// **Once the handshake is behind it and not before.** A QUIC connection
+		// exists before it is authenticated, and telling a host it has a player
+		// at that point is a player that vanishes when the handshake fails.
+		if (peer.Announced || !peer.Wire->Carrying()) {
+			return;
+		}
+		peer.Announced = true;
+		Stats_.Admitted++;
+
+		ENGINE_INFO("replication: admitted {} ({} connected)", peer.Where.Text(), Peers.size());
+		if (Admitted_) {
+			Admitted_(peer.Client);
+		}
+	}
+
+	void Listener::Arrive(const net::Endpoint &from, std::span<const std::byte> datagram, double nowSeconds) {
+		// A datagram for a connection this listener already holds, found by the
+		// destination connection id in its header rather than by its source
+		// address - which is what lets a peer's address change without the
+		// connection ending, and is why the id is what a table is keyed on.
+		std::array<std::byte, net::quic::CONNECTION_ID_BYTES> route{};
+		if (net::quic::RouteOf(datagram, route)) {
+			for (Peer &peer : Peers) {
+				if (peer.Quic == nullptr) {
+					continue;
+				}
+				const auto &ids = peer.Quic->Wire().LocalIds();
+				if (std::find(ids.begin(), ids.end(), route) == ids.end()) {
+					continue;
+				}
+				peer.Wire->Receive(datagram, nowSeconds);
+				Deliver(peer);
+				Announce(peer);
+				return;
+			}
+		}
+
+		// Not for anybody here. The only other thing it may be is somebody
+		// opening a connection, and everything else is refused - **without
+		// remembering anything about the sender**, which is `net/AGENTS.md`'s
+		// rule surviving the change of transport: an unanswered stranger costs
+		// zero bytes, however many are outstanding.
+		if (!net::quic::Accepts(datagram)) {
+			Stats_.Refused++;
+			return;
+		}
+
+		if (Peers.size() >= Settings.MaximumClients) {
+			Stats_.Turned++;
+			return;
+		}
+		if (Policy && !Policy(Applicant{from, Peers.size(), nowSeconds})) {
+			Stats_.Rejected++;
+			return;
+		}
+
+		std::unique_ptr<QuicSession> session =
+			QuicSession::Accept(*Transport_, from, datagram, nowSeconds, Settings.Quic);
+		if (session == nullptr) {
+			Stats_.Refused++;
+			return;
+		}
+
+		Peer peer;
+		peer.Where = from;
+		peer.Quic = session.get();
+		peer.Client = Authority_.Admit();
+		peer.Wire = std::move(session);
+
+		Peers.push_back(std::move(peer));
+		Deliver(Peers.back());
+		Announce(Peers.back());
+	}
+
 	void Listener::Poll(double nowSeconds) {
 		ENGINE_PROFILE_CAT("Listener::Poll", core::ProfileCategory::Network);
 
@@ -362,6 +471,11 @@ namespace engine::replication {
 				continue;
 			}
 
+			if (Settings.Wire == WireKind::Quic) {
+				Arrive(inbound.From, Datagram, nowSeconds);
+				continue;
+			}
+
 			if (net::Packet::PeekChannel(Datagram) == net::ChannelKind::Handshake) {
 				Greet(inbound.From, Datagram, nowSeconds);
 				continue;
@@ -374,26 +488,7 @@ namespace engine::replication {
 			}
 
 			peer->Wire->Receive(Datagram, nowSeconds);
-
-			for (const std::vector<std::byte> &message : peer->Wire->Inbound()) {
-				// **Routed before the authority sees it.** A user message is
-				// not this module's, and handing one to `Authority::Receive`
-				// parses fine and then falls off the end of its switch - so the
-				// message would look delivered while a refusal counter an
-				// operator reads climbed.
-				if (PeekMessageKind(message) == MessageKind::User) {
-					if (UserMessages) {
-						core::ByteReader reader(message);
-						Message read;
-						if (ReadMessage(reader, read)) {
-							UserMessages(peer->Client, read.User.Bytes);
-						}
-					}
-					continue;
-				}
-				Authority_.Receive(peer->Client, message);
-			}
-			peer->Wire->ClearInbound();
+			Deliver(*peer);
 		}
 	}
 
@@ -412,22 +507,24 @@ namespace engine::replication {
 
 		for (size_t index = Peers.size(); index > 0; index--) {
 			Peer &peer = Peers[index - 1];
-			peer.Wire->Link().Advance(nowSeconds);
-			peer.Wire->Link().ResetBudget();
+			peer.Wire->Advance(nowSeconds);
 
-			// **Right after `ResetBudget`, because that is where the link
-			// decides the number.** The allowance is a function of one tick's
+			// **Right after the budget is reset, because that is where the
+			// number is decided.** The allowance is a function of one tick's
 			// worth of observation, and reading it anywhere else in the tick
 			// reads whatever is left of it rather than what it was.
 			//
 			// No reordering was needed to make this current: `Advance` runs
 			// after `Publish`, so what the next `Publish` reads is the allowance
 			// this tick's observations produced. See `Authority::SetAllowance`.
-			Authority_.SetAllowance(
-				peer.Client, static_cast<size_t>(peer.Wire->Link().Stats().SendAllowanceBytes)
-			);
+			Authority_.SetAllowance(peer.Client, peer.Wire->SendAllowanceBytes());
 
-			if (peer.Wire->Link().State() == net::ConnectionState::Disconnected) {
+			// A QUIC peer may finish its handshake on a tick where nothing
+			// arrived, since its own timers are what drive the last flight.
+			Announce(peer);
+			Deliver(peer);
+
+			if (!peer.Wire->Live()) {
 				Drop(index - 1);
 			}
 		}
@@ -489,7 +586,7 @@ namespace engine::replication {
 	float Listener::RoundTripMilliseconds(ClientId client) const {
 		for (const Peer &peer : Peers) {
 			if (peer.Client == client && peer.Wire != nullptr) {
-				return peer.Wire->Link().Stats().RoundTripMilliseconds;
+				return peer.Wire->RoundTripMilliseconds();
 			}
 		}
 		return 0.0f;

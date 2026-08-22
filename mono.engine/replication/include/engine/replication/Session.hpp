@@ -14,6 +14,7 @@
 #include <engine/net/Reliability.hpp>
 #include <engine/net/Transport.hpp>
 #include <engine/replication/Protocol.hpp>
+#include <engine/replication/SessionPort.hpp>
 
 #include <cstdint>
 #include <deque>
@@ -37,8 +38,14 @@ namespace engine::replication {
 
 	// One connection, carrying replication messages both ways.
 	//
+	// **The datagram half of `SessionPort`**, and the one this engine has had
+	// since v0.3: `net::Packet`'s framing, one shared reliable window, the
+	// X25519 exchange and a `Sealer`/`Opener` pair. `SessionPort.hpp` is the
+	// argument for why the QUIC one is a second class rather than a mode of this
+	// one.
+	//
 	// @since v0.3
-	class Session {
+	class Session final : public SessionPort {
 	  public:
 		// Opens a session over a transport, to one peer.
 		//
@@ -60,7 +67,7 @@ namespace engine::replication {
 		// The peer this talks to.
 		//
 		// @return Its address.
-		const net::Endpoint &Peer() const {
+		const net::Endpoint &Peer() const override {
 			return Peer_;
 		}
 
@@ -116,7 +123,7 @@ namespace engine::replication {
 		// @param nowSeconds The current time.
 		// @return `false` when the link refused it: over budget, closed, or
 		//         holding no keys.
-		bool Send(std::span<const std::byte> message, double nowSeconds);
+		bool Send(std::span<const std::byte> message, double nowSeconds) override;
 
 		// Adds deterministic one-way delay before sealed datagrams reach the
 		// transport. Already queued datagrams keep the deadline they received.
@@ -126,10 +133,10 @@ namespace engine::replication {
 		//
 		// @param milliseconds The added delay.
 		// @since v0.18
-		void SetSimulatedLatency(double milliseconds);
+		void SetSimulatedLatency(double milliseconds) override;
 
 		// The effective delay after sanitising, in milliseconds.
-		double SimulatedLatency() const {
+		double SimulatedLatency() const override {
 			return SimulatedLatencySeconds * 1000.0;
 		}
 
@@ -137,7 +144,7 @@ namespace engine::replication {
 		//
 		// @param nowSeconds The current time.
 		// @return The number of datagrams handed to the transport.
-		size_t Flush(double nowSeconds);
+		size_t Flush(double nowSeconds) override;
 
 		// Takes one datagram that arrived from this peer.
 		//
@@ -154,7 +161,7 @@ namespace engine::replication {
 		// @param datagram   The bytes as they arrived.
 		// @param nowSeconds The current time.
 		// @return `false` when it was refused.
-		bool Receive(std::span<const std::byte> datagram, double nowSeconds);
+		bool Receive(std::span<const std::byte> datagram, double nowSeconds) override;
 
 		// The messages that have arrived and not yet been taken.
 		//
@@ -163,12 +170,69 @@ namespace engine::replication {
 		// anything already superseded.
 		//
 		// @return The messages.
-		std::span<const std::vector<std::byte>> Inbound() const {
+		std::span<const std::vector<std::byte>> Inbound() const override {
 			return Inbound_;
 		}
 
 		// Drops the arrived messages, once the caller has applied them.
-		void ClearInbound();
+		void ClearInbound() override;
+
+		// Turns the tick over: ages the link's timers and resets its budget.
+		//
+		// @param nowSeconds The current time.
+		// @since v0.19
+		void Advance(double nowSeconds) override;
+
+		// Whether this session can carry a message right now.
+		//
+		// @return `true` once it holds keys.
+		// @since v0.19
+		bool Carrying() const override {
+			return Sealer_.has_value();
+		}
+
+		// Whether this session still exists at all.
+		//
+		// @return `false` once the link is `Disconnected`.
+		// @since v0.19
+		bool Live() const override;
+
+		// Says goodbye.
+		//
+		// @param nowSeconds The current time.
+		// @since v0.19
+		void Disconnect(double nowSeconds) override;
+
+		// The round-trip estimate the reliable sender measured.
+		//
+		// @return The estimate in milliseconds. Zero means unknown.
+		// @since v0.19
+		float RoundTripMilliseconds() const override;
+
+		// How many bytes this session will carry this tick.
+		//
+		// @return `net::Link`'s allowance, which is Copa's window under
+		//         `BytesPerTick`.
+		// @since v0.19
+		size_t SendAllowanceBytes() const override;
+
+		// Records the admission transcript this session is bound to.
+		//
+		// **Filled by whoever ran the exchange**, because a session does not run
+		// one: `Listener::Accept` and `Connector` both build the transcript from
+		// the two public keys and the cookie, and this is where it is kept so
+		// that an identity claim has something to be checked against.
+		//
+		// @param binding The transcript.
+		// @since v0.19
+		void SetBinding(std::span<const std::byte> binding);
+
+		// The admission transcript this session is bound to.
+		//
+		// @param out Where it goes. Must match the transcript's length.
+		// @return `false` when nothing has been recorded, or the lengths differ.
+		// @since v0.19
+		bool Binding(std::span<std::byte> out) const override;
 
 		// What this session has done.
 		//
@@ -253,6 +317,10 @@ namespace engine::replication {
 		std::optional<net::Cipher::Opener> Opener_;
 
 		std::vector<std::vector<std::byte>> Inbound_;
+
+		// The admission transcript, recorded by whoever ran the exchange. See
+		// `SetBinding`.
+		std::vector<std::byte> Binding_;
 
 		// The datagram being framed, reused across ticks so a session polled
 		// every frame stops allocating. It holds the header while the header is

@@ -588,7 +588,7 @@ TEST_CASE("a connector that gets its welcome is admitted", "[replication][admiss
 
 	CHECK(dialogue.Client->Admitted());
 	CHECK_FALSE(dialogue.Client->Rejected());
-	CHECK(dialogue.Client->Link().State() == engine::net::ConnectionState::Connected);
+	CHECK(dialogue.Client->Link()->State() == engine::net::ConnectionState::Connected);
 }
 
 TEST_CASE("a tampered welcome is refused rather than half-accepted", "[replication][admission]") {
@@ -618,8 +618,8 @@ TEST_CASE("a tampered welcome is refused rather than half-accepted", "[replicati
 
 	CHECK_FALSE(dialogue.Client->Admitted());
 	CHECK(dialogue.Client->Rejected());
-	CHECK(dialogue.Client->Link().State() == engine::net::ConnectionState::Disconnected);
-	CHECK(dialogue.Client->Link().Reason() == engine::net::DisconnectReason::HandshakeFailed);
+	CHECK(dialogue.Client->Link()->State() == engine::net::ConnectionState::Disconnected);
+	CHECK(dialogue.Client->Link()->Reason() == engine::net::DisconnectReason::HandshakeFailed);
 }
 
 TEST_CASE("a welcome bound to another cookie does not verify", "[replication][admission]") {
@@ -656,11 +656,11 @@ TEST_CASE("a client whose exchange goes unanswered gives up", "[replication][adm
 
 	CHECK_FALSE(client.Admitted());
 	CHECK_FALSE(client.Rejected());
-	CHECK(client.Link().State() == engine::net::ConnectionState::Connecting);
+	CHECK(client.Link()->State() == engine::net::ConnectionState::Connecting);
 
 	client.Advance(6.0);
-	CHECK(client.Link().State() == engine::net::ConnectionState::Disconnected);
-	CHECK(client.Link().Reason() == engine::net::DisconnectReason::HandshakeFailed);
+	CHECK(client.Link()->State() == engine::net::ConnectionState::Disconnected);
+	CHECK(client.Link()->Reason() == engine::net::DisconnectReason::HandshakeFailed);
 
 	std::vector<std::byte> scratch;
 	while (transports[0]->Receive(scratch).Status == TransportStatus::Ok) {}

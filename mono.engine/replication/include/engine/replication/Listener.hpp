@@ -8,7 +8,9 @@
 #include <engine/net/Transport.hpp>
 #include <engine/replication/Admission.hpp>
 #include <engine/replication/Authority.hpp>
+#include <engine/replication/QuicSession.hpp>
 #include <engine/replication/Session.hpp>
+#include <engine/replication/SessionPort.hpp>
 
 #include <array>
 #include <cstdint>
@@ -24,6 +26,29 @@ namespace engine::replication {
 	//
 	// @since v0.3
 	struct ListenerSettings {
+		// Which transport this listener serves on.
+		//
+		// **`Datagram` is the default and the swap is not silent.** Two
+		// overlapping reliability stacks is worse than either, so QUIC arrives
+		// beside the old one behind this rather than replacing it under callers
+		// that did not ask - `docs/QUIC.md` §8, which calls the staging "not a
+		// preference".
+		//
+		// @since v0.19
+		WireKind Wire = WireKind::Datagram;
+
+		// How a QUIC session is configured, when `Wire` says QUIC.
+		//
+		// **The server's identity lives in here** - `Quic.Connection.Tls.Seed`
+		// and `HasSeed` - because under QUIC the identity is the TLS one and a
+		// listener with none cannot answer a handshake at all. That is the same
+		// Ed25519 key `SetIdentity` takes for the datagram wire, so an operator
+		// keeps one key across both: `assets::SigningKey::FromSeed` and
+		// `net::quic::IdentityFor` over one seed produce the same public half.
+		//
+		// @since v0.19
+		QuicSessionSettings Quic;
+
 		// The link's own settings - framing, timeouts and per-tick budgets.
 		SessionSettings Session;
 
@@ -335,20 +360,45 @@ namespace engine::replication {
 		struct Peer {
 			net::Endpoint Where;
 			ClientId Client;
-			std::unique_ptr<Session> Wire;
+
+			// Whichever session this listener's wire produces. See
+			// `SessionPort.hpp` for why there are two of them and one interface.
+			std::unique_ptr<SessionPort> Wire;
+
+			// The same object as `Wire` when the wire is QUIC, and null
+			// otherwise. What it is for is the two questions a session cannot
+			// answer: which connection ids this end responds to, so a datagram
+			// can be routed, and who the peer proved itself to be.
+			QuicSession *Quic = nullptr;
+
+			// Whether the admitted handler has been told about this peer.
+			//
+			// **Deferred under QUIC, and it has to be.** A datagram peer is
+			// admitted the moment its answer verifies; a QUIC peer is a
+			// connection that exists before its handshake finishes, and telling
+			// a host it has a player before the peer has proved anything would
+			// be a player that vanishes when the handshake fails.
+			bool Announced = false;
 
 			std::array<std::byte, net::Handshake::MESSAGE_BYTES> PublicKey{};
 
-			// Keep the original frame for safe retransmission.
+			// Keep the original frame for safe retransmission. Datagram wire
+			// only: QUIC repeats its own handshake flight.
 			std::vector<std::byte> Welcome;
-
-			// Retained for later identity verification.
-			std::array<std::byte, 2 * net::Handshake::MESSAGE_BYTES + net::Cookie::COOKIE_BYTES> Transcript{};
 
 			std::optional<assets::PublicKey> Identity;
 		};
 
+		// What an identity claim is signed over. The admission transcript on the
+		// datagram wire and a TLS exporter under QUIC - `SessionPort::Binding`
+		// is the seam, and the length is the same either way so that one
+		// signature format serves both.
+		using Binding = std::array<std::byte, 2 * net::Handshake::MESSAGE_BYTES + net::Cookie::COOKIE_BYTES>;
+
 		Peer *Find(const net::Endpoint &from);
+		void Arrive(const net::Endpoint &from, std::span<const std::byte> datagram, double nowSeconds);
+		void Deliver(Peer &peer);
+		void Announce(Peer &peer);
 		void Greet(const net::Endpoint &from, std::span<const std::byte> datagram, double nowSeconds);
 		void Challenge(const net::Endpoint &from, const replication::Hello &hello, double nowSeconds);
 		void Accept(const net::Endpoint &from, const replication::Answer &answer, double nowSeconds);

@@ -201,7 +201,7 @@ namespace loadtest {
 		}
 
 		if (Link != nullptr) {
-			const engine::net::ConnectionStats &stats = Link->Link().Stats();
+			const engine::net::ConnectionStats stats = Link->LinkStats();
 			report.BytesSent = stats.BytesSent;
 			report.BytesReceived = stats.BytesReceived;
 			report.PacketsSent = stats.PacketsSent;

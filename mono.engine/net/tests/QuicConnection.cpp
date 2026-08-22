@@ -453,3 +453,37 @@ TEST_CASE("the round trip is measured and the window is reported", "[net][quic][
 	// come back by now.
 	CHECK(stats.RoundTripMilliseconds > 0.0);
 }
+
+TEST_CASE(
+	"an exported value is the same on both ends and differs per connection", "[net][quic][connection]"
+) {
+	// What replaces `AdmissionTranscript`. A client's identity claim is signed
+	// over one of these, so a signature captured from one connection proves
+	// nothing on another and a relay holding one handshake with each side cannot
+	// carry the claim across.
+	Fixture first;
+	REQUIRE(first.Settle());
+
+	std::array<std::byte, 32> mine{};
+	std::array<std::byte, 32> theirs{};
+	REQUIRE(first.Client->Export("atomic identity", mine));
+	REQUIRE(first.Server->Export("atomic identity", theirs));
+	CHECK(mine == theirs);
+
+	// A different label over the same connection is a different value.
+	std::array<std::byte, 32> other{};
+	REQUIRE(first.Client->Export("atomic something else", other));
+	CHECK(mine != other);
+
+	Fixture second;
+	REQUIRE(second.Settle());
+	std::array<std::byte, 32> later{};
+	REQUIRE(second.Client->Export("atomic identity", later));
+	CHECK(mine != later);
+}
+
+TEST_CASE("nothing can be exported before the handshake completes", "[net][quic][connection]") {
+	Fixture fixture;
+	std::array<std::byte, 32> value{};
+	CHECK_FALSE(fixture.Client->Export("atomic identity", value));
+}

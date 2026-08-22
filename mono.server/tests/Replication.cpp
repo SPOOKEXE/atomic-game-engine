@@ -559,9 +559,9 @@ TEST_CASE("the world keeps moving after the join", "[server][replication]") {
 	INFO(
 		"applied=" << remote.Link->Applied() << " joinedAt=" << joinedAt << " refused="
 				   << remote.Link->Stats().Refused << " appliedMsgs=" << remote.Link->Stats().Applied
-				   << " linkState=" << static_cast<int>(remote.Link->Link().State())
-				   << " stale=" << remote.Link->Link().Stats().PacketsStale
-				   << " recv=" << remote.Link->Link().Stats().PacketsReceived
+				   << " linkState=" << static_cast<int>(remote.Link->Link()->State())
+				   << " stale=" << remote.Link->Link()->Stats().PacketsStale
+				   << " recv=" << remote.Link->Link()->Stats().PacketsReceived
 	);
 	REQUIRE(remote.Link->Applied() > joinedAt);
 }

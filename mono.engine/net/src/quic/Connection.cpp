@@ -1454,6 +1454,10 @@ namespace engine::net::quic {
 		return Inside->Handshake.PeerIdentity();
 	}
 
+	bool Connection::Export(std::string_view label, std::span<std::byte> out) const {
+		return Inside->Handshake.Export(label, out);
+	}
+
 	const char *Connection::Failure() const {
 		return Inside->Reason;
 	}

@@ -70,6 +70,7 @@
 #include <cstdint>
 #include <memory>
 #include <span>
+#include <string_view>
 #include <vector>
 
 namespace engine::net::quic {
@@ -355,6 +356,19 @@ namespace engine::net::quic {
 		//         server, which asks for no client certificate.
 		// @since v0.19
 		std::span<const std::byte> PeerIdentity() const;
+
+		// Derives a value both ends can compute and nobody else can.
+		//
+		// `Tls::Export`, reached through the connection. What it is for is
+		// binding something to *this* connection - a client's identity claim,
+		// most obviously, which is otherwise a signature a relay could carry
+		// across from another one.
+		//
+		// @param label The exporter label.
+		// @param out   Where the value goes.
+		// @return `false` before the handshake completes.
+		// @since v0.19
+		bool Export(std::string_view label, std::span<std::byte> out) const;
 
 		// Why the connection ended, for a log line.
 		//
