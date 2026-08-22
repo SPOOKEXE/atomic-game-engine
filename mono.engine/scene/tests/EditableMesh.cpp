@@ -9,7 +9,10 @@
 // discovered.
 
 #include <engine/ecs/Store.hpp>
+#include <engine/scene/CollisionShapes.hpp>
+#include <engine/scene/Components.hpp>
 #include <engine/scene/EditableMesh.hpp>
+#include <engine/scene/Enums.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -216,4 +219,147 @@ TEST_CASE("the content name is stable and distinct per instance", "[scene][edita
 	// re-reading `ContentId` after a reload must get back what it wrote to
 	// `MeshId` the first time.
 	CHECK(EditableMeshContentName(store, a) == nameA);
+}
+
+// --- collision ---------------------------------------------------------------
+//
+// **The gap this closes was that a script built something that could be seen
+// and not touched.** The uploader hands a run-time mesh to the renderer and
+// registered nothing with `CollisionShapes`, so a `MeshPart` naming one fell
+// back to colliding as its own bound - a box the size of the whole thing.
+
+namespace {
+	// A unit quad on the ground plane, centred on the mesh's own origin.
+	//
+	// Centred, because a baked shape is used in the part's *object* space and is
+	// not scaled to it - `physics::ShapeInstance` states that - so a mesh built
+	// around the origin is one whose collider lands where its geometry is.
+	Entity MakeQuad(Store &store) {
+		const Entity mesh = MakeEditableMesh(store);
+		(void)AddVertex(store, mesh, Vector3{-1.0f, 0.0f, -1.0f});
+		(void)AddVertex(store, mesh, Vector3{1.0f, 0.0f, -1.0f});
+		(void)AddVertex(store, mesh, Vector3{-1.0f, 0.0f, 1.0f});
+		(void)AddVertex(store, mesh, Vector3{1.0f, 0.0f, 1.0f});
+		(void)AddTriangle(store, mesh, 0, 2, 1);
+		(void)AddTriangle(store, mesh, 1, 2, 3);
+		return mesh;
+	}
+}
+
+TEST_CASE("a run-time mesh gets a hull and a soup", "[scene][editablemesh]") {
+	engine::scene::RegisterSceneComponents();
+
+	Store store("editablemesh.collision");
+	const Entity mesh = MakeQuad(store);
+	const Name name = EditableMeshContentName(store, mesh);
+
+	// Nothing until something bakes, which is the state the report was about.
+	CHECK(engine::scene::CollisionShapesOf(store) == nullptr);
+
+	CHECK(engine::scene::RefreshEditableMeshCollision(store) == 1);
+
+	const engine::scene::CollisionShapes *shapes = engine::scene::CollisionShapesOf(store);
+	REQUIRE(shapes != nullptr);
+	REQUIRE(shapes->FindMesh(name) != nullptr);
+	CHECK(shapes->FindMesh(name)->TriangleCount() == 2);
+
+	// **And no hull, because nothing asked for one.** Measured on a terrain
+	// chunk of 4,225 points: the soup costs 1.3 ms and quickhull costs 7.3, and
+	// a heightfield's convex hull is a dome over its summit. A delivered mesh
+	// is baked once at load and can afford both; this runs on the tick a script
+	// builds geometry, and a streamed world builds one a tick.
+	CHECK(shapes->FindHull(name) == nullptr);
+}
+
+TEST_CASE("a hull is baked for the part that asks for one", "[scene][editablemesh]") {
+	engine::scene::RegisterSceneComponents();
+
+	Store store("editablemesh.collision.hull");
+	const Entity mesh = MakeQuad(store);
+	const Name name = EditableMeshContentName(store, mesh);
+
+	REQUIRE(engine::scene::RefreshEditableMeshCollision(store) == 1);
+	REQUIRE(engine::scene::CollisionShapesOf(store)->FindHull(name) == nullptr);
+
+	// A part switched to `Hull` after its mesh was baked. The revision has not
+	// moved, so the test that decides whether to bake cannot be "has this
+	// changed" - it is "is a hull wanted and missing".
+	const Entity part = store.Create();
+	engine::scene::Collider collider;
+	collider.Shape = engine::scene::ShapeKind::Hull;
+	collider.Geometry = name;
+	store.Set(part, collider);
+
+	CHECK(engine::scene::RefreshEditableMeshCollision(store) == 1);
+
+	const engine::scene::CollisionShapes *shapes = engine::scene::CollisionShapesOf(store);
+	REQUIRE(shapes != nullptr);
+	REQUIRE(shapes->FindHull(name) != nullptr);
+	CHECK(shapes->FindHull(name)->Points.size() >= 3);
+
+	// And it is not built again on the next tick, which is the whole point of
+	// asking whether it is missing rather than whether it is wanted.
+	CHECK(engine::scene::RefreshEditableMeshCollision(store) == 0);
+}
+
+TEST_CASE("a mesh whose revision has not moved is not rebaked", "[scene][editablemesh]") {
+	engine::scene::RegisterSceneComponents();
+
+	Store store("editablemesh.collision.steady");
+	const Entity mesh = MakeQuad(store);
+
+	CHECK(engine::scene::RefreshEditableMeshCollision(store) == 1);
+
+	// The steady state, which is what makes this affordable in a world that
+	// builds a mesh a frame: an integer compare per mesh and no quickhull.
+	CHECK(engine::scene::RefreshEditableMeshCollision(store) == 0);
+
+	// An edit moves the revision, so the shape is built again.
+	CHECK(SetVertexPosition(store, mesh, 0, Vector3{-2.0f, 0.0f, -2.0f}));
+	CHECK(engine::scene::RefreshEditableMeshCollision(store) == 1);
+}
+
+TEST_CASE("a mesh that is gone takes its shapes with it", "[scene][editablemesh]") {
+	engine::scene::RegisterSceneComponents();
+
+	Store store("editablemesh.collision.forget");
+	const Entity mesh = MakeQuad(store);
+	const Name name = EditableMeshContentName(store, mesh);
+
+	REQUIRE(engine::scene::RefreshEditableMeshCollision(store) == 1);
+	REQUIRE(engine::scene::CollisionShapesOf(store)->FindMesh(name) != nullptr);
+
+	// **A streamed world creates and destroys a mesh per chunk**, so a table
+	// that only ever grew would hold a hull and a soup for every chunk anybody
+	// walked past. Nothing can name them again - the content name carries the
+	// entity's generation.
+	store.Destroy(mesh);
+	CHECK(engine::scene::RefreshEditableMeshCollision(store) == 1);
+
+	const engine::scene::CollisionShapes *shapes = engine::scene::CollisionShapesOf(store);
+	REQUIRE(shapes != nullptr);
+	CHECK(shapes->FindMesh(name) == nullptr);
+	CHECK(shapes->FindHull(name) == nullptr);
+	CHECK(shapes->MeshCount() == 0);
+	CHECK(shapes->HullCount() == 0);
+}
+
+TEST_CASE("a mesh with no triangles yet bakes nothing", "[scene][editablemesh]") {
+	engine::scene::RegisterSceneComponents();
+
+	Store store("editablemesh.collision.empty");
+	const Entity mesh = MakeEditableMesh(store);
+	(void)AddVertex(store, mesh, Vector3{0.0f, 0.0f, 0.0f});
+
+	// Vertices added and no triangle yet is the ordinary state right after
+	// `Instance.new("EditableMesh")`, and a hull of one point is a collider
+	// that stops nothing and says nothing.
+	CHECK(engine::scene::RefreshEditableMeshCollision(store) == 0);
+	CHECK(engine::scene::CollisionShapesOf(store) == nullptr);
+
+	// And it is tried again rather than remembered as done.
+	(void)AddVertex(store, mesh, Vector3{1.0f, 0.0f, 0.0f});
+	(void)AddVertex(store, mesh, Vector3{0.0f, 0.0f, 1.0f});
+	(void)AddTriangle(store, mesh, 0, 1, 2);
+	CHECK(engine::scene::RefreshEditableMeshCollision(store) == 1);
 }

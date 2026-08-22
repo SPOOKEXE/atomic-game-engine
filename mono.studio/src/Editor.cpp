@@ -17,6 +17,7 @@
 #include <engine/physics/Pipeline.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Gravity.hpp>
 #include <engine/scene/Interpolation.hpp>
 #include <engine/scene/Ownership.hpp>
@@ -2175,6 +2176,16 @@ namespace studio {
 					ENGINE_PROFILE_CAT("editable upload", engine::core::ProfileCategory::Assets);
 					(void)EditableMeshes.Refresh(store, Renderer);
 					(void)EditableImages.Refresh(store, Renderer);
+
+					// **And the collision shapes, which the editor needs on a
+					// world that is not ticking.** `physics::
+					// RegisterPhysicsSystems` bakes them in `PreSimulation`, so
+					// Play and a server get them from the tick - but an edited
+					// world never ticks, and the collider view is exactly the
+					// thing somebody opens to ask what a script-built mesh
+					// collides as. The revision check makes the second caller a
+					// walk and an integer compare.
+					(void)engine::scene::RefreshEditableMeshCollision(store);
 				}
 
 				if (PipelineSelected.find(shown.Index) == PipelineSelected.end()) {

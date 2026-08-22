@@ -1,14 +1,21 @@
+#include <engine/collision/ConvexHull.hpp>
+#include <engine/collision/TriangleMesh.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Property.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 
 #include <array>
+#include <cstddef>
+#include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace engine::scene {
 
@@ -113,6 +120,154 @@ namespace engine::scene {
 			ecs::Classes::Computed(editableMesh, ContentIdProperty());
 			return editableMesh;
 		}
+	}
+
+	namespace {
+		// Whether any collider in the world names `geometry` as a convex hull.
+		//
+		// The list is gathered once per refresh and only when something asks,
+		// which is what `wanted` being an optional says. A world holds a
+		// handful of distinct shapes however many parts use them - the whole
+		// point of naming them is that they are shared - so the search is over
+		// single digits.
+		bool
+		WantsHull(ecs::Store &store, std::optional<std::vector<core::Name>> &wanted, core::Name geometry) {
+			if (!wanted.has_value()) {
+				wanted.emplace();
+				store.Each<const Collider>([&](ecs::Entity, const Collider &collider) {
+					if (collider.Shape != ShapeKind::Hull || !collider.Geometry.IsValid()) {
+						return;
+					}
+					for (const core::Name &already : *wanted) {
+						if (already == collider.Geometry) {
+							return;
+						}
+					}
+					wanted->push_back(collider.Geometry);
+				});
+			}
+
+			for (const core::Name &name : *wanted) {
+				if (name == geometry) {
+					return true;
+				}
+			}
+			return false;
+		}
+	}
+
+	size_t RefreshEditableMeshCollision(ecs::Store &store) {
+		// **Both tables are read and written whole, which is what a resource
+		// is.** `Store::SetResource` replaces, so the work below builds the two
+		// and writes them back once - and a world with no `EditableMesh` in it
+		// touches neither.
+		EditableMeshCollision baked;
+		if (const EditableMeshCollision *held = store.Resource<EditableMeshCollision>()) {
+			baked = *held;
+		}
+
+		CollisionShapes shapes;
+		if (const CollisionShapes *held = CollisionShapesOf(store)) {
+			shapes = *held;
+		}
+
+		size_t changed = 0;
+
+		// Which geometry names a collider asks for as a hull, gathered on the
+		// first mesh that needs the answer and not before - a world with no
+		// script-built geometry in it must not pay a walk of every collider.
+		std::optional<std::vector<core::Name>> wanted;
+
+		// What is in the world this call, so the sweep below can tell a mesh
+		// that was destroyed from one that simply did not change.
+		std::vector<EditableMeshCollision::Baked> seen;
+
+		store.Each<const EditableMesh>([&](ecs::Entity instance, const EditableMesh &mesh) {
+			const core::Name name = EditableMeshContentName(store, instance);
+			if (!name.IsValid()) {
+				return;
+			}
+
+			uint32_t *known = nullptr;
+			for (EditableMeshCollision::Baked &row : baked.Rows) {
+				if (row.Instance == instance.Id) {
+					known = &row.Revision;
+					break;
+				}
+			}
+
+			// The steady state: an integer compare, which is
+			// `EditableMeshUploader::Refresh`'s decision and its reason.
+			//
+			// **Unless a hull is wanted and is not there**, which is a part
+			// switched to `ShapeKind::Hull` after its mesh was baked. See the
+			// bake below for why a hull is not built until it is asked for.
+			if (known != nullptr && *known == mesh.Revision &&
+				(shapes.FindHull(name) != nullptr || !WantsHull(store, wanted, name))) {
+				seen.push_back(EditableMeshCollision::Baked{instance.Id, mesh.Revision});
+				return;
+			}
+
+			// **A mesh mid-edit registers nothing rather than an empty shape.**
+			// Vertices added and no triangle yet is the ordinary state right
+			// after `Instance.new("EditableMesh")`, and a hull of three points
+			// with no soup behind it is a collider that stops nothing. The
+			// revision is left unrecorded so the next call tries again.
+			if (mesh.Positions.empty() || mesh.Indices.size() < 3) {
+				return;
+			}
+
+			// **The soup always and the hull only when something names one**,
+			// which is the difference between this being affordable and not.
+			// Measured on a terrain chunk of 4,225 points: the triangle soup
+			// costs 1.3 ms and quickhull costs 7.3 ms, and a heightfield's
+			// convex hull is a dome over its summit that no collider in that
+			// scene will ever ask for. `game::AddCollisionShapes` bakes both
+			// because a delivered mesh is baked once at load; this runs on the
+			// tick a script builds geometry, and a streamed world builds one a
+			// tick for as long as somebody keeps walking.
+			//
+			// A part that is switched to `Hull` later gets one on the next
+			// refresh, because the test below is "wanted and missing" rather
+			// than "changed".
+			shapes.SetMesh(name, collision::BuildTriangleMesh(mesh.Positions, mesh.Indices));
+			if (WantsHull(store, wanted, name)) {
+				shapes.SetHull(name, collision::BuildConvexHull(mesh.Positions));
+			}
+
+			seen.push_back(EditableMeshCollision::Baked{instance.Id, mesh.Revision});
+			changed++;
+		});
+
+		// **The shapes of meshes that are gone, dropped here.** A streamed
+		// world creates and destroys a mesh per chunk, and a table that only
+		// grew would hold a hull and a triangle soup for every chunk anybody
+		// ever walked past. Nothing can name them again: the content name
+		// carries the entity's generation, so even a reused id mints a new one.
+		for (const EditableMeshCollision::Baked &was : baked.Rows) {
+			bool alive = false;
+			for (const EditableMeshCollision::Baked &now : seen) {
+				if (now.Instance == was.Instance) {
+					alive = true;
+					break;
+				}
+			}
+			if (alive) {
+				continue;
+			}
+
+			shapes.Forget(core::Name("editable-mesh://" + std::to_string(was.Instance)));
+			changed++;
+		}
+
+		if (changed == 0) {
+			return 0;
+		}
+
+		baked.Rows = std::move(seen);
+		store.SetResource(std::move(baked));
+		store.SetResource(std::move(shapes));
+		return changed;
 	}
 
 	core::Name EditableMeshContentName(const ecs::Store &store, ecs::Entity instance) {

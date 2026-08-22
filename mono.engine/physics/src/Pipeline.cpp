@@ -15,6 +15,7 @@
 #include <engine/physics/Pipeline.hpp>
 #include <engine/physics/Solver.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Registration.hpp>
 
 #include <cstddef>
@@ -145,6 +146,27 @@ namespace engine::physics {
 	}
 
 	void RegisterPhysicsSystems(ecs::Scheduler &scheduler) {
+		// **A mesh a script built this tick has no collision shape until
+		// something bakes one**, and this is where that happens for every host
+		// that solves. `client::EditableMeshUploader` hands a run-time mesh to
+		// the renderer and registers nothing with `scene::CollisionShapes`, so
+		// a `MeshPart` naming one fell back to colliding as its own bound - a
+		// box the size of the whole thing, which a character standing on a
+		// script-built heightfield is *inside*.
+		//
+		// **Registered here rather than beside the uploader**, because the
+		// consumer is the solver: a dedicated server has no uploader at all and
+		// is the machine that decides where anybody is standing. Anything that
+		// calls `RegisterPhysicsSystems` gets it with nothing else edited.
+		//
+		// `PreSimulation`, so the shape exists before the broad phase indexes
+		// the collider that names it. A mesh whose revision has not moved costs
+		// one integer compare, which is what makes this affordable in a world
+		// that streams a chunk a frame.
+		scheduler.Add("physics.editable-mesh", ecs::Phase::PreSimulation, [](ecs::Store &store) {
+			(void)scene::RefreshEditableMeshCollision(store);
+		});
+
 		// One system per phase rather than one per step. `ecs::Scheduler` gives
 		// no ordering between two systems in one phase, and `SyncBroadphase`
 		// reading what `IntegrateMotion` just wrote is a hard dependency - so

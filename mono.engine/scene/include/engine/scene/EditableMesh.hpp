@@ -229,4 +229,63 @@ namespace engine::scene {
 	// @return The class id.
 	// @since v0.18
 	ecs::ClassId EditableMeshClass();
+
+	// Which revision of each `EditableMesh` has a collision shape baked for it.
+	//
+	// **A resource and not a field on the host, which the render side's
+	// `client::EditableMeshUploader` is.** An uploader belongs to a program
+	// because a `render::Renderer` does; a shape table belongs to a *world*,
+	// and a server holds many at once. A map on the host keyed by entity id
+	// would have two worlds' meshes collide on the same key the first time two
+	// of them minted the same id, which they do constantly.
+	//
+	// Derived state: it is registered with a reader that clears, so a world
+	// restored from a snapshot bakes everything again rather than inheriting a
+	// claim about shapes it does not have. See `CollisionShapes`, which is
+	// cleared on load for the same reason.
+	//
+	// @since v0.19
+	struct EditableMeshCollision {
+		// One mesh that has been baked, and at which revision.
+		struct Baked {
+			// The `EditableMesh` instance, by complete entity id.
+			uint64_t Instance = 0;
+
+			// `EditableMesh::Revision` at the time it was baked.
+			uint32_t Revision = 0;
+		};
+
+		// **A vector and a linear scan, for `CollisionShapes`' own reason** -
+		// a world holds a handful of these, and the walk that reads it is
+		// already walking every `EditableMesh` in the world.
+		std::vector<Baked> Rows;
+	};
+
+	// Bakes a collision hull and triangle mesh for every `EditableMesh` whose
+	// geometry has changed, and forgets the shapes of meshes that are gone.
+	//
+	// **The engine gap this closes**: a script that built geometry built
+	// something that could be seen and not touched. `client::
+	// EditableMeshUploader` hands the mesh to the renderer and registered
+	// nothing with `CollisionShapes`, so a `MeshPart` naming a run-time mesh
+	// fell back to colliding as its own bound - a box the size of the whole
+	// thing. A character standing on a script-built heightfield was standing
+	// *inside* that box and could not move in any direction.
+	//
+	// **A free function on a store rather than a class on a host**, so a
+	// dedicated server can call it too. That is the half of the gap that
+	// matters most: the server is the machine that decides where anybody is
+	// standing, and it has no uploader at all.
+	//
+	// Revision-tracked, because baking is quickhull plus a triangle soup and a
+	// streamed world builds a mesh a frame. A mesh whose revision has not moved
+	// costs one integer compare.
+	//
+	// Call it wherever the geometry is settled and before physics reads it -
+	// which for every host in this repository is once a tick.
+	//
+	// @param store The world.
+	// @return How many meshes were baked or forgotten this call.
+	// @since v0.19
+	size_t RefreshEditableMeshCollision(ecs::Store &store);
 }

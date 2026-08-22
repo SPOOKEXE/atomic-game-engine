@@ -551,20 +551,52 @@ The milestone headings below are development labels. Not in line with project ve
       incorrectly (windows). The same investigation, the same negative result,
       above. The moving-camera case is the one this report adds and it is the
       second bullet.
-- [_] bake collision geometry for a run-time `EditableMesh`. The engine gap the
-      Terrain demo works around: `client::EditableMeshUploader` hands the mesh
-      to the renderer and registers nothing with `scene::CollisionShapes`, so a
-      script that builds geometry builds something that can be seen and not
-      touched. `game::AddCollisionShapes` already turns an `assets::MeshData`
-      into a hull and a triangle soup and the uploader already has the
-      `MeshData` in hand, so the client end is small. The server end is not: it
-      has no uploader at all, and a heightfield built by a script on a host that
-      solves has no collision on the machine that decides where anybody is
-      standing.
-
-
-### v0.20
-
+- [x] bake collision geometry for a run-time `EditableMesh`. A script that
+      built geometry built something that could be seen and not touched:
+      `client::EditableMeshUploader` handed the mesh to the renderer and
+      registered nothing with `scene::CollisionShapes`, so a `MeshPart` naming
+      one fell back to colliding as its own bound - which for a terrain chunk
+      is a 64-stud box the full height of it, with the character standing
+      *inside* it.
+      `scene::RefreshEditableMeshCollision` bakes per world, revision-tracked,
+      and **forgets the shapes of meshes that are gone** - a streamed world
+      builds a mesh a chunk, and a table that only grew would hold a hull and a
+      soup for every chunk anybody ever walked past. The ledger is a resource
+      rather than a field on a host, because a server holds many worlds and a
+      map keyed by entity id would have two of them collide.
+      **Registered by `physics::RegisterPhysicsSystems`**, so every host that
+      solves gets it and the dedicated server - the machine that decides where
+      anybody is standing - needs nothing wired. The studio also calls it from
+      its own path, because an edited world never ticks and the collider view
+      is the thing somebody opens to ask what a mesh collides as.
+      **The soup always and the hull only when a collider asks.** Measured on a
+      4,225-point chunk: the soup is 1.3 ms and quickhull is 7.3, and a
+      heightfield's convex hull is a dome over its summit. Baking both made the
+      streaming tick 79 ms; the tick's p50 is 5.8 ms now.
+      `game::AddCollisionShapes` delegates to the same `scene::
+      BakeCollisionShapes`, so a delivered mesh and a script-built one cannot
+      drift apart on tolerance or winding.
+      Verified: a crate dropped on a script-built floor rests on it, slides down
+      its slopes and settles in a trough; a character walks 323 studs across the
+      Terrain demo's mountains with a worst penetration of 0.45 studs.
+- [_] a character can end up stuck in the air after a launch. Found while
+      walking the Terrain demo end to end: after being thrown up by a contact -
+      a chunk arriving under it, most likely - a character comes to rest with
+      **nothing under it** (`GroundCharacters` reports `nothing`), five studs
+      above the field, descending at 0.001 studs a tick rather than at
+      gravity's. Not falling and not moving: the horizontal drive is written
+      every tick and ignored, which reads as the solver having rested the body
+      and `WakeMovingCharacters` not waking it. Everything before the launch is
+      correct, so this is a sleep/wake interaction rather than a collision one.
+- [_] convex sweeps against a triangle mesh. `SweepConvex` is a GJK query over
+      support functions and a triangle soup is not convex, so `ShapeInstance`
+      demotes a `Mesh` collider to its bound for every sweep - which means
+      `SweepFastBodies` and `ClipCharacterVelocity` cannot see mesh terrain at
+      all. The contact path already solves the same problem in `MeshPair`, by
+      gathering the triangles overlapping a box and pairing against each; a
+      sweep wants the same gather over the swept envelope. Until then a
+      character is stopped at a cliff by a *ray*, which is a line and misses
+      anything narrower than the body.
 - [_] add a batch moveto/setcframe system (e.g. skygrid to move them all at once)
 - [_] do similar for batched moveto/setcframe in other systems
 - [_] `~/Documents/GitHub/BLADEBORNE_UNIFIED/game` port and also studio place `~/Documents/Bladeborne Floor 0.rbxl`. Turn this into a demo file.

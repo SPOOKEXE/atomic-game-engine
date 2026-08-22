@@ -456,6 +456,33 @@ type Chunk = { Part: Instance, Mesh: Instance }
 
 local chunks: { [string]: Chunk } = {}
 
+-- Chunks whose mesh was built this frame and whose collision shape is baked at
+-- the start of the next tick. See `BuildChunk`.
+type Settling = { Part: Instance, Geometry: string }
+
+local settling: { Settling } = {}
+
+-- Turns on the collision of every chunk built before this frame.
+--
+-- One frame of lag and no more: the bake runs in `PreSimulation` and a chunk is
+-- built from `Heartbeat`, so by the time this is reached again the shape is
+-- there. A chunk that is destroyed in between is simply not in the list.
+local function Settle()
+	if #settling == 0 then
+		return
+	end
+
+	for _, waiting in settling do
+		local part = waiting.Part :: any
+		if part.Parent ~= nil then
+			part.CollisionShape = Enum.ShapeKind.Mesh
+			part.CollisionGeometry = waiting.Geometry
+			part.CanCollide = true
+		end
+	end
+	table.clear(settling)
+end
+
 local function KeyOf(cx: number, cz: number): string
 	return `{cx},{cz}`
 end
@@ -474,20 +501,38 @@ local function BuildChunk(cx: number, cz: number)
 	local block = SampleBlock(baseX, baseZ)
 	local span = CHUNK + 1
 
-	local mesh = Instance.new("EditableMesh")
-
+	-- **The range first, because the vertices are written around the centre.**
+	-- A mesh's own coordinates are what a collider is placed by: a baked shape
+	-- is used in the part's object space and is not scaled to it, which
+	-- `physics::ShapeInstance` states. So the mesh is built centred on the box
+	-- the part will be given, and the two coincide exactly.
+	--
+	-- The first version wrote world coordinates and relied on `ToGpu` scaling
+	-- the mesh to fill the part - which draws correctly and puts the collider a
+	-- chunk's position away from the geometry it is supposed to be.
 	local lowest = math.huge
 	local highest = -math.huge
-
-	-- `AddVertex` returns ids in the order it is called, starting at zero, so
-	-- the id of `(gx, gz)` is `gz * span + gx` and no lookup table is needed.
 	for gz = 0, CHUNK do
 		for gx = 0, CHUNK do
 			local height = At(block, gx, gz)
 			lowest = math.min(lowest, height)
 			highest = math.max(highest, height)
+		end
+	end
 
-			local id = mesh:AddVertex(Vector3.new(baseX + gx, height, baseZ + gz))
+	local centreX = baseX + CHUNK / 2
+	local centreY = (lowest + highest) / 2
+	local centreZ = baseZ + CHUNK / 2
+
+	local mesh = Instance.new("EditableMesh")
+
+	-- `AddVertex` returns ids in the order it is called, starting at zero, so
+	-- the id of `(gx, gz)` is `gz * span + gx` and no lookup table is needed.
+	for gz = 0, CHUNK do
+		for gx = 0, CHUNK do
+			local id = mesh:AddVertex(
+				Vector3.new(baseX + gx - centreX, At(block, gx, gz) - centreY, baseZ + gz - centreZ)
+			)
 			mesh:SetVertexNormal(id, NormalAt(block, gx, gz))
 			mesh:SetVertexColor(id, ColourAt(block, gx, gz))
 		end
@@ -520,15 +565,35 @@ local function BuildChunk(cx: number, cz: number)
 	part.Name = `Terrain_{cx}_{cz}`
 	part.Anchored = true
 	part.Size = Vector3.new(CHUNK, height, CHUNK)
-	part.Position = Vector3.new(baseX + CHUNK / 2, (lowest + highest) / 2, baseZ + CHUNK / 2)
+	part.Position = Vector3.new(centreX, centreY, centreZ)
 	part.MeshId = mesh.ContentId
 	part.Parent = workspace
 
-	-- **The mesh is drawn and does not collide.** See `StandOnField` below for
-	-- the whole of why, and for what holds the walker up instead.
-	-- After the parent, because `CanCollide` is `Collider::Trigger` inverted and
-	-- there is no collider to write until the part is in the world.
+	-- **And it collides as the mesh, which is the whole of walking on it.** A
+	-- collider names its geometry and picks its kind separately, and the
+	-- default kind is a box - so a chunk left alone collides as its own bound,
+	-- a 64-stud box the full height of the chunk, and a character standing on
+	-- the surface is *inside* it and cannot move in any direction. That is what
+	-- happened the first time this scene had somebody in it.
+	--
+	-- `Mesh` and not `Hull`: a hill's convex hull is a dome over its summit, so
+	-- every valley in the chunk would be solid ground well above the drawn one.
+	-- `physics::RegisterPhysicsSystems` bakes both out of the `EditableMesh` on
+	-- the tick it changes - `scene::RefreshEditableMeshCollision` - so naming
+	-- either costs nothing here.
+	--
+	-- **Not this frame, and that is the one subtlety.** The shape is baked by
+	-- `scene::RefreshEditableMeshCollision` on the tick after the mesh is
+	-- built, and a collider naming a shape that has not resolved yet collides
+	-- as the part's own bound - which for a chunk is a solid 64-stud box the
+	-- full height of it. A character standing where one appears is thrown onto
+	-- the roof of a box that vanishes a tick later. So the chunk does not
+	-- collide until its shape exists, and `Settle` below is where it starts.
+	--
+	-- After the parent, because a collider is what these properties write and
+	-- there is none until the part is in the world.
 	part.CanCollide = false
+	table.insert(settling, { Part = part, Geometry = mesh.ContentId })
 
 	chunks[KeyOf(cx, cz)] = { Part = part, Mesh = mesh }
 	built += 1
@@ -581,13 +646,48 @@ Lighting.FogEnd = VIEW * CHUNK * 1.35
 -- in a field that swings sixty studs either way is a character either buried in
 -- a hill or dropped off one. The pad sits on the field's own height at the
 -- origin, and the character stands on the pad.
-local SPAWN_HEIGHT = math.max(HeightAt(0, 0), SEA_LEVEL + 2)
+-- **Somewhere flat, found rather than assumed.** The field is 91% walkable and
+-- the origin is not guaranteed to be part of it: a character dropped onto a
+-- 58-degree face slides off it before anybody has touched a key. The search is
+-- a coarse spiral outward from the origin, taking the first place that is above
+-- the water and level enough to stand on - `MINIMUM_WALKABLE_NORMAL` in
+-- `physics::Characters` is the same 0.6 the engine uses to decide what a
+-- character may climb.
+local function LevelAt(x: number, z: number): number
+	local dx = HeightAt(x + 1, z) - HeightAt(x - 1, z)
+	local dz = HeightAt(x, z + 1) - HeightAt(x, z - 1)
+	return (Vector3.new(-dx, 2, -dz).Unit).Y
+end
 
+local spawnX, spawnZ = 0, 0
+for radius = 0, 30 do
+	local found = false
+	for step = 0, math.max(radius * 8, 1) - 1 do
+		local angle = step * math.pi * 2 / math.max(radius * 8, 1)
+		local x = math.cos(angle) * radius * 6
+		local z = math.sin(angle) * radius * 6
+		if HeightAt(x, z) > SEA_LEVEL + 3 and LevelAt(x, z) > 0.9 then
+			spawnX, spawnZ = x, z
+			found = true
+			break
+		end
+	end
+	if found then
+		break
+	end
+end
+
+local SPAWN_HEIGHT = math.max(HeightAt(spawnX, spawnZ), SEA_LEVEL + 2)
+
+-- **Sitting on the surface rather than sunk into it.** `FindSpawn` puts a
+-- character's feet on the pad, so the pad's own top is where the character
+-- starts - and a pad buried in the ground starts a character inside the hill,
+-- which the solver answers by throwing it into the air.
 local pad = Instance.new("SpawnLocation")
 pad.Name = "SpawnLocation"
 pad.Anchored = true
 pad.Size = Vector3.new(8, 1, 8)
-pad.Position = Vector3.new(0, SPAWN_HEIGHT + 0.5, 0)
+pad.Position = Vector3.new(spawnX, SPAWN_HEIGHT + 0.5, spawnZ)
 pad.Color = Color3.fromRGB(120, 120, 130)
 pad.Parent = workspace
 
@@ -676,49 +776,6 @@ local function FlyCamera()
 		Vector3.new(travelled, ground + FLIGHT_HEIGHT, 0),
 		Vector3.new(ahead, aim + FLIGHT_HEIGHT * 0.25, 0)
 	)
-end
-
--- **The walker is held on the surface by this scene rather than by a
--- collider**, and that is worth saying plainly because it is a scene's answer
--- to an engine gap rather than how a game should be built.
---
--- A `MeshPart` built at run time has no baked collision geometry - the client
--- uploads an `EditableMesh` to the renderer and registers no hull or triangle
--- soup for it - so a chunk's collider falls back to the part's own bound, which
--- here is a 64-stud box the full height of the chunk. A character on the
--- surface is *inside* that box and cannot move in any direction, which is what
--- happened the first time this scene had somebody in it. The meshes are
--- therefore `CanCollide = false`, and there is nothing left to stand on.
---
--- So the field itself is the floor: after the step, a character below the
--- height its own footprint sits at is lifted back to it. `HeightAt` is the same
--- function the mesh was built from, so the two agree everywhere by
--- construction, and walking up a mountain is walking up the mountain that is
--- drawn. What it does not give is anything a collider gives - no slope limit,
--- no stepping, no ceiling, nothing else to bump into. `ROADMAP.md` carries the
--- engine gap: baked collision for an `EditableMesh`.
-local function StandOnField()
-	local model = workspace:FindFirstChild("Surveyor")
-	local root = if model ~= nil then model:FindFirstChild("HumanoidRootPart") else nil
-	if root == nil then
-		return
-	end
-
-	local part = root :: any
-	local at = part.Position
-
-	-- The root is the middle of the body, so the surface is half a height below
-	-- it. Taken from the part rather than written here, so a rig of a different
-	-- size still stands on the ground rather than in it.
-	local lift = part.Size.Y * 0.5
-	local surface = math.max(HeightAt(at.X, at.Z), SEA_LEVEL) + lift
-
-	if at.Y < surface then
-		-- Position only. The rotation is the controller's - `StepCharacters`
-		-- turns the body toward the walk - and rebuilding a frame from a
-		-- position would face it north on every tick it was below the ground.
-		part.CFrame = part.CFrame + Vector3.new(0, surface - at.Y, 0)
-	end
 end
 
 -- What the streaming follows: the character once something is moving it, and
@@ -821,7 +878,7 @@ RunService.Heartbeat:Connect(function()
 		FlyCamera()
 	end
 
-	StandOnField()
+	Settle()
 	Stream()
 
 	if not announced and built >= (VIEW * 2 + 1) * (VIEW * 2 + 1) then
@@ -847,5 +904,6 @@ end)
 print(
 	`terrain: endless field, chunks of {CHUNK} studs, {VIEW} chunks each way `
 		.. `({(VIEW * 2 + 1) * CHUNK} studs across), `
-		.. `character spawned at y={string.format("%.1f", SPAWN_HEIGHT)}`
+		.. `character spawned at {string.format("%.0f", spawnX)},{string.format("%.0f", spawnZ)} `
+		.. `y={string.format("%.1f", SPAWN_HEIGHT)}`
 )

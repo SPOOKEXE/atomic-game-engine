@@ -876,6 +876,25 @@ namespace engine::scene {
 				}
 			}
 		);
+		// **The bake ledger beside the table it fills.** Which revision of each
+		// `EditableMesh` has a shape baked for it is derived from the meshes
+		// themselves, so it is registered with the same pair `CollisionShapes`
+		// gets: a writer that writes nothing and a reader that clears. A world
+		// restored from a snapshot arrives with an empty shape table and must
+		// arrive with an empty ledger too, or the first refresh would compare
+		// revisions against shapes that are not there and skip every one of
+		// them. See `RefreshEditableMeshCollision`.
+		ecs::Components::Register<EditableMeshCollision>(
+			"scene.EditableMeshCollision",
+			[](core::ByteWriter &, const void *, size_t) {},
+			[](core::ByteReader &, void *destination, size_t count) {
+				auto *ledgers = static_cast<EditableMeshCollision *>(destination);
+				for (size_t index = 0; index < count; index++) {
+					ledgers[index].Rows.clear();
+				}
+			}
+		);
+
 		ecs::Components::Register<ActiveCamera>("scene.ActiveCamera");
 
 		// **`InputState` crosses and `CameraController` crosses**, which is worth
