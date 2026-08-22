@@ -368,7 +368,37 @@ The milestone headings below are development labels. Not in line with project ve
       `engine::control::DEFAULT_PORT` now, at 8738, which is what `.mcp.json`
       and `RUNNING.md` already said. Paths inside the JSON and TOML blocks are
       backslash-escaped, or a Windows path would paste as a parse error.
-- [_] change Terrain demo to be procedural infinite generation, also spawn character on top of terrain
+- [x] change the Terrain demo to procedural infinite generation, and spawn a
+      character on top of it. **The field is a function now**: `HeightAt` takes
+      a world coordinate and has no table behind it, so chunks are built ahead
+      of whoever is walking and dropped behind them, and two chunks that meet
+      agree on the column they share because they call the same pure function
+      with the same coordinate. A chunk samples its own block with a one-stud
+      skirt for the normals, which costs six per cent of the noise twice and is
+      what removes the shared array that made the old version finite. Verified
+      over 1,300 studs of travel: 173 chunks built, 117 dropped, about sixty
+      resident throughout.
+      The character spawns on a pad at the field's own height at the origin, and
+      **it is held on the surface by the scene rather than by a collider**. A
+      `MeshPart` built at run time has no baked collision geometry - the client
+      uploads an `EditableMesh` to the renderer and registers no hull or
+      triangle soup for it - so a chunk's collider falls back to the part's own
+      bound, which is a 64-stud box the full height of the chunk: a character on
+      the surface is *inside* it and cannot move at all, which is what happened
+      the first time this scene had somebody in it. So the meshes do not
+      collide and the field is the floor, from the same function the mesh was
+      built from. Measured walking east at 16 studs a second across 320 studs of
+      hills, the root sits exactly half a body above the field the whole way.
+- [_] bake collision geometry for a run-time `EditableMesh`. The engine gap the
+      Terrain demo works around: `client::EditableMeshUploader` hands the mesh
+      to the renderer and registers nothing with `scene::CollisionShapes`, so a
+      script that builds geometry builds something that can be seen and not
+      touched. `game::AddCollisionShapes` already turns an `assets::MeshData`
+      into a hull and a triangle soup and the uploader already has the
+      `MeshData` in hand, so the client end is small. The server end is not: it
+      has no uploader at all, and a heightfield built by a script on a host that
+      solves has no collision on the machine that decides where anybody is
+      standing.
 - [x] optimise the replication publish path, `ReplicationStress` in a release
       build. **Measured before assumed, and the profile moved the target.**
       761 ticks of twenty thousand moving parts: `Authority::DetectRows` is

@@ -1172,10 +1172,13 @@ TEST_CASE("the terrain scene builds a coloured heightfield mesh", "[examples][sc
 	INFO(error);
 	REQUIRE(loaded);
 
-	// 512 studs cut into 64-stud chunks is 8 by 8 of them.
-	constexpr size_t CHUNKS = 64;
+	// **The scene is endless, so this is the ring it holds rather than the map
+	// it has.** `VIEW` is three chunks each way from whoever is walking, which
+	// is a seven-by-seven block; the nine around the spawn are built before the
+	// first frame and the rest arrive one a tick.
+	constexpr size_t CHUNKS = 49;
 	BuildTerrain(store, systems, CHUNKS);
-	CHECK(TerrainChunks(store) == CHUNKS);
+	CHECK(TerrainChunks(store) >= CHUNKS);
 
 	// **One `EditableMesh` per chunk and not one shared between them**, which is
 	// what makes each a `MeshPart` the frustum can reject on its own. A scene
@@ -1189,13 +1192,23 @@ TEST_CASE("the terrain scene builds a coloured heightfield mesh", "[examples][sc
 		indices += mesh.Indices.size();
 	});
 
-	CHECK(meshes == CHUNKS);
+	// **One `EditableMesh` per chunk part and not one shared between them**,
+	// which is what makes each a `MeshPart` the frustum can reject on its own. A
+	// scene that built one enormous mesh would pass a part count and fail here.
+	//
+	// Equal to the part count rather than to `CHUNKS`, and that equality is the
+	// leak check: a chunk that fell out of the keep radius destroys its part,
+	// and an `EditableMesh` has no parent to be destroyed with it - so a scene
+	// that forgot the mesh would hold one per chunk ever built, and this number
+	// would climb away from the parts as the camera flew.
+	const size_t parts = TerrainChunks(store);
+	CHECK(meshes == parts);
 
 	// A chunk is 65 by 65 samples - the extra column and row are the ones it
 	// shares with its neighbours, which is what makes the surface continuous -
 	// and 64 by 64 cells of two triangles each.
-	CHECK(vertices == CHUNKS * 65 * 65);
-	CHECK(indices == CHUNKS * 64 * 64 * 2 * 3);
+	CHECK(vertices == parts * 65 * 65);
+	CHECK(indices == parts * 64 * 64 * 2 * 3);
 
 	// **More than one colour, which is the whole of the "color them" ask.** The
 	// bands are cut from the field that was generated rather than from constants
@@ -1218,15 +1231,25 @@ TEST_CASE("the terrain scene builds a coloured heightfield mesh", "[examples][sc
 	});
 	CHECK(distinct > 1);
 
-	// The camera the scene placed, outside the map looking in.
+	// The camera the scene placed, flying over the field rather than orbiting
+	// an island - there is no island to orbit any more.
 	REQUIRE(store.Resource<ActiveCamera>() != nullptr);
 
-	const Entity eye = InScene(store, "Surveyor");
+	const Entity eye = InScene(store, "Flyer");
 	REQUIRE(eye != engine::ecs::NULL_ENTITY);
-	CHECK(store.Get<engine::scene::Transform>(eye)->Frame.Position.Y > 100.0f);
 
-	// Measured bounds, not declared: the whole field is built, so the world
-	// reaches the half-width of the map plus whatever the relief adds.
+	// It has travelled, which is the whole of "endless": the flight is driven
+	// by a tick counter, so a camera still at the origin is a scene that built
+	// its ring and stopped.
+	CHECK(store.Get<engine::scene::Transform>(eye)->Frame.Position.X > 1.0f);
+
+	// **And somebody is standing on it.** The character spawns on a pad at the
+	// field's own height at the origin, which is what makes this a place rather
+	// than a picture.
+	CHECK(InScene(store, "SpawnLocation") != engine::ecs::NULL_ENTITY);
+
+	// Measured bounds, not declared: seven chunks of 64 studs each way, plus
+	// whatever the relief adds.
 	REQUIRE(store.Resource<WorldBounds>() != nullptr);
 	CHECK(store.Resource<WorldBounds>()->HalfExtent > 200.0f);
 }
@@ -1251,9 +1274,15 @@ TEST_CASE("the terrain generator is a pure function of its seed", "[examples][sc
 		INFO(error);
 		REQUIRE(loaded);
 
-		// Four chunks each rather than all sixty-four: the generator is the
+		// Four ticks each rather than the whole ring: the generator is the
 		// thing under test and a quarter of a million vertices proves it as
 		// well as a million do, at a quarter of the cost.
+		//
+		// **The flight is counted in ticks and not read off a clock**, which is
+		// what lets this compare two runs at all: the camera decides which
+		// chunks exist, so a flight driven by wall time would build a different
+		// set each run and this would fail for a reason that has nothing to do
+		// with the noise.
 		for (int tick = 0; tick < 4; tick++) {
 			systems.Tick(store, 1.0f / 60.0f);
 		}

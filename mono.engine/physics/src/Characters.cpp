@@ -68,6 +68,23 @@ namespace engine::physics {
 	};
 
 	size_t GroundCharacters(ecs::Store &store) {
+		// **Silent in a world with no solver, exactly as
+		// `ClipCharacterVelocity` below is and for the same reason.** This is
+		// registered by `RegisterCharacterSystems`, which a client installs on
+		// every world it presents - including its own, which is presented and
+		// never simulated and therefore never given a `PhysicsWorld`. The
+		// grounding ray then went through `physics::Raycast`, which asks the
+		// loud accessor, and put `physics has no PhysicsWorld resource` in the
+		// log once per character per tick.
+		//
+		// A character with nothing to stand on is ungrounded, which is the
+		// honest answer for a world with no floors in it as far as this module
+		// is concerned. See `WorldResource.cpp` for why the accessor is loud
+		// where a solver step really is expected.
+		if (!PhysicsWorldRegistered() || store.Resource<PhysicsWorld>() == nullptr) {
+			return 0;
+		}
+
 		size_t tested = 0;
 
 		store.Each<scene::Humanoid>([&](ecs::Entity row, scene::Humanoid &humanoid) {
