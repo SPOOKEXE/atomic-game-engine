@@ -256,6 +256,10 @@ namespace engine::render {
 		// @since v0.10
 		FlipbookCell CellOf(const core::Name &name, double seconds) const;
 
+		// A process-local signature of every registered animated sheet's current
+		// frame. Static textures contribute nothing.
+		uint64_t AnimationSignature(double seconds) const;
+
 		// The shared sampler.
 		SDL_GPUSampler *Sampler() const {
 			return SharedSampler;

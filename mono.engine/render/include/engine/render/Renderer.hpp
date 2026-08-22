@@ -1558,6 +1558,15 @@ namespace engine::render {
 		// @since v0.10
 		FlipbookCell TextureCell(const core::Name &name, double seconds) const;
 
+		// A signature of the current cells of all registered animated textures.
+		//
+		// This lets a presentation scheduler distinguish a still visual state from
+		// one whose pixels changed only because a resident flipbook advanced.
+		// Static textures contribute nothing.
+		//
+		// @since v0.19
+		uint64_t TextureAnimationSignature(double seconds) const;
+
 		// How big a registered texture is, in source pixels.
 		//
 		// **Handed out with the handle, because an interface painter needs
@@ -1708,6 +1717,19 @@ namespace engine::render {
 		//         mid-resize, which is not an error and not a reason to stop
 		//         ticking. Headless always succeeds; it waits for nothing.
 		bool WaitForFrame();
+
+		// Claims a frame only when a swapchain image is already available.
+		//
+		// This is the acquisition for an independently paced update loop. Unlike
+		// `WaitForFrame`, it never waits for the display or for an in-flight frame;
+		// false means the caller should keep updating and try again later. Headless
+		// always succeeds.
+		//
+		// Calling this twice before `Render` is safe and acquires once.
+		//
+		// @return `false` when no image is immediately available.
+		// @since v0.19
+		bool TryFrame();
 
 		// Reports whether the caller is the thread that owns this renderer.
 		//

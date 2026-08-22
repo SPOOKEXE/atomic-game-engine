@@ -369,7 +369,17 @@ namespace engine::render {
 			return false;
 		}
 
-		return State->BeginFrame();
+		return State->BeginFrame(true);
+	}
+
+	bool Renderer::TryFrame() {
+		RequireOwningThread("TryFrame");
+
+		if (State->Device == nullptr) {
+			return false;
+		}
+
+		return State->BeginFrame(false);
 	}
 
 	bool Renderer::IsOnOwningThread() const {
@@ -938,6 +948,10 @@ namespace engine::render {
 			return {};
 		}
 		return State->Textures.CellOf(name, seconds);
+	}
+
+	uint64_t Renderer::TextureAnimationSignature(double seconds) const {
+		return State == nullptr ? 0 : State->Textures.AnimationSignature(seconds);
 	}
 
 	void *Renderer::TextureHandle(const core::Name &name) const {

@@ -44,7 +44,7 @@ state until v0.19.
 | `effects.Beam` | 712 | 8 | yes | . | yes | . | An authored beam drawn between two attachments: colour and transparency along its length, the texture and its scroll, end widths and curve control. |
 | `effects.EmitterSlot` | 12 | 4 | yes | . | . | . | Which row of the particle pool's block table an emitter owns, kept on the emitter's own row so the per-frame passes read a column instead of a hash map. |
 | `effects.ParticleEmitter` | 1296 | 4 | yes | . | . | . | The authored settings of one particle emitter: size, colour, transparency and squash over a particle's life, the spawn shape and rate, and the material and flipbook facts. |
-| `effects.ParticleSystem` | 192 | 8 | yes | . | . | . | Per-world singleton particle pool: the particle slots a step writes, the per-emitter blocks, the free lists that hand slots and blocks out, and last step's statistics. |
+| `effects.ParticleSystem` | 224 | 8 | yes | . | . | . | Per-world singleton particle pool: the particle slots a step writes, the per-emitter blocks, the free lists that hand slots and blocks out, and last step's statistics. |
 | `effects.RibbonBuffer` | 48 | 8 | yes | . | . | . | Per-world singleton holding the vertices and per-ribbon runs that this frame's beams and trails were built into, ready for the renderer. |
 | `effects.Trail` | 1152 | 8 | yes | . | yes | . | A trail following two attachments: its authored colour, transparency, lifetime and texture, plus the ring of recorded edge points it is drawn from. |
 
@@ -192,7 +192,7 @@ state until v0.19.
 | `scene.Team` | 12 | 4 | yes | yes | . | . | On a `Team` instance: the side's colour, which is the thing spawn pads are matched against. Deliberately nothing else. |
 | `scene.Terrain` | 32 | 8 | yes | . | . | . | Resource: how a world's ground is generated - the node graph, the seed, chunk extent and resolution, vertical extent and how far chunks are kept. The recipe is stored and the ground it makes never is. |
 | `scene.TextContent` | 32 | 8 | yes | . | . | . | The text a `StringValue` or `LocalizationTable` holds, verbatim and not interned. Written through the `Value` property and by Rojo `.txt`/`.csv` sync. |
-| `scene.TextureCatalogue` | 56 | 8 | yes | . | . | . | Resource: the flipbook facts - grid, frame count and rate - the content pump learned about each loaded texture. |
+| `scene.TextureCatalogue` | 64 | 8 | yes | . | . | . | Resource: the flipbook facts - grid, frame count and rate - the content pump learned about each loaded texture. |
 | `scene.Tool` | 28 | 4 | yes | yes | . | . | On a `Tool` instance: where its handle sits relative to the grip point. `EquipTool` and the grip pose read it, and it decides where a held handle is drawn. |
 | `scene.Transform` | 28 | 4 | yes | yes | . | 10 | Where a thing is: a world-space CFrame, never relative to a parent. The component almost every system reads. |
 | `scene.Transient` | 0 | 1 | . | . | . | . | Marks an instance made by whoever is looking rather than by the world's author, so the game-file writer leaves it out of a saved `.agame`. |

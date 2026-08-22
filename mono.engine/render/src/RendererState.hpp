@@ -1313,7 +1313,7 @@ namespace engine::render {
 		//
 		// @return `false` when there was nothing to acquire - minimised or
 		//         mid-resize, which is not an error.
-		bool BeginFrame() {
+		bool BeginFrame(bool waitForSwapchain = true) {
 			if (FrameClaimed) {
 				return true;
 			}
@@ -1377,7 +1377,9 @@ namespace engine::render {
 				// the most expensive thing in a frame it spent waiting.
 				ENGINE_PROFILE_CAT("acquire swapchain", core::ProfileCategory::Idle);
 				acquired =
-					SDL_WaitAndAcquireGPUSwapchainTexture(command, Window, &swapchain, &width, &height);
+					waitForSwapchain
+						? SDL_WaitAndAcquireGPUSwapchainTexture(command, Window, &swapchain, &width, &height)
+						: SDL_AcquireGPUSwapchainTexture(command, Window, &swapchain, &width, &height);
 			}
 
 			if (!acquired || swapchain == nullptr) {

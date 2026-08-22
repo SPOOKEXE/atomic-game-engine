@@ -30,13 +30,13 @@
 #include <engine/script/Runtime.hpp>
 #include <engine/world/Universe.hpp>
 
-#include <chrono>
 #include <client/Actions.hpp>
 #include <client/Compositor.hpp>
 #include <client/ContentLink.hpp>
 #include <client/EditableImages.hpp>
 #include <client/EditableMeshes.hpp>
 #include <client/Options.hpp>
+#include <client/PresentationSchedule.hpp>
 #include <client/Scene.hpp>
 #include <client/Sounds.hpp>
 #include <cstdint>
@@ -442,6 +442,17 @@ namespace client {
 		// show the same frames.
 		double AnimationSeconds = 0.0;
 
+		// Device particle time owed since the last rendered image. Simulation may
+		// run several updates between presentation deadlines, so handing the
+		// renderer only the latest update's delta would slow particles by that
+		// ratio.
+		float ParticleDeltaSeconds = 0.0f;
+
+		// Time owed to the next PreRender pass. This is separate from the device
+		// delta because an unchanged prepared image can consume one without
+		// submitting the other.
+		float PresentationDeltaSeconds = 0.0f;
+
 		// The compiled list the pass draws, kept across frames so its signature
 		// can be compared. Holding one per frame would compute a signature, find
 		// nothing to compare it against and rebuild every time - every cost of
@@ -723,9 +734,31 @@ namespace client {
 		uint64_t DirtyInstanceRows = 0;
 		//@}
 
-		// When the next frame is due, for the `--max-fps` limiter. A default
-		// value means "not started"; the first limited frame sets it.
-		std::chrono::steady_clock::time_point NextFrameAt{};
+		// Presentation is a consumer of updated state, not the clock that drives
+		// it. This deadline is observed after the update and never sleeps it.
+		PresentationSchedule Presentations;
+
+		// The complete visual input last submitted. A matching state can leave the
+		// already-presented swapchain image alone without acquiring another one.
+		uint64_t PresentedVisualSignature = 0;
+		bool PresentedVisualSignatureValid = false;
+		uint32_t PresentedImages = 0;
+
+		// Content and shader uploads can change pixels without changing a draw row.
+		// Set by those upload doors and cleared only after a rendered image.
+		bool VisualResourcesChanged = true;
+
+		// The window system can invalidate a presented image without changing any
+		// scene input, for example after restore or expose.
+		bool PresentationInvalidated = true;
+
+		// The scheduler's observable result. These are session counters rather
+		// than per-frame metrics because most update iterations intentionally end
+		// without a frame whose metric buffer could carry them.
+		uint64_t UpdateIterations = 0;
+		uint64_t PresentationOpportunities = 0;
+		uint64_t UnchangedPresentationsSkipped = 0;
+		uint64_t BusySwapchainPresentationsSkipped = 0;
 
 		// The audio device, when one opened. Null runs silently.
 		std::unique_ptr<engine::audio::Device> Sound;

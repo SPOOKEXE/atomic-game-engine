@@ -16,6 +16,7 @@
 #include <client/Settings.hpp>
 #include <cstdio>
 #include <discord/Settings.hpp>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -66,7 +67,7 @@ int main(int argc, char **argv) {
 	arguments.Flag("uncapped", "Present without waiting for vblank");
 	arguments.Value("frames-in-flight", "N", "Frames the CPU may queue ahead of the GPU: 1 (default) to 3");
 	arguments.Flag("headless", "Run with no window (needs --frames)");
-	arguments.Value("max-fps", "N", "Hold this frame rate. Needs --uncapped; 0 is no limit");
+	arguments.Value("max-fps", "N", "Cap presentation FPS. Needs --uncapped; 0 presents every update");
 	arguments.Flag("verbose", "Log at trace level");
 	arguments.Flag(
 		"force-serial-compute",
@@ -218,8 +219,13 @@ int main(int argc, char **argv) {
 		std::fprintf(stderr, "--headless needs --frames N: there is no window to close.\n");
 		return 2;
 	}
-	options.MaximumFrameRate =
-		static_cast<uint32_t>(arguments.GetInteger("max-fps", options.MaximumFrameRate));
+	const int64_t maximumFrameRate = arguments.GetInteger("max-fps", options.MaximumFrameRate);
+	if (maximumFrameRate < 0 ||
+		static_cast<uint64_t>(maximumFrameRate) > std::numeric_limits<uint32_t>::max()) {
+		std::fprintf(stderr, "--max-fps must be between 0 and %u.\n", std::numeric_limits<uint32_t>::max());
+		return 2;
+	}
+	options.MaximumFrameRate = static_cast<uint32_t>(maximumFrameRate);
 	options.ProfileSeconds = arguments.GetNumber("profile-seconds", 0.0);
 	if (auto snapshot = arguments.Get("profile-snapshot")) {
 		options.ProfileSnapshot = std::filesystem::path(*snapshot);

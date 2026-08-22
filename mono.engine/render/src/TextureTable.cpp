@@ -256,6 +256,22 @@ namespace engine::render {
 		);
 	}
 
+	uint64_t TextureTable::AnimationSignature(double seconds) const {
+		uint64_t signature = 0;
+		for (const auto &[name, entry] : Textures) {
+			if (entry.FlipbookSide <= 1 || entry.FlipbookFrames <= 1) {
+				continue;
+			}
+
+			const uint64_t frame = FlipbookFrameAt(entry.FlipbookFrames, entry.FlipbookFrameRate, seconds);
+			const uint64_t word = static_cast<uint64_t>(name) << 32 | frame;
+			// Commutative because the catalogue is an unordered map. The name is
+			// part of every term, so two sheets on the same frame remain distinct.
+			signature ^= word * 0x9E3779B97F4A7C15ull + 0xD6E8FEB86659FD93ull;
+		}
+		return signature;
+	}
+
 	bool TextureTable::Add(const core::Name &name, const assets::TextureData &image) {
 		if (Device == nullptr || !name.IsValid() || !image.IsValid()) {
 			return false;

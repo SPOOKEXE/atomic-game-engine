@@ -129,16 +129,13 @@ namespace client {
 		// @since v0.18
 		int FramesInFlight = 1;
 
-		// The frame rate to hold, or zero for none.
+		// The maximum presentation rate, or zero for every update.
 		//
 		// **The other half of `Uncapped`, not a contradiction of it.** Turning
-		// off the vblank wait is what lets a frame finish early; without a
-		// limiter the loop then spins as fast as the GPU allows, which on a
-		// scene that costs 2 ms a frame is 500 fps of heat for a display that
-		// shows 165. This is how a run says "do not wait for the display, and
-		// do not run away from it either" - which is what a variable-refresh
-		// monitor wants, and what a like-for-like measurement between two
-		// machines needs.
+		// off the vblank wait lets simulation and entity work continue without
+		// the display pacing them. This number limits only how often prepared
+		// visual state may claim and present a swapchain image. The update loop
+		// never sleeps for it, and an unchanged image submits nothing.
 		//
 		// Ignored when the vblank wait is on: the display is already the
 		// limiter, and a second one fighting it produces judder rather than a

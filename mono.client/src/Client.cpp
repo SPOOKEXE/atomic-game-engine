@@ -43,8 +43,10 @@
 #include <client/Client.hpp>
 #include <client/ContentDemand.hpp>
 #include <client/Replicated.hpp>
+#include <cstddef>
 #include <fstream>
 #include <thread>
+#include <type_traits>
 
 namespace client {
 
@@ -122,6 +124,100 @@ namespace client {
 				return "other event";
 			}
 		}
+
+		uint64_t FoldVisual(uint64_t signature, uint64_t word) {
+			return engine::scene::MixSignature(signature, word);
+		}
+
+		template <typename Value> uint64_t FoldVisualObject(uint64_t signature, const Value &value) {
+			static_assert(std::is_trivially_copyable_v<Value>);
+			const auto bytes = std::as_bytes(std::span<const Value>(&value, 1));
+			uint64_t word = 1469598103934665603ull;
+			for (const std::byte byte : bytes) {
+				word = (word ^ std::to_integer<uint8_t>(byte)) * 1099511628211ull;
+			}
+			return FoldVisual(signature, word);
+		}
+
+		template <typename Value> uint64_t FoldVisualSpan(uint64_t signature, std::span<const Value> values) {
+			signature = FoldVisual(signature, values.size());
+			for (const Value &value : values) {
+				signature = FoldVisualObject(signature, value);
+			}
+			return signature;
+		}
+
+		uint64_t SignatureOfVisual(
+			const engine::render::View &view,
+			const engine::render::OverlayImage &overlay,
+			uint64_t interfaceSignature,
+			uint64_t animationSignature,
+			uint32_t pixelWidth,
+			uint32_t pixelHeight,
+			const engine::scene::WorldLighting &lighting,
+			uint32_t surfaceBounces,
+			uint32_t surfaceLimit,
+			engine::core::Name postProcess
+		) {
+			uint64_t signature = engine::scene::SignatureOf(view.Instances);
+			signature = FoldVisualObject(signature, view.CameraFrame);
+			signature = FoldVisualObject(signature, view.Camera);
+			signature = FoldVisual(signature, pixelWidth);
+			signature = FoldVisual(signature, pixelHeight);
+			signature = FoldVisualObject(signature, lighting);
+			signature = FoldVisual(signature, surfaceBounces);
+			signature = FoldVisual(signature, surfaceLimit);
+			signature = FoldVisual(signature, postProcess.Id());
+			signature = FoldVisual(signature, view.World);
+			signature = FoldVisual(signature, view.WorldName.Id());
+			signature = FoldVisual(signature, view.Pipeline.Id());
+			signature = FoldVisual(signature, interfaceSignature);
+			signature = FoldVisual(signature, animationSignature);
+			signature = FoldVisual(signature, overlay.HasContent() ? 1u : 0u);
+			signature = FoldVisualSpan(signature, view.Lights);
+			signature = FoldVisual(signature, engine::scene::SignatureOf(view.Foreign));
+			signature = FoldVisual(signature, view.Portals.size());
+			for (const engine::render::PortalView &portal : view.Portals) {
+				signature = FoldVisualObject(signature, portal.Index);
+				signature = FoldVisualObject(signature, portal.Partner);
+				signature = FoldVisualObject(signature, portal.Centre);
+				signature = FoldVisualObject(signature, portal.Normal);
+				signature = FoldVisualObject(signature, portal.First);
+				signature = FoldVisualObject(signature, portal.Second);
+				signature = FoldVisualObject(signature, portal.Warp);
+				signature = FoldVisualObject(signature, portal.TagFilter);
+			}
+
+			// SurfaceView owns a vector, so hash its value fields and the vector's
+			// contents separately. Hashing the vector object would observe an
+			// allocator address and miss a light changing in place.
+			signature = FoldVisual(signature, view.Surfaces.size());
+			for (const engine::render::SurfaceView &surface : view.Surfaces) {
+				signature = FoldVisualObject(signature, surface.Index);
+				signature = FoldVisualObject(signature, surface.Frame);
+				signature = FoldVisualObject(signature, surface.PaneCentre);
+				signature = FoldVisualObject(signature, surface.PaneNormal);
+				signature = FoldVisualObject(signature, surface.PaneFirst);
+				signature = FoldVisualObject(signature, surface.PaneSecond);
+				signature = FoldVisualObject(signature, surface.PaneNear);
+				signature = FoldVisualObject(signature, surface.PaneFar);
+				signature = FoldVisualObject(signature, surface.Projection);
+				signature = FoldVisualObject(signature, surface.Mapping);
+				signature = FoldVisualObject(signature, surface.Width);
+				signature = FoldVisualObject(signature, surface.Height);
+				signature = FoldVisualObject(signature, surface.ImageOpacity);
+				signature = FoldVisualObject(signature, surface.Effect);
+				signature = FoldVisualObject(signature, surface.TagFilter);
+				signature = FoldVisualObject(signature, surface.FPS);
+				signature = FoldVisualObject(signature, surface.InstanceFirst);
+				signature = FoldVisualObject(signature, surface.InstanceCount);
+				signature = FoldVisualObject(signature, surface.Lighting);
+				signature =
+					FoldVisualSpan(signature, std::span<const engine::render::SceneLight>(surface.Lights));
+				signature = FoldVisual(signature, surface.OverrideLighting ? 1u : 0u);
+			}
+			return signature;
+		}
 	}
 
 	Client::~Client() {
@@ -130,6 +226,7 @@ namespace client {
 
 	bool Client::Initialise(const Options &options) {
 		Settings = options;
+		Presentations.SetRate(Settings.Uncapped ? Settings.MaximumFrameRate : 0);
 
 		// **Said at startup rather than at the first refusal**, so "my texture
 		// never arrives" and "this client was told not to fetch GIFs" are one
@@ -655,6 +752,7 @@ namespace client {
 				// so a slow mesh looked like time `content` spent on nothing.
 				ENGINE_PROFILE_CAT("mesh upload", engine::core::ProfileCategory::Render);
 				if (Renderer.AddMesh(name, mesh)) {
+					VisualResourcesChanged = true;
 					ContentMeshes++;
 
 					// **The sheets its submeshes name, recorded where they are
@@ -712,6 +810,7 @@ namespace client {
 				{
 					ENGINE_PROFILE_CAT("texture upload", engine::core::ProfileCategory::Assets);
 					if (Renderer.AddTexture(name, image)) {
+						VisualResourcesChanged = true;
 						ContentTextures++;
 					}
 				}
@@ -1824,6 +1923,11 @@ namespace client {
 
 			SDL_Event event;
 			while (SDL_PollEvent(&event)) {
+				if (event.type == SDL_EVENT_WINDOW_EXPOSED || event.type == SDL_EVENT_WINDOW_SHOWN ||
+					event.type == SDL_EVENT_WINDOW_RESTORED || event.type == SDL_EVENT_WINDOW_RESIZED ||
+					event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
+					PresentationInvalidated = true;
+				}
 				// **A span per event kind, because "poll events" being slow says
 				// nothing about why.** The report is that this lags on user
 				// input and on a window resize, and those are two different
@@ -2091,39 +2195,13 @@ namespace client {
 	}
 
 	void Client::Step() {
-		// **The limiter sleeps here, before anything else in the frame.** Ahead
-		// of the swapchain wait because the two are alternatives rather than a
-		// sequence: with vblank on, the display paces the loop and this does
-		// nothing; with it off, this is the pacing and the wait below returns
-		// immediately.
-		//
-		// Against a deadline that advances by a fixed step, not by sleeping a
-		// computed amount each frame. The difference is drift: a sleep
-		// overshoots by whatever the scheduler felt like, and a loop that
-		// recomputed from "now" every frame would accumulate every one of those
-		// overshoots and settle below the rate it was asked for.
-		if (Settings.Uncapped && Settings.MaximumFrameRate > 0) {
-			using namespace std::chrono;
-			const auto period = nanoseconds(1'000'000'000ull / Settings.MaximumFrameRate);
-			const auto now = steady_clock::now();
+		UpdateIterations++;
+		const PresentationSchedule::TimePoint presentationNow = PresentationSchedule::Clock::now();
+		const bool presentationDue = Presentations.Due(presentationNow);
 
-			if (NextFrameAt.time_since_epoch().count() == 0) {
-				NextFrameAt = now;
-			} else if (now < NextFrameAt) {
-				std::this_thread::sleep_until(NextFrameAt);
-			} else if (now - NextFrameAt > period * 4) {
-				// A stall - a resize, a hitch, a debugger. Catching up on four
-				// frames of deficit by running four frames flat out is worse
-				// than the stall was, so the deadline is reset rather than
-				// chased.
-				NextFrameAt = now;
-			}
-			NextFrameAt += period;
-		}
-
-		// Everything from here to EndFrame is one frame's worth of spans. The
-		// panels below draw the *previous* frame's, because this one has not
-		// finished being measured.
+		// Everything from here to EndFrame is one update's worth of spans. An
+		// update that reaches presentation includes its preparation and submit;
+		// the others show the simulation work that continued between images.
 		//
 		// **Opened before the wait rather than after it, which is what puts the
 		// wait on the graph.** `Editor::Run` has done it this way since the
@@ -2155,17 +2233,30 @@ namespace client {
 		//
 		// A failure means minimised or mid-resize. The result gates presentation
 		// below after simulation and external services have continued.
-		bool renderingActive = false;
-		{
+		bool renderingActive = true;
+		if (!Settings.Uncapped) {
 			ENGINE_PROFILE_CAT("wait for frame", engine::core::ProfileCategory::Idle);
 			renderingActive = Renderer.WaitForFrame();
 		}
 
 		const float delta = Clock.Tick();
+		AnimationSeconds += delta;
+		ParticleDeltaSeconds += delta;
+		PresentationDeltaSeconds += delta;
 
 		{
 			ENGINE_HEAP_SCOPE("client.events");
 			PumpEvents();
+		}
+
+		// Input belongs to the update clock. Presentation used to write it just
+		// before PreRender, which made an independently paced client leave every
+		// intervening simulation tick reading the last presented state.
+		for (const engine::world::WorldId id : Simulated) {
+			Universe_->Enter(id, [this](engine::ecs::Store &store) { WriteInput(store); });
+		}
+		if (ReportedJoin) {
+			Universe_->Enter(Replicated, [this](engine::ecs::Store &store) { WriteInput(store); });
 		}
 
 		// **Before the simulation and outside every pass.** Content becoming
@@ -2232,12 +2323,15 @@ namespace client {
 		// while PreRender and every GPU allocation below remain demand driven.
 		// Headless rendering still returns true so captures and bounded runs keep
 		// their existing behaviour.
-		if (!renderingActive) {
+		if (!renderingActive || !presentationDue) {
 			FrameGraph::EndFrame();
 			ENGINE_PROFILE_FRAME();
 			Metrics::Clear();
 			return;
 		}
+		const float presentationDelta = PresentationDeltaSeconds;
+		PresentationDeltaSeconds = 0.0f;
+		PresentationOpportunities++;
 
 		// **The requested size when there is no window to ask.** A headless run
 		// still lays the panels out and still renders into an offscreen target
@@ -2305,19 +2399,9 @@ namespace client {
 			std::vector<engine::world::Presentation> presentationDemand;
 			presentationDemand.reserve(Simulated.size());
 			for (const engine::world::WorldId id : Simulated) {
-				// **Written before `Present`, so this frame's `PreRender` sees
-				// this frame's input.** A camera controller reads the state and
-				// places the camera in the same pass; writing afterwards would
-				// aim every camera at where the mouse was one frame ago, which is
-				// the lag nobody can find by reading the controller.
-				//
-				// **Every simulated world, not only the drawn one.** A world the
-				// player is not looking at still ticks its scripts, and a script
-				// polling `UserInputService` there should get the same answer -
-				// the alternative is input that works in one world and silently
-				// does not in another.
-				// **And the size of what it is being drawn into, for the same
-				// reason and in the same breath.** `aim-surface-cameras` clamps
+				// **The size of what it is being drawn into has to arrive before
+				// `Present`, for the same reason and in the same breath.**
+				// `aim-surface-cameras` clamps
 				// every mirror's fit against a frustum built from it, so a world
 				// told after `Present` is a world whose mirrors were fitted to
 				// last frame's window - and a world never told at all, which is
@@ -2328,13 +2412,14 @@ namespace client {
 				// world nobody is looking at still aims its mirrors, and one
 				// that works only while it happens to be the drawn one is the
 				// kind of difference nothing reports.
-				Universe_->Enter(id, [this, pixelWidth, pixelHeight](engine::ecs::Store &store) {
-					WriteInput(store);
+				Universe_->Enter(id, [pixelWidth, pixelHeight](engine::ecs::Store &store) {
 					(void)engine::scene::SetViewportSize(
 						store, static_cast<uint32_t>(pixelWidth), static_cast<uint32_t>(pixelHeight)
 					);
 				});
-				presentationDemand.push_back(engine::world::Presentation{id, delta, Universe_->AlphaOf(id)});
+				presentationDemand.push_back(
+					engine::world::Presentation{id, presentationDelta, Universe_->AlphaOf(id)}
+				);
 			}
 
 			// All demanded worlds prepare their draw packets together. Each
@@ -2450,12 +2535,10 @@ namespace client {
 			// at where the client stood last frame.
 			if (ReportedJoin) {
 				Universe_->Enter(Replicated, [this, pixelWidth, pixelHeight](engine::ecs::Store &store) {
-					// **The replica takes this frame's input like a simulated
-					// world does**, because since v0.14 it has a camera and a
-					// character of its own to drive. It is not in `Simulated` -
-					// it never will be, nothing here is stepped - so it is
-					// written here rather than by widening that loop to mean
-					// something other than what it says.
+					// A join may have completed after the update-clock input pass
+					// above, so the replica's first presentation still needs the
+					// current state. Later updates write it beside the simulated
+					// worlds, without pretending this replicated world is stepped.
 					WriteInput(store);
 
 					(void)AimReplicaViewer(store, ComposedFrame, ComposedCamera);
@@ -2469,7 +2552,7 @@ namespace client {
 					);
 				});
 
-				Universe_->Present(Replicated, delta, Universe_->AlphaOf(Replicated));
+				Universe_->Present(Replicated, presentationDelta, Universe_->AlphaOf(Replicated));
 
 				Universe_->Enter(Replicated, [this](engine::ecs::Store &store) {
 					const auto *list = store.Resource<DrawList>();
@@ -2502,17 +2585,6 @@ namespace client {
 				});
 			}
 		}
-
-		{
-			ENGINE_HEAP_SCOPE("client.statistics");
-			Statistics.Record(Clock.Now(), delta);
-		}
-
-		// **Advanced with the frame it will be drawn against.** Accumulated from
-		// the frame delta rather than read from a wall clock, so a run that
-		// stalls does not skip an animation forward and two runs of one
-		// recording show the same frames - `Renderer::SetAnimationTime`.
-		AnimationSeconds += delta;
 
 		// Ticks actually achieved, over a one-second window. It matches the
 		// configured rate until the machine cannot keep up, and the gap is the
@@ -2697,6 +2769,7 @@ namespace client {
 		}
 
 		engine::render::InterfacePass *hook = nullptr;
+		bool interfaceContinuous = false;
 
 		// **Whether the window should be listening for text, decided from the
 		// world.** Read inside the `Enter` below and applied outside it, because
@@ -2887,6 +2960,13 @@ namespace client {
 				wantsTextInput = engine::gui::FocusedTextBox(store) != engine::ecs::NULL_ENTITY;
 
 				if (!InterfaceList.Commands().Commands.empty()) {
+					interfaceContinuous = std::any_of(
+						InterfaceList.Commands().Commands.begin(),
+						InterfaceList.Commands().Commands.end(),
+						[](const engine::gui::DrawCommand &command) {
+							return command.Kind == engine::gui::DrawKind::Viewport;
+						}
+					);
 					(void)ViewportImages.Render(Renderer, store, InterfaceList.Commands(), 1);
 					Interface.Submit(
 						InterfaceList.Commands(),
@@ -3022,27 +3102,38 @@ namespace client {
 		// number is somebody measuring or comparing, and a world quietly taking
 		// it back on the next frame is the shape of an afternoon lost.
 		ENGINE_HEAP_SCOPE("client.lighting");
-		Universe_->Enter(Rendered, [this](engine::ecs::Store &lit, engine::ecs::Scheduler &) {
-			Renderer.SetLighting(engine::scene::LightingOf(lit));
+		engine::scene::WorldLighting visualLighting;
+		uint32_t visualSurfaceBounces = 0;
+		uint32_t visualSurfaceLimit = 0;
+		Universe_->Enter(
+			Rendered,
+			[this, &visualLighting, &visualSurfaceBounces, &visualSurfaceLimit](
+				engine::ecs::Store &lit, engine::ecs::Scheduler &
+			) {
+				visualLighting = engine::scene::LightingOf(lit);
+				Renderer.SetLighting(visualLighting);
 
-			const int32_t bounces = Settings.SurfaceBounces > 0
-										? static_cast<int32_t>(Settings.SurfaceBounces)
-										: engine::scene::SurfaceBouncesOf(lit);
-			Renderer.SetSurfaceBounces(static_cast<uint32_t>(std::max(bounces, 0)));
+				const int32_t bounces = Settings.SurfaceBounces > 0
+											? static_cast<int32_t>(Settings.SurfaceBounces)
+											: engine::scene::SurfaceBouncesOf(lit);
+				visualSurfaceBounces = static_cast<uint32_t>(std::max(bounces, 0));
+				Renderer.SetSurfaceBounces(visualSurfaceBounces);
 
-			// **And how many panes it draws at once**, which is the other half of
-			// what a hall of mirrors costs: the depth above says how deep a chain
-			// resolves and this says how many chains there are. Read from the
-			// world every frame for the bounce setting's reason - a script may
-			// change it at any time, and once at startup would let the first
-			// world drawn set it for every world after.
-			//
-			// **No session override beside it, deliberately.** `--surface-bounces`
-			// exists because somebody comparing two depths needs the world to stop
-			// arguing; there is no equivalent measurement for the count, and a
-			// flag with no use is a flag that goes stale.
-			Renderer.SetSurfaceLimit(static_cast<uint32_t>(std::max(engine::scene::SurfaceLimitOf(lit), 0)));
-		});
+				// **And how many panes it draws at once**, which is the other half of
+				// what a hall of mirrors costs: the depth above says how deep a chain
+				// resolves and this says how many chains there are. Read from the
+				// world every frame for the bounce setting's reason - a script may
+				// change it at any time, and once at startup would let the first
+				// world drawn set it for every world after.
+				//
+				// **No session override beside it, deliberately.** `--surface-bounces`
+				// exists because somebody comparing two depths needs the world to stop
+				// arguing; there is no equivalent measurement for the count, and a
+				// flag with no use is a flag that goes stale.
+				visualSurfaceLimit = static_cast<uint32_t>(std::max(engine::scene::SurfaceLimitOf(lit), 0));
+				Renderer.SetSurfaceLimit(visualSurfaceLimit);
+			}
+		);
 
 		// **The shaders this world's materials name, resolved before the frame
 		// that draws with them.** Beside the sun and for the same reason: a
@@ -3060,6 +3151,7 @@ namespace client {
 			const engine::core::Name wantedPostProcess = engine::scene::PostProcessShaderOf(shaded);
 
 			if (changed > 0) {
+				VisualResourcesChanged = true;
 				// **Which of the changed names an `ImageLabel` actually asked
 				// for**, and it is worth the second walk: `opaque.frag` and
 				// `interface.frag` declare different binding counts, so a
@@ -3086,12 +3178,13 @@ namespace client {
 					// was built for it is released. The instances that named
 					// it are already gone or already name something else.
 					if (module == nullptr) {
-						(void)Renderer.DropShader(name);
+						VisualResourcesChanged = Renderer.DropShader(name) || VisualResourcesChanged;
 						if (wantedByGui) {
 							(void)Interface.DropShaderVariant(name);
 						}
 						if (wantedByPostProcess) {
 							Renderer.ClearPostProcessShader();
+							VisualResourcesChanged = true;
 							LastPostProcessShader = {};
 						}
 						continue;
@@ -3106,7 +3199,8 @@ namespace client {
 						continue;
 					}
 
-					(void)Renderer.AddShader(name, module->SpirV);
+					VisualResourcesChanged =
+						Renderer.AddShader(name, module->SpirV) || VisualResourcesChanged;
 
 					// **The same words, into the interface pass too, and only
 					// when an `ImageLabel` actually named this shader.** See
@@ -3126,6 +3220,7 @@ namespace client {
 					// those moves anything `Changed` reports.
 					if (wantedByPostProcess) {
 						if (Renderer.SetPostProcessShader(name, module->SpirV)) {
+							VisualResourcesChanged = true;
 							LastPostProcessShader = name;
 						}
 					}
@@ -3141,9 +3236,12 @@ namespace client {
 			if (wantedPostProcess != LastPostProcessShader) {
 				if (!wantedPostProcess.IsValid()) {
 					Renderer.ClearPostProcessShader();
+					VisualResourcesChanged = true;
+					LastPostProcessShader = {};
 				} else if (const engine::render::ShaderModule *module = Shaders.Find(wantedPostProcess);
 						   module != nullptr && module->Error.empty()) {
 					if (Renderer.SetPostProcessShader(wantedPostProcess, module->SpirV)) {
+						VisualResourcesChanged = true;
 						LastPostProcessShader = wantedPostProcess;
 					}
 				}
@@ -3158,8 +3256,9 @@ namespace client {
 		{
 			ENGINE_HEAP_SCOPE("client.editable");
 			Universe_->Enter(Rendered, [this](engine::ecs::Store &shaded, engine::ecs::Scheduler &) {
-				(void)EditableMeshes.Refresh(shaded, Renderer);
-				(void)EditableImages.Refresh(shaded, Renderer);
+				const size_t meshes = EditableMeshes.Refresh(shaded, Renderer);
+				const size_t images = EditableImages.Refresh(shaded, Renderer);
+				VisualResourcesChanged = meshes > 0 || images > 0 || VisualResourcesChanged;
 			});
 		}
 
@@ -3175,10 +3274,10 @@ namespace client {
 		view.ParticlePool = Particles.Pool;
 		view.ParticleBlocks = Particles.BlockCount;
 
-		// **The frame's step and not the tick's**, because the device steps once
-		// per rendered frame - see `View::ParticleDelta`. Spawning is still on
-		// the tick and the two agree, both being rates per second.
-		view.ParticleDelta = delta;
+		// The time since the last device step. Presentation may be slower than the
+		// update loop, and using only this update's delta would slow resident
+		// particles by exactly that ratio.
+		view.ParticleDelta = ParticleDeltaSeconds;
 		view.RibbonVertices = RibbonVertices;
 		view.RibbonRuns = RibbonRuns;
 		view.Lights = Lights;
@@ -3187,10 +3286,63 @@ namespace client {
 		view.Pipeline = PipelineSelected;
 		view.World = Rendered.IsValid() ? Rendered.Index : 0;
 		view.WorldName = Rendered.IsValid() ? Universe_->NameOf(Rendered) : engine::core::Name{};
+
+		const uint64_t visualSignature = SignatureOfVisual(
+			view,
+			Overlay,
+			hook == nullptr ? 0 : InterfaceList.Signature(),
+			Renderer.TextureAnimationSignature(AnimationSeconds),
+			static_cast<uint32_t>(std::max(pixelWidth, 0)),
+			static_cast<uint32_t>(std::max(pixelHeight, 0)),
+			visualLighting,
+			visualSurfaceBounces,
+			visualSurfaceLimit,
+			LastPostProcessShader
+		);
+		const bool continuousVisual = !view.Particles.empty() || !view.RibbonRuns.empty() ||
+									  interfaceContinuous || visualLighting.Sky.Enabled;
+		const bool diagnosticFrame =
+			Settings.Headless || Settings.MaximumFrames >= 0 || !Settings.Capture.empty();
+		const bool visualChanged = diagnosticFrame || continuousVisual || VisualResourcesChanged ||
+								   PresentationInvalidated || PresentedImages < 2 ||
+								   !PresentedVisualSignatureValid ||
+								   visualSignature != PresentedVisualSignature || Overlay.IsDirty();
+
+		if (!visualChanged) {
+			UnchangedPresentationsSkipped++;
+			Presentations.Consume(PresentationSchedule::Clock::now());
+			ParticleDeltaSeconds = 0.0f;
+			FrameGraph::EndFrame();
+			ENGINE_PROFILE_FRAME();
+			Metrics::Clear();
+			return;
+		}
+
+		// The update loop has done all work needed to decide that pixels changed.
+		// Only now claim a swapchain image, and never wait for one in uncapped
+		// mode. A busy GPU drops this opportunity while simulation continues.
+		if (Settings.Uncapped && !Renderer.TryFrame()) {
+			BusySwapchainPresentationsSkipped++;
+			FrameGraph::EndFrame();
+			ENGINE_PROFILE_FRAME();
+			Metrics::Clear();
+			return;
+		}
 		{
 			ENGINE_HEAP_SCOPE("client.submit");
 			LastFrame = Renderer.Render(std::span<const engine::render::View>(&view, 1), Overlay, hook);
 		}
+		{
+			ENGINE_HEAP_SCOPE("client.statistics");
+			Statistics.Record(Clock.Now(), ParticleDeltaSeconds);
+		}
+		Presentations.Consume(PresentationSchedule::Clock::now());
+		PresentedVisualSignature = visualSignature;
+		PresentedVisualSignatureValid = true;
+		PresentedImages++;
+		VisualResourcesChanged = false;
+		PresentationInvalidated = false;
+		ParticleDeltaSeconds = 0.0f;
 
 		// **After the frame rather than before it**, so the capture is of a
 		// frame whose scene texture exists - the studio's own capture states
@@ -3312,6 +3464,17 @@ namespace client {
 				);
 				break;
 			}
+		}
+
+		if (Settings.Uncapped) {
+			ENGINE_INFO(
+				"{} update iteration(s), {} presentation opportunity(s), {} unchanged skipped, {} swapchain "
+				"busy",
+				UpdateIterations,
+				PresentationOpportunities,
+				UnchangedPresentationsSkipped,
+				BusySwapchainPresentationsSkipped
+			);
 		}
 
 		if (Statistics.HasSamples()) {
