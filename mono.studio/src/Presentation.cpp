@@ -8,6 +8,14 @@ namespace studio {
 		return advancing && engine::world::Ticks(state) ? accumulator : 1.0f;
 	}
 
+	std::string WorldSelectorLabel(std::string_view name, bool active) {
+		std::string label(name.empty() ? "?" : name);
+		if (active) {
+			label += " (ACTIVE)";
+		}
+		return label;
+	}
+
 	void AppendReplicaVisualInstances(
 		engine::core::Name replicaWorld,
 		std::span<const engine::scene::DrawInstance> replica,

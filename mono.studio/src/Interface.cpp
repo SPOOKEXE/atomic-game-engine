@@ -22,6 +22,7 @@
 #include <string_view>
 #include <studio/Editor.hpp>
 #include <studio/Keybinds.hpp>
+#include <studio/Presentation.hpp>
 #include <studio/Widgets.hpp>
 #include <vector>
 
@@ -1004,6 +1005,10 @@ namespace studio {
 		// show the unwritten border down two edges.
 		const engine::render::SceneExtent extent = Renderer.SceneTextureExtent(index);
 		void *texture = Renderer.SceneTexture(index);
+		if (ViewportResults.size() <= index) {
+			ViewportResults.resize(index + 1);
+		}
+		ViewportResults[index] = Renderer.SceneFrameResult(index);
 		const bool textureMatchesPanel =
 			extent.DrawnWidth == target.Width && extent.DrawnHeight == target.Height;
 		if (texture != nullptr && textureMatchesPanel) {
@@ -2013,15 +2018,13 @@ namespace studio {
 		// picture in front of you and silently changes a different one.
 		ImGui::SetNextItemWidth(180.0f * Settings.Scale);
 		const Name shownName = Universe->NameOf(shown);
-		// Active is a choice-state marker, so it belongs on the selector's rows
-		// and preview. Putting it on the viewport tab confuses the scene being
-		// shown with the scene an edit command will target.
+		// Runtime activity belongs on the selector's rows and preview. Putting it
+		// on the viewport tab confuses the scene being shown with the scene an
+		// edit command will target.
 		const auto selectorLabel = [&](WorldId world, const Name &name) {
-			std::string label = name.IsValid() ? std::string(Label(name)) : "?";
-			if (world.IsValid() && world == Active) {
-				label += " (ACTIVE)";
-			}
-			return label;
+			return WorldSelectorLabel(
+				name.IsValid() ? Label(name) : std::string_view{}, world.IsValid() && IsActivelyRunning(world)
+			);
 		};
 		const std::string shownLabel =
 			shown.IsValid() ? selectorLabel(shown, shownName) : std::string("(no scene)");

@@ -578,6 +578,13 @@ namespace engine::render {
 		// finished. Waiting once here is simpler and no slower than tracking
 		// per-resource fences for a shutdown path.
 		SDL_WaitForGPUIdle(device);
+		for (Impl::PendingSceneSubmission &submission : State->PendingSceneSubmissions) {
+			if (submission.Fence != nullptr) {
+				SDL_ReleaseGPUFence(device, submission.Fence);
+			}
+		}
+		State->PendingSceneSubmissions.clear();
+		State->DropStagedSceneFrames();
 		State->Timestamps.Shutdown();
 		if (State->Preview.Fence != nullptr) {
 			SDL_ReleaseGPUFence(device, State->Preview.Fence);
@@ -684,6 +691,12 @@ namespace engine::render {
 			SDL_ReleaseGPUSampler(device, State->SurfaceSampler);
 		}
 		for (Impl::SceneSlot &slot : State->SceneSlots) {
+			for (Impl::SceneSlot::RetainedFrame &frame : slot.Retained) {
+				if (frame.Texture != nullptr) {
+					gpu::ReleaseTexture(device, frame.Texture);
+					frame.Texture = nullptr;
+				}
+			}
 			if (slot.Texture) {
 				gpu::ReleaseTexture(device, slot.Texture);
 				slot.Texture = nullptr;
@@ -1206,7 +1219,25 @@ namespace engine::render {
 	}
 
 	void *Renderer::SceneTexture(size_t slot) const {
-		return slot < State->SceneSlots.size() ? State->SceneSlots[slot].Texture : nullptr;
+		if (slot >= State->SceneSlots.size()) {
+			return nullptr;
+		}
+		const Impl::SceneSlot &scene = State->SceneSlots[slot];
+		if (scene.PublishedFrame == Impl::SceneSlot::NO_RETAINED_FRAME) {
+			return nullptr;
+		}
+		return scene.Retained[scene.PublishedFrame].Texture;
+	}
+
+	FrameResult Renderer::SceneFrameResult(size_t slot) const {
+		if (slot >= State->SceneSlots.size()) {
+			return {};
+		}
+		const Impl::SceneSlot &scene = State->SceneSlots[slot];
+		if (scene.PublishedFrame == Impl::SceneSlot::NO_RETAINED_FRAME) {
+			return {};
+		}
+		return scene.Retained[scene.PublishedFrame].Result;
 	}
 
 	void *Renderer::ResourceTexture(core::Name resource, size_t slot) const {
@@ -1433,20 +1464,24 @@ namespace engine::render {
 		}
 
 		const Impl::SceneSlot &target = State->SceneSlots[slot];
+		if (target.PublishedFrame == Impl::SceneSlot::NO_RETAINED_FRAME) {
+			return {};
+		}
+		const Impl::SceneSlot::RetainedFrame &frame = target.Retained[target.PublishedFrame];
 
 		// **The whole texture when nothing has been drawn yet**, which is the
 		// honest answer rather than a safe one: a caller sampling a texture no
 		// pass has written is showing uninitialised memory whatever the
 		// coordinates say, and a fraction of it is not better than all of it.
-		if (target.Width == 0 || target.Height == 0) {
+		if (frame.Width == 0 || frame.Height == 0) {
 			return {};
 		}
 
 		return SceneExtent{
-			static_cast<float>(target.DrawnWidth) / static_cast<float>(target.Width),
-			static_cast<float>(target.DrawnHeight) / static_cast<float>(target.Height),
-			target.DrawnWidth,
-			target.DrawnHeight,
+			static_cast<float>(frame.DrawnWidth) / static_cast<float>(frame.Width),
+			static_cast<float>(frame.DrawnHeight) / static_cast<float>(frame.Height),
+			frame.DrawnWidth,
+			frame.DrawnHeight,
 		};
 	}
 
@@ -1518,6 +1553,7 @@ namespace engine::render {
 		if (State == nullptr || State->Device == nullptr || views.empty() || State->BatchActive) {
 			return frame;
 		}
+		State->PollSceneFrames();
 
 		// **Every mesh admitted since the last frame, in one transfer.** `AddMesh`
 		// only accumulates, so this is the barrier the content pump used to pay
@@ -1690,7 +1726,11 @@ namespace engine::render {
 			if (State->BatchTimingSlot < VulkanTimestamps::SLOTS) {
 				State->PendingMarks[State->BatchTimingSlot].clear();
 			}
-			State->CompleteInstanceUploads(SDL_SubmitGPUCommandBuffer(State->BatchCommand));
+			const bool submitted = State->SubmitSceneCommand(State->BatchCommand);
+			if (!submitted) {
+				ENGINE_ERROR("SDL_SubmitGPUCommandBuffer (failed view batch): {}", SDL_GetError());
+			}
+			State->CompleteInstanceUploads(submitted);
 			State->BatchCommand = nullptr;
 
 			// A failed batch never reached the final view's submit, so any

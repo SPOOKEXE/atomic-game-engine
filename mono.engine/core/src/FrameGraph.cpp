@@ -790,11 +790,11 @@ namespace engine::core {
 				// time as soon as the work it dispatched outran the wall clock
 				// it waited for - which is the normal case for anything
 				// parallel, not an edge one.
-				if (candidate.Depth == span.Depth + 1 && !candidate.Reported) {
+				if (candidate.Depth == span.Depth + 1 && (!candidate.Reported || span.Summary)) {
 					children += candidate.Milliseconds;
 				}
 			}
-			span.SelfMilliseconds = span.Milliseconds - children;
+			span.SelfMilliseconds = std::max(span.Milliseconds - children, 0.0f);
 		}
 
 		// Idle inside: what part of each span's inclusive time was waiting.
@@ -1263,6 +1263,35 @@ namespace engine::core {
 		}
 
 		Index = Push(Intern(state, name), category);
+	}
+
+	FrameGraph::ReportedScope::ReportedScope(
+		std::string_view name, ProfileCategory category, float milliseconds
+	)
+		: Milliseconds(milliseconds) {
+		auto &state = Get();
+		if (!(milliseconds >= 0.0f)) {
+			if (state.Recording &&
+				std::this_thread::get_id() == state.Owner.load(std::memory_order_relaxed)) {
+				state.DroppedThisFrame.fetch_add(1, std::memory_order_relaxed);
+			}
+			return;
+		}
+		Index = Push(name, category);
+	}
+
+	FrameGraph::ReportedScope::~ReportedScope() {
+		const size_t index = Index;
+		Pop(index);
+		if (index == NOT_RECORDING || index == DEPTH_ONLY) {
+			return;
+		}
+
+		auto &state = Get();
+		FrameSpan &span = state.Building[index];
+		span.Milliseconds = Milliseconds;
+		span.Reported = true;
+		span.Summary = true;
 	}
 
 	void FrameGraph::Report(std::string_view name, ProfileCategory category, float milliseconds) {

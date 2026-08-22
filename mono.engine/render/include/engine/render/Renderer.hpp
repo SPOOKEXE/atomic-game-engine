@@ -1813,7 +1813,7 @@ namespace engine::render {
 			FrameOverlayHook *hostOverlayHook = nullptr
 		);
 
-		// The texture the most recent `Render` drew that slot's world into.
+		// The newest completed texture for that scene slot.
 		//
 		// **Slots exist because an editor has more than one viewport.** A game
 		// draws one view of one world and only ever uses slot 0. A studio
@@ -1824,17 +1824,22 @@ namespace engine::render {
 		// measurable: it is a colour and a depth texture destroyed and created
 		// per frame.
 		//
-		// **Valid until the next `Render` into that slot with a different
-		// size**, which is when the target is reallocated. An interface layer hands it straight to
-		// whatever draws it - for Dear ImGui's SDL_GPU backend that is an
-		// `ImTextureID`, which is an `SDL_GPUTexture *` and therefore this
-		// pointer unchanged.
+		// Three completed frames are retained on the device. Submission fences
+		// publish a new one only at a CPU synchronization point, so a UI repaint
+		// either gets a whole new frame or keeps the previous one. It never binds
+		// the target the renderer is currently replacing. An interface layer hands
+		// the pointer straight to whatever draws it; Dear ImGui's SDL_GPU backend
+		// uses the same `SDL_GPUTexture *` as its `ImTextureID`.
 		//
 		// @param slot Which offscreen target to ask about. A program with one
 		//             viewport uses 0 and never passes this.
-		// @return The texture, or `nullptr` when nothing has been drawn into
-		//         that slot.
+		// @return The texture, or `nullptr` before the first frame completes.
 		void *SceneTexture(size_t slot = 0) const;
+
+		// The counters belonging to the completed image `SceneTexture` returns.
+		// They publish at the same fence, so a retained image is never labelled
+		// with the draw counts of a newer frame still running on the device.
+		FrameResult SceneFrameResult(size_t slot = 0) const;
 
 		// A graph resource's current device image. Supports the default PBR
 		// resources and `colour`; returns null when the selected slot has not run

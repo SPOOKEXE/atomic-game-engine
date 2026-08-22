@@ -14,6 +14,7 @@
 #include "VulkanTimestamps.hpp"
 
 #include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 
 #include <SDL3/SDL_gpu.h>
@@ -123,6 +124,139 @@ namespace engine::render {
 			return false;
 		}
 		return true;
+	}
+
+	bool
+	Renderer::Impl::RetainSceneFrame(SDL_GPUCommandBuffer *command, size_t slot, const FrameResult &result) {
+		if (command == nullptr || slot >= SceneSlots.size()) {
+			return false;
+		}
+
+		SceneSlot &scene = SceneSlots[slot];
+		if (scene.Texture == nullptr || scene.DrawnWidth == 0 || scene.DrawnHeight == 0) {
+			return false;
+		}
+
+		uint32_t selected = SceneSlot::NO_RETAINED_FRAME;
+		for (uint32_t offset = 0; offset < SceneSlot::RETAINED_FRAMES; offset++) {
+			const uint32_t candidate = (scene.NextRetainedFrame + offset) % SceneSlot::RETAINED_FRAMES;
+			const SceneSlot::RetainedFrame &frame = scene.Retained[candidate];
+			if (candidate != scene.PublishedFrame && !frame.Pending) {
+				selected = candidate;
+				break;
+			}
+		}
+
+		// Rendering may outrun completion. The scene still renders, but the
+		// interface keeps its last completed image until a retained slot is free.
+		if (selected == SceneSlot::NO_RETAINED_FRAME) {
+			core::Metrics::Count("render.scene_frame.retention_skipped", 1.0);
+			return false;
+		}
+
+		SceneSlot::RetainedFrame &frame = scene.Retained[selected];
+		if (frame.Texture == nullptr || frame.Width != scene.Width || frame.Height != scene.Height) {
+			if (frame.Texture != nullptr) {
+				gpu::ReleaseTexture(Device, frame.Texture);
+				frame.Texture = nullptr;
+			}
+
+			SDL_GPUTextureCreateInfo info{};
+			info.type = SDL_GPU_TEXTURETYPE_2D;
+			info.format = ColourFormat();
+			info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+			info.width = scene.Width;
+			info.height = scene.Height;
+			info.layer_count_or_depth = 1;
+			info.num_levels = 1;
+			frame.Texture = gpu::CreateTexture(Device, &info);
+			if (frame.Texture == nullptr) {
+				ENGINE_ERROR("SDL_CreateGPUTexture (retained scene frame): {}", SDL_GetError());
+				frame = {};
+				return false;
+			}
+			frame.Width = scene.Width;
+			frame.Height = scene.Height;
+		}
+
+		SDL_GPUBlitInfo blit{};
+		blit.source.texture = scene.Texture;
+		blit.source.w = scene.DrawnWidth;
+		blit.source.h = scene.DrawnHeight;
+		blit.destination.texture = frame.Texture;
+		blit.destination.w = scene.DrawnWidth;
+		blit.destination.h = scene.DrawnHeight;
+		blit.load_op = SDL_GPU_LOADOP_DONT_CARE;
+		blit.filter = SDL_GPU_FILTER_NEAREST;
+		SDL_BlitGPUTexture(command, &blit);
+
+		frame.DrawnWidth = scene.DrawnWidth;
+		frame.DrawnHeight = scene.DrawnHeight;
+		frame.Result = result;
+		frame.Sequence = NextSceneSequence++;
+		frame.Pending = true;
+		StagedSceneFrames.push_back({slot, selected, frame.Sequence});
+		scene.NextRetainedFrame = (selected + 1) % SceneSlot::RETAINED_FRAMES;
+		return true;
+	}
+
+	void Renderer::Impl::DropStagedSceneFrames() {
+		for (const StagedSceneFrame &staged : StagedSceneFrames) {
+			if (staged.Slot >= SceneSlots.size() || staged.Frame >= SceneSlot::RETAINED_FRAMES) {
+				continue;
+			}
+			SceneSlot::RetainedFrame &frame = SceneSlots[staged.Slot].Retained[staged.Frame];
+			if (frame.Sequence == staged.Sequence) {
+				frame.Pending = false;
+			}
+		}
+		StagedSceneFrames.clear();
+	}
+
+	bool Renderer::Impl::SubmitSceneCommand(SDL_GPUCommandBuffer *command) {
+		if (StagedSceneFrames.empty()) {
+			return SDL_SubmitGPUCommandBuffer(command);
+		}
+
+		SDL_GPUFence *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(command);
+		if (fence == nullptr) {
+			DropStagedSceneFrames();
+			return false;
+		}
+
+		PendingSceneSubmissions.push_back({fence, std::move(StagedSceneFrames)});
+		StagedSceneFrames.clear();
+		return true;
+	}
+
+	void Renderer::Impl::PollSceneFrames() {
+		for (size_t index = 0; index < PendingSceneSubmissions.size();) {
+			PendingSceneSubmission &submission = PendingSceneSubmissions[index];
+			if (submission.Fence == nullptr || !SDL_QueryGPUFence(Device, submission.Fence)) {
+				index++;
+				continue;
+			}
+
+			for (const StagedSceneFrame &staged : submission.Frames) {
+				if (staged.Slot >= SceneSlots.size() || staged.Frame >= SceneSlot::RETAINED_FRAMES) {
+					continue;
+				}
+				SceneSlot &scene = SceneSlots[staged.Slot];
+				SceneSlot::RetainedFrame &frame = scene.Retained[staged.Frame];
+				if (frame.Sequence != staged.Sequence) {
+					continue;
+				}
+				frame.Pending = false;
+				if (scene.PublishedFrame == SceneSlot::NO_RETAINED_FRAME ||
+					frame.Sequence > scene.Retained[scene.PublishedFrame].Sequence) {
+					scene.PublishedFrame = staged.Frame;
+				}
+			}
+
+			SDL_ReleaseGPUFence(Device, submission.Fence);
+			submission = std::move(PendingSceneSubmissions.back());
+			PendingSceneSubmissions.pop_back();
+		}
 	}
 
 	bool Renderer::Impl::EnsureHistory(size_t slot, uint32_t width, uint32_t height) {

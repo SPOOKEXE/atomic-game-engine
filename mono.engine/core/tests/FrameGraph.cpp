@@ -695,6 +695,55 @@ TEST_CASE("reported time counts towards its category", "[framegraph]") {
 	REQUIRE(FrameGraph::CategoryMilliseconds(ProfileCategory::ECS) == 7.0f);
 }
 
+TEST_CASE("reported scopes retain a worker timing hierarchy", "[framegraph]") {
+	Collecting collecting;
+
+	FrameGraph::BeginFrame();
+	{
+		FrameGraph::ReportedScope workers("worlds", ProfileCategory::ECS, 10.0f);
+		FrameGraph::ReportedScope world("world", ProfileCategory::ECS, 8.0f);
+		FrameGraph::ReportedScope systems("ecs.systems", ProfileCategory::ECS, 7.0f);
+		FrameGraph::ReportedScope phase("post-simulation", ProfileCategory::ECS, 7.0f);
+		FrameGraph::Report("cleanup", ProfileCategory::ECS, 7.0f);
+	}
+	FrameGraph::EndFrame();
+
+	const auto &spans = FrameGraph::Spans();
+	REQUIRE(spans.size() == 5);
+	for (size_t index = 0; index < spans.size(); index++) {
+		CHECK(spans[index].Depth == index);
+		CHECK(spans[index].Reported);
+		if (index > 0) {
+			CHECK(spans[index].Parent == index - 1);
+		}
+	}
+	CHECK(spans[2].Name == "ecs.systems");
+	CHECK(spans[3].Name == "post-simulation");
+	CHECK(spans[4].Name == "cleanup");
+}
+
+TEST_CASE("reported scope totals are not counted once per tree level", "[framegraph]") {
+	Collecting collecting;
+
+	FrameGraph::BeginFrame();
+	{
+		FrameGraph::ReportedScope workers("worlds", ProfileCategory::ECS, 10.0f);
+		FrameGraph::ReportedScope world("world", ProfileCategory::ECS, 8.0f);
+		FrameGraph::ReportedScope systems("ecs.systems", ProfileCategory::ECS, 7.0f);
+		FrameGraph::ReportedScope phase("simulation", ProfileCategory::ECS, 7.0f);
+		FrameGraph::Report("step", ProfileCategory::ECS, 7.0f);
+	}
+	FrameGraph::EndFrame();
+
+	const auto &spans = FrameGraph::Spans();
+	CHECK(spans[0].SelfMilliseconds == 2.0f);
+	CHECK(spans[1].SelfMilliseconds == 1.0f);
+	CHECK(spans[2].SelfMilliseconds == 0.0f);
+	CHECK(spans[3].SelfMilliseconds == 0.0f);
+	CHECK(spans[4].SelfMilliseconds == 7.0f);
+	CHECK(FrameGraph::CategoryMilliseconds(ProfileCategory::ECS) == 10.0f);
+}
+
 TEST_CASE("a reported span is a leaf and never becomes a parent", "[framegraph]") {
 	// Its work happened elsewhere, so nothing recorded on this thread was
 	// inside it. A sibling opened afterwards must sit beside it, not under it.

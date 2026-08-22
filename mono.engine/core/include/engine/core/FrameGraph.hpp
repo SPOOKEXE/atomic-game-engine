@@ -207,6 +207,15 @@ namespace engine::core {
 		// one millisecond of wall clock. The overlay marks them so a reader
 		// knows which bars are concurrent.
 		bool Reported = false;
+
+		// Whether this reported span is a structural total whose direct
+		// reported children break that total down.
+		//
+		// Ordinary reported spans are leaves and are not subtracted from a
+		// measured parent's self time. A summary is different: its duration is
+		// already the total of the work below it, so retaining every child's
+		// duration as self time would count that work once per tree level.
+		bool Summary = false;
 	};
 
 	// Fills in `FrameSpan::IdleMilliseconds` across a frame's spans.
@@ -749,6 +758,34 @@ namespace engine::core {
 
 			// Closes the copied-name span through Scope's RAII destructor.
 			~CopiedScope() = default;
+		};
+
+		// Opens a reported container whose duration was measured by its producer.
+		//
+		// Unlike `Report`, this may contain other reported spans. It is used when
+		// a worker hands the owner a hierarchy such as world, scheduler, phase and
+		// system after the work has joined. The supplied duration replaces the
+		// negligible time spent constructing the tree on this thread.
+		class ReportedScope {
+		  public:
+			// Opens a structural reported span at the current depth.
+			//
+			// @param name Stable span name storage; the text is not copied.
+			// @param category Broad owner used for category totals.
+			// @param milliseconds Inclusive duration measured by the producer.
+			ReportedScope(std::string_view name, ProfileCategory category, float milliseconds);
+
+			// Closes the span and publishes the producer's duration.
+			~ReportedScope();
+
+			ReportedScope(const ReportedScope &) = delete;
+			ReportedScope &operator=(const ReportedScope &) = delete;
+			ReportedScope(ReportedScope &&) = delete;
+			ReportedScope &operator=(ReportedScope &&) = delete;
+
+		  private:
+			size_t Index = NOT_RECORDING;
+			float Milliseconds = 0.0f;
 		};
 
 	  private:

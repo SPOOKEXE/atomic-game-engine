@@ -38,6 +38,8 @@
 #include <engine/world/Enums.hpp>
 
 #include <span>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace studio {
@@ -64,6 +66,13 @@ namespace studio {
 	//         for one that is not.
 	// @since v0.11
 	float PresentationAlpha(bool advancing, engine::world::WorldState state, float accumulator);
+
+	// Builds one world selector row.
+	//
+	// `active` means the world is being advanced now. It is deliberately not
+	// the editor's selected world and not merely `WorldState::Active`, since edit
+	// worlds retain that state while no run exists.
+	std::string WorldSelectorLabel(std::string_view name, bool active);
 
 	// Appends a replica's client-local rows to the authority scene Studio has
 	// already copied for a hosted client viewport.

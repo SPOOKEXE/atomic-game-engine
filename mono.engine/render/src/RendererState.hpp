@@ -34,6 +34,7 @@
 #include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
 
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -1165,6 +1166,9 @@ namespace engine::render {
 		// own - a colour and a depth texture per frame, which is exactly the
 		// cost `RetiredScenes` exists to avoid paying even once.
 		struct SceneSlot {
+			static constexpr size_t RETAINED_FRAMES = 3;
+			static constexpr uint32_t NO_RETAINED_FRAME = UINT32_MAX;
+
 			SDL_GPUTexture *Texture = nullptr;
 
 			// What was allocated, which is the panel's size rounded up to a
@@ -1198,9 +1202,39 @@ namespace engine::render {
 			SDL_GPUBuffer *InstanceIndexBuffer = nullptr;
 			SDL_GPUTransferBuffer *InstanceIndexTransfer = nullptr;
 			uint32_t InstanceIndexCapacity = 0;
+
+			// Completed output images are separate from the target being written.
+			// The CPU publishes one only after its submission fence signals, so an
+			// interface never samples a texture the device is still replacing.
+			struct RetainedFrame {
+				SDL_GPUTexture *Texture = nullptr;
+				uint32_t Width = 0;
+				uint32_t Height = 0;
+				uint32_t DrawnWidth = 0;
+				uint32_t DrawnHeight = 0;
+				FrameResult Result;
+				uint64_t Sequence = 0;
+				bool Pending = false;
+			};
+			std::array<RetainedFrame, RETAINED_FRAMES> Retained;
+			uint32_t PublishedFrame = NO_RETAINED_FRAME;
+			uint32_t NextRetainedFrame = 0;
 		};
 
 		std::vector<SceneSlot> SceneSlots;
+
+		struct StagedSceneFrame {
+			size_t Slot = 0;
+			uint32_t Frame = 0;
+			uint64_t Sequence = 0;
+		};
+		struct PendingSceneSubmission {
+			SDL_GPUFence *Fence = nullptr;
+			std::vector<StagedSceneFrame> Frames;
+		};
+		std::vector<StagedSceneFrame> StagedSceneFrames;
+		std::vector<PendingSceneSubmission> PendingSceneSubmissions;
+		uint64_t NextSceneSequence = 1;
 
 		// The slot the frame in progress is drawing into.
 		size_t ActiveSlot = 0;
@@ -1322,6 +1356,7 @@ namespace engine::render {
 			if (Device == nullptr) {
 				return false;
 			}
+			PollSceneFrames();
 
 			// **Before the acquire, which is the only moment it is legal.** See
 			// `PendingPresentMode`.
@@ -1971,6 +2006,10 @@ namespace engine::render {
 			uint32_t height
 		);
 		bool EnsureScene(uint32_t width, uint32_t height);
+		bool RetainSceneFrame(SDL_GPUCommandBuffer *command, size_t slot, const FrameResult &result);
+		bool SubmitSceneCommand(SDL_GPUCommandBuffer *command);
+		void DropStagedSceneFrames();
+		void PollSceneFrames();
 		bool EnsureHistory(size_t slot, uint32_t width, uint32_t height);
 
 		// Whether this renderer has a window at all.

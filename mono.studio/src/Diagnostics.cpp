@@ -26,11 +26,137 @@
 #include <cstdio>
 #include <imgui.h>
 #include <iterator>
+#include <studio/Diagnostics.hpp>
 #include <studio/Editor.hpp>
 #include <studio/Widgets.hpp>
 #include <vector>
 
 namespace studio {
+	void AccumulateDiagnosticSpans(
+		std::span<const engine::core::FrameSpan> frame, std::vector<DiagnosticSpan> &totals
+	) {
+		std::vector<uint32_t> targets(frame.size(), engine::core::FrameGraph::NO_PARENT);
+
+		for (size_t index = 0; index < frame.size(); index++) {
+			const engine::core::FrameSpan &source = frame[index];
+			const uint32_t parent =
+				source.Parent < index ? targets[source.Parent] : engine::core::FrameGraph::NO_PARENT;
+
+			// The ordinal is local to one parent. Three worlds can each contain an
+			// `ecs.systems`; they are three children of three different parents, not
+			// the first, second and third occurrence of one global name.
+			uint32_t ordinal = 0;
+			for (size_t previous = 0; previous < index; previous++) {
+				if (frame[previous].Parent == source.Parent && frame[previous].Name == source.Name) {
+					ordinal++;
+				}
+			}
+
+			DiagnosticSpan *target = nullptr;
+			uint32_t targetIndex = engine::core::FrameGraph::NO_PARENT;
+			uint32_t seen = 0;
+			for (size_t candidate = 0; candidate < totals.size(); candidate++) {
+				DiagnosticSpan &span = totals[candidate];
+				if (span.Parent != parent || span.Depth != source.Depth || span.Name != source.Name) {
+					continue;
+				}
+				if (seen++ == ordinal) {
+					target = &span;
+					targetIndex = static_cast<uint32_t>(candidate);
+					break;
+				}
+			}
+
+			if (target == nullptr) {
+				totals.push_back(
+					DiagnosticSpan{
+						.Name = std::string(source.Name),
+						.Depth = source.Depth,
+						.Parent = parent,
+						.Category = source.Category,
+						.Reported = source.Reported,
+					}
+				);
+				targetIndex = static_cast<uint32_t>(totals.size() - 1);
+				target = &totals.back();
+			}
+
+			targets[index] = targetIndex;
+			target->StartMilliseconds += source.StartMilliseconds;
+			target->Milliseconds += source.Milliseconds;
+			target->SelfMilliseconds += source.SelfMilliseconds;
+			target->IdleMilliseconds += source.IdleMilliseconds;
+			target->Occurrences++;
+		}
+	}
+
+	void FinishDiagnosticAverage(std::vector<DiagnosticSpan> &spans, uint32_t frames) {
+		if (frames == 0) {
+			return;
+		}
+
+		const float frameCount = static_cast<float>(frames);
+		for (DiagnosticSpan &span : spans) {
+			const float occurrences = static_cast<float>(std::max(span.Occurrences, 1u));
+			span.StartMilliseconds /= occurrences;
+			span.Milliseconds /= frameCount;
+			span.SelfMilliseconds /= frameCount;
+			span.IdleMilliseconds /= frameCount;
+		}
+	}
+
+	uint32_t LayoutDiagnosticRows(
+		std::span<const DiagnosticSpan> spans,
+		float frameMilliseconds,
+		float minimumMilliseconds,
+		std::vector<uint32_t> &rows
+	) {
+		rows.assign(spans.size(), 0);
+		if (spans.empty()) {
+			return 0;
+		}
+
+		uint32_t deepest = 0;
+		for (const DiagnosticSpan &span : spans) {
+			deepest = std::max(deepest, span.Depth);
+		}
+
+		std::vector<std::vector<float>> laneEnds(static_cast<size_t>(deepest) + 1);
+		std::vector<uint32_t> lanes(spans.size(), 0);
+		const float frameEnd = std::max(frameMilliseconds, 0.0f);
+		const float minimum = std::max(minimumMilliseconds, 0.0f);
+
+		for (size_t index = 0; index < spans.size(); index++) {
+			const DiagnosticSpan &span = spans[index];
+			const float latestStart = std::max(frameEnd - minimum, 0.0f);
+			const float left = std::clamp(span.StartMilliseconds, 0.0f, latestStart);
+			const float right = std::min(frameEnd, left + std::max(span.Milliseconds, minimum));
+
+			auto &ends = laneEnds[span.Depth];
+			uint32_t lane = 0;
+			while (lane < ends.size() && left < ends[lane]) {
+				lane++;
+			}
+			if (lane == ends.size()) {
+				ends.push_back(right);
+			} else {
+				ends[lane] = right;
+			}
+			lanes[index] = lane;
+		}
+
+		std::vector<uint32_t> offsets(laneEnds.size(), 0);
+		uint32_t rowCount = 0;
+		for (size_t depth = 0; depth < laneEnds.size(); depth++) {
+			offsets[depth] = rowCount;
+			rowCount += static_cast<uint32_t>(std::max<size_t>(laneEnds[depth].size(), 1));
+		}
+
+		for (size_t index = 0; index < spans.size(); index++) {
+			rows[index] = offsets[spans[index].Depth] + lanes[index];
+		}
+		return rowCount;
+	}
 
 	namespace {
 		using engine::core::FrameGraph;
@@ -268,13 +394,13 @@ namespace studio {
 		const int chosen = std::clamp(view.Interval, 0, static_cast<int>(FRAME_GRAPH_INTERVALS.size()) - 1);
 		const float interval = FRAME_GRAPH_INTERVALS[static_cast<size_t>(chosen)];
 
-		// One frame's spans, names copied - see `Editor::HeldSpan`.
-		const auto snapshot = [&live](std::vector<HeldSpan> &into) {
+		// One frame's spans, names copied - see `DiagnosticSpan`.
+		const auto snapshot = [&live](std::vector<DiagnosticSpan> &into) {
 			into.clear();
 			into.reserve(live.size());
 			for (const FrameSpan &span : live) {
 				into.push_back(
-					HeldSpan{
+					DiagnosticSpan{
 						std::string(span.Name),
 						span.Depth,
 						span.Parent,
@@ -328,42 +454,10 @@ namespace studio {
 				forget();
 			} else {
 				if (view.Average) {
-					// **Matched by name and depth rather than by position.** A
-					// frame that opens one fewer span shifts every later index,
-					// so summing by position would add a renderer's time to a
-					// script's for the rest of the interval. The lists are a
-					// few dozen entries, so a linear find per span is cheaper
-					// than the map that would avoid it.
-					for (const FrameSpan &span : live) {
-						HeldSpan *into = nullptr;
-						for (HeldSpan &candidate : view.Summed) {
-							if (candidate.Depth == span.Depth && candidate.Name == span.Name) {
-								into = &candidate;
-								break;
-							}
-						}
-						if (into == nullptr) {
-							view.Summed.push_back(
-								HeldSpan{
-									std::string(span.Name),
-									span.Depth,
-									span.Parent,
-									0.0f,
-									0.0f,
-									0.0f,
-									0.0f,
-									span.Category,
-									span.Reported,
-								}
-							);
-							into = &view.Summed.back();
-						}
-						into->StartMilliseconds += span.StartMilliseconds;
-						into->Milliseconds += span.Milliseconds;
-						into->SelfMilliseconds += span.SelfMilliseconds;
-						into->IdleMilliseconds += span.IdleMilliseconds;
-						into->Occurrences++;
-					}
+					// Structural matching keeps repeated world and phase trees
+					// separate. Matching only name and depth collapses all of their
+					// bars onto one time range.
+					AccumulateDiagnosticSpans(live, view.Summed);
 
 					view.SummedFrameMilliseconds += FrameGraph::FrameMilliseconds();
 					view.SummedIdleMilliseconds += FrameGraph::CategoryMilliseconds(ProfileCategory::Idle);
@@ -379,21 +473,7 @@ namespace studio {
 					if (view.Average && view.Frames > 0) {
 						const float frames = static_cast<float>(view.Frames);
 						view.Spans = view.Summed;
-						for (HeldSpan &span : view.Spans) {
-							// **The duration divides by frames and the start
-							// divides by occurrences**, and the two divisors
-							// being different is the fix. See
-							// `HeldSpan::Occurrences`: a span that opens three
-							// times a frame costs three times its own length
-							// *per frame*, which is what the width should show -
-							// but its left edge is one start, not three added
-							// together.
-							const float seen = static_cast<float>(std::max(span.Occurrences, 1u));
-							span.StartMilliseconds /= seen;
-							span.Milliseconds /= frames;
-							span.SelfMilliseconds /= frames;
-							span.IdleMilliseconds /= frames;
-						}
+						FinishDiagnosticAverage(view.Spans, view.Frames);
 						view.FrameMilliseconds = view.SummedFrameMilliseconds / frames;
 						view.IdleMilliseconds = view.SummedIdleMilliseconds / frames;
 						view.UnmarkedMilliseconds = view.SummedUnmarkedMilliseconds / frames;
@@ -409,7 +489,7 @@ namespace studio {
 			}
 		}
 
-		const std::vector<HeldSpan> &spans = view.Spans;
+		const std::vector<DiagnosticSpan> &spans = view.Spans;
 
 		const float frameMs = view.FrameMilliseconds;
 		const float idleMs = view.IdleMilliseconds;
@@ -649,7 +729,7 @@ namespace studio {
 					// person is looking at when they write the rule.
 					ImGui::SameLine();
 					if (ImGui::BeginCombo("##pick", "", ImGuiComboFlags_NoPreview)) {
-						for (const HeldSpan &span : spans) {
+						for (const DiagnosticSpan &span : spans) {
 							if (ImGui::Selectable(span.Name.c_str())) {
 								rule.Name = span.Name;
 								changed = true;
@@ -751,32 +831,31 @@ namespace studio {
 		// reason nobody wrote down. `StartMilliseconds` and `Depth` are exactly
 		// the two axes.
 
-		uint32_t deepest = 0;
-		for (const HeldSpan &span : spans) {
-			deepest = std::max(deepest, span.Depth);
-		}
-
 		const float rowHeight = engine::ui::Scaled(engine::ui::Size::Row) * 0.72f;
-		const float graphHeight = rowHeight * static_cast<float>(deepest + 1);
-
 		const ImVec2 origin = ImGui::GetCursorScreenPos();
 		const float graphWidth = std::max(ImGui::GetContentRegionAvail().x, 1.0f);
 		const float scale = frameMs > 0.0001f ? graphWidth / frameMs : 0.0f;
+		const float onePixelMilliseconds = scale > 0.0f ? 1.0f / scale : 0.0f;
+		const uint32_t graphRows = LayoutDiagnosticRows(spans, frameMs, onePixelMilliseconds, view.Rows);
+		const float graphHeight = rowHeight * static_cast<float>(graphRows);
 
 		ImDrawList *draw = ImGui::GetWindowDrawList();
-		const HeldSpan *hovered = nullptr;
+		const DiagnosticSpan *hovered = nullptr;
 
-		for (const HeldSpan &span : spans) {
+		for (size_t index = 0; index < spans.size(); index++) {
+			const DiagnosticSpan &span = spans[index];
 			// **Clamped to the graph, whatever the arithmetic above produced.**
 			// An averaged span can still exceed the averaged frame - a span that
 			// ran in only some of the frames divides by all of them for its
 			// width and by its own count for its start - and a bar drawn past
 			// the right edge lands on top of whatever is beside it. A flamegraph
 			// that lies about a width is worse than one that clips.
-			const float left = origin.x + std::clamp(span.StartMilliseconds * scale, 0.0f, graphWidth);
+			const float left =
+				origin.x +
+				std::clamp(span.StartMilliseconds * scale, 0.0f, std::max(graphWidth - 1.0f, 0.0f));
 			const float room = std::max(origin.x + graphWidth - left, 1.0f);
 			const float width = std::clamp(span.Milliseconds * scale, 1.0f, room);
-			const float top = origin.y + static_cast<float>(span.Depth) * rowHeight;
+			const float top = origin.y + static_cast<float>(view.Rows[index]) * rowHeight;
 
 			const ImVec2 upper(left, top);
 			const ImVec2 lower(left + width, top + rowHeight - 1.0f);
@@ -838,7 +917,7 @@ namespace studio {
 			ImGui::TableSetupScrollFreeze(0, 1);
 			ImGui::TableHeadersRow();
 
-			for (const HeldSpan &span : spans) {
+			for (const DiagnosticSpan &span : spans) {
 				ImGui::TableNextRow();
 
 				ImGui::TableSetColumnIndex(0);

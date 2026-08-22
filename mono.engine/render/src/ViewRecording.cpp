@@ -1989,6 +1989,13 @@ namespace engine::render {
 			}
 		}
 
+		// Keep the interface-facing image separate from the target being written.
+		// Its fence is attached when the batch submits below, and the CPU publishes
+		// it on a later frame only after that fence signals.
+		if (offscreen) {
+			(void)State->RetainSceneFrame(command, targetSlot, result);
+		}
+
 		// Studio chrome is a host concern, not a universe render-graph stage. It
 		// is recorded after `output-image`, so graph previews, authored captures,
 		// and rendering profiles contain only the game image and game interface.
@@ -2034,7 +2041,7 @@ namespace engine::render {
 			// SDL's one unified queue it is what guarantees every pass has
 			// executed before the later-transfer buffer's downloads read their
 			// textures. The fences below therefore move to that second buffer.
-			if (!SDL_SubmitGPUCommandBuffer(command)) {
+			if (!State->SubmitSceneCommand(command)) {
 				ENGINE_ERROR("SDL_SubmitGPUCommandBuffer: {}", SDL_GetError());
 				State->CompleteInstanceUploads(false);
 				State->Timestamps.Abandon(timingSlot);

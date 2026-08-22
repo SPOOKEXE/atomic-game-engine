@@ -40,6 +40,7 @@ using engine::world::WorldSettings;
 using engine::world::WorldState;
 using studio::AppendReplicaVisualInstances;
 using studio::PresentationAlpha;
+using studio::WorldSelectorLabel;
 
 namespace {
 	// An accumulator that is neither of the two answers, so a case that returns
@@ -113,6 +114,12 @@ TEST_CASE("a world being ticked keeps its accumulator", "[studio][presentation]"
 	// world that was simulating perfectly well. `engine::world::Ticks` is what
 	// stopped that being a guess each caller makes.
 	CHECK(PresentationAlpha(true, WorldState::Idle, MIDWAY) == MIDWAY);
+}
+
+TEST_CASE("the world selector marks runtime activity, not selection", "[studio][presentation]") {
+	CHECK(WorldSelectorLabel("MeshGrid", false) == "MeshGrid");
+	CHECK(WorldSelectorLabel("MeshGrid", true) == "MeshGrid (ACTIVE)");
+	CHECK(WorldSelectorLabel({}, true) == "? (ACTIVE)");
 }
 
 // --- the hosted client visual scene -----------------------------------------

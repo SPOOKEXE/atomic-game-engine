@@ -90,6 +90,7 @@
 #include <studio/Complete.hpp>
 #include <studio/Config.hpp>
 #include <studio/ContentSources.hpp>
+#include <studio/Diagnostics.hpp>
 #include <studio/Hierarchy.hpp>
 #include <studio/Operators.hpp>
 #include <studio/PlayLink.hpp>
@@ -3522,6 +3523,10 @@ namespace studio {
 		// @return `true` when it has a run record.
 		bool IsRunning(WorldId world) const;
 
+		// Whether this authority or client replica is advancing right now.
+		// Paused runs remain runs but do not receive the active selector marker.
+		bool IsActivelyRunning(WorldId world) const;
+
 		// Whether a world is a `Play` run's client view rather than a scene.
 		//
 		// **Asked by everything that treats a world as authored content**: the
@@ -5520,67 +5525,6 @@ namespace studio {
 		// it is opened rather than starting empty.
 		engine::render::FrameStatistics Statistics;
 
-		// One frame's spans, with the names copied.
-		//
-		// **`core::FrameSpan::Name` is a `std::string_view` that may point at a
-		// buffer the frame owns**, which its own header says outright - so it is
-		// safe to read during the frame that produced it and a dangling read
-		// afterwards. Every feature below holds spans across frames, so every
-		// one of them needs the string rather than the view.
-		struct HeldSpan {
-			// The span's name, owned rather than viewed. See the note above -
-			// this copy is the whole reason the type exists.
-			std::string Name;
-
-			// Where it sits in the tree: how deep, and which span opened it.
-			//@{
-			uint32_t Depth = 0;
-			uint32_t Parent = 0;
-			//@}
-
-			// When it opened and how long it was open, in milliseconds from the
-			// start of the frame.
-			//@{
-			float StartMilliseconds = 0.0f;
-			float Milliseconds = 0.0f;
-			//@}
-
-			// The same duration with its children taken out, and the part of it
-			// spent waiting. **Both are what a reader actually wants**: a span
-			// that is wide because its children are wide is not the one to look
-			// at, and one that is wide because it blocked is a different problem
-			// from one that is wide because it worked.
-			//@{
-			float SelfMilliseconds = 0.0f;
-			float IdleMilliseconds = 0.0f;
-			//@}
-
-			// Which colour band it draws in.
-			engine::core::ProfileCategory Category = engine::core::ProfileCategory::Engine;
-
-			// Whether this span has already been counted into a summary, so a
-			// held frame is not summed twice.
-			bool Reported = false;
-
-			// How many times this name at this depth was seen across the
-			// averaging interval.
-			//
-			// **Not the same as the frame count, which is what the average used
-			// to divide by.** A span may open several times in one frame -
-			// `World::Tick` once per world, a phase once per owed tick - so
-			// summing over an interval and dividing by *frames* published a bar
-			// that many times too wide, with a left edge that many times too far
-			// along. That is the "bars over-expand into other bars" report, and
-			// it only shows with averaging on because a single frame divides by
-			// one.
-			//
-			// The duration still divides by frames, because the useful figure
-			// for a span that runs three times a frame is what it costs *per
-			// frame*. The start divides by this instead: a mean start rather
-			// than a sum of them.
-			uint32_t Occurrences = 0;
-		};
-
 		// What the frame-graph panel is showing, and when it changes.
 		//
 		// **A live flame graph is unreadable for the one job it has.** The
@@ -5613,7 +5557,8 @@ namespace studio {
 
 			// The published snapshot - what is drawn.
 			//@{
-			std::vector<HeldSpan> Spans;
+			std::vector<DiagnosticSpan> Spans;
+			std::vector<uint32_t> Rows;
 			float FrameMilliseconds = 0.0f;
 			float IdleMilliseconds = 0.0f;
 			float UnmarkedMilliseconds = 0.0f;
@@ -5623,7 +5568,7 @@ namespace studio {
 			// The running sum since the last publish, and how many frames are in
 			// it. Unused when `Average` is off.
 			//@{
-			std::vector<HeldSpan> Summed;
+			std::vector<DiagnosticSpan> Summed;
 			float SummedFrameMilliseconds = 0.0f;
 			float SummedIdleMilliseconds = 0.0f;
 			float SummedUnmarkedMilliseconds = 0.0f;
@@ -5657,7 +5602,7 @@ namespace studio {
 		};
 
 		// What the frame-graph panel is showing. Held across frames, which is
-		// what `HeldSpan` above exists for.
+		// what `DiagnosticSpan` exists for.
 		FrameGraphView FrameGraphState;
 
 		// What the heap panel is showing, refreshed when a reading is taken

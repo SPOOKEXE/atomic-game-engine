@@ -760,47 +760,56 @@ namespace engine::world {
 			// around it says how long it took to do. `FrameGraph::Report`
 			// keeps the two from being subtracted from each other.
 			const parallel::BatchTiming batch = parallel::Jobs::LastBatch();
-			core::FrameGraph::Report(
+			core::FrameGraph::ReportedScope workers(
 				"worlds (pinned workers)", core::ProfileCategory::ECS, batch.BusyMilliseconds
 			);
 
-			// **And what was inside it, which is the half that was missing.**
-			// The bar above says how much work the tick contained and nothing
-			// about what the work was: every span a system opened ran on a
-			// worker, the frame graph refuses those, and so the most expensive
-			// thing in a frame appeared as one opaque block. With four worlds
-			// that is most of `simulation`.
-			//
-			// The schedulers timed themselves - `Scheduler::Timings` is
-			// accumulated per system while they ran - so this is reporting a
-			// measurement rather than taking one. Named by world so two worlds
-			// running the same system are two rows and not one; a driver with
-			// one world gets the system name alone, because the prefix would be
-			// noise on every line.
+			// Rebuild the hierarchy the worker thread would have recorded: world,
+			// scheduler, phase, then system. Flat system reports made `ecs.systems`
+			// look like a leaf and erased the distinction between pre-simulation,
+			// simulation, post-simulation and pre-render.
 			for (size_t at = 0; at < ActiveList.size(); at++) {
 				World *world = ActiveList[at];
 				if (world == nullptr || OwedList[at] == 0) {
 					continue;
 				}
 
-				const bool many = ActiveList.size() > 1;
-				const std::string_view label = world->Name().Text();
-				for (const ecs::Scheduler::Timing &timing : world->Systems().Timings()) {
-					if (!(timing.Milliseconds > 0.0f)) {
-						continue;
+				const std::span<const ecs::Scheduler::Timing> timings = world->Systems().Timings();
+				float systemsMilliseconds = 0.0f;
+				for (const ecs::Scheduler::Timing &timing : timings) {
+					systemsMilliseconds += timing.Milliseconds;
+				}
+
+				const std::string_view worldName = world->Name().Text();
+				core::FrameGraph::ReportedScope worldScope(
+					worldName.empty() ? std::string_view("world") : worldName,
+					core::ProfileCategory::ECS,
+					world->Statistics().LastTickMilliseconds
+				);
+				core::FrameGraph::ReportedScope systemsScope(
+					"ecs.systems", core::ProfileCategory::ECS, systemsMilliseconds
+				);
+
+				for (uint8_t phaseIndex = 0; phaseIndex < static_cast<uint8_t>(ecs::Phase::Count);
+					 phaseIndex++) {
+					const auto phase = static_cast<ecs::Phase>(phaseIndex);
+					float phaseMilliseconds = 0.0f;
+					for (const ecs::Scheduler::Timing &timing : timings) {
+						if (timing.RunPhase == phase) {
+							phaseMilliseconds += timing.Milliseconds;
+						}
 					}
 
-					std::string named;
-					if (many) {
-						named.reserve(label.size() + timing.Name.size() + 2);
-						named.append(label).append(" · ").append(timing.Name);
-					} else {
-						named.assign(timing.Name);
-					}
-
-					core::FrameGraph::ReportNamed(
-						"system", named, core::ProfileCategory::ECS, timing.Milliseconds
+					core::FrameGraph::ReportedScope phaseScope(
+						ecs::GetPhaseName(phase), core::ProfileCategory::ECS, phaseMilliseconds
 					);
+					for (const ecs::Scheduler::Timing &timing : timings) {
+						if (timing.RunPhase == phase) {
+							core::FrameGraph::Report(
+								timing.Name, core::ProfileCategory::ECS, timing.Milliseconds
+							);
+						}
+					}
 				}
 			}
 		} else {

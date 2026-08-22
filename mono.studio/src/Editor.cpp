@@ -2365,10 +2365,6 @@ namespace studio {
 		LastFrame = Renderer.Render(
 			std::span<const engine::render::View>(&view, 1), Overlay, &GameInterface, true, &Interface
 		);
-		if (ViewportResults.size() <= DrawingViewport) {
-			ViewportResults.resize(DrawingViewport + 1);
-		}
-		ViewportResults[DrawingViewport] = LastFrame;
 		if (shown.IsValid()) {
 			RenderPipelineRenderedSlots[shown.Index] = DrawingViewport;
 		}
@@ -3485,6 +3481,24 @@ namespace studio {
 
 	bool Editor::IsRunning(WorldId world) const {
 		return RunOf(world) != nullptr;
+	}
+
+	bool Editor::IsActivelyRunning(WorldId world) const {
+		if (const WorldRun *run = RunOf(world); run != nullptr) {
+			return !run->Paused;
+		}
+
+		for (const WorldRun &run : Runs) {
+			if (run.Paused) {
+				continue;
+			}
+			for (const std::unique_ptr<PlayLink> &link : run.Links) {
+				if (link != nullptr && link->IsRunning() && link->ReplicaWorld() == world) {
+					return true;
+				}
+			}
+		}
+		return false;
 	}
 
 	bool Editor::IsPaused(WorldId world) const {
