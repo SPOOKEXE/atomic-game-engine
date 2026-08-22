@@ -841,3 +841,67 @@ unset(_qjs_includes)
 # Vendor:: to match the rest. `qjs` is upstream's own target name and keeps
 # working; this is the spelling the rest of the tree should use.
 add_library(Vendor::quickjs ALIAS qjs)
+
+# --- ngtcp2 -----------------------------------------------------------------
+# QUIC. `docs/QUIC.md` is the survey and `docs/DEFERRED.md` D00014 is the
+# argument; what belongs here is why this library and what is switched off.
+#
+# **Nothing under its `lib/` names a TLS stack**, which is the property that
+# decided it over seven alternatives. Every other candidate hard-wires one:
+# picoquic and quicly require picotls, lsquic requires BoringSSL which requires
+# Go, quiche is Rust, mvfst depends on folly, and msquic brings its own event
+# loop with Schannel on Windows and OpenSSL elsewhere. This one takes a callback
+# table, so the crypto is `engine::net::quic` over Crypto++ and the fresh-clone
+# rule in `mono.vendor/AGENTS.md` survives - CMake, Ninja and a C++ compiler and
+# nothing else.
+#
+# **Every entry point takes an explicit `ngtcp2_tstamp`.** That is not a
+# convenience, it is the only shape compatible with `net`'s rule that time is
+# passed in and never read, and `just determinism` and `just replay-check` both
+# rest on it.
+#
+# MIT. Not gated on a tier: portable C with no platform dependency, like asio,
+# Crypto++ and BLAKE3. Who may link it stays a tier question, decided by
+# whichever module first lists it - which is `Engine::net` at L11.
+if(NOT EXISTS "${MONO_VENDOR}/ngtcp2/lib/CMakeLists.txt")
+	message(FATAL_ERROR "mono.vendor/ngtcp2 is missing. Run `just setup`.")
+endif()
+
+# `lib/` and nothing else. Upstream's `crypto/` holds the helper libraries for
+# OpenSSL, GnuTLS, wolfSSL, picotls and BoringSSL, and `examples/` wants libev
+# and nghttp3 - none of which is vendored and none of which may be looked for at
+# configure time. ENABLE_LIB_ONLY is what makes that a stated decision rather
+# than a set of find_package calls that happen to fail.
+set(ENABLE_LIB_ONLY   ON  CACHE BOOL "" FORCE)
+set(ENABLE_STATIC_LIB ON  CACHE BOOL "" FORCE)
+set(ENABLE_SHARED_LIB OFF CACHE BOOL "" FORCE)
+set(BUILD_TESTING     OFF CACHE BOOL "" FORCE)
+
+# Upstream defaults the OpenSSL backend ON. Off here, and it is the load-bearing
+# line rather than a tidy-up: left on, the configure looks for a system OpenSSL
+# and a build would silently differ between a machine that has one and a machine
+# that does not.
+set(ENABLE_OPENSSL   OFF CACHE BOOL "" FORCE)
+set(ENABLE_BORINGSSL OFF CACHE BOOL "" FORCE)
+set(ENABLE_GNUTLS    OFF CACHE BOOL "" FORCE)
+set(ENABLE_WOLFSSL   OFF CACHE BOOL "" FORCE)
+set(ENABLE_PICOTLS   OFF CACHE BOOL "" FORCE)
+
+# Same reason LUAU_WERROR and QJS_BUILD_WERROR are off: the `ci` preset builds
+# first-party code with -Werror and a vendored tree that promotes its own
+# warnings is a build we cannot fix without a fork.
+set(ENABLE_WERROR OFF CACHE BOOL "" FORCE)
+
+add_subdirectory("${MONO_VENDOR}/ngtcp2" EXCLUDE_FROM_ALL)
+
+# Same reason as Crypto++, BLAKE3, Zstd, Luau and QuickJS.
+get_target_property(_ngtcp2_includes ngtcp2_static INTERFACE_INCLUDE_DIRECTORIES)
+if(_ngtcp2_includes)
+	set_target_properties(ngtcp2_static PROPERTIES
+		INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_ngtcp2_includes}")
+endif()
+unset(_ngtcp2_includes)
+
+# Vendor:: to match the rest. `ngtcp2_static` is upstream's own target name and
+# keeps working; this is the spelling the rest of the tree should use.
+add_library(Vendor::ngtcp2 ALIAS ngtcp2_static)

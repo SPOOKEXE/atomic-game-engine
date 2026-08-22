@@ -46,6 +46,7 @@ it. `mono.vendor/AGENTS.md` argues the shape.
 | [Roboto](https://github.com/googlefonts/roboto-classic) | SIL OFL 1.1 | the display typeface, from v0.7 | as above |
 | [Noto Sans](https://github.com/notofonts/latin-greek-cyrillic) | SIL OFL 1.1 | fallback coverage for editor and game UI | as above; render loads it as a separate face |
 | [minimp3](https://github.com/lieff/minimp3) | CC0-1.0 | MP3 decoding behind `engine::audio`, from v0.9 | client only - nothing else links `audio` |
+| [ngtcp2](https://github.com/ngtcp2/ngtcp2) | MIT | the QUIC transport under `engine::net::quic`, from v0.19 | yes, where `net` is linked |
 
 shaderc pulls in **glslang** (BSD-3-Clause / Apache-2.0), **SPIRV-Tools**
 (Apache-2.0) and **SPIRV-Headers** (MIT-style) through its own `DEPS` file. They
@@ -147,6 +148,21 @@ contains the `yes` rows and not the others:
   It ships wherever `assets` is linked, which by `repo_layout.md` §8 is every
   program: the client, the server, studio, the CLI and the origin. Like
   Crypto++ and unlike SDL, it produces no tier split.
+- **ngtcp2 is transport only, and that is why it is here and not a TLS stack.**
+  Nothing under its `lib/` names one: the crypto is a callback table this
+  engine fills in from `net/quic/Crypto.hpp` over Crypto++, which is what let a
+  QUIC dependency arrive without a second cryptography library and without
+  `mono.vendor/AGENTS.md`'s fresh-clone rule being argued against. Every other
+  candidate hard-wires a backend, and two of them would have wanted Go or Perl
+  on every clone. `docs/QUIC.md` §3 and §4 hold the survey.
+
+  Obligations are MIT's: retain the notice and the permission text, which ship
+  in `COPYING` with the submodule.
+
+  Only `lib/` is built - `ENABLE_LIB_ONLY` is forced on, so upstream's
+  `crypto/` helpers for OpenSSL, GnuTLS, wolfSSL, picotls and BoringSSL are
+  never configured, nothing looks for those libraries at configure time, and
+  the `examples/` that want libev and nghttp3 are not built either.
 - **Zstandard is dual-licensed, and which half we take matters.** Upstream ships
   two texts: `LICENSE` is BSD-3-Clause and `COPYING` is GPLv2. **We take the
   BSD-3-Clause option**, and that is a decision rather than a formality - the
