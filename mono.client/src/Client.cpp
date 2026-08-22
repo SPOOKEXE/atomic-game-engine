@@ -2893,7 +2893,8 @@ namespace client {
 						engine::core::Vector2{
 							static_cast<float>(pixelWidth), static_cast<float>(pixelHeight)
 						},
-						store
+						store,
+						InterfaceList.Signature()
 					);
 					hook = &Interface;
 				}
@@ -3184,6 +3185,7 @@ namespace client {
 		view.Portals = Portals;
 		view.Pipeline = PipelineSelected;
 		view.World = Rendered.IsValid() ? Rendered.Index : 0;
+		view.WorldName = Rendered.IsValid() ? Universe_->NameOf(Rendered) : engine::core::Name{};
 		{
 			ENGINE_HEAP_SCOPE("client.submit");
 			LastFrame = Renderer.Render(std::span<const engine::render::View>(&view, 1), Overlay, hook);
@@ -3266,6 +3268,8 @@ namespace client {
 		PeakDrawCalls = std::max<uint32_t>(PeakDrawCalls, LastFrame.DrawCalls);
 		TotalInstanceChunks += LastFrame.InstanceChunks;
 		DirtyInstanceChunks += LastFrame.InstanceChunksDirty;
+		TotalInstanceRows += LastFrame.InstanceRows;
+		DirtyInstanceRows += LastFrame.InstanceRowsDirty;
 	}
 
 	int Client::Run() {
@@ -3327,18 +3331,26 @@ namespace client {
 				"{} triangle(s) in {} draw call(s) at the busiest frame", PeakTriangles, PeakDrawCalls
 			);
 
-			// **What a delta upload would have had to skip.** The instance
-			// stream is rewritten whole every frame; this is how much of it a
-			// frame actually changed. Reported rather than acted on: a low
-			// share is an argument for building a delta and a high one is an
-			// argument against, and neither is worth guessing at.
+			// What the resident-row delta actually rewrote. The draw-order index
+			// stream is uploaded separately and is not counted here.
 			if (TotalInstanceChunks > 0) {
 				ENGINE_INFO(
-					"{} of {} instance chunk(s) rewritten ({:.1f}% of the stream moved per frame)",
+					"{} of {} resident instance chunk(s), {} of {} row(s) rewritten "
+					"({:.1f}% of rows changed per frame)",
 					DirtyInstanceChunks,
 					TotalInstanceChunks,
-					100.0 * static_cast<double>(DirtyInstanceChunks) /
-						static_cast<double>(TotalInstanceChunks)
+					DirtyInstanceRows,
+					TotalInstanceRows,
+					TotalInstanceRows > 0 ? 100.0 * static_cast<double>(DirtyInstanceRows) /
+												static_cast<double>(TotalInstanceRows)
+										  : 0.0
+				);
+			}
+			if (Interface.UploadCount() + Interface.ReuseCount() > 0) {
+				ENGINE_INFO(
+					"interface geometry uploaded {} time(s), resident mesh reused {} time(s)",
+					Interface.UploadCount(),
+					Interface.ReuseCount()
 				);
 			}
 			ENGINE_INFO(

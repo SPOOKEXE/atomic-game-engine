@@ -137,12 +137,12 @@ namespace engine::render {
 				) &&
 				ready;
 		ready = ensure(
-					Occlusion.LateInstances,
+					Occlusion.LateIndices,
 					Occlusion.LateCapacity,
 					lateCount,
-					sizeof(GpuInstance),
-					SDL_GPU_BUFFERUSAGE_VERTEX | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE,
-					"late instance"
+					sizeof(uint32_t),
+					SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE,
+					"late index"
 				) &&
 				ready;
 
@@ -276,7 +276,7 @@ namespace engine::render {
 			// the version the atomics must land in. The late buffer took no
 			// upload, so this write is its first touch and may cycle.
 			outputs[0].buffer = Occlusion.Counts;
-			outputs[1].buffer = Occlusion.LateInstances;
+			outputs[1].buffer = Occlusion.LateIndices;
 			outputs[1].cycle = true;
 
 			SDL_GPUComputePass *pass = SDL_BeginGPUComputePass(command, nullptr, 0, outputs, 2);
@@ -296,8 +296,8 @@ namespace engine::render {
 			}
 			SDL_BindGPUComputeSamplers(pass, 0, levels, PYRAMID_LEVEL_LIMIT);
 
-			SDL_GPUBuffer *const reads[3] = {Occlusion.Candidates, InstanceBuffer, Occlusion.RunTable};
-			SDL_BindGPUComputeStorageBuffers(pass, 0, reads, 3);
+			SDL_GPUBuffer *const reads[2] = {Occlusion.Candidates, Occlusion.RunTable};
+			SDL_BindGPUComputeStorageBuffers(pass, 0, reads, 2);
 
 			struct CullUniform {
 				glm::mat4 ViewProjection;
@@ -355,7 +355,7 @@ namespace engine::render {
 		releaseBuffer(Occlusion.RunTable);
 		releaseBuffer(Occlusion.ArgRuns);
 		releaseBuffer(Occlusion.Counts);
-		releaseBuffer(Occlusion.LateInstances);
+		releaseBuffer(Occlusion.LateIndices);
 		if (Occlusion.Transfer != nullptr) {
 			SDL_ReleaseGPUTransferBuffer(Device, Occlusion.Transfer);
 			Occlusion.Transfer = nullptr;

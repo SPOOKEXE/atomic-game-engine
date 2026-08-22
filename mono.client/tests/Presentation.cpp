@@ -814,6 +814,9 @@ TEST_CASE("a portal naming another world draws that world's instances", "[client
 	// where somebody is, is the two-mouthed test below.
 	CHECK(instances.size() == own);
 	CHECK(foreign.size() == published);
+	for (const engine::scene::DrawInstance &instance : foreign) {
+		CHECK(instance.SourceWorld == engine::core::Name("there"));
+	}
 
 	bool found = false;
 	for (const engine::render::SurfaceView &view : views) {

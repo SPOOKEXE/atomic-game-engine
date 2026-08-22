@@ -303,21 +303,21 @@ namespace client {
 				// **`SurfaceAppearance` and `Tags` are columns rather than an
 				// optional join**, which is the whole reason both live on
 				// `BasePart` rather than on `MeshPart`. A batched parallel walk
-				// is handed columns and no entity; a component that only some
-				// rows had could not be read here at all without walking the
-				// world a second time.
+				// is handed fixed columns; a component that only some rows had
+				// could not be read here without splitting the query.
 				// **One writer, two walks.** A limb has to carry the rig it
 				// belongs to - see `DrawInstance::Rig`, which is what lets a
 				// portal cut a character in one piece instead of a dozen times -
 				// and `CharacterLimb` is on some drawable rows and not others.
-				// A batched parallel walk has no entity and therefore no
-				// optional join, so the query is split on the component instead
+				// A batched parallel walk has no optional join, so the query is
+				// split on the component instead
 				// and each half is a walk with a required column list. Every
 				// other field is written by the same function in both.
 				const auto write = [out, capacity, alpha](
 									   size_t base,
 									   size_t first,
 									   size_t rows,
+									   const Entity *entities,
 									   const Transform *transforms,
 									   const PreviousTransform *previous,
 									   const Bounds *bounds,
@@ -366,6 +366,7 @@ namespace client {
 							visuals[row],
 							&appearances[row],
 							&tags[row],
+							entities[row].Id,
 							&locals[row],
 							limbs == nullptr ? nullptr : &limbs[row]
 						);
@@ -383,10 +384,11 @@ namespace client {
 											 const LocalTransparency>()
 										 .With<Rendered>()
 										 .Without<CharacterLimb>()
-										 .EachBatchParallel(
+										 .EachBatchEntitiesParallel(
 											 [&write](
 												 size_t first,
 												 size_t rows,
+												 const Entity *entities,
 												 const Transform *transforms,
 												 const PreviousTransform *previous,
 												 const Bounds *bounds,
@@ -399,6 +401,7 @@ namespace client {
 													 0,
 													 first,
 													 rows,
+													 entities,
 													 transforms,
 													 previous,
 													 bounds,
@@ -428,10 +431,11 @@ namespace client {
 											  const LocalTransparency,
 											  const CharacterLimb>()
 										  .With<Rendered>()
-										  .EachBatchParallel(
+										  .EachBatchEntitiesParallel(
 											  [&write, loose](
 												  size_t first,
 												  size_t rows,
+												  const Entity *entities,
 												  const Transform *transforms,
 												  const PreviousTransform *previous,
 												  const Bounds *bounds,
@@ -445,6 +449,7 @@ namespace client {
 													  loose,
 													  first,
 													  rows,
+													  entities,
 													  transforms,
 													  previous,
 													  bounds,
@@ -786,6 +791,8 @@ namespace client {
 			if (!found.IsValid()) {
 				continue;
 			}
+			const engine::core::Name foundName = universe.NameOf(found);
+			const engine::core::Name sourceName = universe.NameOf(world);
 
 			const auto viewAt =
 				std::find_if(views.begin(), views.end(), [&](const engine::render::SurfaceView &view) {
@@ -887,6 +894,7 @@ namespace client {
 							continue;
 						}
 						foreign.push_back(instance);
+						foreign.back().SourceWorld = foundName;
 					}
 				}
 
@@ -922,7 +930,11 @@ namespace client {
 				// room is the far half of exactly what the far world drew.
 				if (const auto *list = store.Resource<DrawList>()) {
 					for (const int16_t slot : returning) {
+						const size_t cloneFirst = drawn.size();
 						(void)engine::scene::AppendPortalClones(store, slot, list->Instances, drawn);
+						for (size_t index = cloneFirst; index < drawn.size(); index++) {
+							drawn[index].SourceWorld = foundName;
+						}
 					}
 				}
 			});
@@ -940,8 +952,12 @@ namespace client {
 			// draw and a second reason for the two to fall out of order.
 			const auto surface = entry.Surface;
 			const std::span<const DrawInstance> own(drawn.data(), ownRows);
-			universe.Enter(world, [&foreign, own, surface](Store &store) {
+			universe.Enter(world, [&foreign, own, surface, sourceName](Store &store) {
+				const size_t cloneFirst = foreign.size();
 				(void)engine::scene::AppendPortalClones(store, surface, own, foreign);
+				for (size_t index = cloneFirst; index < foreign.size(); index++) {
+					foreign[index].SourceWorld = sourceName;
+				}
 			});
 
 			const auto count = static_cast<uint32_t>(foreign.size() - first);

@@ -219,6 +219,7 @@ namespace client {
 							visual,
 							appearance,
 							tags,
+							entity.Id,
 							local,
 							// Which rig this row belongs to, so a portal cuts a
 							// replicated character in one piece. Optional like

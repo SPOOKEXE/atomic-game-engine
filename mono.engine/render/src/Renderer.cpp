@@ -271,6 +271,8 @@ namespace engine::render {
 		RibbonVertices += view.RibbonVertices;
 		InstanceChunks += view.InstanceChunks;
 		InstanceChunksDirty += view.InstanceChunksDirty;
+		InstanceRows += view.InstanceRows;
+		InstanceRowsDirty += view.InstanceRowsDirty;
 		Particles += view.Particles;
 		Culled += view.Culled;
 		ScheduledReadBytes += view.ScheduledReadBytes;
@@ -659,6 +661,20 @@ namespace engine::render {
 				SDL_ReleaseGPUTexture(device, slot.History);
 				slot.History = nullptr;
 			}
+			if (slot.InstanceIndexBuffer != nullptr) {
+				SDL_ReleaseGPUBuffer(device, slot.InstanceIndexBuffer);
+			}
+			if (slot.InstanceIndexTransfer != nullptr) {
+				SDL_ReleaseGPUTransferBuffer(device, slot.InstanceIndexTransfer);
+			}
+		}
+		for (Impl::InstanceWorld &world : State->InstanceWorlds) {
+			if (world.Buffer != nullptr) {
+				SDL_ReleaseGPUBuffer(device, world.Buffer);
+			}
+			if (world.Transfer != nullptr) {
+				SDL_ReleaseGPUTransferBuffer(device, world.Transfer);
+			}
 		}
 		for (Impl::PbrSlot &slot : State->PbrSlots) {
 			State->ReleasePbr(slot);
@@ -686,12 +702,6 @@ namespace engine::render {
 		}
 		State->Meshes.Shutdown();
 		State->Textures.Shutdown();
-		if (State->InstanceBuffer) {
-			SDL_ReleaseGPUBuffer(device, State->InstanceBuffer);
-		}
-		if (State->InstanceTransfer) {
-			SDL_ReleaseGPUTransferBuffer(device, State->InstanceTransfer);
-		}
 		if (State->DepthTexture) {
 			SDL_ReleaseGPUTexture(device, State->DepthTexture);
 		}

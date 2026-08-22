@@ -6,9 +6,8 @@
 // costs a draw call, a wrong "hidden" is a hole in the world, and the two are
 // not the same kind of mistake.
 //
-// A survivor's instance row is copied, compacted, into the late buffer at its
-// run's own range, so the late draw binds the copy with the vertex layout the
-// early draw used and the vertex shader never learns culling happened.
+// A survivor's resident-slot index is compacted into the late draw list. The
+// packed row never moves and the vertex stage follows the new index stream.
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
 // The pyramid is separate textures rather than one texture's mips, because a
@@ -29,46 +28,20 @@ layout(set = 0, binding = 9) uniform sampler2D pyramid09;
 layout(set = 0, binding = 10) uniform sampler2D pyramid10;
 layout(set = 0, binding = 11) uniform sampler2D pyramid11;
 
-// Pairs per candidate: [centre.xyz | run index], [extent.xyz | source slot].
+// Pairs per candidate: [centre.xyz | run index], [extent.xyz | resident slot].
 layout(set = 0, binding = 12) readonly buffer Candidates { vec4 data[]; } candidates;
 
-// The uploaded instance rows, nine uints each - see `GpuInstance`.
-//
-// **Words rather than vec4s, because the row is thirty-six bytes and no longer
-// divides by sixteen.** Nothing here reads a field: a survivor's row is copied
-// through untouched so the late draw binds it with the vertex layout the early
-// draw used. Copying it as words rather than as vectors is what lets the row
-// shrink to exactly what it carries instead of being padded up to a vector
-// boundary for a shader that never looks inside it.
-layout(set = 0, binding = 13) readonly buffer Instances { uint rows[]; } instances;
-
 // Per slot-run: the first late slot, where its survivors compact to.
-layout(set = 0, binding = 14) readonly buffer Runs { uint first[]; } runs;
+layout(set = 0, binding = 13) readonly buffer Runs { uint first[]; } runs;
 
 layout(set = 1, binding = 0) buffer Counts { uint survivors[]; } counts;
-layout(set = 1, binding = 1) writeonly buffer Late { uint rows[]; } late;
+layout(set = 1, binding = 1) writeonly buffer Late { uint slots[]; } late;
 
 layout(set = 2, binding = 0) uniform Cull {
 	mat4 ViewProjection;
 	uvec4 Counts; // x: candidates. y: pyramid levels built.
 	vec4 Level0;  // xy: level-zero size in texels.
 } cull;
-
-// `sizeof(GpuInstance) / 4`, given by the build.
-//
-// **The value comes from `render::GPU_INSTANCE_WORDS`**, read out of
-// `InstancePacking.hpp` at configure time and passed as `-DGPU_INSTANCE_WORDS`,
-// so there is no literal here to drift from the struct. The fallback below is
-// for compiling this file standalone, which is what every other shader that
-// takes a define does; a build always overrides it.
-//
-// The long name is deliberate: a define reaches every shader in the module, and
-// `particle-step.comp` has an `INSTANCE_WORDS` of its own meaning a particle
-// row. See `resources/CMakeLists.txt`.
-#ifndef GPU_INSTANCE_WORDS
-#define GPU_INSTANCE_WORDS 9
-#endif
-const uint INSTANCE_WORDS_COUNT = uint(GPU_INSTANCE_WORDS);
 
 float FarthestAt(int lod, ivec2 texel) {
 	switch (lod) {
@@ -154,7 +127,5 @@ void main() {
 	}
 	uint offset = atomicAdd(counts.survivors[run], 1u);
 	uint destination = runs.first[run] + offset;
-	for (uint part = 0u; part < INSTANCE_WORDS_COUNT; part++) {
-		late.rows[destination * INSTANCE_WORDS_COUNT + part] = instances.rows[source * INSTANCE_WORDS_COUNT + part];
-	}
+	late.slots[destination] = source;
 }

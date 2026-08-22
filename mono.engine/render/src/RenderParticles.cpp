@@ -1,6 +1,6 @@
-// The particle pool and the ribbon stream.
+// The particle pools and the ribbon stream.
 //
-// **The pool lives on the device and is stepped there.** `particle-step.comp`
+// **Each world's pool lives on the device and is stepped there.** `particle-step.comp`
 // writes the instance stream on its own submission before the frame's command
 // buffer is recorded, which is why the transparent node uploads no particle
 // data at all - see the note in `ViewRecording::SubmitUploads`.
@@ -192,7 +192,11 @@ namespace engine::render {
 	}
 
 	bool Renderer::Impl::ReserveParticles(uint32_t count) {
-		if (count <= ParticleCapacity) {
+		if (ActiveParticleWorld == nullptr) {
+			return false;
+		}
+		ParticleWorld &world = *ActiveParticleWorld;
+		if (count <= world.Capacity) {
 			return true;
 		}
 
@@ -205,13 +209,13 @@ namespace engine::render {
 		// emitting at all has hundreds of particles - the smallest useful scene is
 		// already past the mesh path's starting size, so starting there would be
 		// four reallocations on the first frame anything is drawn.
-		uint32_t capacity = ParticleCapacity == 0 ? 4096 : ParticleCapacity;
+		uint32_t capacity = world.Capacity == 0 ? 4096 : world.Capacity;
 		while (capacity < count) {
 			capacity *= 2;
 		}
 
-		if (ParticleBuffer != nullptr) {
-			SDL_ReleaseGPUBuffer(Device, ParticleBuffer);
+		if (world.Buffer != nullptr) {
+			SDL_ReleaseGPUBuffer(Device, world.Buffer);
 		}
 
 		const uint32_t bytes = capacity * static_cast<uint32_t>(sizeof(effects::ParticleInstance));
@@ -224,19 +228,20 @@ namespace engine::render {
 		SDL_GPUBufferCreateInfo bufferInfo{};
 		bufferInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
 		bufferInfo.size = bytes;
-		ParticleBuffer = SDL_CreateGPUBuffer(Device, &bufferInfo);
+		world.Buffer = SDL_CreateGPUBuffer(Device, &bufferInfo);
 
-		if (ParticleBuffer == nullptr) {
+		if (world.Buffer == nullptr) {
 			ENGINE_ERROR("particle buffer of {} entries: {}", capacity, SDL_GetError());
-			ParticleCapacity = 0;
+			world.Capacity = 0;
 			return false;
 		}
 
-		ParticleCapacity = capacity;
+		world.Capacity = capacity;
 		return true;
 	}
 
 	bool Renderer::Impl::ReserveParticlePool(uint32_t slots) {
+		ParticlePool &Particles = ActiveParticleWorld->Pool;
 		if (slots == 0) {
 			return false;
 		}
@@ -314,6 +319,7 @@ namespace engine::render {
 	}
 
 	bool Renderer::Impl::ReserveParticleTables(uint32_t blocks) {
+		ParticlePool &Particles = ActiveParticleWorld->Pool;
 		if (blocks <= Particles.TableRows) {
 			return true;
 		}
@@ -358,6 +364,7 @@ namespace engine::render {
 	}
 
 	bool Renderer::Impl::ReserveParticleStaging(uint32_t draws, uint32_t births, uint32_t seams) {
+		ParticlePool &Particles = ActiveParticleWorld->Pool;
 		// One shape three times over: a read-only storage buffer and the upload
 		// transfer beside it, grown in powers of two and never shrunk.
 		const auto grow = [this](
@@ -462,50 +469,48 @@ namespace engine::render {
 	}
 
 	void Renderer::Impl::ReleaseParticlePool() {
-		for (SDL_GPUBuffer **buffer :
-			 {&Particles.States,
-			  &Particles.Draws,
-			  &Particles.Params,
-			  &Particles.Curves,
-			  &Particles.ParamUpdateBuffer,
-			  &Particles.CurveUpdateBuffer,
-			  &Particles.Births,
-			  &Particles.Seams}) {
-			if (*buffer != nullptr) {
-				SDL_ReleaseGPUBuffer(Device, *buffer);
-				*buffer = nullptr;
+		for (ParticleWorld &world : ParticleWorlds) {
+			ParticlePool &Particles = world.Pool;
+			for (SDL_GPUBuffer **buffer :
+				 {&world.Buffer,
+				  &Particles.States,
+				  &Particles.Draws,
+				  &Particles.Params,
+				  &Particles.Curves,
+				  &Particles.ParamUpdateBuffer,
+				  &Particles.CurveUpdateBuffer,
+				  &Particles.Births,
+				  &Particles.Seams}) {
+				if (*buffer != nullptr) {
+					SDL_ReleaseGPUBuffer(Device, *buffer);
+					*buffer = nullptr;
+				}
+			}
+			for (SDL_GPUTransferBuffer **staging :
+				 {&Particles.DrawStaging,
+				  &Particles.ParamStaging,
+				  &Particles.CurveStaging,
+				  &Particles.BirthStaging,
+				  &Particles.SeamStaging}) {
+				if (*staging != nullptr) {
+					SDL_ReleaseGPUTransferBuffer(Device, *staging);
+					*staging = nullptr;
+				}
 			}
 		}
-		for (SDL_GPUTransferBuffer **staging :
-			 {&Particles.DrawStaging,
-			  &Particles.ParamStaging,
-			  &Particles.CurveStaging,
-			  &Particles.BirthStaging,
-			  &Particles.SeamStaging}) {
-			if (*staging != nullptr) {
-				SDL_ReleaseGPUTransferBuffer(Device, *staging);
-				*staging = nullptr;
-			}
-		}
-		for (SDL_GPUComputePipeline **pipeline : {&Particles.Step, &Particles.Scatter}) {
+		for (SDL_GPUComputePipeline **pipeline : {&ParticleStep, &ParticleScatter}) {
 			if (*pipeline != nullptr) {
 				SDL_ReleaseGPUComputePipeline(Device, *pipeline);
 				*pipeline = nullptr;
 			}
 		}
-		Particles.Slots = 0;
-		Particles.TableRows = 0;
-		Particles.DrawCapacity = 0;
-		Particles.ParamStagingRows = 0;
-		Particles.CurveStagingRows = 0;
-		Particles.BirthCapacity = 0;
-		Particles.SeamCapacity = 0;
-		Particles.ParamRevision.clear();
-		Particles.CurveRevision.clear();
+		ParticleWorlds.clear();
+		ActiveParticleWorld = nullptr;
 	}
 
 	bool Renderer::Impl::DispatchParticles() {
-		if (Particles.Step == nullptr || Particles.Records == 0) {
+		ParticlePool &Particles = ActiveParticleWorld->Pool;
+		if (ParticleStep == nullptr || Particles.Records == 0) {
 			return true;
 		}
 
@@ -600,7 +605,7 @@ namespace engine::render {
 								 uint32_t words,
 								 uint32_t rows,
 								 const char *what) {
-			if (Particles.Scatter == nullptr || count == 0) {
+			if (ParticleScatter == nullptr || count == 0) {
 				return true;
 			}
 
@@ -613,7 +618,7 @@ namespace engine::render {
 				return false;
 			}
 
-			SDL_BindGPUComputePipeline(pass, Particles.Scatter);
+			SDL_BindGPUComputePipeline(pass, ParticleScatter);
 			SDL_GPUBuffer *const reads[1] = {from};
 			SDL_BindGPUComputeStorageBuffers(pass, 0, reads, 1);
 
@@ -669,7 +674,7 @@ namespace engine::render {
 		{
 			SDL_GPUStorageBufferReadWriteBinding outputs[2]{};
 			outputs[0].buffer = Particles.States;
-			outputs[1].buffer = ParticleBuffer;
+			outputs[1].buffer = ActiveParticleWorld->Buffer;
 
 			SDL_GPUComputePass *pass = SDL_BeginGPUComputePass(command, nullptr, 0, outputs, 2);
 			if (pass == nullptr) {
@@ -678,7 +683,7 @@ namespace engine::render {
 				return false;
 			}
 
-			SDL_BindGPUComputePipeline(pass, Particles.Step);
+			SDL_BindGPUComputePipeline(pass, ParticleStep);
 			SDL_GPUBuffer *const reads[4] = {
 				Particles.Draws, Particles.Params, Particles.Curves, Particles.Seams
 			};
@@ -760,13 +765,15 @@ namespace engine::render {
 	}
 
 	uint32_t Renderer::Impl::PrepareParticles(const render::View &view) {
+		ActiveParticleWorld = &ParticleWorldFor(view.World, view.WorldName);
+		ParticlePool &Particles = ActiveParticleWorld->Pool;
 		ParticleGroups.clear();
 		Particles.Records = 0;
 		Particles.BirthCount = 0;
 		Particles.SeamCount = 0;
 
 		const std::span<const render::ParticleBatch> batches = view.Particles;
-		if (ParticlePipeline == nullptr || Particles.Step == nullptr || batches.empty()) {
+		if (ParticlePipeline == nullptr || ParticleStep == nullptr || batches.empty()) {
 			return 0;
 		}
 
@@ -999,7 +1006,7 @@ namespace engine::render {
 		std::span<const render::ParticleBatch> batches,
 		uint64_t &triangles
 	) {
-		if (ParticlePipeline == nullptr || ParticleGroups.empty()) {
+		if (ParticlePipeline == nullptr || ActiveParticleWorld == nullptr || ParticleGroups.empty()) {
 			return 0;
 		}
 
@@ -1023,7 +1030,7 @@ namespace engine::render {
 		uniforms.CameraForward = axis(0.0f, 0.0f, -1.0f);
 
 		SDL_GPUBufferBinding vertexBinding{};
-		vertexBinding.buffer = ParticleBuffer;
+		vertexBinding.buffer = ActiveParticleWorld->Buffer;
 		vertexBinding.offset = 0;
 		SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
 

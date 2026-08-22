@@ -258,14 +258,37 @@ namespace engine::scene {
 		//
 		// **Explicit, because an `ecs::Entity` is eight-byte aligned and every
 		// field above this one is four.** The compiler would open a four-byte
-		// hole here on its own, and a hole is uninitialised bytes in a type the
-		// surface cache reads as bytes - see the padding assertion in this
-		// module's tests. Named and zeroed, it is four bytes with a known value
-		// instead. `CharacterLimb::Reserved` exists for the same reason.
+		// hole here on its own. Named and zeroed, it remains a flat payload with
+		// a known object representation, which the module's padding test pins.
+		// `CharacterLimb::Reserved` exists for the same reason.
 		uint32_t Reserved = 0;
 
 		// @since v0.19
 		uint64_t Rig = 0;
+
+		// The stable identity of this drawable inside its source world.
+		//
+		// **The entity and not the row position.** Culling and ordering permute a
+		// draw list every frame, while this value remains attached to the thing
+		// being drawn. The renderer uses it to keep one packed GPU row resident
+		// and makes visibility a separate index stream.
+		uint64_t Source = 0;
+
+		// Which synthetic form of `Source` this row is, or zero for the entity
+		// itself. A portal half uses the pane entity, so the original and its copy
+		// can both be resident without claiming the same slot.
+		uint64_t Variant = 0;
+
+		// The world `Source` belongs to, or invalid for the view's own world.
+		//
+		// Entity handles collide between stores. A name is the boundary identity
+		// this repository permits, and a collector may leave the common case
+		// implicit so one world name is written once on the view rather than once
+		// per row.
+		core::Name SourceWorld;
+
+		// Keeps the flat payload free of implicit tail padding.
+		uint32_t IdentityReserved = 0;
 	};
 
 	// Fills the fields a collector reads straight off the world's components.
@@ -296,6 +319,7 @@ namespace engine::scene {
 	// @param appearance The row's appearance, or null for the defaults - a
 	//                   replicated row may arrive without one.
 	// @param tags       The row's tags, or null for none.
+	// @param source     The entity this row draws, as its complete id.
 	// @param local      This viewer's own occlusion fade, or null for none -
 	//                   see `scene::LocalTransparency`. Never present on a
 	//                   headless host's own draw list, because nothing there
@@ -313,6 +337,7 @@ namespace engine::scene {
 		const Visual &visual,
 		const SurfaceAppearance *appearance,
 		const Tags *tags,
+		uint64_t source,
 		const LocalTransparency *local = nullptr,
 		const CharacterLimb *limb = nullptr
 	) {
@@ -357,6 +382,7 @@ namespace engine::scene {
 
 		instance.Surface = visual.Surface;
 		instance.CastShadow = visual.CastShadow;
+		instance.Source = source;
 
 		return instance;
 	}
@@ -366,7 +392,7 @@ namespace engine::scene {
 	// **An order rather than a sort in place**, because the consumer holds a
 	// `std::span<const DrawInstance>` - a view published by a world it does not
 	// own, which may be another process's memory. Writing an index list also
-	// costs four bytes an instance instead of moving eighty.
+	// costs four bytes an instance instead of moving a wide visual row.
 	//
 	// **Why the renderer cannot just draw them in any order.** Opaque geometry
 	// writes depth, so whatever is nearest wins whichever order it arrived in.
@@ -772,64 +798,6 @@ namespace engine::scene {
 	//         skipped redraw rather than a wrong one.
 	// @since v0.8
 	uint64_t SignatureOf(std::span<const DrawInstance> instances);
-
-	// How many instances one chunk of a draw list covers.
-	//
-	// **Chosen so a chunk is a useful upload and not so a chunk is a useful
-	// hash.** 256 rows is 9,216 bytes of `render::GpuInstance`, which is two
-	// pages either side of a partial one - small enough that a single part
-	// moving does not dirty a megabyte, large enough that the per-chunk
-	// bookkeeping stays under a percent of the rows it describes. Nothing
-	// measured picked this number; the counter `ChunkSignaturesOf` feeds is what
-	// will.
-	//
-	// @since v0.19
-	inline constexpr size_t SIGNATURE_CHUNK = 256;
-
-	// Signs a draw list in fixed-size chunks.
-	//
-	// **`SignatureOf` says whether *anything* moved; this says *where*.** That
-	// distinction is the whole question behind uploading a scene as a delta
-	// rather than as a full rewrite: today `render::ViewRecording` converts and
-	// uploads every row every frame, and whether skipping the untouched ones
-	// would pay depends entirely on how many chunks a typical frame actually
-	// dirties. One moving character in a static town dirties one chunk; a camera
-	// orbit that reorders the blended sort dirties all of them. Nobody knows
-	// which shape a real scene has, so this exists to be counted before any
-	// delta protocol is written for it.
-	//
-	// **Signed in emission order, not in list order**, which is why `order` is a
-	// parameter rather than something a caller applies first. The renderer
-	// uploads `instances[order[i]]` at row `i`, so a chunk is a range of `i` and
-	// not of the list - and a frame that merely re-sorted the same instances has
-	// genuinely changed the bytes at those rows even though every instance in it
-	// is untouched. A signature taken before the permutation would report that
-	// frame as clean and a delta built on it would draw the previous sort.
-	//
-	// @param instances The draw list.
-	// @param order     Indices into `instances`, in the order they are uploaded.
-	//                  Empty means the list is uploaded as it stands.
-	// @param out       Filled with one signature per chunk. Resized first, so a
-	//                  caller may hand back the same vector every frame.
-	// @return How many chunks were written, which is `out.size()`.
-	// @since v0.19
-	size_t ChunkSignaturesOf(
-		std::span<const DrawInstance> instances, std::span<const uint32_t> order, std::vector<uint64_t> &out
-	);
-
-	// How many chunks two runs of `ChunkSignaturesOf` disagree about.
-	//
-	// **A length change counts as dirty for every chunk past the shorter of the
-	// two**, because a list that grew has rows nothing has ever uploaded and a
-	// list that shrank has rows that must stop being drawn. Neither is a
-	// comparison; both are work, and a counter that called them clean would
-	// report a scene loading in as costing nothing.
-	//
-	// @param previous Last frame's signatures.
-	// @param current  This frame's.
-	// @return Chunks that differ, at most `max(previous.size(), current.size())`.
-	// @since v0.19
-	size_t DirtyChunkCount(std::span<const uint64_t> previous, std::span<const uint64_t> current);
 
 	// Divides one view's draw list into the runs its passes submit.
 	//

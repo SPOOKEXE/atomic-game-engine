@@ -216,11 +216,31 @@ namespace engine::render {
 
 		uint64_t uploadedBytes = 0;
 		if (uploadInstances) {
-			const SDL_GPUTransferBufferLocation source{State->InstanceTransfer, 0};
+			Impl::InstanceWorld *const world = State->ActiveInstanceWorld;
+			if (world == nullptr) {
+				SDL_EndGPUCopyPass(copy);
+				SDL_CancelGPUCommandBuffer(uploadCommand);
+				return false;
+			}
+			for (const InstanceUploadRange &range : world->Instances.DirtyRanges()) {
+				const uint32_t offset = range.First * static_cast<uint32_t>(sizeof(GpuInstance));
+				const SDL_GPUTransferBufferLocation source{State->InstanceTransfer, offset};
+				const SDL_GPUBufferRegion destination{
+					State->InstanceBuffer,
+					offset,
+					range.Count * static_cast<uint32_t>(sizeof(GpuInstance)),
+				};
+				// Queue order protects unchanged resident rows. Cycling here would
+				// select fresh storage and discard every row this partial copy omits.
+				SDL_UploadToGPUBuffer(copy, &source, &destination, false);
+				uploadedBytes += destination.size;
+			}
+
+			const SDL_GPUTransferBufferLocation source{State->InstanceIndexTransfer, 0};
 			const SDL_GPUBufferRegion destination{
-				State->InstanceBuffer,
+				State->InstanceIndexBuffer,
 				0,
-				uploadCount * static_cast<uint32_t>(sizeof(GpuInstance)),
+				uploadCount * static_cast<uint32_t>(sizeof(uint32_t)),
 			};
 			SDL_UploadToGPUBuffer(copy, &source, &destination, true);
 			uploadedBytes += destination.size;
@@ -296,6 +316,9 @@ namespace engine::render {
 		if (!SDL_SubmitGPUCommandBuffer(uploadCommand)) {
 			ENGINE_ERROR("upload: SDL_SubmitGPUCommandBuffer: {}", SDL_GetError());
 			return false;
+		}
+		if (uploadInstances && State->ActiveInstanceWorld != nullptr) {
+			State->ActiveInstanceWorld->Instances.AcknowledgeDirty();
 		}
 
 		// No fence here. Resource cycling gives each later view a fresh
@@ -438,11 +461,7 @@ namespace engine::render {
 		SDL_PushGPUFragmentUniformData(command, 2, &State->Beams, sizeof(State->Beams));
 		State->BindPipeline(pass, State->OpaquePipeline, Impl::PipelineFamily::Opaque);
 
-		const SDL_GPUBufferBinding vertexBindings[] = {
-			{State->Meshes.Vertices(), 0},
-			{State->InstanceBuffer, 0},
-		};
-		SDL_BindGPUVertexBuffers(pass, 0, vertexBindings, 2);
+		State->BindInstanceBuffers(pass);
 
 		const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
 		SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);

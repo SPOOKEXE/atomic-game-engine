@@ -28,6 +28,16 @@
 #include <vector>
 
 namespace engine::render {
+	void Renderer::Impl::BindInstanceBuffers(SDL_GPURenderPass *pass, SDL_GPUBuffer *indices) {
+		const SDL_GPUBufferBinding vertices{Meshes.Vertices(), 0};
+		SDL_BindGPUVertexBuffers(pass, 0, &vertices, 1);
+
+		SDL_GPUBuffer *const storage[] = {
+			InstanceBuffer,
+			indices != nullptr ? indices : InstanceIndexBuffer,
+		};
+		SDL_BindGPUVertexStorageBuffers(pass, 0, storage, 2);
+	}
 
 	uint32_t Renderer::Impl::DrawSlots(
 		SDL_GPUCommandBuffer *command,
@@ -430,46 +440,82 @@ namespace engine::render {
 		return true;
 	}
 
-	bool Renderer::Impl::EnsureInstanceCapacity(uint32_t count) {
-		if (count <= InstanceCapacity) {
-			return true;
-		}
-
-		// Grow in powers of two. A scene that gains one entity per frame would
-		// otherwise reallocate every frame.
-		uint32_t capacity = InstanceCapacity == 0 ? 256 : InstanceCapacity;
-		while (capacity < count) {
-			capacity *= 2;
-		}
-
-		if (InstanceBuffer) {
-			SDL_ReleaseGPUBuffer(Device, InstanceBuffer);
-		}
-		if (InstanceTransfer) {
-			SDL_ReleaseGPUTransferBuffer(Device, InstanceTransfer);
-		}
-
-		const uint32_t bytes = capacity * static_cast<uint32_t>(sizeof(GpuInstance));
-
-		SDL_GPUBufferCreateInfo bufferInfo{};
-		// Compute-readable as well as a vertex stream: the occlusion cull reads
-		// candidate rows out of this buffer to compact its survivors.
-		bufferInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
-		bufferInfo.size = bytes;
-		InstanceBuffer = SDL_CreateGPUBuffer(Device, &bufferInfo);
-
-		SDL_GPUTransferBufferCreateInfo transferInfo{};
-		transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-		transferInfo.size = bytes;
-		InstanceTransfer = SDL_CreateGPUTransferBuffer(Device, &transferInfo);
-
-		if (!InstanceBuffer || !InstanceTransfer) {
-			ENGINE_ERROR("instance buffer of {} entries: {}", capacity, SDL_GetError());
-			InstanceCapacity = 0;
+	bool Renderer::Impl::EnsureInstanceCapacity(uint32_t rows, uint32_t indices, bool &rowsReallocated) {
+		SceneSlot &slot = SlotAt(ActiveSlot);
+		if (ActiveInstanceWorld == nullptr) {
 			return false;
 		}
+		InstanceWorld &world = *ActiveInstanceWorld;
+		rowsReallocated = false;
 
-		InstanceCapacity = capacity;
+		const auto grown = [](uint32_t have, uint32_t need) {
+			uint32_t capacity = have == 0 ? 256 : have;
+			while (capacity < need) {
+				capacity *= 2;
+			}
+			return capacity;
+		};
+
+		if (rows > world.Capacity || world.Buffer == nullptr || world.Transfer == nullptr) {
+			const uint32_t capacity = grown(world.Capacity, rows);
+			if (world.Buffer != nullptr) {
+				SDL_ReleaseGPUBuffer(Device, world.Buffer);
+			}
+			if (world.Transfer != nullptr) {
+				SDL_ReleaseGPUTransferBuffer(Device, world.Transfer);
+			}
+
+			const uint32_t bytes = capacity * static_cast<uint32_t>(sizeof(GpuInstance));
+			SDL_GPUBufferCreateInfo bufferInfo{};
+			bufferInfo.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
+			bufferInfo.size = bytes;
+			world.Buffer = SDL_CreateGPUBuffer(Device, &bufferInfo);
+			SDL_GPUTransferBufferCreateInfo transferInfo{};
+			transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+			transferInfo.size = bytes;
+			world.Transfer = SDL_CreateGPUTransferBuffer(Device, &transferInfo);
+			if (world.Buffer == nullptr || world.Transfer == nullptr) {
+				ENGINE_ERROR("resident instance buffer of {} entries: {}", capacity, SDL_GetError());
+				world.Capacity = 0;
+				return false;
+			}
+			world.Capacity = capacity;
+			rowsReallocated = true;
+		}
+
+		if (indices > slot.InstanceIndexCapacity || slot.InstanceIndexBuffer == nullptr ||
+			slot.InstanceIndexTransfer == nullptr) {
+			const uint32_t capacity = grown(slot.InstanceIndexCapacity, indices);
+			if (slot.InstanceIndexBuffer != nullptr) {
+				SDL_ReleaseGPUBuffer(Device, slot.InstanceIndexBuffer);
+			}
+			if (slot.InstanceIndexTransfer != nullptr) {
+				SDL_ReleaseGPUTransferBuffer(Device, slot.InstanceIndexTransfer);
+			}
+
+			const uint32_t bytes = capacity * static_cast<uint32_t>(sizeof(uint32_t));
+			SDL_GPUBufferCreateInfo bufferInfo{};
+			bufferInfo.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
+			bufferInfo.size = bytes;
+			slot.InstanceIndexBuffer = SDL_CreateGPUBuffer(Device, &bufferInfo);
+			SDL_GPUTransferBufferCreateInfo transferInfo{};
+			transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+			transferInfo.size = bytes;
+			slot.InstanceIndexTransfer = SDL_CreateGPUTransferBuffer(Device, &transferInfo);
+			if (slot.InstanceIndexBuffer == nullptr || slot.InstanceIndexTransfer == nullptr) {
+				ENGINE_ERROR("instance index buffer of {} entries: {}", capacity, SDL_GetError());
+				slot.InstanceIndexCapacity = 0;
+				return false;
+			}
+			slot.InstanceIndexCapacity = capacity;
+		}
+
+		InstanceBuffer = world.Buffer;
+		InstanceTransfer = world.Transfer;
+		InstanceCapacity = world.Capacity;
+		InstanceIndexBuffer = slot.InstanceIndexBuffer;
+		InstanceIndexTransfer = slot.InstanceIndexTransfer;
+		InstanceIndexCapacity = slot.InstanceIndexCapacity;
 		return true;
 	}
 }

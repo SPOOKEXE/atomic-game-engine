@@ -3140,6 +3140,7 @@ TEST_CASE("what crosses a hole is what is drawn, not what can move", "[scene][su
 	mesh.Tint = engine::core::Color3{0.25f, 0.5f, 0.75f};
 	mesh.TagMask = 0b1010u;
 	mesh.Transparency = 0.25f;
+	mesh.Source = 41;
 	drawn.push_back(mesh);
 
 	std::vector<engine::scene::DrawInstance> picture;
@@ -3152,6 +3153,8 @@ TEST_CASE("what crosses a hole is what is drawn, not what can move", "[scene][su
 	CHECK(copied.Mesh == engine::core::Name("a.mesh"));
 	CHECK(copied.Texture == engine::core::Name("a.texture"));
 	CHECK(copied.TagMask == 0b1010u);
+	CHECK(copied.Source == 41);
+	CHECK(copied.Variant != 0);
 	CHECK_THAT(copied.Transparency, Catch::Matchers::WithinAbs(0.25f, TOLERANCE));
 	CHECK_THAT(copied.Tint.B, Catch::Matchers::WithinAbs(0.75f, TOLERANCE));
 }

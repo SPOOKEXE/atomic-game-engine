@@ -2018,7 +2018,8 @@ namespace studio {
 						engine::core::Vector2{
 							static_cast<float>(target.Width), static_cast<float>(target.Height)
 						},
-						store
+						store,
+						GuiLists[DrawingViewport].Signature()
 					);
 				}
 				if (const auto *list = store.Resource<client::DrawList>()) {
@@ -2295,6 +2296,7 @@ namespace studio {
 		view.Portals = Portals;
 		view.Pipeline = selectedPipeline;
 		view.World = shown.IsValid() ? shown.Index : 0;
+		view.WorldName = shown.IsValid() ? Universe->NameOf(shown) : engine::core::Name{};
 
 		// **The grid is drawn by the renderer now and not by the overlay**, so
 		// that the geometry in front of it hides it. `ConfigureGroundGrid`

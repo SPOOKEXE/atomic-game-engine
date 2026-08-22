@@ -609,6 +609,11 @@ namespace engine::render {
 		// A stable key shared only by views of the same logical world.
 		uint64_t World = 0;
 
+		// The persistent identity of that world for resident visual state. Entity
+		// handles and particle block indices collide between stores, so both the
+		// instance rows and particle pool use this with `World`.
+		core::Name WorldName;
+
 		// A graph installed through `Renderer::SetPipeline`, or invalid for the default.
 		core::Name Pipeline;
 
@@ -638,11 +643,11 @@ namespace engine::render {
 		// happens on the tick, and the two agree because both are rates per
 		// second.
 		//
-		// **Zero on every view of a frame but one.** A frame has several views
-		// and one pool - a mirror and the room it reflects are two pictures of
-		// the same particles - so a caller that passed the frame's step to each
-		// would age them once per camera. Zero draws what the step already wrote,
-		// which for a repeat view is exactly right, and it is also what a paused
+		// **Nonzero on one view per logical world and zero on its other views.** A
+		// mirror and the room it reflects are two pictures of the same particles,
+		// so passing the frame's step to each would age them once per camera. Two
+		// different worlds own different pools and each may advance once. Zero
+		// draws what that world's step already wrote, which is also what a paused
 		// view wants.
 		float ParticleDelta = 0.0f;
 
@@ -931,45 +936,32 @@ namespace engine::render {
 		// wrong, not that the scene is small.
 		uint32_t Culled = 0;
 
-		// How many chunks of the instance stream this view uploaded, and how
-		// many of them held anything different from the frame before.
+		// How many chunks the resident instance pool spans, and how many contain
+		// a row uploaded by this view.
 		//
-		// **A measurement, not a mechanism.** The instance buffer is rewritten
-		// whole every frame, and whether uploading it as a delta would pay
-		// depends on a number nobody has: how much of a real scene's draw list
-		// actually moves between two frames. `scene::ChunkSignaturesOf` signs it
-		// in blocks of `scene::SIGNATURE_CHUNK` rows in the order they are
-		// uploaded, and this is the ratio that falls out.
+		// **Resident rows, not draw-order rows.** Visibility and ordering are a
+		// separate uint index stream, so a camera turn or a frustum edge no longer
+		// moves packed rows. A chunk is dirty only when a stable entity slot is
+		// new or its packed transform, scale, rotation, or colour changed.
 		//
-		// **Measured at v0.19, and the answer was no.** Over the staged example
-		// scenes a still world with a still camera rewrites 0.3% of its chunks
-		// and everything else rewrites 100%. The dividing line is not motion: a
-		// chunk is a range of *row indices*, so one instance entering or leaving
-		// the list shifts every row behind it and dirties every chunk from there
-		// on. This signs the culled list, so a part crossing the frustum edge
-		// does that, and `MeshGrid.luau` does it by streaming meshes in while its
-		// geometry sits still. A delta keyed on draw-order rows would therefore
-		// save the whole upload in a screenshot and nothing at all in a game.
+		// The upload-order experiment that preceded residency rewrote 100% when a
+		// cull or membership edit shifted rows. This pair measures the stable-slot
+		// result that experiment selected.
 		//
-		// The fix is not a better hash. It is to key the resident rows by a
-		// stable per-entity slot - the way `replication::Authority` keys a
-		// component - and to make visibility and order a separate index list the
-		// GPU reads, so culling and sorting stop touching the rows. Then a moving
-		// part dirties one slot. `ROADMAP.md`'s v0.19 entry carries the argument
-		// and `scene/tests/ChunkSignature.cpp` pins the shift that forces it.
-		//
-		// The pair stays because it is how that work will be judged: the same
-		// number, taken again once rows are slot-keyed, is what says whether the
-		// delta is finally worth writing.
-		//
-		// Equal counts every frame in a still scene means the signature is not
-		// matching and something is moving that nobody thinks is moving - the
-		// same reading `SurfacePasses` gives for the same reason.
+		// Equal counts every frame in a still scene means resident rows are still
+		// changing and the delta is not paying.
 		//
 		// @since v0.19
 		//@{
 		uint32_t InstanceChunks = 0;
 		uint32_t InstanceChunksDirty = 0;
+		//@}
+
+		// The same resident-pool measurement at row granularity. Chunks say how
+		// scattered a copy is; rows say how many 36-byte payloads actually crossed.
+		//@{
+		uint32_t InstanceRows = 0;
+		uint32_t InstanceRowsDirty = 0;
 		//@}
 
 		// Resource traffic declared by the graph after world and view scopes are

@@ -78,12 +78,8 @@ namespace engine::render {
 				return pass;
 			};
 			const auto drawOpaque =
-				[&](SDL_GPURenderPass *pass, SDL_GPUBuffer *instances, const Impl::IndirectPhase *phase) {
-					const SDL_GPUBufferBinding vertexBindings[] = {
-						{State->Meshes.Vertices(), 0},
-						{instances, 0},
-					};
-					SDL_BindGPUVertexBuffers(pass, 0, vertexBindings, 2);
+				[&](SDL_GPURenderPass *pass, SDL_GPUBuffer *indices, const Impl::IndirectPhase *phase) {
+					State->BindInstanceBuffers(pass, indices);
 					const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
 					SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
 					result.DrawCalls += State->DrawSlots(
@@ -109,7 +105,7 @@ namespace engine::render {
 					return false;
 				}
 				if (haveInstances && plainOpaque > 0) {
-					drawOpaque(gbuffer, State->InstanceBuffer, nullptr);
+					drawOpaque(gbuffer, State->InstanceIndexBuffer, nullptr);
 				}
 				SDL_EndGPURenderPass(gbuffer);
 				return true;
@@ -133,7 +129,7 @@ namespace engine::render {
 				ENGINE_ERROR("gbuffer early: SDL_BeginGPURenderPass: {}", SDL_GetError());
 				return false;
 			}
-			drawOpaque(earlyPass, State->InstanceBuffer, &early);
+			drawOpaque(earlyPass, State->InstanceIndexBuffer, &early);
 			SDL_EndGPURenderPass(earlyPass);
 
 			// The pyramid over what the occluders wrote, then the cull that
@@ -153,7 +149,7 @@ namespace engine::render {
 				ENGINE_ERROR("gbuffer late: SDL_BeginGPURenderPass: {}", SDL_GetError());
 				return false;
 			}
-			drawOpaque(latePass, State->Occlusion.LateInstances, &late);
+			drawOpaque(latePass, State->Occlusion.LateIndices, &late);
 			SDL_EndGPURenderPass(latePass);
 			return true;
 		});
@@ -316,11 +312,7 @@ namespace engine::render {
 			if (haveInstances) {
 				State->BindPipeline(pass, State->OpaquePipeline, Impl::PipelineFamily::Opaque);
 
-				const SDL_GPUBufferBinding vertexBindings[] = {
-					{State->Meshes.Vertices(), 0},
-					{State->InstanceBuffer, 0},
-				};
-				SDL_BindGPUVertexBuffers(pass, 0, vertexBindings, 2);
+				State->BindInstanceBuffers(pass);
 
 				const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
 				SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);

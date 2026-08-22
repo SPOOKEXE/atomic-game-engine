@@ -88,12 +88,8 @@ namespace engine::scene {
 
 		// Folds one instance into the four lanes.
 		//
-		// **Extracted so `SignatureOf` and `ChunkSignaturesOf` cannot disagree
-		// about what a row says.** Two copies of eighteen mixes is two places to
-		// add the next field to, and the one that would be missed is the chunk
-		// version - it is read by a counter rather than by a picture, so a field
-		// left out of it reports a scene as quieter than it is and nothing looks
-		// wrong.
+		// Kept in one field-wise fold so padding and reserved bytes never become
+		// part of a rendered-surface signature.
 		void FoldInstance(SignatureLanes &lanes, const DrawInstance &instance) {
 			uint64_t &a = lanes.A;
 			uint64_t &b = lanes.B;
@@ -168,49 +164,6 @@ namespace engine::scene {
 			FoldInstance(lanes, instance);
 		}
 		return CombineLanes(lanes);
-	}
-
-	size_t ChunkSignaturesOf(
-		std::span<const DrawInstance> instances, std::span<const uint32_t> order, std::vector<uint64_t> &out
-	) {
-		// The number of rows uploaded, which is the permutation's length when
-		// there is one and the list's otherwise.
-		const size_t rows = order.empty() ? instances.size() : order.size();
-		out.assign((rows + SIGNATURE_CHUNK - 1) / SIGNATURE_CHUNK, 0);
-
-		for (size_t chunk = 0; chunk < out.size(); chunk++) {
-			const size_t first = chunk * SIGNATURE_CHUNK;
-			const size_t last = std::min(first + SIGNATURE_CHUNK, rows);
-
-			// **Lanes start fresh per chunk rather than carrying across.** A
-			// running hash would make every chunk after the first one depend on
-			// every row before it, so one part moving at the head of the list
-			// would dirty the whole tail - which is the exact opposite of what
-			// this is counting.
-			SignatureLanes lanes;
-			for (size_t row = first; row < last; row++) {
-				const size_t index = order.empty() ? row : static_cast<size_t>(order[row]);
-				// An out-of-range index is a caller bug rather than a shape this
-				// has to serve, but a signature is not worth reading past the
-				// list for: it folds in nothing and the chunk stays comparable.
-				if (index < instances.size()) {
-					FoldInstance(lanes, instances[index]);
-				}
-			}
-			out[chunk] = CombineLanes(lanes);
-		}
-		return out.size();
-	}
-
-	size_t DirtyChunkCount(std::span<const uint64_t> previous, std::span<const uint64_t> current) {
-		const size_t shared = std::min(previous.size(), current.size());
-		size_t dirty = std::max(previous.size(), current.size()) - shared;
-		for (size_t chunk = 0; chunk < shared; chunk++) {
-			if (previous[chunk] != current[chunk]) {
-				dirty++;
-			}
-		}
-		return dirty;
 	}
 
 	size_t OrderForDrawing(

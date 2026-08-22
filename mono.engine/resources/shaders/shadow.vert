@@ -1,14 +1,13 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
 
-// Depth-only pass. It shares the colour pass's vertex layout and instance buffer.
+// Depth-only pass. It shares the colour pass's mesh layout and resident rows.
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec2 inTexCoord;
 
-// Locations 3 to 6, and the decode for them. **The same file `opaque.vert`
-// includes**, which is the point: the two stages read the same thirty-six bytes,
+// The same storage decode `opaque.vert` includes. The two stages read the same thirty-six bytes,
 // and the day one of them was edited and the other was not is the day a shadow
 // stopped matching the body casting it.
 #include "instance.glsl"

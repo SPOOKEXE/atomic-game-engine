@@ -65,11 +65,7 @@ namespace engine::render {
 				SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, nullptr, 0, &shadowTarget);
 				State->BindPipeline(pass, State->ShadowPipeline, Impl::PipelineFamily::Other);
 
-				const SDL_GPUBufferBinding vertexBindings[] = {
-					{State->Meshes.Vertices(), 0},
-					{State->InstanceBuffer, 0},
-				};
-				SDL_BindGPUVertexBuffers(pass, 0, vertexBindings, 2);
+				State->BindInstanceBuffers(pass);
 
 				const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
 				SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
@@ -265,11 +261,7 @@ namespace engine::render {
 					};
 					SDL_SetGPUScissor(beamPass, &beamScissor);
 
-					const SDL_GPUBufferBinding beamBindings[] = {
-						{State->Meshes.Vertices(), 0},
-						{State->InstanceBuffer, 0},
-					};
-					SDL_BindGPUVertexBuffers(beamPass, 0, beamBindings, 2);
+					State->BindInstanceBuffers(beamPass);
 
 					const SDL_GPUBufferBinding beamIndices{State->Meshes.Indices(), 0};
 					SDL_BindGPUIndexBuffer(beamPass, &beamIndices, SDL_GPU_INDEXELEMENTSIZE_32BIT);

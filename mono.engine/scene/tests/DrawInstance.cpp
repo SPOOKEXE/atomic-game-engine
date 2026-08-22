@@ -109,7 +109,7 @@ TEST_CASE("a local override wins over the authored transparency", "[scene][drawi
 		LocalTransparency local;
 		local.Value = 0.0f;
 		const DrawInstance instance =
-			MakeDrawInstance(transform.Frame, bounds, visual, nullptr, nullptr, &local);
+			MakeDrawInstance(transform.Frame, bounds, visual, nullptr, nullptr, 41, &local, nullptr);
 		CHECK(instance.Transparency == 0.2f);
 	}
 
@@ -117,13 +117,15 @@ TEST_CASE("a local override wins over the authored transparency", "[scene][drawi
 		LocalTransparency local;
 		local.Value = 0.9f;
 		const DrawInstance instance =
-			MakeDrawInstance(transform.Frame, bounds, visual, nullptr, nullptr, &local);
+			MakeDrawInstance(transform.Frame, bounds, visual, nullptr, nullptr, 41, &local, nullptr);
 		CHECK(instance.Transparency == 0.9f);
 	}
 
 	SECTION("no row at all is the same as zero") {
-		const DrawInstance instance = MakeDrawInstance(transform.Frame, bounds, visual, nullptr, nullptr);
+		const DrawInstance instance =
+			MakeDrawInstance(transform.Frame, bounds, visual, nullptr, nullptr, 41, nullptr, nullptr);
 		CHECK(instance.Transparency == 0.2f);
+		CHECK(instance.Source == 41);
 	}
 }
 
@@ -571,13 +573,14 @@ TEST_CASE("the seam a row is cut at moves its signature", "[scene][drawinstance]
 	// and opens nothing. A fourth byte-sized field would still fit; a fifth is
 	// what would widen the row.
 	//
-	// **And it survived `Rig`, which is the first eight-aligned field on the
-	// type and therefore the first that could not.** The hole it opens is
+	// **It survived `Rig`, which is the first eight-aligned field on the type
+	// and therefore the first that could not.** The hole it opens is
 	// declared as `Reserved` and zeroed rather than left to the compiler, so
 	// the bytes exist and are known. That is the fix this assert asks for, not
 	// an exception to it.
 	static_assert(
-		sizeof(DrawInstance) == offsetof(DrawInstance, Rig) + sizeof(DrawInstance::Rig),
+		sizeof(DrawInstance) ==
+			offsetof(DrawInstance, IdentityReserved) + sizeof(DrawInstance::IdentityReserved),
 		"DrawInstance has grown padding. scene::SignatureOf is field-wise and is unaffected, "
 		"but anything reading this type as bytes is now reading uninitialised memory."
 	);
@@ -629,7 +632,7 @@ TEST_CASE("a draw instance carries every authored material map", "[scene][drawin
 	appearance.Shader = Name("drawinstance_test.Shader");
 
 	const DrawInstance instance =
-		engine::scene::MakeDrawInstance(CFrame{}, Bounds{}, Visual{}, &appearance, nullptr);
+		engine::scene::MakeDrawInstance(CFrame{}, Bounds{}, Visual{}, &appearance, nullptr, 41);
 	CHECK(instance.Texture == appearance.ColourMap);
 	CHECK(instance.NormalMap == appearance.NormalMap);
 	CHECK(instance.RoughnessMap == appearance.RoughnessMap);

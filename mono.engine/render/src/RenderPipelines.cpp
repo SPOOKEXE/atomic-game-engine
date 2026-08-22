@@ -171,7 +171,11 @@ namespace engine::render {
 	}
 
 	SDL_GPUShader *Renderer::Impl::LoadShader(
-		std::string_view name, SDL_GPUShaderStage stage, uint32_t samplers, uint32_t uniformBuffers
+		std::string_view name,
+		SDL_GPUShaderStage stage,
+		uint32_t samplers,
+		uint32_t uniformBuffers,
+		uint32_t storageBuffers
 	) const {
 		// Staged under the owning module's name, so that two modules cannot
 		// collide on a common file name like fullscreen.vert. The built-in GLSL
@@ -196,6 +200,7 @@ namespace engine::render {
 		info.stage = stage;
 		info.num_samplers = samplers;
 		info.num_uniform_buffers = uniformBuffers;
+		info.num_storage_buffers = storageBuffers;
 
 		SDL_GPUShader *shader = SDL_CreateGPUShader(Device, &info);
 		if (!shader) {
@@ -242,7 +247,7 @@ namespace engine::render {
 	}
 
 	bool Renderer::Impl::CreatePipelines() {
-		SDL_GPUShader *opaqueVertex = LoadShader("opaque.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
+		SDL_GPUShader *opaqueVertex = LoadShader("opaque.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1, 2);
 
 		// **Two samplers now: the shadow map and the surface.** The count is
 		// part of the shader object rather than of the pipeline, so a mismatch
@@ -260,7 +265,7 @@ namespace engine::render {
 			3
 		);
 
-		SDL_GPUShader *shadowVertex = LoadShader("shadow.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
+		SDL_GPUShader *shadowVertex = LoadShader("shadow.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1, 2);
 		SDL_GPUShader *shadowFragment = LoadShader("shadow.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 1);
 		SDL_GPUShader *overlayVertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
 		SDL_GPUShader *imageFragment = LoadShader("image.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
@@ -287,30 +292,15 @@ namespace engine::render {
 
 		const SDL_GPUVertexBufferDescription vertexBuffers[] = {
 			{0, sizeof(Vertex), SDL_GPU_VERTEXINPUTRATE_VERTEX, 0},
-			// One step per instance: the same 36 indices are replayed for every
-			// entity, and only the matrix and colour change.
-			{1, sizeof(GpuInstance), SDL_GPU_VERTEXINPUTRATE_INSTANCE, 0},
 		};
 
-		// **Four instance attributes where there were six, and the matrix is
-		// gone.** A `mat4` attribute has to be spelled as four float4 locations
-		// because there is no matrix vertex format, and those four locations
-		// carried a rotation nine times over plus a row that is always
-		// `(0, 0, 0, 1)`. `opaque.vert` now rebuilds `T * R * S` from the three
-		// things it was ever made of. See `InstancePacking.hpp` for what each
-		// field costs and why position and scale stayed float.
+		// Only mesh vertices are attributes. Packed instance rows and the view's
+		// ordered resident-slot indices arrive through vertex storage buffers, so
+		// another camera can reorder the same rows without re-uploading them.
 		const SDL_GPUVertexAttribute attributes[] = {
 			{0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(Vertex, Position)},
 			{1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(Vertex, Normal)},
 			{2, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(Vertex, TexCoord)},
-			{3, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(GpuInstance, Position)},
-			// Two raw words rather than a normalised format: SDL has no
-			// four-component signed-normalised sixteen-bit type, and
-			// `unpackSnorm2x16` in the shader is the same decode the fixed
-			// function would have done.
-			{4, 1, SDL_GPU_VERTEXELEMENTFORMAT_UINT2, offsetof(GpuInstance, Rotation)},
-			{5, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(GpuInstance, Scale)},
-			{6, 1, SDL_GPU_VERTEXELEMENTFORMAT_UINT, offsetof(GpuInstance, Colour)},
 		};
 
 		SDL_GPUColorTargetDescription opaqueTarget{};
@@ -321,9 +311,9 @@ namespace engine::render {
 		opaque.fragment_shader = opaqueFragment;
 		opaque.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
 		opaque.vertex_input_state.vertex_buffer_descriptions = vertexBuffers;
-		opaque.vertex_input_state.num_vertex_buffers = 2;
+		opaque.vertex_input_state.num_vertex_buffers = 1;
 		opaque.vertex_input_state.vertex_attributes = attributes;
-		opaque.vertex_input_state.num_vertex_attributes = 7;
+		opaque.vertex_input_state.num_vertex_attributes = 3;
 		opaque.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
 		opaque.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_BACK;
 		// The cube winds counter-clockwise when seen from outside.
@@ -803,7 +793,7 @@ namespace engine::render {
 		// documents with the failure named rather than the client dying here.
 		Occlusion.Seed = LoadComputePipeline("hzb-seed.comp", 1, 0, 1, 0, 8, 8);
 		Occlusion.Reduce = LoadComputePipeline("hzb-reduce.comp", 1, 0, 1, 0, 8, 8);
-		Occlusion.Cull = LoadComputePipeline("occlusion-cull.comp", PYRAMID_LEVEL_LIMIT, 3, 0, 2, 64, 1);
+		Occlusion.Cull = LoadComputePipeline("occlusion-cull.comp", PYRAMID_LEVEL_LIMIT, 2, 0, 2, 64, 1);
 		Occlusion.Args = LoadComputePipeline("occlusion-args.comp", 0, 2, 0, 1, 64, 1);
 
 		// The particle simulation. Two read-only buffers (the block records and
@@ -816,8 +806,8 @@ namespace engine::render {
 		// pool and the instance stream it fills. The scatter reads one and writes
 		// one, and is dispatched three times a frame at most: births, changed
 		// parameters, changed curves.
-		Particles.Step = LoadComputePipeline("particle-step.comp", 0, 4, 0, 2, 64, 1);
-		Particles.Scatter = LoadComputePipeline("particle-scatter.comp", 0, 1, 0, 1, 64, 1);
+		ParticleStep = LoadComputePipeline("particle-step.comp", 0, 4, 0, 2, 64, 1);
+		ParticleScatter = LoadComputePipeline("particle-scatter.comp", 0, 1, 0, 1, 64, 1);
 
 		// **The particle pipelines are deliberately not in this conjunction.** A
 		// build whose particle shaders failed to compile still draws a world, and

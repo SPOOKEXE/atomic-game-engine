@@ -160,6 +160,20 @@ namespace engine::render {
 			ecs::Store &store
 		);
 
+		// The same submission with the compiled list's persistent signature.
+		//
+		// A matching signature keeps the resident vertex and index buffers. Image
+		// dimensions and flipbook cells are checked separately in `Prepare`, so an
+		// animated or newly resolved image still updates without rebuilding the
+		// world-side list.
+		void Submit(
+			const gui::DrawList &list,
+			const core::Vector2 &canvas,
+			const core::Vector2 &targetPixels,
+			ecs::Store &store,
+			uint64_t signature
+		);
+
 		// Uploads this frame's vertices and indices.
 		//
 		// @param commandBuffer The frame's `SDL_GPUCommandBuffer *`.
@@ -221,6 +235,23 @@ namespace engine::render {
 			return Recorded;
 		}
 
+		// Bytes of interface geometry uploaded by the last `Prepare`. Zero means
+		// the resident mesh was reused or nothing was drawable.
+		uint64_t LastUploadedBytes() const {
+			return LastUploadBytes;
+		}
+
+		// Resident-mesh cache outcomes since initialisation.
+		//@{
+		uint64_t UploadCount() const {
+			return Uploads;
+		}
+
+		uint64_t ReuseCount() const {
+			return Reuses;
+		}
+		//@}
+
 	  private:
 		bool UploadAtlas(void *commandBuffer);
 
@@ -257,6 +288,9 @@ namespace engine::render {
 		InterfaceMesh Mesh;
 		gui::DrawList Pending;
 		core::Vector2 Canvas;
+		uint64_t PendingSignature = 0;
+		bool SignatureValid = false;
+		bool MeshDirty = true;
 
 		// The attachment's real size in device pixels. See `Submit`.
 		core::Vector2 TargetPixels;
@@ -278,5 +312,8 @@ namespace engine::render {
 
 		bool AtlasUploaded = false;
 		size_t Recorded = 0;
+		uint64_t LastUploadBytes = 0;
+		uint64_t Uploads = 0;
+		uint64_t Reuses = 0;
 	};
 }

@@ -34,6 +34,7 @@ namespace engine::render {
 							*visual,
 							store.Get<scene::SurfaceAppearance>(child),
 							store.Get<scene::Tags>(child),
+							child.Id,
 							nullptr,
 							store.Get<scene::CharacterLimb>(child)
 						)
@@ -101,6 +102,7 @@ namespace engine::render {
 			// frames in the same Store are not two cameras on one world, so their
 			// world-scoped shadow work must not be shared.
 			view.World = command.Source.Id;
+			view.WorldName = core::Name("render.viewport-frame");
 			view.Lighting = baseLighting;
 			view.Lighting.Direction = viewport->LightDirection;
 			view.Lighting.Ambient = viewport->Ambient;

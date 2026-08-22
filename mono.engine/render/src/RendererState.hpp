@@ -10,6 +10,7 @@
 // `include/`, and `render/AGENTS.md`'s rule that no SDL header appears in a
 // public header is what confines it to `src/`.
 
+#include "InstanceResidency.hpp"
 #include "RenderTypes.hpp"
 #include "ResourcePreview.hpp"
 #include "ShaderBinary.hpp"
@@ -519,8 +520,8 @@ namespace engine::render {
 		// out of scope is a dangling read at the next `AddShader`. The arrays
 		// live here and the infos point at them.
 		//@{
-		SDL_GPUVertexBufferDescription VariantBuffers[2]{};
-		SDL_GPUVertexAttribute VariantAttributes[7]{};
+		SDL_GPUVertexBufferDescription VariantBuffers[1]{};
+		SDL_GPUVertexAttribute VariantAttributes[3]{};
 		SDL_GPUColorTargetDescription VariantOpaqueTarget{};
 		SDL_GPUColorTargetDescription VariantBlendedTarget{};
 		SDL_GPUGraphicsPipelineCreateInfo VariantOpaqueInfo{};
@@ -713,6 +714,24 @@ namespace engine::render {
 		SDL_GPUBuffer *InstanceBuffer = nullptr;
 		SDL_GPUTransferBuffer *InstanceTransfer = nullptr;
 		uint32_t InstanceCapacity = 0;
+		SDL_GPUBuffer *InstanceIndexBuffer = nullptr;
+		SDL_GPUTransferBuffer *InstanceIndexTransfer = nullptr;
+		uint32_t InstanceIndexCapacity = 0;
+
+		// Packed rows are world-owned. Several cameras looking at one world share
+		// this pool and upload changed rows once; each target keeps only its own
+		// visibility and draw-order index stream.
+		struct InstanceWorld {
+			uint64_t Id = 0;
+			core::Name Name;
+			InstanceResidency Instances;
+			SDL_GPUBuffer *Buffer = nullptr;
+			SDL_GPUTransferBuffer *Transfer = nullptr;
+			uint32_t Capacity = 0;
+			uint64_t MetricFrame = 0;
+		};
+		std::vector<InstanceWorld> InstanceWorlds;
+		InstanceWorld *ActiveInstanceWorld = nullptr;
 
 		// --- occlusion culling ------------------------------------------------
 		//
@@ -749,7 +768,7 @@ namespace engine::render {
 			SDL_GPUBuffer *RunTable = nullptr;	 // per slot-run: first late slot
 			SDL_GPUBuffer *ArgRuns = nullptr;	 // per late argument: its slot-run
 			SDL_GPUBuffer *Counts = nullptr;	 // per slot-run: survivor count
-			SDL_GPUBuffer *LateInstances = nullptr;
+			SDL_GPUBuffer *LateIndices = nullptr;
 			SDL_GPUTransferBuffer *Transfer = nullptr;
 			uint32_t ArgumentCapacity = 0;
 			uint32_t CandidateCapacity = 0;
@@ -825,18 +844,10 @@ namespace engine::render {
 		SDL_GPUGraphicsPipeline *ParticlePipeline = nullptr;
 		SDL_GPUGraphicsPipeline *AdditiveParticlePipeline = nullptr;
 
-		// One instance buffer for every particle in the frame.
-		//
-		// Separate from `InstanceBuffer` because the strides differ - 28 bytes
-		// against 96 - and a shared buffer would mean either padding a particle to
-		// a mesh instance's width or rebinding the vertex layout mid-pass.
-		//
-		// **No transfer buffer beside it since v0.17**, because nothing uploads
-		// to it: `particle-step.comp` writes it as a storage buffer and the draw
-		// reads it as a vertex stream, and the sixteen megabytes a frame that
-		// used to cross to fill it do not.
-		SDL_GPUBuffer *ParticleBuffer = nullptr;
-		uint32_t ParticleCapacity = 0;
+		// Shared programs for every world's particle pool. The state and output
+		// buffers are world-owned below; the shaders carry no world state.
+		SDL_GPUComputePipeline *ParticleStep = nullptr;
+		SDL_GPUComputePipeline *ParticleScatter = nullptr;
 
 		// One run of particles that share every uniform and every binding.
 		//
@@ -922,7 +933,7 @@ namespace engine::render {
 		// What crosses now is `Blocks` - one 384-byte record per emitter, which
 		// is a five-thousand-emitter scene's two megabytes - and `Births`, which
 		// is whatever the tick spawned. `particle-step.comp` does the rest and
-		// writes its output straight into `ParticleBuffer` at the offsets
+		// writes its output straight into its world's buffer at the offsets
 		// `PrepareParticles` worked out, so the draw grouping is exactly what it
 		// was and there is no gather pass.
 		struct ParticlePool {
@@ -999,9 +1010,6 @@ namespace engine::render {
 			uint32_t SeamCapacity = 0;
 			//@}
 
-			SDL_GPUComputePipeline *Step = nullptr;
-			SDL_GPUComputePipeline *Scatter = nullptr;
-
 			// What was staged this frame, for the dispatch that follows.
 			//@{
 			uint32_t Records = 0;
@@ -1029,7 +1037,38 @@ namespace engine::render {
 			const ParticleBatch *StagedFrom = nullptr;
 			size_t StagedCount = 0;
 			//@}
-		} Particles;
+		};
+
+		// Particle simulation is world-owned for the same reason instance rows
+		// are. Block indices start at zero inside each world, and every world's
+		// generated vertex stream must survive until a batched command buffer has
+		// drawn it.
+		struct ParticleWorld {
+			uint64_t Id = 0;
+			core::Name Name;
+			ParticlePool Pool;
+
+			// Written by this world's compute step and read as its vertex stream.
+			// There is no transfer buffer: these rows never live on the host.
+			SDL_GPUBuffer *Buffer = nullptr;
+			uint32_t Capacity = 0;
+		};
+		std::vector<ParticleWorld> ParticleWorlds;
+		ParticleWorld *ActiveParticleWorld = nullptr;
+
+		ParticleWorld &ParticleWorldFor(uint64_t id, core::Name name) {
+			const auto found =
+				std::find_if(ParticleWorlds.begin(), ParticleWorlds.end(), [&](const ParticleWorld &world) {
+					return world.Id == id && world.Name == name;
+				});
+			if (found != ParticleWorlds.end()) {
+				return *found;
+			}
+			ParticleWorlds.push_back(ParticleWorld{});
+			ParticleWorlds.back().Id = id;
+			ParticleWorlds.back().Name = name;
+			return ParticleWorlds.back();
+		}
 
 		// Grows the pool's state buffer to `slots`, and the three staging pairs
 		// to what this frame needs.
@@ -1046,8 +1085,8 @@ namespace engine::render {
 
 		// Runs the spawn scatter and then the step, on their own command buffer.
 		//
-		// **Its own submission, and once per frame rather than once per view.**
-		// The pool is the world's and not a camera's, so stepping it inside a
+		// **Its own submission, and once per world rather than once per view.**
+		// The pool is a world's and not a camera's, so stepping it inside a
 		// view's command buffer would age every particle again for a mirror.
 		// Submission order is what makes the draws that follow see it.
 		bool DispatchParticles();
@@ -1133,14 +1172,13 @@ namespace engine::render {
 			uint32_t HistoryHeight = 0;
 			bool HistoryReady = false;
 
-			// Last frame's per-chunk instance signatures, for
-			// `FrameResult::InstanceChunksDirty`.
-			//
-			// **Per slot rather than per renderer**, because every viewport
-			// uploads its own permutation of its own draw list: a studio with
-			// four panes open would otherwise have each one comparing against
-			// whichever pane recorded last and report everything dirty for ever.
-			std::vector<uint64_t> InstanceChunks;
+			// Visibility and order remain target-owned. The packed rows they index
+			// are shared by every camera carrying the same world key.
+			std::vector<uint32_t> InstanceIndices;
+
+			SDL_GPUBuffer *InstanceIndexBuffer = nullptr;
+			SDL_GPUTransferBuffer *InstanceIndexTransfer = nullptr;
+			uint32_t InstanceIndexCapacity = 0;
 		};
 
 		std::vector<SceneSlot> SceneSlots;
@@ -1153,6 +1191,20 @@ namespace engine::render {
 				SceneSlots.resize(slot + 1);
 			}
 			return SceneSlots[slot];
+		}
+
+		InstanceWorld &InstanceWorldFor(uint64_t id, core::Name name) {
+			const auto found =
+				std::find_if(InstanceWorlds.begin(), InstanceWorlds.end(), [&](const InstanceWorld &world) {
+					return world.Id == id && world.Name == name;
+				});
+			if (found != InstanceWorlds.end()) {
+				return *found;
+			}
+			InstanceWorlds.push_back(InstanceWorld{});
+			InstanceWorlds.back().Id = id;
+			InstanceWorlds.back().Name = name;
+			return InstanceWorlds.back();
 		}
 
 		// Scene targets that have been replaced but may still be referenced.
@@ -1763,7 +1815,11 @@ namespace engine::render {
 		ShaderBinary Binary;
 
 		SDL_GPUShader *LoadShader(
-			std::string_view name, SDL_GPUShaderStage stage, uint32_t samplers, uint32_t uniformBuffers
+			std::string_view name,
+			SDL_GPUShaderStage stage,
+			uint32_t samplers,
+			uint32_t uniformBuffers,
+			uint32_t storageBuffers = 0
 		) const;
 
 		// A built-in compute pipeline from the same staged directory
@@ -1855,8 +1911,11 @@ namespace engine::render {
 			const IndirectPhase *indirect = nullptr
 		);
 
+		// Binds mesh vertices plus the resident rows and one ordered index stream.
+		void BindInstanceBuffers(SDL_GPURenderPass *pass, SDL_GPUBuffer *indices = nullptr);
+
 		bool CreateGeometry();
-		bool EnsureInstanceCapacity(uint32_t count);
+		bool EnsureInstanceCapacity(uint32_t rows, uint32_t indices, bool &rowsReallocated);
 		bool EnsureDepth(uint32_t width, uint32_t height);
 
 		// The same, into whichever depth texture the caller owns. See

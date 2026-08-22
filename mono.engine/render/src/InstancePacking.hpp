@@ -202,8 +202,8 @@ namespace engine::render {
 	// **Thirty-six and not forty, which is worth pinning rather than leaving to
 	// whatever the compiler laid out.** Every member is four-byte aligned and
 	// there is no interior hole, so this is exactly the sum of the fields. The
-	// stride reaches the device three ways - the vertex buffer description, the
-	// late-instance buffer's element size, and the shader constant above.
+	// stride reaches the device as a storage-buffer word count and as the C++
+	// allocation and upload width.
 	static_assert(
 		sizeof(GpuInstance) == GPU_INSTANCE_WORDS * sizeof(uint32_t),
 		"GpuInstance stride changed. Update GPU_INSTANCE_WORDS above; the build passes it to "

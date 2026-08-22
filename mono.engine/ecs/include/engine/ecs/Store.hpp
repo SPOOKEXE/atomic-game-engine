@@ -666,6 +666,34 @@ namespace engine::ecs {
 			return visited;
 		}
 
+		// EachBatchParallel with the entities beside each component run.
+		//
+		// This is the narrow path for a packed output that also needs stable row
+		// identity. The entity pointer spans exactly `rows`, in the same order as
+		// every component pointer and the `first` index. All mutation restrictions
+		// of EachBatchParallel still apply.
+		//
+		// @param body  Called concurrently as `body(size_t first, size_t rows,
+		//              const Entity *entities, Ts *...columns)`.
+		// @param grain The minimum run of rows worth handing to a worker.
+		// @return Rows visited in total.
+		// @tick
+		template <class... Ts, class Body>
+		size_t EachBatchEntitiesParallel(Body &&body, size_t grain = parallel::Jobs::DEFAULT_GRAIN) {
+			RequireOwningThread("EachBatchEntitiesParallel");
+
+			const ComponentId terms[] = {Components::Of<std::remove_const_t<Ts>>()...};
+			size_t visited = 0;
+
+			VisitTables(terms, [&](const TableSlice &slice) {
+				visited += VisitBatchEntitiesParallel<Ts...>(
+					slice, body, grain, visited, std::index_sequence_for<Ts...>{}
+				);
+			});
+
+			return visited;
+		}
+
 		// Each, spread across the job system's workers.
 		//
 		// Parallel *within* a tick, not asynchronous across ticks: this blocks
@@ -869,6 +897,25 @@ namespace engine::ecs {
 				size_t visited = 0;
 				Owner->VisitTables(Terms(), [&](const TableSlice &slice) {
 					visited += Owner->VisitBatchParallel<Ts...>(
+						slice, body, grain, visited, std::index_sequence_for<Ts...>{}
+					);
+				});
+				return visited;
+			}
+
+			// `Store::EachBatchEntitiesParallel`, over this selection.
+			//
+			// @param body Called concurrently as `body(size_t first, size_t rows,
+			//             const Entity *entities, Ts *...columns)`.
+			// @param grain The minimum run of rows worth handing to a worker.
+			// @return Rows visited in total.
+			template <class Body>
+			size_t EachBatchEntitiesParallel(Body &&body, size_t grain = parallel::Jobs::DEFAULT_GRAIN) {
+				Owner->RequireOwningThread("Query::EachBatchEntitiesParallel");
+
+				size_t visited = 0;
+				Owner->VisitTables(Terms(), [&](const TableSlice &slice) {
+					visited += Owner->VisitBatchEntitiesParallel<Ts...>(
 						slice, body, grain, visited, std::index_sequence_for<Ts...>{}
 					);
 				});
@@ -2200,6 +2247,33 @@ namespace engine::ecs {
 					const size_t offset = row - Column::ChunkStart(chunk);
 					const size_t stop = ChunkEnd(row, end);
 					body(base + row, stop - row, RunBase<Ts>(slice.Columns[Indices], chunk, offset)...);
+					row = stop;
+				}
+			});
+
+			return slice.Rows;
+		}
+
+		template <class... Ts, class Body, size_t... Indices>
+		size_t VisitBatchEntitiesParallel(
+			const TableSlice &slice, Body &body, size_t grain, size_t base, std::index_sequence<Indices...>
+		) {
+			if (slice.Rows == 0) {
+				return 0;
+			}
+
+			parallel::Jobs::For(slice.Rows, grain, [&](size_t begin, size_t end) {
+				size_t row = begin;
+				while (row < end) {
+					const size_t chunk = Column::ChunkOf(row);
+					const size_t offset = row - Column::ChunkStart(chunk);
+					const size_t stop = ChunkEnd(row, end);
+					body(
+						base + row,
+						stop - row,
+						slice.Entities + row,
+						RunBase<Ts>(slice.Columns[Indices], chunk, offset)...
+					);
 					row = stop;
 				}
 			});

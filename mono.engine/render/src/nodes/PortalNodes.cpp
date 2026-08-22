@@ -680,11 +680,7 @@ namespace engine::render {
 
 			if (haveInstances) {
 				State->BindPipeline(pass, State->OpaquePipeline, Impl::PipelineFamily::Opaque);
-				const SDL_GPUBufferBinding vertexBindings[] = {
-					{State->Meshes.Vertices(), 0},
-					{State->InstanceBuffer, 0},
-				};
-				SDL_BindGPUVertexBuffers(pass, 0, vertexBindings, 2);
+				State->BindInstanceBuffers(pass);
 				const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
 				SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
 				SDL_PushGPUVertexUniformData(command, 0, &frameUniforms, sizeof(frameUniforms));

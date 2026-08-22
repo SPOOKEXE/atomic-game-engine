@@ -11,19 +11,33 @@
 // matrix the old layout uploaded, and this half is the same three steps in the
 // same order.
 
-// The instance attributes, at locations 3 to 6. A stage that includes this must
-// not declare its own.
-layout(location = 3) in vec3 inInstancePosition;
+// SDL assigns vertex storage buffers to set zero for SPIR-V. The first is the
+// stable thirty-six-byte row pool; the second is this draw order's uint slots.
+layout(set = 0, binding = 0) readonly buffer InstanceRows { uint words[]; } residentInstances;
+layout(set = 0, binding = 1) readonly buffer InstanceIndices { uint slots[]; } drawInstances;
 
-// The rotation, four signed-normalised 16-bit components: x and y in the low
-// and high halves of word 0, z and w in word 1.
-layout(location = 4) in uvec2 inInstanceRotation;
+#ifndef GPU_INSTANCE_WORDS
+#define GPU_INSTANCE_WORDS 9
+#endif
 
-// Per-axis scale. May be zero on an axis; the built-in plane has no thickness.
-layout(location = 5) in vec3 inInstanceScale;
+uint InstanceWord(uint part) {
+	uint resident = drawInstances.slots[gl_InstanceIndex];
+	return residentInstances.words[resident * uint(GPU_INSTANCE_WORDS) + part];
+}
 
-// Colour and alpha as RGBA8, red in the low byte.
-layout(location = 6) in uint inInstanceColour;
+vec3 InstancePosition() {
+	return vec3(
+		uintBitsToFloat(InstanceWord(0)),
+		uintBitsToFloat(InstanceWord(1)),
+		uintBitsToFloat(InstanceWord(2)));
+}
+
+vec3 InstanceScale() {
+	return vec3(
+		uintBitsToFloat(InstanceWord(5)),
+		uintBitsToFloat(InstanceWord(6)),
+		uintBitsToFloat(InstanceWord(7)));
+}
 
 // The rotation as a unit quaternion, `xyz` vector part and `w` scalar.
 //
@@ -33,8 +47,8 @@ layout(location = 6) in uint inInstanceColour;
 // breathing rather than as a rotation being slightly wrong.
 vec4 InstanceRotation() {
 	vec4 raw = vec4(
-		unpackSnorm2x16(inInstanceRotation.x),
-		unpackSnorm2x16(inInstanceRotation.y));
+		unpackSnorm2x16(InstanceWord(3)),
+		unpackSnorm2x16(InstanceWord(4)));
 	float square = dot(raw, raw);
 	return square > 1e-12 ? raw * inversesqrt(square) : vec4(0.0, 0.0, 0.0, 1.0);
 }
@@ -51,7 +65,7 @@ vec3 RotateByQuaternion(vec4 quaternion, vec3 point) {
 
 // The world position of one mesh vertex under this instance.
 vec3 InstanceWorldPosition(vec4 quaternion, vec3 meshPosition) {
-	return RotateByQuaternion(quaternion, meshPosition * inInstanceScale) + inInstancePosition;
+	return RotateByQuaternion(quaternion, meshPosition * InstanceScale()) + InstancePosition();
 }
 
 // The world-space normal, corrected for the instance's non-uniform scale.
@@ -65,13 +79,14 @@ vec3 InstanceWorldPosition(vec4 quaternion, vec3 meshPosition) {
 // multiplies instead, which drives that component to zero exactly as
 // `InverseScaleSquared`'s guard used to.
 vec3 InstanceWorldNormal(vec4 quaternion, vec3 meshNormal) {
-	bvec3 usable = greaterThan(inInstanceScale * inInstanceScale, vec3(1e-12));
-	vec3 divisor = mix(vec3(1.0), inInstanceScale, usable);
-	vec3 factor = mix(inInstanceScale, 1.0 / divisor, usable);
+	vec3 scale = InstanceScale();
+	bvec3 usable = greaterThan(scale * scale, vec3(1e-12));
+	vec3 divisor = mix(vec3(1.0), scale, usable);
+	vec3 factor = mix(scale, 1.0 / divisor, usable);
 	return RotateByQuaternion(quaternion, meshNormal * factor);
 }
 
 // The instance's colour and alpha.
 vec4 InstanceColour() {
-	return unpackUnorm4x8(inInstanceColour);
+	return unpackUnorm4x8(InstanceWord(8));
 }

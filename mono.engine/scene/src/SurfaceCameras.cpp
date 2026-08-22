@@ -1453,6 +1453,7 @@ namespace engine::scene {
 			}
 
 			ghost = row;
+			ghost.Variant = seam.Pane.Id;
 			ghost.Frame = through.Place(row.Frame);
 			ghost.HalfExtent = row.HalfExtent * through.Scale;
 
@@ -2131,6 +2132,8 @@ namespace engine::scene {
 				}
 
 				DrawInstance marker;
+				marker.Source = entity.Id;
+				marker.Variant = entity.Id;
 
 				// **The part's rotation with the face's position**, so the bar
 				// lies in the plane of the face rather than axis-aligned beside

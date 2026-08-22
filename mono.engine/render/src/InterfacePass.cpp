@@ -335,6 +335,11 @@ namespace engine::render {
 		IndexCapacity = 0;
 		TransferCapacity = 0;
 		AtlasUploaded = false;
+		SignatureValid = false;
+		MeshDirty = true;
+		LastUploadBytes = 0;
+		Uploads = 0;
+		Reuses = 0;
 	}
 
 	void InterfacePass::Submit(
@@ -344,6 +349,29 @@ namespace engine::render {
 		ecs::Store &store
 	) {
 		Pending = list;
+		SignatureValid = false;
+		MeshDirty = true;
+		Canvas = canvas;
+		TargetPixels = targetPixels;
+		SpatialCollectors.clear();
+		store.Each<const gui::SpatialCanvas>([&](ecs::Entity collector, const gui::SpatialCanvas &spatial) {
+			SpatialCollectors.push_back(SpatialCollector{collector, spatial});
+		});
+	}
+
+	void InterfacePass::Submit(
+		const gui::DrawList &list,
+		const core::Vector2 &canvas,
+		const core::Vector2 &targetPixels,
+		ecs::Store &store,
+		uint64_t signature
+	) {
+		if (!SignatureValid || PendingSignature != signature) {
+			Pending = list;
+			PendingSignature = signature;
+			SignatureValid = true;
+			MeshDirty = true;
+		}
 		Canvas = canvas;
 		TargetPixels = targetPixels;
 		SpatialCollectors.clear();
@@ -540,6 +568,7 @@ namespace engine::render {
 	}
 
 	bool InterfacePass::Prepare(void *commandBuffer) {
+		LastUploadBytes = 0;
 		if (Pipeline == nullptr || commandBuffer == nullptr) {
 			return false;
 		}
@@ -548,6 +577,7 @@ namespace engine::render {
 
 		UploadAtlas(commandBuffer);
 
+		std::vector<ResolvedImage> previousImages = std::move(ResolvedImages);
 		ResolvedImages.clear();
 		for (const gui::DrawCommand &draw : Pending.Commands) {
 			const bool image = draw.Kind == gui::DrawKind::Image && draw.Image.IsValid();
@@ -569,6 +599,24 @@ namespace engine::render {
 										  : (Images ? Images(draw.Image) : InterfaceImage{});
 				ResolvedImages.push_back(resolved);
 			}
+		}
+
+		const auto sameGeometry = [](const ResolvedImage &left, const ResolvedImage &right) {
+			return left.Name == right.Name && left.Viewport == right.Viewport &&
+				   left.Value.Cell.Scale == right.Value.Cell.Scale &&
+				   left.Value.Cell.OffsetU == right.Value.Cell.OffsetU &&
+				   left.Value.Cell.OffsetV == right.Value.Cell.OffsetV &&
+				   left.Value.UVMax == right.Value.UVMax && left.Value.Width == right.Value.Width &&
+				   left.Value.Height == right.Value.Height;
+		};
+		if (previousImages.size() != ResolvedImages.size() ||
+			!std::equal(previousImages.begin(), previousImages.end(), ResolvedImages.begin(), sameGeometry)) {
+			MeshDirty = true;
+		}
+
+		if (!MeshDirty && VertexBuffer != nullptr && IndexBuffer != nullptr) {
+			Reuses++;
+			return !Mesh.Vertices().empty() && !Mesh.Indices().empty();
 		}
 
 		const auto information = [](const InterfaceImage &image) {
@@ -609,6 +657,7 @@ namespace engine::render {
 		const auto vertices = static_cast<uint32_t>(Mesh.Vertices().size());
 		const auto indices = static_cast<uint32_t>(Mesh.Indices().size());
 		if (vertices == 0 || indices == 0) {
+			MeshDirty = false;
 			return false;
 		}
 
@@ -693,6 +742,9 @@ namespace engine::render {
 		SDL_UploadToGPUBuffer(copy, &from, &to, true);
 
 		SDL_EndGPUCopyPass(copy);
+		MeshDirty = false;
+		LastUploadBytes = total;
+		Uploads++;
 		return true;
 	}
 

@@ -185,6 +185,11 @@ namespace client {
 					count * sizeof(engine::scene::DrawInstance)
 				);
 			}
+			for (size_t at = before; at < Combined.size(); at++) {
+				if (!Combined[at].SourceWorld.IsValid()) {
+					Combined[at].SourceWorld = slot.State.World;
+				}
+			}
 
 			// Placed, because two worlds' coordinates do not mean the same
 			// thing - nothing says they should, and overlaying them would draw

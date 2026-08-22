@@ -1390,10 +1390,8 @@ namespace engine::render {
 	// **This is where a `CFrame` and a `Color3` become a `mat4` and an RGBA,
 	// and it is the only place in the engine that happens.** A world produces
 	// scene data; a device layout is this module's business. The conversion
-	// writes straight into the mapped transfer buffer rather than into a
-	// vector that is then copied, because eighty bytes an entity goes into
-	// write-combined memory either way and the staging copy would be that
-	// traffic paid a third time.
+	// updates stable host slots, then only changed packed rows are staged for the
+	// resident device pool. Visibility and order are a separate uint stream.
 	//
 	// **A private phase of `Begin` rather than a node**, because nothing here
 	// touches the device queue: the copy pass it stages for is submitted by
@@ -1403,358 +1401,345 @@ namespace engine::render {
 		const core::CFrame &cameraFrame = Request.CameraFrame;
 		const uint32_t uploadCount = UploadCount;
 		const uint32_t sceneCount = SceneCount;
+		const uint32_t cameraBase = sceneCount;
 		const uint32_t ownCount = OwnCount;
 		const uint32_t plainOpaque = PlainOpaque;
 		const bool occlusionCulling = OcclusionCulling;
 		bool &haveInstances = HaveInstances;
+		Impl::SceneSlot &target = State->SlotAt(Request.TargetSlot);
+		Impl::InstanceWorld &residentWorld =
+			State->InstanceWorldFor(Request.Source->World, Request.Source->WorldName);
+		State->ActiveInstanceWorld = &residentWorld;
+		InstanceResidency &residency = residentWorld.Instances;
+		residency.BeginFrame(State->FrameCounter);
+		target.InstanceIndices.resize(uploadCount);
 
-		// **What fraction of this view's rows actually changed**, measured before
-		// anything is written so the numbers describe the frame about to be
-		// uploaded rather than the one that was.
-		//
-		// The camera group only. The scene groups are drawn by surface panes,
-		// which already have `scene::SignatureOf` deciding whether to redraw them
-		// at all - signing them again here would be counting the same skip twice.
-		// This group is the one that is rewritten unconditionally every frame,
-		// which makes it the only one a delta upload could save anything on. See
-		// `FrameResult::InstanceChunks`.
+		State->SlotMesh.resize(uploadCount);
+		State->SlotTexture.resize(uploadCount);
+		State->SlotNormalMap.resize(uploadCount);
+		State->SlotRoughnessMap.resize(uploadCount);
+		State->SlotOcclusionMap.resize(uploadCount);
+		State->SlotHeightMap.resize(uploadCount);
+		State->SlotEmissiveMap.resize(uploadCount);
+		State->SlotShader.resize(uploadCount);
+		State->SlotTags.resize(uploadCount);
+		State->SlotSeam.resize(uploadCount);
+		State->SlotSeamLight.resize(uploadCount);
+
+		const core::Name viewWorld = Request.Source->WorldName;
+		const auto record = [&](uint32_t drawSlot, const scene::DrawInstance &instance, uint32_t fallback) {
+			const MeshEntry &mesh = State->Meshes.Resolve(instance.Mesh);
+			State->SlotMesh[drawSlot] = &mesh;
+			State->SlotTexture[drawSlot] = instance.Texture;
+			State->SlotNormalMap[drawSlot] = instance.NormalMap;
+			State->SlotRoughnessMap[drawSlot] = instance.RoughnessMap;
+			State->SlotOcclusionMap[drawSlot] = instance.OcclusionMap;
+			State->SlotHeightMap[drawSlot] = instance.HeightMap;
+			State->SlotEmissiveMap[drawSlot] = instance.EmissiveMap;
+			State->SlotShader[drawSlot] = instance.Shader;
+			State->SlotTags[drawSlot] = instance.TagMask;
+			State->SlotSeam[drawSlot] = glm::vec4{
+				instance.SeamNormal.X,
+				instance.SeamNormal.Y,
+				instance.SeamNormal.Z,
+				instance.SeamOffset,
+			};
+			State->SlotSeamLight[drawSlot] =
+				glm::vec4{instance.SeamLight.X, instance.SeamLight.Y, instance.SeamLight.Z, 0.0f};
+
+			const InstanceKey key{
+				instance.SourceWorld.IsValid() ? instance.SourceWorld : viewWorld,
+				instance.Source,
+				instance.Variant,
+				instance.Source == 0 ? fallback + 1u : 0u,
+			};
+			target.InstanceIndices[drawSlot] = residency.Upsert(key, ToGpu(instance, mesh));
+		};
+
 		{
-			ENGINE_PROFILE_CAT("sign instance chunks", core::ProfileCategory::Render);
-
-			std::vector<uint64_t> &previous = State->SlotAt(Request.TargetSlot).InstanceChunks;
-			std::vector<uint64_t> chunks;
-			scene::ChunkSignaturesOf(State->VisibleInstances, State->DrawOrder, chunks);
-
-			Result.InstanceChunks = static_cast<uint32_t>(chunks.size());
-			Result.InstanceChunksDirty = static_cast<uint32_t>(scene::DirtyChunkCount(previous, chunks));
-			previous.swap(chunks);
+			ENGINE_PROFILE_CAT("resolve resident instances", core::ProfileCategory::Render);
+			for (uint32_t index = 0; index < State->SceneOrder.size(); index++) {
+				const uint32_t source = State->SceneOrder[index];
+				record(index, State->SceneInstances[source], source);
+			}
+			for (uint32_t index = ownCount; index < sceneCount; index++) {
+				record(index, State->SceneInstances[index], index);
+			}
+			for (uint32_t index = 0; index < State->DrawOrder.size(); index++) {
+				const uint32_t source = State->DrawOrder[index];
+				record(cameraBase + index, State->VisibleInstances[source], source);
+			}
 		}
 
-		if (uploadCount > 0) {
-			bool capacity = false;
-			{
-				// Grows the device buffer when the scene does. Separate from the
-				// copy below because one is a GPU allocation and the other is a
-				// memcpy, and a spike in either means something different.
-				ENGINE_PROFILE_CAT("ensure instance capacity", core::ProfileCategory::Render);
-				capacity = State->EnsureInstanceCapacity(uploadCount);
+		// --- the occlusion plan --------------------------------
+		//
+		// Each opaque slot-run is partitioned in place: the
+		// instances big and near enough to occlude move to its
+		// head and draw in the early phase; the tail waits on the
+		// GPU test against the pyramid the early phase's depth
+		// seeds. **Only resident-slot indices move.** Every per-slot
+		// array is constant across a run by `SlotsShareRun`'s
+		// definition, so swapping rows inside one changes no run
+		// boundary and no other pass's picture - an opaque draw
+		// is order-independent under the depth test.
+		State->OcclusionFrame = Impl::OcclusionPlan{};
+		if (occlusionCulling && plainOpaque > 0) {
+			ENGINE_PROFILE_CAT("occlusion plan", core::ProfileCategory::Render);
+			Impl::OcclusionPlan &occlusionPlan = State->OcclusionFrame;
+
+			// Drawn as an occluder when its widest world extent
+			// subtends at least this fraction of its distance -
+			// roughly six degrees. Lower drafts more occluders and
+			// costs early-phase overdraw; higher seeds the pyramid
+			// with too little to cull against. Not measured
+			// finely; revisit with a real scene if the cull rate
+			// disappoints.
+			constexpr float OCCLUDER_SCORE = 0.1f;
+
+			const glm::vec3 eye{cameraFrame.Position.X, cameraFrame.Position.Y, cameraFrame.Position.Z};
+			const auto base = static_cast<uint32_t>(cameraBase);
+			const uint32_t opaqueEnd = base + plainOpaque;
+
+			std::vector<uint32_t> earlyRows;
+			std::vector<uint32_t> lateRows;
+			uint32_t slot = base;
+			while (slot < opaqueEnd) {
+				uint32_t run = 1;
+				while (slot + run < opaqueEnd && State->SlotsShareRun(slot, slot + run)) {
+					run++;
+				}
+
+				const MeshEntry &runMesh = *State->SlotMesh[slot];
+				const glm::vec3 meshCentre{runMesh.Centre.X, runMesh.Centre.Y, runMesh.Centre.Z};
+				const glm::vec3 meshExtent{runMesh.Extent.X, runMesh.Extent.Y, runMesh.Extent.Z};
+
+				const auto runIndex = static_cast<uint32_t>(occlusionPlan.RunFirstSlot.size());
+				earlyRows.clear();
+				lateRows.clear();
+				for (uint32_t at = slot; at < slot + run; at++) {
+					const uint32_t residentSlot = target.InstanceIndices[at];
+					const GpuInstance &row = residency.Row(residentSlot);
+
+					// The world box, from the same matrix the
+					// vertex shader draws with: the mesh's own box
+					// mapped through the model. `ToGpu` built the
+					// model to fill the part's box exactly, so
+					// this bound is tight rather than approximate.
+					//
+					// **Rebuilt from the packed row rather than
+					// carried on it.** The row holds a rotation, a
+					// scale and a translation since v0.19, and
+					// `ModelMatrixOf` decodes them exactly as
+					// `instance.glsl` does - so the box still
+					// bounds the geometry that is drawn rather than
+					// the geometry that was asked for, which is a
+					// quantisation error apart.
+					const glm::mat4 model = ModelMatrixOf(row);
+					const glm::mat3 basis{model};
+					const glm::vec3 centre = glm::vec3(model * glm::vec4(meshCentre, 1.0f));
+					const glm::vec3 extent = glm::abs(basis[0]) * meshExtent.x +
+											 glm::abs(basis[1]) * meshExtent.y +
+											 glm::abs(basis[2]) * meshExtent.z;
+
+					const float widest = std::max(extent.x, std::max(extent.y, extent.z));
+					const float away = std::max(glm::distance(centre, eye), 0.01f);
+					if (widest >= away * OCCLUDER_SCORE) {
+						earlyRows.push_back(residentSlot);
+					} else {
+						lateRows.push_back(residentSlot);
+						occlusionPlan.CandidatePairs.emplace_back(centre, std::bit_cast<float>(runIndex));
+						occlusionPlan.CandidatePairs.emplace_back(extent, std::bit_cast<float>(residentSlot));
+					}
+				}
+
+				const auto earlyCount = static_cast<uint32_t>(earlyRows.size());
+				std::copy(earlyRows.begin(), earlyRows.end(), target.InstanceIndices.begin() + slot);
+				std::copy(
+					lateRows.begin(), lateRows.end(), target.InstanceIndices.begin() + slot + earlyCount
+				);
+
+				occlusionPlan.RunFirstSlot.push_back(slot);
+				occlusionPlan.RunEarly.push_back(earlyCount);
+				occlusionPlan.RunCandidates.push_back(static_cast<uint32_t>(lateRows.size()));
+				occlusionPlan.EarlyTotal += earlyCount;
+				occlusionPlan.ArgCount += DrawArgumentCount(runMesh);
+				slot += run;
 			}
 
-			if (capacity) {
-				ENGINE_PROFILE_CAT("upload instances", core::ProfileCategory::Render);
+			occlusionPlan.RunCount = static_cast<uint32_t>(occlusionPlan.RunFirstSlot.size());
+			occlusionPlan.CandidateCount = static_cast<uint32_t>(occlusionPlan.CandidatePairs.size() / 2);
 
-				void *mapped = nullptr;
-				{
-					// Mapping can stall: the driver hands back memory the GPU may
-					// still be reading unless it cycles, and this asks it to.
-					ENGINE_PROFILE_CAT("map instances", core::ProfileCategory::Render);
-					mapped = SDL_MapGPUTransferBuffer(State->Device, State->InstanceTransfer, true);
+			// Nothing big enough to seed the pyramid means nothing
+			// can be culled, and nothing to test means nothing to
+			// cull either way - both fall back to the plain draw,
+			// which is what "conservative" costs in the worst case.
+			occlusionPlan.Active = occlusionPlan.EarlyTotal > 0 && occlusionPlan.CandidateCount > 0 &&
+								   occlusionPlan.ArgCount > 0;
+		}
+		residency.EndFrame();
+
+		if (uploadCount == 0) {
+			Result.InstanceChunks = 0;
+			Result.InstanceChunksDirty = 0;
+			Result.InstanceRows = 0;
+			Result.InstanceRowsDirty = 0;
+			return;
+		}
+
+		bool rowsReallocated = false;
+		{
+			ENGINE_PROFILE_CAT("ensure instance capacity", core::ProfileCategory::Render);
+			if (!State->EnsureInstanceCapacity(residency.SlotCount(), uploadCount, rowsReallocated)) {
+				return;
+			}
+			if (rowsReallocated) {
+				residency.MarkAllDirty();
+			}
+
+			constexpr uint32_t METRIC_CHUNK_ROWS = 256;
+			const uint32_t residentChunks =
+				(residency.SlotCount() + METRIC_CHUNK_ROWS - 1) / METRIC_CHUNK_ROWS;
+			if (residentWorld.MetricFrame != State->FrameCounter) {
+				Result.InstanceChunks = residentChunks;
+				Result.InstanceRows = residency.LiveCount();
+				residentWorld.MetricFrame = State->FrameCounter;
+			}
+			std::vector<bool> dirtyChunks(residentChunks, false);
+			for (const InstanceUploadRange &range : residency.DirtyRanges()) {
+				const uint32_t last = range.First + range.Count - 1;
+				for (uint32_t chunk = range.First / METRIC_CHUNK_ROWS; chunk <= last / METRIC_CHUNK_ROWS;
+					 chunk++) {
+					dirtyChunks[chunk] = true;
 				}
-				{
-					// Converted straight into the mapped buffer rather than
-					// into a vector that is then memcpy'd. Eighty bytes an
-					// entity go into write-combined memory either way, and the
-					// staging copy would be that traffic paid a third time -
-					// once by the world filling its draw list, once here, and
-					// once again on the way out.
-					//
-					// This is where a `CFrame` and a `Color3` become a `mat4`
-					// and an RGBA, and it is the only place in the engine that
-					// happens. A world produces scene data; a device layout is
-					// this module's business.
-					ENGINE_PROFILE_CAT("convert instances", core::ProfileCategory::Render);
+			}
+			Result.InstanceChunksDirty =
+				static_cast<uint32_t>(std::count(dirtyChunks.begin(), dirtyChunks.end(), true));
+			Result.InstanceRowsDirty = residency.DirtyCount();
 
-					auto *out = static_cast<GpuInstance *>(mapped);
+			{
+				ENGINE_PROFILE_CAT("stage instance indices", core::ProfileCategory::Render);
+				void *mapped = SDL_MapGPUTransferBuffer(State->Device, State->InstanceIndexTransfer, true);
+				if (mapped == nullptr) {
+					ENGINE_ERROR("instance indices: SDL_MapGPUTransferBuffer: {}", SDL_GetError());
+					return;
+				}
+				std::memcpy(mapped, target.InstanceIndices.data(), uploadCount * sizeof(uint32_t));
+				SDL_UnmapGPUTransferBuffer(State->Device, State->InstanceIndexTransfer);
+			}
 
-					// **What is in each slot, recorded in the same pass that
-					// fills it.** The draw loop needs the mesh and the texture
-					// of every slot to find its runs, and the only place that
-					// mapping exists is here - after this loop the order is a
-					// buffer offset and the instance it came from is gone.
-					State->SlotMesh.resize(uploadCount);
-					State->SlotTexture.resize(uploadCount);
-					State->SlotNormalMap.resize(uploadCount);
-					State->SlotRoughnessMap.resize(uploadCount);
-					State->SlotOcclusionMap.resize(uploadCount);
-					State->SlotHeightMap.resize(uploadCount);
-					State->SlotEmissiveMap.resize(uploadCount);
-					State->SlotShader.resize(uploadCount);
-					State->SlotTags.resize(uploadCount);
-					State->SlotSeam.resize(uploadCount);
-					State->SlotSeamLight.resize(uploadCount);
-
-					// **The mesh is resolved once and used twice.** `ToGpu` needs
-					// it to stretch the instance into its `Size` box and the draw
-					// loop needs it to find its runs, and resolving twice would
-					// be a second hash of the same name per instance per frame.
-					const auto record = [&](size_t slot, const scene::DrawInstance &instance) {
-						const MeshEntry &mesh = State->Meshes.Resolve(instance.Mesh);
-						State->SlotMesh[slot] = &mesh;
-						State->SlotTexture[slot] = instance.Texture;
-						State->SlotNormalMap[slot] = instance.NormalMap;
-						State->SlotRoughnessMap[slot] = instance.RoughnessMap;
-						State->SlotOcclusionMap[slot] = instance.OcclusionMap;
-						State->SlotHeightMap[slot] = instance.HeightMap;
-						State->SlotEmissiveMap[slot] = instance.EmissiveMap;
-						State->SlotShader[slot] = instance.Shader;
-						State->SlotTags[slot] = instance.TagMask;
-						State->SlotSeam[slot] = glm::vec4{
-							instance.SeamNormal.X,
-							instance.SeamNormal.Y,
-							instance.SeamNormal.Z,
-							instance.SeamOffset
-						};
-						State->SlotSeamLight[slot] =
-							glm::vec4{instance.SeamLight.X, instance.SeamLight.Y, instance.SeamLight.Z, 0.0f};
-						return &mesh;
-					};
-
-					for (size_t index = 0; index < State->SceneOrder.size(); index++) {
-						const scene::DrawInstance &instance = State->SceneInstances[State->SceneOrder[index]];
-						out[index] = ToGpu(instance, *record(index, instance));
-					}
-
-					// **The other worlds, in the order they were handed over.**
-					// Nothing sorts them: they are drawn as one plain run by one
-					// surface, so there is no partition to build and no eye to
-					// sort towards - the pane's camera is not this frame's.
-					//
-					// Slot `ownCount + k` therefore holds `foreign[k]`, which is
-					// what lets `SurfaceView::InstanceFirst` survive a plan that
-					// permuted everything before it.
-					for (size_t index = ownCount; index < sceneCount; index++) {
-						const scene::DrawInstance &instance = State->SceneInstances[index];
-						out[index] = ToGpu(instance, *record(index, instance));
-					}
-
-					const size_t cameraBase = sceneCount;
-					auto *camera = out + cameraBase;
-					for (size_t index = 0; index < State->DrawOrder.size(); index++) {
-						const scene::DrawInstance &instance =
-							State->VisibleInstances[State->DrawOrder[index]];
-						camera[index] = ToGpu(instance, *record(cameraBase + index, instance));
-					}
-
-					// --- the occlusion plan --------------------------------
-					//
-					// Each opaque slot-run is partitioned in place: the
-					// instances big and near enough to occlude move to its
-					// head and draw in the early phase; the tail waits on the
-					// GPU test against the pyramid the early phase's depth
-					// seeds. **Only the instance rows move.** Every per-slot
-					// array is constant across a run by `SlotsShareRun`'s
-					// definition, so swapping rows inside one changes no run
-					// boundary and no other pass's picture - an opaque draw
-					// is order-independent under the depth test.
-					State->OcclusionFrame = Impl::OcclusionPlan{};
-					if (occlusionCulling && plainOpaque > 0) {
-						ENGINE_PROFILE_CAT("occlusion plan", core::ProfileCategory::Render);
-						Impl::OcclusionPlan &occlusionPlan = State->OcclusionFrame;
-
-						// Drawn as an occluder when its widest world extent
-						// subtends at least this fraction of its distance -
-						// roughly six degrees. Lower drafts more occluders and
-						// costs early-phase overdraw; higher seeds the pyramid
-						// with too little to cull against. Not measured
-						// finely; revisit with a real scene if the cull rate
-						// disappoints.
-						constexpr float OCCLUDER_SCORE = 0.1f;
-
-						const glm::vec3 eye{
-							cameraFrame.Position.X, cameraFrame.Position.Y, cameraFrame.Position.Z
-						};
-						const auto base = static_cast<uint32_t>(cameraBase);
-						const uint32_t opaqueEnd = base + plainOpaque;
-
-						std::vector<GpuInstance> earlyRows;
-						std::vector<GpuInstance> lateRows;
-						uint32_t slot = base;
-						while (slot < opaqueEnd) {
-							uint32_t run = 1;
-							while (slot + run < opaqueEnd && State->SlotsShareRun(slot, slot + run)) {
-								run++;
-							}
-
-							const MeshEntry &runMesh = *State->SlotMesh[slot];
-							const glm::vec3 meshCentre{runMesh.Centre.X, runMesh.Centre.Y, runMesh.Centre.Z};
-							const glm::vec3 meshExtent{runMesh.Extent.X, runMesh.Extent.Y, runMesh.Extent.Z};
-
-							const auto runIndex = static_cast<uint32_t>(occlusionPlan.RunFirstSlot.size());
-							const size_t pairFirst = occlusionPlan.CandidatePairs.size();
-							earlyRows.clear();
-							lateRows.clear();
-							for (uint32_t at = slot; at < slot + run; at++) {
-								const GpuInstance &row = out[at];
-
-								// The world box, from the same matrix the
-								// vertex shader draws with: the mesh's own box
-								// mapped through the model. `ToGpu` built the
-								// model to fill the part's box exactly, so
-								// this bound is tight rather than approximate.
-								//
-								// **Rebuilt from the packed row rather than
-								// carried on it.** The row holds a rotation, a
-								// scale and a translation since v0.19, and
-								// `ModelMatrixOf` decodes them exactly as
-								// `instance.glsl` does - so the box still
-								// bounds the geometry that is drawn rather than
-								// the geometry that was asked for, which is a
-								// quantisation error apart.
-								const glm::mat4 model = ModelMatrixOf(row);
-								const glm::mat3 basis{model};
-								const glm::vec3 centre = glm::vec3(model * glm::vec4(meshCentre, 1.0f));
-								const glm::vec3 extent = glm::abs(basis[0]) * meshExtent.x +
-														 glm::abs(basis[1]) * meshExtent.y +
-														 glm::abs(basis[2]) * meshExtent.z;
-
-								const float widest = std::max(extent.x, std::max(extent.y, extent.z));
-								const float away = std::max(glm::distance(centre, eye), 0.01f);
-								if (widest >= away * OCCLUDER_SCORE) {
-									earlyRows.push_back(row);
-								} else {
-									lateRows.push_back(row);
-									occlusionPlan.CandidatePairs.emplace_back(
-										centre, std::bit_cast<float>(runIndex)
-									);
-									occlusionPlan.CandidatePairs.emplace_back(extent, 0.0f);
-								}
-							}
-
-							const auto earlyCount = static_cast<uint32_t>(earlyRows.size());
-							std::copy(earlyRows.begin(), earlyRows.end(), out + slot);
-							std::copy(lateRows.begin(), lateRows.end(), out + slot + earlyCount);
-
-							// A candidate names the instance row it became
-							// after the partition, which is only known now.
-							for (size_t pair = pairFirst; pair < occlusionPlan.CandidatePairs.size();
-								 pair += 2) {
-								const auto order = static_cast<uint32_t>((pair - pairFirst) / 2);
-								occlusionPlan.CandidatePairs[pair + 1].w =
-									std::bit_cast<float>(slot + earlyCount + order);
-							}
-
-							occlusionPlan.RunFirstSlot.push_back(slot);
-							occlusionPlan.RunEarly.push_back(earlyCount);
-							occlusionPlan.RunCandidates.push_back(static_cast<uint32_t>(lateRows.size()));
-							occlusionPlan.EarlyTotal += earlyCount;
-							occlusionPlan.ArgCount += DrawArgumentCount(runMesh);
-							slot += run;
-						}
-
-						occlusionPlan.RunCount = static_cast<uint32_t>(occlusionPlan.RunFirstSlot.size());
-						occlusionPlan.CandidateCount =
-							static_cast<uint32_t>(occlusionPlan.CandidatePairs.size() / 2);
-
-						// Nothing big enough to seed the pyramid means nothing
-						// can be culled, and nothing to test means nothing to
-						// cull either way - both fall back to the plain draw,
-						// which is what "conservative" costs in the worst case.
-						occlusionPlan.Active = occlusionPlan.EarlyTotal > 0 &&
-											   occlusionPlan.CandidateCount > 0 && occlusionPlan.ArgCount > 0;
+			if (residency.DirtyCount() > 0) {
+				ENGINE_PROFILE_CAT("stage resident instances", core::ProfileCategory::Render);
+				void *mapped = SDL_MapGPUTransferBuffer(State->Device, State->InstanceTransfer, true);
+				if (mapped == nullptr) {
+					ENGINE_ERROR("resident instances: SDL_MapGPUTransferBuffer: {}", SDL_GetError());
+					return;
+				}
+				auto *rows = static_cast<GpuInstance *>(mapped);
+				for (const InstanceUploadRange &range : residency.DirtyRanges()) {
+					for (uint32_t offset = 0; offset < range.Count; offset++) {
+						rows[range.First + offset] = residency.Row(range.First + offset);
 					}
 				}
 				SDL_UnmapGPUTransferBuffer(State->Device, State->InstanceTransfer);
-				haveInstances = true;
+			}
+			haveInstances = true;
 
-				// Stage what the cull reads and the indirect draws consume. Its
-				// own transfer rather than a tail on the instance one, so the
-				// plain path pays nothing for a feature it never authored.
-				if (State->OcclusionFrame.Active) {
-					Impl::OcclusionPlan &occlusionPlan = State->OcclusionFrame;
-					if (!State->EnsureOcclusionResources(
-							occlusionPlan.ArgCount,
-							occlusionPlan.CandidateCount,
-							occlusionPlan.RunCount,
-							plainOpaque
-						)) {
+			// Stage what the cull reads and the indirect draws consume. Its
+			// own transfer rather than a tail on the instance one, so the
+			// plain path pays nothing for a feature it never authored.
+			if (State->OcclusionFrame.Active) {
+				Impl::OcclusionPlan &occlusionPlan = State->OcclusionFrame;
+				if (!State->EnsureOcclusionResources(
+						occlusionPlan.ArgCount,
+						occlusionPlan.CandidateCount,
+						occlusionPlan.RunCount,
+						plainOpaque
+					)) {
+					occlusionPlan.Active = false;
+				} else {
+					void *staged = SDL_MapGPUTransferBuffer(State->Device, State->Occlusion.Transfer, true);
+					if (staged == nullptr) {
+						ENGINE_ERROR("occlusion staging: SDL_MapGPUTransferBuffer: {}", SDL_GetError());
 						occlusionPlan.Active = false;
 					} else {
-						void *staged =
-							SDL_MapGPUTransferBuffer(State->Device, State->Occlusion.Transfer, true);
-						if (staged == nullptr) {
-							ENGINE_ERROR("occlusion staging: SDL_MapGPUTransferBuffer: {}", SDL_GetError());
-							occlusionPlan.Active = false;
-						} else {
-							const auto cameraBase = static_cast<uint32_t>(sceneCount);
-							auto *commands = static_cast<SDL_GPUIndexedIndirectDrawCommand *>(staged);
-							auto *lateArgRuns = reinterpret_cast<uint32_t *>(
-								reinterpret_cast<uint8_t *>(staged) +
-								static_cast<size_t>(occlusionPlan.ArgCount) * 2 *
-									sizeof(SDL_GPUIndexedIndirectDrawCommand) +
-								static_cast<size_t>(occlusionPlan.CandidateCount) * 2 * sizeof(glm::vec4) +
-								static_cast<size_t>(occlusionPlan.RunCount) * sizeof(uint32_t)
-							);
+						const auto cameraBase = static_cast<uint32_t>(sceneCount);
+						auto *commands = static_cast<SDL_GPUIndexedIndirectDrawCommand *>(staged);
+						auto *lateArgRuns = reinterpret_cast<uint32_t *>(
+							reinterpret_cast<uint8_t *>(staged) +
+							static_cast<size_t>(occlusionPlan.ArgCount) * 2 *
+								sizeof(SDL_GPUIndexedIndirectDrawCommand) +
+							static_cast<size_t>(occlusionPlan.CandidateCount) * 2 * sizeof(glm::vec4) +
+							static_cast<size_t>(occlusionPlan.RunCount) * sizeof(uint32_t)
+						);
 
-							// The early and late commands for one draw differ
-							// only in what fills their instance count and where
-							// their instances start: the early phase draws the
-							// run's occluder head out of the instance buffer,
-							// the late phase draws the compacted survivors out
-							// of the late buffer, whose slots drop `cameraBase`
-							// so a view's opaque head starts it at zero.
-							uint32_t argument = 0;
-							for (uint32_t runIndex = 0; runIndex < occlusionPlan.RunCount; runIndex++) {
-								const MeshEntry &runMesh =
-									*State->SlotMesh[occlusionPlan.RunFirstSlot[runIndex]];
-								const uint32_t firstSlot = occlusionPlan.RunFirstSlot[runIndex];
-								const uint32_t lateFirst =
-									firstSlot - cameraBase + occlusionPlan.RunEarly[runIndex];
-								const auto emitArgs = [&](const MeshRange &range) {
-									if (range.IndexCount == 0) {
-										return;
-									}
-									commands[argument] = SDL_GPUIndexedIndirectDrawCommand{
+						// The early and late commands for one draw differ
+						// only in what fills their instance count and where
+						// their instances start: the early phase draws the
+						// run's occluder head out of the instance buffer,
+						// the late phase draws the compacted survivors out
+						// of the late buffer, whose slots drop `cameraBase`
+						// so a view's opaque head starts it at zero.
+						uint32_t argument = 0;
+						for (uint32_t runIndex = 0; runIndex < occlusionPlan.RunCount; runIndex++) {
+							const MeshEntry &runMesh = *State->SlotMesh[occlusionPlan.RunFirstSlot[runIndex]];
+							const uint32_t firstSlot = occlusionPlan.RunFirstSlot[runIndex];
+							const uint32_t lateFirst =
+								firstSlot - cameraBase + occlusionPlan.RunEarly[runIndex];
+							const auto emitArgs = [&](const MeshRange &range) {
+								if (range.IndexCount == 0) {
+									return;
+								}
+								commands[argument] = SDL_GPUIndexedIndirectDrawCommand{
+									range.IndexCount,
+									occlusionPlan.RunEarly[runIndex],
+									range.FirstIndex,
+									range.VertexOffset,
+									firstSlot,
+								};
+								commands[occlusionPlan.ArgCount + argument] =
+									SDL_GPUIndexedIndirectDrawCommand{
 										range.IndexCount,
-										occlusionPlan.RunEarly[runIndex],
+										0,
 										range.FirstIndex,
 										range.VertexOffset,
-										firstSlot,
+										lateFirst,
 									};
-									commands[occlusionPlan.ArgCount + argument] =
-										SDL_GPUIndexedIndirectDrawCommand{
-											range.IndexCount,
-											0,
-											range.FirstIndex,
-											range.VertexOffset,
-											lateFirst,
-										};
-									lateArgRuns[argument] = runIndex;
-									argument++;
-								};
-								if (runMesh.Runs.empty()) {
-									emitArgs(runMesh.Whole);
-								} else {
-									for (const MeshRange &range : runMesh.Runs) {
-										emitArgs(range);
-									}
+								lateArgRuns[argument] = runIndex;
+								argument++;
+							};
+							if (runMesh.Runs.empty()) {
+								emitArgs(runMesh.Whole);
+							} else {
+								for (const MeshRange &range : runMesh.Runs) {
+									emitArgs(range);
 								}
 							}
-
-							auto *cursor = reinterpret_cast<uint8_t *>(staged) +
-										   static_cast<size_t>(occlusionPlan.ArgCount) * 2 *
-											   sizeof(SDL_GPUIndexedIndirectDrawCommand);
-							std::memcpy(
-								cursor,
-								occlusionPlan.CandidatePairs.data(),
-								occlusionPlan.CandidatePairs.size() * sizeof(glm::vec4)
-							);
-							cursor += occlusionPlan.CandidatePairs.size() * sizeof(glm::vec4);
-
-							auto *runTable = reinterpret_cast<uint32_t *>(cursor);
-							for (uint32_t runIndex = 0; runIndex < occlusionPlan.RunCount; runIndex++) {
-								runTable[runIndex] = occlusionPlan.RunFirstSlot[runIndex] - cameraBase +
-													 occlusionPlan.RunEarly[runIndex];
-							}
-							cursor += static_cast<size_t>(occlusionPlan.RunCount) * sizeof(uint32_t) +
-									  static_cast<size_t>(occlusionPlan.ArgCount) * sizeof(uint32_t);
-
-							// The zeros the cull's atomics count up from.
-							std::memset(
-								cursor, 0, static_cast<size_t>(occlusionPlan.RunCount) * sizeof(uint32_t)
-							);
-
-							SDL_UnmapGPUTransferBuffer(State->Device, State->Occlusion.Transfer);
 						}
+
+						auto *cursor = reinterpret_cast<uint8_t *>(staged) +
+									   static_cast<size_t>(occlusionPlan.ArgCount) * 2 *
+										   sizeof(SDL_GPUIndexedIndirectDrawCommand);
+						std::memcpy(
+							cursor,
+							occlusionPlan.CandidatePairs.data(),
+							occlusionPlan.CandidatePairs.size() * sizeof(glm::vec4)
+						);
+						cursor += occlusionPlan.CandidatePairs.size() * sizeof(glm::vec4);
+
+						auto *runTable = reinterpret_cast<uint32_t *>(cursor);
+						for (uint32_t runIndex = 0; runIndex < occlusionPlan.RunCount; runIndex++) {
+							runTable[runIndex] = occlusionPlan.RunFirstSlot[runIndex] - cameraBase +
+												 occlusionPlan.RunEarly[runIndex];
+						}
+						cursor += static_cast<size_t>(occlusionPlan.RunCount) * sizeof(uint32_t) +
+								  static_cast<size_t>(occlusionPlan.ArgCount) * sizeof(uint32_t);
+
+						// The zeros the cull's atomics count up from.
+						std::memset(
+							cursor, 0, static_cast<size_t>(occlusionPlan.RunCount) * sizeof(uint32_t)
+						);
+
+						SDL_UnmapGPUTransferBuffer(State->Device, State->Occlusion.Transfer);
 					}
 				}
 			}

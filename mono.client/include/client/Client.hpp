@@ -707,12 +707,9 @@ namespace client {
 
 		// Instance-stream chunks offered and rewritten, summed over the run.
 		//
-		// **A ratio, and it is the number that decides whether a delta upload is
-		// worth writing.** The instance buffer is rewritten whole every frame;
-		// `scene::ChunkSignaturesOf` says how much of it actually changed. A run
-		// that dirties a few per cent has something to skip. A run that dirties
-		// almost all of it does not, and the reason is usually the blended sort
-		// following the camera - which no delta protocol can help with.
+		// **The resident-row result, not the old upload-order estimate.** Draw order
+		// and visibility are uint indices now, so only a new or changed entity row
+		// contributes to the dirty side of this ratio.
 		//
 		// Summed rather than peaked, unlike the two above: the question is what a
 		// typical frame costs, and a peak would report the one frame a world
@@ -722,6 +719,8 @@ namespace client {
 		//@{
 		uint64_t TotalInstanceChunks = 0;
 		uint64_t DirtyInstanceChunks = 0;
+		uint64_t TotalInstanceRows = 0;
+		uint64_t DirtyInstanceRows = 0;
 		//@}
 
 		// When the next frame is due, for the `--max-fps` limiter. A default

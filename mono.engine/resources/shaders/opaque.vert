@@ -1,13 +1,14 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
 
-// Instanced opaque geometry: slot 0 is the mesh, slot 1 is per-instance data.
+// Instanced opaque geometry: attributes are the mesh; storage holds resident
+// instance rows and this view's ordered indices.
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec2 inTexCoord;
 
-// Locations 3 to 6, and the decode for them.
+// The resident-row storage declarations and their decode.
 #include "instance.glsl"
 
 // SDL's GPU API puts vertex uniform buffers in set 1 for SPIR-V.
