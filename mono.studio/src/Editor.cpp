@@ -2301,6 +2301,17 @@ namespace studio {
 		// carries the settings and the two cases where it stays off; the
 		// overlay keeps the always-on-top copy for the length of a drag.
 		ConfigureGroundGrid(view, shown);
+
+		// **The world goes flat while the collider view is open.** A wireframe
+		// over a textured scene is a wireframe over a photograph and the shape
+		// somebody opened the view to check is the thing they cannot pick out of
+		// it. `render::Renderer::SetUntextured` is a binding rather than a
+		// pipeline, so this costs a branch per draw and nothing when it is off.
+		//
+		// Set per frame rather than when the menu is clicked, because it is the
+		// renderer's state and the renderer is shared: a preview render or
+		// another panel would otherwise inherit whatever the last click left.
+		Renderer.SetUntextured(ShowColliders && ColliderHideTextures);
 		LastFrame = Renderer.Render(
 			std::span<const engine::render::View>(&view, 1), Overlay, &GameInterface, true, &Interface
 		);

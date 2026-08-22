@@ -1259,6 +1259,44 @@ namespace studio {
 		// default - see `ShowColliders`.
 		ImGui::MenuItem("Collider Outlines", nullptr, &ShowColliders);
 
+		// **The three shapes a part has, as one menu rather than three
+		// toggles.** They are alternatives - a face is drawn as one of them -
+		// so a radio is what the choice actually is. Greyed with the view off,
+		// because a submenu that does nothing is a submenu somebody clicks
+		// twice.
+		ImGui::BeginDisabled(!ShowColliders);
+		if (ImGui::BeginMenu("Collider Shape")) {
+			const auto option = [this](const char *label, ColliderShapeView which, const char *hint) {
+				if (ImGui::MenuItem(label, nullptr, ColliderShapes == which)) {
+					ColliderShapes = which;
+				}
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("%s", hint);
+				}
+			};
+
+			option(
+				"As chosen",
+				ColliderShapeView::Chosen,
+				"What Collider.CollisionShape selects, which is what actually collides."
+			);
+			option(
+				"Precise", ColliderShapeView::Precise, "The baked triangle soup, for anything that has one."
+			);
+			option("Hull", ColliderShapeView::Hull, "The baked convex hull, for anything that has one.");
+			option(
+				"Bounds",
+				ColliderShapeView::Bounds,
+				"The part's own box - what a shape falls back to when its name does not resolve."
+			);
+
+			ImGui::Separator();
+			ImGui::MenuItem("Fill faces", nullptr, &ColliderFill);
+			ImGui::MenuItem("Hide textures", nullptr, &ColliderHideTextures);
+			ImGui::EndMenu();
+		}
+		ImGui::EndDisabled();
+
 		ImGui::Separator();
 
 		if (ImGui::MenuItem("Show Every Panel")) {

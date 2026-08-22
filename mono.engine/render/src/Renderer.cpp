@@ -930,6 +930,11 @@ namespace engine::render {
 		// SetWireframe` is the only door.
 		bool WireframeMode = false;
 
+		// Whether every instance draws with the default texture rather than its
+		// own. `Renderer::SetUntextured` is the only door; see `DrawSlots`,
+		// where the substitution happens.
+		bool UntexturedMode = false;
+
 		// The default graph's opaque path. Geometry writes material properties,
 		// then screen-sized passes consume those textures. Portal panes and the
 		// blended tail stay on the forward family below because their projected
@@ -3432,12 +3437,26 @@ namespace engine::render {
 				const TextureChoice choice =
 					ChooseTexture(found != nullptr, texture.IsValid(), Textures.Expecting(texture));
 
-				SDL_GPUTexture *const sampled = choice == TextureChoice::Named	   ? found
+				// **Untextured draws the default and not the named image**, and
+				// it is one substitution rather than a second pipeline family
+				// because a texture is a *binding* and a fill mode is not -
+				// `WireframeMode` had to become pipelines and this does not.
+				// What it is for is the collider view: a collision shape drawn
+				// over a textured scene is a wireframe over a photograph, and
+				// nothing about the shape is legible in it.
+				SDL_GPUTexture *const sampled = UntexturedMode					   ? Textures.Default()
+												: choice == TextureChoice::Named   ? found
 												: choice == TextureChoice::Missing ? Textures.Missing()
 																				   : Textures.Default();
-				const bool absent = choice == TextureChoice::Missing;
+				const bool absent = !UntexturedMode && choice == TextureChoice::Missing;
 
 				const auto dataMap = [&](core::Name name) {
+					if (UntexturedMode) {
+						// The data maps go with it. A normal map on a flat white
+						// surface is the one that still reads, and reading it is
+						// exactly what makes a shape hard to see.
+						return static_cast<SDL_GPUTexture *>(nullptr);
+					}
 					SDL_GPUTexture *foundMap = Textures.Find(name);
 					if (foundMap != nullptr) {
 						return foundMap;
@@ -7276,6 +7295,16 @@ namespace engine::render {
 
 	bool Renderer::Wireframe() const {
 		return State != nullptr && State->WireframeMode;
+	}
+
+	void Renderer::SetUntextured(bool enabled) {
+		if (State != nullptr) {
+			State->UntexturedMode = enabled;
+		}
+	}
+
+	bool Renderer::Untextured() const {
+		return State != nullptr && State->UntexturedMode;
 	}
 
 	void Renderer::SetPortalDepth(uint32_t depth) {

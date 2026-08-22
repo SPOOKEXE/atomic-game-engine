@@ -2117,6 +2117,69 @@ everybody. What a stream decides is how a client *finds* it and whether it was
 invited, and `--stream-key` gates discovery rather than delivery: a grant is
 still what admits a fetch.
 
+### What a part collides as
+
+A part is drawn at its `Size` and collides at its `CollisionShape`, and nothing
+keeps those the same. **View → Collider Outlines** draws what the solver
+actually has: a colour per face, so a hull reads as an object rather than as a
+tangle of lines.
+
+**View → Collider Shape** picks which of the three a part has:
+
+| Mode | Draws |
+|---|---|
+| As chosen | What `CollisionShape` selects - what actually collides |
+| Precise | The baked triangle soup, for anything that has one |
+| Hull | The baked convex hull, for anything that has one |
+| Bounds | The part's own box - what a shape falls back to when its name does not resolve |
+
+The two that are *not* selected are usually what answers "why does this collide
+like that": a rock whose hull swallows the gap it should have, a chunk whose
+bound is a box the size of the whole tile. A mode with nothing baked to show
+falls back to drawing what the collider actually is, because the absence is the
+answer for a part somebody expected a hull on.
+
+**Fill faces** fills them as well as outlining them - filled is how a shape reads
+as a solid, outlined is how two overlapping ones stay separable. **Hide
+textures** draws the world flat while the view is open, because a wireframe over
+a textured scene is a wireframe over a photograph.
+
+### Geometry a script builds, and standing on it
+
+An `EditableMesh` is drawn *and* collides. `MeshPart.MeshId` names it for the
+renderer and `CollisionGeometry` names it for the solver:
+
+```lua
+local mesh = Instance.new("EditableMesh")
+-- ... AddVertex / AddTriangle ...
+
+local part = Instance.new("MeshPart")
+part.MeshId = mesh.ContentId
+part.Parent = workspace
+part.CollisionShape = Enum.ShapeKind.Mesh   -- or Hull
+part.CollisionGeometry = mesh.ContentId
+```
+
+**Build the vertices around the mesh's own origin.** A baked shape is used in
+the part's object space and is not scaled to it, so a mesh written in world
+coordinates draws correctly - `ToGpu` fits it to the part - and puts its
+collider wherever the part is not.
+
+**The shape arrives on the next tick.** `physics::RegisterPhysicsSystems` bakes
+it in `PreSimulation` for every host that solves, and a collider naming a shape
+that has not resolved yet collides as the part's own bound. For a terrain chunk
+that bound is a solid box the height of the whole tile, so a streamer should
+leave a new chunk `CanCollide = false` for one frame - `Terrain.luau` does, and
+says why where it does it.
+
+**The soup is baked always and the hull only when a collider asks for one.**
+Measured on a 4,225-point chunk the soup costs 1.3 ms and quickhull costs 7.3,
+and a heightfield's hull is a dome over its summit. Switching a part to `Hull`
+later still gets one, on the next tick.
+
+Shapes are forgotten when their mesh is destroyed, so a world that streams a
+mesh per chunk does not accumulate one per chunk ever built.
+
 ### In the editor
 
 **View → Team Create.** The editor announces itself at the same layer, sees the

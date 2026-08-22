@@ -4502,6 +4502,55 @@ namespace studio {
 		// @since v0.17
 		bool ShowColliders = false;
 
+		// Which shape the collider view draws.
+		//
+		// **Because a part has three of them and only one is in force.** A
+		// `MeshPart` carries a bound, and its `CollisionGeometry` resolves to
+		// both a convex hull and a triangle soup - `scene::BakeCollisionShapes`
+		// bakes the pair - while `Collider::Shape` picks which the solver uses.
+		// The question "why does this collide like that" is usually answered by
+		// seeing the *other* two: a rock whose hull swallows the gap it should
+		// have, a chunk whose bound is a box the size of the whole tile.
+		//
+		// @since v0.19
+		enum class ColliderShapeView : uint8_t {
+			// Whatever `Collider::Shape` selects, which is what actually
+			// collides. The default, because it is the honest picture.
+			Chosen,
+
+			// The triangle soup, for anything that has one baked.
+			Precise,
+
+			// The convex hull, for anything that has one baked.
+			Hull,
+
+			// The part's own bound - the box a shape falls back to when its
+			// name does not resolve.
+			Bounds,
+		};
+
+		ColliderShapeView ColliderShapes = ColliderShapeView::Chosen;
+
+		// Whether the collider view fills its faces as well as outlining them.
+		//
+		// **Filled is how a shape reads as a solid** and outlined is how two
+		// overlapping ones stay separable, so this is a switch rather than a
+		// decision. The fill is translucent and unsorted - an overlay has no
+		// depth buffer - which is legible for one shape and a soup for a
+		// hundred, and is the reason it is not simply always on.
+		//
+		// @since v0.19
+		bool ColliderFill = true;
+
+		// Whether the world is drawn without its textures while the collider
+		// view is open.
+		//
+		// A wireframe over a photograph is not readable, which is the whole of
+		// it. See `render::Renderer::SetUntextured`.
+		//
+		// @since v0.19
+		bool ColliderHideTextures = true;
+
 		// The adornment geometry for the viewport being drawn, kept between
 		// frames so a steady selection stops allocating - which is the property
 		// `render::AdornmentGeometry` is built for and documents.

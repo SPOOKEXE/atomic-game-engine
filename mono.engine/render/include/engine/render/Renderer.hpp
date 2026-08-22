@@ -1369,6 +1369,36 @@ namespace engine::render {
 		// @since v0.18
 		bool Wireframe() const;
 
+		// Draws every instance with the default white texture rather than its
+		// own, from here on.
+		//
+		// **For looking at shapes rather than at surfaces**, which is the
+		// collider view's whole problem: a wireframe drawn over a textured
+		// scene is a wireframe over a photograph, and the shape somebody opened
+		// the view to check is the thing they cannot pick out of it. With the
+		// images gone, what is left is the lighting on the geometry - enough to
+		// read form, quiet enough that an overlay sits on top of it.
+		//
+		// **A binding and not a pipeline**, which is the difference from
+		// `SetWireframe`: a fill mode is baked into a pipeline and had to
+		// become a second family, and a texture is chosen per draw. So this
+		// costs one branch in `DrawSlots` and works on every device.
+		//
+		// The data maps go with the colour map. A normal map on a flat white
+		// surface is the one that still reads, and reading it is what makes a
+		// shape hard to see.
+		//
+		// @param enabled Whether to ignore instance textures from here on.
+		// @since v0.19
+		void SetUntextured(bool enabled);
+
+		// Whether untextured drawing was asked for.
+		//
+		// @return The last value passed to `SetUntextured`, or `false` before
+		//         the renderer has a device.
+		// @since v0.19
+		bool Untextured() const;
+
 		// What it is set to: zero for automatic, and zero before the renderer has
 		// a device.
 		//
