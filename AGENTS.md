@@ -203,6 +203,10 @@ almost none of it is in the plumbing.
   search.
 - **Do not silently reduce scope.** If part of a task turns out to be blocked,
   finish everything else and say explicitly what was left out and why.
+- **Do not put engine code elsewhere.** If you are adding a core system to the engine,
+  it belongs in the mono.engine, NOT mono.server, mono.client, mono.cdn, etc.
+  The mono.server, mono.client, mono.cdn, etc, all pull code from mono.engine,
+  based on its needs, so everything is consolidated and unified under one location.
 
 ---
 
