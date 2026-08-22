@@ -348,6 +348,45 @@ namespace engine::script {
 				return CheckInstanceArgument(State, Slot(index));
 			}
 
+			bool ReadPlacements(
+				size_t index, std::vector<ecs::Entity> &instances, std::vector<core::CFrame> &frames
+			) override {
+				instances.clear();
+				frames.clear();
+
+				const int parts = Slot(index);
+				const int placements = Slot(index + 1);
+				luaL_checktype(State, parts, LUA_TTABLE);
+				luaL_checktype(State, placements, LUA_TTABLE);
+
+				// **`lua_objlen` and an integer walk, not `lua_next`.** These are
+				// arrays and the two have to line up by position, so the order
+				// the walk visits them in is the whole meaning of the argument -
+				// and `lua_next` offers no order at all. It also lets the two
+				// lengths be compared before anything is read.
+				const int count = static_cast<int>(lua_objlen(State, parts));
+				const int placed = static_cast<int>(lua_objlen(State, placements));
+
+				instances.reserve(static_cast<size_t>(count));
+				frames.reserve(static_cast<size_t>(count));
+
+				for (int at = 1; at <= count; at++) {
+					lua_rawgeti(State, parts, at);
+					const ecs::Entity instance = CheckInstanceArgument(State, -1);
+					lua_pop(State, 1);
+					instances.push_back(instance);
+				}
+
+				for (int at = 1; at <= placed; at++) {
+					lua_rawgeti(State, placements, at);
+					const core::CFrame frame = CheckCFrame(State, -1);
+					lua_pop(State, 1);
+					frames.push_back(frame);
+				}
+
+				return count == placed;
+			}
+
 			void ReadAttribute(size_t index, AttributeValue &out) override {
 				out = ReadLuauAttribute(State, Slot(index));
 			}

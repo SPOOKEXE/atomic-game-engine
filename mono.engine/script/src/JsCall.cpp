@@ -287,6 +287,59 @@ namespace engine::script {
 				return entity;
 			}
 
+			bool ReadPlacements(
+				size_t index, std::vector<ecs::Entity> &instances, std::vector<core::CFrame> &frames
+			) override {
+				instances.clear();
+				frames.clear();
+
+				if (index + 1 >= Argc) {
+					Raise("expected two arrays");
+				}
+
+				// **Every value fetched is freed**, which is the half of this
+				// the Luau adapter has no equivalent of: `JS_GetPropertyUint32`
+				// hands back a reference and QuickJS counts them, so a walk that
+				// dropped one leaks a part handle per element for the life of
+				// the runtime.
+				const auto lengthOf = [&](JSValueConst array) {
+					JSValue held = JS_GetPropertyStr(Context, array, "length");
+					uint32_t length = 0;
+					JS_ToUint32(Context, &length, held);
+					JS_FreeValue(Context, held);
+					return length;
+				};
+
+				const uint32_t count = lengthOf(Argv[index]);
+				const uint32_t placed = lengthOf(Argv[index + 1]);
+
+				instances.reserve(count);
+				frames.reserve(count);
+
+				for (uint32_t at = 0; at < count; at++) {
+					JSValue item = JS_GetPropertyUint32(Context, Argv[index], at);
+					const ecs::Entity instance = JsEntityOf(Context, item);
+					JS_FreeValue(Context, item);
+					if (instance == ecs::NULL_ENTITY) {
+						Raise("expected an Instance");
+					}
+					instances.push_back(instance);
+				}
+
+				for (uint32_t at = 0; at < placed; at++) {
+					JSValue item = JS_GetPropertyUint32(Context, Argv[index + 1], at);
+					const core::CFrame *frame = script::AsCFrame(Context, item);
+					const core::CFrame copied = frame == nullptr ? core::CFrame{} : *frame;
+					JS_FreeValue(Context, item);
+					if (frame == nullptr) {
+						Raise("expected a CFrame");
+					}
+					frames.push_back(copied);
+				}
+
+				return count == placed;
+			}
+
 			void ReadAttribute(size_t index, AttributeValue &out) override {
 				out = AttributeValue{};
 				if (index >= Argc) {

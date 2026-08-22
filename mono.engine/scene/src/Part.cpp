@@ -2254,6 +2254,40 @@ namespace engine::scene {
 		return true;
 	}
 
+	size_t BulkMoveTo(
+		ecs::Store &store, std::span<const ecs::Entity> instances, std::span<const core::CFrame> frames
+	) {
+		const size_t count = std::min(instances.size(), frames.size());
+
+		size_t moved = 0;
+		for (size_t at = 0; at < count; at++) {
+			// **The same helper a single write uses, deliberately.** The header
+			// argues the case: a batch is a cheaper *boundary*, not a cheaper
+			// write, and the moment the two paths differ they can disagree
+			// about what a placement leaves behind.
+			if (store.Get<Transform>(instances[at]) == nullptr) {
+				continue;
+			}
+			PlaceInstance(store, instances[at], frames[at]);
+			moved++;
+		}
+		return moved;
+	}
+
+	size_t BulkPivotTo(
+		ecs::Store &store, std::span<const ecs::Entity> instances, std::span<const core::CFrame> targets
+	) {
+		const size_t count = std::min(instances.size(), targets.size());
+
+		size_t moved = 0;
+		for (size_t at = 0; at < count; at++) {
+			if (PivotTo(store, instances[at], targets[at])) {
+				moved++;
+			}
+		}
+		return moved;
+	}
+
 	float LocalTransparencyOf(const ecs::Store &store, ecs::Entity instance) {
 		const LocalTransparency *local = store.Get<LocalTransparency>(instance);
 		return local == nullptr ? 0.0f : local->Value;

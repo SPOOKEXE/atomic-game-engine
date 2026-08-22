@@ -1049,6 +1049,8 @@ declare interface Instance {
 	ClearAllChildren(): void;
 	GetPivot(): CFrame;
 	PivotTo(target: CFrame): void;
+	BulkMoveTo(parts: Instance[], placements: CFrame[]): void;
+	BulkPivotTo(parts: Instance[], targets: CFrame[]): void;
 	GetPropertyChangedSignal(property: string): PropertyChangedSignal;
 	readonly ChildAdded: InstanceSignal;
 	readonly ChildRemoved: InstanceSignal;
@@ -1179,6 +1181,7 @@ declare interface SurfaceCamera extends Camera {
 }
 
 declare interface Portal extends SurfaceCamera {
+	Bidirectional: boolean;
 	Destination: Instance;
 	DestinationWorld: string;
 	Enabled: boolean;

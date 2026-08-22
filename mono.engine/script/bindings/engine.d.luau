@@ -1245,6 +1245,8 @@ declare extern type Instance with
 	function ClearAllChildren(self): ()
 	function GetPivot(self): CFrame
 	function PivotTo(self, target: CFrame): ()
+	function BulkMoveTo(self, parts: { Instance }, placements: { CFrame }): ()
+	function BulkPivotTo(self, parts: { Instance }, targets: { CFrame }): ()
 	function GetPropertyChangedSignal(self, property: string): PropertyChangedSignal
 	ChildAdded: InstanceSignal
 	ChildRemoved: InstanceSignal
@@ -1375,6 +1377,7 @@ declare extern type SurfaceCamera extends Camera with
 end
 
 declare extern type Portal extends SurfaceCamera with
+	Bidirectional: boolean
 	Destination: Instance
 	DestinationWorld: string
 	Enabled: boolean

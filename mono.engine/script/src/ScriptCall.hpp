@@ -390,6 +390,34 @@ namespace engine::script {
 		// @return `false` when the argument has no form of that type.
 		virtual bool ReadProperty(size_t index, ecs::PropertyType type, core::Name enumName, void *out) = 0;
 
+		// Two array arguments, read as a list of instances and a list of
+		// placements.
+		//
+		// **Shaped for its one caller rather than built out of generic pieces**,
+		// which is this header's rule stated at the top: the alternative was an
+		// array-length accessor plus an element accessor per type, and three
+		// virtuals of surface for one method - two of which nothing else would
+		// ever call - is exactly the speculative API that rule exists to refuse.
+		//
+		// **It also keeps the win.** `Instance:BulkMoveTo` exists because a
+		// per-part property write crosses the language boundary once per part;
+		// a reader that handed elements back one virtual call at a time would
+		// put a boundary back in the middle of the loop and give most of it up.
+		//
+		// A slot that is not an array, or an array holding something that is not
+		// an instance or not a `CFrame`, raises through the VM rather than
+		// returning - a script that passed the wrong thing wants to know where.
+		//
+		// @param index      Zero-based, `self` excluded. The instance list; the
+		//                   placements are the argument after it.
+		// @param instances  Cleared and filled.
+		// @param frames     Cleared and filled.
+		// @return `false` when the two arrays are of different lengths, which
+		//         the caller reports; the outputs are filled either way.
+		virtual bool ReadPlacements(
+			size_t index, std::vector<ecs::Entity> &instances, std::vector<core::CFrame> &frames
+		) = 0;
+
 		// Keeps an argument that is a function, and hands back the VM's name for
 		// it. Raises when it is not one.
 		//

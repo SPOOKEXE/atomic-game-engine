@@ -363,6 +363,11 @@ type Tile = { Body: Part, Local: CFrame }
 
 local tiles: { Tile } = {}
 
+-- The two lists `BulkMoveTo` takes. The bodies never change; the placements are
+-- overwritten in place every frame.
+local bodies: { Instance } = {}
+local placements: { CFrame } = {}
+
 -- Which facets get a camera, spread rather than taken from the front of the
 -- list. Subdivision emits a base triangle's four children together, so the
 -- first few faces of a subdivided ball are all children of the same few base
@@ -444,6 +449,8 @@ for index, face in faces do
 	end
 
 	table.insert(tiles, { Body = tile, Local = frame })
+	bodies[#tiles] = tile
+	placements[#tiles] = tile.CFrame
 end
 
 -- --- something to reflect ----------------------------------------------------
@@ -518,7 +525,13 @@ RunService.Heartbeat:Connect(function(delta: number)
 
 	core.CFrame = ball
 
-	for _, tile in tiles do
-		tile.Body.CFrame = ball * tile.Local
+	for at, tile in tiles do
+		placements[at] = ball * tile.Local
 	end
+
+	-- **One call for all three hundred and twenty facets.** A per-facet
+	-- `CFrame =` crosses the language boundary once per facet, and this scene
+	-- is here to measure the *mirror* path rather than the property bindings -
+	-- see `scene::BulkMoveTo`, which carries what the boundary costs.
+	workspace:BulkMoveTo(bodies, placements)
 end)

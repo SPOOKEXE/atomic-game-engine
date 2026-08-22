@@ -13,6 +13,8 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
+
 TEST_SUITE_ID("engine.scene.part")
 // MakePart's collider defaults are spatial::LayerMask values.
 TEST_DEPENDS("engine.spatial.layermask")
@@ -337,6 +339,10 @@ TEST_CASE("a property write marks its column changed", "[scene][part]") {
 	// builds deltas from the change channel, so a write the channel never sees
 	// is a script edit the server never sends.
 	store.Observe<Transform>();
+	// **Observed on purpose**: change tracking is opt-in per component - see
+	// `Store::Observe` - so a world nobody asked would record neither write and
+	// this case would pass by measuring nothing.
+	store.Observe<engine::scene::Transform>();
 	store.ClearChanges();
 	CHECK_FALSE(store.Changed<Transform>(part));
 
@@ -729,6 +735,139 @@ TEST_CASE("PivotTo with no offset is a plain move", "[scene][part]") {
 	REQUIRE(engine::scene::PivotTo(store, part, target));
 	CHECK(Read<Vector3>(store, part, "Position").X == Catch::Approx(7.0f));
 	CHECK(Read<Vector3>(store, part, "Position").Z == Catch::Approx(-3.0f));
+}
+
+// --- moving many at once ------------------------------------------------------
+
+TEST_CASE("BulkMoveTo places every instance it is given", "[scene][part]") {
+	Store store("bulk_move");
+	RegisterSceneClasses();
+
+	const auto part = engine::ecs::Classes::Find(Name("Part"));
+	const Entity first = store.CreateInstance(part, "First");
+	const Entity second = store.CreateInstance(part, "Second");
+	const Entity third = store.CreateInstance(part, "Third");
+
+	const std::array<Entity, 3> instances{first, second, third};
+	const std::array<engine::core::CFrame, 3> frames{
+		engine::core::CFrame(Vector3(1.0f, 0.0f, 0.0f)),
+		engine::core::CFrame(Vector3(2.0f, 0.0f, 0.0f)),
+		engine::core::CFrame(Vector3(3.0f, 0.0f, 0.0f)),
+	};
+
+	CHECK(engine::scene::BulkMoveTo(store, instances, frames) == 3);
+
+	CHECK(Read<Vector3>(store, first, "Position").X == Catch::Approx(1.0f));
+	CHECK(Read<Vector3>(store, second, "Position").X == Catch::Approx(2.0f));
+	CHECK(Read<Vector3>(store, third, "Position").X == Catch::Approx(3.0f));
+}
+
+TEST_CASE("BulkMoveTo leaves a world a per-part write would leave", "[scene][part]") {
+	// **The property the batch exists to keep.** A batch is a cheaper *boundary*
+	// and not a cheaper write - `scene/Part.hpp` says so - and the moment the
+	// two paths differ in what they leave behind, a script that switched to the
+	// batch for speed has changed behaviour it did not mean to.
+	//
+	// The change mark is the half that would go first: it is what
+	// `physics::SyncBroadphase` reads to decide a static collider moved, and a
+	// batch that wrote the field directly would move parts nothing re-indexed.
+	Store store("bulk_parity");
+	RegisterSceneClasses();
+
+	// **Observed before the rows exist.** Change tracking is opt-in per
+	// component and the bits belong to the table, so asking after a row has been
+	// created leaves that row's table without them - and this case would then
+	// pass by measuring nothing. See `Store::Observe`.
+	store.Observe<engine::scene::Transform>();
+
+	const auto part = engine::ecs::Classes::Find(Name("Part"));
+	const Entity singly = store.CreateInstance(part, "Singly");
+	const Entity batched = store.CreateInstance(part, "Batched");
+
+	const engine::core::CFrame target(Vector3(4.0f, 5.0f, 6.0f));
+
+	store.ClearChanges();
+
+	REQUIRE(Write(store, singly, "CFrame", target));
+
+	const std::array<Entity, 1> instances{batched};
+	const std::array<engine::core::CFrame, 1> frames{target};
+	REQUIRE(engine::scene::BulkMoveTo(store, instances, frames) == 1);
+
+	CHECK(Read<Vector3>(store, batched, "Position") == Read<Vector3>(store, singly, "Position"));
+
+	// Both rows are in the changed set, and neither is there twice as much as
+	// the other: what matters is that the batched one is there at all.
+	size_t marked = 0;
+	store.EachChanged<engine::scene::Transform>([&](Entity, const engine::scene::Transform &) { marked++; });
+	CHECK(marked == 2);
+}
+
+TEST_CASE("BulkMoveTo skips what has no placement", "[scene][part]") {
+	// A list built by a script is whatever the script put in it, and a `Folder`
+	// among the parts is a typo rather than a reason to move nothing. The count
+	// is what says so.
+	Store store("bulk_absent");
+	RegisterSceneClasses();
+
+	const Entity folder = store.CreateInstance(engine::ecs::Classes::Find(Name("Instance")), "Folder");
+	const Entity placed = store.CreateInstance(engine::ecs::Classes::Find(Name("Part")), "Placed");
+
+	const std::array<Entity, 2> instances{folder, placed};
+	const std::array<engine::core::CFrame, 2> frames{
+		engine::core::CFrame(Vector3(1.0f, 0.0f, 0.0f)),
+		engine::core::CFrame(Vector3(2.0f, 0.0f, 0.0f)),
+	};
+
+	CHECK(engine::scene::BulkMoveTo(store, instances, frames) == 1);
+	CHECK(Read<Vector3>(store, placed, "Position").X == Catch::Approx(2.0f));
+}
+
+TEST_CASE("BulkMoveTo moves as many as the shorter list names", "[scene][part]") {
+	// The C++ contract, which is not the script one: a caller with two spans has
+	// already decided what it meant, where a script that built two tables of
+	// different lengths has made a mistake and is told so - see
+	// `script::ScriptMethods`.
+	Store store("bulk_short");
+	RegisterSceneClasses();
+
+	const auto part = engine::ecs::Classes::Find(Name("Part"));
+	const Entity first = store.CreateInstance(part, "First");
+	const Entity second = store.CreateInstance(part, "Second");
+
+	const std::array<Entity, 2> instances{first, second};
+	const std::array<engine::core::CFrame, 1> frames{engine::core::CFrame(Vector3(1.0f, 0.0f, 0.0f))};
+
+	CHECK(engine::scene::BulkMoveTo(store, instances, frames) == 1);
+	CHECK(Read<Vector3>(store, first, "Position").X == Catch::Approx(1.0f));
+	CHECK(Read<Vector3>(store, second, "Position").X == Catch::Approx(0.0f));
+}
+
+TEST_CASE("BulkPivotTo respects each offset", "[scene][part]") {
+	// `PivotTo` over a list, which is the whole of it - and the offset is what
+	// makes it a different method rather than a second spelling of
+	// `BulkMoveTo`.
+	Store store("bulk_pivot");
+	RegisterSceneClasses();
+
+	const auto part = engine::ecs::Classes::Find(Name("Part"));
+	const Entity door = store.CreateInstance(part, "Door");
+	const Entity plain = store.CreateInstance(part, "Plain");
+
+	REQUIRE(Write(store, door, "PivotOffset", engine::core::CFrame(Vector3(-2.0f, 0.0f, 0.0f))));
+
+	const std::array<Entity, 2> instances{door, plain};
+	const std::array<engine::core::CFrame, 2> targets{
+		engine::core::CFrame(Vector3(10.0f, 0.0f, 0.0f)),
+		engine::core::CFrame(Vector3(10.0f, 0.0f, 0.0f)),
+	};
+
+	CHECK(engine::scene::BulkPivotTo(store, instances, targets) == 2);
+
+	// The handle landed on the target for both; the placement behind it did not.
+	CHECK(engine::scene::PivotOf(store, door).Position.X == Catch::Approx(10.0f));
+	CHECK(Read<Vector3>(store, door, "Position").X == Catch::Approx(12.0f));
+	CHECK(Read<Vector3>(store, plain, "Position").X == Catch::Approx(10.0f));
 }
 
 TEST_CASE("something with no placement has no pivot to move", "[scene][part]") {

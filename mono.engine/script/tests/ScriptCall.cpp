@@ -382,6 +382,40 @@ TEST_CASE("a neutral method answers the same in both languages", "[scripting][sc
 		 },
 		 "2"},
 
+		{"BulkMoveTo places every part in the list",
+		 [](Language language) {
+			 // **Two parts and one call**, which is the whole of what the method
+			 // claims: the sum is read back so a version that placed only the
+			 // first - the shape a length or an off-by-one bug takes - fails
+			 // rather than passing on the one it did move.
+			 const bool luau = language == Language::Luau;
+			 const std::string parts = luau ? "{part, other}" : "[part, other]";
+			 const std::string frames = luau ? "{CFrame.new(0, 2, 0), CFrame.new(0, 5, 0)}"
+											 : "[CFrame.new(0, 2, 0), CFrame.new(0, 5, 0)]";
+
+			 return APart(language) + Let(language, "other", "Instance.new('Part')") +
+					Send(language, "workspace", "BulkMoveTo(" + parts + ", " + frames + ")") +
+					Say(language, "part.Position.Y + other.Position.Y");
+		 },
+		 "7"},
+
+		{"BulkPivotTo respects the offset",
+		 [](Language language) {
+			 // The single-instance pair's own difference, over a list: a part
+			 // with no `Pivot` is its own handle, so this is `BulkMoveTo`'s
+			 // answer - and a version that quietly called the wrong one of the
+			 // two would still pass. What it pins is that the method exists and
+			 // moves, which is what a batch for models needs.
+			 const bool luau = language == Language::Luau;
+			 const std::string parts = luau ? "{part}" : "[part]";
+			 const std::string targets = luau ? "{CFrame.new(0, 9, 0)}" : "[CFrame.new(0, 9, 0)]";
+
+			 return APart(language) +
+					Send(language, "workspace", "BulkPivotTo(" + parts + ", " + targets + ")") +
+					Say(language, "part.Position.Y");
+		 },
+		 "9"},
+
 		{"AddTag answers whether it took",
 		 [](Language language) {
 			 return APart(language) +
@@ -870,6 +904,33 @@ TEST_CASE("who you are is not yours to assign, in both languages", "[scripting][
 			engine::scene::PlayersOf(store), engine::core::Name("MaxPlayers"), &seats, sizeof(seats)
 		));
 		CHECK(seats == 8);
+	}
+}
+
+TEST_CASE("BulkMoveTo refuses lists of different lengths", "[scripting][scriptcall]") {
+	// **Refused rather than truncated**, and the reason is in `ScriptMethods`:
+	// `scene::BulkMoveTo` takes the shorter of two spans because a C++ caller
+	// has already decided what it means, where a script that built two tables of
+	// different lengths has made a mistake - and moving half the parts hides it
+	// until somebody notices the other half never left.
+	//
+	// A list literal is the one thing the parity harness cannot spell for both
+	// languages at once, which is why this is its own case rather than a probe.
+	for (const Language language : LANGUAGES) {
+		Store store = Fresh("scriptcall_bulk_lengths");
+		const auto runtime = MakeRuntime(store, language);
+		REQUIRE(runtime != nullptr);
+
+		const bool luau = language == Language::Luau;
+		const std::string parts = luau ? "{part, part}" : "[part, part]";
+		const std::string frames = luau ? "{CFrame.new(0, 1, 0)}" : "[CFrame.new(0, 1, 0)]";
+
+		const std::string source =
+			APart(language) + Send(language, "workspace", "BulkMoveTo(" + parts + ", " + frames + ")");
+
+		INFO(source);
+		CHECK_FALSE(runtime->Run(source.c_str()));
+		CHECK_FALSE(runtime->LastError().empty());
 	}
 }
 
