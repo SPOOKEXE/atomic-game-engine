@@ -523,16 +523,25 @@ The milestone headings below are development labels. Not in line with project ve
       thing being read. So it is drawn at `GRID_IDLE` strength by default and
       whole for the length of a drag, axes included. That is not occlusion and
       the comment says so.
-      **What true occlusion needs**, for whoever picks it up: a node in the
-      render graph rather than a draw list. A line-list pipeline with depth test
-      `LESS_OR_EQUAL` and depth write off, drawn into the lit colour target with
-      the gbuffer's depth attached - the same shape the forward `mirror-capture`
-      and `portal-capture` passes already have, so the plumbing exists. A
-      vertex buffer of world positions and colours uploaded per view per frame,
-      because the grid is camera-anchored: `SnapDown(eye.X, GRID_STEP)` centres
-      it on the camera and `GridFade` fades it radially from the eye, so it
-      cannot be a per-world draw-list append the way `AppendSurfaceFaceMarkers`
-      is. Per view, not per world, is the whole cost of the item.
+      **What true occlusion needs**, for whoever picks it up, and the cheap
+      route was found while looking: the graph's existing `raster` node already
+      draws a full-screen triangle with a user fragment shader, hands it
+      `ViewProjection` and its inverse, binds whatever textures the node reads,
+      and can load rather than clear its colour target. That is everything the
+      classic infinite-grid shader wants - intersect the camera ray with `y = 0`
+      per pixel, derive the line from the world coordinate and its screen
+      derivatives, and compare the plane's depth against the `depth` target it
+      reads. No new backend node kind, no vertex buffer, no line-list pipeline:
+      a `grid.frag` and a node in the pipeline the studio selects for an edited
+      world.
+      A per-view *vertex* pass would be the other route and is the more
+      expensive one, because the grid is camera-anchored - `SnapDown(eye.X,
+      GRID_STEP)` centres it on the camera and `GridFade` fades it radially from
+      the eye - so it cannot be a per-world draw-list append the way
+      `AppendSurfaceFaceMarkers` is.
+      The part that is not free either way is which pipeline: the studio would
+      need the node on for an edited world and off everywhere else, and the
+      profile is chosen per world rather than per panel.
 - [~] fix viewport image size stretch. **Measured, and the projection is not
       it.** `MipProbe`, one build, two window shapes, everything else equal: the
       marker post is 71 x 119 pixels at 720x720 and 68 x 119 at 1440x720. The
