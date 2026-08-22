@@ -49,12 +49,12 @@ namespace engine::render {
 			}
 			const uint32_t entries = grown(capacity, need);
 			if (buffer != nullptr) {
-				SDL_ReleaseGPUBuffer(Device, buffer);
+				gpu::ReleaseBuffer(Device, buffer);
 			}
 			SDL_GPUBufferCreateInfo info{};
 			info.usage = usage;
 			info.size = entries * stride;
-			buffer = SDL_CreateGPUBuffer(Device, &info);
+			buffer = gpu::CreateBuffer(Device, &info);
 			if (buffer == nullptr) {
 				ENGINE_ERROR("occlusion {} buffer of {} entries: {}", what, entries, SDL_GetError());
 				capacity = 0;
@@ -75,7 +75,7 @@ namespace engine::render {
 		if (argCount * 2 > Occlusion.ArgumentCapacity || Occlusion.Arguments == nullptr ||
 			Occlusion.ArgRuns == nullptr) {
 			if (Occlusion.ArgRuns != nullptr) {
-				SDL_ReleaseGPUBuffer(Device, Occlusion.ArgRuns);
+				gpu::ReleaseBuffer(Device, Occlusion.ArgRuns);
 				Occlusion.ArgRuns = nullptr;
 			}
 			ready = ensure(
@@ -91,7 +91,7 @@ namespace engine::render {
 				SDL_GPUBufferCreateInfo info{};
 				info.usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
 				info.size = Occlusion.ArgumentCapacity * static_cast<uint32_t>(sizeof(uint32_t));
-				Occlusion.ArgRuns = SDL_CreateGPUBuffer(Device, &info);
+				Occlusion.ArgRuns = gpu::CreateBuffer(Device, &info);
 				ready = Occlusion.ArgRuns != nullptr;
 				if (!ready) {
 					ENGINE_ERROR("occlusion argument-run buffer: {}", SDL_GetError());
@@ -102,7 +102,7 @@ namespace engine::render {
 		if (runCount > Occlusion.RunCapacity || Occlusion.RunTable == nullptr ||
 			Occlusion.Counts == nullptr) {
 			if (Occlusion.Counts != nullptr) {
-				SDL_ReleaseGPUBuffer(Device, Occlusion.Counts);
+				gpu::ReleaseBuffer(Device, Occlusion.Counts);
 				Occlusion.Counts = nullptr;
 			}
 			ready = ensure(
@@ -119,7 +119,7 @@ namespace engine::render {
 				info.usage =
 					SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
 				info.size = Occlusion.RunCapacity * static_cast<uint32_t>(sizeof(uint32_t));
-				Occlusion.Counts = SDL_CreateGPUBuffer(Device, &info);
+				Occlusion.Counts = gpu::CreateBuffer(Device, &info);
 				ready = Occlusion.Counts != nullptr;
 				if (!ready) {
 					ENGINE_ERROR("occlusion count buffer: {}", SDL_GetError());
@@ -155,13 +155,13 @@ namespace engine::render {
 								runCount * static_cast<uint32_t>(sizeof(uint32_t));
 		if (staged > Occlusion.TransferCapacity || Occlusion.Transfer == nullptr) {
 			if (Occlusion.Transfer != nullptr) {
-				SDL_ReleaseGPUTransferBuffer(Device, Occlusion.Transfer);
+				gpu::ReleaseTransferBuffer(Device, Occlusion.Transfer);
 			}
 			const uint32_t bytes = grown(Occlusion.TransferCapacity, staged);
 			SDL_GPUTransferBufferCreateInfo info{};
 			info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
 			info.size = bytes;
-			Occlusion.Transfer = SDL_CreateGPUTransferBuffer(Device, &info);
+			Occlusion.Transfer = gpu::CreateTransferBuffer(Device, &info);
 			if (Occlusion.Transfer == nullptr) {
 				ENGINE_ERROR("occlusion transfer buffer of {} bytes: {}", bytes, SDL_GetError());
 				Occlusion.TransferCapacity = 0;
@@ -179,7 +179,7 @@ namespace engine::render {
 		}
 		for (SDL_GPUTexture *&level : Occlusion.Levels) {
 			if (level != nullptr) {
-				SDL_ReleaseGPUTexture(Device, level);
+				gpu::ReleaseTexture(Device, level);
 				level = nullptr;
 			}
 		}
@@ -200,7 +200,7 @@ namespace engine::render {
 			info.layer_count_or_depth = 1;
 			info.num_levels = 1;
 			info.sample_count = SDL_GPU_SAMPLECOUNT_1;
-			Occlusion.Levels[count] = SDL_CreateGPUTexture(Device, &info);
+			Occlusion.Levels[count] = gpu::CreateTexture(Device, &info);
 			if (Occlusion.Levels[count] == nullptr) {
 				ENGINE_ERROR("depth pyramid level {}: {}", count, SDL_GetError());
 				return false;
@@ -340,13 +340,13 @@ namespace engine::render {
 	void Renderer::Impl::ReleaseOcclusion() {
 		for (SDL_GPUTexture *&level : Occlusion.Levels) {
 			if (level != nullptr) {
-				SDL_ReleaseGPUTexture(Device, level);
+				gpu::ReleaseTexture(Device, level);
 				level = nullptr;
 			}
 		}
 		const auto releaseBuffer = [&](SDL_GPUBuffer *&buffer) {
 			if (buffer != nullptr) {
-				SDL_ReleaseGPUBuffer(Device, buffer);
+				gpu::ReleaseBuffer(Device, buffer);
 				buffer = nullptr;
 			}
 		};
@@ -357,7 +357,7 @@ namespace engine::render {
 		releaseBuffer(Occlusion.Counts);
 		releaseBuffer(Occlusion.LateIndices);
 		if (Occlusion.Transfer != nullptr) {
-			SDL_ReleaseGPUTransferBuffer(Device, Occlusion.Transfer);
+			gpu::ReleaseTransferBuffer(Device, Occlusion.Transfer);
 			Occlusion.Transfer = nullptr;
 		}
 		const auto releasePipeline = [&](SDL_GPUComputePipeline *&pipeline) {

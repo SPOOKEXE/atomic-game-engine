@@ -216,7 +216,7 @@ namespace studio {
 		ImGui::Spacing();
 		ImGui::SeparatorText("Rates");
 
-		ImGui::TextDisabled("the lowest ceiling that applies is the one the frame is paced at");
+		ImGui::TextDisabled("the lowest ceiling that applies is the image presentation rate");
 
 		const auto rate = [](const char *label, float &value, const char *tip) {
 			ImGui::SetNextItemWidth(engine::ui::Scaled(160.0f));

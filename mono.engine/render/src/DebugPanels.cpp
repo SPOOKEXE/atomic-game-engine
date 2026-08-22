@@ -10,6 +10,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <iterator>
+#include <limits>
 #include <span>
 #include <string>
 #include <vector>
@@ -922,6 +923,11 @@ namespace engine::render {
 			for (const core::HeapSample &sample : history) {
 				peak = std::max(peak, sample.LiveBytes);
 			}
+			for (const uint64_t bytes : data.GpuHeapHistory) {
+				peak = std::max<int64_t>(
+					peak, static_cast<int64_t>(std::min<uint64_t>(bytes, std::numeric_limits<int64_t>::max()))
+				);
+			}
 
 			const int scale = data.Scale;
 			const auto readings = static_cast<int>(history.size());
@@ -939,6 +945,21 @@ namespace engine::render {
 				const auto share = static_cast<double>(history[index].LiveBytes) / static_cast<double>(peak);
 				const int filled = std::clamp(static_cast<int>(share * height), 1, height);
 				image.Blend(x + column, y + height - filled, scale, filled, 120, 190, 240, 150);
+			}
+
+			// GPU history shares the clock and horizontal axis with the process
+			// heap. A line rather than a second fill keeps both readable where the
+			// logical resource payload is larger than the CPU heap.
+			const auto gpuReadings = static_cast<int>(data.GpuHeapHistory.size());
+			if (gpuReadings >= 2) {
+				for (int column = 0; column < width; column += scale) {
+					const int fromRight = std::clamp((width - scale - column) / scale, 0, gpuReadings - 1);
+					const auto index = static_cast<size_t>(gpuReadings - 1 - fromRight);
+					const auto share =
+						static_cast<double>(data.GpuHeapHistory[index]) / static_cast<double>(peak);
+					const int line = std::clamp(static_cast<int>(share * height), 1, height);
+					image.Blend(x + column, y + height - line, scale, scale, 245, 177, 76, 230);
+				}
 			}
 
 			// The window's peak, so the plot's height is a number rather than a
@@ -999,6 +1020,25 @@ namespace engine::render {
 				TEXT.R,
 				TEXT.G,
 				TEXT.B,
+				scale
+			);
+			cursor += rowHeight;
+
+			DebugText::Draw(
+				image,
+				x,
+				cursor,
+				Format(
+					"GPU LOGICAL %s   PEAK %s   BUFFER %s   TRANSFER %s   TEXTURE %s",
+					FormatBytes(static_cast<double>(data.GpuHeapLiveBytes)).c_str(),
+					FormatBytes(static_cast<double>(data.GpuHeapPeakBytes)).c_str(),
+					FormatBytes(static_cast<double>(data.GpuBufferBytes)).c_str(),
+					FormatBytes(static_cast<double>(data.GpuTransferBufferBytes)).c_str(),
+					FormatBytes(static_cast<double>(data.GpuTextureBytes)).c_str()
+				),
+				TEXT_DIM.R,
+				TEXT_DIM.G,
+				TEXT_DIM.B,
 				scale
 			);
 			cursor += rowHeight;

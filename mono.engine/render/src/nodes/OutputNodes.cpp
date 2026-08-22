@@ -359,7 +359,7 @@ namespace engine::render {
 					info.layer_count_or_depth = 1;
 					info.num_levels = 1;
 					info.sample_count = SDL_GPU_SAMPLECOUNT_1;
-					writeTexture = SDL_CreateGPUTexture(State->Device, &info);
+					writeTexture = gpu::CreateTexture(State->Device, &info);
 					preview.Width = writeTexture != nullptr ? previewWidth : 0;
 					preview.Height = writeTexture != nullptr ? previewHeight : 0;
 				}

@@ -1146,6 +1146,8 @@ namespace studio {
 		ImGui::BeginGroup();
 		{
 			const engine::ui::ScopedFont small(engine::ui::Typeface::Interface, engine::ui::TextSize::Small);
+			const engine::render::FrameResult frame =
+				index < ViewportResults.size() ? ViewportResults[index] : engine::render::FrameResult{};
 
 			const engine::core::Name scene =
 				Universe->NameOf(second ? (extra->World.IsValid() ? extra->World : Active) : Active);
@@ -1155,9 +1157,9 @@ namespace studio {
 				scene.IsValid() ? Label(scene) : "(no scene)",
 				target.Width,
 				target.Height,
-				LastFrame.DrawCalls,
-				static_cast<unsigned long long>(LastFrame.Triangles),
-				LastFrame.Culled
+				frame.DrawCalls,
+				static_cast<unsigned long long>(frame.Triangles),
+				frame.Culled
 			);
 			ImGui::PopStyleColor();
 
@@ -2505,13 +2507,16 @@ namespace studio {
 								  : live == 1 ? std::string(Describe(Runs.front().Mode)) + " (1 scene)"
 											  : std::to_string(live) + " scenes running";
 
+		const engine::render::FrameResult frame = FocusedViewport < ViewportResults.size()
+													  ? ViewportResults[FocusedViewport]
+													  : engine::render::FrameResult{};
 		ImGui::Text(
 			"%s  |  %.0f fps  |  %u draw calls, %llu triangles, %u culled",
 			state.c_str(),
 			ImGui::GetIO().Framerate,
-			LastFrame.DrawCalls,
-			static_cast<unsigned long long>(LastFrame.Triangles),
-			LastFrame.Culled
+			frame.DrawCalls,
+			static_cast<unsigned long long>(frame.Triangles),
+			frame.Culled
 		);
 
 		// **What is selected, which the explorer cannot say while you are

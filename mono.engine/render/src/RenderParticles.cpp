@@ -226,7 +226,7 @@ namespace engine::render {
 		}
 
 		if (world.Buffer != nullptr) {
-			SDL_ReleaseGPUBuffer(Device, world.Buffer);
+			gpu::ReleaseBuffer(Device, world.Buffer);
 		}
 
 		const uint32_t bytes = capacity * static_cast<uint32_t>(sizeof(effects::ParticleInstance));
@@ -239,7 +239,7 @@ namespace engine::render {
 		SDL_GPUBufferCreateInfo bufferInfo{};
 		bufferInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
 		bufferInfo.size = bytes;
-		world.Buffer = SDL_CreateGPUBuffer(Device, &bufferInfo);
+		world.Buffer = gpu::CreateBuffer(Device, &bufferInfo);
 
 		if (world.Buffer == nullptr) {
 			ENGINE_ERROR("particle buffer of {} entries: {}", capacity, SDL_GetError());
@@ -266,13 +266,13 @@ namespace engine::render {
 		// pool sized to anything but the declared number would put a block's run
 		// off the end. It is asked for once and answered once.
 		if (Particles.States != nullptr) {
-			SDL_ReleaseGPUBuffer(Device, Particles.States);
+			gpu::ReleaseBuffer(Device, Particles.States);
 		}
 
 		SDL_GPUBufferCreateInfo info{};
 		info.usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
 		info.size = slots * static_cast<uint32_t>(sizeof(effects::ParticleState));
-		Particles.States = SDL_CreateGPUBuffer(Device, &info);
+		Particles.States = gpu::CreateBuffer(Device, &info);
 		if (Particles.States == nullptr) {
 			ENGINE_ERROR("particle state pool of {} slots: {}", slots, SDL_GetError());
 			Particles.Slots = 0;
@@ -291,14 +291,14 @@ namespace engine::render {
 		SDL_GPUTransferBufferCreateInfo blank{};
 		blank.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
 		blank.size = info.size;
-		SDL_GPUTransferBuffer *zeros = SDL_CreateGPUTransferBuffer(Device, &blank);
+		SDL_GPUTransferBuffer *zeros = gpu::CreateTransferBuffer(Device, &blank);
 		SDL_GPUCommandBuffer *command = zeros != nullptr ? SDL_AcquireGPUCommandBuffer(Device) : nullptr;
 		if (zeros == nullptr || command == nullptr) {
 			ENGINE_ERROR("particle state pool: could not clear {} bytes: {}", info.size, SDL_GetError());
 			if (zeros != nullptr) {
-				SDL_ReleaseGPUTransferBuffer(Device, zeros);
+				gpu::ReleaseTransferBuffer(Device, zeros);
 			}
-			SDL_ReleaseGPUBuffer(Device, Particles.States);
+			gpu::ReleaseBuffer(Device, Particles.States);
 			Particles.States = nullptr;
 			Particles.Slots = 0;
 			return false;
@@ -323,7 +323,7 @@ namespace engine::render {
 		// and releasing it while a submitted command buffer still has work
 		// against it is a use after free the driver will not warn about.
 		SDL_WaitForGPUIdle(Device);
-		SDL_ReleaseGPUTransferBuffer(Device, zeros);
+		gpu::ReleaseTransferBuffer(Device, zeros);
 
 		Particles.Slots = slots;
 		return true;
@@ -348,7 +348,7 @@ namespace engine::render {
 
 		for (SDL_GPUBuffer **buffer : {&Particles.Params, &Particles.Curves}) {
 			if (*buffer != nullptr) {
-				SDL_ReleaseGPUBuffer(Device, *buffer);
+				gpu::ReleaseBuffer(Device, *buffer);
 				*buffer = nullptr;
 			}
 		}
@@ -357,10 +357,10 @@ namespace engine::render {
 		info.usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
 
 		info.size = rows * PARTICLE_PARAM_WORDS * static_cast<uint32_t>(sizeof(uint32_t));
-		Particles.Params = SDL_CreateGPUBuffer(Device, &info);
+		Particles.Params = gpu::CreateBuffer(Device, &info);
 
 		info.size = rows * PARTICLE_CURVE_WORDS * static_cast<uint32_t>(sizeof(uint32_t));
-		Particles.Curves = SDL_CreateGPUBuffer(Device, &info);
+		Particles.Curves = gpu::CreateBuffer(Device, &info);
 
 		if (Particles.Params == nullptr || Particles.Curves == nullptr) {
 			ENGINE_ERROR("particle tables of {} blocks: {}", rows, SDL_GetError());
@@ -396,21 +396,21 @@ namespace engine::render {
 			}
 
 			if (buffer != nullptr) {
-				SDL_ReleaseGPUBuffer(Device, buffer);
+				gpu::ReleaseBuffer(Device, buffer);
 			}
 			if (staging != nullptr) {
-				SDL_ReleaseGPUTransferBuffer(Device, staging);
+				gpu::ReleaseTransferBuffer(Device, staging);
 			}
 
 			SDL_GPUBufferCreateInfo info{};
 			info.usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
 			info.size = size * stride;
-			buffer = SDL_CreateGPUBuffer(Device, &info);
+			buffer = gpu::CreateBuffer(Device, &info);
 
 			SDL_GPUTransferBufferCreateInfo transfer{};
 			transfer.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
 			transfer.size = size * stride;
-			staging = SDL_CreateGPUTransferBuffer(Device, &transfer);
+			staging = gpu::CreateTransferBuffer(Device, &transfer);
 
 			if (buffer == nullptr || staging == nullptr) {
 				ENGINE_ERROR("particle {} of {} entries: {}", what, size, SDL_GetError());
@@ -493,7 +493,7 @@ namespace engine::render {
 				  &Particles.Births,
 				  &Particles.Seams}) {
 				if (*buffer != nullptr) {
-					SDL_ReleaseGPUBuffer(Device, *buffer);
+					gpu::ReleaseBuffer(Device, *buffer);
 					*buffer = nullptr;
 				}
 			}
@@ -504,7 +504,7 @@ namespace engine::render {
 				  &Particles.BirthStaging,
 				  &Particles.SeamStaging}) {
 				if (*staging != nullptr) {
-					SDL_ReleaseGPUTransferBuffer(Device, *staging);
+					gpu::ReleaseTransferBuffer(Device, *staging);
 					*staging = nullptr;
 				}
 			}
@@ -1134,10 +1134,10 @@ namespace engine::render {
 		}
 
 		if (RibbonBuffer != nullptr) {
-			SDL_ReleaseGPUBuffer(Device, RibbonBuffer);
+			gpu::ReleaseBuffer(Device, RibbonBuffer);
 		}
 		if (RibbonTransfer != nullptr) {
-			SDL_ReleaseGPUTransferBuffer(Device, RibbonTransfer);
+			gpu::ReleaseTransferBuffer(Device, RibbonTransfer);
 		}
 
 		const uint32_t bytes = capacity * static_cast<uint32_t>(sizeof(effects::RibbonVertex));
@@ -1145,12 +1145,12 @@ namespace engine::render {
 		SDL_GPUBufferCreateInfo bufferInfo{};
 		bufferInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
 		bufferInfo.size = bytes;
-		RibbonBuffer = SDL_CreateGPUBuffer(Device, &bufferInfo);
+		RibbonBuffer = gpu::CreateBuffer(Device, &bufferInfo);
 
 		SDL_GPUTransferBufferCreateInfo transferInfo{};
 		transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
 		transferInfo.size = bytes;
-		RibbonTransfer = SDL_CreateGPUTransferBuffer(Device, &transferInfo);
+		RibbonTransfer = gpu::CreateTransferBuffer(Device, &transferInfo);
 
 		if (RibbonBuffer == nullptr || RibbonTransfer == nullptr) {
 			ENGINE_ERROR("ribbon buffer of {} vertices: {}", capacity, SDL_GetError());

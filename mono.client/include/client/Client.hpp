@@ -901,6 +901,8 @@ namespace client {
 		std::vector<engine::core::HeapGrowth> HeapGrowth;
 		std::vector<engine::core::HeapSample> HeapHistory;
 		engine::core::HeapTotals HeapTotals;
+		std::vector<uint64_t> GpuHeapHistory;
+		engine::render::GpuMemoryStatistics GpuHeapTotals;
 
 		bool Running = false;
 		int64_t FramesDrawn = 0;

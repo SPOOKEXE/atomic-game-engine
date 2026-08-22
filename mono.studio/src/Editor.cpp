@@ -56,7 +56,6 @@
 #include <studio/RojoSync.hpp>
 #include <studio/ViewerLens.hpp>
 #include <studio/Widgets.hpp>
-#include <thread>
 
 namespace studio {
 
@@ -749,6 +748,7 @@ namespace studio {
 		// empty one.
 		if (!Settings.HeapReport.empty()) {
 			const engine::core::HeapTotals heap = engine::core::HeapProfile::Totals();
+			const engine::render::GpuMemoryStatistics gpu = Renderer.MemoryStatistics();
 			ENGINE_INFO(
 				"heap: {:.1f} MiB live in {} block(s), {:.1f} MiB peak, {} tag(s)",
 				static_cast<double>(heap.LiveBytes) / (1024.0 * 1024.0),
@@ -756,7 +756,13 @@ namespace studio {
 				static_cast<double>(heap.PeakBytes) / (1024.0 * 1024.0),
 				heap.Nodes
 			);
-			if (engine::core::HeapProfile::WriteReport(Settings.HeapReport)) {
+			ENGINE_INFO(
+				"gpu heap: {:.1f} MiB logical live, {:.1f} MiB peak",
+				static_cast<double>(gpu.LiveBytes) / (1024.0 * 1024.0),
+				static_cast<double>(gpu.PeakBytes) / (1024.0 * 1024.0)
+			);
+			if (engine::core::HeapProfile::WriteReport(Settings.HeapReport) &&
+				Renderer.AppendMemoryReport(Settings.HeapReport)) {
 				ENGINE_INFO("heap report written to {}", Settings.HeapReport.string());
 			} else {
 				ENGINE_ERROR("could not write {}", Settings.HeapReport.string());
@@ -802,7 +808,19 @@ namespace studio {
 
 	int Editor::Run() {
 		while (Running) {
-			// **The wait comes first, and that is the whole of the input-latency
+			// A headless frame is diagnostic work rather than an image shown to a
+			// person. It has no swapchain to pace it and bounded runs must finish as
+			// quickly as the renderer can produce their requested frames. With
+			// vertical sync on, the display owns the deadline instead.
+			const float ceiling = Settings.Headless || VerticalSync ? 0.0f : PacingCeiling();
+			const uint32_t presentationRate =
+				ceiling > 0.0f ? static_cast<uint32_t>(std::lround(ceiling)) : 0u;
+			if (Presentations.Rate() != presentationRate) {
+				Presentations.SetRate(presentationRate);
+			}
+			const bool presentationDue = Presentations.Due(client::PresentationSchedule::Clock::now());
+
+			// **Acquisition comes first, and that is the whole of the input-latency
 			// fix.** `Renderer::Render` blocks the better part of a frame waiting
 			// for the display, and it used to do so *after* the events had been
 			// read - so every frame was built from input that was already a frame
@@ -821,18 +839,23 @@ namespace studio {
 			engine::core::FrameGraph::BeginFrame();
 
 			bool renderingActive = false;
-			{
+			if (presentationDue) {
 				ENGINE_PROFILE_CAT("wait for frame", engine::core::ProfileCategory::Idle);
 
-				// A frame that could not be acquired is minimised or mid-resize.
+				// A frame that could not be acquired is minimised, mid-resize, or
+				// still owned by the GPU in immediate mode.
 				// The result gates presentation below, after simulation,
 				// control, collaboration, and plugins have continued, so an
 				// invisible editor allocates and submits no rendering work.
-				renderingActive = Renderer.WaitForFrame();
+				//
+				// Vsync deliberately waits before input for the latency argument
+				// above. Immediate mode never waits: the update loop keeps advancing
+				// and submits the next changed image when a swapchain slot is ready.
+				renderingActive = VerticalSync ? Renderer.WaitForFrame() : Renderer.TryFrame();
 			}
 
 			const float delta = Clock.Tick();
-			const double frameBegan = Clock.Now();
+			PresentationDeltaSeconds += delta;
 
 			PumpEvents();
 
@@ -866,30 +889,29 @@ namespace studio {
 
 			Simulate(delta);
 			if (renderingActive) {
-				Present(delta);
+				Present(PresentationDeltaSeconds);
+				PresentationDeltaSeconds = 0.0f;
+				Presentations.Consume(client::PresentationSchedule::Clock::now());
 			}
 
 			engine::core::FrameGraph::EndFrame();
 
 			// After the frame's work, so a reading covers whole frames rather
 			// than catching the renderer mid-frame holding its scratch buffers.
-			engine::core::HeapProfile::SampleIfDue();
+			if (engine::core::HeapProfile::SampleIfDue()) {
+				HeapState.Gpu = Renderer.MemoryStatistics();
+				HeapState.GpuPlot.push_back(
+					static_cast<float>(HeapState.Gpu.LiveBytes) / (1024.0f * 1024.0f)
+				);
 
-			// **After `EndFrame`, so the sleep is not measured as part of the
-			// frame.** Inside it, the frame graph would report the editor
-			// spending most of its time in "waiting", which is true and is the
-			// opposite of the question the graph is opened to answer.
-			//
-			// Only when vertical sync is off: with it on the display already
-			// paces the frame, and a second limiter would beat against it and
-			// produce a stutter neither one causes alone.
-			if (const float ceiling = PacingCeiling();
-				!VerticalSync && ceiling > 0.0f && !Settings.Headless) {
-				const double budget = 1.0 / static_cast<double>(ceiling);
-				const double spent = Clock.Now() - frameBegan;
-
-				if (spent < budget) {
-					std::this_thread::sleep_for(std::chrono::duration<double>(budget - spent));
+				// The CPU profiler owns the retention window. Mirroring its sample
+				// count keeps both plots aligned without a second timer or limit.
+				const size_t retained = engine::core::HeapProfile::History().size();
+				if (HeapState.GpuPlot.size() > retained) {
+					HeapState.GpuPlot.erase(
+						HeapState.GpuPlot.begin(),
+						HeapState.GpuPlot.begin() + (HeapState.GpuPlot.size() - retained)
+					);
 				}
 			}
 
@@ -1566,7 +1588,9 @@ namespace studio {
 		// F5 mid-run would otherwise throw away the window the report is fitted
 		// over, and the panel is the natural thing to close once you have seen
 		// the shape you were looking for.
-		engine::core::HeapProfile::SetSamplingEnabled(ShowFrameGraph || !Settings.HeapReport.empty());
+		engine::core::HeapProfile::SetSamplingEnabled(
+			ShowFrameGraph || ShowHeap || !Settings.HeapReport.empty()
+		);
 	}
 
 	void Editor::PresentPortalDestinations(WorldId shown, float frameSeconds) {
@@ -2317,6 +2341,10 @@ namespace studio {
 		LastFrame = Renderer.Render(
 			std::span<const engine::render::View>(&view, 1), Overlay, &GameInterface, true, &Interface
 		);
+		if (ViewportResults.size() <= DrawingViewport) {
+			ViewportResults.resize(DrawingViewport + 1);
+		}
+		ViewportResults[DrawingViewport] = LastFrame;
 		if (shown.IsValid()) {
 			RenderPipelineRenderedSlots[shown.Index] = DrawingViewport;
 		}

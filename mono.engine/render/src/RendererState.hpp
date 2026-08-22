@@ -10,6 +10,7 @@
 // `include/`, and `render/AGENTS.md`'s rule that no SDL header appears in a
 // public header is what confines it to `src/`.
 
+#include "GpuHeap.hpp"
 #include "InstanceResidency.hpp"
 #include "RenderTypes.hpp"
 #include "ResourcePreview.hpp"
@@ -1256,7 +1257,7 @@ namespace engine::render {
 		// one of them.
 		void DrainRetiredScenes() {
 			for (SDL_GPUTexture *texture : RetiredScenes) {
-				SDL_ReleaseGPUTexture(Device, texture);
+				gpu::ReleaseTexture(Device, texture);
 			}
 			RetiredScenes.clear();
 		}

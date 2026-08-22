@@ -1,3 +1,4 @@
+#include "GpuHeap.hpp"
 #include "Primitives.hpp"
 #include "ShaderBinary.hpp"
 
@@ -247,7 +248,7 @@ namespace engine::render {
 			texture.layer_count_or_depth = 1;
 			texture.num_levels = 1;
 
-			AtlasTexture = SDL_CreateGPUTexture(gpu, &texture);
+			AtlasTexture = gpu::CreateTexture(gpu, &texture);
 			if (AtlasTexture == nullptr) {
 				ENGINE_ERROR("interface pass: atlas texture: {}", SDL_GetError());
 			}
@@ -267,7 +268,7 @@ namespace engine::render {
 				return false;
 			}
 			SDL_SubmitGPUCommandBuffer(upload);
-			SDL_ReleaseGPUTransferBuffer(gpu, static_cast<SDL_GPUTransferBuffer *>(AtlasTransferBuffer));
+			gpu::ReleaseTransferBuffer(gpu, static_cast<SDL_GPUTransferBuffer *>(AtlasTransferBuffer));
 			AtlasTransferBuffer = nullptr;
 		}
 
@@ -284,19 +285,19 @@ namespace engine::render {
 		// Released in the reverse of the order they were made, which is what the
 		// device expects and what keeps a validation layer quiet.
 		if (TransferBuffer != nullptr) {
-			SDL_ReleaseGPUTransferBuffer(gpu, static_cast<SDL_GPUTransferBuffer *>(TransferBuffer));
+			gpu::ReleaseTransferBuffer(gpu, static_cast<SDL_GPUTransferBuffer *>(TransferBuffer));
 		}
 		if (AtlasTransferBuffer != nullptr) {
-			SDL_ReleaseGPUTransferBuffer(gpu, static_cast<SDL_GPUTransferBuffer *>(AtlasTransferBuffer));
+			gpu::ReleaseTransferBuffer(gpu, static_cast<SDL_GPUTransferBuffer *>(AtlasTransferBuffer));
 		}
 		if (IndexBuffer != nullptr) {
-			SDL_ReleaseGPUBuffer(gpu, static_cast<SDL_GPUBuffer *>(IndexBuffer));
+			gpu::ReleaseBuffer(gpu, static_cast<SDL_GPUBuffer *>(IndexBuffer));
 		}
 		if (VertexBuffer != nullptr) {
-			SDL_ReleaseGPUBuffer(gpu, static_cast<SDL_GPUBuffer *>(VertexBuffer));
+			gpu::ReleaseBuffer(gpu, static_cast<SDL_GPUBuffer *>(VertexBuffer));
 		}
 		if (AtlasTexture != nullptr) {
-			SDL_ReleaseGPUTexture(gpu, static_cast<SDL_GPUTexture *>(AtlasTexture));
+			gpu::ReleaseTexture(gpu, static_cast<SDL_GPUTexture *>(AtlasTexture));
 		}
 		if (PixelSampler != nullptr) {
 			SDL_ReleaseGPUSampler(gpu, static_cast<SDL_GPUSampler *>(PixelSampler));
@@ -531,7 +532,7 @@ namespace engine::render {
 		info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
 		info.size = static_cast<uint32_t>(pixels.size());
 
-		SDL_GPUTransferBuffer *staging = SDL_CreateGPUTransferBuffer(gpu, &info);
+		SDL_GPUTransferBuffer *staging = gpu::CreateTransferBuffer(gpu, &info);
 		if (staging == nullptr) {
 			return false;
 		}
@@ -539,7 +540,7 @@ namespace engine::render {
 
 		void *mapped = SDL_MapGPUTransferBuffer(gpu, staging, false);
 		if (mapped == nullptr) {
-			SDL_ReleaseGPUTransferBuffer(gpu, staging);
+			gpu::ReleaseTransferBuffer(gpu, staging);
 			AtlasTransferBuffer = nullptr;
 			return false;
 		}
@@ -670,23 +671,23 @@ namespace engine::render {
 		// blamed for.
 		if (VertexBuffer == nullptr || VertexCapacity < vertexBytes) {
 			if (VertexBuffer != nullptr) {
-				SDL_ReleaseGPUBuffer(gpu, static_cast<SDL_GPUBuffer *>(VertexBuffer));
+				gpu::ReleaseBuffer(gpu, static_cast<SDL_GPUBuffer *>(VertexBuffer));
 			}
 			SDL_GPUBufferCreateInfo info{};
 			info.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
 			info.size = vertexBytes;
-			VertexBuffer = SDL_CreateGPUBuffer(gpu, &info);
+			VertexBuffer = gpu::CreateBuffer(gpu, &info);
 			VertexCapacity = VertexBuffer != nullptr ? vertexBytes : 0;
 		}
 
 		if (IndexBuffer == nullptr || IndexCapacity < indexBytes) {
 			if (IndexBuffer != nullptr) {
-				SDL_ReleaseGPUBuffer(gpu, static_cast<SDL_GPUBuffer *>(IndexBuffer));
+				gpu::ReleaseBuffer(gpu, static_cast<SDL_GPUBuffer *>(IndexBuffer));
 			}
 			SDL_GPUBufferCreateInfo info{};
 			info.usage = SDL_GPU_BUFFERUSAGE_INDEX;
 			info.size = indexBytes;
-			IndexBuffer = SDL_CreateGPUBuffer(gpu, &info);
+			IndexBuffer = gpu::CreateBuffer(gpu, &info);
 			IndexCapacity = IndexBuffer != nullptr ? indexBytes : 0;
 		}
 
@@ -697,12 +698,12 @@ namespace engine::render {
 		const uint32_t total = vertexBytes + indexBytes;
 		if (TransferBuffer == nullptr || TransferCapacity < total) {
 			if (TransferBuffer != nullptr) {
-				SDL_ReleaseGPUTransferBuffer(gpu, static_cast<SDL_GPUTransferBuffer *>(TransferBuffer));
+				gpu::ReleaseTransferBuffer(gpu, static_cast<SDL_GPUTransferBuffer *>(TransferBuffer));
 			}
 			SDL_GPUTransferBufferCreateInfo info{};
 			info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
 			info.size = total;
-			TransferBuffer = SDL_CreateGPUTransferBuffer(gpu, &info);
+			TransferBuffer = gpu::CreateTransferBuffer(gpu, &info);
 			TransferCapacity = TransferBuffer != nullptr ? total : 0;
 		}
 

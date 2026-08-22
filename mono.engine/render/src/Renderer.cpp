@@ -44,6 +44,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <functional>
 #include <iterator>
 #include <optional>
@@ -215,14 +216,14 @@ namespace engine::render {
 		}
 		if (Preview.Capacity < bytes) {
 			if (Preview.Transfer != nullptr) {
-				SDL_ReleaseGPUTransferBuffer(Device, Preview.Transfer);
+				gpu::ReleaseTransferBuffer(Device, Preview.Transfer);
 				Preview.Transfer = nullptr;
 			}
 
 			SDL_GPUTransferBufferCreateInfo info{};
 			info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
 			info.size = static_cast<uint32_t>(bytes);
-			Preview.Transfer = SDL_CreateGPUTransferBuffer(Device, &info);
+			Preview.Transfer = gpu::CreateTransferBuffer(Device, &info);
 			if (Preview.Transfer == nullptr) {
 				ENGINE_ERROR("resource preview: SDL_CreateGPUTransferBuffer: {}", SDL_GetError());
 				Preview.Capacity = 0;
@@ -331,6 +332,30 @@ namespace engine::render {
 
 	std::string_view Renderer::BackendName() const {
 		return State->Backend;
+	}
+
+	GpuMemoryStatistics Renderer::MemoryStatistics() const {
+		return State != nullptr ? gpu::MemoryStatistics(State->Device) : GpuMemoryStatistics{};
+	}
+
+	bool Renderer::AppendMemoryReport(const std::filesystem::path &path) const {
+		std::ofstream file(path, std::ios::app);
+		if (!file) {
+			return false;
+		}
+
+		const GpuMemoryStatistics memory = MemoryStatistics();
+		file << "\ngpu logical heap\n";
+		file << "  live      " << memory.LiveBytes << " bytes\n";
+		file << "  peak      " << memory.PeakBytes << " bytes\n";
+		file << "  buffers   " << memory.BufferBytes << " bytes in " << memory.Buffers << " resources\n";
+		file << "  transfers " << memory.TransferBufferBytes << " bytes in " << memory.TransferBuffers
+			 << " resources\n";
+		file << "  textures  " << memory.TextureBytes << " bytes in " << memory.Textures << " resources\n";
+		file
+			<< "  coverage  requested payload; driver alignment, pipelines, samplers, shaders, and swapchain "
+			   "images excluded\n";
+		return file.good();
 	}
 
 	bool Renderer::SetVerticalSync(bool enabled) {
@@ -559,7 +584,7 @@ namespace engine::render {
 			State->Preview.Fence = nullptr;
 		}
 		if (State->Preview.Transfer != nullptr) {
-			SDL_ReleaseGPUTransferBuffer(device, State->Preview.Transfer);
+			gpu::ReleaseTransferBuffer(device, State->Preview.Transfer);
 			State->Preview.Transfer = nullptr;
 		}
 
@@ -600,10 +625,10 @@ namespace engine::render {
 			SDL_ReleaseGPUGraphicsPipeline(device, State->ShadowPipeline);
 		}
 		if (State->ShadowTexture) {
-			SDL_ReleaseGPUTexture(device, State->ShadowTexture);
+			gpu::ReleaseTexture(device, State->ShadowTexture);
 		}
 		if (State->BeamTexture) {
-			SDL_ReleaseGPUTexture(device, State->BeamTexture);
+			gpu::ReleaseTexture(device, State->BeamTexture);
 		}
 		if (State->ShadowSampler) {
 			SDL_ReleaseGPUSampler(device, State->ShadowSampler);
@@ -612,24 +637,24 @@ namespace engine::render {
 			for (Impl::SurfaceSlotState &surface : bank.Surfaces) {
 				for (SDL_GPUTexture *texture : surface.Texture) {
 					if (texture) {
-						SDL_ReleaseGPUTexture(device, texture);
+						gpu::ReleaseTexture(device, texture);
 					}
 				}
 				if (surface.Depth) {
-					SDL_ReleaseGPUTexture(device, surface.Depth);
+					gpu::ReleaseTexture(device, surface.Depth);
 				}
 			}
 
 			for (Impl::PortalLevel &level : bank.Portals) {
 				for (Impl::PortalTarget &target : level.Targets) {
 					if (target.Colour) {
-						SDL_ReleaseGPUTexture(device, target.Colour);
+						gpu::ReleaseTexture(device, target.Colour);
 					}
 					if (target.Display) {
-						SDL_ReleaseGPUTexture(device, target.Display);
+						gpu::ReleaseTexture(device, target.Display);
 					}
 					if (target.Depth) {
-						SDL_ReleaseGPUTexture(device, target.Depth);
+						gpu::ReleaseTexture(device, target.Depth);
 					}
 				}
 			}
@@ -637,20 +662,20 @@ namespace engine::render {
 			for (Impl::MirrorLevel &level : bank.Mirrors) {
 				for (Impl::MirrorTarget &target : level.Targets) {
 					if (target.Colour) {
-						SDL_ReleaseGPUTexture(device, target.Colour);
+						gpu::ReleaseTexture(device, target.Colour);
 					}
 					if (target.Depth) {
-						SDL_ReleaseGPUTexture(device, target.Depth);
+						gpu::ReleaseTexture(device, target.Depth);
 					}
 				}
 			}
 
 			for (Impl::SeamLightTarget &target : bank.SeamLights) {
 				if (target.Colour) {
-					SDL_ReleaseGPUTexture(device, target.Colour);
+					gpu::ReleaseTexture(device, target.Colour);
 				}
 				if (target.Depth) {
-					SDL_ReleaseGPUTexture(device, target.Depth);
+					gpu::ReleaseTexture(device, target.Depth);
 				}
 			}
 		}
@@ -660,30 +685,30 @@ namespace engine::render {
 		}
 		for (Impl::SceneSlot &slot : State->SceneSlots) {
 			if (slot.Texture) {
-				SDL_ReleaseGPUTexture(device, slot.Texture);
+				gpu::ReleaseTexture(device, slot.Texture);
 				slot.Texture = nullptr;
 			}
 			if (slot.Depth) {
-				SDL_ReleaseGPUTexture(device, slot.Depth);
+				gpu::ReleaseTexture(device, slot.Depth);
 				slot.Depth = nullptr;
 			}
 			if (slot.History) {
-				SDL_ReleaseGPUTexture(device, slot.History);
+				gpu::ReleaseTexture(device, slot.History);
 				slot.History = nullptr;
 			}
 			if (slot.InstanceIndexBuffer != nullptr) {
-				SDL_ReleaseGPUBuffer(device, slot.InstanceIndexBuffer);
+				gpu::ReleaseBuffer(device, slot.InstanceIndexBuffer);
 			}
 			if (slot.InstanceIndexTransfer != nullptr) {
-				SDL_ReleaseGPUTransferBuffer(device, slot.InstanceIndexTransfer);
+				gpu::ReleaseTransferBuffer(device, slot.InstanceIndexTransfer);
 			}
 		}
 		for (Impl::InstanceWorld &world : State->InstanceWorlds) {
 			if (world.Buffer != nullptr) {
-				SDL_ReleaseGPUBuffer(device, world.Buffer);
+				gpu::ReleaseBuffer(device, world.Buffer);
 			}
 			if (world.Transfer != nullptr) {
-				SDL_ReleaseGPUTransferBuffer(device, world.Transfer);
+				gpu::ReleaseTransferBuffer(device, world.Transfer);
 			}
 		}
 		for (Impl::PbrSlot &slot : State->PbrSlots) {
@@ -693,7 +718,7 @@ namespace engine::render {
 		for (Impl::ResourcePreviewTarget &preview : State->ResourcePreviews) {
 			for (SDL_GPUTexture *texture : preview.Textures) {
 				if (texture != nullptr) {
-					SDL_ReleaseGPUTexture(device, texture);
+					gpu::ReleaseTexture(device, texture);
 				}
 			}
 		}
@@ -713,16 +738,16 @@ namespace engine::render {
 		State->Meshes.Shutdown();
 		State->Textures.Shutdown();
 		if (State->DepthTexture) {
-			SDL_ReleaseGPUTexture(device, State->DepthTexture);
+			gpu::ReleaseTexture(device, State->DepthTexture);
 		}
 		if (State->FallbackTexture) {
-			SDL_ReleaseGPUTexture(device, State->FallbackTexture);
+			gpu::ReleaseTexture(device, State->FallbackTexture);
 		}
 		if (State->OverlayTexture) {
-			SDL_ReleaseGPUTexture(device, State->OverlayTexture);
+			gpu::ReleaseTexture(device, State->OverlayTexture);
 		}
 		if (State->OverlayTransfer) {
-			SDL_ReleaseGPUTransferBuffer(device, State->OverlayTransfer);
+			gpu::ReleaseTransferBuffer(device, State->OverlayTransfer);
 		}
 		if (State->OverlaySampler) {
 			SDL_ReleaseGPUSampler(device, State->OverlaySampler);
@@ -731,6 +756,7 @@ namespace engine::render {
 		if (State->Window) {
 			SDL_ReleaseWindowFromGPUDevice(device, State->Window);
 		}
+		gpu::ForgetDevice(device);
 		SDL_DestroyGPUDevice(device);
 
 		// **Rebuilt in place rather than assigned from a fresh one.** The two
@@ -1355,7 +1381,7 @@ namespace engine::render {
 		info.layer_count_or_depth = 1;
 		info.num_levels = 1;
 
-		SDL_GPUTexture *copy = SDL_CreateGPUTexture(State->Device, &info);
+		SDL_GPUTexture *copy = gpu::CreateTexture(State->Device, &info);
 		if (copy == nullptr) {
 			ENGINE_ERROR("SDL_CreateGPUTexture (scene capture): {}", SDL_GetError());
 			return false;
@@ -1364,7 +1390,7 @@ namespace engine::render {
 		SDL_GPUCommandBuffer *command = SDL_AcquireGPUCommandBuffer(State->Device);
 		if (command == nullptr) {
 			ENGINE_ERROR("SDL_AcquireGPUCommandBuffer (scene capture): {}", SDL_GetError());
-			SDL_ReleaseGPUTexture(State->Device, copy);
+			gpu::ReleaseTexture(State->Device, copy);
 			return false;
 		}
 
@@ -1394,7 +1420,7 @@ namespace engine::render {
 
 		if (!State->Textures.Adopt(name, copy, source.DrawnWidth, source.DrawnHeight, bytes)) {
 			// Refused, so the texture is still ours to release - `Adopt` says so.
-			SDL_ReleaseGPUTexture(State->Device, copy);
+			gpu::ReleaseTexture(State->Device, copy);
 			return false;
 		}
 

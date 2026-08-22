@@ -314,6 +314,18 @@ namespace engine::render {
 		// Seconds the growth figures are fitted over.
 		double HeapHistorySeconds = 0.0;
 
+		// Logical GPU resource payload sampled with the process heap. SDL has no
+		// portable driver-heap query, so this covers buffers, transfer buffers,
+		// textures, mip levels, and samples rather than backend allocation slack.
+		//@{
+		uint64_t GpuHeapLiveBytes = 0;
+		uint64_t GpuHeapPeakBytes = 0;
+		uint64_t GpuBufferBytes = 0;
+		uint64_t GpuTransferBufferBytes = 0;
+		uint64_t GpuTextureBytes = 0;
+		std::span<const uint64_t> GpuHeapHistory;
+		//@}
+
 		// Positive integer pixel scale, raised on high-DPI displays to keep the panels legible.
 		int Scale = 2;
 	};

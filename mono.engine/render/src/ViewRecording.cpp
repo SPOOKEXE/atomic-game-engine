@@ -1957,7 +1957,7 @@ namespace engine::render {
 				info.size = static_cast<uint32_t>(captureBytes);
 			}
 
-			capture = info.size > 0 ? SDL_CreateGPUTransferBuffer(State->Device, &info) : nullptr;
+			capture = info.size > 0 ? gpu::CreateTransferBuffer(State->Device, &info) : nullptr;
 			if (capture == nullptr) {
 				ENGINE_ERROR("capture: SDL_CreateGPUTransferBuffer: {}", SDL_GetError());
 			}
@@ -1967,7 +1967,7 @@ namespace engine::render {
 			// the same one-queue ordering the previews rely on.
 			SDL_GPUCommandBuffer *downloads = capture != nullptr ? State->DownloadBuffer() : nullptr;
 			if (capture != nullptr && downloads == nullptr) {
-				SDL_ReleaseGPUTransferBuffer(State->Device, capture);
+				gpu::ReleaseTransferBuffer(State->Device, capture);
 				capture = nullptr;
 			}
 			if (capture != nullptr) {
@@ -2042,7 +2042,7 @@ namespace engine::render {
 					State->PendingMarks[timingSlot].clear();
 				}
 				if (capture != nullptr) {
-					SDL_ReleaseGPUTransferBuffer(State->Device, capture);
+					gpu::ReleaseTransferBuffer(State->Device, capture);
 				}
 				State->DropDownloads();
 				return;
@@ -2062,7 +2062,7 @@ namespace engine::render {
 					SDL_GPUFence *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(downloads);
 					if (fence == nullptr) {
 						ENGINE_ERROR("SDL_SubmitGPUCommandBufferAndAcquireFence: {}", SDL_GetError());
-						SDL_ReleaseGPUTransferBuffer(State->Device, capture);
+						gpu::ReleaseTransferBuffer(State->Device, capture);
 						if (State->PreviewSubmitted) {
 							State->Preview.Pending.Poll(true);
 							State->Preview.Pixels.clear();
@@ -2091,7 +2091,7 @@ namespace engine::render {
 							);
 						}
 
-						SDL_ReleaseGPUTransferBuffer(State->Device, capture);
+						gpu::ReleaseTransferBuffer(State->Device, capture);
 
 						// Once. A request that repeated would write a file
 						// every frame and stall every one of them.

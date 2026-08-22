@@ -52,7 +52,7 @@ namespace engine::render {
 			// grace period the colour target needs does not apply, and a closed
 			// panel should not go on holding a megabyte of it.
 			if (target.Depth) {
-				SDL_ReleaseGPUTexture(Device, target.Depth);
+				gpu::ReleaseTexture(Device, target.Depth);
 				target.Depth = nullptr;
 			}
 
@@ -110,7 +110,7 @@ namespace engine::render {
 		info.layer_count_or_depth = 1;
 		info.num_levels = 1;
 
-		target.Texture = SDL_CreateGPUTexture(Device, &info);
+		target.Texture = gpu::CreateTexture(Device, &info);
 		if (!target.Texture) {
 			ENGINE_ERROR("SDL_CreateGPUTexture (scene target): {}", SDL_GetError());
 			target.Width = 0;
@@ -154,7 +154,7 @@ namespace engine::render {
 		info.layer_count_or_depth = 1;
 		info.num_levels = 1;
 		info.sample_count = SDL_GPU_SAMPLECOUNT_1;
-		history.History = SDL_CreateGPUTexture(Device, &info);
+		history.History = gpu::CreateTexture(Device, &info);
 		if (history.History == nullptr) {
 			ENGINE_ERROR("SDL_CreateGPUTexture (frame history): {}", SDL_GetError());
 			return false;
@@ -172,7 +172,7 @@ namespace engine::render {
 		}
 
 		if (texture) {
-			SDL_ReleaseGPUTexture(Device, texture);
+			gpu::ReleaseTexture(Device, texture);
 			texture = nullptr;
 		}
 
@@ -188,7 +188,7 @@ namespace engine::render {
 		info.num_levels = 1;
 		info.sample_count = SDL_GPU_SAMPLECOUNT_1;
 
-		texture = SDL_CreateGPUTexture(Device, &info);
+		texture = gpu::CreateTexture(Device, &info);
 		if (!texture) {
 			ENGINE_ERROR("depth texture {}x{}: {}", width, height, SDL_GetError());
 			haveWidth = 0;
@@ -215,7 +215,7 @@ namespace engine::render {
 			  slot.Occlusion,
 			  slot.Lit}) {
 			if (texture != nullptr) {
-				SDL_ReleaseGPUTexture(Device, texture);
+				gpu::ReleaseTexture(Device, texture);
 			}
 		}
 		slot = {};
@@ -245,7 +245,7 @@ namespace engine::render {
 			info.layer_count_or_depth = 1;
 			info.num_levels = 1;
 			info.sample_count = SDL_GPU_SAMPLECOUNT_1;
-			return SDL_CreateGPUTexture(Device, &info);
+			return gpu::CreateTexture(Device, &info);
 		};
 
 		made.Albedo = texture(
@@ -363,7 +363,7 @@ namespace engine::render {
 				return NamedTexture{target.Texture, width, height, format};
 			}
 			if (target.Texture != nullptr) {
-				SDL_ReleaseGPUTexture(Device, target.Texture);
+				gpu::ReleaseTexture(Device, target.Texture);
 				target.Texture = nullptr;
 			}
 
@@ -383,7 +383,7 @@ namespace engine::render {
 			info.layer_count_or_depth = 1;
 			info.num_levels = 1;
 			info.sample_count = SDL_GPU_SAMPLECOUNT_1;
-			target.Texture = SDL_CreateGPUTexture(Device, &info);
+			target.Texture = gpu::CreateTexture(Device, &info);
 			target.Format = format;
 			target.Width = width;
 			target.Height = height;
@@ -424,7 +424,7 @@ namespace engine::render {
 		info.num_levels = 1;
 		info.sample_count = SDL_GPU_SAMPLECOUNT_1;
 
-		BeamTexture = SDL_CreateGPUTexture(Device, &info);
+		BeamTexture = gpu::CreateTexture(Device, &info);
 		if (!BeamTexture) {
 			ENGINE_ERROR("portal beam texture: {}", SDL_GetError());
 			return false;
@@ -451,7 +451,7 @@ namespace engine::render {
 		info.num_levels = 1;
 		info.sample_count = SDL_GPU_SAMPLECOUNT_1;
 
-		ShadowTexture = SDL_CreateGPUTexture(Device, &info);
+		ShadowTexture = gpu::CreateTexture(Device, &info);
 		if (!ShadowTexture) {
 			ENGINE_ERROR("shadow texture: {}", SDL_GetError());
 			return false;
@@ -547,11 +547,11 @@ namespace engine::render {
 		const auto abandon = [&]() {
 			for (SDL_GPUTexture *texture : made) {
 				if (texture != nullptr) {
-					SDL_ReleaseGPUTexture(Device, texture);
+					gpu::ReleaseTexture(Device, texture);
 				}
 			}
 			if (madeDepth != nullptr) {
-				SDL_ReleaseGPUTexture(Device, madeDepth);
+				gpu::ReleaseTexture(Device, madeDepth);
 			}
 			// **True when the slot still has its old pair**, because the caller's
 			// question is "may this surface be rendered", not "was it resized".
@@ -559,7 +559,7 @@ namespace engine::render {
 		};
 
 		for (SDL_GPUTexture *&texture : made) {
-			texture = SDL_CreateGPUTexture(Device, &colour);
+			texture = gpu::CreateTexture(Device, &colour);
 			if (texture == nullptr) {
 				ENGINE_ERROR(
 					"viewport {} surface {} texture {}x{}: {}", viewport, index, width, height, SDL_GetError()
@@ -568,7 +568,7 @@ namespace engine::render {
 			}
 		}
 
-		madeDepth = SDL_CreateGPUTexture(Device, &depth);
+		madeDepth = gpu::CreateTexture(Device, &depth);
 		if (madeDepth == nullptr) {
 			ENGINE_ERROR(
 				"viewport {} surface {} depth {}x{}: {}", viewport, index, width, height, SDL_GetError()
@@ -578,11 +578,11 @@ namespace engine::render {
 
 		for (SDL_GPUTexture *&texture : state.Texture) {
 			if (texture != nullptr) {
-				SDL_ReleaseGPUTexture(Device, texture);
+				gpu::ReleaseTexture(Device, texture);
 			}
 		}
 		if (state.Depth != nullptr) {
-			SDL_ReleaseGPUTexture(Device, state.Depth);
+			gpu::ReleaseTexture(Device, state.Depth);
 		}
 
 		state.Texture[0] = made[0];
@@ -624,15 +624,15 @@ namespace engine::render {
 		}
 
 		if (target.Colour != nullptr) {
-			SDL_ReleaseGPUTexture(Device, target.Colour);
+			gpu::ReleaseTexture(Device, target.Colour);
 			target.Colour = nullptr;
 		}
 		if (target.Display != nullptr) {
-			SDL_ReleaseGPUTexture(Device, target.Display);
+			gpu::ReleaseTexture(Device, target.Display);
 			target.Display = nullptr;
 		}
 		if (target.Depth != nullptr) {
-			SDL_ReleaseGPUTexture(Device, target.Depth);
+			gpu::ReleaseTexture(Device, target.Depth);
 			target.Depth = nullptr;
 		}
 		target.Width = 0;
@@ -648,7 +648,7 @@ namespace engine::render {
 		colour.num_levels = 1;
 		colour.sample_count = SDL_GPU_SAMPLECOUNT_1;
 
-		target.Colour = SDL_CreateGPUTexture(Device, &colour);
+		target.Colour = gpu::CreateTexture(Device, &colour);
 		if (target.Colour == nullptr) {
 			ENGINE_ERROR(
 				"viewport {} portal level {} slot {} colour {}x{}: {}",
@@ -661,7 +661,7 @@ namespace engine::render {
 			);
 			return nullptr;
 		}
-		target.Display = SDL_CreateGPUTexture(Device, &colour);
+		target.Display = gpu::CreateTexture(Device, &colour);
 		if (target.Display == nullptr) {
 			ENGINE_ERROR(
 				"viewport {} portal level {} slot {} display {}x{}: {}",
@@ -672,7 +672,7 @@ namespace engine::render {
 				height,
 				SDL_GetError()
 			);
-			SDL_ReleaseGPUTexture(Device, target.Colour);
+			gpu::ReleaseTexture(Device, target.Colour);
 			target.Colour = nullptr;
 			target.Display = nullptr;
 			return nullptr;
@@ -688,7 +688,7 @@ namespace engine::render {
 		depth.num_levels = 1;
 		depth.sample_count = SDL_GPU_SAMPLECOUNT_1;
 
-		target.Depth = SDL_CreateGPUTexture(Device, &depth);
+		target.Depth = gpu::CreateTexture(Device, &depth);
 		if (target.Depth == nullptr) {
 			ENGINE_ERROR(
 				"viewport {} portal level {} slot {} depth {}x{}: {}",
@@ -699,8 +699,8 @@ namespace engine::render {
 				height,
 				SDL_GetError()
 			);
-			SDL_ReleaseGPUTexture(Device, target.Colour);
-			SDL_ReleaseGPUTexture(Device, target.Display);
+			gpu::ReleaseTexture(Device, target.Colour);
+			gpu::ReleaseTexture(Device, target.Display);
 			target.Colour = nullptr;
 			target.Display = nullptr;
 			return nullptr;
@@ -709,9 +709,9 @@ namespace engine::render {
 		// **Shared with the surface path rather than a second one.** A portal
 		// level is sampled exactly as a mirror's texture is.
 		if (!EnsureSurfaceSampler()) {
-			SDL_ReleaseGPUTexture(Device, target.Colour);
-			SDL_ReleaseGPUTexture(Device, target.Display);
-			SDL_ReleaseGPUTexture(Device, target.Depth);
+			gpu::ReleaseTexture(Device, target.Colour);
+			gpu::ReleaseTexture(Device, target.Display);
+			gpu::ReleaseTexture(Device, target.Depth);
 			target.Colour = nullptr;
 			target.Display = nullptr;
 			target.Depth = nullptr;
@@ -741,11 +741,11 @@ namespace engine::render {
 		}
 
 		if (target.Colour != nullptr) {
-			SDL_ReleaseGPUTexture(Device, target.Colour);
+			gpu::ReleaseTexture(Device, target.Colour);
 			target.Colour = nullptr;
 		}
 		if (target.Depth != nullptr) {
-			SDL_ReleaseGPUTexture(Device, target.Depth);
+			gpu::ReleaseTexture(Device, target.Depth);
 			target.Depth = nullptr;
 		}
 		target.Width = 0;
@@ -761,7 +761,7 @@ namespace engine::render {
 		colour.num_levels = 1;
 		colour.sample_count = SDL_GPU_SAMPLECOUNT_1;
 
-		target.Colour = SDL_CreateGPUTexture(Device, &colour);
+		target.Colour = gpu::CreateTexture(Device, &colour);
 		if (target.Colour == nullptr) {
 			ENGINE_ERROR(
 				"viewport {} mirror level {} slot {} colour {}x{}: {}",
@@ -785,7 +785,7 @@ namespace engine::render {
 		depth.num_levels = 1;
 		depth.sample_count = SDL_GPU_SAMPLECOUNT_1;
 
-		target.Depth = SDL_CreateGPUTexture(Device, &depth);
+		target.Depth = gpu::CreateTexture(Device, &depth);
 		if (target.Depth == nullptr) {
 			ENGINE_ERROR(
 				"viewport {} mirror level {} slot {} depth {}x{}: {}",
@@ -796,7 +796,7 @@ namespace engine::render {
 				height,
 				SDL_GetError()
 			);
-			SDL_ReleaseGPUTexture(Device, target.Colour);
+			gpu::ReleaseTexture(Device, target.Colour);
 			target.Colour = nullptr;
 			return nullptr;
 		}
@@ -833,7 +833,7 @@ namespace engine::render {
 		colour.num_levels = 1;
 		colour.sample_count = SDL_GPU_SAMPLECOUNT_1;
 
-		target.Colour = SDL_CreateGPUTexture(Device, &colour);
+		target.Colour = gpu::CreateTexture(Device, &colour);
 		if (target.Colour == nullptr) {
 			ENGINE_ERROR("viewport {} seam light {} colour: {}", viewport, index, SDL_GetError());
 			return nullptr;
@@ -849,10 +849,10 @@ namespace engine::render {
 		depth.num_levels = 1;
 		depth.sample_count = SDL_GPU_SAMPLECOUNT_1;
 
-		target.Depth = SDL_CreateGPUTexture(Device, &depth);
+		target.Depth = gpu::CreateTexture(Device, &depth);
 		if (target.Depth == nullptr) {
 			ENGINE_ERROR("viewport {} seam light {} depth: {}", viewport, index, SDL_GetError());
-			SDL_ReleaseGPUTexture(Device, target.Colour);
+			gpu::ReleaseTexture(Device, target.Colour);
 			target.Colour = nullptr;
 			return nullptr;
 		}
@@ -868,11 +868,11 @@ namespace engine::render {
 		}
 
 		if (OverlayTexture) {
-			SDL_ReleaseGPUTexture(Device, OverlayTexture);
+			gpu::ReleaseTexture(Device, OverlayTexture);
 			OverlayTexture = nullptr;
 		}
 		if (OverlayTransfer) {
-			SDL_ReleaseGPUTransferBuffer(Device, OverlayTransfer);
+			gpu::ReleaseTransferBuffer(Device, OverlayTransfer);
 			OverlayTransfer = nullptr;
 		}
 
@@ -886,13 +886,13 @@ namespace engine::render {
 		info.num_levels = 1;
 		info.sample_count = SDL_GPU_SAMPLECOUNT_1;
 
-		OverlayTexture = SDL_CreateGPUTexture(Device, &info);
+		OverlayTexture = gpu::CreateTexture(Device, &info);
 
 		SDL_GPUTransferBufferCreateInfo transferInfo{};
 		transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
 		transferInfo.size =
 			static_cast<uint32_t>(width) * static_cast<uint32_t>(height) * OverlayImage::BYTES_PER_PIXEL;
-		OverlayTransfer = SDL_CreateGPUTransferBuffer(Device, &transferInfo);
+		OverlayTransfer = gpu::CreateTransferBuffer(Device, &transferInfo);
 
 		if (!OverlayTexture || !OverlayTransfer) {
 			ENGINE_ERROR("overlay texture {}x{}: {}", width, height, SDL_GetError());

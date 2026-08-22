@@ -67,6 +67,7 @@
 #include <cdn/LocalStore.hpp>
 #include <client/EditableImages.hpp>
 #include <client/EditableMeshes.hpp>
+#include <client/PresentationSchedule.hpp>
 #include <client/Scene.hpp>
 #include <cstdint>
 #include <deque>
@@ -517,8 +518,9 @@ namespace studio {
 		// 120 fps ceiling that keeps a still scene off a laptop's fans.
 		//
 		// Which makes this a benchmark's flag rather than a comfort one: pass it
-		// when the number being read is the frame's cost, and the sleep that
-		// pads every frame out to 8.3 ms would be measured as that cost. See
+		// when the number being read is the maximum presentation throughput.
+		// The scheduled cap never sleeps or slows the update loop, but it still
+		// deliberately leaves time between images. See
 		// `render::Renderer::SetVerticalSync`.
 		bool Uncapped = false;
 
@@ -4397,11 +4399,11 @@ namespace studio {
 		// default than what they are now.
 		bool VerticalSync = false;
 
-		// A ceiling on frames per second while vertical sync is off.
+		// A ceiling on presented frames per second while vertical sync is off.
 		//
 		// **Zero is no ceiling**, which is what `--uncapped` means and what a
-		// benchmark wants. Anything else is a soft cap applied by sleeping out
-		// the rest of the frame - worth having because an editor that renders
+		// benchmark wants. Anything else schedules image acquisition without
+		// sleeping the update loop - worth having because an editor that renders
 		// nine hundred frames a second to show a still scene is an editor that
 		// spins a laptop's fans for nothing.
 		//
@@ -4411,10 +4413,15 @@ namespace studio {
 		// display's refresh - being unpaced by the display is the point.
 		float FrameCap = 120.0f;
 
+		// The image deadline, independent of the update loop. A busy swapchain
+		// does not consume its opportunity, and a late image does not cause a
+		// burst of obsolete presents.
+		client::PresentationSchedule Presentations;
+
 		// The four rates the ceiling is actually made of, in hertz.
 		//
 		// **One number could not answer this, and the symptom was a laptop.**
-		// `FrameCap` is a single ceiling on the whole loop, so an editor sitting
+		// `FrameCap` is a single ceiling on presentation, so an editor sitting
 		// behind a browser with nobody touching it still drew a hundred and
 		// twenty identical pictures a second. What a person actually wants is
 		// four different answers to two different questions - how often the
@@ -4427,7 +4434,8 @@ namespace studio {
 		// present in one call, so a frame that redraws the panels also redraws
 		// the world; there is no arrangement today where the two run at
 		// different rates. The four knobs therefore set a ceiling each and the
-		// lowest one that applies is what the loop is paced at. Splitting them
+		// lowest one that applies is what image acquisition is scheduled at.
+		// Splitting them
 		// for real means `Render` taking the world and the chrome separately,
 		// which is a change to the shared renderer.
 		//
@@ -4796,6 +4804,11 @@ namespace studio {
 		// frame in a fresh vector would allocate on every frame to say the same
 		// thing it said on the last one.
 		std::vector<size_t> Candidates;
+
+		// The most recent submitted result for each viewport slot. The texture is
+		// retained per slot, so its counters have to be retained beside it or a
+		// round-robin frame from another panel labels the visible image.
+		std::vector<engine::render::FrameResult> ViewportResults;
 
 		// --- dialogs -----------------------------------------------------------
 		//
@@ -5665,6 +5678,12 @@ namespace studio {
 			// The process totals, as of the reading `Plot` ends on.
 			engine::core::HeapTotals Totals;
 
+			// Logical GPU bytes sampled on the same one-second clock as `Plot`.
+			// Driver-private allocations are not portable through SDL, so this is
+			// the payload of the renderer's buffers and textures rather than VRAM.
+			std::vector<float> GpuPlot;
+			engine::render::GpuMemoryStatistics Gpu;
+
 			// Seconds the plot and the growth figures cover.
 			double HistorySeconds = 0.0;
 		};
@@ -5851,6 +5870,7 @@ namespace studio {
 		bool Running = false;
 		int64_t FramesDrawn = 0;
 		engine::render::FrameResult LastFrame;
+		float PresentationDeltaSeconds = 0.0f;
 		//@}
 	};
 

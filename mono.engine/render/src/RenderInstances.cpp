@@ -411,7 +411,7 @@ namespace engine::render {
 			info.num_levels = 1;
 			info.sample_count = SDL_GPU_SAMPLECOUNT_1;
 
-			FallbackTexture = SDL_CreateGPUTexture(Device, &info);
+			FallbackTexture = gpu::CreateTexture(Device, &info);
 			if (!FallbackTexture) {
 				ENGINE_ERROR("fallback texture: {}", SDL_GetError());
 				return false;
@@ -424,7 +424,7 @@ namespace engine::render {
 		transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
 		transferInfo.size = OverlayImage::BYTES_PER_PIXEL;
 
-		SDL_GPUTransferBuffer *transfer = SDL_CreateGPUTransferBuffer(Device, &transferInfo);
+		SDL_GPUTransferBuffer *transfer = gpu::CreateTransferBuffer(Device, &transferInfo);
 		if (!transfer) {
 			ENGINE_ERROR("cube transfer buffer: {}", SDL_GetError());
 			return false;
@@ -458,7 +458,7 @@ namespace engine::render {
 
 		SDL_EndGPUCopyPass(copy);
 		SDL_SubmitGPUCommandBuffer(command);
-		SDL_ReleaseGPUTransferBuffer(Device, transfer);
+		gpu::ReleaseTransferBuffer(Device, transfer);
 
 		return true;
 	}
@@ -482,21 +482,21 @@ namespace engine::render {
 		if (rows > world.Capacity || world.Buffer == nullptr || world.Transfer == nullptr) {
 			const uint32_t capacity = grown(world.Capacity, rows);
 			if (world.Buffer != nullptr) {
-				SDL_ReleaseGPUBuffer(Device, world.Buffer);
+				gpu::ReleaseBuffer(Device, world.Buffer);
 			}
 			if (world.Transfer != nullptr) {
-				SDL_ReleaseGPUTransferBuffer(Device, world.Transfer);
+				gpu::ReleaseTransferBuffer(Device, world.Transfer);
 			}
 
 			const uint32_t bytes = capacity * static_cast<uint32_t>(sizeof(GpuInstance));
 			SDL_GPUBufferCreateInfo bufferInfo{};
 			bufferInfo.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
 			bufferInfo.size = bytes;
-			world.Buffer = SDL_CreateGPUBuffer(Device, &bufferInfo);
+			world.Buffer = gpu::CreateBuffer(Device, &bufferInfo);
 			SDL_GPUTransferBufferCreateInfo transferInfo{};
 			transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
 			transferInfo.size = bytes;
-			world.Transfer = SDL_CreateGPUTransferBuffer(Device, &transferInfo);
+			world.Transfer = gpu::CreateTransferBuffer(Device, &transferInfo);
 			if (world.Buffer == nullptr || world.Transfer == nullptr) {
 				ENGINE_ERROR("resident instance buffer of {} entries: {}", capacity, SDL_GetError());
 				world.Capacity = 0;
@@ -510,21 +510,21 @@ namespace engine::render {
 			slot.InstanceIndexTransfer == nullptr) {
 			const uint32_t capacity = grown(slot.InstanceIndexCapacity, indices);
 			if (slot.InstanceIndexBuffer != nullptr) {
-				SDL_ReleaseGPUBuffer(Device, slot.InstanceIndexBuffer);
+				gpu::ReleaseBuffer(Device, slot.InstanceIndexBuffer);
 			}
 			if (slot.InstanceIndexTransfer != nullptr) {
-				SDL_ReleaseGPUTransferBuffer(Device, slot.InstanceIndexTransfer);
+				gpu::ReleaseTransferBuffer(Device, slot.InstanceIndexTransfer);
 			}
 
 			const uint32_t bytes = capacity * static_cast<uint32_t>(sizeof(uint32_t));
 			SDL_GPUBufferCreateInfo bufferInfo{};
 			bufferInfo.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
 			bufferInfo.size = bytes;
-			slot.InstanceIndexBuffer = SDL_CreateGPUBuffer(Device, &bufferInfo);
+			slot.InstanceIndexBuffer = gpu::CreateBuffer(Device, &bufferInfo);
 			SDL_GPUTransferBufferCreateInfo transferInfo{};
 			transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
 			transferInfo.size = bytes;
-			slot.InstanceIndexTransfer = SDL_CreateGPUTransferBuffer(Device, &transferInfo);
+			slot.InstanceIndexTransfer = gpu::CreateTransferBuffer(Device, &transferInfo);
 			if (slot.InstanceIndexBuffer == nullptr || slot.InstanceIndexTransfer == nullptr) {
 				ENGINE_ERROR("instance index buffer of {} entries: {}", capacity, SDL_GetError());
 				slot.InstanceIndexCapacity = 0;

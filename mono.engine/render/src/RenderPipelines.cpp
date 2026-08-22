@@ -1151,7 +1151,7 @@ namespace engine::render {
 				continue;
 			}
 			if (target.Texture != nullptr && Device != nullptr) {
-				SDL_ReleaseGPUTexture(Device, target.Texture);
+				gpu::ReleaseTexture(Device, target.Texture);
 			}
 			GraphTargets.erase(GraphTargets.begin() + static_cast<ptrdiff_t>(index - 1));
 		}

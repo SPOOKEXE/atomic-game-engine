@@ -1,3 +1,5 @@
+#include "GpuHeap.hpp"
+
 #include <engine/assets/Builtin.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/render/DefaultTexture.hpp>
@@ -99,13 +101,13 @@ namespace engine::render {
 	void TextureTable::Shutdown() {
 		if (Device != nullptr) {
 			for (const auto &[name, entry] : Textures) {
-				SDL_ReleaseGPUTexture(Device, entry.Texture);
+				gpu::ReleaseTexture(Device, entry.Texture);
 			}
 			if (DefaultHandle != nullptr) {
-				SDL_ReleaseGPUTexture(Device, DefaultHandle);
+				gpu::ReleaseTexture(Device, DefaultHandle);
 			}
 			if (MissingHandle != nullptr) {
-				SDL_ReleaseGPUTexture(Device, MissingHandle);
+				gpu::ReleaseTexture(Device, MissingHandle);
 			}
 			if (SharedSampler != nullptr) {
 				SDL_ReleaseGPUSampler(Device, SharedSampler);
@@ -171,7 +173,7 @@ namespace engine::render {
 		info.num_levels = levels;
 		info.sample_count = SDL_GPU_SAMPLECOUNT_1;
 
-		SDL_GPUTexture *texture = SDL_CreateGPUTexture(Device, &info);
+		SDL_GPUTexture *texture = gpu::CreateTexture(Device, &info);
 		if (texture == nullptr) {
 			ENGINE_ERROR("texture table: {}: {}", label, SDL_GetError());
 			return nullptr;
@@ -181,10 +183,10 @@ namespace engine::render {
 		transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
 		transferInfo.size = static_cast<uint32_t>(uploadBytes);
 
-		SDL_GPUTransferBuffer *transfer = SDL_CreateGPUTransferBuffer(Device, &transferInfo);
+		SDL_GPUTransferBuffer *transfer = gpu::CreateTransferBuffer(Device, &transferInfo);
 		if (transfer == nullptr) {
 			ENGINE_ERROR("texture table: transfer buffer: {}", SDL_GetError());
-			SDL_ReleaseGPUTexture(Device, texture);
+			gpu::ReleaseTexture(Device, texture);
 			return nullptr;
 		}
 
@@ -219,7 +221,7 @@ namespace engine::render {
 
 		SDL_EndGPUCopyPass(copy);
 		SDL_SubmitGPUCommandBuffer(command);
-		SDL_ReleaseGPUTransferBuffer(Device, transfer);
+		gpu::ReleaseTransferBuffer(Device, transfer);
 
 		bytes = uploadBytes;
 		return texture;
@@ -298,7 +300,7 @@ namespace engine::render {
 		// Release the old texture only after the replacement upload succeeds.
 		const auto existing = Textures.find(name.Id());
 		if (existing != Textures.end()) {
-			SDL_ReleaseGPUTexture(Device, existing->second.Texture);
+			gpu::ReleaseTexture(Device, existing->second.Texture);
 
 			// **The old size comes off before the new one goes on**, which it
 			// did not before: the total only ever grew, so a session that
@@ -369,7 +371,7 @@ namespace engine::render {
 
 		const auto existing = Textures.find(name.Id());
 		if (existing != Textures.end()) {
-			SDL_ReleaseGPUTexture(Device, existing->second.Texture);
+			gpu::ReleaseTexture(Device, existing->second.Texture);
 			UploadedBytes -= std::min(UploadedBytes, existing->second.Bytes);
 			existing->second = entry;
 		} else {
@@ -418,7 +420,7 @@ namespace engine::render {
 			return false;
 		}
 
-		SDL_ReleaseGPUTexture(Device, found->second.Texture);
+		gpu::ReleaseTexture(Device, found->second.Texture);
 		UploadedBytes -= std::min(UploadedBytes, found->second.Bytes);
 		Textures.erase(found);
 		return true;

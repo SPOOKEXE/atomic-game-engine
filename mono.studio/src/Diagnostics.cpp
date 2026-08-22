@@ -199,27 +199,30 @@ namespace studio {
 			ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthStretch, 0.45f);
 			ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthStretch, 0.55f);
 
-			Row("draw calls", "%u", LastFrame.DrawCalls);
-			Row("triangles", "%llu", static_cast<unsigned long long>(LastFrame.Triangles));
+			const engine::render::FrameResult frame = FocusedViewport < ViewportResults.size()
+														  ? ViewportResults[FocusedViewport]
+														  : engine::render::FrameResult{};
+			Row("draw calls", "%u", frame.DrawCalls);
+			Row("triangles", "%llu", static_cast<unsigned long long>(frame.Triangles));
 			Row("uploads",
 				"%.2f MiB in %u buffer%s",
-				static_cast<double>(LastFrame.UploadedBytes) / (1024.0 * 1024.0),
-				LastFrame.UploadCommandBuffers,
-				LastFrame.UploadCommandBuffers == 1 ? "" : "s");
+				static_cast<double>(frame.UploadedBytes) / (1024.0 * 1024.0),
+				frame.UploadCommandBuffers,
+				frame.UploadCommandBuffers == 1 ? "" : "s");
 			Row("compute",
 				"%u dispatch%s, %u dedicated buffer%s on SDL's unified queue",
-				LastFrame.ComputeDispatches,
-				LastFrame.ComputeDispatches == 1 ? "" : "es",
-				LastFrame.AsyncComputeCommandBuffers,
-				LastFrame.AsyncComputeCommandBuffers == 1 ? "" : "s");
+				frame.ComputeDispatches,
+				frame.ComputeDispatches == 1 ? "" : "es",
+				frame.AsyncComputeCommandBuffers,
+				frame.AsyncComputeCommandBuffers == 1 ? "" : "s");
 			Row("downloads",
 				"%u later-transfer buffer%s after the main stream",
-				LastFrame.DownloadCommandBuffers,
-				LastFrame.DownloadCommandBuffers == 1 ? "" : "s");
+				frame.DownloadCommandBuffers,
+				frame.DownloadCommandBuffers == 1 ? "" : "s");
 			Row("traffic plan",
 				"%u command buffer%s, submitted serially",
-				LastFrame.TrafficCommandBuffers,
-				LastFrame.TrafficCommandBuffers == 1 ? "" : "s");
+				frame.TrafficCommandBuffers,
+				frame.TrafficCommandBuffers == 1 ? "" : "s");
 
 			size_t instances = 0;
 			for (const WorldId world : Universe->Worlds()) {
@@ -948,6 +951,14 @@ namespace studio {
 			FormatBytes(static_cast<double>(totals.PeakBytes)).c_str(),
 			FormatBytes(static_cast<double>(totals.OverheadBytes)).c_str()
 		);
+		ImGui::Text(
+			"GPU logical %s   peak %s   buffers %s   transfers %s   textures %s",
+			FormatBytes(static_cast<double>(view.Gpu.LiveBytes)).c_str(),
+			FormatBytes(static_cast<double>(view.Gpu.PeakBytes)).c_str(),
+			FormatBytes(static_cast<double>(view.Gpu.BufferBytes)).c_str(),
+			FormatBytes(static_cast<double>(view.Gpu.TransferBufferBytes)).c_str(),
+			FormatBytes(static_cast<double>(view.Gpu.TextureBytes)).c_str()
+		);
 
 		if (totals.DroppedScopes > 0 || totals.ForeignFrees > 0) {
 			// A partial tree must not look complete, which is the same position
@@ -977,6 +988,19 @@ namespace studio {
 				ImVec2(-1.0f, ImGui::GetTextLineHeight() * 6.0f)
 			);
 			ImGui::Text("live MiB over the last %.0f s, sampled once a second", view.HistorySeconds);
+			if (view.GpuPlot.size() >= 2) {
+				ImGui::PlotLines(
+					"##gpuheaplive",
+					view.GpuPlot.data(),
+					static_cast<int>(view.GpuPlot.size()),
+					0,
+					nullptr,
+					0.0f,
+					FLT_MAX,
+					ImVec2(-1.0f, ImGui::GetTextLineHeight() * 4.0f)
+				);
+				ImGui::TextDisabled("GPU logical live MiB on the same samples");
+			}
 		} else {
 			ImGui::TextDisabled("collecting - the plot needs a second reading");
 		}

@@ -2156,6 +2156,7 @@ namespace client {
 
 	void Client::RefreshHeapReport() {
 		HeapTotals = HeapProfile::Totals();
+		GpuHeapTotals = Renderer.MemoryStatistics();
 
 		// A floor, so the tree is the subsystems worth a row rather than every
 		// tag that ever held a string. The growth report keeps its own, higher
@@ -2167,6 +2168,12 @@ namespace client {
 		HeapRows = HeapProfile::TreeRows(TREE_FLOOR);
 		HeapGrowth = HeapProfile::Growth(0.0, GROWTH_FLOOR);
 		HeapHistory = HeapProfile::History();
+		GpuHeapHistory.push_back(GpuHeapTotals.LiveBytes);
+		if (GpuHeapHistory.size() > HeapHistory.size()) {
+			GpuHeapHistory.erase(
+				GpuHeapHistory.begin(), GpuHeapHistory.begin() + (GpuHeapHistory.size() - HeapHistory.size())
+			);
+		}
 	}
 
 	void Client::WriteSnapshot() {
@@ -2678,6 +2685,12 @@ namespace client {
 				panels.HeapGrowth = HeapGrowth;
 				panels.HeapHistory = HeapHistory;
 				panels.HeapHistorySeconds = HeapProfile::HistorySeconds();
+				panels.GpuHeapLiveBytes = GpuHeapTotals.LiveBytes;
+				panels.GpuHeapPeakBytes = GpuHeapTotals.PeakBytes;
+				panels.GpuBufferBytes = GpuHeapTotals.BufferBytes;
+				panels.GpuTransferBufferBytes = GpuHeapTotals.TransferBufferBytes;
+				panels.GpuTextureBytes = GpuHeapTotals.TextureBytes;
+				panels.GpuHeapHistory = GpuHeapHistory;
 				// Asked of the world, not read back off the command line. The
 				// number that matters is what the world actually holds, and
 				// the day something spawns or destroys an entity those two
@@ -3546,6 +3559,7 @@ namespace client {
 		// describes an empty one.
 		if (!Settings.HeapReport.empty()) {
 			const engine::core::HeapTotals heap = HeapProfile::Totals();
+			const engine::render::GpuMemoryStatistics gpu = Renderer.MemoryStatistics();
 			ENGINE_INFO(
 				"heap: {:.1f} MiB live in {} block(s), {:.1f} MiB peak, {} tag(s)",
 				static_cast<double>(heap.LiveBytes) / (1024.0 * 1024.0),
@@ -3553,7 +3567,13 @@ namespace client {
 				static_cast<double>(heap.PeakBytes) / (1024.0 * 1024.0),
 				heap.Nodes
 			);
-			if (HeapProfile::WriteReport(Settings.HeapReport)) {
+			ENGINE_INFO(
+				"gpu heap: {:.1f} MiB logical live, {:.1f} MiB peak",
+				static_cast<double>(gpu.LiveBytes) / (1024.0 * 1024.0),
+				static_cast<double>(gpu.PeakBytes) / (1024.0 * 1024.0)
+			);
+			if (HeapProfile::WriteReport(Settings.HeapReport) &&
+				Renderer.AppendMemoryReport(Settings.HeapReport)) {
 				ENGINE_INFO("heap report written to {}", Settings.HeapReport.string());
 			} else {
 				ENGINE_ERROR("could not write {}", Settings.HeapReport.string());

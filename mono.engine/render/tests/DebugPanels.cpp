@@ -897,6 +897,7 @@ TEST_CASE("the heap tab draws a tree and a plot", "[panels][heap]") {
 	const std::vector<engine::core::HeapGrowth> growth{
 		{.Path = "render;meshes", .Node = 2, .BytesPerSecond = 4.5e6, .Fit = 0.99},
 	};
+	const std::vector<uint64_t> gpuHistory{32 << 20, 48 << 20, 64 << 20};
 
 	OverlayImage image;
 	image.Resize(640, 480);
@@ -913,6 +914,12 @@ TEST_CASE("the heap tab draws a tree and a plot", "[panels][heap]") {
 	data.Heap.LiveBlocks = 940;
 	data.Heap.PeakBytes = 20 << 20;
 	data.Heap.Nodes = 3;
+	data.GpuHeapLiveBytes = 64 << 20;
+	data.GpuHeapPeakBytes = 80 << 20;
+	data.GpuBufferBytes = 12 << 20;
+	data.GpuTransferBufferBytes = 4 << 20;
+	data.GpuTextureBytes = 48 << 20;
+	data.GpuHeapHistory = gpuHistory;
 
 	DrawDebugPanels(image, data);
 	REQUIRE(image.IsDirty());

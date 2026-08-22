@@ -1029,6 +1029,26 @@ namespace engine::render {
 		void Accumulate(const FrameResult &view);
 	};
 
+	// Logical payload held by the renderer's live GPU resources.
+	//
+	// SDL does not expose backend heap commitments portably, so these figures
+	// count the bytes requested for buffers, transfer buffers, textures, mip
+	// levels, and samples. Driver alignment, pipelines, samplers, shaders, and
+	// swapchain images are deliberately outside the total.
+	//
+	// @since v0.19
+	// @client
+	struct GpuMemoryStatistics {
+		uint64_t LiveBytes = 0;
+		uint64_t PeakBytes = 0;
+		uint64_t BufferBytes = 0;
+		uint64_t TransferBufferBytes = 0;
+		uint64_t TextureBytes = 0;
+		uint64_t Buffers = 0;
+		uint64_t TransferBuffers = 0;
+		uint64_t Textures = 0;
+	};
+
 	// Owns the client GPU device, window claim, pipelines, and per-frame upload resources.
 	//
 	// @client
@@ -1746,6 +1766,19 @@ namespace engine::render {
 		// The returned view belongs to the renderer and is invalidated by Shutdown
 		// or destruction. It is empty before successful initialisation.
 		std::string_view BackendName() const;
+
+		// Reports logical bytes held by tracked GPU resources on this device.
+		//
+		// The snapshot is cheap enough for the heap profiler's one-second sample,
+		// but it takes the tracker's lock and is not a per-draw counter.
+		GpuMemoryStatistics MemoryStatistics() const;
+
+		// Appends the logical GPU section to an existing process heap report.
+		//
+		// This is separate from `core::HeapProfile::WriteReport` because the core
+		// layer cannot name a client renderer. The report stays one artifact at
+		// the program boundary where both sources are visible.
+		bool AppendMemoryReport(const std::filesystem::path &path) const;
 
 		// Off presents without waiting for vblank, which is what makes a frame
 		// time measure the engine rather than the display. Returns false, and
