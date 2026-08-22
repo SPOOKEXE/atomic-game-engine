@@ -567,7 +567,7 @@ The milestone headings below are development labels. Not in line with project ve
 
 - [_] add a batch moveto/setcframe system (e.g. skygrid to move them all at once)
 - [_] do similar for batched moveto/setcframe in other systems
-- [_] `/home/declan/Documents/GitHub/BLADEBORNE_UNIFIED/game` port and also studio place `/home/declan/Documents/Bladeborne Floor 0.rbxl`. Turn this into a demo file.
+- [_] `~/Documents/GitHub/BLADEBORNE_UNIFIED/game` port and also studio place `~/Documents/Bladeborne Floor 0.rbxl`. Turn this into a demo file.
 - [_] explore the idea of having the active scene entities resident on the gpu always and we just have a compute timer on the gpu 24/7. this way, when the scene changes, we tell the gpu what changed. also doing a 2-way sync is easy with signatures/hashes with cpu-gpu, this way we have no swapchain waiting, we just compute at a given interval. sort of like "replication" to the gpu. same for particles, ui, entites, studio, etc.
 - [_] check if we need to move files / classes / structures around. **Analysed,
       not applied** - `docs/ARCH_REVIEW.md` §C. The five with arguments:
