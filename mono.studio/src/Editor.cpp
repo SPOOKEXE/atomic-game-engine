@@ -2284,6 +2284,12 @@ namespace studio {
 		view.Portals = Portals;
 		view.Pipeline = selectedPipeline;
 		view.World = shown.IsValid() ? shown.Index : 0;
+
+		// **The grid is drawn by the renderer now and not by the overlay**, so
+		// that the geometry in front of it hides it. `ConfigureGroundGrid`
+		// carries the settings and the two cases where it stays off; the
+		// overlay keeps the always-on-top copy for the length of a drag.
+		ConfigureGroundGrid(view, shown);
 		LastFrame = Renderer.Render(
 			std::span<const engine::render::View>(&view, 1), Overlay, &GameInterface, true, &Interface
 		);

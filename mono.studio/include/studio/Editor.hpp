@@ -1592,6 +1592,24 @@ namespace studio {
 		// @return The mapping, invalid when that panel did not draw.
 		PanelProjection ProjectionFor(size_t viewport);
 
+		// Fills a view's ground grid from this editor's own settings.
+		//
+		// **Here rather than at the call site, because the numbers live in
+		// `Overlay.cpp`** - the spacing, the heavy interval, the reach and the
+		// idle strength are all constants beside the overlay that used to draw
+		// the grid, and a second copy in `Editor.cpp` is two places to change a
+		// grid's look.
+		//
+		// Off for a replica world, for the reason the overlay gives at length: a
+		// replica panel is the one picture in this editor that is exactly what a
+		// player sees, so editor furniture on it makes "does this look right"
+		// impossible to answer.
+		//
+		// @param view  The request being built.
+		// @param shown Which world the panel is showing.
+		// @since v0.19
+		void ConfigureGroundGrid(engine::render::View &view, WorldId shown) const;
+
 		// Selects whatever is under a panel point.
 		//
 		// **Builds a `spatial::HashGrid` per click rather than reading the

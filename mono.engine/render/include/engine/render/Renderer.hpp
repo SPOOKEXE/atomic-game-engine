@@ -680,6 +680,52 @@ namespace engine::render {
 
 		// Whether to replace the renderer's current lighting for this view.
 		bool OverrideLighting = false;
+
+		// The editor's ground grid, drawn in this view or not drawn at all.
+		//
+		// **On the view rather than in the pipeline document, because the grid
+		// is a property of who is looking.** A profile is chosen per world and
+		// the studio shows one world in several panels - a replica panel beside
+		// an authored one - so a grid wired into the graph would appear in the
+		// panel that exists to show exactly what a player sees. `Renderer`
+		// draws it as one triangle at the head of the transparent pass, which
+		// already has the depth attached; `grid.frag` carries the rest.
+		//
+		// @since v0.19
+		struct GroundGrid {
+			// Whether to draw it at all. Off, so a client pays one branch.
+			bool Enabled = false;
+
+			// Studs between thin lines, and how many cells to a heavy one.
+			//@{
+			float Step = 4.0f;
+			float Major = 8.0f;
+			//@}
+
+			// The studs at which it has faded out entirely.
+			float Reach = 480.0f;
+
+			// An overall multiplier on every line's alpha, so a host can dim
+			// the whole grid without restating its colours.
+			float Strength = 1.0f;
+
+			// The line colour, and the alpha a heavy line reaches.
+			//@{
+			core::Color3 Colour{0.6f, 0.65f, 0.75f};
+			float Alpha = 0.5f;
+			//@}
+
+			// The two axes at the origin: X red, Z blue, the convention every
+			// editor uses. `AxisAlpha` is theirs for the same reason `Alpha` is
+			// the grid's.
+			//@{
+			core::Color3 AxisX{0.85f, 0.30f, 0.32f};
+			core::Color3 AxisZ{0.32f, 0.50f, 0.90f};
+			float AxisAlpha = 0.65f;
+			//@}
+		};
+
+		GroundGrid Grid;
 	};
 
 	// How much of a slot's texture the world was actually drawn into.

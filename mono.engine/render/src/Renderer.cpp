@@ -359,6 +359,25 @@ namespace engine::render {
 		// Shared by the default graph's fullscreen passes. One block keeps the
 		// camera and authored Lighting state identical from depth reconstruction
 		// through ambient occlusion and deferred shading.
+		// What `grid.frag` reads. Its own block rather than a corner of
+		// `PbrUniforms`, because the grid is an editor's furniture and the PBR
+		// block is the lighting contract every authored post shader compiles
+		// against - widening that to carry a grid colour would put a studio
+		// preference in a file a game ships.
+		struct GridUniforms {
+			glm::mat4 ViewProjection{1.0f};
+			glm::mat4 InverseViewProjection{1.0f};
+			glm::vec4 Eye{};
+
+			// x: studs between thin lines. y: cells to a heavy one. z: the
+			// studs at which it has faded out. w: overall strength.
+			glm::vec4 Params{};
+
+			glm::vec4 Colour{};
+			glm::vec4 AxisX{};
+			glm::vec4 AxisZ{};
+		};
+
 		struct PbrUniforms {
 			glm::mat4 InverseViewProjection{1.0f};
 			glm::mat4 LightViewProjection{1.0f};
@@ -1078,6 +1097,13 @@ namespace engine::render {
 		// a uniform, because blend state is baked into a pipeline on every
 		// modern API and cannot be changed by a draw call.
 		SDL_GPUGraphicsPipeline *TransparentPipeline = nullptr;
+
+		// The ground grid, drawn in the transparent pass. See `grid.frag`: a
+		// fullscreen triangle that finds the ground plane per pixel and writes
+		// its own `gl_FragDepth`, so the hardware depth test is what hides it
+		// behind a wall. Null when the shader failed to build, which disables
+		// the grid and nothing else.
+		SDL_GPUGraphicsPipeline *GridPipeline = nullptr;
 
 		// --- shader variants --------------------------------------------------
 		//
@@ -2809,6 +2835,33 @@ namespace engine::render {
 		TransparentPipeline = SDL_CreateGPUGraphicsPipeline(Device, &transparent);
 		if (!TransparentPipeline) {
 			ENGINE_ERROR("transparent pipeline: {}", SDL_GetError());
+		}
+
+		// **The grid, which is the transparent state with no vertex input.** It
+		// blends like a transparent surface, tests depth like one and writes
+		// none - the difference is that its geometry is a fullscreen triangle
+		// and its depth comes from the fragment shader rather than from a
+		// vertex. `grid.frag` carries why that is the whole feature.
+		{
+			SDL_GPUShader *gridFragment = LoadShader("grid.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 1);
+			if (gridFragment == nullptr) {
+				ENGINE_WARN("ground grid unavailable: {}", SDL_GetError());
+			} else {
+				SDL_GPUGraphicsPipelineCreateInfo grid = transparent;
+				grid.vertex_shader = overlayVertex;
+				grid.fragment_shader = gridFragment;
+				grid.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+
+				// No vertex buffer: the triangle is three indices, exactly as
+				// every other fullscreen pass in this file draws it.
+				grid.vertex_input_state = SDL_GPUVertexInputState{};
+
+				GridPipeline = SDL_CreateGPUGraphicsPipeline(Device, &grid);
+				if (GridPipeline == nullptr) {
+					ENGINE_WARN("ground grid pipeline unavailable: {}", SDL_GetError());
+				}
+				SDL_ReleaseGPUShader(Device, gridFragment);
+			}
 		}
 
 		// The wireframe twin, for `WireframeOpaquePipeline`'s own reason.
@@ -11562,6 +11615,10 @@ namespace engine::render {
 		SDL_GPUTexture *const viewTarget = colourTarget.texture;
 		const float aspect = static_cast<float>(sceneWidth) / static_cast<float>(sceneHeight);
 		const scene::CameraMatrices matrices = scene::ResolveCamera(cameraFrame, drawCamera, aspect);
+
+		// Named here because the transparent node reads it and that lambda has
+		// a `source` of its own - a texture, not this view.
+		const View::GroundGrid &groundGrid = source.Grid;
 		const FrameUniforms frameUniforms{
 			matrices.ViewProjection,
 			lightViewProjection,
@@ -12822,6 +12879,48 @@ namespace engine::render {
 			// scribble outside it, and the border is memory nothing owns.
 			const SDL_Rect scissor{0, 0, static_cast<int>(sceneWidth), static_cast<int>(sceneHeight)};
 			SDL_SetGPUScissor(pass, &scissor);
+
+			// **The ground grid, first in this pass and nowhere else.** It is
+			// here rather than in a node of its own because a node would need
+			// the depth as a *sampler* and this pass already has it as an
+			// attachment - so the hardware does the occluding and the grid
+			// costs one triangle. First, so a transparent pane blends over it
+			// the way it blends over the floor.
+			//
+			// Off unless a view asked, which is the studio asking for an edited
+			// world. A client pays one branch.
+			if (groundGrid.Enabled && State->GridPipeline != nullptr) {
+				ENGINE_PROFILE_CAT("ground grid", core::ProfileCategory::Render);
+
+				GridUniforms gridUniforms;
+				gridUniforms.ViewProjection = matrices.ViewProjection;
+				gridUniforms.InverseViewProjection = glm::inverse(matrices.ViewProjection);
+				gridUniforms.Eye =
+					glm::vec4{cameraFrame.Position.X, cameraFrame.Position.Y, cameraFrame.Position.Z, 0.0f};
+				gridUniforms.Params =
+					glm::vec4{groundGrid.Step, groundGrid.Major, groundGrid.Reach, groundGrid.Strength};
+				gridUniforms.Colour = glm::vec4{
+					groundGrid.Colour.R, groundGrid.Colour.G, groundGrid.Colour.B, groundGrid.Alpha
+				};
+				gridUniforms.AxisX = glm::vec4{
+					groundGrid.AxisX.R, groundGrid.AxisX.G, groundGrid.AxisX.B, groundGrid.AxisAlpha
+				};
+				gridUniforms.AxisZ = glm::vec4{
+					groundGrid.AxisZ.R, groundGrid.AxisZ.G, groundGrid.AxisZ.B, groundGrid.AxisAlpha
+				};
+
+				SDL_BindGPUGraphicsPipeline(pass, State->GridPipeline);
+				SDL_PushGPUFragmentUniformData(command, 0, &gridUniforms, sizeof(gridUniforms));
+				SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+				result.DrawCalls++;
+
+				// **Bound directly rather than through `BindPipeline`, so the
+				// tracked one is cleared by hand.** `DrawSlots` reads
+				// `ActivePipeline` to know what to return to after a shader
+				// variant, and leaving the grid there would send an instance
+				// draw back to a fullscreen triangle's pipeline.
+				State->ActivePipeline = nullptr;
+			}
 
 			if (haveInstances) {
 				State->BindPipeline(pass, State->OpaquePipeline, Impl::PipelineFamily::Opaque);
