@@ -95,7 +95,14 @@ namespace engine::script {
 		// as it liked one trip at a time; and `StepsTaken` lost exactly the
 		// script that had spent the most, which is the one a profile panel is
 		// being read to find.
-		void Interrupt(lua_State *state, int) {
+		void Interrupt(lua_State *state, int gc) {
+			// Luau also calls this hook while assisting the collector. Counting that
+			// work charges the host for VM maintenance, and raising from it can enter
+			// the collector again while the error string is being built.
+			if (gc >= 0) {
+				return;
+			}
+
 			Bounds &bounds = BoundsOf(state);
 			bounds.StepsTaken++;
 			if (bounds.StepBudget == 0) {
