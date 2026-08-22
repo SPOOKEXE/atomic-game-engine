@@ -1122,3 +1122,68 @@ TEST_CASE("a rule that is off does not fire", "[framegraph]") {
 	SlowFrame("slow", 3);
 	REQUIRE(FrameGraph::Triggered() == nullptr);
 }
+
+TEST_CASE("device time is its own category and does not inflate render", "[framegraph]") {
+	// **The claim `ProfileCategory::Gpu` exists to make true.** `Render` is CPU
+	// wall clock spent walking a draw list and recording commands; GPU time is
+	// the device executing them afterwards, overlapping that recording and the
+	// next frame's. Added together they read as a renderer costing twice what it
+	// does, and - worse - a frame CPU-bound on command recording becomes
+	// indistinguishable from one GPU-bound on fill rate, which is the single
+	// thing a reader most wants this panel to separate.
+	Collecting collecting;
+
+	FrameGraph::BeginFrame();
+	{
+		ENGINE_PROFILE_CAT("record", ProfileCategory::Render);
+		std::this_thread::sleep_for(std::chrono::milliseconds(2));
+
+		// What `render::Renderer::CollectTimings` does once a query pool
+		// resolves: a duration measured by the device, handed over after the
+		// fact because nothing on the CPU can hold a scope open across a pass.
+		FrameGraph::Report("opaque", ProfileCategory::Gpu, 9.0f);
+	}
+	FrameGraph::EndFrame();
+
+	const float device = FrameGraph::CategoryMilliseconds(ProfileCategory::Gpu);
+	REQUIRE(device > 8.9f);
+	REQUIRE(device < 9.1f);
+
+	// The CPU side kept its own number. Nine milliseconds of device time did not
+	// land on it.
+	const float render = FrameGraph::CategoryMilliseconds(ProfileCategory::Render);
+	REQUIRE(render > 0.0f);
+	REQUIRE(render < 9.0f);
+}
+
+TEST_CASE("device time reaches the flamegraph as its own line", "[framegraph]") {
+	// A folded stack is what a flamegraph renderer reads, and until v0.19 no GPU
+	// measurement reached one: the device timings existed but only a Studio panel
+	// ever read them, so every `render` bar in a flamegraph was command recording
+	// and the device was absent from the picture entirely.
+	const std::vector<engine::core::FrameSpan> spans{
+		{.Name = "frame", .Depth = 0, .Parent = FrameGraph::NO_PARENT, .SelfMilliseconds = 1.0f},
+		{.Name = "record",
+		 .Depth = 1,
+		 .Parent = 0,
+		 .SelfMilliseconds = 2.0f,
+		 .Category = ProfileCategory::Render},
+		{.Name = "opaque",
+		 .Depth = 1,
+		 .Parent = 0,
+		 .SelfMilliseconds = 9.0f,
+		 .Category = ProfileCategory::Gpu,
+		 .Reported = true},
+	};
+
+	engine::core::FoldedStacks totals;
+	engine::core::AccumulateFoldedStacks(spans, totals);
+
+	// **Its own line, kept apart from the recording that dispatched it.** A
+	// reported span keeps its own stack rather than being merged, which is why
+	// the totals of a run that used a GPU add to more than its wall clock - the
+	// same arithmetic a worker pool already produces, not a new exception.
+	REQUIRE(totals.at("frame;opaque") == 9000.0);
+	REQUIRE(totals.at("frame;record") == 2000.0);
+	REQUIRE(totals.at("frame") == 1000.0);
+}

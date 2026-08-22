@@ -931,6 +931,47 @@ namespace engine::render {
 		// wrong, not that the scene is small.
 		uint32_t Culled = 0;
 
+		// How many chunks of the instance stream this view uploaded, and how
+		// many of them held anything different from the frame before.
+		//
+		// **A measurement, not a mechanism.** The instance buffer is rewritten
+		// whole every frame, and whether uploading it as a delta would pay
+		// depends on a number nobody has: how much of a real scene's draw list
+		// actually moves between two frames. `scene::ChunkSignaturesOf` signs it
+		// in blocks of `scene::SIGNATURE_CHUNK` rows in the order they are
+		// uploaded, and this is the ratio that falls out.
+		//
+		// **Measured at v0.19, and the answer was no.** Over the staged example
+		// scenes a still world with a still camera rewrites 0.3% of its chunks
+		// and everything else rewrites 100%. The dividing line is not motion: a
+		// chunk is a range of *row indices*, so one instance entering or leaving
+		// the list shifts every row behind it and dirties every chunk from there
+		// on. This signs the culled list, so a part crossing the frustum edge
+		// does that, and `MeshGrid.luau` does it by streaming meshes in while its
+		// geometry sits still. A delta keyed on draw-order rows would therefore
+		// save the whole upload in a screenshot and nothing at all in a game.
+		//
+		// The fix is not a better hash. It is to key the resident rows by a
+		// stable per-entity slot - the way `replication::Authority` keys a
+		// component - and to make visibility and order a separate index list the
+		// GPU reads, so culling and sorting stop touching the rows. Then a moving
+		// part dirties one slot. `ROADMAP.md`'s v0.19 entry carries the argument
+		// and `scene/tests/ChunkSignature.cpp` pins the shift that forces it.
+		//
+		// The pair stays because it is how that work will be judged: the same
+		// number, taken again once rows are slot-keyed, is what says whether the
+		// delta is finally worth writing.
+		//
+		// Equal counts every frame in a still scene means the signature is not
+		// matching and something is moving that nobody thinks is moving - the
+		// same reading `SurfacePasses` gives for the same reason.
+		//
+		// @since v0.19
+		//@{
+		uint32_t InstanceChunks = 0;
+		uint32_t InstanceChunksDirty = 0;
+		//@}
+
 		// Resource traffic declared by the graph after world and view scopes are
 		// expanded for this frame. QueueTransferBytes is visibility traffic across
 		// logical queues, not necessarily a physical memory copy.

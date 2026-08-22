@@ -85,6 +85,14 @@ namespace studio {
 			constexpr float TURN[] = {
 				0.00f, // engine
 				0.52f, // render
+
+				// The widest gap the wheel had left, and it needs to be: this
+				// is the device and `render` above it is the CPU recording for
+				// it, so the one comparison a reader makes on this panel is
+				// between those two bars. Neighbouring hues would make that
+				// comparison the hardest one instead of the easiest.
+				0.22f, // GPU
+
 				0.14f, // ECS
 				0.86f, // physics
 				0.72f, // simulation

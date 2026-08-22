@@ -422,6 +422,8 @@ namespace engine::core {
 			return "engine";
 		case ProfileCategory::Render:
 			return "render";
+		case ProfileCategory::Gpu:
+			return "GPU";
 		case ProfileCategory::ECS:
 			return "ECS";
 		case ProfileCategory::Physics:

@@ -1408,6 +1408,28 @@ namespace engine::render {
 		const bool occlusionCulling = OcclusionCulling;
 		bool &haveInstances = HaveInstances;
 
+		// **What fraction of this view's rows actually changed**, measured before
+		// anything is written so the numbers describe the frame about to be
+		// uploaded rather than the one that was.
+		//
+		// The camera group only. The scene groups are drawn by surface panes,
+		// which already have `scene::SignatureOf` deciding whether to redraw them
+		// at all - signing them again here would be counting the same skip twice.
+		// This group is the one that is rewritten unconditionally every frame,
+		// which makes it the only one a delta upload could save anything on. See
+		// `FrameResult::InstanceChunks`.
+		{
+			ENGINE_PROFILE_CAT("sign instance chunks", core::ProfileCategory::Render);
+
+			std::vector<uint64_t> &previous = State->SlotAt(Request.TargetSlot).InstanceChunks;
+			std::vector<uint64_t> chunks;
+			scene::ChunkSignaturesOf(State->VisibleInstances, State->DrawOrder, chunks);
+
+			Result.InstanceChunks = static_cast<uint32_t>(chunks.size());
+			Result.InstanceChunksDirty = static_cast<uint32_t>(scene::DirtyChunkCount(previous, chunks));
+			previous.swap(chunks);
+		}
+
 		if (uploadCount > 0) {
 			bool capacity = false;
 			{
@@ -1569,8 +1591,18 @@ namespace engine::render {
 								// mapped through the model. `ToGpu` built the
 								// model to fill the part's box exactly, so
 								// this bound is tight rather than approximate.
-								const glm::mat3 basis{row.Model};
-								const glm::vec3 centre = glm::vec3(row.Model * glm::vec4(meshCentre, 1.0f));
+								//
+								// **Rebuilt from the packed row rather than
+								// carried on it.** The row holds a rotation, a
+								// scale and a translation since v0.19, and
+								// `ModelMatrixOf` decodes them exactly as
+								// `instance.glsl` does - so the box still
+								// bounds the geometry that is drawn rather than
+								// the geometry that was asked for, which is a
+								// quantisation error apart.
+								const glm::mat4 model = ModelMatrixOf(row);
+								const glm::mat3 basis{model};
+								const glm::vec3 centre = glm::vec3(model * glm::vec4(meshCentre, 1.0f));
 								const glm::vec3 extent = glm::abs(basis[0]) * meshExtent.x +
 														 glm::abs(basis[1]) * meshExtent.y +
 														 glm::abs(basis[2]) * meshExtent.z;

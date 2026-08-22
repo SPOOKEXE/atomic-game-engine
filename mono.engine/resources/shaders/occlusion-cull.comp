@@ -32,14 +32,21 @@ layout(set = 0, binding = 11) uniform sampler2D pyramid11;
 // Pairs per candidate: [centre.xyz | run index], [extent.xyz | source slot].
 layout(set = 0, binding = 12) readonly buffer Candidates { vec4 data[]; } candidates;
 
-// The uploaded instance rows, six vec4 each - see `GpuInstance`.
-layout(set = 0, binding = 13) readonly buffer Instances { vec4 rows[]; } instances;
+// The uploaded instance rows, nine uints each - see `GpuInstance`.
+//
+// **Words rather than vec4s, because the row is thirty-six bytes and no longer
+// divides by sixteen.** Nothing here reads a field: a survivor's row is copied
+// through untouched so the late draw binds it with the vertex layout the early
+// draw used. Copying it as words rather than as vectors is what lets the row
+// shrink to exactly what it carries instead of being padded up to a vector
+// boundary for a shader that never looks inside it.
+layout(set = 0, binding = 13) readonly buffer Instances { uint rows[]; } instances;
 
 // Per slot-run: the first late slot, where its survivors compact to.
 layout(set = 0, binding = 14) readonly buffer Runs { uint first[]; } runs;
 
 layout(set = 1, binding = 0) buffer Counts { uint survivors[]; } counts;
-layout(set = 1, binding = 1) writeonly buffer Late { vec4 rows[]; } late;
+layout(set = 1, binding = 1) writeonly buffer Late { uint rows[]; } late;
 
 layout(set = 2, binding = 0) uniform Cull {
 	mat4 ViewProjection;
@@ -47,7 +54,21 @@ layout(set = 2, binding = 0) uniform Cull {
 	vec4 Level0;  // xy: level-zero size in texels.
 } cull;
 
-const uint INSTANCE_VECS = 6u;
+// `sizeof(GpuInstance) / 4`, given by the build.
+//
+// **The value comes from `render::GPU_INSTANCE_WORDS`**, read out of
+// `InstancePacking.hpp` at configure time and passed as `-DGPU_INSTANCE_WORDS`,
+// so there is no literal here to drift from the struct. The fallback below is
+// for compiling this file standalone, which is what every other shader that
+// takes a define does; a build always overrides it.
+//
+// The long name is deliberate: a define reaches every shader in the module, and
+// `particle-step.comp` has an `INSTANCE_WORDS` of its own meaning a particle
+// row. See `resources/CMakeLists.txt`.
+#ifndef GPU_INSTANCE_WORDS
+#define GPU_INSTANCE_WORDS 9
+#endif
+const uint INSTANCE_WORDS_COUNT = uint(GPU_INSTANCE_WORDS);
 
 float FarthestAt(int lod, ivec2 texel) {
 	switch (lod) {
@@ -133,7 +154,7 @@ void main() {
 	}
 	uint offset = atomicAdd(counts.survivors[run], 1u);
 	uint destination = runs.first[run] + offset;
-	for (uint part = 0u; part < INSTANCE_VECS; part++) {
-		late.rows[destination * INSTANCE_VECS + part] = instances.rows[source * INSTANCE_VECS + part];
+	for (uint part = 0u; part < INSTANCE_WORDS_COUNT; part++) {
+		late.rows[destination * INSTANCE_WORDS_COUNT + part] = instances.rows[source * INSTANCE_WORDS_COUNT + part];
 	}
 }

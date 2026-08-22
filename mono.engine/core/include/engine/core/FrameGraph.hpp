@@ -36,7 +36,31 @@ namespace engine::core {
 	// A broad owner used to group a span's self time in the frame overlay.
 	enum class ProfileCategory : uint8_t {
 		Engine, // General engine work.
-		Render, // Rendering work.
+		Render, // Rendering work: culling, ordering, and recording commands.
+
+		// Time the *device* spent executing, as its own timestamps measured it.
+		//
+		// **A category rather than part of `Render`, because the two are
+		// different resources and adding them makes the panel lie.** `Render` is
+		// CPU wall clock inside this process: how long it took to walk the draw
+		// list and record command buffers. This is how long the GPU was busy
+		// afterwards, which overlaps that recording, overlaps the next frame's,
+		// and is not spent by this thread at all. Folded into `Render` it would
+		// read as a renderer that costs twice what it does, and a frame CPU-bound
+		// on command recording would be indistinguishable from one GPU-bound on
+		// fill rate - which is the single most useful thing a reader wants this
+		// panel to tell them apart.
+		//
+		// **Always a `Reported` span, and never a `Scope`.** Nothing on the CPU
+		// can hold a scope open across a GPU pass, so this arrives after the fact
+		// through `FrameGraph::Report` once the device's query pool resolves -
+		// which is up to a few frames after the work happened.
+		// `render::Renderer::CollectTimings` is the only producer, and the
+		// guarantee it keeps is that every measurement is reported exactly once:
+		// per-frame attribution lags, and totals over a run are exact.
+		//
+		// @since v0.19
+		Gpu,
 
 		// Time inside the entity-component system: the scheduler, and every
 		// system it ran that no narrower category below claims.

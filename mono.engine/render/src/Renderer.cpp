@@ -66,15 +66,66 @@ namespace engine::render {
 				continue;
 			}
 
-			if (TimingSequence[slot] >= ResolvedTimingSequence) {
+			// **Published only when this slot is not older than what is already
+			// on show.** Slots resolve out of order, and a stale one overwriting
+			// a fresh one would make the panel walk backwards in time.
+			const bool publish = TimingSequence[slot] >= ResolvedTimingSequence;
+			if (publish) {
 				GpuTimings.clear();
-				for (const PassMarks &marks : PendingMarks[slot]) {
-					if (marks.Opened >= count || marks.Closed >= count) {
-						continue;
-					}
-					GpuTimings[marks.Name.Id()] +=
-						VulkanTimestamps::Between(times, marks.Opened, marks.Closed) / 1000.0;
+			}
+
+			for (const PassMarks &marks : PendingMarks[slot]) {
+				if (marks.Opened >= count || marks.Closed >= count) {
+					continue;
 				}
+				// **Microseconds, which is what `PassTimings` documents itself to
+				// report.** `VulkanTimestamps::Between` returns nanoseconds -
+				// ticks already multiplied by the device's `timestampPeriod` -
+				// so this divide is the one that fixes the unit, and the
+				// frame graph below has to divide again because it takes
+				// milliseconds. Getting that second divide wrong reads as a
+				// renderer spending three seconds of GPU time in a third of a
+				// second of wall clock, which is how it was caught.
+				const double microseconds =
+					VulkanTimestamps::Between(times, marks.Opened, marks.Closed) / 1000.0;
+
+				if (publish) {
+					GpuTimings[marks.Name.Id()] += microseconds;
+				}
+
+				// **Every slot, not just the published one, and that is the
+				// whole accuracy argument.** `GpuTimings` is a snapshot for a
+				// panel, so showing the newest and dropping a straggler is
+				// right for it. A flamegraph is a *total* over a run, so a
+				// dropped straggler is GPU time that happened and that the
+				// graph will never account for - and a slot reported twice is
+				// time that did not happen. This loop runs once per submitted
+				// slot and each slot's marks are cleared below, so every
+				// measurement reaches the graph exactly once.
+				//
+				// **The frame it lands in is not the frame it happened in.** A
+				// query pool resolves a few frames late, so this is a duration
+				// in a tree rather than a position on a timeline - which is
+				// exactly what `FrameGraph::Report` documents a reported span to
+				// be, and why the GPU has a category of its own instead of
+				// inflating `Render`.
+				//
+				// **`gpu ssao` and not `ssao`.** `GraphRunner` already opens a
+				// CPU scope named after the node, so an undecorated name would
+				// put two spans with one label in every frame and the per-span
+				// table would sum them - the exact CPU-versus-GPU confusion this
+				// category exists to end, arriving through the label instead of
+				// through the colour. `GpuSpanName` owns the decorated text, so
+				// the span may borrow it and the overlay may read it after the
+				// frame has ended.
+				core::FrameGraph::Report(
+					GpuSpanName(marks.Name),
+					core::ProfileCategory::Gpu,
+					static_cast<float>(microseconds / 1000.0)
+				);
+			}
+
+			if (publish) {
 				ResolvedTimingSequence = TimingSequence[slot];
 			}
 			PendingMarks[slot].clear();
@@ -218,6 +269,8 @@ namespace engine::render {
 		SurfacePasses += view.SurfacePasses;
 		PortalPasses += view.PortalPasses;
 		RibbonVertices += view.RibbonVertices;
+		InstanceChunks += view.InstanceChunks;
+		InstanceChunksDirty += view.InstanceChunksDirty;
 		Particles += view.Particles;
 		Culled += view.Culled;
 		ScheduledReadBytes += view.ScheduledReadBytes;

@@ -249,6 +249,33 @@ namespace engine::render {
 		std::unordered_map<uint32_t, double> GpuTimings;
 		std::unordered_map<uint32_t, double> WallTimings;
 
+		// The frame-graph span name for each pass's *device* time, keyed by the
+		// pass's `core::Name::Id`.
+		//
+		// **Decorated, because the undecorated name is already taken.**
+		// `GraphRunner` opens a CPU scope named after the node - `ssao`,
+		// `gbuffer` - so reporting device time under the same name puts two spans
+		// with one label in every frame, and the profiler's per-span table sums
+		// them. That is precisely the CPU-versus-GPU confusion
+		// `ProfileCategory::Gpu` was added to end, arriving through the label
+		// instead of through the colour.
+		//
+		// **Cached rather than built per frame**, and not for the allocation:
+		// `FrameGraph::Report` borrows the text and the overlay reads it after
+		// the frame has ended, so the string has to outlive the frame. Owning it
+		// here is what makes that true, and a pass name is registered once and
+		// then read every frame for the life of the process.
+		std::unordered_map<uint32_t, std::string> GpuSpanNames;
+
+		// The span name for one pass's device time, registering it on first use.
+		std::string_view GpuSpanName(const core::Name &pass) {
+			auto found = GpuSpanNames.find(pass.Id());
+			if (found == GpuSpanNames.end()) {
+				found = GpuSpanNames.emplace(pass.Id(), "gpu " + std::string(pass.Text())).first;
+			}
+			return found->second;
+		}
+
 		void CollectTimings();
 
 		SDL_GPUGraphicsPipeline *OpaquePipeline = nullptr;
@@ -493,7 +520,7 @@ namespace engine::render {
 		// live here and the infos point at them.
 		//@{
 		SDL_GPUVertexBufferDescription VariantBuffers[2]{};
-		SDL_GPUVertexAttribute VariantAttributes[9]{};
+		SDL_GPUVertexAttribute VariantAttributes[7]{};
 		SDL_GPUColorTargetDescription VariantOpaqueTarget{};
 		SDL_GPUColorTargetDescription VariantBlendedTarget{};
 		SDL_GPUGraphicsPipelineCreateInfo VariantOpaqueInfo{};
@@ -1105,6 +1132,15 @@ namespace engine::render {
 			uint32_t HistoryWidth = 0;
 			uint32_t HistoryHeight = 0;
 			bool HistoryReady = false;
+
+			// Last frame's per-chunk instance signatures, for
+			// `FrameResult::InstanceChunksDirty`.
+			//
+			// **Per slot rather than per renderer**, because every viewport
+			// uploads its own permutation of its own draw list: a studio with
+			// four panes open would otherwise have each one comparing against
+			// whichever pane recorded last and report everything dirty for ever.
+			std::vector<uint64_t> InstanceChunks;
 		};
 
 		std::vector<SceneSlot> SceneSlots;

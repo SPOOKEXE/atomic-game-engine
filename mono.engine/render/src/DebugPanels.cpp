@@ -59,6 +59,22 @@ namespace engine::render {
 			Colour{108, 142, 216}, // engine
 			Colour{96, 190, 130},  // render
 
+			// Pink, and deliberately nowhere near the render green above it.
+			//
+			// **The one pair on this panel that must never be misread for each
+			// other.** `render` is the CPU recording commands and this is the
+			// device running them, and telling those two apart *is* the
+			// diagnosis: a frame long on the green bar is CPU-bound on the draw
+			// list, a frame long on this one is GPU-bound on fill or bandwidth,
+			// and the fixes have nothing in common. A shade of the same green
+			// would have read as "the render bar, slightly different" - which is
+			// the reading that sends somebody to optimise the wrong half of the
+			// engine.
+			//
+			// Distinct from the script violet below it by being warm: this is
+			// red-dominant, that one is blue-dominant.
+			Colour{235, 125, 185}, // GPU
+
 			// Cyan, and deliberately the most legible colour here after the
 			// warnings. Every engine and game system runs through the ECS, so
 			// this is the bar a reader is looking for - and it has to be

@@ -10,6 +10,8 @@
 // still obey: the device layout is private and stays private, so nothing here
 // reaches a public header.
 
+#include "InstancePacking.hpp"
+
 #include <engine/graph/RenderGraph.hpp>
 #include <engine/graph/Schedule.hpp>
 #include <engine/render/GraphRunner.hpp>
@@ -97,91 +99,6 @@ namespace engine::render {
 			nodes.Set(node.Kind, handler);
 		}
 		return nodes;
-	}
-
-	// One instance as the vertex shader reads it.
-	//
-	// Private GPU layout; scene data must not expose device types.
-	struct GpuInstance {
-		glm::mat4 Model{1.0f};
-		glm::vec4 Colour{1.0f, 1.0f, 1.0f, 1.0f};
-
-		// One over the square of each axis' scale, for the normal matrix.
-		// The model includes scale, so its upper 3x3 is not a normal matrix.
-		glm::vec4 InverseScaleSquared{1.0f, 1.0f, 1.0f, 0.0f};
-	};
-
-	// A draw instance in the layout the opaque pipeline binds.
-	//
-	// **`Size` is a box the mesh is stretched into, not a multiplier.** The
-	// mesh's own bounding box is mapped exactly onto the part's, so
-	// `MeshPart.Size` means metres for every mesh in the world regardless of
-	// the scale it was authored at - Roblox's `MeshPart` semantic, and the
-	// thing that makes `scene::Bounds` describe the geometry rather than
-	// approximate it.
-	//
-	// **The culling depended on this and nothing enforced it.**
-	// `graph::CullAndBound` tests `HalfExtent` against the frustum. While
-	// `Size` merely multiplied mesh coordinates, a mesh authored twenty units
-	// tall drew ten times outside the box describing it and was culled with
-	// most of itself still on screen. Now the drawn geometry fills that box
-	// exactly, so the cull is right by construction rather than right when
-	// the content happened to be baked correctly.
-	//
-	// A built-in is a unit shape about its own origin, so its `Extent` is a
-	// half on every axis and this is `HalfExtent * 2` - byte for byte what
-	// this function did before.
-	//
-	// @param instance What to draw.
-	// @param mesh     Its geometry, as `MeshTable::Resolve` gave it. Never
-	//        null: an unknown name resolves to the fallback.
-	inline GpuInstance ToGpu(const scene::DrawInstance &instance, const MeshEntry &mesh) {
-		// How much to multiply one axis by so the mesh's own box becomes the
-		// part's.
-		//
-		// **A degenerate axis keeps the old rule rather than dividing.** The
-		// built-in plane is a quad with no thickness, so its Y extent is
-		// exactly zero - and a flat mesh is an ordinary thing to author. The
-		// fallback is `HalfExtent * 2`, which is what a zero-thickness mesh
-		// got before and does nothing to geometry that has no extent on that
-		// axis anyway.
-		const auto stretch = [](float half, float extent) {
-			return extent > 1e-6f ? half / extent : half * 2.0f;
-		};
-
-		const glm::vec3 scale{
-			stretch(instance.HalfExtent.X, mesh.Extent.X),
-			stretch(instance.HalfExtent.Y, mesh.Extent.Y),
-			stretch(instance.HalfExtent.Z, mesh.Extent.Z),
-		};
-
-		GpuInstance gpu;
-		gpu.Model = instance.Frame.ToMatrix();
-
-		gpu.Model[0] *= scale.x;
-		gpu.Model[1] *= scale.y;
-		gpu.Model[2] *= scale.z;
-
-		// **Centred after scaling, in the part's own space.** A model
-		// authored off its origin would otherwise hang away from the part by
-		// however far its box is offset - and because the offset scales with
-		// the part, it would grow as somebody resized it. Written into the
-		// translation column rather than composed as a second matrix: this
-		// runs once per instance per frame over the whole draw list.
-		// The upper 3x3 already carries the rotation *and* the scale, so one
-		// multiply moves the mesh's centre onto the part's origin.
-		const glm::vec3 centre{mesh.Centre.X, mesh.Centre.Y, mesh.Centre.Z};
-		gpu.Model[3] -= glm::vec4(glm::mat3(gpu.Model) * centre, 0.0f);
-
-		// Convert author-facing transparency to shader alpha.
-		gpu.Colour =
-			glm::vec4{instance.Tint.R, instance.Tint.G, instance.Tint.B, 1.0f - instance.Transparency};
-
-		// Avoid infinities for zero-scale geometry.
-		const auto reciprocal = [](float axis) { return axis * axis > 1e-12f ? 1.0f / (axis * axis) : 1.0f; };
-		gpu.InverseScaleSquared =
-			glm::vec4{reciprocal(scale.x), reciprocal(scale.y), reciprocal(scale.z), 0.0f};
-		return gpu;
 	}
 
 	struct FrameUniforms {

@@ -98,6 +98,19 @@ function(_mono_add_shaders name target defines)
 		return()
 	endif()
 
+	# **`.glsl` is a shared fragment, not a stage, and it is compiled by nobody.**
+	# `instance.glsl` holds the decode `opaque.vert` and `shadow.vert` both need;
+	# a stage `#include`s it and glslc resolves the quoted path against the
+	# including file's own directory.
+	#
+	# Every stage in the module depends on every one of them, which is coarser
+	# than tracking real include edges and is the right trade: a shader fragment
+	# is a handful of files, over-building one module's shaders costs a second,
+	# and the alternative failure is the one this build already refuses to
+	# tolerate - an edit that leaves a stale `.spv` on disk and surfaces as a
+	# pipeline that will not create.
+	file(GLOB_RECURSE shader_headers CONFIGURE_DEPENDS "${source_dir}/*.glsl")
+
 	if(NOT MONO_GLSLC)
 		message(FATAL_ERROR
 			"${name} owns shaders but no glslc was resolved.\n"
@@ -119,11 +132,12 @@ function(_mono_add_shaders name target defines)
 		set(spv "${stage}/${shader_name}.spv")
 		add_custom_command(
 			OUTPUT "${spv}"
-			COMMAND ${MONO_GLSLC} ${define_flags} "${shader}" -o "${spv}"
+			COMMAND ${MONO_GLSLC} ${define_flags} -I "${source_dir}" "${shader}" -o "${spv}"
 			# The compiler is a dependency, not just a command. Without it a
 			# shaderc bump leaves every .spv on disk stale, and the mismatch
-			# surfaces as a pipeline that fails to create.
-			DEPENDS "${shader}" ${MONO_GLSLC_DEPENDS}
+			# surfaces as a pipeline that fails to create. The `.glsl` fragments
+			# are dependencies for the same reason - see the glob above.
+			DEPENDS "${shader}" ${shader_headers} ${MONO_GLSLC_DEPENDS}
 			COMMENT "SPIR-V ${name}/${shader_name}"
 			VERBATIM
 		)

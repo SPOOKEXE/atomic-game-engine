@@ -773,6 +773,64 @@ namespace engine::scene {
 	// @since v0.8
 	uint64_t SignatureOf(std::span<const DrawInstance> instances);
 
+	// How many instances one chunk of a draw list covers.
+	//
+	// **Chosen so a chunk is a useful upload and not so a chunk is a useful
+	// hash.** 256 rows is 9,216 bytes of `render::GpuInstance`, which is two
+	// pages either side of a partial one - small enough that a single part
+	// moving does not dirty a megabyte, large enough that the per-chunk
+	// bookkeeping stays under a percent of the rows it describes. Nothing
+	// measured picked this number; the counter `ChunkSignaturesOf` feeds is what
+	// will.
+	//
+	// @since v0.19
+	inline constexpr size_t SIGNATURE_CHUNK = 256;
+
+	// Signs a draw list in fixed-size chunks.
+	//
+	// **`SignatureOf` says whether *anything* moved; this says *where*.** That
+	// distinction is the whole question behind uploading a scene as a delta
+	// rather than as a full rewrite: today `render::ViewRecording` converts and
+	// uploads every row every frame, and whether skipping the untouched ones
+	// would pay depends entirely on how many chunks a typical frame actually
+	// dirties. One moving character in a static town dirties one chunk; a camera
+	// orbit that reorders the blended sort dirties all of them. Nobody knows
+	// which shape a real scene has, so this exists to be counted before any
+	// delta protocol is written for it.
+	//
+	// **Signed in emission order, not in list order**, which is why `order` is a
+	// parameter rather than something a caller applies first. The renderer
+	// uploads `instances[order[i]]` at row `i`, so a chunk is a range of `i` and
+	// not of the list - and a frame that merely re-sorted the same instances has
+	// genuinely changed the bytes at those rows even though every instance in it
+	// is untouched. A signature taken before the permutation would report that
+	// frame as clean and a delta built on it would draw the previous sort.
+	//
+	// @param instances The draw list.
+	// @param order     Indices into `instances`, in the order they are uploaded.
+	//                  Empty means the list is uploaded as it stands.
+	// @param out       Filled with one signature per chunk. Resized first, so a
+	//                  caller may hand back the same vector every frame.
+	// @return How many chunks were written, which is `out.size()`.
+	// @since v0.19
+	size_t ChunkSignaturesOf(
+		std::span<const DrawInstance> instances, std::span<const uint32_t> order, std::vector<uint64_t> &out
+	);
+
+	// How many chunks two runs of `ChunkSignaturesOf` disagree about.
+	//
+	// **A length change counts as dirty for every chunk past the shorter of the
+	// two**, because a list that grew has rows nothing has ever uploaded and a
+	// list that shrank has rows that must stop being drawn. Neither is a
+	// comparison; both are work, and a counter that called them clean would
+	// report a scene loading in as costing nothing.
+	//
+	// @param previous Last frame's signatures.
+	// @param current  This frame's.
+	// @return Chunks that differ, at most `max(previous.size(), current.size())`.
+	// @since v0.19
+	size_t DirtyChunkCount(std::span<const uint64_t> previous, std::span<const uint64_t> current);
+
 	// Divides one view's draw list into the runs its passes submit.
 	//
 	// Orders the list - opaque in world order, blended back to front from `eye`

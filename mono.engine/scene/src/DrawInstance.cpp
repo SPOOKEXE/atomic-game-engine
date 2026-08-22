@@ -61,7 +61,8 @@ namespace engine::scene {
 		return hash ^ (word + 0x9E3779B97F4A7C15ull + (hash << 6) + (hash >> 2));
 	}
 
-	uint64_t SignatureOf(std::span<const DrawInstance> instances) {
+	namespace {
+		// The four independent accumulators one signature is folded through.
 		// **Four chains rather than one, because this is latency-bound and not
 		// throughput-bound.** `MixSignature` is a shift, a shift, an add and an
 		// xor, and every one of them needs the previous hash - so folding
@@ -78,18 +79,27 @@ namespace engine::scene {
 		// every field still lands in the result, still by its bit pattern, and
 		// still field-wise rather than over the object representation, which is
 		// what `tests/DrawInstance.cpp` pins and what keeps `Reserved` out of it.
-		//
-		// **The value changes, and nothing may depend on the old one.** A
-		// signature is compared against another produced by this same function
-		// within one run; `scene/Registration.cpp` deliberately serialises a
-		// `RenderedSignature` as nothing and reads it back as a default, so
-		// there is no file and no wire carrying one.
-		uint64_t a = SIGNATURE_SEED;
-		uint64_t b = SIGNATURE_SEED;
-		uint64_t c = SIGNATURE_SEED;
-		uint64_t d = SIGNATURE_SEED;
+		struct SignatureLanes {
+			uint64_t A = SIGNATURE_SEED;
+			uint64_t B = SIGNATURE_SEED;
+			uint64_t C = SIGNATURE_SEED;
+			uint64_t D = SIGNATURE_SEED;
+		};
 
-		for (const DrawInstance &instance : instances) {
+		// Folds one instance into the four lanes.
+		//
+		// **Extracted so `SignatureOf` and `ChunkSignaturesOf` cannot disagree
+		// about what a row says.** Two copies of eighteen mixes is two places to
+		// add the next field to, and the one that would be missed is the chunk
+		// version - it is read by a counter rather than by a picture, so a field
+		// left out of it reports a scene as quieter than it is and nothing looks
+		// wrong.
+		void FoldInstance(SignatureLanes &lanes, const DrawInstance &instance) {
+			uint64_t &a = lanes.A;
+			uint64_t &b = lanes.B;
+			uint64_t &c = lanes.C;
+			uint64_t &d = lanes.D;
+
 			const core::CFrame &frame = instance.Frame;
 
 			a = MixSignature(a, Pair(BitsOf(frame.Position.X), BitsOf(frame.Position.Y)));
@@ -138,10 +148,69 @@ namespace engine::scene {
 			c = MixSignature(c, Pair(BitsOf(instance.SeamLight.Z), 0u));
 		}
 
-		// Combined in a fixed order, so the four lanes give one value. The
-		// combine is four mixes for the whole list rather than per instance, so
-		// its cost rounds to nothing.
-		return MixSignature(MixSignature(a, b), MixSignature(c, d));
+		// The four lanes as one value, in a fixed order.
+		//
+		// Four mixes for a whole run rather than per instance, so its cost
+		// rounds to nothing.
+		uint64_t CombineLanes(const SignatureLanes &lanes) {
+			return MixSignature(MixSignature(lanes.A, lanes.B), MixSignature(lanes.C, lanes.D));
+		}
+	}
+
+	uint64_t SignatureOf(std::span<const DrawInstance> instances) {
+		// **The value changes between engine versions, and nothing may depend on
+		// an old one.** A signature is compared against another produced by this
+		// same function within one run; `scene/Registration.cpp` deliberately
+		// serialises a `RenderedSignature` as nothing and reads it back as a
+		// default, so there is no file and no wire carrying one.
+		SignatureLanes lanes;
+		for (const DrawInstance &instance : instances) {
+			FoldInstance(lanes, instance);
+		}
+		return CombineLanes(lanes);
+	}
+
+	size_t ChunkSignaturesOf(
+		std::span<const DrawInstance> instances, std::span<const uint32_t> order, std::vector<uint64_t> &out
+	) {
+		// The number of rows uploaded, which is the permutation's length when
+		// there is one and the list's otherwise.
+		const size_t rows = order.empty() ? instances.size() : order.size();
+		out.assign((rows + SIGNATURE_CHUNK - 1) / SIGNATURE_CHUNK, 0);
+
+		for (size_t chunk = 0; chunk < out.size(); chunk++) {
+			const size_t first = chunk * SIGNATURE_CHUNK;
+			const size_t last = std::min(first + SIGNATURE_CHUNK, rows);
+
+			// **Lanes start fresh per chunk rather than carrying across.** A
+			// running hash would make every chunk after the first one depend on
+			// every row before it, so one part moving at the head of the list
+			// would dirty the whole tail - which is the exact opposite of what
+			// this is counting.
+			SignatureLanes lanes;
+			for (size_t row = first; row < last; row++) {
+				const size_t index = order.empty() ? row : static_cast<size_t>(order[row]);
+				// An out-of-range index is a caller bug rather than a shape this
+				// has to serve, but a signature is not worth reading past the
+				// list for: it folds in nothing and the chunk stays comparable.
+				if (index < instances.size()) {
+					FoldInstance(lanes, instances[index]);
+				}
+			}
+			out[chunk] = CombineLanes(lanes);
+		}
+		return out.size();
+	}
+
+	size_t DirtyChunkCount(std::span<const uint64_t> previous, std::span<const uint64_t> current) {
+		const size_t shared = std::min(previous.size(), current.size());
+		size_t dirty = std::max(previous.size(), current.size()) - shared;
+		for (size_t chunk = 0; chunk < shared; chunk++) {
+			if (previous[chunk] != current[chunk]) {
+				dirty++;
+			}
+		}
+		return dirty;
 	}
 
 	size_t OrderForDrawing(

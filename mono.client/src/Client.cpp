@@ -3264,6 +3264,8 @@ namespace client {
 		// makes them useless as the one number a log can carry.
 		PeakTriangles = std::max(PeakTriangles, LastFrame.Triangles);
 		PeakDrawCalls = std::max<uint32_t>(PeakDrawCalls, LastFrame.DrawCalls);
+		TotalInstanceChunks += LastFrame.InstanceChunks;
+		DirtyInstanceChunks += LastFrame.InstanceChunksDirty;
 	}
 
 	int Client::Run() {
@@ -3324,6 +3326,21 @@ namespace client {
 			ENGINE_INFO(
 				"{} triangle(s) in {} draw call(s) at the busiest frame", PeakTriangles, PeakDrawCalls
 			);
+
+			// **What a delta upload would have had to skip.** The instance
+			// stream is rewritten whole every frame; this is how much of it a
+			// frame actually changed. Reported rather than acted on: a low
+			// share is an argument for building a delta and a high one is an
+			// argument against, and neither is worth guessing at.
+			if (TotalInstanceChunks > 0) {
+				ENGINE_INFO(
+					"{} of {} instance chunk(s) rewritten ({:.1f}% of the stream moved per frame)",
+					DirtyInstanceChunks,
+					TotalInstanceChunks,
+					100.0 * static_cast<double>(DirtyInstanceChunks) /
+						static_cast<double>(TotalInstanceChunks)
+				);
+			}
 			ENGINE_INFO(
 				"{} tick(s) at {:.0f} Hz · {:.1f} achieved · {} dropped",
 				Universe_->StatisticsOf(Rendered).Ticks,

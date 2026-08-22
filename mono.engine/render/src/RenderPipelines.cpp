@@ -292,18 +292,25 @@ namespace engine::render {
 			{1, sizeof(GpuInstance), SDL_GPU_VERTEXINPUTRATE_INSTANCE, 0},
 		};
 
+		// **Four instance attributes where there were six, and the matrix is
+		// gone.** A `mat4` attribute has to be spelled as four float4 locations
+		// because there is no matrix vertex format, and those four locations
+		// carried a rotation nine times over plus a row that is always
+		// `(0, 0, 0, 1)`. `opaque.vert` now rebuilds `T * R * S` from the three
+		// things it was ever made of. See `InstancePacking.hpp` for what each
+		// field costs and why position and scale stayed float.
 		const SDL_GPUVertexAttribute attributes[] = {
 			{0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(Vertex, Position)},
 			{1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(Vertex, Normal)},
 			{2, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(Vertex, TexCoord)},
-			// A mat4 attribute is four float4 locations; there is no matrix
-			// vertex format.
-			{3, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, 0},
-			{4, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, sizeof(float) * 4},
-			{5, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, sizeof(float) * 8},
-			{6, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, sizeof(float) * 12},
-			{7, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(GpuInstance, Colour)},
-			{8, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(GpuInstance, InverseScaleSquared)},
+			{3, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(GpuInstance, Position)},
+			// Two raw words rather than a normalised format: SDL has no
+			// four-component signed-normalised sixteen-bit type, and
+			// `unpackSnorm2x16` in the shader is the same decode the fixed
+			// function would have done.
+			{4, 1, SDL_GPU_VERTEXELEMENTFORMAT_UINT2, offsetof(GpuInstance, Rotation)},
+			{5, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(GpuInstance, Scale)},
+			{6, 1, SDL_GPU_VERTEXELEMENTFORMAT_UINT, offsetof(GpuInstance, Colour)},
 		};
 
 		SDL_GPUColorTargetDescription opaqueTarget{};
@@ -316,7 +323,7 @@ namespace engine::render {
 		opaque.vertex_input_state.vertex_buffer_descriptions = vertexBuffers;
 		opaque.vertex_input_state.num_vertex_buffers = 2;
 		opaque.vertex_input_state.vertex_attributes = attributes;
-		opaque.vertex_input_state.num_vertex_attributes = 9;
+		opaque.vertex_input_state.num_vertex_attributes = 7;
 		opaque.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
 		opaque.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_BACK;
 		// The cube winds counter-clockwise when seen from outside.

@@ -705,6 +705,25 @@ namespace client {
 		uint64_t PeakTriangles = 0;
 		uint32_t PeakDrawCalls = 0;
 
+		// Instance-stream chunks offered and rewritten, summed over the run.
+		//
+		// **A ratio, and it is the number that decides whether a delta upload is
+		// worth writing.** The instance buffer is rewritten whole every frame;
+		// `scene::ChunkSignaturesOf` says how much of it actually changed. A run
+		// that dirties a few per cent has something to skip. A run that dirties
+		// almost all of it does not, and the reason is usually the blended sort
+		// following the camera - which no delta protocol can help with.
+		//
+		// Summed rather than peaked, unlike the two above: the question is what a
+		// typical frame costs, and a peak would report the one frame a world
+		// streamed in on.
+		//
+		// @since v0.19
+		//@{
+		uint64_t TotalInstanceChunks = 0;
+		uint64_t DirtyInstanceChunks = 0;
+		//@}
+
 		// When the next frame is due, for the `--max-fps` limiter. A default
 		// value means "not started"; the first limited frame sets it.
 		std::chrono::steady_clock::time_point NextFrameAt{};
