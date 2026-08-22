@@ -5,9 +5,9 @@
 -- that makes this a different scene from `Particles.luau`.** That one is a
 -- *count*: it answers v0.10's hundred-thousand-emitter target and the flipbook
 -- path, with a grid of identical emitters so that what the frame time measures
--- is the number of them and nothing about what any one is doing. It leaves
--- eleven authored properties untouched, and an untouched property is one that
--- can stop working without anything noticing.
+-- is the number of them and nothing about what any one is doing. An untouched
+-- property can stop working without anything noticing, so this scene covers the
+-- full declared surface including the resident force controls added at v0.20.
 --
 -- This is the other question. Every property `ParticleEmitter` declares gets a
 -- labelled bay it is the only variable in, so a reader who knows what the

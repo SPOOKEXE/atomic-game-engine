@@ -890,7 +890,7 @@ knobs at the top of the file and say what each one costs.
 
 | scene | what it loads | run it with |
 | --- | --- | --- |
-| `StressParticles.luau` | ten bays covering every authored `ParticleEmitter` property, then 1,024 parts carrying five emitters each - 512,000 particles | `just run --script .../StressParticles.luau --stats` |
+| `StressParticles.luau` | fourteen bays covering every authored `ParticleEmitter` property, then 1,024 parts carrying five emitters each - 512,000 particles | `just run --script .../StressParticles.luau --stats` |
 | `StressPhysics.luau` | 100,000 unanchored blocks in a tray that tilts, so nothing ever settles | `server --game .../StressPhysics.luau --physics-tick-rate 20` |
 | `StressMirrors.luau` | an ico-sphere mirror ball - 80 facets, 16 of them mirrors | `just run --script .../StressMirrors.luau` |
 
