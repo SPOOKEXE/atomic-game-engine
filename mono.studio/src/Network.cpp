@@ -25,6 +25,7 @@
 #include <engine/assets/Builtin.hpp>
 #include <engine/assets/ContentForm.hpp>
 #include <engine/assets/ContentPolicy.hpp>
+#include <engine/assets/LocalStore.hpp>
 #include <engine/assets/Manifest.hpp>
 #include <engine/assets/Material.hpp>
 #include <engine/assets/Mesh.hpp>
@@ -42,7 +43,6 @@
 #include <engine/ui/Theme.hpp>
 
 #include <algorithm>
-#include <cdn/LocalStore.hpp>
 #include <client/ContentDemand.hpp>
 #include <filesystem>
 #include <fstream>
@@ -809,7 +809,7 @@ namespace studio {
 		// names plus a signed manifest, which would arrive as several thousand
 		// unrecognisable files. The far end publishes what it receives; sending
 		// it something already published would be publishing twice.
-		const cdn::LocalPaths paths = cdn::DefaultLocalPaths();
+		const engine::assets::LocalPaths paths = engine::assets::DefaultLocalPaths();
 
 		std::error_code failure;
 		if (!std::filesystem::is_directory(paths.Raw, failure)) {
@@ -879,8 +879,8 @@ namespace studio {
 					// A download that landed somewhere else would be a second
 					// place content lives, and the whole reason the store is
 					// content-addressed is that there is one.
-					const cdn::LocalPaths paths = cdn::DefaultLocalPaths();
-					if (cdn::EnsureLocalStore(paths)) {
+					const engine::assets::LocalPaths paths = engine::assets::DefaultLocalPaths();
+					if (engine::assets::EnsureLocalStore(paths)) {
 						const std::filesystem::path stored =
 							paths.Raw /
 							(asset->Root.ToHex() + std::filesystem::path(asset->Name).extension().string());

@@ -185,7 +185,7 @@ TEST_CASE("confirming a picker writes the property", "[studio][properties]") {
 	);
 
 	// And it landed where the renderer reads it, not merely somewhere.
-	// `client::CollectInstances` copies `Visual::Mesh` into the draw list, so a
+	// `engine::render::CollectInstances` copies `Visual::Mesh` into the draw list, so a
 	// write that stopped short of this component is a part that keeps drawing
 	// the fallback however good the string looked in the panel.
 	const engine::scene::Visual *visual = store.Get<engine::scene::Visual>(part);

@@ -1,22 +1,21 @@
 // Converting `scene::EditableMesh`'s raw arrays into `assets::MeshData`.
 //
 // **The device-free half, and the only half this codebase unit-tests.**
-// `client::EditableMeshUploader::Refresh` calls into `render::Renderer`
+// `engine::render::EditableMeshUploader::Refresh` calls into `render::Renderer`
 // itself, which nothing here can assert against without a GPU -
 // `render::ShaderLibrary`'s tests draw the identical line for the identical
 // reason. This pins the conversion: what a mesh built one triangle at a time
 // looks like once it is in the format `render::MeshTable::Add` takes.
 
 #include <engine/assets/Mesh.hpp>
+#include <engine/render/EditableMeshes.hpp>
 #include <engine/scene/EditableMesh.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
-#include <client/EditableMeshes.hpp>
-
-TEST_SUITE_ID("client.editablemeshes")
+TEST_SUITE_ID("engine.render.editablemeshes")
 TEST_DEPENDS("engine.scene.editablemesh")
 
 using Catch::Approx;
@@ -25,7 +24,7 @@ using engine::core::Vector2;
 using engine::core::Vector3;
 using engine::scene::EditableMesh;
 
-TEST_CASE("a mesh with vertices and no triangle is not yet valid to draw", "[client][editablemeshes]") {
+TEST_CASE("a mesh with vertices and no triangle is not yet valid to draw", "[render][editablemeshes]") {
 	EditableMesh mesh;
 	mesh.Positions.push_back(Vector3{0.0f, 0.0f, 0.0f});
 	mesh.Normals.push_back(Vector3{0.0f, 1.0f, 0.0f});
@@ -33,14 +32,14 @@ TEST_CASE("a mesh with vertices and no triangle is not yet valid to draw", "[cli
 	mesh.Colours.push_back(Color3{1.0f, 1.0f, 1.0f});
 	mesh.Alphas.push_back(0.0f);
 
-	const engine::assets::MeshData built = client::BuildMeshData(mesh);
+	const engine::assets::MeshData built = engine::render::BuildMeshData(mesh);
 
 	// `Instance.new("EditableMesh")` produces exactly this state, and it must
 	// not be reported as a broken mesh - it is one nobody has finished yet.
 	CHECK_FALSE(built.IsValid());
 }
 
-TEST_CASE("a triangle converts position, normal and UV without touching them", "[client][editablemeshes]") {
+TEST_CASE("a triangle converts position, normal and UV without touching them", "[render][editablemeshes]") {
 	EditableMesh mesh;
 	mesh.Positions = {
 		Vector3{0.0f, 0.0f, 0.0f},
@@ -61,7 +60,7 @@ TEST_CASE("a triangle converts position, normal and UV without touching them", "
 	mesh.Alphas = {0.0f, 0.0f, 0.0f};
 	mesh.Indices = {0, 1, 2};
 
-	const engine::assets::MeshData built = client::BuildMeshData(mesh);
+	const engine::assets::MeshData built = engine::render::BuildMeshData(mesh);
 
 	REQUIRE(built.IsValid());
 	REQUIRE(built.Vertices.size() == 3);
@@ -74,7 +73,7 @@ TEST_CASE("a triangle converts position, normal and UV without touching them", "
 	CHECK(built.Indices[2] == 2);
 }
 
-TEST_CASE("one triangle's vertex colours average into its run's flat colour", "[client][editablemeshes]") {
+TEST_CASE("one triangle's vertex colours average into its run's flat colour", "[render][editablemeshes]") {
 	EditableMesh mesh;
 	mesh.Positions = {Vector3{}, Vector3{1.0f, 0.0f, 0.0f}, Vector3{0.0f, 1.0f, 0.0f}};
 	mesh.Normals = {Vector3{0.0f, 1.0f, 0.0f}, Vector3{0.0f, 1.0f, 0.0f}, Vector3{0.0f, 1.0f, 0.0f}};
@@ -87,7 +86,7 @@ TEST_CASE("one triangle's vertex colours average into its run's flat colour", "[
 	mesh.Alphas = {0.0f, 0.3f, 0.6f};
 	mesh.Indices = {0, 1, 2};
 
-	const engine::assets::MeshData built = client::BuildMeshData(mesh);
+	const engine::assets::MeshData built = engine::render::BuildMeshData(mesh);
 
 	REQUIRE(built.Submeshes.size() == 1);
 	const engine::assets::Submesh &submesh = built.Submeshes.front();
@@ -106,7 +105,7 @@ TEST_CASE("one triangle's vertex colours average into its run's flat colour", "[
 // colours. `assets::MeshVertex` carries no colour, so the only place a second
 // colour can live is a second submesh run - and the conversion collapsing them
 // into one average is what made a coloured terrain read as uniform mud.
-TEST_CASE("faces of different colours become separate submesh runs", "[client][editablemeshes]") {
+TEST_CASE("faces of different colours become separate submesh runs", "[render][editablemeshes]") {
 	EditableMesh mesh;
 
 	// Two triangles sharing no vertex, so each face's three corners agree and
@@ -132,7 +131,7 @@ TEST_CASE("faces of different colours become separate submesh runs", "[client][e
 	mesh.Alphas.assign(6, 0.0f);
 	mesh.Indices = {0, 1, 2, 3, 4, 5};
 
-	const engine::assets::MeshData built = client::BuildMeshData(mesh);
+	const engine::assets::MeshData built = engine::render::BuildMeshData(mesh);
 
 	REQUIRE(built.IsValid());
 	REQUIRE(built.Submeshes.size() == 2);
@@ -153,7 +152,7 @@ TEST_CASE("faces of different colours become separate submesh runs", "[client][e
 }
 
 // Two colours a display cannot tell apart must not cost two draw runs.
-TEST_CASE("colours within a quantisation step share one run", "[client][editablemeshes]") {
+TEST_CASE("colours within a quantisation step share one run", "[render][editablemeshes]") {
 	EditableMesh mesh;
 	mesh.Positions = {
 		Vector3{},
@@ -170,14 +169,14 @@ TEST_CASE("colours within a quantisation step share one run", "[client][editable
 	mesh.Alphas.assign(6, 0.0f);
 	mesh.Indices = {0, 1, 2, 3, 4, 5};
 
-	const engine::assets::MeshData built = client::BuildMeshData(mesh);
+	const engine::assets::MeshData built = engine::render::BuildMeshData(mesh);
 
 	REQUIRE(built.Submeshes.size() == 1);
 	CHECK(built.Submeshes.front().IndexCount == 6);
 }
 
-TEST_CASE("an empty mesh converts to an empty, invalid MeshData", "[client][editablemeshes]") {
-	const engine::assets::MeshData built = client::BuildMeshData(EditableMesh{});
+TEST_CASE("an empty mesh converts to an empty, invalid MeshData", "[render][editablemeshes]") {
+	const engine::assets::MeshData built = engine::render::BuildMeshData(EditableMesh{});
 	CHECK(built.Vertices.empty());
 	CHECK(built.Indices.empty());
 	CHECK(built.Submeshes.empty());

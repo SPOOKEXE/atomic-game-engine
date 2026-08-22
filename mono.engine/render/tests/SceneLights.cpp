@@ -40,7 +40,7 @@ TEST_CASE("a scene light's defaults are the ones a point light wants", "[render]
 	// until somebody set one.
 	REQUIRE(light.Range > 0.0f);
 
-	// Brightness is folded into the colour by `client::CollectLights`, so the
+	// Brightness is folded into the colour by `render::CollectLights`, so the
 	// default here is the unmultiplied white a light with no author starts from.
 	REQUIRE(light.Colour.R == 1.0f);
 }

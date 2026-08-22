@@ -30,6 +30,7 @@
 // places to say the same thing.
 
 #include <engine/assets/AssetKind.hpp>
+#include <engine/assets/LocalStore.hpp>
 #include <engine/assets/Mesh.hpp>
 #include <engine/assets/Texture.hpp>
 #include <engine/core/Bytes.hpp>
@@ -41,7 +42,7 @@
 #include <algorithm>
 #include <array>
 #include <assetc/Bake.hpp>
-#include <cdn/LocalStore.hpp>
+#include <cdn/LocalPublish.hpp>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -112,7 +113,7 @@ namespace studio {
 			return;
 		}
 
-		const cdn::LocalPaths paths = cdn::DefaultLocalPaths();
+		const engine::assets::LocalPaths paths = engine::assets::DefaultLocalPaths();
 
 		// **Read when the panel opens and after anything changes it**, not every
 		// frame: listing `raw/` stats every file and reading the manifest parses
@@ -384,7 +385,7 @@ namespace studio {
 	}
 
 	bool Editor::BakeRawAsset(const std::string &relative, std::string &baked) {
-		const cdn::LocalPaths paths = cdn::DefaultLocalPaths();
+		const engine::assets::LocalPaths paths = engine::assets::DefaultLocalPaths();
 
 		// **One source, through the whole baker.** `assetc::Settings::Only`
 		// filters the walk rather than skipping it, so a material picked here
@@ -407,7 +408,7 @@ namespace studio {
 		// flat, so a model's `tex/skin.png` cannot be followed through the folder
 		// and only the import record still knows where the two came from. A bake
 		// without this produces a mesh whose sheets nothing can fetch.
-		settings.ResolveTexture = cdn::StoreTextureResolver(paths);
+		settings.ResolveTexture = engine::assets::StoreTextureResolver(paths);
 
 		std::string failure;
 		const assetc::Report report = assetc::Bake(settings, failure);
@@ -445,7 +446,7 @@ namespace studio {
 	bool Editor::LoadRawAsset(const std::filesystem::path &folder, const std::string &relative) {
 		// **The tree is the truth here, so no resolver is passed.** A model in a
 		// raw folder still sits beside its `tex/` directory - the flattening
-		// that made `cdn::StoreTextureResolver` necessary is what `ImportFile`
+		// that made `engine::assets::StoreTextureResolver` necessary is what `ImportFile`
 		// does, and nothing has imported this.
 		assetc::Settings settings;
 		settings.Input = folder;
@@ -460,7 +461,7 @@ namespace studio {
 		// **Empty output is the memory-only case**, which is the default and
 		// the reason this exists: looking at somebody's art folder must not
 		// write a baked copy of it anywhere.
-		const cdn::LocalPaths paths = cdn::DefaultLocalPaths();
+		const engine::assets::LocalPaths paths = engine::assets::DefaultLocalPaths();
 		if (!Content.MemoryOnly) {
 			settings.Output = paths.Baked;
 		}
@@ -797,7 +798,7 @@ namespace studio {
 
 	void Editor::DrawRawList() {
 		uint64_t total = 0;
-		for (const cdn::RawEntry &entry : PickerRaw) {
+		for (const engine::assets::RawEntry &entry : PickerRaw) {
 			total += entry.Bytes;
 		}
 
@@ -835,9 +836,9 @@ namespace studio {
 		//
 		// The filter is applied first so the clipper counts what is actually
 		// drawn - a clipper over the unfiltered list would leave gaps.
-		std::vector<const cdn::RawEntry *> shown;
+		std::vector<const engine::assets::RawEntry *> shown;
 		shown.reserve(PickerRaw.size());
-		for (const cdn::RawEntry &entry : PickerRaw) {
+		for (const engine::assets::RawEntry &entry : PickerRaw) {
 			int score = 0;
 			if (FuzzyMatch(AssetFilter, entry.Original, score)) {
 				shown.push_back(&entry);
@@ -857,7 +858,7 @@ namespace studio {
 
 		while (clipper.Step()) {
 			for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; row++) {
-				const cdn::RawEntry &entry = *shown[static_cast<size_t>(row)];
+				const engine::assets::RawEntry &entry = *shown[static_cast<size_t>(row)];
 
 				ImGui::TableNextRow();
 
@@ -895,7 +896,8 @@ namespace studio {
 		ImGui::EndTable();
 	}
 
-	void Editor::SortRaw(std::vector<const cdn::RawEntry *> &rows, const ImGuiTableSortSpecs *specs) {
+	void
+	Editor::SortRaw(std::vector<const engine::assets::RawEntry *> &rows, const ImGuiTableSortSpecs *specs) {
 		if (specs == nullptr || specs->SpecsCount == 0) {
 			return;
 		}
@@ -906,7 +908,9 @@ namespace studio {
 			const bool ascending = spec.SortDirection == ImGuiSortDirection_Ascending;
 
 			std::stable_sort(
-				rows.begin(), rows.end(), [&](const cdn::RawEntry *left, const cdn::RawEntry *right) {
+				rows.begin(),
+				rows.end(),
+				[&](const engine::assets::RawEntry *left, const engine::assets::RawEntry *right) {
 					bool less = false;
 					switch (spec.ColumnIndex) {
 					case 1:
@@ -931,9 +935,9 @@ namespace studio {
 	}
 
 	void Editor::RefreshStoreContents() {
-		const cdn::LocalPaths paths = cdn::DefaultLocalPaths();
-		PickerRaw = cdn::RawContents(paths);
-		PickerContents = cdn::PublishedContents(paths);
+		const engine::assets::LocalPaths paths = engine::assets::DefaultLocalPaths();
+		PickerRaw = engine::assets::RawContents(paths);
+		PickerContents = engine::assets::PublishedContents(paths);
 
 		// **Built from the configured sources rather than from this machine's
 		// store alone.** The store is one of those sources - the default list's
@@ -952,8 +956,8 @@ namespace studio {
 	}
 
 	void Editor::ImportAssetPath(const std::string &given) {
-		const cdn::LocalPaths paths = cdn::DefaultLocalPaths();
-		if (!cdn::EnsureLocalStore(paths)) {
+		const engine::assets::LocalPaths paths = engine::assets::DefaultLocalPaths();
+		if (!engine::assets::EnsureLocalStore(paths)) {
 			AssetStatus = "could not create the content store";
 			return;
 		}
@@ -968,7 +972,7 @@ namespace studio {
 		const uint64_t now = NowSeconds();
 
 		const auto take = [&](const std::filesystem::path &file) {
-			const auto report = cdn::ImportFile(paths, file, now);
+			const auto report = engine::assets::ImportFile(paths, file, now);
 			if (!report.has_value()) {
 				failures++;
 				return;
@@ -1069,7 +1073,7 @@ namespace studio {
 			return;
 		}
 
-		const cdn::LocalPaths paths = cdn::DefaultLocalPaths();
+		const engine::assets::LocalPaths paths = engine::assets::DefaultLocalPaths();
 		const auto report = cdn::PublishLocal(paths, *signing, NowSeconds());
 		if (!report.has_value()) {
 			AssetStatus = "the publish failed - see the output panel";

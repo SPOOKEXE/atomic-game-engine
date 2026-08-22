@@ -2,12 +2,12 @@
 
 // A monotonic deadline for presentation, independent of the update loop.
 //
-// @client
+// @tier L12 · client
 
 #include <chrono>
 #include <cstdint>
 
-namespace client {
+namespace engine::render {
 
 	// Limits presentation without limiting simulation.
 	//
@@ -33,6 +33,11 @@ namespace client {
 		//
 		// Missed intervals are dropped rather than replayed in a burst.
 		void Consume(TimePoint now);
+
+		// Time remaining before the next presentation opportunity.
+		//
+		// Zero means unlimited, not started, or already due.
+		Clock::duration Remaining(TimePoint now) const;
 
 		// The configured rate, or zero when every update is due.
 		uint32_t Rate() const {

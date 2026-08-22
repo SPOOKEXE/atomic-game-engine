@@ -1,12 +1,12 @@
 #include <engine/assets/Texture.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/render/EditableImages.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/scene/EditableImage.hpp>
 
-#include <client/EditableImages.hpp>
 #include <cstring>
 
-namespace client {
+namespace engine::render {
 
 	engine::assets::TextureData BuildTextureData(const engine::scene::EditableImage &image) {
 		engine::assets::TextureData built;

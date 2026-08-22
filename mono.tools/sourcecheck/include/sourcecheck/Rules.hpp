@@ -146,7 +146,7 @@ namespace sourcecheck {
 	// **Catches** `Id()` inside the arguments of a call whose name begins
 	// `Write`, `Encode`, `Serialise`, `Serialize`, `Emit` or `Put`; a
 	// `sizeof(...Name...)` inside one of those, which is the object-representation
-	// write that produced the `client::DrawList` failure at v0.7; and
+	// write that produced the `engine::render::DrawList` failure at v0.7; and
 	// `Name::FromId` fed from a `Read` call, which is the same violation on the
 	// way back in.
 	//

@@ -19,6 +19,7 @@
 // sentence, and none of them is drawn as an empty table.
 
 #include <engine/assets/ChunkStore.hpp>
+#include <engine/assets/LocalStore.hpp>
 #include <engine/assets/Signature.hpp>
 #include <engine/net/Endpoint.hpp>
 #include <engine/testing/Suite.hpp>
@@ -29,7 +30,6 @@
 #include <array>
 #include <atomic>
 #include <cdn/ContentRoot.hpp>
-#include <cdn/LocalStore.hpp>
 #include <cdn/Origin.hpp>
 #include <cdn/Publisher.hpp>
 #include <cdn/Service.hpp>
@@ -113,10 +113,10 @@ TEST_CASE("a fresh install starts with the store on this machine", "[studio][con
 
 	// **A key by default, which the comment here used to forbid.** "Defaulting
 	// one would be defaulting who this editor believes" is still true and is
-	// exactly why this one is `cdn::DevelopmentSigningKey`'s public half: it
+	// exactly why this one is `engine::assets::DevelopmentSigningKey`'s public half: it
 	// believes the store this machine publishes to, which is the folder on the
 	// row above it. Pointing a row anywhere else means supplying the real key -
-	// see `cdn/LocalStore.hpp` for where that stops.
+	// see `engine/assets/LocalStore.hpp` for where that stops.
 	CHECK_FALSE(sources.PublisherKey.empty());
 }
 
@@ -359,12 +359,12 @@ TEST_CASE("a fresh editor can fetch from the store on this machine", "[studio][c
 
 	// The store this machine's client publishes to and reads from, first.
 	CHECK(settings.Usable().front().Kind == engine::delivery::SourceKind::Directory);
-	CHECK(settings.Usable().front().Location == cdn::DefaultLocalPaths().Processed.string());
+	CHECK(settings.Usable().front().Location == engine::assets::DefaultLocalPaths().Processed.string());
 
 	// **The key that can verify it.** Trusting the development identity is what
 	// makes the local folder usable with nothing typed; it verifies only what
 	// this editor publishes, and any other origin needs the real one.
-	CHECK(sources.PublisherKey == cdn::DevelopmentPublisher().ToHex());
+	CHECK(sources.PublisherKey == engine::assets::DevelopmentPublisher().ToHex());
 }
 
 TEST_CASE("the remote row is kept and turned off", "[studio][content]") {

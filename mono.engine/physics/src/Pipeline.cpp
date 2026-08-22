@@ -148,7 +148,7 @@ namespace engine::physics {
 	void RegisterPhysicsSystems(ecs::Scheduler &scheduler) {
 		// **A mesh a script built this tick has no collision shape until
 		// something bakes one**, and this is where that happens for every host
-		// that solves. `client::EditableMeshUploader` hands a run-time mesh to
+		// that solves. `engine::render::EditableMeshUploader` hands a run-time mesh to
 		// the renderer and registers nothing with `scene::CollisionShapes`, so
 		// a `MeshPart` naming one fell back to colliding as its own bound - a
 		// box the size of the whole thing, which a character standing on a

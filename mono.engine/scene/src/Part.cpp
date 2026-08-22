@@ -1911,7 +1911,7 @@ namespace engine::scene {
 
 				// **On the class for `SurfaceAppearance`'s reason, and never
 				// replicated for `LocalTransparency`'s own.** Four bytes on
-				// every part, in exchange for `client::CollectInstances`
+				// every part, in exchange for `engine::render::CollectInstances`
 				// reading it as a plain column rather than a per-row join.
 				ecs::Components::Of<LocalTransparency>(),
 

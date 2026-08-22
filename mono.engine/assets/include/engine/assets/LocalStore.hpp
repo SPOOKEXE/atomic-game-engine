@@ -6,10 +6,10 @@
 // it, content only existed if somebody ran `assetc`, then `cdn --publish`, then
 // passed `--cdn dir:...` to the client - three steps and a path, every time, on
 // every machine. A test that wanted a texture had to do all three. So this is the
-// well-known place: `~/Documents/atomic-game-engine/cdn`, with two folders under
+// well-known place: `~/Documents/atomic-game-engine/cdn`, with three folders under
 // it, and every program looks there when nobody has said otherwise.
 //
-// ## The two folders, and why the split
+// ## The three folders, and why the split
 //
 // - **`raw/`** - what a person put in. A `.png`, a `.gltf`, a `.wav`, under its
 //   own name. This is the half a human reads and drags files into.
@@ -28,12 +28,11 @@
 // store held 231 PNGs, 12 BMPs, 6 PMX models and a GLB, and the engine could
 // read none of them.
 //
-// **Nothing here bakes, and that is deliberate.** `mono.cdn`'s link row is the
-// point of this member - `AGENTS.md` - and a baker is `Engine::bake`'s image and
-// model decoders, which is exactly the interpretation an origin must not do. So
-// this module owns the *path* and publishes whatever is in it; filling it is the
-// job of something that already links a baker, which today is `contentimport`
-// and the studio. Two callers, and both go through `assetc::Bake`.
+// **Nothing here bakes or publishes, and that is deliberate.** This module owns
+// the shared workspace layout and the operations that describe its files.
+// `Engine::bake` interprets source content, while `cdn::PublishLocal` applies
+// origin grouping and compression policy. The Studio and `contentimport`
+// compose those operations without making either policy part of the workspace.
 //
 // **The split is not tidiness, it is that the two have different identities.** A
 // raw file is identified by what somebody called it and changes when they edit
@@ -69,7 +68,6 @@
 #include <engine/assets/ContentHash.hpp>
 #include <engine/assets/Signature.hpp>
 
-#include <cdn/Publisher.hpp>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -78,7 +76,7 @@
 #include <string_view>
 #include <vector>
 
-namespace cdn {
+namespace engine::assets {
 
 	// Where the local store lives, and what it is called.
 	//
@@ -236,36 +234,6 @@ namespace cdn {
 	//         empty.
 	std::optional<ImportReport>
 	ImportFile(const LocalPaths &paths, const std::filesystem::path &source, uint64_t seconds);
-
-	// Publishes everything in `baked/` into `processed/`.
-	//
-	// **`baked/` and not `raw/`, which is the correction v0.10 made.** A raw
-	// tree published straight through hands a client bytes no runtime reads -
-	// see the header. Whatever filled `baked/` decides what is in it; this
-	// publishes a directory it did not create.
-	//
-	// **An empty `baked/` beside a full `raw/` is refused rather than published
-	// as nothing.** That is the exact state a store is in the first time this
-	// runs after the upgrade, and publishing an empty manifest over a working
-	// one would look like the store had been emptied.
-	//
-	// A thin wrapper over `cdn::Publish` that supplies the two paths and writes
-	// the log line. **The signing key is the caller's**, because a store on disk
-	// has no business holding one - `assets::Signature` is the whole reason a
-	// manifest is trustworthy and a key beside the content it signs is a key that
-	// signs anything anybody drops there.
-	//
-	// @param paths    The store.
-	// @param signing  The key to sign the manifest with.
-	// @param seconds  The time to log it at.
-	// @param settings How to chunk and group.
-	// @return The publish report, or nothing when it failed.
-	std::optional<PublishReport> PublishLocal(
-		const LocalPaths &paths,
-		const engine::assets::SigningKey &signing,
-		uint64_t seconds,
-		const PublishSettings &settings = {}
-	);
 
 	// One file sitting in `raw/`, waiting to be published.
 	//

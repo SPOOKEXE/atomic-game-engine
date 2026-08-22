@@ -3,10 +3,9 @@
 // From `scene::EditableImage`'s raw pixels to `render::TextureTable`, the
 // conversion `scene` cannot make itself.
 //
-// **`client::EditableMeshUploader`'s exact shape, one dimension down** - see
-// that header for the full argument, which applies here unchanged: the two
-// halves meet in `client` because that is the one tier that may link both
-// `scene` and `assets`.
+// **`EditableMeshUploader`'s exact shape, one dimension down.** The render
+// module already owns both device tables and is the lowest client-tier layer
+// allowed to combine scene rows with baked asset layouts.
 //
 // @tier L12 · client
 
@@ -31,11 +30,11 @@ namespace engine::scene {
 	struct EditableImage;
 }
 
-namespace client {
+namespace engine::render {
 	// Converts the raw pixel buffer into the format `render::TextureTable`
 	// takes.
 	//
-	// **Free and device-free**, `client::BuildMeshData`'s own reason: the
+	// **Free and device-free**, `BuildMeshData`'s own reason: the
 	// layouts already agree byte for byte, so this is a copy rather than a
 	// conversion, and it is the half worth testing without a GPU.
 	//

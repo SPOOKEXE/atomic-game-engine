@@ -719,6 +719,7 @@ namespace engine::effects {
 		// is the same reason `ActiveCamera` names an entity rather than being
 		// searched for.
 		system->Statistics.EmittersRefused = 0;
+		bool layoutChanged = false;
 
 		// Mark every block unclaimed, then let the walk claim them back. A block
 		// still unclaimed at the end belonged to an emitter that has died.
@@ -736,6 +737,7 @@ namespace engine::effects {
 			EmitterBlock &block = system->Blocks[index];
 			if (block.Capacity > 0) {
 				system->Free.emplace_back(block.First, block.Capacity);
+				layoutChanged = true;
 			}
 			block.Capacity = 0;
 			block.Live = 0;
@@ -757,6 +759,7 @@ namespace engine::effects {
 
 			slot->Enabled = emitter.Enabled;
 			slot->Configured = true;
+			layoutChanged = true;
 
 			if (slot->Index == NO_SLOT || slot->Index >= system->Blocks.size()) {
 				return;
@@ -953,6 +956,7 @@ namespace engine::effects {
 					system->Blocks.push_back(block);
 					system->FrameParents.push_back(parent);
 				}
+				layoutChanged = true;
 			});
 		}
 
@@ -975,6 +979,7 @@ namespace engine::effects {
 				// row did not, so the walk above and the memory under it grew
 				// with every effect the game had ever played.
 				system->FreeSlots.push_back(static_cast<uint32_t>(index));
+				layoutChanged = true;
 			}
 			if (block.Capacity > 0) {
 				live++;
@@ -982,6 +987,9 @@ namespace engine::effects {
 		}
 
 		system->Statistics.Blocks = static_cast<uint32_t>(live);
+		if (layoutChanged) {
+			system->LayoutRevision++;
+		}
 		return live;
 	}
 
@@ -1056,6 +1064,46 @@ namespace engine::effects {
 			}
 			return velocity.Unit() * maximum;
 		}
+
+		void CompactPendingBirths(ParticleSystem &system) {
+			const size_t capacity = system.Capacity;
+			const size_t residentRows = system.Used;
+			if (capacity == 0 || residentRows == 0 || system.Births.size() <= residentRows * 2) {
+				return;
+			}
+
+			// A hidden or low-rate presentation can leave several simulation ticks
+			// queued. Bound that queue by rows actually assigned to emitters, not
+			// the mostly empty global pool. Only the newest birth for a ring row
+			// matters, so compact in place before the queue can grow with wall time.
+			static thread_local std::vector<uint32_t> seen;
+			static thread_local uint32_t pass = 0;
+			seen.resize(capacity);
+			pass++;
+			if (pass == 0) {
+				std::fill(seen.begin(), seen.end(), 0);
+				pass = 1;
+			}
+
+			// Walk backwards so the first record seen for a row is its newest.
+			// Survivors are written into the already-visited tail, then moved down
+			// once. The stamp avoids clearing a pool-sized table on every compaction.
+			size_t firstKept = system.Births.size();
+			for (size_t index = system.Births.size(); index > 0; index--) {
+				const ParticleBirth birth = system.Births[index - 1];
+				if (birth.Row >= capacity || seen[birth.Row] == pass) {
+					continue;
+				}
+				seen[birth.Row] = pass;
+				system.Births[--firstKept] = birth;
+			}
+			std::move(
+				system.Births.begin() + static_cast<std::ptrdiff_t>(firstKept),
+				system.Births.end(),
+				system.Births.begin()
+			);
+			system.Births.resize(system.Births.size() - firstKept);
+		}
 	}
 
 	ParticleStatistics StepParticles(ecs::Store &store, float delta) {
@@ -1065,6 +1113,10 @@ namespace engine::effects {
 		if (system == nullptr) {
 			return {};
 		}
+		if (system->DeviceStepped && system->BirthsPresentedRevision == system->PresentationRevision) {
+			system->Births.clear();
+		}
+		system->PresentationRevision++;
 
 		// **Released on the first device-stepped tick.** The device owns the pool
 		// and neither array is read on this side again: at the client's default
@@ -1087,6 +1139,7 @@ namespace engine::effects {
 		// incremented half a million times a frame is a cache line every worker
 		// fights over, and the sum is the same number either way.
 		std::vector<EmitterBlock> &blocks = system->Blocks;
+		const size_t carriedBirths = system->DeviceStepped ? system->Births.size() : 0;
 
 		// **Two spans, because the two halves answer to different things.**
 		// Ageing is proportional to particles *alive* and is parallel over
@@ -1358,7 +1411,7 @@ namespace engine::effects {
 					}
 
 					block.Idle = 0.0f;
-					plan.BirthAt = births;
+					plan.BirthAt = static_cast<uint32_t>(carriedBirths + births);
 					births += owed;
 
 					plans.push_back(plan);
@@ -1368,9 +1421,10 @@ namespace engine::effects {
 			// Sized once, after the walk that decided how many there are. The
 			// rows themselves are written by the workers below, each into its
 			// own run.
-			system->Births.clear();
 			if (system->DeviceStepped) {
-				system->Births.resize(births);
+				system->Births.resize(carriedBirths + births);
+			} else {
+				system->Births.clear();
 			}
 		}
 
@@ -1506,6 +1560,9 @@ namespace engine::effects {
 				},
 				SPAWN_MINIMUM
 			);
+		}
+		if (system->DeviceStepped) {
+			CompactPendingBirths(*system);
 		}
 
 		// Summed after the dispatch rather than during it, which is the reason

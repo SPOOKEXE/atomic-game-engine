@@ -159,7 +159,7 @@ TEST_CASE("no component carries unnamed padding", "[scene][components]") {
 	//
 	// **The second one is paid for on every part in the world**, including every
 	// plain `Part` that will never name a mesh, and that is the honest cost of
-	// keeping `client::CollectInstances` a batched walk over fixed columns: the
+	// keeping `engine::render::CollectInstances` a batched walk over fixed columns: the
 	// same trade `SurfaceAppearance` makes one component over. Four bytes an
 	// entity buys a fit rule with nothing to keep in step - see `Visual::Fitted`
 	// for why a bool would have been cheaper and wrong.

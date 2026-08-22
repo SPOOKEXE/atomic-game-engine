@@ -98,7 +98,7 @@ namespace {
 		}
 
 		const std::vector<DrawInstance> &Drawn() const {
-			return World.Resource<client::DrawList>()->Instances;
+			return World.Resource<engine::render::DrawList>()->Instances;
 		}
 	};
 }
@@ -124,7 +124,7 @@ TEST_CASE("the world holds the scene's state, not a scene object", "[demo]") {
 	// being serialised with the world.
 	REQUIRE(session.World.HasResource<WorldBounds>());
 	REQUIRE(session.World.HasResource<ActiveCamera>());
-	REQUIRE(session.World.HasResource<client::DrawList>());
+	REQUIRE(session.World.HasResource<engine::render::DrawList>());
 
 	// And the clock, which every store has from birth.
 	REQUIRE(session.World.Time().Tick == 0);

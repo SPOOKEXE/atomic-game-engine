@@ -215,7 +215,7 @@ namespace engine::effects {
 		}
 
 		// The pool is derived state and its serialisation says so by writing
-		// nothing - `client::DrawList`'s argument, applied to something far bigger.
+		// nothing - `engine::render::DrawList`'s argument, applied to something far bigger.
 		//
 		// A world's particles are its emitters plus one frame of simulation, and
 		// writing half a million of them into every save file would be storing an
@@ -269,7 +269,7 @@ namespace engine::effects {
 		// serialisation instead of writing bytes it cannot read back, so a world
 		// with a `RibbonBuffer` in it simply would not save - which is what
 		// `client/tests/Presentation.cpp` reported, in exactly the words
-		// `client::DrawList`'s own comment predicts for this mistake.
+		// `engine::render::DrawList`'s own comment predicts for this mistake.
 		//
 		// Nothing is written, for `DrawList`'s reason: the vertices are rebuilt by
 		// `BuildRibbons` in `PreRender` every frame before anything looks at them,

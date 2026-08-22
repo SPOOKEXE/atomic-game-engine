@@ -88,11 +88,10 @@ mono_add_library(studio
 		# the library and gets none of it.
 		Mono::nodegraph
 
-		# L10, `shared`. The content store this editor manages and lists.
-		# **Named here rather than taken transitively through `Mono::server`**,
-		# which is where it was arriving from: a dependency a file includes is
-		# one its build file should say out loud, and `src/Assets.cpp` includes
-		# `cdn/LocalStore.hpp` directly.
+		# `shared`. The origin policy used when the editor publishes its
+		# engine-owned local content workspace. Store paths, imports and listings
+		# live in `Engine::assets`; this dependency remains for grouping,
+		# compression and manifest publication through `cdn::PublishLocal`.
 		Mono::cdn
 
 		# The baker, so the asset picker can turn a raw file into something a
@@ -135,10 +134,9 @@ mono_add_library(studio
 		# includes is one its build file should say out loud.
 		Engine::gui
 
-		# The client's presentation seam: `client::InstallPresentation` and
-		# `client::DrawList`. **Reused rather than reimplemented** - a second
-		# draw-list collector would be a second answer to what a world hands its
-		# renderer, and the two would diverge the first time one was optimised.
+		# Client host orchestration used for Play and replica worlds. Rendering
+		# data, collection, upload and scheduling live in `Engine::render`; this
+		# edge remains for the client runtime composition and replication helpers.
 		Mono::client
 
 		# L11, `shared`. The HTTP client the assets panel asks an origin's

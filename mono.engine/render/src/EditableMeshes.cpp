@@ -1,15 +1,15 @@
 #include <engine/assets/Mesh.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/render/EditableMeshes.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/scene/EditableMesh.hpp>
 
 #include <algorithm>
-#include <client/EditableMeshes.hpp>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
-namespace client {
+namespace engine::render {
 
 	engine::assets::MeshData BuildMeshData(const engine::scene::EditableMesh &mesh) {
 		// **Built fresh from the raw arrays rather than kept incrementally**,

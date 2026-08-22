@@ -659,7 +659,7 @@ namespace engine::scene {
 	//
 	// **One description of a hole, for the three passes that need one.** A body
 	// walking through (`CrossPortals`), a body *half* through and therefore
-	// drawn on both sides (`client::CollectInstances`), and a body half through
+	// drawn on both sides (`engine::render::CollectInstances`), and a body half through
 	// and therefore standing on both floors (`physics::GhostPortalBodies`) are
 	// the same rectangle asked three questions. They disagreed the moment there
 	// were three copies of it, and what that looks like is a character that

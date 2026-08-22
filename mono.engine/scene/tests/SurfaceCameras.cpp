@@ -2210,7 +2210,7 @@ TEST_CASE("a point is on one side of a hole or the other", "[scene][surfacecamer
 	// straddles a plane and is cut by it; a spark is wholly in one space or the
 	// other, so it is *moved* through a hole rather than copied and cut. Drawing
 	// it in both places would be two sparks where the author authored one, and
-	// `client::CollectParticleBatches` is the caller this exists for - a torch
+	// `engine::render::CollectParticleBatches` is the caller this exists for - a torch
 	// carried into a doorway whose flame dies at the seam is the artefact.
 	//
 	// The geometry is this file's: pane A at the origin with its `Front` face at
@@ -2754,7 +2754,7 @@ TEST_CASE("a character standing in a hole is drawn on both sides of it", "[scene
 	(void)engine::scene::PoseCharacters(mirror.World);
 
 	// The draw list a collector would build from this world, which is what the
-	// pass reads. Built here by hand because `client::CollectInstances` is a
+	// pass reads. Built here by hand because `engine::render::CollectInstances` is a
 	// tier away and what is under test is the seam.
 	std::vector<engine::scene::DrawInstance> drawn;
 	mirror.World.Each<const Transform, const Bounds, const Visual, const engine::scene::Rendered>(

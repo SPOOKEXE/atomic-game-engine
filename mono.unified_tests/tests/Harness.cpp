@@ -366,7 +366,7 @@ TEST_CASE("a size changed after the join reaches what is drawn", "[unified]") {
 
 	// And it reached the draw list rather than only the store, which is the
 	// half `Report::Drawn` exists to separate.
-	const auto *drawList = harness.ClientWorld().Resource<client::DrawList>();
+	const auto *drawList = harness.ClientWorld().Resource<engine::render::DrawList>();
 	REQUIRE(drawList != nullptr);
 
 	bool drawn = false;

@@ -1103,24 +1103,10 @@ namespace engine::render {
 		// it is in.
 		lightUniforms = ToGpu(lights);
 
-		particleCount = 0;
-		ribbonCount = 0;
-		{
-			ENGINE_PROFILE_CAT("prepare particles", core::ProfileCategory::Render);
-			particleCount = graphEnabled(core::Name("transparent")) ? State->PrepareParticles(source) : 0;
-			result.Particles = particleCount;
-
-			ribbonCount = graphEnabled(core::Name("transparent")) ? State->PrepareRibbons(ribbonVertices) : 0;
-			result.RibbonVertices = ribbonCount;
-		}
-
-		// Only when something is actually waiting to go across. A panel redrawn
-		// ten times a second and presented a thousand times has nothing to
-		// upload on nine hundred and ninety of those frames.
-		uploadOverlay = haveOverlay && (State->OverlayUninitialised || overlay.UploadRegion().Width > 0);
-
-		// Timings and the frame result use authored node names. This is the
-		// execution record of the selected graph, not a second fixed pass list.
+		// Begin the device timeline before particle preparation because its copy,
+		// scatter and simulation now belong to this frame command buffer. The old
+		// standalone particle submission sat outside the frame's timestamp pool
+		// and made its device cost invisible.
 		if (State->BatchFirst || !State->BatchActive) {
 			State->CollectTimings();
 			State->WallTimings.clear();
@@ -1139,6 +1125,26 @@ namespace engine::render {
 		openedWall = std::chrono::steady_clock::now();
 		mainGpuWorkRecorded = State->BatchActive && !State->BatchFirst;
 		dedicatedComputeSubmitted = false;
+
+		particleCount = 0;
+		ribbonCount = 0;
+		{
+			ENGINE_PROFILE_CAT("prepare particles", core::ProfileCategory::Render);
+			const Impl::ParticlePreparation prepared =
+				graphEnabled(core::Name("transparent")) ? State->PrepareParticles(source, command, timingSlot)
+														: Impl::ParticlePreparation{};
+			particleCount = prepared.Count;
+			result.ComputeDispatches += prepared.Dispatches;
+			result.Particles = particleCount;
+
+			ribbonCount = graphEnabled(core::Name("transparent")) ? State->PrepareRibbons(ribbonVertices) : 0;
+			result.RibbonVertices = ribbonCount;
+		}
+
+		// Only when something is actually waiting to go across. A panel redrawn
+		// ten times a second and presented a thousand times has nothing to
+		// upload on nine hundred and ninety of those frames.
+		uploadOverlay = haveOverlay && (State->OverlayUninitialised || overlay.UploadRegion().Width > 0);
 
 		// --- shadow pass ----------------------------------------------------
 		//
@@ -2043,7 +2049,7 @@ namespace engine::render {
 			// textures. The fences below therefore move to that second buffer.
 			if (!State->SubmitSceneCommand(command)) {
 				ENGINE_ERROR("SDL_SubmitGPUCommandBuffer: {}", SDL_GetError());
-				State->CompleteInstanceUploads(false);
+				State->CompleteResidentUploads(false);
 				State->Timestamps.Abandon(timingSlot);
 				if (timingSlot < VulkanTimestamps::SLOTS) {
 					State->PendingMarks[timingSlot].clear();
@@ -2054,7 +2060,7 @@ namespace engine::render {
 				State->DropDownloads();
 				return;
 			}
-			State->CompleteInstanceUploads(true);
+			State->CompleteResidentUploads(true);
 
 			if (SDL_GPUCommandBuffer *downloads = State->DownloadCommand; downloads != nullptr) {
 				State->DownloadCommand = nullptr;

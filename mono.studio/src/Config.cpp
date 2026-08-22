@@ -125,7 +125,7 @@ namespace studio {
 
 		// `create_directories` reports "already there" as `false` with no error,
 		// which is why the error code rather than the return value decides -
-		// the same reading `cdn::EnsureLocalStore` makes.
+		// the same reading `engine::assets::EnsureLocalStore` makes.
 		std::filesystem::create_directories(Root(), failed);
 		if (failed) {
 			ENGINE_ERROR("studio config: could not create {}: {}", Root().string(), failed.message());

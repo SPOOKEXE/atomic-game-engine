@@ -818,7 +818,8 @@ namespace studio {
 			if (Presentations.Rate() != presentationRate) {
 				Presentations.SetRate(presentationRate);
 			}
-			const bool presentationDue = Presentations.Due(client::PresentationSchedule::Clock::now());
+			const bool presentationDue =
+				Presentations.Due(engine::render::PresentationSchedule::Clock::now());
 
 			// **Acquisition comes first, and that is the whole of the input-latency
 			// fix.** `Renderer::Render` blocks the better part of a frame waiting
@@ -891,7 +892,7 @@ namespace studio {
 			if (renderingActive) {
 				Present(PresentationDeltaSeconds);
 				PresentationDeltaSeconds = 0.0f;
-				Presentations.Consume(client::PresentationSchedule::Clock::now());
+				Presentations.Consume(engine::render::PresentationSchedule::Clock::now());
 			}
 
 			engine::core::FrameGraph::EndFrame();
@@ -2023,7 +2024,7 @@ namespace studio {
 		// a texture nothing samples, and a surface pass paid for every frame the
 		// panel is empty.
 		Surfaces.clear();
-		Particles.Clear();
+		bool particleFrameCollected = false;
 		RibbonVertices.clear();
 		RibbonRuns.clear();
 		Lights.clear();
@@ -2036,7 +2037,7 @@ namespace studio {
 				// service changes this viewport on the same frame.
 				Renderer.SetLighting(engine::scene::LightingOf(store));
 
-				if (const auto *list = store.Resource<client::DrawList>()) {
+				if (const auto *list = store.Resource<engine::render::DrawList>()) {
 					// Copied out rather than borrowed. The renderer's call
 					// happens outside `Enter`, and a span into a store nobody
 					// is inside is a pointer across a boundary that rule 3
@@ -2088,7 +2089,8 @@ namespace studio {
 					// A block is a few hundred bytes against the twenty-eight a
 					// particle was, so this copies a couple of megabytes where it
 					// used to copy sixteen.
-					(void)client::CollectParticleBatches(store, Particles);
+					(void)engine::render::CollectParticleBatches(store, Particles);
+					particleFrameCollected = true;
 					Particles.Detach();
 
 					const std::span<const engine::effects::RibbonVertex> vertices =
@@ -2104,7 +2106,7 @@ namespace studio {
 					// and a world may hold any number; which sixteen is a scene
 					// question and distance is the answer that is right more
 					// often than it is wrong.
-					(void)client::CollectLights(store, eye.Position, Lights);
+					(void)engine::render::CollectLights(store, eye.Position, Lights);
 				}
 
 				// **How deep this world's mirrors go, pushed with the world that
@@ -2204,11 +2206,14 @@ namespace studio {
 				}
 
 				if (PipelineSelected.find(visual.Index) == PipelineSelected.end()) {
-					PipelineSelected[visual.Index] = client::InstallRenderingProfiles(
+					PipelineSelected[visual.Index] = engine::render::InstallWorldPipeline(
 						RenderingProfiles, Renderer, visual.Index, selectedProfile
 					);
 				}
 			});
+		}
+		if (!particleFrameCollected) {
+			Particles.Clear();
 		}
 
 		if (shown.IsValid()) {
@@ -2233,7 +2238,7 @@ namespace studio {
 				}
 
 				if (shown != visual) {
-					if (const auto *list = store.Resource<client::DrawList>()) {
+					if (const auto *list = store.Resource<engine::render::DrawList>()) {
 						ENGINE_PROFILE_CAT("merge client visuals", engine::core::ProfileCategory::Render);
 						AppendReplicaVisualInstances(
 							Universe->NameOf(shown), list->Instances, DrawnInstances
@@ -2248,7 +2253,7 @@ namespace studio {
 			// **The far world draws itself first, and this is the step that was
 			// missing.** `Universe::Present` is what runs `PreRender`, and
 			// `PreRender` is where `collect-instances` builds a world's
-			// `client::DrawList` - so a world builds a draw list exactly when
+			// `render::DrawList` - so a world builds a draw list exactly when
 			// somebody presents it, and until now the only world presented for a
 			// panel was the one the panel shows.
 			//
@@ -2329,6 +2334,8 @@ namespace studio {
 		view.Particles = Particles.Batches;
 		view.ParticleBirths = Particles.Births;
 		view.ParticleSeams = Particles.Seams;
+		view.ParticleRevision = Particles.Revision;
+		view.ParticleLayoutRevision = Particles.LayoutRevision;
 		view.ParticlePool = Particles.Pool;
 		view.ParticleBlocks = Particles.BlockCount;
 		// Every surface and nested camera in this render reads the same prepared

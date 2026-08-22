@@ -6,6 +6,9 @@ mono_add_library(render
 		Engine::core
 		Engine::parallel
 
+		# WorldPresentation is the shared world-to-renderer boundary.
+		Engine::ecs
+
 		# Scene data and culling decisions are shared with headless hosts.
 		Engine::graph
 

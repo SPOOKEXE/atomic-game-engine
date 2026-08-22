@@ -472,7 +472,7 @@ namespace unified {
 		return transform == nullptr ? 0.0f : transform->Frame.Position.X;
 	}
 
-	float Crossing::DrawnPositionOf(const client::DrawList &drawList, Entity entity) {
+	float Crossing::DrawnPositionOf(const engine::render::DrawList &drawList, Entity entity) {
 		size_t ordinal = 0;
 		bool found = false;
 
@@ -769,7 +769,7 @@ namespace unified {
 				Client.SetFrame(static_cast<float>(1.0 / (Options.TickRate * Options.FramesPerTick)), 0.0f);
 				ClientSystems.RunPhases(Client, Phase::PreRender, Phase::PreRender);
 
-				const auto *drawList = Client.Resource<client::DrawList>();
+				const auto *drawList = Client.Resource<engine::render::DrawList>();
 				report.Drawn = drawList == nullptr ? 0 : drawList->Instances.size();
 
 				// DrawList has no entity id; resolve the probe by traversal ordinal.

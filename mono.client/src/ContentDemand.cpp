@@ -22,7 +22,7 @@ namespace client {
 		// This runs on the content pump and not in the frame - it answers "is
 		// there anything new to ask for", which changes when a scene is authored
 		// or streamed rather than every tick - so the constant factor is not
-		// where the cost is. `client::CollectInstances` is the loop that needed
+		// where the cost is. `engine::render::CollectInstances` is the loop that needed
 		// the batched form and it is a different loop.
 		store.Each<engine::scene::Visual>([&out](engine::ecs::Entity, engine::scene::Visual &visual) {
 			Want(out, visual.Mesh);

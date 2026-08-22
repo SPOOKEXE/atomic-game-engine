@@ -29,7 +29,7 @@
 // `ResolveMaterials` walks every `MaterialRef` row, looks its asset up in the
 // world's `MaterialCatalogue`, and writes the resulting texture name into the
 // **parent's** `SurfaceAppearance::ColourMap`. That is the field the draw-list
-// pass already reads - `client::CollectInstances` is a batched parallel loop
+// pass already reads - `engine::render::CollectInstances` is a batched parallel loop
 // over a fixed signature, and a child lookup is precisely what that shape cannot
 // express, which is the same wall `SurfaceAppearance`'s own comment hits.
 //

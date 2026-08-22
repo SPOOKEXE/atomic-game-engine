@@ -1,8 +1,5 @@
 #include <engine/assets/Builtin.hpp>
-#include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
-#include <engine/core/Metrics.hpp>
-#include <engine/core/Profiling.hpp>
 #include <engine/core/Random.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
@@ -12,9 +9,6 @@
 #include <engine/effects/Ribbon.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/game/CollisionContent.hpp>
-#include <engine/graph/PipelineCatalogue.hpp>
-#include <engine/graph/PipelineDocument.hpp>
-#include <engine/parallel/Jobs.hpp>
 #include <engine/physics/Characters.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/physics/Query.hpp>
@@ -37,8 +31,6 @@
 #include <algorithm>
 #include <client/Scene.hpp>
 #include <cmath>
-#include <format>
-#include <numbers>
 #include <span>
 
 namespace client {
@@ -51,17 +43,10 @@ namespace client {
 	using engine::ecs::Phase;
 	using engine::ecs::Scheduler;
 	using engine::ecs::Store;
+	using engine::render::DrawList;
 	using engine::scene::ActiveCamera;
-	using engine::scene::Bounds;
-	using engine::scene::CharacterLimb;
 	using engine::scene::DrawInstance;
-	using engine::scene::LocalTransparency;
-	using engine::scene::PreviousTransform;
-	using engine::scene::Rendered;
-	using engine::scene::SurfaceAppearance;
-	using engine::scene::Tags;
 	using engine::scene::Transform;
-	using engine::scene::Visual;
 	using engine::scene::WorldBounds;
 
 	namespace {
@@ -183,336 +168,6 @@ namespace client {
 			(void)engine::scene::AimSurfaceCameras(store);
 		}
 
-		// The smallest run of instances worth handing to another worker.
-		//
-		// **Reasoned by analogy and not measured, which is the whole of what is
-		// known about it.** The number it is copied from is
-		// `physics::INTEGRATE_GRAIN`, and the analogy is close enough to be worth
-		// making: that body carries a whole `core::CFrame` per row through a
-		// quaternion product and a normalise, and this one carries two through an
-		// `NLerp` - the same shape of arithmetic, the same reciprocal square
-		// root, over roughly three times the bytes. `Integrate.hpp` measures its
-		// crossover at 8,000 rows, and 1024 puts this loop's floor at the same
-		// 8192.
-		//
-		// **What it replaces is the default, and the default was certainly
-		// wrong.** `Jobs::DEFAULT_GRAIN` is calibrated for three float adds per
-		// row; taking it put this loop's floor at 32,768 instances, so a scene of
-		// twenty thousand parts ran the whole draw list on one thread - the exact
-		// failure `Integrate.hpp` records for the same reason, where the default
-		// cost 73.5 us against 27.3 us for a dispatch it declined to make. Being
-		// approximately right beats being precisely calibrated for somebody
-		// else's body.
-		//
-		// **1024 rather than the 512 the analogy would also allow**, because a
-		// range is not free: `engine.parallel.bench.dispatch` fits the handover at
-		// about 6.2 us to wake the pool plus 0.19 us a range, and `Integrate.hpp`
-		// measured 9 to 18 per cent lost above the floor when its grain was the
-		// narrower one. Halving the grain doubles the ranges to buy a floor this
-		// loop has no measurement for.
-		//
-		// **`engine.ecs.bench.iteration` is the suite that would settle it**, over
-		// this body rather than over three float adds, laddering either side of
-		// 8192. Until that exists this constant is an estimate, and a reading that
-		// disagrees with it should win.
-		constexpr size_t DRAW_LIST_GRAIN = 1024;
-
-		// The one phase that turns simulation state into something to draw. It
-		// reads the simulation and writes only the draw list, which is what
-		// "PreRender never mutates simulation state" means in practice.
-		void CollectInstances(Store &store) {
-			const float alpha = store.Time().Alpha;
-
-			auto *drawList = store.ResourceMutable<DrawList>();
-
-			// Split into spans that cost nothing to separate.
-			//
-			// The counting, the sizing and the arithmetic are three different
-			// answers to "why is this system slow" - a cached query that is not
-			// as cached as it looks, a vector reallocating every frame, or the
-			// interpolation itself. One number covering all three cannot tell
-			// them apart.
-			//
-			// It stops here. Going finer means a scope *inside* the row loop,
-			// and a scope costs a clock read and a push - several times what a
-			// quaternion multiply costs. That measurement would be mostly of
-			// itself.
-			size_t matching = 0;
-			{
-				ENGINE_PROFILE_CAT("count entities", engine::core::ProfileCategory::Simulation);
-				matching = store.CountMatching<
-					Transform,
-					PreviousTransform,
-					Bounds,
-					Visual,
-					SurfaceAppearance,
-					Tags,
-					LocalTransparency,
-					Rendered>();
-			}
-
-			{
-				// Sized once, then written by index. The vector is not cleared
-				// first, so on a steady scene this is a no-op: the buffer is the
-				// size it already was, and no element is value-initialised only
-				// to be overwritten a moment later. A reading above zero here
-				// means the scene changed size or the capacity is being lost.
-				//
-				// The count is a floor rather than a contract - it comes from a
-				// different query than the one EachBatch walks, and this system
-				// does not get to assume the two agree. The batches decide the
-				// real size, and the shrink below settles it.
-				ENGINE_PROFILE_CAT("size draw list", engine::core::ProfileCategory::Simulation);
-				drawList->Instances.resize(matching);
-			}
-
-			size_t written = 0;
-			{
-				// Parallel, and this is the loop that earns it. The arithmetic
-				// stopped being the cost once the interpolation lost its
-				// transcendentals; what is left is a hundred and fifty bytes of
-				// traffic per entity, over half of it the instance being written.
-				// A memory-bound loop is the case where more threads means more
-				// loads in flight, so it is the one that crosses over soonest.
-				//
-				// **Which is why it passes `DRAW_LIST_GRAIN` and stopped taking
-				// the default.** This paragraph and a dispatch floor of 32,768
-				// instances contradicted each other for as long as both were
-				// here, and the floor was the one winning.
-				//
-				// Each slice is told where its rows land in the output, so the
-				// workers never touch the same bytes and the array comes out in
-				// the same order every frame. No atomic, no locking, no
-				// frame-to-frame reshuffling of the draw list.
-				ENGINE_PROFILE_CAT("interpolate", engine::core::ProfileCategory::Simulation);
-
-				// Taken once, outside. A worker cannot grow the vector - that is
-				// a reallocation under every other worker's feet - so the buffer
-				// is sized before the loop starts and the body writes into it.
-				DrawInstance *const out = drawList->Instances.data();
-				const size_t capacity = drawList->Instances.size();
-
-				// **`Rendered` is in the signature and nothing reads it**, which
-				// is the point of a tag: it is a term in the query, so the
-				// archetype walk never reaches a row that has not been marked as
-				// a visible descendant of `Workspace`. A branch here could not
-				// have done the same job - this loop writes `out[first + row]`
-				// so that no two workers touch the same bytes, and skipping a
-				// row would leave a hole in the draw list and make `written` a
-				// lie. `scene/Visibility.hpp` has the whole argument.
-				// **`SurfaceAppearance` and `Tags` are columns rather than an
-				// optional join**, which is the whole reason both live on
-				// `BasePart` rather than on `MeshPart`. A batched parallel walk
-				// is handed fixed columns; a component that only some rows had
-				// could not be read here without splitting the query.
-				// **One writer, two walks.** A limb has to carry the rig it
-				// belongs to - see `DrawInstance::Rig`, which is what lets a
-				// portal cut a character in one piece instead of a dozen times -
-				// and `CharacterLimb` is on some drawable rows and not others.
-				// A batched parallel walk has no optional join, so the query is
-				// split on the component instead
-				// and each half is a walk with a required column list. Every
-				// other field is written by the same function in both.
-				const auto write = [out, capacity, alpha](
-									   size_t base,
-									   size_t first,
-									   size_t rows,
-									   const Entity *entities,
-									   const Transform *transforms,
-									   const PreviousTransform *previous,
-									   const Bounds *bounds,
-									   const Visual *visuals,
-									   const SurfaceAppearance *appearances,
-									   const Tags *tags,
-									   const LocalTransparency *locals,
-									   const CharacterLimb *limbs
-								   ) {
-					// The count came from a different query than the one being
-					// walked. They agree, and this is what happens if they ever
-					// stop: instances go missing and the number on the panel
-					// drops, rather than a worker writing past the end of the
-					// buffer.
-					const size_t at = base + first;
-					if (at >= capacity) {
-						return;
-					}
-					rows = std::min(rows, capacity - at);
-
-					for (size_t row = 0; row < rows; row++) {
-						// Interpolated, not the tick position. At 300 fps
-						// against a 60 Hz tick, drawing tick positions shows
-						// each one five times and then jumps - which reads as
-						// a frame-rate problem rather than as a tick-rate one.
-						//
-						// NLerp, not Lerp. The endpoints are one simulation
-						// tick apart - a few degrees at most - and over an arc
-						// that short the two agree to well inside a pixel.
-						// Lerp's constant angular speed costs an acos and
-						// three sin calls per entity, which on this loop was
-						// the single most expensive thing in the frame.
-						//
-						// A `CFrame` and a half-extent, not a matrix: this is
-						// what the world knows, and `render` is what turns it
-						// into something a GPU binds.
-						//
-						// The fields come from `scene::MakeDrawInstance`, which
-						// is the only place that list is written - the
-						// replicated collector fills the same row from a
-						// snapshot. Both components are required columns of
-						// *this* query, so the addresses are always good.
-						out[at + row] = engine::scene::MakeDrawInstance(
-							previous[row].Frame.NLerp(transforms[row].Frame, alpha),
-							bounds[row],
-							visuals[row],
-							&appearances[row],
-							&tags[row],
-							entities[row].Id,
-							&locals[row],
-							limbs == nullptr ? nullptr : &limbs[row]
-						);
-					}
-				};
-
-				const size_t loose = store
-										 .Query<
-											 const Transform,
-											 const PreviousTransform,
-											 const Bounds,
-											 const Visual,
-											 const SurfaceAppearance,
-											 const Tags,
-											 const LocalTransparency>()
-										 .With<Rendered>()
-										 .Without<CharacterLimb>()
-										 .EachBatchEntitiesParallel(
-											 [&write](
-												 size_t first,
-												 size_t rows,
-												 const Entity *entities,
-												 const Transform *transforms,
-												 const PreviousTransform *previous,
-												 const Bounds *bounds,
-												 const Visual *visuals,
-												 const SurfaceAppearance *appearances,
-												 const Tags *tags,
-												 const LocalTransparency *locals
-											 ) {
-												 write(
-													 0,
-													 first,
-													 rows,
-													 entities,
-													 transforms,
-													 previous,
-													 bounds,
-													 visuals,
-													 appearances,
-													 tags,
-													 locals,
-													 nullptr
-												 );
-											 },
-											 DRAW_LIST_GRAIN
-										 );
-
-				// After the loose rows, so the two halves cannot overlap. Their
-				// order relative to each other is not a promise anything reads -
-				// `EachBatch` already says a batch boundary is not a unit
-				// anybody declared - and within each half it is as deterministic
-				// as it was.
-				const size_t rigged = store
-										  .Query<
-											  const Transform,
-											  const PreviousTransform,
-											  const Bounds,
-											  const Visual,
-											  const SurfaceAppearance,
-											  const Tags,
-											  const LocalTransparency,
-											  const CharacterLimb>()
-										  .With<Rendered>()
-										  .EachBatchEntitiesParallel(
-											  [&write, loose](
-												  size_t first,
-												  size_t rows,
-												  const Entity *entities,
-												  const Transform *transforms,
-												  const PreviousTransform *previous,
-												  const Bounds *bounds,
-												  const Visual *visuals,
-												  const SurfaceAppearance *appearances,
-												  const Tags *tags,
-												  const LocalTransparency *locals,
-												  const CharacterLimb *limbs
-											  ) {
-												  write(
-													  loose,
-													  first,
-													  rows,
-													  entities,
-													  transforms,
-													  previous,
-													  bounds,
-													  visuals,
-													  appearances,
-													  tags,
-													  locals,
-													  limbs
-												  );
-											  },
-											  DRAW_LIST_GRAIN
-										  );
-
-				written = loose + rigged;
-			}
-
-			{
-				ENGINE_PROFILE_CAT("publish draw list", engine::core::ProfileCategory::Simulation);
-
-				// Whatever the count said, this is how many there are. Shrinking
-				// a vector writes nothing and keeps the capacity, so the frame
-				// after an entity is destroyed still does not allocate.
-				drawList->Instances.resize(std::min(written, drawList->Instances.size()));
-
-				engine::core::Metrics::Count(
-					"render.instances", static_cast<double>(drawList->Instances.size())
-				);
-			}
-
-			// **After the metric, deliberately.** `render.instances` answers
-			// "how much scene is there", and a number that moved when somebody
-			// turned a debugging aid on would stop being comparable across the
-			// runs it exists to compare.
-			//
-			// The markers are appended rather than written by the loop above
-			// because they are not entities: nothing in the world matches the
-			// query, so there is no row to size the list against. `push_back`
-			// past the shrink costs one reallocation on the frame a mirror is
-			// created and nothing after it - the capacity stays.
-			// **Before the markers, so a marker is never cloned.** A face bar is
-			// a debugging aid lying on a pane, which means it straddles that
-			// pane by construction - and a bar cloned onto the far side would
-			// mark a face nothing projects off.
-			//
-			// **One far-side copy and not two, which is what this used to
-			// draw.** There were two passes producing it - one walked the world
-			// for things that can move, the other walked the draw list - and
-			// calling both put two copies of every straddling body on the far
-			// side, z-fighting each other. Worse, the list pass reads the list
-			// it appends to, so it also copied the entity pass's output: a copy
-			// sits across the *far* pane by construction, so it was mapped back
-			// again and a third landed on top of the original. What that looks
-			// like is a spare character standing near the hole.
-			//
-			// **`CutAndCloneSeams` is the one pass now**, and it is the list one
-			// because only a list walk holds the row the original is in - which
-			// is what lets it *cut* the body at the plane rather than leave two
-			// whole copies straddling two panes. The same call serves a replica,
-			// which has a draw list and no simulation behind it.
-			(void)engine::scene::CutAndCloneSeams(store, drawList->Instances);
-
-			(void)engine::scene::AppendSurfaceFaceMarkers(store, drawList->Instances);
-		}
 	}
 
 	// --- what the systems need, whoever built the entities --------------------
@@ -818,7 +473,7 @@ namespace client {
 			const auto first = static_cast<uint32_t>(foreign.size());
 			universe.Enter(found, [&](Store &store) {
 				destinationLighting = engine::scene::LightingOf(store);
-				(void)CollectLights(store, viewAt->Frame.Position, destinationLights);
+				(void)engine::render::CollectLights(store, viewAt->Frame.Position, destinationLights);
 
 				// **The far world's own panes back to here, gathered before its
 				// rows are copied**, because they decide which of those rows may
@@ -1223,276 +878,6 @@ namespace client {
 		return views.size();
 	}
 
-	void ParticleFrame::Detach() {
-		Blocks.clear();
-		Blocks.reserve(Batches.size());
-		for (const engine::render::ParticleBatch &batch : Batches) {
-			if (batch.Block != nullptr) {
-				Blocks.push_back(*batch.Block);
-			}
-		}
-
-		// **Reserved before anything is written**, so no later push can move the
-		// vector an earlier batch already points into. The same rule the carry
-		// buffer this replaced followed, and for the same reason.
-		size_t at = 0;
-		for (engine::render::ParticleBatch &batch : Batches) {
-			if (batch.Block != nullptr) {
-				batch.Block = Blocks.data() + at;
-				at++;
-			}
-		}
-	}
-
-	void ParticleFrame::Clear() {
-		Batches.clear();
-		Births.clear();
-		Seams.clear();
-		Blocks.clear();
-	}
-
-	size_t CollectParticleBatches(Store &store, ParticleFrame &frame) {
-		frame.Clear();
-
-		const auto *system = store.Resource<engine::effects::ParticleSystem>();
-		if (system == nullptr || system->Blocks.empty()) {
-			return 0;
-		}
-		frame.Pool = system->Capacity;
-		frame.BlockCount = static_cast<uint32_t>(system->Blocks.size());
-
-		// **The holes, so a spark that has gone through one is drawn in the room
-		// it went into.** A particle is a point rather than a body: it is on one
-		// side of a pane or the other and belongs wholly to whichever space that
-		// is, so it is *moved* rather than cut and copied. A torch carried into a
-		// doorway keeps the sparks this side of the plane where they are and the
-		// ones past it arrive in the far room, which is what stops a flame dying
-		// at the seam while the torch holding it does not.
-		//
-		// **Flattened here and applied in the step shader**, which is where the
-		// positions are. What crosses is a pane, not a particle: a scene with a
-		// doorway in it uploads eighty bytes and the decision is taken per
-		// particle on the device, where it costs a dot product.
-		static thread_local std::vector<engine::scene::PortalSeam> seams;
-		if (engine::scene::GatherPortalSeams(store, seams) > 0) {
-			for (const engine::scene::PortalSeam &seam : seams) {
-				if (seam.Crosses) {
-					// A pane straddles its own plane by definition, so carrying
-					// through it is a portal inside a portal.
-					continue;
-				}
-
-				const engine::scene::SeamTransform map = engine::scene::SeamMapping(seam);
-				engine::render::ParticleSeam flat;
-				flat.Centre = seam.Centre;
-				flat.Normal = seam.Normal;
-				flat.First = seam.First;
-				flat.Second = seam.Second;
-				flat.Mapping = map.Frame;
-				flat.Scale = map.Scale;
-				frame.Seams.push_back(flat);
-			}
-		}
-
-		// This tick's births, copied so a caller that renders outside the tick has
-		// something that outlives it. Already exactly what the renderer wants -
-		// the device-stepped spawn writes the whole state into the record rather
-		// than into an array, which is what lets the host arrays go entirely.
-		frame.Births.assign(system->Births.begin(), system->Births.end());
-
-		// **Walked from the emitter column rather than from the block list**, and
-		// the direction matters: a block knows how many particles it has and
-		// nothing about what they look like, and the shared half - texture, blend
-		// mode, flipbook - is on the emitter. Walking blocks would mean a lookup
-		// from `EmitterBlock::Owner` back to a row per block, which is a random
-		// access per emitter to avoid a sequential one.
-		//
-		// The order is therefore the emitter column's, which is stable within a
-		// tick - so the batch list is the same every frame and the draw order does
-		// not shuffle.
-		store.Each<const engine::effects::ParticleEmitter, const engine::effects::EmitterSlot>(
-			[&](engine::ecs::Entity,
-				const engine::effects::ParticleEmitter &emitter,
-				const engine::effects::EmitterSlot &slot) {
-				if (slot.Index == engine::effects::NO_SLOT || slot.Index >= system->Blocks.size()) {
-					return;
-				}
-
-				const engine::effects::EmitterBlock &block = system->Blocks[slot.Index];
-				if (block.Capacity == 0 || block.Live == 0) {
-					// **Skipped rather than emitted as an empty batch.** An empty
-					// batch is a uniform push and a pipeline bind for zero
-					// vertices, and in a scene of a hundred thousand emitters most
-					// of them are empty at any moment.
-					//
-					// **`Live` still means "worth drawing" when the device owns
-					// the pool**, but it is arithmetic rather than a count: it is
-					// what the block has ever been given until nothing more is
-					// born for longer than the longest lifetime, at which point
-					// it falls to zero. See `EmitterBlock::Idle`.
-					return;
-				}
-
-				engine::render::ParticleBatch batch;
-				batch.Block = &block;
-				batch.Index = slot.Index;
-				batch.Texture = emitter.Texture;
-				batch.FlipbookSide = static_cast<float>(engine::effects::FlipbookSide(emitter.Flipbook));
-				batch.ZOffset = emitter.ZOffset;
-				batch.LightEmission = emitter.LightEmission;
-				batch.LightInfluence = emitter.LightInfluence;
-				batch.Additive = emitter.Additive;
-				batch.WorldUp =
-					emitter.Orientation == engine::effects::ParticleOrientation::FacingCameraWorldUp;
-				frame.Batches.push_back(batch);
-			}
-		);
-
-		return frame.Batches.size();
-	}
-
-	size_t CollectLights(Store &store, const Vector3 &eye, std::vector<engine::render::SceneLight> &lights) {
-		lights.clear();
-
-		// Gathered whole, then ordered, then cut. **Not cut during the walk**,
-		// because "the sixteen nearest" cannot be decided until the far ones have
-		// been seen - a partial sort over the whole set is the only form that is
-		// correct, and a scene has tens of lights rather than thousands.
-		store.Each<const engine::scene::Light>([&](engine::ecs::Entity entity,
-												   const engine::scene::Light &bulb) {
-			if (!bulb.Enabled || bulb.Brightness <= 0.0f || bulb.Range <= 0.0f) {
-				return;
-			}
-
-			const engine::ecs::Entity parent = store.ParentOf(entity);
-			if (parent == engine::ecs::NULL_ENTITY) {
-				return;
-			}
-
-			engine::core::CFrame frame;
-			if (const auto *point = store.Get<engine::scene::Attachment>(parent)) {
-				frame = point->WorldFrame;
-			} else if (const auto *placement = store.Get<Transform>(parent)) {
-				frame = placement->Frame;
-			} else {
-				// No place to shine from. Skipped rather than placed at the
-				// origin - see the header.
-				return;
-			}
-
-			engine::render::SceneLight light;
-			light.Position = frame.Position;
-			light.Range = bulb.Range;
-
-			// Brightness folded into the colour here, once per light per
-			// frame, rather than in the shader once per light per fragment.
-			light.Colour = engine::core::Color3{
-				bulb.Colour.R * bulb.Brightness,
-				bulb.Colour.G * bulb.Brightness,
-				bulb.Colour.B * bulb.Brightness,
-			};
-
-			if (bulb.Kind == engine::scene::LightKind::Point) {
-				// -1 is the value the shader reads as "never clip", which is
-				// what a point light is, and it needs no branch of its own
-				// there.
-				light.ConeCosine = -1.0f;
-			} else {
-				// The face's normal, turned into world space by whatever the
-				// light hangs off. A spot on an attachment points along the
-				// attachment, which is what an attachment carries an
-				// orientation for.
-				light.Direction = frame.VectorToWorldSpace(engine::scene::NormalOf(bulb.Face));
-
-				// Half the authored angle, as a cosine. Roblox's `Angle` is
-				// the full cone width, and the dot product test is against the
-				// half - halving in the shader would be doing it per fragment.
-				light.ConeCosine = std::cos(
-					std::clamp(bulb.Angle, 0.0f, 180.0f) * 0.5f * std::numbers::pi_v<float> / 180.0f
-				);
-			}
-
-			lights.push_back(light);
-		});
-
-		// **And the same lamps again on the far side of every hole they reach.**
-		// A torch carried up to a portal lights the room beyond it, which is what
-		// "light works through a portal" means to somebody looking at one. The
-		// copy is the lamp mapped by the seam: `Point` for where it is, `Length`
-		// for how far it reaches, `Rotate` for which way a spot points - the same
-		// four applications a body, a camera and a ray go through, and mixing two
-		// of them up is a light that leads somewhere slightly wrong.
-		//
-		// **Where it lands is the same place the sub-camera stands**, which is
-		// what makes this right rather than plausible: the map carries the front
-		// of this pane to the *back* of the far one, so a lamp in front of a hole
-		// arrives behind the far pane, shining forward into the room the hole
-		// shows. A camera does exactly that and for exactly that reason.
-		//
-		// **It ignores the aperture, and is no less correct than the lamp it
-		// copies.** A transported light spills into the whole far room rather
-		// than the hole's beam - and a local light in this pipeline is unshadowed
-		// and already spills through every wall in the world. When local shadows
-		// arrive the copy inherits them for free, because it is an ordinary entry
-		// in the same buffer. `NON-EUCLIDEAN.md` Part V.3.
-		//
-		// **One hop.** A copy is never itself copied through a second seam: two
-		// hops is a geometric series inside a sixteen-entry budget, and a room
-		// two holes away is not lit by a candle.
-		{
-			static thread_local std::vector<engine::scene::PortalSeam> seams;
-			if (engine::scene::GatherPortalSeams(store, seams) > 0) {
-				const size_t own = lights.size();
-				for (size_t index = 0; index < own; index++) {
-					for (const engine::scene::PortalSeam &seam : seams) {
-						// A cross-world pane's destination is a camera stand-in
-						// in *this* world, so a lamp through one would light a
-						// spot a metre behind the pane rather than the world it
-						// leads to. The same rule the copy pass has.
-						if (seam.Crosses) {
-							continue;
-						}
-
-						// Out of reach of the hole itself, so nothing of it gets
-						// through - measured against the rectangle rather than
-						// its plane, or every lamp in a building would transport
-						// through every pane in it.
-						if (engine::scene::SeamDistance(seam, lights[index].Position) >=
-							lights[index].Range) {
-							continue;
-						}
-
-						const engine::scene::SeamTransform through = engine::scene::SeamMapping(seam);
-
-						engine::render::SceneLight copy = lights[index];
-						copy.Position = through.Point(lights[index].Position);
-						copy.Range = through.Length(lights[index].Range);
-						copy.Direction = through.Rotate(lights[index].Direction);
-						lights.push_back(copy);
-					}
-				}
-			}
-		}
-
-		if (lights.size() > engine::render::MAX_SCENE_LIGHTS) {
-			std::partial_sort(
-				lights.begin(),
-				lights.begin() + engine::render::MAX_SCENE_LIGHTS,
-				lights.end(),
-				[&eye](const engine::render::SceneLight &left, const engine::render::SceneLight &right) {
-					// Squared, because the square root is monotonic and cannot
-					// change an ordering - `scene::OrderForDrawing`'s reason.
-					const Vector3 a = left.Position - eye;
-					const Vector3 b = right.Position - eye;
-					return a.Dot(a) < b.Dot(b);
-				}
-			);
-			lights.resize(engine::render::MAX_SCENE_LIGHTS);
-		}
-
-		return lights.size();
-	}
-
 	namespace {
 		// The three effects systems, installed together because they are one
 		// dependency chain and installing two of the three is a scene where
@@ -1544,7 +929,7 @@ namespace client {
 			//     place a spawn, and it runs in `PreSimulation`. Resolving only
 			//     at `PreRender` would hand it the previous tick's frame, so a
 			//     rocket's exhaust would trail its nozzle by a tick.
-			//   - `client::CollectLights` reads it to place a lamp, and it runs
+			//   - `render::CollectLights` reads it to place a lamp, and it runs
 			//     at present time. A world that is being *authored* never ticks
 			//     at all - `World::Present` runs `PreRender` alone - so
 			//     resolving only at `PreSimulation` left every attachment at the
@@ -1568,7 +953,7 @@ namespace client {
 			});
 			// The `PreRender` half of the pair above. First in this phase, so
 			// `build-ribbons` and everything the host reads after `Present` -
-			// `client::CollectLights`, `CollectParticleBatches` - see a frame
+			// `render::CollectLights`, `CollectParticleBatches` - see a frame
 			// resolved against the transforms this frame is being drawn with.
 			scheduler.Add("resolve-attachments", Phase::PreRender, [](Store &world) {
 				(void)engine::scene::ResolveAttachments(world);
@@ -1774,7 +1159,7 @@ namespace client {
 		InstallEffects(store, scheduler, DEFAULT_PARTICLE_POOL);
 		InstallControls(store, scheduler);
 
-		scheduler.Add("collect-instances", Phase::PreRender, CollectInstances);
+		scheduler.Add("collect-instances", Phase::PreRender, engine::render::CollectInstances);
 		return true;
 	}
 
@@ -1797,61 +1182,9 @@ namespace client {
 		const engine::graph::PipelineSet &profiles,
 		engine::render::Renderer &renderer,
 		uint64_t world,
-		engine::core::Name selectedProfile
+		engine::core::Name selected
 	) {
-		engine::graph::RegisterRenderNodeKinds();
-
-		const std::string suffix = "#" + std::to_string(world);
-		for (const engine::core::Name key : renderer.Pipelines()) {
-			if (key.Text().ends_with(suffix)) {
-				(void)renderer.RemovePipeline(key);
-			}
-		}
-
-		engine::graph::PipelineSet defaults;
-		const engine::graph::PipelineSet *set = &profiles;
-		if (profiles.Count() == 0) {
-			defaults.Set(engine::core::Name("Default PBR"), engine::graph::DefaultPbrDocument());
-			set = &defaults;
-		}
-
-		std::vector<engine::core::Name> candidates;
-		const auto addCandidate = [&](engine::core::Name name) {
-			if (name.IsValid() && set->Find(name) != nullptr &&
-				std::find(candidates.begin(), candidates.end(), name) == candidates.end()) {
-				candidates.push_back(name);
-			}
-		};
-		addCandidate(selectedProfile);
-		addCandidate(engine::core::Name("Default PBR"));
-		for (const engine::core::Name name : set->Names()) {
-			addCandidate(name);
-		}
-
-		for (const engine::core::Name name : candidates) {
-			const engine::graph::PipelineDocument *document = set->Find(name);
-			assert(document != nullptr);
-
-			engine::graph::RenderGraph graph;
-			engine::core::Name offender;
-			const engine::graph::PipelineDocumentStatus status =
-				engine::graph::Build(*document, graph, offender);
-			if (status != engine::graph::PipelineDocumentStatus::Ok) {
-				ENGINE_ERROR(
-					"pipeline '{}' does not build: {} at '{}'",
-					name.Text(),
-					engine::graph::Describe(status),
-					offender.Text()
-				);
-				continue;
-			}
-
-			const engine::core::Name key(std::format("{}#{}", name.Text(), world));
-			if (renderer.SetPipeline(key, graph)) {
-				return key;
-			}
-		}
-		return {};
+		return engine::render::InstallWorldPipeline(profiles, renderer, world, selected);
 	}
 
 	void RegisterClientComponents() {
@@ -1886,16 +1219,7 @@ namespace client {
 		// looks at it. Writing a frame's worth of interpolated cubes into every
 		// save file would be storing an answer that is recomputed before it is
 		// ever used.
-		engine::ecs::Components::Register<DrawList>(
-			"client.DrawList",
-			[](engine::core::ByteWriter &, const void *, size_t) {},
-			[](engine::core::ByteReader &, void *destination, size_t count) {
-				auto *lists = static_cast<DrawList *>(destination);
-				for (size_t index = 0; index < count; index++) {
-					lists[index].Instances.clear();
-				}
-			}
-		);
+		engine::render::RegisterPresentationComponents();
 	}
 
 	void InstallPresentation(Store &store, Scheduler &scheduler, uint32_t reserve) {
@@ -2005,6 +1329,6 @@ namespace client {
 		InstallEffects(store, scheduler, DEFAULT_PARTICLE_POOL);
 		InstallControls(store, scheduler);
 
-		scheduler.Add("collect-instances", Phase::PreRender, CollectInstances);
+		scheduler.Add("collect-instances", Phase::PreRender, engine::render::CollectInstances);
 	}
 }

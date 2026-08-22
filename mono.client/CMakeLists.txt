@@ -131,20 +131,10 @@ mono_add_program(client
 		Engine::render
 
 		# `main.cpp` reads `assets/ContentPolicy.hpp` to turn a content form off
-		# from the command line, which is the program's decision rather than the
-		# library's - so the row is here as well as on the library.
+		# from the command line and `assets/LocalStore.hpp` for its default local
+		# source. Both are program decisions rather than library defaults, so the
+		# row is here as well as on the library.
 		Engine::assets
-
-		# **The program and not the library**, because only `main.cpp` names it:
-		# the client defaults its content origin to the local store at
-		# `~/Documents/atomic-game-engine/cdn` when nobody passed `--cdn`, which
-		# is `ROADMAP.md` v0.10's "hook up all cdn behavior to this by default".
-		#
-		# Keeping it out of `Mono::client` matters: a host that embeds the client
-		# library - the studio, the unified harness - chooses its own content
-		# sources, and inheriting a default from a library it links would be a
-		# decision made somewhere it cannot see.
-		Mono::cdn
 
 	# Single-player will link the server library into this process, and that is
 	# the one edge the tier rule has to allow by name rather than by rule:

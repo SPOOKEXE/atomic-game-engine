@@ -254,7 +254,7 @@ end
 --
 -- It is also the second half of the subdivision knob. At three levels this is a
 -- 1,280 triangle mesh built vertex by vertex in Luau and re-uploaded by
--- `client::EditableMeshUploader`, which is a real exercise of the path
+-- `engine::render::EditableMeshUploader`, which is a real exercise of the path
 -- `EditableMesh.luau` demonstrates at five vertices.
 
 local mesh = Instance.new("EditableMesh")

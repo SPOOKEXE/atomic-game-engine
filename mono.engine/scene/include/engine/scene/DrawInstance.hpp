@@ -302,7 +302,7 @@ namespace engine::scene {
 	// Fills the fields a collector reads straight off the world's components.
 	//
 	// **The one place that field list is spelled out.** Two collectors publish
-	// this type - `client::CollectInstances` from a world this machine ticks and
+	// this type - `engine::render::CollectInstances` from a world this machine ticks and
 	// `client::CollectReplicated` from one it receives - and each wrote its own
 	// fourteen-member aggregate until v0.15. That is the most expensive shape a
 	// duplicate can take here, because the drift is silent: a member added to the

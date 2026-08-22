@@ -656,7 +656,7 @@ namespace engine::scene {
 		// **What the four bytes cost, stated rather than waved at.** `Visual` is
 		// on every drawable, so a scene of 4096 parts pays 16 KB - one L2 way on
 		// most machines, against a component the draw-list walk reads once per
-		// entity per frame. `client::CollectInstances` is the loop that would
+		// entity per frame. `engine::render::CollectInstances` is the loop that would
 		// feel it and it is bandwidth-bound on `Transform` long before this.
 		//
 		// **The invariant is that this stays the last member.** A field appended
@@ -716,7 +716,7 @@ namespace engine::scene {
 	// replicated, signed, and the authority's to mean something by.
 	//
 	// **On the class the same way `SurfaceAppearance` is, for the identical
-	// reason.** `client::CollectInstances` is a batched parallel walk over a
+	// reason.** `engine::render::CollectInstances` is a batched parallel walk over a
 	// fixed signature, and an optional column is exactly what that shape cannot
 	// express - see `SurfaceAppearance`'s own header. Four bytes on every part
 	// is the price already paid for the four components ahead of it in this
@@ -835,7 +835,7 @@ namespace engine::scene {
 	// That is a real cost - a name and two more fields on a column that holds
 	// four thousand cubes - and it is paid deliberately. The alternative is an
 	// optional component, which means the draw-list pass either joins it per
-	// row or walks the world twice; `client::CollectInstances` is a batched
+	// row or walks the world twice; `engine::render::CollectInstances` is a batched
 	// parallel loop over a fixed signature, and an optional column is precisely
 	// what that shape cannot express. A dense column of mostly-invalid names is
 	// sixteen bytes an entity and no branches.

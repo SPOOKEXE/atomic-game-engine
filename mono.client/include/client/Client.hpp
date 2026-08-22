@@ -18,12 +18,16 @@
 #include <engine/net/Transport.hpp>
 #include <engine/net/Wire.hpp>
 #include <engine/render/DebugPanels.hpp>
+#include <engine/render/EditableImages.hpp>
+#include <engine/render/EditableMeshes.hpp>
 #include <engine/render/FrameStatistics.hpp>
 #include <engine/render/InterfacePass.hpp>
+#include <engine/render/PresentationSchedule.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/ShaderLibrary.hpp>
 #include <engine/render/SpatialCanvas.hpp>
 #include <engine/render/ViewportFrames.hpp>
+#include <engine/render/WorldPresentation.hpp>
 #include <engine/replication/Connector.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Input.hpp>
@@ -33,10 +37,7 @@
 #include <client/Actions.hpp>
 #include <client/Compositor.hpp>
 #include <client/ContentLink.hpp>
-#include <client/EditableImages.hpp>
-#include <client/EditableMeshes.hpp>
 #include <client/Options.hpp>
-#include <client/PresentationSchedule.hpp>
 #include <client/Scene.hpp>
 #include <client/Sounds.hpp>
 #include <cstdint>
@@ -390,10 +391,10 @@ namespace client {
 		// **What an `EditableMesh` a script built converts into and
 		// uploads**, one per client for `Shaders`' own reason: the ledger of
 		// last-uploaded revisions is process-wide state, not world state.
-		client::EditableMeshUploader EditableMeshes;
+		engine::render::EditableMeshUploader EditableMeshes;
 
 		// The identical ledger, for `EditableImage`.
-		client::EditableImageUploader EditableImages;
+		engine::render::EditableImageUploader EditableImages;
 
 		engine::render::OverlayImage Overlay;
 
@@ -580,7 +581,7 @@ namespace client {
 		// Which world's selected profile is installed in the renderer.
 		//
 		// **A guard so installing happens on a world change and not per frame.**
-		// `client::InstallRenderingProfiles` compiles every profile it installs
+		// `render::InstallWorldPipeline` compiles every profile it installs
 		// and reports what is wrong with each - worth paying when the world
 		// changes, and sixty complaints a second about a half-wired one if it
 		// were not guarded.
@@ -736,7 +737,7 @@ namespace client {
 
 		// Presentation is a consumer of updated state, not the clock that drives
 		// it. This deadline is observed after the update and never sleeps it.
-		PresentationSchedule Presentations;
+		engine::render::PresentationSchedule Presentations;
 
 		// The complete visual input last submitted. A matching state can leave the
 		// already-presented swapchain image alone without acquiring another one.
@@ -856,7 +857,7 @@ namespace client {
 		// world's pool and a birth names a slot of it, and a second world's pool
 		// is a different allocation - so mixing two worlds in one frame would
 		// hand the renderer indices into a buffer they do not belong to.
-		ParticleFrame Particles;
+		engine::render::ParticleFrame Particles;
 
 		// This frame's beams and trails, as spans into the drawn world's buffer.
 		//

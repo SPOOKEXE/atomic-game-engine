@@ -319,7 +319,7 @@ namespace engine::scene {
 		//
 		// So the reader zeroes the whole thing rather than reading anything:
 		// `Fresh` back to zero is what forces the first sync after a load to be
-		// a real one. `client::DrawList` writes nothing for the related but
+		// a real one. `engine::render::DrawList` writes nothing for the related but
 		// weaker reason that its value is recomputed before anybody looks.
 		void WriteRenderedSignatures(core::ByteWriter &, const void *, size_t) {}
 
@@ -805,7 +805,7 @@ namespace engine::scene {
 		// **`Sun` is a resource nothing registered, and it registered itself on
 		// first read.** A world's directional light is a per-world resource, so
 		// the first `store.Resource<Sun>()` minted an id under the compiler's
-		// spelling of the type - the same failure `client::DrawList` had at v0.7
+		// spelling of the type - the same failure `engine::render::DrawList` had at v0.7
 		// and `physics::PoppercamState` had until v0.19. It reaches a `.agame`,
 		// which is rule 4: a name that crosses a file is a string somebody
 		// chose.
@@ -993,7 +993,7 @@ namespace engine::scene {
 		// grids.
 		//
 		// **A writer that writes nothing rather than no writer at all**, which
-		// is `client::DrawList`'s arrangement and is here for its reason:
+		// is `engine::render::DrawList`'s arrangement and is here for its reason:
 		// `Store::Save` refuses a resource with no serialisation rather than
 		// writing bytes that cannot be read back, so a world holding this could
 		// not be snapshotted - and the studio snapshots a universe every time
@@ -1083,7 +1083,7 @@ namespace engine::scene {
 		// by whichever worker claimed it.
 		//
 		// Registered rather than left to be minted from the compiler's
-		// spelling, which is the failure `client::DrawList` was found in - and
+		// spelling, which is the failure `engine::render::DrawList` was found in - and
 		// with a writer that stores nothing, which is the other half. See the
 		// pair above.
 		ecs::Components::Register<RenderedSignature>(

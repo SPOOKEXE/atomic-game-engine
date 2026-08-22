@@ -44,7 +44,7 @@ namespace engine::scene {
 	//
 	//   - `mono.client`'s scripted and presented worlds run it in `PreSimulation`
 	//     - `effects::RefreshEmitters` wants a spawn point before the tick moves
-	//     anything - and again in `PreRender`, where `client::CollectLights`
+	//     anything - and again in `PreRender`, where `engine::render::CollectLights`
 	//     places a lamp parented to an attachment.
 	//   - `mono.client`'s *replica* runs it in `PreRender` alone. A replica ticks
 	//     no simulation, and its lamps were lighting the world origin without it.
@@ -54,7 +54,7 @@ namespace engine::scene {
 	//     fire their change signal for a server script.
 	//
 	// **Two production readers of the field, and beams are not among them.**
-	// `effects::ParticleSystem` places a spawn from it and `client::CollectLights`
+	// `effects::ParticleSystem` places a spawn from it and `engine::render::CollectLights`
 	// places a lamp; `effects::BuildRibbons` calls `ResolveAttachment` below per
 	// beam instead, because a ribbon is built from two named attachments rather
 	// than from a walk over all of them. A caller that needs a world frame

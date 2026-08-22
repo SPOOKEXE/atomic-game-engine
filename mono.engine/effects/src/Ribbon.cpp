@@ -266,7 +266,7 @@ namespace engine::effects {
 		// Cleared rather than resized, because the vertex count is a function of
 		// how many ribbons doubled back this frame and no count is known ahead of
 		// the walk. The capacity stays, so a steady scene stops allocating after
-		// its first frame - the same argument `client::CollectInstances` makes for
+		// its first frame - the same argument `engine::render::CollectInstances` makes for
 		// its own buffer.
 		buffer->Vertices.clear();
 		buffer->Runs.clear();

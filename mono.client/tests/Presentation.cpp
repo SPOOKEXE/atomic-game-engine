@@ -116,7 +116,7 @@ namespace {
 
 		size_t count = 0;
 		universe.Enter(world, [&count](Store &store) {
-			if (const auto *list = store.Resource<client::DrawList>()) {
+			if (const auto *list = store.Resource<engine::render::DrawList>()) {
 				count = list->Instances.size();
 			}
 		});
@@ -147,11 +147,25 @@ TEST_CASE("particle light properties reach the render batch", "[client][presenta
 
 		engine::scene::ResolveAttachments(store);
 		REQUIRE(engine::effects::RefreshEmitters(store) == 1);
-		REQUIRE(engine::effects::StepParticles(store, 1.0f / 30.0f).Live > 0);
+		const engine::effects::ParticleStatistics first = engine::effects::StepParticles(store, 1.0f / 30.0f);
+		const engine::effects::ParticleStatistics second =
+			engine::effects::StepParticles(store, 1.0f / 30.0f);
+		REQUIRE(first.Live > 0);
+		REQUIRE(second.Live > 0);
 
-		client::ParticleFrame frame;
-		REQUIRE(client::CollectParticleBatches(store, frame) == 1);
+		engine::render::ParticleFrame frame;
+		REQUIRE(engine::render::CollectParticleBatches(store, frame) == 1);
 		REQUIRE(frame.Batches.size() == 1);
+		CHECK(frame.Births.size() == first.Emitted + second.Emitted);
+		const auto *system = store.Resource<engine::effects::ParticleSystem>();
+		CHECK(system->Births.size() == frame.Births.size());
+		CHECK(system->BirthsPresentedRevision == system->PresentationRevision);
+
+		const engine::effects::ParticleStatistics third = engine::effects::StepParticles(store, 1.0f / 30.0f);
+		system = store.Resource<engine::effects::ParticleSystem>();
+		CHECK(system->Births.size() == third.Emitted);
+		REQUIRE(engine::render::CollectParticleBatches(store, frame) == 1);
+		CHECK(frame.Births.size() == third.Emitted);
 		CHECK(frame.Batches[0].LightEmission == Catch::Approx(0.35f));
 		CHECK(frame.Batches[0].LightInfluence == Catch::Approx(0.8f));
 
@@ -193,8 +207,8 @@ TEST_CASE("a detached particle frame stops pointing into the world", "[client][p
 		REQUIRE(engine::effects::RefreshEmitters(store) == 3);
 		REQUIRE(engine::effects::StepParticles(store, 1.0f / 30.0f).Emitted > 0);
 
-		client::ParticleFrame frame;
-		REQUIRE(client::CollectParticleBatches(store, frame) == 3);
+		engine::render::ParticleFrame frame;
+		REQUIRE(engine::render::CollectParticleBatches(store, frame) == 3);
 
 		const auto *system = store.Resource<engine::effects::ParticleSystem>();
 		const engine::effects::EmitterBlock *pool = system->Blocks.data();
@@ -204,6 +218,15 @@ TEST_CASE("a detached particle frame stops pointing into the world", "[client][p
 		}
 
 		frame.Detach();
+		const uint64_t collectedRevision = frame.Revision;
+		const engine::effects::EmitterBlock *const detachedPool = frame.Blocks.data();
+
+		// A render-rate collection of the same simulation revision is constant
+		// time and Detach is safe to repeat. Studio does both between ticks.
+		REQUIRE(engine::render::CollectParticleBatches(store, frame) == 3);
+		frame.Detach();
+		CHECK(frame.Revision == collectedRevision);
+		CHECK(frame.Blocks.data() == detachedPool);
 
 		// **Every batch, and each still describing its own block.** Repointing
 		// them all at the first copy would be a frame of three emitters drawing
@@ -215,6 +238,17 @@ TEST_CASE("a detached particle frame stops pointing into the world", "[client][p
 			CHECK(frame.Batches[at].Block->First == system->Blocks[at].First);
 			CHECK(frame.Batches[at].Block->Capacity == system->Blocks[at].Capacity);
 			CHECK(frame.Batches[at].Block->Generation == system->Blocks[at].Generation);
+		}
+
+		// Simulation advances the source revision. The next collection rebuilds
+		// the batch pointers from the world and can be detached afresh.
+		(void)engine::effects::StepParticles(store, 1.0f / 30.0f);
+		REQUIRE(engine::render::CollectParticleBatches(store, frame) == 3);
+		CHECK(frame.Revision == collectedRevision + 1);
+		CHECK_FALSE(frame.Detached);
+		for (const engine::render::ParticleBatch &batch : frame.Batches) {
+			CHECK(batch.Block >= pool);
+			CHECK(batch.Block < pool + system->Blocks.size());
 		}
 	});
 }
@@ -469,7 +503,7 @@ TEST_CASE("what a part looks like reaches the draw list whole", "[client][presen
 	REQUIRE(Drawn(universe, world) == 1);
 
 	universe.Enter(world, [](Store &store) {
-		const auto *list = store.Resource<client::DrawList>();
+		const auto *list = store.Resource<engine::render::DrawList>();
 		REQUIRE(list != nullptr);
 		REQUIRE(list->Instances.size() == 1);
 
@@ -531,7 +565,7 @@ TEST_CASE("a world that only presents still aims its mirrors", "[client][present
 		// shows, by nothing more than a camera being parented to it.
 		CHECK(store.Get<engine::scene::Visual>(pane)->Surface == 0);
 
-		const auto *list = store.Resource<client::DrawList>();
+		const auto *list = store.Resource<engine::render::DrawList>();
 		REQUIRE(list != nullptr);
 
 		// And it reaches the draw list, which is the half `Visual` alone does
@@ -591,7 +625,7 @@ TEST_CASE("a part moved without a tick is drawn where it was moved to", "[client
 	universe.Present(world, 1.0f / 60.0f, 1.0f);
 
 	universe.Enter(world, [](Store &store) {
-		const auto *list = store.Resource<client::DrawList>();
+		const auto *list = store.Resource<engine::render::DrawList>();
 		REQUIRE(list != nullptr);
 		REQUIRE(list->Instances.size() == 1);
 		CHECK(list->Instances[0].Frame.Position.X == Catch::Approx(12.0f));
@@ -629,7 +663,7 @@ TEST_CASE("a scripted move still interpolates across a tick", "[client][presenta
 	universe.Present(world, 1.0f / 60.0f, 0.5f);
 
 	universe.Enter(world, [](Store &store) {
-		const auto *list = store.Resource<client::DrawList>();
+		const auto *list = store.Resource<engine::render::DrawList>();
 		REQUIRE(list != nullptr);
 		REQUIRE(list->Instances.size() == 1);
 		CHECK(list->Instances[0].Frame.Position.X == Catch::Approx(20.0f));
@@ -688,7 +722,7 @@ TEST_CASE("a material assigned without a tick reaches the draw list", "[client][
 
 		// ...and the copy of it the renderer actually samples, which is the half
 		// that decides whether anything looks different on screen.
-		const auto *list = store.Resource<client::DrawList>();
+		const auto *list = store.Resource<engine::render::DrawList>();
 		REQUIRE(list != nullptr);
 		REQUIRE(list->Instances.size() == 1);
 		CHECK(list->Instances[0].Texture == colour);
@@ -724,7 +758,7 @@ TEST_CASE("a light on an attachment is placed without a tick", "[client][present
 
 	std::vector<engine::render::SceneLight> lights;
 	universe.Enter(world, [&lights](Store &store) {
-		CHECK(client::CollectLights(store, Vector3{}, lights) == 1);
+		CHECK(engine::render::CollectLights(store, Vector3{}, lights) == 1);
 	});
 
 	REQUIRE(lights.size() == 1);
@@ -756,7 +790,7 @@ TEST_CASE("a portal naming another world draws that world's instances", "[client
 	// this world's array.
 	size_t published = 0;
 	universe.Enter(there, [&published](Store &store) {
-		if (const auto *list = store.Resource<client::DrawList>()) {
+		if (const auto *list = store.Resource<engine::render::DrawList>()) {
 			published = list->Instances.size();
 		}
 	});
@@ -792,7 +826,7 @@ TEST_CASE("a portal naming another world draws that world's instances", "[client
 	std::vector<engine::render::SurfaceView> views;
 
 	universe.Enter(here, [&instances, &views](Store &store) {
-		if (const auto *list = store.Resource<client::DrawList>()) {
+		if (const auto *list = store.Resource<engine::render::DrawList>()) {
 			instances = list->Instances;
 		}
 		(void)client::CollectSurfaceViews(store, views);
@@ -870,7 +904,7 @@ TEST_CASE("a portal naming a world that is not there keeps showing its own", "[c
 	std::vector<engine::scene::DrawInstance> instances;
 	std::vector<engine::render::SurfaceView> views;
 	universe.Enter(here, [&instances, &views](Store &store) {
-		if (const auto *list = store.Resource<client::DrawList>()) {
+		if (const auto *list = store.Resource<engine::render::DrawList>()) {
 			instances = list->Instances;
 		}
 		(void)client::CollectSurfaceViews(store, views);
@@ -1187,7 +1221,7 @@ TEST_CASE("a cross-world portal carries a body through both of its mouths", "[cl
 	const auto publishedBy = [&universe](WorldId world) {
 		size_t count = 0;
 		universe.Enter(world, [&count](Store &store) {
-			if (const auto *list = store.Resource<client::DrawList>()) {
+			if (const auto *list = store.Resource<engine::render::DrawList>()) {
 				count = list->Instances.size();
 			}
 		});
@@ -1226,7 +1260,7 @@ TEST_CASE("a cross-world portal carries a body through both of its mouths", "[cl
 		std::vector<engine::scene::DrawInstance> drawn;
 		std::vector<engine::render::SurfaceView> views;
 		universe.Enter(here, [&drawn, &views](Store &store) {
-			if (const auto *list = store.Resource<client::DrawList>()) {
+			if (const auto *list = store.Resource<engine::render::DrawList>()) {
 				drawn = list->Instances;
 			}
 			(void)client::CollectSurfaceViews(store, views);
@@ -1254,7 +1288,7 @@ TEST_CASE("a cross-world portal carries a body through both of its mouths", "[cl
 		std::vector<engine::scene::DrawInstance> drawn;
 		std::vector<engine::render::SurfaceView> views;
 		universe.Enter(there, [&drawn, &views](Store &store) {
-			if (const auto *list = store.Resource<client::DrawList>()) {
+			if (const auto *list = store.Resource<engine::render::DrawList>()) {
 				drawn = list->Instances;
 			}
 			(void)client::CollectSurfaceViews(store, views);
@@ -1490,7 +1524,7 @@ TEST_CASE("a cross-world pane in a client's view leads to that client's rooms", 
 	std::vector<engine::render::SurfaceView> views;
 	std::vector<engine::scene::DrawInstance> drawn;
 	universe.Enter(hereSeen, [&views, &drawn](Store &store) {
-		if (const auto *list = store.Resource<client::DrawList>()) {
+		if (const auto *list = store.Resource<engine::render::DrawList>()) {
 			drawn = list->Instances;
 		}
 		std::vector<engine::render::PortalView> portals;

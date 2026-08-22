@@ -3,11 +3,10 @@
 // From `scene::EditableMesh`'s raw arrays to `render::MeshTable`, the
 // conversion `scene` cannot make itself.
 //
-// **The identical split `render::ShaderLibrary` draws**, one door along: a
-// world holds words a script wrote and a device turns them into something it
-// can draw, and the two halves meet in `client` because that is the one tier
-// that may link both `scene` and `assets`. `scene::EditableMesh`'s own header
-// carries the full argument for why the conversion is not made there.
+// **The identical split `ShaderLibrary` draws**, one door along: a world holds
+// words a script wrote and a device turns them into something it can draw. The
+// render module already owns both device tables and is the lowest client-tier
+// layer allowed to combine scene rows with baked asset layouts.
 //
 // @tier L12 · client
 
@@ -32,7 +31,7 @@ namespace engine::scene {
 	struct EditableMesh;
 }
 
-namespace client {
+namespace engine::render {
 	// Converts the raw arrays into the format `render::MeshTable::Add`
 	// takes.
 	//
@@ -53,7 +52,7 @@ namespace client {
 	// Uploads every `scene::EditableMesh` whose revision has moved since the
 	// last call.
 	//
-	// **One instance per client, matching `ShaderLibrary`'s reason.** The
+	// **One instance per presentation host, matching `ShaderLibrary`'s reason.** The
 	// ledger it keeps - which revision was last uploaded, per entity - is
 	// what turns a per-frame walk into an integer compare for the steady
 	// case, exactly as `ShaderSource::Revision` does for a compiled shader.

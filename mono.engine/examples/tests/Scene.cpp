@@ -1235,7 +1235,7 @@ TEST_CASE("the terrain scene builds a coloured heightfield mesh", "[examples][sc
 	// somewhere rather than pinning which band a given corner fell in.
 	//
 	// It is also the only place this suite can see the colours at all: turning
-	// them into draw runs is `client::BuildMeshData`'s job and `client` is two
+	// them into draw runs is `engine::render::BuildMeshData`'s job and `client` is two
 	// tiers above this one.
 	size_t distinct = 0;
 	store.Each<const engine::scene::EditableMesh>([&](Entity, const engine::scene::EditableMesh &mesh) {
@@ -1611,7 +1611,7 @@ TEST_CASE("the player list names everybody in the world", "[examples][scene][pla
 
 TEST_CASE("the portal lighting scenes author lamps a seam can carry", "[examples][scene]") {
 	// **What a scene gets wrong about portal lighting is placement, and it is
-	// silent.** The transport itself is `client::CollectLights`' and
+	// silent.** The transport itself is `engine::render::CollectLights`' and
 	// `mono.client/tests/PortalLighting.cpp` asserts it; what belongs here is
 	// that the two shipped scenes hand that pass what it needs - a linked pair
 	// of mouths, every lamp inside its own seam's reach, and a world dark

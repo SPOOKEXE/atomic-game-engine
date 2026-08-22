@@ -20,7 +20,7 @@
 // The obvious fix is a branch in the collect loop, and it is the wrong one
 // twice over.
 //
-// The first reason is mechanical. `client::CollectInstances` runs
+// The first reason is mechanical. `engine::render::CollectInstances` runs
 // `EachBatchParallel` and writes `out[first + row]` - each worker is told where
 // its slice lands so no two touch the same bytes and no atomic is needed.
 // A `continue` inside that loop leaves holes in the output and makes the
@@ -199,7 +199,7 @@ namespace engine::scene {
 	// because a resource is keyed by a component id and an unregistered type
 	// gets one minted from the compiler's spelling - which `Store::Save` then
 	// refuses, taking out every snapshot of every world that has one.
-	// `client::DrawList` learned that the expensive way.
+	// `engine::render::DrawList` learned that the expensive way.
 	//
 	// @since v0.8
 	struct RenderedSignature {

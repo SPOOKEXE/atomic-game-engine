@@ -551,6 +551,23 @@ namespace engine::effects {
 		// The texture catalogue revision already reflected in `Blocks`.
 		uint64_t TextureRevision = 0;
 
+		// Which completed simulation revision the presentation data describes.
+		//
+		// **One counter for the whole pool, because rendering needs one answer to
+		// "did any batch input change?"** `EmitterBlock` revisions remain the
+		// narrow device-table dirtiness checks. This one lets a renderer that runs
+		// faster than simulation reuse its ordered emitter list without walking
+		// every emitter again between ticks.
+		uint64_t PresentationRevision = 1;
+
+		// Which emitter membership and material layout presentation has to order.
+		//
+		// Simulation advances every tick, while this advances only when a batch is
+		// added, removed, or changes draw state. Keeping the two separate lets a
+		// resident renderer upload births and changed block parameters without
+		// sorting and rewriting the complete emitter draw table.
+		uint64_t LayoutRevision = 1;
+
 		// Rows of `Blocks` whose emitter has gone, waiting to be handed to the
 		// next one that arrives.
 		//
@@ -588,7 +605,8 @@ namespace engine::effects {
 		// both; `particle-step.comp` says so at each point where it matters.
 		bool DeviceStepped = false;
 
-		// What was spawned this tick, and which pool row each one belongs in.
+		// What was spawned since presentation last consumed a revision, and which
+		// pool row each one belongs in.
 		//
 		// **The whole state and not a row into `States`, which is what lets both
 		// host arrays go.** When the device owns the pool nothing on this side
@@ -601,6 +619,12 @@ namespace engine::effects {
 		// Empty unless `DeviceStepped`. The host-side pass has no need of it: it
 		// spawns into the arrays it also ages.
 		std::vector<ParticleBirth> Births;
+
+		// The revision whose births presentation has copied. The next simulation
+		// step may then discard those records before appending new ones. Keeping
+		// them until that step lets several cameras or a rebuilt snapshot read the
+		// same revision without one consumer stealing it from the others.
+		uint64_t BirthsPresentedRevision = 0;
 
 		// How many slots the pool holds in total.
 		//

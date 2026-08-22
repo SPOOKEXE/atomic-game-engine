@@ -33,13 +33,13 @@ TEST_DEPENDS("engine.scene.drawinstance")
 TEST_DEPENDS("engine.scene.attachments")
 
 using Catch::Approx;
-using client::DrawList;
 using engine::core::CFrame;
 using engine::core::Vector3;
 using engine::ecs::Entity;
 using engine::ecs::Phase;
 using engine::ecs::Scheduler;
 using engine::ecs::Store;
+using engine::render::DrawList;
 using engine::replication::InterpolationSettings;
 using engine::replication::SnapshotBuffer;
 using engine::scene::Attachment;
@@ -366,7 +366,7 @@ TEST_CASE("a replica does not draw a part it was told is invisible", "[client][r
 // `Components::Of<T>` caches its answer per type per process and marks the name
 // it minted as automatic - so the first mention of `DrawList` anywhere decides
 // what it is called. `BuildReplicatedWorld` reached for the resource without
-// registering first, which named it `client::DrawList`, the compiler's
+// registering first, which named it `engine::render::DrawList`, the compiler's
 // spelling. Nothing failed here. It failed in whichever world was built *next*,
 // where the explicit `RegisterClientComponents` aborted the process naming a
 // type that function never mentions.
@@ -385,7 +385,7 @@ TEST_CASE("a replicated world registers its own types before it uses them", "[cl
 
 // --- what a snapshot of a replica world can carry -----------------------------
 
-// **Rule 4, and `client::DrawList` learned it the expensive way.** A resource is
+// **Rule 4, and `engine::render::DrawList` learned it the expensive way.** A resource is
 // keyed by a component id, and `Store::SetResource` mints one under whatever the
 // compiler spells the type as unless somebody registered a name. Nothing notices
 // until a world holding it is saved - which is exactly what the studio's Play
@@ -607,7 +607,7 @@ TEST_CASE("a replica resolves the attachments that arrived", "[client][replicati
 	// have.** Until v0.19 `resolve-attachments` was registered by the scripted
 	// and presented paths only, and a replica ran neither - so every
 	// `Attachment::WorldFrame` in a joined world stayed at the identity for the
-	// whole session and `client::CollectLights`, which reads that field to place
+	// whole session and `engine::render::CollectLights`, which reads that field to place
 	// a lamp parented to an attachment, lit the world origin.
 	Replica replica;
 

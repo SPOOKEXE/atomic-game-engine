@@ -593,7 +593,7 @@ TEST_CASE("a resolver places a texture the tree cannot", "[assetc][bake]") {
 	// **The flattened-store case, which is what a `cdn` import produces.** The
 	// model and its sheet are both `<hash><extension>` in one directory, so
 	// `tex/skin.png` names nothing - and only the import log knows the two belong
-	// together. `cdn::StoreTextureResolver` is the real one; this stands in for
+	// together. `engine::assets::StoreTextureResolver` is the real one; this stands in for
 	// it so the wiring is checked without a store.
 	const Scratch scratch("resolved");
 	scratch.Write("deadbeef.pmx", PmxWithSheet());

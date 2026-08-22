@@ -1730,7 +1730,7 @@ namespace engine::render {
 			if (!submitted) {
 				ENGINE_ERROR("SDL_SubmitGPUCommandBuffer (failed view batch): {}", SDL_GetError());
 			}
-			State->CompleteInstanceUploads(submitted);
+			State->CompleteResidentUploads(submitted);
 			State->BatchCommand = nullptr;
 
 			// A failed batch never reached the final view's submit, so any

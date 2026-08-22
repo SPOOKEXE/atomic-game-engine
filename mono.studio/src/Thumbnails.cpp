@@ -49,6 +49,7 @@
 // The three together mean scrolling a large store costs a steady trickle rather
 // than a cliff, and stopping costs nothing.
 
+#include <engine/assets/LocalStore.hpp>
 #include <engine/assets/Mesh.hpp>
 #include <engine/assets/Resample.hpp>
 #include <engine/assets/Texture.hpp>
@@ -56,7 +57,6 @@
 #include <engine/core/Log.hpp>
 
 #include <algorithm>
-#include <cdn/LocalStore.hpp>
 #include <fstream>
 #include <studio/Editor.hpp>
 #include <studio/Preview.hpp>
@@ -275,11 +275,12 @@ namespace studio {
 	void *Editor::BuildThumbnail(const std::string &name, PreviewState &state) {
 		// `raw/<name>`, which is the same file the publisher read - see the
 		// header on why that identity holds.
-		// **`cdn::FindInStore` and not a folder spelled here.** This read
+		// **`engine::assets::FindInStore` and not a folder spelled here.** This read
 		// `raw/<name>` and was right for as long as the publisher walked `raw/`;
 		// the day it walked `baked/`, every preview in the editor resolved to a
 		// missing file and turned into "no local pixels" with nothing said.
-		const std::filesystem::path source = cdn::FindInStore(cdn::DefaultLocalPaths(), name);
+		const std::filesystem::path source =
+			engine::assets::FindInStore(engine::assets::DefaultLocalPaths(), name);
 
 		std::error_code failure;
 		if (!std::filesystem::is_regular_file(source, failure)) {

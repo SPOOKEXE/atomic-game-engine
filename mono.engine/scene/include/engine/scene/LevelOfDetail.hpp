@@ -31,7 +31,7 @@
 //
 // arch-waiver public-header: forward API. `SelectLevel` is decision 19 stated once
 // and the draw-list build is what will call it; `docs/FUTURE_COMPONENTS.md`
-// says why that pass is not `client::CollectInstances`. Decision 16.
+// says why that pass is not `engine::render::CollectInstances`. Decision 16.
 //
 // @tier L7 · shared
 
@@ -94,7 +94,7 @@ namespace engine::scene {
 	// **An optional column and not part of `BasePart`'s set**, which is the
 	// opposite call from `SurfaceAppearance` and `Tags` and is right for the
 	// opposite reason. Those two are on every part because
-	// `client::CollectInstances` is a fixed-signature batched walk that cannot
+	// `engine::render::CollectInstances` is a fixed-signature batched walk that cannot
 	// read an optional column at all. Level selection is not that walk: it runs
 	// over `<Visual, LevelOfDetail>` and touches only the parts that have levels,
 	// and in a world of four thousand plain cubes that is none of them. Putting

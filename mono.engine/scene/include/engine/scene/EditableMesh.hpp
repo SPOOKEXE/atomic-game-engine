@@ -232,9 +232,9 @@ namespace engine::scene {
 
 	// Which revision of each `EditableMesh` has a collision shape baked for it.
 	//
-	// **A resource and not a field on the host, which the render side's
-	// `client::EditableMeshUploader` is.** An uploader belongs to a program
-	// because a `render::Renderer` does; a shape table belongs to a *world*,
+	// **A resource and not a field on the presentation host, which the render
+	// side's `engine::render::EditableMeshUploader` is.** An uploader belongs to
+	// the renderer because its device does; a shape table belongs to a *world*,
 	// and a server holds many at once. A map on the host keyed by entity id
 	// would have two worlds' meshes collide on the same key the first time two
 	// of them minted the same id, which they do constantly.

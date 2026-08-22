@@ -1,9 +1,9 @@
 // The particle pools and the ribbon stream.
 //
 // **Each world's pool lives on the device and is stepped there.** `particle-step.comp`
-// writes the instance stream on its own submission before the frame's command
-// buffer is recorded, which is why the transparent node uploads no particle
-// data at all - see the note in `ViewRecording::RecordUploads`.
+// writes the instance stream into the same command buffer the scene later draws
+// from. Queue order is the dependency, so particle uploads, simulation and
+// presentation need one host submission rather than a device stall between two.
 
 #include "DisplayColour.hpp"
 #include "RenderTypes.hpp"
@@ -251,9 +251,9 @@ namespace engine::render {
 		return true;
 	}
 
-	bool Renderer::Impl::ReserveParticlePool(uint32_t slots) {
+	bool Renderer::Impl::ReserveParticlePool(uint32_t slots, SDL_GPUCommandBuffer *command) {
 		ParticlePool &Particles = ActiveParticleWorld->Pool;
-		if (slots == 0) {
+		if (slots == 0 || command == nullptr) {
 			return false;
 		}
 		if (slots <= Particles.Slots) {
@@ -266,7 +266,14 @@ namespace engine::render {
 		// pool sized to anything but the declared number would put a block's run
 		// off the end. It is asked for once and answered once.
 		if (Particles.States != nullptr) {
+			// A changed declared capacity is exceptional, but the old pool can still
+			// be referenced by queued frames. Drain it before replacing either half.
+			SDL_WaitForGPUIdle(Device);
 			gpu::ReleaseBuffer(Device, Particles.States);
+			if (Particles.StateStaging != nullptr) {
+				gpu::ReleaseTransferBuffer(Device, Particles.StateStaging);
+				Particles.StateStaging = nullptr;
+			}
 		}
 
 		SDL_GPUBufferCreateInfo info{};
@@ -287,45 +294,52 @@ namespace engine::render {
 		// overwriting them. Some drivers hand back zeroed pages and the first
 		// version of this looked correct on the machine it was written on.
 		//
+		// The transfer buffer stays with the pool because this copy now shares the
+		// scene command and therefore may still be in flight after the host submit.
 		// Once per pool rather than per frame, and the pool is created once.
 		SDL_GPUTransferBufferCreateInfo blank{};
 		blank.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
 		blank.size = info.size;
-		SDL_GPUTransferBuffer *zeros = gpu::CreateTransferBuffer(Device, &blank);
-		SDL_GPUCommandBuffer *command = zeros != nullptr ? SDL_AcquireGPUCommandBuffer(Device) : nullptr;
-		if (zeros == nullptr || command == nullptr) {
+		Particles.StateStaging = gpu::CreateTransferBuffer(Device, &blank);
+		if (Particles.StateStaging == nullptr) {
 			ENGINE_ERROR("particle state pool: could not clear {} bytes: {}", info.size, SDL_GetError());
-			if (zeros != nullptr) {
-				gpu::ReleaseTransferBuffer(Device, zeros);
-			}
 			gpu::ReleaseBuffer(Device, Particles.States);
 			Particles.States = nullptr;
 			Particles.Slots = 0;
 			return false;
 		}
 
-		if (void *mapped = SDL_MapGPUTransferBuffer(Device, zeros, true)) {
+		if (void *mapped = SDL_MapGPUTransferBuffer(Device, Particles.StateStaging, true)) {
 			std::memset(mapped, 0, info.size);
-			SDL_UnmapGPUTransferBuffer(Device, zeros);
+			SDL_UnmapGPUTransferBuffer(Device, Particles.StateStaging);
+		} else {
+			ENGINE_ERROR("particle state pool: could not map clear buffer: {}", SDL_GetError());
+			gpu::ReleaseTransferBuffer(Device, Particles.StateStaging);
+			gpu::ReleaseBuffer(Device, Particles.States);
+			Particles.StateStaging = nullptr;
+			Particles.States = nullptr;
+			Particles.Slots = 0;
+			return false;
 		}
 
 		if (SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(command)) {
-			const SDL_GPUTransferBufferLocation source{zeros, 0};
+			const SDL_GPUTransferBufferLocation source{Particles.StateStaging, 0};
 			const SDL_GPUBufferRegion destination{Particles.States, 0, info.size};
 			SDL_UploadToGPUBuffer(copy, &source, &destination, false);
 			SDL_EndGPUCopyPass(copy);
-			(void)SDL_SubmitGPUCommandBuffer(command);
 		} else {
-			SDL_CancelGPUCommandBuffer(command);
+			ENGINE_ERROR("particle state pool: could not begin clear pass: {}", SDL_GetError());
+			gpu::ReleaseTransferBuffer(Device, Particles.StateStaging);
+			gpu::ReleaseBuffer(Device, Particles.States);
+			Particles.StateStaging = nullptr;
+			Particles.States = nullptr;
+			Particles.Slots = 0;
+			return false;
 		}
 
-		// **Waited for before the transfer buffer is let go.** The copy reads it,
-		// and releasing it while a submitted command buffer still has work
-		// against it is a use after free the driver will not warn about.
-		SDL_WaitForGPUIdle(Device);
-		gpu::ReleaseTransferBuffer(Device, zeros);
-
 		Particles.Slots = slots;
+		ActiveParticleWorld->SubmissionPending = true;
+		ActiveParticleWorld->StateInitialisationPending = true;
 		return true;
 	}
 
@@ -498,7 +512,8 @@ namespace engine::render {
 				}
 			}
 			for (SDL_GPUTransferBuffer **staging :
-				 {&Particles.DrawStaging,
+				 {&Particles.StateStaging,
+				  &Particles.DrawStaging,
 				  &Particles.ParamStaging,
 				  &Particles.CurveStaging,
 				  &Particles.BirthStaging,
@@ -519,36 +534,37 @@ namespace engine::render {
 		ActiveParticleWorld = nullptr;
 	}
 
-	bool Renderer::Impl::DispatchParticles() {
+	Renderer::Impl::ParticleDispatch
+	Renderer::Impl::DispatchParticles(SDL_GPUCommandBuffer *command, uint32_t timingSlot) {
 		ParticlePool &Particles = ActiveParticleWorld->Pool;
-		if (ParticleStep == nullptr || Particles.Records == 0) {
-			return true;
+		if (ParticleStep == nullptr || Particles.Records == 0 || command == nullptr) {
+			return {true, 0};
 		}
 
 		ENGINE_PROFILE_CAT("particles.step", core::ProfileCategory::Render);
-
-		SDL_GPUCommandBuffer *command = SDL_AcquireGPUCommandBuffer(Device);
-		if (command == nullptr) {
-			ENGINE_ERROR("particle step: SDL_AcquireGPUCommandBuffer: {}", SDL_GetError());
-			return false;
-		}
+		static const core::Name PARTICLE_STEP_NAME("particle-step");
+		const uint32_t openedMark =
+			timingSlot < VulkanTimestamps::SLOTS ? Timestamps.Mark(command) : VulkanTimestamps::MARKS;
+		uint32_t dispatches = 0;
 
 		const uint32_t word = static_cast<uint32_t>(sizeof(uint32_t));
+		const bool upload = Particles.DrawUpdates > 0 || Particles.BirthCount > 0 ||
+							Particles.SeamCount > 0 || Particles.ParamUpdates > 0 ||
+							Particles.CurveUpdates > 0;
 
-		// The frame's uploads, in one copy pass. All are cycled: this is each
-		// buffer's first touch of the frame, so the previous frame's dispatch
+		// Changed uploads share one copy pass. All are cycled: this is each
+		// buffer's first touch of the command, so the previous frame's dispatch
 		// keeps the version it bound.
 		//
 		// **The table updates are two regions of one buffer, from its two ends.**
 		// `PrepareParticles` fills parameters from the front and curves from the
 		// back, so a frame that changed neither uploads nothing rather than a
 		// zero-length copy the driver still has to look at.
-		{
+		if (upload) {
 			SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(command);
 			if (copy == nullptr) {
 				ENGINE_ERROR("particle step: SDL_BeginGPUCopyPass: {}", SDL_GetError());
-				SDL_CancelGPUCommandBuffer(command);
-				return false;
+				return {false, dispatches};
 			}
 
 			const auto send = [copy](
@@ -570,7 +586,7 @@ namespace engine::render {
 				Particles.DrawStaging,
 				Particles.Draws,
 				0,
-				Particles.Records * PARTICLE_DRAW_WORDS * word,
+				Particles.DrawUpdates * PARTICLE_DRAW_WORDS * word,
 				true
 			);
 			send(
@@ -641,6 +657,7 @@ namespace engine::render {
 			SDL_PushGPUComputeUniformData(command, 0, counts, sizeof(counts));
 			SDL_DispatchGPUCompute(pass, (count + 63) / 64, 1, 1);
 			SDL_EndGPUComputePass(pass);
+			dispatches++;
 			return true;
 		};
 
@@ -678,8 +695,7 @@ namespace engine::render {
 								"spawn"
 							);
 		if (!staged) {
-			SDL_CancelGPUCommandBuffer(command);
-			return false;
+			return {false, dispatches};
 		}
 
 		{
@@ -690,8 +706,7 @@ namespace engine::render {
 			SDL_GPUComputePass *pass = SDL_BeginGPUComputePass(command, nullptr, 0, outputs, 2);
 			if (pass == nullptr) {
 				ENGINE_ERROR("particle step: SDL_BeginGPUComputePass: {}", SDL_GetError());
-				SDL_CancelGPUCommandBuffer(command);
-				return false;
+				return {false, dispatches};
 			}
 
 			SDL_BindGPUComputePipeline(pass, ParticleStep);
@@ -714,13 +729,18 @@ namespace engine::render {
 			// one strides through its own capacity.
 			SDL_DispatchGPUCompute(pass, Particles.Records, 1, 1);
 			SDL_EndGPUComputePass(pass);
+			dispatches++;
 		}
 
-		if (!SDL_SubmitGPUCommandBuffer(command)) {
-			ENGINE_ERROR("particle step: SDL_SubmitGPUCommandBuffer: {}", SDL_GetError());
-			return false;
+		if (timingSlot < VulkanTimestamps::SLOTS) {
+			const uint32_t closedMark = Timestamps.Mark(command);
+			if (openedMark < VulkanTimestamps::MARKS && closedMark < VulkanTimestamps::MARKS) {
+				PendingMarks[timingSlot].push_back({PARTICLE_STEP_NAME, openedMark, closedMark});
+			}
 		}
-		return true;
+		ActiveParticleWorld->PendingDelta = Particles.Delta;
+		ActiveParticleWorld->SubmissionPending = true;
+		return {true, dispatches};
 	}
 
 	// The uniforms the particle shaders read. Private, like every other GPU
@@ -775,23 +795,68 @@ namespace engine::render {
 		}
 	}
 
-	uint32_t Renderer::Impl::PrepareParticles(const render::View &view) {
+	Renderer::Impl::ParticlePreparation Renderer::Impl::PrepareParticles(
+		const render::View &view, SDL_GPUCommandBuffer *command, uint32_t timingSlot
+	) {
 		ActiveParticleWorld = &ParticleWorldFor(view.World, view.WorldName);
 		if (ActiveParticleWorld->PreparedFrame == FrameCounter) {
 			ParticleGroups = ActiveParticleWorld->PreparedGroups;
-			return ActiveParticleWorld->PreparedCount;
+			return {ActiveParticleWorld->PreparedCount, 0};
 		}
 
 		ParticlePool &Particles = ActiveParticleWorld->Pool;
-		ParticleGroups.clear();
-		Particles.Records = 0;
-		Particles.BirthCount = 0;
-		Particles.SeamCount = 0;
-
 		const std::span<const render::ParticleBatch> batches = view.Particles;
 		if (ParticlePipeline == nullptr || ParticleStep == nullptr || batches.empty()) {
-			return 0;
+			ParticleGroups.clear();
+			Particles.Records = 0;
+			Particles.DrawUpdates = 0;
+			Particles.BirthCount = 0;
+			Particles.SeamCount = 0;
+			Particles.ParamUpdates = 0;
+			Particles.CurveUpdates = 0;
+			ActiveParticleWorld->PreparedFrame = FrameCounter;
+			ActiveParticleWorld->PreparedRevision = view.ParticleRevision;
+			ActiveParticleWorld->PreparedRevisionValid = true;
+			ActiveParticleWorld->PreparedCount = 0;
+			ActiveParticleWorld->PreparedBatches.clear();
+			ActiveParticleWorld->PreparedGroups.clear();
+			return {};
 		}
+
+		const bool rebuild = !ActiveParticleWorld->PreparedRevisionValid ||
+							 ActiveParticleWorld->PreparedRevision != view.ParticleRevision;
+		if (!rebuild) {
+			ParticleGroups = ActiveParticleWorld->PreparedGroups;
+			Particles.DrawUpdates = 0;
+			Particles.BirthCount = 0;
+			Particles.SeamCount = 0;
+			Particles.ParamUpdates = 0;
+			Particles.CurveUpdates = 0;
+			Particles.Delta = view.ParticleDelta + ActiveParticleWorld->CarriedDelta;
+
+			ParticleDispatch dispatched{true, 0};
+			if (view.ParticleDelta > 0.0f) {
+				dispatched = DispatchParticles(command, timingSlot);
+			}
+			if (!dispatched.Succeeded) {
+				ActiveParticleWorld->PreparedRevisionValid = false;
+				ActiveParticleWorld->CarriedDelta = Particles.Delta;
+				std::fill(Particles.ParamRevision.begin(), Particles.ParamRevision.end(), 0);
+				std::fill(Particles.CurveRevision.begin(), Particles.CurveRevision.end(), 0);
+				return {};
+			}
+
+			ActiveParticleWorld->PreparedFrame = FrameCounter;
+			return {ActiveParticleWorld->PreparedCount, dispatched.Count};
+		}
+
+		ParticleGroups.clear();
+		Particles.Records = 0;
+		Particles.DrawUpdates = 0;
+		Particles.BirthCount = 0;
+		Particles.SeamCount = 0;
+		Particles.ParamUpdates = 0;
+		Particles.CurveUpdates = 0;
 
 		// **Grouped by state, and this is the difference between a scene that
 		// draws and one that does not.** The first version issued one draw call
@@ -860,17 +925,17 @@ namespace engine::render {
 			}
 		}
 		if (total == 0 || !ReserveParticles(total)) {
-			return 0;
+			return {};
 		}
-		if (!ReserveParticlePool(view.ParticlePool) || !ReserveParticleTables(view.ParticleBlocks)) {
-			return 0;
+		if (!ReserveParticlePool(view.ParticlePool, command) || !ReserveParticleTables(view.ParticleBlocks)) {
+			return {};
 		}
 		if (!ReserveParticleStaging(
 				static_cast<uint32_t>(batches.size()),
 				static_cast<uint32_t>(view.ParticleBirths.size()),
 				static_cast<uint32_t>(view.ParticleSeams.size())
 			)) {
-			return 0;
+			return {};
 		}
 
 		auto *draws = static_cast<uint32_t *>(SDL_MapGPUTransferBuffer(Device, Particles.DrawStaging, true));
@@ -888,7 +953,7 @@ namespace engine::render {
 					SDL_UnmapGPUTransferBuffer(Device, buffer);
 				}
 			}
-			return 0;
+			return {};
 		}
 
 		// One walk that stages the draw list, notices which blocks the device is
@@ -965,9 +1030,10 @@ namespace engine::render {
 		SDL_UnmapGPUTransferBuffer(Device, Particles.ParamStaging);
 		SDL_UnmapGPUTransferBuffer(Device, Particles.CurveStaging);
 		Particles.Records = staged;
+		Particles.DrawUpdates = staged;
 		Particles.ParamUpdates = params;
 		Particles.CurveUpdates = curves;
-		Particles.Delta = view.ParticleDelta;
+		Particles.Delta = view.ParticleDelta + ActiveParticleWorld->CarriedDelta;
 
 		// The births and the panes, both small and both straight copies - a birth
 		// is sixty bytes and a scene has thousands of them against half a million
@@ -1000,23 +1066,26 @@ namespace engine::render {
 			}
 		}
 
-		// **Stepped here rather than by the caller**, because the destinations
-		// this walk just decided are what the step writes to: the two cannot be
-		// separated without the block records crossing twice.
-		const bool restage =
-			batches.data() != Particles.StagedFrom || batches.size() != Particles.StagedCount;
-		if (restage || view.ParticleDelta > 0.0f) {
-			(void)DispatchParticles();
-			Particles.StagedFrom = batches.data();
-			Particles.StagedCount = batches.size();
+		// **Stepped in the frame command after staging**, because the destinations
+		// this walk decided are what the step writes to. Queue order makes the
+		// transparent draw see them without a second host submission.
+		const ParticleDispatch dispatched = DispatchParticles(command, timingSlot);
+		if (!dispatched.Succeeded) {
+			ActiveParticleWorld->PreparedRevisionValid = false;
+			ActiveParticleWorld->CarriedDelta = Particles.Delta;
+			std::fill(Particles.ParamRevision.begin(), Particles.ParamRevision.end(), 0);
+			std::fill(Particles.CurveRevision.begin(), Particles.CurveRevision.end(), 0);
+			return {};
 		}
 
 		ActiveParticleWorld->PreparedFrame = FrameCounter;
+		ActiveParticleWorld->PreparedRevision = view.ParticleRevision;
+		ActiveParticleWorld->PreparedRevisionValid = true;
 		ActiveParticleWorld->PreparedCount = written;
 		ActiveParticleWorld->PreparedBatches.assign(batches.begin(), batches.end());
 		ActiveParticleWorld->PreparedGroups = ParticleGroups;
 
-		return written;
+		return {written, dispatched.Count};
 	}
 
 	uint32_t Renderer::Impl::DrawParticles(

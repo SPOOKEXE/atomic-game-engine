@@ -403,7 +403,7 @@ namespace unified {
 
 		// One entity's X as it was actually drawn, by its ordinal in the walk
 		// that filled the list.
-		float DrawnPositionOf(const client::DrawList &drawList, engine::ecs::Entity entity);
+		float DrawnPositionOf(const engine::render::DrawList &drawList, engine::ecs::Entity entity);
 
 		Settings Options;
 		Arrangement Wired;

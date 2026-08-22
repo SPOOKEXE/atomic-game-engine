@@ -64,7 +64,7 @@ namespace engine::render {
 			// The batch owner drops any recorded downloads with the frame.
 			State->BatchFailed = true;
 		} else {
-			State->CompleteInstanceUploads(SDL_SubmitGPUCommandBuffer(command));
+			State->CompleteResidentUploads(SDL_SubmitGPUCommandBuffer(command));
 			State->DropDownloads();
 		}
 	}
@@ -176,7 +176,7 @@ namespace engine::render {
 		// Multiple `SDL_UploadToGPUBuffer` calls and a transfer-buffer map all
 		// live inside whichever graph node first needs them, so keep the whole
 		// record phase visible rather than timing only overlay staging.
-		ENGINE_PROFILE_CAT("submit uploads", core::ProfileCategory::Render);
+		ENGINE_PROFILE_CAT("record uploads", core::ProfileCategory::Render);
 
 		OverlayImage::Region overlayRegion;
 		if (uploadOverlay) {
@@ -280,10 +280,10 @@ namespace engine::render {
 			uploadedBytes += destination.size;
 		}
 
-		// **No particle upload here any more.** The instance stream is not
-		// host data that has to cross - it is what `particle-step.comp`
-		// wrote, on its own submission, before this command buffer was
-		// recorded. See `Impl::ParticlePool`.
+		// **No particle instance upload here.** The instance stream is not host
+		// data that has to cross: `PrepareParticles` recorded changed block data
+		// and `particle-step.comp` into this command before the graph passes.
+		// Queue order makes this later draw see the generated rows.
 
 		if (uploadOverlay) {
 			SDL_GPUTextureTransferInfo source{};

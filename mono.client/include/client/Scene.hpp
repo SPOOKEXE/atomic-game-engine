@@ -9,8 +9,8 @@
 // them. `scene` at L7 is that place, both programs register the same set under
 // the same names, and a snapshot now crosses between them with no translation
 // layer. What is left here is the demo: `Spin` and `Orbit`, which describe how
-// this scene moves and nothing else does, and `DrawList`, which is what one
-// world hands its compositor.
+// this scene moves and nothing else does. The draw list and its collectors now
+// live in `Engine::render`, where both this client and Studio use them.
 //
 // **There is no scene object.** Building the world is a function, and
 // everything the tick touches is in the store: per-entity data as components,
@@ -25,6 +25,7 @@
 #include <engine/examples/Scene.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/render/WorldPresentation.hpp>
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/world/Universe.hpp>
 
@@ -47,25 +48,6 @@ namespace client {
 	using engine::examples::Spin;
 
 	// --- resources: one of each, for the whole world -----------------------
-
-	// What to draw this frame, as the *world* describes it.
-	//
-	// In the world rather than beside it, because the alternative is the thing
-	// repo_layout.md §1 names outright: a module keeping a private vector for
-	// data another module reads. The vector's capacity survives from frame to
-	// frame, so a steady scene stops allocating after the first one.
-	struct DrawList {
-		// One entry per visible cube, rebuilt every frame.
-		//
-		// `scene::DrawInstance`, not a renderer's instance: a `server`-tier host
-		// publishes one of these too, so the payload cannot be a type only a
-		// client can name. The conversion into a matrix and an RGBA happens in
-		// `render`, once, at the point of upload.
-		//
-		// Cleared rather than reallocated, so the capacity survives from frame
-		// to frame and a steady scene stops allocating after the first one.
-		std::vector<engine::scene::DrawInstance> Instances;
-	};
 
 	// Every surface camera in the world, as views the renderer takes.
 	//
@@ -273,110 +255,6 @@ namespace client {
 		std::vector<engine::scene::DrawInstance> &drawn,
 		std::vector<engine::scene::DrawInstance> &foreign,
 		std::vector<engine::render::SurfaceView> &views
-	);
-
-	// Everything a frame's particles need, on one object.
-	//
-	// **Four lists rather than four out-parameters**, because they are only
-	// meaningful together: a batch names a block, a birth names a slot of the
-	// pool those blocks index into, and a seam is a property of the same world.
-	// Handing them separately made the studio's copy - see `Detach` - a thing
-	// four call sites had to remember.
-	//
-	// @since v0.17
-	struct ParticleFrame {
-		// One per emitter with a block, in the emitter column's order.
-		std::vector<engine::render::ParticleBatch> Batches;
-
-		// What was spawned on the tick that just ran.
-		//
-		// **Copied out of the world rather than spanned into it**, so a caller
-		// that renders outside the tick has something that outlives it. A birth
-		// is sixty-four bytes and a busy scene has a couple of thousand a tick.
-		std::vector<engine::effects::ParticleBirth> Births;
-
-		// The portal panes, if the world has any.
-		std::vector<engine::render::ParticleSeam> Seams;
-
-		// How many slots the device pool must hold, from the world's own.
-		uint32_t Pool = 0;
-
-		// How many blocks the world has ever handed out, which is what sizes the
-		// renderer's per-block tables. See `render::View::ParticleBlocks`.
-		uint32_t BlockCount = 0;
-
-		// Where `Batches` point when they have been detached from the world.
-		//
-		// Empty for a caller that renders inside the tick, which the client does.
-		std::vector<engine::effects::EmitterBlock> Blocks;
-
-		// Copies the blocks the batches point at and repoints them.
-		//
-		// **For a caller that renders outside the tick that filled this**, which
-		// is the studio: `Renderer::Render` happens after `Universe::Enter` has
-		// returned, and by then the world may be stepping again. Copying the
-		// batches alone would copy the pointers.
-		//
-		// A block is about three hundred bytes and a scene has thousands of them,
-		// so this is a couple of megabytes - against the sixteen the same call
-		// used to copy when a batch was a span of particles.
-		void Detach();
-
-		// Empties every list. `Pool` is kept, being a property of the world.
-		void Clear();
-	};
-
-	// Turns a world's particle pool into what the renderer's step and draw need.
-	//
-	// **One batch per emitter with a block, pointing at the block rather than at
-	// its particles.** Since v0.17 the device owns the pool: `particle-step.comp`
-	// integrates and shades from the block's own parameters, so what reaches the
-	// renderer is a few hundred bytes an emitter and not the half million
-	// particles they between them hold.
-	//
-	// **Here rather than in `effects`, for `CollectSurfaceViews`'s reason.**
-	// `render::ParticleBatch` is a `client`-tier type and `effects` is `shared`;
-	// a module that named it would be a shared module naming a presentation type.
-	// So the pool knows nothing about batches and this is where the two meet.
-	//
-	// The emitter's shared half - texture, blend mode, flipbook layout, Z offset -
-	// is read off `ParticleEmitter` here, once per emitter rather than once per
-	// particle, which is the whole reason `ParticleInstance` is twenty-eight
-	// bytes.
-	//
-	// @param store The world.
-	// @param frame Cleared and filled. Its batches point into the world's block
-	//              list, so they are valid until the world is stepped again -
-	//              see `ParticleFrame::Detach` for the caller that cannot rely
-	//              on that.
-	// @return How many batches have something to draw.
-	size_t CollectParticleBatches(engine::ecs::Store &store, ParticleFrame &frame);
-
-	// Turns a world's `scene::Light` rows into the lights the renderer takes.
-	//
-	// **Resolves where each one shines from, which is its parent's business.**
-	// A `Light` carries no position - `scene/Components.hpp` refuses it one, for
-	// `Sound`'s reason - so this walks one step to the parent and takes its
-	// `Attachment`'s world frame or its `Transform`. A light parented to neither
-	// is skipped rather than placed at the origin, which would put a lamp in the
-	// middle of every world that had one lying loose in `ReplicatedStorage`.
-	//
-	// **Capped at `render::MAX_SCENE_LIGHTS`, nearest to the eye first.** The
-	// renderer drops anything past the cap and has no idea which lamp matters;
-	// choosing is the caller's, and distance is the only ordering that is right
-	// more often than it is wrong. A scene that needs a better rule - a boss's
-	// aura outranking a corridor sconce - wants an authored priority, which is
-	// the same shape `replication::DistancePriority` already has and is not in
-	// v0.10.
-	//
-	// @param store  The world.
-	// @param eye    Where the view is, for the ordering.
-	// @param lights Cleared and filled. Keeps its capacity between frames.
-	// @return How many lights were written.
-	size_t CollectLights(
-		engine::ecs::Store &store,
-		const engine::core::Vector3 &eye,
-		std::vector<engine::render::SceneLight> &lights
 	);
 
 	// Builds the scene by running a Luau file instead of a C++ loop.

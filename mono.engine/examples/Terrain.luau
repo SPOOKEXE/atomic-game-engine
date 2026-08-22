@@ -26,7 +26,7 @@
 --
 --   * **The bands.** Water, shore sand, grass, upland scrub, bare rock and snow
 --     each come out as their own colour. `assets::MeshVertex` has no colour
---     field, so this works by `client::BuildMeshData` giving every distinct
+--     field, so this works by `engine::render::BuildMeshData` giving every distinct
 --     *triangle* colour its own submesh run - a scene of one flat brown means
 --     that split has regressed to the average it used to take.
 --   * **The slopes.** A cliff is shaded as a cliff because the normals are

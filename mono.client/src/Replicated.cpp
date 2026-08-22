@@ -31,6 +31,7 @@ namespace client {
 	using engine::ecs::Phase;
 	using engine::ecs::Scheduler;
 	using engine::ecs::Store;
+	using engine::render::DrawList;
 	using engine::replication::InterpolationSettings;
 	using engine::replication::SnapshotBuffer;
 	using engine::scene::AlphaMode;
@@ -161,7 +162,7 @@ namespace client {
 			//  * The output is a *filtered* `push_back`. `visual.Visible` is a
 			//    field test rather than a query term, so a row's position in the
 			//    walk does not decide its position in the draw list - which is
-			//    exactly what `client::CollectInstances` relies on to let
+			//    exactly what `engine::render::CollectInstances` relies on to let
 			//    workers write `out[base + first + row]` with no atomic and no
 			//    reshuffling. Making this list dense needs `scene::Rendered` in
 			//    the query, and marking it needs a visibility system running in
@@ -240,7 +241,7 @@ namespace client {
 			// frames - the ones this machine actually draws - so the far half of
 			// a body lines up with the near half rather than trailing it by
 			// however far the character walked since the last tick. After the
-			// metric for the reason `client::CollectInstances` gives.
+			// metric for the reason `engine::render::CollectInstances` gives.
 			(void)engine::scene::CutAndCloneSeams(store, drawList->Instances);
 
 			engine::core::Metrics::Count("replica.behind.ticks", buffer->Behind());
@@ -301,7 +302,7 @@ namespace client {
 		// `SnapshotBuffer` is a resource, a resource is keyed by a component id,
 		// and one minted from the compiler's spelling is a world `Store::Save`
 		// refuses - so a replica could not be snapshotted, which is what the
-		// studio does every time Play is pressed. `client::DrawList` two lines
+		// studio does every time Play is pressed. `engine::render::DrawList` two lines
 		// down is the same fix for the same reason, one version earlier.
 		engine::replication::RegisterReplicationComponents();
 
@@ -325,7 +326,7 @@ namespace client {
 		// only resolve, and without it `Attachment::WorldFrame` stayed at the
 		// identity for the whole session. What that looked like was a
 		// `PointLight` parented to an attachment lighting the world origin
-		// rather than the lamp it hangs from: `client::CollectLights` reads the
+		// rather than the lamp it hangs from: `engine::render::CollectLights` reads the
 		// cache and there was nobody to fill it. The script surface was never
 		// affected - `Attachment.WorldCFrame` is a computed property that
 		// resolves on the spot - but its *change signal* was, for the reason

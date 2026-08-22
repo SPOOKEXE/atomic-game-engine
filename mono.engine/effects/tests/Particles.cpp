@@ -895,11 +895,12 @@ TEST_CASE("a device-stepped pool reports every birth and the row it went to", "[
 	Settings(store, emitter).Lifetime = NumberRange{1.0f, 1.0f};
 
 	Frame(store, 1.0f / 60.0f);
+	const size_t firstTickBirths = store.Resource<engine::effects::ParticleSystem>()->Births.size();
 	const auto stats = Frame(store, 1.0f / 60.0f);
 
 	const auto *system = store.Resource<engine::effects::ParticleSystem>();
 	REQUIRE(stats.Emitted > 0);
-	REQUIRE(system->Births.size() == stats.Emitted);
+	REQUIRE(system->Births.size() == firstTickBirths + stats.Emitted);
 
 	// **And the host pool is gone.** Neither array is read on this side once the
 	// device owns it, so `StepParticles` releases both - fifty-four megabytes at
@@ -949,6 +950,7 @@ TEST_CASE("a device-stepped block spawns round its ring rather than refusing", "
 	CHECK(block.Spawned == emitted);
 	CHECK(block.First + block.Spawned % block.Capacity < block.First + block.Capacity);
 	CHECK(block.Live == std::min(block.Spawned, block.Capacity));
+	CHECK(system->Births.size() <= block.Capacity * 2);
 }
 
 TEST_CASE("a recycled device block disagrees with what it inherited", "[effects][device]") {

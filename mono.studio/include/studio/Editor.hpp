@@ -28,6 +28,7 @@
 // exist; this program is the first caller with a reason to use them.
 
 #include <engine/assets/AssetKind.hpp>
+#include <engine/assets/LocalStore.hpp>
 #include <engine/assets/Texture.hpp>
 #include <engine/control/Server.hpp>
 #include <engine/control/Surface.hpp>
@@ -50,11 +51,15 @@
 #include <engine/gui/Input.hpp>
 #include <engine/render/AdornmentGeometry.hpp>
 #include <engine/render/DebugPanels.hpp>
+#include <engine/render/EditableImages.hpp>
+#include <engine/render/EditableMeshes.hpp>
 #include <engine/render/FrameStatistics.hpp>
 #include <engine/render/InterfacePass.hpp>
+#include <engine/render/PresentationSchedule.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/ShaderLibrary.hpp>
 #include <engine/render/ViewportFrames.hpp>
+#include <engine/render/WorldPresentation.hpp>
 #include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/script/Runtime.hpp>
@@ -64,10 +69,6 @@
 #include <engine/world/Universe.hpp>
 
 #include <array>
-#include <cdn/LocalStore.hpp>
-#include <client/EditableImages.hpp>
-#include <client/EditableMeshes.hpp>
-#include <client/PresentationSchedule.hpp>
 #include <client/Scene.hpp>
 #include <cstdint>
 #include <deque>
@@ -1787,7 +1788,7 @@ namespace studio {
 		);
 
 		// The same for the raw view.
-		void SortRaw(std::vector<const cdn::RawEntry *> &rows, const ImGuiTableSortSpecs *specs);
+		void SortRaw(std::vector<const engine::assets::RawEntry *> &rows, const ImGuiTableSortSpecs *specs);
 
 		// Re-reads both halves of the store.
 		//
@@ -2078,7 +2079,7 @@ namespace studio {
 		bool FinishAssetPicker(std::string &chosen, bool confirmed);
 
 		// A raw entry's path relative to `raw/`, which is what a baker takes.
-		static std::string RawRelativePath(const cdn::RawEntry &entry);
+		static std::string RawRelativePath(const engine::assets::RawEntry &entry);
 
 		// Bakes one source out of `raw/` into `baked/`, now.
 		//
@@ -3190,10 +3191,10 @@ namespace studio {
 		//
 		// One per editor for `Shaders`' reason: the ledger of last-uploaded
 		// revisions is process-wide state rather than world state.
-		client::EditableMeshUploader EditableMeshes;
+		engine::render::EditableMeshUploader EditableMeshes;
 
 		// The identical ledger, for `EditableImage`.
-		client::EditableImageUploader EditableImages;
+		engine::render::EditableImageUploader EditableImages;
 		engine::render::OverlayImage Overlay;
 		engine::render::InterfacePass GameInterface;
 		engine::ui::Interface Interface;
@@ -3381,7 +3382,7 @@ namespace studio {
 		// warm when a million-row scene is presented repeatedly.
 		std::vector<engine::scene::DrawInstance> DrawnInstances;
 		std::vector<engine::scene::DrawInstance> ForeignInstances;
-		client::ParticleFrame Particles;
+		engine::render::ParticleFrame Particles;
 
 		std::vector<engine::effects::RibbonVertex> RibbonVertices;
 		std::vector<engine::effects::RibbonRun> RibbonRuns;
@@ -4428,7 +4429,7 @@ namespace studio {
 		// The image deadline, independent of the update loop. A busy swapchain
 		// does not consume its opportunity, and a late image does not cause a
 		// burst of obsolete presents.
-		client::PresentationSchedule Presentations;
+		engine::render::PresentationSchedule Presentations;
 
 		// The four rates the ceiling is actually made of, in hertz.
 		//
@@ -5086,10 +5087,10 @@ namespace studio {
 		// Held rather than re-read, for `RefreshPickerContents`' reason. Shared
 		// by every picker and by the Assets panel, because they are looking at
 		// one store and two copies would disagree the moment one refreshed.
-		std::vector<cdn::PublishedEntry> PickerContents;
+		std::vector<engine::assets::PublishedEntry> PickerContents;
 
 		// What is sitting in `raw/`, as of the last refresh.
-		std::vector<cdn::RawEntry> PickerRaw;
+		std::vector<engine::assets::RawEntry> PickerRaw;
 
 		// Every place the assets panel can list, as of the last refresh.
 		//
@@ -5194,7 +5195,7 @@ namespace studio {
 		// Filled from `EngineAssets`, which is also what the assets panel's
 		// engine tab draws - one enumeration, so the two cannot offer different
 		// sets.
-		std::vector<cdn::PublishedEntry> PickerBuiltins;
+		std::vector<engine::assets::PublishedEntry> PickerBuiltins;
 
 		// The name a picker is currently offering.
 		std::string PickerChoice;

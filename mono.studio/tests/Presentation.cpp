@@ -75,7 +75,7 @@ namespace {
 
 		Vector3 where;
 		universe.Enter(world, [&where](Store &store) {
-			const auto *list = store.Resource<client::DrawList>();
+			const auto *list = store.Resource<engine::render::DrawList>();
 			REQUIRE(list != nullptr);
 			REQUIRE(list->Instances.size() == 1);
 			where = list->Instances[0].Frame.Position;

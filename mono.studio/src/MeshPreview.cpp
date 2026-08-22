@@ -38,6 +38,7 @@
 
 #include <engine/assets/AssetKind.hpp>
 #include <engine/assets/Builtin.hpp>
+#include <engine/assets/LocalStore.hpp>
 #include <engine/assets/Material.hpp>
 #include <engine/assets/Mesh.hpp>
 #include <engine/assets/Resample.hpp>
@@ -46,7 +47,6 @@
 #include <engine/scene/DrawInstance.hpp>
 
 #include <algorithm>
-#include <cdn/LocalStore.hpp>
 #include <cmath>
 #include <fstream>
 #include <studio/Editor.hpp>
@@ -176,7 +176,8 @@ namespace studio {
 
 	PreviewState
 	Editor::BuildPreviewMaterial(const std::string &name, engine::scene::SurfaceAppearance &appearance) {
-		const std::filesystem::path source = cdn::FindInStore(cdn::DefaultLocalPaths(), name);
+		const std::filesystem::path source =
+			engine::assets::FindInStore(engine::assets::DefaultLocalPaths(), name);
 
 		std::error_code failure;
 		if (!std::filesystem::is_regular_file(source, failure)) {
@@ -213,7 +214,8 @@ namespace studio {
 			if (map->empty()) {
 				continue;
 			}
-			const std::filesystem::path sheet = cdn::FindInStore(cdn::DefaultLocalPaths(), *map);
+			const std::filesystem::path sheet =
+				engine::assets::FindInStore(engine::assets::DefaultLocalPaths(), *map);
 			if (std::filesystem::is_regular_file(sheet, failure)) {
 				continue;
 			}
@@ -231,7 +233,8 @@ namespace studio {
 			if (map->empty()) {
 				continue;
 			}
-			const std::filesystem::path sheet = cdn::FindInStore(cdn::DefaultLocalPaths(), *map);
+			const std::filesystem::path sheet =
+				engine::assets::FindInStore(engine::assets::DefaultLocalPaths(), *map);
 			const std::optional<std::vector<std::byte>> sheetBytes = ReadWholeFile(sheet);
 			if (!sheetBytes) {
 				return PreviewState::TooLarge;
@@ -296,12 +299,13 @@ namespace studio {
 		} else if (engine::assets::BuiltinMesh builtin; engine::assets::BuiltinFromName(name, builtin)) {
 			mesh = engine::assets::MakeBuiltin(builtin);
 		} else {
-			// **`cdn::FindInStore` and not a folder spelled here.** This read
+			// **`engine::assets::FindInStore` and not a folder spelled here.** This read
 			// `raw/<name>` and was right for as long as the publisher walked
 			// `raw/`; the day it walked `baked/`, every preview in the editor
 			// resolved to a missing file and turned into "no local pixels" with
 			// nothing said.
-			const std::filesystem::path source = cdn::FindInStore(cdn::DefaultLocalPaths(), name);
+			const std::filesystem::path source =
+				engine::assets::FindInStore(engine::assets::DefaultLocalPaths(), name);
 
 			std::error_code failure;
 			if (!std::filesystem::is_regular_file(source, failure)) {

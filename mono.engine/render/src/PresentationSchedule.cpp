@@ -1,6 +1,6 @@
-#include <client/PresentationSchedule.hpp>
+#include <engine/render/PresentationSchedule.hpp>
 
-namespace client {
+namespace engine::render {
 
 	void PresentationSchedule::SetRate(uint32_t framesPerSecond) {
 		FramesPerSecond = framesPerSecond;
@@ -42,5 +42,12 @@ namespace client {
 		const auto elapsed = now >= Next ? now - Next : Clock::duration{};
 		const auto intervals = elapsed / Period + 1;
 		Next += Period * intervals;
+	}
+
+	PresentationSchedule::Clock::duration PresentationSchedule::Remaining(TimePoint now) const {
+		if (FramesPerSecond == 0 || !Started || now >= Next) {
+			return Clock::duration{};
+		}
+		return Next - now;
 	}
 }

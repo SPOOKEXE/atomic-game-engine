@@ -2203,7 +2203,8 @@ namespace client {
 
 	void Client::Step() {
 		UpdateIterations++;
-		const PresentationSchedule::TimePoint presentationNow = PresentationSchedule::Clock::now();
+		const engine::render::PresentationSchedule::TimePoint presentationNow =
+			engine::render::PresentationSchedule::Clock::now();
 		const bool presentationDue = Presentations.Due(presentationNow);
 
 		// Everything from here to EndFrame is one update's worth of spans. An
@@ -2331,6 +2332,20 @@ namespace client {
 		// Headless rendering still returns true so captures and bounded runs keep
 		// their existing behaviour.
 		if (!renderingActive || !presentationDue) {
+			if (renderingActive && !presentationDue && Settings.Uncapped && Presentations.Rate() > 0) {
+				// Keep simulation and services independent from a lower presentation
+				// rate, but do not poll a future image deadline millions of times a
+				// second. The short ceiling preserves sub-frame input and network
+				// service while removing the busy spin.
+				constexpr engine::render::PresentationSchedule::Clock::duration MAXIMUM_PRESENTATION_IDLE =
+					std::chrono::milliseconds(1);
+				const auto remaining =
+					Presentations.Remaining(engine::render::PresentationSchedule::Clock::now());
+				if (remaining > engine::render::PresentationSchedule::Clock::duration{}) {
+					ENGINE_PROFILE_CAT("wait for presentation", engine::core::ProfileCategory::Idle);
+					std::this_thread::sleep_for(std::min(remaining, MAXIMUM_PRESENTATION_IDLE));
+				}
+			}
 			FrameGraph::EndFrame();
 			ENGINE_PROFILE_FRAME();
 			Metrics::Clear();
@@ -2393,12 +2408,10 @@ namespace client {
 			// go on rendering a camera that is no longer in the scene.
 			Surfaces.clear();
 
-			// **Cleared with the surfaces and for a sharper version of the same
-			// reason.** A stale `SurfaceView` renders a camera that has gone; a
-			// stale `ParticleBatch` points at a block that may since have been
-			// reclaimed and handed to another emitter, so its run of the pool
-			// would be stepped with somebody else's curves.
-			Particles.Clear();
+			// Collection keys the snapshot by world and simulation revision. Keep
+			// it until the rendered world either replaces it or fails to publish,
+			// so render-rate frames between ticks reuse the same device inputs.
+			bool particleFrameCollected = false;
 			Lights.clear();
 			RibbonVertices = {};
 			RibbonRuns = {};
@@ -2441,9 +2454,9 @@ namespace client {
 				// phase filled the draw list. The camera and the list stay
 				// where they were produced; what leaves is a copy in a buffer
 				// the renderer owns the other end of.
-				Universe_->Enter(id, [this, id, selectedProfile](engine::ecs::Store &store) {
+				Universe_->Enter(id, [&, id, selectedProfile](engine::ecs::Store &store) {
 					const auto *active = store.Resource<engine::scene::ActiveCamera>();
-					const auto *list = store.Resource<DrawList>();
+					const auto *list = store.Resource<engine::render::DrawList>();
 					if (active == nullptr || list == nullptr) {
 						return;
 					}
@@ -2491,7 +2504,7 @@ namespace client {
 						if (ProfilesInstalledFor != id || ProfileInstalledSelection != selectedProfile) {
 							ProfilesInstalledFor = id;
 							ProfileInstalledSelection = selectedProfile;
-							PipelineSelected = InstallRenderingProfiles(
+							PipelineSelected = engine::render::InstallWorldPipeline(
 								RenderingProfiles, Renderer, id.Index, selectedProfile
 							);
 						}
@@ -2500,7 +2513,8 @@ namespace client {
 						// that one.** A batch is a span into this world's pool;
 						// see `Client.hpp` for why a second world's cannot be
 						// appended to the same list.
-						(void)CollectParticleBatches(store, Particles);
+						(void)engine::render::CollectParticleBatches(store, Particles);
+						particleFrameCollected = true;
 
 						// **The ribbons are taken as spans rather than copied**,
 						// which is safe for the frame and only for the frame:
@@ -2514,13 +2528,16 @@ namespace client {
 						// sixteen lights and a world may hold any number; which
 						// sixteen is a scene question and distance is the answer
 						// that is right more often than it is wrong.
-						(void)CollectLights(store, placement->Frame.Position, Lights);
+						(void)engine::render::CollectLights(store, placement->Frame.Position, Lights);
 					}
 
 					Views.Publish(
 						id, placement->Frame, *lens, list->Instances, store.Time().Tick, store.Time().Alpha
 					);
 				});
+			}
+			if (!particleFrameCollected) {
+				Particles.Clear();
 			}
 
 			// The replicated world, once it has joined and been given a
@@ -2562,7 +2579,7 @@ namespace client {
 				Universe_->Present(Replicated, presentationDelta, Universe_->AlphaOf(Replicated));
 
 				Universe_->Enter(Replicated, [this](engine::ecs::Store &store) {
-					const auto *list = store.Resource<DrawList>();
+					const auto *list = store.Resource<engine::render::DrawList>();
 					if (list == nullptr) {
 						return;
 					}
@@ -3284,6 +3301,8 @@ namespace client {
 		view.Particles = Particles.Batches;
 		view.ParticleBirths = Particles.Births;
 		view.ParticleSeams = Particles.Seams;
+		view.ParticleRevision = Particles.Revision;
+		view.ParticleLayoutRevision = Particles.LayoutRevision;
 		view.ParticlePool = Particles.Pool;
 		view.ParticleBlocks = Particles.BlockCount;
 
@@ -3323,7 +3342,7 @@ namespace client {
 
 		if (!visualChanged) {
 			UnchangedPresentationsSkipped++;
-			Presentations.Consume(PresentationSchedule::Clock::now());
+			Presentations.Consume(engine::render::PresentationSchedule::Clock::now());
 			ParticleDeltaSeconds = 0.0f;
 			FrameGraph::EndFrame();
 			ENGINE_PROFILE_FRAME();
@@ -3349,7 +3368,7 @@ namespace client {
 			ENGINE_HEAP_SCOPE("client.statistics");
 			Statistics.Record(Clock.Now(), ParticleDeltaSeconds);
 		}
-		Presentations.Consume(PresentationSchedule::Clock::now());
+		Presentations.Consume(engine::render::PresentationSchedule::Clock::now());
 		PresentedVisualSignature = visualSignature;
 		PresentedVisualSignatureValid = true;
 		PresentedImages++;
@@ -3647,7 +3666,7 @@ namespace client {
 			Universe_->Enter(Replicated, [&network](engine::ecs::Store &store) {
 				network.Entities = store.CountMatching<engine::scene::Transform>();
 
-				if (const auto *drawList = store.Resource<DrawList>()) {
+				if (const auto *drawList = store.Resource<engine::render::DrawList>()) {
 					network.Drawn = drawList->Instances.size();
 				}
 				if (const auto *buffer = store.Resource<engine::replication::SnapshotBuffer>()) {
@@ -3689,7 +3708,7 @@ namespace client {
 		Universe_->Enter(Replicated, [&](engine::ecs::Store &store) {
 			store.EachEntity([&entities](engine::ecs::Entity) { entities++; });
 
-			if (const auto *drawList = store.Resource<DrawList>()) {
+			if (const auto *drawList = store.Resource<engine::render::DrawList>()) {
 				drawn = drawList->Instances.size();
 			}
 			if (const auto *buffer = store.Resource<engine::replication::SnapshotBuffer>()) {

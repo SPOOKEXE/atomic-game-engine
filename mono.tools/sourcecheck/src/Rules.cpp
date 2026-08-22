@@ -566,9 +566,10 @@ namespace sourcecheck {
 							  "in another process or another run: serialise `Text()`, or call `WriteName`.";
 				} else if (SerialiserName(name) && arguments.find("sizeof") != std::string_view::npos &&
 						   arguments.find("Name") != std::string_view::npos) {
-					message = std::string(name) +
-							  " writes a `Name`'s object representation. That is its process-local id with "
-							  "extra steps - the failure `client::DrawList` had at v0.7. Write `Text()`.";
+					message =
+						std::string(name) +
+						" writes a `Name`'s object representation. That is its process-local id with "
+						"extra steps - the failure `engine::render::DrawList` had at v0.7. Write `Text()`.";
 				} else if (name == "FromId" && arguments.find("Read") != std::string_view::npos) {
 					message = "Name::FromId is fed straight from a reader. An id read back from a stream "
 							  "names whatever happened to be interned first in this process: read the text "

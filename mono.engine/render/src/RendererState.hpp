@@ -959,11 +959,12 @@ namespace engine::render {
 			// One state per slot, `STATE_WORDS` wide, read and written by the
 			// step and written by the spawn. Never read by the host.
 			SDL_GPUBuffer *States = nullptr;
+			SDL_GPUTransferBuffer *StateStaging = nullptr;
 			uint32_t Slots = 0;
 
-			// This frame's draw list: two words an emitter, in the sorted batch
-			// order, so a workgroup index is an entry index and no live list is
-			// needed. The only per-emitter thing that crosses per frame.
+			// The resident draw list: two words an emitter, in sorted batch order,
+			// so a workgroup index is an entry index and no live list is needed. It
+			// crosses only when the simulation revision changes.
 			//@{
 			SDL_GPUBuffer *Draws = nullptr;
 			SDL_GPUTransferBuffer *DrawStaging = nullptr;
@@ -1015,7 +1016,8 @@ namespace engine::render {
 			std::vector<uint32_t> CurveRevision;
 			//@}
 
-			// This frame's births, each a slot and the state to put in it.
+			// Pending births since the last presented revision, each a slot and the
+			// state to put in it.
 			//@{
 			SDL_GPUBuffer *Births = nullptr;
 			SDL_GPUTransferBuffer *BirthStaging = nullptr;
@@ -1029,26 +1031,15 @@ namespace engine::render {
 			uint32_t SeamCapacity = 0;
 			//@}
 
-			// What was staged this frame, for the dispatch that follows.
+			// What changed for the dispatch being recorded.
 			//@{
 			uint32_t Records = 0;
+			uint32_t DrawUpdates = 0;
 			uint32_t BirthCount = 0;
 			uint32_t SeamCount = 0;
 			uint32_t ParamUpdates = 0;
 			uint32_t CurveUpdates = 0;
 			float Delta = 0.0f;
-			//@}
-
-			// Which batch list the device stream held on its last preparation.
-			//
-			// The enclosing `ParticleWorld` handles cameras within one render
-			// frame. This pair handles the next frame: a paused world whose batch
-			// storage and count are unchanged needs neither a restage nor a compute
-			// dispatch, while a caller that rebuilt its list at another address is
-			// brought current even with a zero delta.
-			//@{
-			const ParticleBatch *StagedFrom = nullptr;
-			size_t StagedCount = 0;
 			//@}
 		};
 
@@ -1065,9 +1056,21 @@ namespace engine::render {
 			// the current renderer frame. The first view stages and advances it;
 			// later views reuse both its material groups and device output.
 			uint64_t PreparedFrame = 0;
+			uint64_t PreparedRevision = 0;
+			uint64_t PreparedLayoutRevision = 0;
+			bool PreparedRevisionValid = false;
 			uint32_t PreparedCount = 0;
 			std::vector<ParticleBatch> PreparedBatches;
 			std::vector<ParticleGroup> PreparedGroups;
+
+			// Time recorded into the command currently owned by the host. A submit
+			// failure carries it into the next device step instead of losing time.
+			//@{
+			float CarriedDelta = 0.0f;
+			float PendingDelta = 0.0f;
+			bool SubmissionPending = false;
+			bool StateInitialisationPending = false;
+			//@}
 
 			// Written by this world's compute step and read as its vertex stream.
 			// There is no transfer buffer: these rows never live on the host.
@@ -1099,18 +1102,23 @@ namespace engine::render {
 		// live particle in the scene, which is a visible pop rather than a slow
 		// frame.
 		//@{
-		bool ReserveParticlePool(uint32_t slots);
+		bool ReserveParticlePool(uint32_t slots, SDL_GPUCommandBuffer *command);
 		bool ReserveParticleTables(uint32_t blocks);
 		bool ReserveParticleStaging(uint32_t draws, uint32_t births, uint32_t seams);
 		//@}
 
-		// Runs the spawn scatter and then the step, on their own command buffer.
+		// Runs changed-state uploads, the spawn scatter and the step in the
+		// frame's command buffer.
 		//
-		// **Its own submission, and once per world rather than once per view.**
-		// The pool is a world's and not a camera's, so stepping it inside a
-		// view's command buffer would age every particle again for a mirror.
-		// Submission order is what makes the draws that follow see it.
-		bool DispatchParticles();
+		// **Once per world rather than once per view.** The pool is a world's and
+		// not a camera's; `PrepareParticles` records it for the first view and
+		// later cameras reuse the output. Recording it here removes the separate
+		// submission while command order still makes the following draws see it.
+		struct ParticleDispatch {
+			bool Succeeded = false;
+			uint32_t Count = 0;
+		};
+		ParticleDispatch DispatchParticles(SDL_GPUCommandBuffer *command, uint32_t timingSlot);
 
 		void ReleaseParticlePool();
 
@@ -1131,8 +1139,14 @@ namespace engine::render {
 		// previous frame left - which draws *something*, which is why it took a
 		// capture rather than a crash to find.
 		//
-		// @return How many instance slots the frame will draw.
-		uint32_t PrepareParticles(const View &view);
+		struct ParticlePreparation {
+			uint32_t Count = 0;
+			uint32_t Dispatches = 0;
+		};
+
+		// @return How many instance slots and compute dispatches the frame recorded.
+		ParticlePreparation
+		PrepareParticles(const View &view, SDL_GPUCommandBuffer *command, uint32_t timingSlot);
 
 		// Draws what the step wrote.
 		//
@@ -1273,13 +1287,33 @@ namespace engine::render {
 			}
 		}
 
-		void CompleteInstanceUploads(bool submitted) {
+		void CompleteResidentUploads(bool submitted) {
 			if (!submitted) {
 				for (const PendingInstanceUpload &pending : PendingInstanceUploads) {
 					InstanceWorldFor(pending.Id, pending.Name).Instances.MarkAllDirty();
 				}
 			}
 			PendingInstanceUploads.clear();
+
+			for (ParticleWorld &world : ParticleWorlds) {
+				if (!world.SubmissionPending) {
+					continue;
+				}
+				if (submitted) {
+					world.CarriedDelta = 0.0f;
+				} else {
+					world.PreparedRevisionValid = false;
+					world.CarriedDelta = world.PendingDelta;
+					if (world.StateInitialisationPending) {
+						world.Pool.Slots = 0;
+					}
+					std::fill(world.Pool.ParamRevision.begin(), world.Pool.ParamRevision.end(), 0);
+					std::fill(world.Pool.CurveRevision.begin(), world.Pool.CurveRevision.end(), 0);
+				}
+				world.PendingDelta = 0.0f;
+				world.SubmissionPending = false;
+				world.StateInitialisationPending = false;
+			}
 		}
 
 		// Scene targets that have been replaced but may still be referenced.

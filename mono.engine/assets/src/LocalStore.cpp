@@ -1,11 +1,11 @@
 #include <engine/assets/ChunkStore.hpp>
 #include <engine/assets/ContentHash.hpp>
+#include <engine/assets/LocalStore.hpp>
 #include <engine/assets/Manifest.hpp>
 #include <engine/core/Log.hpp>
 
 #include <algorithm>
 #include <array>
-#include <cdn/LocalStore.hpp>
 #include <cstdlib>
 #include <fstream>
 #include <functional>
@@ -15,7 +15,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace cdn {
+namespace engine::assets {
 
 	namespace {
 		// Where a person's home is, or the current directory.
@@ -42,26 +42,6 @@ namespace cdn {
 		// space-separated log would split one of those into two fields the first
 		// time anybody read it back.
 		constexpr char FIELD = '\t';
-	}
-
-	namespace {
-		// Whether a directory holds no regular file, at any depth.
-		//
-		// **Missing counts as empty**, because the caller's question is "is there
-		// anything to publish" and a store that has never been baked has no
-		// folder rather than an empty one.
-		bool IsEmptyDirectory(const std::filesystem::path &path) {
-			std::error_code failure;
-			for (const auto &entry : std::filesystem::recursive_directory_iterator(path, failure)) {
-				if (failure) {
-					break;
-				}
-				if (entry.is_regular_file(failure)) {
-					return false;
-				}
-			}
-			return true;
-		}
 	}
 
 	LocalPaths DefaultLocalPaths() {
@@ -244,44 +224,6 @@ namespace cdn {
 		entry.Subject = source.string();
 		entry.Hash = report.Hash;
 		entry.Bytes = report.Bytes;
-		(void)AppendLog(paths, entry);
-
-		return report;
-	}
-
-	std::optional<PublishReport> PublishLocal(
-		const LocalPaths &paths,
-		const engine::assets::SigningKey &signing,
-		uint64_t seconds,
-		const PublishSettings &settings
-	) {
-		if (!EnsureLocalStore(paths)) {
-			return std::nullopt;
-		}
-
-		// **Refused rather than published as nothing.** This is exactly the
-		// state a store is in the first time it is published after `baked/`
-		// existed, and an empty manifest written over a working one reads as a
-		// store somebody emptied. Whatever fills `baked/` has not run.
-		if (IsEmptyDirectory(paths.Baked) && !IsEmptyDirectory(paths.Raw)) {
-			ENGINE_ERROR(
-				"content store: {} is empty and {} is not", paths.Baked.string(), paths.Raw.string()
-			);
-			ENGINE_ERROR("bake before publishing - `contentimport --publish` and the studio both do");
-			return std::nullopt;
-		}
-
-		const std::optional<PublishReport> report = Publish(paths.Baked, paths.Processed, signing, settings);
-		if (!report.has_value()) {
-			return std::nullopt;
-		}
-
-		LogEntry entry;
-		entry.Seconds = seconds;
-		entry.Action = "publish";
-		entry.Subject = std::to_string(report->Assets) + " asset(s)";
-		entry.Hash = report->Root.ToHex();
-		entry.Bytes = report->StoredBytes;
 		(void)AppendLog(paths, entry);
 
 		return report;

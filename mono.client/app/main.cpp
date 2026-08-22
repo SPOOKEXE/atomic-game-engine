@@ -1,6 +1,7 @@
 // Thin argument-parsing entry point over the client library.
 
 #include <engine/assets/ContentPolicy.hpp>
+#include <engine/assets/LocalStore.hpp>
 #include <engine/core/Arguments.hpp>
 #include <engine/core/Config.hpp>
 #include <engine/core/Flags.hpp>
@@ -11,7 +12,6 @@
 #include <engine/render/DebugPanels.hpp>
 
 #include <cctype>
-#include <cdn/LocalStore.hpp>
 #include <client/Client.hpp>
 #include <client/Settings.hpp>
 #include <cstdio>
@@ -302,8 +302,8 @@ int main(int argc, char **argv) {
 	// The folder is created rather than merely looked for, so a first run leaves
 	// somewhere to drag files into instead of a path that does not exist.
 	if (options.ContentSources.empty()) {
-		const cdn::LocalPaths local = cdn::DefaultLocalPaths();
-		if (cdn::EnsureLocalStore(local)) {
+		const engine::assets::LocalPaths local = engine::assets::DefaultLocalPaths();
+		if (engine::assets::EnsureLocalStore(local)) {
 			options.ContentSources.push_back("dir:" + local.Processed.string());
 		}
 	}
@@ -332,7 +332,8 @@ int main(int argc, char **argv) {
 	if (auto key = arguments.Get("publisher-key")) {
 		options.ContentPublisherKey = std::string(*key);
 	} else if (options.ContentSources.size() == 1 &&
-			   options.ContentSources.front() == "dir:" + cdn::DefaultLocalPaths().Processed.string()) {
+			   options.ContentSources.front() ==
+				   "dir:" + engine::assets::DefaultLocalPaths().Processed.string()) {
 		// **The development key, and only for the store on this machine.** A
 		// client with no `--publisher-key` refused to start at all, which is
 		// right for an origin across a network and was pure friction for the
@@ -345,9 +346,9 @@ int main(int argc, char **argv) {
 		// store's own directory. Naming any origin - `--cdn`, a remote, even
 		// another directory - leaves the key required, because a key that
 		// everybody knows is not a trust boundary and must never become one for
-		// content somebody else served. `cdn::DevelopmentSigningKey` carries the
+		// content somebody else served. `engine::assets::DevelopmentSigningKey` carries the
 		// same argument from the publishing end.
-		options.ContentPublisherKey = cdn::DevelopmentPublisher().ToHex();
+		options.ContentPublisherKey = engine::assets::DevelopmentPublisher().ToHex();
 	}
 
 	if (auto tab = arguments.Get("profiler-tab")) {
