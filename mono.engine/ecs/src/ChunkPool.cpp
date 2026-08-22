@@ -1,6 +1,7 @@
 #include "ChunkPool.hpp"
 
-#include <atomic>
+#include <engine/core/Metrics.hpp>
+
 #include <mutex>
 #include <new>
 #include <unordered_map>
@@ -40,11 +41,6 @@ namespace engine::ecs {
 			std::mutex Guard;
 			std::unordered_map<SizeClass, std::vector<void *>, SizeClassHash> Free;
 			size_t Retained = 0;
-
-			// Outside the lock so that a diagnostic read never contends with the
-			// path it is measuring.
-			std::atomic<uint64_t> Allocated{0};
-			std::atomic<uint64_t> Reused{0};
 		};
 
 		// Function-local rather than a namespace static: initialisation order
@@ -67,6 +63,7 @@ namespace engine::ecs {
 
 	void *ChunkPool::Acquire(size_t bytes, size_t alignment) {
 		PoolState &pool = Pool();
+		void *reused = nullptr;
 
 		{
 			const std::lock_guard<std::mutex> held(pool.Guard);
@@ -78,15 +75,21 @@ namespace engine::ecs {
 				void *chunk = found->second.back();
 				found->second.pop_back();
 				pool.Retained -= bytes;
-				pool.Reused.fetch_add(1, std::memory_order_relaxed);
-				return chunk;
+				reused = chunk;
 			}
 		}
 
-		// Outside the lock. An allocation can be slow and can take a lock of its
-		// own, and holding one across a call into another subsystem is how a
-		// deadlock gets built out of two reasonable pieces of code.
-		pool.Allocated.fetch_add(1, std::memory_order_relaxed);
+		// Counted outside the lock, which is also why the hit above returns
+		// through a local: `Metrics::Count` takes the sink's own lock, and
+		// holding one lock across a call into another subsystem is how a
+		// deadlock gets built out of two reasonable pieces of code. The same
+		// reasoning keeps the allocation itself out here.
+		if (reused != nullptr) {
+			core::Metrics::Count(REUSED_COUNTER, 1.0);
+			return reused;
+		}
+
+		core::Metrics::Count(ALLOCATED_COUNTER, 1.0);
 		return ::operator new(bytes, std::align_val_t(alignment));
 	}
 
@@ -131,13 +134,5 @@ namespace engine::ecs {
 		PoolState &pool = Pool();
 		const std::lock_guard<std::mutex> held(pool.Guard);
 		return pool.Retained;
-	}
-
-	uint64_t ChunkPool::Allocations() {
-		return Pool().Allocated.load(std::memory_order_relaxed);
-	}
-
-	uint64_t ChunkPool::Reuses() {
-		return Pool().Reused.load(std::memory_order_relaxed);
 	}
 }

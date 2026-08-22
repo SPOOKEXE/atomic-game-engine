@@ -46,7 +46,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
@@ -120,7 +119,32 @@ namespace engine::script {
 		//
 		// Zero disables the check, which is for a host that has some other way
 		// to bound a script and knows it.
+		//
+		// **Spent across everything one call runs, not reset per job.** A
+		// budget handed out again to each queued reaction or each `pcall` is
+		// not a budget: a script gets as many of them as it can arrange to
+		// start, which is a script running forever one job at a time.
 		uint64_t StepBudget = 200u * 1000u * 1000u;
+
+		// How many queued jobs one call may drain before the drain is refused.
+		//
+		// **JavaScript's microtask queue is the one thing `StepBudget` cannot
+		// bound.** A reaction that queues another reaction never empties the
+		// queue, and QuickJS polls the interrupt handler on a divider - one
+		// call per ten thousand safepoints - so a storm of tiny jobs can run
+		// essentially forever without the step counter noticing. That is a tick
+		// that never ends, which is the boundary rule 5 rests on.
+		//
+		// Counted rather than timed, for `StepBudget`'s reason exactly: a
+		// wall-clock deadline would make whether a script finished depend on
+		// how busy the machine was, so `just determinism` and `just
+		// replay-check` would stop being byte-identical between machines.
+		//
+		// Luau has no queue of its own and ignores this. Zero disables the
+		// check.
+		//
+		// @since v0.19
+		uint64_t JobBudget = 100u * 1000u;
 
 		// Where scripts running under this runtime are standing.
 		HostRole Role;
@@ -395,6 +419,17 @@ namespace engine::script {
 		// busy the machine was, and two runs of one recording would then
 		// disagree about it. A step is the same on every machine.
 		//
+		// **Cumulative and never reset, which is what makes a difference of two
+		// readings mean something.** `RunWorldScripts` brackets each script
+		// with a pair of them, so a counter that went back to zero anywhere -
+		// per chunk, or on a budget trip - reported nothing for whichever
+		// script had just spent the most.
+		//
+		// **Not comparable between languages.** Luau counts one safepoint per
+		// step and QuickJS counts one interrupt poll, which the VM raises once
+		// per ten thousand safepoints. Both are stable on every machine, which
+		// is the property this is for, and nothing puts the two in one table.
+		//
 		// Zero from a VM with no equivalent counter, which is honest rather than
 		// approximate - a fabricated number here would be compared against a
 		// real one in the same table.
@@ -505,14 +540,9 @@ namespace engine::script {
 		std::vector<ecs::Entity> StartedScripts;
 	};
 
-	// Opens a VM of the given language over `store`.
-	//
-	// @param store    The world scripts create instances in. Outlives the result.
-	// @param language Which VM.
-	// @param limits   What bounds a script.
-	// @return The runtime.
-	std::unique_ptr<Runtime>
-	MakeRuntime(ecs::Store &store, Language language, const RuntimeLimits &limits = {});
+	// **`MakeRuntime` is not here, and that is the module boundary.** Opening a
+	// VM means naming one, so the factory lives in `engine/scripthost/Runtime.hpp`
+	// one layer above the two adapters. Nothing in this module links a VM at all.
 
 	// Takes in everybody a teleport has sent to this world.
 	//

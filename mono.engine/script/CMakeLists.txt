@@ -9,13 +9,16 @@
 # client-tier one; a scripting layer that could only exist on one side would put
 # the game's own logic on the wrong side of the tier check.
 #
-# **The VM is `VENDOR` rather than `VENDOR_PUBLIC`, and that is the invariant
-# worth keeping.** No `lua_State` appears in this module's public headers - the
-# one in `Runtime.hpp` is a forward declaration and a pointer. So no consumer
-# compiles against Luau, nobody outside can call the VM directly, and swapping
-# or adding a second VM is a change inside this directory. `v05.md` §5.7 has
-# JavaScript arriving beside Luau rather than instead of it; this is what makes
-# that a second source file rather than a second module.
+# **No vendor at all, and that is the invariant this module now carries.** Until
+# v0.19 both VMs were `VENDOR` here and the boundary between "what a script may
+# name" and "how a VM builds it" was a *filename* convention, checked by a
+# sixty-line CMake closure walk in this file. It is a module boundary now:
+# `scriptluau` and `scriptjs` sit at L10 above this, `scripthost` at L11 picks
+# between them, and the layer check enforces for free what the closure walk
+# enforced by hand. See `AGENTS.md` for what each of the four holds.
+#
+# So a `lua_State` or a `JSContext` in this directory does not fail a naming
+# rule - it fails to compile, because neither header is on the include path.
 #
 # Does not depend on `world` or `physics`. A script reaches a world through the
 # `Store` its host hands it, which is the same seam every other module uses, and
@@ -62,103 +65,4 @@ mono_add_library(script
 		# The only edge from `script` to a simulation module, and it is one-way:
 		# nothing in `physics` knows a script exists.
 		Engine::physics
-	VENDOR
-		Vendor::luau_vm
-		Vendor::luau_compiler
-		Vendor::quickjs
-
-		# For `SourceMap.cpp` and nothing else. A `.js.map` is JSON, and the
-		# alternative was scanning for two known keys in a generated file -
-		# cheaper to write and a parser either way, only an unreviewed one.
-		# Header-only, and it reaches no public header here.
-		Vendor::json
 )
-
-# Every file in `src/` that meets a VM is named for that VM.
-#
-# **The three kinds of file in this directory, checked rather than written
-# down.** A service here is now three things - internal machinery that runs per
-# tick whether or not a script exists, a `ServiceSurface` describing what a
-# script may call, and the per-VM adapter that meets a `lua_State *` or a
-# `JSContext *` - and the split is only worth having if the build refuses to let
-# it rot. Rule 6: a rule the build does not check is documentation.
-#
-# The rule is one sentence. **A translation unit or private header that reaches
-# `<lua.h>` or `<quickjs.h>`, however many hops away, has a name beginning
-# `Luau`, `Js` or `JavaScript`.** Everything else compiles in a build that never
-# opens a VM, which is what makes `AdmitTeleports` a system rather than a
-# binding and `UserInputService.cpp` a description rather than a Luau file.
-#
-# Transitive, because the coupling that matters arrives through an umbrella
-# rather than through `#include <lua.h>`. `LuauBindings.hpp` was called
-# `Bindings.hpp` until v0.18 and eleven neutral files included it for one
-# constant apiece; nothing said so, because none of them named Luau.
-#
-# Re-read on every configure, and `just build` configures every time - so this
-# fires on the commit that introduces the edge rather than on the next time
-# somebody adds a file.
-function(mono_check_script_vm_naming)
-	file(GLOB _vm_sources CONFIGURE_DEPENDS
-		"${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
-		"${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp")
-
-	# `ServiceCatalogue.cpp` is the one file allowed to have met both VMs, and
-	# its own header comment carries why: it names every installer so the static
-	# archive cannot drop one, and it walks the table once per language. A second
-	# name on this list is a claim that a file cannot be split, and it needs the
-	# same kind of argument written where the file is.
-	set(_vm_exempt "ServiceCatalogue.cpp")
-
-	set(_vm_headers "")
-	foreach(_source IN LISTS _vm_sources)
-		file(READ "${_source}" _text)
-		if(_text MATCHES "#include[ \t]*[<\"](lua|lualib|luaconf|luacode|quickjs)")
-			get_filename_component(_name "${_source}" NAME)
-			list(APPEND _vm_headers "${_name}")
-		endif()
-	endforeach()
-
-	# Closure: a file including a VM-touching header is VM-touching itself.
-	# Bounded by the file count, and the list only ever grows.
-	set(_growing TRUE)
-	while(_growing)
-		set(_growing FALSE)
-		foreach(_source IN LISTS _vm_sources)
-			get_filename_component(_name "${_source}" NAME)
-			if(_name IN_LIST _vm_headers)
-				continue()
-			endif()
-			file(READ "${_source}" _text)
-			foreach(_header IN LISTS _vm_headers)
-				if(_text MATCHES "#include[ \t]*\"${_header}\"")
-					list(APPEND _vm_headers "${_name}")
-					set(_growing TRUE)
-					break()
-				endif()
-			endforeach()
-		endforeach()
-	endwhile()
-
-	set(_offenders "")
-	foreach(_name IN LISTS _vm_headers)
-		if(_name IN_LIST _vm_exempt)
-			continue()
-		endif()
-		if(NOT _name MATCHES "^(Luau|Js|JavaScript)")
-			list(APPEND _offenders "${_name}")
-		endif()
-	endforeach()
-
-	if(_offenders)
-		list(JOIN _offenders "\n    " _report)
-		message(FATAL_ERROR
-			"mono.engine/script: these reach a scripting VM but are not named for one:\n"
-			"    ${_report}\n"
-			"A file that meets a lua_State or a JSContext is an adapter and its name says "
-			"which VM. Everything else in src/ compiles with no VM present. Either rename "
-			"it Luau*/Js*, or split the part that needs the VM out into an adapter of that "
-			"name - see mono.engine/script/AGENTS.md.")
-	endif()
-endfunction()
-
-mono_check_script_vm_naming()

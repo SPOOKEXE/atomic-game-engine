@@ -1,6 +1,8 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/net/Packet.hpp>
+#include <engine/net/Wire.hpp>
+#include <engine/net/quic/Tls.hpp>
 #include <engine/replication/Listener.hpp>
 
 #include <algorithm>
@@ -27,6 +29,27 @@ namespace engine::replication {
 	Listener::Listener(net::Transport &transport, const ListenerSettings &settings)
 		: Transport_(&transport), Settings(settings), Authority_(settings.Authority),
 		  Cookie_(net::Cookie::Begin(settings.Cookie)) {
+		// **A QUIC listener always has an identity, because QUIC has no
+		// anonymous mode.** An operator that pinned one supplied the seed; one
+		// that did not gets a fresh seed for this run, which is the same
+		// guarantee the datagram wire's unsigned welcome gives and is said out
+		// loud rather than implied by a working connection.
+		if (net::Serves(Settings.Wire, net::WireKind::Quic) && !Settings.Quic.Connection.Tls.HasSeed) {
+			if (net::quic::DrawIdentitySeed(Settings.Quic.Connection.Tls.Seed)) {
+				Settings.Quic.Connection.Tls.HasSeed = true;
+				ENGINE_WARN(
+					"replication: no server identity was supplied, so this QUIC listener drew an "
+					"ephemeral one. It is encrypted against a listener and open to a relay, and it "
+					"changes every run - nothing can pin it."
+				);
+			} else {
+				ENGINE_ERROR(
+					"replication: no operating system entropy for a QUIC identity, so this listener "
+					"admits nobody over QUIC."
+				);
+			}
+		}
+
 		if (!Cookie_.has_value()) {
 			ENGINE_ERROR(
 				"replication: no operating system entropy for the admission challenge, so this listener "
@@ -85,11 +108,74 @@ namespace engine::replication {
 
 	Listener::Peer *Listener::Find(const net::Endpoint &from) {
 		for (Peer &peer : Peers) {
-			if (peer.Where == from) {
+			// **Datagram peers only.** A QUIC connection is found by the
+			// destination connection id in the header and not by where the
+			// datagram came from, which is what lets a peer's address change
+			// without the connection ending. Under `WireMode::Both` the two
+			// kinds share this list, so matching a QUIC peer here would hand it
+			// a packet framed by the other stack.
+			if (peer.Quic == nullptr && peer.Where == from) {
 				return &peer;
 			}
 		}
 		return nullptr;
+	}
+
+	bool Listener::Route(std::span<const std::byte> datagram, double nowSeconds) {
+		// The destination connection id in the header rather than the source
+		// address - which is what lets a peer's address change without the
+		// connection ending, and is why the id is what a table is keyed on.
+		std::array<std::byte, net::quic::CONNECTION_ID_BYTES> route{};
+		if (!net::quic::RouteOf(datagram, route)) {
+			return false;
+		}
+
+		for (Peer &peer : Peers) {
+			if (peer.Quic == nullptr) {
+				continue;
+			}
+			const auto &ids = peer.Quic->Wire().LocalIds();
+			if (std::find(ids.begin(), ids.end(), route) == ids.end()) {
+				continue;
+			}
+			peer.Wire->Receive(datagram, nowSeconds);
+			Deliver(peer);
+			Announce(peer);
+			return true;
+		}
+		return false;
+	}
+
+	void
+	Listener::Refuse(const net::Endpoint &from, net::WireKind opening, std::span<const std::byte> datagram) {
+		// **One datagram, no state, and smaller than the question.** Both are
+		// `net/AGENTS.md`'s rules for answering a stranger and both survive the
+		// change of transport: nothing is remembered per refusal, however many
+		// arrive, and neither reply can be amplified off this port.
+		Stats_.Mismatched++;
+
+		if (opening == net::WireKind::Quic) {
+			// A Version Negotiation packet. See `quic::WriteVersionNegotiation`
+			// for why it is that rather than a CONNECTION_CLOSE: it needs no
+			// keys, which is the whole point when the answer is "this server
+			// does not do QUIC".
+			std::array<std::byte, net::quic::VERSION_NEGOTIATION_BYTES> packet{};
+			const size_t written = net::quic::WriteVersionNegotiation(datagram, packet);
+			if (written > 0) {
+				Transport_->Send(from, std::span<const std::byte>(packet).first(written));
+			}
+			return;
+		}
+
+		// The datagram stack's own refusal, on its own handshake channel, saying
+		// which wire this server does answer - so the client tries the right one
+		// next rather than the next one in a list.
+		replication::Refusal refusal;
+		refusal.Wire = net::WireKind::Quic;
+		Frame(Reply, refusal);
+		if (!Reply.empty()) {
+			Transport_->Send(from, Reply);
+		}
 	}
 
 	void Listener::SetIdentity(const assets::SigningKey *key) {
@@ -202,6 +288,10 @@ namespace engine::replication {
 
 		case AdmissionKind::Challenge:
 		case AdmissionKind::Welcome:
+		case AdmissionKind::Refuse:
+			// All three are a server's to send. One arriving here is a client
+			// pretending to be one, or a reflected copy of this listener's own
+			// answer.
 			Stats_.Refused++;
 			return;
 		}
@@ -397,37 +487,11 @@ namespace engine::replication {
 	}
 
 	void Listener::Arrive(const net::Endpoint &from, std::span<const std::byte> datagram, double nowSeconds) {
-		// A datagram for a connection this listener already holds, found by the
-		// destination connection id in its header rather than by its source
-		// address - which is what lets a peer's address change without the
-		// connection ending, and is why the id is what a table is keyed on.
-		std::array<std::byte, net::quic::CONNECTION_ID_BYTES> route{};
-		if (net::quic::RouteOf(datagram, route)) {
-			for (Peer &peer : Peers) {
-				if (peer.Quic == nullptr) {
-					continue;
-				}
-				const auto &ids = peer.Quic->Wire().LocalIds();
-				if (std::find(ids.begin(), ids.end(), route) == ids.end()) {
-					continue;
-				}
-				peer.Wire->Receive(datagram, nowSeconds);
-				Deliver(peer);
-				Announce(peer);
-				return;
-			}
-		}
-
-		// Not for anybody here. The only other thing it may be is somebody
-		// opening a connection, and everything else is refused - **without
-		// remembering anything about the sender**, which is `net/AGENTS.md`'s
-		// rule surviving the change of transport: an unanswered stranger costs
-		// zero bytes, however many are outstanding.
-		if (!net::quic::Accepts(datagram)) {
-			Stats_.Refused++;
-			return;
-		}
-
+		// Somebody opening a connection. `Route` has already had this datagram
+		// and did not claim it, and `net::WireOf` said it is an Initial packet -
+		// so what is left is standing a connection up, **without remembering
+		// anything about a sender that never finishes**, which is
+		// `net/AGENTS.md`'s rule surviving the change of transport.
 		if (Peers.size() >= Settings.MaximumClients) {
 			Stats_.Turned++;
 			return;
@@ -471,16 +535,44 @@ namespace engine::replication {
 				continue;
 			}
 
-			if (Settings.Wire == WireKind::Quic) {
+			// **Before the discriminator, because a 1-RTT packet cannot be
+			// told apart by its first byte and does not need to be.** It
+			// belongs to a connection and carries the id of one, so it is
+			// routed rather than classified - see `net::WireOf` for the bit
+			// positions and for why that leaves the two *opening* forms
+			// unambiguous.
+			if (net::Serves(Settings.Wire, net::WireKind::Quic) && Route(Datagram, nowSeconds)) {
+				continue;
+			}
+
+			const std::optional<net::WireKind> opening = net::WireOf(Datagram);
+			if (!opening.has_value()) {
+				Stats_.Refused++;
+				continue;
+			}
+
+			if (*opening == net::WireKind::Quic) {
+				if (!net::Serves(Settings.Wire, net::WireKind::Quic)) {
+					Refuse(inbound.From, net::WireKind::Quic, Datagram);
+					continue;
+				}
 				Arrive(inbound.From, Datagram, nowSeconds);
 				continue;
 			}
 
 			if (net::Packet::PeekChannel(Datagram) == net::ChannelKind::Handshake) {
+				if (!net::Serves(Settings.Wire, net::WireKind::Datagram)) {
+					Refuse(inbound.From, net::WireKind::Datagram, Datagram);
+					continue;
+				}
 				Greet(inbound.From, Datagram, nowSeconds);
 				continue;
 			}
 
+			// A payload packet. **Not answered with a refusal even when this
+			// listener does not serve the stack**: a refusal is owed to
+			// somebody trying to connect, and a payload packet from a peer that
+			// is not in the table is a stale link or a probe.
 			Peer *peer = Find(inbound.From);
 			if (peer == nullptr) {
 				Stats_.Refused++;
@@ -568,6 +660,16 @@ namespace engine::replication {
 			}
 			peer.Wire->Flush(nowSeconds);
 		}
+	}
+
+	size_t Listener::Carrying() const {
+		size_t ready = 0;
+		for (const Peer &peer : Peers) {
+			if (peer.Wire != nullptr && peer.Wire->Carrying()) {
+				ready++;
+			}
+		}
+		return ready;
 	}
 
 	std::vector<Listener::Submission> Listener::Inputs() const {

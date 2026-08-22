@@ -4,10 +4,9 @@
 // the same reason `Signals.cpp` tests the connection table directly. What a
 // script sees on top of this is covered in `Scripting.cpp`, once per language.
 
-#include "../src/Subtree.hpp"
-
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/script/Subtree.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>

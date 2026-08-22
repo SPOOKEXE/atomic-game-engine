@@ -42,8 +42,8 @@
 #include <string_view>
 
 TEST_SUITE_ID("client.replica.scripts")
-TEST_DEPENDS("engine.script.runtime")
-TEST_DEPENDS("engine.script.sourcecache")
+TEST_DEPENDS("engine.scripthost.runtime")
+TEST_DEPENDS("engine.scripthost.sourcecache")
 TEST_DEPENDS("engine.gui.input")
 TEST_DEPENDS("engine.gui.services")
 TEST_DEPENDS("engine.scene.services")

@@ -445,12 +445,14 @@ declare interface EnumItem { readonly Name: string; readonly EnumType: string; E
 
 declare namespace Enum {
 	interface AlphaMode extends EnumItem { readonly __enum: "AlphaMode"; }
+	interface AnimationPriority extends EnumItem { readonly __enum: "AnimationPriority"; }
 	interface ApplyStrokeMode extends EnumItem { readonly __enum: "ApplyStrokeMode"; }
 	interface AspectType extends EnumItem { readonly __enum: "AspectType"; }
 	interface AutomaticSize extends EnumItem { readonly __enum: "AutomaticSize"; }
 	interface Axis extends EnumItem { readonly __enum: "Axis"; }
 	interface BorderMode extends EnumItem { readonly __enum: "BorderMode"; }
 	interface CameraType extends EnumItem { readonly __enum: "CameraType"; }
+	interface ConstraintMotion extends EnumItem { readonly __enum: "ConstraintMotion"; }
 	interface ContextActionResult extends EnumItem { readonly __enum: "ContextActionResult"; }
 	interface DominantAxis extends EnumItem { readonly __enum: "DominantAxis"; }
 	interface EasingDirection extends EnumItem { readonly __enum: "EasingDirection"; }
@@ -502,6 +504,13 @@ declare namespace Enum {
 		readonly Clip: AlphaMode;
 		readonly Blend: AlphaMode;
 	};
+	const AnimationPriority: {
+		readonly Core: AnimationPriority;
+		readonly Idle: AnimationPriority;
+		readonly Movement: AnimationPriority;
+		readonly Action: AnimationPriority;
+		readonly Override: AnimationPriority;
+	};
 	const ApplyStrokeMode: {
 		readonly Contextual: ApplyStrokeMode;
 		readonly Border: ApplyStrokeMode;
@@ -531,6 +540,11 @@ declare namespace Enum {
 		readonly LockFirstPerson: CameraType;
 		readonly ShiftLock: CameraType;
 		readonly Scriptable: CameraType;
+	};
+	const ConstraintMotion: {
+		readonly Locked: ConstraintMotion;
+		readonly Limited: ConstraintMotion;
+		readonly Free: ConstraintMotion;
 	};
 	const ContextActionResult: {
 		readonly Sink: ContextActionResult;
@@ -1250,6 +1264,91 @@ declare interface StringValue extends ValueBase {
 declare interface LocalizationTable extends ValueBase {
 }
 
+declare interface Bone extends Instance {
+	InverseBindCFrame: CFrame;
+	RestCFrame: CFrame;
+	Transform: CFrame;
+	readonly TransformedWorldCFrame: CFrame;
+}
+
+declare interface Animation extends Instance {
+	AnimationId: string;
+	RigId: string;
+}
+
+declare interface Animator extends Instance {
+	EvaluationThrottled: boolean;
+	Rig: Instance;
+	RootMotion: boolean;
+	RootMotionWeight: number;
+}
+
+declare interface AnimationTrack extends Instance {
+	Animation: Instance;
+	FadeTime: number;
+	IsPlaying: boolean;
+	Looped: boolean;
+	Priority: Enum.AnimationPriority;
+	Speed: number;
+	TimePosition: number;
+	WeightCurrent: number;
+	WeightTarget: number;
+}
+
+declare interface Atmosphere extends Instance {
+	Color: Color3;
+	Decay: Color3;
+	Density: number;
+	Glare: number;
+	Haze: number;
+	Offset: number;
+}
+
+declare interface Clouds extends Instance {
+	Color: Color3;
+	Cover: number;
+	Density: number;
+	Enabled: boolean;
+	WindDirection: number;
+	WindSpeed: number;
+}
+
+declare interface Constraint extends Instance {
+	Attachment0: Instance;
+	Attachment1: Instance;
+	Damping: number;
+	Enabled: boolean;
+	LowerAngle: number;
+	LowerLimit: number;
+	MaxForce: number;
+	MaxTorque: number;
+	Stiffness: number;
+	Target: CFrame;
+	UpperAngle: number;
+	UpperLimit: number;
+}
+
+declare interface WeldConstraint extends Constraint {
+}
+
+declare interface BallSocketConstraint extends Constraint {
+}
+
+declare interface HingeConstraint extends Constraint {
+}
+
+declare interface PrismaticConstraint extends Constraint {
+}
+
+declare interface CylindricalConstraint extends Constraint {
+}
+
+declare interface RopeConstraint extends Constraint {
+}
+
+declare interface SpringConstraint extends Constraint {
+}
+
 declare interface ShaderScript extends Instance {
 	readonly Revision: number;
 }
@@ -1762,6 +1861,11 @@ declare interface Workspace extends Service {
 	CurrentCamera: Instance;
 	MaxSurfaces: number;
 	SurfaceBounces: number;
+	TerrainChunkSize: number;
+	TerrainEnabled: boolean;
+	TerrainGenerator: string;
+	TerrainSeed: number;
+	TerrainViewDistance: number;
 	Raycast(origin: Vector3, direction: Vector3, params?: RaycastParams): RaycastResult | null;
 	RaycastThroughPortals(origin: Vector3, direction: Vector3, params?: RaycastParams): RaycastResult | null;
 	OverlapBox(centre: Vector3, size: Vector3, params?: RaycastParams): Instance[];
@@ -2233,6 +2337,20 @@ declare const Instance: {
 		(className: "ValueBase", parent?: Instance): ValueBase;
 		(className: "StringValue", parent?: Instance): StringValue;
 		(className: "LocalizationTable", parent?: Instance): LocalizationTable;
+		(className: "Bone", parent?: Instance): Bone;
+		(className: "Animation", parent?: Instance): Animation;
+		(className: "Animator", parent?: Instance): Animator;
+		(className: "AnimationTrack", parent?: Instance): AnimationTrack;
+		(className: "Atmosphere", parent?: Instance): Atmosphere;
+		(className: "Clouds", parent?: Instance): Clouds;
+		(className: "Constraint", parent?: Instance): Constraint;
+		(className: "WeldConstraint", parent?: Instance): WeldConstraint;
+		(className: "BallSocketConstraint", parent?: Instance): BallSocketConstraint;
+		(className: "HingeConstraint", parent?: Instance): HingeConstraint;
+		(className: "PrismaticConstraint", parent?: Instance): PrismaticConstraint;
+		(className: "CylindricalConstraint", parent?: Instance): CylindricalConstraint;
+		(className: "RopeConstraint", parent?: Instance): RopeConstraint;
+		(className: "SpringConstraint", parent?: Instance): SpringConstraint;
 		(className: "ShaderScript", parent?: Instance): ShaderScript;
 		(className: "EditableMesh", parent?: Instance): EditableMesh;
 		(className: "EditableImage", parent?: Instance): EditableImage;

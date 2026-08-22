@@ -133,7 +133,7 @@ TEST_CASE("a degenerate matrix accepts everything rather than nothing", "[graph]
 }
 
 TEST_CASE("a rotated cube is bounded by what it actually reaches", "[graph][frustum]") {
-	// `FromOrientedBox`, not the centre and the half-extent. A unit cube turned
+	// `OrientedBoxBounds`, not the centre and the half-extent. A unit cube turned
 	// forty-five degrees reaches root two, and a bound smaller than the shape
 	// is a part that vanishes as it turns near the screen edge.
 	DrawInstance turned;

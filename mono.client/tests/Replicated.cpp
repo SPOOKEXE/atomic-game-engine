@@ -6,8 +6,11 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/replication/SnapshotBuffer.hpp>
+#include <engine/scene/Attachments.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/DrawInstance.hpp>
+#include <engine/scene/Part.hpp>
+#include <engine/scene/Registration.hpp>
 #include <engine/scene/Wire.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -27,6 +30,7 @@ TEST_DEPENDS("engine.ecs.store")
 TEST_DEPENDS("engine.replication.snapshotbuffer")
 TEST_DEPENDS("engine.scene.components")
 TEST_DEPENDS("engine.scene.drawinstance")
+TEST_DEPENDS("engine.scene.attachments")
 
 using Catch::Approx;
 using client::DrawList;
@@ -38,6 +42,7 @@ using engine::ecs::Scheduler;
 using engine::ecs::Store;
 using engine::replication::InterpolationSettings;
 using engine::replication::SnapshotBuffer;
+using engine::scene::Attachment;
 using engine::scene::Bounds;
 using engine::scene::SurfaceAppearance;
 using engine::scene::Tags;
@@ -593,4 +598,36 @@ TEST_CASE("the guess is unwound rather than snapped away", "[client][replication
 
 	// And it is genuinely finished, rather than merely small.
 	CHECK(replica.World.Resource<SnapshotBuffer>()->DeadReckonSeconds() == 0.0);
+}
+
+// --- the derived halves a replica has to derive for itself -------------------
+
+TEST_CASE("a replica resolves the attachments that arrived", "[client][replication]") {
+	// **A replica ticks no simulation, so it has to resolve where a host would
+	// have.** Until v0.19 `resolve-attachments` was registered by the scripted
+	// and presented paths only, and a replica ran neither - so every
+	// `Attachment::WorldFrame` in a joined world stayed at the identity for the
+	// whole session and `client::CollectLights`, which reads that field to place
+	// a lamp parented to an attachment, lit the world origin.
+	Replica replica;
+
+	// **Instances rather than bare entities**, because an attachment resolves
+	// against the part it is *parented* to and a bare entity has no place in the
+	// tree. That is also what arrives: a snapshot carries instances.
+	engine::scene::RegisterSceneClasses();
+
+	const Entity post = replica.World.CreateInstance(engine::scene::PartClass(), "Post");
+	REQUIRE(post != engine::ecs::NULL_ENTITY);
+	replica.World.GetMutable<Transform>(post)->Frame = CFrame(Vector3{7.0f, 0.0f, 0.0f});
+
+	const Entity point = replica.World.CreateInstance(engine::scene::AttachmentClass(), "Top");
+	REQUIRE(replica.World.SetParent(point, post));
+	replica.World.GetMutable<Attachment>(point)->Frame = CFrame(Vector3{0.0f, 2.0f, 0.0f});
+
+	replica.Draw();
+
+	const Attachment *resolved = replica.World.Get<Attachment>(point);
+	REQUIRE(resolved != nullptr);
+	CHECK(resolved->WorldFrame.Position.X == Approx(7.0f));
+	CHECK(resolved->WorldFrame.Position.Y == Approx(2.0f));
 }

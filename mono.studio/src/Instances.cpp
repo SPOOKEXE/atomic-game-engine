@@ -34,7 +34,7 @@ namespace studio {
 	namespace {
 		// A byte count in the units somebody reads at a glance, which is the
 		// same rule the Bus panel's sizes follow.
-		void WriteSize(char *into, size_t capacity, uint64_t bytes) {
+		void WriteInstanceSize(char *into, size_t capacity, uint64_t bytes) {
 			if (bytes < 1024) {
 				std::snprintf(into, capacity, "%llu B", static_cast<unsigned long long>(bytes));
 			} else if (bytes < 1024 * 1024) {
@@ -270,10 +270,10 @@ namespace studio {
 
 				if (ImGui::IsItemHovered()) {
 					char total[32];
-					WriteSize(total, sizeof(total), report.TotalBytes);
+					WriteInstanceSize(total, sizeof(total), report.TotalBytes);
 
 					char largest[32];
-					WriteSize(largest, sizeof(largest), report.LargestMessage);
+					WriteInstanceSize(largest, sizeof(largest), report.LargestMessage);
 
 					ImGui::SetTooltip(
 						"a replica of '%s', served in this process\n"

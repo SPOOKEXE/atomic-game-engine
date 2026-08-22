@@ -21,7 +21,7 @@ state until v0.19.
 | align | `alignof` |
 | save | has `Write`/`Read`, so a snapshot can carry it. A component without this refuses to be saved rather than writing bytes that cannot be read back |
 | raw | `Write` copies the object representation. Padding and any process-local id inside it reach the file, which is why `pad` below only matters here |
-| pad | has bytes no member occupies |
+| pad | has bytes no member occupies. `just components-check` refuses a component that is `save` **and** `raw` **and** `pad` at once: that trio writes uninitialised bytes into every `.agame` |
 | wire | bytes in the compact replication form. Blank means the wire carries `Write`'s bytes unchanged |
 
 
@@ -76,7 +76,7 @@ state until v0.19.
 | `gui.Element` | 60 | 4 | yes | yes | . | . | The base row every `GuiObject` has: position, size, anchor, rotation, draw order and the visibility, clipping and input flags the layout pass reads. |
 | `gui.Entry` | 56 | 8 | yes | . | . | . | What makes a `TextBox` editable: the placeholder text and colour, the multi-line and editable flags, and the caret and selection offsets. |
 | `gui.FlexItem` | 12 | 4 | yes | yes | . | . | `UIFlexItem`, on the flexed child rather than on the layout: how one element grows into or shrinks out of a flexed list's spare room. |
-| `gui.Gradient` | 672 | 4 | yes | yes | . | . | `UIGradient`: a colour and transparency ramp multiplied into whatever the parent already draws, at an authored angle and size-relative offset. |
+| `gui.Gradient` | 672 | 4 | yes | . | . | . | `UIGradient`: a colour and transparency ramp multiplied into whatever the parent already draws, at an authored angle and size-relative offset. |
 | `gui.GridLayout` | 44 | 4 | yes | yes | . | . | `UIGridLayout`: places the parent's children in equal cells on a grid, with a cell size, cell padding, fill direction and start corner. |
 | `gui.Group` | 16 | 4 | yes | yes | . | . | What a `CanvasGroup` composites its subtree with: one colour and one transparency applied to the whole group rather than to each child. |
 | `gui.GuiServiceState` | 24 | 8 | yes | yes | . | . | `GuiService`'s own state: the selected element, the focused `TextBox`, whether a platform menu covers the game, and whether selection may seed itself. |
@@ -121,22 +121,31 @@ state until v0.19.
 
 | component | size | align | save | raw | pad | wire | what it is for |
 |---|---|---|---|---|---|---|---|
-| `scene.ActiveCamera` | 208 | 8 | yes | yes | . | . | Resource: which entity the world is currently looked through, the viewport aspect ratio, and the view/projection matrices `ResolveActiveCamera` caches each frame. |
-| `scene.Attachment` | 56 | 4 | yes | yes | . | . | A named point on a part: the authored local `Frame` plus the `WorldFrame` that `ResolveAttachments` recomposes every tick, so beams and emitters have somewhere to hang off. |
+| `scene.ActiveCamera` | 16 | 8 | yes | yes | . | . | Resource: which entity the world is currently looked through, and the aspect ratio of whatever is drawing it. The matrices are not here: every consumer builds them against its own target with `ResolveCamera`. |
+| `scene.AnimationClip` | 8 | 4 | yes | . | . | . | On an `Animation` instance: which clip and which `Skeleton::Rig` its channels were authored against, so playing a fox's walk on a dragon is refusable. |
+| `scene.AnimationTrack` | 32 | 8 | yes | yes | . | . | One clip playing on one animator: its play head, speed, current and target weight, fade time, priority, loop flag and whether it is running. Storage for the v0.24 animation handler. |
+| `scene.Animator` | 16 | 8 | yes | yes | . | . | On an `Animator` instance: which rig it poses, whether the root channel moves the body and by how much, and whether the pose may be evaluated less often at distance. |
+| `scene.Atmosphere` | 40 | 4 | yes | yes | . | . | Per-world scattering authored on an `Atmosphere` instance under `Lighting`: the air's colour and decay, its density and offset, and the sun's glare and horizon haze. Presentation only. |
+| `scene.Attachment` | 56 | 4 | yes | yes | . | . | A named point on a part: the authored local `Frame` plus the `WorldFrame` every host recomposes each tick. The cache puts an emitter and a lamp where their part is, and its reported write is what signals a change. |
 | `scene.AudioState` | 16 | 8 | yes | yes | . | . | Resource: the world's one ear and master gain - listener mode, listener instance and volume, set through `SoundService` and consumed by the client mixer. |
 | `scene.AwakeWorld` | 4 | 4 | yes | yes | . | . | Held by an entity that wants the world to keep ticking, with a required `Reason` naming why. `world::DecideLifecycle` walks these rows. |
+| `scene.Bone` | 116 | 4 | yes | yes | . | . | One joint of a rig on a `Bone` instance: its rest frame, the animated offset on top of it, its inverse bind frame, its resolved world frame, and its palette slot and parent slot. |
 | `scene.Bounds` | 12 | 4 | yes | yes | . | . | Half the extent of a part on each local axis. Render culling reads it every frame, the broad phase every tick, and the `Size` property writes it. |
 | `scene.Camera` | 12 | 4 | yes | yes | . | . | The lens: vertical field of view, near plane and far plane. It deliberately holds no aspect ratio, because that is a fact about a window and not about the world. |
 | `scene.CameraController` | 64 | 8 | yes | yes | . | . | Resource: how this viewer's own eye is driven - subject, orbit angles and distance, zoom and sensitivity limits, camera mode, and the poppercam distance override. |
 | `scene.Character` | 24 | 8 | yes | yes | . | . | On a character `Model`: handles to its root part, its `Humanoid` and the owning `Player`, null for an NPC. Controls, tools and camera code all start here. |
 | `scene.CharacterChanges` | 24 | 8 | yes | . | . | . | Resource: the ordered queue of character arrivals and departures since the last drain, emptied into the `CharacterAdded` and `CharacterRemoving` script signals. |
 | `scene.CharacterLimb` | 40 | 8 | yes | yes | . | . | On a rig limb or an equipped tool's handle: which root part it hangs off and its rest pose in that root's own frame, posed every tick. |
+| `scene.Clouds` | 32 | 4 | yes | yes | . | . | A cloud layer authored under `Lighting`: its lit colour, how much sky it covers and how opaque that is, and the speed and heading it drifts at. Presentation only. |
 | `scene.Collider` | 28 | 4 | yes | yes | . | . | The collision shape: kind, extent or baked geometry name, layer and mask, and whether contacts are only reported rather than solved. Read by both physics phases every tick. |
 | `scene.CollisionShapes` | 48 | 8 | yes | . | . | . | Resource: the world's table of baked convex hulls and triangle meshes, looked up by the name a `Collider::Geometry` field carries. |
+| `scene.Constraint` | 120 | 8 | yes | yes | . | . | A generic six-degree-of-freedom joint between two attachments: a motion mode and a limit per axis, plus the drive target, stiffness, damping and force caps. Each Roblox constraint class is a prototype of this one row. |
 | `scene.EditableImage` | 40 | 8 | yes | . | . | . | Script-drawable RGBA8 pixels with their width and height, plus a revision the client watches to know when to re-upload the texture. |
 | `scene.EditableMesh` | 152 | 8 | yes | . | . | . | Script-built geometry: positions, normals, UVs, colours, alphas and indices, plus a revision the client watches to know when to re-upload the mesh. |
-| `scene.Humanoid` | 56 | 8 | yes | yes | . | . | The character controller's state: move direction, walk and jump speed, capsule size, health, and the grounded, jump-requested and enabled latches the movement pass reads every tick. |
+| `scene.EditableMeshCollision` | 24 | 8 | yes | . | . | . | Resource: which revision of each `EditableMesh` already has a collision shape baked for it, so a mesh a script is still editing is baked once per change and not once per tick. |
+| `scene.Humanoid` | 48 | 8 | yes | yes | . | . | The character controller's state: move direction, walk and jump speed, capsule size, health, and the grounded, jump-requested and enabled latches the movement pass reads every tick. |
 | `scene.InputState` | 56 | 8 | yes | yes | . | . | Resource: this host's keyboard, mouse and focus state for the current frame, with last-frame copies and sticky press edges. It is a machine's own input, never another's. |
+| `scene.LevelOfDetail` | 32 | 4 | yes | . | . | . | The coarser versions of a part's geometry: up to three extra mesh names, the triangle fraction each keeps, how the levels were produced, and the projected area per triangle `SelectLevel` targets. |
 | `scene.Light` | 28 | 4 | yes | yes | . | . | A point, spot or surface light: colour, brightness, range, cone angle, face and enabled flag. The client walks these rows and fills its lighting uniforms. |
 | `scene.LightingService` | 56 | 4 | yes | yes | . | . | On the single `Lighting` service instance: ambient and outdoor ambient colour, fog colour and range, sun brightness, time of day and geographic latitude. |
 | `scene.LocalPlayer` | 8 | 8 | yes | yes | . | . | Resource: the `Player` this host is looking through, or null on a server. It backs the `Players.LocalPlayer` property. |
@@ -161,13 +170,13 @@ state until v0.19.
 | `scene.PostProcessing` | 4 | 4 | yes | . | . | . | Resource: the fragment shader that replaces the engine's own tonemap for this world. An invalid name leaves the default pass in place. |
 | `scene.PreviousTransform` | 28 | 4 | yes | yes | . | . | Where `Transform::Frame` stood when the current tick began. The presentation pass blends between the two so drawing stays smooth between ticks. |
 | `scene.PublishedCatalogue` | 24 | 8 | yes | . | . | . | Resource: the published mesh names in manifest order, as the content pump saw them. It backs `ContentService:GetPublishedMeshes`. |
-| `scene.QuickHash` | 8 | 8 | yes | yes | . | . | A per-row content hash as of the last `PostSimulation`, the row-granularity fallback for change detection where a batch path is the writer. |
 | `scene.Rendered` | 4 | 1 | yes | yes | . | . | Marks exactly the entities a draw list should contain, added and removed only by `SyncRendered`; the `Mark` byte is that walk's own scratch and is zero between passes. |
 | `scene.RenderedSignature` | 16 | 8 | yes | . | . | . | Resource: a rolling hash of the instance tree `SyncRendered` last ran against, so the walk can early-out on a frame where nothing structural moved. |
 | `scene.RigidBody` | 16 | 4 | yes | yes | . | . | Mass, linear and angular damping, and body kind for a physics body. Gravity queries it every tick and the contact solver reads it per contact. |
 | `scene.Service` | 4 | 1 | yes | yes | . | . | On each service instance: who may see its children, and whether an author is allowed to delete or reparent it. Checked at install and at lookup. |
 | `scene.ShaderSource` | 40 | 8 | yes | . | . | . | The fragment-stage GLSL a `ShaderScript` holds, verbatim and not interned, with a revision bumped on every write so a compiler knows when to rebuild. |
 | `scene.Simulated` | 0 | 1 | . | . | . | . | Tag meaning physics owns this body's motion. `Anchored = false` adds it and `Anchored = true` removes it; every dynamic query filters on its presence. |
+| `scene.Skeleton` | 8 | 4 | yes | . | . | . | On a skinned drawable: what the file called the rig, and how many palette slots the mesh's vertex joint indices may name. `Bone` rows under it are the joints. |
 | `scene.Sound` | 20 | 4 | yes | . | yes | . | What a sound is rather than a sound playing: asset name, volume, roll-off distances, looped and playing. The client's mixer walks these rows every frame. |
 | `scene.SpawnLocation` | 16 | 4 | yes | yes | . | . | On a spawn pad: which team colour it serves, whether it takes anyone regardless, and whether it is a spawn at all. `FindSpawn` reads all three. |
 | `scene.Sun` | 24 | 4 | yes | yes | . | . | Per-world singleton directional light: the direction it shines and the ambient standing in for sky on the faces it misses. |
@@ -181,11 +190,12 @@ state until v0.19.
 | `scene.TagTable` | 24 | 8 | yes | . | . | . | Resource: the registered tag names, at most thirty-two, whose index is the bit `Tags::Mask` sets. A mask means nothing without the table beside it. |
 | `scene.Tags` | 4 | 4 | yes | yes | . | . | One bit per registered tag, named by the world's `TagTable`. Read by tag-filtered surface cameras and by every `CollectionService:GetTagged` call. |
 | `scene.Team` | 12 | 4 | yes | yes | . | . | On a `Team` instance: the side's colour, which is the thing spawn pads are matched against. Deliberately nothing else. |
+| `scene.Terrain` | 32 | 8 | yes | . | . | . | Resource: how a world's ground is generated - the node graph, the seed, chunk extent and resolution, vertical extent and how far chunks are kept. The recipe is stored and the ground it makes never is. |
 | `scene.TextContent` | 32 | 8 | yes | . | . | . | The text a `StringValue` or `LocalizationTable` holds, verbatim and not interned. Written through the `Value` property and by Rojo `.txt`/`.csv` sync. |
 | `scene.TextureCatalogue` | 56 | 8 | yes | . | . | . | Resource: the flipbook facts - grid, frame count and rate - the content pump learned about each loaded texture. |
 | `scene.Tool` | 28 | 4 | yes | yes | . | . | On a `Tool` instance: where its handle sits relative to the grip point. `EquipTool` and the grip pose read it, and it decides where a held handle is drawn. |
 | `scene.Transform` | 28 | 4 | yes | yes | . | 10 | Where a thing is: a world-space CFrame, never relative to a parent. The component almost every system reads. |
-| `scene.Transient` | 4 | 4 | yes | yes | . | . | Marks an instance made by whoever is looking rather than by the world's author, so the game-file writer leaves it out of a saved `.agame`. |
+| `scene.Transient` | 0 | 1 | . | . | . | . | Marks an instance made by whoever is looking rather than by the world's author, so the game-file writer leaves it out of a saved `.agame`. |
 | `scene.Visual` | 32 | 4 | yes | . | . | . | What a drawable looks like: mesh, tint, transparency, visibility, shadow casting, editor lock, and which mirror surface it shows. The draw-list walk reads it every frame. |
 | `scene.WorldBounds` | 4 | 4 | yes | yes | . | . | Resource: how far the world reaches from the origin on each axis. Camera framing, the bounce loop and wire quantisation all read it. |
 
@@ -211,4 +221,4 @@ state until v0.19.
 
 ---
 
-134 components registered by the engine, 0 without a purpose line.
+144 components registered by the engine, 0 without a purpose line.

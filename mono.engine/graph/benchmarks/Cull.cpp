@@ -21,7 +21,7 @@
 // | Bound a rotated instance | 9 ns ± 1 | |
 //
 // **Bounding costs more than testing, which was not the expected shape.** Nine
-// of the seventeen nanoseconds an instance is `AABB::FromOrientedBox` - three
+// of the seventeen nanoseconds an instance is `core::OrientedBoxBounds` - three
 // quaternion rotations to find what a turned box actually reaches - and only
 // the remaining eight are the six planes. The plane test was the part that
 // looked expensive and is not.

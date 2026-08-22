@@ -235,22 +235,87 @@ A node enabled in a document with nothing here to draw it fails without a
 device. That is the check that replaced the two-lists-in-step one, and it is
 strictly better: the old one could only catch a seventh entry added to one side.
 
-**The hole the old section named is still the hole.** A pass drawn by calling
-`SDL_BeginGPURenderPass` inline is invisible to the graph, and
-`src/Renderer.cpp` still does that in eighteen places inside `RenderView`. That
-function runs from `Renderer.cpp:8032` to `:13516` - 5,485 lines, two fifths of
-the module - and holds its node handlers as lambdas inside itself, which is the
-same failure the old `PassRecorder` note described, one layer up. `D00016`.
+**The hole the old section named was closed at v0.19, and this is the shape it
+left.** A pass drawn by calling `SDL_BeginGPURenderPass` inline is invisible to
+the graph, and `src/Renderer.cpp` did that inside a `RenderView` that ran 5,485
+lines - two fifths of the module - holding its node handlers as lambdas over its
+own locals. `docs/ARCH_REVIEW.md` C2 is the finding; `D00016` is the entry.
 
-**It is also why this module is slow to build.** One 13,517-line translation
-unit with a 5,485-line function in it cannot be split across cores, so the whole
-module waits on one compile. Splitting `RenderView` by node family, into files
-that implement `GraphRunner` for a family each, fixes the build cost and the
-architecture with one change - which is the argument for doing it as one.
+**Fifteen calls rather than the eighteen C2 counted**, because three of the
+eighteen were `ENGINE_ERROR` strings naming the function rather than calls to
+it. Eight are inside a node family's runner now and five are inside the shared
+recording in `src/ScenePasses.cpp` - `OpenScenePass`, `Fullscreen`, `DrawImage`,
+`DrawOverlayImage` and `ClearOcclusion` - each of which runs only from a node,
+so the pass it opens is still inside a node's execution and still named in the
+frame graph.
 
-**So: a new way of drawing is a node with a backend here, and never an inline
-render pass.** Adding the second is what makes the graph a description of some
-of the frame rather than of the frame.
+**Two stay outside the graph deliberately, and both are in
+`ViewRecording::Finish`.** Neither is a candidate for a node family:
+
+- **The host chrome pass.** Studio panels are a host concern rather than a stage
+  of a universe's render graph, and they are recorded *after* `output-image` for
+  exactly that reason - so a graph preview, an authored capture and a rendering
+  profile hold only the game image and the game interface. Making it a node
+  would put it in the graph's description of the frame and therefore in every
+  capture taken from one.
+- **The clear of a window nothing touched.** It exists precisely for the frame
+  where *no* node reached the swapchain: the world went offscreen and neither
+  the overlay nor the interface is open. There is no node to put it in, because
+  its whole condition is that none ran. Presenting a texture the driver handed
+  back unwritten shows last frame's image or uninitialised memory.
+
+### Where a pass lives
+
+| File | What is in it |
+|---|---|
+| `src/RendererState.hpp` | `Renderer::Impl` - every device object the module owns |
+| `src/RenderTypes.hpp` | the GPU layouts and the frame-wide constants |
+| `src/ViewRecording.hpp` | what one view's recording holds, and the operations every family shares |
+| `src/ViewRecording.cpp` | `Begin`, which works the frame out, and `Finish`, which runs the graph and submits |
+| `src/ScenePasses.cpp` | `OpenScenePass`, `DrawWorldInto`, `Fullscreen`, `DrawImage` and the rest of the shared recording |
+| `src/nodes/*.cpp` | one file per node family, each registering its own runners |
+
+**`ViewRecording` is what the handlers used to close over, and naming it is the
+whole trick.** A handler needed `openScenePass`, so it had to be written in the
+same function as it; the state is a type now, the shared operations are its
+members, and a family is a file. `Renderer` makes it a friend so that
+`Renderer::Impl` stays private to `src/` - nothing about the split reaches
+`include/`.
+
+**Its members are not published from locals, they *are* the locals.** `Begin`
+binds a reference per name and writes through it, and each handler binds the
+same names back the other way. A value the passes read a thousand lines from
+where it was decided therefore has one home rather than two that can drift.
+
+**It is also why this module is no longer slow to build.** One 13,680-line
+translation unit cannot be split across cores, so the whole module waited on one
+compile. Measured on a 24-core machine with `release`'s flags, `CCACHE_DISABLE=1`
+and no unity build, compiling every source in the module at `-j24`:
+
+| | before | after |
+|---|---|---|
+| units | 22 | 38 |
+| wall clock | **11.0 s** | **6.5 s** |
+| CPU seconds | 34.9 | 76.3 |
+| slowest unit | `Renderer.cpp`, **10.6 s** | `ViewRecording.cpp`, **3.8 s** |
+
+**The CPU seconds nearly double, and that is the trade rather than a
+regression.** Sixteen more files parse `RendererState.hpp` and `RenderTypes.hpp`,
+and 72% of this repository's first-party compile cost is the frontend. What a
+developer waits on is the wall clock, and the module no longer has a unit long
+enough to be the whole build's critical path - which was the other half of C2's
+argument.
+
+**`docs/ARCH_REVIEW.md` E2 estimated 22 s off the tree's wall clock and that
+number is stale.** It was derived from `Renderer.cpp` at 31.2 s, measured with
+another job stealing 420% CPU and before E1's include fixes landed. The same
+unit is 10.6 s today, so the saving available from this change was at most about
+7 s of critical path, not 22.
+
+**So: a new way of drawing is a node with a backend in `src/nodes/`, and never
+an inline render pass.** Adding the second is what makes the graph a description
+of some of the frame rather than of the frame - and there is now nowhere else to
+put one, which is the point of the layout above.
 
 ## The textures this module owns, and what each pass may assume
 
@@ -328,12 +393,33 @@ once and was diagnosed from a screenshot rather than from the symptom
 description.
 
 **Geometry that can be asserted without a GPU should live where a test can reach
-it.** `AdornmentGeometry.hpp` is the module's example: it is a public header
-precisely so `tests/AdornmentGeometry.cpp` can check every triangle it emits
-with no device. This section previously pointed at a `Primitives.hpp` and a
-`tests/Primitives.cpp`, and neither exists - the built-in shapes are back inside
+it.** `AdornmentGeometry.hpp` is the module's public example: it is a public
+header precisely so `tests/AdornmentGeometry.cpp` can check every triangle it
+emits with no device. `src/Primitives.hpp` is the private one, checked by
+`tests/Primitives.cpp` - a module's own tests may reach its `src/`, so a header
+does not have to be published to be tested.
+
+**What that file is, and what it is not.** Until v0.19 this section pointed at a
+`Primitives.hpp` and a `tests/Primitives.cpp` that did not exist, and
+`docs/ARCH_REVIEW.md` B recorded the gap as "the built-in shapes are back inside
 `src/Renderer.cpp` and `src/InterfacePass.cpp`, where nothing checks their
-winding. That is a gap, not a decision.
+winding". **That description was wrong and the gap was real.** The built-in
+shapes are `assets::MakeBuiltin` and `assets/tests/Builtin.cpp` checks every
+triangle of every one of them against its declared normal - the winding rule
+above is enforced, one module down. What genuinely had no home and no suite was
+the arithmetic those two files did around the shapes:
+
+- **the portal beam atlas quadrant**, which was `index % 2` and `index / 2`
+  written out three times - once as the shader's lookup window, once as a
+  viewport and once as a scissor. Three expressions of one rectangle, and a beam
+  that drew into one quadrant while sampling another shadows through the wrong
+  doorway. `BeamQuadrant` is the one expression; the suite checks that the four
+  tile the atlas exactly and that each one's window is its own viewport.
+- **the quad a spatial canvas occupies**, whose normal is deliberately *not* the
+  cross product of its own axes: a canvas is laid out in interface pixels so
+  `AxisY` runs down the image, and a caller deriving the normal from the axes
+  would light every billboard from behind. `SpatialQuad` carries both and the
+  suite asserts the sign.
 
 ## SDL's clip space is Y-up. Do not "fix" it
 

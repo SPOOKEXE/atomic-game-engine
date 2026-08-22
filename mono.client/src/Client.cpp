@@ -48,13 +48,29 @@
 
 namespace client {
 
+	using client::Action;
 	using engine::core::FrameGraph;
 	using engine::core::HeapProfile;
 	using engine::core::Metrics;
-	using engine::input::Action;
 	using engine::render::ProfilerTab;
 
 	namespace {
+		// What a `MouseBehavior` is called in a log line.
+		//
+		// Roblox's own spelling of each, so a line and the property a script
+		// wrote say the same word.
+		std::string_view MouseBehaviorName(engine::scene::MouseBehavior behaviour) {
+			switch (behaviour) {
+			case engine::scene::MouseBehavior::LockCenter:
+				return "LockCenter";
+			case engine::scene::MouseBehavior::LockCurrentPosition:
+				return "LockCurrentPosition";
+			case engine::scene::MouseBehavior::Default:
+				break;
+			}
+			return "Default";
+		}
+
 		// The SDL event kinds worth telling apart in a frame graph.
 		//
 		// **A switch and not a table, because SDL exposes no name API.** Every
@@ -541,11 +557,13 @@ namespace client {
 			OfferPublishedContent();
 		}
 
-		// **Every pump, and it is a diff rather than a walk of the catalogue.**
-		// A world's content names change when a scene is authored, loaded or
-		// replicated, none of which this can observe cheaply - so the names are
-		// collected and everything already asked for is dropped. What survives is
-		// almost always nothing.
+		// **A diff rather than a walk of the catalogue, and only for a world
+		// that has moved.** A world's content names change when a scene is
+		// authored, loaded or replicated, and all three of those happen inside
+		// a tick - so a world whose tick has not advanced is one whose answer
+		// cannot have. `RequestWantedContent` carries the gate. What survives
+		// the diff is almost always nothing, which is why running it every
+		// frame was eight store walks per world to produce an empty list.
 		if (ContentRequested) {
 			ENGINE_PROFILE_CAT("content.demand", engine::core::ProfileCategory::Assets);
 			RequestWantedContent();
@@ -876,20 +894,72 @@ namespace client {
 		ENGINE_INFO("content: {} published mesh(es) offered to the world", meshes.size());
 	}
 
-	void Client::RequestWantedContent() {
-		std::vector<engine::core::Name> wanted;
-		for (const engine::world::WorldId id : Simulated) {
-			Universe_->Enter(id, [&wanted](engine::ecs::Store &store) {
-				CollectWantedContent(store, wanted);
-			});
-		}
-		if (ReportedJoin) {
-			Universe_->Enter(Replicated, [&wanted](engine::ecs::Store &store) {
-				CollectWantedContent(store, wanted);
-			});
+	void Client::ScanWantedContent(engine::world::WorldId world) {
+		if (!world.IsValid()) {
+			return;
 		}
 
-		for (const engine::core::Name &name : wanted) {
+		Universe_->Enter(world, [this, world](engine::ecs::Store &store) {
+			// **The gate, and it is one integer compare.** `CollectWantedContent`
+			// is eight walks of the store, and this used to run all eight on
+			// every world on every frame - `docs/ARCH_REVIEW.md` F1, which is
+			// explicit that this is work that should not happen rather than
+			// work to parallelise. Nothing can put a new content name into a
+			// world without a tick advancing, so a world whose tick has not
+			// moved since the last scan cannot have a different answer.
+			//
+			// **Why not the change channel, which is what rule 2 points at.**
+			// Three things were checked and each rules it out on its own:
+			//
+			//  * `Store::ClearChanges` runs at the *start* of a tick, so a
+			//    reader that runs once per frame sees only the last tick of a
+			//    frame that owed several. At 30 fps against a 60 Hz tick that
+			//    is every other tick's new content, silently.
+			//  * A write made outside a tick - which is how a snapshot and a
+			//    world build reach a store - has its bits cleared by the next
+			//    tick before `FlushSignals` ever runs, so `Store::OnChanged`
+			//    does not see it either.
+			//  * `Store::ChangeVersion` moves for *any* write in an archetype
+			//    that carries `DirtyBits`, and `physics` observes
+			//    `scene::Transform`, which sits in the same archetype as every
+			//    `Visual` in the world. One moving part falsifies it for the
+			//    whole scene, so it is never false when it matters.
+			//
+			// The tick counter has none of those properties: it is the world's
+			// own, it is in the store, it advances exactly when the world may
+			// have advanced, and no consumer can clear it.
+			//
+			// **A missed frame costs latency and never a request.** A row that
+			// arrives between two ticks is picked up on the next one, which is
+			// at most one tick late against a fetch that takes hundreds of
+			// milliseconds. A request that never fires would be a texture that
+			// never loads, and that is the failure this gate is written to
+			// avoid rather than to trade against.
+			const uint64_t tick = store.Time().Tick;
+			const auto scanned = ContentScannedAtTick.find(world.Index);
+			if (scanned != ContentScannedAtTick.end() && scanned->second == tick) {
+				return;
+			}
+			ContentScannedAtTick[world.Index] = tick;
+
+			CollectWantedContent(store, ContentWanted);
+		});
+	}
+
+	void Client::RequestWantedContent() {
+		// Reused rather than made per pump: the steady-state answer is empty and
+		// an allocation per world per frame to produce nothing is the same kind
+		// of waste the gate below removes.
+		ContentWanted.clear();
+
+		for (const engine::world::WorldId id : Simulated) {
+			ScanWantedContent(id);
+		}
+		if (ReportedJoin) {
+			ScanWantedContent(Replicated);
+		}
+
+		for (const engine::core::Name &name : ContentWanted) {
 			RequestAsset(name);
 		}
 	}
@@ -1302,6 +1372,7 @@ namespace client {
 						continue;
 					}
 					Settings.ConnectAddress = row.Dial().Text();
+					Advertised = row.Session.Transports;
 					ENGINE_INFO(
 						"found \"{}\" ({}, {}) at {}",
 						row.Session.Name,
@@ -1430,11 +1501,13 @@ namespace client {
 			Runtimes.emplace_back(Replicated, std::move(replicaScripts));
 		}
 
+		// **No transport flag, and there is not going to be one.** The connector
+		// opens with QUIC and falls back if the server refuses; what a browse
+		// heard is passed along so a datagram-only server costs no refusal at
+		// all. `replication::ConnectorSettings::Advertised` carries the argument.
 		engine::replication::ConnectorSettings connector;
-		if (Settings.Quic) {
-			connector.Wire = engine::replication::WireKind::Quic;
-			connector.Quic.BytesPerTick = connector.Session.Link.BytesPerTick;
-		}
+		connector.Advertised = Advertised;
+		connector.Quic.BytesPerTick = connector.Session.Link.BytesPerTick;
 		if (!Settings.ServerKey.empty()) {
 			connector.ServerIdentity = engine::assets::PublicKey::FromHex(Settings.ServerKey);
 			if (!connector.ServerIdentity.has_value()) {
@@ -1534,13 +1607,18 @@ namespace client {
 		// `UserInputService.MouseBehavior` and the client applies it to the
 		// window; copying the whole translator over the resource would throw
 		// that away every frame. `scene::InputState` is the seam in both
-		// directions.
-		// **Three fields survive the overwrite, for two different reasons.** The
+		// directions - and since v0.19 it is the *only* place either field
+		// lives. This used to mirror the pointer pair onto the client as it
+		// passed, and it runs once per world per frame, so the window obeyed
+		// whichever world was entered last. `PumpEvents` reads them from
+		// `InterfaceWorld()` at the point of use instead.
+		//
+		// **Four values survive the overwrite, for two different reasons.** The
 		// pointer mode and whether the cursor is drawn travel the other way - a
-		// script writes them and the window obeys - and the tap latch is *older
-		// than this frame* by design: it is what a key pressed between two ticks
-		// is remembered in, and `Input.State()` only knows about the frame it
-		// just read.
+		// script writes them and the window obeys - and the two tap latches are
+		// *older than this frame* by design: they are what a key or a button
+		// pressed between two ticks is remembered in, and `Input.State()` only
+		// knows about the frame it just read.
 		const engine::scene::MouseBehavior wanted = state->Behaviour;
 		const bool wantedIcon = state->MouseIconEnabled;
 		const engine::scene::KeyBits taps = state->Pressed;
@@ -1557,8 +1635,6 @@ namespace client {
 		state->MouseIconEnabled = wantedIcon;
 		state->Pressed = taps;
 		state->PressedButtons = buttonTaps;
-		PointerMode = wanted;
-		PointerIconEnabled = wantedIcon;
 
 		// Latched here, where every frame is seen. This used to set a private
 		// `PendingJump` on the client, which `SubmitMove` then had to merge back
@@ -1778,9 +1854,47 @@ namespace client {
 		// `SDL_SetWindowRelativeMouseMode` is a system call and a window-manager
 		// round trip on some platforms, so setting it every frame is a per-frame
 		// cost to say what it already says. The compare is what makes it free.
-		if (Window != nullptr &&
-			(PointerMode != AppliedPointerMode || PointerIconEnabled != AppliedPointerIcon)) {
-			const bool relative = PointerMode == engine::scene::MouseBehavior::LockCenter;
+		//
+		// **Read out of the world that holds the input focus, not off a member.**
+		// There is one window and one pointer, and `scene::InputState` is a
+		// per-world resource - so the question "what does a script want the
+		// pointer to do" only has an answer once somebody says *which* script.
+		// `InterfaceWorld()` is that answer and is the same one the interface
+		// layout, the router and `gui::Type` already use. A copy on the client
+		// could not express it: `WriteInput` runs once per world per frame, so
+		// `--worlds 2` and `--connect` both ended up obeying whichever world was
+		// entered last. Root `AGENTS.md` rule 2.
+		engine::scene::MouseBehavior pointerMode = engine::scene::MouseBehavior::Default;
+		bool pointerIcon = true;
+		std::string focusName;
+		if (Window != nullptr && Universe_ != nullptr) {
+			const engine::world::WorldId focus = InterfaceWorld();
+			if (focus.IsValid()) {
+				Universe_->Enter(focus, [&pointerMode, &pointerIcon, &focusName](engine::ecs::Store &store) {
+					focusName = store.Name();
+					if (const auto *state = store.Resource<engine::scene::InputState>(); state != nullptr) {
+						pointerMode = state->Behaviour;
+						pointerIcon = state->MouseIconEnabled;
+					}
+				});
+			}
+		}
+
+		if (Window != nullptr && (pointerMode != AppliedPointerMode || pointerIcon != AppliedPointerIcon)) {
+			// **Which world asked, not only what it asked for.** There is one
+			// window and one pointer against a `scene::InputState` per world, so
+			// the interesting half of this line is the name: a client obeying a
+			// world the player is not standing in is what this used to do, and
+			// nothing said so. `--type`'s toggle line is here for the same
+			// reason - a system call nothing can observe afterwards needs a line
+			// where it was made.
+			ENGINE_INFO(
+				"pointer: {} icon {} (asked by world '{}')",
+				MouseBehaviorName(pointerMode),
+				pointerIcon ? "on" : "off",
+				focusName.empty() ? "none" : focusName
+			);
+			const bool relative = pointerMode == engine::scene::MouseBehavior::LockCenter;
 			SDL_SetWindowRelativeMouseMode(Window, relative);
 
 			// **`LockCurrentPosition` hides the pointer whatever
@@ -1791,17 +1905,16 @@ namespace client {
 			// mode would warp to the centre. `MouseIconEnabled` is what decides
 			// every other case, which is the one Roblox uses it for - a cutscene
 			// with the pointer free and invisible.
-			const bool hidden = relative ||
-								PointerMode == engine::scene::MouseBehavior::LockCurrentPosition ||
-								!PointerIconEnabled;
+			const bool hidden =
+				relative || pointerMode == engine::scene::MouseBehavior::LockCurrentPosition || !pointerIcon;
 			if (hidden) {
 				SDL_HideCursor();
 			} else {
 				SDL_ShowCursor();
 			}
 
-			AppliedPointerMode = PointerMode;
-			AppliedPointerIcon = PointerIconEnabled;
+			AppliedPointerMode = pointerMode;
+			AppliedPointerIcon = pointerIcon;
 		}
 
 		if (Actions.Fired(Action::Quit)) {

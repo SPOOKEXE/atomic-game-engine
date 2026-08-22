@@ -294,7 +294,11 @@ namespace engine::core {
 		// Which category to read. Ignored unless `Subject` is `Category`.
 		ProfileCategory Category = ProfileCategory::Engine;
 
+		// What this rule reads, which decides whether `Name` or `Category` is
+		// the one that matters.
 		TriggerSubject Subject = TriggerSubject::Span;
+
+		// Which side of `Threshold` fires the rule.
 		TriggerTest Test = TriggerTest::Above;
 
 		// Milliseconds, or a count for `Dropped`.
@@ -441,6 +445,21 @@ namespace engine::core {
 		// opened outside the thread that called BeginFrame(). The overlay shows the
 		// count because a partial flame graph must not look complete.
 		static size_t Dropped();
+
+		// The counter `EndFrame` adds every frame's drops to.
+		//
+		// **Because the overlay was the only thing that could see them**, and a
+		// headless server is precisely the program that runs parallel compute
+		// and has no overlay. `docs/ARCH_REVIEW.md` §G2 asks for the drop to be
+		// visible rather than silent; this is how. Named here rather than
+		// spelled twice, because a counter whose name is a literal in two files
+		// is a counter that gets renamed in one of them.
+		//
+		// Nothing is added on a frame that dropped nothing, so a report with no
+		// such row is a run that lost no spans.
+		//
+		// @since v0.19
+		static constexpr std::string_view DROPPED_COUNTER = "core.framegraph.dropped";
 
 		// --- timings measured somewhere else -----------------------------------
 

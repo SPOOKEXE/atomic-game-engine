@@ -20,6 +20,16 @@
 // reachable by name at runtime, a column serialisable without knowing its type,
 // and a world restorable into another process.
 //
+// **Two surfaces, and this header is where they meet.** Most of what follows is
+// storage - entities, components, resources, queries, change tracking,
+// snapshots. One section of it, `--- instances ---` onward, is the Roblox
+// object model: classes, the tree, and properties reached by name. They are one
+// class because they are one set of rows read two ways, and `AGENTS.md` in this
+// directory carries the argument and the measurement. What matters at the top
+// of the file is the rule that keeps them apart at compile time: **this header
+// does not include `Classes.hpp`**, so a consumer that iterates a column does
+// not compile the class tree.
+//
 // Thread affinity is checked rather than trusted. A store belongs to the
 // thread that bound it, every mutation aborts unless it is on that thread, and
 // the check is on in every build - a data race that only shows up under load on
@@ -37,12 +47,11 @@
 
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
-#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <type_traits>
 #include <utility>
 
@@ -128,9 +137,9 @@ namespace engine::ecs {
 		// picked up by whichever job worker claims it, so the owner is a
 		// different thread most ticks. That is why the owner is atomic - the
 		// handoff races the affinity check of any thread still holding a stale
-		// belief about who owns this store, and a plain read of a plain
-		// `std::thread::id` there is a data race by the letter of the standard
-		// even where it happens to be benign.
+		// belief about who owns this store, and a plain read of a plain token
+		// there is a data race by the letter of the standard even where it
+		// happens to be benign.
 		//
 		// @threadsafe
 		void BindToCallingThread();
@@ -140,7 +149,7 @@ namespace engine::ecs {
 		// @return `true` when the current thread may mutate this Store.
 		// @threadsafe
 		bool IsOnOwningThread() const {
-			return std::this_thread::get_id() == Owner.load(std::memory_order_relaxed);
+			return CallingThreadToken() == Owner.load(std::memory_order_relaxed);
 		}
 
 		// --- entities ------------------------------------------------------
@@ -2310,8 +2319,39 @@ namespace engine::ecs {
 
 		void RequireOwningThread(const char *what) const;
 
-		std::unique_ptr<StoreState> State;
+		// Identifies the calling thread, as a value that compares equal only to
+		// itself.
+		//
+		// **A sentinel address rather than `std::thread::id`, and the reason is
+		// build cost.** The affinity check was the one thing in this header
+		// that needed `<thread>`, which preprocesses to 55,318 lines and
+		// reaches every one of the 216 translation units that include
+		// `Store.hpp`. A thread-local object's address is unique to its thread
+		// for that thread's whole life, which is the entire property the check
+		// wants, and it compares as one integer rather than through
+		// `std::thread::id`'s operator.
+		//
+		// Private, and inline because `IsOnOwningThread` is: it is a token, not
+		// a thread *name*, and two runs give one thread different values, so
+		// nothing may log it, serialise it, or offer it as an identity.
+		static uintptr_t CallingThreadToken() {
+			static thread_local const char sentinel = 0;
+			return reinterpret_cast<uintptr_t>(&sentinel);
+		}
+
+		// Owned, and deleted by `~Store`. A raw pointer rather than a
+		// `std::unique_ptr`, to keep `<memory>` off the 216 translation units
+		// that include this header. It only pays together with `<thread>`
+		// above: the two share about 15,000 preprocessed lines of the same
+		// standard-library substrate, so dropping either alone is worth 5,500
+		// and dropping both is worth **20,120**, a quarter of the closure.
+		//
+		// The safety a `unique_ptr` would add is already here: copy and move are
+		// deleted above, and the destructor is out of line in `Store.cpp` -
+		// which is what a `unique_ptr` member over an incomplete `StoreState`
+		// would have needed anyway.
+		StoreState *State = nullptr;
 		std::string StoreName;
-		std::atomic<std::thread::id> Owner;
+		std::atomic<uintptr_t> Owner;
 	};
 }

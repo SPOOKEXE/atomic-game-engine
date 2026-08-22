@@ -173,7 +173,7 @@ namespace engine::physics {
 
 	core::AABB ShapeReach(const ShapeInstance &shape) {
 		if (shape.Hull != nullptr) {
-			return core::AABB::FromOrientedBox(
+			return core::OrientedBoxBounds(
 				shape.Frame,
 				core::Vector3{
 					std::max(std::abs(shape.Hull->Bounds.Minimum.X), std::abs(shape.Hull->Bounds.Maximum.X)),

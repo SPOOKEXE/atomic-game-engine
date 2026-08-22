@@ -1,7 +1,5 @@
-#include "../src/Signals.hpp"
-
-#include "../src/Tasks.hpp"
-
+#include <engine/script/Signals.hpp>
+#include <engine/script/Tasks.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>

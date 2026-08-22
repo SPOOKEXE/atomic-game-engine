@@ -337,9 +337,9 @@ TEST_CASE("the coarse counter moves on every recorded write", "[ecs]") {
 
 TEST_CASE("a batch write moves the counter but sets no bit", "[ecs]") {
 	// The documented gap. EachBatch hands out raw column pointers precisely to
-	// avoid a per-row check, so a write through one cannot set a bit - and
-	// v0.4's QuickHash is what closes it for consumers that need row
-	// granularity over batch-written data.
+	// avoid a per-row check, so a write through one cannot set a bit - and a
+	// content signature is what closes it for a consumer that needs row
+	// granularity over batch-written data. `gui::Compiled` folds one.
 	Store store("test");
 	store.Observe<Spot>();
 

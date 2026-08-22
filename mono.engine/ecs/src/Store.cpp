@@ -88,7 +88,7 @@ namespace engine::ecs {
 	}
 
 	Store::Store(std::string_view name)
-		: State(std::make_unique<StoreState>()), StoreName(name), Owner(std::this_thread::get_id()) {
+		: State(new StoreState()), StoreName(name), Owner(CallingThreadToken()) {
 		// **The other door into the instance model.** A world can be made and
 		// filled from a snapshot without a single `Classes::Register` running
 		// first, and the names in that snapshot have to mean what they meant
@@ -102,10 +102,12 @@ namespace engine::ecs {
 		ENGINE_TRACE("store '{}' created", StoreName);
 	}
 
-	Store::~Store() = default;
+	Store::~Store() {
+		delete State;
+	}
 
 	void Store::BindToCallingThread() {
-		Owner.store(std::this_thread::get_id(), std::memory_order_relaxed);
+		Owner.store(CallingThreadToken(), std::memory_order_relaxed);
 	}
 
 	void Store::TooManyFilterTerms(const char *what) const {

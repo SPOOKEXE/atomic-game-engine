@@ -51,10 +51,6 @@
 //
 // @tier L9 · shared
 
-#include "ScriptCall.hpp"
-#include "Subtree.hpp"
-#include "Tasks.hpp"
-
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/scene/Awake.hpp>
@@ -65,6 +61,9 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Tagging.hpp>
+#include <engine/script/ScriptCall.hpp>
+#include <engine/script/Subtree.hpp>
+#include <engine/script/Tasks.hpp>
 
 #include <algorithm>
 #include <array>
@@ -977,7 +976,7 @@ namespace engine::script {
 		// catalogue: a method table is a map from a name to a callable and no
 		// entry can be reached before another. Grouped by what they do, so a
 		// reader can see that the four attribute calls arrived together.
-		constexpr std::array<InstanceMethod, 52> METHODS{{
+		constexpr std::array<InstanceMethod, 52> SCRIPT_METHODS{{
 			{"GetPivot", GetPivot},
 			{"PivotTo", PivotTo},
 			{"BulkMoveTo", BulkMoveTo},
@@ -1059,7 +1058,7 @@ namespace engine::script {
 		// Luau trampoline on an upvalue and the JavaScript one as magic - so the
 		// concatenation has to happen once and hand back the same span forever.
 		static const std::vector<InstanceMethod> ALL = [] {
-			std::vector<InstanceMethod> rows(METHODS.begin(), METHODS.end());
+			std::vector<InstanceMethod> rows(SCRIPT_METHODS.begin(), SCRIPT_METHODS.end());
 			const std::span<const InstanceMethod> gui = GuiInstanceMethods();
 			rows.insert(rows.end(), gui.begin(), gui.end());
 			return rows;

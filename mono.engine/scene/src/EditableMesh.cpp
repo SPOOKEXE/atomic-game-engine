@@ -1,5 +1,7 @@
 #include <engine/collision/ConvexHull.hpp>
 #include <engine/collision/TriangleMesh.hpp>
+#include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
@@ -76,7 +78,7 @@ namespace engine::scene {
 
 		// The content name a `MeshId` names this mesh by, read-only - see
 		// `EditableMeshContentName`.
-		ecs::PropertyDescriptor ContentIdProperty() {
+		ecs::PropertyDescriptor MeshContentIdProperty() {
 			ecs::PropertyDescriptor property;
 			property.Name = core::Name("ContentId");
 			property.Type = ecs::PropertyType::Name;
@@ -117,7 +119,7 @@ namespace engine::scene {
 
 			ecs::Classes::Computed(editableMesh, VertexCountProperty());
 			ecs::Classes::Computed(editableMesh, TriangleCountProperty());
-			ecs::Classes::Computed(editableMesh, ContentIdProperty());
+			ecs::Classes::Computed(editableMesh, MeshContentIdProperty());
 			return editableMesh;
 		}
 	}
@@ -214,6 +216,15 @@ namespace engine::scene {
 			// with no soup behind it is a collider that stops nothing. The
 			// revision is left unrecorded so the next call tries again.
 			if (mesh.Positions.empty() || mesh.Indices.size() < 3) {
+				// Retried every tick until it becomes valid, which is right and
+				// is also what a mesh that never becomes valid looks like: a
+				// part with no collision and nothing saying why.
+				ENGINE_TRACE_EVERY(
+					5.0,
+					"an editable mesh has {} position(s) and {} index/indices; no collider yet",
+					mesh.Positions.size(),
+					mesh.Indices.size()
+				);
 				return;
 			}
 

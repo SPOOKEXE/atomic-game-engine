@@ -1,3 +1,4 @@
+#include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/core/SecureWipe.hpp>
@@ -190,19 +191,20 @@ namespace engine::net::quic {
 		// /dev/urandom inside a sandbox, or a handle exhausted. A fallback to a
 		// weaker source would be a session anybody can decrypt, reported as a
 		// success.
-		bool RandomBytes(std::span<std::byte> out) {
+		bool TlsRandomBytes(std::span<std::byte> out) {
 			try {
 				CryptoPP::OS_GenerateRandomBlock(
 					false, reinterpret_cast<CryptoPP::byte *>(out.data()), out.size()
 				);
 			} catch (const CryptoPP::Exception &) {
 				core::Metrics::Count("net.quic.tls.no_entropy", 1.0);
+				ENGINE_ERROR("the operating system refused entropy; no handshake can be made");
 				return false;
 			}
 			return true;
 		}
 
-		std::span<const std::byte> AsBytes(std::span<const uint8_t> raw) {
+		std::span<const std::byte> TlsAsBytes(std::span<const uint8_t> raw) {
 			return {reinterpret_cast<const std::byte *>(raw.data()), raw.size()};
 		}
 
@@ -253,6 +255,13 @@ namespace engine::net::quic {
 		// opposite of how the call reads aloud.
 		CryptoPP::Donna::ed25519_publickey(reinterpret_cast<CryptoPP::byte *>(identity.data()), Raw(seed));
 		return identity;
+	}
+
+	bool DrawIdentitySeed(std::span<std::byte> out) {
+		if (out.size() != IDENTITY_SEED_BYTES) {
+			return false;
+		}
+		return TlsRandomBytes(out);
 	}
 
 	Tls::Tls(Role role, TlsSettings settings) : Side(role), Settings(std::move(settings)) {
@@ -367,6 +376,12 @@ namespace engine::net::quic {
 			// event. The counter is deliberately one an operator can alarm on,
 			// the same argument `assets::VerifySessionTranscript` makes.
 			core::Metrics::Count("net.quic.tls.refused", 1.0);
+
+			// **Every TLS refusal in this file routes through here.** A pinning
+			// mismatch, a downgrade, a bad certificate and a decode error are
+			// four different problems that used to be one counter, and each of
+			// them looks from outside like a handshake that hangs.
+			ENGINE_WARN("handshake refused: {} (alert {})", reason, alert);
 		}
 		return false;
 	}
@@ -468,7 +483,7 @@ namespace engine::net::quic {
 		}
 
 		std::array<std::byte, 32> random{};
-		if (!RandomBytes(random) || !RandomBytes(EphemeralSecret)) {
+		if (!TlsRandomBytes(random) || !TlsRandomBytes(EphemeralSecret)) {
 			return Refuse(ALERT_INTERNAL_ERROR, "the operating system refused entropy");
 		}
 		if (CryptoPP::Donna::curve25519_mult(
@@ -801,7 +816,7 @@ namespace engine::net::quic {
 		Absorb(whole);
 
 		std::array<std::byte, 32> random{};
-		if (!RandomBytes(random) || !RandomBytes(EphemeralSecret)) {
+		if (!TlsRandomBytes(random) || !TlsRandomBytes(EphemeralSecret)) {
 			return Refuse(ALERT_INTERNAL_ERROR, "the operating system refused entropy");
 		}
 		if (CryptoPP::Donna::curve25519_mult(
@@ -926,7 +941,7 @@ namespace engine::net::quic {
 			flight.U8(0);
 			const size_t list = flight.Open(3);
 			const size_t entry = flight.Open(3);
-			flight.Raw(AsBytes(std::span<const uint8_t>(ED25519_SPKI_PREFIX)));
+			flight.Raw(TlsAsBytes(std::span<const uint8_t>(ED25519_SPKI_PREFIX)));
 			flight.Raw(Identity);
 			flight.Close(entry, 3);
 			// Per-certificate extensions, of which there are none.
@@ -1008,7 +1023,7 @@ namespace engine::net::quic {
 		if (reader.Broken) {
 			return Refuse(ALERT_DECODE_ERROR, "the ServerHello is malformed");
 		}
-		if (SameBytes(random, AsBytes(std::span<const uint8_t>(HELLO_RETRY_REQUEST)))) {
+		if (SameBytes(random, TlsAsBytes(std::span<const uint8_t>(HELLO_RETRY_REQUEST)))) {
 			// One group is offered, so there is nothing a second ClientHello
 			// could carry that the first did not. Refused rather than looped.
 			return Refuse(ALERT_HANDSHAKE_FAILURE, "a HelloRetryRequest has nothing to retry with");
@@ -1175,7 +1190,7 @@ namespace engine::net::quic {
 		// one. Compared against the fixed prefix rather than parsed, because an
 		// ASN.1 parser here would be attack surface for a structure with no
 		// variability in it.
-		const auto prefix = AsBytes(std::span<const uint8_t>(ED25519_SPKI_PREFIX));
+		const auto prefix = TlsAsBytes(std::span<const uint8_t>(ED25519_SPKI_PREFIX));
 		if (entry.size() != prefix.size() + IDENTITY_BYTES ||
 			!SameBytes(entry.subspan(0, prefix.size()), prefix)) {
 			return Refuse(ALERT_BAD_CERTIFICATE, "the key is not an Ed25519 SubjectPublicKeyInfo");
@@ -1258,6 +1273,9 @@ namespace engine::net::quic {
 			Phase = Stage::Done;
 			Events.push_back({Event::Kind::Complete, Level::Application, {}, {}});
 			core::Metrics::Count("net.quic.tls.completed", 1.0);
+			// The suite is chosen once and read by nobody afterwards, and "why is
+			// this slow on that machine" is usually AES against ChaCha.
+			ENGINE_DEBUG("server handshake done on suite {}", static_cast<int>(Chosen));
 			return true;
 		}
 
@@ -1287,6 +1305,7 @@ namespace engine::net::quic {
 
 		Phase = Stage::Done;
 		core::Metrics::Count("net.quic.tls.completed", 1.0);
+		ENGINE_DEBUG("client handshake done on suite {}", static_cast<int>(Chosen));
 		return true;
 	}
 }

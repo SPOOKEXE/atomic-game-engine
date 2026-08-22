@@ -1,6 +1,7 @@
 #include "Codec.hpp"
 
 #include <engine/core/Bytes.hpp>
+#include <engine/core/Log.hpp>
 #include <engine/core/SecureWipe.hpp>
 
 #include <algorithm>
@@ -25,7 +26,12 @@ namespace network {
 		// belongs to this module; that is the shape of the *game* and belongs
 		// to whoever is announcing. Two builds of a game that changed its input
 		// encoding share this version and differ in that one.
-		constexpr uint16_t ADVERT_VERSION = 1;
+		//
+		// **2 - the frame gained `Advert::Transports`.** A version 1 reader
+		// would take that byte as the first byte of the name's length prefix
+		// and lose everything after it, so the frame is refused whole rather
+		// than read forgivingly.
+		constexpr uint16_t ADVERT_VERSION = 2;
 
 		// The one flag: whether a tag follows the body.
 		constexpr uint8_t FLAG_TAGGED = 0x01;
@@ -34,7 +40,7 @@ namespace network {
 		// two length prefixes of two empty strings. Checked before anything is
 		// read so a truncated datagram is refused rather than half-parsed.
 		constexpr size_t MINIMUM_BYTES =
-			4 + 2 + 1 + SessionId::BYTES + 1 + 1 + 4 + ENDPOINT_BYTES + 2 + 2 + 4 + 4;
+			4 + 2 + 1 + SessionId::BYTES + 1 + 1 + 1 + 4 + ENDPOINT_BYTES + 2 + 2 + 4 + 4;
 
 		// Text as it goes on the wire: capped, and cut at the cap rather than
 		// refused. A name is cosmetic and dropping a whole announcement over
@@ -52,6 +58,10 @@ namespace network {
 			return value <= static_cast<uint8_t>(Access::Private);
 		}
 
+		bool KnownTransports(uint8_t value) {
+			return value <= static_cast<uint8_t>(engine::net::WireMode::Both);
+		}
+
 		// Everything except the tag, which is what the tag commits to.
 		void WriteBody(engine::core::ByteWriter &writer, const Advert &advert, bool tagged) {
 			writer.WriteUInt32(ADVERT_MAGIC);
@@ -60,6 +70,7 @@ namespace network {
 			WriteSessionId(writer, advert.Session);
 			writer.WriteUInt8(static_cast<uint8_t>(advert.Use));
 			writer.WriteUInt8(static_cast<uint8_t>(advert.Admits));
+			writer.WriteUInt8(static_cast<uint8_t>(advert.Transports));
 			writer.WriteUInt32(advert.Protocol);
 			WriteEndpoint(writer, advert.At);
 			writer.WriteUInt16(advert.Peers);
@@ -161,13 +172,22 @@ namespace network {
 
 	std::optional<DecodedAdvert>
 	Decode(std::span<const std::byte> datagram, std::span<const SessionKey> keys) {
-		if (datagram.size() < MINIMUM_BYTES) {
+		// **Eight refusals share one `Tally.Malformed`.** "I cannot see the
+		// server" and "I can see it and will not list it" are the same number
+		// from outside, so each refusal names itself. Rate-limited because an
+		// open UDP port carries whatever anybody sends it.
+		const auto refuse = [](const char *why) -> std::optional<DecodedAdvert> {
+			ENGINE_DEBUG_EVERY(1.0, "advert refused: {}", why);
 			return std::nullopt;
+		};
+
+		if (datagram.size() < MINIMUM_BYTES) {
+			return refuse("shorter than the smallest frame");
 		}
 
 		engine::core::ByteReader reader(datagram);
 		if (reader.ReadUInt32() != ADVERT_MAGIC || reader.ReadUInt16() != ADVERT_VERSION) {
-			return std::nullopt;
+			return refuse("the magic or the frame version is not this build's");
 		}
 
 		const uint8_t flags = reader.ReadUInt8();
@@ -177,7 +197,7 @@ namespace network {
 		// after it are laid out differently, and reading them anyway is exactly
 		// the guess the version check exists to prevent.
 		if ((flags & ~FLAG_TAGGED) != 0) {
-			return std::nullopt;
+			return refuse("a flag bit this build does not know");
 		}
 
 		DecodedAdvert decoded;
@@ -186,11 +206,13 @@ namespace network {
 
 		const uint8_t use = reader.ReadUInt8();
 		const uint8_t admits = reader.ReadUInt8();
-		if (!KnownPurpose(use) || !KnownAccess(admits)) {
-			return std::nullopt;
+		const uint8_t transports = reader.ReadUInt8();
+		if (!KnownPurpose(use) || !KnownAccess(admits) || !KnownTransports(transports)) {
+			return refuse("a purpose, access or transport outside its closed list");
 		}
 		advert.Use = static_cast<Purpose>(use);
 		advert.Admits = static_cast<Access>(admits);
+		advert.Transports = static_cast<engine::net::WireMode>(transports);
 
 		advert.Protocol = reader.ReadUInt32();
 		advert.At = ReadEndpoint(reader);
@@ -201,13 +223,13 @@ namespace network {
 		const std::string_view detail = reader.ReadString();
 		if (reader.Failed() || name.size() > Advert::MAXIMUM_TEXT_BYTES ||
 			detail.size() > Advert::MAXIMUM_TEXT_BYTES) {
-			return std::nullopt;
+			return refuse("truncated, or a name or detail past the cap");
 		}
 		advert.Name.assign(name);
 		advert.Detail.assign(detail);
 
 		if (!advert.Session.IsValid()) {
-			return std::nullopt;
+			return refuse("the session id is all zeros");
 		}
 
 		const size_t body = reader.Position();
@@ -216,11 +238,12 @@ namespace network {
 			// its bytes did is one somebody appended to, and accepting it would
 			// let two datagrams that decode identically carry different bytes -
 			// which is the last thing a format a tag commits to should allow.
-			return body == datagram.size() ? std::optional<DecodedAdvert>(std::move(decoded)) : std::nullopt;
+			return body == datagram.size() ? std::optional<DecodedAdvert>(std::move(decoded))
+										   : refuse("bytes after the last field, on an untagged frame");
 		}
 
 		if (datagram.size() != body + SessionKey::TAG_BYTES) {
-			return std::nullopt;
+			return refuse("the tagged frame is not exactly one tag longer than its body");
 		}
 
 		const std::span<const std::byte> covered = datagram.first(body);

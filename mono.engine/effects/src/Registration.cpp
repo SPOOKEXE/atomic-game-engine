@@ -1,4 +1,5 @@
 #include <engine/core/Bytes.hpp>
+#include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/EnumTable.hpp>
@@ -54,7 +55,16 @@ namespace engine::effects {
 				// made a mistake worth reporting, and a file holding twenty-one
 				// was written by a build whose cap was higher. Refusing would make
 				// the whole world unloadable over one gradient.
-				(void)sequence.Add(core::NumberKeypoint{time, value, envelope});
+				if (!sequence.Add(core::NumberKeypoint{time, value, envelope})) {
+					// The curve loads shorter than it was saved and the effect
+					// looks subtly wrong, with nothing to tie it to the load.
+					ENGINE_WARN(
+						"a saved curve of {} keypoints is past this build's capacity; {} were dropped",
+						count,
+						count - sequence.Count
+					);
+					break;
+				}
 			}
 		}
 

@@ -1,5 +1,10 @@
+#include <engine/core/Bytes.hpp>
+#include <engine/core/Name.hpp>
+#include <engine/ecs/Components.hpp>
 #include <engine/ecs/Entity.hpp>
+#include <engine/ecs/TypeDescriptor.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
+#include <engine/physics/Pipeline.hpp>
 #include <engine/spatial/HashGrid.hpp>
 #include <engine/spatial/LayerMask.hpp>
 #include <engine/testing/Suite.hpp>
@@ -148,4 +153,64 @@ TEST_CASE("a record keeps the two masks apart", "[physics][physicsworld]") {
 	CHECK(record.Layer == LayerMask::Only(2));
 	CHECK(record.Mask == LayerMask::Only(3));
 	CHECK_FALSE(record.Layer == record.Mask);
+}
+
+// **What a `PhysicsWorld` writes into a snapshot, measured rather than assumed.**
+//
+// The type is forty members wide and thirty-four of them are per-step scratch -
+// the grids, the pair list, the manifolds, the solver rows, the impulse caches.
+// `docs/ARCH_REVIEW.md` §D3 recorded that shape and read it as "all serialised",
+// with a proposal to split the scratch out so it could not reach a file.
+//
+// It never could. `WritePhysicsWorlds` writes the cell size and the flag saying
+// whether that size was measured or chosen, and nothing else - every other
+// member is derived from `Transform` and `Collider`, which the same snapshot
+// already carries. Five bytes, and a world restored from them is a fresh world
+// with its static index marked stale.
+//
+// This case is what keeps that true. A writer that started copying a buffer
+// would fail here rather than in a `.agame` that loads a stale broad phase.
+TEST_CASE("a physics world saves its cell size and none of its scratch", "[physics][physicsworld]") {
+	engine::physics::RegisterPhysicsComponents();
+
+	const engine::ecs::TypeDescriptor &type = engine::ecs::Components::Describe(
+		engine::ecs::Components::Find(engine::core::Name("physics.PhysicsWorld"))
+	);
+	REQUIRE(type.Serialisable);
+
+	// **Not the object representation, which is the first half of the claim.**
+	// A raw writer would put a `std::vector`'s pointers into the file.
+	CHECK_FALSE(type.RawSerialisation);
+
+	PhysicsWorld busy(2.0f);
+	PipelineInternals::Pairs(busy).resize(4096);
+	PipelineInternals::Manifolds(busy).resize(4096);
+	PipelineInternals::Rows(busy).resize(4096);
+	PipelineInternals::ImpulseCache(busy).resize(4096);
+
+	PhysicsWorld quiet(2.0f);
+
+	engine::core::ByteWriter loaded;
+	type.Write(loaded, &busy, 1);
+	engine::core::ByteWriter fresh;
+	type.Write(fresh, &quiet, 1);
+
+	// A float and a bool. Both worlds, whatever is in their buffers.
+	CHECK(loaded.Size() == sizeof(float) + 1);
+	CHECK(fresh.Size() == loaded.Size());
+
+	// And the same bytes: nothing a step filled in is in either.
+	REQUIRE(loaded.Bytes().size() == fresh.Bytes().size());
+	CHECK(std::equal(loaded.Bytes().begin(), loaded.Bytes().end(), fresh.Bytes().begin()));
+
+	// What comes back is a fresh world at the saved size, with the static index
+	// stale so the first sync after a load rebuilds rather than querying an
+	// index describing the world the file was written from.
+	PhysicsWorld restored(9.0f);
+	engine::core::ByteReader reader(loaded.Bytes());
+	type.Read(reader, &restored, 1);
+	CHECK(restored.CellSize() == Approx(2.0f));
+	CHECK(restored.StaticDirty());
+	CHECK(restored.Pairs().empty());
+	CHECK(restored.Manifolds().empty());
 }

@@ -65,6 +65,20 @@ namespace defaults_test {
 		int Value = 0;
 	};
 
+	// A shared component that carries a hand-written serialisation and still
+	// cannot be *signed*, which is the gate `CannotBeSigned` exists to open.
+	//
+	// **`Bulky` above is the other half of the same rule and they are not the
+	// same case.** That one has no serialisation at all, so it is dropped for
+	// want of a way to write it. This one has one - somebody sat down and wrote
+	// the pair - and is dropped anyway, because a signature hashes the object
+	// representation and a `std::string`'s object representation is a pointer.
+	// Two different reasons, one silence, and the second is the one that reads
+	// as "I wrote a serialiser and it never crossed".
+	struct Scripted {
+		std::string Text;
+	};
+
 	// **Registered by this suite, which is what makes the cases below say
 	// anything.** The table is a function-local static built on first use, so in
 	// a host it is built after start-up registered everything and here it is
@@ -120,6 +134,26 @@ namespace defaults_test {
 		// **that** rule: scripts are a list rather than a prefix, so a component
 		// this module has not been told about does not ride in on a spelling.
 		engine::ecs::Components::Register<Sidecar>("script.DefaultsTestOutside");
+
+		// The non-trivial component that *does* carry a pair, under this suite's
+		// own spelling. What it proves is a drop rather than a crossing: the
+		// gate is `Trivial`, not `Serialisable`, so writing the pair is not
+		// enough on its own.
+		engine::ecs::Components::Register<Scripted>(
+			"scene.DefaultsTestScripted",
+			[](engine::core::ByteWriter &writer, const void *values, size_t count) {
+				const auto *scripted = static_cast<const Scripted *>(values);
+				for (size_t index = 0; index < count; index++) {
+					writer.WriteString(scripted[index].Text);
+				}
+			},
+			[](engine::core::ByteReader &reader, void *values, size_t count) {
+				auto *scripted = static_cast<Scripted *>(values);
+				for (size_t index = 0; index < count; index++) {
+					scripted[index].Text = std::string(reader.ReadString());
+				}
+			}
+		);
 
 		// **The `ecs.` half of the table, and it has to be registered before the
 		// table is built or the exhaustiveness case below asserts over nothing.**
@@ -184,7 +218,6 @@ TEST_CASE("what a machine works out for itself is not sent", "[replication][defa
 	// spent on a value the far side is about to overwrite.
 	CHECK(LocalToTheClient("scene.PreviousTransform"));
 	CHECK(LocalToTheClient("scene.Rendered"));
-	CHECK(LocalToTheClient("scene.QuickHash"));
 	CHECK(LocalToTheClient("scene.Transient"));
 
 	// A client's own input and its own identity. Sending the server's copy would
@@ -195,6 +228,19 @@ TEST_CASE("what a machine works out for itself is not sent", "[replication][defa
 	// A viewer's own occlusion fade. Sending it would put one client's
 	// poppercam on every other client's screen.
 	CHECK(LocalToTheClient("scene.LocalTransparency"));
+
+	// **The interface half of the same rule, and `gui.Canvas` is the row that
+	// was missing from it.** `gui::Layout` writes the canvas rectangle and
+	// `gui.Resolved` in one block, off the same local viewport; only one of the
+	// two was excluded, so the authority's screen rectangle crossed to every
+	// client and was overwritten by that client's next layout pass.
+	CHECK(LocalToTheClient("gui.Canvas"));
+	CHECK(LocalToTheClient("gui.Resolved"));
+
+	// And what an author wrote still crosses, which is the line the whole gui
+	// set is drawn on.
+	CHECK_FALSE(LocalToTheClient("gui.Element"));
+	CHECK_FALSE(LocalToTheClient("gui.Scrolling"));
 
 	// And the ordinary case: everything else is shared.
 	CHECK_FALSE(LocalToTheClient("scene.Transform"));
@@ -226,6 +272,70 @@ TEST_CASE("the derivation keeps what can cross and drops what cannot", "[replica
 	// And the prefix is a rule rather than a convention: a component this
 	// process registered under another module's name is not a world's state.
 	CHECK(Row("defaults_test.Outside") == nullptr);
+}
+
+TEST_CASE("a serialiser is not enough to cross, and the two that say so", "[replication][defaults]") {
+	defaults_test::Ready();
+
+	// **The gate is `Trivial`, and a component with a hand-written pair still
+	// meets it.** `scene.DefaultsTestScripted` has a `Write` and a `Read`
+	// somebody sat down and wrote, and it does not cross: a signature hashes
+	// the object representation, a `std::string`'s object representation is a
+	// pointer, and `Authority::Resign` declines a component it cannot sign. The
+	// component looks replicated from every angle except the wire.
+	CHECK(Row("scene.DefaultsTestScripted") == nullptr);
+
+	// **Which is exactly what happened to two real components.**
+	// `scene.TextContent` is what a `StringValue` holds and `scene.ShaderSource`
+	// is the GLSL a `ShaderScript` holds; both carry hand-written pairs in
+	// `scene/Registration.cpp` for the express purpose of crossing, and both
+	// were dropped by the line above without a word. Declaring them here is the
+	// whole of the wiring - `Authority::Survey` turns the observation on.
+	CHECK(engine::replication::CannotBeSigned("scene.TextContent"));
+	CHECK(engine::replication::CannotBeSigned("scene.ShaderSource"));
+
+	// And the ordinary case, so this is a rule rather than a list: a component
+	// whose bytes *can* be hashed is signed, and declaring it here would buy a
+	// dirty column paid every tick and read never.
+	CHECK_FALSE(engine::replication::CannotBeSigned("scene.Transform"));
+	CHECK_FALSE(engine::replication::CannotBeSigned("scene.Visual"));
+}
+
+TEST_CASE("the viewer's own portal snap is not the authority's", "[replication][defaults]") {
+	defaults_test::Ready();
+
+	// **A live bug until v0.19, and the shape of it is worth keeping written
+	// down.** `scene::SnapPortalTransit` collapses a replica's interpolation
+	// onto where a body arrived, once per crossing, and it knows which
+	// crossings it has already dealt with from `scene.PortalTransitSeen` -
+	// `scene/Interpolation.cpp` takes the serial after it snaps.
+	//
+	// The authority runs that same pass and takes the same serial. With the row
+	// replicated, the authority's answer arrives on the client *in the same
+	// snapshot as the crossing it describes*, so the client's own
+	// `SnapPortalTransit` finds `seen->Serial == went.Serial` on its very first
+	// look and returns without snapping. The body then interpolates from the
+	// room it left to the room it arrived in - a smear across however far apart
+	// the two panes are - and nothing in the frame says why.
+	//
+	// It is a per-viewer bookkeeping row, exactly as `scene.Rendered` and
+	// `scene.PreviousTransform` beside it are.
+	CHECK(LocalToTheClient("scene.PortalTransitSeen"));
+
+	// What the crossing itself is stays shared: `scene.PortalTransit` is a fact
+	// about the body, written by `CrossPortals` on the authority, and it is what
+	// tells a client a crossing happened at all.
+	CHECK_FALSE(LocalToTheClient("scene.PortalTransit"));
+
+	// **The memo the local visibility walk keeps, on the same argument.**
+	// `scene.RenderedSignature` says "the walk has already run against a tree
+	// that folds to this", and that is a claim about the machine holding it.
+	// `scene::SyncRendered` compares the authority's stamp against a tree it has
+	// never walked, matches, skips the walk, and leaves `scene.Rendered` as
+	// whatever arrived - which is one frame drawn wrong with nothing in it to
+	// explain the frame. Its own serialisation already refuses to persist for
+	// this reason; the wire is the second door into the same room.
+	CHECK(LocalToTheClient("scene.RenderedSignature"));
 }
 
 TEST_CASE("the set is derived, and never contradicts the exclusions", "[replication][defaults]") {

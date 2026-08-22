@@ -20,6 +20,7 @@ using engine::audio::AudioFormat;
 using engine::audio::AudioMixer;
 using engine::audio::Command;
 using engine::audio::CommandKind;
+using engine::audio::CommandQueue;
 using engine::audio::MixReport;
 using engine::audio::NodeId;
 using engine::audio::NodeKind;
@@ -131,6 +132,43 @@ namespace {
 			return Out.Frame(frame)[0];
 		}
 	};
+}
+
+TEST_CASE("a producer can ask how much room is left before it posts a burst", "[audio][mixer]") {
+	// **The question `CommandQueue::Post` alone cannot answer.** A voice is five
+	// commands or seven and half of one is a player wired to nothing, so a
+	// producer that posts and checks per command is left holding a partial graph
+	// with no way to undo it - the undo would itself be commands, into the queue
+	// that just refused. `mono.client/src/Sounds.cpp` is the caller.
+	AudioMixer mixer(STEREO, BLOCK);
+	CommandQueue &queue = mixer.Commands();
+
+	// One slot short of `CAPACITY`, because the ring keeps one empty so that
+	// full and empty are distinguishable.
+	CHECK(queue.Free() == CommandQueue::CAPACITY - 1);
+
+	Command command;
+	command.Kind = CommandKind::SetGain;
+	REQUIRE(queue.Post(command));
+	CHECK(queue.Free() == CommandQueue::CAPACITY - 2);
+	CHECK(queue.Pending() == 1);
+
+	while (queue.Free() > 0) {
+		REQUIRE(queue.Post(command));
+	}
+
+	// The two answers agree at the boundary: nothing free is exactly the point
+	// where posting starts refusing and counting drops.
+	const uint64_t dropped = queue.Dropped();
+	CHECK_FALSE(queue.Post(command));
+	CHECK(queue.Free() == 0);
+	CHECK(queue.Dropped() == dropped + 1);
+
+	// A drain is the only thing that gives room back, and it gives all of it.
+	std::vector<Command> taken;
+	queue.Drain(taken);
+	CHECK(taken.size() == CommandQueue::CAPACITY - 1);
+	CHECK(queue.Free() == CommandQueue::CAPACITY - 1);
 }
 
 TEST_CASE("an empty graph renders silence", "[audio][mixer]") {

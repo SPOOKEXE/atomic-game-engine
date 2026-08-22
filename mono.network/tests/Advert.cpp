@@ -6,6 +6,7 @@
 // standing between that and a listing is this decoder.
 
 #include <engine/net/Endpoint.hpp>
+#include <engine/net/Wire.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -37,6 +38,7 @@ namespace {
 		advert.Use = Purpose::Game;
 		advert.Admits = Access::Public;
 		advert.Protocol = 7;
+		advert.Transports = engine::net::WireMode::Both;
 		advert.At = Endpoint::LoopbackIPv4(7777);
 		advert.Name = "User's game";
 		advert.Detail = "Baseplate";
@@ -87,6 +89,7 @@ TEST_CASE("an advert survives its own encoding", "[network][advert]") {
 	CHECK(got.Use == sent.Use);
 	CHECK(got.Admits == sent.Admits);
 	CHECK(got.Protocol == sent.Protocol);
+	CHECK(got.Transports == sent.Transports);
 	CHECK(got.At == sent.At);
 	CHECK(got.Name == sent.Name);
 	CHECK(got.Detail == sent.Detail);
@@ -224,6 +227,34 @@ TEST_CASE("hostile bytes are refused whole", "[network][advert]") {
 	std::vector<std::byte> unknownAccess = good;
 	unknownAccess[8 + SessionId::BYTES] = static_cast<std::byte>(0x7F);
 	CHECK_FALSE(network::Decode(unknownAccess, {}).has_value());
+
+	// And a transport mode outside its list, which sits straight after access.
+	// It reaches a `replication::ConnectorSettings` and steers which stack a
+	// client opens with, so a value no switch handles is a byte from a stranger
+	// picking a code path the type says cannot be reached.
+	std::vector<std::byte> unknownTransports = good;
+	unknownTransports[9 + SessionId::BYTES] = static_cast<std::byte>(0x7F);
+	CHECK_FALSE(network::Decode(unknownTransports, {}).has_value());
+}
+
+TEST_CASE("an advert says which transports the host answers", "[network][advert]") {
+	// **What it saves is one refusal round trip and nothing else.** The server
+	// decides the transport either way; a client that heard this opens on the
+	// stack the server serves instead of being turned away first, and a client
+	// that heard nothing falls back exactly as it would have.
+	for (const engine::net::WireMode mode :
+		 {engine::net::WireMode::Quic, engine::net::WireMode::Datagram, engine::net::WireMode::Both}) {
+		Advert advert = Sample();
+		advert.Transports = mode;
+
+		const std::optional<DecodedAdvert> decoded = network::Decode(network::Encode(advert, nullptr), {});
+		REQUIRE(decoded.has_value());
+		CHECK(decoded->Session.Transports == mode);
+	}
+
+	// The default is what a host that says nothing about it announces, and it
+	// is the same default `replication::ListenerSettings` serves on.
+	CHECK(Advert{}.Transports == engine::net::WireMode::Quic);
 }
 
 TEST_CASE("an advert with no session is not one", "[network][advert]") {

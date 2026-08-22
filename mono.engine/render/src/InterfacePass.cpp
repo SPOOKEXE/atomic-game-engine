@@ -1,3 +1,4 @@
+#include "Primitives.hpp"
 #include "ShaderBinary.hpp"
 
 #include <engine/core/Log.hpp>
@@ -882,42 +883,32 @@ namespace engine::render {
 			}
 
 			if (spatial.Kind == gui::SpatialCanvasKind::Surface) {
-				if (normal.Dot(toCamera) <= 0.0f) {
+				if (!CanvasFacesViewer(normal, toCamera)) {
 					continue;
 				}
 			} else {
-				const core::Vector3 right = camera.RightVector();
-				const core::Vector3 up = camera.UpVector();
-				const glm::vec4 projectedAnchor =
-					viewProjection * glm::vec4{spatial.Origin.X, spatial.Origin.Y, spatial.Origin.Z, 1.0f};
-				const core::Vector3 oneUp = spatial.Origin + up;
-				const glm::vec4 projectedUp = viewProjection * glm::vec4{oneUp.X, oneUp.Y, oneUp.Z, 1.0f};
-				// **Against the canvas height, not the attachment's.** The
-				// number being divided by this is `BillboardPixels`, which came
-				// from a `UDim2` offset and is therefore in canvas units - and
-				// `ResolveSpatialCanvases` sized the same billboard's canvas
-				// with `PixelsPerStud(..., screen.Height)`, also canvas units.
-				// Using the attachment made the two disagree by the display's
-				// density: the canvas was laid out at one size and the quad it
-				// lands on was built at another, so the pixel half of a
-				// billboard's `Size` came out at a fraction of the studs asked
-				// for on a high-density display and nowhere else.
+				// **The billboard's quad, worked out where a test can reach it.**
+				// The pixels-per-stud measurement, the studs-plus-pixels size and
+				// the centring on the anchor were all inline here until v0.19,
+				// which is the gap `docs/ARCH_REVIEW.md` B recorded and
+				// `src/Primitives.hpp` closes. `tests/Primitives.cpp` holds the
+				// two facts that were never asserted: the quad is centred on its
+				// anchor, and its normal is *not* the cross product of its axes.
 				const float canvasHeight = Canvas.Y > 0.0f ? Canvas.Y : static_cast<float>(height);
-				const float pixelsPerStud =
-					std::abs(
-						projectedUp.y / std::max(std::abs(projectedUp.w), 1.0e-5f) -
-						projectedAnchor.y / std::max(std::abs(projectedAnchor.w), 1.0e-5f)
-					) *
-					canvasHeight * 0.5f;
-				const float usablePixelsPerStud = std::max(pixelsPerStud, 1.0e-5f);
-				const core::Vector2 worldSize{
-					spatial.BillboardStuds.X + spatial.BillboardPixels.X / usablePixelsPerStud,
-					spatial.BillboardStuds.Y + spatial.BillboardPixels.Y / usablePixelsPerStud,
-				};
-				axisX = right * worldSize.X;
-				axisY = up * -worldSize.Y;
-				origin = spatial.Origin - axisX * 0.5f - axisY * 0.5f;
-				normal = distance > 0.0f ? toCamera / distance : camera.LookVector() * -1.0f;
+				const SpatialQuad quad = BillboardQuad(
+					spatial.Origin,
+					camera.RightVector(),
+					camera.UpVector(),
+					toCamera,
+					spatial.BillboardStuds,
+					spatial.BillboardPixels,
+					CanvasPixelsPerStud(viewProjection, spatial.Origin, camera.UpVector(), canvasHeight),
+					camera.LookVector() * -1.0f
+				);
+				origin = quad.Origin;
+				axisX = quad.AxisX;
+				axisY = quad.AxisY;
+				normal = quad.Normal;
 			}
 
 			const void *wantedPipeline = spatial.AlwaysOnTop ? SpatialTopPipeline : SpatialPipeline;

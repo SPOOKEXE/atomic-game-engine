@@ -16,6 +16,7 @@
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/SourceCache.hpp>
+#include <engine/scripthost/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -24,7 +25,7 @@
 #include <vector>
 
 TEST_SUITE_ID("studio.debugger")
-TEST_DEPENDS("engine.script.debugger")
+TEST_DEPENDS("engine.scripthost.debugger")
 
 using engine::core::Name;
 using engine::ecs::Store;

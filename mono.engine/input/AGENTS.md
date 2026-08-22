@@ -3,14 +3,31 @@
 L12, `client` tier. Absent from the server binary entirely, and from a
 server-only configure altogether.
 
-## One table names keys. Nothing else does
+## This module answers "what is held". It does not decide what a key means
 
-`BINDINGS` in `Actions.cpp` is the only place in the engine where a key code
-appears. Everything else asks whether an action fired.
+`KeyOf` in `Translate.cpp` is the only place in the engine where an SDL keycode
+becomes a `scene::KeyCode`, and that is the whole of what this module owns: a
+name a script can read, on a resource a world holds.
 
-That is what makes rebinding a table edit rather than a search, and it is why
-`SDLK_F5` must not appear in `mono.client`. If a new behaviour needs a key, it
-needs an `Action` first.
+**`Action` and `Actions` left at v0.19, and the argument is worth keeping.**
+They were here until then, and `docs/ARCH_REVIEW.md` C6 was right about them:
+all twelve members were the host program's own diagnostics - ten profiler and
+HUD panels, a wireframe toggle and `Quit` - and exactly one target in the
+repository linked this module for them. A game does not ask whether
+`WriteProfilerSnapshot` fired; it reads `scene::InputState`. So they are
+`mono.client/include/client/Actions.hpp` now, beside the profiler and the HUD
+they drive.
+
+The rule that used to live here said "nothing outside this module names a key",
+and moving the enum did not break it, because what it protects is that a
+*binding* is one table rather than branches spread over a codebase. There are
+still exactly two places an `SDLK_` appears: `KeyOf` here, and `BINDINGS` in
+`mono.client`. **Do not add a third**, and in particular do not scatter
+`event.key.key == SDLK_...` through a frame loop.
+
+If the engine ever needs a game-facing action map, it is a different thing from
+what moved - it is bindings a game declares at runtime, not an enum - and it
+belongs here, over `scene::KeyCode` rather than over `SDL_Keycode`.
 
 ## This module translates events. It does not pump them
 
@@ -83,9 +100,15 @@ keyboard and starts composition, so it is off until something asks. The client
 asks while a `TextBox` has the keyboard and stops when it does not - that call
 belongs where the window is, and this module has no window.
 
-## Every action needs a binding and a name
+## An unmapped key is reported, not silent
 
-`GetActionBinding` feeds the overlay, so an action with no binding string is a
-feature nobody can discover. The test asserts both exist for every action in
-the enum, which is why adding one to the enum and forgetting the table is a
-test failure rather than a silent gap.
+`KeyOf` answers `KeyCode::Unknown` for anything not in its switch, and
+`Translator::HandleEvent` then drops the event. That is correct - `KeyCode` only
+names keys this engine can produce, which is `scene/Input.hpp`'s own rule - but
+it used to be invisible, and the symptom is a script that cannot see a key the
+player can see on their keyboard.
+
+Since v0.19 the drop is a `debug` line under the `input` category carrying the
+SDL keycode, so `--log input=debug` names the key that would have to be added to
+the table. Keep it that way: if a key is worth mapping, the log is where the
+request comes from.

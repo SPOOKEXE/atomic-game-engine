@@ -21,12 +21,11 @@
 // @tier L9 · shared
 // @since v0.16
 
-#include "Actions.hpp"
-#include "ScriptCall.hpp"
-#include "ServiceSurface.hpp"
-
 #include <engine/core/Name.hpp>
 #include <engine/scene/Input.hpp>
+#include <engine/script/Actions.hpp>
+#include <engine/script/ScriptCall.hpp>
+#include <engine/script/ServiceSurface.hpp>
 
 #include <array>
 #include <cstddef>

@@ -14,14 +14,14 @@ namespace engine::ecs {
 		// The spans handed out have to stay valid for the life of the process,
 		// so the vectors backing them live in a deque that never moves an
 		// element - the same arrangement `Classes` uses and for the same reason.
-		struct Entry {
+		struct EnumEntry {
 			core::Name Name;
 			std::vector<core::Name> Members;
 		};
 
-		struct Table {
+		struct EnumMemberTable {
 			std::mutex Guard;
-			std::deque<Entry> Entries;
+			std::deque<EnumEntry> Entries;
 			std::unordered_map<uint32_t, size_t> ByName;
 
 			// Every registered enum's name, so `Names` can hand back a span
@@ -29,28 +29,28 @@ namespace engine::ecs {
 			std::vector<core::Name> Order;
 		};
 
-		Table &Registry() {
-			static Table table;
+		EnumMemberTable &Enums() {
+			static EnumMemberTable table;
 			return table;
 		}
 
 		// Caller holds the lock.
-		Entry *Lookup(Table &table, core::Name name) {
+		EnumEntry *Lookup(EnumMemberTable &table, core::Name name) {
 			const auto found = table.ByName.find(name.Id());
 			return found == table.ByName.end() ? nullptr : &table.Entries[found->second];
 		}
 	}
 
 	void EnumTable::Register(std::string_view enumName, std::string_view member) {
-		Table &table = Registry();
+		EnumMemberTable &table = Enums();
 		const std::lock_guard lock(table.Guard);
 
 		const core::Name name(enumName);
-		Entry *entry = Lookup(table, name);
+		EnumEntry *entry = Lookup(table, name);
 
 		if (entry == nullptr) {
 			table.ByName.emplace(name.Id(), table.Entries.size());
-			table.Entries.push_back(Entry{name, {}});
+			table.Entries.push_back(EnumEntry{name, {}});
 			table.Order.push_back(name);
 			entry = &table.Entries.back();
 		}
@@ -72,10 +72,10 @@ namespace engine::ecs {
 	}
 
 	bool EnumTable::Has(core::Name enumName, core::Name member) {
-		Table &table = Registry();
+		EnumMemberTable &table = Enums();
 		const std::lock_guard lock(table.Guard);
 
-		const Entry *entry = Lookup(table, enumName);
+		const EnumEntry *entry = Lookup(table, enumName);
 		if (entry == nullptr) {
 			return false;
 		}
@@ -83,25 +83,25 @@ namespace engine::ecs {
 	}
 
 	bool EnumTable::Known(core::Name enumName) {
-		Table &table = Registry();
+		EnumMemberTable &table = Enums();
 		const std::lock_guard lock(table.Guard);
 
 		return Lookup(table, enumName) != nullptr;
 	}
 
 	std::vector<core::Name> EnumTable::MembersOf(core::Name enumName) {
-		Table &table = Registry();
+		EnumMemberTable &table = Enums();
 		const std::lock_guard lock(table.Guard);
 
-		const Entry *entry = Lookup(table, enumName);
+		const EnumEntry *entry = Lookup(table, enumName);
 		return entry == nullptr ? std::vector<core::Name>{} : entry->Members;
 	}
 
 	core::Name EnumTable::MemberAt(core::Name enumName, size_t ordinal) {
-		Table &table = Registry();
+		EnumMemberTable &table = Enums();
 		const std::lock_guard lock(table.Guard);
 
-		const Entry *entry = Lookup(table, enumName);
+		const EnumEntry *entry = Lookup(table, enumName);
 		if (entry == nullptr || ordinal >= entry->Members.size()) {
 			// An invalid `Name` rather than the first member. A stored ordinal
 			// past the end means the component holds a value nothing registered
@@ -113,10 +113,10 @@ namespace engine::ecs {
 	}
 
 	bool EnumTable::OrdinalOf(core::Name enumName, core::Name member, size_t &ordinal) {
-		Table &table = Registry();
+		EnumMemberTable &table = Enums();
 		const std::lock_guard lock(table.Guard);
 
-		const Entry *entry = Lookup(table, enumName);
+		const EnumEntry *entry = Lookup(table, enumName);
 		if (entry == nullptr) {
 			return false;
 		}
@@ -134,14 +134,14 @@ namespace engine::ecs {
 	}
 
 	std::vector<core::Name> EnumTable::Names() {
-		Table &table = Registry();
+		EnumMemberTable &table = Enums();
 		const std::lock_guard lock(table.Guard);
 
 		return table.Order;
 	}
 
 	size_t EnumTable::Count() {
-		Table &table = Registry();
+		EnumMemberTable &table = Enums();
 		const std::lock_guard lock(table.Guard);
 
 		return table.Entries.size();

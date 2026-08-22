@@ -9,7 +9,6 @@
 #include <engine/scene/Enums.hpp>
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
-#include <engine/scene/Visibility.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -2558,7 +2557,6 @@ namespace engine::scene {
 			// a tenth the size crossing the room at the same rate, which reads
 			// as the portal having made it fast rather than small.
 			resized.Height *= scale;
-			resized.Radius *= scale;
 			resized.WalkSpeed *= scale;
 			resized.JumpSpeed *= scale;
 			resized.GroundTolerance *= scale;
@@ -2724,6 +2722,31 @@ namespace engine::scene {
 					placement.Frame =
 						through.Place(CFrame{placement.Frame.Position + clear, placement.Frame.Rotation()});
 					motion.Linear = through.Carry(motion.Linear);
+
+					// **And the spin, by the same rotation but not by the same
+					// scale.** `Motion` is a `Linear` and an `Angular`, the
+					// solver writes both and `physics::Advanced` integrates
+					// both, so a pair that turns the room turns the axis a body
+					// is tumbling about exactly as it turns the direction the
+					// body is travelling in. Mapping one and not the other is
+					// the bug that reads as physics: a crate goes through a hole
+					// in a floor still spinning about the wall's up.
+					//
+					// **`Rotate` and not `Carry`, because radians per second are
+					// not a length.** A hole that halves a body halves the
+					// radius it spins at and halves the speed of every point on
+					// it, and the rate those two divide to is unchanged - which
+					// is why this is the one thing crossing a scaled seam that
+					// the scale must not touch. `Carry` would spin a body down
+					// to nothing over a few crossings of a shrinking pair.
+					//
+					// An angular velocity is a pseudovector and would need the
+					// determinant as well if a seam could reflect. None can:
+					// `SeamTransform::Frame` is a `CFrame`, whose rotation is
+					// proper by construction, and `Scale` is a square root and
+					// therefore positive. A mirror is the only thing here with a
+					// reflection in it, and nothing crosses a mirror.
+					motion.Angular = through.Rotate(motion.Angular);
 
 					// **And where it started the tick, or the frames between now
 					// and the next tick draw it halfway between two rooms.**

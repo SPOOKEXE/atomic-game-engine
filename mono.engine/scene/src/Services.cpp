@@ -1,3 +1,4 @@
+#include <engine/core/Log.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
@@ -11,6 +12,7 @@
 #include <engine/scene/Shaders.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Teams.hpp>
+#include <engine/scene/Terrain.hpp>
 
 #include <algorithm>
 #include <array>
@@ -477,16 +479,13 @@ namespace engine::scene {
 				const auto camera = *static_cast<const ecs::Entity *>(value);
 
 				// **Refused for anything that is not a camera.** Assigning a part
-				// here would leave `ResolveActiveCamera` looking for a `Camera`
-				// component it will not find, so the matrices would silently stay
-				// as they were - a frame drawn from where the camera used to be,
-				// which reads as a renderer fault. `ActiveCamera.hpp` describes
-				// that exact failure and this is what keeps a script from causing
-				// it.
+				// here would leave every consumer looking for a `Camera`
+				// component it will not find, and each of them gives up on such a
+				// row rather than drawing from it - so the view would silently
+				// stop following anything and read as a renderer fault.
 				//
 				// Clearing is allowed: `workspace.CurrentCamera = nil` is how a
-				// script says "nothing is looking", and the resource keeps its
-				// last matrices for the reason `ResolveActiveCamera` gives.
+				// script says "nothing is looking".
 				if (camera != ecs::NULL_ENTITY && store.Get<Camera>(camera) == nullptr) {
 					return false;
 				}
@@ -607,6 +606,161 @@ namespace engine::scene {
 				}
 
 				store.SetResource(SurfaceLimit{panes});
+				return true;
+			};
+
+			return property;
+		}
+
+		// --- the terrain recipe, on `workspace` ------------------------------
+		//
+		// **`SurfaceBouncesProperty`'s exact shape, five times over.**
+		// `scene::Terrain` is a resource for `WorldBounds`' reason - authored, one
+		// per world, and nothing derives it - so `instance` is unread here as it
+		// is there, and the resource is the only storage.
+		//
+		// **On `workspace` rather than on a `Terrain` instance**, which is where
+		// Roblox puts it. Roblox's `Terrain` is a `BasePart` singleton that
+		// `Instance.new` refuses to make a second of, and this engine has no way to
+		// register a class that cannot be constructed; a resource is one per world
+		// by construction, which is the property that mattered. `Terrain.hpp`
+		// carries the whole argument, including why the chunks the recipe produces
+		// are never stored.
+		//
+		// **Read through `TerrainSettings` and written through `TerrainOf`**, so a
+		// world that has never had terrain answers the defaults rather than
+		// acquiring a resource from inside a read - which is `TrianglesOf`'s split
+		// against `MeshesOf`, and it matters here for the same reason: a getter
+		// that made a structural write would make one on every properties-panel
+		// refresh.
+
+		PropertyDescriptor TerrainGeneratorProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("TerrainGenerator");
+			property.Type = PropertyType::Name;
+			property.Size = sizeof(core::Name);
+			property.Kind = PropertyKind::Resource;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Terrain>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity, void *out) -> bool {
+				*static_cast<core::Name *>(out) = TerrainSettings(store).Generator;
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity, const void *value) -> bool {
+				TerrainOf(store).Generator = *static_cast<const core::Name *>(value);
+				return true;
+			};
+
+			return property;
+		}
+
+		PropertyDescriptor TerrainSeedProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("TerrainSeed");
+			property.Type = PropertyType::Int64;
+			property.Size = sizeof(int64_t);
+			property.Kind = PropertyKind::Resource;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Terrain>()});
+			property.Writes = property.Reads;
+
+			// **`Int64` and not `Int32`, and the reinterpretation is the point.**
+			// The field is a `uint64_t` because a seed is a bit pattern rather than
+			// a quantity, and `PropertyType` has no unsigned member - so a seed a
+			// script wrote as a negative number has to come back as the same
+			// negative number rather than as something clamped.
+			property.Get = [](const ecs::Store &store, ecs::Entity, void *out) -> bool {
+				*static_cast<int64_t *>(out) = static_cast<int64_t>(TerrainSettings(store).Seed);
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity, const void *value) -> bool {
+				TerrainOf(store).Seed = static_cast<uint64_t>(*static_cast<const int64_t *>(value));
+				return true;
+			};
+
+			return property;
+		}
+
+		PropertyDescriptor TerrainEnabledProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("TerrainEnabled");
+			property.Type = PropertyType::Bool;
+			property.Size = sizeof(bool);
+			property.Kind = PropertyKind::Resource;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Terrain>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity, void *out) -> bool {
+				*static_cast<bool *>(out) = TerrainSettings(store).Enabled;
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity, const void *value) -> bool {
+				TerrainOf(store).Enabled = *static_cast<const bool *>(value);
+				return true;
+			};
+
+			return property;
+		}
+
+		// The two distances, and both are clamped rather than refused.
+		//
+		// `TerrainSettings` clamps on read regardless - the values arrive from a
+		// file and a wire as often as from here - so refusing a large one at the
+		// setter would be a second statement of the same rule that only covered
+		// the script door. What the setter owes is that a negative number does not
+		// reach the row at all, which is `SurfaceBouncesProperty`'s refusal: too
+		// large is a world asking for more than a machine will allocate, and below
+		// zero is a world asking for something the word does not mean.
+
+		PropertyDescriptor TerrainChunkSizeProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("TerrainChunkSize");
+			property.Type = PropertyType::Float;
+			property.Size = sizeof(float);
+			property.Kind = PropertyKind::Resource;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Terrain>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity, void *out) -> bool {
+				*static_cast<float *>(out) = TerrainSettings(store).ChunkExtent;
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity, const void *value) -> bool {
+				const float metres = *static_cast<const float *>(value);
+				if (!(metres >= 0.0f)) {
+					return false;
+				}
+				TerrainOf(store).ChunkExtent = std::min(metres, MAX_CHUNK_EXTENT);
+				return true;
+			};
+
+			return property;
+		}
+
+		PropertyDescriptor TerrainViewDistanceProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("TerrainViewDistance");
+			property.Type = PropertyType::Float;
+			property.Size = sizeof(float);
+			property.Kind = PropertyKind::Resource;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Terrain>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity, void *out) -> bool {
+				*static_cast<float *>(out) = TerrainSettings(store).ViewDistance;
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity, const void *value) -> bool {
+				const float metres = *static_cast<const float *>(value);
+				if (!(metres >= 0.0f)) {
+					return false;
+				}
+				TerrainOf(store).ViewDistance = metres;
 				return true;
 			};
 
@@ -752,6 +906,20 @@ namespace engine::scene {
 			Classes::Computed(workspace, CurrentCameraProperty());
 			Classes::Computed(workspace, SurfaceBouncesProperty());
 			Classes::Computed(workspace, MaxSurfacesProperty());
+
+			// **The terrain recipe, beside the two above and for their reason.**
+			// A statement about the scene rather than a quality setting a session
+			// picks: which graph makes this world's ground, and with what seed, is
+			// what the world *is*. `TerrainResolution` and `TerrainHeight` are
+			// deliberately not here - both are numbers a generator is authored
+			// against rather than dials an author turns while playing, and a
+			// property surface that offered every field would be six ways to make
+			// a world that does not come back the same.
+			Classes::Computed(workspace, TerrainEnabledProperty());
+			Classes::Computed(workspace, TerrainGeneratorProperty());
+			Classes::Computed(workspace, TerrainSeedProperty());
+			Classes::Computed(workspace, TerrainChunkSizeProperty());
+			Classes::Computed(workspace, TerrainViewDistanceProperty());
 
 			const ClassId players = Classes::Find(core::Name("Players"));
 			Classes::Computed(players, LocalPlayerProperty());
@@ -973,6 +1141,10 @@ namespace engine::scene {
 			// a player to a world with no `Players` has skipped
 			// `InstallServices`, and quietly creating the service here would
 			// make that omission invisible until something else asked for it.
+			//
+			// **Four different reasons return `NULL_ENTITY` from this function**
+			// and a caller cannot tell them apart, so each says which.
+			ENGINE_WARN("cannot add player '{}': the world has no Players service", name);
 			return NULL_ENTITY;
 		}
 
@@ -984,13 +1156,16 @@ namespace engine::scene {
 		// and the honest answer for it is to admit rather than to invent a cap.
 		if (settings != nullptr &&
 			PlayerCount(store) >= static_cast<size_t>(std::max(0, settings->MaxPlayers))) {
+			ENGINE_INFO("refused player '{}': the world is at its {} player cap", name, settings->MaxPlayers);
 			return NULL_ENTITY;
 		}
 
 		const Entity player = store.CreateInstance(PlayerClass(), name);
 		if (player == NULL_ENTITY) {
+			ENGINE_WARN("cannot add player '{}': the store refused to create the instance", name);
 			return NULL_ENTITY;
 		}
+		ENGINE_INFO("player '{}' joined as entity {}{}", name, player.Id, local ? " (local)" : "");
 
 		store.SetParent(player, players);
 
@@ -1085,6 +1260,11 @@ namespace engine::scene {
 			if (!desc.Parent.empty()) {
 				parent = ServiceOf(store, Classes::Find(core::Name(desc.Parent)));
 				if (parent == NULL_ENTITY) {
+					// A whole service is skipped and every later lookup for it
+					// answers nothing, a long way from here.
+					ENGINE_WARN(
+						"service '{}' skipped: its parent '{}' is not in this world", desc.Name, desc.Parent
+					);
 					continue;
 				}
 			}
@@ -1095,8 +1275,10 @@ namespace engine::scene {
 			if (existing == NULL_ENTITY) {
 				existing = store.CreateInstance(klass, desc.Name);
 				if (existing == NULL_ENTITY) {
+					ENGINE_WARN("service '{}' could not be created; the class is not registered", desc.Name);
 					continue;
 				}
+				ENGINE_DEBUG("service '{}' created", desc.Name);
 
 				if (parent != NULL_ENTITY) {
 					store.SetParent(existing, parent);

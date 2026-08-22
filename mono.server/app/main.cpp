@@ -1,6 +1,7 @@
 // Thin argument-parsing entry point over the server library.
 
 #include <engine/assets/ContentPolicy.hpp>
+#include <engine/control/Server.hpp>
 #include <engine/core/Arguments.hpp>
 #include <engine/core/Config.hpp>
 #include <engine/core/Flags.hpp>
@@ -64,7 +65,14 @@ int main(int argc, char **argv) {
 	);
 
 	// The control surface. Off unless asked for - see `Options::ControlPort`.
-	arguments.Value("mcp-port", "PORT", "Listen for Model Context Protocol on 127.0.0.1:PORT (default 8734)");
+	// The number is read from the one constant rather than written here, so the
+	// help cannot drift from what the flag opens.
+	arguments.Value(
+		"mcp-port",
+		"PORT",
+		"Listen for Model Context Protocol on 127.0.0.1:PORT (conventionally " +
+			std::to_string(engine::control::DEFAULT_SERVER_PORT) + ")"
+	);
 	arguments.Flag("chatter", "Make every world publish on a shared topic (no game file yet)");
 
 	arguments.Value("tick-rate", "HZ", "Ticks per second (default 30)");
@@ -97,6 +105,9 @@ int main(int argc, char **argv) {
 		"TICKS",
 		"With --profile-out, also snapshot every TICKS ticks for scripts/flamegraph.py --average"
 	);
+	arguments.Value(
+		"metrics-every", "SECONDS", "Report the engine's counters every SECONDS (0: only at shutdown)"
+	);
 	arguments.Value("listen", "PORT", "Serve the world to clients on this UDP port (0 for ephemeral)");
 	arguments.Value("max-clients", "N", "The hard cap on connected clients (default 64)");
 	arguments.Flag("advertise", "Announce this server on the local subnet so clients can find it");
@@ -114,10 +125,11 @@ int main(int argc, char **argv) {
 	arguments.Value(
 		"content-grant-key", "HEX", "64 hex characters - the secret grants are issued and checked with"
 	);
-	arguments.Flag(
-		"quic",
-		"Serve over QUIC rather than the datagram wire. Needs --identity-key, and every client must "
-		"be started with --quic too"
+	arguments.Value(
+		"transport",
+		"MODE",
+		"Which transports to answer: quic (default), datagram, or both. The server decides; a client "
+		"opens with quic and falls back on its own"
 	);
 	arguments.Value(
 		"identity-key",
@@ -176,6 +188,8 @@ int main(int argc, char **argv) {
 	options.Entities = static_cast<uint32_t>(arguments.GetInteger("entities", options.Entities));
 	options.MaximumTicks = arguments.GetInteger("ticks", -1);
 	options.Seconds = arguments.GetNumber("seconds", 0.0);
+	options.MetricsReportSeconds =
+		std::max(0.0, arguments.GetNumber("metrics-every", options.MetricsReportSeconds));
 	// **Absent means unmanaged, which is not the same as `never`.** Unmanaged is
 	// this program's behaviour before v0.13 and the one `just determinism` and
 	// `just replay-check` compare against; `never` is a deliberate 24/7 server
@@ -211,12 +225,17 @@ int main(int argc, char **argv) {
 
 	// **`Has` then `GetInteger`, and the two-step is the opt-in.** A bare
 	// `GetInteger` with a fallback would open the port on every run, because a
-	// fallback is returned when the flag is absent. This way `--mcp-port` alone
-	// takes this program's number, and no flag at all leaves whatever
-	// `server.control-port` said - which is minus one unless a deployment
-	// deliberately opened it.
+	// fallback is returned when the flag is absent. This way no flag at all
+	// leaves whatever `server.control-port` said - which is minus one unless a
+	// deployment deliberately opened it.
+	//
+	// `--mcp-port` takes a value; `core::Arguments` refuses the flag without
+	// one, so the fallback below is reached only for a value that is not an
+	// integer. It is this program's conventional port rather than a literal, for
+	// the reason the declaration above gives.
 	if (arguments.Has("mcp-port")) {
-		options.ControlPort = static_cast<int>(arguments.GetInteger("mcp-port", 8734));
+		options.ControlPort =
+			static_cast<int>(arguments.GetInteger("mcp-port", engine::control::DEFAULT_SERVER_PORT));
 	}
 	options.Chatter = options.Chatter || arguments.Has("chatter");
 
@@ -230,7 +249,16 @@ int main(int argc, char **argv) {
 	if (auto key = arguments.Get("identity-key")) {
 		options.IdentityKey = std::string(*key);
 	}
-	options.Quic = options.Quic || arguments.Has("quic");
+	if (auto transport = arguments.Get("transport")) {
+		if (const std::optional<engine::net::WireMode> mode = engine::net::ParseWireMode(*transport)) {
+			options.Transport = *mode;
+		} else {
+			std::fprintf(
+				stderr, "--transport '%s' is not quic, datagram or both\n", std::string(*transport).c_str()
+			);
+			return 2;
+		}
+	}
 
 	if (auto game = arguments.Get("game")) {
 		options.GamePath = std::string(*game);

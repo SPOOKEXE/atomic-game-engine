@@ -6,6 +6,7 @@
 #include <engine/gui/Services.hpp>
 #include <engine/physics/Integrate.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Attachments.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
@@ -103,6 +104,14 @@ namespace client {
 		}
 
 		void CollectReplicated(Store &store) {
+			// **Named, because it was the one collector with no span.**
+			// `collect-instances` has had one since v0.5 and this is its twin
+			// for a replicated world, so a `--connect` run's `pre-render` bar
+			// had a hole in it exactly the size of the loop below - which is
+			// also the number `docs/ARCH_REVIEW.md` F3 asks for and nobody
+			// could read.
+			ENGINE_PROFILE_CAT("collect-replicated", engine::core::ProfileCategory::Simulation);
+
 			auto *drawList = store.ResourceMutable<DrawList>();
 			auto *buffer = store.ResourceMutable<SnapshotBuffer>();
 			if (drawList == nullptr || buffer == nullptr) {
@@ -124,6 +133,48 @@ namespace client {
 
 			// The authority owns ancestry filtering; the replica only honors `Visible`.
 			// Optional appearance and tag components must not be query requirements.
+			//
+			// **Serial, and the reason is not the crossover.** Rule 5 asks for
+			// the number, so: measured in `release` against a server holding
+			// 20,000 replicated rows, this loop is **1.542 ms at p50, 77 ns a
+			// row** - read off the `collect-replicated` span above. A pool
+			// handover is 7.74 us for eight ranges (`parallel/Jobs.hpp`,
+			// re-measured at `-O3`), so at this row cost the handover is a
+			// quarter of the serial work at about **400 rows**. That is a very
+			// low crossover and the loop clears it by fifty times: at 20,000
+			// rows a perfect split across 23 workers would be about 75 us
+			// against 1.542 ms. `docs/ARCH_REVIEW.md` F3 is right that the
+			// blocker is not the loop shape, and it is right that the
+			// crossover is not the argument either - so the argument has to be
+			// written down rather than implied by leaving it serial.
+			//
+			// **Two things stop it, both outside this loop and neither cheap.**
+			//
+			//  * `SnapshotBuffer::Sample` is not thread-safe and its header says
+			//    why it never will be quietly: it counts `Statistics::Held`
+			//    against `Statistics::Interpolated` on every call, which is what
+			//    says whether the buffer is smoothing anything at all, and that
+			//    header refuses to hide those behind a `mutable`. Twenty-three
+			//    workers incrementing two plain counters is a race, and making
+			//    them atomic puts a contended write on the per-row path this
+			//    loop is trying to make cheaper.
+			//  * The output is a *filtered* `push_back`. `visual.Visible` is a
+			//    field test rather than a query term, so a row's position in the
+			//    walk does not decide its position in the draw list - which is
+			//    exactly what `client::CollectInstances` relies on to let
+			//    workers write `out[base + first + row]` with no atomic and no
+			//    reshuffling. Making this list dense needs `scene::Rendered` in
+			//    the query, and marking it needs a visibility system running in
+			//    a world that `mono.client/AGENTS.md` says advances nothing.
+			//
+			// The four optional joins below are *not* a third reason. They rule
+			// out `EachBatchParallel`, which is handed columns and no entity, but
+			// `Store::EachParallel` hands out entities and could express them.
+			//
+			// So this is a measured decision to leave it, not an unmeasured one:
+			// the win is real and it is bought with a change to `replication`'s
+			// public contract and a new system in the replica. Neither belongs
+			// in a loop rewrite.
 			store.Each<const Transform, const Bounds, const Visual>(
 				[drawList, buffer, &store, reckonSeconds](
 					Entity entity, const Transform &transform, const Bounds &bounds, const Visual &visual
@@ -266,6 +317,26 @@ namespace client {
 		// whose every other row is somebody else's answer.
 		store.SetResource(engine::scene::InputState{});
 		store.SetResource(engine::scene::CameraController{});
+
+		// **First in the phase, because everything below is derived from it.**
+		// A replica never ticks a simulation, so the `PreSimulation` copy every
+		// other host installs has nothing to hang off - this is the replica's
+		// only resolve, and without it `Attachment::WorldFrame` stayed at the
+		// identity for the whole session. What that looked like was a
+		// `PointLight` parented to an attachment lighting the world origin
+		// rather than the lamp it hangs from: `client::CollectLights` reads the
+		// cache and there was nobody to fill it. The script surface was never
+		// affected - `Attachment.WorldCFrame` is a computed property that
+		// resolves on the spot - but its *change signal* was, for the reason
+		// `server::PrepareSimulation` gives.
+		//
+		// **Resolved again here rather than trusted from the wire.** The
+		// authority's answer arrives a tick old and against uninterpolated
+		// transforms; this world draws from interpolated ones, so a lamp placed
+		// from the wire would sit where its part was at the last snapshot.
+		scheduler.Add("resolve-attachments", Phase::PreRender, [](Store &store) {
+			(void)engine::scene::ResolveAttachments(store);
+		});
 
 		// PreRender derives draw data and mirror aim; the replica does not simulate.
 		//

@@ -375,16 +375,23 @@ merge is free.
   a search, and collapsing the component into the resource makes the second
   camera impossible.
 
-## `QuickHash` is second-best and the comment says so
+## A content hash is second-best, and this module no longer carries one
 
-Change detection is `ecs::ChangeChannel`. `QuickHash` exists for one gap: a
+Change detection is `ecs::ChangeChannel`. A content hash exists for one gap: a
 write through a raw column pointer in the batch path advances no per-row stamp,
 because there is no per-row write to hang one on.
 
-It costs a pass over the data every tick whether anything moved or not. **If it
-starts appearing beside components nothing writes in bulk, it has spread** - and
-the fix is to delete it there, not to make the hash cheaper. A reviewer adding
-one should be able to name the batch writer.
+It costs a pass over the data every tick whether anything moved or not, so it is
+the fallback rather than the answer. `scene::QuickHash` was this module's
+version of it from v0.4 to v0.19 and was **deleted at v0.19 having never
+acquired a reader or a writer** - it was a column in every archetype and a row in
+every `.agame` schema, describing a comparison nothing ever made. The two places
+that do need row granularity over batch-written data fold their own hash where
+they read it: `gui::Compiled` and `studio::HierarchyView`.
+
+A reviewer handed a new one here should be able to name the batch writer it is
+for, and the consumer that compares it. Neither existed for the one that was
+removed.
 
 ## The wire grid is beside `WorldBounds` because it is the same decision
 
@@ -608,9 +615,10 @@ mute with nothing in the file saying why.
   `RegisterGravitySystem` (`Gravity.hpp:62`) and `RegisterOwnershipSystem`
   (`Ownership.hpp:101`). Both compute a property of a row from that row and its
   ancestors and from nothing else - no broadphase, no pairs, no solver, no other
-  module's components - which is the same argument `ResolveActiveCamera` makes
-  about a camera's matrices being a function of a camera. A system that has to
-  see a second module's data is the kind that does not belong here.
+  module's components - which is the same argument `ResolveAttachments` makes
+  about an attachment's world frame being a function of its parent's placement.
+  A system that has to see a second module's data is the kind that does not
+  belong here.
 
   This bullet read "No systems" until v0.19, by which time there were two.
 - **No world AABB, and no `Ray` anything.** `core::AABB`, `core::Ray` and
@@ -855,3 +863,297 @@ Three things hold it up, and two of them are only obvious once broken:
 **The ceiling is the caller's and the count is the world's.** `--surface-bounces N` is an override for
 one run, not a setting; a view with no pane rectangle of its own - a cross-world pane iterates rather
 than descends - keeps `DEFAULT_SURFACE_BOUNCES` because there is nothing there to measure.
+
+## `SurfaceCameras` stays in this module, and the measurement is why
+
+`docs/ARCH_REVIEW.md` §C6 proposed lifting `src/SurfaceCameras.cpp` out as its
+own L7 module. **It was measured at v0.19 and refused.** Both of the numbers the
+finding rested on are wrong, and the claim underneath them - "lifts out cleanly"
+- is the opposite of what the edges say. This section exists so the next person
+to notice that the file is the biggest one here does not re-propose it.
+
+**The numbers.** The file was **2,909 lines** when this was measured, not 4,108,
+and it has never been 4,108: the four commits that touched it read 2,607, 2,684,
+2,895 and 2,910. The 4,108 is closest to the file plus its header (4,343) and
+matches nothing exactly.
+The share is **22.7% of `src/`**, or 18.9% of `src/` and `include/` together, or
+22.0% of the module counting tests and benchmarks. There is no reading of `just
+linecount mono.engine/scene --files` that produces 36%.
+
+**The edges run both ways, which is the part nobody checked.** Four places in
+this module call into `SurfaceCameras` - three sources and, worse, a *public
+header signature*. It was five when this was measured, and the one that went is
+still listed, because losing it changed nothing about the conclusion:
+
+- `include/engine/scene/ActiveCamera.hpp` declares
+  `glm::mat4 SeamMatrix(const SeamTransform &)`. A `SurfaceCameras` type is in
+  this module's public API, and `render::ShadowNodes` calls it through that
+  header.
+- `src/ActiveCamera.cpp` used to build the world's camera matrices with
+  `PortalNearPlane(camera->NearPlane, NearestSeamDistance(store, ...))`, inside
+  `ResolveActiveCamera`. **That function and the cached `ActiveCamera::Matrices`
+  were both deleted later in v0.19**, because one cached set cannot serve three
+  consumers that each project against a different target, so this edge is gone
+  and the count above is four rather than five. It is left in the list because
+  the argument does not turn on it: the four that remain are still four sources
+  and a public header signature calling upward. `NearestSeamDistance` survives
+  the deletion with nothing calling it, on purpose, and its header says why.
+- `src/Controls.cpp` calls `PortalCrossing` and `ClearOfPanes` inside
+  `PlaceCamera`.
+- `src/Services.cpp` registers `workspace.SurfaceBounces` and
+  `workspace.MaxSurfaces` over `SurfaceBouncesOf` and `SurfaceLimitOf`.
+- `src/Registration.cpp` registers `scene.SurfaceBounces` and
+  `scene.SurfaceLimit`.
+
+And `SurfaceCameras.cpp` reads back down into `scene`: `Character`,
+`CharacterLimb`, `Humanoid`, `SunOf`, `ActiveCamera`, `DrawInstance`,
+`SurfaceLens`, `SurfaceCamera`, `Portal`, `Bounds`, `Transform`, `NormalId`.
+That is a cycle, not a layer.
+
+**So all three placements fail, and they fail differently.** Above L7: four
+`scene` sources and one public header would call upward. Below L7: the
+module could not name a dozen `scene` types it is written in terms of. Lateral
+at L7: a lateral edge in this repository is one-directional and named in a
+`lateral` array, and this is mutual, which is a different thing.
+
+**Splitting out only the pure maths does not rescue it either.** Of 2,909 lines,
+about 370 take no `ecs::Store`: `SeamMapping`, `SeamOffset`, `RectangleDistance`,
+`SeamDistance`, `PortalNearPlane`, `PortalClipBias`, `SeamCarries`,
+`SeamStraddled`, `CutOfSeam`, `NextSurfaceBounces`, both `FrustumCorners` and
+`ReflectCamera`. The other 87% walks a store full of this module's components.
+And the 370 lines are not a leaf: `SurfacePane`, `PortalSeam`, `MirrorEye` and
+`SeamCut` carry `ecs::Entity` and `SurfaceLens`, so the "pure" half still names
+L7. `docs/ARCH_REVIEW.md` §C7 and decision 22 are the standing rule for this
+shape: **this repository does not create a directory for one thing**, and the bar
+is three.
+
+**What would have to change first**, if somebody ever wants to revisit it: the
+components would have to stop being `scene.*`. `Portal`, `SurfaceCamera`,
+`SurfaceLens`, `PortalTransit`, `PortalTransitSeen`, `SurfaceBounces` and
+`SurfaceLimit` are registered here under a `scene.` prefix, and that prefix is
+what `just components` files them under and what a `.agame` file and a
+replication schema carry. Moving the code without moving the names files them
+under a module they no longer live in; moving the names is a save-format break
+for no gain the measurement above can find.
+
+## What is actually unfinished about portals
+
+`ROADMAP.md` v0.22 asks for "lighting, physics, projection, clipping and geometry
+crossing the seam" to be seamless. This is what each of those five is missing
+today, written by somebody who had just read the pass. It is a survey and not a
+plan: nothing here is a promise about which version closes it.
+
+### Lighting: occlusion crosses, illumination does not
+
+A portal transports the *absence* of light and never light itself.
+`render::ShadowNodes` maps the sun's direction through the partner's warp and
+carries a far-side fragment back with `scene::SeamMatrix`, so a caster on the far
+side darkens the near floor. Nothing adds a second contribution, deliberately:
+that would double-light every floor near a doorway. The consequences:
+
+- **Four beams per frame**, ranked by distance, the rest dropped with a warning.
+- **The beam shadow only reaches the forward path.** `opaque.frag` has
+  `BeamFactor` and applies it; `gbuffer.frag` declares `beamMap` and never
+  samples it, and `deferred-lighting.frag` has no beam code. The shipped pipeline
+  document builds `gbuffer` and `deferred-lighting`, so transported occlusion is
+  visible in portal and mirror captures and not on the default screen path. That
+  is the single largest lighting gap and it is a shader gap, not a maths one.
+- **Seam spill is a two-mouth prototype.** `deferred-lighting.frag` treats the
+  seam as a textured window with a fixed 45 degree spread at 128x128, and the
+  budget is one pair. It exists only in the deferred shader, so a doorway's light
+  pool is invisible inside any portal or mirror capture: the exact complement of
+  the beam gap above.
+- **Transported local lamps ignore the aperture** and spill into the whole far
+  room. One hop, never across worlds, and the copies compete for the same
+  sixteen-light budget as the room's own.
+- **A straddling body is lit as one body and shadowed as two.** The far half is
+  lit through the map and still shadowed along the near room's light matrix.
+
+### Physics: static geometry crosses, momentum does not
+
+`physics::GhostPortalBodies` copies the far room's **static** colliders into the
+near room for a body standing in a seam. That is the whole mechanism, and it is
+deliberately not the picture's mechanism.
+
+- **A far-side dynamic body is refused by name**, because two copies of one body
+  with its own momentum would fight through the wall between them. So a crate on
+  the far side cannot be pushed by a body in the doorway, in either direction,
+  and bodies stacked across a seam interpenetrate.
+- **Angular velocity is mapped since v0.19, and by `Rotate` rather than
+  `Carry`.** `scene::Motion` carries `Linear` and `Angular` and `CrossPortals`
+  now maps both. It went four versions mapping `Linear` alone, and the reason it
+  survived is that the case is invisible in a wall: a seam's destination is
+  `LookAt(centre, centre + normal, UpFor(normal))` and the half-turn is a yaw, so
+  any two upright panes compose to a map that leaves `Y` fixed and a body
+  spinning about `Y` comes out looking right either way. Point a pane at the sky
+  and it does not. `engine.scene.surfacecameras`' "a spinning body keeps its spin
+  in the room it arrives in" is that pane, and it fails on the old pass. **The
+  scale must not touch it**: radians per second have no length in them, so a hole
+  that halves a body halves the radius and halves the speed of every point on it,
+  and the rate is unchanged. `Carry` would spin a body down to nothing over a few
+  crossings of a shrinking pair.
+- **Both portal passes are gated on `scene::Motion`, sleep removes it, and that
+  is a state rather than a hole.** `physics::Publish` drops `Motion` when a body
+  sleeps, and both the straddler walk in `GhostPortalBodies` and the crossing
+  walk in `CrossPortals` query for it, so a body that settles in a doorway is
+  visited by neither. Neither omission can drop it. The same absence takes the
+  row out of `IntegrateMotion`, so removing the far room's floor is removing a
+  floor from under something that was not falling; and a crossing is the segment
+  between `PreviousTransform` and `Transform`, which for a row nothing integrates
+  is a point. Waking is putting `Motion` back, and `character.control` does that
+  in `PreSimulation` **before** `portal.ghost` runs in the same phase - which is
+  safe because registration order inside a phase is `ecs::Scheduler`'s stated
+  contract, not an accident. `engine.physics.portals`' "a body asleep in a seam
+  has no proxies and cannot fall through one" is the case; it was listed here as
+  untested until v0.19.
+- **The proxy carries four components** (`Transform`, `Bounds`, `Collider`,
+  `PortalProxy`) and not `Surface` or `PhysicsProperties`, so a proxy of an ice
+  floor has default friction.
+- **`MAX_PROXIES_PER_BODY` is 32 and the overflow is a warning plus a partial
+  prefix.** The overlap writes dynamic candidates before static ones and the loop
+  then discards every dynamic one, so a busy far room can spend the whole budget
+  on rows that are thrown away and leave the straddler no floor at all. The
+  warning says the opposite ("the rest are not holding it up").
+- **One seam per body per tick**, by an explicit `break`. A body where two panes
+  meet gets one far room.
+- **Only `Raycast` is portal-aware.** `ShapeCast`, `OverlapBox` and
+  `OverlapSphere` are not, and the character's collide-and-slide sweep uses the
+  raw broadphase, so the sweep reaches the far room only through the proxies.
+  Ray continuation is one hop and does not recurse.
+- **No test runs the solver.** `physics/tests/Portals.cpp` proves a proxy is
+  created and retired; nothing proves a proxy generates a contact or holds
+  anything up.
+
+### Projection: the recursion is real, the default is contested
+
+The recursive portal pass derives each level's camera from the camera the pass is
+rendering from, which is what makes a hole seen through a hole correct rather
+than merely fresh. What is open:
+
+- **`RendererState::PortalDepth` is `2` and the comment above it argues at length
+  for `1`**, reporting twenty of twenty runs hanging the device at depth two
+  against none of thirteen at depth one, and naming the fix it needs (a command
+  buffer per top-level hole) as unbuilt. Read in an uncommitted tree while
+  `render` was being edited, so confirm with whoever owns `render` before acting
+  on it, but the comment and the constant cannot both be right.
+- **A view with no pane rectangle still iterates rather than descends.** A camera
+  parented to the world and a cross-world pane have nothing to reflect through,
+  so they resolve their chain by running the whole pass again from the eye. That
+  is the residual of the v0.15 viewpoint fix and it is stated in
+  `SurfaceCameras.hpp` rather than hidden.
+- **A cross-world pane is still a frame behind and does not recurse**, by design:
+  it is a window onto a second simulation rather than a hole in one space.
+- Inside a deep reflection, blended geometry is sorted for the wrong eye, and a
+  faded mirror shows as glass rather than as a reflection.
+
+### Clipping: the oblique clip is real, the bias is measured from the wrong hole
+
+The near plane is a true skew onto the mapped pane, at every level, re-derived
+each time from the unskewed screen projection. What is left:
+
+- **`PortalClipBias` is fed the distance from the viewer to the *nearest* pane in
+  the frame, and then used for every hole at every level.** A distant hole seen
+  while standing in a near one gets the near one's bias, and a level-one
+  sub-camera gets the eye's bias rather than its own. The residual artefact is
+  named in `render::PortalNodes`: a hairline of background around the inside of
+  every hole, with parts poking through it, and pushing the bias the other way
+  cuts a straddling body in two instead.
+- **Two bias conventions coexist**: the seam-light capture uses a fixed stand-off
+  rather than the viewer's distance.
+- **The body cut is a `discard` and not a clip plane**, so it defeats early-Z,
+  which is why what may be cut is bounded by what fits through the hole.
+
+### Geometry: meshes cross, everything else does not
+
+`CutAndCloneSeams` cuts a straddling body at the plane and appends the far half
+as draw rows, carrying rigs in one piece. What does not cross:
+
+- **A body wider than the aperture gets no far half at all.** `CutOfSeam::Fits`
+  refuses it, because the rule that refuses a floor slab is the same rule.
+- **Particles are moved rather than cloned, and only for same-world seams**, so
+  sparks do not cross a cross-world portal.
+- **Ribbons and trails have no seam clause anywhere** in `effects`.
+- **No particles or ribbons are drawn inside any capture**, so a portal or mirror
+  picture contains no smoke, no sparks and no trails.
+- **Transparent panes are omitted from every sub-render.**
+- **Spatial GUI is drawn into sub-renders but is never cut or cloned**; there is
+  no GUI equivalent of `CutAndCloneSeams`.
+- **A partly transparent part in the far world is drawn opaque.**
+- Collision and the picture are deliberately different mechanisms
+  (`GhostPortalBodies` against `CutAndCloneSeams`), so they can disagree, and the
+  size rules they use are not the same rule.
+
+### The sixth seam, which the roadmap does not name: authority
+
+`scene.PortalTransitSeen` was replicated until v0.19, and the bug is the one to
+keep in mind for everything above. It is a **derived local latch**:
+`SnapPortalTransit` writes it after collapsing a client's interpolation onto
+where a body arrived. Replicating it meant the authority's serial arrived in the
+same snapshot as the crossing it described, the client's own pass found
+`seen->Serial == went.Serial` on its first look, and the body interpolated
+between two rooms instead of arriving. The fix is one entry in
+`replication::Defaults`.
+
+Two things follow, and both are conventions rather than mechanisms:
+
+- **`CameraController::SeenTransit` is the same latch in another place**, and it
+  is safe only because the whole `scene.CameraController` resource is local.
+  Replicating any field of it reintroduces the identical defeat, and the view
+  would keep pointing the way it did in the room the player left.
+- **`CrossPortals` writes `PortalTransitSeen` inline**, so the snap is a no-op on
+  the machine that simulated the crossing. That is a simulation pass writing a
+  presentation latch, and it is correct only while the component stays on the
+  local-only list. Nothing but this paragraph and the comment in `Defaults.cpp`
+  says so, which by rule 6 makes it documentation.
+
+`PortalTransit::Serial` is also compared for equality rather than ordering, so a
+client that rolls prediction back to before a crossing holds a `Seen` ahead of
+the `Transit` and snaps a second time. Untested.
+
+## Ten components here are read by nothing, and that is a state rather than a gap
+
+`Skeleton`, `Bone`, `AnimationClip`, `Animator`, `AnimationTrack`, `Constraint`,
+`LevelOfDetail`, `Atmosphere`, `Clouds` and `Terrain` landed at v0.19 with no
+consumer in the engine. That is decision 16 - *a surface may ship complete and
+frozen with its implementation deliberately unwired*, revisited never - and root
+`AGENTS.md`'s warning that an unwired subsystem is not dead code.
+`docs/FUTURE_COMPONENTS.md` is what each gets wired to and in what order; do not
+repeat that argument here, and do not delete one for having no reader.
+
+**They are registered rather than left to register themselves, and that is not
+tidiness.** `ecs::Components::Seal()` is called by the client and the server at
+start-up, so a type that first reaches `Components::Of<T>` after the seal aborts
+the process - which is the failure `scene.Sun` and `scene.PortalProxy` were both
+found in at v0.19. Declaring the storage up front is also what makes the version
+that wires it a change to behaviour rather than a change to the save format.
+
+Four things a reviewer should refuse:
+
+- **A `Fog` component.** The world already has fog:
+  `LightingServiceComponent::FogColor`, `FogStart` and `FogEnd`, resolved by
+  `LightingOf` and read by `render::ViewRecording`. A second one is rule 2, and
+  it is exactly what `Humanoid::Radius` was deleted for. `Atmosphere` is a
+  different model rather than a second copy of that one - linear fog fades the
+  same looking up as along the ground, and scattering does not.
+- **A `Kind` field on `Constraint`.** The class is how a kind is said: seven
+  classes share one component and differ by the prototype row `Instance.new`
+  copies, which is `Light`'s trade at greater width. A `Kind` beside the six
+  motion modes makes a `HingeConstraint` whose axes are all free expressible,
+  and the solver would have to pick which of the two statements it believed.
+- **A stored chosen LOD level, or a stored terrain chunk.** Both are derived -
+  the first changes per view within one frame, the second is gigabytes - and
+  this file already refuses the same shape for a cached world AABB. `Terrain`
+  stores the recipe; `SelectLevel` is a function.
+- **A `Transform` on a `Bone`, or an `Attachment` under one.** A bone's frame is
+  relative to its parent joint and `ResolveBones` composes it; `Attachment`
+  resolves against the parent *part*. A class carrying both would have two world
+  frames on one row filled by two passes against two different parents, which is
+  the pair of opinions `Attachment`'s own class comment refuses. That is why
+  `Bone` derives from `Instance` and not, as in Roblox, from `Attachment`.
+
+**`Bone::ParentJoint` is strictly lower than `Bone::Joint`, and the build does
+not check it.** By rule 6 that makes it a convention, and this is where it is
+written down: it is what turns `ResolveBones` into a forward pass over a sorted
+palette instead of a recursive walk, and an importer that cannot produce that
+ordering has produced a cycle. The pass degrades to the rig's own frame rather
+than looping, and `engine.scene.skinning` holds both halves.

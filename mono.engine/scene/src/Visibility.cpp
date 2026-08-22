@@ -1,3 +1,5 @@
+#include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
@@ -326,6 +328,11 @@ namespace engine::scene {
 			rendered++;
 		});
 
+		// **A gauge and not a counter**: this is a level, and how many entities
+		// a world is drawing is the first number to ask for when the answer to
+		// "why is nothing on screen" is "everything left the walk".
+		core::Metrics::SetGauge("scene.rendered", static_cast<double>(rendered));
+		ENGINE_TRACE("{} entity/entities are rendered", rendered);
 		return rendered;
 	}
 }

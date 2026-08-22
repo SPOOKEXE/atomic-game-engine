@@ -9,14 +9,20 @@
 //
 // No scale. Scale belongs to whatever is being drawn, not to where it is.
 //
+// `OrientedBoxBounds` at the bottom is the one free function here, and it is
+// here because it is the only box operation that needs a rotation. Its comment
+// carries the measurement that moved it.
+//
 // @tier L1 · shared
 
+#include <engine/core/types/AABB.hpp>
 #include <engine/core/types/Vector3.hpp>
 
 #include <glm/gtc/quaternion.hpp>
 #include <glm/mat4x4.hpp>
 
 #include <array>
+#include <cmath>
 
 namespace engine::core {
 
@@ -369,4 +375,48 @@ namespace engine::core {
 		// Translation occupies the fourth column, ready for a uniform buffer.
 		glm::mat4 ToMatrix() const;
 	};
+
+	// Returns the world-space box that encloses a rotated local box.
+	//
+	// The extent grows by the **absolute value** of the rotated half-extent on
+	// each axis, which is what makes a unit cube turned 45 degrees about Y come
+	// out root two wide. Rotating only the centre and keeping the original
+	// extent is a cheaper function that is also wrong: it produces a bound
+	// smaller than the shape, and a broad phase whose bound is too small drops
+	// contacts without reporting anything.
+	//
+	// **Here rather than on `AABB`, and the reason is what a header costs.** It
+	// is the only box operation that needs a rotation, so a static member of
+	// `AABB` would make `AABB.hpp` include this file - and a box, which is six
+	// floats, would arrive at all 152 of its objects carrying a quaternion and
+	// `<glm/gtc/quaternion.hpp>` behind it. Measured with the real compile
+	// flags: `AABB.hpp` cost 73,835 preprocessed lines that way against this
+	// file's 73,713, which is a box that was 99.8% transform. It is 25,368
+	// free of it, a 66% cut, and what remains is `<cmath>` reached through
+	// `Vector3.hpp` rather than anything of its own.
+	//
+	// The dependency also only runs one way round: a frame knows what a box
+	// is, and a box has no reason to know what a frame is.
+	//
+	// @param frame      Where the box is and how it is turned.
+	// @param halfExtent The box's reach from its own centre, in local axes.
+	// @since v0.19
+	inline AABB OrientedBoxBounds(const CFrame &frame, const Vector3 &halfExtent) {
+		const Vector3 right = frame.VectorToWorldSpace(Vector3::XAxis);
+		const Vector3 up = frame.VectorToWorldSpace(Vector3::YAxis);
+		const Vector3 forward = frame.VectorToWorldSpace(Vector3::ZAxis);
+
+		// Each world axis takes a contribution from all three local axes: this
+		// is the absolute value of the rotation matrix applied to the
+		// half-extent, written out because the matrix is not stored.
+		const Vector3 worldHalfExtent{
+			std::abs(right.X) * halfExtent.X + std::abs(up.X) * halfExtent.Y +
+				std::abs(forward.X) * halfExtent.Z,
+			std::abs(right.Y) * halfExtent.X + std::abs(up.Y) * halfExtent.Y +
+				std::abs(forward.Y) * halfExtent.Z,
+			std::abs(right.Z) * halfExtent.X + std::abs(up.Z) * halfExtent.Y +
+				std::abs(forward.Z) * halfExtent.Z,
+		};
+		return AABB::FromCentre(frame.Position, worldHalfExtent);
+	}
 }

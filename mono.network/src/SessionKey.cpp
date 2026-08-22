@@ -1,3 +1,4 @@
+#include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/SecureWipe.hpp>
 
@@ -83,6 +84,11 @@ namespace network {
 				// Wiped before the refusal: half a key derived from half a
 				// valid string is still key-shaped material sitting in memory.
 				engine::core::SecureWipe(std::span<uint8_t>(key.Secret));
+
+				// The key is never named, only the fact that the text was not
+				// one: a mistyped key otherwise looks like a private session
+				// that simply refuses everybody.
+				ENGINE_WARN("the session key text is not {} hex digits", BYTES * 2);
 				return std::nullopt;
 			}
 			key.Secret[index] = static_cast<uint8_t>((high << 4) | low);
@@ -97,6 +103,7 @@ namespace network {
 		} catch (const CryptoPP::Exception &) {
 			engine::core::SecureWipe(std::span<uint8_t>(key.Secret));
 			engine::core::Metrics::Count("network.key.no_entropy", 1.0);
+			ENGINE_ERROR("the operating system refused entropy; no session key can be drawn");
 			return std::nullopt;
 		}
 		return key;

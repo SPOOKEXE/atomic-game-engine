@@ -1,4 +1,5 @@
 #include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/effects/ParticleSystem.hpp>
@@ -723,8 +724,22 @@ namespace engine::effects {
 					// row costs nothing to take, so it is only a fresh one that has
 					// to fit under the cap.
 					const bool recycling = !system->FreeSlots.empty();
-					if ((!recycling && system->Blocks.size() >= MAX_EMITTER_SLOTS) ||
-						!Take(*system, wanted, first)) {
+					const bool noSlot = !recycling && system->Blocks.size() >= MAX_EMITTER_SLOTS;
+					if (noSlot || !Take(*system, wanted, first)) {
+						// **Two causes on one counter, and they need different
+						// fixes.** Out of emitter rows is a scene with too many
+						// effects; out of pool is a scene whose effects each want
+						// too many particles. Either way the effect never
+						// appears and nothing else says so.
+						ENGINE_WARN_EVERY(
+							5.0,
+							"emitter refused: {} ({} of {} slots, {} of {} particle rows used)",
+							noSlot ? "no emitter slot" : "no room in the particle pool",
+							system->Blocks.size(),
+							MAX_EMITTER_SLOTS,
+							system->Used,
+							system->Capacity
+						);
 						system->Statistics.EmittersRefused++;
 						return;
 					}
@@ -1316,6 +1331,22 @@ namespace engine::effects {
 		}
 
 		system->Statistics = counted;
+
+		// **Per frame and outside every dispatch**, which is why these are read
+		// off the summed statistics rather than counted per particle: an atomic
+		// per birth is a cache line every worker fights over.
+		core::Metrics::SetGauge("effects.particles.live", static_cast<double>(counted.Live));
+		core::Metrics::SetGauge("effects.emitters.blocks", static_cast<double>(counted.Blocks));
+		core::Metrics::Count("effects.particles.emitted", static_cast<double>(counted.Emitted));
+		if (counted.SpawnsDropped != 0) {
+			core::Metrics::Count("effects.particles.dropped", static_cast<double>(counted.SpawnsDropped));
+			ENGINE_DEBUG_EVERY(
+				5.0,
+				"{} of {} births had no room this frame; the emitters are smaller than their rate",
+				counted.SpawnsDropped,
+				counted.Emitted + counted.SpawnsDropped
+			);
+		}
 		return counted;
 	}
 

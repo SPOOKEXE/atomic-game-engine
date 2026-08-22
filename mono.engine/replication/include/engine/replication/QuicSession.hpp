@@ -161,6 +161,18 @@ namespace engine::replication {
 		// @return The connection's statistics.
 		net::quic::Connection::Statistics Stats() const;
 
+		// Whether the far end said it does not speak QUIC.
+		//
+		// **Not on `SessionPort`, deliberately.** The datagram session has no
+		// answer to give: its refusal is an `AdmissionKind::Refuse` message the
+		// connector reads itself, not a state the session holds. A virtual that
+		// one implementation could only ever answer `false` would be a widening
+		// of the interface to save a caller one cast.
+		//
+		// @return `true` once a Version Negotiation packet has arrived.
+		// @since v0.19
+		bool Refused() const;
+
 	  private:
 		QuicSession(std::unique_ptr<net::quic::Connection> connection, const QuicSessionSettings &settings);
 

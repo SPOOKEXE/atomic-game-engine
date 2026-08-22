@@ -11,6 +11,7 @@
 #include <engine/scene/Services.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/SourceCache.hpp>
+#include <engine/scripthost/Runtime.hpp>
 
 #include <algorithm>
 #include <charconv>
@@ -56,7 +57,7 @@ namespace engine::game {
 		// a camera that *is* content, and a viewer may make something that is
 		// not a camera.
 		bool IsTransient(const Store &store, Entity instance) {
-			return store.Get<scene::TransientComponent>(instance) != nullptr;
+			return store.Has<scene::TransientComponent>(instance);
 		}
 
 		// Written as an attribute and never as a property, because the tree

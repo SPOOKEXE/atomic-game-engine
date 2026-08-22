@@ -20,6 +20,7 @@
 
 #include <engine/core/types/Color3.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/scene/Atmosphere.hpp>
 
 namespace engine::ecs {
 	class Store;
@@ -84,6 +85,30 @@ namespace engine::scene {
 		float FogStart = 100000.0f;
 		float FogEnd = 100001.0f;
 		//@}
+
+		// The scattering the world authored, resolved from its `Atmosphere`
+		// instance.
+		//
+		// **Beside the fog rather than instead of it**, because the two are not
+		// the same model and a world may author either. Linear fog is two
+		// distances and a colour; scattering has a density, a decay and a
+		// horizon, and Roblox lets an `Atmosphere` take over from `FogStart`
+		// and `FogEnd` where one is present. Which of them a render graph reads
+		// is that graph's decision - decision 20 - and this carries both so the
+		// decision is not made here.
+		//
+		// A world with no `Atmosphere` instance resolves to a density of zero,
+		// which is clear air and leaves the fog terms above doing exactly what
+		// they did before.
+		//
+		// @since v0.19
+		Atmosphere Air;
+
+		// The cloud layer the world authored, resolved from its `Clouds`
+		// instance. Disabled when it has none.
+		//
+		// @since v0.19
+		Clouds Sky;
 	};
 
 	// Resolves the `Lighting` service into the values a renderer consumes.

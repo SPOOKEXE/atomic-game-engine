@@ -173,6 +173,52 @@ BENCH("ScopedCount · 50k empty scopes", COUNTS) {
 	Metrics::Clear();
 }
 
+BENCH("Metrics::SetGauge · 50k, 64 names", COUNTS) {
+	// A gauge replaces where a counter accumulates, so this row should sit on
+	// top of `Metrics::Count`: the same lock and the same name lookup, one
+	// store instead of one add. A gap means the gauge table is being searched
+	// differently from the counter table for no reason.
+	const std::vector<std::string> &names = CounterNames();
+	for (size_t index = 0; index < COUNTS; index++) {
+		Metrics::SetGauge(names[index % COUNTERS], static_cast<double>(index));
+	}
+	Metrics::Clear();
+}
+
+BENCH("Metrics::Observe · 50k, 64 names", COUNTS) {
+	// **The row that says whether a histogram may be put on a hot path.** It is
+	// the counter's lock and lookup plus a bounded-ring store, and the ring is
+	// allocated with the entry rather than grown - so if this is materially
+	// above `Metrics::Count`, something is allocating per observation.
+	const std::vector<std::string> &names = CounterNames();
+	for (size_t index = 0; index < COUNTS; index++) {
+		Metrics::Observe(names[index % COUNTERS], static_cast<double>(index % 97));
+	}
+	Metrics::Clear();
+}
+
+BENCH("Metrics::Snapshot · 64 counters and 8 histograms", 100) {
+	// **Not a per-frame call, and this row is why.** A snapshot sorts every
+	// kind by name and takes three percentiles per histogram over a window of
+	// up to 1024 readings, which is a report's price rather than a frame's. The
+	// server takes one at shutdown and, when asked, on an interval in seconds.
+	const std::vector<std::string> &names = CounterNames();
+	for (size_t index = 0; index < COUNTERS; index++) {
+		Metrics::Count(names[index], 1.0);
+	}
+	for (size_t index = 0; index < 8; index++) {
+		for (size_t sample = 0; sample < 1024; sample++) {
+			Metrics::Observe(names[index], static_cast<double>(sample));
+		}
+	}
+
+	for (size_t pass = 0; pass < 100; pass++) {
+		const engine::core::MetricsSnapshot taken = Metrics::Snapshot();
+		Consume(taken.Counters.size() + taken.Histograms.size());
+	}
+	Metrics::Clear();
+}
+
 BENCH("Metrics::Drain · 64 counters", 1000) {
 	// Once per frame, by exactly one reader - that is the property that makes
 	// the values a rate rather than a number that only goes up. It allocates a

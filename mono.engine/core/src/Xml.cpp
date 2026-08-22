@@ -14,7 +14,7 @@ namespace engine::core::xml {
 			return character >= '0' && character <= '9';
 		}
 
-		char Lowered(char character) {
+		char LoweredChar(char character) {
 			return character >= 'A' && character <= 'Z' ? static_cast<char>(character - 'A' + 'a')
 														: character;
 		}
@@ -54,7 +54,7 @@ namespace engine::core::xml {
 				value = static_cast<uint32_t>(character - '0');
 				return true;
 			}
-			const char lowered = Lowered(character);
+			const char lowered = LoweredChar(character);
 			if (lowered >= 'a' && lowered <= 'f') {
 				value = static_cast<uint32_t>(lowered - 'a') + 10u;
 				return true;
@@ -68,7 +68,7 @@ namespace engine::core::xml {
 			}
 		}
 
-		std::string_view Trimmed(std::string_view text) {
+		std::string_view TrimmedXml(std::string_view text) {
 			while (!text.empty() && IsSpace(text.front())) {
 				text.remove_prefix(1);
 			}
@@ -168,7 +168,7 @@ namespace engine::core::xml {
 			// `&#48;` and `&#x30;`, which expand to exactly one character each and
 			// so cannot be a bomb however many of them there are.
 			if (!name.empty() && name.front() == '#') {
-				const bool hexadecimal = name.size() > 2 && Lowered(name[1]) == 'x';
+				const bool hexadecimal = name.size() > 2 && LoweredChar(name[1]) == 'x';
 				const size_t start = hexadecimal ? 2u : 1u;
 
 				uint32_t codePoint = 0;
@@ -336,7 +336,7 @@ namespace engine::core::xml {
 		std::string_view attributes = text.substr(0, index);
 		text.remove_prefix(index + 1);
 
-		attributes = Trimmed(attributes);
+		attributes = TrimmedXml(attributes);
 		if (!attributes.empty() && attributes.back() == '/') {
 			tag.SelfClosing = true;
 			attributes.remove_suffix(1);
@@ -372,12 +372,12 @@ namespace engine::core::xml {
 					failure,
 					options,
 					Fault::Malformed,
-					"attribute '" + std::string(Trimmed(text)) + "' has no value"
+					"attribute '" + std::string(TrimmedXml(text)) + "' has no value"
 				);
 			}
 
 			Attribute attribute;
-			attribute.Name = Trimmed(text.substr(0, equals));
+			attribute.Name = TrimmedXml(text.substr(0, equals));
 			text.remove_prefix(equals + 1);
 			SkipSpace(text);
 

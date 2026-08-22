@@ -117,7 +117,7 @@ namespace studio {
 		// filled once per process and the socket is opened and closed as often
 		// as somebody likes.
 		if (ControlSurface.Count() == 0) {
-			ControlSurface.AddUniverseTools(*Universe);
+			ControlSurface.AddStandardTools(*Universe);
 			RegisterControlTools();
 		}
 
@@ -342,11 +342,11 @@ namespace studio {
 
 		// **The tools are registered once, not once per start.** `Surface::Add`
 		// replaces by name, so a second registration would be harmless and a
-		// second `AddUniverseTools` would still be work nobody asked for - and
+		// second `AddStandardTools` would still be work nobody asked for - and
 		// the count in the log line would go on saying the same number while
 		// doing it twice.
 		if (ControlSurface.Count() == 0) {
-			ControlSurface.AddUniverseTools(*Universe);
+			ControlSurface.AddStandardTools(*Universe);
 			RegisterControlTools();
 		}
 

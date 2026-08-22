@@ -1,3 +1,4 @@
+#include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/core/SecureWipe.hpp>
@@ -38,6 +39,7 @@ namespace engine::net {
 			} catch (const CryptoPP::Exception &) {
 				core::SecureWipe(into);
 				core::Metrics::Count("net.cookie.no_entropy", 1.0);
+				ENGINE_ERROR("the operating system refused entropy; no admission cookie can be issued");
 				return false;
 			}
 			return true;
@@ -105,6 +107,10 @@ namespace engine::net {
 			// current secret for another period does not.
 			core::SecureWipe(fresh);
 			RotateAt = nowSeconds + RotatePeriod;
+
+			// Degraded rather than dead, and nothing else marks that the secret
+			// is now serving past the period somebody chose for it.
+			ENGINE_WARN("no entropy to rotate the cookie secret; keeping the current one for another period");
 			return;
 		}
 
@@ -163,7 +169,12 @@ namespace engine::net {
 		ENGINE_PROFILE_CAT("Cookie::Answers", core::ProfileCategory::Network);
 
 		if (cookie.size() != COOKIE_BYTES) {
+			// Refused before any comparison, so it never reaches the counter
+			// that means "wrong secret" - two different problems on one number.
 			core::Metrics::Count("net.cookie.refused", 1.0);
+			ENGINE_DEBUG_EVERY(
+				1.0, "a cookie of {} bytes is not the {} expected", cookie.size(), COOKIE_BYTES
+			);
 			return false;
 		}
 

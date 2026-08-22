@@ -1,7 +1,7 @@
 # L12 [client]. The editor's toolkit, and the target that makes Dear ImGui
-# public. `Engine::nodegraph` links it too, as of v0.18.0, but privately - no
-# public header there names an ImGui type, so this is still the only place a
-# consumer gets `<imgui.h>` from.
+# public. `Mono::nodegraph`, over in `mono.studio/`, vendors it too but
+# privately - no public header there names an ImGui type, so this is still the
+# only place a consumer gets `<imgui.h>` from.
 #
 # **`render` deliberately does not depend on this and never should.** The edge
 # runs the other way: this module implements `render::FrameOverlayHook`, which

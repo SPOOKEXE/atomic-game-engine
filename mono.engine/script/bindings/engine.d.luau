@@ -516,6 +516,9 @@ end
 declare extern type Enum_AlphaMode extends EnumItem with
 end
 
+declare extern type Enum_AnimationPriority extends EnumItem with
+end
+
 declare extern type Enum_ApplyStrokeMode extends EnumItem with
 end
 
@@ -532,6 +535,9 @@ declare extern type Enum_BorderMode extends EnumItem with
 end
 
 declare extern type Enum_CameraType extends EnumItem with
+end
+
+declare extern type Enum_ConstraintMotion extends EnumItem with
 end
 
 declare extern type Enum_ContextActionResult extends EnumItem with
@@ -675,6 +681,13 @@ declare Enum: {
 		Clip: Enum_AlphaMode,
 		Blend: Enum_AlphaMode,
 	},
+	AnimationPriority: {
+		Core: Enum_AnimationPriority,
+		Idle: Enum_AnimationPriority,
+		Movement: Enum_AnimationPriority,
+		Action: Enum_AnimationPriority,
+		Override: Enum_AnimationPriority,
+	},
 	ApplyStrokeMode: {
 		Contextual: Enum_ApplyStrokeMode,
 		Border: Enum_ApplyStrokeMode,
@@ -704,6 +717,11 @@ declare Enum: {
 		LockFirstPerson: Enum_CameraType,
 		ShiftLock: Enum_CameraType,
 		Scriptable: Enum_CameraType,
+	},
+	ConstraintMotion: {
+		Locked: Enum_ConstraintMotion,
+		Limited: Enum_ConstraintMotion,
+		Free: Enum_ConstraintMotion,
 	},
 	ContextActionResult: {
 		Sink: Enum_ContextActionResult,
@@ -1446,6 +1464,91 @@ end
 declare extern type LocalizationTable extends ValueBase with
 end
 
+declare extern type Bone extends Instance with
+	InverseBindCFrame: CFrame
+	RestCFrame: CFrame
+	Transform: CFrame
+	read TransformedWorldCFrame: CFrame
+end
+
+declare extern type Animation extends Instance with
+	AnimationId: string
+	RigId: string
+end
+
+declare extern type Animator extends Instance with
+	EvaluationThrottled: boolean
+	Rig: Instance
+	RootMotion: boolean
+	RootMotionWeight: number
+end
+
+declare extern type AnimationTrack extends Instance with
+	Animation: Instance
+	FadeTime: number
+	IsPlaying: boolean
+	Looped: boolean
+	Priority: Enum_AnimationPriority
+	Speed: number
+	TimePosition: number
+	WeightCurrent: number
+	WeightTarget: number
+end
+
+declare extern type Atmosphere extends Instance with
+	Color: Color3
+	Decay: Color3
+	Density: number
+	Glare: number
+	Haze: number
+	Offset: number
+end
+
+declare extern type Clouds extends Instance with
+	Color: Color3
+	Cover: number
+	Density: number
+	Enabled: boolean
+	WindDirection: number
+	WindSpeed: number
+end
+
+declare extern type Constraint extends Instance with
+	Attachment0: Instance
+	Attachment1: Instance
+	Damping: number
+	Enabled: boolean
+	LowerAngle: number
+	LowerLimit: number
+	MaxForce: number
+	MaxTorque: number
+	Stiffness: number
+	Target: CFrame
+	UpperAngle: number
+	UpperLimit: number
+end
+
+declare extern type WeldConstraint extends Constraint with
+end
+
+declare extern type BallSocketConstraint extends Constraint with
+end
+
+declare extern type HingeConstraint extends Constraint with
+end
+
+declare extern type PrismaticConstraint extends Constraint with
+end
+
+declare extern type CylindricalConstraint extends Constraint with
+end
+
+declare extern type RopeConstraint extends Constraint with
+end
+
+declare extern type SpringConstraint extends Constraint with
+end
+
 declare extern type ShaderScript extends Instance with
 	read Revision: number
 end
@@ -1958,6 +2061,11 @@ declare extern type Workspace extends Service with
 	CurrentCamera: Instance
 	MaxSurfaces: number
 	SurfaceBounces: number
+	TerrainChunkSize: number
+	TerrainEnabled: boolean
+	TerrainGenerator: string
+	TerrainSeed: number
+	TerrainViewDistance: number
 	function OverlapBox(self, centre: Vector3, size: Vector3, params: RaycastParams?): { Instance }
 	function OverlapSphere(self, centre: Vector3, radius: number, params: RaycastParams?): { Instance }
 	function BlockCast(self, from: CFrame, size: Vector3, motion: Vector3, params: RaycastParams?): { Instance }
@@ -2535,6 +2643,20 @@ type CreatableInstances = {
 	ValueBase: ValueBase,
 	StringValue: StringValue,
 	LocalizationTable: LocalizationTable,
+	Bone: Bone,
+	Animation: Animation,
+	Animator: Animator,
+	AnimationTrack: AnimationTrack,
+	Atmosphere: Atmosphere,
+	Clouds: Clouds,
+	Constraint: Constraint,
+	WeldConstraint: WeldConstraint,
+	BallSocketConstraint: BallSocketConstraint,
+	HingeConstraint: HingeConstraint,
+	PrismaticConstraint: PrismaticConstraint,
+	CylindricalConstraint: CylindricalConstraint,
+	RopeConstraint: RopeConstraint,
+	SpringConstraint: SpringConstraint,
 	ShaderScript: ShaderScript,
 	EditableMesh: EditableMesh,
 	EditableImage: EditableImage,

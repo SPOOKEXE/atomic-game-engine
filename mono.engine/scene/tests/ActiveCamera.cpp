@@ -1,9 +1,7 @@
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Vector3.hpp>
-#include <engine/ecs/Store.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
-#include <engine/scene/Registration.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -17,27 +15,9 @@ TEST_SUITE_ID("engine.scene.activecamera")
 using Catch::Approx;
 using engine::core::CFrame;
 using engine::core::Vector3;
-using engine::ecs::Entity;
-using engine::ecs::Store;
-using engine::scene::ActiveCamera;
 using engine::scene::Camera;
 using engine::scene::CameraMatrices;
-using engine::scene::RegisterSceneComponents;
-using engine::scene::ResolveActiveCamera;
 using engine::scene::ResolveCamera;
-using engine::scene::Transform;
-
-namespace activecamera_test {
-	// Every case that touches a store calls this first. `Store::SetResource`
-	// resolves a type to a component id, and a type first seen through the
-	// automatic path takes the compiler's spelling of its name - after which
-	// the explicit registration aborts rather than leaving two names for one
-	// thing. Registering is idempotent, so calling it per case costs a hash
-	// lookup and removes the ordering question entirely.
-	void Ready() {
-		RegisterSceneComponents();
-	}
-}
 
 TEST_CASE("a camera at the origin looks down negative Z", "[scene][activecamera]") {
 	// The engine is right-handed, Y-up, -Z forward. A view matrix that had the
@@ -169,88 +149,4 @@ TEST_CASE("a zero aspect ratio yields identity rather than infinities", "[scene]
 	CHECK(matrices.Projection == glm::mat4(1.0f));
 	CHECK(matrices.View == glm::mat4(1.0f));
 	CHECK(matrices.ViewProjection == glm::mat4(1.0f));
-}
-
-TEST_CASE("resolving fills the resource from the row it names", "[scene][activecamera]") {
-	activecamera_test::Ready();
-	Store store("activecamera_test.resolve");
-
-	const Entity eye = store.Create();
-	store.Set(eye, Transform{CFrame(Vector3(0.0f, 2.0f, 8.0f))});
-	store.Set(eye, Camera{});
-
-	ActiveCamera active;
-	active.Entity = eye;
-	active.AspectRatio = 16.0f / 9.0f;
-	store.SetResource(active);
-
-	ResolveActiveCamera(store);
-
-	const ActiveCamera *resolved = store.Resource<ActiveCamera>();
-	REQUIRE(resolved != nullptr);
-
-	const glm::vec4 origin = resolved->Matrices.View * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
-	CHECK(origin.y == Approx(-2.0f));
-	CHECK(origin.z == Approx(-8.0f));
-}
-
-TEST_CASE("a camera row that moves is picked up on the next resolve", "[scene][activecamera]") {
-	// The resource holds a handle rather than a copy of the values precisely so
-	// that there is one place a camera is written. If it cached the transform,
-	// this case would keep the old position.
-	activecamera_test::Ready();
-	Store store("activecamera_test.moving");
-
-	const Entity eye = store.Create();
-	store.Set(eye, Transform{CFrame(Vector3(0.0f, 0.0f, 0.0f))});
-	store.Set(eye, Camera{});
-
-	ActiveCamera active;
-	active.Entity = eye;
-	active.AspectRatio = 1.0f;
-	store.SetResource(active);
-	ResolveActiveCamera(store);
-
-	store.Set(eye, Transform{CFrame(Vector3(5.0f, 0.0f, 0.0f))});
-	ResolveActiveCamera(store);
-
-	const glm::vec4 origin =
-		store.Resource<ActiveCamera>()->Matrices.View * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
-	CHECK(origin.x == Approx(-5.0f));
-}
-
-TEST_CASE("a camera that goes away leaves the last matrices alone", "[scene][activecamera]") {
-	// Stale rather than identity, deliberately. A stale view draws the frame
-	// from where the camera was; identity draws it from inside the origin with
-	// nothing in it, which looks like a renderer fault and sends the search to
-	// the wrong module.
-	activecamera_test::Ready();
-	Store store("activecamera_test.missing");
-
-	const Entity eye = store.Create();
-	store.Set(eye, Transform{CFrame(Vector3(0.0f, 0.0f, 7.0f))});
-	store.Set(eye, Camera{});
-
-	ActiveCamera active;
-	active.Entity = eye;
-	active.AspectRatio = 1.0f;
-	store.SetResource(active);
-	ResolveActiveCamera(store);
-
-	const glm::mat4 before = store.Resource<ActiveCamera>()->Matrices.View;
-	REQUIRE(before != glm::mat4(1.0f));
-
-	store.Destroy(eye);
-	ResolveActiveCamera(store);
-
-	CHECK(store.Resource<ActiveCamera>()->Matrices.View == before);
-}
-
-TEST_CASE("resolving a world with no active camera does nothing", "[scene][activecamera]") {
-	// A headless world, or one being built. Not an error and not a reason to
-	// abort a tick.
-	activecamera_test::Ready();
-	Store store("activecamera_test.none");
-	ResolveActiveCamera(store);
-	CHECK_FALSE(store.HasResource<ActiveCamera>());
 }

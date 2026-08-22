@@ -18,6 +18,7 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/physics/Broadphase.hpp>
+#include <engine/physics/Integrate.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/physics/Portals.hpp>
@@ -215,4 +216,46 @@ TEST_CASE("a proxy is not made for a pane, a proxy or a moving body", "[physics]
 	CHECK(again == placed);
 
 	CHECK(RetirePortalProxies(world.World) == placed * 2);
+}
+
+TEST_CASE("a body asleep in a seam has no proxies and cannot fall through one", "[physics][portals]") {
+	// **Sleeping is the absence of `scene::Motion`, and this pass is gated on
+	// it**, so a body that settles in a doorway stops being given the far room's
+	// floor on the very tick it goes quiet. That reads like a body about to drop
+	// through the world, and it is not one. The same absence that takes it out of
+	// the walk here takes it out of `IntegrateMotion`: nothing is moving it, so
+	// there is nothing for a floor to hold up.
+	//
+	// Written because `scene/AGENTS.md` called the interaction untested and
+	// asked for this case first. It pins a state rather than a fix.
+	Doorway world;
+
+	REQUIRE(GhostPortalBodies(world.World) >= 1);
+	REQUIRE(RetirePortalProxies(world.World) >= 1);
+
+	// What `physics::Publish` does to a body the solver has put to sleep.
+	world.World.Remove<Motion>(world.Body);
+	world.Index();
+
+	CHECK(GhostPortalBodies(world.World) == 0);
+	CHECK(world.Proxies() == 0);
+
+	// **And it stays exactly where it settled.** A sleeping row is not in
+	// `IntegrateMotion`'s query either, so taking the far room's floor away from
+	// under it is taking a floor from under something that was never falling.
+	const Vector3 settled = world.World.Get<Transform>(world.Body)->Frame.Position;
+	engine::physics::IntegrateMotion(world.World);
+	CHECK(world.World.Get<Transform>(world.Body)->Frame.Position.Z == Approx(settled.Z).margin(1e-6f));
+
+	// **And waking gives them straight back, in the same tick.** Waking *is*
+	// putting `Motion` back - `WakeMovingCharacters` says so - and it runs in
+	// `character.control`, which is registered before `portal.ghost` in the same
+	// `PreSimulation` phase. Registration order inside a phase is the scheduler's
+	// contract, so the body has its floor again before the solver sees it and
+	// never spends a tick unsupported.
+	world.World.Set<Motion>(world.Body, Motion{});
+	world.Index();
+
+	CHECK(GhostPortalBodies(world.World) >= 1);
+	CHECK(RetirePortalProxies(world.World) >= 1);
 }

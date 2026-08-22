@@ -38,6 +38,22 @@ see what it did, so the two ends disagreeing is a failed `just check` rather
 than a shared mistake. Do not make one call the other: a checker that links the
 thing it checks is a checker that agrees with it by construction.
 
+## The assignment is traced, and that is why `core` is linked
+
+This module linked nothing first-party until v0.19. `Engine::core` is here for
+the log and for nothing else: every index the section above assigns is written
+at `trace` under the `msl` category, so `--log msl=trace` prints the set, the
+binding and the `[[texture(n)]]`, `[[sampler(n)]]` or `[[buffer(n)]]` it landed
+on. The failure this prevents is invisible from Linux and wrong on macOS, and
+nothing in a `dev` run could previously say what was chosen.
+
+**Do not add a second first-party dependency.** The property the empty row was
+protecting is that nothing here has an opinion about shaders, and `core` does
+not; a renderer, an asset store or a device would.
+
+The separate-sampler branch warns the first time it is taken, for the reason the
+comment beside it gives: it has never run.
+
 ## No SPIRV-Cross type in a public header
 
 `Translation` is a string, a bool and a diagnostic. `render` and a build tool

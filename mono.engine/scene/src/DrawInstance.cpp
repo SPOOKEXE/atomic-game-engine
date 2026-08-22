@@ -1,3 +1,4 @@
+#include <engine/core/Log.hpp>
 #include <engine/scene/DrawInstance.hpp>
 
 #include <algorithm>
@@ -186,6 +187,13 @@ namespace engine::scene {
 			// an instance that no longer exists is a mis-wired pipeline - which
 			// should be a missing object, not a read off the end.
 			if (index >= instances.size()) {
+				// Should be unreachable: this always means a filter node handed
+				// on an index the draw list no longer holds. Dropped to the
+				// transparent tail rather than read, and named rather than
+				// swallowed, because it is a pipeline bug and not bad content.
+				ENGINE_WARN_EVERY(
+					5.0, "draw index {} is past the {} instances the frame holds", index, instances.size()
+				);
 				order[--transparent] = index;
 				continue;
 			}

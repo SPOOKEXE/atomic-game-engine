@@ -27,6 +27,7 @@
 // @tier shared
 
 #include <engine/net/Endpoint.hpp>
+#include <engine/net/Wire.hpp>
 
 #include <array>
 #include <compare>
@@ -127,6 +128,20 @@ namespace network {
 		// during the handshake instead of in the browser costs a person a
 		// connection attempt and a confusing error.
 		uint32_t Protocol = 0;
+
+		// Which transports the host accepts.
+		//
+		// **So a client that finds a datagram-only server does not pay even the
+		// one refusal round trip.** The transport is the server's choice and
+		// nothing here changes that: this is the same answer the server would
+		// give on the wire, said early. A row that is wrong or absent costs the
+		// refusal it was meant to save and nothing else, because the fallback in
+		// `replication::Connector` still runs.
+		//
+		// Meaningless for `Purpose::Content`, whose endpoint is an HTTP one.
+		//
+		// @since v0.19
+		engine::net::WireMode Transports = engine::net::WireMode::Quic;
 
 		// Where to connect.
 		//

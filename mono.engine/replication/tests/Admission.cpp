@@ -5,6 +5,7 @@
 #include <engine/net/Handshake.hpp>
 #include <engine/net/Packet.hpp>
 #include <engine/net/Transport.hpp>
+#include <engine/net/Wire.hpp>
 #include <engine/replication/Admission.hpp>
 #include <engine/replication/Connector.hpp>
 #include <engine/replication/Listener.hpp>
@@ -219,6 +220,13 @@ namespace admission_test {
 
 		explicit Dialogue(const ConnectorSettings &settings = {}) : Options(settings) {
 			REQUIRE(Transports.size() == 2);
+			// **The datagram stack, named by every case in this file.** A
+			// connector opens with QUIC by default as of v0.19 and this whole
+			// suite is about the exchange the other stack does not have - the
+			// cookie, the transcript and the signed welcome. `Advertised` is the
+			// only thing that moves the first attempt, which is what a client
+			// that found a datagram-only server in a browser has.
+			Options.Advertised = engine::net::WireMode::Datagram;
 			Issuer = Cookie::Begin();
 			REQUIRE(Issuer.has_value());
 
@@ -257,7 +265,11 @@ namespace admission_test {
 		explicit Port(size_t peers, const ListenerSettings &settings = {}) {
 			Transports = MakeLoopbackTransport(peers + 1);
 			REQUIRE(Transports.size() == peers + 1);
-			Server.emplace(*Transports[0], settings);
+			// The datagram stack, for `Dialogue`'s reason: every case here is
+			// about the admission exchange the other stack does not have.
+			ListenerSettings serving = settings;
+			serving.Wire = engine::net::WireMode::Datagram;
+			Server.emplace(*Transports[0], serving);
 			REQUIRE(Server->Admitting());
 		}
 
@@ -646,7 +658,9 @@ TEST_CASE("a client whose exchange goes unanswered gives up", "[replication][adm
 	REQUIRE(transports.size() == 2);
 
 	Store replica("client");
-	Connector client(*transports[1], transports[0]->Local(), 0.0);
+	ConnectorSettings connecting;
+	connecting.Advertised = engine::net::WireMode::Datagram;
+	Connector client(*transports[1], transports[0]->Local(), 0.0, connecting);
 
 	for (int tick = 0; tick < 8; tick++) {
 		const double now = static_cast<double>(tick) * 0.25;

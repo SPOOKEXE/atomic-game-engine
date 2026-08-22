@@ -11,13 +11,25 @@
 // **This holds no `render::Camera` and must never hold one.** That type is
 // `client` tier: a server-tier host resolves a view for a hosted world and
 // cannot name it, and reaching for it would put presentation in the type a
-// headless world writes. What crosses is a `CFrame`, three floats and the
-// matrices below - all of which are arithmetic, not device state.
+// headless world writes. What the resource carries is a handle and an aspect
+// ratio - arithmetic and a number, not device state.
 //
-// The matrices are cached rather than derived at every read because the
-// consumers are a culling pass, a draw-list build and an overlay, and three
-// passes recomputing one inverse per frame is three chances for two of them to
-// disagree about which tick's camera they were looking at.
+// **The matrices are not cached on the resource, and a cache was tried.** The
+// resource carried a `CameraMatrices` and a `ResolveActiveCamera` system to
+// fill it from v0.4 to v0.19, on the argument that one copy stops a culling
+// pass, a draw-list build and an overlay disagreeing about which tick they were
+// looking at. The argument does not survive contact with the consumers: every
+// one of them needs matrices built against *its own* target. `render`'s
+// `ViewRecording` builds them against the swapchain and against a near plane it
+// has shrunk for the nearest portal pane, `render::ResolveSpatialPointer`
+// against the `gui::Screen`, and `studio::Overlay` against a viewport panel -
+// and the studio round-robins two panels of different sizes through one world,
+// so there is no single answer a resource could hold. One cached set could
+// serve at most one of the three and would be quietly wrong for the others,
+// which is worse than the disagreement it was meant to prevent. `ResolveCamera`
+// below is the shared part: one function, so nobody disagrees about handedness,
+// clip depth or the order of the product, and each caller supplies its own
+// aspect.
 //
 // @tier L7 · shared
 
@@ -75,22 +87,16 @@ namespace engine::scene {
 		//
 		// Written by the consumer - a window, an offscreen target, a mirror's
 		// texture - because a world has no idea how big anybody's screen is.
-		// Kept here rather than passed to `ResolveActiveCamera` so that
-		// resolving stays a plain `void(Store &)` the scheduler can register.
+		// **Read by the world rather than by the thing that wrote it**:
+		// `FrustumCorners` builds the viewer's frustum from it and `FitExtents`
+		// clamps every surface camera against it, so a mirror is only fitted to
+		// what the viewer can see once somebody has said. `SetViewportSize` is
+		// the writer and carries what a wrong one looks like.
 		float AspectRatio = 1.0f;
 
 		// Explicit padding, so the object representation a snapshot writes
 		// holds no uninitialised bytes.
 		uint32_t Reserved = 0;
-
-		// What `ResolveActiveCamera` last computed. Identity until it runs.
-		//
-		// Braced rather than left bare so that "identity until it runs" is what
-		// the type says and not only what this comment says. An aggregate
-		// initialiser naming the entity and the aspect ratio - which is every
-		// caller - leaves this member behind, and a member with no default is
-		// one `-Wmissing-field-initializers` is right to call out.
-		CameraMatrices Matrices{};
 	};
 
 	// Builds the matrices for one camera at one placement.
@@ -217,22 +223,6 @@ namespace engine::scene {
 	// @return The resolved view, projection and their product.
 	// @since v0.14
 	CameraMatrices ResolveSurfaceCamera(const core::CFrame &frame, const glm::mat4 &projection);
-
-	// Refreshes the world's `ActiveCamera` matrices from the row it names.
-	//
-	// A `void(Store &)` and nothing else, so it registers as an ordinary
-	// system - which is the reason `AspectRatio` is a field above rather than a
-	// second argument here.
-	//
-	// Leaves the matrices exactly as they were when there is no `ActiveCamera`
-	// resource, when the entity it names is dead, or when that entity carries
-	// no `Camera` or no `Transform`. A stale view is a frame drawn from where
-	// the camera was; clearing to identity would be a frame drawn from inside
-	// the origin with nothing in it, which looks like a renderer fault and
-	// sends the search to the wrong module.
-	//
-	// @param store The world to resolve in.
-	void ResolveActiveCamera(ecs::Store &store);
 
 	// Tells a world how big the thing drawing it is.
 	//

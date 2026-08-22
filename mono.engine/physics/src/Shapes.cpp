@@ -37,7 +37,7 @@ namespace engine::physics {
 	core::AABB ShapeWorldBounds(const scene::Collider &collider, const core::CFrame &frame) {
 		switch (collider.Shape) {
 		case scene::ShapeKind::Box:
-			return core::AABB::FromOrientedBox(frame, collider.Extent);
+			return core::OrientedBoxBounds(frame, collider.Extent);
 
 		case scene::ShapeKind::Sphere: {
 			// Rotation-invariant, and that is the whole reason spheres are not
@@ -90,11 +90,11 @@ namespace engine::physics {
 			// mistake - the part is what a designer sized and what the renderer
 			// draws - and `ShapeWorldBoundsOf` is the overload that takes the
 			// geometry for a caller that has it in hand.
-			return core::AABB::FromOrientedBox(frame, collider.Extent);
+			return core::OrientedBoxBounds(frame, collider.Extent);
 		}
 
 		// See ShapeHalfExtent: a shape kind this build does not know about takes
 		// the conservative bound rather than aborting.
-		return core::AABB::FromOrientedBox(frame, ShapeHalfExtent(collider.Shape, collider.Extent));
+		return core::OrientedBoxBounds(frame, ShapeHalfExtent(collider.Shape, collider.Extent));
 	}
 }

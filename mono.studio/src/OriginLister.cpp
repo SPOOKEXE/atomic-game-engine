@@ -52,7 +52,7 @@ namespace studio {
 			return line;
 		}
 
-		std::optional<uint64_t> Number(std::string_view text) {
+		std::optional<uint64_t> OriginNumber(std::string_view text) {
 			uint64_t value = 0;
 			const char *const end = text.data() + text.size();
 			const std::from_chars_result read = std::from_chars(text.data(), end, value);
@@ -87,7 +87,7 @@ namespace studio {
 
 			const std::optional<engine::assets::ContentHash> address =
 				engine::assets::ContentHash::FromHex(*root);
-			if (!address || !Number(*bytes)) {
+			if (!address || !OriginNumber(*bytes)) {
 				return std::nullopt;
 			}
 
@@ -305,7 +305,7 @@ namespace studio {
 				continue;
 			}
 
-			const std::optional<uint64_t> number = Number(value);
+			const std::optional<uint64_t> number = OriginNumber(value);
 			if (key == "total") {
 				if (!number) {
 					return std::nullopt;

@@ -75,9 +75,19 @@ namespace engine::parallel {
 			bool Stopping = false;
 		};
 
+		// Never destroyed, deliberately, the same way `ecs::Components` and
+		// `ecs::ChunkPool` are and for a problem of the same shape.
+		//
+		// Destroying the pool destroys four condition variables with every
+		// worker still parked on `Available`, and `pthread_cond_destroy` waits
+		// for the last waiter - so a process that called `Jobs::Start` and did
+		// not call `Jobs::Stop` returned zero from `main` and then hung in
+		// `exit` for ever. It reads as a hung test suite rather than as a stuck
+		// teardown, which is what made it expensive to find. `Jobs::Stop` still
+		// joins whoever asks for it; the process reclaims the memory.
 		Pool &Get() {
-			static Pool pool;
-			return pool;
+			static Pool *pool = new Pool();
+			return *pool;
 		}
 
 		constexpr size_t NO_RANGE = static_cast<size_t>(-1);
@@ -289,9 +299,19 @@ namespace engine::parallel {
 		}
 		pool.Available.notify_all();
 
+		// Outside the guard, and it has to be: a worker needs that mutex to
+		// observe `Stopping`, so joining while holding it deadlocks.
 		for (auto &worker : pool.Workers) {
 			worker.join();
 		}
+
+		// Back under it for the tail. Every worker is joined by now so nothing
+		// contends, but these five are read under the guard by `WorkerCount`,
+		// `PinnedWorkerCount` and `For`, and one uncontended acquisition is
+		// cheaper than an exception to the rule that they always are. It does
+		// **not** make `Stop` thread-safe: two of them still join the same
+		// threads, which is undefined whatever this holds.
+		std::lock_guard lock(pool.Guard);
 		pool.Workers.clear();
 		pool.WorkerProcessors.clear();
 		pool.WorkerPinned.clear();

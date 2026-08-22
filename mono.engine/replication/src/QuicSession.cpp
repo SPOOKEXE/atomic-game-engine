@@ -24,16 +24,6 @@ namespace engine::replication {
 		constexpr double MAXIMUM_LATENCY_SECONDS = 60.0;
 	}
 
-	const char *Describe(WireKind kind) {
-		switch (kind) {
-		case WireKind::Datagram:
-			return "datagram";
-		case WireKind::Quic:
-			return "quic";
-		}
-		return "unknown";
-	}
-
 	QuicRoute QuicRouteFor(MessageKind kind) {
 		// `docs/CODE_ARCH.md` §10's table, read literally. A stream each for the
 		// things whose loss is visible as an absence, and datagrams for the one
@@ -241,6 +231,10 @@ namespace engine::replication {
 
 	bool QuicSession::Binding(std::span<std::byte> out) const {
 		return Connection_->Export(BINDING_LABEL, out);
+	}
+
+	bool QuicSession::Refused() const {
+		return Connection_->Refused();
 	}
 
 	net::quic::Connection::Statistics QuicSession::Stats() const {

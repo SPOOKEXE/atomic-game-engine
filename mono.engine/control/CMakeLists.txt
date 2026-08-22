@@ -35,3 +35,39 @@ mono_add_library(control
 		# module's own sources include the real header.
 		Vendor::json
 )
+
+# The checked-in target graph, compiled in.
+#
+# **The `resources` module's trade, applied to a different file.** A constant
+# that lives in one place and is needed in another is read at configure time
+# rather than typed again, so the second copy cannot drift. Here the constant is
+# the whole of `expected_graph.json` - the modules, their tiers, their layers and
+# their exact link sets - and the second place is a tool a model asks "may render
+# link script".
+#
+# **Compiled in rather than opened at run time**, because the program answering
+# is a dedicated server or an editor started from wherever somebody was standing.
+# A tool that only worked when the current directory was the repository would
+# fail exactly when a model most needs it.
+set(control_graph "${CMAKE_SOURCE_DIR}/mono.tools/architecture/expected_graph.json")
+if(NOT EXISTS "${control_graph}")
+	message(FATAL_ERROR
+		"control: ${control_graph} is missing.\n"
+		"  The module graph tools answer out of that file. If it moved, update "
+		"this path and mono.tools/architecture/CheckTargetGraph.cmake's caller "
+		"in the same commit.")
+endif()
+
+file(READ "${control_graph}" MONO_CONTROL_GRAPH)
+
+# Without this, editing the expectation would leave the compiled copy holding
+# whatever the last configure read - the drift this exists to prevent, arriving
+# by a different door.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${control_graph}")
+
+configure_file(
+	"${CMAKE_CURRENT_SOURCE_DIR}/cmake/GraphData.cpp.in"
+	"${CMAKE_CURRENT_BINARY_DIR}/generated/GraphData.cpp"
+	@ONLY)
+
+target_sources(engine_control PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated/GraphData.cpp")

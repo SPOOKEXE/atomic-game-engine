@@ -256,20 +256,53 @@ asio is `VENDOR`, never `VENDOR_PUBLIC`. No public header here names a socket, a
 `io_context` or an `error_code`. That is what keeps a transport swappable and
 what stops asio reaching every module that links this.
 
-## `quic/` is a second stack, and both are live
+## `quic/` is a second stack, both are live, and neither is going away
 
 `quic/` holds a QUIC transport - ngtcp2 underneath, `quic/Crypto.hpp` and
 `quic/Tls.hpp` above it, both first-party. It arrived at v0.19 **beside** the
-datagram stack rather than instead of it, and `replication::WireKind` chooses.
-`docs/QUIC.md` is the survey, the staging and the account of what the survey got
-wrong.
+datagram stack rather than instead of it. `docs/QUIC.md` is the survey, the
+staging and the account of what the survey got wrong.
 
-**Two overlapping reliability stacks is worse than either, so this state is
-temporary by design.** Nothing is deleted while `Datagram` is the default; the
-day it stops being, `Packet`, `Reliability`, `Handshake`, `Cookie` and
-`ConnectionId` go with it and each takes its suite and its benchmark. Until
-then, **a change to one stack is a question about the other**: a rule that holds
-here and not there is a rule one of them has lost.
+**QUIC is the default and the server picks.** `net::WireMode` is the choice -
+`quic`, `datagram` or `both` - and it belongs to a listener.
+`replication::ConnectorSettings` has no such field: a connector opens with QUIC
+and falls back once when it is refused. A flag on both ends that had to agree is
+a flag that will disagree, and what it produces is a connection that hangs with
+nothing saying why.
+
+**`Datagram` is a supported mode, so nothing is deleted.** `docs/QUIC.md` §8's
+step 6 was "delete the old stack" and is now closed as will-not-do: `Packet`,
+`Reliability`, `Handshake`, `Cookie` and `ConnectionId` are what
+`--transport datagram` runs on, and they are also what the client's fallback
+lands on. **A change to one stack is therefore a permanent question about the
+other**: a rule that holds here and not there is a rule one of them has lost.
+
+## One port, two stacks, and one bit tells them apart
+
+`Wire.hpp` is the seam. A server reads the first packet from an unknown peer and
+decides which stack it belongs to before either stack sees it.
+
+**The discriminator is bit 7 of byte 0 and the two forms cannot be confused.** A
+QUIC long header - which every Initial packet is, RFC 9000 §17.2 - sets bit 7
+(Header Form) and bit 6 (Fixed Bit), so an Initial starts in `0xC0..0xFF`. A
+`net::Packet` starts with `Packet::MAGIC` written little-endian, so its first
+byte is `0x41` and bit 7 is clear. Neither format can set it the other way: the
+magic is a constant and the Fixed Bit pair is what makes a long header long.
+
+**A QUIC short header is not separable this way and does not need to be.** A
+1-RTT packet has bit 7 clear and bit 6 set, so `0x40..0x7F` contains `0x41`. It
+never reaches the discriminator: it belongs to an established connection and is
+routed by the destination connection id in it, and one that matches no
+connection is refused by the full six-byte magic-and-version check.
+
+**A refusal is answered, not dropped, and both directions cost one round trip.**
+A `datagram`-only listener answers a QUIC Initial with
+`quic::WriteVersionNegotiation` - stateless, keyless, and under sixty bytes
+against a 1200-byte Initial. A `quic`-only listener answers a datagram hello
+with `replication::AdmissionKind::Refuse`. Both keep this module's two rules for
+answering a stranger: **nothing is remembered per refusal**, and **the reply is
+smaller than the question**. A refusal larger than what caused it is a reflector
+somebody else's traffic gets bounced off.
 
 Three things survive the swap and are the reason they are not on the delete
 list:

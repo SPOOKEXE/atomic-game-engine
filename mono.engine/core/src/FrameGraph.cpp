@@ -1,6 +1,7 @@
 #include <engine/core/Clock.hpp>
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/HeapProfile.hpp>
+#include <engine/core/Metrics.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -861,6 +862,21 @@ namespace engine::core {
 		state.Published.swap(state.Building);
 		state.PublishedMilliseconds = total;
 		state.PublishedDropped = state.DroppedThisFrame.load(std::memory_order_relaxed);
+
+		// **Reported rather than left silent**, which is what `docs/ARCH_REVIEW.md`
+		// §A1 made this counter atomic for and what §G2 asks of it. This
+		// collector records one thread by design, so every scope opened inside
+		// an `EachParallel` body is dropped - and until v0.19 the only thing
+		// that could see that was the F5 overlay, which a headless server does
+		// not have and a headless server is exactly the program that runs
+		// parallel compute.
+		//
+		// Only when something was dropped, so a run whose report has no such
+		// row is a run that lost no spans, rather than one nobody can tell
+		// apart from a row of zeroes.
+		if (state.PublishedDropped > 0) {
+			Metrics::Count(FrameGraph::DROPPED_COUNTER, static_cast<double>(state.PublishedDropped));
+		}
 		// The names go with the spans that view into them.
 		state.PublishedNames.swap(state.BuildingNames);
 		state.BuildingNameCount = 0;

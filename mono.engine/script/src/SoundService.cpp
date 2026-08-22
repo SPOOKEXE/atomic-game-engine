@@ -82,14 +82,13 @@
 // @tier L9 · shared
 // @since v0.16
 
-#include "LuauTags.hpp"
-#include "ScriptCall.hpp"
-#include "ServiceSurface.hpp"
-
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Audio.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/script/LuauTags.hpp>
+#include <engine/script/ScriptCall.hpp>
+#include <engine/script/ServiceSurface.hpp>
 
 #include <array>
 

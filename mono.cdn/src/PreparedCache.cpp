@@ -11,7 +11,17 @@ namespace cdn {
 
 	namespace {
 		using engine::assets::ContentHash;
+	}
 
+	struct PreparedCache::Impl {
+		// **Nested rather than in this file's anonymous namespace.** `Impl` is
+		// named in the header and therefore has external linkage, and a field of
+		// it whose type has internal linkage is `-Wsubobject-linkage`: one
+		// definition of `Impl` per translation unit, each with a different
+		// `KeyHash`. It went unreported while every source was its own
+		// translation unit and became an error under the `release` and `ci`
+		// unity build, where the declaration and this definition meet inside one
+		// unit.
 		struct KeyHash {
 			size_t operator()(const PreparedKey &key) const noexcept {
 				// The digests are already uniformly distributed, so the first
@@ -27,9 +37,7 @@ namespace cdn {
 				return bundle ^ (dictionary * 0x9E3779B97F4A7C15ull);
 			}
 		};
-	}
 
-	struct PreparedCache::Impl {
 		mutable std::mutex Guard;
 
 		// Most recently used at the front. A list rather than a heap because

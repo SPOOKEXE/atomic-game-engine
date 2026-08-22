@@ -32,7 +32,6 @@ using engine::scene::Motion;
 using engine::scene::NormalId;
 using engine::scene::Portal;
 using engine::scene::PreviousTransform;
-using engine::scene::QuickHash;
 using engine::scene::Rendered;
 using engine::scene::RigidBody;
 using engine::scene::ShapeKind;
@@ -62,7 +61,6 @@ TEST_CASE("every component is trivially copyable", "[scene][components]") {
 	CHECK(std::is_trivially_copyable_v<Camera>);
 	CHECK(std::is_trivially_copyable_v<Portal>);
 	CHECK(std::is_trivially_copyable_v<SurfaceLens>);
-	CHECK(std::is_trivially_copyable_v<QuickHash>);
 }
 
 // **The one that catches a real bug rather than a design opinion.** A
@@ -79,7 +77,6 @@ TEST_CASE("no component carries unnamed padding", "[scene][components]") {
 	CHECK(sizeof(Bounds) == sizeof(Vector3));
 	CHECK(sizeof(Motion) == 2 * sizeof(Vector3));
 	CHECK(sizeof(Surface) == sizeof(Name));
-	CHECK(sizeof(QuickHash) == sizeof(uint64_t));
 	CHECK(sizeof(Camera) == 3 * sizeof(float));
 	// **`ImageTransparency` widened this one and the two bytes it needed came
 	// out of the named padding**, which is the same trade `Visual` records
@@ -286,14 +283,6 @@ TEST_CASE("bounds and half extents agree on halves", "[scene][components]") {
 	CHECK(bounds.HalfExtent.X == 0.5f);
 	CHECK(bounds.HalfExtent.Y == 0.5f);
 	CHECK(bounds.HalfExtent.Z == 0.5f);
-}
-
-TEST_CASE("a quick hash starts at zero and zero is a real value", "[scene][components]") {
-	// Nothing may read zero as "not computed yet". Both sides of a comparison
-	// come from the same function, and a hash that happens to be zero is a hash
-	// like any other.
-	const QuickHash hash;
-	CHECK(hash.Value == 0u);
 }
 
 TEST_CASE("world bounds are a half extent, once per world", "[scene][components]") {

@@ -1,6 +1,7 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Schema.hpp>
+#include <engine/scripthost/Runtime.hpp>
 
 #include <algorithm>
 #include <fstream>

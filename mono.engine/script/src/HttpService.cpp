@@ -46,7 +46,30 @@
 // `ScriptValue` into text; `JSONDecode` is the mirror, and answers through the
 // same `ReturnValue`. Every table rule below is inherited rather than invented,
 // and the ones this file adds are the ones JSON forces: what a number looks
-// like, what an escape is, and what has no JSON form at all.
+// like, what an escape is, and what has no JSON form at all. The sort is not
+// even one of those: `Codec::SortEntries` is the one that runs, so the order a
+// map is written in is decided once for the bus and the document together.
+//
+// ## Why the text half is still hand-written
+//
+// `mono.vendor` carries nlohmann and `scriptjs/src/SourceMap.cpp` uses it, so
+// the fair question about the six hundred lines below is why they are not a
+// call into it. **Because `script` has no vendor at all**, which is this
+// module's stated invariant in its own `CMakeLists.txt` since the L9/L10 split:
+// a `lua_State` in this directory does not fail a naming rule, it fails to
+// compile. `scriptjs` is a *different module*, one layer up, and one library
+// pulled in here for a tokeniser is the first hole in a property somebody has
+// just finished establishing. It would also put a `nlohmann::json` tree beside
+// the `ScriptValue` one for the encoder to translate between.
+//
+// **That is an argument for keeping it, not for trusting it.** The failure
+// modes of hand-written JSON are known and narrow, so v0.19 measured them:
+// `scripthost/tests/HttpService.cpp` puts number round-tripping, surrogate
+// pairs, lone surrogates, control bytes, NaN and infinity, depth, duplicate
+// keys and RFC 8259's number grammar through this file one case at a time.
+// Everything but the last was already right. The number grammar was not - the
+// scan was `strtod`'s rather than JSON's, which is the sort of thing a library
+// gets right for free - and `ReadNumber` records what it used to accept.
 //
 // ## Neutral since v0.16
 //
@@ -58,12 +81,11 @@
 //
 // @tier L9 · shared
 
-#include "Codec.hpp"
-#include "ScriptCall.hpp"
-#include "ServiceSurface.hpp"
-
 #include <engine/core/Chars.hpp>
 #include <engine/core/Random.hpp>
+#include <engine/script/Codec.hpp>
+#include <engine/script/ScriptCall.hpp>
+#include <engine/script/ServiceSurface.hpp>
 
 #include <algorithm>
 #include <array>
@@ -179,15 +201,14 @@ namespace engine::script {
 
 		// Appends one value's JSON text, sorting map entries on the way.
 		//
-		// **Sorted by key bytes, exactly as `Encode` sorts.** A Lua table is a
-		// hash map, so writing entries in iteration order would make the *string*
-		// a script gets back depend on insertion history and allocator state -
-		// and that string may then be stored in a property, replicated, or
-		// written into a save. `Codec.hpp` §1 is the whole argument, and the only
-		// thing that changes here is that the output is text: the same table must
-		// produce the same document on every run and in both VMs. By bytes rather
-		// than by either language's own comparison, for the same reason that
-		// section gives about `"é"`.
+		// **`Codec::SortEntries`, which is the function `Encode` sorts with**,
+		// rather than a second `std::sort` spelled the same way here. A Lua table
+		// is a hash map, so writing entries in iteration order would make the
+		// *string* a script gets back depend on insertion history and allocator
+		// state - and that string may then be stored in a property, replicated,
+		// or written into a save. `Codec.hpp` §1 is the whole argument, and the
+		// only thing that changes here is that the output is text: the same table
+		// must produce the same document on every run and in both VMs.
 		//
 		// Non-const, like `Encode`, because the sort happens in place and the
 		// tree handed in comes back in the order it was written.
@@ -226,11 +247,14 @@ namespace engine::script {
 				return nullptr;
 
 			case ValueTag::Map:
-				std::sort(
-					value.Entries.begin(), value.Entries.end(), [](const auto &left, const auto &right) {
-						return left.first < right.first;
-					}
-				);
+				// **Two keys spelling one name is refused, not written twice.**
+				// `{ [1] = "a", ["1"] = "b" }` is two Lua keys and one JSON
+				// name, and a document holding `"1"` twice decodes back to a
+				// table with one of them - which one depending on the order the
+				// VM walked the table in. See `CodecStatus::DuplicateKey`.
+				if (SortEntries(value.Entries) != CodecStatus::Ok) {
+					return "two of the table's keys spell one JSON name";
+				}
 
 				out.push_back('{');
 				for (size_t entry = 0; entry < value.Entries.size(); entry++) {
@@ -455,25 +479,101 @@ namespace engine::script {
 				}
 			}
 
+			// Whether the cursor sits on a decimal digit.
+			bool AtDigit() const {
+				return !Done() && Peek() >= '0' && Peek() <= '9';
+			}
+
 			// Reads a number, cursor on its first byte.
 			//
-			// **The grammar is `std::from_chars`'s, applied to the maximal run of
-			// bytes a number can be made of.** Scanning the run first is what
-			// keeps `inf` and `nan` out - `from_chars` accepts both words and
-			// JSON has neither - and requiring the whole run to be consumed is
-			// what makes `1..2` and `1e` errors rather than a `1` followed by
-			// rubbish nothing looked at.
+			// **RFC 8259's grammar is scanned here, and `core::FromChars`
+			// only converts the run the scan accepted.** Until v0.19 the scan
+			// took the maximal run of bytes a number could be made of, so the
+			// grammar was `strtod`'s, which is a superset. The conformance
+			// suite added with this comment found eight documents this reader
+			// accepted and JSON does not have: `.5`, `-.5`, `1.`, `01`, `-01`,
+			// `00.5`, `1.e5` and `0100`. A document only this engine accepts is
+			// worse than one it refuses, because the author finds out from
+			// somebody else's parser.
+			//
+			// The old scan did get one thing right and it is kept: `inf` and
+			// `nan` never reach the conversion. `from_chars` reads both words,
+			// JSON spells neither, and a number here has to start with a digit
+			// or a minus.
 			bool ReadNumber(ScriptValue &out) {
 				const size_t start = At;
-				while (!Done()) {
-					const char character = Peek();
-					const bool numeric = (character >= '0' && character <= '9') || character == '-' ||
-										 character == '+' || character == '.' || character == 'e' ||
-										 character == 'E';
-					if (!numeric) {
-						break;
-					}
+				const bool negative = !Done() && Peek() == '-';
+				if (negative) {
 					At++;
+				}
+
+				// `digits` counts the digit stream, integer digits and then
+				// fraction digits; `significant` is where the first one that is
+				// not a zero sits in it. Only the out-of-range branch below
+				// reads either.
+				size_t digits = 0;
+				size_t significant = SIZE_MAX;
+				const auto take = [&] {
+					if (significant == SIZE_MAX && Peek() != '0') {
+						significant = digits;
+					}
+					digits++;
+					At++;
+				};
+
+				if (!AtDigit()) {
+					return Fail(negative ? "a number wants a digit" : "a value is not recognised");
+				}
+
+				// **The integer part is `0` alone, or a non-zero digit and
+				// its tail.** JSON's one arbitrary-looking rule, and the one
+				// that makes `0100` an error rather than a hundred.
+				if (Peek() == '0') {
+					take();
+				} else {
+					while (AtDigit()) {
+						take();
+					}
+				}
+				const size_t integerDigits = digits;
+
+				// **A fraction is a point and at least one digit**, so
+				// neither `1.` nor `1.e5` is a number.
+				if (!Done() && Peek() == '.') {
+					At++;
+					if (!AtDigit()) {
+						return Fail("a number wants a digit after its point");
+					}
+					while (AtDigit()) {
+						take();
+					}
+				}
+
+				// **An exponent is `e`, an optional sign and at least one
+				// digit**, so `1e` and `1e+` are errors rather than a `1` with
+				// rubbish after it.
+				int64_t exponent = 0;
+				if (!Done() && (Peek() == 'e' || Peek() == 'E')) {
+					At++;
+					const bool negativeExponent = !Done() && Peek() == '-';
+					if (!Done() && (Peek() == '+' || Peek() == '-')) {
+						At++;
+					}
+					if (!AtDigit()) {
+						return Fail("a number wants a digit after its exponent");
+					}
+
+					// Saturating, because the only thing read off this is
+					// its sign and a document may write as many exponent
+					// digits as it likes.
+					static constexpr int64_t EXPONENT_CEILING = 1000000;
+					while (AtDigit()) {
+						exponent = std::min(exponent * 10 + (Peek() - '0'), EXPONENT_CEILING);
+						At++;
+					}
+					if (negativeExponent) {
+						exponent = -exponent;
+					}
 				}
 
 				const std::string_view run = Text.substr(start, At - start);
@@ -482,13 +582,43 @@ namespace engine::script {
 					core::FromChars(run.data(), run.data() + run.size(), value);
 
 				if (read.ec == std::errc::result_out_of_range) {
-					// **Out of a double's range is malformed, not infinity.**
-					// `1e400` would otherwise decode to an infinity that
-					// `JSONEncode` refuses, and this reader's one invariant is
-					// that it never produces a value the writer will not take.
-					return Fail("a number is outside what a double can hold");
-				}
-				if (read.ec != std::errc{} || read.ptr != run.data() + run.size()) {
+					// **`from_chars` answers `result_out_of_range` at both
+					// ends of the range and does not say which end, and the
+					// two want opposite answers.** `1e400` has no double, and
+					// refusing it is this reader's one invariant at work: it
+					// never produces a value the writer will not take, and the
+					// writer refuses an infinity. `1e-400` is an ordinary JSON
+					// number whose nearest double is zero, which every other
+					// parser reads as zero and which the writer takes happily.
+					// Refusing that one was this file's own bug until v0.19.
+					//
+					// Which end it is comes from the text. The value is
+					// `0.d1d2... x 10^power`, where `power` counts from the
+					// decimal point to the first significant digit and then
+					// adds the written exponent. Underflow needs `power` below
+					// -323 and overflow needs it above 308, so the sign of
+					// `power` separates the two with three hundred decades of
+					// margin either way. A run of nothing but zeroes has no
+					// `power` and cannot get here anyway, because zero
+					// converts.
+					// One, so a run with no significant digit at all takes
+					// the overflow branch rather than silently reading as
+					// zero. Unreachable, and cheaper to state than to argue.
+					int64_t power = 1;
+					if (significant != SIZE_MAX) {
+						power = static_cast<int64_t>(integerDigits) - static_cast<int64_t>(significant) +
+								exponent;
+					}
+
+					if (power > 0) {
+						return Fail("a number is larger than a double can hold");
+					}
+
+					// Signed, so `-1e-400` writes back as `-0` and the round
+					// trip is the one the writer already promises for a
+					// negative zero.
+					value = negative ? -0.0 : 0.0;
+				} else if (read.ec != std::errc{} || read.ptr != run.data() + run.size()) {
 					return Fail("a number is malformed");
 				}
 
@@ -888,7 +1018,7 @@ namespace engine::script {
 		// **Four methods, and the three that are missing are missing on
 		// purpose.** Do not add `RequestAsync`, `GetAsync` or `PostAsync` here -
 		// this file's header says what would have to be decided first.
-		constexpr std::array<ServiceMethod, 4> METHODS{{
+		constexpr std::array<ServiceMethod, 4> HTTP_METHODS{{
 			{"JSONEncode", JsonEncode},
 			{"JSONDecode", JsonDecode},
 			{"GenerateGUID", GenerateGuid},
@@ -900,7 +1030,7 @@ namespace engine::script {
 		static const ServiceSurface SURFACE = [] {
 			ServiceSurface surface;
 			surface.Name = "HttpService";
-			surface.Methods = METHODS;
+			surface.Methods = HTTP_METHODS;
 			return surface;
 		}();
 		return SURFACE;

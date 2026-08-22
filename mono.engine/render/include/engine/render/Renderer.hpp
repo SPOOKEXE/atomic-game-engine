@@ -725,6 +725,8 @@ namespace engine::render {
 			//@}
 		};
 
+		// This view's grid. Off unless the view says otherwise, so a client that
+		// never mentions it draws none.
 		GroundGrid Grid;
 	};
 
@@ -1899,6 +1901,19 @@ namespace engine::render {
 
 		struct Impl;
 		std::unique_ptr<Impl> State;
+
+		// The recording of one view, which is where the node families reach
+		// this state from.
+		//
+		// **A friend rather than a public `Impl`, and rather than lifting the
+		// state out of this class.** Splitting `RenderView` put each node
+		// family in its own translation unit, and every one of them records
+		// against the device objects `Impl` holds - so the type has to be
+		// nameable from `src/nodes/`. Naming it through one class keeps the
+		// definition private to `src/RendererState.hpp` and adds no type a
+		// consumer of this header can do anything with. `src/ViewRecording.hpp`
+		// carries the split's argument; `docs/ARCH_REVIEW.md` C2 is the finding.
+		friend class ViewRecording;
 
 		// The thread that called `Initialise`, and the only one that may record.
 		//

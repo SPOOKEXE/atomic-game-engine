@@ -270,8 +270,27 @@ namespace engine::graph {
 
 		// One kind.
 		//
+		// **The pointer is valid until the next `Register`, and the mutex does
+		// not extend past the return.** `All` has carried that contract since
+		// v0.11 and `Find` did not, which made the two look like different
+		// strengths of the same guarantee when they are the same one.
+		// `Specs` is a sorted vector, so a `Register` does `push_back` and
+		// `std::sort`: the pointer can dangle on a reallocation, and it can
+		// silently name a *different* kind without dangling if the sort moved
+		// another spec into that slot. The second is the one to be afraid of.
+		//
+		// **Safe today because registration is init-only.**
+		// `RegisterRenderNodeKinds` is called once by the client and once by
+		// the studio, and nothing else registers outside tests. The hazard is
+		// `Register`'s own documented intent that a game may correct a
+		// built-in, which would put a `Register` after a `Find`. If that ever
+		// becomes real, the table has to stop being a sorted vector first;
+		// widening the lock would not help, because the caller holds the
+		// pointer and the lock is gone by then.
+		//
 		// @param kind Which.
-		// @return The spec, or null when nothing registered that name.
+		// @return The spec, or null when nothing registered that name. Valid
+		//         until the next `Register`.
 		static const NodeKindSpec *Find(core::Name kind);
 
 		// Every kind, sorted by `Kind`'s text.
@@ -280,7 +299,9 @@ namespace engine::graph {
 		// way whatever order the registrations happened to run in - the same
 		// argument `PipelineSet::Names` makes about a save file.
 		//
-		// @return The specs. Valid until the next `Register`.
+		// @return The specs. Valid until the next `Register`; the mutex does
+		//         not extend past the return. See `Find` for what a later
+		//         `Register` does to a span taken from here.
 		static std::span<const NodeKindSpec> All();
 
 		// Forgets everything. For tests, which need a table they control.

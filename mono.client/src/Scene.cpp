@@ -1569,13 +1569,38 @@ namespace client {
 			});
 		}
 
-		// The camera and character systems, installed together.
+		// The two resources a script writes `UserInputService` through.
 		//
-		// **`InputState` is created here and never by a script**, because a world
-		// with no resource is one where every input query answers "nothing
-		// pressed" - which is exactly right for a server and exactly wrong for a
-		// client that forgot to install it. Creating it at install time makes the
-		// presence of the resource mean "somebody is looking at this world".
+		// **Created by the host and never by a script**, because a world with no
+		// resource is one where every input query answers "nothing pressed" -
+		// which is exactly right for a server and exactly wrong for a client that
+		// forgot to install it. Creating it at install time makes the presence of
+		// the resource mean "somebody is looking at this world".
+		//
+		// **Its own function because it has to happen before the scene script's
+		// top-level chunk runs, and installing the systems there would be far too
+		// early.** `UserInputService.MouseBehavior`, `MouseIconEnabled` and
+		// `MouseDeltaSensitivity` are writes onto these two resources, and
+		// `script::UserInputService` drops a write onto a world that has neither -
+		// deliberately, so that a server does not mint a window's state. Until
+		// v0.19 they were minted by `InstallControls`, which runs *after*
+		// `LoadScene`, so a `--script` scene that locked the pointer at the top
+		// level had the write silently dropped and only a write from inside a
+		// `Heartbeat` took.
+		//
+		// Idempotent, and every caller relies on that: `InstallControls` calls it
+		// again on a world that has already been through here, and a second
+		// `SetResource` would throw away the pointer mode the script just set.
+		void InstallInputResources(Store &store) {
+			if (!store.HasResource<engine::scene::InputState>()) {
+				store.SetResource(engine::scene::InputState{});
+			}
+			if (!store.HasResource<engine::scene::CameraController>()) {
+				store.SetResource(engine::scene::CameraController{});
+			}
+		}
+
+		// The camera and character systems, installed together.
 		//
 		// **The ground check is the client's rather than `scene`'s**, and that is
 		// the tier doing its job: `scene` may not link `physics`, so
@@ -1583,12 +1608,7 @@ namespace client {
 		// The same split `replication::DistancePriority::Blocked` already has -
 		// the arithmetic there, the query here.
 		void InstallControls(Store &store, Scheduler &scheduler) {
-			if (!store.HasResource<engine::scene::InputState>()) {
-				store.SetResource(engine::scene::InputState{});
-			}
-			if (!store.HasResource<engine::scene::CameraController>()) {
-				store.SetResource(engine::scene::CameraController{});
-			}
+			InstallInputResources(store);
 
 			// **Camera control in `PreRender` and character control in
 			// `Simulation`**, which is not an inconsistency. A camera is
@@ -1672,6 +1692,14 @@ namespace client {
 
 		// Register built-in metadata before the script can query it.
 		RecordBuiltinMeshes(store);
+
+		// **Before the script runs, for `RegisterEffectClasses`' reason with a
+		// quieter failure.** A top-level `UserInputService.MouseBehavior` is a
+		// write onto `scene::InputState`, and a write onto a world that has none
+		// is dropped rather than refused - so the scene simply did not lock the
+		// pointer and nothing said why. `InstallInputResources` states the whole
+		// argument.
+		InstallInputResources(store);
 
 		// The scene, the components and the systems that move it are the
 		// engine's and every program's. What follows is the client's half.

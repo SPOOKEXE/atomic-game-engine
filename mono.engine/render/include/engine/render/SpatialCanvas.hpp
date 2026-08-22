@@ -24,10 +24,10 @@
 //
 // ## Order
 //
-// Runs **before** `gui::Layout` in a frame, and after `scene::ResolveActiveCamera`
-// so the camera it reads is this frame's. Running it after the layout would draw
-// one frame at the previous canvas, which on a billboard the player is walking
-// towards is a visible lag on the size of everything inside it.
+// Runs **before** `gui::Layout` in a frame, and after whatever placed the eye,
+// so the camera row it reads is this frame's. Running it after the layout would
+// draw one frame at the previous canvas, which on a billboard the player is
+// walking towards is a visible lag on the size of everything inside it.
 //
 // **Headless.** Bounds, a distance and a tangent - no device, so it is testable
 // without one.

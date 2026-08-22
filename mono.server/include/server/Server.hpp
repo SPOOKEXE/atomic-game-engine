@@ -13,6 +13,7 @@
 #include <engine/examples/Shooting.hpp>
 #include <engine/game/Play.hpp>
 #include <engine/net/Transport.hpp>
+#include <engine/net/Wire.hpp>
 #include <engine/replication/Listener.hpp>
 #include <engine/replication/Rewind.hpp>
 #include <engine/script/Runtime.hpp>
@@ -224,6 +225,27 @@ namespace server {
 		// @since v0.18
 		uint64_t ProfileWindowTicks = 0;
 
+		// Seconds between periodic `core::Metrics` reports. Zero writes none.
+		//
+		// **The headless server counted things for ten versions and read none
+		// of them.** `cdn`, `assets`, `delivery`, `net` and `replication` all
+		// write into `core::Metrics`; the only reader in the tree was the
+		// client's F5 overlay, which a server does not have. So every counter a
+		// host produced went into a sink and was thrown away at exit -
+		// `docs/ARCH_REVIEW.md` §G2.
+		//
+		// **Off by default, and that is deliberate rather than timid.** A report
+		// on a schedule is output nobody asked for, and a host's log is scraped:
+		// `just stress` reads the tick line out of it. A run that wants the
+		// numbers says so, and gets them on the interval it named.
+		//
+		// The final report at shutdown is **not** gated by this. It costs one
+		// snapshot at the end of a run that is already over, and a counter
+		// nobody can see is the whole finding.
+		//
+		// @since v0.19
+		double MetricsReportSeconds = 0.0;
+
 		// Write a heap report here when the run ends. Empty writes none.
 		//
 		// Turning it on turns heap sampling on, for the reason `ProfilePath`
@@ -408,18 +430,21 @@ namespace server {
 		// @since v0.13
 		std::string RendezvousAddress;
 
-		// Whether to serve over QUIC instead of the datagram wire.
+		// Which transports this server answers. `quic` by default.
 		//
-		// **Needs an identity, and refuses to start without one.** A QUIC server
-		// proves who it is inside its own handshake - there is no unauthenticated
-		// mode to fall back to, which is the opposite of the datagram wire where
-		// the signature is an optional field in the welcome. `docs/QUIC.md` is
-		// the argument for the transport; what belongs here is that turning it on
-		// is a decision an operator makes and a client has to match, because
-		// there is no negotiation between the two and there should not be.
+		// **The server decides and the client has no flag.** A client opens with
+		// QUIC and falls back when it is refused, so `datagram` and `both` are
+		// operator decisions that need nothing changed at the other end. The
+		// boolean `--quic` this replaces is gone rather than kept as an alias:
+		// nothing in the tree depended on it, and a boolean beside a three-valued
+		// flag has an undefined answer when somebody passes both.
+		//
+		// A QUIC server with no `IdentityKey` draws an ephemeral one rather than
+		// refusing to start - `replication::ListenerSettings::Quic` says why, and
+		// what it gives is exactly what an unsigned datagram welcome gives.
 		//
 		// @since v0.19
-		bool Quic = false;
+		engine::net::WireMode Transport = engine::net::WireMode::Quic;
 
 		// The Ed25519 seed this server proves its identity with, as 64 hex
 		// characters, or empty for none.
@@ -523,10 +548,15 @@ namespace server {
 		// that client actually saw.
 		//
 		// **The query is a game's to make and the answer is a game's to act
-		// on.** This engine has no notion of a shot, so nothing here consumes
-		// it; what the server owes is an accurate record and
+		// on.** What the server owes is an accurate record and
 		// `Rewind::TickSeenBy` to turn a client's input tick and its link's
 		// round trip into the moment to sample.
+		//
+		// **Nothing calls this accessor today**, and the claim it used to carry
+		// - that nothing consumes the history at all - stopped being true when
+		// `ApplyInputs` gained the shot path, which asks over `History`
+		// directly. What is unwired is the *outward* half: a game asking its own
+		// question of the same record. `docs/CODE_ARCH.md` decision 16.
 		//
 		// @return The history.
 		const engine::replication::Rewind &Rewound() const {
@@ -873,6 +903,15 @@ namespace server {
 		// @param nowSeconds The current time.
 		void TouchWorld(engine::world::WorldId world, double nowSeconds);
 
+		// Fills the control surface with the shared table and this server's own.
+		//
+		// **In `src/Control.cpp`, beside the state it reads**, which is the same
+		// place the editor keeps its own. Called once, from `Run`, and only when
+		// `--mcp-port` asked for a surface at all.
+		//
+		// @since v0.19
+		void RegisterControlTools();
+
 		// The control surface. Started only when asked; a server that was never
 		// started costs a thread that was never spawned.
 		engine::control::Server ControlServer;
@@ -975,6 +1014,10 @@ namespace server {
 		// built-in shapes and nothing else.
 		//
 		// @since v0.17
+		// arch-waiver ecs-copy: baked once for the host and merged into each world
+		// by `InstallCollisionShapes`. The paragraph above is the argument: a host
+		// of eight worlds would otherwise run quickhull eight times over the same
+		// meshes to produce eight identical tables.
 		std::unique_ptr<engine::scene::CollisionShapes> ContentShapes;
 
 		// One VM per world, while a game file is being hosted.

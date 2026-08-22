@@ -91,6 +91,34 @@ The cache is consulted before any source and is **not** itself a source. It hold
 content this client has already verified, so reading it is not a fetch and cannot
 be pointed at somebody else's bytes.
 
+### The cache's running total is a trigger, and must never become a listing
+
+`ContentCache` keeps how many bytes it believes its directory holds. **It decides
+whether `MakeRoom` walks the directory at all; it never decides what to evict.**
+That distinction is the whole design and a reviewer should refuse a change that
+blurs it.
+
+Storing used to walk the whole cache tree every time - three syscalls per file
+already there, so caching N assets cost N squared stats, inside `Pump`, at the
+tick barrier. Measured over 1024 four-kilobyte assets: 1.17 ms per store, against
+16.3 us for the same stores into an uncapped cache, which does no eviction work
+at all. It is 16.4 us now.
+
+A total can drift and an index of *what is here* must not. Another process
+writing into the directory makes the total too small, so the ceiling is crossed
+late by whatever that process wrote; one deleting files makes it too large, so a
+walk happens early and finds nothing to do. **Neither can hide a file from
+eviction**, because eviction chooses from the walk, and both correct themselves
+at the walk, which replaces the total with what it found. A remembered listing
+could not make that trade: a stale entry would be a file nothing ever evicts,
+which is the directory growing past its ceiling for ever with no symptom.
+
+Eviction goes an eighth of the ceiling below it rather than exactly to it. A
+cache smaller than its game's working set sits at its ceiling for ever, and
+evicting the minimum puts the walk back on every store - 647 us per store against
+36 us with the headroom. What that costs is an eighth of the cache dropped
+earlier than it had to be, which is content refetched rather than content lost.
+
 ## A descriptor is untrusted
 
 `repo_layout.md` §11: *a client that is told to fetch from an arbitrary host is a
@@ -136,6 +164,15 @@ order, with no framing and no index. That layout is **derived from the signed
 manifest** rather than transmitted, so an origin cannot move an asset's boundary
 without breaking the signature. `Manifest::SliceOf` is the one definition of it
 and `ChunkStore::ReadBundle` is the one producer.
+
+Cutting a group up asks the manifest per member, twice - once to resolve the
+member and once inside `SliceOf` for every member it walks past - so it stays
+quadratic in a bundle's size however fast the lookup is. That is affordable
+because the lookup is a binary search now: 11.96 us to locate one member of a
+32-member group in a 4096-asset manifest before `Manifest::RootOrder` existed,
+319 ns after. **Do not answer the remaining quadratic by computing the offsets in
+the client.** That would be a second definition of where an asset sits inside a
+group, which is the one thing this section refuses.
 
 ## How much a frame absorbs is a decision, and it is one decision
 

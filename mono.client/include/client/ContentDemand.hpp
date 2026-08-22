@@ -35,8 +35,14 @@
 // caller issues a bounded number of new requests per pump, so a scene naming
 // five hundred assets becomes five hundred assets arriving over several seconds
 // rather than one frame that never ends. The collection below is idempotent, so
-// a caller re-runs it each pump and picks up where it left off with no queue of
-// its own to keep in step.
+// a caller re-runs it and picks up where it left off with no queue of its own to
+// keep in step.
+//
+// **Idempotent is not free, and the caller decides when to spend it.** This is
+// eight walks of a store, so a client that ran it on every world on every frame
+// spent all eight to learn nothing on every frame but the ones where a scene
+// changed - `docs/ARCH_REVIEW.md` F1. `Client::ScanWantedContent` is the gate
+// and states why it is `ecs::WorldTime::Tick` and not the ECS change channel.
 //
 // @tier L13 · client
 

@@ -109,8 +109,7 @@ namespace unified {
 		// A lossy arrangement that lost nothing passes for the wrong reason,
 		// which is the failure `net::LossStatistics` asks a caller to assert
 		// against by name.
-		if (reports.Ran.Carrying == Transport::Lossy && reports.ToClient.has_value() &&
-			reports.ToClient->Dropped == 0) {
+		if (Loses(reports.Ran.Carrying) && reports.ToClient.has_value() && reports.ToClient->Dropped == 0) {
 			found.push_back(Says(
 				"net/unified",
 				"the arrangement is lossy and the wrapper on the client's end dropped nothing of the " +
@@ -153,7 +152,7 @@ namespace unified {
 			// `Transport::Lossy` a chunk can genuinely be in flight or gone, and
 			// asserting equality there would be asserting that loss does not
 			// happen on a link built to make it happen.
-			if (reports.Ran.Carrying != Transport::Lossy) {
+			if (!Loses(reports.Ran.Carrying)) {
 				if (reports.Relay->Served != reports.Link->Completed) {
 					found.push_back(Says(
 						"client/server",

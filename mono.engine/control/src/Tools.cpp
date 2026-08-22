@@ -12,8 +12,18 @@
 // default both to something small - a world of fifty thousand parts serialised
 // whole is a reply nothing can read and a frame nothing can draw.
 
+#include "Catalogue.hpp"
+
 #include <engine/control/Surface.hpp>
 #include <engine/core/FrameGraph.hpp>
+#include <engine/core/types/CFrame.hpp>
+#include <engine/core/types/Color3.hpp>
+#include <engine/core/types/NumberRange.hpp>
+#include <engine/core/types/Rect.hpp>
+#include <engine/core/types/Sequence.hpp>
+#include <engine/core/types/UDim.hpp>
+#include <engine/core/types/Vector2.hpp>
+#include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Instance.hpp>
@@ -653,6 +663,31 @@ namespace engine::control {
 		}
 	}
 
+	json ComponentCatalogue() {
+		json out = json::array();
+		for (uint32_t index = 0; index < static_cast<uint32_t>(ecs::Components::Count()); index++) {
+			const ecs::TypeDescriptor &type = ecs::Components::Describe(ecs::ComponentId(index));
+			const std::string name(type.Name.Text());
+			const size_t dot = name.find('.');
+
+			out.push_back(
+				json{
+					{"name", name},
+					{"module", dot == std::string::npos ? std::string() : name.substr(0, dot)},
+					{"bytes", type.Size},
+					{"tag", type.Kind == ecs::ComponentKind::Tag},
+					{"saved", type.Serialisable},
+					{"wireBytes", type.Wire.Present() ? type.Wire.Size : 0},
+				}
+			);
+		}
+
+		std::sort(out.begin(), out.end(), [](const json &a, const json &b) {
+			return a.at("name").get<std::string>() < b.at("name").get<std::string>();
+		});
+		return json{{"components", std::move(out)}, {"count", ecs::Components::Count()}};
+	}
+
 	void Surface::AddUniverseTools(world::Universe &universe, bool writable) {
 		world::Universe *worlds = &universe;
 
@@ -695,30 +730,7 @@ namespace engine::control {
 			"is a set of these. Use component_list instead for the components a game declared for "
 			"itself, and instance_get to read one off a particular instance.",
 			[] { return json{{"type", "object"}}; },
-			[](const json &, std::string &) {
-				json out = json::array();
-				for (uint32_t index = 0; index < static_cast<uint32_t>(ecs::Components::Count()); index++) {
-					const ecs::TypeDescriptor &type = ecs::Components::Describe(ecs::ComponentId(index));
-					const std::string name(type.Name.Text());
-					const size_t dot = name.find('.');
-
-					out.push_back(
-						json{
-							{"name", name},
-							{"module", dot == std::string::npos ? std::string() : name.substr(0, dot)},
-							{"bytes", type.Size},
-							{"tag", type.Kind == ecs::ComponentKind::Tag},
-							{"saved", type.Serialisable},
-							{"wireBytes", type.Wire.Present() ? type.Wire.Size : 0},
-						}
-					);
-				}
-
-				std::sort(out.begin(), out.end(), [](const json &a, const json &b) {
-					return a.at("name").get<std::string>() < b.at("name").get<std::string>();
-				});
-				return json{{"components", std::move(out)}, {"count", ecs::Components::Count()}};
-			},
+			[](const json &, std::string &) { return ComponentCatalogue(); },
 		});
 
 		Add(Tool{

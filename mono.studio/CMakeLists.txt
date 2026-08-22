@@ -14,6 +14,12 @@
 # harness is: under the `server` preset there is no renderer to link and this is
 # absent rather than stubbed.
 
+# The node graph library this editor is the only consumer of; its own
+# CMakeLists says why it lives here rather than in `mono.engine/`. Declared
+# before the library below, which names `Mono::nodegraph` and needs the alias
+# to exist by then.
+add_subdirectory(nodegraph)
+
 mono_add_library(studio
 	TIER client
 	NAMESPACE Mono
@@ -24,6 +30,13 @@ mono_add_library(studio
 		Engine::world
 		Engine::scene
 		Engine::script
+
+		# L11, `shared`. **Because a plugin is a script and the command bar opens
+		# its own VM.** `Plugins.cpp`, `CommandBar.cpp` and `ScriptEditor.cpp` each
+		# call `MakeRuntime`; it was arriving through `Engine::game` and a
+		# dependency a file includes is one its build file should say out loud.
+		Engine::scripthost
+
 		Engine::graph
 
 		# L6, `shared`. The simulation. **Named here rather than reached
@@ -52,27 +65,28 @@ mono_add_library(studio
 
 		# L12, `client`. The renderer, and the interface layer that records into
 		# its frames. `Engine::ui` is where Dear ImGui is public; `nodegraph`
-		# below links it too, but privately.
+		# below vendors it too, but privately.
 		Engine::render
 		Engine::ui
 
-		# L11, `client`. The node graph, its evaluator and its canvas. Was a
-		# vendored submodule until v0.18.0 and is a first-party module now, so
-		# it is a `DEPS` entry rather than a `VENDOR_PUBLIC` one - which is a
-		# narrowing, not a widening: `DEPS` is public linkage either way, and
-		# this no longer drags Dear ImGui along publicly behind it.
+		# `client`, no layer. The node graph, its evaluator and its canvas -
+		# `nodegraph/` beside this file since v0.19. It was a vendored submodule
+		# until v0.18.0 and `Engine::nodegraph` until v0.19, and it is here now
+		# because this is the only target in the repository that links it: an
+		# imgui-carrying `client` library nothing in the engine reaches is an
+		# editor widget library, not a layer of the engine.
 		#
 		# **Public, and it has to be.** `studio::Editor` *holds* the graph, the
-		# canvas and the evaluator by value and hands an
-		# `engine::nodegraph::PreviewImage` to its texture sink, so those types
-		# are named in `studio/Editor.hpp` and cannot be hidden without a pimpl
-		# over the editor's whole state.
+		# canvas and the evaluator by value and hands a
+		# `nodegraph::PreviewImage` to its texture sink, so those types are
+		# named in `studio/Editor.hpp` and cannot be hidden without a pimpl over
+		# the editor's whole state.
 		#
-		# The node set the Demo Nodes panel runs is *not* here. It is
+		# The node set the Demo Nodes panel runs is *not* in it. It is
 		# `src/DemoNodes.cpp`, in this target, because it is content rather than
 		# library - D00113's seam, kept: a host with its own vocabulary links
-		# the module and gets none of it.
-		Engine::nodegraph
+		# the library and gets none of it.
+		Mono::nodegraph
 
 		# L10, `shared`. The content store this editor manages and lists.
 		# **Named here rather than taken transitively through `Mono::server`**,

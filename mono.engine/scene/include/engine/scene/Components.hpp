@@ -1457,14 +1457,19 @@ namespace engine::scene {
 	// loop over one component type, and everything else in this file is
 	// untouched.
 	//
-	// **The derived frame is a field rather than a getter, and the reason is a
-	// beam.** A beam reads both of its attachments' world frames every frame,
-	// and a getter that resolved by walking to the parent would be two hierarchy
-	// lookups and two `CFrame` products per beam per frame - for a value that is
-	// the same for every reader within one frame. `ecs/AGENTS.md`'s rule against
-	// two copies of a fact bends here for the reason `CameraMatrices` bends it:
-	// the second copy is a *cache with one writer*, and `ResolveAttachments` is
-	// that writer.
+	// **The derived frame is a field rather than a getter, and the second reason
+	// is the one that matters.** The first is ordinary: a spawn point and a lamp
+	// placement both want the same product every frame, so one pass over one
+	// component type beats a hierarchy lookup per reader. The second is that a
+	// getter cannot signal. `ResolveAttachments` writes the rows that moved
+	// through `Store::GetMutable`, which *reports* the write - and that report is
+	// the whole of why `Attachment.WorldCFrame` and `WorldPosition` can fire
+	// `.Changed` when the part underneath moves. `ecs/AGENTS.md`'s rule against
+	// two copies of a fact bends here on those terms: the second copy is a cache
+	// with exactly one writer, and every host that owns a world runs it. A caller
+	// that wants the value without waiting for the pass calls
+	// `ResolveAttachment`, which is what the property getters and `BuildRibbons`
+	// do.
 	//
 	// **An attachment on nothing keeps its local frame as its world frame.**
 	// Roblox's rule - an `Attachment` parented to a `Model` or to the tree root
@@ -1566,33 +1571,6 @@ namespace engine::scene {
 
 		// Whether it is on.
 		bool Enabled = true;
-	};
-
-	// A content hash of what a consumer last saw, for consumers that cannot
-	// observe a column version.
-	//
-	// **This is the fallback and it must stay labelled as one.** Change
-	// detection is `ecs::ChangeChannel`: a column carries a version, a write
-	// through `Set` or `GetMutable` advances it, and that covers almost
-	// everything. The gap is the batch path - a system writing through a raw
-	// column pointer advances no per-row stamp, because there is no per-row
-	// write to hang one on, and `Store::MarkAllChanged` over-reports by design.
-	//
-	// So a consumer that must know exactly which rows differ recomputes this at
-	// `PostSimulation` and compares. It costs a pass over the data it is
-	// hashing, every tick, whether anything moved or not - which is why the
-	// answer is almost always the column version instead.
-	//
-	// Add one only where the batch path is genuinely the writer. If this starts
-	// appearing next to components nothing writes in bulk, it has spread and
-	// the fix is to delete it there rather than to make it cheaper.
-	//
-	// @since v0.4
-	struct QuickHash {
-		// The hash as of the last `PostSimulation`. Zero is a real value and
-		// not "unset": what makes a comparison meaningful is that both sides
-		// were computed by the same function, not that either is non-zero.
-		uint64_t Value = 0;
 	};
 
 	// How far a world reaches from its own origin.

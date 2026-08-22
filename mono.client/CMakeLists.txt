@@ -18,6 +18,20 @@ mono_add_library(client
 		# `Engine::ui` is the editor's toolkit and is deliberately absent.
 		Engine::gui
 
+		# L8, `shared`. `client/Client.hpp` includes `assets/ContentPolicy.hpp`
+		# to hold the process's content policy, and `Client.cpp` names the
+		# manifest and the material format. **Undeclared until v0.19**, arriving
+		# through `Engine::render` and `Engine::delivery`, which is the failure
+		# the `Engine::physics` row below already records happening once.
+		Engine::assets
+
+		# L9, `shared`. A render pipeline is a document before it is a graph:
+		# `client/Client.hpp` and `client/Scene.hpp` both name
+		# `graph::PipelineDocument` in public headers and `Scene.cpp` registers
+		# the render node kinds. Undeclared until v0.19, arriving through
+		# `Engine::render`.
+		Engine::graph
+
 		Engine::render
 
 		# L7, `shared`. The component set both programs share: the demo world is
@@ -63,13 +77,23 @@ mono_add_library(client
 		# includes is one its build file should say out loud.
 		Mono::discord
 
-		# L10, `shared`. `--script` builds the scene by running a Luau file
+		# L9, `shared`. The VM-free half of the script layer, and the one this
+		# directory compiles against: `client/Client.hpp` and
+		# `client/Replicated.hpp` both name `script::Runtime` in a public header
+		# because a client owns one VM per world. **`Engine::scripthost` is
+		# deliberately absent** - nothing here calls `MakeRuntime`; the worlds
+		# are opened through `Engine::examples` and `Engine::game`, which are
+		# above the adapters and name the factory themselves. Undeclared until
+		# v0.19, arriving through `Engine::examples`.
+		Engine::script
+
+		# L12, `shared`. `--script` builds the scene by running a Luau file
 		# instead of the C++ loop in Demo.cpp. The VM itself is private to that
 		# module - nothing here compiles against Luau - so this row says "the
 		# client can run a game file" and nothing about which language it is in.
 		Engine::examples
 
-		# L10, `shared`. `--game FILE.agame` plays a universe authored in the
+		# L12, `shared`. `--game FILE.agame` plays a universe authored in the
 		# studio, single-player. **Not `Mono::server`**: loading a game file and
 		# running its scripts as both roles needs the format and the VM and
 		# nothing else, so the tier escape reserved below is still not declared.
@@ -87,6 +111,14 @@ mono_add_library(client
 		# inside its game file never builds one, which is why this is a
 		# dependency and not a start-up step.
 		Engine::delivery
+
+	# **Private, and `client/Actions.hpp` names `SDL_Event` anyway.** That header
+	# arrived at v0.19 from `Engine::input`, whose `VENDOR_PUBLIC SDL3::SDL3`
+	# already propagates SDL's include directories to everything linking this
+	# library - and `Actions.hpp` is a keyboard table, so the event type in its
+	# signature is the same fact `input/CMakeLists.txt` states for `Translate.hpp`.
+	# If `Engine::input` ever stops being public about SDL, this line becomes
+	# `VENDOR_PUBLIC` in the same commit.
 	VENDOR SDL3::SDL3
 )
 
@@ -97,6 +129,11 @@ mono_add_program(client
 		Mono::client
 		Engine::core
 		Engine::render
+
+		# `main.cpp` reads `assets/ContentPolicy.hpp` to turn a content form off
+		# from the command line, which is the program's decision rather than the
+		# library's - so the row is here as well as on the library.
+		Engine::assets
 
 		# **The program and not the library**, because only `main.cpp` names it:
 		# the client defaults its content origin to the local store at

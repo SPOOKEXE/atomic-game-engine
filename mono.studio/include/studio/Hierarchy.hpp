@@ -20,8 +20,8 @@
 //
 // So the scan computes a **signature** - a rolling hash of every field the
 // flatten reads - and when it matches the last one, the compiled rows are still
-// correct and are kept. This is `scene::QuickHash`'s pattern one layer up, and
-// it is the same fallback for the same reason: `Hierarchy` and `InstanceName`
+// correct and are kept. This is `gui::Compiled`'s pattern one layer up, and it
+// is the same fallback for the same reason: `Hierarchy` and `InstanceName`
 // are not observed components, so `Store::ChangeVersion` does not move when
 // something is reparented or renamed.
 //
@@ -334,7 +334,7 @@ namespace studio {
 		std::vector<engine::ecs::Entity> Fringe;
 
 		// The last signature, and whether there is one at all. Zero is a real
-		// hash and not "unset", exactly as `scene::QuickHash` says of its own.
+		// hash and not "unset", exactly as `gui::Compiled` says of its own.
 		uint64_t Stamp = 0;
 		bool Stamped = false;
 

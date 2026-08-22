@@ -66,7 +66,7 @@ mono.build/            the tier system, MonoLibrary.cmake, the shared test main
 mono.engine/           libraries, and nothing else. No main.cpp lives here
 mono.client/           the client library and its thin main
 mono.server/           the server library and its thin main
-mono.studio/           the editor
+mono.studio/           the editor, and the node graph library beside it
 mono.launcher/         the launcher
 mono.cdn/              the content origin
 mono.network/          finding a peer, and being findable
@@ -144,10 +144,12 @@ checks it.
 | 13 | `control` | shared | the control surface |
 | 12 | `render` `ui` `input` `audio` | client | presentation |
 | 12 | `replication` `network` | shared | what the wire means, and finding a peer |
+| 12 | `game` `examples` | shared | what a game file is |
 | 11 | `net` `delivery` `discord` | shared | transport, fetching, presence |
-| 11 | `resources` `msl` `nodegraph` | client | built-in GLSL, SPIR-V to MSL, a node canvas |
-| 10 | `game` `examples` | shared | what a game file is |
-| 9 | `script` `graph` `bake` `bakegraph` | shared | running a script, what is drawn, importing |
+| 11 | `resources` `msl` | client | built-in GLSL, SPIR-V to MSL |
+| 11 | `scripthost` | shared | which VM to open |
+| 10 | `scriptluau` `scriptjs` | shared | one adapter each, and neither names the other |
+| 9 | `script` `graph` `bake` `bakegraph` | shared | what a script may name, what is drawn, importing |
 | 8 | `assets` `physics` `effects` | shared | content addressing, simulation |
 | 7 | `scene` `gui` | shared | what a thing in a world is, what a 2D thing is |
 | 6 | `spatial` | shared | where things are |
@@ -157,11 +159,28 @@ checks it.
 | 2 | `parallel` | shared | jobs, threads, processes, ipc |
 | 1 | `core` | shared | platform and values |
 
+**`game` and `examples` moved from L10 to L12 at v0.19**, and the reason is the
+one edge the split created: both call `MakeRuntime` to start a world's scripts,
+`MakeRuntime` is the only thing that may name both VMs, and it therefore has to
+sit above both adapters. Nothing but the program band links either module, so
+the move cost two `layer` fields and no edge - which is what §4's "a layer is a
+ceiling, not a slot" is for.
+
 Above L13 is the **program band**: `client`, `server`, `studio`, `launcher`,
-`cdn`, `loadtest`, `unified_tests`, and the tool libraries `assetc`, `docgen`,
-`linecount`, `shadercheck`, `testrunner`. These have no layer, and that absence
-is itself checked: **nothing that has a layer may link something that has not.**
-A program-band entry is the thing that links modules and that no module links.
+`cdn`, `loadtest`, `unified_tests`, the tool libraries `assetc`, `docgen`,
+`linecount`, `shadercheck`, `testrunner`, and `nodegraph`. These have no layer,
+and that absence is itself checked: **nothing that has a layer may link
+something that has not.** A program-band entry is the thing that links modules
+and that no module links.
+
+**`nodegraph` is in the band for the second half of that definition rather than
+the first.** It links no module at all - `shadercheck` is the other row shaped
+that way - and it is a library of one program: `mono.studio/nodegraph` since
+v0.19, moved out of `mono.engine/` because `studio` was the only target in the
+repository that ever linked it. Dropping its `layer` is what turns "only the
+editor uses this" from a fact about today into an edge the architecture check
+refuses. §4.3 recounts the leaf band after the move and reaches the same answer
+it did before.
 
 ### 4.2 · Where the built stack and the designed one disagree
 
@@ -173,22 +192,68 @@ knowing before somebody "corrects" one of them.
 | L13 `script` | L9 `script` | `script` binds the object model and the simulation, and both sit below it. It never needed the top of the stack, so it stopped claiming it |
 | L12 `vfx` | L8 `effects` | as designed, `render` and `vfx` were siblings and `render` needed `effects`, which is a lateral edge. Demoting `effects` made the edge downward, which is the better fix |
 | L10 `physics` | L8 `physics` | same reason: `script` and `graph` both read it from L9 |
-| L6 `ledger` **[server]** | not built | no global commit log exists |
-| L5 `persistence` | not built | no storage layer exists |
+| L6 `ledger` **[server]** | reserved at L5 | no global commit log exists yet; §4.2 places it |
+| L5 `persistence` | reserved at L3 | no storage layer exists yet; §4.2 places it |
 
-**The two unbuilt layers are the finding.** L5 and L6 were reserved in the
-design for `persistence` and `ledger`, and in the built tree those numbers are
-occupied by `collision` and `spatial`. Decision 7 in §9 below still says
-`persistence` is shared and the datastore surface is server-only, and the
-roadmap still schedules datastores. **When that module arrives it has nowhere to
-land**, and the choice at that point is a renumber of eleven modules or a
-fractional layer. Deciding now costs a paragraph; deciding then costs a
-migration.
+**The two unbuilt layers were the finding, and at v0.19 they are decided.** L5
+and L6 were reserved in the design for `persistence` and `ledger`, and in the
+built tree those numbers are occupied by `collision` and `spatial`. The apparent
+choice once a module needed one of them was a renumber of eleven modules or a
+fractional layer.
 
-Eleven modules that exist today appear nowhere in the designed stack:
+**It is neither, because a layer is a ceiling and not a slot.** §4's first
+paragraph says exactly that, and the built table already carries six modules at
+L12 and six at L11. Two modules at one height are a problem only when one needs
+to see the other, and that is the case the `lateral` array already covers by
+name. So the reservation is:
+
+| Reserved | Layer | Tier | May see | Sits beside |
+|---|---|---|---|---|
+| `persistence` | **L3** | shared | `core`, `parallel` | `ecs` |
+| `ledger` | **L5** | server | `core`, `parallel`, `persistence`, `world` | `collision` |
+
+`persistence` is L3 for what it is allowed to see rather than for what it
+happens to contain. A key, a scope, a version and a value are `core` vocabulary,
+and the only thing above `core` it needs is `parallel`, because a store that
+blocks a tick on a disk is a store nothing may call from inside one.
+
+**It must not see `ecs`, and that is the load-bearing half of the number.** A
+datastore holds what a game chose to persist, which is not the set a world
+ticks. The moment those two can name each other, the save format and the
+datastore format become one thing that has to be migrated together, and decision
+9's scene identifiers stop being the only stable reference between them.
+
+Being below L9 is the constraint that actually binds: `DataStoreService` is a
+script service, so whatever backs it has to be visible from `script`. L5 would
+also have satisfied that and L12 would not, which is the trap the obvious
+placement walks into, because the obvious placement is "above `net`, with the
+other things that talk to a server".
+
+**Remote backends do not live in `persistence`.** The roadmap schedules sqlite,
+mongo and supabase. A remote store needs `net`, which is L11, and nothing at L3
+may see it. §9 is the answer, and it is the one this engine already uses for
+`net::Transport`: the port is low, the adapter is wherever it has to be, and the
+program does the wiring. `persistence` holds the port, the value model, and the
+in-memory and local-file adapters. A remote adapter is a separate target above
+`net`, and until a second one exists it belongs in `mono.server` rather than in
+`mono.engine`, because decision 7 already makes the datastore surface
+server-only and a module with exactly one caller in the program band is a header
+that program should have owned.
+
+`ledger` is L5 and `server` because decision 13 says ledger reads are
+projections and worlds never block on it. It needs `world` at L4 to name what
+committed and `persistence` at L3 to keep the log, and nothing above either.
+
+**Nothing is renumbered and no module moves.** `collision` stays at L5 and
+`spatial` at L6, neither will link either reserved module, and neither needs a
+lateral edge. The cost of this decision is the table above, which is what
+deciding early was supposed to cost.
+
+Ten modules that exist today appear nowhere in the designed stack:
 `collision`, `spatial`, `gui`, `bakegraph`, `examples`, `delivery`,
-`replication`, `control`, `resources`, `msl` and `nodegraph`. Their placement
-above is this file's, not `repo_layout.md`'s.
+`replication`, `control`, `resources` and `msl`. Their placement above is this
+file's, not `repo_layout.md`'s. It was eleven until v0.19, when `nodegraph`
+stopped being an engine module.
 
 ### 4.3 · The leaf band, and why it does not exist yet
 
@@ -205,17 +270,18 @@ Counting what each candidate actually includes:
 | `collision` | `types/AABB`, `types/Vector3` | none | yes |
 | `spatial` | `types/{AABB,Ray,Vector3}`, `Name` | none | yes, with `core::Name` |
 | `msl` | nothing | SPIRV-Cross | no, it carries a vendor |
-| `nodegraph` | nothing | imgui | no, and see below |
 | `resources` | `Paths` | none | no, it reads the filesystem |
 
 Two leaves is not three. **`mono.libraries/` should not be created yet**, and
 this paragraph exists so that the next person to notice `collision` is a leaf
 does not create it either. The trigger is a third one.
 
-`nodegraph` is a different problem and a real one. It uses `std::thread`,
+**Recounted after v0.19's `nodegraph` move, and the answer is the same.** That
+module was a fourth candidate here and never a leaf - `std::thread`,
 `std::atomic`, `std::condition_variable` and `imgui.h`, and the only thing in
-the repository that links it is `studio`. It is a studio widget library living
-in `mono.engine/`. See §6.3.
+the repository that links it is `studio`. It was a studio widget library living
+in `mono.engine/`, and it is `mono.studio/nodegraph` now, which takes it out of
+this count without changing it. Two.
 
 ---
 
@@ -294,7 +360,7 @@ Four mechanisms cross layers, and each is a named mechanism rather than a call.
 | ECS columns and change channels | L3 | between siblings, and upward to any reader | data, not calls. No sibling names another |
 | `core::Metrics` sink | L1 | any layer reports; a tool reads | the reporter never names the reader |
 | The ordered bus | L4 | between worlds | copies at tick boundaries. No pointers |
-| The commit stream | L6 | *not built* | reserved for `ledger` |
+| The commit stream | L5 | *not built* | reserved for `ledger`, §4.2 |
 
 And four that must not:
 
@@ -342,7 +408,6 @@ this table is stale.
 | `discord` | 11 | shared | O | O | O | . | O | . | O |
 | `msl` | 11 | client | O | . | O | O | . | . | O |
 | `net` | 11 | shared | O | O | O | . | O | O | O |
-| `nodegraph` | 11 | client | . | . | O | . | . | . | . |
 | `resources` | 11 | client | O | . | O | O | . | . | O |
 | `audio` | 12 | client | O | . | O | . | . | . | O |
 | `input` | 12 | client | O | . | O | . | . | . | O |
@@ -351,8 +416,14 @@ this table is stale.
 | `replication` | 12 | shared | O | O | O | . | . | O | O |
 | `ui` | 12 | client | . | . | O | O | . | . | . |
 | `control` | 13 | shared | . | O | O | . | . | . | O |
+| `nodegraph` | . | client | . | . | O | . | . | . | . |
 
-Three rows are worth reading twice.
+Four rows are worth reading twice.
+
+**`nodegraph` is last because it has no layer.** It is a library of
+`mono.studio` rather than of the engine, and its row is the shape a program-band
+library has: one `O`, in the column of the program it belongs to. Every row
+above it carries a number, and none of those may link this one.
 
 **The `server` column is the headless proof.** It has no `render`, `ui`,
 `input`, `audio`, `msl`, `resources` or `nodegraph`. Any change that puts an `O`
@@ -396,7 +467,7 @@ This is the DDD question worth actually answering, and the tree has four cases.
 | Noun | Claimants | The real split |
 |---|---|---|
 | world | `world` L4, `scene` L7, `game` L10 | `world` owns the tick and the universe of worlds. `scene` owns what a thing *in* a world is - the instance tree, the class registry, serialisation. `game` owns what a *file* is. Three different questions that all say "world" in English |
-| graph | `graph` L9, `bakegraph` L9, `nodegraph` L11, `audio::Graph` | `graph` is the node runtime. `bakegraph` is a pipeline *description* carrying no decoders, which is what lets a game file travel with its bake pipelines and without glTF. `nodegraph` is an editor canvas. `audio::Graph` is a fourth one that decision 12 says should eventually be `graph` and is not yet |
+| graph | `graph` L9, `bakegraph` L9, `nodegraph` in `mono.studio`, `audio::Graph` | `graph` is the node runtime. `bakegraph` is a pipeline *description* carrying no decoders, which is what lets a game file travel with its bake pipelines and without glTF. `nodegraph` is an editor canvas. `audio::Graph` is a fourth one that decision 12 says should eventually be `graph` and is not yet |
 | ui | `gui` L7 shared, `ui` L12 client | `gui` is the widget tree: retained, serialisable, replicable, headless-testable. `ui` is the drawing of it. See §9.2 - this is the cleanest port in the repository |
 | net | `net` L11, `network` L12, `replication` L12 | `net` is transport and framing. `network` is discovery - finding a peer and being findable. `replication` is what the bytes mean |
 
@@ -595,6 +666,11 @@ This is the current honest accounting.
 | **Layer edges: downward, or lateral by name** | the same file, `_check_layers` | `just test-architecture` |
 | **A layered module linking the program band** | the same | `just test-architecture` |
 | That the architecture check still bites | `mono.tools/architecture/tests/`, six fixtures | `just test-architecture` |
+| **A private copy of data the ECS owns** | `mono.tools/sourcecheck`, rule `ecs-copy` | `just source-check` |
+| **A pointer inside a type marked as crossing a world boundary** | the same, rule `world-pointer` | `just source-check` |
+| **A `core::Name` serialized as its `Id()`** | the same, rule `name-id` | `just source-check` |
+| **A public header nothing outside its module includes** | the same, rule `public-header`. **Reports; does not gate** | `just source-check` |
+| That the source-text checks still bite | `mono.tools/sourcecheck/tests/fixtures/`, thirteen fixtures | `just source-check` |
 | The server stages no shaders | `just check-server-is-headless` | `just check` |
 | The cdn stays bare | `just check-cdn-is-bare` | `just check` |
 | Every object records its headers | `just deps-check` | manual |
@@ -605,18 +681,59 @@ The layer rows are new at v0.19. Before then `docs/CODE_QUALITY.md` asked a
 reviewer to *"check the layer heights by hand"*, which is exactly the third
 category rule 6 refuses to allow.
 
-**What is still not checked, and is therefore convention:**
+**The five `sourcecheck` rows are also new at v0.19, and they are the four this
+section listed as convention until this version.** They are checked by reading
+first-party C++ as text rather than by reading CMake's output, because a
+member's type, a header's includers and an argument reaching a writer are not
+facts the target graph has. What that costs is stated below rather than left to
+be discovered.
 
-- That a public header is actually public. §3's rule is judgement.
-- That a module does not keep a private copy of data the ECS owns. Root
-  `AGENTS.md` rule 2 is a review question.
-- That nothing crossing a world boundary is a pointer. Rule 3 is a review
-  question.
-- That a `Name` is serialized as its string and never as its `Id()`. Rule 4 is a
-  review question, and decision 21 is the reasoning.
+### 11.1 · What each source-text rule catches, and what it does not
 
-Those four are the highest-value checks that do not exist. Anyone with an
-appetite for tooling should take them in that order.
+`mono.tools/sourcecheck` is not a C++ front end and must not become one: a tool
+that needed the build's include paths could only run after a configure, which is
+the property that makes `test-architecture` cheap. So each rule is a heuristic
+over declarations, and each one's limit is written beside it in `Rules.hpp`.
+
+| Rule | Catches | Does not catch |
+|---|---|---|
+| `ecs-copy` | a record that declares a function - so it outlives a call - holding a registered component by value or in a container, or holding an enumeration a component declares one of its own fields with | a copy whose type is a primitive. `Client::AppliedPointerIcon` is a `bool` and carries no identity to match on. Nor a copy reached through a macro or a `using` alias |
+| `world-pointer` | a pointer, reference, `unique_ptr`, `shared_ptr`, `weak_ptr`, `span`, `string_view`, `function`, `reference_wrapper` or `any` anywhere in the transitive field closure of a record marked `// arch-crossing` | a type that crosses without the marker, and a field whose type resolves to nothing declared in this repository - which is one more reason `VENDOR_PUBLIC` is rationed |
+| `name-id` | `Id()` inside the arguments of a `Write*`, `Encode*`, `Serialise*`, `Emit*` or `Put*` call; a `sizeof(...Name...)` in one of those, which is the object-representation write `client::DrawList` had at v0.7; and `Name::FromId` fed from a reader | an id that reaches a writer through a variable, a field or another function. Making `Id()` return something a writer refused would catch those and would touch all 169 call sites, and all but a handful are the map keys and sorts the dense integer exists to make cheap |
+| `public-header` | a header under a module's `include/` that no file outside that module includes, and that the module's own `app/` does not include either | a header one other module includes once and should not, which is the other half of §3's judgement and is not mechanical |
+
+**The compiler already owns half of the `name-id` rule.** `core::Name`'s only
+conversion operator is an `explicit operator bool`, so `WriteUInt32(name)` does
+not compile and never has. What is left is the spelling somebody reaches for
+when it does not, and that spelling is what the check reads.
+
+**A rule is switched off at one declaration by a comment above it**, not by a
+list in a build file that drifts away from what it names:
+
+```cpp
+// arch-waiver ecs-copy: the record of a system call, not a copy of a world's
+// state. Nothing but SDL knows what the window was last told.
+engine::scene::MouseBehavior AppliedPointerMode = engine::scene::MouseBehavior::Default;
+```
+
+The reason is not optional - a waiver with nothing after the colon is reported
+rather than honoured, and there is a fixture for that. A reason beginning
+`known violation` is a third state: printed on every run, counted apart from the
+waived, and not fatal. That exists so a violation nobody can fix this afternoon
+stays visible instead of disappearing into the waived count. Nothing in the tree
+carries one today.
+
+**`public-header` reports and never fails the build.** Root `AGENTS.md` warns
+that an unwired subsystem is not dead code, and decision 16 says a surface may
+ship complete and frozen with nothing calling it. At v0.19 it names 87 of the
+tree's 393 public headers, and twenty-five of those are `mono.studio` putting
+its whole internal surface under `include/`. Eleven more are `render` and seven
+are `physics`, both of which have a real private surface and no private include
+directory to put it in. That is a list somebody works through, not a verdict.
+
+The other three gate. At v0.19 `world-pointer` and `name-id` find nothing at
+all, and `ecs-copy` finds nine, every one of them waived with the reason in the
+source beside it.
 
 ---
 
@@ -653,5 +770,7 @@ for each, with the rejected alternatives, is in that document.
 | 23 | Work inside a tick may be parallel. Work across ticks may not | a system cannot fit in a tick even parallel |
 | 24 | First-party code is unoptimised by default. `release` is the one preset that opts in | never |
 
-Decisions 7 and 22 are the two with no implementation behind them today. §4.2
-and §4.3 record what that costs.
+Decisions 7 and 22 are the two with no implementation behind them today. §4.3
+records what 22 costs. Decision 7 no longer costs anything to leave unbuilt:
+§4.2 fixes `persistence` at L3 and `ledger` at L5, so the module that arrives
+lands on a decided number rather than triggering one.

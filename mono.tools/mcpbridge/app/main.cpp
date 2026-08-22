@@ -11,7 +11,7 @@
 // Because it parses nothing, there is no second copy of the protocol to keep in
 // step. A tool added to `engine/control/src/Tools.cpp` or to the editor's own
 // `mono.studio/src/Control.cpp` is reachable through here the moment it exists,
-// and this file never changes.
+// and adding one needs no edit to this file.
 //
 // **Two threads, because both directions block.** A single-threaded pump would
 // have to poll one side while the other was mid-read, and the whole point of
@@ -19,7 +19,14 @@
 //
 // Point a client at it:
 //
-//     "atomic": { "command": "…/tools/mcpbridge", "args": ["--port", "8730"] }
+//     "atomic": { "command": ".cache/build/dev/tools/mcpbridge", "args": ["--port", "8738"] }
+//
+// which is what the checked-in `.mcp.json` already says, and 8738 is
+// `engine::control::DEFAULT_PORT`. This example read 8730 until v0.19 - a port
+// nothing has opened since that constant existed, and the third copy of a number
+// that had already gone wrong twice. `mono.tools/mcpbridge/CMakeLists.txt` now
+// fails the configure when `.mcp.json` or the `just mcp` recipe disagrees with
+// the header, so a fourth copy cannot appear quietly.
 //
 // It exits when either side closes, which is what makes a client's own
 // lifecycle management work: killing the bridge does not touch the editor, and

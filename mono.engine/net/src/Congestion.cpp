@@ -1,3 +1,4 @@
+#include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/net/Congestion.hpp>
 
@@ -115,6 +116,8 @@ namespace engine::net {
 			return;
 		}
 
+		const double before = Window;
+
 		HasCut = true;
 		LastCutAt = nowSeconds;
 		++Cuts;
@@ -150,6 +153,13 @@ namespace engine::net {
 		}
 
 		core::Metrics::Count("net.congestion.loss", 1.0);
+
+		// **The window either side of the cut, which the counter cannot carry.**
+		// "The connection got slow" is answered by how far the window fell and
+		// how often, and rate-limiting keeps a lossy path from being the log.
+		ENGINE_DEBUG_EVERY(
+			1.0, "loss on {} packet(s): window {} -> {} bytes, cut {}", packets, before, Window, Cuts
+		);
 	}
 
 	void CongestionControl::Advance(double elapsedSeconds, uint32_t ceilingBytes, bool answered) {
@@ -196,6 +206,7 @@ namespace engine::net {
 				SlowStart = false;
 				Window /= Paced.SlowStartGrowth;
 				core::Metrics::Count("net.congestion.slowstart.ended", 1.0);
+				ENGINE_DEBUG("slow start ended on a queue of {}s; window {} bytes", Queue, Window);
 			}
 
 			Window = std::clamp(Window, Paced.MinimumWindowBytes, ceiling);
@@ -203,7 +214,12 @@ namespace engine::net {
 				// The cap is reached, so there is nothing left to search for.
 				// Staying in slow start would mean answering the first sign of a
 				// queue by halving from a window the link was never spending.
+				//
+				// This exit had neither a counter nor a line, and it is the one
+				// that fires on a link whose configured budget is the limit
+				// rather than the path.
 				SlowStart = false;
+				ENGINE_DEBUG("slow start reached the {} byte ceiling; the budget is the limit", ceiling);
 			}
 
 			Allowance = static_cast<uint32_t>(Window * elapsed / trip);
@@ -289,10 +305,14 @@ namespace engine::net {
 				// a queue that was only ever justified by somebody else's.
 				TargetQueue = Paced.TargetQueuePackets;
 				core::Metrics::Count("net.congestion.competitive.ended", 1.0);
+				ENGINE_DEBUG("competitive mode ended; target queue back to {} packets", TargetQueue);
 			}
 
 			if (Competitive && !wasCompetitive) {
 				core::Metrics::Count("net.congestion.competitive.began", 1.0);
+				// A materially different sending regime, and the reason a path
+				// suddenly tolerates latency it did not a moment ago.
+				ENGINE_DEBUG("competitive mode began after {} undrained round trips", UndrainedRoundTrips);
 			}
 		}
 

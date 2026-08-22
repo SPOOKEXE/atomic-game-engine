@@ -4,6 +4,7 @@
 #include <engine/core/Bytes.hpp>
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/delivery/Relay.hpp>
@@ -44,6 +45,79 @@
 #include <thread>
 
 namespace server {
+
+	namespace {
+		// Writes one `core::Metrics` snapshot to the log.
+		//
+		// **The whole reason `Metrics` grew a read side.** Everything below L11
+		// counted things into that sink and the only reader in the tree was the
+		// client's F5 overlay, which a headless host does not have - so a
+		// server's own numbers went in and were thrown away at exit.
+		// `docs/ARCH_REVIEW.md` §G2.
+		//
+		// One line per metric, and nothing at all when the sink is empty: a
+		// heading over no rows is a report that looks like a fault.
+		//
+		// **A snapshot rather than a drain**, so the periodic report and the
+		// shutdown report do not take each other's numbers, and so the values
+		// are run totals a reader can subtract rather than a window whose
+		// length depends on when somebody looked. The one exception is the
+		// client's overlay, which drains because it wants a per-frame rate.
+		void ReportMetrics(std::string_view when) {
+			const engine::core::MetricsSnapshot taken = engine::core::Metrics::Snapshot();
+			if (taken.Counters.empty() && taken.Gauges.empty() && taken.Histograms.empty()) {
+				return;
+			}
+
+			ENGINE_INFO(
+				"metrics ({}): {} counter(s), {} gauge(s), {} histogram(s)",
+				when,
+				taken.Counters.size(),
+				taken.Gauges.size(),
+				taken.Histograms.size()
+			);
+
+			for (const engine::core::Counter &counter : taken.Counters) {
+				if (counter.IsTime) {
+					// Nanoseconds in, milliseconds out. The unit travels with
+					// the counter so that a reader never has to guess it from a
+					// name - which is what `Counter::IsTime` is for.
+					ENGINE_INFO(
+						"  {} · {:.3f} ms over {} call(s)",
+						counter.Name.Text(),
+						counter.Value / 1e6,
+						counter.Samples
+					);
+				} else {
+					ENGINE_INFO(
+						"  {} · {:.0f} over {} call(s)", counter.Name.Text(), counter.Value, counter.Samples
+					);
+				}
+			}
+
+			for (const engine::core::Gauge &gauge : taken.Gauges) {
+				ENGINE_INFO("  {} · {:.3f} (set {} time(s))", gauge.Name.Text(), gauge.Value, gauge.Writes);
+			}
+
+			for (const engine::core::Histogram &shape : taken.Histograms) {
+				const double scale = shape.IsTime ? 1e6 : 1.0;
+				const char *unit = shape.IsTime ? " ms" : "";
+				ENGINE_INFO(
+					"  {} · {} sample(s) · p50 {:.3f}{} · p95 {:.3f}{} · p99 {:.3f}{} · max {:.3f}{}",
+					shape.Name.Text(),
+					shape.Samples,
+					shape.P50 / scale,
+					unit,
+					shape.P95 / scale,
+					unit,
+					shape.P99 / scale,
+					unit,
+					shape.Maximum / scale,
+					unit
+				);
+			}
+		}
+	}
 
 	namespace {
 		// Parses an exact-length hexadecimal value into `out`.
@@ -880,18 +954,17 @@ namespace server {
 			seeded = true;
 		}
 
-		if (Settings.Quic) {
-			if (!seeded) {
-				// **No unauthenticated QUIC mode, and that is not an oversight.**
-				// A QUIC server proves who it is inside its own handshake, so
-				// there is nothing to fall back to - unlike the datagram wire,
-				// where the signature is an optional field in the welcome.
-				ENGINE_ERROR("server: --quic needs --identity-key - a QUIC server has no anonymous mode.");
-				return false;
+		streaming.Wire = Settings.Transport;
+		if (engine::net::Serves(Settings.Transport, engine::net::WireKind::Quic)) {
+			// **No unauthenticated QUIC mode, and an operator that gave no key
+			// still gets a server.** A QUIC handshake needs an identity whether
+			// or not anybody pinned it, so the listener draws an ephemeral one
+			// when none is supplied and says so - the alternative is a default
+			// transport that refuses to start without a flag.
+			if (seeded) {
+				streaming.Quic.Connection.Tls.Seed = seed;
+				streaming.Quic.Connection.Tls.HasSeed = true;
 			}
-			streaming.Wire = engine::replication::WireKind::Quic;
-			streaming.Quic.Connection.Tls.Seed = seed;
-			streaming.Quic.Connection.Tls.HasSeed = true;
 			// The ceiling is the one a game already stated. `docs/QUIC.md` §6:
 			// it survives above the congestion controller rather than instead of
 			// it.
@@ -1366,7 +1439,7 @@ namespace server {
 		ENGINE_INFO(
 			"replication listening on {} over {}",
 			Socket->Local().Text(),
-			engine::replication::Describe(streaming.Wire)
+			engine::net::Describe(streaming.Wire)
 		);
 		return true;
 	}
@@ -1675,6 +1748,11 @@ namespace server {
 		Announcement.Use = network::Purpose::Game;
 		Announcement.Admits = key ? network::Access::Private : network::Access::Public;
 		Announcement.Protocol = engine::replication::PROTOCOL_VERSION;
+		// **What this server answers, said in the advert.** A client that finds
+		// a datagram-only server this way opens on the datagram wire and never
+		// pays the refusal round trip; one that trusts a wrong row pays it and
+		// falls back exactly as it would have.
+		Announcement.Transports = Settings.Transport;
 		// The port that was bound rather than the one that was asked for:
 		// `--listen 0` binds an ephemeral one. The address is left as the
 		// socket has it - usually the wildcard - because the browser at the
@@ -2320,6 +2398,7 @@ namespace server {
 		// matter is bounded by how long somebody left it running.
 		std::vector<float> tickMilliseconds;
 		size_t droppedSpans = 0;
+		uint64_t lastMetricsReport = started;
 
 		const auto ticksSoFar = [this] { return Worlds().StatisticsOf(PrimaryWorld).Ticks; };
 
@@ -2345,7 +2424,7 @@ namespace server {
 		}
 
 		if (Settings.ControlPort >= 0) {
-			ControlSurface.AddUniverseTools(Worlds());
+			RegisterControlTools();
 			if (ControlServer.Start(static_cast<uint16_t>(Settings.ControlPort))) {
 				ENGINE_INFO(
 					"control: listening on 127.0.0.1:{} - {} tools",
@@ -2515,6 +2594,16 @@ namespace server {
 			// length of a tick and report the sawtooth as the shape of the heap.
 			engine::core::HeapProfile::SampleIfDue();
 
+			// **Against wall time rather than against a tick count**, because
+			// the interval somebody typed is in seconds and an unpaced run does
+			// four hundred ticks a second. Off unless a run asked for it; the
+			// report at shutdown below is not gated the same way.
+			if (Settings.MetricsReportSeconds > 0.0 &&
+				static_cast<double>(tickEnded - lastMetricsReport) / 1e9 >= Settings.MetricsReportSeconds) {
+				lastMetricsReport = tickEnded;
+				ReportMetrics("running");
+			}
+
 			if (Settings.MaximumTicks >= 0 && ticks >= static_cast<uint64_t>(Settings.MaximumTicks)) {
 				break;
 			}
@@ -2624,6 +2713,13 @@ namespace server {
 				relayed->Deferred
 			);
 		}
+
+		// **Always, and not only when a run asked for the periodic one.** The
+		// finding this closes is that the server never read its own counters at
+		// all; a report that has to be switched on is a report nobody switches
+		// on. It costs one snapshot at the end of a run that is already over,
+		// and it says nothing when nothing was counted.
+		ReportMetrics("run total");
 
 		if (!Settings.HeapReport.empty()) {
 			const engine::core::HeapTotals heap = engine::core::HeapProfile::Totals();

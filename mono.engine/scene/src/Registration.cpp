@@ -2,14 +2,18 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Instance.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Animation.hpp>
+#include <engine/scene/Atmosphere.hpp>
 #include <engine/scene/Audio.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Constraints.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/EditableImage.hpp>
 #include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Input.hpp>
+#include <engine/scene/LevelOfDetail.hpp>
 #include <engine/scene/Materials.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Part.hpp>
@@ -17,11 +21,13 @@
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Shaders.hpp>
+#include <engine/scene/Skinning.hpp>
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/SurfaceTable.hpp>
 #include <engine/scene/Tagging.hpp>
 #include <engine/scene/Teams.hpp>
+#include <engine/scene/Terrain.hpp>
 #include <engine/scene/TextureCatalogue.hpp>
 #include <engine/scene/Tools.hpp>
 #include <engine/scene/Visibility.hpp>
@@ -51,6 +57,111 @@ namespace engine::scene {
 			auto *surfaces = static_cast<Surface *>(destination);
 			for (size_t index = 0; index < count; index++) {
 				surfaces[index].Material = reader.ReadName();
+			}
+		}
+
+		// The four forward-API types that hold a `core::Name`, each written as
+		// text for the reason this file opens with. A rig, a clip, a level ladder
+		// and a terrain recipe all cross a save file and a wire, and a name's id
+		// is a counter this process assigned in first-seen order.
+
+		void WriteSkeletons(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *rigs = static_cast<const Skeleton *>(source);
+			for (size_t index = 0; index < count; index++) {
+				writer.WriteName(rigs[index].Rig);
+				writer.WriteUInt16(rigs[index].JointCount);
+			}
+		}
+
+		void ReadSkeletons(core::ByteReader &reader, void *destination, size_t count) {
+			auto *rigs = static_cast<Skeleton *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				rigs[index].Rig = reader.ReadName();
+				rigs[index].JointCount = reader.ReadUInt16();
+			}
+		}
+
+		void WriteAnimationClips(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *clips = static_cast<const AnimationClip *>(source);
+			for (size_t index = 0; index < count; index++) {
+				writer.WriteName(clips[index].Asset);
+				writer.WriteName(clips[index].Rig);
+			}
+		}
+
+		void ReadAnimationClips(core::ByteReader &reader, void *destination, size_t count) {
+			auto *clips = static_cast<AnimationClip *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				clips[index].Asset = reader.ReadName();
+				clips[index].Rig = reader.ReadName();
+			}
+		}
+
+		// **Every field written, and the ladder's three names first.**
+		// `WriteVisuals` records what a hand-written pair costs: a field added to
+		// a type with one crosses only if somebody remembers, and nothing in the
+		// build checks. Six fields today, and all six are written.
+		void WriteLevelsOfDetail(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *ladders = static_cast<const LevelOfDetail *>(source);
+			for (size_t index = 0; index < count; index++) {
+				const LevelOfDetail &ladder = ladders[index];
+				for (size_t level = 0; level < LOD_LEVELS - 1; level++) {
+					writer.WriteName(ladder.Meshes[level]);
+					writer.WriteFloat(ladder.Ratios[level]);
+				}
+				writer.WriteFloat(ladder.TargetQuadArea);
+				writer.WriteUInt8(static_cast<uint8_t>(ladder.Strategy));
+				writer.WriteUInt8(ladder.Levels);
+			}
+		}
+
+		void ReadLevelsOfDetail(core::ByteReader &reader, void *destination, size_t count) {
+			auto *ladders = static_cast<LevelOfDetail *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				LevelOfDetail &ladder = ladders[index];
+				for (size_t level = 0; level < LOD_LEVELS - 1; level++) {
+					ladder.Meshes[level] = reader.ReadName();
+					ladder.Ratios[level] = reader.ReadFloat();
+				}
+				ladder.TargetQuadArea = reader.ReadFloat();
+
+				// Clamped on read rather than trusted, because a strategy past the
+				// end of the enum is a `switch` falling through to whatever the
+				// compiler chose. `SelectLevel` clamps `Levels` itself for the
+				// same reason, so this only has to keep the enum honest.
+				const uint8_t strategy = reader.ReadUInt8();
+				ladder.Strategy = strategy <= static_cast<uint8_t>(LodStrategy::Reduced)
+									  ? static_cast<LodStrategy>(strategy)
+									  : LodStrategy::None;
+				ladder.Levels = reader.ReadUInt8();
+			}
+		}
+
+		void WriteTerrains(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *recipes = static_cast<const Terrain *>(source);
+			for (size_t index = 0; index < count; index++) {
+				const Terrain &recipe = recipes[index];
+				writer.WriteUInt64(recipe.Seed);
+				writer.WriteName(recipe.Generator);
+				writer.WriteFloat(recipe.ChunkExtent);
+				writer.WriteFloat(recipe.VerticalExtent);
+				writer.WriteFloat(recipe.ViewDistance);
+				writer.WriteUInt16(recipe.ChunkResolution);
+				writer.WriteBool(recipe.Enabled);
+			}
+		}
+
+		void ReadTerrains(core::ByteReader &reader, void *destination, size_t count) {
+			auto *recipes = static_cast<Terrain *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				Terrain &recipe = recipes[index];
+				recipe.Seed = reader.ReadUInt64();
+				recipe.Generator = reader.ReadName();
+				recipe.ChunkExtent = reader.ReadFloat();
+				recipe.VerticalExtent = reader.ReadFloat();
+				recipe.ViewDistance = reader.ReadFloat();
+				recipe.ChunkResolution = reader.ReadUInt16();
+				recipe.Enabled = reader.ReadBool();
 			}
 		}
 
@@ -134,7 +245,18 @@ namespace engine::scene {
 				// reopened. `mono.client/tests/Presentation.cpp` is the check
 				// that would have caught it, and now does.
 				writer.WriteFloat(visual.Transparency);
-				writer.WriteInt8(visual.Surface);
+
+				// **Sixteen bits, because the field is sixteen bits.** It was
+				// written and read as an `int8_t` from v0.7 to v0.19, and
+				// `Visual::Surface` was widened to `int16_t` at v0.17
+				// *expressly* to lift a ceiling of a hundred and twenty-seven
+				// mirrors - so every slot index from 128 up was silently
+				// truncated on the way into a file and read back as some other
+				// pane, or as -1. The paragraph above is about a field that
+				// crosses only if somebody remembers; this is the same failure
+				// one step further on, where somebody remembered the field and
+				// not its width.
+				writer.WriteInt16(visual.Surface);
 
 				// Added at v0.7 beside the shadow pass that reads it, and
 				// written here in the same breath rather than a release later -
@@ -159,7 +281,7 @@ namespace engine::scene {
 				visual.Visible = reader.ReadBool();
 				visual.Fitted = reader.ReadName();
 				visual.Transparency = reader.ReadFloat();
-				visual.Surface = reader.ReadInt8();
+				visual.Surface = reader.ReadInt16();
 				visual.CastShadow = reader.ReadBool();
 				visual.Locked = reader.ReadBool();
 			}
@@ -776,8 +898,6 @@ namespace engine::scene {
 		// here are in.
 		ecs::Components::Register<Humanoid>("scene.Humanoid");
 
-		ecs::Components::Register<QuickHash>("scene.QuickHash");
-
 		// The service fixtures, added at the end because that is the rule this
 		// list opens with: registration order decides component ids, ids decide
 		// the order archetypes iterate their columns, and inserting one of
@@ -785,6 +905,9 @@ namespace engine::scene {
 		// engine is visited in. Neither carries a wire form - a service is
 		// authored content that a snapshot moves, not per-tick state a delta
 		// does.
+		//
+		// `scene.Transient` is a tag, so it costs a column of nothing and a
+		// snapshot carries it as the entity's name in the component's row list.
 		ecs::Components::Register<TransientComponent>("scene.Transient");
 		ecs::Components::Register<ServiceComponent>("scene.Service");
 		ecs::Components::Register<LightingServiceComponent>("scene.LightingService");
@@ -1095,6 +1218,122 @@ namespace engine::scene {
 		// player state, so the generated scalar serializer is sufficient and the
 		// default replication catalogue includes it with the other `scene.` rows.
 		ecs::Components::Register<PlayerNetworkComponent>("scene.PlayerNetworkComponent");
+
+		// --- the forward-declared storage --------------------------------------
+		//
+		// **Eight types nothing in the engine reads yet, registered here rather
+		// than lazily**, and both halves of that sentence are decisions.
+		//
+		// *Registered*, because `Components::Seal()` is called by the client and
+		// the server at start-up and a type that first reaches `Components::Of<T>`
+		// after the seal aborts the process. A component declared and left to
+		// register itself is a component that works in a unit test and takes down
+		// every host the first time a game file carries one. That is the failure
+		// `scene.Sun`, `scene.PortalProxy` and `physics.PoppercamState` were all
+		// found in at v0.19.
+		//
+		// *Nothing reads them yet*, which is decision 16: a surface may ship
+		// complete and frozen with its implementation deliberately unwired, and
+		// the revisit condition is "never - it is a state, not a stage".
+		// `docs/FUTURE_COMPONENTS.md` says what each of these gets wired to and in
+		// what order.
+		//
+		// **Appended, like every addition here**, for the reason this list opens
+		// with: a component id is registration order, an archetype is a sorted
+		// list of ids, and inserting one anywhere but the end reorders how every
+		// row in the engine is visited.
+
+		// **A hand-written pair, because a `Skeleton` holds a name.** The rig's
+		// name is what an animation clip is authored against, so it crosses a save
+		// file and has to cross as text.
+		ecs::Components::Register<Skeleton>("scene.Skeleton", WriteSkeletons, ReadSkeletons);
+
+		// **The generated form, because a `Bone` is four `CFrame`s and two
+		// indices.** No name and no handle, so the object representation is the
+		// format - `scene.Attachment` is registered on the same argument, and a
+		// bone is that argument with a chain on it.
+		//
+		// **It crosses, and `WorldFrame` crossing with it is deliberate.** The
+		// resolved frame is derived on whichever machine draws, exactly as an
+		// attachment's is, and it goes on the wire for the reason that one does:
+		// `ResolveBones` runs in `PreRender`, so a client that cleared the field
+		// on arrival would present a rig at the origin for one frame. A frame of a
+		// character in the wrong place is more visible than the bytes.
+		ecs::Components::Register<Bone>("scene.Bone");
+
+		// **A hand-written pair, because a clip holds two names.**
+		ecs::Components::Register<AnimationClip>(
+			"scene.AnimationClip", WriteAnimationClips, ReadAnimationClips
+		);
+
+		// **Both generated, because neither holds a name.** An `Animator` is a
+		// handle, a float and two flags; an `AnimationTrack` is a handle, five
+		// floats, an enum and two flags. An `ecs::Entity` is a directory index a
+		// snapshot and a replica both restore exactly, which is the argument
+		// `scene.PlayerCharacter` already makes.
+		//
+		// **Both cross, and the play head crossing is the decision worth
+		// stating.** `AnimationTrack::TimePosition` is advanced by whoever owns
+		// the row, and `ecs::Store::SetProperty` already refuses a property write
+		// in a replica - so the authority owns it exactly as it owns
+		// `scene.Transform`, and a client predicting its own play head would be
+		// predicting the same field rather than needing a second one. Nothing new
+		// has to be stored for the v0.24 decision to go either way.
+		ecs::Components::Register<Animator>("scene.Animator");
+		ecs::Components::Register<AnimationTrack>("scene.AnimationTrack");
+
+		// **A hand-written pair, because a ladder holds three mesh names.**
+		//
+		// **It crosses, because it is authored content and not a conclusion.**
+		// Which four meshes a part has is what an author published; which of them
+		// a frame draws is derived per view and is not stored anywhere, so there
+		// is nothing here for a replica to disagree with. `scene.Visual` is on the
+		// same side of that line for the same reason.
+		ecs::Components::Register<LevelOfDetail>(
+			"scene.LevelOfDetail", WriteLevelsOfDetail, ReadLevelsOfDetail
+		);
+
+		// **The generated form, because a `Constraint` is two handles, a `CFrame`,
+		// six enum bytes and eight floats.** No name, so the object representation
+		// is the format.
+		//
+		// **It crosses, and it has to.** A joint is authored scene content and the
+		// solver runs on both ends: a client simulating its own replica with no
+		// constraints would let a door swing free while the server held it shut.
+		// The accumulated impulses a warm start needs are not here and must not
+		// come to be - those are `physics::PhysicsWorld`'s, which does not cross
+		// for `CollisionShapes`' reason.
+		ecs::Components::Register<Constraint>("scene.Constraint");
+
+		// **Both generated, and both cross.** An `Atmosphere` is two colours and
+		// four floats and a `Clouds` is a colour, four floats and a flag; neither
+		// holds a name or a handle.
+		//
+		// **Presentation state that crosses, which is not a contradiction.**
+		// Decision 20 says a render graph may vary per platform and anything
+		// reaching a simulation input may not - these reach no simulation input,
+		// and what crosses is what the *author* wrote rather than what a machine
+		// resolved. `scene.LightingService` is already on this side of the line
+		// with the fog terms these sit beside; what stays local is the resolved
+		// half, and the resolved half is `scene::WorldLighting`, which is not a
+		// component at all.
+		ecs::Components::Register<Atmosphere>("scene.Atmosphere");
+		ecs::Components::Register<Clouds>("scene.Clouds");
+
+		// **A resource, and a hand-written pair because it holds the generator's
+		// name.**
+		//
+		// **The recipe crosses and the ground it makes never can.** A chunked
+		// world is gigabytes; both ends run the same graph over the same seed and
+		// get the same ground, which is decision 14's strict IEEE arithmetic doing
+		// the work it exists to do. `CollisionShapes` makes the identical argument
+		// at four fewer orders of magnitude: sending a conclusion instead of its
+		// input hands an attacker the half they get to choose.
+		//
+		// Registered rather than left to be minted by the first `SetResource`,
+		// which takes the compiler's spelling of the type and aborts once the
+		// table is sealed.
+		ecs::Components::Register<Terrain>("scene.Terrain", WriteTerrains, ReadTerrains);
 	}
 
 	void RegisterSceneClasses() {

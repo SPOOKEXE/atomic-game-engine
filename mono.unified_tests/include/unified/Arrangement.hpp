@@ -14,7 +14,7 @@
 // real deployment**:
 //
 // - `Transport` - what is between the serialiser and the deserialiser. Nothing,
-//   a real link, or a real link that loses datagrams.
+//   a real link on either stack, or a real link that loses datagrams.
 // - `Content` - whether the server also carries content for its clients, which
 //   is `--content relay` in `mono.server`.
 // - `Discovery` - whether the session announces itself and something is
@@ -63,6 +63,29 @@ namespace unified {
 		// `net::LossSettings` gives: "the fortieth datagram never arrived" is a
 		// test and "ten percent loss" is a flake with a story attached.
 		Lossy,
+
+		// `Loopback`, over QUIC - `replication::QuicSession` in place of
+		// `replication::Session`, with a real TLS 1.3 handshake in front of it.
+		//
+		// **The seam under test is `SessionPort`**, which is the whole reason
+		// this is an axis value rather than a suite of its own: everything above
+		// the session is the same code, so an arrangement that crosses here and
+		// not under `Loopback` is a difference in the transport and nowhere
+		// else.
+		//
+		// @since v0.19
+		Quic,
+
+		// `Quic` with a `net::LossyTransport` on each end.
+		//
+		// **Not the same case as `Lossy` and not redundant with it.** The
+		// datagram stack repairs a hole with `ReliableSender`'s window and QUIC
+		// repairs it with per-stream retransmission, so the two answer the same
+		// question with entirely different code - and the join snapshot is the
+		// payload that makes the difference visible.
+		//
+		// @since v0.19
+		QuicLossy,
 	};
 
 	// Whether the server also carries content for its client.
@@ -124,6 +147,27 @@ namespace unified {
 		// @return `true` when every knob matches.
 		bool operator==(const Arrangement &) const = default;
 	};
+
+	// Whether a transport puts a real link between the two halves.
+	//
+	// @param carrying The transport.
+	// @return `false` only for `Direct`.
+	// @since v0.19
+	bool OverAWire(Transport carrying);
+
+	// Whether a transport drops datagrams.
+	//
+	// @param carrying The transport.
+	// @return `true` for the two lossy ones.
+	// @since v0.19
+	bool Loses(Transport carrying);
+
+	// Whether a transport runs the QUIC stack.
+	//
+	// @param carrying The transport.
+	// @return `true` for the two QUIC ones.
+	// @since v0.19
+	bool OverQuic(Transport carrying);
 
 	// The name of one transport, as `Arrangement::Name` spells it.
 	//

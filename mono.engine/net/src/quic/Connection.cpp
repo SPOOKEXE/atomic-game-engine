@@ -113,6 +113,10 @@ namespace engine::net::quic {
 				);
 			} catch (const CryptoPP::Exception &) {
 				core::Metrics::Count("net.quic.no_entropy", 1.0);
+				// Nothing that needs to be unpredictable can be produced, so
+				// every connection from here fails. An operator has to see this
+				// rather than a counter nobody drained.
+				ENGINE_ERROR("the operating system refused entropy; no connection can be made");
 				return false;
 			}
 			return true;
@@ -171,6 +175,12 @@ namespace engine::net::quic {
 		bool ContextSet = false;
 		ConnectionState Phase = ConnectionState::Handshaking;
 		const char *Reason = "";
+
+		// Whether the far end said, in as many words, that it does not speak
+		// this. A Version Negotiation packet is the only thing that says so, and
+		// keeping it apart from `Reason` is what lets a caller tell a refusal
+		// from a timeout without parsing a string.
+		bool Turned = false;
 		ngtcp2_tstamp Last = STAMP_BASE;
 
 		// One outbound stream per channel, opened lazily.
@@ -251,6 +261,12 @@ namespace engine::net::quic {
 				Phase = ConnectionState::Closed;
 				Reason = reason;
 				core::Metrics::Count("net.quic.failed", 1.0);
+
+				// **The one place every QUIC teardown reason passes through.**
+				// Without this line a connection that stops working produces one
+				// counter tick and nothing that says whether the peer went away,
+				// spoke the wrong version, or handed ngtcp2 something fatal.
+				ENGINE_WARN("connection failed: {}", reason);
 			}
 		}
 
@@ -460,6 +476,7 @@ namespace engine::net::quic {
 			next(currentRead, readSecret, readIv, readContext);
 			next(currentWrite, writeSecret, writeIv, writeContext);
 			core::Metrics::Count("net.quic.key_update", 1.0);
+			ENGINE_DEBUG("key phase updated in both directions");
 			return 0;
 		}
 
@@ -561,6 +578,7 @@ namespace engine::net::quic {
 			auto *inside = Of(user);
 			inside->Phase = ConnectionState::Established;
 			core::Metrics::Count("net.quic.established", 1.0);
+			ENGINE_INFO("handshake complete");
 			return 0;
 		}
 
@@ -600,6 +618,15 @@ namespace engine::net::quic {
 					// range-checked before the cast and refused rather than
 					// clamped - the same rule `Packet::Read` keeps for its
 					// channel byte.
+					//
+					// The refusal tears the whole connection down, so it says
+					// which byte did it rather than leaving a peer that "just
+					// disconnects".
+					ENGINE_WARN(
+						"stream channel {} is past the {} this build has; refusing the connection",
+						reading.Channel,
+						MAXIMUM_CHANNELS
+					);
 					return NGTCP2_ERR_CALLBACK_FAILURE;
 				}
 				reading.KnowsChannel = true;
@@ -616,6 +643,11 @@ namespace engine::net::quic {
 				if (size > inside->Config.MaximumMessageBytes) {
 					// The length is the peer's and an allocation sized from it
 					// would be the peer's too.
+					ENGINE_WARN(
+						"stream message claims {} bytes over the {} limit; refusing the connection",
+						size,
+						inside->Config.MaximumMessageBytes
+					);
 					return NGTCP2_ERR_CALLBACK_FAILURE;
 				}
 				if (reading.Bytes.size() - at - LENGTH_BYTES < size) {
@@ -693,6 +725,11 @@ namespace engine::net::quic {
 			}
 			const auto channel = static_cast<uint8_t>(data[0]);
 			if (channel >= MAXIMUM_CHANNELS) {
+				ENGINE_WARN(
+					"datagram channel {} is past the {} this build has; refusing the connection",
+					channel,
+					MAXIMUM_CHANNELS
+				);
 				return NGTCP2_ERR_CALLBACK_FAILURE;
 			}
 			inside->Arrived.push_back(
@@ -1133,11 +1170,21 @@ namespace engine::net::quic {
 		case NGTCP2_ERR_DROP_CONN:
 			inside.Phase = ConnectionState::Closed;
 			inside.Reason = "the peer closed the connection";
+			ENGINE_INFO("the peer closed the connection");
 			break;
 		case NGTCP2_ERR_RETRY:
 			// A server asking for address validation. Handled by the layer that
 			// owns the socket, which is the only one that can answer without
 			// remembering anything - `net/AGENTS.md`'s zero-bytes rule.
+			break;
+		case NGTCP2_ERR_RECV_VERSION_NEGOTIATION:
+			// **An explicit refusal, and the reason it is worth one round trip.**
+			// The far end listed the versions it speaks and none of them is
+			// ours, so waiting out a handshake timeout would learn nothing this
+			// packet has not already said. A caller reads `Refused` and falls
+			// back now rather than in three seconds.
+			inside.Turned = true;
+			inside.Fail("the peer speaks no QUIC version this build offers");
 			break;
 		default:
 			if (ngtcp2_err_is_fatal(result)) {
@@ -1282,6 +1329,10 @@ namespace engine::net::quic {
 				} else if (written == NGTCP2_ERR_INVALID_STATE) {
 					// The peer offered no datagram support. Refused rather than
 					// held, because nothing will ever carry it.
+					ENGINE_WARN(
+						"the peer offers no datagram support; dropping {} queued unreliable message(s)",
+						inside.PendingDatagrams.size()
+					);
 					inside.Counters.DatagramsRefused += static_cast<uint64_t>(inside.PendingDatagrams.size());
 					inside.PendingDatagrams.clear();
 					continue;
@@ -1347,6 +1398,10 @@ namespace engine::net::quic {
 					// can go out for it until an acknowledgement opens it, and
 					// the other channels are unaffected - which is exactly the
 					// isolation the streams exist for.
+					//
+					// Rate-limited: this is a per-tick path and a blocked channel
+					// stays blocked for as long as the peer takes to acknowledge.
+					ENGINE_DEBUG_EVERY(1.0, "channel {} is blocked on the peer's window", chosen);
 					break;
 				}
 			}
@@ -1370,6 +1425,12 @@ namespace engine::net::quic {
 				sent++;
 			} else {
 				inside.Counters.Undeliverable++;
+				ENGINE_WARN_EVERY(
+					1.0,
+					"the transport refused a {} byte packet: status {}",
+					packet.size(),
+					static_cast<int>(status)
+				);
 				break;
 			}
 		}
@@ -1446,6 +1507,10 @@ namespace engine::net::quic {
 		return Inside->Server;
 	}
 
+	bool Connection::Refused() const {
+		return Inside->Turned;
+	}
+
 	std::span<const std::array<std::byte, CONNECTION_ID_BYTES>> Connection::LocalIds() const {
 		return Inside->Ids;
 	}
@@ -1480,6 +1545,68 @@ namespace engine::net::quic {
 		ngtcp2_pkt_hd header{};
 		return ngtcp2_accept(&header, reinterpret_cast<const uint8_t *>(datagram.data()), datagram.size()) ==
 			   0;
+	}
+
+	size_t WriteVersionNegotiation(std::span<const std::byte> initial, std::span<std::byte> out) {
+		if (out.size() < VERSION_NEGOTIATION_BYTES || initial.empty()) {
+			return 0;
+		}
+
+		// **The long-header bit, checked here rather than left to the decoder.**
+		// `ngtcp2_pkt_decode_version_cid` reads a short header happily and hands
+		// back the fixed-length id it was told to expect, so a packet from the
+		// datagram stack - whose first byte is `'A'`, bit 7 clear - would come
+		// back as something to answer. Only a long header can be an Initial.
+		if ((initial[0] & std::byte{0x80}) == std::byte{0}) {
+			return 0;
+		}
+
+		ngtcp2_version_cid cid{};
+		const int result = ngtcp2_pkt_decode_version_cid(
+			&cid, reinterpret_cast<const uint8_t *>(initial.data()), initial.size(), CONNECTION_ID_BYTES
+		);
+		// `NGTCP2_ERR_VERSION_NEGOTIATION` is what this call returns for a
+		// packet whose version this build does not know, and it fills the ids
+		// anyway - which is the case a real negotiation exists for. Both it and
+		// success are answerable; anything else is not a long-header packet.
+		if (result != 0 && result != NGTCP2_ERR_VERSION_NEGOTIATION) {
+			return 0;
+		}
+		if (cid.dcidlen > NGTCP2_MAX_CIDLEN || cid.scidlen > NGTCP2_MAX_CIDLEN) {
+			return 0;
+		}
+
+		// One reserved version, RFC 9000 §15's `0x?a?a?a?a` form. Every
+		// implementation must ignore it, so a list holding only this one says
+		// "nothing you can use" in a packet that is still well formed.
+		static constexpr uint32_t NOTHING_OFFERED = 0x0a0a0a0aU;
+
+		// The unused byte is the low seven bits of the first octet and is
+		// specified to be random. It is not a nonce and nothing is derived from
+		// it, so a failure to draw one is not a reason to leave a client
+		// hanging: zero is a legal value and the packet is identical without it.
+		std::array<std::byte, 1> noise{};
+		(void)RandomBytes(noise);
+
+		// The reply swaps the ids: RFC 9000 §17.2.1 has the Destination
+		// Connection ID of a Version Negotiation be the client's *source*, and
+		// ngtcp2's client discards one whose ids are the other way round.
+		const ngtcp2_ssize written = ngtcp2_pkt_write_version_negotiation(
+			reinterpret_cast<uint8_t *>(out.data()),
+			out.size(),
+			static_cast<uint8_t>(noise[0]),
+			cid.scid,
+			cid.scidlen,
+			cid.dcid,
+			cid.dcidlen,
+			&NOTHING_OFFERED,
+			1
+		);
+		if (written <= 0) {
+			return 0;
+		}
+		core::Metrics::Count("net.quic.version_negotiation_sent", 1.0);
+		return static_cast<size_t>(written);
 	}
 
 	bool RouteOf(std::span<const std::byte> datagram, std::array<std::byte, CONNECTION_ID_BYTES> &out) {

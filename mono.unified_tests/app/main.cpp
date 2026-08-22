@@ -441,8 +441,8 @@ int main(int argc, char **argv) {
 	}
 
 	// **The matrix, one line per arrangement.** With one arrangement this is a
-	// restatement of what is above it; with twelve it is the whole answer, and
-	// scrolling back through twelve reports to find the one that failed is
+	// restatement of what is above it; with twenty it is the whole answer, and
+	// scrolling back through twenty reports to find the one that failed is
 	// exactly what it exists to save.
 	if (running.size() > 1) {
 		std::printf("\n%-28s %8s %s\n", "arrangement", "joined", "contradictions");

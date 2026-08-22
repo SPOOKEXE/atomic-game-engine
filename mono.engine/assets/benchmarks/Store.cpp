@@ -39,8 +39,10 @@
 // justify changing it, because the argument for a background reader is exactly
 // the gap between these figures and a frame budget.
 
+#include <engine/assets/AssetKind.hpp>
 #include <engine/assets/ChunkStore.hpp>
 #include <engine/assets/ContentHash.hpp>
+#include <engine/assets/Manifest.hpp>
 #include <engine/testing/Bench.hpp>
 
 #include <cstddef>
@@ -55,9 +57,13 @@
 
 TEST_SUITE_ID("engine.assets.bench.store")
 
+using engine::assets::AssetEntry;
+using engine::assets::AssetKind;
+using engine::assets::ChunkEntry;
 using engine::assets::ChunkStore;
 using engine::assets::ContentHash;
 using engine::assets::Hasher;
+using engine::assets::Manifest;
 using engine::testing::Consume;
 
 namespace fs = std::filesystem;
@@ -153,6 +159,50 @@ namespace store_bench {
 			return opened;
 		}();
 		return *store;
+	}
+
+	// Chunks per asset for the reassembly rows. Sixty-four 64 KiB chunks is four
+	// megabytes, which is an ordinary character mesh with its textures beside it.
+	constexpr size_t ASSET_CHUNKS = 64;
+
+	// A manifest describing the store's first `ASSET_CHUNKS` chunks as one
+	// asset, in stream order.
+	//
+	// Built through `AddAsset` rather than by filling in an `AssetEntry` by
+	// hand, so the root and the total are exactly what the format computes -
+	// `ReadAsset` verifies against them and would refuse anything else.
+	const Manifest &Catalogue() {
+		static const Manifest built = [] {
+			Manifest manifest;
+			std::vector<ChunkEntry> entries;
+			entries.reserve(ASSET_CHUNKS);
+			const std::vector<ContentHash> &names = Names();
+			for (size_t chunk = 0; chunk < ASSET_CHUNKS; chunk++) {
+				entries.push_back(ChunkEntry{.Hash = names[chunk], .Bytes = CHUNK_BYTES});
+			}
+			manifest.AddAsset("content/reassembled.abin", AssetKind::Mesh, std::move(entries));
+			return manifest;
+		}();
+		return built;
+	}
+
+	// That asset's entry.
+	const AssetEntry &Asset() {
+		return Catalogue().Assets().front();
+	}
+
+	// The same asset as one buffer, for the row that verifies without a disk.
+	const std::vector<std::byte> &Reassembled() {
+		static const std::vector<std::byte> built = [] {
+			std::vector<std::byte> whole;
+			whole.reserve(ASSET_CHUNKS * CHUNK_BYTES);
+			const std::vector<std::vector<std::byte>> &chunks = Chunks();
+			for (size_t chunk = 0; chunk < ASSET_CHUNKS; chunk++) {
+				whole.insert(whole.end(), chunks[chunk].begin(), chunks[chunk].end());
+			}
+			return whole;
+		}();
+		return built;
 	}
 }
 
@@ -266,4 +316,41 @@ BENCH_PER_ITEM("Control · the same 32 MiB written as one file", CHUNKS) {
 	}
 	file.flush();
 	Consume(bytes);
+}
+
+// --- reassembly ---------------------------------------------------------------
+
+BENCH_PER_ITEM("ChunkStore::ReadAsset · a 4 MiB asset in 64 chunks", ASSET_CHUNKS) {
+	// **The client path end to end**, and the one inside a tick: a bundle read
+	// out of a local store is cut into assets by `ChunkStore::ReadBundle`, which
+	// calls this per member, from `delivery::Client::Start`, from `Pump`.
+	//
+	// Read against the two rows below. `Read` is what the chunks cost coming off
+	// the disk with one BLAKE3 pass each; `VerifyAsset` is a second pass over
+	// the same bytes with no disk in it at all. If this row is close to their
+	// sum, the second pass is being paid.
+	ChunkStore &store = Filled();
+	const std::optional<std::vector<std::byte>> whole = store.ReadAsset(Asset());
+	Consume(whole.has_value() ? whole->size() : 0);
+}
+
+BENCH_PER_ITEM("ChunkStore::Read · the same 64 chunks, not reassembled", ASSET_CHUNKS) {
+	// The disk half of the row above, with the same verification per chunk and
+	// without the concatenation or anything after it.
+	ChunkStore &store = Filled();
+	size_t bytes = 0;
+	for (const ChunkEntry &chunk : Asset().Chunks) {
+		const std::optional<std::vector<std::byte>> read = store.Read(chunk.Hash);
+		bytes += read.has_value() ? read->size() : 0;
+	}
+	Consume(bytes);
+}
+
+BENCH_PER_ITEM("VerifyAsset · 4 MiB already in memory", ASSET_CHUNKS) {
+	// **No disk.** One BLAKE3 pass over the asset in chunk-sized pieces plus the
+	// tree over their hashes, which is the check `delivery::Client` makes
+	// against bytes off a wire - where it is the only check there is - and which
+	// `ChunkStore::ReadAsset` used to repeat over bytes each of whose chunks had
+	// just been hashed on the way in.
+	Consume(engine::assets::VerifyAsset(Asset(), Reassembled()) ? 1 : 0);
 }

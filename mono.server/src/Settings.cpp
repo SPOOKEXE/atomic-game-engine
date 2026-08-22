@@ -1,5 +1,6 @@
 #include <engine/core/Flags.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/net/Wire.hpp>
 
 #include <algorithm>
 #include <filesystem>
@@ -83,11 +84,11 @@ namespace server {
 					defaults.RendezvousAddress,
 					"Register with this rendezvous point, so clients off this subnet can reach it"
 				);
-				built.Boolean(
-					"server.quic",
-					defaults.Quic,
-					"Serve over QUIC rather than the datagram wire. Needs server.identity-key, and "
-					"every client must be started with the same flag"
+				built.Text(
+					"server.transport",
+					engine::net::Describe(defaults.Transport),
+					"Which transports to answer: quic, datagram, or both. The server decides; a "
+					"client opens with quic and falls back on its own"
 				);
 				built.Text(
 					"server.identity-key",
@@ -104,6 +105,12 @@ namespace server {
 					"server.profile-window",
 					static_cast<int64_t>(defaults.ProfileWindowTicks),
 					"With server.profile-out, also snapshot every N ticks for flamegraph.py --average"
+				);
+
+				built.Number(
+					"server.metrics-every",
+					defaults.MetricsReportSeconds,
+					"Report core::Metrics every N seconds. 0 reports only at shutdown"
 				);
 
 				built.Integer(
@@ -211,12 +218,27 @@ namespace server {
 		options.SessionName = std::string(Flag("server.session-name").Text());
 		options.SessionSecret = std::string(Flag("server.session-key").Text());
 		options.RendezvousAddress = std::string(Flag("server.rendezvous").Text());
-		options.Quic = Flag("server.quic").Boolean();
+		if (const std::optional<engine::net::WireMode> mode =
+				engine::net::ParseWireMode(Flag("server.transport").Text())) {
+			options.Transport = *mode;
+		} else {
+			// **Named rather than defaulted**, the position `server.idle-sleep`
+			// and `server.content-mode` both take: a misspelling that silently
+			// means `quic` is a deployment that thinks it said otherwise, and
+			// the clients that then cannot join look like a firewall problem.
+			ENGINE_WARN(
+				"server.transport: '{}' is not quic, datagram or both; using quic",
+				Flag("server.transport").Text()
+			);
+			options.Transport = engine::net::WireMode::Quic;
+		}
 		options.IdentityKey = std::string(Flag("server.identity-key").Text());
 
 		options.ProfilePath = std::filesystem::path(Flag("server.profile-out").Text());
 		options.ProfileWindowTicks =
 			static_cast<uint64_t>(std::max<int64_t>(0, Flag("server.profile-window").Integer()));
+
+		options.MetricsReportSeconds = std::max(0.0, Flag("server.metrics-every").Number());
 
 		options.ControlPort = static_cast<int>(Flag("server.control-port").Integer());
 

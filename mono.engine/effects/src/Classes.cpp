@@ -1,3 +1,4 @@
+#include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/EnumTable.hpp>
@@ -110,7 +111,12 @@ namespace engine::effects {
 				size_t ordinal = 0;
 				if (!ecs::EnumTable::OrdinalOf(EnumOf(), *static_cast<const core::Name *>(value), ordinal)) {
 					// Refused where it was written, rather than landing in the
-					// component as a value nobody chose.
+					// component as a value nobody chose. The script sees a
+					// failed assignment and nothing says which name was wrong.
+					ENGINE_DEBUG(
+						"'{}' is not a member of this enum; the property is unchanged",
+						static_cast<const core::Name *>(value)->Text()
+					);
 					return false;
 				}
 				emitter->*Member = static_cast<Enum>(ordinal);

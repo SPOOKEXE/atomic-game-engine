@@ -118,7 +118,7 @@ to find.
 shape it **collides** as. They are the same number for a `MakePart` box and
 nothing keeps them so. An index built from the first can be smaller than the
 shape in the second, and a broad phase whose bound is too small drops contacts
-silently - the exact failure `core::AABB::FromOrientedBox` was written to avoid.
+silently - the exact failure `core::OrientedBoxBounds` was written to avoid.
 
 Querying `<Transform, Collider>` also excludes anything that does not collide,
 where every part has a `Bounds`.

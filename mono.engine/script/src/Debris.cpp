@@ -6,7 +6,7 @@
 //
 // @tier L9 · shared
 
-#include "Debris.hpp"
+#include <engine/script/Debris.hpp>
 
 #include <algorithm>
 

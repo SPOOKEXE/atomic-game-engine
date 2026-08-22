@@ -36,6 +36,7 @@
 // @tier L12 · shared
 
 #include <engine/net/Endpoint.hpp>
+#include <engine/net/Wire.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -43,27 +44,6 @@
 #include <vector>
 
 namespace engine::replication {
-
-	// Which transport a listener or a connector runs on.
-	//
-	// @since v0.19
-	enum class WireKind : uint8_t {
-		// `net::Packet` framing, `net::Reliability`'s window, `net::Handshake`'s
-		// X25519 exchange and `net::Cipher`'s sealing. What this engine has had
-		// since v0.3.
-		Datagram,
-
-		// QUIC: a stream per channel, RFC 9221 datagrams for what is unreliable,
-		// and TLS 1.3 in place of the exchange. `docs/QUIC.md`.
-		Quic,
-	};
-
-	// Returns a stable, human-readable name for a wire.
-	//
-	// @param kind The wire.
-	// @return A view valid for the lifetime of the process.
-	// @since v0.19
-	const char *Describe(WireKind kind);
 
 	// One connection, carrying replication messages both ways.
 	//

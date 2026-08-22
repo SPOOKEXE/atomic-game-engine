@@ -205,6 +205,22 @@ refused every real asset as a cache miss. One implementation now, with three
 callers: the chunk store reassembling, the delivery client checking what arrived
 from an origin, and the same client checking what came out of its own cache.
 
+**It is two halves and they are named apart, which is not a second way to
+verify.** `VerifyAsset` asks whether these bytes are the chunks the entry lists,
+which costs a BLAKE3 pass over all of them, and then whether those chunks add up
+to the asset the entry claims, which touches no content at all. The second half
+is `VerifyAssetShape` and `VerifyAsset` is defined as the first followed by it,
+so there is one definition of each rather than two that agree until they do not.
+
+`ChunkStore::ReadAsset` is the one caller that takes the halves apart, because
+its reads have already made the first: every chunk is hashed against its own name
+on the way past, which is the same comparison and says *which* chunk was wrong.
+Handing the concatenation to `VerifyAsset` afterwards hashed every byte a second
+time - 14.76 us per chunk against 9.17 us, measured over a 4 MiB asset.
+
+**A caller that has not checked the content must not call `VerifyAssetShape`.**
+On its own it says nothing whatever about any bytes.
+
 ## The chunk store is the format's, not the origin's
 
 `ChunkStore` decides how chunks are laid out on a disk - the thing `CDN.md` §7
@@ -225,6 +241,34 @@ with the same check.
 where each asset sits. The origin compresses what one produces and the client
 splits what the other describes, so the two ends cannot disagree about where an
 asset starts.
+
+## The manifest's lookups are all indexed now, and the index holds no facts
+
+`Find` was always a binary search over the name order the format already
+requires. `FindByRoot` was a scan, defended by a comment saying a second index
+would be a second thing to keep true and that this ran while a manifest was being
+built rather than while one was being served. The second half stopped being true:
+`delivery::Client::Split` calls it per member of every arriving group, inside
+`Pump`, at the tick barrier - 11.96 us to locate one member of a 32-member group
+in a 4096-asset manifest, measured.
+
+`RootOrder` answers it, and it answers the objection by **holding positions into
+`AssetsByName` rather than a copy of anything**. There is still one statement of
+what a manifest describes, so the two cannot disagree about an asset; what the
+index adds is an order over it. Every operation that changes `AssetsByName`
+updates it in the same call and there is no path that appends an asset without
+one. Ties break towards the earlier asset, because two names can carry identical
+content and the scan returned the first of them in name order.
+
+`FindBundle` is the same argument one list over, and it removed two open-coded
+scans - `delivery::Client` and `delivery::Relay` each held one.
+
+**`BundleFor` is still a walk, and that is a decision.** An asset-to-bundle index
+is not positions over a list this manifest already holds in that order; it is a
+new key, and the format has no such mapping. The caller that repeated the lookup
+was the problem and it was fixed there: `delivery::Client` records the carrier
+its `Resolve` already found, instead of asking again per pending request per
+pump.
 
 ## Not here yet
 

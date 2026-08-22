@@ -1,3 +1,4 @@
+#include <engine/core/Log.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
@@ -199,10 +200,15 @@ namespace engine::scene {
 			// An NPC's tool, or a player built without going through
 			// `AddPlayer`. Left in the hand rather than put somewhere this
 			// module invented - see the declaration.
+			//
+			// This function answers `false` for four different reasons and the
+			// caller sees one bool, so each of them names itself.
+			ENGINE_DEBUG("tool {} not unequipped: the holder has no Backpack", tool.Id);
 			return false;
 		}
 
 		if (!store.SetParent(tool, backpack)) {
+			ENGINE_WARN("tool {} could not be reparented into the backpack", tool.Id);
 			return false;
 		}
 

@@ -34,6 +34,7 @@ namespace studio {
 
 	using engine::core::AABB;
 	using engine::core::CFrame;
+	using engine::core::OrientedBoxBounds;
 	using engine::core::Ray;
 	using engine::core::Vector3;
 	using engine::ecs::Entity;
@@ -1471,7 +1472,7 @@ namespace studio {
 
 					engine::spatial::Proxy proxy;
 					proxy.Id = entity.Id;
-					proxy.Bounds = AABB::FromOrientedBox(transform.Frame, bounds.HalfExtent);
+					proxy.Bounds = OrientedBoxBounds(transform.Frame, bounds.HalfExtent);
 					proxy.Layers = engine::spatial::LayerMask::All();
 					proxies.push_back(proxy);
 				}

@@ -594,8 +594,9 @@ about how this submodule is bumped, not a version waiting to be reached.
 **Closed at v0.19, and closed by being built rather than by being argued out
 of.** ngtcp2 is vendored, the crypto seam and a TLS 1.3 handshake are in
 `mono.engine/net/quic/`, a QUIC session runs beside the datagram one behind
-`ListenerSettings::Wire`, and `mono.server` and `mono.client` both take
-`--quic`. **`docs/QUIC.md` §0 is the staging table and §12 is what the survey
+`ListenerSettings::Wire`, and at v0.19 QUIC became the default with the server
+choosing - `mono.server --transport quic|datagram|both`, and no transport flag
+on the client at all. **`docs/QUIC.md` §0 is the staging table and §12 is what the survey
 got right and wrong**; what belongs here is which of this entry's own arguments
 were answered.
 

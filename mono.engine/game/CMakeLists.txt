@@ -41,6 +41,12 @@ mono_add_library(game
 		# need.
 		Engine::script
 
+		# L11. **Because `StartWorldScripts` opens a VM.** A document says which
+		# language it is in and this module acts on that, so it needs the factory
+		# rather than either adapter - which is what puts this module at L12 since
+		# v0.19.
+		Engine::scripthost
+
 		# L9, `shared`. The asset pipelines a world carries, as
 		# `bake::PipelineSet` and its text format.
 		#

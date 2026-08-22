@@ -1,5 +1,6 @@
 #include "Utf8.hpp"
 
+#include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Components.hpp>
@@ -37,6 +38,14 @@ namespace engine::gui {
 		// caret past the end. `Typing.hpp` carries the argument for clamping at
 		// the reader rather than at the write.
 		int32_t cursor = std::clamp(entry->CursorPosition, 1, characters + 1);
+		if (cursor != entry->CursorPosition) {
+			// The clamp is correct and silent, and a caret that is repeatedly
+			// far out of range is a script writing `Text` and `CursorPosition`
+			// out of step - which reads as typing landing in the wrong place.
+			ENGINE_DEBUG_EVERY(
+				5.0, "caret {} clamped to {} over {} character(s)", entry->CursorPosition, cursor, characters
+			);
+		}
 		int32_t anchor = entry->SelectionStart < 1 ? -1 : std::min(entry->SelectionStart, characters + 1);
 		if (anchor == cursor) {
 			anchor = -1;

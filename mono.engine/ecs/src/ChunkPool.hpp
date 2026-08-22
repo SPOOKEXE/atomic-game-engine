@@ -33,7 +33,7 @@
 // @tier L3 · shared
 
 #include <cstddef>
-#include <cstdint>
+#include <string_view>
 
 namespace engine::ecs {
 
@@ -95,21 +95,27 @@ namespace engine::ecs {
 		// @threadsafe
 		static size_t RetainedBytes();
 
-		// Chunks taken from the allocator since the process started.
+		// The metrics counter this pool adds one to for every chunk it has to
+		// take from the allocator.
 		//
 		// **The number that says whether the pool is working.** A world cycling
-		// across a chunk boundary should move this by nothing at all; if it
+		// across a chunk boundary should move it by nothing at all; if it
 		// climbs, the pool is a freelist that never hits.
 		//
-		// @return The allocation count.
-		// @threadsafe
-		static uint64_t Allocations();
+		// It used to be a `std::atomic<uint64_t>` beside the freelist with its
+		// own accessor, read by one test and by nothing else in the process -
+		// the last of the counter pairs the v0.19 observability pass found
+		// duplicating `core::Metrics`. It is a counter there now, so the same
+		// reader that prints every other subsystem's totals prints these
+		// without `ecs` growing a reporting surface of its own. A counter is
+		// drained, so the value is chunks since the last `Metrics::Drain`
+		// rather than since the process started, which is the rate the question
+		// above actually wants.
+		static constexpr std::string_view ALLOCATED_COUNTER = "ecs.chunkpool.allocated";
 
-		// Chunks handed back out of the freelist since the process started.
-		//
-		// @return The reuse count.
-		// @threadsafe
-		static uint64_t Reuses();
+		// The metrics counter this pool adds one to for every chunk it hands
+		// back out of the freelist. See `ALLOCATED_COUNTER`.
+		static constexpr std::string_view REUSED_COUNTER = "ecs.chunkpool.reused";
 
 	  private:
 		ChunkPool() = delete;

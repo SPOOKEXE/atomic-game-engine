@@ -1,5 +1,6 @@
 #include <engine/core/Clock.hpp>
 #include <engine/core/FrameGraph.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -15,6 +16,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.core.framegraph")
+TEST_DEPENDS("engine.core.metrics")
 
 using engine::core::FrameGraph;
 using engine::core::ProfileCategory;
@@ -249,6 +251,40 @@ TEST_CASE("a scope on another thread is dropped and counted", "[framegraph]") {
 	REQUIRE(FrameGraph::Spans().size() == 1);
 	REQUIRE(FrameGraph::Spans()[0].Name == "main");
 	REQUIRE(FrameGraph::Dropped() == 1);
+}
+
+TEST_CASE("a dropped scope reaches the metrics sink", "[framegraph]") {
+	// **The half of the drop that a headless program can see.** `Dropped()` is
+	// read by the F5 overlay and by nothing else, so a server running parallel
+	// compute lost spans and had no way to say so. `EndFrame` counts them into
+	// `core::Metrics`, which the server drains and reports.
+	engine::core::Metrics::Clear();
+
+	{
+		Collecting collecting;
+		FrameGraph::BeginFrame();
+		{
+			ENGINE_PROFILE("main");
+			std::thread worker([] { ENGINE_PROFILE("worker"); });
+			worker.join();
+		}
+		FrameGraph::EndFrame();
+	}
+
+	const auto counted = engine::core::Metrics::Get(FrameGraph::DROPPED_COUNTER);
+	REQUIRE(counted.has_value());
+	CHECK(counted->Value == 1.0);
+
+	// Nothing is added on a frame that dropped nothing, so an absent row means
+	// "lost no spans" rather than "nobody looked".
+	engine::core::Metrics::Clear();
+	{
+		Collecting collecting;
+		FrameGraph::BeginFrame();
+		{ ENGINE_PROFILE("main"); }
+		FrameGraph::EndFrame();
+	}
+	CHECK_FALSE(engine::core::Metrics::Get(FrameGraph::DROPPED_COUNTER).has_value());
 }
 
 // --- parentage ---------------------------------------------------------------

@@ -26,9 +26,10 @@
 //   box - the swept-box query in `spatial` - builds it with `FromCentre`.
 // - `Contains(AABB)`, `Volume()`, `SurfaceArea()`. These are the surface a BVH
 //   wants, and decision 4 chose a uniform grid.
-// - `Transformed()`. `FromOrientedBox` is the operation that actually exists:
-//   the world-space bound of a local box under a rigid transform. A general
-//   transform of a box is not a box.
+// - `Transformed()`. `OrientedBoxBounds` is the operation that actually
+//   exists: the world-space bound of a local box under a rigid transform. A
+//   general transform of a box is not a box. It is declared beside `CFrame`
+//   rather than here, and the file comment there says why.
 // - Any `Vector2`. It arrives when the overlay or the editor needs one.
 //
 // **There is no ray/box test here.** The slab test lives privately in
@@ -38,10 +39,7 @@
 //
 // @tier L1 · shared
 
-#include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Vector3.hpp>
-
-#include <cmath>
 
 namespace engine::core {
 
@@ -80,36 +78,6 @@ namespace engine::core {
 		// @param halfExtent How far it reaches from the centre on each axis.
 		static constexpr AABB FromCentre(const Vector3 &centre, const Vector3 &halfExtent) {
 			return AABB{centre - halfExtent, centre + halfExtent};
-		}
-
-		// Returns the world-space box that encloses a rotated local box.
-		//
-		// The extent grows by the **absolute value** of the rotated half-extent
-		// on each axis, which is what makes a unit cube turned 45 degrees about
-		// Y come out root two wide. Rotating only the centre and keeping the
-		// original extent is a cheaper function that is also wrong: it produces
-		// a bound smaller than the shape, and a broad phase whose bound is too
-		// small drops contacts without reporting anything.
-		//
-		// @param frame      Where the box is and how it is turned.
-		// @param halfExtent The box's reach from its own centre, in local axes.
-		static AABB FromOrientedBox(const CFrame &frame, const Vector3 &halfExtent) {
-			const Vector3 right = frame.VectorToWorldSpace(Vector3::XAxis);
-			const Vector3 up = frame.VectorToWorldSpace(Vector3::YAxis);
-			const Vector3 forward = frame.VectorToWorldSpace(Vector3::ZAxis);
-
-			// Each world axis takes a contribution from all three local axes:
-			// this is the absolute value of the rotation matrix applied to the
-			// half-extent, written out because the matrix is not stored.
-			const Vector3 worldHalfExtent{
-				std::abs(right.X) * halfExtent.X + std::abs(up.X) * halfExtent.Y +
-					std::abs(forward.X) * halfExtent.Z,
-				std::abs(right.Y) * halfExtent.X + std::abs(up.Y) * halfExtent.Y +
-					std::abs(forward.Y) * halfExtent.Z,
-				std::abs(right.Z) * halfExtent.X + std::abs(up.Z) * halfExtent.Y +
-					std::abs(forward.Z) * halfExtent.Z,
-			};
-			return FromCentre(frame.Position, worldHalfExtent);
 		}
 
 		// Returns the middle of the box.

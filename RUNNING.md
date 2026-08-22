@@ -235,6 +235,7 @@ just preset=release build engine_ecs   # any of the above, other preset
 | `mono.cdn` | `cdn_lib` | `Mono::cdn` | `test_cdn` | shared |
 | `mono.tools/testrunner` | `testrunner_lib` | `Tool::testrunner` | `test_testrunner` | shared |
 | `mono.tools/linecount` | `linecount_lib` | `Tool::linecount` | `test_linecount` | shared |
+| `mono.tools/sourcecheck` | `sourcecheck_lib` | `Tool::sourcecheck` | `test_sourcecheck` | shared |
 
 The names are derived, not chosen per module: `mono_add_library` makes
 `engine_<name>` for an `Engine::` module and `<name>_lib` for a product's own
@@ -1344,9 +1345,9 @@ room; rotating the destination is the general answer.
 rather than to a blank pane. A surface that stopped reflecting reads as something
 to fix; a pane that vanished reads as a broken renderer.
 
-**You can walk through these.** `scene::CrossPortals` maps a body - and its
-velocity, and the camera's yaw when the body is the one the camera follows -
-through the same product the picture goes through, and `scene::OpenPortals`
+**You can walk through these.** `scene::CrossPortals` maps a body - and both
+halves of its `Motion`, and the camera's yaw when the body is the one the camera
+follows - through the same product the picture goes through, and `scene::OpenPortals`
 takes the pane's collider out of the solver's way so a walker reaches it at all.
 Press Play in the studio on `run-portals`' scene, or host it with
 `scripts/demos/run-local-server.sh`; the standalone client has no character and
@@ -1766,6 +1767,7 @@ just host --ticks 300 --entities 20000
 --host-program PATH              The program a host runs (default: this one)
 --processes N                    How many processes share this machine
 --listen PORT                    Serve a world to clients over UDP
+--transport MODE                 quic (default), datagram, or both
 --identity-key HEX               Ed25519 seed for the server identity
 --content-store DIR              Serve a local content store
 --content-port PORT              Port for the attached content origin
@@ -1974,6 +1976,44 @@ across that is fitted across the changeovers. Reports land in
 
 Not part of `just check`: at the default it is five minutes, and a check
 somebody skips is a check that is not run.
+
+---
+
+## Which transport a session runs on
+
+**QUIC is the default and the server decides. The client has no flag.**
+
+```sh
+server --listen 9000                       # quic, which is the default
+server --listen 9000 --transport datagram  # the stack this engine had before v0.19
+server --listen 9000 --transport both      # whichever a client opens with
+```
+
+A client always opens with QUIC. A server that does not serve it answers with a
+refusal rather than with silence, and the client retries over the datagram
+stack immediately - one round trip, not a timeout. A server that serves only
+QUIC refuses a datagram hello the same way. Either way the log line says which
+transport the connection landed on and why:
+
+```
+replication: quic did not connect (the server does not serve this transport) - retrying over the datagram wire.
+replication: connected over datagram on attempt 2 of 2
+```
+
+**Both modes share one UDP port.** There is no second socket and no second
+accept loop: the first packet from an unknown peer is a QUIC Initial or a
+`net::Packet`, and one bit of its first byte says which. `mono.engine/net/
+include/engine/net/Wire.hpp` carries the bit positions.
+
+A server that is announcing itself puts its mode in the advert, so a client that
+found it in a browser opens on the right stack and pays no refusal at all. A
+typed-in address has no advert, so that client pays one round trip when the
+server is on the old stack.
+
+`--transport quic` needs no `--identity-key`: a QUIC handshake needs an identity
+whether or not anybody pinned one, so a server without a key draws an ephemeral
+one for the run and says so. That authenticates nobody, exactly as an unsigned
+`Welcome` on the datagram stack does. The next section is how to fix that.
 
 ---
 
@@ -2836,6 +2876,48 @@ configure time and fails the build with the offending edge named. This checks
 the graph against the checked-in expectation, so that an architectural change
 shows up as a diff somebody reviews.
 
+## The source-text architecture rules
+
+```sh
+just source-check
+```
+
+The other half of `test-architecture`. That one reads CMake's output, so it can
+see the module set, the tiers, the link sets and the layer heights; it cannot
+see a member's type, a header's includers, or an argument reaching a writer.
+This reads first-party C++ as text and checks the four rules
+`docs/CODE_ARCH.md` §11 listed as convention until v0.19: a private copy of data
+the ECS owns, a pointer inside a type marked as crossing a world boundary, a
+`core::Name` serialized as its `Id()`, and a header under `include/` that
+nothing outside its module includes.
+
+It needs a *build* of one target and nothing else - the tool reads sources, not
+objects. Directly, and with `--rule` for one rule at a time:
+
+```sh
+./.cache/build/dev/tools/sourcecheck .                       # every rule
+./.cache/build/dev/tools/sourcecheck . --rule name-id        # one of them
+./.cache/build/dev/tools/sourcecheck . --verbose             # waived findings too
+```
+
+Three of the four gate. `public-header` reports and never fails: an unwired
+subsystem is not dead code, and it currently names 87 of 393 public headers,
+twenty-five of them `mono.studio`'s.
+
+A rule is switched off at one declaration with a comment above it, reason
+included - a waiver with nothing after the colon is reported rather than
+honoured:
+
+```cpp
+// arch-waiver ecs-copy: composed from N views for one frame out. No world
+// holds this camera, because it is not any world's camera.
+engine::scene::Camera ComposedCamera;
+```
+
+`just source-check` runs the fixture trees under
+`mono.tools/sourcecheck/tests/fixtures/` before it runs the repository, because
+a scanner that read nothing would report success over both.
+
 ## The shader check
 
 ```sh
@@ -3053,8 +3135,9 @@ only be a format for bun and npm to disagree about.
 The `server` and `studio` programs can open a socket that answers **Model
 Context Protocol**, so a language model or a script can watch them and steer
 them: list scenes, read and write properties, start and stop a world, read the
-log, and read the frame profile. The client, unified harness and content origin
-do not currently register `--mcp-port`.
+log and the metrics, ask what a module is allowed to link, type-check a script,
+and start a test run. The client, unified harness and content origin do not
+currently register `--mcp-port`.
 
 **It is off unless you ask.** Read
 [SECURITY.md](SECURITY.md#the-control-surface-is-a-third-boundary-and-it-is-opt-in-for-that-reason)
@@ -3071,8 +3154,49 @@ one machine do not collide:
 
 | Program | Port | What it exposes |
 |---|---|---|
-| `server` | 8734 | its worlds, read and write |
+| `server` | 8734 | its worlds, who is connected, and what the game socket has done |
 | `studio` | 8738 | worlds, plus selection, Play and the output panel |
+
+Both also answer the tools that are about the repository rather than about the
+program - the module graph, the class table, the log and the test runner - and
+both serve resources and prompts. `--mcp-port` always takes a number; the ports
+above are conventions, and `engine::control::DEFAULT_PORT` and
+`DEFAULT_SERVER_PORT` are where they are written down. `.mcp.json` and the `just
+mcp` recipe are checked against that header at configure time, so a fourth copy
+of the number cannot quietly disagree.
+
+### What is on the surface
+
+**About this program.** `engine_info` first, always. Then `world_list`,
+`world_tree`, `instance_get`, `instance_set`, `component_list`, `entity_query`,
+`component_get`, `component_set`, `engine_components` and `profile_frame`. The
+editor adds `world_run`, `selection_get`, `select` and its own `log_tail`; the
+server adds `host_link` and `host_players`.
+
+**About the engine.** `layer_table` is the stack, `module_get` is one module with
+what links it, and `module_may_link` answers whether an edge would be legal -
+the question `just test-architecture` answers, out of the same file. `class_list`
+and `class_get` are the class table this process registered.
+
+**About what it has been doing.** `log_tail` is the last 1024 lines, filtered by
+level and category; `log_level` reads and changes the severity floors while the
+program runs; `metrics_read` is every counter, gauge and distribution, and reads
+without draining.
+
+**Doing work.** `script_check` type-checks Luau against the generated
+declarations and never runs any of it. `test_run` starts the suites and returns
+immediately, and `test_result` polls it - a full run is minutes, and a tool that
+blocked would hold the frame it was called in. Both need the checkout this
+program was built from and say so when there is not one.
+
+**Resources**, which a client may attach without a tool call:
+`atomic://architecture/layers`, `atomic://architecture/modules`,
+`atomic://components`, one `atomic://agents/<path>` per `AGENTS.md`, and
+`atomic://bindings/manifest` and `atomic://bindings/luau`. The last three groups
+are files, so they are listed only when the program is running out of a checkout.
+
+**Prompts**, one per file in `.claude/commands/` plus an `architecture-review`
+pass written for this surface.
 
 ### Connecting a client to it
 

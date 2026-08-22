@@ -55,6 +55,81 @@ namespace engine::control {
 		std::function<nlohmann::json(const nlohmann::json &arguments, std::string &failure)> Call;
 	};
 
+	// Something a client may read without calling a tool.
+	//
+	// **The difference from a tool is who decides to fetch it.** A tool is an
+	// action a model chooses; a resource is context a client may attach on its
+	// own, and MCP clients do exactly that - they list resources at connect time
+	// and offer them. So the layer table, the component catalogue and the
+	// module graph belong here rather than only behind a call: they are the
+	// things a model should already know before it asks its first question.
+	//
+	// Read lazily. A resource that is a hundred kilobytes of manifest costs
+	// nothing until somebody reads it.
+	//
+	// @since v0.19
+	struct Resource {
+		// The address, in this engine's own scheme: `atomic://<what>/<which>`.
+		// Stable, because a client remembers one it was told about.
+		std::string Uri;
+
+		// A short identifier a person recognises in a list.
+		std::string Name;
+
+		// One sentence for whoever has never seen this engine, exactly as a
+		// `Tool::Description` is.
+		std::string Description;
+
+		// `text/markdown`, `application/json`, `text/plain`.
+		std::string MimeType;
+
+		// The contents. Sets `failure` and returns empty to refuse, which
+		// arrives as a protocol error - a resource that cannot be read is not a
+		// result a model can act on, unlike a tool that declined.
+		std::function<std::string(std::string &failure)> Read;
+	};
+
+	// One thing a prompt can be told before it renders.
+	//
+	// **Declared rather than merely accepted**, because a client builds its
+	// argument form from this list: an argument a prompt reads and does not
+	// declare is one nobody can supply.
+	//
+	// @since v0.19
+	struct PromptArgument {
+		// What the caller passes it as.
+		std::string Name;
+
+		// One sentence, for a person filling in a form.
+		std::string Description;
+
+		// Whether rendering fails without it.
+		bool Required = false;
+	};
+
+	// One workflow this repository actually has, offered as a prompt.
+	//
+	// **Prompts are the part of MCP that carries procedure**, and this
+	// repository keeps its procedures in files - the completion checklist, the
+	// module scaffold, the review pass. A prompt here is how one of those
+	// reaches a client that has never opened the repository, and it renders the
+	// checked-in text rather than a second copy of it.
+	//
+	// @since v0.19
+	struct Prompt {
+		// What a client calls it, and usually what it shows as a command.
+		std::string Name;
+
+		// One sentence saying when to reach for it.
+		std::string Description;
+
+		// What it may be told, for a client that builds a form from it.
+		std::vector<PromptArgument> Arguments;
+
+		// The message. Sets `failure` and returns empty to refuse.
+		std::function<std::string(const nlohmann::json &arguments, std::string &failure)> Render;
+	};
+
 	// The protocol, the table, and what a program says about itself.
 	//
 	// @since v0.8
@@ -89,6 +164,118 @@ namespace engine::control {
 		//                 fails is worse than one that was never listed.
 		void AddUniverseTools(world::Universe &universe, bool writable = true);
 
+		// Installs every group below, which is what a program with worlds wants.
+		//
+		// **One call, because there is one right answer.** Each group is
+		// separately available for a program that has a reason to differ, and no
+		// program has yet had one: the universe tools, the module graph, the
+		// class table and the type checker, the log and the metrics, and the
+		// test runner, plus the standard resources and prompts. A program adds
+		// its own rows afterwards, and a later row wins.
+		//
+		// @param universe The worlds to expose.
+		// @param writable Whether the write tools are offered at all.
+		// @since v0.19
+		void AddStandardTools(world::Universe &universe, bool writable = true);
+
+		// Installs the module graph and the layer table.
+		//
+		// **The only tools in this module a program with no worlds can still
+		// answer honestly.** A content origin holds no scenes and has no
+		// `world_list`; the layer stack is the same stack whatever the program
+		// is, because it is compiled in from the file `just test-architecture`
+		// checks the build against.
+		//
+		// `layer_table`, `module_get` and `module_may_link`. The last is the
+		// question the architecture check answers and a model could not
+		// previously ask: whether an edge would be legal, before writing it.
+		//
+		// @since v0.19
+		void AddArchitectureTools();
+
+		// Installs the class table and the type checker.
+		//
+		// `class_list` and `class_get` read the classes this process actually
+		// registered; `script_check` type-checks Luau against the generated
+		// declarations without running any of it. **Nothing here evaluates a
+		// script**, and `src/ScriptTools.cpp` says why in full: a tool runs
+		// inside the frame and there is no thread here to interrupt a loop from.
+		//
+		// `script_check` needs the checkout this program was built from and
+		// refuses with a reason when there is not one.
+		//
+		// @since v0.19
+		void AddScriptTools();
+
+		// Installs the log tools, and a sink to feed them.
+		//
+		// **A ring of the most recent lines, on the process-wide logger.** The
+		// editor could already be asked what it had said and no other program
+		// could, so a dedicated server misbehaving unattended answered nothing.
+		// `log_tail` reads the ring; `log_level` reads and changes the severity
+		// floors, per category, while the program runs. `metrics_read` is here
+		// too, and is the same question asked of `core::Metrics`: nothing
+		// exported those out of the process, so a counter the headless server
+		// had kept since v0.9 had never once been read.
+		//
+		// The sink is installed here rather than by the module, so a program
+		// that never opens a control port pays nothing per line. Installed once
+		// per process however many surfaces ask, and never removed - the logger
+		// outlives every `Surface` and a sink detached mid-line would be a
+		// use-after-free in the one component whose job is explaining a crash.
+		//
+		// @since v0.19
+		void AddDiagnosticTools();
+
+		// Installs the test runner.
+		//
+		// `test_run` starts the suites and returns a handle; `test_result`
+		// polls it. **Asynchronous because it has to be** - a full run is
+		// minutes, and a tool holds the frame it was called in.
+		//
+		// It invokes exactly `<build>/tools/testrunner`, with an argument list
+		// this module assembles: no shell, no `just`, and no path a client can
+		// influence. It runs the suites and does not build them.
+		//
+		// @since v0.19
+		void AddBuildTools();
+
+		// Adds one resource. Later rows win, as `Add` does.
+		//
+		// @since v0.19
+		void AddResource(Resource resource);
+
+		// Adds one prompt. Later rows win, as `Add` does.
+		//
+		// @since v0.19
+		void AddPrompt(Prompt prompt);
+
+		// Installs the resources any program can serve, plus the ones a
+		// checkout adds.
+		//
+		// The layer table, the module graph and the component catalogue are
+		// compiled in or read out of the running process, so every program has
+		// them. The `AGENTS.md` files and the scripting manifest are files, so
+		// they appear only when this executable was staged into a checkout -
+		// which is the same principle the tool table follows: a client is told
+		// what this program can actually do rather than discovering it by
+		// asking for something that fails.
+		//
+		// @since v0.19
+		void AddStandardResources();
+
+		// Installs the prompts for the workflows this repository has.
+		//
+		// **Rendered from `.claude/commands/*.md` rather than copied**, so a
+		// fifth command file is a fifth prompt with no code change and no second
+		// copy to keep in step. One prompt is written here and has no file: an
+		// architecture-review pass, which drives the module-graph tools above.
+		//
+		// The file-backed ones appear only inside a checkout.
+		//
+		// @since v0.19
+		void AddStandardPrompts();
+
 		// One JSON-RPC message in, one out. Empty means "no reply", which is
 		// what a notification gets.
 		std::string Answer(const std::string &line);
@@ -122,12 +309,36 @@ namespace engine::control {
 			return Profiling;
 		}
 
+		// Every registered resource, in the order `resources/list` reports them.
+		//
+		// Valid until the next `AddResource`.
+		//
+		// @return The resources.
+		// @since v0.19
+		std::span<const Resource> Readable() const {
+			return Resources;
+		}
+
+		// Every registered prompt, in the order `prompts/list` reports them.
+		//
+		// Valid until the next `AddPrompt`.
+		//
+		// @return The prompts.
+		// @since v0.19
+		std::span<const Prompt> Prompted() const {
+			return Prompts;
+		}
+
 	  private:
 		nlohmann::json ToolList() const;
+		nlohmann::json ResourceList() const;
+		nlohmann::json PromptList() const;
 
 		std::string Name;
 		std::string Purpose;
 		std::vector<Tool> Tools;
+		std::vector<Resource> Resources;
+		std::vector<Prompt> Prompts;
 		bool Profiling = false;
 	};
 }

@@ -21,7 +21,7 @@ namespace loadtest {
 		case Stage::Playing:
 			return "playing";
 		case Stage::Refused:
-			return "refused";
+			return "gave up";
 		case Stage::TimedOut:
 			return "timed out";
 		}

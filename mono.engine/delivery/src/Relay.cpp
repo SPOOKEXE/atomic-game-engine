@@ -22,7 +22,7 @@
 
 namespace engine::delivery {
 	namespace {
-		std::string ToHex(std::span<const std::byte> bytes) {
+		std::string HexText(std::span<const std::byte> bytes) {
 			static constexpr char DIGITS[] = "0123456789abcdef";
 			std::string hex;
 			hex.reserve(bytes.size() * 2);
@@ -33,7 +33,7 @@ namespace engine::delivery {
 			return hex;
 		}
 
-		std::optional<std::vector<std::byte>> ReadWholeFile(const std::filesystem::path &path) {
+		std::optional<std::vector<std::byte>> ReadRelayFile(const std::filesystem::path &path) {
 			std::ifstream file(path, std::ios::binary | std::ios::ate);
 			if (!file) {
 				return std::nullopt;
@@ -420,7 +420,7 @@ namespace engine::delivery {
 					ask.Target = request.Route;
 					if (!Grant.empty()) {
 						ask.Headers.push_back(
-							net::http::Header{.Name = "x-atomic-grant", .Value = ToHex(Grant)}
+							net::http::Header{.Name = "x-atomic-grant", .Value = HexText(Grant)}
 						);
 					}
 					request.Fetch = Transfer->Submit(source.Address, ask, source.Host);
@@ -496,7 +496,7 @@ namespace engine::delivery {
 					// something nobody signed - `cdn::Service` reads it the same
 					// way for the same reason.
 					std::optional<std::vector<std::byte>> file =
-						ReadWholeFile(source.Store->Directory() / assets::ChunkStore::MANIFEST_FILE);
+						ReadRelayFile(source.Store->Directory() / assets::ChunkStore::MANIFEST_FILE);
 					if (!file || !Accepts(route, *file)) {
 						return false;
 					}
@@ -517,13 +517,7 @@ namespace engine::delivery {
 				if (!root || !source.Catalogue) {
 					return false;
 				}
-				const assets::BundleEntry *found = nullptr;
-				for (const assets::BundleEntry &bundle : source.Catalogue->Bundles()) {
-					if (bundle.Root == *root) {
-						found = &bundle;
-						break;
-					}
-				}
+				const assets::BundleEntry *const found = source.Catalogue->FindBundle(*root);
 				if (found == nullptr) {
 					return false;
 				}

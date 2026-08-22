@@ -1,3 +1,4 @@
+#include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/graph/Cull.hpp>
 #include <engine/graph/Shadow.hpp>
@@ -105,6 +106,7 @@ namespace engine::graph {
 			// caller with no light direction has a bug, and a scene rendered
 			// entirely in shadow would hide it behind a symptom that looks like
 			// a renderer fault.
+			ENGINE_WARN_EVERY(1.0, "the directional light has no direction; it casts no shadow");
 			return glm::mat4{1.0f};
 		}
 
@@ -149,6 +151,7 @@ namespace engine::graph {
 	) {
 		const float length = direction.Magnitude();
 		if (length <= 0.0f) {
+			ENGINE_WARN_EVERY(1.0, "the portal light has no direction; it casts no shadow");
 			return glm::mat4{1.0f};
 		}
 
@@ -180,6 +183,12 @@ namespace engine::graph {
 		// A rectangle with no area is a pane nobody can see through, and a beam
 		// of no width would divide by nothing on the way to a projection.
 		if (halfWide <= 1.0e-4f || halfHigh <= 1.0e-4f) {
+			ENGINE_DEBUG_EVERY(
+				1.0,
+				"the portal aperture is {} by {} across the light; it casts no shadow",
+				halfWide,
+				halfHigh
+			);
 			return glm::mat4{1.0f};
 		}
 

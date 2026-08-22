@@ -1,5 +1,7 @@
 #include "GridInternals.hpp"
 
+#include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/spatial/HashGrid.hpp>
 
 #include <algorithm>
@@ -72,6 +74,12 @@ namespace engine::spatial {
 		// investigated.
 		Spacing = cellSize > 0.0f ? cellSize : DEFAULT_CELL_SIZE;
 		InverseSpacing = 1.0f / Spacing;
+
+		// The symptom of the fallback is a cell-size experiment that stops
+		// changing anything, so it says so rather than quietly working.
+		if (!(cellSize > 0.0f)) {
+			ENGINE_WARN("cell size {} is not positive; using the default {}", cellSize, DEFAULT_CELL_SIZE);
+		}
 	}
 
 	void HashGrid::Clear() {
@@ -86,6 +94,11 @@ namespace engine::spatial {
 	}
 
 	void HashGrid::Rebuild(std::span<const Proxy> proxies) {
+		// **A histogram and not a counter.** This runs once a tick over the whole
+		// scene, and what a stutter needs is the worst rebuild rather than the
+		// mean of sixty of them.
+		const core::ScopedObservation timed("spatial.grid.rebuild");
+
 		Clear();
 
 		Proxies.assign(proxies.begin(), proxies.end());
@@ -133,6 +146,43 @@ namespace engine::spatial {
 
 		const size_t buckets = ChooseBucketCount(entryCount);
 		BucketStart.assign(buckets + 1, 0);
+
+		core::Metrics::Count("spatial.grid.proxies", static_cast<double>(Proxies.size()));
+
+		// **Every oversized proxy is tested exactly against every query**, so a
+		// scene that accumulates them loses the acceleration one proxy at a
+		// time with nothing reporting it.
+		if (!Oversized.empty()) {
+			core::Metrics::Count("spatial.grid.oversized", static_cast<double>(Oversized.size()));
+			ENGINE_DEBUG_EVERY(
+				5.0,
+				"{} of {} proxies span more than {} cells at spacing {} and are tested exactly by every "
+				"query",
+				Oversized.size(),
+				Proxies.size(),
+				MAXIMUM_CELLS_PER_PROXY,
+				Spacing
+			);
+		}
+
+		// At the cap the table is no longer one bucket per entry, so a query
+		// walks somebody else's cell contents on every lookup.
+		if (buckets == MAXIMUM_BUCKET_COUNT && entryCount > buckets) {
+			ENGINE_WARN_EVERY(
+				10.0,
+				"{} cell entries over the {} bucket cap; every query now scans a shared bucket",
+				entryCount,
+				MAXIMUM_BUCKET_COUNT
+			);
+		}
+
+		ENGINE_TRACE(
+			"rebuilt: {} proxies, {} cell entries, {} buckets, {} oversized",
+			Proxies.size(),
+			entryCount,
+			buckets,
+			Oversized.size()
+		);
 
 		// Pass two: how many entries each bucket owns, counted one slot to the
 		// right so the prefix sum turns the counts into starts in place.
@@ -187,6 +237,8 @@ namespace engine::spatial {
 			return;
 		}
 
+		ENGINE_DEBUG("cell size {} -> {}; the index is dropped", Spacing, resolved);
+
 		Spacing = resolved;
 		InverseSpacing = 1.0f / resolved;
 
@@ -220,6 +272,11 @@ namespace engine::spatial {
 		// A world of degenerate boxes, or one whose bounds are not finite. The
 		// default is the honest answer rather than a number derived from a NaN.
 		if (!(mean > 0.0f)) {
+			ENGINE_WARN(
+				"{} proxies have a mean widest axis of {}; suggesting the default cell size instead",
+				proxies.size(),
+				mean
+			);
 			return HashGrid::DEFAULT_CELL_SIZE;
 		}
 

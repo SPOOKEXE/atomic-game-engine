@@ -13,6 +13,12 @@
 // which is what makes adding a component to the engine also add it to the
 // catalogue, rather than leaving the catalogue to drift.
 //
+// **It also refuses a component that is saved, raw-serialised and padded at
+// once**, which is the trio that leaks uninitialised bytes into an `.agame` and
+// turns `just determinism` red a very long way from the type at fault. That was
+// a paragraph in `docs/ARCH_REVIEW.md` §D claiming to be a check until v0.19;
+// the tool printed the two columns and compared neither.
+//
 // The pattern is `expected_graph.json`'s and `bindings`': a checked-in
 // expectation, a tool that compares, and a rule that says if the two disagree
 // the question is which one is wrong.
@@ -231,7 +237,9 @@ namespace {
 			   "be saved rather than writing bytes that cannot be read back |\n";
 		out << "| raw | `Write` copies the object representation. Padding and any process-local id inside it "
 			   "reach the file, which is why `pad` below only matters here |\n";
-		out << "| pad | has bytes no member occupies |\n";
+		out << "| pad | has bytes no member occupies. `just components-check` refuses a component "
+			   "that is `save` **and** `raw` **and** `pad` at once: that trio writes uninitialised "
+			   "bytes into every `.agame` |\n";
 		out << "| wire | bytes in the compact replication form. Blank means the wire carries `Write`'s bytes "
 			   "unchanged |\n\n";
 
@@ -349,6 +357,41 @@ int main(int argc, char **argv) {
 		}
 	}
 
+	// **Saved, raw-serialised and padded at once is a determinism bug waiting
+	// for a scene big enough to notice it.**
+	//
+	// A raw serialiser copies the object representation, and a byte no member
+	// occupies is a byte nobody initialised - so two runs of one scene write
+	// different `.agame` bytes and `just determinism` reports it from
+	// `mono.server` with no clue which type is at fault. Every component in this
+	// engine that is raw-serialised names its padding as a `Reserved` run for
+	// exactly this reason, and `ecs::HasPadding` is what notices when one stops.
+	//
+	// **The trio was clean when the catalogue landed and nothing checked it.**
+	// `docs/ARCH_REVIEW.md` §D said it was "checked every time the catalogue
+	// regenerates"; the tool printed the two columns and compared neither, so
+	// the rule was a paragraph. Root `AGENTS.md` rule 6 is what this closes.
+	//
+	// Two of the three are needed for a failure and the third is what makes it
+	// reachable: `Padded` is meaningless for a type that is not trivially
+	// copyable, `RawSerialisation` is what puts the bytes in a file, and
+	// `Serialisable` is what makes a file happen at all.
+	std::vector<std::string> leaky;
+	for (const Row &row : rows) {
+		if (row.Serialisable && row.RawSerialisation && row.Padded) {
+			leaky.push_back(row.Name);
+		}
+	}
+
+	// Reported whichever way the tool was run, because a generated catalogue
+	// that quietly records a leak is worse than one that refuses.
+	for (const std::string &name : leaky) {
+		std::cerr << "'" << name
+				  << "' is saved, raw-serialised and padded. Its padding reaches every .agame "
+					 "uninitialised. Name the hole as a `Reserved` member, or give the type a "
+					 "hand-written Write/Read pair.\n";
+	}
+
 	if (!arguments.Has("check")) {
 		if (!WriteFile(out, rendered)) {
 			std::cerr << "cannot write " << out << "\n";
@@ -356,7 +399,7 @@ int main(int argc, char **argv) {
 		}
 		std::cout << "componentdoc - " << rows.size() << " component(s) written to " << out << ", "
 				  << undocumented << " undocumented\n";
-		return 0;
+		return leaky.empty() ? 0 : 1;
 	}
 
 	int status = 0;
@@ -378,8 +421,12 @@ int main(int argc, char **argv) {
 		}
 		status = 1;
 	}
+	if (!leaky.empty()) {
+		status = 1;
+	}
 	if (status == 0) {
-		std::cout << "componentdoc ok - " << rows.size() << " component(s), all documented\n";
+		std::cout << "componentdoc ok - " << rows.size()
+				  << " component(s), all documented, none leaking padding into a save\n";
 	}
 	return status;
 }

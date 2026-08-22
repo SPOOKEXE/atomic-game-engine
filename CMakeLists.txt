@@ -67,6 +67,53 @@ option(MONO_WERROR       "Treat warnings as errors"    OFF)
 # benchmark is the one measurement that needs both the optimiser and the hooks.
 option(MONO_HEAP_PROFILE "Track every allocation and attribute it to a tag" ON)
 
+# The severity a build compiles log statements in at.
+#
+# **A statement below this floor is removed by the preprocessor, not skipped at
+# runtime.** `ENGINE_TRACE` under a `debug` floor expands to a `sizeof` of a
+# call that never happens: the arguments are still type-checked and the format
+# string is still verified, and no instruction is emitted - so the eight trace
+# sites in the tree cost a shipped build nothing at all, and neither does the
+# ninth somebody adds in a loop.
+#
+# `trace` everywhere except `release` and `bench`, which compile at `debug`.
+# Not `info`, because a release build somebody is debugging in the field should
+# still be able to answer `--log net=debug` without being rebuilt.
+#
+# Public on `Engine::core`, like `MONO_HEAP_PROFILE` and for a weaker version of
+# its reason: the floor only affects call sites, so a mismatch is confusing
+# rather than corrupting - but "which statements does this build contain" should
+# have one answer per program.
+set(MONO_LOG_LEVEL "trace" CACHE STRING "Lowest severity compiled into log statements")
+set_property(CACHE MONO_LOG_LEVEL PROPERTY STRINGS trace debug info warning error off)
+
+if(MONO_LOG_LEVEL STREQUAL "trace")
+	set(MONO_LOG_LEVEL_NUMBER 0)
+elseif(MONO_LOG_LEVEL STREQUAL "debug")
+	set(MONO_LOG_LEVEL_NUMBER 1)
+elseif(MONO_LOG_LEVEL STREQUAL "info")
+	set(MONO_LOG_LEVEL_NUMBER 2)
+elseif(MONO_LOG_LEVEL STREQUAL "warning")
+	set(MONO_LOG_LEVEL_NUMBER 3)
+elseif(MONO_LOG_LEVEL STREQUAL "error")
+	set(MONO_LOG_LEVEL_NUMBER 4)
+elseif(MONO_LOG_LEVEL STREQUAL "off")
+	set(MONO_LOG_LEVEL_NUMBER 5)
+else()
+	message(FATAL_ERROR
+		"MONO_LOG_LEVEL is '${MONO_LOG_LEVEL}'. It is trace, debug, info, warning, error or off.")
+endif()
+
+# `ENGINE_ASSERT` - core/Assert.hpp.
+#
+# On by default and off in `release`, exactly as the heap profiler is arranged
+# and for the same argument: a developer build should check its invariants
+# without being reconfigured first, and a shipped build should not pay for a
+# check on a path that is hot. `ENGINE_UNREACHABLE` and `ENGINE_ENSURE` are
+# unaffected - they are compiled in whatever this says, because neither has
+# anywhere to carry on to and both are on cold paths.
+option(MONO_ASSERTS "Check ENGINE_ASSERT conditions" ON)
+
 # Off by default, and the `release` preset is the one place it goes back on.
 #
 # First-party code is built at -O0 so that a profile measures what the engine
@@ -93,6 +140,108 @@ option(MONO_OPTIMISE     "Optimise first-party targets" OFF)
 # two switches that can disagree.
 set(MONO_OPTIMISE_LEVEL "3" CACHE STRING "Optimisation level for first-party targets when MONO_OPTIMISE is on")
 set_property(CACHE MONO_OPTIMISE_LEVEL PROPERTY STRINGS 1 2 3)
+
+# How much debug information first-party objects carry.
+#
+# **`line-tables` is `-g1`, and it is a third of the compile off the heaviest
+# translation units for something no preset that sets it was using.** Measured
+# on this machine against the eight heaviest first-party sources, `release`
+# flags, ccache bypassed, best of three, at a load average of 11:
+#
+#   | debug info | CPU     | objects |
+#   |------------|---------|---------|
+#   | `-g` full  | 60.3 s  | 96.2 MB |
+#   | `-g1`      | 41.6 s  | 20.6 MB |
+#   | `-g0`      | 40.4 s  |  6.0 MB |
+#
+# **The third row is why there is no `none`.** Dropping debug information
+# altogether buys 1.2 CPU-seconds more, 2.8%, and costs every backtrace its
+# file and line. `-g1` keeps function descriptions and the line-number table
+# and drops only the local-variable and type information a live debugger needs,
+# so a core file from a shipped build still symbolicates.
+#
+# **`full` in `dev`, and that is the whole of the preset split.** `dev` is where
+# a debugger is attached and where `-g1` would take away exactly what a debugger
+# reads; it is also `-O0`, where the same measurement is 15% rather than 31%. So
+# `release` and `ci` set `line-tables` - one is shipped and one is read as a log
+# - and `dist-dev` sets it back to `full`, because that preset exists to be the
+# build somebody diagnoses.
+#
+# **Nothing here on MSVC, and not by oversight.** MSVC has no line-tables-only
+# mode, so there is no flag for the middle value to map to. The related MSVC
+# knob is a different one: ccache caches an MSVC compile only where debug info
+# is `/Z7` rather than `/Zi`, and `.github/workflows/build.yml` records that the
+# Windows build compiles and has never shipped - so that flag belongs to
+# whoever first ships it, beside the cache they turn on at the same time.
+#
+# Applied through MONO_COMPILE_OPTIONS below, which is first-party only, so
+# vendored code keeps whatever the build type gave it. Its `-g1` lands after the
+# build type's `-g` on the command line and the last one wins.
+# Compile each first-party target as a handful of concatenated translation units
+# rather than one per source file.
+#
+# **The largest remaining build-time lever, and it is a trade rather than a
+# win.** A unity build pays the header cost once per batch instead of once per
+# file, and 72% of this repository's first-party compile cost is the frontend.
+# What it costs back is incremental rebuild: touching one file rebuilds its
+# whole batch, so a preset a developer edits in should not have it. Hence
+# `release` and `ci`, which build everything once, and not `dev`, `server` or
+# `cdn`, which are the presets an incremental rebuild happens in.
+#
+# Measured on this machine over the 45 library targets, `Debug` flags, ccache
+# bypassed, twelve concurrent compiles at a load average of 15 to 22:
+#
+#   |                     | units | wall   | CPU     |
+#   |---------------------|-------|--------|---------|
+#   | one file per unit   |   469 | 49.3 s | 486.1 s |
+#   | eight files per unit|    81 | 22.3 s | 201.1 s |
+#
+# **59% off CPU and 55% off wall.** The wall figure is the one that depends on
+# the machine: 81 units across 24 cores leaves a longer tail than 469 do, and an
+# earlier run at ten concurrent compiles gave 36% of CPU rather than 59%. CPU is
+# what a CI runner with two cores actually pays.
+#
+# **It also changes what a translation unit is, which is a behaviour change in
+# exactly one way.** A `static` or anonymous-namespace name that was private to
+# one file becomes visible to the seven beside it, so two files in a batch that
+# each declared a local `Trimmed` now declare it twice. Every such collision in
+# this tree was resolved by renaming one of the two, never by making something
+# non-static: the whole point of the name being private is that nothing outside
+# the file may reach it, and widening the linkage to satisfy the build would
+# trade a compile error for a linker one nobody would look for.
+option(MONO_UNITY_BUILD "Compile first-party targets as concatenated translation units" OFF)
+
+# How many source files land in one concatenated unit.
+#
+# Eight is CMake's own default and is kept. A larger batch shares more headers
+# and costs more memory per compiler process, and it also coarsens the rebuild -
+# a batch is the unit that is redone when one file in it changes.
+set(MONO_UNITY_BATCH "8" CACHE STRING "Source files per concatenated translation unit")
+
+# A precompiled header of the standard library, for the presets that do not get
+# a unity build.
+#
+# **The same job as the unity build and a smaller share of it, so the two do not
+# both run.** Measured at 10.4% of first-party compile CPU across three modules,
+# against 59% for the unity build measured the same way - which ranks it below
+# rather than above, the opposite of the usual intuition about precompiled
+# headers and the reason the number was taken rather than assumed.
+# `mono.build/MonoLibrary.cmake` carries the table and the header list.
+#
+# On by default, so `dev`, `server` and `cdn` get it and `release` and `ci` get
+# the unity build instead. Nothing to configure per preset: the choice follows
+# from `MONO_UNITY_BUILD`.
+#
+# ccache handles a PCH compile only where `sloppiness` permits it, which the
+# launcher below already sets for the two vendored targets that carry one.
+option(MONO_PCH "Precompile the standard headers, where there is no unity build" ON)
+
+set(MONO_DEBUG_INFO "full" CACHE STRING "Debug information in first-party objects: full or line-tables")
+set_property(CACHE MONO_DEBUG_INFO PROPERTY STRINGS full line-tables)
+if(NOT MONO_DEBUG_INFO MATCHES "^(full|line-tables)$")
+	message(FATAL_ERROR
+		"MONO_DEBUG_INFO is '${MONO_DEBUG_INFO}'. It is full or line-tables.")
+endif()
 
 # On: compile shaders with the glslc built from mono.vendor/shaderc. Off: find
 # one on PATH.
@@ -174,6 +323,11 @@ else()
 		if(NOT MONO_OPTIMISE_LEVEL STREQUAL "3")
 			list(APPEND MONO_COMPILE_OPTIONS -fno-omit-frame-pointer)
 		endif()
+	endif()
+
+	# Last, so it overrides the build type's own -g. See MONO_DEBUG_INFO above.
+	if(MONO_DEBUG_INFO STREQUAL "line-tables")
+		list(APPEND MONO_COMPILE_OPTIONS -g1)
 	endif()
 endif()
 
@@ -428,5 +582,13 @@ if(MONO_OPTIMISE)
 	message(STATUS "  optimised  ON (-O${MONO_OPTIMISE_LEVEL})")
 else()
 	message(STATUS "  optimised  OFF")
+endif()
+message(STATUS "  debuginfo  ${MONO_DEBUG_INFO}")
+if(MONO_UNITY_BUILD)
+	message(STATUS "  headers    unity build, ${MONO_UNITY_BATCH} sources per unit")
+elseif(MONO_PCH)
+	message(STATUS "  headers    precompiled")
+else()
+	message(STATUS "  headers    once per source file")
 endif()
 message(STATUS "")

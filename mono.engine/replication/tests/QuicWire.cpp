@@ -45,6 +45,8 @@ using engine::net::LossSettings;
 using engine::net::LossyTransport;
 using engine::net::MakeLoopbackTransport;
 using engine::net::Transport;
+using engine::net::WireKind;
+using engine::net::WireMode;
 using engine::replication::ClientId;
 using engine::replication::Connector;
 using engine::replication::ConnectorSettings;
@@ -52,7 +54,6 @@ using engine::replication::Listener;
 using engine::replication::ListenerSettings;
 using engine::replication::MessageKind;
 using engine::replication::QuicRouteFor;
-using engine::replication::WireKind;
 
 using namespace replication_wire;
 
@@ -106,14 +107,13 @@ namespace {
 			ClientWire = std::make_unique<LossyTransport>(std::move(Ends[1]), clientLoss);
 
 			ListenerSettings serving;
-			serving.Wire = WireKind::Quic;
+			serving.Wire = WireMode::Quic;
 			serving.Quic.Connection.Tls.Seed = Seed();
 			serving.Quic.Connection.Tls.HasSeed = true;
 			Server = std::make_unique<Listener>(*ServerWire, serving);
 			Server->Authority().Replicate(Name("endtoend_test.Spot"));
 
 			ConnectorSettings connecting;
-			connecting.Wire = WireKind::Quic;
 			// The pin is stated once and lands wherever the wire needs it. Under
 			// QUIC it becomes the raw public key TLS checks.
 			engine::assets::PublicKey identity;
@@ -199,7 +199,6 @@ TEST_CASE("a client refuses a server it did not pin", "[replication][quic]") {
 	// safe against a listener and not against a relay, which is what `D00006`
 	// was filed about and what the pin closes.
 	ConnectorSettings connecting;
-	connecting.Wire = WireKind::Quic;
 	engine::assets::PublicKey wrong;
 	wrong.Value.fill(0x7f);
 	connecting.ServerIdentity = wrong;
@@ -323,7 +322,6 @@ TEST_CASE("a client proves an identity over QUIC", "[replication][quic]") {
 	REQUIRE(key.has_value());
 
 	ConnectorSettings connecting;
-	connecting.Wire = WireKind::Quic;
 	engine::assets::PublicKey identity;
 	const auto derived = engine::net::quic::IdentityFor(Seed());
 	for (size_t index = 0; index < identity.Value.size(); index++) {

@@ -638,3 +638,46 @@ TEST_CASE("the button latch keeps InputState the size a save file expects", "[sc
 	CHECK_FALSE(input.WasKeyTapped(KeyCode::Space));
 	CHECK_FALSE(input.WasButtonTapped(MouseButton::Left));
 }
+
+// **A humanoid's size against the sum of its members, so a hole shows here.**
+//
+// `scene.Humanoid` is registered in the generated form, which writes the object
+// representation - so a byte no member occupies is a byte nobody initialises and
+// two runs of one scene write different snapshots. `just determinism` reports
+// that from `mono.server` with no clue which type is at fault; this reports it
+// by name.
+//
+// It carries no `Reserved` run, and that is the measurement rather than an
+// omission: `RootPart` aligns the object to eight, the four bools land exactly
+// on a boundary, and the named run this used to have existed only to swallow a
+// round-up that `Radius`'s removal took away with it.
+TEST_CASE("a humanoid carries no unnamed padding", "[scene][controls]") {
+	CHECK(sizeof(Humanoid) == sizeof(Entity) + sizeof(Vector3) + 6 * sizeof(float) + 4 * sizeof(bool));
+	CHECK(sizeof(Humanoid) % alignof(Humanoid) == 0);
+}
+
+// **The field that was written twice and read nowhere, and the row that
+// answers instead.**
+//
+// `Humanoid::Radius` existed from v0.10 to v0.19. `LoadCharacter` set it to one
+// and the portal-scaling pass multiplied it, and no pass in `physics`, `scene`,
+// `client` or `studio` ever loaded it - the character sweep takes its width from
+// `scene::Collider::Extent`, which the broad phase and the narrow phase already
+// read. It was not exposed as a property either, in Luau or in TypeScript, so
+// nothing outside the engine could see it.
+//
+// This case is what stops it coming back: a humanoid's width is a collider's
+// business, and a second copy of it here would be root `AGENTS.md` rule 2.
+TEST_CASE("a character's width is the collider's and not the humanoid's", "[scene][controls]") {
+	engine::scene::RegisterSceneComponents();
+
+	Store store("controls.width");
+	const Entity body = store.Create();
+	store.Set(body, engine::scene::Collider{});
+
+	// The collider says how wide. The humanoid says how tall, because the
+	// ground ray's origin is measured from the feet and no collider field says
+	// where those are.
+	CHECK(store.Get<engine::scene::Collider>(body)->Extent.X > 0.0f);
+	CHECK(Humanoid{}.Height > 0.0f);
+}

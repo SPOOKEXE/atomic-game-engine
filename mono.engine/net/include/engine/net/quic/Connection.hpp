@@ -331,6 +331,17 @@ namespace engine::net::quic {
 		// @since v0.19
 		bool IsServer() const;
 
+		// Whether the far end said it does not speak QUIC.
+		//
+		// **A refusal is not a timeout and a caller must not treat it as one.**
+		// A Version Negotiation packet listing nothing this build offers is the
+		// far end answering in one round trip, so a client that reads this falls
+		// back now instead of waiting out a handshake deadline.
+		//
+		// @return `true` once such a packet has arrived.
+		// @since v0.19
+		bool Refused() const;
+
 		// The peer this talks to.
 		//
 		// @return Its address.
@@ -468,4 +479,36 @@ namespace engine::net::quic {
 	//         somebody else and not an error.
 	// @since v0.19
 	bool RouteOf(std::span<const std::byte> datagram, std::array<std::byte, CONNECTION_ID_BYTES> &out);
+
+	// The largest Version Negotiation packet `WriteVersionNegotiation` produces.
+	//
+	// One byte of header, four of version, two length prefixes, two connection
+	// ids of QUIC v1's maximum twenty bytes, and one four-byte version.
+	inline constexpr size_t VERSION_NEGOTIATION_BYTES = 1 + 4 + 1 + 20 + 1 + 20 + 4;
+
+	// Answers a client's Initial with "nothing here speaks QUIC".
+	//
+	// **The refusal a datagram-only server owes a QUIC client, and the reason it
+	// is a Version Negotiation packet rather than a CONNECTION_CLOSE.** Three
+	// properties decide it. It is *stateless*: RFC 9000 §6 defines it as a reply
+	// derived entirely from the packet that caused it, which is exactly
+	// `net/AGENTS.md`'s rule that an unanswered stranger costs zero bytes
+	// however many are outstanding. It needs *no keys*: a CONNECTION_CLOSE in an
+	// Initial packet would have to derive Initial secrets from the client's
+	// destination connection id and encrypt a packet under them, which is a
+	// server that does not speak QUIC doing QUIC's crypto in order to say it
+	// does not. And it is *smaller than the question*: an Initial is padded to
+	// 1200 bytes and this is under sixty, so the reply cannot be amplified off.
+	//
+	// The version list is one reserved value of RFC 9000 §15's `0x?a?a?a?a`
+	// form, which every implementation is required to ignore. That is what turns
+	// "here is what I speak" into "I speak nothing you can use" without
+	// inventing an empty list nobody has to accept.
+	//
+	// @param initial The client's datagram, whole.
+	// @param out     Where the packet goes, `VERSION_NEGOTIATION_BYTES` or more.
+	// @return How many bytes were written, or zero when `initial` is not a
+	//         packet this can answer or `out` is too small.
+	// @since v0.19
+	size_t WriteVersionNegotiation(std::span<const std::byte> initial, std::span<std::byte> out);
 }

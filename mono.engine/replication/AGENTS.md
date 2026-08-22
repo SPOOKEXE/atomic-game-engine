@@ -7,10 +7,13 @@ with it. `net` carries the bytes; this decides what they mean.
 
 `SessionPort` is what a session is, `Session` is the datagram one this module
 has had since v0.3, and `QuicSession` is the QUIC one added at v0.19.
-`ListenerSettings::Wire` and `ConnectorSettings::Wire` choose, they must match,
-and there is no negotiation between them - a client speaking one at a server
-speaking the other gets no answer, which is a connection that fails rather than
-a server running two protocols where the second is the one nobody tests.
+
+**The server chooses and the client has no vote.** `ListenerSettings::Wire` is a
+`net::WireMode` - `quic` (the default), `datagram`, or `both` - and
+`ConnectorSettings` has no matching field on purpose. A `Connector` opens with
+QUIC, and falls back to the datagram wire once when the listener refuses it. Two
+flags that had to agree is two flags that will disagree, and the failure is a
+connection that hangs with nothing saying why.
 
 **A second implementation rather than one class with two modes**, and
 `SessionPort.hpp` carries the argument. What matters for anyone changing this
@@ -27,9 +30,35 @@ session can compute. A claim signed over something reproducible elsewhere is a
 signature a relay can carry across from another connection, which is the whole
 of what `D00006` was about.
 
-**`Datagram` is still the default and both stacks are live.** That is temporary
-by design - `net/AGENTS.md` and `docs/QUIC.md` §8 say why - and until it ends, a
-change to one wire is a question about the other.
+**Both stacks are live and neither is going away.** `docs/QUIC.md` §8's step 6 -
+delete the old one - is closed as will-not-do, because `--transport datagram` is
+a mode an operator selects and is also where the client's fallback lands. So a
+change to one wire is a permanent question about the other.
+
+## A fallback is bounded, said out loud, and never a user's choice
+
+`Connector::MAXIMUM_ATTEMPTS` is two, because there are two stacks. What moves
+between them:
+
+- **An explicit refusal costs one round trip.** `QuicSession::Refused` is a
+  Version Negotiation packet having arrived; `AdmissionKind::Refuse` is the
+  datagram stack's own. Either one falls back immediately.
+- **A silence costs `ConnectorSettings::AttemptSeconds` and then falls back
+  once.** That deadline applies to the *last* attempt too, which is what makes a
+  wrong address a reported failure rather than a client that retries for ever.
+- **`ConnectorSettings::Advertised` moves the first attempt and nothing else.**
+  It is what a browse heard the server say, so a datagram-only server found in a
+  browser costs no refusal at all. It is a hint from an open UDP port: being
+  wrong costs the round trip it was meant to save.
+
+**Every landing and every fallback is logged with which transport and why.** A
+client that quietly changed stacks is one whose operator cannot tell an old
+server from a QUIC handshake failing for its own reasons.
+
+**A fallback replaces the session whole.** `Connector::Begin` drops the key
+exchange, the cookie and the port together. Carrying half of one attempt into
+the next is a state machine that can be in two attempts at once, which is the
+shape `net/AGENTS.md` bans a reconnect from having, for the same reason.
 
 ## The server is authoritative and the client is a replica
 
@@ -836,6 +865,66 @@ cost is a set lookup per replicated component per tick; the first call is not
 free, because observing moves every entity already carrying the component into an
 archetype with somewhere to put the bits. That happens once, on the tick the
 first client makes `Publish` do any work.
+
+## A publish is three passes, and only the third one is per client
+
+`Authority::Publish` is `Survey`, then the clients that owe snapshot bytes, then
+the rest. What decides which pass a piece of work belongs in is not how
+expensive it is but **who the answer depends on**.
+
+**Anything whose answer is the same for every client belongs in `Survey`, and
+that is a rule rather than an optimisation.** Which component a name resolves
+to, what its descriptor says, whether its widest row could ever fit a message,
+which entities carry a replicated component, what a signed slot hashes to and
+*which rows moved this tick* are all facts about the world. Each of them used to
+be re-derived per client: at two hundred clients over two dozen slots that is
+nine thousand acquisitions of `ecs::Components`' process-wide mutex and nine
+thousand walks of the archetype tables a tick, to get nine thousand copies of
+two dozen answers. `Crossing` holds them, `Survey` fills it, and **the per-client
+pass reads the component registry zero times.**
+
+**The store is walked in `Survey` and only read after it.** `Store::EachRuns`,
+`EachChangedRuns` and `EachMatchingAny` all call `RequireOwningThread`, which
+aborts rather than races; `Alive`, `HasComponent` and `GetComponent` are `const`
+and take no affinity. Gathering the runs up front is therefore what makes the
+third pass safe on a worker at all, and it is the same two-pass shape `Resign`
+already had for signing. The borrowed pointers stay good because a publish does
+not write to the store it is publishing - a join snapshot is built into a scratch
+one.
+
+**A join builds a world, so it stays on the owning thread and it is bounded.**
+`Capture` makes a scratch `ecs::Store`, a row per entity and a `Save` over the
+result, measured at about 113 ms for ten thousand entities in `release`. Nothing
+bounded how many of those one tick did, so a listener that admitted sixteen
+clients together spent 1.8 seconds in one tick and answered no handshakes while
+it did - at thirty-two clients against a ten-thousand-entity world, four of them
+ever joined. `AuthoritySettings::JoinsPerTick` is the bound; a client turned away
+waits one tick and is still joining on the next.
+
+**The third pass is spread across lanes, and what that requires of a host is
+written on `SetInterest`.** Above `AuthoritySettings::ParallelClientThreshold`
+steady-state clients, `parallel::Jobs::For` publishes them through one `Lane`
+each. Rule 5's first half holds because the batch blocks: a tick is still one
+thing that starts and finishes. Rule 5's second half is the threshold, and the
+number behind it is `engine.replication.bench.publish`, which runs the same
+ladder with the pool and without it.
+
+**The bytes a client receives may not depend on which lane published it**, and
+that is the invariant every part of the split is arranged around. A client writes
+only into its own `Client` and its lane's scratch; everything shared is filled by
+`Survey` and read afterwards; the counters merge by sum and maximum; and the one
+piece of state a worker used to write - the audit switching itself off when a
+group will not fit - is recorded on the lane and applied by the owner. So a run
+on a machine with twenty-three workers records the same bytes as a run with none,
+which is what `just determinism` and `just replay-check` compare.
+
+**A per-client `ENGINE_PROFILE` would have been a drop counter, so there are
+none.** `core::FrameGraph` refuses a span it did not open on the recording
+thread. Each lane counts nanoseconds into `Lane::Spent` with no lock and
+`ReportPhases` folds them into the graph under the names the spans used and into
+`core::Metrics` as histograms, on the thread that owns both. The bars are the sum
+across lanes and the `Authority::Steady` scope around them is the wall time, for
+the same reason `Universe::Tick` reports its worker bars that way.
 
 ## A delta's rows are not one width
 

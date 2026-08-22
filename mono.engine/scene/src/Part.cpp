@@ -1,11 +1,15 @@
+#include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Property.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/scene/Animation.hpp>
+#include <engine/scene/Atmosphere.hpp>
 #include <engine/scene/Attachments.hpp>
 #include <engine/scene/Audio.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Constraints.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/Enums.hpp>
@@ -13,6 +17,7 @@
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/Skinning.hpp>
 #include <engine/scene/Tagging.hpp>
 #include <engine/scene/Teams.hpp>
 #include <engine/scene/Tools.hpp>
@@ -212,7 +217,7 @@ namespace engine::scene {
 		// first would leave a part drawn at one size and collided at another,
 		// and nothing would report it. `Writes` naming both is what tells the
 		// manifest, and v0.6's `.Changed`, that this is what happened.
-		PropertyDescriptor SizeProperty() {
+		PropertyDescriptor PartSizeProperty() {
 			PropertyDescriptor property;
 			property.Name = core::Name("Size");
 			property.Type = PropertyType::Vector3;
@@ -476,7 +481,11 @@ namespace engine::scene {
 				if (index == spatial::NO_GROUP) {
 					// Refused rather than defaulted. A typo that silently put a
 					// part in `Default` would be a collision bug nobody could
-					// see from the script that caused it.
+					// see from the script that caused it - and the name is the
+					// half a script author can act on.
+					ENGINE_WARN(
+						"'{}' is not a registered collision group; the part is unchanged", name.Text()
+					);
 					return false;
 				}
 
@@ -945,6 +954,9 @@ namespace engine::scene {
 						// The table is full. Refused rather than left partly
 						// applied: a filter that silently became "everything" is
 						// a redirected pass quietly drawing the whole world.
+						ENGINE_WARN(
+							"tag '{}' does not fit the world's tag table; the filter is unchanged", entry
+						);
 						return false;
 					}
 					mask |= bit;
@@ -1405,6 +1417,16 @@ namespace engine::scene {
 				const auto size = *static_cast<const core::Vector3 *>(value);
 
 				if (size.X < 1.0f || size.Y < 1.0f) {
+					// **The component is removed, and the write reports success.**
+					// A script shrinking a mirror below one texel loses the
+					// mirror, which is right and is indistinguishable from a
+					// mirror that never worked.
+					ENGINE_DEBUG(
+						"surface size {}x{} is below one texel; the SurfaceCamera on {} is removed",
+						size.X,
+						size.Y,
+						instance.Id
+					);
 					store.Remove<SurfaceCamera>(instance);
 					return true;
 				}
@@ -1428,6 +1450,307 @@ namespace engine::scene {
 				store.Set(instance, surface);
 				return true;
 			};
+			return property;
+		}
+
+		// --- the forward-declared property surface ---------------------------
+		//
+		// **What a script may name on a bone, a track and a joint.** Each of
+		// these is storage nothing reads yet - decision 16 - and every one of
+		// them is authored, so leaving them undeclared would ship a class whose
+		// only door is C++.
+		//
+		// **Three components deliberately declare no property at all**, and the
+		// reason is `AGENTS.md`'s "do not declare a property for scripts alone"
+		// read the other way round. `Skeleton` and `LevelOfDetail` are optional
+		// columns on a `MeshPart`: a property on that class would fail on every
+		// mesh part that is not skinned and has no level ladder, which is almost
+		// all of them, and a property that usually fails is worse than one that
+		// does not exist. Both are written by the publisher, which is C++.
+		// `Bone::Joint` and `Bone::ParentJoint` are refused for a sharper reason:
+		// a script renumbering a palette slot is a script that makes a vertex's
+		// joint index name a slot nothing filled.
+
+		// The frame a bone ended up in, once `ResolveBones` has run.
+		//
+		// Roblox's `Bone.TransformedWorldCFrame`, and read-only for
+		// `WorldCFrameProperty`'s reason: a writable one would be a second way to
+		// place a joint, and the two would disagree the moment the rig moved.
+		//
+		// **The getter resolves on the spot rather than reading the field**,
+		// which is the same split the attachment's four make: a script reading
+		// this on the frame it built a rig would otherwise get an identity
+		// through the field and the right answer through the walk, and a property
+		// whose answer depends on when in the frame it is asked is one nobody can
+		// reason about. The draw path reads `Bone::WorldFrame`.
+		PropertyDescriptor BoneWorldProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("TransformedWorldCFrame");
+			property.Type = PropertyType::CFrame;
+			property.Size = sizeof(core::CFrame);
+			property.Kind = PropertyKind::Computed;
+			property.Writable = false;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Bone>()});
+
+			// Nothing, because nothing is written. `Writes` reaches the binding
+			// manifest, and naming a component there tells a script author that
+			// setting this moves storage.
+			property.Writes = &ecs::ComponentSet::Intern({});
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				if (store.Get<Bone>(instance) == nullptr) {
+					return false;
+				}
+				*static_cast<core::CFrame *>(out) = ResolveBone(store, instance);
+				return true;
+			};
+			return property;
+		}
+
+		// Interned once, for `SurfaceEffectEnum`'s reason: a `core::Name`
+		// constructed from a literal inside a getter is a registry lookup per
+		// property read.
+		const core::Name &AnimationPriorityEnum() {
+			static const core::Name name("AnimationPriority");
+			return name;
+		}
+
+		// Which layer a track's channels land on.
+		//
+		// An `Enum` and not an `Int32`, for `CollisionShapeProperty`'s reason: a
+		// number out of range would be a priority the blend has no case for, and
+		// an enum is checked against `EnumTable` where the mistake was made.
+		PropertyDescriptor TrackPriorityProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("Priority");
+			property.Type = PropertyType::Enum;
+			property.EnumName = AnimationPriorityEnum();
+			property.Size = sizeof(core::Name);
+			property.Kind = PropertyKind::Field;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<AnimationTrack>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const AnimationTrack *track = store.Get<AnimationTrack>(instance);
+				if (track == nullptr) {
+					return false;
+				}
+				*static_cast<core::Name *>(out) =
+					ecs::EnumTable::MemberAt(AnimationPriorityEnum(), static_cast<size_t>(track->Priority));
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				AnimationTrack *track = store.GetMutable<AnimationTrack>(instance);
+				if (track == nullptr) {
+					return false;
+				}
+
+				size_t ordinal = 0;
+				if (!ecs::EnumTable::OrdinalOf(
+						AnimationPriorityEnum(), *static_cast<const core::Name *>(value), ordinal
+					)) {
+					return false;
+				}
+
+				track->Priority = static_cast<AnimationPriority>(ordinal);
+				return true;
+			};
+			return property;
+		}
+
+		// Whether an entity is usable as a constraint's anchor.
+		//
+		// **An `Attachment` and nothing else**, which is `DestinationProperty`'s
+		// refusal one type along: a joint is anchored at a point with an
+		// orientation, and pointing one at a `Folder` would be a constraint that
+		// silently held nothing. Clearing is allowed, because an unattached second
+		// end is how a door hangs off a wall that is not a body.
+		bool UsableAsAnchor(const ecs::Store &store, ecs::Entity candidate) {
+			return candidate == ecs::NULL_ENTITY || store.Get<Attachment>(candidate) != nullptr;
+		}
+
+		PropertyDescriptor Attachment0Property() {
+			PropertyDescriptor property;
+			property.Name = core::Name("Attachment0");
+			property.Type = PropertyType::Reference;
+			property.Size = sizeof(ecs::Entity);
+			property.Kind = PropertyKind::Field;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Constraint>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Constraint *joint = store.Get<Constraint>(instance);
+				if (joint == nullptr) {
+					return false;
+				}
+				*static_cast<ecs::Entity *>(out) = joint->Attachment0;
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				const auto anchor = *static_cast<const ecs::Entity *>(value);
+				if (!UsableAsAnchor(store, anchor)) {
+					return false;
+				}
+				Constraint *joint = store.GetMutable<Constraint>(instance);
+				if (joint == nullptr) {
+					return false;
+				}
+				joint->Attachment0 = anchor;
+				return true;
+			};
+			return property;
+		}
+
+		PropertyDescriptor Attachment1Property() {
+			PropertyDescriptor property;
+			property.Name = core::Name("Attachment1");
+			property.Type = PropertyType::Reference;
+			property.Size = sizeof(ecs::Entity);
+			property.Kind = PropertyKind::Field;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Constraint>()});
+			property.Writes = property.Reads;
+
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Constraint *joint = store.Get<Constraint>(instance);
+				if (joint == nullptr) {
+					return false;
+				}
+				*static_cast<ecs::Entity *>(out) = joint->Attachment1;
+				return true;
+			};
+
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				const auto anchor = *static_cast<const ecs::Entity *>(value);
+				if (!UsableAsAnchor(store, anchor)) {
+					return false;
+				}
+				Constraint *joint = store.GetMutable<Constraint>(instance);
+				if (joint == nullptr) {
+					return false;
+				}
+				joint->Attachment1 = anchor;
+				return true;
+			};
+			return property;
+		}
+
+		// --- a joint's limits, as one number each ---------------------------
+		//
+		// **Written to every axis and read from the first, which is what makes
+		// one number describe both a slot and a sphere.** A prismatic joint is
+		// limited on one linear axis and a rope is limited on all three, and a
+		// `Locked` axis ignores its bounds entirely - so writing all three is
+		// correct for both and lets an author say "this rope is four metres"
+		// without knowing which axes the class chose.
+		//
+		// **Degrees on the way in and radians in the row**, which is
+		// `Orientation`'s arrangement: the solver works in radians and Roblox's
+		// constraint angles are degrees, so the conversion lives at the one place
+		// a human types a number.
+
+		PropertyDescriptor LinearLimitProperty(bool upper) {
+			PropertyDescriptor property;
+			property.Name = core::Name(upper ? "UpperLimit" : "LowerLimit");
+			property.Type = PropertyType::Float;
+			property.Size = sizeof(float);
+			property.Kind = PropertyKind::Computed;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Constraint>()});
+			property.Writes = property.Reads;
+
+			if (upper) {
+				property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+					const Constraint *joint = store.Get<Constraint>(instance);
+					if (joint == nullptr) {
+						return false;
+					}
+					*static_cast<float *>(out) = joint->LinearUpper[0];
+					return true;
+				};
+				property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+					Constraint *joint = store.GetMutable<Constraint>(instance);
+					if (joint == nullptr) {
+						return false;
+					}
+					for (size_t axis = 0; axis < CONSTRAINT_AXES; axis++) {
+						joint->LinearUpper[axis] = *static_cast<const float *>(value);
+					}
+					return true;
+				};
+			} else {
+				property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+					const Constraint *joint = store.Get<Constraint>(instance);
+					if (joint == nullptr) {
+						return false;
+					}
+					*static_cast<float *>(out) = joint->LinearLower[0];
+					return true;
+				};
+				property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+					Constraint *joint = store.GetMutable<Constraint>(instance);
+					if (joint == nullptr) {
+						return false;
+					}
+					for (size_t axis = 0; axis < CONSTRAINT_AXES; axis++) {
+						joint->LinearLower[axis] = *static_cast<const float *>(value);
+					}
+					return true;
+				};
+			}
+			return property;
+		}
+
+		PropertyDescriptor AngularLimitProperty(bool upper) {
+			PropertyDescriptor property;
+			property.Name = core::Name(upper ? "UpperAngle" : "LowerAngle");
+			property.Type = PropertyType::Float;
+			property.Size = sizeof(float);
+			property.Kind = PropertyKind::Computed;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Constraint>()});
+			property.Writes = property.Reads;
+
+			if (upper) {
+				property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+					const Constraint *joint = store.Get<Constraint>(instance);
+					if (joint == nullptr) {
+						return false;
+					}
+					*static_cast<float *>(out) = joint->AngularUpper[0] * DEGREES_PER_RADIAN;
+					return true;
+				};
+				property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+					Constraint *joint = store.GetMutable<Constraint>(instance);
+					if (joint == nullptr) {
+						return false;
+					}
+					const float radians = *static_cast<const float *>(value) * RADIANS_PER_DEGREE;
+					for (size_t axis = 0; axis < CONSTRAINT_AXES; axis++) {
+						joint->AngularUpper[axis] = radians;
+					}
+					return true;
+				};
+			} else {
+				property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+					const Constraint *joint = store.Get<Constraint>(instance);
+					if (joint == nullptr) {
+						return false;
+					}
+					*static_cast<float *>(out) = joint->AngularLower[0] * DEGREES_PER_RADIAN;
+					return true;
+				};
+				property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+					Constraint *joint = store.GetMutable<Constraint>(instance);
+					if (joint == nullptr) {
+						return false;
+					}
+					const float radians = *static_cast<const float *>(value) * RADIANS_PER_DEGREE;
+					for (size_t axis = 0; axis < CONSTRAINT_AXES; axis++) {
+						joint->AngularLower[axis] = radians;
+					}
+					return true;
+				};
+			}
 			return property;
 		}
 
@@ -1859,6 +2182,135 @@ namespace engine::scene {
 			ecs::Classes::Register("StringValue", valueBase, {});
 			ecs::Classes::Register("LocalizationTable", valueBase, {});
 
+			// --- the forward-declared classes --------------------------------
+			//
+			// Registered rather than left until something reads them, which is
+			// decision 16: a surface may ship complete and frozen with its
+			// implementation deliberately unwired. What that buys concretely is
+			// that a game file, a Rojo tree or a `.rbxl` import carrying one of
+			// these resolves rather than failing with "no class named", and that
+			// the studio's insert menu - built by walking everything registered
+			// under `Instance` - can offer them. `docs/FUTURE_COMPONENTS.md` says
+			// what each gets wired to.
+
+			// **A `Bone` is an `Instance` and not Roblox's `Attachment`**, which
+			// is the one place this rig departs from that tree and is argued in
+			// `Skinning.hpp`: an attachment already carries a frame that
+			// `ResolveAttachments` fills against its parent *part*, so inheriting
+			// it would put two world frames on one row resolved by two passes
+			// against two different parents.
+			const std::array joint{ecs::Components::Of<Bone>()};
+			const ecs::ClassId boneClass = ecs::Classes::Register("Bone", instance, joint);
+
+			// **A `Skeleton` is not a class**, and that is deliberate. It is a
+			// component on whatever drawable is skinned - a `MeshPart` today -
+			// rather than an instance of its own, because a rig with an instance
+			// between the mesh and its bones would put the bones somewhere other
+			// than under the thing they deform, and `SkeletonOf` walks up from a
+			// bone expecting to reach it. Roblox has no `Skeleton` class either.
+
+			// **Three animation classes, and a track is one of them.** Roblox's
+			// `AnimationTrack` is a userdata because its `Animator` is a black
+			// box; `ROADMAP.md` v0.24 says this engine's is not going to be one,
+			// and a row in the store is what that means here - it saves, it
+			// replicates and a script can read it.
+			const std::array clip{ecs::Components::Of<AnimationClip>()};
+			const ecs::ClassId animationClass = ecs::Classes::Register("Animation", instance, clip);
+
+			const std::array driver{ecs::Components::Of<Animator>()};
+			const ecs::ClassId animatorClass = ecs::Classes::Register("Animator", instance, driver);
+
+			const std::array track{ecs::Components::Of<AnimationTrack>()};
+			const ecs::ClassId trackClass = ecs::Classes::Register("AnimationTrack", instance, track);
+
+			ecs::EnumTable::Register(
+				"AnimationPriority",
+				std::array<std::string_view, 5>{"Core", "Idle", "Movement", "Action", "Override"}
+			);
+
+			// **The sky, both halves of it under `Lighting`.** Neither is a
+			// `PVInstance`, which is `Sound`'s and `Attachment`'s omission for
+			// their reason: the air has no place in the world, and a `Transform`
+			// here would be a second opinion about where `Lighting` is.
+			const std::array air{ecs::Components::Of<Atmosphere>()};
+			const ecs::ClassId atmosphereClass = ecs::Classes::Register("Atmosphere", instance, air);
+
+			const std::array layer{ecs::Components::Of<Clouds>()};
+			const ecs::ClassId cloudsClass = ecs::Classes::Register("Clouds", instance, layer);
+
+			// **One component, seven classes**, which is `Light`'s trade at
+			// greater width and is the whole argument in `Constraints.hpp`: a
+			// generic six-degree-of-freedom joint covers the family, and each
+			// class says which member of it by setting the six motion modes as a
+			// *prototype default*. A `Kind` field would be the second answer, and
+			// it would make a `HingeConstraint` whose axes were all free
+			// expressible.
+			const std::array joined{ecs::Components::Of<Constraint>()};
+			const ecs::ClassId constraintClass = ecs::Classes::Register("Constraint", instance, joined);
+			const ecs::ClassId weldClass = ecs::Classes::Register("WeldConstraint", constraintClass, {});
+			const ecs::ClassId ballClass =
+				ecs::Classes::Register("BallSocketConstraint", constraintClass, {});
+			const ecs::ClassId hingeClass = ecs::Classes::Register("HingeConstraint", constraintClass, {});
+			const ecs::ClassId prismaticClass =
+				ecs::Classes::Register("PrismaticConstraint", constraintClass, {});
+			const ecs::ClassId cylindricalClass =
+				ecs::Classes::Register("CylindricalConstraint", constraintClass, {});
+			const ecs::ClassId ropeClass = ecs::Classes::Register("RopeConstraint", constraintClass, {});
+			const ecs::ClassId springClass = ecs::Classes::Register("SpringConstraint", constraintClass, {});
+
+			ecs::EnumTable::Register(
+				"ConstraintMotion", std::array<std::string_view, 3>{"Locked", "Limited", "Free"}
+			);
+
+			// The prototypes. **X is the joint's axis throughout**, matching
+			// `Attachment`'s own convention that a beam leaves along its X axis
+			// and a light's cone opens about its face: one axis convention across
+			// the module, so an author who has aimed one attachment has aimed all
+			// of them.
+			{
+				// A weld is the default row, so `WeldConstraint` sets nothing.
+				(void)weldClass;
+
+				Constraint ball;
+				ball.Angular[0] = ConstraintMotion::Free;
+				ball.Angular[1] = ConstraintMotion::Free;
+				ball.Angular[2] = ConstraintMotion::Free;
+				ecs::Classes::Default(ballClass, ball);
+
+				Constraint hinge;
+				hinge.Angular[0] = ConstraintMotion::Free;
+				ecs::Classes::Default(hingeClass, hinge);
+
+				Constraint prismatic;
+				prismatic.Linear[0] = ConstraintMotion::Free;
+				ecs::Classes::Default(prismaticClass, prismatic);
+
+				Constraint cylindrical;
+				cylindrical.Linear[0] = ConstraintMotion::Free;
+				cylindrical.Angular[0] = ConstraintMotion::Free;
+				ecs::Classes::Default(cylindricalClass, cylindrical);
+
+				// A rope is a maximum length and nothing else: the three linear
+				// axes are limited to a sphere about `Attachment0` and every
+				// rotation is free. `Limited` with a lower bound of zero is what
+				// separates it from a rod, which would set the lower bound to the
+				// same number.
+				Constraint rope;
+				for (size_t axis = 0; axis < CONSTRAINT_AXES; axis++) {
+					rope.Linear[axis] = ConstraintMotion::Limited;
+					rope.Angular[axis] = ConstraintMotion::Free;
+				}
+				ecs::Classes::Default(ropeClass, rope);
+
+				// A spring is a rope with a stiffness, which is exactly what the
+				// one-component design is for: no new field, and the difference
+				// between the two classes is a number an author can also type.
+				Constraint spring = rope;
+				spring.Stiffness = 1000.0f;
+				spring.Damping = 50.0f;
+				ecs::Classes::Default(springClass, spring);
+			}
+
 			// --- properties, declared where the component arrives ------------
 			//
 			// Each on the class that first holds what it projects, so a derived
@@ -1900,7 +2352,7 @@ namespace engine::scene {
 			// keeps one answer to "what has a pivot".
 			ecs::Classes::Property<&Pivot::Offset>(pvInstance, "PivotOffset");
 
-			ecs::Classes::Computed(basePart, SizeProperty());
+			ecs::Classes::Computed(basePart, PartSizeProperty());
 			ecs::Classes::Computed(basePart, CanCollideProperty());
 			ecs::Classes::Computed(basePart, AnchoredProperty());
 
@@ -2214,6 +2666,91 @@ namespace engine::scene {
 			// orthogonal by hand. A `CFrame` is a declared property type here and
 			// `Attachment.CFrame` already crosses as one.
 			ecs::Classes::Property<&Tool::Grip>(toolClass, "Grip");
+
+			// --- the forward-declared classes' properties ---------------------
+
+			// **`Transform` and not `CFrame`, which is Roblox's spelling and is
+			// the more useful one anyway**: the writable field on a bone is what
+			// an animation *adds* to the rest pose, so a script that clears it
+			// puts the rig back where it started. `RestCFrame` is the pose it goes
+			// back to, writable because a rig assembled by a script has to be able
+			// to say where its joints sit.
+			ecs::Classes::Property<&Bone::Transform>(boneClass, "Transform");
+			ecs::Classes::Property<&Bone::Rest>(boneClass, "RestCFrame");
+			ecs::Classes::Property<&Bone::InverseBind>(boneClass, "InverseBindCFrame");
+			ecs::Classes::Computed(boneClass, BoneWorldProperty());
+
+			// The clip's two names. **`RigId` beside `AnimationId`**, because a
+			// clip authored against one skeleton means nothing on another and
+			// `ClipFitsRig` is what refuses it - an author who cannot set the
+			// second cannot make that refusal work.
+			ecs::Classes::Property<&AnimationClip::Asset>(animationClass, "AnimationId");
+			ecs::Classes::Property<&AnimationClip::Rig>(animationClass, "RigId");
+
+			ecs::Classes::Property<&Animator::Rig>(animatorClass, "Rig");
+			ecs::Classes::Property<&Animator::RootMotion>(animatorClass, "RootMotion");
+			ecs::Classes::ClampedProperty<&Animator::RootMotionWeight, 0.0f, 1.0f>(
+				animatorClass, "RootMotionWeight"
+			);
+			ecs::Classes::Property<&Animator::EvaluationThrottled>(animatorClass, "EvaluationThrottled");
+
+			// **`WeightCurrent` is writable here and read-only in Roblox**, which
+			// is the black-box difference stated once more: a fade is the ordinary
+			// way to reach a weight and `WeightTarget` is how you ask for one, but
+			// a game building its own blend tree has to be able to set the weight
+			// outright and there is nothing in the storage that stops it.
+			ecs::Classes::Property<&AnimationTrack::Clip>(trackClass, "Animation");
+			ecs::Classes::Property<&AnimationTrack::TimePosition>(trackClass, "TimePosition");
+			ecs::Classes::Property<&AnimationTrack::Speed>(trackClass, "Speed");
+			ecs::Classes::ClampedProperty<&AnimationTrack::Weight, 0.0f, 1.0f>(trackClass, "WeightCurrent");
+			ecs::Classes::ClampedProperty<&AnimationTrack::WeightTarget, 0.0f, 1.0f>(
+				trackClass, "WeightTarget"
+			);
+			ecs::Classes::Property<&AnimationTrack::FadeTime>(trackClass, "FadeTime");
+			ecs::Classes::Property<&AnimationTrack::Looped>(trackClass, "Looped");
+			ecs::Classes::Property<&AnimationTrack::Playing>(trackClass, "IsPlaying");
+			ecs::Classes::Computed(trackClass, TrackPriorityProperty());
+
+			// The sky. **`Color` and not `Colour`**, matching `Light.Color` and
+			// every other colour on this surface: the spelling is Roblox's because
+			// a script written against that engine has to keep working, and the
+			// field behind it is this repository's because the code is not.
+			ecs::Classes::Property<&Atmosphere::Colour>(atmosphereClass, "Color");
+			ecs::Classes::Property<&Atmosphere::Decay>(atmosphereClass, "Decay");
+			ecs::Classes::ClampedProperty<&Atmosphere::Density, 0.0f, 1.0f>(atmosphereClass, "Density");
+			ecs::Classes::ClampedProperty<&Atmosphere::Offset, -1.0f, 1.0f>(atmosphereClass, "Offset");
+			ecs::Classes::ClampedProperty<&Atmosphere::Glare, 0.0f, 10.0f>(atmosphereClass, "Glare");
+			ecs::Classes::ClampedProperty<&Atmosphere::Haze, 0.0f, 10.0f>(atmosphereClass, "Haze");
+
+			ecs::Classes::Property<&Clouds::Colour>(cloudsClass, "Color");
+			ecs::Classes::ClampedProperty<&Clouds::Cover, 0.0f, 1.0f>(cloudsClass, "Cover");
+			ecs::Classes::ClampedProperty<&Clouds::Density, 0.0f, 1.0f>(cloudsClass, "Density");
+			ecs::Classes::Property<&Clouds::WindSpeed>(cloudsClass, "WindSpeed");
+			ecs::Classes::Property<&Clouds::WindDirection>(cloudsClass, "WindDirection");
+			ecs::Classes::Property<&Clouds::Enabled>(cloudsClass, "Enabled");
+
+			// **Every constraint property is on the base class**, which is the
+			// other half of the one-component design: the seven classes differ by
+			// a prototype row and nothing else, so declaring a property per class
+			// would be the same declaration seven times.
+			//
+			// **`Enum.ConstraintMotion` is registered and no property projects
+			// it, deliberately.** The six modes are what the class already said,
+			// and a per-axis property would let an author turn a
+			// `HingeConstraint` into something that is not a hinge while it still
+			// answered `IsA("HingeConstraint")`.
+			ecs::Classes::Computed(constraintClass, Attachment0Property());
+			ecs::Classes::Computed(constraintClass, Attachment1Property());
+			ecs::Classes::Property<&Constraint::Enabled>(constraintClass, "Enabled");
+			ecs::Classes::Property<&Constraint::Target>(constraintClass, "Target");
+			ecs::Classes::Property<&Constraint::Stiffness>(constraintClass, "Stiffness");
+			ecs::Classes::Property<&Constraint::Damping>(constraintClass, "Damping");
+			ecs::Classes::Property<&Constraint::MaxForce>(constraintClass, "MaxForce");
+			ecs::Classes::Property<&Constraint::MaxTorque>(constraintClass, "MaxTorque");
+			ecs::Classes::Computed(constraintClass, LinearLimitProperty(false));
+			ecs::Classes::Computed(constraintClass, LinearLimitProperty(true));
+			ecs::Classes::Computed(constraintClass, AngularLimitProperty(false));
+			ecs::Classes::Computed(constraintClass, AngularLimitProperty(true));
 
 			// Still not declared, and for a reason rather than an oversight:
 			// **`Surface::Material`**, which is what a part *feels* like. The

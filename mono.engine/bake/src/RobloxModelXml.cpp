@@ -1,5 +1,7 @@
 #include <engine/bake/RobloxModel.hpp>
 #include <engine/core/Chars.hpp>
+#include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Xml.hpp>
 
 #include <glm/gtc/quaternion.hpp>
@@ -173,7 +175,7 @@ namespace engine::bake {
 		}
 
 		// One component of a value, by the name the format gives it.
-		bool Component(const std::vector<Field> &fields, std::string_view path, float &out) {
+		bool XmlComponent(const std::vector<Field> &fields, std::string_view path, float &out) {
 			const std::string *text = TextOf(fields, path);
 			if (text == nullptr) {
 				return false;
@@ -377,7 +379,7 @@ namespace engine::bake {
 			if (element == "UDim") {
 				float scale = 0.0f;
 				float offset = 0.0f;
-				if (!Component(fields, "S", scale) || !Component(fields, "O", offset)) {
+				if (!XmlComponent(fields, "S", scale) || !XmlComponent(fields, "O", offset)) {
 					return ValueResult::Malformed;
 				}
 				out.Kind = RobloxValueKind::UDim;
@@ -390,8 +392,8 @@ namespace engine::bake {
 				float xOffset = 0.0f;
 				float yScale = 0.0f;
 				float yOffset = 0.0f;
-				if (!Component(fields, "XS", xScale) || !Component(fields, "XO", xOffset) ||
-					!Component(fields, "YS", yScale) || !Component(fields, "YO", yOffset)) {
+				if (!XmlComponent(fields, "XS", xScale) || !XmlComponent(fields, "XO", xOffset) ||
+					!XmlComponent(fields, "YS", yScale) || !XmlComponent(fields, "YO", yOffset)) {
 					return ValueResult::Malformed;
 				}
 				out.Kind = RobloxValueKind::UDim2;
@@ -402,7 +404,7 @@ namespace engine::bake {
 			if (element == "Vector2") {
 				float x = 0.0f;
 				float y = 0.0f;
-				if (!Component(fields, "X", x) || !Component(fields, "Y", y)) {
+				if (!XmlComponent(fields, "X", x) || !XmlComponent(fields, "Y", y)) {
 					return ValueResult::Malformed;
 				}
 				out.Kind = RobloxValueKind::Vector2;
@@ -414,7 +416,8 @@ namespace engine::bake {
 				float x = 0.0f;
 				float y = 0.0f;
 				float z = 0.0f;
-				if (!Component(fields, "X", x) || !Component(fields, "Y", y) || !Component(fields, "Z", z)) {
+				if (!XmlComponent(fields, "X", x) || !XmlComponent(fields, "Y", y) ||
+					!XmlComponent(fields, "Z", z)) {
 					return ValueResult::Malformed;
 				}
 				out.Kind = RobloxValueKind::Vector3;
@@ -426,8 +429,8 @@ namespace engine::bake {
 				float red = 0.0f;
 				float green = 0.0f;
 				float blue = 0.0f;
-				if (!Component(fields, "R", red) || !Component(fields, "G", green) ||
-					!Component(fields, "B", blue)) {
+				if (!XmlComponent(fields, "R", red) || !XmlComponent(fields, "G", green) ||
+					!XmlComponent(fields, "B", blue)) {
 					return ValueResult::Malformed;
 				}
 				out.Kind = RobloxValueKind::Color3;
@@ -458,8 +461,8 @@ namespace engine::bake {
 				float minimumY = 0.0f;
 				float maximumX = 0.0f;
 				float maximumY = 0.0f;
-				if (!Component(fields, "min/X", minimumX) || !Component(fields, "min/Y", minimumY) ||
-					!Component(fields, "max/X", maximumX) || !Component(fields, "max/Y", maximumY)) {
+				if (!XmlComponent(fields, "min/X", minimumX) || !XmlComponent(fields, "min/Y", minimumY) ||
+					!XmlComponent(fields, "max/X", maximumX) || !XmlComponent(fields, "max/Y", maximumY)) {
 					return ValueResult::Malformed;
 				}
 				out.Kind = RobloxValueKind::Rect;
@@ -488,8 +491,8 @@ namespace engine::bake {
 
 			if (element == "CoordinateFrame") {
 				float position[3] = {};
-				if (!Component(fields, "X", position[0]) || !Component(fields, "Y", position[1]) ||
-					!Component(fields, "Z", position[2])) {
+				if (!XmlComponent(fields, "X", position[0]) || !XmlComponent(fields, "Y", position[1]) ||
+					!XmlComponent(fields, "Z", position[2])) {
 					return ValueResult::Malformed;
 				}
 
@@ -502,7 +505,7 @@ namespace engine::bake {
 				for (int row = 0; row < 3; row++) {
 					for (int column = 0; column < 3; column++) {
 						const std::string name = "R" + std::to_string(row) + std::to_string(column);
-						if (!Component(fields, name, rotation[row * 3 + column])) {
+						if (!XmlComponent(fields, name, rotation[row * 3 + column])) {
 							return ValueResult::Malformed;
 						}
 					}
@@ -932,6 +935,23 @@ namespace engine::bake {
 					items.back().Children.push_back(std::move(node));
 				}
 			}
+		}
+
+		// **The same taxonomy as the binary reader's, deliberately.** Both
+		// containers produce one `RobloxModel`, and an import that lost
+		// properties should read the same whichever file it came out of.
+		for (const std::string &note : model.Notes) {
+			ENGINE_DEBUG("rbxmx: {}", note);
+		}
+		if (!model.Notes.empty()) {
+			core::Metrics::Count("bake.rbxmx.notes", static_cast<double>(model.Notes.size()));
+			ENGINE_WARN(
+				"rbxmx: {} root(s) read with {} thing(s) this reader could not keep",
+				model.Roots.size(),
+				model.Notes.size()
+			);
+		} else {
+			ENGINE_DEBUG("rbxmx: {} root(s) read whole", model.Roots.size());
 		}
 
 		out = std::move(model);

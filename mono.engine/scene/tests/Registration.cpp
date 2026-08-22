@@ -48,16 +48,49 @@ namespace registration_test {
 	// makes it show up as a failing test rather than as a snapshot that loads
 	// into a narrower world.
 	const std::vector<std::string_view> EXPECTED{
-		"scene.Transform",	 "scene.PreviousTransform", "scene.Bounds",
-		"scene.Motion",		 "scene.RigidBody",			"scene.Collider",
-		"scene.Surface",	 "scene.PhysicsProperties", "scene.Visual",
-		"scene.Camera",		 "scene.QuickHash",			"scene.SurfaceCamera",
-		"scene.Transient",	 "scene.Service",			"scene.LightingService",
-		"scene.Rendered",	 "scene.SurfaceTable",		"scene.ActiveCamera",
-		"scene.WorldBounds", "scene.RenderedSignature", "scene.Portal",
-		"scene.SurfaceLens", "scene.SurfaceBounces",	"scene.Team",
-		"scene.PlayerTeam",	 "scene.SpawnLocation",		"scene.Tool",
+		"scene.Transform",
+		"scene.PreviousTransform",
+		"scene.Bounds",
+		"scene.Motion",
+		"scene.RigidBody",
+		"scene.Collider",
+		"scene.Surface",
+		"scene.PhysicsProperties",
+		"scene.Visual",
+		"scene.Camera",
+		"scene.SurfaceCamera",
+		"scene.Transient",
+		"scene.Service",
+		"scene.LightingService",
+		"scene.Rendered",
+		"scene.SurfaceTable",
+		"scene.ActiveCamera",
+		"scene.WorldBounds",
+		"scene.RenderedSignature",
+		"scene.Portal",
+		"scene.SurfaceLens",
+		"scene.SurfaceBounces",
+		"scene.Team",
+		"scene.PlayerTeam",
+		"scene.SpawnLocation",
+		"scene.Tool",
 		"scene.Simulated",
+
+		// The ten declared at v0.19 with nothing in the engine reading them.
+		// They are in this list for the reason the list exists: a name crosses a
+		// file and a wire, so renaming one is a format change and has to show up
+		// as a failing test rather than as a snapshot that loads into a narrower
+		// world. `docs/FUTURE_COMPONENTS.md` says what wires each of them.
+		"scene.Skeleton",
+		"scene.Bone",
+		"scene.AnimationClip",
+		"scene.Animator",
+		"scene.AnimationTrack",
+		"scene.LevelOfDetail",
+		"scene.Constraint",
+		"scene.Atmosphere",
+		"scene.Clouds",
+		"scene.Terrain",
 	};
 }
 
@@ -282,9 +315,17 @@ TEST_CASE("every field of Visual reaches the wire", "[scene][registration]") {
 		surface.Surface = 3;
 		cases.push_back({"Surface", surface});
 
+		Visual fitted = base;
+		fitted.Fitted = Name("registration_test.Fitted");
+		cases.push_back({"Fitted", fitted});
+
 		Visual shadow = base;
 		shadow.CastShadow = !base.CastShadow;
 		cases.push_back({"CastShadow", shadow});
+
+		Visual locked = base;
+		locked.Locked = !base.Locked;
+		cases.push_back({"Locked", locked});
 	}
 
 	for (const Case &one : cases) {
@@ -317,6 +358,50 @@ TEST_CASE("every field of Visual reaches the wire", "[scene][registration]") {
 	CHECK(restored.Visible == authored.Visible);
 	CHECK(restored.Surface == authored.Surface);
 	CHECK(restored.CastShadow == authored.CastShadow);
+	CHECK(restored.Fitted == authored.Fitted);
+	CHECK(restored.Locked == authored.Locked);
+}
+
+// **A field's *width* is as easy to forget as the field, and this is the case
+// that says so.**
+//
+// `Visual::Surface` was widened from `int8_t` to `int16_t` at v0.17 expressly to
+// lift a ceiling of a hundred and twenty-seven mirrors, and its serialiser went
+// on writing and reading eight bits until v0.19. Every slot index from 128 up
+// was truncated on the way into an `.agame` and came back as a different pane or
+// as -1, in a world that had gone to the trouble of authoring that many.
+//
+// The case above never caught it because it used slot 3. This one uses the whole
+// range: the two extremes an `int16_t` reaches, the first value an `int8_t`
+// cannot hold, and the sentinel.
+TEST_CASE("a surface slot survives the whole width of its field", "[scene][registration]") {
+	RegisterSceneComponents();
+
+	const TypeDescriptor &descriptor = Components::Describe(Components::Find(Name("scene.Visual")));
+
+	for (const int16_t slot :
+		 {int16_t(-1),
+		  int16_t(0),
+		  int16_t(127),
+		  int16_t(128),
+		  int16_t(4096),
+		  int16_t(32767),
+		  int16_t(-32768)}) {
+		INFO("slot " << slot);
+
+		Visual authored;
+		authored.Surface = slot;
+
+		ByteWriter writer;
+		descriptor.Write(writer, &authored, 1);
+		ByteReader reader(writer.Bytes());
+
+		Visual restored;
+		restored.Surface = 9;
+		descriptor.Read(reader, &restored, 1);
+
+		CHECK(restored.Surface == slot);
+	}
 }
 
 TEST_CASE("every scene component obeys the serialisation rules", "[scene][registration]") {

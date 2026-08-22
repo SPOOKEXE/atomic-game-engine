@@ -2,6 +2,144 @@
 
 L3. Storage, and nothing above it.
 
+## Two things live here, and the second one is the object model
+
+This module is not only columns, sets and change channels. It also carries the
+**Roblox object model** - `Classes`, `Instance`, `Attributes`, `EnumTable`,
+`Property`, the class tree and the property surface - and until v0.19 this file
+said nothing about it, which left half the module invisible to anybody who read
+its invariants first.
+
+Measured over the module's 27,200 lines of `.hpp` and `.cpp`:
+
+| | Lines | Share |
+|---|---:|---:|
+| storage - entities, columns, archetypes, queries, change channels, snapshots | 20,553 | 75.6% |
+| object model - classes, instances, the tree, properties, attributes, enum sets | 6,647 | 24.4% |
+
+The object-model half is `Classes.hpp`, `Instance.hpp`, `Attributes.hpp`,
+`Property.hpp` and `EnumTable.hpp` with their `src/` and `tests/`, plus 507 of
+`Store.hpp`'s 2,357 lines and 350 of `Store.cpp`'s 1,514. `ARCH_REVIEW.md` §C6
+put `Store.hpp`'s length down to this; the measurement says otherwise. The
+header is 1,627 lines of comment against 522 of code, and the object model is
+under a quarter of it.
+
+### Why it is one module and not two
+
+**The object model is not a layer above the storage. It is the storage, read a
+second way.** A class *is* a `ComponentSet`; `:IsA` *is* a subset test over
+sorted ids; an instance *is* an entity; a property *is* a column and an offset;
+`Instance.new` *is* a copy from a prototype row. There is no interface to draw
+between the two because every object-model operation is already an archetype
+operation.
+
+**A second module would need everything `StoreState` holds** - the directory,
+the archetype tables, the columns, the name maps. That is why every function in
+`src/Instances.hpp` takes a `StoreState &`. Giving another module the same
+reach means widening what leaves `include/`, and this file's own rule is that
+everything public here is a migration cost.
+
+**The fusion is what keeps the cost out of the layers above.** `script` is
+32,981 lines and its object model is 1,465 of them, precisely because
+`ecs::Classes` already owns the tree (`ARCH_REVIEW.md` §C5). Splitting here
+pushes that back out into every consumer that has one.
+
+**And the bar for a new target is not met.** `ARCH_REVIEW.md` §C7 and decision
+22: this repository does not create a directory for one thing, and a half that
+cannot be reached except through `Store` is not a second thing yet.
+
+Splitting `Store`'s instance API into free functions taking a `Store &` was
+costed rather than dismissed: about two thousand call sites across `scene`,
+`gui`, `studio`, `script`, `client` and `replication`. That is a tree-wide edit
+to move a boundary the storage does not have.
+
+### What is separated, and must stay separated
+
+The headers are layered even though the module is not, and that layering is
+what stops a consumer of one context compiling the other:
+
+```
+Entity  Column  Components  ComponentSet  ChangeChannel  SparseSet     storage
+   └─────────────────┴── Store.hpp
+Instance ── Classes ── Attributes                                  object model
+                └───── Property.hpp  (declares a property, so it needs Store)
+```
+
+**`Store.hpp` does not include `Classes.hpp`, and must not start.** It
+forward-declares `PropertyDescriptor` and hands out spans of them. A consumer
+that iterates a column pays nothing for the class tree today, nothing checks
+that, and the compiler will not tell you the day it stops being true.
+`Property.hpp` exists to hold the one template that genuinely needs both:
+**include `Classes.hpp` to read a property, `Property.hpp` to declare one.**
+
+**A header that only *names* a `core/types` value declares it; a header that
+*stores* one includes it.** `Classes.hpp` asks `std::is_same_v` about the ten
+types `PropertyType` covers and does nothing else with them, so it declares
+them - the eight headers it used to include cost 35,742 preprocessed lines on
+179 translation units, nearly all of it `CFrame.hpp` reaching glm.
+`Attributes.hpp` holds an `AttributeValue` with all ten as members, so it
+includes them and always will. Naming is a declaration; storing is a
+definition, and that is the whole of the rule.
+
+### One suite per context, and a shared fixture because a class tree is process-wide
+
+`tests/Instance.cpp` was 1,689 lines covering two public headers, so touching
+`Classes.hpp` re-ran every hierarchy, clone and churn case with it. It is now
+`tests/Classes.cpp` (`engine.ecs.classes`, the class table) and
+`tests/Instance.cpp` (`engine.ecs.instance`, the three components and the tree),
+and `control/tests/Marshalling.cpp`'s `TEST_DEPENDS("engine.ecs.classes")` names
+a suite that exists rather than raising a runner warning.
+
+The fixture had to move to `tests/ClassTree.hpp` and that is not tidiness.
+`Classes` and `Components` are process-wide and never unregister, so two files
+each declaring their own `test.Transform` would be two C++ types asking for one
+component name and `Components::Adopt` aborts on that. **Any further split of
+these suites uses that header rather than registering a second tree.**
+
+### `Store.hpp` is on 216 translation units, so anything added to it is paid 216 times
+
+Measured with the real `release` compile flags, as preprocessed lines, which is
+a number that does not move with machine load. Translation-unit counts are the
+`release` preset; `dev` adds the test binaries and is 377 and 282.
+
+| Header | Before | After | TUs |
+|---|---:|---:|---:|
+| `Store.hpp` | 84,150 | **64,030** | 216 |
+| `Classes.hpp` | 91,271 | **55,529** | 179 |
+| `Scheduler.hpp` | 84,245 | **64,125** | 126 |
+| `Property.hpp` | 118,185 | **69,332** | 12 |
+| `Schema.hpp` | 91,446 | **55,708** | 5 |
+
+Two changes got them there. `Classes.hpp` declares its `core/types` rather than
+including them, as above. `Store.hpp` gave up `<thread>` and `<memory>`, which
+overlap so heavily that dropping either alone is worth 6.6% and dropping both
+is worth 24%: the affinity check compares `CallingThreadToken()`, a thread-local
+sentinel's address, instead of a `std::thread::id`, and `StoreState` is an
+owning raw pointer deleted by `~Store` rather than a `std::unique_ptr`. Copy and
+move are deleted and the destructor is out of line, which is what a `unique_ptr`
+member over an incomplete type would have needed anyway.
+
+One file in the tree was relying on `Classes.hpp` to bring it `core/types`:
+`control/src/Tools.cpp`, which marshals every property type and now includes
+them itself.
+
+### Measured and not done, so the next person does not re-measure
+
+- **`<functional>` out of `Entity.hpp`.** The header preprocesses to 43,536
+  lines and 43,345 of that is `<functional>`, present for `std::hash<Entity>`.
+  Removing it saves **one** line in a real closure, because `core::Name` pulls
+  `<functional>` into every consumer that has an entity anyway. Exactly one
+  type in the tree hashes an `Entity`.
+- **Forward-declaring `Store` in `Scheduler.hpp`.** `System` is
+  `std::function<void(Store &)>`, so a declaration would do. Zero of the 126
+  translation units that include `Scheduler.hpp` lack `Store.hpp` already.
+- **Splitting `Schema.cpp`.** It is the module's slowest translation unit at
+  7.60 s of its 21.7 s total, and 6.6 s of that is the 2048-slot thunk table -
+  1.75 s at 256 slots, 2.60 at 512, 4.20 at 1024, about 3.4 ms a slot. Spread
+  over four translation units it would put 2.6 s on the critical path instead
+  of 7.6 s, at the price of four near-identical files. `ARCH_REVIEW.md` §E
+  measured this file at 22.2 s on a loaded machine; on a quiet one it is 7.6.
+
 ## The ECS owns the storage
 
 This is the rule the whole layer exists to enforce, and it is the one most

@@ -26,7 +26,7 @@ namespace engine::physics {
 		// `Proxy::Id` is the index the two arrays share, not the entity - see
 		// `PhysicsWorld`, which explains why. The entity is on the record, so
 		// resolving a candidate is a subscript and never a store lookup.
-		void Append(
+		void AppendEntry(
 			std::vector<spatial::Proxy> &proxies,
 			std::vector<ColliderRecord> &records,
 			std::vector<PlacedCollider> &shapes,
@@ -144,7 +144,11 @@ namespace engine::physics {
 				const scene::Transform &transform,
 				const scene::Collider &collider,
 				const scene::Motion &
-			) { Append(dynamicProxies, dynamicRecords, dynamicShapes, baked, entity, transform, collider); }
+			) {
+				AppendEntry(
+					dynamicProxies, dynamicRecords, dynamicShapes, baked, entity, transform, collider
+				);
+			}
 		);
 
 		{
@@ -208,7 +212,7 @@ namespace engine::physics {
 				if (store.Has<scene::Motion>(entity)) {
 					return;
 				}
-				Append(staticProxies, staticRecords, staticShapes, baked, entity, transform, collider);
+				AppendEntry(staticProxies, staticRecords, staticShapes, baked, entity, transform, collider);
 			}
 		);
 

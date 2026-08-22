@@ -6,6 +6,7 @@
 #include <engine/physics/Characters.hpp>
 #include <engine/physics/Clock.hpp>
 #include <engine/physics/Pipeline.hpp>
+#include <engine/scene/Attachments.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Gravity.hpp>
@@ -231,6 +232,42 @@ namespace server {
 			for (const engine::ecs::Entity player : spawned) {
 				(void)engine::gui::ResetPlayerGui(store, player);
 			}
+		});
+
+		// **The authority derives the derived half of an `Attachment` too**, and
+		// until v0.19 only `mono.client`'s presentation did. Nothing here draws a
+		// beam, so this is not about the cache: `ResolveAttachments` is what
+		// *reports* the write, and a reported write is what makes
+		// `Attachment.WorldCFrame` and `WorldPosition` fire their change signal.
+		// Unscheduled, a server script's `GetPropertyChangedSignal("WorldCFrame")`
+		// never fired at all while the same script on a client did - one fact
+		// with two answers, which is rule 2 with a part moving under it.
+		//
+		// **`PostSimulation`, which is the phase the authority's answer is
+		// finished in.** The parts have stopped moving for this tick,
+		// `World::Step` flushes signals immediately after this phase, and
+		// extraction reads the change bits after that - so the frame that is
+		// signalled, the frame that is stored and the frame that crosses are all
+		// the one this tick ended at. `PreSimulation` - which is where the client
+		// registers its first copy, because `refresh-emitters` needs a spawn
+		// point before the tick moves anything - would resolve against last
+		// tick's transforms here and there is nothing on a server that wants
+		// that.
+		//
+		// **A world with no attachments pays an archetype match and nothing
+		// else**, which is what makes it safe to register unconditionally.
+		//
+		// **It does put bytes on the wire, and that is worth knowing.**
+		// `scene.Attachment` is replicated whole, so an attachment whose part
+		// moves is now a dirty row every tick where it was dirty never - 56
+		// bytes an attachment per tick that a client then recomputes anyway,
+		// against its own interpolated transforms. The row that is *authored*
+		// has to cross; the derived half arguably does not, and taking it off
+		// would mean a hand-written pair for this one component. Left as it is
+		// until a stress run says the traffic matters: `just stress` is where
+		// that number would come from.
+		scheduler.Add("resolve-attachments", Phase::PostSimulation, [](Store &store) {
+			(void)engine::scene::ResolveAttachments(store);
 		});
 	}
 

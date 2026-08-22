@@ -43,10 +43,9 @@
 //
 // @tier L9 · shared
 
-#include "Codec.hpp"
-#include "ScriptCall.hpp"
-#include "ServiceSurface.hpp"
-
+#include <engine/script/Codec.hpp>
+#include <engine/script/ScriptCall.hpp>
+#include <engine/script/ServiceSurface.hpp>
 #include <engine/world/Postbox.hpp>
 
 #include <array>
@@ -149,7 +148,7 @@ namespace engine::script {
 			call.Await(ticket.Value);
 		}
 
-		constexpr std::array<ServiceMethod, 3> METHODS{{
+		constexpr std::array<ServiceMethod, 3> CROSS_WORLD_METHODS{{
 			{"OpenChannel", OpenChannel},
 			{"CloseChannel", CloseChannel},
 			{"SendAsync", SendAsync},
@@ -160,7 +159,7 @@ namespace engine::script {
 		static const ServiceSurface SURFACE = [] {
 			ServiceSurface surface;
 			surface.Name = "CrossWorldService";
-			surface.Methods = METHODS;
+			surface.Methods = CROSS_WORLD_METHODS;
 			return surface;
 		}();
 		return SURFACE;

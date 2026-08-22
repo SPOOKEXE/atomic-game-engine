@@ -1,5 +1,6 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/scene/Atmosphere.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Sunlight.hpp>
 
@@ -54,6 +55,14 @@ namespace engine::scene {
 			lighting.FogStart = std::max(authored->FogStart, 0.0f);
 			lighting.FogEnd = std::max(authored->FogEnd, lighting.FogStart);
 		}
+
+		// **Resolved here rather than left to whoever draws**, for the reason
+		// this function exists at all: a portal's far half is a copy of a world
+		// lit by the same authored state, and a second resolver reading the
+		// instance tree from inside a render pass would have to find the same
+		// `Atmosphere` twice and could disagree about which one.
+		lighting.Air = AtmosphereOf(store);
+		lighting.Sky = CloudsOf(store);
 
 		if (const Sun *override = store.Resource<Sun>()) {
 			lighting.Direction = Normalised(override->Direction);

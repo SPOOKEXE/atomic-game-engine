@@ -39,7 +39,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.examples.scene")
-TEST_DEPENDS("engine.script.scripting")
+TEST_DEPENDS("engine.scripthost.scripting")
 
 using Catch::Approx;
 using engine::core::Name;
@@ -535,8 +535,15 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 		walker,
 		engine::scene::PreviousTransform{engine::core::CFrame(engine::core::Vector3{3.0f, 6.0f, 20.0f})}
 	);
+	// **Tumbling as well as walking, and about `X` rather than `Y`.** The pair in
+	// this building turns a corner, which is a yaw - so a body spinning about the
+	// world's up comes out spinning about it whatever the pass does, and the case
+	// proves nothing. End over end is the axis the corner actually moves.
 	store.Set<engine::scene::Motion>(
-		walker, engine::scene::Motion{engine::core::Vector3{-16.0f, 0.0f, 0.0f}, engine::core::Vector3::Zero}
+		walker,
+		engine::scene::Motion{
+			engine::core::Vector3{-16.0f, 0.0f, 0.0f}, engine::core::Vector3{3.0f, 0.0f, 0.0f}
+		}
 	);
 
 	REQUIRE(engine::scene::CrossPortals(store) == 1);
@@ -564,6 +571,18 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 	const engine::core::Vector3 speed = store.Get<engine::scene::Motion>(walker)->Linear;
 	CHECK(speed.X == Approx(0.0f).margin(1e-3f));
 	CHECK(speed.Z == Approx(-16.0f).margin(1e-3f));
+
+	// **And the tumble turned with it too, which went four versions unmapped.**
+	// The corner that sends the walk from west to north sends the spin from `X`
+	// to `Z`; a pass that maps `Linear` alone leaves this one end over end about
+	// an axis the hall has no reason to name, and what that looks like is a
+	// thrown crate that starts wobbling the moment it comes out of a doorway.
+	// **At the same rate**, because a spin is not a length and this pair is
+	// rigid anyway.
+	const engine::core::Vector3 spin = store.Get<engine::scene::Motion>(walker)->Angular;
+	CHECK(spin.X == Approx(0.0f).margin(1e-3f));
+	CHECK(spin.Y == Approx(0.0f).margin(1e-3f));
+	CHECK(std::abs(spin.Z) == Approx(3.0f).margin(1e-3f));
 
 	// **And the eye turns with it - on the machine the eye is on.** The
 	// crossing writes `scene::PortalTransit` on the body rather than reaching

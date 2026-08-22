@@ -1,6 +1,7 @@
 #include "Importers.hpp"
 
 #include <engine/core/Chars.hpp>
+#include <engine/core/Log.hpp>
 
 #include <algorithm>
 #include <array>
@@ -197,6 +198,14 @@ namespace engine::bake {
 				// silent merge of two files that may define the same `newmtl`.
 				if (imported.MaterialLibrary.empty()) {
 					imported.MaterialLibrary = std::string(fields[1]);
+				} else if (imported.MaterialLibrary != fields[1]) {
+					// A second library is dropped, and the materials it named
+					// resolve to nothing with no message about the file.
+					ENGINE_WARN(
+						"obj: keeping material library '{}'; '{}' is ignored",
+						imported.MaterialLibrary,
+						fields[1]
+					);
 				}
 			} else if (fields[0] == "usemtl") {
 				openGroup(fields.size() >= 2 ? std::string(fields[1]) : std::string());
@@ -336,6 +345,10 @@ namespace engine::bake {
 			}
 		);
 		if (!anyNormal) {
+			// The normals in the result were computed here rather than authored,
+			// which is why a model can look right in one viewer and faceted in
+			// another.
+			ENGINE_DEBUG("obj: the file carried no normals; they were computed from the geometry");
 			SmoothNormals(imported.Mesh);
 		}
 

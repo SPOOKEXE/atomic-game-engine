@@ -121,6 +121,23 @@ namespace engine::net::quic {
 	// @since v0.19
 	std::array<std::byte, IDENTITY_BYTES> IdentityFor(std::span<const std::byte> seed);
 
+	// Draws a fresh identity seed from the operating system's entropy.
+	//
+	// **What a server with no operator-supplied key gets, now that QUIC is the
+	// default wire.** A QUIC server proves who it is inside its own handshake,
+	// so unlike the datagram wire there is no anonymous mode to fall back to -
+	// the handshake needs *a* key whether or not anybody pinned it. An ephemeral
+	// one gives the same guarantee the datagram wire's anonymous mode gives and
+	// no more: encrypted against a listener, open to a relay. It changes every
+	// run, so it is never what an operator publishes.
+	//
+	// @param out Exactly `IDENTITY_SEED_BYTES`.
+	// @return `false` when the length is wrong or the operating system refused
+	//         entropy, in which case `out` is untouched and the caller must not
+	//         serve QUIC.
+	// @since v0.19
+	bool DrawIdentitySeed(std::span<std::byte> out);
+
 	// What a handshake needs before it can start.
 	//
 	// @since v0.19

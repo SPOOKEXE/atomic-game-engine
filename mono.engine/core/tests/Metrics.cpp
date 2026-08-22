@@ -166,3 +166,172 @@ TEST_CASE("counting from many threads loses nothing", "[metrics]") {
 	REQUIRE(drained.front().Value == Approx(1600.0));
 	REQUIRE(drained.front().Samples == 1600);
 }
+
+TEST_CASE("a counter reads back without being drained", "[metrics]") {
+	Metrics::Clear();
+	const std::string name = Unique("read");
+
+	Metrics::Count(name, 2.0);
+	Metrics::Count(name, 3.0);
+
+	// **To report, never to decide.** Reading must leave the counter exactly
+	// where it was, or a reporter and the one drainer per frame would be
+	// fighting over each frame's numbers.
+	const auto read = Metrics::Get(name);
+	REQUIRE(read.has_value());
+	CHECK(read->Value == Approx(5.0));
+	CHECK(read->Samples == 2);
+
+	const auto again = Metrics::Get(name);
+	REQUIRE(again.has_value());
+	CHECK(again->Value == Approx(5.0));
+
+	CHECK_FALSE(Metrics::Get("metric.nothing.named.this").has_value());
+
+	const auto drained = Metrics::Drain();
+	REQUIRE(Find(drained, name) != nullptr);
+	CHECK_FALSE(Metrics::Get(name).has_value());
+}
+
+TEST_CASE("a gauge replaces rather than accumulates", "[metrics]") {
+	Metrics::Clear();
+	const std::string name = Unique("gauge");
+
+	Metrics::SetGauge(name, 4.0);
+	Metrics::SetGauge(name, 7.0);
+
+	const auto read = Metrics::GetGauge(name);
+	REQUIRE(read.has_value());
+	CHECK(read->Value == Approx(7.0));
+
+	// The write count is the only way to tell a gauge somebody is keeping
+	// current from one nothing has touched since startup.
+	CHECK(read->Writes == 2);
+
+	// **Not drained**, because "how many clients are connected" has no
+	// per-frame meaning and a drain would answer zero for every frame nobody
+	// happened to write it in.
+	const auto drained = Metrics::Drain();
+	CHECK(drained.empty());
+	REQUIRE(Metrics::GetGauge(name).has_value());
+	CHECK(Metrics::GetGauge(name)->Value == Approx(7.0));
+}
+
+TEST_CASE("a histogram keeps the shape and not only the total", "[metrics]") {
+	Metrics::Clear();
+	const std::string name = Unique("histogram");
+
+	for (int value = 1; value <= 100; value++) {
+		Metrics::Observe(name, static_cast<double>(value));
+	}
+
+	const auto read = Metrics::GetHistogram(name);
+	REQUIRE(read.has_value());
+	CHECK(read->Samples == 100);
+	CHECK(read->Sum == Approx(5050.0));
+	CHECK(read->Minimum == Approx(1.0));
+	CHECK(read->Maximum == Approx(100.0));
+	CHECK(read->Mean == Approx(50.5));
+	CHECK(read->Retained == 100);
+
+	// Nearest-rank, so every percentile is a reading that actually happened.
+	// An interpolated p99 over 1..100 would answer 99.01, which is a value
+	// nothing observed.
+	//
+	// p50 is 51 rather than 50 because the rank is rounded rather than floored,
+	// which puts an exact half on the upper reading. That is `FrameGraph`'s
+	// convention and `Server::Run`'s, and it is pinned here so that a change to
+	// any one of the three is a change that fails a test rather than one that
+	// makes two reports disagree by one reading.
+	CHECK(read->P50 == Approx(51.0));
+	CHECK(read->P95 == Approx(95.0));
+	CHECK(read->P99 == Approx(99.0));
+}
+
+TEST_CASE("a histogram's window is bounded", "[metrics]") {
+	Metrics::Clear();
+	const std::string name = Unique("window");
+
+	// Twice the window, all of the second half larger than all of the first.
+	// The percentiles must describe the recent readings, and the exact totals
+	// must still describe every one of them.
+	const uint32_t window = Metrics::RETAINED_OBSERVATIONS;
+	for (uint32_t index = 0; index < window; index++) {
+		Metrics::Observe(name, 1.0);
+	}
+	for (uint32_t index = 0; index < window; index++) {
+		Metrics::Observe(name, 9.0);
+	}
+
+	const auto read = Metrics::GetHistogram(name);
+	REQUIRE(read.has_value());
+	CHECK(read->Samples == 2 * window);
+	CHECK(read->Retained == window);
+	CHECK(read->Minimum == Approx(1.0));
+	CHECK(read->Maximum == Approx(9.0));
+	CHECK(read->P50 == Approx(9.0));
+}
+
+TEST_CASE("ScopedObservation records elapsed time", "[metrics]") {
+	Metrics::Clear();
+	const std::string name = Unique("observed");
+
+	{
+		const engine::core::ScopedObservation scope(name);
+		std::this_thread::sleep_for(std::chrono::milliseconds(3));
+	}
+
+	const auto read = Metrics::GetHistogram(name);
+	REQUIRE(read.has_value());
+	CHECK(read->IsTime);
+	CHECK(read->Samples == 1);
+	CHECK(read->Maximum >= 2'000'000.0);
+}
+
+TEST_CASE("a snapshot carries all three kinds and resets nothing", "[metrics]") {
+	Metrics::Clear();
+	const std::string counted = Unique("snapshot.counter");
+	const std::string level = Unique("snapshot.gauge");
+	const std::string shape = Unique("snapshot.histogram");
+
+	Metrics::Count(counted, 3.0);
+	Metrics::SetGauge(level, 11.0);
+	Metrics::Observe(shape, 5.0);
+
+	const engine::core::MetricsSnapshot taken = Metrics::Snapshot();
+	REQUIRE(taken.Counters.size() == 1);
+	REQUIRE(taken.Gauges.size() == 1);
+	REQUIRE(taken.Histograms.size() == 1);
+	CHECK(taken.Counters.front().Value == Approx(3.0));
+	CHECK(taken.Gauges.front().Value == Approx(11.0));
+	CHECK(taken.Histograms.front().P50 == Approx(5.0));
+
+	// Twice, identically. A report that emptied the sink would be a report
+	// nobody could take beside a drain.
+	const engine::core::MetricsSnapshot again = Metrics::Snapshot();
+	REQUIRE(again.Counters.size() == 1);
+	CHECK(again.Counters.front().Value == Approx(3.0));
+
+	Metrics::Clear();
+	CHECK(Metrics::Snapshot().Counters.empty());
+	CHECK(Metrics::Snapshot().Gauges.empty());
+	CHECK(Metrics::Snapshot().Histograms.empty());
+}
+
+TEST_CASE("a snapshot is sorted by name", "[metrics]") {
+	Metrics::Clear();
+
+	Metrics::Count("metric.sorted.zulu", 1.0);
+	Metrics::Count("metric.sorted.alpha", 1.0);
+	Metrics::Count("metric.sorted.mike", 1.0);
+
+	// First-seen order is what the interned ids carry and is not an order
+	// anybody reading a report expects.
+	const engine::core::MetricsSnapshot taken = Metrics::Snapshot();
+	REQUIRE(taken.Counters.size() == 3);
+	CHECK(taken.Counters[0].Name.Text() == "metric.sorted.alpha");
+	CHECK(taken.Counters[1].Name.Text() == "metric.sorted.mike");
+	CHECK(taken.Counters[2].Name.Text() == "metric.sorted.zulu");
+
+	Metrics::Clear();
+}

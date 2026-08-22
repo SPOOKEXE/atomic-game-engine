@@ -1366,6 +1366,74 @@ TEST_CASE("a body that walks into a portal comes out of the far one", "[scene][s
 	CHECK(engine::scene::CrossPortals(mirror.World) == 0);
 }
 
+TEST_CASE("a spinning body keeps its spin in the room it arrives in", "[scene][surfacecameras]") {
+	// **The second half of `Motion`, which the crossing carried for four
+	// versions without.** `Motion` is a `Linear` and an `Angular`, the solver
+	// writes both and `physics::Advanced` integrates both - so a pair of panes
+	// that turns the room turns the axis a body is spinning about, exactly as it
+	// turns the direction the body is travelling in. Mapping one and not the
+	// other is the bug that reads as physics rather than as a portal: a crate
+	// tumbling end over end through a corner comes out tumbling about an axis
+	// the far room has no reason to name.
+	//
+	// The far pane is a hole in the **floor** rather than one more door in a
+	// wall, because a wall is the one arrangement that hides this. A seam's
+	// destination is `LookAt(centre, centre + normal, UpFor(normal))` and the
+	// half-turn is about `Y`, so any two upright panes - however they are yawed
+	// or rolled - compose to a map that leaves `Y` alone, and a body spinning
+	// about `Y` comes out looking correct however the pass is written. Point the
+	// far pane's face at the sky and the near room's up is the far room's
+	// sideways, which is the case that tells the two implementations apart.
+	Mirror mirror;
+
+	const Entity far =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	mirror.World.Set<Transform>(
+		far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f}) * CFrame::Angles(1.5707963f, 0.0f, 0.0f)}
+	);
+	mirror.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+
+	std::vector<engine::scene::PortalSeam> seams;
+	REQUIRE(engine::scene::GatherPortalSeams(mirror.World, seams) == 1);
+	const engine::scene::SeamTransform through = engine::scene::SeamMapping(seams[0]);
+
+	// A top, spinning about world up at four radians a second, walking along -Z
+	// through pane A exactly as the case above does.
+	const Vector3 spin{0.0f, 4.0f, 0.0f};
+
+	const Entity top =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Top");
+	mirror.World.Set<Transform>(top, Transform{CFrame(Vector3{0.0f, 0.0f, -1.0f})});
+	mirror.World.Set<engine::scene::PreviousTransform>(
+		top, engine::scene::PreviousTransform{CFrame(Vector3{0.0f, 0.0f, 1.0f})}
+	);
+	mirror.World.Set<engine::scene::Motion>(top, engine::scene::Motion{Vector3{0.0f, 0.0f, -16.0f}, spin});
+
+	REQUIRE(engine::scene::CrossPortals(mirror.World) == 1);
+
+	const Vector3 spinning = mirror.World.Get<engine::scene::Motion>(top)->Angular;
+	const Vector3 expected = through.Rotate(spin);
+
+	CHECK_THAT(spinning.X, Catch::Matchers::WithinAbs(expected.X, TOLERANCE));
+	CHECK_THAT(spinning.Y, Catch::Matchers::WithinAbs(expected.Y, TOLERANCE));
+	CHECK_THAT(spinning.Z, Catch::Matchers::WithinAbs(expected.Z, TOLERANCE));
+
+	// **And it is a different axis**, which is what makes the three lines above
+	// an assertion rather than a restatement. A pass that leaves `Angular` alone
+	// passes them the moment the pair stops turning anything, so the case has to
+	// say that this pair does turn something.
+	CHECK((spinning - spin).Magnitude() > 1.0f);
+
+	// **The same rate, because a spin is not a length.** `Rotate` and not
+	// `Carry`: radians per second have no distance in them, so a hole that
+	// halves a body halves the radius it spins at and halves the speed of every
+	// point on it, and the rate those two divide to is unchanged. `Carry` here
+	// would make a shrinking pair spin a body down to nothing over a few
+	// crossings, and a growing one spin it up without bound.
+	CHECK_THAT(spinning.Magnitude(), Catch::Matchers::WithinAbs(4.0f, TOLERANCE));
+}
+
 TEST_CASE("a portal swallows only what goes through the hole", "[scene][surfacecameras]") {
 	Mirror mirror;
 

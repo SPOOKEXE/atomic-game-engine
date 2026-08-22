@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstring>
 #include <span>
 #include <string>
 #include <string_view>
@@ -36,6 +37,14 @@ using engine::core::FrameGraph;
 using engine::core::Metrics;
 
 namespace {
+	// The same text as bytes, for the rows that verify content rather than
+	// describe it.
+	std::vector<std::byte> Body(std::string_view text) {
+		std::vector<std::byte> bytes(text.size());
+		std::memcpy(bytes.data(), text.data(), text.size());
+		return bytes;
+	}
+
 	ChunkEntry Chunk(std::string_view text) {
 		ChunkEntry entry;
 		entry.Hash = Hasher::Of(
@@ -489,4 +498,140 @@ TEST_CASE(
 
 	CHECK(total("assets.manifest.parsed") == 1.0);
 	CHECK(total("assets.manifest.refused") == 1.0);
+}
+
+TEST_CASE("the root index answers what a scan over the assets would", "[assets][manifest]") {
+	// **`FindByRoot` was a scan until v0.19 and is a binary search now.** The
+	// index is derived from `AssetsByName` and nothing else, so the check that
+	// matters is not that it finds something but that it finds *the same thing*
+	// the scan would have, for every asset and for a root that is not there.
+	Manifest manifest;
+	std::vector<ContentHash> roots;
+	for (int index = 0; index < 64; ++index) {
+		// A scrambled order, because a sorted one would append every time and
+		// never exercise the shift an insert in the middle causes.
+		const int scattered = (index * 37) % 64;
+		roots.push_back(manifest.AddAsset(
+			"asset-" + std::to_string(scattered), AssetKind::Data, {Chunk(std::to_string(scattered))}
+		));
+	}
+
+	for (const ContentHash &root : roots) {
+		const AssetEntry *const found = manifest.FindByRoot(root);
+		const auto scanned = std::find_if(
+			manifest.Assets().begin(), manifest.Assets().end(), [&root](const AssetEntry &asset) {
+				return asset.Root == root;
+			}
+		);
+		REQUIRE(scanned != manifest.Assets().end());
+		REQUIRE(found != nullptr);
+		CHECK(found == &*scanned);
+	}
+
+	CHECK(manifest.FindByRoot(Hasher::Of(std::span<const std::byte>())) == nullptr);
+}
+
+TEST_CASE("two names for one blob resolve to the first by name", "[assets][manifest]") {
+	// Identical content under two names is one root - that is what dedup means
+	// - so the index holds two positions for one key. The scan this replaced
+	// returned the earlier of them, and the tiebreak in `RootOrder` is there so
+	// that it still does.
+	Manifest manifest;
+	const ContentHash second = manifest.AddAsset("z-later.bin", AssetKind::Data, {Chunk("identical")});
+	const ContentHash first = manifest.AddAsset("a-earlier.bin", AssetKind::Data, {Chunk("identical")});
+	REQUIRE(first == second);
+
+	const AssetEntry *const found = manifest.FindByRoot(first);
+	REQUIRE(found != nullptr);
+	CHECK(found->Name == "a-earlier.bin");
+}
+
+TEST_CASE("replacing a name moves its root in the index", "[assets][manifest]") {
+	// `AddAsset` replaces rather than duplicates, and the replacement usually
+	// has a different root. The old one has to stop resolving, or a manifest
+	// would answer for content it no longer describes.
+	Manifest manifest;
+	manifest.AddAsset("a", AssetKind::Data, {Chunk("before")});
+	manifest.AddAsset("b", AssetKind::Data, {Chunk("other")});
+	const ContentHash before = manifest.Assets()[0].Root;
+
+	const ContentHash after = manifest.AddAsset("a", AssetKind::Data, {Chunk("after")});
+	REQUIRE(before != after);
+
+	CHECK(manifest.FindByRoot(before) == nullptr);
+	REQUIRE(manifest.FindByRoot(after) != nullptr);
+	CHECK(manifest.FindByRoot(after)->Name == "a");
+	// And the asset the replacement shifted past is still findable.
+	REQUIRE(manifest.FindByRoot(manifest.Assets()[1].Root) != nullptr);
+	CHECK(manifest.FindByRoot(manifest.Assets()[1].Root)->Name == "b");
+}
+
+TEST_CASE("a parsed manifest resolves by root as well as a built one", "[assets][manifest]") {
+	// The parse path fills the asset list in one go rather than through
+	// `AddAsset`, so it builds the index separately - and its bundle loop
+	// resolves every member against it while still parsing.
+	Manifest manifest;
+	std::vector<ContentHash> roots;
+	for (int index = 0; index < 32; ++index) {
+		roots.push_back(manifest.AddAsset(
+			"asset-" + std::to_string(index), AssetKind::Data, {Chunk(std::to_string(index))}
+		));
+	}
+	REQUIRE(manifest.AddBundle(roots).has_value());
+
+	const auto bytes = Serialise(manifest);
+	ByteReader reader(bytes);
+	const auto parsed = Manifest::Read(reader);
+	REQUIRE(parsed.has_value());
+
+	for (const ContentHash &root : roots) {
+		const AssetEntry *const found = parsed->FindByRoot(root);
+		REQUIRE(found != nullptr);
+		CHECK(found->Root == root);
+	}
+	CHECK(parsed->FindByRoot(Hasher::Of(std::span<const std::byte>())) == nullptr);
+}
+
+TEST_CASE("a copied manifest carries a working index", "[assets][manifest]") {
+	// The index holds positions rather than pointers, which is what makes a
+	// copy of a manifest a copy of a working index instead of one pointing into
+	// the original's storage.
+	const Manifest original = Sample();
+	const Manifest copied = original;
+	for (const AssetEntry &asset : original.Assets()) {
+		REQUIRE(copied.FindByRoot(asset.Root) != nullptr);
+		CHECK(copied.FindByRoot(asset.Root)->Name == asset.Name);
+	}
+}
+
+TEST_CASE("VerifyAssetShape is the half of VerifyAsset that needs no bytes", "[assets][manifest]") {
+	// **The two halves have to stay two halves.** `ChunkStore::ReadAsset` calls
+	// the shape half alone because its reads already made the content half, so
+	// a change that folded a content check into `VerifyAssetShape` would break
+	// it and a change that dropped the tree check from it would let a run of
+	// good chunks be passed off as a different asset.
+	Manifest manifest;
+	manifest.AddAsset("a", AssetKind::Data, {Chunk("one"), Chunk("two")});
+	const AssetEntry &asset = manifest.Assets()[0];
+
+	CHECK(engine::assets::VerifyAssetShape(asset));
+	CHECK(engine::assets::VerifyAsset(asset, Body("onetwo")));
+
+	// A root that does not cover the chunk list. Refused by the shape half
+	// alone, with no content anywhere near it.
+	AssetEntry renamed = asset;
+	renamed.Root = Hasher::Of(std::span<const std::byte>());
+	CHECK_FALSE(engine::assets::VerifyAssetShape(renamed));
+	CHECK_FALSE(engine::assets::VerifyAsset(renamed, Body("onetwo")));
+
+	// A total that disagrees with the chunks, which is what would size a buffer
+	// one way and fill it another.
+	AssetEntry miscounted = asset;
+	miscounted.TotalBytes += 1;
+	CHECK_FALSE(engine::assets::VerifyAssetShape(miscounted));
+
+	// And the content half is still the content half: the shape is untouched
+	// and the bytes are wrong.
+	CHECK(engine::assets::VerifyAssetShape(asset));
+	CHECK_FALSE(engine::assets::VerifyAsset(asset, Body("onetwX")));
 }

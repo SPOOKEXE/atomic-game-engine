@@ -86,7 +86,7 @@ namespace studio {
 		// when the key is *absent* - a key holding a string still comes back as
 		// a throw. These files are hand-editable by design, so every read has to
 		// survive somebody typing the wrong thing.
-		float Number(const json &document, const char *key, float fallback) {
+		float JsonNumber(const json &document, const char *key, float fallback) {
 			const auto found = document.find(key);
 			return found != document.end() && found->is_number() ? found->get<float>() : fallback;
 		}
@@ -276,11 +276,11 @@ namespace studio {
 		// **Every field defaults to what this object already holds**, so a
 		// document written by an older build is read forward rather than
 		// clearing whatever it did not mention.
-		Scale = Number(document, "scale", Scale);
+		Scale = JsonNumber(document, "scale", Scale);
 		ShowGrid = Flag(document, "showGrid", ShowGrid);
 		SnapEnabled = Flag(document, "snap", SnapEnabled);
-		SnapDistance = Number(document, "gridStep", SnapDistance);
-		SnapDegrees = Number(document, "rotationStep", SnapDegrees);
+		SnapDistance = JsonNumber(document, "gridStep", SnapDistance);
+		SnapDegrees = JsonNumber(document, "rotationStep", SnapDegrees);
 		PivotEditing = Flag(document, "pivotEditing", PivotEditing);
 		DragAligns = Flag(document, "dragAligns", DragAligns);
 		ShowFacing = Flag(document, "showFacing", ShowFacing);
@@ -301,11 +301,11 @@ namespace studio {
 		ControlPort = Integer(document, "controlPort", ControlPort);
 
 		if (const auto rates = document.find("frameRates"); rates != document.end() && rates->is_object()) {
-			FrameCap = Number(*rates, "cap", FrameCap);
-			InterfaceActiveHz = Number(*rates, "interfaceActive", InterfaceActiveHz);
-			InterfaceIdleHz = Number(*rates, "interfaceIdle", InterfaceIdleHz);
-			RendererFocusedHz = Number(*rates, "rendererFocused", RendererFocusedHz);
-			RendererUnfocusedHz = Number(*rates, "rendererUnfocused", RendererUnfocusedHz);
+			FrameCap = JsonNumber(*rates, "cap", FrameCap);
+			InterfaceActiveHz = JsonNumber(*rates, "interfaceActive", InterfaceActiveHz);
+			InterfaceIdleHz = JsonNumber(*rates, "interfaceIdle", InterfaceIdleHz);
+			RendererFocusedHz = JsonNumber(*rates, "rendererFocused", RendererFocusedHz);
+			RendererUnfocusedHz = JsonNumber(*rates, "rendererUnfocused", RendererUnfocusedHz);
 		}
 
 		if (const auto panels = document.find("panels"); panels != document.end() && panels->is_object()) {
@@ -335,7 +335,7 @@ namespace studio {
 
 				engine::core::FrameTrigger rule;
 				rule.Name = Words(entry, "span", "");
-				rule.Threshold = Number(entry, "threshold", 0.0f);
+				rule.Threshold = JsonNumber(entry, "threshold", 0.0f);
 				rule.Enabled = Flag(entry, "enabled", true);
 
 				const std::string subject = Words(entry, "subject", "");

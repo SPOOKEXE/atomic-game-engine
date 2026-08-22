@@ -1,10 +1,10 @@
 // The demo node set: terrain fields, a colouriser, and two slow tasks.
 //
 // **Copy this file, change the registrations, and nothing in `nodegraph` needs
-// editing** — which is the property the whole design is for. Three kinds of
+// editing**, which is the property the whole design is for. Three kinds of
 // node, each demonstrating a different half of the machinery:
 //
-// - **Generators and filters** — value-noise fBm, ridged noise, domain warp,
+// - **Generators and filters**: value-noise fBm, ridged noise, domain warp,
 //   terraces, remap, slope, a threshold mask and a combine. These are sync: they
 //   run inside `Run` and are cheap enough that a slider drag recomputes the
 //   chain between frames.
@@ -13,17 +13,15 @@
 //   JavaScript template draws too: a height field is data, and turning it into
 //   colour is a node somebody adds rather than something the viewer does
 //   quietly.
-// - **Erosion and a staged task**, which are async. Erosion is genuinely slow —
-//   a few hundred milliseconds at 256² — and the staged task is slow on purpose,
-//   so that two of them in two branches visibly run at once.
+// - **Erosion and a staged task**, which are async. Erosion is genuinely slow
+//   (a few hundred milliseconds at 256²), and the staged task is slow on
+//   purpose, so that two of them in two branches visibly run at once.
 //
 // **Every evaluation here is pure.** Results are cached against a hash of a
 // node's parameters and its inputs' hashes, so a function that read a clock
-// would produce a picture the cache then refuses to recompute — a stale frame
+// would produce a picture the cache then refuses to recompute, a stale frame
 // that looks like a broken graph. The staged task sleeps rather than reading
 // wall-clock time *into* its result, for the same reason.
-
-#include <engine/nodegraph/Preview.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -31,6 +29,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <nodegraph/Preview.hpp>
 #include <string>
 #include <studio/DemoNodes.hpp>
 #include <thread>
@@ -43,11 +42,11 @@ namespace studio {
 	// node graph's vocabulary, because building that vocabulary is the whole of
 	// what the file does. Listing them one at a time was noise that had to be
 	// extended on every new node type. It is a source file, so nothing leaks.
-	using namespace engine::nodegraph;
+	using namespace nodegraph;
 
 	namespace {
 		// A square scalar grid, in 0..1. What flows down a `data.FIELD`
-		// wire — the library never learns what this is, which is what
+		// wire. The library never learns what this is, which is what
 		// `Inputs::In` exists for.
 		struct Field {
 			int Side = 0;
@@ -133,7 +132,7 @@ namespace studio {
 				float sample = Noise(x * frequency, y * frequency, seed + octave * 17);
 				if (ridge) {
 					// Fold, so a ridge forms where the noise crosses its
-					// middle — the whole difference between rolling hills
+					// middle: the whole difference between rolling hills
 					// and a mountain range.
 					sample = 1.0f - std::fabs(sample * 2.0f - 1.0f);
 					sample *= sample;
@@ -176,7 +175,7 @@ namespace studio {
 		// --- pictures -------------------------------------------------------
 
 		// How wide a thumbnail is. Bigger than the node draws it, because the
-		// inspector shows the same texture large — one conversion, two sizes.
+		// inspector shows the same texture large: one conversion, two sizes.
 		constexpr uint32_t PREVIEW_SIDE = 160;
 
 		// Relief shading: a surface lit from the north-west, which is what
@@ -256,7 +255,7 @@ namespace studio {
 		//
 		// **On the data type rather than on each node**, which is the whole
 		// point of `DataType::Preview`: eight filters carry a field and one
-		// function draws every one of them — and, more usefully, an
+		// function draws every one of them. And, more usefully, an
 		// inspector can draw a node's *inputs*, whose payloads were made
 		// upstream by a type it has never heard of.
 
@@ -326,7 +325,7 @@ namespace studio {
 	void RegisterDemoNodes() {
 		// Idempotent: the panel registers on first open and every test case
 		// asks. A second registration replaces in place, so this is a saving
-		// rather than a correctness fix — but a palette that grew a
+		// rather than a correctness fix. But a palette that grew a
 		// duplicate row every open would be neither.
 		if (Registered) {
 			return;
@@ -454,7 +453,7 @@ namespace studio {
 		NodeType ridged = perlin;
 		ridged.Id = "field.ridged";
 		ridged.Title = "Ridged";
-		ridged.Subtitle = "folded fBm — ranges";
+		ridged.Subtitle = "folded fBm, ranges";
 		ridged.Accent = Colour::Hex(0x3D8BD6);
 		ridged.Evaluate = [](const Inputs &in) {
 			const int side = SideOf(in, "resolution");
@@ -540,7 +539,7 @@ namespace studio {
 				const float within = scaled - step;
 
 				// Between the flat step and the untouched slope, so
-				// sharpness is a blend rather than a switch — a terrace that
+				// sharpness is a blend rather than a switch: a terrace that
 				// snapped at 1 and did nothing at 0.99 would be a knob with
 				// one useful position.
 				const float flattened = (step + std::pow(within, 1.0f + sharpness * 6.0f)) / steps;
@@ -700,7 +699,7 @@ namespace studio {
 
 			// **Stacked bands rather than a gradient texture.** Each is a
 			// colour and a boundary, which is what an author actually
-			// adjusts — and it keeps the whole node four numbers wide
+			// adjusts, and it keeps the whole node four numbers wide
 			// instead of needing a curve editor this canvas does not have.
 			struct Band {
 				float Until;
@@ -773,7 +772,7 @@ namespace studio {
 
 					float lit = relief ? Relief(field, x, y) : 1.0f;
 					if (usable) {
-						// A mask darkens where it is set — a cliff layer, in
+						// A mask darkens where it is set: a cliff layer, in
 						// the reference implementation's terms.
 						lit *= 1.0f - cliffs.At(x, y) * 0.55f;
 					}
@@ -923,7 +922,7 @@ namespace studio {
 
 		// **Slow on purpose, and it is the honest way to show concurrency.**
 		// Two of these in two branches of a graph run at once because the
-		// evaluator starts every node whose inputs are ready — there is no
+		// evaluator starts every node whose inputs are ready. There is no
 		// scheduler deciding it. Sleeping rather than spinning, so watching
 		// the demo does not cost a core.
 		staged.Evaluate = [](const Inputs &in) {

@@ -1,6 +1,10 @@
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/Metrics.hpp>
+#include <engine/ecs/Scheduler.hpp>
+#include <engine/scene/Attachments.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Part.hpp>
+#include <engine/scene/Registration.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/Universe.hpp>
 
@@ -21,15 +25,21 @@ TEST_SUITE_ID("server.host")
 TEST_DEPENDS("engine.ecs.store")
 TEST_DEPENDS("engine.ecs.scheduler")
 TEST_DEPENDS("engine.scene.components")
+TEST_DEPENDS("engine.scene.attachments")
 // The world's settings are what the options are copied into, and the rates that
 // arrived there are read straight back out.
 TEST_DEPENDS("engine.world.universe")
 
 using Catch::Approx;
+using engine::core::CFrame;
 using engine::core::FrameGraph;
 using engine::core::Metrics;
+using engine::core::Vector3;
 using engine::ecs::Entity;
+using engine::ecs::Phase;
+using engine::ecs::Scheduler;
 using engine::ecs::Store;
+using engine::scene::Attachment;
 using engine::scene::Motion;
 using engine::scene::Transform;
 using engine::scene::WorldBounds;
@@ -444,4 +454,48 @@ TEST_CASE("a world with no rates configured keeps following its tick", "[server]
 	// what this program did before either rate existed.
 	CHECK(settings.PhysicsTickRate == 0.0);
 	CHECK(settings.ReplicationTickRate == 0.0);
+}
+
+// --- what a prepared world derives ------------------------------------------
+
+TEST_CASE("a prepared world resolves its attachments", "[server]") {
+	// **The authority derives the derived half too.** Until v0.19 only
+	// `mono.client`'s presentation registered `ResolveAttachments`, so an
+	// attachment on a dedicated server kept the identity for the whole run - and
+	// the visible half of that was not the cached frame, which nothing here
+	// reads, but the *signal*: the pass reports its write, and that report is
+	// what makes `Attachment.WorldCFrame` fire `.Changed` for a server script.
+	// Reproduced with a scene script before it was fixed: zero signals over
+	// twenty ticks of a part moving one stud each.
+	server::RegisterPlaceholderComponents();
+	engine::scene::RegisterSceneClasses();
+
+	Store store("server_test.attachments");
+	Scheduler scheduler;
+	server::PrepareSimulation(store, scheduler, 0.0);
+
+	const Entity post = store.CreateInstance(engine::scene::PartClass(), "Post");
+	store.GetMutable<Transform>(post)->Frame = CFrame(Vector3(4.0f, 0.0f, 0.0f));
+
+	const Entity point = store.CreateInstance(engine::scene::AttachmentClass(), "Top");
+	REQUIRE(store.SetParent(point, post));
+	store.GetMutable<Attachment>(point)->Frame = CFrame(Vector3(0.0f, 3.0f, 0.0f));
+
+	std::vector<Entity> heard;
+	store.OnChanged<Attachment>([&heard](Store &, Entity moved, const Attachment &) {
+		heard.push_back(moved);
+	});
+
+	store.ClearChanges();
+	store.AdvanceTick(1.0f / 30.0f);
+	scheduler.RunPhases(store, Phase::PreSimulation, Phase::PostSimulation);
+	REQUIRE(store.FlushSignals() == 1);
+
+	// `PostSimulation`, so the frame stored is the one this tick ended at rather
+	// than the one it started from.
+	const Attachment *resolved = store.Get<Attachment>(point);
+	REQUIRE(resolved != nullptr);
+	CHECK(resolved->WorldFrame.Position.X == Approx(4.0f));
+	CHECK(resolved->WorldFrame.Position.Y == Approx(3.0f));
+	CHECK(heard == std::vector<Entity>{point});
 }

@@ -1,3 +1,4 @@
+#include <engine/core/Log.hpp>
 #include <engine/graph/Frustum.hpp>
 
 #include <cmath>
@@ -19,6 +20,10 @@ namespace engine::graph {
 		Plane Normalised(float x, float y, float z, float w) {
 			const float length = std::sqrt(x * x + y * y + z * z);
 			if (length <= 0.0f) {
+				// Accepting everything is the conservative direction and it is
+				// also indistinguishable from a cull that is switched off. Said
+				// once a second because this runs per view per frame.
+				ENGINE_WARN_EVERY(1.0, "a frustum plane is degenerate; that side culls nothing");
 				return Plane{core::Vector3{0.0f, 0.0f, 0.0f}, 1.0f};
 			}
 

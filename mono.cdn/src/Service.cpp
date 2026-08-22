@@ -72,7 +72,7 @@ namespace cdn {
 			return bytes;
 		}
 
-		std::optional<std::vector<std::byte>> ReadWholeFile(const std::filesystem::path &path) {
+		std::optional<std::vector<std::byte>> ReadServiceFile(const std::filesystem::path &path) {
 			std::ifstream file(path, std::ios::binary | std::ios::ate);
 			if (!file) {
 				return std::nullopt;
@@ -108,7 +108,7 @@ namespace cdn {
 				// what lets a client verify what the publisher actually signed
 				// rather than a re-serialisation that is *supposed* to be
 				// identical.
-				Published = ReadWholeFile(Store.Directory() / ChunkStore::MANIFEST_FILE);
+				Published = ReadServiceFile(Store.Directory() / ChunkStore::MANIFEST_FILE);
 				Codebook = Store.ReadDictionary();
 				if (!Published) {
 					ENGINE_WARN(

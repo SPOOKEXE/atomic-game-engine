@@ -20,6 +20,7 @@
 #include <engine/render/DebugPanels.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Input.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -27,6 +28,8 @@
 
 #include <algorithm>
 #include <client/Scene.hpp>
+#include <filesystem>
+#include <fstream>
 
 TEST_SUITE_ID("client.scene.tick")
 TEST_DEPENDS("engine.ecs.scheduler")
@@ -36,6 +39,7 @@ TEST_DEPENDS("engine.render.debugpanels")
 TEST_DEPENDS("engine.core.framegraph")
 TEST_DEPENDS("engine.scene.components")
 TEST_DEPENDS("engine.scene.drawinstance")
+TEST_DEPENDS("engine.scene.input")
 
 using Catch::Approx;
 using engine::core::FrameGraph;
@@ -515,4 +519,42 @@ TEST_CASE("the panels render a real tick's data", "[demo]") {
 	FrameGraph::SetEnabled(false);
 
 	REQUIRE(image.IsDirty());
+}
+
+// --- what a scene script may write before the systems are installed ---------
+
+TEST_CASE("a top-level pointer-mode write survives the install", "[demo]") {
+	// **`InputState` used to be minted after the script had already run.**
+	// `UserInputService.MouseBehavior` writes onto that resource and the setter
+	// drops a write onto a world that has none - correctly, because a server
+	// must not mint a window's state - so a `--script` scene that locked the
+	// pointer at the top level was silently ignored and only a write from inside
+	// a `Heartbeat` took. Reproduced with a real scene before it was fixed: the
+	// top-level write read back `Default` and the tick-three write read back
+	// `LockCenter`.
+	engine::parallel::Jobs::Start(2);
+	engine::core::Paths::SetAssetsOverride(engine::core::Paths::Base().parent_path() / "assets");
+
+	const std::filesystem::path scene =
+		std::filesystem::temp_directory_path() / "client_scene_tick_pointer_mode.luau";
+	{
+		std::ofstream out(scene);
+		out << "local UIS = game:GetService('UserInputService')\n";
+		out << "UIS.MouseBehavior = Enum.MouseBehavior.LockCenter\n";
+		out << "UIS.MouseIconEnabled = false\n";
+		out << "local block = Instance.new('Part')\n";
+		out << "block.Parent = workspace\n";
+	}
+
+	Store world("pointer_mode");
+	Scheduler systems;
+	REQUIRE(client::BuildScriptedWorld(world, systems, scene.string(), 1));
+
+	const auto *input = world.Resource<engine::scene::InputState>();
+	REQUIRE(input != nullptr);
+	CHECK(input->Behaviour == engine::scene::MouseBehavior::LockCenter);
+	CHECK_FALSE(input->MouseIconEnabled);
+
+	std::filesystem::remove(scene);
+	engine::parallel::Jobs::Stop();
 }

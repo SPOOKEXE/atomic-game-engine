@@ -31,7 +31,7 @@
 | [docs/CODE_QUALITY.md](docs/CODE_QUALITY.md) | the completion checklist - run it before opening one |
 | [docs/CODE_FORMAT.md](docs/CODE_FORMAT.md) | naming, includes, and what a comment is for |
 | [docs/CODE_DOCUMENTING.md](docs/CODE_DOCUMENTING.md) | where a comment ends up in the generated reference, and the tags |
-| [AGENTS.md](AGENTS.md) | the four rules, and how AI is used here |
+| [AGENTS.md](AGENTS.md) | the six rules, and how AI is used here |
 | [ROADMAP.md](ROADMAP.md) | what is built, what is next |
 | [docs/RELEASING.md](docs/RELEASING.md) | the version scheme, and how a tag becomes a download |
 | [docs/DEFERRED.md](docs/DEFERRED.md) | deferred items from ROADMAP.md that need to be revisited |

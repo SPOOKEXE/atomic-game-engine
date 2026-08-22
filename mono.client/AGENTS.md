@@ -2,14 +2,64 @@
 
 The client program: a `client`-tier library and a thin main over it.
 
-## This directory holds attachments, not engine
+## What is here, and the test that decides it
 
 The main, the session bootstrap, the window and swapchain owner, the event
-loop, and the demo scene. Anything reusable belongs under `mono.engine/` behind
-a tier.
+loop, the content pump, and the presentation half of a world. Anything reusable
+that does **not** need a device belongs under `mono.engine/` behind a tier.
 
-The test for "does this belong here" is whether a second program would want it.
-The frame loop's *shape* would; `Client::Step` itself would not.
+**The test used to be "would a second program want it", and that test was
+already false when it was written.** `mono.studio` links `Mono::client` and
+includes five of its headers - `client/Scene.hpp`, `client/Replicated.hpp`,
+`client/ContentDemand.hpp`, `client/EditableImages.hpp` and
+`client/EditableMeshes.hpp` - and `mono.unified_tests` adds
+`client/ContentLink.hpp` to that list. So a second program wants most of this
+directory, and reading the old test literally would empty it.
+`docs/ARCH_REVIEW.md` B and C4 are that finding.
+
+**The real test is two questions, and the library/program split is where they
+are answered.**
+
+- *Does it need a device, a window or a swapchain?* Then it is `client` tier,
+  and it is here unless it is big enough to be its own engine module -
+  `Engine::render`, `Engine::ui` and `Engine::audio` are what that looks like.
+  Nothing left in this directory is.
+- *Is it the **program**'s decision or the **presentation**'s?* A default
+  content origin, a command line, a frame budget, an exit code: the program's,
+  and those live in `app/main.cpp` and on `Client`. Turning a world into a draw
+  list, a `scene::EditableMesh` into a `render::MeshTable` entry, a `Sound` row
+  into mixer voices: presentation, and a second program that draws a world wants
+  every one of them.
+
+**Two programs drawing the same world through two collectors is the failure
+this arrangement exists to prevent**, and it has happened here: `Replicated.cpp`
+and `Scene.cpp` each built a `scene::DrawInstance` by hand and drifted, which is
+why both now go through `scene::MakeDrawInstance`. A studio that reimplemented
+`CollectInstances` rather than linking it would be that failure one level up,
+between two programs instead of two files.
+
+So `Mono::client` is a library two programs link and one program is thin over,
+and that is deliberate rather than an accident to be corrected. The section
+below on single-player is the same property from the other end.
+
+### `BuildMeshData` is `shared`-shaped and stays here anyway
+
+`EditableMeshes.cpp`'s `BuildMeshData` is the clearest case `docs/ARCH_REVIEW.md`
+C4 names: a pure `scene::EditableMesh` to `assets::MeshData` transform with no
+device anywhere in it, sitting in a `client`-tier directory. Checked, and it is
+true - the function names `scene` and `assets` and nothing else.
+
+It stays, and the reason is where it would have to go. `scene` is L7 and
+`assets` is L8, so `scene` may not host it; `assets` could, but `assets` is the
+file formats and knows nothing about a component today, and giving it a `scene`
+edge to host one function inverts a clean module. A module of its own is a row
+in `expected_graph.json`, a layer, a tier, an `AGENTS.md` and a suite for
+eighty-five lines with two callers, both of which link `Mono::client` already.
+
+**The thing that would change this is a third caller that cannot link
+`Mono::client`** - a server baking a script-built mesh, a tool importing one.
+Until one exists this is machinery bought against a need nobody has, and the
+honest place to record that is here rather than in a module nobody asked for.
 
 ## The library exists so single-player can happen
 
@@ -198,6 +248,26 @@ Compiling the drawn world and delivering the press there is what made every
 button in a replicated world silent: the router picked the right element,
 produced the right event, and handed it to a VM that was not the button's.
 
+**The pointer belongs to it too, and that is the same rule and a second bug.**
+`UserInputService.MouseBehavior` and `MouseIconEnabled` are `scene::InputState`
+fields, so there is one of each *per world*, and there is one window. Until
+v0.19 `Client::WriteInput` mirrored both onto a member as it passed - and it is
+called once per simulated world per frame, plus once for the replica - so the
+pointer obeyed whichever world was entered last. Reproduced with `--worlds 2`
+and a script that asks for `LockCenter` in one world and `Default` in the other:
+the window took world 1's answer while the player stood in world 0. Root
+`AGENTS.md` rule 2, exactly: the ECS owns the fact, a flat copy cannot represent
+"per world", so it cannot be right.
+
+There is no copy now. `Client::PumpEvents` reads both out of
+`InterfaceWorld()`'s store at the point the window call is made. What survives
+on `Client` is `AppliedPointerMode` and `AppliedPointerIcon`, which are the
+record of a system call and not a copy of anything: no store holds what
+`SDL_SetWindowRelativeMouseMode` was last told, and the compare against it is
+what keeps a window-manager round trip off every frame. The `pointer:` log line
+names the world that asked, because a client obeying a world the player is not
+standing in is what this used to do and nothing said so.
+
 ## Simulation and rendering tick separately
 
 `Client::Step` advances a `FixedTimestep` by the frame time and runs the
@@ -234,6 +304,66 @@ which is the previous one - this frame has not finished being measured. That is
 correct and intended. Do not "fix" it by calling `EndFrame` before the panels
 are drawn; the render pass would then be missing from every graph, which is the
 part you most want to see.
+
+## The content pump is the largest thing here that nothing described
+
+`Client::PumpContent` is 323 lines and had no account in this file at all until
+v0.19. It is not the biggest function in the directory - `Client::Step` is 1,177
+lines and is described three sections down - but it is the one with rules a
+reader cannot recover from the code in one sitting.
+
+Four steps, in this order and for reasons that are each a failure somebody had:
+
+- **Ask once, when the catalogue is ready.** `OfferPublishedContent` hands every
+  world the manifest's mesh *names* - a few hundred strings - because a scene
+  can only name what it can discover, and a script's own catalogue holds what
+  has already been asked for. Names and never content: asking by kind fetched
+  6.9 GB through one synchronous function on the frame the editor opened, which
+  is the failure `client/ContentDemand.hpp` carries in full.
+- **Collect demand, for a world that has moved.** `CollectWantedContent` is
+  eight walks of a store and it ran on every world on every frame to produce, in
+  the steady state, an empty list. `Client::ScanWantedContent` gates it on
+  `ecs::WorldTime::Tick` and states there why the ECS change channel cannot
+  serve a once-per-frame reader. `docs/ARCH_REVIEW.md` F1.
+- **Pump delivery.** `AssetClient::Pump` resolves, verifies and decompresses
+  **synchronously**, because the fetch path may not have a thread: a completion
+  that landed at a moment scheduling chose would be a desync. That is why the
+  step above must not over-ask.
+- **Take completions against a byte budget.** `delivery::IntakeBudget` is what
+  stops the frame that notices a room full of new models from taking a third of
+  a second. A deferred arrival is *held*, never dropped, so the budget is a
+  delay and not a loss.
+
+**Two things are asked for at the moment they become readable rather than by
+the walk**, and both would otherwise never be fetched at all: a mesh's own
+sheets, whose names live inside the mesh file and are read on arrival, and a
+material's colour map, which `scene::ResolveMaterials` writes into a
+`SurfaceAppearance` field the next scan already reads.
+
+**Where it runs is load-bearing.** Before the simulation and outside every pass:
+content becoming visible mid-tick is rule 5's desync, and content registering
+mid-frame is an upload into a buffer a render pass may be reading.
+
+## `client::Action` is this program's diagnostics, and it lives here now
+
+`client/Actions.hpp` was `engine/input/Actions.hpp` until v0.19.
+`docs/ARCH_REVIEW.md` C6 was right about it: all twelve members are this
+program's own intents - ten profiler and HUD panels, a wireframe toggle and
+`Quit` - and no target but this one ever named them. An engine module at L12
+whose job is input has no business enumerating `WriteProfilerSnapshot`.
+
+**The key table came with it, and the invariant it carried still holds.**
+`input/AGENTS.md` said "nothing outside this module names a key"; what that
+protects is that a binding is *one table* rather than branches spread over a
+frame loop. There are exactly two places an `SDLK_` may appear:
+`input::KeyOf`, which answers what a script sees, and `BINDINGS` in
+`src/Actions.cpp`, which answers what this program does. **Do not add a third**,
+and in particular do not compare `event.key.key` anywhere in `Client.cpp`.
+
+Adding a behaviour that needs a key means adding an `Action` first, and every
+`Action` needs a name and a binding - `tests/Actions.cpp` asserts both exist for
+every member, so forgetting the table is a test failure rather than a feature
+nobody can discover.
 
 ## Order in the frame
 
@@ -285,6 +415,20 @@ reposted its whole state every frame would fill it with no-ops and start
 dropping the commands that were real changes. That is what the last-posted
 values on `Voice` are for, and they are the values the *mixer* was told rather
 than the values the world holds.
+
+**And a drop is repaired, never recorded as landed.** `CommandQueue::Post`
+returns whether the command was queued and all fifteen call sites in
+`Sounds.cpp` discarded it until v0.19, which turned one transient full queue
+into three different permanent faults: a dropped `Open` burst is a voice that is
+silent for the life of the world with every side of the system reporting it as
+correct, a dropped `SetGain` recorded as sent is a fader stuck at the old level
+for ever, and a dropped `RemoveNode` is a node nothing can ever ask for again.
+`audio/Commands.hpp` names the three classes - coalescable, repairable,
+terminal - and states what each owes a refusal. Here that means: a last-posted
+value is written only after `Post` returned true; a voice is reserved with
+`CommandQueue::Free` and built all at once or not at all; and a teardown whose
+row has gone is held in `SoundStage::PendingCloses()` and retried, because
+nothing in the world will ever ask for it a second time.
 
 **Decode and resample once, at delivery.** The graph must never resample on the
 device thread, and a buffer converted per voice would pay for it again for every

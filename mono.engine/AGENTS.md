@@ -48,7 +48,6 @@ the machine-readable copy that `just test-architecture` enforces.
 | 11 | `discord` | shared | what a person's Discord profile says while a program runs |
 | 11 | `resources` | client | the engine's own built-in GLSL |
 | 11 | `msl` | client | SPIR-V to Metal Shading Language |
-| 11 | `nodegraph` | client | a typed node graph and its canvas |
 | 12 | `replication` | shared | what the wire means. Snapshots, deltas, ownership, priority |
 | 12 | `network` | shared | finding a peer, and being findable |
 | 12 | `render` | client | the device. Render nodes, the RHI, the frame |
@@ -67,7 +66,10 @@ Two pairs are routinely confused and are not the same thing:
 - **`graph`, `bakegraph` and `nodegraph` are three different things.** `graph`
   is the runtime that executes nodes. `bakegraph` is a pipeline *description*
   with no decoders in it, which is what lets a game file carry its bake
-  pipelines without carrying a glTF reader. `nodegraph` is an editor canvas.
+  pipelines without carrying a glTF reader. `nodegraph` is an editor canvas and
+  is **not here** - it was `mono.engine/nodegraph` until v0.19 and is
+  `mono.studio/nodegraph` now, because the editor was the only thing that ever
+  linked it.
 
 ---
 

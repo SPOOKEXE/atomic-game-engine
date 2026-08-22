@@ -1,3 +1,5 @@
+#include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/net/http/Server.hpp>
 
 #include <algorithm>
@@ -18,9 +20,9 @@
 namespace engine::net::http {
 	namespace {
 		// Bounds per-connection work in one pump.
-		constexpr int MAXIMUM_IO_PER_PUMP = 16;
+		constexpr int SERVER_MAXIMUM_IO_PER_PUMP = 16;
 
-		constexpr size_t READ_CHUNK_BYTES = 16u * 1024u;
+		constexpr size_t SERVER_READ_CHUNK_BYTES = 16u * 1024u;
 
 		Endpoint FromAsio(const asio::ip::tcp::endpoint &source) {
 			const asio::ip::address address = source.address();
@@ -139,7 +141,7 @@ namespace engine::net::http {
 		  private:
 			// Accepts ready connections up to the configured ceiling.
 			void Accept(ServeReport &report) {
-				for (int attempt = 0; attempt < MAXIMUM_IO_PER_PUMP; ++attempt) {
+				for (int attempt = 0; attempt < SERVER_MAXIMUM_IO_PER_PUMP; ++attempt) {
 					std::error_code failure;
 					asio::ip::tcp::socket socket(Context);
 					Acceptor.accept(socket, failure);
@@ -192,6 +194,9 @@ namespace engine::net::http {
 					const size_t after = connection.Inbox.size() + connection.Sent;
 					connection.Quiet = (after == before) ? connection.Quiet + 1 : 0;
 					if (connection.Quiet >= Limits.IdlePolls) {
+						ENGINE_DEBUG_EVERY(
+							5.0, "closing a connection that moved nothing for {} polls", connection.Quiet
+						);
 						++report.Closed;
 						return false;
 					}
@@ -205,14 +210,20 @@ namespace engine::net::http {
 					return true;
 				}
 
-				for (int attempt = 0; attempt < MAXIMUM_IO_PER_PUMP; ++attempt) {
+				for (int attempt = 0; attempt < SERVER_MAXIMUM_IO_PER_PUMP; ++attempt) {
 					const size_t offset = connection.Inbox.size();
 					if (offset >= Limits.ConnectionBufferBytes) {
 						// Bound peers that never finish a request.
+						ENGINE_WARN_EVERY(
+							1.0,
+							"a peer filled the {} byte connection buffer without finishing a request",
+							Limits.ConnectionBufferBytes
+						);
 						++report.Rejected;
 						return false;
 					}
-					const size_t room = std::min(READ_CHUNK_BYTES, Limits.ConnectionBufferBytes - offset);
+					const size_t room =
+						std::min(SERVER_READ_CHUNK_BYTES, Limits.ConnectionBufferBytes - offset);
 					connection.Inbox.resize(offset + room);
 
 					std::error_code failure;
@@ -261,6 +272,13 @@ namespace engine::net::http {
 					Queue(connection, refusal, false);
 					connection.CloseWhenDrained = true;
 					++report.Rejected;
+
+					// **The only place the parse verdict exists.** Twenty
+					// rejections in `ParseRequest` all arrive here as one enum,
+					// and outside this line the peer sees a 400 with no record
+					// of which check refused it.
+					core::Metrics::Count("net.http.request.rejected", 1.0);
+					ENGINE_WARN_EVERY(1.0, "request refused: {}", Describe(parsed));
 					return true;
 				}
 
@@ -299,7 +317,7 @@ namespace engine::net::http {
 			}
 
 			bool Write(Connection &connection, ServeReport &report) {
-				for (int attempt = 0; attempt < MAXIMUM_IO_PER_PUMP; ++attempt) {
+				for (int attempt = 0; attempt < SERVER_MAXIMUM_IO_PER_PUMP; ++attempt) {
 					if (connection.Sent >= connection.Outbox.size()) {
 						return true;
 					}

@@ -1,4 +1,6 @@
 #include <engine/core/Bytes.hpp>
+#include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/effects/Ribbon.hpp>
@@ -222,6 +224,11 @@ namespace engine::effects {
 					// like.
 					if (havePrevious && along.Magnitude() > 1e-5f && previousAlong.Magnitude() > 1e-5f) {
 						if (previousAlong.Unit().Dot(along.Unit()) < cosLimit) {
+							// The visible gap in a fast swipe, and the only
+							// evidence it was deliberate rather than a dropped
+							// frame. Counted rather than logged per point: this
+							// runs per recorded point per trail per frame.
+							core::Metrics::Count("effects.trail.broken", 1.0);
 							havePrevious = false;
 							continue;
 						}
@@ -281,6 +288,9 @@ namespace engine::effects {
 			if (run.Count >= 4) {
 				buffer->Runs.push_back(run);
 			} else {
+				// An enabled beam that produced less than one quad draws
+				// nothing, and the entity is simply absent from the frame.
+				ENGINE_DEBUG_EVERY(5.0, "a beam produced {} vertices and was dropped", run.Count);
 				buffer->Vertices.resize(first);
 			}
 		});
@@ -301,10 +311,17 @@ namespace engine::effects {
 				// vertices is half a quad, and a strip pass given one would read
 				// past its own run to find the third. Cheaper to refuse it here
 				// than to make every consumer check.
+				//
+				// A trail with fewer than two recorded points is the ordinary
+				// case for a trail that has not moved yet, so this is `trace`
+				// rather than a warning.
+				ENGINE_TRACE("a trail produced {} vertices and was dropped", run.Count);
 				buffer->Vertices.resize(first);
 			}
 		});
 
+		core::Metrics::SetGauge("effects.ribbon.runs", static_cast<double>(buffer->Runs.size()));
+		core::Metrics::SetGauge("effects.ribbon.vertices", static_cast<double>(buffer->Vertices.size()));
 		return buffer->Runs.size();
 	}
 
@@ -330,7 +347,7 @@ namespace engine::effects {
 	// then draw it, motionless, at the position the world was saved from.
 
 	namespace {
-		void WriteGradient(core::ByteWriter &writer, const core::ColorSequence &sequence) {
+		void WriteRibbonGradient(core::ByteWriter &writer, const core::ColorSequence &sequence) {
 			writer.WriteUInt32(sequence.Count);
 			for (uint32_t index = 0; index < sequence.Count; index++) {
 				writer.WriteFloat(sequence.Keypoints[index].Time);
@@ -340,7 +357,7 @@ namespace engine::effects {
 			}
 		}
 
-		void ReadGradient(core::ByteReader &reader, core::ColorSequence &sequence) {
+		void ReadRibbonGradient(core::ByteReader &reader, core::ColorSequence &sequence) {
 			sequence = core::ColorSequence{};
 			const uint32_t count = reader.ReadUInt32();
 			for (uint32_t index = 0; index < count; index++) {
@@ -377,7 +394,7 @@ namespace engine::effects {
 		const auto *beams = static_cast<const Beam *>(source);
 		for (size_t index = 0; index < count; index++) {
 			const Beam &beam = beams[index];
-			WriteGradient(writer, beam.Colour);
+			WriteRibbonGradient(writer, beam.Colour);
 			WriteCurve(writer, beam.Transparency);
 			writer.WriteName(beam.Texture);
 
@@ -403,7 +420,7 @@ namespace engine::effects {
 		auto *beams = static_cast<Beam *>(destination);
 		for (size_t index = 0; index < count; index++) {
 			Beam &beam = beams[index];
-			ReadGradient(reader, beam.Colour);
+			ReadRibbonGradient(reader, beam.Colour);
 			ReadCurve(reader, beam.Transparency);
 			beam.Texture = reader.ReadName();
 
@@ -427,7 +444,7 @@ namespace engine::effects {
 		const auto *trails = static_cast<const Trail *>(source);
 		for (size_t index = 0; index < count; index++) {
 			const Trail &trail = trails[index];
-			WriteGradient(writer, trail.Colour);
+			WriteRibbonGradient(writer, trail.Colour);
 			WriteCurve(writer, trail.Transparency);
 			writer.WriteName(trail.Texture);
 			writer.WriteFloat(trail.Lifetime);
@@ -442,7 +459,7 @@ namespace engine::effects {
 		auto *trails = static_cast<Trail *>(destination);
 		for (size_t index = 0; index < count; index++) {
 			Trail &trail = trails[index];
-			ReadGradient(reader, trail.Colour);
+			ReadRibbonGradient(reader, trail.Colour);
 			ReadCurve(reader, trail.Transparency);
 			trail.Texture = reader.ReadName();
 			trail.Lifetime = reader.ReadFloat();

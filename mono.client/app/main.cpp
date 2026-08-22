@@ -109,9 +109,6 @@ int main(int argc, char **argv) {
 		"session-key", "SECRET", "The secret for a private session: 64 hex characters, or a passphrase"
 	);
 	arguments.Value("rendezvous", "HOST:PORT", "Reach a session through this rendezvous point");
-	arguments.Flag(
-		"quic", "Connect over QUIC rather than the datagram wire. The server must be running with --quic too"
-	);
 	arguments.Value(
 		"server-key",
 		"HEX",
@@ -271,7 +268,6 @@ int main(int argc, char **argv) {
 	if (auto point = arguments.Get("rendezvous")) {
 		options.RendezvousAddress = std::string(*point);
 	}
-	options.Quic = options.Quic || arguments.Has("quic");
 	if (auto key = arguments.Get("server-key")) {
 		options.ServerKey = std::string(*key);
 	}

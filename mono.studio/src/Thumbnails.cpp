@@ -91,7 +91,7 @@ namespace studio {
 		// `Preview.hpp` carries the argument.
 		enum class ReadOutcome : uint8_t { Ok, TooLarge, Unreadable };
 
-		ReadOutcome ReadWholeFile(const std::filesystem::path &path, std::vector<std::byte> &out) {
+		ReadOutcome ReadThumbnailFile(const std::filesystem::path &path, std::vector<std::byte> &out) {
 			std::error_code failure;
 			const auto size = std::filesystem::file_size(path, failure);
 			if (failure || size == 0) {
@@ -289,7 +289,7 @@ namespace studio {
 		}
 
 		std::vector<std::byte> bytes;
-		switch (ReadWholeFile(source, bytes)) {
+		switch (ReadThumbnailFile(source, bytes)) {
 		case ReadOutcome::TooLarge:
 			// **The one refusal a person can act on.** Named rather than folded
 			// into "unavailable" - `Preview.hpp` carries why.

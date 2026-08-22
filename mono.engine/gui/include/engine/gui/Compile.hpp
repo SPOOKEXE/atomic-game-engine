@@ -10,13 +10,11 @@
 //
 // So the scan computes a **signature** - a rolling hash of every field the
 // compile reads - and when it matches the last one, the compiled list is still
-// correct and is kept. This is `scene::QuickHash`'s pattern and
-// `studio::HierarchyView`'s, one layer over, and it is the same fallback for
-// the same reason: `ecs::Hierarchy`, `gui::Element` and the rest are not
-// observed components, so `Store::ChangeVersion` does not move when an element
-// is reparented, resized or renamed - and it *does* move when a physics tick
-// writes a transform, which would rebuild the UI sixty times a second for
-// nothing.
+// correct and is kept. This is `studio::HierarchyView`'s pattern, one layer
+// over, and it is the same fallback for the same reason: `ecs::Hierarchy`, `gui::Element` and the rest are
+// not observed components, so `Store::ChangeVersion` does not move when an element is reparented, resized or
+// renamed - and it *does* move when a physics tick writes a transform, which would rebuild the UI sixty times
+// a second for nothing.
 //
 // ## What the signature covers, which is the whole correctness argument
 //
@@ -138,7 +136,8 @@ namespace engine::gui {
 		// Exposed for tests and for a panel reporting why a rebuild happened.
 		// Zero before the first `Rebuild`, and zero is not a reserved value -
 		// what makes a comparison meaningful is that both sides came out of the
-		// same function, exactly as `scene::QuickHash` says of its own.
+		// same function, which is also what `studio::HierarchyView` says of its
+		// own stamp.
 		uint64_t Signature() const {
 			return Stamp;
 		}

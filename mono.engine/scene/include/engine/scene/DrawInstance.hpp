@@ -300,6 +300,11 @@ namespace engine::scene {
 	//                   see `scene::LocalTransparency`. Never present on a
 	//                   headless host's own draw list, because nothing there
 	//                   is looking at anything.
+	// @param limb       The row's limb, or null when the row is not part of a
+	//                   character. A limb names the root it hangs off and every
+	//                   limb of one character names the same root, which is the
+	//                   grouping a portal seam needs; a row without one is its
+	//                   own body. See `DrawInstance::Rig`.
 	// @return The instance to publish.
 	// @since v0.15
 	inline DrawInstance MakeDrawInstance(

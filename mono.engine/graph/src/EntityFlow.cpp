@@ -1,3 +1,5 @@
+#include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/graph/Cull.hpp>
 #include <engine/graph/EntityFlow.hpp>
 
@@ -239,6 +241,15 @@ namespace engine::graph {
 		const std::string_view kind = node.Kind.Text();
 		if (!output.IsValid() || (kind != "entities" && kind != "cull-frustum" && kind != "cull-distance" &&
 								  kind != "filter-tag" && kind != "order-draw")) {
+			// The node stays in the graph, runs every frame, and produces
+			// nothing. A pipeline missing half its objects looks exactly like
+			// one whose cull is too aggressive.
+			ENGINE_WARN_EVERY(
+				5.0,
+				"'{}' is not an entity node this build runs (kind '{}'); it produces nothing",
+				node.Name.Text(),
+				kind
+			);
 			return {};
 		}
 
@@ -282,6 +293,12 @@ namespace engine::graph {
 		}
 
 		result.Count = into.size();
+
+		// **Entities in against entities out, per pass.** "Why did half the
+		// world stop drawing" is answered by which pass dropped them, and the
+		// two counts are already here.
+		core::Metrics::Count("graph.entities.out", static_cast<double>(into.size()));
+		ENGINE_TRACE("'{}' ({}): {} entities in, {} out", node.Name.Text(), kind, source.size(), into.size());
 		return result;
 	}
 }

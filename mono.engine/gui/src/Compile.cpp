@@ -1,3 +1,5 @@
+#include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Instance.hpp>
@@ -1088,6 +1090,12 @@ namespace engine::gui {
 			DrawList &out
 		) {
 			if (depth > 256) {
+				// The whole subtree below here is dropped from the draw list
+				// with the rest of the interface still painting, which reads as
+				// one panel having gone missing.
+				ENGINE_WARN_EVERY(
+					5.0, "gui tree deeper than 256 at entity {}; the rest is not drawn", instance.Id
+				);
 				return;
 			}
 
@@ -1229,11 +1237,20 @@ namespace engine::gui {
 		stamp = FoldRows<Selection>(store, stamp);
 		stamp = FoldRows<GuiServiceState>(store, stamp);
 
+		core::Metrics::Count("gui.compile.asked", 1.0);
+
 		if (Fresh && stamp == Stamp) {
 			return false;
 		}
 
 		// --- the compile, which is what the scan exists to skip ---------------
+
+		// **`moving` is the answer to "why is the GUI rebuilding every frame".**
+		// The signature folds `Seconds` only while something is in flight, so a
+		// rebuild with `moving` set is an animation and one without it is a real
+		// change - and the two are indistinguishable from the outside.
+		core::Metrics::Count(moving ? "gui.compile.built.moving" : "gui.compile.built.changed", 1.0);
+		ENGINE_TRACE("rebuilding: signature {} -> {}, {}", Stamp, stamp, moving ? "animating" : "changed");
 
 		Stamp = stamp;
 		Fresh = true;
@@ -1402,6 +1419,20 @@ namespace engine::gui {
 				value->Order = static_cast<int32_t>(index);
 			}
 		}
+
+		// Counted per rebuild rather than per frame, so the rate reads as "draw
+		// commands produced" rather than as a number multiplied by the frame
+		// rate on a scene that is not changing.
+		core::Metrics::Count("gui.compile.commands", static_cast<double>(List.Commands.size()));
+		core::Metrics::Count("gui.compile.elements", static_cast<double>(List.Elements));
+		ENGINE_DEBUG_EVERY(
+			5.0,
+			"{} elements into {} draw commands ({} of {} calls rebuilt)",
+			List.Elements,
+			List.Commands.size(),
+			Built,
+			Asked
+		);
 
 		return true;
 	}

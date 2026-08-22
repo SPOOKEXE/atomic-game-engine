@@ -41,6 +41,7 @@
 
 #include <engine/core/Log.hpp>
 #include <engine/script/Runtime.hpp>
+#include <engine/scripthost/Runtime.hpp>
 #include <engine/ui/Theme.hpp>
 
 #include <imgui.h>

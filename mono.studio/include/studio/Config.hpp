@@ -46,6 +46,7 @@
 //
 // @tier client
 
+#include <engine/control/Server.hpp>
 #include <engine/core/FrameGraph.hpp>
 #include <engine/ui/Theme.hpp>
 
@@ -265,7 +266,14 @@ namespace studio {
 		// **Not whether it is listening.** A port is a preference and an open
 		// socket is a decision somebody makes while working - `SECURITY.md` is
 		// why the second is never restored from a file.
-		int ControlPort = 8720;
+		//
+		// **The engine's constant rather than a number written here**, which is
+		// the mismatch v0.19 half-fixed: `Editor::ControlPortField` was changed
+		// to read `DEFAULT_PORT` and this line, which overwrites it from a saved
+		// configuration, was left at 8720. So a fresh editor's panel offered a
+		// port `--mcp-port`'s help, `.mcp.json` and `RUNNING.md` all disagreed
+		// with, and somebody who pressed Start got a bridge talking to nothing.
+		int ControlPort = engine::control::DEFAULT_PORT;
 
 		// Which of the panels somebody keeps open.
 		//@{

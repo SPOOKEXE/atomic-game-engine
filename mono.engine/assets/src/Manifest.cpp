@@ -7,8 +7,11 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdint>
+#include <numeric>
 #include <span>
 #include <utility>
+#include <vector>
 
 namespace engine::assets {
 
@@ -21,7 +24,7 @@ namespace engine::assets {
 		// 32-bit count could ask for, and the gap between those two numbers is
 		// the whole attack.
 		constexpr uint32_t MAXIMUM_ASSETS = 1'000'000;
-		constexpr uint32_t MAXIMUM_BUNDLES = 1'000'000;
+		constexpr uint32_t MAXIMUM_MANIFEST_BUNDLES = 1'000'000;
 		constexpr uint32_t MAXIMUM_CHUNKS_PER_ASSET = 1'000'000;
 		constexpr size_t MAXIMUM_NAME_BYTES = 1024;
 
@@ -71,13 +74,22 @@ namespace engine::assets {
 		}
 	}
 
+	bool VerifyAssetShape(const AssetEntry &asset) {
+		uint64_t measured = 0;
+		for (const ChunkEntry &chunk : asset.Chunks) {
+			measured += chunk.Bytes;
+		}
+		// The tree, so a run of chunks that each verified cannot be passed off
+		// as a different asset made of the same pieces in another order, and
+		// the total, so a caller cannot size a buffer one way and fill it
+		// another.
+		return measured == asset.TotalBytes && HashTree::RootOf(ChunkHashes(asset.Chunks)) == asset.Root;
+	}
+
 	bool VerifyAsset(const AssetEntry &asset, std::span<const std::byte> bytes) {
 		if (bytes.size() != asset.TotalBytes) {
 			return false;
 		}
-
-		std::vector<ContentHash> hashes;
-		hashes.reserve(asset.Chunks.size());
 
 		size_t offset = 0;
 		for (const ChunkEntry &chunk : asset.Chunks) {
@@ -90,13 +102,10 @@ namespace engine::assets {
 			if (Hasher::Of(bytes.subspan(offset, chunk.Bytes)) != chunk.Hash) {
 				return false;
 			}
-			hashes.push_back(chunk.Hash);
 			offset += chunk.Bytes;
 		}
 
-		// And the tree, so a run of chunks that each verified cannot be passed
-		// off as a different asset made of the same pieces in another order.
-		return offset == bytes.size() && HashTree::RootOf(hashes) == asset.Root;
+		return offset == bytes.size() && VerifyAssetShape(asset);
 	}
 
 	ContentHash Manifest::AddAsset(std::string name, AssetKind kind, std::vector<ChunkEntry> chunks) {
@@ -126,9 +135,19 @@ namespace engine::assets {
 		if (position != AssetsByName.end() && position->Name == entry.Name) {
 			// Publishing twice from one build should not leave two rows for one
 			// name. Replacing is the only answer that keeps Find total.
-			*position = std::move(entry);
+			//
+			// The index comes out first, while it still describes what is
+			// there: the replacement usually has a different root, and taking
+			// the old one out afterwards would be searching for a hash the
+			// manifest no longer holds.
+			const size_t at = static_cast<size_t>(position - AssetsByName.begin());
+			IndexReplaced(at);
+			AssetsByName[at] = std::move(entry);
+			IndexPlace(at);
 		} else {
+			const size_t at = static_cast<size_t>(position - AssetsByName.begin());
 			AssetsByName.insert(position, std::move(entry));
+			IndexInserted(at);
 		}
 
 		return root;
@@ -218,17 +237,110 @@ namespace engine::assets {
 		return &*position;
 	}
 
+	std::vector<uint32_t>::const_iterator Manifest::LowerBoundByRoot(const ContentHash &root) const {
+		return std::lower_bound(
+			RootOrder.begin(), RootOrder.end(), root, [this](uint32_t candidate, const ContentHash &target) {
+				return AssetsByName[candidate].Root < target;
+			}
+		);
+	}
+
+	// Where the position of `AssetsByName[position]` belongs in `RootOrder`,
+	// ordered by that entry's root and then by the position itself.
+	std::vector<uint32_t>::const_iterator Manifest::IndexSlotOf(size_t position) const {
+		return std::lower_bound(
+			RootOrder.begin(),
+			RootOrder.end(),
+			static_cast<uint32_t>(position),
+			[this](uint32_t candidate, uint32_t target) {
+				const AssetEntry &left = AssetsByName[candidate];
+				const AssetEntry &right = AssetsByName[target];
+				return left.Root != right.Root ? left.Root < right.Root : candidate < target;
+			}
+		);
+	}
+
+	void Manifest::IndexPlace(size_t position) {
+		RootOrder.insert(IndexSlotOf(position), static_cast<uint32_t>(position));
+	}
+
+	void Manifest::IndexInserted(size_t position) {
+		// Everything the insert pushed along now sits one place further on.
+		// A pass over the index rather than a rebuild of it: the order this
+		// holds does not change when positions shift together, only the numbers
+		// do.
+		//
+		// **Only for an insert.** A replacement leaves every other position
+		// where it was, so it takes `IndexReplaced` and `IndexPlace` and not
+		// this - running the shift for one moves every later asset's index off
+		// its entry and the manifest stops finding them.
+		//
+		// **Written without a branch on purpose.** Which half of the index
+		// moves depends on where the insert landed, so a predictor gets it
+		// wrong about half the time and the pass costs several times what the
+		// arithmetic does. Adding the comparison's result vectorises instead:
+		// measured in `bench` over 4096 assets, 5.5 us per asset with the branch
+		// and 3.3 us without, against 2.7 us before there was an index at all.
+		for (uint32_t &at : RootOrder) {
+			at += static_cast<uint32_t>(at >= position);
+		}
+		IndexPlace(position);
+	}
+
+	void Manifest::IndexReplaced(size_t position) {
+		const auto where = IndexSlotOf(position);
+		if (where != RootOrder.end() && *where == position) {
+			RootOrder.erase(where);
+		}
+	}
+
+	void Manifest::IndexAll() {
+		RootOrder.resize(AssetsByName.size());
+		std::iota(RootOrder.begin(), RootOrder.end(), 0u);
+		std::sort(RootOrder.begin(), RootOrder.end(), [this](uint32_t left, uint32_t right) {
+			const AssetEntry &first = AssetsByName[left];
+			const AssetEntry &second = AssetsByName[right];
+			return first.Root != second.Root ? first.Root < second.Root : left < right;
+		});
+	}
+
 	const AssetEntry *Manifest::FindByRoot(const ContentHash &root) const {
-		// Assets are ordered by name rather than by root, so this is linear.
-		// Deliberately: a second index would be a second thing to keep true,
-		// and this is called while building a manifest rather than while
-		// serving one. If it ever moves onto a serving path it wants an index,
-		// and that is the moment to add one.
-		const auto position =
-			std::find_if(AssetsByName.begin(), AssetsByName.end(), [&root](const AssetEntry &asset) {
-				return asset.Root == root;
-			});
-		return position == AssetsByName.end() ? nullptr : &*position;
+		// **This was a scan until v0.19** and the comment here defended it: a
+		// second index is a second thing to keep true, and this ran while a
+		// manifest was being built rather than while one was being served. The
+		// second half stopped being true. `delivery::Client::Split` calls this
+		// once per member of every arriving group and `Manifest::SliceOf` calls
+		// it again per member it walks past, so cutting up one bundle of M
+		// members in a manifest of A assets cost O(M squared x A) hash
+		// compares - inside `Pump`, at the tick barrier. Measured in `bench`
+		// over 4096 assets in bundles of 32: 11.96 us to locate one member of a
+		// group, 319 ns after, and a lookup on its own 669 ns against 78 ns.
+		//
+		// The first half is answered by `RootOrder` holding positions rather
+		// than a copy of anything. See its declaration.
+		const auto position = LowerBoundByRoot(root);
+		if (position == RootOrder.end() || AssetsByName[*position].Root != root) {
+			return nullptr;
+		}
+		return &AssetsByName[*position];
+	}
+
+	const BundleEntry *Manifest::FindBundle(const ContentHash &root) const {
+		// Bundles are held in root order because the format says so, which
+		// makes this a binary search over data already arranged for it. The
+		// delivery client and the relay each walked the list instead, and two
+		// scans for one question is how the format's own knowledge of its own
+		// structure ends up living somewhere else.
+		const auto position = std::lower_bound(
+			BundlesByRoot.begin(),
+			BundlesByRoot.end(),
+			root,
+			[](const BundleEntry &candidate, const ContentHash &target) { return candidate.Root < target; }
+		);
+		if (position == BundlesByRoot.end() || position->Root != root) {
+			return nullptr;
+		}
+		return &*position;
 	}
 
 	const BundleEntry *Manifest::BundleFor(const ContentHash &assetRoot) const {
@@ -408,8 +520,14 @@ namespace engine::assets {
 			manifest.AssetsByName.push_back(std::move(asset));
 		}
 
+		// Every asset is in, so the index is built once here rather than
+		// maintained per row. The bundle loop below resolves every member
+		// against it, which is what made parsing a large manifest quadratic in
+		// its asset count.
+		manifest.IndexAll();
+
 		const uint32_t bundleCount = reader.ReadUInt32();
-		if (bundleCount > MAXIMUM_BUNDLES) {
+		if (bundleCount > MAXIMUM_MANIFEST_BUNDLES) {
 			return refuse();
 		}
 		manifest.BundlesByRoot.reserve(bundleCount);

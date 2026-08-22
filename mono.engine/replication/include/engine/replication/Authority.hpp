@@ -132,6 +132,80 @@ namespace engine::replication {
 		//
 		// @since v0.15
 		AuditSettings Audit;
+
+		// How many join snapshots one `Publish` may build.
+		//
+		// **A join builds a world, and a tick that built sixteen of them took
+		// 1.8 seconds.** `Authority::Capture` makes a scratch `ecs::Store`, an
+		// entity and a component row per entity in the client's interest set,
+		// and a `Save` over the result - measured at about 113 ms for ten
+		// thousand entities in the `release` preset. Nothing bounded how many of
+		// those one tick did, so a listener that admitted sixteen clients
+		// together spent that many in one tick, answered no handshakes while it
+		// did, and the clients waiting behind it timed out. At thirty-two
+		// clients against a ten-thousand-entity world, four of them ever joined.
+		//
+		// **Two, because the cost is a property of the world and not of this
+		// number.** One join is already over a 30 Hz budget on a large world, so
+		// the number cannot buy a tick that fits; what it buys is that the
+		// overrun is one join long instead of however many arrived at once. Two
+		// keeps the ordinary two-client case joining in a single tick. A client
+		// turned away waits exactly one tick and is still joining on the next,
+		// so a full server fills in `MaximumClients / JoinsPerTick` ticks.
+		//
+		// Zero is no bound, which is the behaviour from before there was one.
+		//
+		// @since v0.19
+		size_t JoinsPerTick = 2;
+
+		// How many steady-state clients a publish needs before it spreads them
+		// across the job pool.
+		//
+		// **Below this the loop is the serial loop it always was, and the number
+		// is measured rather than chosen.** Rule 5's second half: parallel is
+		// not free, and the crossover is higher than it looks. A client's
+		// publish is a walk of the world through the interest predicate, a
+		// structural comparison against what it holds, and a delta built out of
+		// runs `Survey` gathered - real work, but small enough at low client
+		// counts that a batch dispatch and a cold lane cost more than they save.
+		//
+		// **Eight, and the number is two measurements rather than one.**
+		// `engine.replication.bench.publish` runs the ladder at ten thousand
+		// entities with four replicated components and five hundred of them
+		// moving a tick, on a twenty-four-thread machine in the `bench` preset.
+		// Nanoseconds per client per tick, serial against lanes:
+		//
+		//     1 client    421 833   546 196
+		//     2 clients   498 376   279 655
+		//     4 clients   383 135   238 385
+		//     16 clients  367 494    92 175
+		//     64 clients  392 635    53 743
+		//     128 clients 384 908    84 350
+		//     200 clients 485 804    79 305
+		//
+		// **The ladder cannot resolve the crossover below about four, and the
+		// one-client row is what says so.** At one client both settings run the
+		// same code - `LanesFor` answers one lane and the batch is never
+		// dispatched - and the two rows are 30% apart anyway, from nothing but
+		// which fixture was built onto a warmer heap. From sixteen up the gap is
+		// four to seven times, which no fixture effect explains.
+		//
+		// A client count on its own is also the wrong unit, because what a
+		// client's publish costs is a function of the world: a hundred-entity
+		// world is a hundredth of that ladder's per-client work, about four
+		// microseconds. `engine.parallel.bench.dispatch` measures a batch at
+		// **20 us** for eight ranges, so on that world the crossover is around
+		// six to eight clients. Eight is above the crossover on both readings,
+		// and it costs a large world almost nothing: eight clients over ten
+		// thousand entities is 3 ms of publish either way, on a tick with 33 ms
+		// in it.
+		//
+		// A host whose interest or priority hooks are not safe to call from
+		// several threads at once sets this to `SIZE_MAX`, which is the serial
+		// loop for ever. See `Authority::SetInterest`.
+		//
+		// @since v0.19
+		size_t ParallelClientThreshold = 8;
 	};
 
 	// How the authority notices that a component's value moved.
@@ -232,14 +306,31 @@ namespace engine::replication {
 		// reads of a world a host chose to stream at all. A server that means to
 		// hide its `ServerStorage` says so - see `scene::VisibleToClients`.
 		//
+		// **Called from several threads at once, and so is every other hook on
+		// this class except `SetPreface`.** `Publish` spreads its steady-state
+		// clients across the job pool once there are more than
+		// `AuthoritySettings::ParallelClientThreshold` of them, so a predicate
+		// is asked about different clients on different threads inside one
+		// call. What that requires of a host is exactly what it already
+		// required of it: read the world and this module's arguments, and write
+		// nothing. `mono.server`'s predicate is two binary searches and a map
+		// lookup over tables its tick filled before the publish began, and its
+		// scorer's occlusion test is `physics::Raycast` over a `const
+		// ecs::Store &`.
+		//
+		// A host that cannot promise that sets `ParallelClientThreshold` to
+		// `SIZE_MAX`, which keeps the serial loop this class has always had.
+		//
 		// @param predicate Called as `predicate(ClientId, ecs::Entity, const
-		//                  ecs::Store &)`.
+		//                  ecs::Store &)`. Must be safe to call concurrently and
+		//                  must not write to the store.
 		void SetInterest(std::function<bool(ClientId, ecs::Entity, const ecs::Store &)> predicate);
 
 		// Scores which entities a client is sent first when not all of them
 		// fit.
 		//
-		// @param score Called as `score(ClientId, ecs::Entity)`. Empty scores
+		// @param score Called as `score(ClientId, ecs::Entity)`, concurrently
+		//        for different clients - see `SetInterest`. Empty scores
 		//        everything the same, which leaves the rotation in sole charge
 		//        and is a plain round robin.
 		void SetPriority(std::function<float(ClientId, ecs::Entity)> score);
@@ -522,7 +613,13 @@ namespace engine::replication {
 			// Their total size.
 			size_t Bytes = 0;
 
-			// How many entities passed interest across every client.
+			// How many entities passed interest, summed over the clients this
+			// publish actually asked about.
+			//
+			// **Not every live client**, and the difference is a walk of the
+			// world per client per tick. A client part way through a join is
+			// being sent a blob taken when it started, so asking the interest
+			// predicate about it again produces an answer nothing reads.
 			size_t Visible = 0;
 
 			// Clients re-snapshotted rather than repaired.
@@ -911,10 +1008,73 @@ namespace engine::replication {
 			size_t Values = 0;
 		};
 
+		// One contiguous slice of a store column, borrowed rather than copied.
+		//
+		// **Gathered on the thread that owns the store and read off it.** The
+		// `Each*Runs` family walks the archetype tables and may only be called by
+		// the owning thread; reading the block it handed back is a plain memory
+		// read that any thread may do. Splitting the two is what lets signing fan
+		// out across workers and what lets the per-client loop read this tick's
+		// changed rows without walking the store once per client.
+		//
+		// The pointers are into the store's own columns and stay good until a
+		// structural change. `Publish` reads and never writes - a join snapshot
+		// is built into a scratch store, not this one - so they are good for the
+		// whole of the publish that gathered them.
+		struct ColumnRun {
+			// The entities in this run, and the component bytes beside them.
+			//@{
+			const ecs::Entity *Entities = nullptr;
+			const std::byte *Values = nullptr;
+			//@}
+
+			// How many rows both pointers cover.
+			size_t Rows = 0;
+		};
+
+		// Everything about one declared slot that does not depend on which
+		// client is being published to, worked out once per tick by `Survey`.
+		//
+		// **The point is that none of it depends on the client.** `Publish`'s
+		// per-client loop used to ask `ecs::Components` for the id and the
+		// descriptor of every declared slot and then walk the store for that
+		// slot's changed rows - all three answers identical for every client, and
+		// all three re-derived per client. Two hundred clients times two dozen
+		// slots is nine thousand acquisitions of the component registry's
+		// process-wide mutex and nine thousand archetype walks a tick, where two
+		// dozen of each would do.
+		struct Crossing {
+			// The registered id, or invalid where this process registered no
+			// such component.
+			ecs::ComponentId Id;
+
+			// The descriptor behind `Id`, or null with it.
+			//
+			// A pointer rather than a copy because `Components::Describe` hands
+			// back a reference into a `std::deque` that only ever grows, so the
+			// address is stable for the life of the process. Refreshed every
+			// tick anyway, because a slot is allowed to resolve later than the
+			// authority that declared it.
+			const ecs::TypeDescriptor *Descriptor = nullptr;
+
+			// Whether a row of this component may go into a delta at all: it is
+			// registered, it has a serialisation, and its widest stored value
+			// still leaves room in a message.
+			//
+			// A refused slot is warned about here, once a tick, where it used to
+			// be warned about once per client per tick.
+			bool Sendable = false;
+
+			// This tick's changed rows, for a slot whose detection reads the
+			// store's dirty bits. Empty for a signed slot, which carries its
+			// changed ids in `Signature::Changed` instead.
+			std::vector<ColumnRun> Changed;
+		};
+
 		struct Signature {
-			// Entity, last hash - ascending by entity id, because `Resign` builds
-			// it by merge-walking `ResignCandidates`, which is sorted for the same
-			// reason.
+			// Entity, last hash - ascending by entity id, because `SignSlot`
+			// rebuilds it by merge-walking `Hashed`, which is sorted for the
+			// same reason.
 			//
 			// **A sorted vector rather than a hash map, as of v0.18.** A tick with
 			// twenty thousand signed entities did twenty thousand
@@ -940,24 +1100,8 @@ namespace engine::replication {
 			// dozen even costs of about 0.3 ms each, so the shape of the work
 			// was already a fan-out waiting to happen.
 			//
-			// The pointers are into the store's own columns and stay good until
-			// a structural change. Signing is a read and nothing between the two
-			// passes writes, so they are good for as long as they are used.
-			// One contiguous slice of a store column, for a signing job to read.
-			struct Run {
-				// The entities in this run, and the component bytes beside them.
-				// Borrowed from the store's own columns - see the note above for
-				// how long they stay good.
-				//@{
-				const ecs::Entity *Entities = nullptr;
-				const std::byte *Values = nullptr;
-				//@}
-
-				// How many rows both pointers cover.
-				size_t Rows = 0;
-			};
-
-			std::vector<Run> Runs;
+			// See `ColumnRun` for how long the borrowed pointers stay good.
+			std::vector<ColumnRun> Runs;
 
 			// Bytes one value occupies, read once on the owning thread because
 			// `Components::Describe` takes the registry's process-wide lock.
@@ -982,6 +1126,199 @@ namespace engine::replication {
 			// breakdown - which is the thing that showed signing to be a dozen
 			// even costs rather than one expensive one.
 			float Milliseconds = 0.0f;
+		};
+
+		// One publishing lane, and everything the per-client body writes that
+		// does not belong to the client.
+		//
+		// **The authority used to keep one copy of each of these, which was
+		// right while the loop was serial and is a race the moment two clients
+		// are published at once.** Held rather than local for the reason they
+		// always were: vectors whose size barely moves, rebuilt every tick,
+		// should not allocate every tick.
+		//
+		// **A lane and not a client.** The storage is what keeps the allocation
+		// out of the tick, and a server publishing two hundred clients through
+		// eight workers needs eight of these, not two hundred. Which lane a
+		// client lands in changes nothing it produces: every field here is
+		// cleared before it is used and no client reads another's.
+		struct Lane {
+			// The entities this client may be sent, ascending by handle.
+			std::vector<ecs::Entity> Visible;
+
+			// The rows this tick built, and a permutation of them the priority
+			// pass puts in order.
+			//@{
+			std::vector<Candidate> Candidates;
+			std::vector<uint32_t> Order;
+			//@}
+
+			// One score per *entity* per client, indexed against `Bearing`.
+			//
+			// **Because a score is a function of the client and the entity, and
+			// a candidate is a row.** An entity with a transform, a motion, a
+			// name and a class is four candidates that a host's scorer is asked
+			// about four times for one answer - and the answer costs whatever
+			// that host's lookup costs, which for `mono.server` includes an
+			// occlusion raycast. Refilled per client, so nothing survives a
+			// publish to disagree with a world that has moved.
+			std::vector<float> Scores;
+
+			// The same, for the refined half, and a second array rather than a
+			// flag beside the first.
+			//
+			// A refinement is asked about the entities inside the window and
+			// about no others, so "not asked" and "asked and unchanged" have to
+			// stay distinguishable: writing a refined value back over `Scores`
+			// would make the second row of an entity already in the window look
+			// unrefined the moment the window moved.
+			std::vector<float> Refined;
+
+			// Which declared slot each delta entry came from, and which message
+			// each entry is currently open in.
+			//@{
+			std::vector<size_t> SourceSlot;
+			std::vector<size_t> OpenEntry;
+			//@}
+
+			// Recovery entries in `OutstandingSet` order, which is ascending.
+			// Held as ids rather than walked in place because offering one
+			// inserts into the set it came from.
+			std::vector<uint64_t> Recovering;
+
+			// The rows the recovery walk found nothing behind, dropped in one
+			// pass once the walk has finished. Ascending, because `Recovering`
+			// is.
+			std::vector<uint64_t> Dropping;
+
+			// The entities this client has just been told about, seeded into
+			// every component's unconfirmed set so the recovery walk carries
+			// them.
+			std::vector<uint64_t> Appearing;
+
+			// One client's known set in handle order, for the audit.
+			//
+			// Sorted rather than walked in place, for `Recovering`'s reason: the
+			// known set is an `unordered_set` and two servers that inserted into
+			// it in different orders would hash the same world into different
+			// digests.
+			std::vector<ecs::Entity> Auditing;
+
+			// The subset of `Resolved` one audit's batch actually carries, which
+			// is what its leaf ordinals count in.
+			std::vector<ecs::ComponentId> Auditable;
+
+			// The non-overlapping pieces of a client's publish, in nanoseconds.
+			//
+			// **This is what an `ENGINE_PROFILE` in the per-client path became.**
+			// `core::FrameGraph` drops a span it did not open on the recording
+			// thread, so the moment the loop went parallel every one of those
+			// bars would have turned into a number in the drop counter - which
+			// is exactly the way profiling a parallel loop misleads. The lanes
+			// count nanoseconds with no lock and `Publish` reports the totals
+			// under the names the spans used, so the graph reads the same
+			// whether the tick ran on one thread or twenty-three.
+			//
+			// **Leaves rather than a tree.** `FrameGraph::Report` adds a flat
+			// bar, so a total reported beside its own parts would count the
+			// parts twice. What is here is exactly the set of blocks that do not
+			// contain one another.
+			enum class Phase : uint8_t {
+				Interest,			///< Filtering `Bearing` through the host's predicate.
+				Structure,			///< What this client gained and lost since last tick.
+				PrepareOutstanding, ///< Seeding the unconfirmed sets.
+				DetectRows,			///< Turning what moved into candidate rows.
+				RecoverRows,		///< Re-offering what the client has not confirmed.
+				CommitRows,			///< Moving a component's rows into the delta.
+				Score,				///< The host's cheap priority hook.
+				Sort,				///< Ordering the candidates.
+				Refine,				///< The host's expensive priority hook.
+				Pack,				///< Cutting the delta into messages.
+				Record,				///< The acknowledgement bookkeeping.
+				Audit,				///< Hashing a slice of what the client holds.
+
+				Count
+			};
+
+			std::array<double, static_cast<size_t>(Phase::Count)> Spent{};
+
+			// Times a block into one of `Spent`.
+			//
+			// One monotonic clock read at each end and an add, which is what an
+			// `ENGINE_PROFILE` costs when nothing is attached - so this is the
+			// same price for a number that survives being taken on a worker.
+			class Timed {
+			  public:
+				// Starts timing `phase` on `lane`, which must outlive this.
+				Timed(Lane &lane, Phase phase);
+
+				// Adds the elapsed nanoseconds to the phase.
+				~Timed();
+
+				// Each instance records exactly once, so there is nothing a copy
+				// could mean.
+				//@{
+				Timed(const Timed &) = delete;
+				Timed &operator=(const Timed &) = delete;
+				//@}
+
+			  private:
+				double &Into;
+				uint64_t Began;
+			};
+
+			// What this lane's clients contributed to `Statistics`, merged into
+			// `Stats_` in lane order once the batch has finished.
+			//
+			// **Only the counters a per-client publish touches**, rather than a
+			// whole `Statistics`: the rest are cumulative across `Receive` and
+			// merging them by addition would count them twice. Six sums and one
+			// maximum, so the merge order does not change the answer - it is
+			// done in lane order anyway, because a number that depended on which
+			// worker finished first would be a number nobody could reproduce.
+			struct Tally {
+				// The messages this lane built and their total size. See
+				// `Statistics::Messages` and `Statistics::Bytes`.
+				//@{
+				size_t Messages = 0;
+				size_t Bytes = 0;
+				//@}
+
+				// Entities that passed interest, over this lane's clients only.
+				// See `Statistics::Visible` for what summing them means.
+				size_t Visible = 0;
+
+				// Values this lane held back because the budget was spent. See
+				// `Statistics::Deferred`.
+				size_t Deferred = 0;
+
+				// Audits this lane built. See `Statistics::Audits`.
+				size_t Audits = 0;
+
+				// Rows this lane staged as a blob for being too big for any
+				// message. See `Statistics::Oversized`.
+				size_t Oversized = 0;
+
+				// The longest deferred wait this lane saw, in ticks.
+				//
+				// **Merged by maximum where the six above merge by sum**, and
+				// that asymmetry is what keeps the figure independent of how
+				// many lanes ran: the stalest value in the world is the stalest
+				// one some lane saw, and adding two lanes' worst cases would
+				// report a wait nothing waited. See `Statistics::Stalest`.
+				uint64_t Stalest = 0;
+			};
+
+			Tally Stats;
+
+			// Whether this lane found that one audit group does not fit a
+			// message.
+			//
+			// **A flag rather than the setting itself.** Switching the audit off
+			// is a write to `Settings_`, and a worker writing a setting every
+			// other worker is reading is the race the whole of this struct
+			// exists to avoid. The owner applies it after the batch.
+			bool AuditTooLarge = false;
 		};
 
 		// Queues an inbound delta, having checked only that somebody has said
@@ -1013,7 +1350,7 @@ namespace engine::replication {
 		// with nothing in it still writes a header.
 		std::vector<std::byte> Capture(ecs::Store &store, std::span<const ecs::Entity> entities) const;
 
-		void BeginSnapshot(Client &client, ecs::Store &store, uint64_t tick);
+		void BeginSnapshot(Lane &lane, Client &client, ecs::Store &store, uint64_t tick);
 
 		// Stages the entities `Client::Oversize` names as an overlay blob.
 		//
@@ -1027,10 +1364,34 @@ namespace engine::replication {
 		void StageOversize(Client &client, ecs::Store &store, uint64_t tick);
 
 		void StreamSnapshot(Client &client);
-		void BuildComponents(ecs::Store &store, Client &client, Delta &delta, uint64_t tick);
-		void Prioritise(ClientId client, uint64_t tick);
-		Placement Pack(Client &client, const Delta &delta, size_t messageLimit);
-		void Record(Client &client, const Placement &placed, uint64_t tick);
+		// Filters `Bearing` through the host's interest predicate into
+		// `Lane::Visible`, ascending by handle.
+		void SelectVisible(Lane &lane, ClientId handle, const ecs::Store &store);
+
+		// Publishes one client that owes no snapshot bytes.
+		//
+		// **Called from a worker**, so what it may touch is the rule rather than
+		// an implementation detail: this client, this lane, and everything
+		// `Survey` left read-only. The store is read through `Alive`,
+		// `HasComponent` and `GetComponent`, which are `const` and take no
+		// affinity; the run walks that do are all in `Survey`, and building a
+		// world - which is what a join does - is in `Publish`'s serial pass.
+		void PublishOne(Lane &lane, ClientId handle, Client &client, ecs::Store &store, uint64_t tick);
+
+		// How many lanes to publish `clients` steady-state clients through.
+		//
+		// One below `AuthoritySettings::ParallelClientThreshold`, and otherwise
+		// the pool plus the calling thread, capped at the client count.
+		size_t LanesFor(size_t clients) const;
+
+		// Folds every lane's phase timings into the frame graph and the metrics
+		// sink, on the thread that owns both.
+		void ReportPhases(size_t lanes);
+
+		void BuildComponents(Lane &lane, ecs::Store &store, Client &client, Delta &delta, uint64_t tick);
+		void Prioritise(Lane &lane, ClientId client, uint64_t tick);
+		Placement Pack(Lane &lane, Client &client, const Delta &delta, size_t messageLimit);
+		void Record(Lane &lane, Client &client, const Placement &placed, uint64_t tick);
 		void EmitStructure(Client &client, const Structure &structure);
 
 		// Asks `Refinement` about the rows near enough to the front to contend,
@@ -1046,13 +1407,13 @@ namespace engine::replication {
 		//        up what the ordered rows really encode to, because the sort's
 		//        own bound assumes rows that are all as short as the shortest.
 		template <class Before>
-		void Refine(ClientId client, size_t reachable, size_t spend, const Before &before);
+		void Refine(Lane &lane, ClientId client, size_t reachable, size_t spend, const Before &before);
 
 		// Builds this tick's audit for one client, if one is due.
 		//
 		// Emitted after the delta and never before it, so the message the byte
 		// budget turns away first is the one whose loss costs nothing.
-		void EmitAudit(const ecs::Store &store, ClientId handle, Client &client, uint64_t tick);
+		void EmitAudit(Lane &lane, const ecs::Store &store, ClientId handle, Client &client, uint64_t tick);
 
 		// Takes a client's answer to an audit, having decided the server agrees
 		// it asked the question.
@@ -1095,35 +1456,18 @@ namespace engine::replication {
 		std::vector<Client> Clients;
 		Statistics Stats_;
 
-		std::vector<ecs::Entity> Visible;
-
-		// The subset of `Visible` the preface predicate claimed, refilled per
-		// join rather than per publish because that is the only moment it is
+		// The subset of `Lane::Visible` the preface predicate claimed, refilled
+		// per join rather than per publish because that is the only moment it is
 		// asked.
+		//
+		// **On the authority rather than on a lane, and that is the invariant
+		// rather than an oversight.** A join is built on the thread that owns
+		// the store - see `Publish` - so there is exactly one of these in flight
+		// at a time and a copy per lane would be a copy nothing ever fills.
 		std::vector<ecs::Entity> Preceding;
-
-		std::vector<Candidate> Candidates;
 
 		std::vector<uint64_t> Bearing;
 
-		// `Resign`'s scratch space: entity, this tick's hash - the one
-		// component slot it is currently signing, sorted by entity id once
-		// `Resign` has finished collecting it.
-		//
-		// **Not filtered out of `Bearing`, and not read back through
-		// `GetComponent` either.** `Bearing` is the union of every replicated
-		// component's carriers, and most scenes have far more declared
-		// component slots than any one entity carries - a scene of nothing but
-		// moving parts replicates `scene.Transform` on all of them and half a
-		// dozen other component types on none. `Store::EachRuns` visits only
-		// the archetype tables that have the component, chunk by chunk, and
-		// hands back the raw column alongside the entities - so a slot with
-		// zero carriers costs one table lookup and touches no entity at all,
-		// and a populated one is hashed straight out of contiguous memory
-		// instead of one `GetComponent` - a directory lookup, an archetype
-		// fetch, a binary search - per entity. A member rather than a local so
-		// the vector's storage survives between slots instead of reallocating
-		// once per component per tick.
 		// The signed slots this tick, as indices into `Signatures`.
 		//
 		// Built by `Resign`'s first pass so the second is a flat parallel range
@@ -1132,16 +1476,17 @@ namespace engine::replication {
 
 		std::vector<ecs::ComponentId> Resolved;
 
-		// The same ids indexed by slot, with an invalid id wherever a declared
-		// component is not registered in this process.
+		// What each declared slot resolves to this tick, indexed by slot.
 		//
 		// **`Resolved` is compacted and this is not, which is the whole point.**
 		// `Detection`, `Signatures` and `Suppressors` are keyed by slot, so a pass
 		// over any of them cannot use `Resolved`'s indices - `ResolvedSuppressors`
-		// carries the same warning. Held so that `Resign` does not repeat
-		// `Components::Find`, which takes the component registry's process-wide
-		// lock, once per signed slot per tick.
-		std::vector<ecs::ComponentId> ResolvedSlots;
+		// carries the same warning.
+		//
+		// This is the whole of what `Publish`'s per-client loop needs to know
+		// about a component, which is what lets that loop take the registry's
+		// process-wide mutex **zero** times. See `Crossing`.
+		std::vector<Crossing> Crossings;
 
 		// The same list as names, which is what an audit puts on the wire. Kept
 		// beside `Resolved` rather than derived from `Components`, because a
@@ -1149,53 +1494,17 @@ namespace engine::replication {
 		// keeps them the same positions.
 		std::vector<core::Name> ResolvedNames;
 
-		std::vector<uint32_t> Order;
+		// The lanes, one per thread a publish may use. Never shrunk, so a tick
+		// with fewer clients keeps the buffers the busiest tick grew.
+		std::vector<Lane> Lanes;
 
-		// One score per *entity* per client, indexed against `Bearing`.
+		// The live clients whose publish is neither a join nor a chunk of one,
+		// as indices into `Clients`, in ascending index order.
 		//
-		// **Because a score is a function of the client and the entity, and a
-		// candidate is a row.** An entity with a transform, a motion, a name and
-		// a class is four candidates that a host's scorer is asked about four
-		// times for one answer - and the answer costs whatever that host's
-		// lookup costs, which for `mono.server` includes an occlusion raycast.
-		// Refilled per client, so nothing survives a publish to disagree with a
-		// world that has moved.
-		std::vector<float> Scores;
-
-		// The same, for the refined half, and a second array rather than a flag
-		// beside the first.
-		//
-		// A refinement is asked about the entities inside the window and about
-		// no others, so "not asked" and "asked and unchanged" have to stay
-		// distinguishable: writing a refined value back over `Scores` would make
-		// the second row of an entity already in the window look unrefined the
-		// moment the window moved.
-		std::vector<float> Refined;
-
-		std::vector<size_t> SourceSlot;
-
-		std::vector<size_t> OpenEntry;
-
-		// Recovery entries in `OutstandingSet` order, which is ascending. Held
-		// as ids rather than walked in place because offering one inserts into
-		// the set it came from.
-		std::vector<uint64_t> Recovering;
-
-		// The rows the recovery walk found nothing behind, dropped in one pass
-		// once the walk has finished. Ascending, because `Recovering` is.
-		std::vector<uint64_t> Dropping;
-
-		std::vector<uint64_t> Appearing;
-
-		// One client's known set in handle order, for the audit.
-		//
-		// Sorted rather than walked in place, for `Recovering`'s reason: the
-		// known set is an `unordered_set` and two servers that inserted into it
-		// in different orders would hash the same world into different digests.
-		std::vector<ecs::Entity> Auditing;
-
-		// The subset of `Resolved` one audit's batch actually carries, which is
-		// what its leaf ordinals count in.
-		std::vector<ecs::ComponentId> Auditable;
+		// Built by the serial pass and spread across the lanes by the parallel
+		// one. Ascending, because the bytes a client receives may not depend on
+		// which lane it landed in and the order it is *listed* in is the one
+		// thing about that split a reader can check.
+		std::vector<uint32_t> Steady;
 	};
 }

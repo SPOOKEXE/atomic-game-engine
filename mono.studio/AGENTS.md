@@ -2,6 +2,11 @@
 
 The editor. `client` tier, with a named escape to `Mono::server`.
 
+**Two libraries live here, not one.** `Mono::studio` is this directory's
+`include/`, `src/` and `app/`. `Mono::nodegraph` is `nodegraph/` beside them, a
+node graph and its ImGui canvas that nothing else in the repository links; it
+has its own `AGENTS.md` and the section below says what each half owns.
+
 ## Nothing in this program is world state
 
 Selection, expansion, scroll, splitter positions, which panels are open, where
@@ -404,43 +409,48 @@ detector is known to work rather than merely known to pass. **Reach for that
 harness before extracting a free function**: a panel's imgui behaviour is now
 testable, and moving logic out to avoid testing it is no longer the only option.
 
-## The node graph is an engine module, and the panel is all that is left here
+## The node graph is a library of this program, and the panel is what is left here
 
-`studio/NodeGraph.hpp` was this program's own implementation of a design that
-already existed as a standalone library. Two of one thing is the debt
-`AGENTS.md` calls the most expensive kind, and `D00113` closed by taking the
-further-along copy - this one - upstream.
+`nodegraph/` beside this file is `Mono::nodegraph`: the registry, the model,
+folding, layout, evaluation, the canvas, the save format and pictures as pixels.
+It has its own `AGENTS.md`, its own `tests/` and no first-party dependency at
+all, and it is here because this editor is the only thing in the repository that
+links it.
 
-Upstream was a private repository, which made this public one unclonable by
-anybody but its owner and stopped the v0.18.0 release at checkout. So at v0.18.0
-the library came back in as `Engine::nodegraph`, a first-party module with its
-own `AGENTS.md`. `src/NodeDemo.cpp` is what stayed here, plus one thing that did
-not exist before: `src/DemoNodes.cpp`.
+It has moved three times and the trail matters. `studio/NodeGraph.hpp` was this
+program's own implementation of a design that already existed as a standalone
+library, and `D00113` closed by taking the further-along copy - this one -
+upstream. Upstream was a private repository, which made this public one
+unclonable by anybody but its owner and stopped the v0.18.0 release at checkout,
+so at v0.18.0 the library came back in as `Engine::nodegraph`. At v0.19 it came
+the rest of the way: an imgui-carrying `client` target that nothing in the
+engine reaches is an editor widget library, and `mono.engine` ships nothing on
+its own. Its row in `expected_graph.json` has no `layer`, which is what makes
+"only the editor links this" a rule the architecture check enforces rather than
+a fact about today.
 
 The split is worth stating, because the next node editor has to know which side
-it is adding to. **The module owns everything that is true of any node graph** -
-the registry, the model, folding, layout, evaluation, the canvas, the save
-format, and pictures as pixels. **This program owns what only an engine has**: a
-texture for a picture, a theme, an undo stack, a file dialog and a dockable
-window.
+it is adding to. **The library owns everything that is true of any node graph.**
+**The program owns what only a host has**: a texture for a picture, a theme, an
+undo stack, a file dialog and a dockable window - `src/NodeDemo.cpp`.
 
 **And it owns the node types.** `src/DemoNodes.cpp` is the set the Demo Nodes
-panel runs, and it is here rather than beside the module because it is content
+panel runs, and it is here rather than inside `nodegraph/` because it is content
 rather than library: it registers terrain-shaped types through the same public
-`NodeTypes::Register` any host would use, and the module knows nothing about it.
-That is the same seam by another name - a host with its own vocabulary links
-`Engine::nodegraph` and gets none of this. The module's own suite registers a
+`NodeTypes::Register` any host would use, and the library knows nothing about
+it. That is the same seam by another name - a host with its own vocabulary links
+`Mono::nodegraph` and gets none of this. The library's own suite registers a
 fixture it owns rather than reaching for these, so nothing but this panel
 depends on them.
 
 Two seams, both in `studio/Editor.hpp` as free functions so that
 `tests/NodeGraph.cpp` can reach them, and both silent when they break:
 
-- **`NodePreviewTexture`** copies an `engine::nodegraph::PreviewImage` into an
+- **`NodePreviewTexture`** copies a `nodegraph::PreviewImage` into an
   `assets::TextureData`. It is a `memcpy` because both sides mean red first and
   the top row first - and the day one of them stops meaning that, the editor
   keeps drawing thumbnails with their channels swapped.
-- **`ApplyNodeChrome`** hands the module the four values it draws chrome with.
+- **`ApplyNodeChrome`** hands the library the four values it draws chrome with.
   Called every frame the panel draws, because the theme and the interface scale
   are both settings somebody can change while it is open.
 
@@ -449,9 +459,9 @@ file rather than as a decision - the render pipeline as a node editor is still
 to be written, and it could start its own registry and its own canvas without
 anybody noticing until the cycle guard or the hash diverged.
 `just check-one-node-graph` is what stops it: no first-party file outside
-`mono.engine/nodegraph` may open `namespace engine::nodegraph`, and registering
-types into it - which is what `DemoNodes.cpp` does - is not opening it. Extend
-the module where it lives.
+`mono.studio/nodegraph` may open `namespace nodegraph`, and registering types
+into it - which is what `DemoNodes.cpp` does - is not opening it. Extend the
+library where it lives.
 
 ## Configuration lives in the person's folder, not beside the binary
 
