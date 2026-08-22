@@ -77,6 +77,11 @@ namespace client {
 					defaults.RendezvousAddress,
 					"Reach a session through this rendezvous point"
 				);
+				built.Boolean(
+					"client.quic",
+					defaults.Quic,
+					"Connect over QUIC rather than the datagram wire. The server must be serving it too"
+				);
 				built.Text(
 					"client.server-key",
 					defaults.ServerKey,
@@ -153,6 +158,7 @@ namespace client {
 		options.SessionIdText = std::string(Flag("client.session-id").Text());
 		options.SessionSecret = std::string(Flag("client.session-key").Text());
 		options.RendezvousAddress = std::string(Flag("client.rendezvous").Text());
+		options.Quic = Flag("client.quic").Boolean();
 		options.ServerKey = std::string(Flag("client.server-key").Text());
 
 		const Flag configured("client.content-sources");

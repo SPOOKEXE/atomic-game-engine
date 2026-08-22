@@ -1431,6 +1431,10 @@ namespace client {
 		}
 
 		engine::replication::ConnectorSettings connector;
+		if (Settings.Quic) {
+			connector.Wire = engine::replication::WireKind::Quic;
+			connector.Quic.BytesPerTick = connector.Session.Link.BytesPerTick;
+		}
 		if (!Settings.ServerKey.empty()) {
 			connector.ServerIdentity = engine::assets::PublicKey::FromHex(Settings.ServerKey);
 			if (!connector.ServerIdentity.has_value()) {

@@ -83,6 +83,12 @@ namespace server {
 					defaults.RendezvousAddress,
 					"Register with this rendezvous point, so clients off this subnet can reach it"
 				);
+				built.Boolean(
+					"server.quic",
+					defaults.Quic,
+					"Serve over QUIC rather than the datagram wire. Needs server.identity-key, and "
+					"every client must be started with the same flag"
+				);
 				built.Text(
 					"server.identity-key",
 					defaults.IdentityKey,
@@ -205,6 +211,7 @@ namespace server {
 		options.SessionName = std::string(Flag("server.session-name").Text());
 		options.SessionSecret = std::string(Flag("server.session-key").Text());
 		options.RendezvousAddress = std::string(Flag("server.rendezvous").Text());
+		options.Quic = Flag("server.quic").Boolean();
 		options.IdentityKey = std::string(Flag("server.identity-key").Text());
 
 		options.ProfilePath = std::filesystem::path(Flag("server.profile-out").Text());

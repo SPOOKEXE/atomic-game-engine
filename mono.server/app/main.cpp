@@ -114,6 +114,11 @@ int main(int argc, char **argv) {
 	arguments.Value(
 		"content-grant-key", "HEX", "64 hex characters - the secret grants are issued and checked with"
 	);
+	arguments.Flag(
+		"quic",
+		"Serve over QUIC rather than the datagram wire. Needs --identity-key, and every client must "
+		"be started with --quic too"
+	);
 	arguments.Value(
 		"identity-key",
 		"HEX",
@@ -225,6 +230,7 @@ int main(int argc, char **argv) {
 	if (auto key = arguments.Get("identity-key")) {
 		options.IdentityKey = std::string(*key);
 	}
+	options.Quic = options.Quic || arguments.Has("quic");
 
 	if (auto game = arguments.Get("game")) {
 		options.GamePath = std::string(*game);

@@ -867,6 +867,37 @@ namespace server {
 		streaming.Authority.Audit.Enabled = true;
 		streaming.MaximumClients = Settings.MaximumClients;
 
+		// **The identity is read before the listener rather than after it**, and
+		// under QUIC it has to be: the seed is the TLS one, so it is part of how
+		// the listener is built rather than something set on it afterwards.
+		std::array<std::byte, engine::assets::SigningKey::SEED_BYTES> seed{};
+		bool seeded = false;
+		if (!Settings.IdentityKey.empty()) {
+			if (!ParseHex(Settings.IdentityKey, seed)) {
+				ENGINE_ERROR("server: --identity-key is not {} hex characters", seed.size() * 2);
+				return false;
+			}
+			seeded = true;
+		}
+
+		if (Settings.Quic) {
+			if (!seeded) {
+				// **No unauthenticated QUIC mode, and that is not an oversight.**
+				// A QUIC server proves who it is inside its own handshake, so
+				// there is nothing to fall back to - unlike the datagram wire,
+				// where the signature is an optional field in the welcome.
+				ENGINE_ERROR("server: --quic needs --identity-key - a QUIC server has no anonymous mode.");
+				return false;
+			}
+			streaming.Wire = engine::replication::WireKind::Quic;
+			streaming.Quic.Connection.Tls.Seed = seed;
+			streaming.Quic.Connection.Tls.HasSeed = true;
+			// The ceiling is the one a game already stated. `docs/QUIC.md` §6:
+			// it survives above the congestion controller rather than instead of
+			// it.
+			streaming.Quic.BytesPerTick = streaming.Session.Link.BytesPerTick;
+		}
+
 		Replication = std::make_unique<engine::replication::Listener>(*Socket, streaming);
 
 		if (!Replication->Admitting()) {
@@ -1311,19 +1342,18 @@ namespace server {
 		// **The identity, and the log line says which mode this server is in.**
 		// A deployment that meant to sign and typo'd the flag would otherwise
 		// look identical to one that meant not to.
-		if (!Settings.IdentityKey.empty()) {
-			std::array<std::byte, engine::assets::SigningKey::SEED_BYTES> seed{};
-			if (!ParseHex(Settings.IdentityKey, seed)) {
-				ENGINE_ERROR("server: --identity-key is not {} hex characters", seed.size() * 2);
-				return false;
-			}
-
+		if (seeded) {
 			Identity = engine::assets::SigningKey::FromSeed(seed);
 			if (!Identity.has_value()) {
 				ENGINE_ERROR("server: --identity-key is not a usable Ed25519 seed");
 				return false;
 			}
 
+			// **The same key on both wires, which is why one seed is enough.**
+			// Under QUIC the TLS handshake proves it and this call is what the
+			// datagram wire uses; a deployment distributes one public key either
+			// way, and `assets::SigningKey::FromSeed` and
+			// `net::quic::IdentityFor` produce the same public half from it.
 			Replication->SetIdentity(&*Identity);
 			ENGINE_INFO("replication identity {}", Identity->Public().ToHex());
 		} else {
@@ -1333,7 +1363,11 @@ namespace server {
 			);
 		}
 
-		ENGINE_INFO("replication listening on {}", Socket->Local().Text());
+		ENGINE_INFO(
+			"replication listening on {} over {}",
+			Socket->Local().Text(),
+			engine::replication::Describe(streaming.Wire)
+		);
 		return true;
 	}
 

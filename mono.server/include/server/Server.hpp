@@ -408,6 +408,19 @@ namespace server {
 		// @since v0.13
 		std::string RendezvousAddress;
 
+		// Whether to serve over QUIC instead of the datagram wire.
+		//
+		// **Needs an identity, and refuses to start without one.** A QUIC server
+		// proves who it is inside its own handshake - there is no unauthenticated
+		// mode to fall back to, which is the opposite of the datagram wire where
+		// the signature is an optional field in the welcome. `docs/QUIC.md` is
+		// the argument for the transport; what belongs here is that turning it on
+		// is a decision an operator makes and a client has to match, because
+		// there is no negotiation between the two and there should not be.
+		//
+		// @since v0.19
+		bool Quic = false;
+
 		// The Ed25519 seed this server proves its identity with, as 64 hex
 		// characters, or empty for none.
 		//

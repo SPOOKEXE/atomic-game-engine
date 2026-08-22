@@ -487,3 +487,73 @@ TEST_CASE("nothing can be exported before the handshake completes", "[net][quic]
 	std::array<std::byte, 32> value{};
 	CHECK_FALSE(fixture.Client->Export("atomic identity", value));
 }
+
+// --- over a socket the operating system owns ---------------------------------
+
+TEST_CASE("a handshake completes over two real UDP sockets", "[net][quic][connection]") {
+	// **Everything above runs on the loopback, and this one does not.** The
+	// loopback is a routed network in this process, which is the right harness
+	// for the protocol and says nothing about whether the framing survives a
+	// kernel: the datagram sizes, the source address a reply comes back from,
+	// and the path bytes ngtcp2 compares are all the operating system's here.
+	//
+	// `tests/Transport.cpp` already binds sockets, so this is the same
+	// precedent rather than a new one.
+	std::unique_ptr<Transport> serverWire = engine::net::MakeUdpTransport(0);
+	std::unique_ptr<Transport> clientWire = engine::net::MakeUdpTransport(0);
+	if (serverWire == nullptr || clientWire == nullptr) {
+		// A machine with no socket to bind. Skipped rather than failed, which is
+		// what `Transport.cpp` does with the same situation.
+		SUCCEED("no UDP socket available");
+		return;
+	}
+
+	ConnectionSettings serving;
+	serving.Tls.Seed = Seed();
+	serving.Tls.HasSeed = true;
+
+	ConnectionSettings connecting;
+	connecting.Tls.PinIdentity = true;
+	connecting.Tls.Expected = engine::net::quic::IdentityFor(Seed());
+
+	// `Local()` reports the wildcard address a socket bound every interface on,
+	// and a datagram has to be addressed somewhere in particular.
+	const Endpoint where = Endpoint::FromIPv4({127, 0, 0, 1}, serverWire->Local().Port);
+
+	double now = 0.0;
+	std::unique_ptr<Connection> client = Connection::Connect(*clientWire, where, now, connecting);
+	REQUIRE(client != nullptr);
+	std::unique_ptr<Connection> server;
+
+	std::vector<std::byte> datagram;
+	for (int tick = 0; tick < 400; tick++) {
+		now += 1.0 / 60.0;
+		client->Flush(now);
+		if (server != nullptr) {
+			server->Flush(now);
+		}
+
+		while (serverWire->Receive(datagram).Status == TransportStatus::Ok) {
+			if (server == nullptr) {
+				if (Accepts(datagram)) {
+					const Endpoint from = Endpoint::FromIPv4({127, 0, 0, 1}, clientWire->Local().Port);
+					server = Connection::Accept(*serverWire, from, datagram, now, serving);
+				}
+				continue;
+			}
+			server->Receive(datagram, now);
+		}
+		while (clientWire->Receive(datagram).Status == TransportStatus::Ok) {
+			client->Receive(datagram, now);
+		}
+
+		if (server != nullptr && client->State() == ConnectionState::Established &&
+			server->State() == ConnectionState::Established) {
+			break;
+		}
+	}
+
+	REQUIRE(server != nullptr);
+	CHECK(client->State() == ConnectionState::Established);
+	CHECK(server->State() == ConnectionState::Established);
+}

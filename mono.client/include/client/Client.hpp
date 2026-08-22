@@ -332,6 +332,16 @@ namespace client {
 		//
 		std::filesystem::path SoundPath;
 
+		// Whether to connect over QUIC instead of the datagram wire.
+		//
+		// **Must match the server, and there is no negotiation.** A client
+		// speaking one protocol at a server speaking the other gets no answer,
+		// which is a connection that fails rather than a server running two
+		// stacks - and the second one is the one nobody tests.
+		//
+		// @since v0.19
+		bool Quic = false;
+
 		// The server's Ed25519 public key, as 64 hex characters, or empty to
 		// accept any server.
 		//
