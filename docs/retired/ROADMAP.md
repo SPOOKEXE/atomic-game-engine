@@ -1939,3 +1939,42 @@ examples/Magic.luau:44```. Same with TerrainCore. - **the libraries were staged 
       Verified: five cases in `physics/tests/ConvexQuery.cpp`, four of which
       fail when the mesh walk is taken out, plus the two character bugs above
       that this uncovered.
+
+- [x] add a batch moveto/setcframe system (e.g. skygrid to move them all at
+      once). `scene::BulkMoveTo` and `scene::BulkPivotTo` take two spans, and
+      `Instance:BulkMoveTo` / `:BulkPivotTo` reach them from both VMs through one
+      new `ScriptCall::ReadPlacements`. The first is Roblox's
+      `WorldRoot:BulkMoveTo`; the second has no Roblox counterpart and exists
+      because the engine's single-instance pair is `CFrame =` *and* `PivotTo`.
+      **The cost of moving a part from a script is not the move**, which is what
+      makes this worth a method: every `part.CFrame = x` goes through the VM's
+      `__newindex`, a string compare of the member name against every property
+      the class has - `script::ScriptableProperty` is a linear scan - the value
+      unpacked out of a userdata, and `Store::SetProperty`'s own checks, before
+      anything touches a `Transform`. Measured in the `release` preset over
+      eight thousand parts: 1.349 ms a tick per-part against 0.975 ms batched,
+      and the batch pays a Luau table store per part that the per-part version
+      does not, so the boundary is worth more than the difference shows.
+      **Per row it does exactly what a single write does** - the same
+      `Transform` lookup, the same change mark - and a case in
+      `scene/tests/Part.cpp` pins that. A batch on a cheaper path would leave a
+      world a single write would not, and `physics::SyncBroadphase` reads those
+      marks to decide a static collider moved.
+      No `BulkMoveMode`, unlike Roblox: `.Changed` here is a projection of the
+      store's change tracking read at the start of the next tick rather than
+      something that fires at the assignment, so there is no signal storm to opt
+      out of and the enum would select between two identical behaviours.
+- [x] do similar for batched moveto/setcframe in other systems. Four demos moved
+      over: `SkyGrid`, `Rings` (and its JavaScript twin, which is also what
+      proves the second VM's reader end to end), `ReplicationStress` and
+      `StressMirrors`. Rings is 0.220 ms a tick against 0.198; SkyGrid is
+      unchanged at 0.041, because two hundred blocks is below where any of this
+      is measurable - it is in the roadmap as the example and it is the shape it
+      stands in for, a crowd or a conveyor, that pays.
+      **`StressPhysics` was left alone on purpose.** Its whole tick is five
+      property writes on one tray and its own comment says why: a script that
+      walked the blocks would be measuring Luau instead of the broad phase.
+      The studio's drag was left alone for a different reason - it writes
+      `Transform` through `Store::Set` rather than the property path, over a
+      selection, and records an undo entry per instance that a batch would have
+      to take apart.

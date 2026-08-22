@@ -39,46 +39,12 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### v0.19
 
-- [x] add a batch moveto/setcframe system (e.g. skygrid to move them all at
-      once). `scene::BulkMoveTo` and `scene::BulkPivotTo` take two spans, and
-      `Instance:BulkMoveTo` / `:BulkPivotTo` reach them from both VMs through one
-      new `ScriptCall::ReadPlacements`. The first is Roblox's
-      `WorldRoot:BulkMoveTo`; the second has no Roblox counterpart and exists
-      because the engine's single-instance pair is `CFrame =` *and* `PivotTo`.
-      **The cost of moving a part from a script is not the move**, which is what
-      makes this worth a method: every `part.CFrame = x` goes through the VM's
-      `__newindex`, a string compare of the member name against every property
-      the class has - `script::ScriptableProperty` is a linear scan - the value
-      unpacked out of a userdata, and `Store::SetProperty`'s own checks, before
-      anything touches a `Transform`. Measured in the `release` preset over
-      eight thousand parts: 1.349 ms a tick per-part against 0.975 ms batched,
-      and the batch pays a Luau table store per part that the per-part version
-      does not, so the boundary is worth more than the difference shows.
-      **Per row it does exactly what a single write does** - the same
-      `Transform` lookup, the same change mark - and a case in
-      `scene/tests/Part.cpp` pins that. A batch on a cheaper path would leave a
-      world a single write would not, and `physics::SyncBroadphase` reads those
-      marks to decide a static collider moved.
-      No `BulkMoveMode`, unlike Roblox: `.Changed` here is a projection of the
-      store's change tracking read at the start of the next tick rather than
-      something that fires at the assignment, so there is no signal storm to opt
-      out of and the enum would select between two identical behaviours.
-- [x] do similar for batched moveto/setcframe in other systems. Four demos moved
-      over: `SkyGrid`, `Rings` (and its JavaScript twin, which is also what
-      proves the second VM's reader end to end), `ReplicationStress` and
-      `StressMirrors`. Rings is 0.220 ms a tick against 0.198; SkyGrid is
-      unchanged at 0.041, because two hundred blocks is below where any of this
-      is measurable - it is in the roadmap as the example and it is the shape it
-      stands in for, a crowd or a conveyor, that pays.
-      **`StressPhysics` was left alone on purpose.** Its whole tick is five
-      property writes on one tray and its own comment says why: a script that
-      walked the blocks would be measuring Luau instead of the broad phase.
-      The studio's drag was left alone for a different reason - it writes
-      `Transform` through `Store::Set` rather than the property path, over a
-      selection, and records an undo entry per instance that a batch would have
-      to take apart.
-- [_] `~/Documents/GitHub/BLADEBORNE_UNIFIED/game` port and also studio place `~/Documents/Bladeborne Floor 0.rbxl`. Turn this into a demo file.
-- [_] explore the idea of having the active scene entities resident on the gpu always and we just have a compute timer on the gpu 24/7. this way, when the scene changes, we tell the gpu what changed. also doing a 2-way sync is easy with signatures/hashes with cpu-gpu, this way we have no swapchain waiting, we just compute at a given interval. sort of like "replication" to the gpu. same for particles, ui, entites, studio, etc.
+- [_] quic implementation. **Scoped, not started.** `docs/CODE_ARCH.md` §10.1
+      has the seam analysis: `net::Transport` is a real port and
+      `replication::Session` already holds one, so the open question is the
+      layer above - `Session` owns a `Link`, a reliable pair and its cipher
+      pair as members, and QUIC supplies all four itself.
+
 - [_] check if we need to move files / classes / structures around. **Analysed,
       not applied** - `docs/ARCH_REVIEW.md` §C. The five with arguments:
       `nodegraph` is linked only by `studio` and belongs in it; `RenderView` is
@@ -118,11 +84,6 @@ The milestone headings below are development labels. Not in line with project ve
       `docs/ARCH_REVIEW.md` §G. Logging is 101 lines with no categories, no
       dynamic level and no free disabled statement, and thirteen modules never
       call it. `core::Metrics` has no read side at all.
-- [_] quic implementation. **Scoped, not started.** `docs/CODE_ARCH.md` §10.1
-      has the seam analysis: `net::Transport` is a real port and
-      `replication::Session` already holds one, so the open question is the
-      layer above - `Session` owns a `Link`, a reliable pair and its cipher
-      pair as members, and QUIC supplies all four itself.
 - [_] think plan for future features as well listed in roadmap and plan for them
       now. **Partly** - the component gaps v0.21 and v0.23 imply are recorded in
       `docs/ARCH_REVIEW.md` §D4 (no `Skeleton`, `Bone`, `Animator`,
@@ -130,7 +91,6 @@ The milestone headings below are development labels. Not in line with project ve
       exists), and the `persistence`/`ledger` layer problem in
       `docs/CODE_ARCH.md` §4.2 - both L5 and L6 were reserved for them and are
       now occupied.
-
 - [_] make the four unchecked architecture rules checked. `docs/CODE_ARCH.md`
       §11 lists them in value order and they are the third category rule 6
       refuses to allow: a module keeping a private copy of data the ECS owns; a
@@ -208,12 +168,14 @@ The milestone headings below are development labels. Not in line with project ve
       obviously wants and cannot get. Also fix the three port mismatches, one of
       which has `studio --mcp-port` bare defaulting to 8720 while its own help
       says 8738, and give `mcpbridge` a suite - it has none.
+- [_] explore the idea of having the active scene entities resident on the gpu always and we just have a compute timer on the gpu 24/7. this way, when the scene changes, we tell the gpu what changed. also doing a 2-way sync is easy with signatures/hashes with cpu-gpu, this way we have no swapchain waiting, we just compute at a given interval. sort of like "replication" to the gpu. same for particles, ui, entites, studio, etc.
 
 ### v0.21
 
 - [x] thoroughly implement every user-interface element, including `SurfaceGui` and `BillboardGui` - `SurfaceGui` gains `ZOffset`, `MaxDistance`, `ClipsDescendants` and `Active`, and `BillboardGui` gains `Active`, `Brightness`, `ClipsDescendants`, `CurrentDistance`, `DistanceStep`, `ExtentsOffsetWorldSpace`, `SizeOffset` and `PlayerToHideFrom`; new classes `UIGradient`, `UITableLayout`, `UIPageLayout` and `UIDragDetector`; `ScrollingFrame` completed with `ScrollingEnabled`, `AutomaticCanvasSize`, the two `ScrollBarInset`s, `VerticalScrollBarPosition`, `ElasticBehavior`, the three bar images and `AbsoluteCanvasSize`/`AbsoluteWindowSize`, plus wheel and thumb-drag input; `RichText`, `MaxVisibleGraphemes`, `ContentText`, `TextBounds` and `TextFits` on every text class; `Interactable`, the four `NextSelection*`, `SelectionOrder` and `SelectionImageObject` on `GuiObject`; `HoverImage`, `PressedImage` and `ResampleMode` on the image classes; `Enabled` and `ApplyStrokeMode` on `UIStroke`. Laid out, drawn by both backends, saved, replicated, bound and in the Properties panel. `D00129` carries the members that need a subsystem this engine has not got (filed as `D00120`, renumbered at v0.17 - that number was already a retired entry)
 - [_] build out all remaining roblox surfaces with available underlying surface
 - [_] port many particle features from unity to here (https://docs.unity3d.com/6000.5/Documentation/ScriptReference/ParticleSystem.html)
+- [_] `~/Documents/GitHub/BLADEBORNE_UNIFIED/game` port and also studio place `~/Documents/Bladeborne Floor 0.rbxl`. Turn this into a demo file.
 
 ### v0.22
 
