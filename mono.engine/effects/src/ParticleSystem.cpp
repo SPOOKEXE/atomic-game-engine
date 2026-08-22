@@ -726,6 +726,73 @@ namespace engine::effects {
 			block.Reserved = 0;
 		}
 
+		const auto releaseBlock = [&](EmitterSlot &slot) {
+			if (slot.Index == NO_SLOT || slot.Index >= system->Blocks.size()) {
+				slot.Index = NO_SLOT;
+				return;
+			}
+
+			const uint32_t index = slot.Index;
+			EmitterBlock &block = system->Blocks[index];
+			if (block.Capacity > 0) {
+				system->Free.emplace_back(block.First, block.Capacity);
+			}
+			block.Capacity = 0;
+			block.Live = 0;
+			block.Owner = ecs::NULL_ENTITY;
+			block.Reserved = 0;
+			system->FreeSlots.push_back(index);
+			slot.Index = NO_SLOT;
+			slot.ClearRequested = false;
+		};
+
+		// Pull authored data only for rows that changed. The steady claim pass
+		// below walks `EmitterSlot`, which is a small runtime row instead of the
+		// roughly 1.5 KiB authored component.
+		store.EachChanged<ParticleEmitter>([&](ecs::Entity entity, ParticleEmitter &emitter) {
+			EmitterSlot *slot = store.GetMutable<EmitterSlot>(entity);
+			if (slot == nullptr) {
+				return;
+			}
+
+			slot->Enabled = emitter.Enabled;
+			slot->Configured = true;
+
+			if (slot->Index == NO_SLOT || slot->Index >= system->Blocks.size()) {
+				return;
+			}
+
+			EmitterBlock &block = system->Blocks[slot->Index];
+			block.RateOverDistance = emitter.RateOverDistance;
+			if (block.ParticleLimit != emitter.MaxParticles) {
+				releaseBlock(*slot);
+				return;
+			}
+
+			SampleCurves(emitter, block.Curves);
+			block.Longest = std::max(emitter.Lifetime.Maximum, 0.0f);
+			block.CurveRevision++;
+			if (ApplyPlayback(store, emitter, block, true, catalogueChanged)) {
+				block.Revision++;
+			}
+		});
+
+		// A catalogue revision is rare and is the one steady-state event that
+		// needs the emitter's texture sequence without an authored row changing.
+		if (catalogueChanged) {
+			store.Each<const ParticleEmitter, EmitterSlot>(
+				[&](ecs::Entity, const ParticleEmitter &emitter, EmitterSlot &slot) {
+					if (slot.Index >= system->Blocks.size()) {
+						return;
+					}
+					EmitterBlock &block = system->Blocks[slot.Index];
+					if (ApplyPlayback(store, emitter, block, false, true)) {
+						block.Revision++;
+					}
+				}
+			);
+		}
+
 		// **Three spans, and the split is where the three costs actually are.**
 		// The claim walk is proportional to *emitters* and is where the curve
 		// sampling lives; the reclaim sweep is proportional to blocks ever
@@ -735,196 +802,158 @@ namespace engine::effects {
 		{
 			ENGINE_PROFILE_CAT("emitters.claim", core::ProfileCategory::Simulation);
 
-			store.Each<const ParticleEmitter, EmitterSlot>(
-				[&](ecs::Entity entity, const ParticleEmitter &emitter, EmitterSlot &slot) {
-					// An emitter that is off and has nothing left alive gives its
-					// block back. One that is off and still has particles keeps it,
-					// because disabling must not kill what is already in the air -
-					// `ParticleEmitter::Enabled` carries the argument.
-					bool holds = slot.Index != NO_SLOT && slot.Index < system->Blocks.size();
-					if (!holds && slot.ClearRequested) {
+			store.Each<EmitterSlot>([&](ecs::Entity entity, EmitterSlot &slot) {
+				if (!slot.Configured) {
+					const ParticleEmitter *emitter = store.Get<ParticleEmitter>(entity);
+					if (emitter == nullptr) {
+						return;
+					}
+					slot.Enabled = emitter->Enabled;
+					slot.Configured = true;
+				}
+
+				// An emitter that is off and has nothing left alive gives its
+				// block back. One that is off and still has particles keeps it,
+				// because disabling must not kill what is already in the air -
+				// `ParticleEmitter::Enabled` carries the argument.
+				bool holds = slot.Index != NO_SLOT && slot.Index < system->Blocks.size();
+				if (!holds && slot.ClearRequested) {
+					slot.ClearRequested = false;
+				}
+				if (holds) {
+					system->Blocks[slot.Index].Reserved = 1;
+				}
+				if (holds) {
+					EmitterBlock &block = system->Blocks[slot.Index];
+
+					if (slot.ClearRequested) {
+						block.Generation++;
+						block.Revision++;
+						block.Live = 0;
+						block.Spawned = 0;
+						block.Pending = 0.0f;
+						block.Idle = 0.0f;
 						slot.ClearRequested = false;
 					}
-					if (holds) {
-						EmitterBlock &block = system->Blocks[slot.Index];
-						block.Reserved = 1;
 
-						// Capacity is storage, not just a birth-time check. Reclaiming on a
-						// limit edit is what lets a raised limit grow the run and what makes
-						// a lowered one invalidate device rows outside the new run.
-						if (block.ParticleLimit != emitter.MaxParticles) {
-							system->Free.emplace_back(block.First, block.Capacity);
-							block.Capacity = 0;
-							block.Owner = ecs::NULL_ENTITY;
-							block.Reserved = 0;
-							slot.Index = NO_SLOT;
-							slot.ClearRequested = false;
-							holds = false;
-						}
-					}
-					if (holds) {
-						EmitterBlock &block = system->Blocks[slot.Index];
-
-						if (slot.ClearRequested) {
-							block.Generation++;
-							block.Revision++;
-							block.Live = 0;
-							block.Spawned = 0;
-							block.Pending = 0.0f;
-							block.Idle = 0.0f;
-							slot.ClearRequested = false;
-						}
-
-						if (!emitter.Enabled && slot.Requested == 0 && block.Live == 0) {
-							system->Free.emplace_back(block.First, block.Capacity);
-							block.Capacity = 0;
-							block.Owner = ecs::NULL_ENTITY;
-							block.Reserved = 0;
-							slot.Index = NO_SLOT;
-							return;
-						}
-
-						// **Re-sampled only when the emitter was written, and this
-						// gate is the single largest thing in the module's frame
-						// cost.** Sampling four curves is sixty-four `Evaluate`
-						// calls, each a scan over a keypoint list; at a hundred
-						// thousand emitters that is 6.4 million evaluations a frame
-						// for tables that almost never change.
-						//
-						// The original comparison was **522 us unconditional against
-						// 192 us gated**. It unknowingly stopped at the former 65,535
-						// slot cap. With the cap removed, the gated refresh over the
-						// roadmap's true 100,000 emitters measured 304 us in the
-						// `bench` preset on the same 24-thread machine. Caching
-						// steady parent frames and texture playback brought that to
-						// 184 us.
-						//
-						// `ecs::ChangeChannel` is the mechanism and `Observe` in
-						// `InstallParticles` is what turns it on. What it costs is
-						// **one frame of latency on a curve edit** - a script writing
-						// `emitter.Size` during `Simulation` is seen by the next
-						// frame's refresh, because `ClearChanges` runs at the phase
-						// boundary between them. That is invisible for an authored
-						// property and would matter for a curve driven per frame,
-						// which is a thing to drive through `Brightness` instead.
-						const bool authoredChanged = store.Changed<ParticleEmitter>(entity);
-						if (authoredChanged) {
-							SampleCurves(emitter, block.Curves);
-							block.Longest = std::max(emitter.Lifetime.Maximum, 0.0f);
-							block.CurveRevision++;
-						}
-						if (ApplyPlayback(store, emitter, block, authoredChanged, catalogueChanged)) {
-							block.Revision++;
-						}
-
-						// Resolve the parent frame only when the relationship changed
-						// or the observed Transform or Attachment row moved. The
-						// steady path is one retained-entity comparison and a binary
-						// search rather than two sparse-column lookups per emitter.
-						const ecs::Entity parent = store.ParentOf(entity);
-						const bool parentChanged = system->FrameParents[slot.Index] != parent;
-						const bool parentMoved =
-							std::binary_search(movedParents.begin(), movedParents.end(), parent.Id);
-						if (parentChanged || parentMoved) {
-							const core::CFrame frame = FrameOfParent(store, parent);
-							if (!SameFrame(frame, block.Frame)) {
-								if (emitter.Enabled && emitter.RateOverDistance > 0.0f) {
-									block.Pending += (frame.Position - block.Frame.Position).Magnitude() *
-													 emitter.RateOverDistance;
-								}
-								block.Frame = frame;
-								block.Revision++;
-							}
-							system->FrameParents[slot.Index] = parent;
-						}
+					if (!slot.Enabled && slot.Requested == 0 && block.Live == 0) {
+						releaseBlock(slot);
 						return;
 					}
 
-					if (!emitter.Enabled && slot.Requested == 0) {
-						return;
-					}
-
-					uint32_t first = 0;
-					const uint32_t wanted = BlockSizeFor(emitter, slot.Requested, system->BlockCeiling);
-					// **The ceiling is on rows in use, not rows ever made** - which
-					// is what `MAX_EMITTER_SLOTS` has always claimed to be. A free
-					// row costs nothing to take, so it is only a fresh one that has
-					// to fit under the cap.
-					const bool recycling = !system->FreeSlots.empty();
-					const bool noSlot = !recycling && system->Blocks.size() >= MAX_EMITTER_SLOTS;
-					if (noSlot || !Take(*system, wanted, first)) {
-						// **Two causes on one counter, and they need different
-						// fixes.** Out of emitter rows is a scene with too many
-						// effects; out of pool is a scene whose effects each want
-						// too many particles. Either way the effect never
-						// appears and nothing else says so.
-						ENGINE_WARN_EVERY(
-							5.0,
-							"emitter refused: {} ({} of {} slots, {} of {} particle rows used)",
-							noSlot ? "no emitter slot" : "no room in the particle pool",
-							system->Blocks.size(),
-							MAX_EMITTER_SLOTS,
-							system->Used,
-							system->Capacity
-						);
-						system->Statistics.EmittersRefused++;
-						return;
-					}
-
-					EmitterBlock block;
-					block.First = first;
-					block.Capacity = wanted;
-					block.Owner = entity;
-					block.Reserved = 1;
-					block.Longest = std::max(emitter.Lifetime.Maximum, 0.0f);
-					block.ParticleLimit = emitter.MaxParticles;
-
-					// **A fresh block owes one particle immediately.**
-					//
-					// The accumulator adds `Rate * delta` per frame, so an emitter at
-					// a low rate produces nothing for `1 / Rate` seconds after it is
-					// enabled - a fifth of a particle a second waits five seconds, and
-					// what an author sees is an effect that does not work. They turn
-					// the rate up, get a crowd, and never find out the first one was
-					// merely late.
-					//
-					// Starting the accumulator owing one makes "enable it and it
-					// starts" true at every rate. It is not free particles: the debt
-					// is subtracted like any other, so the *steady* rate is unchanged
-					// and only the first particle moves.
-					block.Pending = emitter.Enabled && emitter.Rate > 0.0f ? 1.0f : 0.0f;
-					SampleCurves(emitter, block.Curves);
-					ApplyPlayback(store, emitter, block);
+					// Resolve the parent frame only when the relationship changed
+					// or the observed Transform or Attachment row moved. The
+					// steady path is one retained-entity comparison and a binary
+					// search rather than two sparse-column lookups per emitter.
 					const ecs::Entity parent = store.ParentOf(entity);
-					block.Frame = FrameOfParent(store, parent);
-
-					// **The generation is carried over and advanced, not reset**,
-					// which is the whole point of it: whatever the last tenant of
-					// these rows left behind is stamped with the number this one
-					// is leaving behind, so the step reads it as death. Starting
-					// again at one would make a block agree with its predecessor.
-					if (recycling) {
-						const uint32_t reused = system->FreeSlots.back();
-						system->FreeSlots.pop_back();
-						const EmitterBlock &previous = system->Blocks[reused];
-						block.Generation = previous.Generation + 1;
-
-						// Carried over for `Generation`'s reason and one more: the
-						// renderer's copy of what it uploaded is indexed by block,
-						// so a recycled row that started its count again would
-						// agree with a record describing the emitter that has gone.
-						block.Revision = previous.Revision + 1;
-						block.CurveRevision = previous.CurveRevision + 1;
-						slot.Index = reused;
-						system->Blocks[reused] = block;
-						system->FrameParents[reused] = parent;
-					} else {
-						slot.Index = static_cast<uint32_t>(system->Blocks.size());
-						system->Blocks.push_back(block);
-						system->FrameParents.push_back(parent);
+					const bool parentChanged = system->FrameParents[slot.Index] != parent;
+					const bool parentMoved =
+						std::binary_search(movedParents.begin(), movedParents.end(), parent.Id);
+					if (parentChanged || parentMoved) {
+						const core::CFrame frame = FrameOfParent(store, parent);
+						if (!SameFrame(frame, block.Frame)) {
+							if (slot.Enabled && block.RateOverDistance > 0.0f) {
+								block.Pending += (frame.Position - block.Frame.Position).Magnitude() *
+												 block.RateOverDistance;
+							}
+							block.Frame = frame;
+							block.Revision++;
+						}
+						system->FrameParents[slot.Index] = parent;
 					}
+					return;
 				}
-			);
+
+				if (!slot.Enabled && slot.Requested == 0) {
+					return;
+				}
+
+				const ParticleEmitter *emitter = store.Get<ParticleEmitter>(entity);
+				if (emitter == nullptr) {
+					return;
+				}
+
+				uint32_t first = 0;
+				const uint32_t wanted = BlockSizeFor(*emitter, slot.Requested, system->BlockCeiling);
+				// **The ceiling is on rows in use, not rows ever made** - which
+				// is what `MAX_EMITTER_SLOTS` has always claimed to be. A free
+				// row costs nothing to take, so it is only a fresh one that has
+				// to fit under the cap.
+				const bool recycling = !system->FreeSlots.empty();
+				const bool noSlot = !recycling && system->Blocks.size() >= MAX_EMITTER_SLOTS;
+				if (noSlot || !Take(*system, wanted, first)) {
+					// **Two causes on one counter, and they need different
+					// fixes.** Out of emitter rows is a scene with too many
+					// effects; out of pool is a scene whose effects each want
+					// too many particles. Either way the effect never
+					// appears and nothing else says so.
+					ENGINE_WARN_EVERY(
+						5.0,
+						"emitter refused: {} ({} of {} slots, {} of {} particle rows used)",
+						noSlot ? "no emitter slot" : "no room in the particle pool",
+						system->Blocks.size(),
+						MAX_EMITTER_SLOTS,
+						system->Used,
+						system->Capacity
+					);
+					system->Statistics.EmittersRefused++;
+					return;
+				}
+
+				EmitterBlock block;
+				block.First = first;
+				block.Capacity = wanted;
+				block.Owner = entity;
+				block.Reserved = 1;
+				block.Longest = std::max(emitter->Lifetime.Maximum, 0.0f);
+				block.ParticleLimit = emitter->MaxParticles;
+				block.RateOverDistance = emitter->RateOverDistance;
+
+				// **A fresh block owes one particle immediately.**
+				//
+				// The accumulator adds `Rate * delta` per frame, so an emitter at
+				// a low rate produces nothing for `1 / Rate` seconds after it is
+				// enabled - a fifth of a particle a second waits five seconds, and
+				// what an author sees is an effect that does not work. They turn
+				// the rate up, get a crowd, and never find out the first one was
+				// merely late.
+				//
+				// Starting the accumulator owing one makes "enable it and it
+				// starts" true at every rate. It is not free particles: the debt
+				// is subtracted like any other, so the *steady* rate is unchanged
+				// and only the first particle moves.
+				block.Pending = emitter->Enabled && emitter->Rate > 0.0f ? 1.0f : 0.0f;
+				SampleCurves(*emitter, block.Curves);
+				ApplyPlayback(store, *emitter, block);
+				const ecs::Entity parent = store.ParentOf(entity);
+				block.Frame = FrameOfParent(store, parent);
+
+				// **The generation is carried over and advanced, not reset**,
+				// which is the whole point of it: whatever the last tenant of
+				// these rows left behind is stamped with the number this one
+				// is leaving behind, so the step reads it as death. Starting
+				// again at one would make a block agree with its predecessor.
+				if (recycling) {
+					const uint32_t reused = system->FreeSlots.back();
+					system->FreeSlots.pop_back();
+					const EmitterBlock &previous = system->Blocks[reused];
+					block.Generation = previous.Generation + 1;
+
+					// Carried over for `Generation`'s reason and one more: the
+					// renderer's copy of what it uploaded is indexed by block,
+					// so a recycled row that started its count again would
+					// agree with a record describing the emitter that has gone.
+					block.Revision = previous.Revision + 1;
+					block.CurveRevision = previous.CurveRevision + 1;
+					slot.Index = reused;
+					system->Blocks[reused] = block;
+					system->FrameParents[reused] = parent;
+				} else {
+					slot.Index = static_cast<uint32_t>(system->Blocks.size());
+					system->Blocks.push_back(block);
+					system->FrameParents.push_back(parent);
+				}
+			});
 		}
 
 		// Reclaim the blocks nobody claimed. Their particles go with them: an

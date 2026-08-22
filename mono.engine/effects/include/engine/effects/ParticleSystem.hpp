@@ -181,12 +181,20 @@ namespace engine::effects {
 		// happened to take that number.
 		uint32_t Index = NO_SLOT;
 
+		// The state the refresh walk needs even before this emitter owns a block,
+		// sampled from the much wider authored component when it changes.
+		//@{
+		bool Enabled = true;
+		bool Configured = false;
+		//@}
+
 		// Whether the next refresh invalidates every particle in the block.
 		bool ClearRequested = false;
 
 		// Explicit padding, for the reason every other `Reserved` gives.
-		uint8_t Reserved[3] = {};
+		uint8_t Reserved[1] = {};
 	};
+	static_assert(sizeof(EmitterSlot) == 12);
 
 	// Where an emitter emits from, in world space.
 	//
@@ -266,6 +274,10 @@ namespace engine::effects {
 		// The authored capacity ceiling that sized this block. A change releases
 		// and reclaims the run so raising the ceiling can actually add rows.
 		int32_t ParticleLimit = 0;
+
+		// Distance births read on the steady refresh path. Sampled here so that
+		// moving a parent does not pull the authored emitter row into cache.
+		float RateOverDistance = 0.0f;
 
 		// Device-stepped forces and velocity ceiling. These are one value per
 		// emitter, not fields repeated on every particle.

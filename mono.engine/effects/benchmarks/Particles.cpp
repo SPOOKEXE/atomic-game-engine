@@ -26,15 +26,15 @@
 //
 // | Row | Cost |
 // |---|---|
-// | Frame · 1,000 emitters · 5,000 particles | 0.50 us |
-// | Frame · 10,000 emitters · 50,000 particles | 21.3 us |
-// | **Frame · 100,000 emitters · 500,000 particles** | **583 us** |
-// | Refresh only · 100,000 emitters | 184 us |
-// | Step only · 100,000 emitters · 500,000 particles | 290 us |
-// | Step at zero delta · 100,000 emitters | 285 us |
+// | Frame · 1,000 emitters · 5,000 particles | 0.34 us |
+// | Frame · 10,000 emitters · 50,000 particles | 14.1 us |
+// | **Frame · 100,000 emitters · 500,000 particles** | **427 us** |
+// | Refresh only · 100,000 emitters | 112 us |
+// | Step only · 100,000 emitters · 500,000 particles | 304 us |
+// | Step at zero delta · 100,000 emitters | 307 us |
 //
-// **The roadmap's number holds with room to spare: 583 microseconds is 3.5 per
-// cent of a 60 Hz frame.** The scaling from 10,000 to 100,000 is 27x for 10x the
+// **The roadmap's number holds with room to spare: 427 microseconds is 2.6 per
+// cent of a 60 Hz frame.** The scaling from 10,000 to 100,000 is 30x for 10x the
 // work. That cache cost is visible, but it remains far below quadratic growth.
 //
 // **Two findings came out of this suite rather than out of reading the code.**
@@ -46,10 +46,11 @@
 //   measured 65,535 emitters because the former uint16 slot cap silently refused
 //   the rest. The authored gate alone measured 304 us at the true 100,000
 //   target. Caching steady parent frames and texture playback reduced it to
-//   184 us.
+//   184 us. Moving authored-row reads onto the change walk and keeping the
+//   steady claim row at twelve bytes reduced it again to 112 us.
 // - **The spawn half really is free.** "Step at zero delta" ages nothing and
-//   spawns nothing and costs 285 us, which is within noise of the full step's
-//   290 us. So the entire cost of the step is the walk and the per-particle
+//   spawns nothing and costs 307 us, which is within noise of the full step's
+//   304 us. So the entire cost of the step is the walk and the per-particle
 //   arithmetic, and the serial spawn loop - the one deliberate serialisation in
 //   the module - does not appear in the measurement at all. That is the
 //   justification `StepParticles` claims for it, confirmed rather than asserted.

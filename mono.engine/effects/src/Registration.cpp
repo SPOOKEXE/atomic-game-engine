@@ -247,7 +247,10 @@ namespace engine::effects {
 			for (size_t index = 0; index < count; index++) {
 				slots[index].Requested = 0;
 				slots[index].Index = NO_SLOT;
+				slots[index].Enabled = true;
+				slots[index].Configured = false;
 				slots[index].ClearRequested = false;
+				slots[index].Reserved[0] = 0;
 			}
 		}
 	}

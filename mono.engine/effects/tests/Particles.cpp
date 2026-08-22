@@ -474,7 +474,24 @@ TEST_CASE("changing MaxParticles reclaims the block at the new capacity", "[effe
 
 	const uint32_t grownSlot = store.Get<EmitterSlot>(emitter)->Index;
 	REQUIRE(grownSlot != NO_SLOT);
+	CHECK(grownSlot == firstSlot);
 	CHECK(store.Resource<ParticleSystem>()->Blocks[grownSlot].Capacity == 6);
+}
+
+TEST_CASE("capacity edits reuse the emitter runtime row", "[effects]") {
+	Store store("effects_test");
+	const Entity emitter = MakeEmitter(store);
+
+	Settings(store, emitter).Enabled = false;
+	Settings(store, emitter).Rate = 0.0f;
+	for (int edit = 0; edit < 32; edit++) {
+		Settings(store, emitter).MaxParticles = edit % 2 == 0 ? 2 : 3;
+		REQUIRE(engine::effects::EmitParticles(store, emitter, 3));
+		Frame(store, 0.0f);
+		REQUIRE(store.Get<EmitterSlot>(emitter)->Index != NO_SLOT);
+	}
+
+	CHECK(store.Resource<ParticleSystem>()->Blocks.size() == 1);
 }
 
 TEST_CASE("resident force modules accelerate and cap a particle", "[effects]") {
