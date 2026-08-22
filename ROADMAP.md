@@ -494,14 +494,24 @@ The milestone headings below are development labels. Not in line with project ve
       emitted by the `version` job because `jobs.<id>.if` cannot read the
       `matrix` context. Verified end to end on Linux: the dev archive unpacks,
       runs, and writes a 123-tag heap report the shipped binary refuses.
-- [_] crossworldseam demo is not setup properly. **Half done.** The command in
-      the file's own header omitted `--view-spacing 0`, so following it
-      composited the two worlds 40 apart: two 80-stud floors z-fighting in a
-      coplanar band and the camera aimed down the middle at neither pane. That is
-      fixed, and the flag is now argued rather than just present. What is left is
-      a mirror control in the same scene that draws no image at all in any of
-      eight variants tried, while `MirrorCorridor` works in the same build -
-      that one did not reduce to a scene cause and needs an engine look.
+- [x] crossworldseam demo is not setup properly. The command in the file's own
+      header omitted `--view-spacing 0`, so following it composited the two
+      worlds 40 apart: two 80-stud floors z-fighting in a coplanar band and the
+      camera aimed down the middle at neither pane. That was most of the report
+      and is fixed.
+      **The rest does not reproduce, measured rather than eyeballed.** Both panes
+      draw. Taking the deviation across each pane as well as the mean - an image
+      varies and a flat material does not - the hole reads `(84, 64, 40)` σ33
+      with one world, its own room in the fallback, and `(42, 61, 89)` σ15 with
+      two, which is the far world's blue palette seen through it. The mirror
+      beside it reads `(57, 45, 34)` σ18 at *both* counts, identical to a tenth
+      of a level. The control that makes those numbers mean something: delete the
+      mirror's `SurfaceCamera` and leave its pane, and the same region reads
+      `(142, 142, 147)` σ**0.3** - the material lit, flat, which is what "no
+      image" looks like here. The branch the note accused,
+      `SurfaceView::InstanceCount` being non-zero so the pass draws only the
+      foreign range, is what *makes* the two-world picture blue. The scene's
+      header carries the measurement in place of the diagnosis it replaced.
 - [~] ground grid "enables always on top" when moving/scaling something,
       otherwise its not "always on top". **The half that is a flag is done; the
       half that is occlusion is a render-graph node and is specified below.**

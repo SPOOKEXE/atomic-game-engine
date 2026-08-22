@@ -49,57 +49,45 @@
 --     client --worlds 1 --script CrossWorldSeam.luau --frames 40 --capture a.bmp
 --     client --worlds 2 --view-spacing 0 --script CrossWorldSeam.luau --frames 40 --capture b.bmp
 --
--- With **one** world the pane renders: its destination names a world that is not
--- there, so it falls back to showing its own - and the pad and the marker are
--- plainly in the glass. With **two** the same pane draws its own material, flat,
--- and so does the plain mirror beside it. Two panes, two slots, both blank, and
--- the only thing that changed is how many worlds are being composited.
+-- **`--view-spacing 0` is not optional and the omission was most of the
+-- report.** Without it the two worlds are composited forty studs apart: two
+-- eighty-stud floors z-fighting in a coplanar band, and the camera aimed down
+-- the middle at neither pane. Nothing about the seam is visible in that picture,
+-- working or not.
 --
--- **And the difference is one branch, measured in pixels.** Sample the pane in
--- both stills: with one world it is `(11, 13, 21)` and `(59, 42, 28)` - the
--- sub-render's own sky and this world's floor, so an image. With two it is a
--- uniform `(141, 145, 167)`, which is the pane's material lit, so no image at
--- all.
+-- ## Both panes draw, and here is the measurement that says so
 --
--- The renderer takes a different path for exactly that reason. With no
--- destination present `SurfaceView::InstanceCount` is zero and the surface pass
--- draws `plan.Reflected` - this world's own rows - which works. With the
--- destination present it is six, and the pass draws **only the foreign range**
--- and skips the plan. That branch is what yields an empty texture, and it is the
--- one line to instrument next.
+-- Sample the two panes in both stills, and take the deviation as well as the
+-- mean - a rendered image varies across the pane and a flat material does not:
 --
--- ## And what the sampling turned out not to be
+--   * the **hole**, one world: `(84, 64, 40)`, deviation 33. Its destination
+--     names a world that is not there, so it falls back to showing its own, and
+--     the pad and the marker are plainly in the glass.
+--   * the **hole**, two worlds: `(42, 61, 89)`, deviation 15. Blue, which is the
+--     far world's palette: the pad and the marker over there, seen through this
+--     pane. That is the feature working.
+--   * the **mirror**, either count: `(57, 45, 34)`, deviation 18, *identical to
+--     a tenth of a level between the two runs* - this world's floor and sky,
+--     reflected, and unaffected by how many worlds are being composited.
 --
--- Instrumented and removed: the pane's sampling matrix is **identical** in the
--- run that works and the run that does not - stored and fresh agree, and both
--- world counts agree. The far world's rows *are* uploaded at the right slots and
--- *are* drawn into the surface texture, one call, seventy-two triangles.
+-- And the control that makes those numbers mean something: delete the mirror's
+-- `SurfaceCamera` and leave its pane, and the same region reads
+-- `(142, 142, 147)` with a deviation of **0.3**. That is the pane's own material
+-- lit, flat, and it is what "no image" actually looks like here.
 --
--- So the picture is not a bad projection of a good texture. It is a uniform
--- texture. Whatever those seventy-two triangles produce from that camera fills
--- the hole with one colour.
+-- The report this scene was built for - "two panes, two slots, both blank with
+-- two worlds" - therefore does not reproduce. Neither does the branch it
+-- accused: `SurfaceView::InstanceCount` being non-zero and the pass drawing only
+-- the foreign range is what *makes* the two-world picture blue rather than
+-- brown.
 --
--- **The leading explanation, unconfirmed:** both worlds are laid out the same
--- way, and the stand-in sits a fraction behind the block. So the surface camera
--- ends up looking at the *far world's own portal block*, from about the same
--- distance the frustum is fitted at, and that block is the same ten by eight the
--- frustum covers. It fills the hole exactly. `ImmersivePortals.luau` has the same
--- layout and the same stand-in offset, which is why its pane reads as a flat slab
--- rather than as a room.
+-- ## What the sampling was checked against on the way
 --
--- If that is it, the fix is the scene's and not the engine's - a destination
--- stand-in has to be placed where the far world's own pane is not, or the far
--- pane has to be kept out of the picture by tag. Moving the stand-in aside here
--- did not change the still, so it is not proven and should be measured before it
--- is believed.
---
--- So whatever is left is in the multi-world path rather than in the seam: the
--- camera is right (`scene/tests/SurfaceCameras.cpp` pins it against
--- `SeamMapping` from both sides), the sampling is right (the same file projects
--- the pane's four corners through `ViewProjection · SurfaceMapping` and requires
--- them inside `0..1`), and the far world's rows arrive
--- (`client/tests/Presentation.cpp`). Every cross-world scene has two worlds by
--- definition, which is why this was only ever seen through a portal.
+-- Instrumented and removed while the report was open: the pane's sampling matrix
+-- is identical in the run that works and the run that did not - stored and fresh
+-- agree, and both world counts agree. The far world's rows are uploaded at the
+-- right slots and drawn into the surface texture, one call, seventy-two
+-- triangles.
 --
 -- ## Which world is which
 --
