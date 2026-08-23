@@ -124,6 +124,7 @@
         "audio",
         "bakegraph",
         "collision",
+        "control",
         "core",
         "delivery",
         "discord",
@@ -164,9 +165,7 @@
       "layer": 13,
       "links": [
         "core",
-        "ecs",
-        "parallel",
-        "world"
+        "parallel"
       ]
     },
     "core": {
@@ -686,6 +685,7 @@
       "tier": "shared",
       "links": [
         "assets",
+        "control",
         "core",
         "delivery",
         "discord",
@@ -702,6 +702,7 @@
         "audio",
         "bakegraph",
         "collision",
+        "control",
         "core",
         "delivery",
         "discord",

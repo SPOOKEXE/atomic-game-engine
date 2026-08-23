@@ -17,8 +17,7 @@
 // The file-backed ones appear only inside a checkout, which is the tool table's
 // own rule: a client is told what this program can actually do.
 
-#include "Repository.hpp"
-
+#include <engine/control/Repository.hpp>
 #include <engine/control/Surface.hpp>
 
 #include <algorithm>

@@ -28,6 +28,9 @@ namespace client {
 
 	// Command-line configuration copied into Client during Initialise.
 	struct Options {
+		// The loopback MCP port, or -1 when the control surface is disabled.
+		int ControlPort = -1;
+
 		// Window width in logical pixels, before any display scaling.
 		int Width = 1280;
 

@@ -17,6 +17,9 @@
 
 #include "ControlAutomation.hpp"
 
+#include <engine/control/Features.hpp>
+#include <engine/control/features/Script.hpp>
+#include <engine/control/features/Universe.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
@@ -28,6 +31,7 @@
 #include <SDL3/SDL_video.h>
 
 #include <algorithm>
+#include <array>
 #include <cfloat>
 #include <filesystem>
 #include <imgui.h>
@@ -147,6 +151,22 @@ namespace studio {
 		}
 	}
 
+	void Editor::EnableControlFeatures() {
+		const std::array features{
+			engine::control::features::Universe(*Universe),
+			engine::control::features::Architecture(),
+			engine::control::features::Script(),
+			engine::control::features::Diagnostics(),
+			engine::control::features::Build(),
+			engine::control::features::Resources(),
+			engine::control::features::Prompts(),
+			engine::control::features::Custom("studio", [this](engine::control::Surface &) {
+				RegisterControlTools();
+			}),
+		};
+		ControlSurface.Enable(features);
+	}
+
 	void Editor::StartControl() {
 		// **The port field is seeded whether or not the server starts**, because
 		// the panel's Start button has to offer something sensible in the case
@@ -167,8 +187,7 @@ namespace studio {
 		// filled once per process and the socket is opened and closed as often
 		// as somebody likes.
 		if (ControlSurface.Count() == 0) {
-			ControlSurface.AddStandardTools(*Universe);
-			RegisterControlTools();
+			EnableControlFeatures();
 		}
 
 		if (!ControlServer.Start(static_cast<uint16_t>(Settings.ControlPort))) {
@@ -725,12 +744,11 @@ namespace studio {
 
 		// **The tools are registered once, not once per start.** `Surface::Add`
 		// replaces by name, so a second registration would be harmless and a
-		// second `AddStandardTools` would still be work nobody asked for - and
+		// second feature pass would still be work nobody asked for, and
 		// the count in the log line would go on saying the same number while
 		// doing it twice.
 		if (ControlSurface.Count() == 0) {
-			ControlSurface.AddStandardTools(*Universe);
-			RegisterControlTools();
+			EnableControlFeatures();
 		}
 
 		if (!ControlServer.Start(static_cast<uint16_t>(std::max(0, ControlPortField)))) {

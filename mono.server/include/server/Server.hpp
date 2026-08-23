@@ -903,11 +903,11 @@ namespace server {
 		// @param nowSeconds The current time.
 		void TouchWorld(engine::world::WorldId world, double nowSeconds);
 
-		// Fills the control surface with the shared table and this server's own.
+		// Adds this server's own tools after the engine feature list.
 		//
 		// **In `src/Control.cpp`, beside the state it reads**, which is the same
-		// place the editor keeps its own. Called once, from `Run`, and only when
-		// `--mcp-port` asked for a surface at all.
+		// place the editor keeps its own. Called by the custom feature in `Run`,
+		// and only when `--mcp-port` asked for a surface at all.
 		//
 		// @since v0.19
 		void RegisterControlTools();

@@ -45,6 +45,22 @@ namespace engine::control {
 	// @since v0.19
 	inline constexpr uint16_t DEFAULT_SERVER_PORT = 8734;
 
+	// A shipped client's conventional control port.
+	//
+	// Distinct from the studio and dedicated server so all three may run on one
+	// development machine. Still disabled unless `--mcp-port` is supplied.
+	//
+	// @since v0.20
+	inline constexpr uint16_t DEFAULT_CLIENT_PORT = 8736;
+
+	// A content origin's conventional control port.
+	//
+	// The origin has no universe or script features, and opens this only when an
+	// operator explicitly asks for it.
+	//
+	// @since v0.20
+	inline constexpr uint16_t DEFAULT_CDN_PORT = 8732;
+
 	// A listener with one client.
 	//
 	// @since v0.8

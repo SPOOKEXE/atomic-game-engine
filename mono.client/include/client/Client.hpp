@@ -4,6 +4,8 @@
 
 #include <engine/assets/ContentPolicy.hpp>
 #include <engine/audio/Device.hpp>
+#include <engine/control/Server.hpp>
+#include <engine/control/Surface.hpp>
 #include <engine/core/Clock.hpp>
 #include <engine/core/HeapProfile.hpp>
 #include <engine/delivery/Client.hpp>
@@ -526,6 +528,15 @@ namespace client {
 		// construction, and that thread is decided in Initialise rather than
 		// wherever this object was declared.
 		std::unique_ptr<engine::world::Universe> Universe_;
+
+		// The loopback MCP surface. It registers nothing and opens no socket when
+		// `Options::ControlPort` is negative.
+		engine::control::Server ControlServer;
+		engine::control::Surface ControlSurface{
+			"atomic-client",
+			"A shipped atomic game client. Its universe contains local scenes and may also contain a "
+			"replica received from a dedicated server. Replica writes are refused by their store."
+		};
 
 		// One VM per world, while a game file is being played. Held here as
 		// well as by each world's scheduler, for the reason

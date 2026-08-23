@@ -2,6 +2,9 @@
 #include <engine/assets/Manifest.hpp>
 #include <engine/assets/Material.hpp>
 #include <engine/audio/Wav.hpp>
+#include <engine/control/Features.hpp>
+#include <engine/control/features/Script.hpp>
+#include <engine/control/features/Universe.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Paths.hpp>
@@ -39,6 +42,7 @@
 #include <SDL3/SDL_gpu.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <client/Client.hpp>
 #include <client/ContentDemand.hpp>
@@ -494,6 +498,25 @@ namespace client {
 
 		if (!BeginAudio()) {
 			return false;
+		}
+
+		if (Settings.ControlPort >= 0) {
+			const std::array features{
+				engine::control::features::Universe(*Universe_),
+				engine::control::features::Architecture(),
+				engine::control::features::Script(),
+				engine::control::features::Diagnostics(),
+				engine::control::features::Resources(),
+				engine::control::features::Prompts(),
+			};
+			ControlSurface.Enable(features);
+			if (ControlServer.Start(static_cast<uint16_t>(Settings.ControlPort))) {
+				ENGINE_INFO(
+					"control: listening on 127.0.0.1:{} - {} tools",
+					ControlServer.Port(),
+					ControlSurface.Count()
+				);
+			}
 		}
 
 		Running = true;
@@ -1330,6 +1353,7 @@ namespace client {
 
 	void Client::Shutdown() {
 		// Stop dependants before renderer and SDL teardown.
+		ControlServer.Stop();
 		Sound.reset();
 		Content.reset();
 
@@ -2255,6 +2279,10 @@ namespace client {
 		{
 			ENGINE_HEAP_SCOPE("client.events");
 			PumpEvents();
+		}
+
+		if (ControlServer.IsRunning()) {
+			ControlServer.Pump([this](const std::string &line) { return ControlSurface.Answer(line); });
 		}
 
 		// Input belongs to the update clock. Presentation used to write it just

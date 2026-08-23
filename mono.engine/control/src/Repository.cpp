@@ -1,7 +1,6 @@
 // Walking up from the executable until something recognisable is underfoot.
 
-#include "Repository.hpp"
-
+#include <engine/control/Repository.hpp>
 #include <engine/core/Paths.hpp>
 
 #include <system_error>

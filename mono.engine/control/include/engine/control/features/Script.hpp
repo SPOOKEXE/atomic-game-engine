@@ -1,3 +1,5 @@
+#pragma once
+
 // What a script may name, and whether one would compile.
 //
 // **Checking is offered and evaluating is not, and that is a decision rather
@@ -25,8 +27,7 @@
 // program that registered a class the checked-in manifest has not caught up with
 // still tells the truth about itself.
 
-#include "Repository.hpp"
-
+#include <engine/control/Repository.hpp>
 #include <engine/control/Surface.hpp>
 #include <engine/core/Clock.hpp>
 #include <engine/core/Paths.hpp>
@@ -107,7 +108,7 @@ namespace engine::control {
 		}
 	}
 
-	void Surface::AddScriptTools() {
+	inline void Surface::AddScriptTools() {
 		Add(Tool{
 			"class_list",
 			"Every class this process registers, with what it derives from. A class is what "
@@ -297,5 +298,12 @@ namespace engine::control {
 				};
 			},
 		});
+	}
+
+	namespace features {
+		// The live class catalogue and bounded Luau type checking.
+		inline Feature Script() {
+			return Feature{"script", [](Surface &surface) { surface.AddScriptTools(); }};
+		}
 	}
 }

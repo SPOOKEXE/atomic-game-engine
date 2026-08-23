@@ -1,6 +1,9 @@
 #include <engine/assets/ChunkStore.hpp>
 #include <engine/assets/Grant.hpp>
 #include <engine/assets/Signature.hpp>
+#include <engine/control/Features.hpp>
+#include <engine/control/features/Script.hpp>
+#include <engine/control/features/Universe.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/Log.hpp>
@@ -2424,7 +2427,19 @@ namespace server {
 		}
 
 		if (Settings.ControlPort >= 0) {
-			RegisterControlTools();
+			const std::array features{
+				engine::control::features::Universe(Worlds()),
+				engine::control::features::Architecture(),
+				engine::control::features::Script(),
+				engine::control::features::Diagnostics(),
+				engine::control::features::Build(),
+				engine::control::features::Resources(),
+				engine::control::features::Prompts(),
+				engine::control::features::Custom("server", [this](engine::control::Surface &) {
+					RegisterControlTools();
+				}),
+			};
+			ControlSurface.Enable(features);
 			if (ControlServer.Start(static_cast<uint16_t>(Settings.ControlPort))) {
 				ENGINE_INFO(
 					"control: listening on 127.0.0.1:{} - {} tools",

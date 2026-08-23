@@ -25,6 +25,9 @@
 #include <engine/assets/ContentPolicy.hpp>
 #include <engine/assets/Grant.hpp>
 #include <engine/assets/Signature.hpp>
+#include <engine/control/Features.hpp>
+#include <engine/control/Server.hpp>
+#include <engine/control/Surface.hpp>
 #include <engine/core/Arguments.hpp>
 #include <engine/core/Config.hpp>
 #include <engine/core/Flags.hpp>
@@ -46,6 +49,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <memory>
+#include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -154,6 +158,14 @@ int main(int argc, char **argv) {
 	engine::core::Config::DeclareOptions(arguments);
 
 	arguments.Flag("verbose", "Log at trace level");
+	// Value-taking and absent by default. The conventional number remains in
+	// one constant, while any valid port supplied here is used as written.
+	arguments.Value(
+		"mcp-port",
+		"PORT",
+		"Listen for Model Context Protocol on 127.0.0.1:PORT (conventionally " +
+			std::to_string(engine::control::DEFAULT_CDN_PORT) + ")"
+	);
 	arguments.Value(
 		"store", "DIR", "The content store to serve or publish into (default: beside the binary)"
 	);
@@ -449,6 +461,76 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 
+	std::unique_ptr<engine::control::Server> controlServer;
+	std::unique_ptr<engine::control::Surface> controlSurface;
+	if (arguments.Has("mcp-port")) {
+		controlServer = std::make_unique<engine::control::Server>();
+		controlSurface = std::make_unique<engine::control::Surface>(
+			"atomic-cdn",
+			"An atomic content origin. It has no worlds or scripting runtime; its tools report the "
+			"module graph, process diagnostics, and content service state."
+		);
+
+		const std::array features{
+			engine::control::features::Architecture(),
+			engine::control::features::Diagnostics(),
+			engine::control::features::Resources(),
+			engine::control::features::Prompts(),
+			engine::control::features::Custom(
+				"cdn", [&origin, &serving, &controlServer](engine::control::Surface &surface) {
+					surface.Add(
+						engine::control::Tool{
+							"engine_info",
+							"This content origin's own state: where it is listening, the manifest root it "
+							"serves, cache use, request counters, and its loopback control endpoint.",
+							[] { return nlohmann::json{{"type", "object"}}; },
+							[&origin, &serving, &controlServer](const nlohmann::json &, std::string &) {
+								const cdn::ServiceCounters &counts = serving->Counters();
+								const std::shared_ptr<const cdn::Publication> publication = origin.Current();
+								return nlohmann::json{
+									{"endpoint", serving->Local().Text()},
+									{"manifest",
+									 publication == nullptr ? std::string()
+															: publication->Contents().Root().ToHex()},
+									{"cache",
+									 nlohmann::json{
+										 {"bytes", origin.Cache().Bytes()},
+										 {"entries", origin.Cache().Count()},
+										 {"capacity", origin.Cache().Capacity()},
+									 }},
+									{"requests",
+									 nlohmann::json{
+										 {"bundles", counts.Bundles},
+										 {"refused", counts.Refused},
+										 {"missing", counts.Missing},
+										 {"sentBytes", counts.SentBytes},
+										 {"receivedBytes", counts.ReceivedBytes},
+									 }},
+									{"control",
+									 nlohmann::json{
+										 {"port", controlServer->Port()},
+										 {"served", controlServer->Served()},
+									 }},
+								};
+							},
+						}
+					);
+				}
+			),
+		};
+		controlSurface->Enable(features);
+
+		const int port =
+			static_cast<int>(arguments.GetInteger("mcp-port", engine::control::DEFAULT_CDN_PORT));
+		if (controlServer->Start(static_cast<uint16_t>(port))) {
+			ENGINE_INFO(
+				"control: listening on 127.0.0.1:{} - {} tools",
+				controlServer->Port(),
+				controlSurface->Count()
+			);
+		}
+	}
+
 	// A bounded run for a smoke test, unbounded otherwise. Bounded rather than
 	// "run for N seconds" so the check is a count a test can state instead of a
 	// duration it has to wait out.
@@ -539,6 +621,11 @@ int main(int argc, char **argv) {
 
 	for (long frame = 0; frames < 0 || frame < frames; ++frame) {
 		const size_t answered = serving->Pump(NowSeconds());
+		if (controlServer && controlServer->IsRunning()) {
+			controlServer->Pump([&controlSurface](const std::string &line) {
+				return controlSurface->Answer(line);
+			});
+		}
 
 		// Beside the content pump, for the reason the announcer below is: this
 		// is bookkeeping around the serve loop rather than part of answering a

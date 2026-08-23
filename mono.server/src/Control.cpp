@@ -28,12 +28,6 @@ namespace server {
 	void Server::RegisterControlTools() {
 		Server *host = this;
 
-		// The shared table first, then this program's, so a replacement is
-		// written after the thing it replaces. `engine_info` below is the
-		// better-informed version of the one `AddStandardTools` installed: a
-		// server's own state is what it is listening on and who is on it.
-		ControlSurface.AddStandardTools(Worlds());
-
 		ControlSurface.Add(
 			Tool{
 				"engine_info",

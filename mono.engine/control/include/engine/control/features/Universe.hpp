@@ -1,3 +1,5 @@
+#pragma once
+
 // The tools any program with worlds can answer.
 //
 // **The universe is the game and a world is a scene**, which is the mapping a
@@ -11,8 +13,6 @@
 // a world without a bound. The tree tools take a `depth` and a `limit` and
 // default both to something small - a world of fifty thousand parts serialised
 // whole is a reply nothing can read and a frame nothing can draw.
-
-#include "Catalogue.hpp"
 
 #include <engine/control/Surface.hpp>
 #include <engine/core/FrameGraph.hpp>
@@ -28,6 +28,7 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Schema.hpp>
+#include <engine/world/Universe.hpp>
 
 #include <algorithm>
 #include <new>
@@ -663,7 +664,7 @@ namespace engine::control {
 		}
 	}
 
-	json ComponentCatalogue() {
+	inline json ComponentCatalogue() {
 		json out = json::array();
 		for (uint32_t index = 0; index < static_cast<uint32_t>(ecs::Components::Count()); index++) {
 			const ecs::TypeDescriptor &type = ecs::Components::Describe(ecs::ComponentId(index));
@@ -688,7 +689,7 @@ namespace engine::control {
 		return json{{"components", std::move(out)}, {"count", ecs::Components::Count()}};
 	}
 
-	void Surface::AddUniverseTools(world::Universe &universe, bool writable) {
+	inline void Surface::AddUniverseTools(world::Universe &universe, bool writable) {
 		world::Universe *worlds = &universe;
 
 		Add(Tool{
@@ -732,6 +733,17 @@ namespace engine::control {
 			[] { return json{{"type", "object"}}; },
 			[](const json &, std::string &) { return ComponentCatalogue(); },
 		});
+
+		AddResource(
+			Resource{
+				"atomic://components",
+				"The component catalogue",
+				"Every component type this engine registers, with its size, whether it is a tag, "
+				"whether a save file can carry it and how many bytes a replication delta needs.",
+				"application/json",
+				[](std::string &) { return ComponentCatalogue().dump(2); },
+			}
+		);
 
 		Add(Tool{
 			"world_list",
@@ -1219,5 +1231,15 @@ namespace engine::control {
 				};
 			},
 		});
+	}
+
+	namespace features {
+		// World and ECS inspection, with writes when the product permits them.
+		inline Feature Universe(world::Universe &universe, bool writable = true) {
+			return Feature{
+				"universe",
+				[&universe, writable](Surface &surface) { surface.AddUniverseTools(universe, writable); },
+			};
+		}
 	}
 }

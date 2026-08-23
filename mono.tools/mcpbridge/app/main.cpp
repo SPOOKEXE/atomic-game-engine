@@ -1,17 +1,16 @@
-// Model Context Protocol on stdio, forwarded to a running editor.
+// Model Context Protocol on stdio, forwarded to a running engine product.
 //
 // **A byte pump, and it understands nothing.** MCP clients start a server as a
 // subprocess and speak newline-delimited JSON-RPC over its stdin and stdout.
-// The editor cannot be that subprocess: it is a windowed program with a
-// renderer and a universe, started by a person or by `just edit`, and outliving
-// any one client. So the editor listens on loopback and this stands in front of
-// it - everything a client writes goes to the socket, everything the socket
-// says goes back out.
+// The client, server, studio, and content origin are started independently and
+// may outlive any one MCP client. Each listens on loopback when asked, and this
+// stands in front of it: everything a client writes goes to the socket and
+// everything the socket says goes back out.
 //
 // Because it parses nothing, there is no second copy of the protocol to keep in
-// step. A tool added to `engine/control/src/Tools.cpp` or to the editor's own
-// `mono.studio/src/Control.cpp` is reachable through here the moment it exists,
-// and adding one needs no edit to this file.
+// step. A tool added through an engine control feature or a product's custom
+// feature is reachable through here the moment it exists, and adding one needs
+// no edit to this file.
 //
 // **Two threads, because both directions block.** A single-threaded pump would
 // have to poll one side while the other was mid-read, and the whole point of

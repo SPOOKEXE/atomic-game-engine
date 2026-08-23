@@ -23,15 +23,28 @@
 //
 // @tier shared
 
-#include <engine/world/Universe.hpp>
-
 #include <functional>
 #include <nlohmann/json_fwd.hpp>
 #include <span>
 #include <string>
 #include <vector>
 
+namespace engine::world {
+	class Universe;
+}
+
 namespace engine::control {
+
+	class Surface;
+
+	// One named group of tools, resources, or prompts a program elects to
+	// expose. The installer runs immediately and is not retained.
+	//
+	// @since v0.20
+	struct Feature {
+		std::string Name;
+		std::function<void(Surface &)> Install;
+	};
 
 	// One thing a program can be asked to do.
 	//
@@ -143,6 +156,16 @@ namespace engine::control {
 		// one with a better-informed version of itself.
 		void Add(Tool tool);
 
+		// Enables a program's explicit feature list, in order.
+		//
+		// A later feature may replace a row from an earlier one through `Add`,
+		// which is how product-specific tools refine shared engine tools without
+		// a second registry or a switch in the protocol.
+		//
+		// @param features Borrowed for this call. Installers are not retained.
+		// @since v0.20
+		void Enable(std::span<const Feature> features);
+
 		// Installs the tools any program with worlds can answer.
 		//
 		// **The class tree and the storage under it, which are two views of one
@@ -164,20 +187,6 @@ namespace engine::control {
 		//                 fails is worse than one that was never listed.
 		void AddUniverseTools(world::Universe &universe, bool writable = true);
 
-		// Installs every group below, which is what a program with worlds wants.
-		//
-		// **One call, because there is one right answer.** Each group is
-		// separately available for a program that has a reason to differ, and no
-		// program has yet had one: the universe tools, the module graph, the
-		// class table and the type checker, the log and the metrics, and the
-		// test runner, plus the standard resources and prompts. A program adds
-		// its own rows afterwards, and a later row wins.
-		//
-		// @param universe The worlds to expose.
-		// @param writable Whether the write tools are offered at all.
-		// @since v0.19
-		void AddStandardTools(world::Universe &universe, bool writable = true);
-
 		// Installs the module graph and the layer table.
 		//
 		// **The only tools in this module a program with no worlds can still
@@ -198,7 +207,7 @@ namespace engine::control {
 		// `class_list` and `class_get` read the classes this process actually
 		// registered; `script_check` type-checks Luau against the generated
 		// declarations without running any of it. **Nothing here evaluates a
-		// script**, and `src/ScriptTools.cpp` says why in full: a tool runs
+		// script**, and `features/Script.hpp` says why in full: a tool runs
 		// inside the frame and there is no thread here to interrupt a loop from.
 		//
 		// `script_check` needs the checkout this program was built from and
@@ -253,9 +262,9 @@ namespace engine::control {
 		// Installs the resources any program can serve, plus the ones a
 		// checkout adds.
 		//
-		// The layer table, the module graph and the component catalogue are
-		// compiled in or read out of the running process, so every program has
-		// them. The `AGENTS.md` files and the scripting manifest are files, so
+		// The layer table and module graph are compiled in, so every program has
+		// them. The component catalogue belongs to the optional universe feature.
+		// The `AGENTS.md` files and the scripting manifest are files, so
 		// they appear only when this executable was staged into a checkout -
 		// which is the same principle the tool table follows: a client is told
 		// what this program can actually do rather than discovering it by

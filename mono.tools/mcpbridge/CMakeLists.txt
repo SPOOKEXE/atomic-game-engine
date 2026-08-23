@@ -2,9 +2,9 @@
 #
 # **A byte pump with no opinions**, which is why it links `core` for argument
 # parsing and asio for a socket and nothing else. It does not link the studio,
-# does not parse JSON, and has no idea what a world is - the whole protocol
-# lives in `mono.studio`, and this exists because MCP clients speak stdio to a
-# subprocess while the editor is a window that outlives them.
+# does not parse JSON, and has no idea what a world is. The whole protocol
+# lives in `Engine::control`, and this exists because MCP clients speak stdio to a
+# subprocess while each engine product is a process that outlives them.
 #
 # A bare `add_executable`, the same shape as `bindings` and `scriptcheck`, and
 # invisible to `expected_graph.json` for the same reason.
@@ -16,8 +16,8 @@ target_link_libraries(mcpbridge PRIVATE
 # **The header without the library, deliberately.** All this needs from `control`
 # is `DEFAULT_PORT`, and that number existing in one place is the whole point of
 # it - three copies is how the editor came to advertise a port the bridge did not
-# dial. Linking the module would drag `ecs` and `world` into a byte pump that has
-# no idea what a world is, so it takes the include path and no symbols.
+# dial. Linking the module is still unnecessary for a byte pump with no protocol
+# work, so it takes the include path and no symbols.
 target_include_directories(mcpbridge PRIVATE
 	"${CMAKE_SOURCE_DIR}/mono.engine/control/include")
 target_compile_options(mcpbridge PRIVATE ${MONO_COMPILE_OPTIONS})
@@ -95,7 +95,7 @@ endif()
 # them, which is the only way to prove the pump carries a protocol rather than
 # merely carrying bytes.
 if(MONO_BUILD_TESTS AND IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tests")
-	mono_add_tests(mcpbridge DEPS Engine::control Engine::core)
+	mono_add_tests(mcpbridge DEPS Engine::control Engine::core Engine::world)
 
 	# The suite spawns the program it is testing, so the program has to be there.
 	add_dependencies(test_mcpbridge mcpbridge)

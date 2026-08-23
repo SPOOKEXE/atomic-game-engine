@@ -7,9 +7,8 @@
 // repository says to read before touching anything. A model that had to *call*
 // for those would call for them after it had already written the wrong thing.
 //
-// **Three of them are compiled in or read out of the running process, and the
-// rest are files.** The layer table, the module graph and the component
-// catalogue are properties of the build and answer everywhere. The `AGENTS.md`
+// **Two of them are compiled in, and the rest are files.** The layer table and
+// module graph are properties of the build and answer everywhere. The `AGENTS.md`
 // files and the scripting manifest are a working tree, so they are listed only
 // when this executable was staged into one - the same rule the tool table
 // follows, and for the same reason: being told what a program can do beats
@@ -19,10 +18,8 @@
 // `file://`. Two of them are not files at all, and a client that resolved a
 // `file://` against its own filesystem would be reading a different machine's.
 
-#include "Catalogue.hpp"
-#include "Repository.hpp"
-
 #include <engine/control/Architecture.hpp>
+#include <engine/control/Repository.hpp>
 #include <engine/control/Surface.hpp>
 
 #include <algorithm>
@@ -197,19 +194,6 @@ namespace engine::control {
 				"the sideways edges each is allowed. The same data the architecture check enforces.",
 				"application/json",
 				[](std::string &) { return ModuleGraph(); },
-			}
-		);
-
-		AddResource(
-			Resource{
-				"atomic://components",
-				"The component catalogue",
-				"Every component type this engine registers, with its size, whether it is a tag, "
-				"whether a save file can carry it and how many bytes a replication delta needs.",
-				"application/json",
-				// The same builder `engine_components` answers with, so the tool
-				// and the resource cannot describe the registry differently.
-				[](std::string &) { return ComponentCatalogue().dump(2); },
 			}
 		);
 

@@ -1,6 +1,6 @@
 #pragma once
 
-// Where this program was built from, when it was built from a checkout.
+// Where a control feature's program was built from, when it was built from a checkout.
 //
 // **Two of the tools this module registers only exist inside a repository.** A
 // test run needs the sources it signs suites against, and the `AGENTS.md`

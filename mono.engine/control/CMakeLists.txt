@@ -10,19 +10,18 @@
 # `shared`, and it has to be: a headless server exposes its worlds through this
 # and links no client code at all.
 #
-# Above `world` because a tool's whole vocabulary is worlds and instances, and
-# below anything that presents - this module builds an answer and never draws
-# one.
+# L13 because tools may coordinate lower layers, while each optional feature
+# carries the includes for the state it exposes. The transport itself stays
+# dependency-light enough for a content origin with no worlds.
 #
-# **Nothing links it by default.** Each program opts in by constructing a
-# `Surface`, and each opens its port only when told to. `SECURITY.md` carries
-# why that is a decision rather than a default.
+# Each product links the registry, selects an explicit feature list, and opens
+# its port only when told to. `SECURITY.md` carries why listening is a decision
+# rather than a default.
 mono_add_library(control
 	TIER shared
 	DEPS
 		Engine::core
-		Engine::ecs
-		Engine::world
+		Engine::parallel
 	VENDOR
 		# The socket. Private: `Server.hpp` keeps asio behind a pimpl, so nothing
 		# that links this module compiles a networking library.
@@ -35,6 +34,12 @@ mono_add_library(control
 		# module's own sources include the real header.
 		Vendor::json
 )
+
+# The surface suite exercises the optional universe feature. Those dependencies
+# belong to the test executable rather than to every control consumer.
+if(TARGET test_control)
+	target_link_libraries(test_control PRIVATE Engine::ecs Engine::world)
+endif()
 
 # The checked-in target graph, compiled in.
 #

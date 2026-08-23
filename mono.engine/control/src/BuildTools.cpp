@@ -34,8 +34,8 @@
 // the next `just test` may skip.
 
 #include "Report.hpp"
-#include "Repository.hpp"
 
+#include <engine/control/Repository.hpp>
 #include <engine/control/Surface.hpp>
 #include <engine/core/Clock.hpp>
 #include <engine/core/Paths.hpp>

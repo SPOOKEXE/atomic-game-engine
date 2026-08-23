@@ -69,6 +69,14 @@ namespace engine::control {
 		Tools.push_back(std::move(tool));
 	}
 
+	void Surface::Enable(std::span<const Feature> features) {
+		for (const Feature &feature : features) {
+			if (feature.Install) {
+				feature.Install(*this);
+			}
+		}
+	}
+
 	void Surface::AddResource(Resource resource) {
 		for (Resource &existing : Resources) {
 			if (existing.Uri == resource.Uri) {
@@ -87,16 +95,6 @@ namespace engine::control {
 			}
 		}
 		Prompts.push_back(std::move(prompt));
-	}
-
-	void Surface::AddStandardTools(world::Universe &universe, bool writable) {
-		AddUniverseTools(universe, writable);
-		AddArchitectureTools();
-		AddScriptTools();
-		AddDiagnosticTools();
-		AddBuildTools();
-		AddStandardResources();
-		AddStandardPrompts();
 	}
 
 	size_t Surface::Count() const {

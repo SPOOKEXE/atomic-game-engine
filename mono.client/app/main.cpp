@@ -2,6 +2,7 @@
 
 #include <engine/assets/ContentPolicy.hpp>
 #include <engine/assets/LocalStore.hpp>
+#include <engine/control/Server.hpp>
 #include <engine/core/Arguments.hpp>
 #include <engine/core/Config.hpp>
 #include <engine/core/Flags.hpp>
@@ -69,6 +70,14 @@ int main(int argc, char **argv) {
 	arguments.Flag("headless", "Run with no window (needs --frames)");
 	arguments.Value("max-fps", "N", "Cap presentation FPS. Needs --uncapped; 0 presents every update");
 	arguments.Flag("verbose", "Log at trace level");
+	// Value-taking and absent by default. The conventional number remains in
+	// one constant, while any valid port supplied here is used as written.
+	arguments.Value(
+		"mcp-port",
+		"PORT",
+		"Listen for Model Context Protocol on 127.0.0.1:PORT (conventionally " +
+			std::to_string(engine::control::DEFAULT_CLIENT_PORT) + ")"
+	);
 	arguments.Flag(
 		"force-serial-compute",
 		"Run every parallel dispatch on one thread, so the frame graph keeps every span"
@@ -197,6 +206,10 @@ int main(int argc, char **argv) {
 	options.ViewSpacing = static_cast<float>(arguments.GetNumber("view-spacing", options.ViewSpacing));
 	options.TickRate = arguments.GetNumber("tick-rate", options.TickRate);
 	options.MaximumFrames = arguments.GetInteger("frames", -1);
+	if (arguments.Has("mcp-port")) {
+		options.ControlPort =
+			static_cast<int>(arguments.GetInteger("mcp-port", engine::control::DEFAULT_CLIENT_PORT));
+	}
 	options.SurfaceBounces =
 		static_cast<int>(arguments.GetInteger("surface-bounces", options.SurfaceBounces));
 

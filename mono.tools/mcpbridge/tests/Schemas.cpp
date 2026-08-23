@@ -18,12 +18,16 @@
 // `Bridge.cpp`.
 
 #include <engine/control/Architecture.hpp>
+#include <engine/control/Features.hpp>
 #include <engine/control/Surface.hpp>
+#include <engine/control/features/Script.hpp>
+#include <engine/control/features/Universe.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <nlohmann/json.hpp>
 #include <string>
 
@@ -45,13 +49,22 @@ namespace {
 	// A surface with everything a program with worlds registers.
 	//
 	// The universe outlives the surface because the caller holds both, which is
-	// what `AddStandardTools` documents: it keeps the reference.
+	// what the universe feature documents: it keeps the reference.
 	void Fill(Surface &surface, Universe &universe) {
 		WorldSettings settings;
 		settings.Name = Name("mcpbridge-schemas");
 		universe.Create(settings);
 
-		surface.AddStandardTools(universe);
+		const std::array features{
+			engine::control::features::Universe(universe),
+			engine::control::features::Architecture(),
+			engine::control::features::Script(),
+			engine::control::features::Diagnostics(),
+			engine::control::features::Build(),
+			engine::control::features::Resources(),
+			engine::control::features::Prompts(),
+		};
+		surface.Enable(features);
 	}
 
 	json Ask(Surface &surface, const std::string &method, const json &parameters = json::object()) {
@@ -246,7 +259,7 @@ TEST_CASE("module_may_link refuses an edge for the reason the build would", "[mc
 	};
 
 	// Downward, and it already exists.
-	const json down = verdict("control", "ecs");
+	const json down = verdict("control", "parallel");
 	CHECK(down.at("allowed") == true);
 	CHECK(down.at("existing") == true);
 

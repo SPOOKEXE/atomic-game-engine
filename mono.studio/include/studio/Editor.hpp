@@ -3088,6 +3088,9 @@ namespace studio {
 		// Answers everything the socket parked since the last frame.
 		void PumpControl();
 
+		// Enables this product's ordered engine and studio feature list once.
+		void EnableControlFeatures();
+
 		// The editor's own tools, added on top of the shared ones.
 		void RegisterControlTools();
 
