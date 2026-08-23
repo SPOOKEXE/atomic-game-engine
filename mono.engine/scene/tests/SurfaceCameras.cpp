@@ -1366,6 +1366,41 @@ TEST_CASE("a body that walks into a portal comes out of the far one", "[scene][s
 	CHECK(engine::scene::CrossPortals(mirror.World) == 0);
 }
 
+TEST_CASE("an active free camera flies through the portal it crosses", "[scene][surfacecameras]") {
+	// A scripted camera has a transform but no velocity. The body-only query
+	// therefore left it in the source corridor even though the pane already
+	// showed the destination, which made a fly-through stop at the doorway.
+	Mirror mirror;
+
+	const Entity far =
+		mirror.World.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("Part")), "Far");
+	mirror.World.Set<Transform>(far, Transform{CFrame(Vector3{100.0f, 0.0f, 0.0f})});
+	mirror.World.Set<Bounds>(far, Bounds{Vector3{8.0f, 4.5f, 0.2f}});
+	mirror.World.Set<engine::scene::Portal>(mirror.Reflection, engine::scene::Portal{far});
+
+	// A controller with no subject is the presented free/scripted-camera path.
+	// A subject camera is placed later by `PlaceCamera` and must not be carried
+	// a second time here.
+	mirror.World.SetResource(engine::scene::CameraController{});
+	mirror.World.Set<engine::scene::PreviousTransform>(
+		mirror.Eye, engine::scene::PreviousTransform{CFrame(Vector3{0.0f, 0.0f, 1.0f})}
+	);
+	mirror.World.Set<Transform>(
+		mirror.Eye, Transform{CFrame::LookAt(Vector3{0.0f, 0.0f, -1.0f}, Vector3{0.0f, 0.0f, -2.0f})}
+	);
+
+	REQUIRE(engine::scene::CrossPortals(mirror.World) == 1);
+
+	const CFrame &arrived = mirror.World.Get<Transform>(mirror.Eye)->Frame;
+	CHECK_THAT(arrived.Position.X, Catch::Matchers::WithinAbs(100.0f, TOLERANCE));
+	CHECK_THAT(arrived.Position.Z, Catch::Matchers::WithinAbs(0.6f, TOLERANCE));
+	CHECK(arrived.LookVector().Z > 0.9f);
+
+	// Both ends of the tick landed in the destination frame, so asking again
+	// cannot bounce the eye back through the partner pane.
+	CHECK(engine::scene::CrossPortals(mirror.World) == 0);
+}
+
 TEST_CASE("a spinning body keeps its spin in the room it arrives in", "[scene][surfacecameras]") {
 	// **The second half of `Motion`, which the crossing carried for four
 	// versions without.** `Motion` is a `Linear` and an `Angular`, the solver

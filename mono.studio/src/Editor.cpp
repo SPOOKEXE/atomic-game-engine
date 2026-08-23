@@ -503,7 +503,10 @@ namespace studio {
 		// read again - the Preferences page is what moves either of them after
 		// this point.
 		if (Settings.Uncapped) {
-			FrameCap = 0.0f;
+			InterfaceActiveHz = 0.0f;
+			InterfaceIdleHz = 0.0f;
+			RendererFocusedHz = 0.0f;
+			RendererUnfocusedHz = 0.0f;
 		}
 
 		if (!Settings.Headless && !Renderer.SetVerticalSync(false)) {
@@ -1674,9 +1677,7 @@ namespace studio {
 		const bool focused = Window == nullptr || (SDL_GetWindowFlags(Window) & SDL_WINDOW_INPUT_FOCUS) != 0;
 		const bool inputIdle = engine::core::Clock::Seconds() - LastInputSeconds > IDLE_AFTER_SECONDS;
 		return PresentationCeiling(
-			PresentationRates{
-				FrameCap, InterfaceActiveHz, InterfaceIdleHz, RendererFocusedHz, RendererUnfocusedHz
-			},
+			PresentationRates{InterfaceActiveHz, InterfaceIdleHz, RendererFocusedHz, RendererUnfocusedHz},
 			focused,
 			AnyRunning(),
 			inputIdle
@@ -1798,7 +1799,10 @@ namespace studio {
 			}
 		}
 
-		const WorldId shown = drawingSecond ? (extra->World.IsValid() ? extra->World : Active) : Active;
+		const bool drawingWorld = drawingSecond ? extra->Open : ShowViewport;
+		const WorldId shown =
+			drawingWorld ? (drawingSecond ? (extra->World.IsValid() ? extra->World : Active) : Active)
+						 : WorldId{};
 		const WorldId visual = VisualWorldOf(shown);
 
 		// **Resolved before anything presents, because `PreRender` reads it.**
@@ -2139,24 +2143,26 @@ namespace studio {
 				//
 				// `Refresh` is an integer compare per distinct shader on a
 				// world nobody is editing - see `scene::ShaderSource::Revision`.
-				ENGINE_PROFILE_CAT("shaders", engine::core::ProfileCategory::Render);
-				if (Shaders.Refresh(store) > 0) {
-					for (const engine::core::Name &shader : Shaders.Changed()) {
-						const engine::render::ShaderModule *module = Shaders.Find(shader);
-						if (module == nullptr) {
-							(void)Renderer.DropShader(shader);
-							continue;
-						}
+				{
+					ENGINE_PROFILE_CAT("shaders", engine::core::ProfileCategory::Render);
+					if (Shaders.Refresh(store) > 0) {
+						for (const engine::core::Name &shader : Shaders.Changed()) {
+							const engine::render::ShaderModule *module = Shaders.Find(shader);
+							if (module == nullptr) {
+								(void)Renderer.DropShader(shader);
+								continue;
+							}
 
-						// A diagnostic and not a fatal, which is
-						// `render/AGENTS.md`'s rule for a shader somebody is
-						// writing. The part goes on drawing with the engine's.
-						if (!module->Error.empty()) {
-							ENGINE_WARN("shader '{}': {}", shader.Text(), module->Error);
-							continue;
-						}
+							// A diagnostic and not a fatal, which is
+							// `render/AGENTS.md`'s rule for a shader somebody is
+							// writing. The part goes on drawing with the engine's.
+							if (!module->Error.empty()) {
+								ENGINE_WARN("shader '{}': {}", shader.Text(), module->Error);
+								continue;
+							}
 
-						(void)Renderer.AddShader(shader, module->SpirV);
+							(void)Renderer.AddShader(shader, module->SpirV);
+						}
 					}
 				}
 
@@ -2335,7 +2341,7 @@ namespace studio {
 		view.RibbonVertices = RibbonVertices;
 		view.RibbonRuns = RibbonRuns;
 		view.Lights = Lights;
-		view.Target = target.IsValid() ? &target : nullptr;
+		view.Target = drawingWorld && target.IsValid() ? &target : nullptr;
 		view.Slot = DrawingViewport;
 		view.Foreign = ForeignInstances;
 		view.Portals = Portals;

@@ -180,6 +180,24 @@ TEST_CASE("two branches that do not feed each other run at once", "[nodegraph][a
 	CHECK(seconds < 0.85);
 }
 
+TEST_CASE("serial evaluation keeps asynchronous nodes on the caller", "[nodegraph][async]") {
+	RegisterFixtureNodes();
+	Graph graph;
+	const NodeId task = graph.Add("task.staged", 0.0f, 0.0f);
+	graph.Find(task)->Widgets["seconds"].Number = 0.01;
+
+	Evaluator runner;
+	runner.SetSerial(true);
+	REQUIRE(runner.IsSerial());
+
+	const RunReport report = runner.Run(graph);
+	CHECK(report.Evaluated == 1);
+	CHECK(report.Started == 0);
+	CHECK(report.Running == 0);
+	CHECK_FALSE(runner.Busy());
+	CHECK(runner.Output(task, "Done") != nullptr);
+}
+
 TEST_CASE("a node waits for an input that is still being computed", "[nodegraph][async]") {
 	RegisterFixtureNodes();
 	Graph graph;

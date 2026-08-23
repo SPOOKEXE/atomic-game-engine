@@ -483,6 +483,15 @@ TEST_CASE("a surface camera has its own opacity, clamped the same way", "[scene]
 	CHECK(Read<float>(store, camera, "ImageTransparency") == 0.0f);
 }
 
+TEST_CASE("a camera records the frame its portal crossing starts from", "[scene][part]") {
+	Store store("camera_history_test");
+	RegisterSceneClasses();
+
+	const Entity camera = store.CreateInstance(engine::scene::CameraClass(), "Camera");
+	REQUIRE(camera != NULL_ENTITY);
+	CHECK(store.Get<engine::scene::PreviousTransform>(camera) != nullptr);
+}
+
 TEST_CASE("resizing a surface camera keeps its grade, face and filter", "[scene][part]") {
 	Store store("surface_size_test");
 	RegisterSceneClasses();

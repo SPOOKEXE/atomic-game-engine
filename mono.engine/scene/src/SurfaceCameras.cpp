@@ -252,6 +252,29 @@ namespace engine::scene {
 		// through - see `SeamStraddled`, whose reach is a whole body's radius.
 		constexpr float LANDING_CLEARANCE = 0.01f;
 
+		// Carries both ends of one tick through a seam and leaves them on the
+		// destination side. Bodies and scriptable cameras use the same operation;
+		// keeping it here prevents the eye and the thing it watches disagreeing
+		// about the landing plane.
+		void CarryCrossingFrames(
+			const PortalSeam &hole, const SeamTransform &through, CFrame &placement, CFrame &previous
+		) {
+			const float side = SeamOffset(hole, previous.Position) > 0.0f ? -1.0f : 1.0f;
+			const float depth = std::abs(SeamOffset(hole, placement.Position));
+			const Vector3 clear = hole.Normal * (side * std::max(LANDING_CLEARANCE - depth, 0.0f));
+
+			placement = through.Place(CFrame{placement.Position + clear, placement.Rotation()});
+
+			const float leaving = SeamOffset(hole, previous.Position) * side;
+			if (leaving < LANDING_CLEARANCE) {
+				previous = CFrame{
+					previous.Position + hole.Normal * (side * (LANDING_CLEARANCE - leaving)),
+					previous.Rotation()
+				};
+			}
+			previous = through.Place(previous);
+		}
+
 		// How far a viewpoint is kept from a pane's plane, in studs.
 		//
 		// **Much wider than a body's landing clearance, and for a different
@@ -2708,10 +2731,6 @@ namespace engine::scene {
 					// line between here and there overwrites one of them.
 					const Vector3 facing = placement.Frame.VectorToWorldSpace({0.0f, 0.0f, -1.0f});
 
-					const float side = SeamOffset(hole, was) > 0.0f ? -1.0f : 1.0f;
-					const float depth = std::abs(SeamOffset(hole, now));
-					const Vector3 clear = hole.Normal * (side * std::max(LANDING_CLEARANCE - depth, 0.0f));
-
 					// **The placement and the velocity, by the same transform.**
 					// Forgetting the second is the bug that looks like physics:
 					// the body arrives aimed the way it was aimed in the frame it
@@ -2722,8 +2741,7 @@ namespace engine::scene {
 					// speed it went into the large end crosses the far room in a
 					// fraction of the time, which reads as the portal firing you
 					// out rather than as a change of scale.
-					placement.Frame =
-						through.Place(CFrame{placement.Frame.Position + clear, placement.Frame.Rotation()});
+					CarryCrossingFrames(hole, through, placement.Frame, before.Frame);
 					motion.Linear = through.Carry(motion.Linear);
 
 					// **And the spin, by the same rotation but not by the same
@@ -2785,16 +2803,6 @@ namespace engine::scene {
 					// body emerging from the pane rather than one standing
 					// still - which is the whole reason this frame is mapped
 					// instead of collapsed onto the new placement.
-					const float leaving = SeamOffset(hole, before.Frame.Position) * side;
-					if (leaving < LANDING_CLEARANCE) {
-						before.Frame = CFrame{
-							before.Frame.Position + hole.Normal * (side * (LANDING_CLEARANCE - leaving)),
-							before.Frame.Rotation()
-						};
-					}
-
-					before.Frame = through.Place(before.Frame);
-
 					// **And the body itself, when the two ends are not the same
 					// size.** Gathered rather than applied here for the reason
 					// every pass in this file gives about its own two phases: this
@@ -2927,6 +2935,29 @@ namespace engine::scene {
 		for (const TurnedIntent &turn : turnedIntents) {
 			if (Humanoid *humanoid = store.GetMutable<Humanoid>(turn.Steering)) {
 				humanoid->MoveDirection = turn.Through.Rotate(humanoid->MoveDirection);
+			}
+		}
+
+		// A free or scriptable camera is its own moving viewpoint. It has no
+		// `Motion`, so the body walk above cannot see it, while a subject camera
+		// is placed later by `PlaceCamera` and already maps its arm through a seam.
+		// Requiring the controller distinguishes a presented world from a store
+		// used only to aim portal and mirror cameras.
+		const ActiveCamera *active = store.Resource<ActiveCamera>();
+		const CameraController *controller = store.Resource<CameraController>();
+		if (active != nullptr && controller != nullptr && controller->Subject == NULL_ENTITY &&
+			active->Entity != NULL_ENTITY && store.Alive(active->Entity) &&
+			!store.Has<Motion>(active->Entity)) {
+			Transform *placement = store.GetMutable<Transform>(active->Entity);
+			PreviousTransform *before = store.GetMutable<PreviousTransform>(active->Entity);
+			if (placement != nullptr && before != nullptr) {
+				PortalHop hop;
+				const PortalSeam *met =
+					NearestCrossing(holes, before->Frame.Position, placement->Frame.Position, hop);
+				if (met != nullptr) {
+					CarryCrossingFrames(*met, hop.Through, placement->Frame, before->Frame);
+					crossed++;
+				}
 			}
 		}
 

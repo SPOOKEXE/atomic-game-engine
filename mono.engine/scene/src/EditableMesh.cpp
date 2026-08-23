@@ -159,6 +159,48 @@ namespace engine::scene {
 	}
 
 	size_t RefreshEditableMeshCollision(ecs::Store &store) {
+		// Refuse the expensive path before copying either resource. Both can hold
+		// whole terrain chunks, and copying them merely to discover that every
+		// revision is already resident made a stopped editable scene cost
+		// milliseconds on every presentation.
+		const EditableMeshCollision *heldBaked = store.Resource<EditableMeshCollision>();
+		const CollisionShapes *heldShapes = CollisionShapesOf(store);
+		std::optional<std::vector<core::Name>> fastWanted;
+		size_t live = 0;
+		bool dirty = heldBaked == nullptr;
+		store.Each<const EditableMesh>([&](ecs::Entity instance, const EditableMesh &mesh) {
+			const core::Name name = EditableMeshContentName(store, instance);
+			if (!name.IsValid()) {
+				return;
+			}
+			live++;
+
+			const EditableMeshCollision::Baked *known = nullptr;
+			if (heldBaked != nullptr) {
+				for (const EditableMeshCollision::Baked &row : heldBaked->Rows) {
+					if (row.Instance == instance.Id) {
+						known = &row;
+						break;
+					}
+				}
+			}
+
+			if (known == nullptr || known->Revision != mesh.Revision) {
+				dirty = true;
+				return;
+			}
+			if (WantsHull(store, fastWanted, name) &&
+				(heldShapes == nullptr || heldShapes->FindHull(name) == nullptr)) {
+				dirty = true;
+			}
+		});
+		if (heldBaked != nullptr && heldBaked->Rows.size() != live) {
+			dirty = true;
+		}
+		if (!dirty) {
+			return 0;
+		}
+
 		// **Both tables are read and written whole, which is what a resource
 		// is.** `Store::SetResource` replaces, so the work below builds the two
 		// and writes them back once - and a world with no `EditableMesh` in it

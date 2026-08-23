@@ -198,6 +198,41 @@ namespace nodegraph {
 				continue;
 			}
 
+			if (Serial) {
+				const auto began = std::chrono::steady_clock::now();
+				NodeStatus &status = States[id];
+				status.State = NodeState::Running;
+				status.Progress = 0.0f;
+				status.Step = 0;
+				status.Cached = false;
+				status.Note = type->Steps.empty() ? std::string("working") : type->Steps.front();
+
+				inputs.Stopping = &Stopping;
+				inputs.Report = [&status](size_t step, float fraction, std::string_view note) {
+					status.Step = step;
+					status.Progress = fraction;
+					if (!note.empty()) {
+						status.Note.assign(note);
+					}
+				};
+
+				try {
+					Results.emplace(hash, type->Evaluate(inputs));
+					Reused.emplace(id, false);
+					status.State = NodeState::Done;
+					status.Note.clear();
+				} catch (...) {
+					status.State = NodeState::Failed;
+					status.Note = "it raised";
+				}
+				status.Progress = 1.0f;
+				status.Milliseconds =
+					std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began)
+						.count();
+				report.Evaluated++;
+				continue;
+			}
+
 			// --- off to a worker ----------------------------------------------
 			//
 			// **Everything it reads is copied here, on this thread.** The graph

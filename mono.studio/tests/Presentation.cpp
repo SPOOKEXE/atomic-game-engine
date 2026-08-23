@@ -125,18 +125,21 @@ TEST_CASE("the world selector marks runtime activity, not selection", "[studio][
 }
 
 TEST_CASE("a running world is not reduced to the input-idle rate", "[studio][presentation]") {
-	const PresentationRates rates{120.0f, 120.0f, 20.0f, 120.0f, 10.0f};
+	const PresentationRates rates{120.0f, 20.0f, 120.0f, 10.0f};
 
 	CHECK(PresentationCeiling(rates, true, true, true) == 120.0f);
 	CHECK(PresentationCeiling(rates, true, false, true) == 20.0f);
 }
 
-TEST_CASE("renderer focus and the master cap still limit presentation", "[studio][presentation]") {
-	const PresentationRates rates{90.0f, 120.0f, 20.0f, 100.0f, 10.0f};
+TEST_CASE("renderer focus and the active subsystem rates limit presentation", "[studio][presentation]") {
+	const PresentationRates rates{120.0f, 20.0f, 100.0f, 10.0f};
 
-	CHECK(PresentationCeiling(rates, true, true, false) == 90.0f);
+	CHECK(PresentationCeiling(rates, true, true, false) == 100.0f);
 	CHECK(PresentationCeiling(rates, false, true, false) == 10.0f);
 	CHECK(PresentationCeiling(PresentationRates{}, true, true, true) == 0.0f);
+
+	const PresentationRates interfaceUnlimited{0.0f, 0.0f, 165.0f, 60.0f};
+	CHECK(PresentationCeiling(interfaceUnlimited, true, true, false) == 165.0f);
 }
 
 // --- the hosted client visual scene -----------------------------------------

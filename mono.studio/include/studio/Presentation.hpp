@@ -43,9 +43,8 @@
 #include <vector>
 
 namespace studio {
-	// The four presentation ceilings configured by Studio.
+	// The presentation ceilings configured by Studio.
 	struct PresentationRates {
-		float Frame = 0.0f;
 		float InterfaceActive = 0.0f;
 		float InterfaceIdle = 0.0f;
 		float RendererFocused = 0.0f;

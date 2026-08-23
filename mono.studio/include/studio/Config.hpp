@@ -311,11 +311,10 @@ namespace studio {
 		// catalogue's own defaults rather than to nothing.
 		std::vector<std::string> DefaultWorlds;
 
-		// The frame ceiling and the four rates under it, in hertz. See
+		// The four frame rates, in hertz. See
 		// `Editor::InterfaceActiveHz` for what each one bounds and why they
 		// combine as a minimum rather than as separate clocks.
 		//@{
-		float FrameCap = 120.0f;
 		float InterfaceActiveHz = 120.0f;
 		float InterfaceIdleHz = 20.0f;
 		float RendererFocusedHz = 120.0f;

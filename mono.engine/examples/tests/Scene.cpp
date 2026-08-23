@@ -506,6 +506,33 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 	// indistinguishable from a painted mural.
 	CHECK(CountNamed(store, "Drifter") == 18);
 
+	// The authored camera crosses through the engine too. This used to be a
+	// hand-written jump in the scene, which left a broken camera traversal path
+	// looking correct. A Camera prototype carries the tick-start frame and a
+	// free controller marks it as an independently moving eye.
+	const Entity sceneCamera = InScene(store, "Viewer");
+	REQUIRE(sceneCamera != engine::ecs::NULL_ENTITY);
+	REQUIRE(store.Get<engine::scene::PreviousTransform>(sceneCamera) != nullptr);
+	store.SetResource(engine::scene::CameraController{});
+	store.Set<engine::scene::PreviousTransform>(
+		sceneCamera,
+		engine::scene::PreviousTransform{engine::core::CFrame(engine::core::Vector3{3.0f, 6.0f, 20.0f})}
+	);
+	store.Set<engine::scene::Transform>(
+		sceneCamera, engine::scene::Transform{engine::core::CFrame(engine::core::Vector3{0.0f, 6.0f, 20.0f})}
+	);
+	REQUIRE(engine::scene::CrossPortals(store) >= 1);
+	const engine::core::Vector3 cameraLanded =
+		store.Get<engine::scene::Transform>(sceneCamera)->Frame.Position;
+	CHECK(cameraLanded.X == Approx(-20.0f).margin(1e-3f));
+	CHECK(cameraLanded.Y == Approx(6.0f).margin(1e-3f));
+	CHECK(cameraLanded.Z == Approx(-0.25f).margin(1e-3f));
+
+	const Entity demoCharacter = InScene(store, "PortalWalker");
+	REQUIRE(demoCharacter != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(demoCharacter, "HumanoidRootPart") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(demoCharacter, "Humanoid") != engine::ecs::NULL_ENTITY);
+
 	// **And the walk closes, which is the claim the pictures cannot make.**
 	// `scene/tests/SurfaceCameras.cpp` proves `CrossPortals` maps a body through
 	// the same matrix as the camera; what is scene-specific - and what a pair of
@@ -513,8 +540,8 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 	// - is *which way round* the two ends are glued. Walk west out of the garden
 	// and the hall has to arrive ahead of you, not behind or beside you.
 	//
-	// It is also what pins the rails camera in the scene file: those legs are
-	// this arithmetic, written out by hand because a script has no `Inverse`.
+	// It also pins the route the camera and demo character now cross through:
+	// neither has a hand-written jump that can conceal this arithmetic.
 	const Entity walker = store.CreateInstance(engine::ecs::Classes::Find(Name("Part")), "Walker");
 
 	// **Watched by a camera, because a player is a body and an eye.** The yaw is
@@ -600,6 +627,49 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 	// the next frame would spin a quarter turn per frame for ever.
 	CHECK_FALSE(engine::scene::FollowPortalTransit(store));
 	CHECK(store.Resource<engine::scene::CameraController>()->Angles.Y == Approx(0.0f).margin(1e-3f));
+}
+
+TEST_CASE("the hallway camera and character enter its long tunnel", "[examples][scene]") {
+	const StagedAssets assets;
+
+	Store store("hallway");
+	Scheduler systems;
+
+	std::string error;
+	const bool loaded = LoadScene(store, systems, ExamplePath("Hallway.luau"), error);
+	INFO(error);
+	REQUIRE(loaded);
+
+	const Entity camera = InScene(store, "Viewer");
+	REQUIRE(camera != engine::ecs::NULL_ENTITY);
+	REQUIRE(store.Get<engine::scene::PreviousTransform>(camera) != nullptr);
+	store.SetResource(engine::scene::CameraController{});
+
+	// Cross the north mouth of the long corridor. The short corridor is at
+	// x=20 and only four metres long, so landing inside it distinguishes portal
+	// traversal from merely moving through the source pane.
+	store.Set<engine::scene::PreviousTransform>(
+		camera,
+		engine::scene::PreviousTransform{engine::core::CFrame(engine::core::Vector3{-20.0f, 4.0f, 16.5f})}
+	);
+	store.Set<engine::scene::Transform>(
+		camera, engine::scene::Transform{engine::core::CFrame(engine::core::Vector3{-20.0f, 4.0f, 15.5f})}
+	);
+	REQUIRE(engine::scene::CrossPortals(store) >= 1);
+
+	const engine::core::CFrame &arrived = store.Get<engine::scene::Transform>(camera)->Frame;
+	const engine::core::Vector3 landed = arrived.Position;
+	CHECK(landed.X == Approx(20.0f).margin(1e-3f));
+	CHECK(landed.Y == Approx(4.0f).margin(1e-3f));
+	CHECK(landed.Z < 2.0f);
+	CHECK(landed.Z > -2.0f);
+	CHECK(arrived.LookVector().X == Approx(0.0f).margin(1e-3f));
+	CHECK(arrived.LookVector().Z < -0.9f);
+
+	const Entity demoCharacter = InScene(store, "HallwayWalker");
+	REQUIRE(demoCharacter != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(demoCharacter, "HumanoidRootPart") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(demoCharacter, "Humanoid") != engine::ecs::NULL_ENTITY);
 }
 
 TEST_CASE("the tunnels scene is shorter and longer inside than out", "[examples][scene]") {

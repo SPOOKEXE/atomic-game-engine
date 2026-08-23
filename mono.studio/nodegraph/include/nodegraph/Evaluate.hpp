@@ -133,6 +133,17 @@ namespace nodegraph {
 		// Whether any worker is still busy.
 		bool Busy() const;
 
+		// Runs newly-ready asynchronous nodes on the caller instead of handing
+		// them to this evaluator's private pool. In-flight work is allowed to
+		// finish, so toggling this from a live editor never blocks on old work.
+		void SetSerial(bool serial) {
+			Serial = serial;
+		}
+
+		bool IsSerial() const {
+			return Serial;
+		}
+
 		// Drops every held result. In-flight work is left to finish and its
 		// result is kept: it is keyed by a hash that is still correct.
 		void Forget();
@@ -189,5 +200,6 @@ namespace nodegraph {
 		std::condition_variable Waking;
 		std::atomic<bool> Stopping{false};
 		bool Started = false;
+		bool Serial = false;
 	};
 }

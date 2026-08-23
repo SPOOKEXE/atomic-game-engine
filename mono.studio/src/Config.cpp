@@ -301,7 +301,6 @@ namespace studio {
 		ControlPort = Integer(document, "controlPort", ControlPort);
 
 		if (const auto rates = document.find("frameRates"); rates != document.end() && rates->is_object()) {
-			FrameCap = JsonNumber(*rates, "cap", FrameCap);
 			InterfaceActiveHz = JsonNumber(*rates, "interfaceActive", InterfaceActiveHz);
 			InterfaceIdleHz = JsonNumber(*rates, "interfaceIdle", InterfaceIdleHz);
 			RendererFocusedHz = JsonNumber(*rates, "rendererFocused", RendererFocusedHz);
@@ -462,7 +461,6 @@ namespace studio {
 		// one imposes no ceiling", which is a real answer for every one of them
 		// - a negative is not, and a file with one in it is a typo rather than a
 		// document to reject.
-		FrameCap = std::clamp(FrameCap, 0.0f, 1000.0f);
 		InterfaceActiveHz = std::clamp(InterfaceActiveHz, 0.0f, 1000.0f);
 		InterfaceIdleHz = std::clamp(InterfaceIdleHz, 0.0f, 1000.0f);
 		RendererFocusedHz = std::clamp(RendererFocusedHz, 0.0f, 1000.0f);
@@ -546,7 +544,6 @@ namespace studio {
 			 }},
 			{"frameRates",
 			 json{
-				 {"cap", FrameCap},
 				 {"interfaceActive", InterfaceActiveHz},
 				 {"interfaceIdle", InterfaceIdleHz},
 				 {"rendererFocused", RendererFocusedHz},
@@ -658,7 +655,6 @@ namespace studio {
 			Settings.Scale = Prefs.Scale;
 		}
 
-		FrameCap = Prefs.FrameCap;
 		InterfaceActiveHz = Prefs.InterfaceActiveHz;
 		InterfaceIdleHz = Prefs.InterfaceIdleHz;
 		RendererFocusedHz = Prefs.RendererFocusedHz;
@@ -717,7 +713,6 @@ namespace studio {
 		Prefs.DragAligns = DragAligns;
 		Prefs.ShowFacing = ShowFacing;
 		Prefs.Scale = Settings.Scale;
-		Prefs.FrameCap = FrameCap;
 		Prefs.InterfaceActiveHz = InterfaceActiveHz;
 		Prefs.InterfaceIdleHz = InterfaceIdleHz;
 		Prefs.RendererFocusedHz = RendererFocusedHz;

@@ -516,13 +516,13 @@ namespace studio {
 		// client is paced by the display until this is passed. The editor never
 		// is - `Editor::VerticalSync` is off from the start, because the hands
 		// doing the work feel every millisecond between the mouse and the
-		// viewport - so what is left to remove here is `Editor::FrameCap`, the
-		// 120 fps ceiling that keeps a still scene off a laptop's fans.
+		// viewport - so what is left to remove here are the four presentation
+		// rates that keep a still scene off a laptop's fans.
 		//
 		// Which makes this a benchmark's flag rather than a comfort one: pass it
 		// when the number being read is the maximum presentation throughput.
-		// The scheduled cap never sleeps or slows the update loop, but it still
-		// deliberately leaves time between images. See
+		// The scheduled rates never sleep or slow the update loop, but they still
+		// deliberately leave time between images. See
 		// `render::Renderer::SetVerticalSync`.
 		bool Uncapped = false;
 
@@ -4401,30 +4401,16 @@ namespace studio {
 		// **Live rather than start-up-only, unlike `Options::Uncapped`.** The
 		// flag is what a launcher passes; these are what somebody changes while
 		// looking at the frame graph, which is the only time the question comes
-		// up. `Options::Uncapped` clears `FrameCap` and is not read again.
+		// up. `Options::Uncapped` clears the four rates and is not read again.
 		//
 		// **Off by default, and the pair is one decision.** An editor is a
 		// program with hands on it, and vertical sync puts the display's refresh
 		// between the mouse and the viewport - 16.7 ms on a 60 Hz panel before
 		// the compositor takes its turn. The cost of turning it off is a
-		// viewport spinning as fast as the GPU allows, which `FrameCap` is there
-		// to answer; the two ship together because either one alone is a worse
+		// viewport spinning as fast as the GPU allows, which the rates below
+		// answer; the two ship together because either one alone is a worse
 		// default than what they are now.
 		bool VerticalSync = false;
-
-		// A ceiling on presented frames per second while vertical sync is off.
-		//
-		// **Zero is no ceiling**, which is what `--uncapped` means and what a
-		// benchmark wants. Anything else schedules image acquisition without
-		// sleeping the update loop - worth having because an editor that renders
-		// nine hundred frames a second to show a still scene is an editor that
-		// spins a laptop's fans for nothing.
-		//
-		// 120 by default: high enough that the cap is not what anybody feels on
-		// a 60, 75 or 120 Hz panel, and low enough that a still scene stops
-		// costing a laptop its fans. It is deliberately *not* tied to the
-		// display's refresh - being unpaced by the display is the point.
-		float FrameCap = 120.0f;
 
 		// The image deadline, independent of the update loop. A busy swapchain
 		// does not consume its opportunity, and a late image does not cause a
@@ -4434,9 +4420,8 @@ namespace studio {
 		// The four rates the ceiling is actually made of, in hertz.
 		//
 		// **One number could not answer this, and the symptom was a laptop.**
-		// `FrameCap` is a single ceiling on presentation, so an editor sitting
-		// behind a browser with nobody touching it still drew a hundred and
-		// twenty identical pictures a second. What a person actually wants is
+		// A single ceiling made an editor sitting behind a browser draw a hundred
+		// and twenty identical pictures a second. What a person actually wants is
 		// four different answers to two different questions - how often the
 		// panels are rebuilt, and how often the world behind them is - and each
 		// of those has a busy case and a quiet one.

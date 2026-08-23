@@ -1166,7 +1166,11 @@ namespace engine::scene {
 	// heading. `physics::RegisterCharacterSystems` installs it.
 	//
 	// @param store The world.
-	// @return How many bodies crossed. Zero in every scene with no portal in it.
+	// The active free or scriptable camera is included. Subject cameras use
+	// `PlaceCamera`'s portal-aware arm instead, so the two paths never move one
+	// eye twice.
+	//
+	// @return How many bodies and active cameras crossed. Zero in a scene with no portal.
 	// @since v0.14
 	size_t CrossPortals(ecs::Store &store);
 

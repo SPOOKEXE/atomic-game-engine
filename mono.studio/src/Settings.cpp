@@ -198,19 +198,9 @@ namespace studio {
 
 		ImGui::BeginDisabled(VerticalSync);
 
-		bool capped = FrameCap > 0.0f;
-		if (ImGui::Checkbox("Limit frame rate", &capped)) {
-			FrameCap = capped ? 120.0f : 0.0f;
-		}
-
-		ImGui::BeginDisabled(!capped);
-		ImGui::SetNextItemWidth(engine::ui::Scaled(160.0f));
-		ImGui::SliderFloat("Frames per second", &FrameCap, 30.0f, 360.0f, "%.0f fps");
-
-		// **Four rates under the one ceiling, because a still editor and a busy
-		// one are not the same question.** The number above is the most this
-		// program will ever draw; these four are what it settles to when nobody
-		// is asking it for anything. An editor behind a browser drawing a
+		// **Four rates, because a still editor and a busy one are not the same
+		// question.** These are what it settles to when nobody is asking it for
+		// anything. An editor behind a browser drawing a
 		// hundred and twenty identical pictures a second is what they exist to
 		// stop.
 		ImGui::Spacing();
@@ -248,8 +238,6 @@ namespace studio {
 			"While the window is behind something else. There is nobody looking at it,\n"
 			"so this is the one worth setting low."
 		);
-
-		ImGui::EndDisabled();
 
 		ImGui::EndDisabled();
 
@@ -901,20 +889,25 @@ namespace studio {
 		ImGui::Spacing();
 		ImGui::SeparatorText("Dispatch");
 
-		// **The one global switch, and the one that can make every measurement
-		// on this machine a lie.** It is here rather than on the frame graph
-		// because it is not a property of that panel; the panel says when it is
-		// on, which is the half that mattered.
-		bool serial = engine::parallel::ForceSerialCompute();
-		if (ImGui::Checkbox("Force serial compute", &serial)) {
+		// The engine pool covers ECS work and the universe consults the same
+		// switch before placing worlds on lanes. Node graphs have a deliberately
+		// separate, nonblocking pool, so the master must set both domains.
+		bool engineSerial = engine::parallel::ForceSerialCompute();
+		bool nodeGraphsSerial = NodeDemoRunner.IsSerial() && RenderPipelinePreviewEvaluator.IsSerial();
+		bool serial = engineSerial && nodeGraphsSerial;
+		if (ImGui::Checkbox("Force all serial compute", &serial)) {
 			engine::parallel::SetForceSerialCompute(serial);
-			Say(serial ? "every parallel dispatch now runs on the thread that asked"
+			NodeDemoRunner.SetSerial(serial);
+			RenderPipelinePreviewEvaluator.SetSerial(serial);
+			engineSerial = serial;
+			nodeGraphsSerial = serial;
+			Say(serial ? "every compute dispatch now runs on the thread that asked"
 					   : "parallel dispatch restored");
 		}
 
 		if (ImGui::IsItemHovered()) {
 			ImGui::SetTooltip(
-				"Every parallel dispatch runs on the thread that asked, so no span is dropped\n"
+				"Every compute dispatch runs on the thread that asked, so no span is dropped\n"
 				"and the frame graph keeps the whole tree.\n"
 				"The frame gets slower on purpose: this measures a serial cost, not a verdict\n"
 				"on the parallel one."
@@ -926,6 +919,16 @@ namespace studio {
 			ImGui::TextUnformatted("every timing taken while this is on is a serial one");
 			ImGui::PopStyleColor();
 		}
+
+		ImGui::Indent();
+		if (ImGui::Checkbox("Engine jobs and world scheduling", &engineSerial)) {
+			engine::parallel::SetForceSerialCompute(engineSerial);
+		}
+		if (ImGui::Checkbox("Editor node graphs", &nodeGraphsSerial)) {
+			NodeDemoRunner.SetSerial(nodeGraphsSerial);
+			RenderPipelinePreviewEvaluator.SetSerial(nodeGraphsSerial);
+		}
+		ImGui::Unindent();
 
 		ImGui::Spacing();
 

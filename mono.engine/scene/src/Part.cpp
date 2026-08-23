@@ -2029,7 +2029,11 @@ namespace engine::scene {
 			//
 			// Derives from `PVInstance` rather than from `BasePart`: a camera
 			// has a place in the world and is not drawn, collided or bounded.
-			const std::array camera{ecs::Components::Of<Camera>()};
+			// A scriptable camera moves during `Heartbeat`, so portal traversal
+			// needs the same tick-start frame a moving part uses. Surface cameras
+			// inherit it harmlessly; only `ActiveCamera` is ever considered for a
+			// crossing.
+			const std::array camera{ecs::Components::Of<Camera>(), ecs::Components::Of<PreviousTransform>()};
 			const ecs::ClassId cameraClass = ecs::Classes::Register("Camera", pvInstance, camera);
 
 			// **A surface camera is a camera you parent to a part**, and that is

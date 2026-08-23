@@ -6,21 +6,16 @@
 namespace studio {
 	float
 	PresentationCeiling(const PresentationRates &rates, bool focused, bool worldRunning, bool inputIdle) {
-		if (rates.Frame <= 0.0f) {
-			return 0.0f;
-		}
-
 		const float interface_ = inputIdle && !worldRunning ? rates.InterfaceIdle : rates.InterfaceActive;
 		const float renderer = focused ? rates.RendererFocused : rates.RendererUnfocused;
 
-		float ceiling = rates.Frame;
-		if (interface_ > 0.0f) {
-			ceiling = std::min(ceiling, interface_);
+		if (interface_ <= 0.0f) {
+			return std::max(renderer, 0.0f);
 		}
-		if (renderer > 0.0f) {
-			ceiling = std::min(ceiling, renderer);
+		if (renderer <= 0.0f) {
+			return interface_;
 		}
-		return ceiling;
+		return std::min(interface_, renderer);
 	}
 
 	float PresentationAlpha(bool advancing, engine::world::WorldState state, float accumulator) {
