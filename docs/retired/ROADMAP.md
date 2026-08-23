@@ -2411,3 +2411,4 @@ examples/Magic.luau:44```. Same with TerrainCore. - **the libraries were staged 
 - [x] properly fix fps cap counters
 - [x] improvements to replication, some newer additions were not using sigantures properly (and added relevent tests/benchmarks).
 - [x] compare `-O0` and `-O2` builds and find shared bottlenecks, several fixed already
+- [x] more gpu optimisations - fixed lighting signatures causing resident refresh every frame

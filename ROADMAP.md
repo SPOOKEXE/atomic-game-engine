@@ -39,7 +39,9 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### v0.19
 
-
+- [_] add AtmosphereCompute and AtmosphereProcedural
+- [_] add SkyboxCompute and SkyboxTextures
+- [_] add CloudCompute and CloudProcedural
 
 ### v0.20
 
