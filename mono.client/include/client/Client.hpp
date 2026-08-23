@@ -770,7 +770,6 @@ namespace client {
 		uint64_t UpdateIterations = 0;
 		uint64_t PresentationOpportunities = 0;
 		uint64_t UnchangedPresentationsSkipped = 0;
-		uint64_t BusySwapchainPresentationsSkipped = 0;
 
 		// The audio device, when one opened. Null runs silently.
 		std::unique_ptr<engine::audio::Device> Sound;

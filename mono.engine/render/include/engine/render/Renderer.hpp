@@ -1758,19 +1758,6 @@ namespace engine::render {
 		//         ticking. Headless always succeeds; it waits for nothing.
 		bool WaitForFrame();
 
-		// Claims a frame only when a swapchain image is already available.
-		//
-		// This is the acquisition for an independently paced update loop. Unlike
-		// `WaitForFrame`, it never waits for the display or for an in-flight frame;
-		// false means the caller should keep updating and try again later. Headless
-		// always succeeds.
-		//
-		// Calling this twice before `Render` is safe and acquires once.
-		//
-		// @return `false` when no image is immediately available.
-		// @since v0.19
-		bool TryFrame();
-
 		// Reports whether the caller is the thread that owns this renderer.
 		//
 		// Recording is single-threaded; the owner is the thread that initialised it.

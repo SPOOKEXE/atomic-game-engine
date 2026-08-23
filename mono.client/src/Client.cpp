@@ -3386,10 +3386,11 @@ namespace client {
 		}
 
 		// The update loop has done all work needed to decide that pixels changed.
-		// Only now claim a swapchain image, and never wait for one in uncapped
-		// mode. A busy GPU drops this opportunity while simulation continues.
-		if (Settings.Uncapped && !Renderer.TryFrame()) {
-			BusySwapchainPresentationsSkipped++;
+		// Only now claim a swapchain image. Waiting here is deliberate in immediate
+		// mode: polling used to acquire and cancel a command buffer on every miss,
+		// then redo the entire update before trying again. One frame in flight fell
+		// from the old blocking path's throughput to roughly one third of it.
+		if (!Renderer.WaitForFrame()) {
 			FrameGraph::EndFrame();
 			ENGINE_PROFILE_FRAME();
 			Metrics::Clear();
@@ -3535,12 +3536,10 @@ namespace client {
 
 		if (Settings.Uncapped) {
 			ENGINE_INFO(
-				"{} update iteration(s), {} presentation opportunity(s), {} unchanged skipped, {} swapchain "
-				"busy",
+				"{} update iteration(s), {} presentation opportunity(s), {} unchanged skipped",
 				UpdateIterations,
 				PresentationOpportunities,
-				UnchangedPresentationsSkipped,
-				BusySwapchainPresentationsSkipped
+				UnchangedPresentationsSkipped
 			);
 		}
 

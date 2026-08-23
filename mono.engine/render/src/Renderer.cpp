@@ -398,17 +398,7 @@ namespace engine::render {
 			return false;
 		}
 
-		return State->BeginFrame(true);
-	}
-
-	bool Renderer::TryFrame() {
-		RequireOwningThread("TryFrame");
-
-		if (State->Device == nullptr) {
-			return false;
-		}
-
-		return State->BeginFrame(false);
+		return State->BeginFrame();
 	}
 
 	bool Renderer::IsOnOwningThread() const {

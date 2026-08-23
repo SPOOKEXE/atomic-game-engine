@@ -854,10 +854,11 @@ namespace studio {
 					// control, collaboration, and plugins have continued, so an
 					// invisible editor allocates and submits no rendering work.
 					//
-					// Vsync deliberately waits before input for the latency argument
-					// above. Immediate mode never waits: the update loop keeps advancing
-					// and submits the next changed image when a swapchain slot is ready.
-					renderingActive = VerticalSync ? Renderer.WaitForFrame() : Renderer.TryFrame();
+					// Immediate mode waits for the next available image too. Polling here
+					// acquired and cancelled a command buffer on every miss, repeated the
+					// whole editor update, and cut one-frame-in-flight throughput instead
+					// of increasing it.
+					renderingActive = Renderer.WaitForFrame();
 				}
 
 				float delta = 0.0f;
