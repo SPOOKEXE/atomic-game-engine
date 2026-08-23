@@ -1,6 +1,7 @@
 #include <engine/core/FrameGraph.hpp>
 #include <engine/testing/Suite.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
@@ -16,6 +17,7 @@ using studio::AccumulateDiagnosticSpans;
 using studio::AppendUnaccountedDiagnosticSpans;
 using studio::DiagnosticSpan;
 using studio::FinishDiagnosticAverage;
+using studio::FitReportedDiagnosticTimeline;
 using studio::LayoutDiagnosticRows;
 
 TEST_CASE("averaging retains repeated scheduler trees", "[studio][diagnostics]") {
@@ -62,6 +64,60 @@ TEST_CASE("same-name siblings keep their ordinal across frames", "[studio][diagn
 	CHECK(totals[2].Occurrences == 2);
 }
 
+TEST_CASE("reported parallel work fits inside measured wall time", "[studio][diagnostics]") {
+	std::vector spans{
+		DiagnosticSpan{.Name = "Universe::Tick", .Depth = 0, .Milliseconds = 10.0f},
+		DiagnosticSpan{
+			.Name = "barrier",
+			.Depth = 1,
+			.Parent = 0,
+			.StartMilliseconds = 0.0f,
+			.Milliseconds = 1.0f,
+		},
+		DiagnosticSpan{
+			.Name = "workers",
+			.Depth = 1,
+			.Parent = 0,
+			.StartMilliseconds = 9.0f,
+			.Milliseconds = 20.0f,
+			.Reported = true,
+		},
+		DiagnosticSpan{
+			.Name = "left",
+			.Depth = 2,
+			.Parent = 2,
+			.Milliseconds = 4.0f,
+			.Reported = true,
+		},
+		DiagnosticSpan{
+			.Name = "right",
+			.Depth = 2,
+			.Parent = 2,
+			.Milliseconds = 6.0f,
+			.Reported = true,
+		},
+		DiagnosticSpan{
+			.Name = "diagnostics",
+			.Depth = 1,
+			.Parent = 0,
+			.StartMilliseconds = 9.0f,
+			.Milliseconds = 1.0f,
+		},
+	};
+
+	FitReportedDiagnosticTimeline(spans, 10.0f);
+
+	CHECK(spans[2].StartMilliseconds == 1.0f);
+	CHECK(spans[2].Milliseconds == 8.0f);
+	CHECK(spans[3].StartMilliseconds == 1.0f);
+	CHECK(spans[3].Milliseconds == Catch::Approx(3.2f));
+	CHECK(spans[4].StartMilliseconds == Catch::Approx(4.2f));
+	CHECK(spans[4].Milliseconds == Catch::Approx(4.8f));
+
+	std::vector<uint32_t> rows;
+	CHECK(LayoutDiagnosticRows(spans, 10.0f, 0.01f, rows) == 3);
+}
+
 TEST_CASE("overlapping bars at one depth receive separate rows", "[studio][diagnostics]") {
 	const std::array spans{
 		DiagnosticSpan{.Name = "first", .Depth = 0, .StartMilliseconds = 0.0f, .Milliseconds = 5.0f},
@@ -77,6 +133,23 @@ TEST_CASE("overlapping bars at one depth receive separate rows", "[studio][diagn
 	CHECK(rows[0] != rows[1]);
 	CHECK(rows[0] == rows[2]);
 	CHECK(rows[3] > rows[1]);
+	CHECK(count == 3);
+}
+
+TEST_CASE("overlapping spans in different parent branches reuse a row", "[studio][diagnostics]") {
+	const std::array spans{
+		DiagnosticSpan{.Name = "left", .Depth = 0, .Parent = FrameGraph::NO_PARENT, .Milliseconds = 5.0f},
+		DiagnosticSpan{.Name = "left child", .Depth = 1, .Parent = 0, .Milliseconds = 5.0f},
+		DiagnosticSpan{.Name = "right", .Depth = 0, .Parent = FrameGraph::NO_PARENT, .Milliseconds = 5.0f},
+		DiagnosticSpan{.Name = "right child", .Depth = 1, .Parent = 2, .Milliseconds = 5.0f},
+	};
+
+	std::vector<uint32_t> rows;
+	const uint32_t count = LayoutDiagnosticRows(spans, 10.0f, 0.01f, rows);
+
+	REQUIRE(rows.size() == spans.size());
+	CHECK(rows[0] != rows[2]);
+	CHECK(rows[1] == rows[3]);
 	CHECK(count == 3);
 }
 
@@ -135,4 +208,48 @@ TEST_CASE("unaccounted spans merge overlapping child coverage", "[studio][diagno
 	AppendUnaccountedDiagnosticSpans(spans);
 
 	CHECK(spans.size() == 3);
+}
+
+TEST_CASE("reported worker time does not conceal measured parent gaps", "[studio][diagnostics]") {
+	std::vector spans{
+		DiagnosticSpan{.Name = "Universe::Tick", .Depth = 0, .Milliseconds = 2.0f},
+		DiagnosticSpan{
+			.Name = "barrier",
+			.Depth = 1,
+			.Parent = 0,
+			.Milliseconds = 0.5f,
+		},
+		DiagnosticSpan{
+			.Name = "worlds (pinned workers)",
+			.Depth = 1,
+			.Parent = 0,
+			.Milliseconds = 8.0f,
+			.Reported = true,
+		},
+	};
+
+	AppendUnaccountedDiagnosticSpans(spans);
+
+	REQUIRE(spans.size() == 4);
+	CHECK(spans[3].Name == "unaccounted");
+	CHECK(spans[3].Parent == 0);
+	CHECK(spans[3].StartMilliseconds == 0.5f);
+	CHECK(spans[3].Milliseconds == 1.5f);
+}
+
+TEST_CASE("reported summaries do not invent unaccounted worker time", "[studio][diagnostics]") {
+	std::vector spans{
+		DiagnosticSpan{.Name = "workers", .Depth = 0, .Milliseconds = 8.0f, .Reported = true},
+		DiagnosticSpan{
+			.Name = "world",
+			.Depth = 1,
+			.Parent = 0,
+			.Milliseconds = 8.0f,
+			.Reported = true,
+		},
+	};
+
+	AppendUnaccountedDiagnosticSpans(spans);
+
+	CHECK(spans.size() == 2);
 }

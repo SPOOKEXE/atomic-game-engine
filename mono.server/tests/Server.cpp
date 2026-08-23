@@ -283,7 +283,8 @@ TEST_CASE("a tick reports itself to the frame graph and the metrics sink", "[ser
 	// rest of the pool waits - which is no concurrency bought at the price of
 	// all of it.
 	REQUIRE(named("Universe::Tick"));
-	REQUIRE(named("worlds (serial)"));
+	REQUIRE(named("worlds (driver)"));
+	REQUIRE_FALSE(named("worlds (serial)"));
 	REQUIRE_FALSE(named("worlds (pinned workers)"));
 
 	const auto counters = Metrics::Drain();

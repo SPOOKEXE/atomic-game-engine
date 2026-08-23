@@ -35,6 +35,7 @@ using engine::core::Ray;
 using engine::core::Vector3;
 using engine::scene::Camera;
 using engine::scene::CameraMatrices;
+using studio::FitViewportImage;
 using studio::PanelProjection;
 
 namespace {
@@ -208,6 +209,22 @@ TEST_CASE("the aspect ratio is honoured rather than assumed square", "[studio][p
 	const float tallFraction = (onTall.x - 125.0f) / 250.0f;
 
 	CHECK(wideFraction < tallFraction);
+}
+
+TEST_CASE("a completed viewport frame keeps its aspect while the panel resizes", "[studio][projection]") {
+	const auto wide = FitViewportImage(glm::vec2(1200.0f, 400.0f), 800, 600);
+	CHECK_THAT(wide.Size.x, WithinAbs(533.3333f, TIGHT));
+	CHECK_THAT(wide.Size.y, WithinAbs(400.0f, TIGHT));
+	CHECK_THAT(wide.Min.x, WithinAbs(333.3333f, TIGHT));
+	CHECK_THAT(wide.Min.y, WithinAbs(0.0f, TIGHT));
+	CHECK_THAT(wide.Size.x / wide.Size.y, WithinAbs(4.0f / 3.0f, TIGHT));
+
+	const auto tall = FitViewportImage(glm::vec2(400.0f, 900.0f), 1600, 900);
+	CHECK_THAT(tall.Size.x, WithinAbs(400.0f, TIGHT));
+	CHECK_THAT(tall.Size.y, WithinAbs(225.0f, TIGHT));
+	CHECK_THAT(tall.Min.x, WithinAbs(0.0f, TIGHT));
+	CHECK_THAT(tall.Min.y, WithinAbs(337.5f, TIGHT));
+	CHECK_THAT(tall.Size.x / tall.Size.y, WithinAbs(16.0f / 9.0f, TIGHT));
 }
 
 TEST_CASE("a segment wholly in front projects like its endpoints", "[studio][projection]") {

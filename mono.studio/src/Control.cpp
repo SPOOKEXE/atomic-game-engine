@@ -132,11 +132,12 @@ namespace studio {
 	}
 
 	void Editor::PumpControl() {
+		ENGINE_PROFILE("control");
+
 		if (!ControlServer.IsRunning()) {
 			return;
 		}
 
-		ENGINE_PROFILE("control");
 		ControlServer.Pump([this](const std::string &line) { return ControlSurface.Answer(line); });
 	}
 

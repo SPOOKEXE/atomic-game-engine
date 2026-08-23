@@ -434,7 +434,8 @@ TEST_CASE("a lone world ticks on the driver and a pair goes to lanes", "[world]"
 	// One world: on this thread, so everything it contains keeps its spans and
 	// the pool is free for whatever it dispatches.
 	const RecordedTree alone = tickWith(1);
-	CHECK(has(alone.Names, "worlds (serial)"));
+	CHECK(has(alone.Names, "worlds (driver)"));
+	CHECK_FALSE(has(alone.Names, "worlds (serial)"));
 	CHECK_FALSE(has(alone.Names, "worlds (pinned workers)"));
 
 	// Two: the lanes now have something to overlap, which is the case they are

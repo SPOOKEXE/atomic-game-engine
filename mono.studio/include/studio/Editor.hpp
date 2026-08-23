@@ -5552,6 +5552,10 @@ namespace studio {
 			float IdleMilliseconds = 0.0f;
 			float UnmarkedMilliseconds = 0.0f;
 			size_t Dropped = 0;
+			// Frames represented by the published snapshot. Kept apart from the
+			// next interval's running count so the label does not jump back to zero
+			// immediately after publishing a mean.
+			uint32_t PublishedFrames = 0;
 			//@}
 
 			// The running sum since the last publish, and how many frames are in

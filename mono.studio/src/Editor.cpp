@@ -811,19 +811,6 @@ namespace studio {
 
 	int Editor::Run() {
 		while (Running) {
-			// A headless frame is diagnostic work rather than an image shown to a
-			// person. It has no swapchain to pace it and bounded runs must finish as
-			// quickly as the renderer can produce their requested frames. With
-			// vertical sync on, the display owns the deadline instead.
-			const float ceiling = Settings.Headless || VerticalSync ? 0.0f : PacingCeiling();
-			const uint32_t presentationRate =
-				ceiling > 0.0f ? static_cast<uint32_t>(std::lround(ceiling)) : 0u;
-			if (Presentations.Rate() != presentationRate) {
-				Presentations.SetRate(presentationRate);
-			}
-			const bool presentationDue =
-				Presentations.Due(engine::render::PresentationSchedule::Clock::now());
-
 			// **Acquisition comes first, and that is the whole of the input-latency
 			// fix.** `Renderer::Render` blocks the better part of a frame waiting
 			// for the display, and it used to do so *after* the events had been
@@ -844,6 +831,23 @@ namespace studio {
 			{
 				ENGINE_PROFILE_CAT("Application", engine::core::ProfileCategory::Engine);
 
+				bool presentationDue = false;
+				{
+					ENGINE_PROFILE_CAT("frame schedule", engine::core::ProfileCategory::Engine);
+
+					// A headless frame is diagnostic work rather than an image shown to a
+					// person. It has no swapchain to pace it and bounded runs must finish as
+					// quickly as the renderer can produce their requested frames. With
+					// vertical sync on, the display owns the deadline instead.
+					const float ceiling = Settings.Headless || VerticalSync ? 0.0f : PacingCeiling();
+					const uint32_t presentationRate =
+						ceiling > 0.0f ? static_cast<uint32_t>(std::lround(ceiling)) : 0u;
+					if (Presentations.Rate() != presentationRate) {
+						Presentations.SetRate(presentationRate);
+					}
+					presentationDue = Presentations.Due(engine::render::PresentationSchedule::Clock::now());
+				}
+
 				bool renderingActive = false;
 				if (presentationDue) {
 					ENGINE_PROFILE_CAT("wait for frame", engine::core::ProfileCategory::Idle);
@@ -860,8 +864,12 @@ namespace studio {
 					renderingActive = VerticalSync ? Renderer.WaitForFrame() : Renderer.TryFrame();
 				}
 
-				const float delta = Clock.Tick();
-				PresentationDeltaSeconds += delta;
+				float delta = 0.0f;
+				{
+					ENGINE_PROFILE_CAT("frame clock", engine::core::ProfileCategory::Engine);
+					delta = Clock.Tick();
+					PresentationDeltaSeconds += delta;
+				}
 
 				PumpEvents();
 
@@ -899,32 +907,39 @@ namespace studio {
 					PresentationDeltaSeconds = 0.0f;
 					Presentations.Consume(engine::render::PresentationSchedule::Clock::now());
 				}
-			}
 
-			engine::core::FrameGraph::EndFrame();
+				// Last in the application span, so the heap is sampled after the
+				// frame released its transient renderer storage while the cost of
+				// reading CPU and GPU memory still belongs to this cycle.
+				{
+					ENGINE_PROFILE_CAT("memory sample", engine::core::ProfileCategory::Engine);
+					if (engine::core::HeapProfile::SampleIfDue()) {
+						HeapState.Gpu = Renderer.MemoryStatistics();
+						HeapState.GpuPlot.push_back(
+							static_cast<float>(HeapState.Gpu.LiveBytes) / (1024.0f * 1024.0f)
+						);
 
-			// After the frame's work, so a reading covers whole frames rather
-			// than catching the renderer mid-frame holding its scratch buffers.
-			if (engine::core::HeapProfile::SampleIfDue()) {
-				HeapState.Gpu = Renderer.MemoryStatistics();
-				HeapState.GpuPlot.push_back(
-					static_cast<float>(HeapState.Gpu.LiveBytes) / (1024.0f * 1024.0f)
-				);
+						// The CPU profiler owns the retention window. Mirroring its sample
+						// count keeps both plots aligned without a second timer or limit.
+						const size_t retained = engine::core::HeapProfile::History().size();
+						if (HeapState.GpuPlot.size() > retained) {
+							HeapState.GpuPlot.erase(
+								HeapState.GpuPlot.begin(),
+								HeapState.GpuPlot.begin() + (HeapState.GpuPlot.size() - retained)
+							);
+						}
+					}
+				}
 
-				// The CPU profiler owns the retention window. Mirroring its sample
-				// count keeps both plots aligned without a second timer or limit.
-				const size_t retained = engine::core::HeapProfile::History().size();
-				if (HeapState.GpuPlot.size() > retained) {
-					HeapState.GpuPlot.erase(
-						HeapState.GpuPlot.begin(),
-						HeapState.GpuPlot.begin() + (HeapState.GpuPlot.size() - retained)
-					);
+				{
+					ENGINE_PROFILE_CAT("frame limit", engine::core::ProfileCategory::Engine);
+					if (Settings.MaximumFrames >= 0 && FramesDrawn >= Settings.MaximumFrames) {
+						Running = false;
+					}
 				}
 			}
 
-			if (Settings.MaximumFrames >= 0 && FramesDrawn >= Settings.MaximumFrames) {
-				Running = false;
-			}
+			engine::core::FrameGraph::EndFrame();
 		}
 
 		return 0;
@@ -1057,6 +1072,8 @@ namespace studio {
 	}
 
 	void Editor::Simulate(float frameSeconds) {
+		ENGINE_PROFILE_CAT("simulation", engine::core::ProfileCategory::Simulation);
+
 		// **Cleared first and set once, at the tick.** Every early return below
 		// is a frame the universe does not advance, and `Present` has to know
 		// which - see `studio::PresentationAlpha` for what reading it wrong
@@ -1081,14 +1098,17 @@ namespace studio {
 		// is expressed by suspending the paused worlds - which is what the loop
 		// below does - rather than by skipping the tick.
 		bool anyLive = false;
-		for (const WorldRun &run : Runs) {
-			if (!run.Paused) {
-				anyLive = true;
+		{
+			ENGINE_PROFILE_CAT("world states", engine::core::ProfileCategory::Simulation);
+			for (const WorldRun &run : Runs) {
+				if (!run.Paused) {
+					anyLive = true;
+				}
+				Universe->SetState(
+					run.World,
+					run.Paused ? engine::world::WorldState::Suspended : engine::world::WorldState::Active
+				);
 			}
-			Universe->SetState(
-				run.World,
-				run.Paused ? engine::world::WorldState::Suspended : engine::world::WorldState::Active
-			);
 		}
 
 		if (!anyLive) {
@@ -1104,9 +1124,10 @@ namespace studio {
 		// Opening a world and then not running it until the next frame is a
 		// teleport that arrives one frame late for no reason anybody could
 		// find.
-		UpdateWorldLifecycle();
-
-		ENGINE_PROFILE_CAT("simulation", engine::core::ProfileCategory::Simulation);
+		{
+			ENGINE_PROFILE_CAT("world lifecycle", engine::core::ProfileCategory::Simulation);
+			UpdateWorldLifecycle();
+		}
 
 		// **Every world, together.** `Universe::Tick` runs them under the
 		// universe's `ExecutionMode`, which is `WorldParallel` by default - so
@@ -1132,13 +1153,16 @@ namespace studio {
 		// Publishing here catches both: the previous tick's system writes are
 		// still marked, and so is everything done to the world since. The tick
 		// below then clears exactly what was just sent.
-		for (WorldRun &run : Runs) {
-			if (run.Paused) {
-				continue;
-			}
-			for (const std::unique_ptr<PlayLink> &link : run.Links) {
-				if (link != nullptr) {
-					link->Step(*Universe);
+		{
+			ENGINE_PROFILE_CAT("replication links", engine::core::ProfileCategory::Network);
+			for (WorldRun &run : Runs) {
+				if (run.Paused) {
+					continue;
+				}
+				for (const std::unique_ptr<PlayLink> &link : run.Links) {
+					if (link != nullptr) {
+						link->Step(*Universe);
+					}
 				}
 			}
 		}
@@ -1152,10 +1176,15 @@ namespace studio {
 		// - which is inside `Universe::Tick`. Looking before it would see the
 		// player gone and the arrival not yet made, and this would drop a client
 		// that was mid-flight.
-		FollowTeleports();
+		{
+			ENGINE_PROFILE_CAT("follow teleports", engine::core::ProfileCategory::Simulation);
+			FollowTeleports();
+		}
 	}
 
 	void Editor::Present(float frameSeconds) {
+		ENGINE_PROFILE_CAT("presentation", engine::core::ProfileCategory::Render);
+
 		// **Before the panels draw, so the numbers they show are this frame's.**
 		// Sampling afterwards would put the frame-rate history one frame behind
 		// the graph it is drawn beside.
@@ -1953,58 +1982,61 @@ namespace studio {
 		// authority is then presented from that resolved eye and supplies the one
 		// shared visual scene. Presenting is PreRender only, so this does not tick
 		// either world twice.
-		if (shown.IsValid() && shown != visual) {
-			Universe->Present(
-				shown,
-				frameSeconds,
-				PresentationAlpha(Advancing, Universe->StateOf(shown), Universe->AlphaOf(shown))
-			);
-		}
-
-		if (visual.IsValid()) {
-			// **The render gate rides along with it**, because
-			// `client::InstallPresentation` registers `sync-rendered` in this
-			// same phase. That is what makes an edited world work at all: it
-			// never ticks, so a gate maintained by the simulation would leave a
-			// part dragged into `Workspace` invisible until somebody pressed
-			// play. See `scene/Visibility.hpp`.
-			// **A world that is not being ticked is presented at one, not at
-			// its accumulator.** Alpha is where *between* two ticks to draw,
-			// and a world nothing advances has no next tick to draw towards -
-			// its accumulator stops wherever it stopped, which is usually zero,
-			// and zero means "draw the previous frame". `capture-previous` is a
-			// `PreSimulation` system and `Present` runs `PreRender` alone, so
-			// that previous frame is wherever each part was created: an edited
-			// world drew every part at its birthplace while the selection
-			// outline followed the real transform.
-			//
-			// **This asked `StateOf` alone and that was wrong for Edit mode**,
-			// which is where an author spends most of their time.
-			// `SyncWorldStates` leaves every world `Active` when nothing is
-			// running, so the state said "ticking" while `Simulate` was
-			// returning before the tick. `studio::PresentationAlpha` carries
-			// the whole argument and is where it is now decided, because
-			// nothing in this class is reachable from a test.
-			// **After the world has been asked for its picture, so the bounds
-			// are this frame's.** The queue is empty on every frame but the one
-			// after a scene first builds itself, so this is a walk of an empty
-			// vector.
-			for (size_t index = 0; index < PendingFrame.size(); index++) {
-				if (PendingFrame[index] != visual) {
-					continue;
-				}
-				if (FrameWorldContents(visual)) {
-					PendingFrame.erase(PendingFrame.begin() + static_cast<ptrdiff_t>(index));
-				}
-				break;
+		{
+			ENGINE_PROFILE_CAT("present views", engine::core::ProfileCategory::ECS);
+			if (shown.IsValid() && shown != visual) {
+				Universe->Present(
+					shown,
+					frameSeconds,
+					PresentationAlpha(Advancing, Universe->StateOf(shown), Universe->AlphaOf(shown))
+				);
 			}
 
-			ENGINE_PROFILE_CAT("world present", engine::core::ProfileCategory::ECS);
-			Universe->Present(
-				visual,
-				frameSeconds,
-				PresentationAlpha(Advancing, Universe->StateOf(visual), Universe->AlphaOf(visual))
-			);
+			if (visual.IsValid()) {
+				// **The render gate rides along with it**, because
+				// `client::InstallPresentation` registers `sync-rendered` in this
+				// same phase. That is what makes an edited world work at all: it
+				// never ticks, so a gate maintained by the simulation would leave a
+				// part dragged into `Workspace` invisible until somebody pressed
+				// play. See `scene/Visibility.hpp`.
+				// **A world that is not being ticked is presented at one, not at
+				// its accumulator.** Alpha is where *between* two ticks to draw,
+				// and a world nothing advances has no next tick to draw towards -
+				// its accumulator stops wherever it stopped, which is usually zero,
+				// and zero means "draw the previous frame". `capture-previous` is a
+				// `PreSimulation` system and `Present` runs `PreRender` alone, so
+				// that previous frame is wherever each part was created: an edited
+				// world drew every part at its birthplace while the selection
+				// outline followed the real transform.
+				//
+				// **This asked `StateOf` alone and that was wrong for Edit mode**,
+				// which is where an author spends most of their time.
+				// `SyncWorldStates` leaves every world `Active` when nothing is
+				// running, so the state said "ticking" while `Simulate` was
+				// returning before the tick. `studio::PresentationAlpha` carries
+				// the whole argument and is where it is now decided, because
+				// nothing in this class is reachable from a test.
+				// **After the world has been asked for its picture, so the bounds
+				// are this frame's.** The queue is empty on every frame but the one
+				// after a scene first builds itself, so this is a walk of an empty
+				// vector.
+				for (size_t index = 0; index < PendingFrame.size(); index++) {
+					if (PendingFrame[index] != visual) {
+						continue;
+					}
+					if (FrameWorldContents(visual)) {
+						PendingFrame.erase(PendingFrame.begin() + static_cast<ptrdiff_t>(index));
+					}
+					break;
+				}
+
+				ENGINE_PROFILE_CAT("world present", engine::core::ProfileCategory::ECS);
+				Universe->Present(
+					visual,
+					frameSeconds,
+					PresentationAlpha(Advancing, Universe->StateOf(visual), Universe->AlphaOf(visual))
+				);
+			}
 		}
 
 		const std::vector<engine::scene::DrawInstance> *instances = nullptr;
@@ -2186,8 +2218,14 @@ namespace studio {
 				// job.
 				{
 					ENGINE_PROFILE_CAT("editable upload", engine::core::ProfileCategory::Assets);
-					(void)EditableMeshes.Refresh(store, Renderer);
-					(void)EditableImages.Refresh(store, Renderer);
+					{
+						ENGINE_PROFILE_CAT("editable meshes", engine::core::ProfileCategory::Assets);
+						(void)EditableMeshes.Refresh(store, Renderer);
+					}
+					{
+						ENGINE_PROFILE_CAT("editable images", engine::core::ProfileCategory::Assets);
+						(void)EditableImages.Refresh(store, Renderer);
+					}
 
 					// **And the collision shapes, which the editor needs on a
 					// world that is not ticking.** `physics::
@@ -2197,7 +2235,10 @@ namespace studio {
 					// thing somebody opens to ask what a script-built mesh
 					// collides as. The revision check makes the second caller a
 					// walk and an integer compare.
-					(void)engine::scene::RefreshEditableMeshCollision(store);
+					{
+						ENGINE_PROFILE_CAT("editable collision", engine::core::ProfileCategory::Assets);
+						(void)engine::scene::RefreshEditableMeshCollision(store);
+					}
 				}
 
 				if (PipelineSelected.find(visual.Index) == PipelineSelected.end()) {
@@ -2321,89 +2362,98 @@ namespace studio {
 			}
 		}
 		engine::render::View view;
-		view.CameraFrame = eye;
-		view.Camera = lens;
-		view.Instances = instances != nullptr ? std::span<const engine::scene::DrawInstance>(*instances)
-											  : std::span<const engine::scene::DrawInstance>{};
-		view.Surfaces = Surfaces;
-		view.Particles = Particles.Batches;
-		view.ParticleBirths = Particles.Births;
-		view.ParticleSeams = Particles.Seams;
-		view.ParticleRevision = Particles.Revision;
-		view.ParticleLayoutRevision = Particles.LayoutRevision;
-		view.ParticleResidentRevision = Particles.ResidentRevision;
-		view.ParticlePool = Particles.Pool;
-		view.ParticleBlocks = Particles.BlockCount;
-		// Every surface and nested camera in this render reads the same prepared
-		// authority pool. `Renderer::PrepareParticles` consumes the delta on the
-		// first view for this logical world and reuses that result for the rest.
-		view.ParticleDelta = frameSeconds;
-		view.RibbonVertices = RibbonVertices;
-		view.RibbonRuns = RibbonRuns;
-		view.Lights = Lights;
-		view.Target = drawingWorld && target.IsValid() ? &target : nullptr;
-		view.Slot = DrawingViewport;
-		view.Foreign = ForeignInstances;
-		view.Portals = Portals;
-		view.Pipeline = selectedPipeline;
-		view.World = visual.IsValid() ? visual.Index : 0;
-		view.WorldName = visual.IsValid() ? Universe->NameOf(visual) : engine::core::Name{};
+		{
+			ENGINE_PROFILE_CAT("build render view", engine::core::ProfileCategory::Render);
+			view.CameraFrame = eye;
+			view.Camera = lens;
+			view.Instances = instances != nullptr ? std::span<const engine::scene::DrawInstance>(*instances)
+												  : std::span<const engine::scene::DrawInstance>{};
+			view.Surfaces = Surfaces;
+			view.Particles = Particles.Batches;
+			view.ParticleBirths = Particles.Births;
+			view.ParticleSeams = Particles.Seams;
+			view.ParticleRevision = Particles.Revision;
+			view.ParticleLayoutRevision = Particles.LayoutRevision;
+			view.ParticleResidentRevision = Particles.ResidentRevision;
+			view.ParticlePool = Particles.Pool;
+			view.ParticleBlocks = Particles.BlockCount;
+			// Every surface and nested camera in this render reads the same prepared
+			// authority pool. `Renderer::PrepareParticles` consumes the delta on the
+			// first view for this logical world and reuses that result for the rest.
+			view.ParticleDelta = frameSeconds;
+			view.RibbonVertices = RibbonVertices;
+			view.RibbonRuns = RibbonRuns;
+			view.Lights = Lights;
+			view.Target = drawingWorld && target.IsValid() ? &target : nullptr;
+			view.Slot = DrawingViewport;
+			view.Foreign = ForeignInstances;
+			view.Portals = Portals;
+			view.Pipeline = selectedPipeline;
+			view.World = visual.IsValid() ? visual.Index : 0;
+			view.WorldName = visual.IsValid() ? Universe->NameOf(visual) : engine::core::Name{};
 
-		// **The grid is drawn by the renderer now and not by the overlay**, so
-		// that the geometry in front of it hides it. `ConfigureGroundGrid`
-		// carries the settings and the two cases where it stays off; the
-		// overlay keeps the always-on-top copy for the length of a drag.
-		ConfigureGroundGrid(view, shown);
+			// **The grid is drawn by the renderer now and not by the overlay**, so
+			// that the geometry in front of it hides it. `ConfigureGroundGrid`
+			// carries the settings and the two cases where it stays off; the
+			// overlay keeps the always-on-top copy for the length of a drag.
+			ConfigureGroundGrid(view, shown);
 
-		// **The world goes flat while the collider view is open.** A wireframe
-		// over a textured scene is a wireframe over a photograph and the shape
-		// somebody opened the view to check is the thing they cannot pick out of
-		// it. `render::Renderer::SetUntextured` is a binding rather than a
-		// pipeline, so this costs a branch per draw and nothing when it is off.
-		//
-		// Set per frame rather than when the menu is clicked, because it is the
-		// renderer's state and the renderer is shared: a preview render or
-		// another panel would otherwise inherit whatever the last click left.
-		Renderer.SetUntextured(ShowColliders && ColliderHideTextures);
-		LastFrame = Renderer.Render(
-			std::span<const engine::render::View>(&view, 1), Overlay, &GameInterface, true, &Interface
-		);
-		if (shown.IsValid()) {
-			RenderPipelineRenderedSlots[shown.Index] = DrawingViewport;
+			// **The world goes flat while the collider view is open.** A wireframe
+			// over a textured scene is a wireframe over a photograph and the shape
+			// somebody opened the view to check is the thing they cannot pick out of
+			// it. `render::Renderer::SetUntextured` is a binding rather than a
+			// pipeline, so this costs a branch per draw and nothing when it is off.
+			//
+			// Set per frame rather than when the menu is clicked, because it is the
+			// renderer's state and the renderer is shared: a preview render or
+			// another panel would otherwise inherit whatever the last click left.
+			Renderer.SetUntextured(ShowColliders && ColliderHideTextures);
 		}
-
-		// **Presented, or simply drawn when there is nowhere to present.**
-		// A headless renderer never presents by design, so counting presents
-		// would leave `--frames` unreachable and the run would never end - which
-		// is the one failure mode a build server cannot recover from.
-		if (LastFrame.Presented || Settings.Headless) {
-			FramesDrawn++;
+		{
+			ENGINE_PROFILE_CAT("render frame", engine::core::ProfileCategory::Render);
+			LastFrame = Renderer.Render(
+				std::span<const engine::render::View>(&view, 1), Overlay, &GameInterface, true, &Interface
+			);
 		}
-
-		// **After the frame rather than before it**, so the capture is of a
-		// frame that has a scene texture - the first frame has none, because the
-		// viewport panel only learns its size once it has been laid out.
-		//
-		if (!Settings.Capture.empty() && FramesDrawn == CaptureAtFrame()) {
-			// **Named by viewport, or the wrong scene is photographed.** With
-			// two panels the request made here is consumed by the *next*
-			// `Render`, which is the other panel - so `--capture-world` moved
-			// `Active` correctly and the picture came out of whichever panel
-			// happened to be next. Finding the panel showing the wanted world
-			// makes the renderer wait for its turn.
-			size_t slot = engine::render::Renderer::ANY_VIEWPORT;
-
-			if (!Settings.CaptureWorld.empty()) {
-				const WorldId wanted = Universe->Find(Name(Settings.CaptureWorld));
-				for (size_t index = 0; index <= Extras.size(); index++) {
-					if (ViewportWorld(index) == wanted) {
-						slot = index;
-						break;
-					}
-				}
+		{
+			ENGINE_PROFILE_CAT("frame result", engine::core::ProfileCategory::Render);
+			if (shown.IsValid()) {
+				RenderPipelineRenderedSlots[shown.Index] = DrawingViewport;
 			}
 
-			Renderer.RequestSceneCapture(Settings.Capture, slot);
+			// **Presented, or simply drawn when there is nowhere to present.**
+			// A headless renderer never presents by design, so counting presents
+			// would leave `--frames` unreachable and the run would never end - which
+			// is the one failure mode a build server cannot recover from.
+			if (LastFrame.Presented || Settings.Headless) {
+				FramesDrawn++;
+			}
+
+			// **After the frame rather than before it**, so the capture is of a
+			// frame that has a scene texture - the first frame has none, because the
+			// viewport panel only learns its size once it has been laid out.
+			//
+			if (!Settings.Capture.empty() && FramesDrawn == CaptureAtFrame()) {
+				// **Named by viewport, or the wrong scene is photographed.** With
+				// two panels the request made here is consumed by the *next*
+				// `Render`, which is the other panel - so `--capture-world` moved
+				// `Active` correctly and the picture came out of whichever panel
+				// happened to be next. Finding the panel showing the wanted world
+				// makes the renderer wait for its turn.
+				size_t slot = engine::render::Renderer::ANY_VIEWPORT;
+
+				if (!Settings.CaptureWorld.empty()) {
+					const WorldId wanted = Universe->Find(Name(Settings.CaptureWorld));
+					for (size_t index = 0; index <= Extras.size(); index++) {
+						if (ViewportWorld(index) == wanted) {
+							slot = index;
+							break;
+						}
+					}
+				}
+
+				Renderer.RequestSceneCapture(Settings.Capture, slot);
+			}
 		}
 	}
 

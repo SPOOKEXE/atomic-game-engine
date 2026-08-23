@@ -29,13 +29,63 @@
 #include <studio/Diagnostics.hpp>
 #include <studio/Editor.hpp>
 #include <studio/Widgets.hpp>
+#include <unordered_map>
 #include <vector>
 
 namespace studio {
 	void AccumulateDiagnosticSpans(
 		std::span<const engine::core::FrameSpan> frame, std::vector<DiagnosticSpan> &totals
 	) {
-		std::vector<uint32_t> targets(frame.size(), engine::core::FrameGraph::NO_PARENT);
+		struct SiblingKey {
+			uint32_t Parent = engine::core::FrameGraph::NO_PARENT;
+			std::string_view Name;
+
+			bool operator==(const SiblingKey &) const = default;
+		};
+		struct StructuralKey {
+			SiblingKey Sibling;
+			uint32_t Depth = 0;
+			uint32_t Ordinal = 0;
+
+			bool operator==(const StructuralKey &) const = default;
+		};
+		struct SiblingHash {
+			size_t operator()(const SiblingKey &key) const {
+				return std::hash<std::string_view>{}(key.Name) ^ (static_cast<size_t>(key.Parent) << 1);
+			}
+		};
+		struct StructuralHash {
+			size_t operator()(const StructuralKey &key) const {
+				const size_t sibling = SiblingHash{}(key.Sibling);
+				return sibling ^ (static_cast<size_t>(key.Depth) << 3) ^
+					   (static_cast<size_t>(key.Ordinal) << 11);
+			}
+		};
+
+		// Retained because averaging runs every frame while the panel is open.
+		// The previous pair of linear searches made N spans cost N squared and
+		// turned a granular particle or server capture into profiler lag.
+		static thread_local std::vector<uint32_t> targets;
+		static thread_local std::unordered_map<SiblingKey, uint32_t, SiblingHash> ordinals;
+		static thread_local std::unordered_map<StructuralKey, uint32_t, StructuralHash> targetByKey;
+
+		totals.reserve(totals.size() + frame.size());
+		targets.assign(frame.size(), engine::core::FrameGraph::NO_PARENT);
+		ordinals.clear();
+		targetByKey.clear();
+		ordinals.reserve(totals.size());
+		targetByKey.reserve(totals.size() + frame.size());
+
+		for (size_t index = 0; index < totals.size(); index++) {
+			const DiagnosticSpan &span = totals[index];
+			const SiblingKey sibling{span.Parent, span.Name};
+			const uint32_t ordinal = ordinals[sibling]++;
+			targetByKey.emplace(
+				StructuralKey{.Sibling = sibling, .Depth = span.Depth, .Ordinal = ordinal},
+				static_cast<uint32_t>(index)
+			);
+		}
+		ordinals.clear();
 
 		for (size_t index = 0; index < frame.size(); index++) {
 			const engine::core::FrameSpan &source = frame[index];
@@ -45,26 +95,16 @@ namespace studio {
 			// The ordinal is local to one parent. Three worlds can each contain an
 			// `ecs.systems`; they are three children of three different parents, not
 			// the first, second and third occurrence of one global name.
-			uint32_t ordinal = 0;
-			for (size_t previous = 0; previous < index; previous++) {
-				if (frame[previous].Parent == source.Parent && frame[previous].Name == source.Name) {
-					ordinal++;
-				}
-			}
+			const SiblingKey sibling{parent, source.Name};
+			const uint32_t ordinal = ordinals[sibling]++;
+			const StructuralKey key{.Sibling = sibling, .Depth = source.Depth, .Ordinal = ordinal};
 
 			DiagnosticSpan *target = nullptr;
 			uint32_t targetIndex = engine::core::FrameGraph::NO_PARENT;
-			uint32_t seen = 0;
-			for (size_t candidate = 0; candidate < totals.size(); candidate++) {
-				DiagnosticSpan &span = totals[candidate];
-				if (span.Parent != parent || span.Depth != source.Depth || span.Name != source.Name) {
-					continue;
-				}
-				if (seen++ == ordinal) {
-					target = &span;
-					targetIndex = static_cast<uint32_t>(candidate);
-					break;
-				}
+			const auto found = targetByKey.find(key);
+			if (found != targetByKey.end()) {
+				targetIndex = found->second;
+				target = &totals[targetIndex];
 			}
 
 			if (target == nullptr) {
@@ -79,6 +119,7 @@ namespace studio {
 				);
 				targetIndex = static_cast<uint32_t>(totals.size() - 1);
 				target = &totals.back();
+				targetByKey.emplace(key, targetIndex);
 			}
 
 			targets[index] = targetIndex;
@@ -88,6 +129,11 @@ namespace studio {
 			target->IdleMilliseconds += source.IdleMilliseconds;
 			target->Occurrences++;
 		}
+
+		// Keys borrow names from `totals` and `frame`. Keep the buckets between
+		// frames, but never keep those borrowed views after either owner can move.
+		ordinals.clear();
+		targetByKey.clear();
 	}
 
 	void FinishDiagnosticAverage(std::vector<DiagnosticSpan> &spans, uint32_t frames) {
@@ -102,6 +148,84 @@ namespace studio {
 			span.Milliseconds /= frameCount;
 			span.SelfMilliseconds /= frameCount;
 			span.IdleMilliseconds /= frameCount;
+		}
+	}
+
+	void FitReportedDiagnosticTimeline(std::vector<DiagnosticSpan> &spans, float frameMilliseconds) {
+		const float frameEnd = std::max(frameMilliseconds, 0.0f);
+		const size_t count = spans.size();
+		for (size_t parentIndex = 0; parentIndex < count; parentIndex++) {
+			DiagnosticSpan &parent = spans[parentIndex];
+			const float parentStart = std::clamp(parent.StartMilliseconds, 0.0f, frameEnd);
+			const float parentEnd =
+				std::clamp(parent.StartMilliseconds + parent.Milliseconds, parentStart, frameEnd);
+			if (parentEnd <= parentStart) {
+				continue;
+			}
+
+			float reportedTotal = 0.0f;
+			size_t reportedCount = 0;
+			for (size_t childIndex = parentIndex + 1; childIndex < count; childIndex++) {
+				const DiagnosticSpan &child = spans[childIndex];
+				if (child.Depth <= parent.Depth) {
+					break;
+				}
+				if (child.Parent == parentIndex && child.Reported) {
+					reportedTotal += std::max(child.Milliseconds, 0.0f);
+					reportedCount++;
+				}
+			}
+			if (reportedCount == 0) {
+				continue;
+			}
+
+			float gapStart = parentStart;
+			float gapEnd = parentEnd;
+			if (!parent.Reported) {
+				float coveredUntil = parentStart;
+				float widest = -1.0f;
+				for (size_t childIndex = parentIndex + 1; childIndex < count; childIndex++) {
+					const DiagnosticSpan &child = spans[childIndex];
+					if (child.Depth <= parent.Depth) {
+						break;
+					}
+					if (child.Parent != parentIndex || child.Reported || child.Milliseconds <= 0.0f) {
+						continue;
+					}
+
+					const float childStart = std::clamp(child.StartMilliseconds, parentStart, parentEnd);
+					const float childEnd =
+						std::clamp(child.StartMilliseconds + child.Milliseconds, childStart, parentEnd);
+					if (childStart - coveredUntil > widest) {
+						widest = childStart - coveredUntil;
+						gapStart = coveredUntil;
+						gapEnd = childStart;
+					}
+					coveredUntil = std::max(coveredUntil, childEnd);
+				}
+				if (parentEnd - coveredUntil > widest) {
+					gapStart = coveredUntil;
+					gapEnd = parentEnd;
+				}
+			}
+
+			const float gap = std::max(gapEnd - gapStart, 0.0f);
+			float cursor = gapStart;
+			for (size_t childIndex = parentIndex + 1; childIndex < count; childIndex++) {
+				DiagnosticSpan &child = spans[childIndex];
+				if (child.Depth <= parent.Depth) {
+					break;
+				}
+				if (child.Parent != parentIndex || !child.Reported) {
+					continue;
+				}
+
+				const float share = reportedTotal > 0.0f ? std::max(child.Milliseconds, 0.0f) / reportedTotal
+														 : 1.0f / static_cast<float>(reportedCount);
+				child.StartMilliseconds = cursor;
+				child.Milliseconds = gap * share;
+				cursor += child.Milliseconds;
+			}
 		}
 	}
 
@@ -120,7 +244,7 @@ namespace studio {
 		children.clear();
 		children.reserve(recorded);
 		for (const DiagnosticSpan &child : spans) {
-			if (child.Parent >= recorded || child.Milliseconds <= 0.0f) {
+			if (child.Parent >= recorded || child.Milliseconds <= 0.0f || child.Reported) {
 				continue;
 			}
 
@@ -151,6 +275,12 @@ namespace studio {
 		size_t firstChild = 0;
 		for (size_t parentIndex = 0; parentIndex < recorded; parentIndex++) {
 			const DiagnosticSpan parent = spans[parentIndex];
+			// Reported hierarchies are logical worker-time breakdowns rather than
+			// intervals on this thread. Inventing gaps between them would label
+			// concurrency as unaccounted wall time.
+			if (parent.Reported) {
+				continue;
+			}
 			const float parentStart = parent.StartMilliseconds;
 			const float parentEnd = parentStart + std::max(parent.Milliseconds, 0.0f);
 			if (parentEnd <= parentStart) {
@@ -221,7 +351,12 @@ namespace studio {
 			deepest = std::max(deepest, span.Depth);
 		}
 
-		std::vector<std::vector<float>> laneEnds(static_cast<size_t>(deepest) + 1);
+		struct ParentLanes {
+			uint32_t Parent = engine::core::FrameGraph::NO_PARENT;
+			std::vector<float> Ends;
+		};
+		std::vector<std::vector<ParentLanes>> parentLanes(static_cast<size_t>(deepest) + 1);
+		std::vector<uint32_t> depthLaneCounts(static_cast<size_t>(deepest) + 1, 1);
 		std::vector<uint32_t> lanes(spans.size(), 0);
 		const float frameEnd = std::max(frameMilliseconds, 0.0f);
 		const float minimum = std::max(minimumMilliseconds, 0.0f);
@@ -232,7 +367,15 @@ namespace studio {
 			const float left = std::clamp(span.StartMilliseconds, 0.0f, latestStart);
 			const float right = std::min(frameEnd, left + std::max(span.Milliseconds, minimum));
 
-			auto &ends = laneEnds[span.Depth];
+			auto &groups = parentLanes[span.Depth];
+			auto found = std::find_if(groups.begin(), groups.end(), [&](const ParentLanes &candidate) {
+				return candidate.Parent == span.Parent;
+			});
+			if (found == groups.end()) {
+				groups.push_back(ParentLanes{.Parent = span.Parent, .Ends = {}});
+				found = std::prev(groups.end());
+			}
+			auto &ends = found->Ends;
 			uint32_t lane = 0;
 			while (lane < ends.size() && left < ends[lane]) {
 				lane++;
@@ -243,13 +386,14 @@ namespace studio {
 				ends[lane] = right;
 			}
 			lanes[index] = lane;
+			depthLaneCounts[span.Depth] = std::max(depthLaneCounts[span.Depth], lane + 1);
 		}
 
-		std::vector<uint32_t> offsets(laneEnds.size(), 0);
+		std::vector<uint32_t> offsets(parentLanes.size(), 0);
 		uint32_t rowCount = 0;
-		for (size_t depth = 0; depth < laneEnds.size(); depth++) {
+		for (size_t depth = 0; depth < parentLanes.size(); depth++) {
 			offsets[depth] = rowCount;
-			rowCount += static_cast<uint32_t>(std::max<size_t>(laneEnds[depth].size(), 1));
+			rowCount += depthLaneCounts[depth];
 		}
 
 		for (size_t index = 0; index < spans.size(); index++) {
@@ -539,6 +683,7 @@ namespace studio {
 			if (const engine::core::FrameTriggerHit *hit = FrameGraph::Triggered(); hit != nullptr) {
 				snapshot(view.Spans);
 				readScalars();
+				view.PublishedFrames = 1;
 				forget();
 				view.Paused = true;
 				view.PausedByRule = true;
@@ -551,6 +696,7 @@ namespace studio {
 				// Every frame, which is what this panel always did.
 				snapshot(view.Spans);
 				readScalars();
+				view.PublishedFrames = 1;
 				forget();
 			} else {
 				if (view.Average) {
@@ -578,9 +724,11 @@ namespace studio {
 						view.IdleMilliseconds = view.SummedIdleMilliseconds / frames;
 						view.UnmarkedMilliseconds = view.SummedUnmarkedMilliseconds / frames;
 						view.Dropped = view.SummedDropped / view.Frames;
+						view.PublishedFrames = view.Frames;
 					} else {
 						snapshot(view.Spans);
 						readScalars();
+						view.PublishedFrames = 1;
 					}
 
 					view.NextPublish = now + static_cast<double>(interval);
@@ -590,13 +738,14 @@ namespace studio {
 		}
 
 		const std::vector<DiagnosticSpan> &spans = view.Spans;
-		std::vector<DiagnosticSpan> &graphSpans = view.DisplaySpans;
-		graphSpans = spans;
-		AppendUnaccountedDiagnosticSpans(graphSpans);
-
 		const float frameMs = view.FrameMilliseconds;
 		const float idleMs = view.IdleMilliseconds;
-		const float busyMs = frameMs > idleMs ? frameMs - idleMs : frameMs;
+		const float busyMs = std::max(frameMs - idleMs, 0.0f);
+
+		std::vector<DiagnosticSpan> &graphSpans = view.DisplaySpans;
+		graphSpans = spans;
+		FitReportedDiagnosticTimeline(graphSpans, frameMs);
+		AppendUnaccountedDiagnosticSpans(graphSpans);
 
 		ImGui::Text("%.2f ms", static_cast<double>(frameMs));
 		ImGui::SameLine();
@@ -687,7 +836,7 @@ namespace studio {
 		} else if (interval > 0.0f && view.Average) {
 			ImGui::SameLine();
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
-			ImGui::Text("- mean of %u frame(s)", view.Frames);
+			ImGui::Text("- mean of %u frame(s)", view.PublishedFrames);
 			ImGui::PopStyleColor();
 		}
 
@@ -697,7 +846,7 @@ namespace studio {
 		// panel becomes one on which nothing is ever worth optimising.
 		// **Three causes, and this used to name the rarest one.** `Dropped`
 		// counts buffer overflow, depth past `MAXIMUM_DEPTH`, and scopes opened
-		// off the frame's owning thread - and with `MAXIMUM_SPANS` at 4096
+		// off the frame's owning thread - and with `MAXIMUM_SPANS` at 65536
 		// against a frame of a few dozen, overflow is the one that essentially
 		// never happens. What does happen every frame is the third: two worlds
 		// ticking on workers open a span per phase and per system, and every one
@@ -968,7 +1117,7 @@ namespace studio {
 			draw->AddRectFilled(upper, lower, colour, 2.0f);
 
 			if (ImGui::IsMouseHoveringRect(upper, lower)) {
-				hovered = &span;
+				hovered = index < spans.size() ? &spans[index] : &span;
 				draw->AddRect(upper, lower, engine::ui::BrightColour(), 2.0f);
 			}
 
@@ -1030,7 +1179,7 @@ namespace studio {
 				ImGui::TextUnformatted(span.Name.data(), span.Name.data() + span.Name.size());
 				ImGui::Unindent(static_cast<float>(span.Depth) * engine::ui::Scaled(10.0f));
 
-				const float spanBusy = span.Milliseconds - span.IdleMilliseconds;
+				const float spanBusy = std::max(span.Milliseconds - span.IdleMilliseconds, 0.0f);
 				const float share = busyMs > 0.0001f ? (spanBusy / busyMs) * 100.0f : 0.0f;
 
 				ImGui::TableSetColumnIndex(1);

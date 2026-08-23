@@ -889,18 +889,24 @@ namespace studio {
 		ImGui::Spacing();
 		ImGui::SeparatorText("Dispatch");
 
-		// The engine pool covers ECS work and the universe consults the same
-		// switch before placing worlds on lanes. Node graphs have a deliberately
-		// separate, nonblocking pool, so the master must set both domains.
+		// The engine pool, world lanes and node graphs are independently
+		// selectable domains. The master includes all three.
 		bool engineSerial = engine::parallel::ForceSerialCompute();
+		bool worldsSerial = Universe->Settings().Mode == engine::world::ExecutionMode::WorldSerial;
 		bool nodeGraphsSerial = NodeDemoRunner.IsSerial() && RenderPipelinePreviewEvaluator.IsSerial();
-		bool serial = engineSerial && nodeGraphsSerial;
+		bool serial = engineSerial && worldsSerial && nodeGraphsSerial;
 		if (ImGui::Checkbox("Force all serial compute", &serial)) {
 			engine::parallel::SetForceSerialCompute(serial);
+			Universe->SetMode(
+				serial ? engine::world::ExecutionMode::WorldSerial
+					   : engine::world::ExecutionMode::WorldParallel
+			);
 			NodeDemoRunner.SetSerial(serial);
 			RenderPipelinePreviewEvaluator.SetSerial(serial);
 			engineSerial = serial;
+			worldsSerial = serial;
 			nodeGraphsSerial = serial;
+			Modified = true;
 			Say(serial ? "every compute dispatch now runs on the thread that asked"
 					   : "parallel dispatch restored");
 		}
@@ -921,8 +927,15 @@ namespace studio {
 		}
 
 		ImGui::Indent();
-		if (ImGui::Checkbox("Engine jobs and world scheduling", &engineSerial)) {
+		if (ImGui::Checkbox("Engine jobs", &engineSerial)) {
 			engine::parallel::SetForceSerialCompute(engineSerial);
+		}
+		if (ImGui::Checkbox("World scheduling", &worldsSerial)) {
+			Universe->SetMode(
+				worldsSerial ? engine::world::ExecutionMode::WorldSerial
+							 : engine::world::ExecutionMode::WorldParallel
+			);
+			Modified = true;
 		}
 		if (ImGui::Checkbox("Editor node graphs", &nodeGraphsSerial)) {
 			NodeDemoRunner.SetSerial(nodeGraphsSerial);

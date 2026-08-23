@@ -81,6 +81,10 @@ namespace engine::core {
 			// Built during the frame.
 			std::vector<FrameSpan> Building;
 			std::vector<size_t> Open;
+			// Logical placement scratch for reported worker hierarchies. Retained
+			// because EndFrame is part of the profiler and must not allocate every
+			// frame in order to describe allocations elsewhere.
+			std::vector<float> ReportedChildEnds;
 			// Tracked past MAXIMUM_DEPTH as well as below it, so that a Pop
 			// under the budget still matches the Push that opened it.
 			uint32_t Depth = 0;
@@ -521,6 +525,9 @@ namespace engine::core {
 		if (state.Building.capacity() < MAXIMUM_SPANS) {
 			state.Building.reserve(MAXIMUM_SPANS);
 		}
+		if (state.ReportedChildEnds.capacity() < MAXIMUM_SPANS) {
+			state.ReportedChildEnds.reserve(MAXIMUM_SPANS);
+		}
 	}
 
 	void AccumulateIdleMilliseconds(std::span<FrameSpan> spans) {
@@ -773,6 +780,27 @@ namespace engine::core {
 		}
 		state.Open.clear();
 		state.Depth = 0;
+
+		// Reported spans are reconstructed after their worker has joined. Their
+		// wall-clock start is therefore the tiny call that builds the report, not
+		// where the work belongs in its parent. Place reported children after the
+		// preceding direct child so scheduler phases and systems remain adjacent.
+		state.ReportedChildEnds.assign(state.Building.size(), 0.0f);
+		for (size_t index = 0; index < state.Building.size(); index++) {
+			FrameSpan &span = state.Building[index];
+			if (span.Parent < index) {
+				FrameSpan &parent = state.Building[span.Parent];
+				float &childEnd = state.ReportedChildEnds[span.Parent];
+				if (childEnd < parent.StartMilliseconds) {
+					childEnd = parent.StartMilliseconds;
+				}
+				if (span.Reported) {
+					span.StartMilliseconds = childEnd;
+				}
+				childEnd = std::max(childEnd, span.StartMilliseconds + span.Milliseconds);
+			}
+			state.ReportedChildEnds[index] = span.StartMilliseconds;
+		}
 
 		// Self time: a span's duration less the duration of its direct
 		// children. Spans are in open order, so a child is always a later entry

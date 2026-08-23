@@ -11,6 +11,19 @@ namespace studio {
 	using engine::core::Ray;
 	using engine::core::Vector3;
 
+	ViewportImageRect FitViewportImage(glm::vec2 panelSize, uint32_t imageWidth, uint32_t imageHeight) {
+		panelSize.x = std::max(panelSize.x, 0.0f);
+		panelSize.y = std::max(panelSize.y, 0.0f);
+		if (imageWidth == 0 || imageHeight == 0 || panelSize.x == 0.0f || panelSize.y == 0.0f) {
+			return ViewportImageRect{glm::vec2(0.0f), panelSize};
+		}
+
+		const glm::vec2 imageSize{static_cast<float>(imageWidth), static_cast<float>(imageHeight)};
+		const float scale = std::min(panelSize.x / imageSize.x, panelSize.y / imageSize.y);
+		const glm::vec2 fitted = imageSize * scale;
+		return ViewportImageRect{(panelSize - fitted) * 0.5f, fitted};
+	}
+
 	namespace {
 		// Anything at or behind this much clip-space `w` is treated as behind
 		// the camera.

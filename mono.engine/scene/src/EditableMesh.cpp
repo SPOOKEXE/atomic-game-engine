@@ -167,7 +167,7 @@ namespace engine::scene {
 		const CollisionShapes *heldShapes = CollisionShapesOf(store);
 		std::optional<std::vector<core::Name>> fastWanted;
 		size_t live = 0;
-		bool dirty = heldBaked == nullptr;
+		bool dirty = false;
 		store.Each<const EditableMesh>([&](ecs::Entity instance, const EditableMesh &mesh) {
 			const core::Name name = EditableMeshContentName(store, instance);
 			if (!name.IsValid()) {
@@ -185,7 +185,15 @@ namespace engine::scene {
 				}
 			}
 
-			if (known == nullptr || known->Revision != mesh.Revision) {
+			const bool hasTriangles = !mesh.Positions.empty() && mesh.Indices.size() >= 3;
+			if (known == nullptr) {
+				// A newly created mesh is commonly incomplete for several edits.
+				// There is no resident shape to replace or remove until it has a
+				// triangle, so copying the catalogue cannot change the answer.
+				dirty = dirty || hasTriangles;
+				return;
+			}
+			if (known->Revision != mesh.Revision) {
 				dirty = true;
 				return;
 			}

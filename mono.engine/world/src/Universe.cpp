@@ -647,56 +647,60 @@ namespace engine::world {
 		}
 
 		// --- 2. who owes a tick ---
-		RefreshLanes(parallel::Jobs::PinnedWorkerCount());
-		ActiveList.clear();
-		OwedList.clear();
-		ActiveLanes.clear();
+		std::vector<size_t> order;
+		{
+			ENGINE_PROFILE_CAT("schedule worlds", engine::core::ProfileCategory::Simulation);
+			RefreshLanes(parallel::Jobs::PinnedWorkerCount());
+			ActiveList.clear();
+			OwedList.clear();
+			ActiveLanes.clear();
 
-		for (size_t index = 0; index < Registry.size(); index++) {
-			const auto &world = Registry[index];
-			if (world == nullptr) {
-				continue;
+			for (size_t index = 0; index < Registry.size(); index++) {
+				const auto &world = Registry[index];
+				if (world == nullptr) {
+					continue;
+				}
+
+				int owed = world->Owed(frameSeconds);
+				if (owed <= 0) {
+					continue;
+				}
+
+				if (owed > Settings_.MaximumCatchUpTicks) {
+					// A world far enough behind will not recover by running a
+					// hundred ticks in one frame; it will only fall further behind
+					// while holding a worker. Dropping the excess and counting it
+					// makes that visible instead of terminal.
+					owed = Settings_.MaximumCatchUpTicks;
+				}
+
+				ActiveList.push_back(world.get());
+				OwedList.push_back(owed);
+				ActiveLanes.push_back(LaneByWorld[index]);
 			}
 
-			int owed = world->Owed(frameSeconds);
-			if (owed <= 0) {
-				continue;
+			// Longest first, by what the world's last tick cost. Each lane handles its
+			// assigned worlds in this order, so the expensive work begins before the
+			// cheap worlds waiting behind it.
+			order.resize(ActiveList.size());
+			for (size_t index = 0; index < order.size(); index++) {
+				order[index] = index;
 			}
+			std::sort(order.begin(), order.end(), [this](size_t left, size_t right) {
+				const float leftCost = ActiveList[left]->Statistics().LastTickMilliseconds;
+				const float rightCost = ActiveList[right]->Statistics().LastTickMilliseconds;
+				if (leftCost != rightCost) {
+					return leftCost > rightCost;
+				}
+				// Ties broken by index rather than left unspecified, so two runs
+				// dispatch in the same order and a recorded run replays.
+				return left < right;
+			});
 
-			if (owed > Settings_.MaximumCatchUpTicks) {
-				// A world far enough behind will not recover by running a
-				// hundred ticks in one frame; it will only fall further behind
-				// while holding a worker. Dropping the excess and counting it
-				// makes that visible instead of terminal.
-				owed = Settings_.MaximumCatchUpTicks;
+			DispatchLanes.resize(order.size());
+			for (size_t at = 0; at < order.size(); at++) {
+				DispatchLanes[at] = ActiveLanes[order[at]];
 			}
-
-			ActiveList.push_back(world.get());
-			OwedList.push_back(owed);
-			ActiveLanes.push_back(LaneByWorld[index]);
-		}
-
-		// Longest first, by what the world's last tick cost. Each lane handles its
-		// assigned worlds in this order, so the expensive work begins before the
-		// cheap worlds waiting behind it.
-		std::vector<size_t> order(ActiveList.size());
-		for (size_t index = 0; index < order.size(); index++) {
-			order[index] = index;
-		}
-		std::sort(order.begin(), order.end(), [this](size_t left, size_t right) {
-			const float leftCost = ActiveList[left]->Statistics().LastTickMilliseconds;
-			const float rightCost = ActiveList[right]->Statistics().LastTickMilliseconds;
-			if (leftCost != rightCost) {
-				return leftCost > rightCost;
-			}
-			// Ties broken by index rather than left unspecified, so two runs
-			// dispatch in the same order and a recorded run replays.
-			return left < right;
-		});
-
-		DispatchLanes.resize(order.size());
-		for (size_t at = 0; at < order.size(); at++) {
-			DispatchLanes[at] = ActiveLanes[order[at]];
 		}
 
 		// --- 3. the only parallel step ---
@@ -813,7 +817,12 @@ namespace engine::world {
 				}
 			}
 		} else {
-			ENGINE_PROFILE_CAT("worlds (serial)", engine::core::ProfileCategory::ECS);
+			const bool serialRequested =
+				Settings_.Mode == ExecutionMode::WorldSerial || parallel::ForceSerialCompute();
+			core::FrameGraph::Scope worlds(
+				serialRequested ? std::string_view("worlds (serial)") : std::string_view("worlds (driver)"),
+				core::ProfileCategory::ECS
+			);
 			for (const size_t index : order) {
 				ActiveList[index]->Tick(OwedList[index]);
 			}
@@ -825,28 +834,31 @@ namespace engine::world {
 		// Every worker has joined before the router can touch an outbox. Bus and
 		// service traffic therefore crosses cores as copied envelopes at the next
 		// driver barrier, never as shared world storage.
-		DrainControls();
+		{
+			ENGINE_PROFILE_CAT("tick diagnostics", engine::core::ProfileCategory::Simulation);
+			DrainControls();
 
-		Stats.ActiveWorlds = ActiveList.size();
-		Stats.Suspended = 0;
-		Stats.Faulted = 0;
-		Stats.Remote = 0;
-		Stats.SimulationTicks = 0;
+			Stats.ActiveWorlds = ActiveList.size();
+			Stats.Suspended = 0;
+			Stats.Faulted = 0;
+			Stats.Remote = 0;
+			Stats.SimulationTicks = 0;
 
-		for (const auto &world : Registry) {
-			if (world == nullptr) {
-				continue;
+			for (const auto &world : Registry) {
+				if (world == nullptr) {
+					continue;
+				}
+				if (world->State() == WorldState::Suspended) {
+					Stats.Suspended++;
+				}
+				if (world->State() == WorldState::Faulted) {
+					Stats.Faulted++;
+				}
+				if (world->State() == WorldState::Remote) {
+					Stats.Remote++;
+				}
+				Stats.SimulationTicks += world->Statistics().Ticks;
 			}
-			if (world->State() == WorldState::Suspended) {
-				Stats.Suspended++;
-			}
-			if (world->State() == WorldState::Faulted) {
-				Stats.Faulted++;
-			}
-			if (world->State() == WorldState::Remote) {
-				Stats.Remote++;
-			}
-			Stats.SimulationTicks += world->Statistics().Ticks;
 		}
 
 		Stats.LastTickMilliseconds =

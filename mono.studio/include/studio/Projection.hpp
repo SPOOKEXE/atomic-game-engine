@@ -54,7 +54,17 @@
 #include <glm/mat4x4.hpp>
 #include <glm/vec2.hpp>
 
+#include <cstdint>
+
 namespace studio {
+	// A source image fitted uniformly inside a viewport panel.
+	struct ViewportImageRect {
+		glm::vec2 Min{0.0f, 0.0f};
+		glm::vec2 Size{0.0f, 0.0f};
+	};
+
+	// Preserves a completed frame's aspect ratio while its panel is resizing.
+	ViewportImageRect FitViewportImage(glm::vec2 panelSize, uint32_t imageWidth, uint32_t imageHeight);
 
 	// Where a ray meets a plane.
 	//

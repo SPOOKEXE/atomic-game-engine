@@ -513,10 +513,11 @@ namespace engine::core {
 		// behind about a worker is worth far more than being silent about one.
 		//
 		// The span is placed at the current depth, so a reported worker sits
-		// under whatever opened the batch. Its start is the moment of the call
-		// rather than the moment the work happened: this is a duration in a
-		// tree, not a position on a timeline, and pretending otherwise would
-		// draw bars that overlap their own parent.
+		// under whatever opened the batch. EndFrame packs reported siblings in
+		// their recorded order from their parent's start. Their producer supplied
+		// no wall-clock start, so this is deliberately a logical work layout: it
+		// preserves the hierarchy without drawing every reconstructed child at
+		// the instant the report was copied onto this thread.
 		//
 		// @param name         What ran. Same lifetime rule as `Scope`: a
 		//                     literal, or text outliving the frame.
@@ -566,21 +567,25 @@ namespace engine::core {
 		// profiler caught a headless client at 10 MiB across 20,249 blocks and
 		// still climbing after forty seconds, for a panel nobody had open.
 		//
-		// A quarter of a million readings is exactly 2 MiB, allocated once when
+		// One million readings is exactly 8 MiB, allocated once when
 		// collection is switched on. What it buys in window depth depends on how
 		// many distinct spans a frame has: fifty is about five thousand frames,
-		// which is five seconds at a thousand frames a second and rather less
-		// above that. `HistoryFrames` and `HistorySeconds` report what was
-		// actually kept, so a snapshot says what it covers rather than assuming.
+		// while five hundred is about two thousand frames. Both cover the five
+		// second window at the rates those workloads sustain. `HistoryFrames` and
+		// `HistorySeconds` report what was actually kept, so a snapshot says what
+		// it covers rather than assuming.
 		//
 		// @since v0.18
-		static constexpr size_t MAXIMUM_HISTORY_READINGS = 1 << 18;
+		static constexpr size_t MAXIMUM_HISTORY_READINGS = 1 << 20;
 
 		// Distinct span names the history tracks. Past this a name is not
-		// recorded and the snapshot says how many it turned away - a copied
-		// name is arbitrary text, so a script naming a zone per chunk could
-		// otherwise grow this without limit.
-		static constexpr size_t MAXIMUM_HISTORY_NAMES = 256;
+		// recorded and the snapshot says how many it turned away. The original
+		// 256 bound was below this repository's own instrumentation: a Studio run
+		// of its three default worlds measured 29,711 refused occurrences in five
+		// seconds, making the retained names depend on which systems ran first.
+		// Two thousand names retain every first-party section with room for
+		// runtime system names while keeping arbitrary script text bounded.
+		static constexpr size_t MAXIMUM_HISTORY_NAMES = 2048;
 
 		// Returns the worst *single* reading for a named span in any of the last
 		// RECENT_FRAMES frames - not a total. A span that opens six times in a

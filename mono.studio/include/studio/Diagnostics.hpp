@@ -55,15 +55,27 @@ namespace studio {
 	// meaningful start position.
 	void FinishDiagnosticAverage(std::vector<DiagnosticSpan> &spans, uint32_t frames);
 
+	// Fits reported worker work into the measured timeline used for drawing.
+	//
+	// Reported durations are CPU work totals and may exceed wall time when
+	// workers overlap. Direct reported children are scaled into their measured
+	// parent's largest uncovered interval, then their descendants are fitted
+	// proportionally inside that logical bar. Call this on a display copy: the
+	// table and tooltip must retain the producer's actual milliseconds.
+	void FitReportedDiagnosticTimeline(std::vector<DiagnosticSpan> &spans, float frameMilliseconds);
+
 	// Adds display-only children for time inside a span that none of its direct
-	// children covers. The input tree stays intact and new spans are appended, so
-	// recorded parent indices remain valid.
+	// children covers. Reported worker spans are logical work rather than wall
+	// intervals, so they neither cover measured gaps nor receive synthetic gaps.
+	// The input tree stays intact and new spans are appended, so recorded parent
+	// indices remain valid.
 	void AppendUnaccountedDiagnosticSpans(std::vector<DiagnosticSpan> &spans);
 
 	// Assigns a non-overlapping display row to every span.
 	//
-	// Rows remain grouped by tree depth. Within one depth, overlapping time
-	// intervals take separate lanes; non-overlapping intervals reuse a lane.
+	// Rows remain grouped by tree depth. Overlapping siblings take separate
+	// lanes; spans under different parents reuse the same lanes because their
+	// parent branches already explain the overlap.
 	// `minimumMilliseconds` is the graph's one-pixel minimum expressed in time.
 	//
 	// @return How many rows the graph needs.

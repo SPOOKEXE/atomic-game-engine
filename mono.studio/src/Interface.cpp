@@ -1018,23 +1018,14 @@ namespace studio {
 			ViewportResults.resize(index + 1);
 		}
 		ViewportResults[index] = Renderer.SceneFrameResult(index);
-		const bool textureMatchesPanel =
-			extent.DrawnWidth == target.Width && extent.DrawnHeight == target.Height;
-		if (texture != nullptr && textureMatchesPanel) {
-			ImGui::Image(
-				reinterpret_cast<ImTextureID>(texture), size, ImVec2(0.0f, 0.0f), ImVec2(extent.U, extent.V)
-			);
-		} else if (texture != nullptr && extent.DrawnWidth > 0 && extent.DrawnHeight > 0) {
+		ViewportImageRect imageRect{glm::vec2(0.0f), glm::vec2(size.x, size.y)};
+		if (texture != nullptr && extent.DrawnWidth > 0 && extent.DrawnHeight > 0) {
 			// Keep the last complete frame visible while the new target is being
 			// allocated. It is fitted uniformly inside the panel, so a resize can
 			// letterbox for one frame but cannot stretch either the world or its UI.
-			const float oldWidth = static_cast<float>(extent.DrawnWidth) / density;
-			const float oldHeight = static_cast<float>(extent.DrawnHeight) / density;
-			const float scale = std::min(size.x / oldWidth, size.y / oldHeight);
-			const ImVec2 fitted{oldWidth * scale, oldHeight * scale};
-			const ImVec2 inset{(size.x - fitted.x) * 0.5f, (size.y - fitted.y) * 0.5f};
-			const ImVec2 minimum{origin.x + inset.x, origin.y + inset.y};
-			const ImVec2 maximum{minimum.x + fitted.x, minimum.y + fitted.y};
+			imageRect = FitViewportImage(glm::vec2(size.x, size.y), extent.DrawnWidth, extent.DrawnHeight);
+			const ImVec2 minimum{origin.x + imageRect.Min.x, origin.y + imageRect.Min.y};
+			const ImVec2 maximum{minimum.x + imageRect.Size.x, minimum.y + imageRect.Size.y};
 			ImGui::GetWindowDrawList()->AddImage(
 				reinterpret_cast<ImTextureID>(texture),
 				minimum,
@@ -1070,10 +1061,10 @@ namespace studio {
 		if (index < Overlays.size()) {
 			OverlaySlot &slot = Overlays[index];
 			slot.List = ImGui::GetWindowDrawList();
-			slot.X = origin.x;
-			slot.Y = origin.y;
-			slot.Width = size.x;
-			slot.Height = size.y;
+			slot.X = origin.x + imageRect.Min.x;
+			slot.Y = origin.y + imageRect.Min.y;
+			slot.Width = imageRect.Size.x;
+			slot.Height = imageRect.Size.y;
 			slot.Drawn = true;
 		}
 
