@@ -2412,3 +2412,9 @@ examples/Magic.luau:44```. Same with TerrainCore. - **the libraries were staged 
 - [x] improvements to replication, some newer additions were not using sigantures properly (and added relevent tests/benchmarks).
 - [x] compare `-O0` and `-O2` builds and find shared bottlenecks, several fixed already
 - [x] more gpu optimisations - fixed lighting signatures causing resident refresh every frame
+- [x] add AtmosphereCompute and AtmosphereProcedural
+- [x] add SkyboxCompute and SkyboxTextures
+- [x] add CloudCompute and CloudProcedural
+- [x] build out proper caching and cascaded caching implementations across every pipeline - some are done incorrectly and need to be corrected.
+- [x] make particles emit in studio when property is enabled and they are within a PVInstance (BasePart/Attachment) - this will cause cache invalidation on scene
+- [x] button to disable all particle emitter rendering in studio
