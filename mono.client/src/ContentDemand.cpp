@@ -2,6 +2,7 @@
 #include <engine/effects/Particles.hpp>
 #include <engine/effects/Ribbon.hpp>
 #include <engine/gui/Components.hpp>
+#include <engine/scene/Atmosphere.hpp>
 #include <engine/scene/Components.hpp>
 
 #include <client/ContentDemand.hpp>
@@ -69,5 +70,18 @@ namespace client {
 		store.Each<engine::effects::Trail>([&out](engine::ecs::Entity, engine::effects::Trail &trail) {
 			Want(out, trail.Texture);
 		});
+
+		// Skybox faces are demand-loaded like every other texture, but only for
+		// the provider hierarchy resolution selected. Asking for every inactive
+		// sibling would spend device memory on content that cannot reach a pixel.
+		const engine::scene::Environment environment = engine::scene::EnvironmentOf(store);
+		if (environment.Skybox == engine::scene::SkyboxSource::Textures && environment.Textures.Enabled) {
+			Want(out, environment.Textures.Front);
+			Want(out, environment.Textures.Back);
+			Want(out, environment.Textures.Left);
+			Want(out, environment.Textures.Right);
+			Want(out, environment.Textures.Up);
+			Want(out, environment.Textures.Down);
+		}
 	}
 }

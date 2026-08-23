@@ -96,6 +96,7 @@ namespace engine::render {
 			LinearDepth,
 			Occlusion,
 			Lit,
+			SkyLit,
 		};
 
 		ResourceRole RoleFor(core::Name resource) const {
@@ -148,6 +149,9 @@ namespace engine::render {
 					}
 					if (node->Kind == core::Name("deferred-lighting")) {
 						return ResourceRole::Lit;
+					}
+					if (node->Kind == core::Name("sky")) {
+						return ResourceRole::SkyLit;
 					}
 				}
 			}
@@ -307,7 +311,9 @@ namespace engine::render {
 		SDL_GPUGraphicsPipeline *DepthLinearPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *SsaoPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *DeferredLightingPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *SkyPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *TonemapPipeline = nullptr;
+		SDL_GPUComputePipeline *EnvironmentCompute = nullptr;
 
 		// `TonemapPipeline`'s replacement, when a world has asked for one -
 		// see `Renderer::SetPostProcessShader`. Null is the ordinary state,
@@ -343,6 +349,7 @@ namespace engine::render {
 			SDL_GPUTexture *LinearDepth = nullptr;
 			SDL_GPUTexture *Occlusion = nullptr;
 			SDL_GPUTexture *Lit = nullptr;
+			SDL_GPUTexture *SkyLit = nullptr;
 			PbrDimensions Dimensions;
 		};
 
@@ -357,6 +364,25 @@ namespace engine::render {
 
 		bool EnsurePbr(size_t slot, const PbrDimensions &dimensions);
 		void ReleasePbr(PbrSlot &slot);
+
+		// One generated environment per world, shared by every camera that draws
+		// it. The texture is regenerated only when the selected authored provider
+		// or one of its six resident source handles changes.
+		struct EnvironmentTarget {
+			uint64_t World = 0;
+			uint64_t Signature = 0;
+			uint64_t LastUsedFrame = 0;
+			SDL_GPUTexture *Texture = nullptr;
+		};
+
+		std::vector<EnvironmentTarget> Environments;
+		SDL_GPUTexture *EnsureEnvironment(
+			uint64_t world,
+			const scene::Environment &environment,
+			SDL_GPUCommandBuffer *command,
+			uint32_t &dispatches
+		);
+		void ReleaseEnvironments();
 
 		struct NamedTexture {
 			SDL_GPUTexture *Texture = nullptr;
@@ -678,6 +704,7 @@ namespace engine::render {
 		glm::vec4 FogColour{0.05f, 0.06f, 0.09f, 1.0f};
 		float FogStart = 100000.0f;
 		float FogEnd = 100001.0f;
+		scene::Environment EnvironmentState;
 
 		// What is in each slot of the instance buffer, filled in the same loop
 		// that fills the buffer itself.

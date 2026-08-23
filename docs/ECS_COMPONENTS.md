@@ -126,6 +126,7 @@ state until v0.19.
 | `scene.AnimationTrack` | 32 | 8 | yes | yes | . | . | One clip playing on one animator: its play head, speed, current and target weight, fade time, priority, loop flag and whether it is running. Storage for the v0.24 animation handler. |
 | `scene.Animator` | 16 | 8 | yes | yes | . | . | On an `Animator` instance: which rig it poses, whether the root channel moves the body and by how much, and whether the pose may be evaluated less often at distance. |
 | `scene.Atmosphere` | 40 | 4 | yes | yes | . | . | Per-world scattering authored on an `Atmosphere` instance under `Lighting`: the air's colour and decay, its density and offset, and the sun's glare and horizon haze. Presentation only. |
+| `scene.AtmosphereProcedural` | 24 | 4 | yes | . | . | . | Extra scattering controls on an `AtmosphereProcedural` instance: planet and atmosphere scale, Rayleigh and Mie strength, and bounded integration quality for the resident environment compute pass. |
 | `scene.Attachment` | 56 | 4 | yes | yes | . | . | A named point on a part: the authored local `Frame` plus the `WorldFrame` every host recomposes each tick. The cache puts an emitter and a lamp where their part is, and its reported write is what signals a change. |
 | `scene.AudioState` | 16 | 8 | yes | yes | . | . | Resource: the world's one ear and master gain - listener mode, listener instance and volume, set through `SoundService` and consumed by the client mixer. |
 | `scene.AwakeWorld` | 4 | 4 | yes | yes | . | . | Held by an entity that wants the world to keep ticking, with a required `Reason` naming why. `world::DecideLifecycle` walks these rows. |
@@ -136,6 +137,7 @@ state until v0.19.
 | `scene.Character` | 24 | 8 | yes | yes | . | . | On a character `Model`: handles to its root part, its `Humanoid` and the owning `Player`, null for an NPC. Controls, tools and camera code all start here. |
 | `scene.CharacterChanges` | 24 | 8 | yes | . | . | . | Resource: the ordered queue of character arrivals and departures since the last drain, emptied into the `CharacterAdded` and `CharacterRemoving` script signals. |
 | `scene.CharacterLimb` | 40 | 8 | yes | yes | . | . | On a rig limb or an equipped tool's handle: which root part it hangs off and its rest pose in that root's own frame, posed every tick. |
+| `scene.CloudCompute` | 28 | 4 | yes | . | . | . | Voxel-like cloud generation controls on a `CloudCompute` instance: cell and layer dimensions, fractal detail, deterministic seed and bounded ray-march quality for the resident environment texture. |
 | `scene.Clouds` | 32 | 4 | yes | yes | . | . | A cloud layer authored under `Lighting`: its lit colour, how much sky it covers and how opaque that is, and the speed and heading it drifts at. Presentation only. |
 | `scene.Collider` | 28 | 4 | yes | yes | . | . | The collision shape: kind, extent or baked geometry name, layer and mask, and whether contacts are only reported rather than solved. Read by both physics phases every tick. |
 | `scene.CollisionShapes` | 48 | 8 | yes | . | . | . | Resource: the world's table of baked convex hulls and triangle meshes, looked up by the name a `Collider::Geometry` field carries. |
@@ -177,6 +179,8 @@ state until v0.19.
 | `scene.ShaderSource` | 40 | 8 | yes | . | . | . | The fragment-stage GLSL a `ShaderScript` holds, verbatim and not interned, with a revision bumped on every write so a compiler knows when to rebuild. |
 | `scene.Simulated` | 0 | 1 | . | . | . | . | Tag meaning physics owns this body's motion. `Anchored = false` adds it and `Anchored = true` removes it; every dynamic query filters on its presence. |
 | `scene.Skeleton` | 8 | 4 | yes | . | . | . | On a skinned drawable: what the file called the rig, and how many palette slots the mesh's vertex joint indices may name. `Bone` rows under it are the joints. |
+| `scene.SkyboxCompute` | 52 | 4 | yes | . | . | . | Procedural sky controls on a `SkyboxCompute` instance: zenith, horizon and ground colours, deterministic stars and sun size, generated into one resident environment texture. |
+| `scene.SkyboxTextures` | 28 | 4 | yes | . | . | . | Six CDN texture names on a `SkyboxTextures` instance, one per cube face. Only the first such instance below `Lighting` is selected and demanded. |
 | `scene.Sound` | 20 | 4 | yes | . | yes | . | What a sound is rather than a sound playing: asset name, volume, roll-off distances, looped and playing. The client's mixer walks these rows every frame. |
 | `scene.SpawnLocation` | 16 | 4 | yes | yes | . | . | On a spawn pad: which team colour it serves, whether it takes anyone regardless, and whether it is a spawn at all. `FindSpawn` reads all three. |
 | `scene.Sun` | 24 | 4 | yes | yes | . | . | Per-world singleton directional light: the direction it shines and the ambient standing in for sky on the faces it misses. |
@@ -221,4 +225,4 @@ state until v0.19.
 
 ---
 
-144 components registered by the engine, 0 without a purpose line.
+148 components registered by the engine, 0 without a purpose line.

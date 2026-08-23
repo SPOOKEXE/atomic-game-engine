@@ -11,12 +11,11 @@
 // fade is, which is rule 2 and is exactly the mistake `Humanoid::Radius` was
 // deleted for.
 //
-// **What is missing is `Atmosphere`, and it is missing because linear fog cannot
-// express it.** Two distances and a colour give a fade that is the same looking
-// up as looking along the ground; scattering is not. Roblox draws the same line -
-// `Atmosphere` is an instance under `Lighting` and it *replaces* the legacy fog
-// where it is present - and `ROADMAP.md` v0.22 asks for "fog, atmosphere,
-// clouds" as three separate things for the same reason.
+// **`Atmosphere` is separate because linear fog cannot express it.** Two
+// distances and a colour give a fade that is the same looking up as looking
+// along the ground; scattering is not. Roblox draws the same line:
+// `Atmosphere` is an instance under `Lighting`, while the legacy fog remains
+// three properties on that service.
 //
 // **Both of these are per-world presentation state and neither reaches a
 // simulation input.** That is decision 20: "render graphs may vary per platform.
@@ -32,15 +31,13 @@
 // is authored content that an author adds and removes, so it is an instance -
 // the same call `Material` makes against being a property on `BasePart`.
 //
-// arch-waiver public-header: forward API for v0.22's atmosphere and clouds. The
-// resolved values already reach `scene::WorldLighting`, which `render` reads;
-// what is missing is the graph node. Decision 16.
-//
 // @tier L7 · shared
 
+#include <engine/core/Name.hpp>
 #include <engine/core/types/Color3.hpp>
 #include <engine/ecs/Classes.hpp>
 
+#include <cstddef>
 #include <cstdint>
 
 namespace engine::ecs {
@@ -133,6 +130,137 @@ namespace engine::scene {
 		uint8_t Reserved[3] = {};
 	};
 
+	// Six authored cube faces. The names resolve through the ordinary content
+	// catalogue, so a sky uses the same CDN and resident texture table as a part.
+	//
+	// @since v0.19
+	struct SkyboxTextures {
+		core::Name Front;
+		core::Name Back;
+		core::Name Left;
+		core::Name Right;
+		core::Name Up;
+		core::Name Down;
+		bool Enabled = true;
+		uint8_t Reserved[3] = {};
+	};
+
+	// Built-in device programs exposed as a closed property list. The authored
+	// value saves by name, while the resolved enum is what the compute shader
+	// consumes.
+	//
+	// @since v0.19
+	enum class SkyboxComputeShader : uint8_t {
+		Gradient,
+		Sunset,
+		Night,
+		Nebula,
+		Voxel,
+	};
+
+	constexpr size_t SKYBOX_COMPUTE_SHADER_COUNT = 5;
+
+	// @since v0.19
+	enum class CloudComputeShader : uint8_t {
+		Cumulus,
+		Stratus,
+		Storm,
+		Voxel,
+	};
+
+	constexpr size_t CLOUD_COMPUTE_SHADER_COUNT = 4;
+
+	// @since v0.19
+	enum class AtmosphereProceduralShader : uint8_t {
+		Earth,
+		Thin,
+		Mars,
+		Alien,
+	};
+
+	constexpr size_t ATMOSPHERE_PROCEDURAL_SHADER_COUNT = 4;
+
+	const char *Describe(SkyboxComputeShader shader);
+	const char *Describe(CloudComputeShader shader);
+	const char *Describe(AtmosphereProceduralShader shader);
+	SkyboxComputeShader SkyboxComputeShaderFromName(const core::Name &name);
+	CloudComputeShader CloudComputeShaderFromName(const core::Name &name);
+	AtmosphereProceduralShader AtmosphereProceduralShaderFromName(const core::Name &name);
+
+	// A device-generated sky recipe. The generated image is derived render
+	// state and never becomes another ECS copy of these values.
+	//
+	// @since v0.19
+	struct SkyboxCompute {
+		core::Color3 Zenith{0.08f, 0.24f, 0.55f};
+		core::Color3 Horizon{0.62f, 0.76f, 0.92f};
+		core::Color3 Ground{0.035f, 0.04f, 0.055f};
+		float StarDensity = 0.0f;
+		float SunSize = 0.025f;
+		uint32_t Seed = 1;
+		SkyboxComputeShader Shader = SkyboxComputeShader::Gradient;
+		bool Enabled = true;
+		uint8_t Reserved[2] = {};
+	};
+
+	// Extra volumetric controls carried by a `CloudCompute` instance. The base
+	// colour, cover, density and wind remain the one `Clouds` component shared
+	// with `CloudProcedural`.
+	//
+	// @since v0.19
+	struct CloudCompute {
+		float CellSize = 0.18f;
+		float Detail = 0.55f;
+		float Height = 0.28f;
+		float Thickness = 0.12f;
+		uint32_t Seed = 1;
+		uint32_t Steps = 12;
+		CloudComputeShader Shader = CloudComputeShader::Cumulus;
+		bool Enabled = true;
+		uint8_t Reserved[2] = {};
+	};
+
+	// Extra scattering controls carried by an `AtmosphereProcedural` instance.
+	// The common authored appearance remains the `Atmosphere` component.
+	//
+	// @since v0.19
+	struct AtmosphereProcedural {
+		float PlanetRadius = 6371000.0f;
+		float Height = 80000.0f;
+		float Rayleigh = 1.0f;
+		float Mie = 1.0f;
+		uint32_t Samples = 12;
+		AtmosphereProceduralShader Shader = AtmosphereProceduralShader::Earth;
+		bool Enabled = true;
+		uint8_t Reserved[2] = {};
+	};
+
+	enum class SkyboxSource : uint8_t {
+		None,
+		Textures,
+		Compute,
+	};
+
+	// The one environment selected in deterministic hierarchy order.
+	//
+	// The booleans distinguish a missing instance from a present instance whose
+	// authored density is zero. Render signatures use that distinction, while
+	// simulation never consumes it.
+	//
+	// @since v0.19
+	struct Environment {
+		SkyboxTextures Textures;
+		SkyboxCompute SkyCompute;
+		Atmosphere Air;
+		AtmosphereProcedural AirCompute;
+		Clouds CloudLayer;
+		CloudCompute CloudVolume;
+		SkyboxSource Skybox = SkyboxSource::None;
+		bool HasAtmosphere = false;
+		bool HasClouds = false;
+		uint8_t Reserved = 0;
+	};
+
 	// The world's atmosphere, or the defaults when it has none.
 	//
 	// **A free function rather than a lookup at every call site**, which is
@@ -152,6 +280,13 @@ namespace engine::scene {
 	// @param store The world.
 	// @return Its clouds, clamped into range.
 	Clouds CloudsOf(const ecs::Store &store);
+
+	// Resolves the first skybox, atmosphere and cloud provider beneath
+	// `Lighting`. Each category is independent and follows tree order.
+	//
+	// @param store The world.
+	// @return The selected authored environment.
+	Environment EnvironmentOf(const ecs::Store &store);
 
 	// The `Atmosphere` class id, registering the scene tree on first call.
 	//

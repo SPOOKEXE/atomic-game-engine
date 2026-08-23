@@ -165,6 +165,126 @@ namespace engine::scene {
 			}
 		}
 
+		void WriteSkyboxTextures(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *skyboxes = static_cast<const SkyboxTextures *>(source);
+			for (size_t index = 0; index < count; index++) {
+				writer.WriteName(skyboxes[index].Front);
+				writer.WriteName(skyboxes[index].Back);
+				writer.WriteName(skyboxes[index].Left);
+				writer.WriteName(skyboxes[index].Right);
+				writer.WriteName(skyboxes[index].Up);
+				writer.WriteName(skyboxes[index].Down);
+				writer.WriteBool(skyboxes[index].Enabled);
+			}
+		}
+
+		void ReadSkyboxTextures(core::ByteReader &reader, void *destination, size_t count) {
+			auto *skyboxes = static_cast<SkyboxTextures *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				skyboxes[index].Front = reader.ReadName();
+				skyboxes[index].Back = reader.ReadName();
+				skyboxes[index].Left = reader.ReadName();
+				skyboxes[index].Right = reader.ReadName();
+				skyboxes[index].Up = reader.ReadName();
+				skyboxes[index].Down = reader.ReadName();
+				skyboxes[index].Enabled = reader.ReadBool();
+			}
+		}
+
+		void WriteSkyboxCompute(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *skies = static_cast<const SkyboxCompute *>(source);
+			for (size_t index = 0; index < count; index++) {
+				const SkyboxCompute &sky = skies[index];
+				writer.WriteFloat(sky.Zenith.R);
+				writer.WriteFloat(sky.Zenith.G);
+				writer.WriteFloat(sky.Zenith.B);
+				writer.WriteFloat(sky.Horizon.R);
+				writer.WriteFloat(sky.Horizon.G);
+				writer.WriteFloat(sky.Horizon.B);
+				writer.WriteFloat(sky.Ground.R);
+				writer.WriteFloat(sky.Ground.G);
+				writer.WriteFloat(sky.Ground.B);
+				writer.WriteFloat(sky.StarDensity);
+				writer.WriteFloat(sky.SunSize);
+				writer.WriteUInt32(sky.Seed);
+				writer.WriteName(core::Name(Describe(sky.Shader)));
+				writer.WriteBool(sky.Enabled);
+			}
+		}
+
+		void ReadSkyboxCompute(core::ByteReader &reader, void *destination, size_t count) {
+			auto *skies = static_cast<SkyboxCompute *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				SkyboxCompute &sky = skies[index];
+				sky.Zenith = {reader.ReadFloat(), reader.ReadFloat(), reader.ReadFloat()};
+				sky.Horizon = {reader.ReadFloat(), reader.ReadFloat(), reader.ReadFloat()};
+				sky.Ground = {reader.ReadFloat(), reader.ReadFloat(), reader.ReadFloat()};
+				sky.StarDensity = reader.ReadFloat();
+				sky.SunSize = reader.ReadFloat();
+				sky.Seed = reader.ReadUInt32();
+				sky.Shader = SkyboxComputeShaderFromName(reader.ReadName());
+				sky.Enabled = reader.ReadBool();
+			}
+		}
+
+		void WriteCloudCompute(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *clouds = static_cast<const CloudCompute *>(source);
+			for (size_t index = 0; index < count; index++) {
+				const CloudCompute &cloud = clouds[index];
+				writer.WriteFloat(cloud.CellSize);
+				writer.WriteFloat(cloud.Detail);
+				writer.WriteFloat(cloud.Height);
+				writer.WriteFloat(cloud.Thickness);
+				writer.WriteUInt32(cloud.Seed);
+				writer.WriteUInt32(cloud.Steps);
+				writer.WriteName(core::Name(Describe(cloud.Shader)));
+				writer.WriteBool(cloud.Enabled);
+			}
+		}
+
+		void ReadCloudCompute(core::ByteReader &reader, void *destination, size_t count) {
+			auto *clouds = static_cast<CloudCompute *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				CloudCompute &cloud = clouds[index];
+				cloud.CellSize = reader.ReadFloat();
+				cloud.Detail = reader.ReadFloat();
+				cloud.Height = reader.ReadFloat();
+				cloud.Thickness = reader.ReadFloat();
+				cloud.Seed = reader.ReadUInt32();
+				cloud.Steps = reader.ReadUInt32();
+				cloud.Shader = CloudComputeShaderFromName(reader.ReadName());
+				cloud.Enabled = reader.ReadBool();
+			}
+		}
+
+		void WriteAtmosphereProcedural(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *atmospheres = static_cast<const AtmosphereProcedural *>(source);
+			for (size_t index = 0; index < count; index++) {
+				const AtmosphereProcedural &atmosphere = atmospheres[index];
+				writer.WriteFloat(atmosphere.PlanetRadius);
+				writer.WriteFloat(atmosphere.Height);
+				writer.WriteFloat(atmosphere.Rayleigh);
+				writer.WriteFloat(atmosphere.Mie);
+				writer.WriteUInt32(atmosphere.Samples);
+				writer.WriteName(core::Name(Describe(atmosphere.Shader)));
+				writer.WriteBool(atmosphere.Enabled);
+			}
+		}
+
+		void ReadAtmosphereProcedural(core::ByteReader &reader, void *destination, size_t count) {
+			auto *atmospheres = static_cast<AtmosphereProcedural *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				AtmosphereProcedural &atmosphere = atmospheres[index];
+				atmosphere.PlanetRadius = reader.ReadFloat();
+				atmosphere.Height = reader.ReadFloat();
+				atmosphere.Rayleigh = reader.ReadFloat();
+				atmosphere.Mie = reader.ReadFloat();
+				atmosphere.Samples = reader.ReadUInt32();
+				atmosphere.Shader = AtmosphereProceduralShaderFromName(reader.ReadName());
+				atmosphere.Enabled = reader.ReadBool();
+			}
+		}
+
 		void WriteTexts(core::ByteWriter &writer, const void *source, size_t count) {
 			const auto *texts = static_cast<const TextContent *>(source);
 			for (size_t index = 0; index < count; index++) {
@@ -1359,6 +1479,20 @@ namespace engine::scene {
 		// which takes the compiler's spelling of the type and aborts once the
 		// table is sealed.
 		ecs::Components::Register<Terrain>("scene.Terrain", WriteTerrains, ReadTerrains);
+
+		// Appended because component ids are registration order. Every format is
+		// explicit: sky face names cross as text, and shader choices cross by
+		// their stable names rather than declaration-order ordinals.
+		ecs::Components::Register<SkyboxTextures>(
+			"scene.SkyboxTextures", WriteSkyboxTextures, ReadSkyboxTextures
+		);
+		ecs::Components::Register<SkyboxCompute>(
+			"scene.SkyboxCompute", WriteSkyboxCompute, ReadSkyboxCompute
+		);
+		ecs::Components::Register<CloudCompute>("scene.CloudCompute", WriteCloudCompute, ReadCloudCompute);
+		ecs::Components::Register<AtmosphereProcedural>(
+			"scene.AtmosphereProcedural", WriteAtmosphereProcedural, ReadAtmosphereProcedural
+		);
 	}
 
 	void RegisterSceneClasses() {

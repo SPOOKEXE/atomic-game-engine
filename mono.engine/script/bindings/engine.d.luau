@@ -525,6 +525,9 @@ end
 declare extern type Enum_AspectType extends EnumItem with
 end
 
+declare extern type Enum_AtmosphereProceduralShader extends EnumItem with
+end
+
 declare extern type Enum_AutomaticSize extends EnumItem with
 end
 
@@ -535,6 +538,9 @@ declare extern type Enum_BorderMode extends EnumItem with
 end
 
 declare extern type Enum_CameraType extends EnumItem with
+end
+
+declare extern type Enum_CloudComputeShader extends EnumItem with
 end
 
 declare extern type Enum_ConstraintMotion extends EnumItem with
@@ -624,6 +630,9 @@ end
 declare extern type Enum_SizeConstraint extends EnumItem with
 end
 
+declare extern type Enum_SkyboxComputeShader extends EnumItem with
+end
+
 declare extern type Enum_SortOrder extends EnumItem with
 end
 
@@ -697,6 +706,12 @@ declare Enum: {
 		FitWithinMaxSize: Enum_AspectType,
 		ScaleWithParentSize: Enum_AspectType,
 	},
+	AtmosphereProceduralShader: {
+		Earth: Enum_AtmosphereProceduralShader,
+		Thin: Enum_AtmosphereProceduralShader,
+		Mars: Enum_AtmosphereProceduralShader,
+		Alien: Enum_AtmosphereProceduralShader,
+	},
 	AutomaticSize: {
 		None: Enum_AutomaticSize,
 		X: Enum_AutomaticSize,
@@ -718,6 +733,12 @@ declare Enum: {
 		LockFirstPerson: Enum_CameraType,
 		ShiftLock: Enum_CameraType,
 		Scriptable: Enum_CameraType,
+	},
+	CloudComputeShader: {
+		Cumulus: Enum_CloudComputeShader,
+		Stratus: Enum_CloudComputeShader,
+		Storm: Enum_CloudComputeShader,
+		Voxel: Enum_CloudComputeShader,
 	},
 	ConstraintMotion: {
 		Locked: Enum_ConstraintMotion,
@@ -939,6 +960,13 @@ declare Enum: {
 		RelativeXY: Enum_SizeConstraint,
 		RelativeXX: Enum_SizeConstraint,
 		RelativeYY: Enum_SizeConstraint,
+	},
+	SkyboxComputeShader: {
+		Gradient: Enum_SkyboxComputeShader,
+		Sunset: Enum_SkyboxComputeShader,
+		Night: Enum_SkyboxComputeShader,
+		Nebula: Enum_SkyboxComputeShader,
+		Voxel: Enum_SkyboxComputeShader,
 	},
 	SortOrder: {
 		Name: Enum_SortOrder,
@@ -1517,6 +1545,19 @@ declare extern type Atmosphere extends Instance with
 	Offset: number
 end
 
+declare extern type AtmosphereComponent extends Atmosphere with
+end
+
+declare extern type AtmosphereProcedural extends AtmosphereComponent with
+	AtmosphereHeight: number
+	Mie: number
+	PlanetRadius: number
+	ProceduralEnabled: boolean
+	Rayleigh: number
+	Samples: number
+	Shader: Enum_AtmosphereProceduralShader
+end
+
 declare extern type Clouds extends Instance with
 	Color: Color3
 	Cover: number
@@ -1524,6 +1565,41 @@ declare extern type Clouds extends Instance with
 	Enabled: boolean
 	WindDirection: number
 	WindSpeed: number
+end
+
+declare extern type CloudProcedural extends Clouds with
+end
+
+declare extern type CloudCompute extends CloudProcedural with
+	CellSize: number
+	ComputeEnabled: boolean
+	Detail: number
+	Height: number
+	Seed: number
+	Shader: Enum_CloudComputeShader
+	Steps: number
+	Thickness: number
+end
+
+declare extern type SkyboxTextures extends Instance with
+	Back: string
+	Down: string
+	Enabled: boolean
+	Front: string
+	Left: string
+	Right: string
+	Up: string
+end
+
+declare extern type SkyboxCompute extends Instance with
+	Enabled: boolean
+	GroundColor: Color3
+	HorizonColor: Color3
+	Seed: number
+	Shader: Enum_SkyboxComputeShader
+	StarDensity: number
+	SunSize: number
+	ZenithColor: Color3
 end
 
 declare extern type Constraint extends Instance with
@@ -2669,7 +2745,13 @@ type CreatableInstances = {
 	Animator: Animator,
 	AnimationTrack: AnimationTrack,
 	Atmosphere: Atmosphere,
+	AtmosphereComponent: AtmosphereComponent,
+	AtmosphereProcedural: AtmosphereProcedural,
 	Clouds: Clouds,
+	CloudProcedural: CloudProcedural,
+	CloudCompute: CloudCompute,
+	SkyboxTextures: SkyboxTextures,
+	SkyboxCompute: SkyboxCompute,
 	Constraint: Constraint,
 	WeldConstraint: WeldConstraint,
 	BallSocketConstraint: BallSocketConstraint,

@@ -100,18 +100,21 @@ TEST_CASE("camera and renderer state invalidate scene pixels", "[render][present
 	CHECK(engine::render::ScenePresentationSignature(view, state) != original);
 }
 
-TEST_CASE(
-	"only lighting consumed by render passes invalidates scene pixels", "[render][presentation][damage]"
-) {
+TEST_CASE("only selected environment state invalidates scene pixels", "[render][presentation][damage]") {
 	engine::render::View view;
 	engine::render::ScenePresentationState state;
 	const uint64_t original = engine::render::ScenePresentationSignature(view, state);
 
-	state.Lighting.Sky.Enabled = !state.Lighting.Sky.Enabled;
-	state.Lighting.Sky.Cover = 0.9f;
-	state.Lighting.Air.Density = 0.8f;
+	state.Lighting.EnvironmentState.CloudLayer.Cover = 0.9f;
+	state.Lighting.EnvironmentState.Air.Density = 0.8f;
 	CHECK(engine::render::ScenePresentationSignature(view, state) == original);
 
-	state.Lighting.Ambient.R = 0.25f;
+	state.Lighting.EnvironmentState.HasAtmosphere = true;
+	CHECK(engine::render::ScenePresentationSignature(view, state) != original);
+
+	state = {};
+	state.Lighting.EnvironmentState.Textures.Front = Name("unused.atex");
+	CHECK(engine::render::ScenePresentationSignature(view, state) == original);
+	state.Lighting.EnvironmentState.Skybox = engine::scene::SkyboxSource::Textures;
 	CHECK(engine::render::ScenePresentationSignature(view, state) != original);
 }

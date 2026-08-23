@@ -7,6 +7,7 @@
 // distance fade is, which is rule 2.
 
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Atmosphere.hpp>
 #include <engine/scene/Part.hpp>
@@ -31,6 +32,8 @@ using engine::scene::AtmosphereClass;
 using engine::scene::AtmosphereOf;
 using engine::scene::Clouds;
 using engine::scene::CloudsOf;
+using engine::scene::Environment;
+using engine::scene::EnvironmentOf;
 using engine::scene::InstallServices;
 using engine::scene::LightingOf;
 using engine::scene::LightingServiceComponent;
@@ -85,7 +88,7 @@ TEST_CASE("an atmosphere does not disturb the fog beside it", "[scene][atmospher
 	CHECK(resolved.FogStart == Approx(25.0f));
 	CHECK(resolved.FogEnd == Approx(90.0f));
 	CHECK(resolved.FogColor.B == Approx(0.4f));
-	CHECK(resolved.Air.Density == Approx(0.8f));
+	CHECK(resolved.EnvironmentState.Air.Density == Approx(0.8f));
 }
 
 TEST_CASE("the resolved lighting carries the sky", "[scene][atmosphere]") {
@@ -109,11 +112,101 @@ TEST_CASE("the resolved lighting carries the sky", "[scene][atmosphere]") {
 	store.Set(clouds, layer);
 
 	const WorldLighting resolved = LightingOf(store);
-	CHECK(resolved.Air.Colour.R == Approx(0.9f));
-	CHECK(resolved.Air.Haze == Approx(3.0f));
-	CHECK(resolved.Sky.Enabled);
-	CHECK(resolved.Sky.Cover == Approx(0.3f));
-	CHECK(resolved.Sky.WindSpeed == Approx(12.0f));
+	CHECK(resolved.EnvironmentState.Air.Colour.R == Approx(0.9f));
+	CHECK(resolved.EnvironmentState.Air.Haze == Approx(3.0f));
+	CHECK(resolved.EnvironmentState.CloudLayer.Enabled);
+	CHECK(resolved.EnvironmentState.CloudLayer.Cover == Approx(0.3f));
+	CHECK(resolved.EnvironmentState.CloudLayer.WindSpeed == Approx(12.0f));
+}
+
+TEST_CASE("only the first provider of each kind below Lighting resolves", "[scene][atmosphere][skybox]") {
+	RegisterSceneClasses();
+	Store store("atmosphere_test.providers");
+	const Entity lighting = Lighting(store);
+
+	const Entity outside = store.CreateInstance(Classes::Find(Name("SkyboxCompute")), "Outside");
+	store.GetMutable<engine::scene::SkyboxCompute>(outside)->Seed = 90;
+
+	const Entity firstSky = store.CreateInstance(Classes::Find(Name("SkyboxTextures")), "FirstSky");
+	REQUIRE(store.SetParent(firstSky, lighting));
+	store.GetMutable<engine::scene::SkyboxTextures>(firstSky)->Front = Name("sky/front.atex");
+
+	const Entity secondSky = store.CreateInstance(Classes::Find(Name("SkyboxCompute")), "SecondSky");
+	REQUIRE(store.SetParent(secondSky, lighting));
+	store.GetMutable<engine::scene::SkyboxCompute>(secondSky)->Seed = 22;
+
+	const Entity firstCloud = store.CreateInstance(Classes::Find(Name("CloudProcedural")), "FirstCloud");
+	REQUIRE(store.SetParent(firstCloud, lighting));
+	store.GetMutable<Clouds>(firstCloud)->Cover = 0.2f;
+
+	const Entity secondCloud = store.CreateInstance(Classes::Find(Name("CloudCompute")), "SecondCloud");
+	REQUIRE(store.SetParent(secondCloud, lighting));
+	store.GetMutable<Clouds>(secondCloud)->Cover = 0.9f;
+
+	const Environment environment = EnvironmentOf(store);
+	CHECK(environment.Skybox == engine::scene::SkyboxSource::Textures);
+	CHECK(environment.Textures.Front == Name("sky/front.atex"));
+	CHECK(environment.CloudLayer.Cover == Approx(0.2f));
+	CHECK_FALSE(environment.CloudVolume.Enabled);
+}
+
+TEST_CASE("compute variants carry the common authored component", "[scene][atmosphere][compute]") {
+	RegisterSceneClasses();
+	Store store("atmosphere_test.compute");
+	const Entity lighting = Lighting(store);
+
+	const Entity air =
+		store.CreateInstance(Classes::Find(Name("AtmosphereProcedural")), "ComputedAtmosphere");
+	REQUIRE(store.SetParent(air, lighting));
+	store.GetMutable<Atmosphere>(air)->Density = 0.7f;
+	store.GetMutable<engine::scene::AtmosphereProcedural>(air)->Samples = 31;
+
+	const Entity clouds = store.CreateInstance(Classes::Find(Name("CloudCompute")), "ComputedClouds");
+	REQUIRE(store.SetParent(clouds, lighting));
+	store.GetMutable<Clouds>(clouds)->Cover = 0.4f;
+	store.GetMutable<engine::scene::CloudCompute>(clouds)->Steps = 23;
+
+	const Environment environment = EnvironmentOf(store);
+	CHECK(environment.HasAtmosphere);
+	CHECK(environment.Air.Density == Approx(0.7f));
+	CHECK(environment.AirCompute.Enabled);
+	CHECK(environment.AirCompute.Samples == 31);
+	CHECK(environment.HasClouds);
+	CHECK(environment.CloudLayer.Cover == Approx(0.4f));
+	CHECK(environment.CloudVolume.Enabled);
+	CHECK(environment.CloudVolume.Steps == 23);
+}
+
+TEST_CASE("compute shader choices are closed dropdowns", "[scene][atmosphere][compute][enum]") {
+	RegisterSceneClasses();
+	Store store("atmosphere_test.shaders");
+	const Entity lighting = Lighting(store);
+
+	const Entity sky = store.CreateInstance(Classes::Find(Name("SkyboxCompute")), "Sky");
+	const Entity clouds = store.CreateInstance(Classes::Find(Name("CloudCompute")), "Clouds");
+	const Entity air = store.CreateInstance(Classes::Find(Name("AtmosphereProcedural")), "Atmosphere");
+	REQUIRE(store.SetParent(sky, lighting));
+	REQUIRE(store.SetParent(clouds, lighting));
+	REQUIRE(store.SetParent(air, lighting));
+
+	const Name nebula("Nebula");
+	const Name voxel("Voxel");
+	const Name mars("Mars");
+	REQUIRE(store.SetProperty(sky, Name("Shader"), &nebula, sizeof(nebula)));
+	REQUIRE(store.SetProperty(clouds, Name("Shader"), &voxel, sizeof(voxel)));
+	REQUIRE(store.SetProperty(air, Name("Shader"), &mars, sizeof(mars)));
+	CHECK(store.Get<engine::scene::SkyboxCompute>(sky)->Shader == engine::scene::SkyboxComputeShader::Nebula);
+	CHECK(store.Get<engine::scene::CloudCompute>(clouds)->Shader == engine::scene::CloudComputeShader::Voxel);
+	CHECK(
+		store.Get<engine::scene::AtmosphereProcedural>(air)->Shader ==
+		engine::scene::AtmosphereProceduralShader::Mars
+	);
+
+	const Name unknown("NotAComputeShader");
+	CHECK_FALSE(store.SetProperty(sky, Name("Shader"), &unknown, sizeof(unknown)));
+	CHECK(engine::ecs::EnumTable::MembersOf(Name("SkyboxComputeShader")).size() == 5);
+	CHECK(engine::ecs::EnumTable::MembersOf(Name("CloudComputeShader")).size() == 4);
+	CHECK(engine::ecs::EnumTable::MembersOf(Name("AtmosphereProceduralShader")).size() == 4);
 }
 
 TEST_CASE("authored values out of range are clamped on read", "[scene][atmosphere]") {

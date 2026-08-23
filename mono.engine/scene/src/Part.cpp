@@ -28,6 +28,7 @@
 #include <numbers>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 namespace engine::scene {
@@ -610,6 +611,58 @@ namespace engine::scene {
 		const core::Name &SurfaceEffectEnum() {
 			static const core::Name name("SurfaceEffect");
 			return name;
+		}
+
+		const core::Name &SkyboxComputeShaderEnum() {
+			static const core::Name name("SkyboxComputeShader");
+			return name;
+		}
+
+		const core::Name &CloudComputeShaderEnum() {
+			static const core::Name name("CloudComputeShader");
+			return name;
+		}
+
+		const core::Name &AtmosphereProceduralShaderEnum() {
+			static const core::Name name("AtmosphereProceduralShader");
+			return name;
+		}
+
+		template <class Component, auto Member, const core::Name &(*EnumName)()>
+		PropertyDescriptor EnumFieldProperty(std::string_view name) {
+			PropertyDescriptor property;
+			property.Name = core::Name(name);
+			property.Type = PropertyType::Enum;
+			property.EnumName = EnumName();
+			property.Size = sizeof(core::Name);
+			property.Kind = PropertyKind::Field;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Component>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Component *component = store.Get<Component>(instance);
+				if (component == nullptr) {
+					return false;
+				}
+				*static_cast<core::Name *>(out) =
+					ecs::EnumTable::MemberAt(EnumName(), static_cast<size_t>(component->*Member));
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				Component *component = store.GetMutable<Component>(instance);
+				if (component == nullptr) {
+					return false;
+				}
+				size_t ordinal = 0;
+				if (!ecs::EnumTable::OrdinalOf(
+						EnumName(), *static_cast<const core::Name *>(value), ordinal
+					)) {
+					return false;
+				}
+				using Field = std::remove_cvref_t<decltype(component->*Member)>;
+				component->*Member = static_cast<Field>(ordinal);
+				return true;
+			};
+			return property;
 		}
 
 		// What a surface camera's image is put through, as an enum member.
@@ -2276,15 +2329,50 @@ namespace engine::scene {
 				std::array<std::string_view, 5>{"Core", "Idle", "Movement", "Action", "Override"}
 			);
 
+			std::array<std::string_view, SKYBOX_COMPUTE_SHADER_COUNT> skyShaders{};
+			for (size_t index = 0; index < skyShaders.size(); index++) {
+				skyShaders[index] = Describe(static_cast<SkyboxComputeShader>(index));
+			}
+			ecs::EnumTable::Register(SkyboxComputeShaderEnum().Text(), skyShaders);
+
+			std::array<std::string_view, CLOUD_COMPUTE_SHADER_COUNT> cloudShaders{};
+			for (size_t index = 0; index < cloudShaders.size(); index++) {
+				cloudShaders[index] = Describe(static_cast<CloudComputeShader>(index));
+			}
+			ecs::EnumTable::Register(CloudComputeShaderEnum().Text(), cloudShaders);
+
+			std::array<std::string_view, ATMOSPHERE_PROCEDURAL_SHADER_COUNT> atmosphereShaders{};
+			for (size_t index = 0; index < atmosphereShaders.size(); index++) {
+				atmosphereShaders[index] = Describe(static_cast<AtmosphereProceduralShader>(index));
+			}
+			ecs::EnumTable::Register(AtmosphereProceduralShaderEnum().Text(), atmosphereShaders);
+
 			// **The sky, both halves of it under `Lighting`.** Neither is a
 			// `PVInstance`, which is `Sound`'s and `Attachment`'s omission for
 			// their reason: the air has no place in the world, and a `Transform`
 			// here would be a second opinion about where `Lighting` is.
 			const std::array air{ecs::Components::Of<Atmosphere>()};
 			const ecs::ClassId atmosphereClass = ecs::Classes::Register("Atmosphere", instance, air);
+			const ecs::ClassId atmosphereComponentClass =
+				ecs::Classes::Register("AtmosphereComponent", atmosphereClass, {});
+			const std::array proceduralAir{ecs::Components::Of<AtmosphereProcedural>()};
+			const ecs::ClassId atmosphereProceduralClass =
+				ecs::Classes::Register("AtmosphereProcedural", atmosphereComponentClass, proceduralAir);
 
 			const std::array layer{ecs::Components::Of<Clouds>()};
 			const ecs::ClassId cloudsClass = ecs::Classes::Register("Clouds", instance, layer);
+			const ecs::ClassId cloudProceduralClass =
+				ecs::Classes::Register("CloudProcedural", cloudsClass, {});
+			const std::array cloudVolume{ecs::Components::Of<CloudCompute>()};
+			const ecs::ClassId cloudComputeClass =
+				ecs::Classes::Register("CloudCompute", cloudProceduralClass, cloudVolume);
+
+			const std::array skyboxTextures{ecs::Components::Of<SkyboxTextures>()};
+			const ecs::ClassId skyboxTexturesClass =
+				ecs::Classes::Register("SkyboxTextures", instance, skyboxTextures);
+			const std::array skyboxCompute{ecs::Components::Of<SkyboxCompute>()};
+			const ecs::ClassId skyboxComputeClass =
+				ecs::Classes::Register("SkyboxCompute", instance, skyboxCompute);
 
 			// **One component, seven classes**, which is `Light`'s trade at
 			// greater width and is the whole argument in `Constraints.hpp`: a
@@ -2788,6 +2876,66 @@ namespace engine::scene {
 			ecs::Classes::Property<&Clouds::WindSpeed>(cloudsClass, "WindSpeed");
 			ecs::Classes::Property<&Clouds::WindDirection>(cloudsClass, "WindDirection");
 			ecs::Classes::Property<&Clouds::Enabled>(cloudsClass, "Enabled");
+
+			ecs::Classes::Property<&SkyboxTextures::Front>(skyboxTexturesClass, "Front");
+			ecs::Classes::Property<&SkyboxTextures::Back>(skyboxTexturesClass, "Back");
+			ecs::Classes::Property<&SkyboxTextures::Left>(skyboxTexturesClass, "Left");
+			ecs::Classes::Property<&SkyboxTextures::Right>(skyboxTexturesClass, "Right");
+			ecs::Classes::Property<&SkyboxTextures::Up>(skyboxTexturesClass, "Up");
+			ecs::Classes::Property<&SkyboxTextures::Down>(skyboxTexturesClass, "Down");
+			ecs::Classes::Property<&SkyboxTextures::Enabled>(skyboxTexturesClass, "Enabled");
+
+			ecs::Classes::Property<&SkyboxCompute::Zenith>(skyboxComputeClass, "ZenithColor");
+			ecs::Classes::Property<&SkyboxCompute::Horizon>(skyboxComputeClass, "HorizonColor");
+			ecs::Classes::Property<&SkyboxCompute::Ground>(skyboxComputeClass, "GroundColor");
+			ecs::Classes::ClampedProperty<&SkyboxCompute::StarDensity, 0.0f, 1.0f>(
+				skyboxComputeClass, "StarDensity"
+			);
+			ecs::Classes::ClampedProperty<&SkyboxCompute::SunSize, 0.001f, 0.25f>(
+				skyboxComputeClass, "SunSize"
+			);
+			ecs::Classes::Property<&SkyboxCompute::Seed>(skyboxComputeClass, "Seed");
+			ecs::Classes::Computed(
+				skyboxComputeClass,
+				EnumFieldProperty<SkyboxCompute, &SkyboxCompute::Shader, SkyboxComputeShaderEnum>("Shader")
+			);
+			ecs::Classes::Property<&SkyboxCompute::Enabled>(skyboxComputeClass, "Enabled");
+
+			ecs::Classes::ClampedProperty<&CloudCompute::CellSize, 0.001f, 4.0f>(
+				cloudComputeClass, "CellSize"
+			);
+			ecs::Classes::ClampedProperty<&CloudCompute::Detail, 0.0f, 1.0f>(cloudComputeClass, "Detail");
+			ecs::Classes::ClampedProperty<&CloudCompute::Height, 0.0f, 1.0f>(cloudComputeClass, "Height");
+			ecs::Classes::ClampedProperty<&CloudCompute::Thickness, 0.001f, 1.0f>(
+				cloudComputeClass, "Thickness"
+			);
+			ecs::Classes::Property<&CloudCompute::Seed>(cloudComputeClass, "Seed");
+			ecs::Classes::Property<&CloudCompute::Steps>(cloudComputeClass, "Steps");
+			ecs::Classes::Computed(
+				cloudComputeClass,
+				EnumFieldProperty<CloudCompute, &CloudCompute::Shader, CloudComputeShaderEnum>("Shader")
+			);
+			ecs::Classes::Property<&CloudCompute::Enabled>(cloudComputeClass, "ComputeEnabled");
+
+			ecs::Classes::Property<&AtmosphereProcedural::PlanetRadius>(
+				atmosphereProceduralClass, "PlanetRadius"
+			);
+			ecs::Classes::Property<&AtmosphereProcedural::Height>(
+				atmosphereProceduralClass, "AtmosphereHeight"
+			);
+			ecs::Classes::Property<&AtmosphereProcedural::Rayleigh>(atmosphereProceduralClass, "Rayleigh");
+			ecs::Classes::Property<&AtmosphereProcedural::Mie>(atmosphereProceduralClass, "Mie");
+			ecs::Classes::Property<&AtmosphereProcedural::Samples>(atmosphereProceduralClass, "Samples");
+			ecs::Classes::Computed(
+				atmosphereProceduralClass,
+				EnumFieldProperty<
+					AtmosphereProcedural,
+					&AtmosphereProcedural::Shader,
+					AtmosphereProceduralShaderEnum>("Shader")
+			);
+			ecs::Classes::Property<&AtmosphereProcedural::Enabled>(
+				atmosphereProceduralClass, "ProceduralEnabled"
+			);
 
 			// **Every constraint property is on the base class**, which is the
 			// other half of the one-component design: the seven classes differ by

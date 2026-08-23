@@ -60,6 +60,7 @@ scene.AnimationClip | On an `Animation` instance: which clip and which `Skeleton
 scene.AnimationTrack | One clip playing on one animator: its play head, speed, current and target weight, fade time, priority, loop flag and whether it is running. Storage for the v0.24 animation handler.
 scene.Animator | On an `Animator` instance: which rig it poses, whether the root channel moves the body and by how much, and whether the pose may be evaluated less often at distance.
 scene.Atmosphere | Per-world scattering authored on an `Atmosphere` instance under `Lighting`: the air's colour and decay, its density and offset, and the sun's glare and horizon haze. Presentation only.
+scene.AtmosphereProcedural | Extra scattering controls on an `AtmosphereProcedural` instance: planet and atmosphere scale, Rayleigh and Mie strength, and bounded integration quality for the resident environment compute pass.
 scene.Attachment | A named point on a part: the authored local `Frame` plus the `WorldFrame` every host recomposes each tick. The cache puts an emitter and a lamp where their part is, and its reported write is what signals a change.
 scene.AudioState | Resource: the world's one ear and master gain - listener mode, listener instance and volume, set through `SoundService` and consumed by the client mixer.
 scene.AwakeWorld | Held by an entity that wants the world to keep ticking, with a required `Reason` naming why. `world::DecideLifecycle` walks these rows.
@@ -67,6 +68,7 @@ scene.Bounds | Half the extent of a part on each local axis. Render culling read
 scene.Bone | One joint of a rig on a `Bone` instance: its rest frame, the animated offset on top of it, its inverse bind frame, its resolved world frame, and its palette slot and parent slot.
 scene.Camera | The lens: vertical field of view, near plane and far plane. It deliberately holds no aspect ratio, because that is a fact about a window and not about the world.
 scene.Clouds | A cloud layer authored under `Lighting`: its lit colour, how much sky it covers and how opaque that is, and the speed and heading it drifts at. Presentation only.
+scene.CloudCompute | Voxel-like cloud generation controls on a `CloudCompute` instance: cell and layer dimensions, fractal detail, deterministic seed and bounded ray-march quality for the resident environment texture.
 scene.Constraint | A generic six-degree-of-freedom joint between two attachments: a motion mode and a limit per axis, plus the drive target, stiffness, damping and force caps. Each Roblox constraint class is a prototype of this one row.
 scene.CameraController | Resource: how this viewer's own eye is driven - subject, orbit angles and distance, zoom and sensitivity limits, camera mode, and the poppercam distance override.
 scene.Character | On a character `Model`: handles to its root part, its `Humanoid` and the owning `Player`, null for an NPC. Controls, tools and camera code all start here.
@@ -110,6 +112,8 @@ scene.RigidBody | Mass, linear and angular damping, and body kind for a physics 
 scene.Service | On each service instance: who may see its children, and whether an author is allowed to delete or reparent it. Checked at install and at lookup.
 scene.ShaderSource | The fragment-stage GLSL a `ShaderScript` holds, verbatim and not interned, with a revision bumped on every write so a compiler knows when to rebuild.
 scene.Simulated | Tag meaning physics owns this body's motion. `Anchored = false` adds it and `Anchored = true` removes it; every dynamic query filters on its presence.
+scene.SkyboxCompute | Procedural sky controls on a `SkyboxCompute` instance: zenith, horizon and ground colours, deterministic stars and sun size, generated into one resident environment texture.
+scene.SkyboxTextures | Six CDN texture names on a `SkyboxTextures` instance, one per cube face. Only the first such instance below `Lighting` is selected and demanded.
 scene.Skeleton | On a skinned drawable: what the file called the rig, and how many palette slots the mesh's vertex joint indices may name. `Bone` rows under it are the joints.
 scene.Sound | What a sound is rather than a sound playing: asset name, volume, roll-off distances, looped and playing. The client's mixer walks these rows every frame.
 scene.SpawnLocation | On a spawn pad: which team colour it serves, whether it takes anyone regardless, and whether it is a spawn at all. `FindSpawn` reads all three.

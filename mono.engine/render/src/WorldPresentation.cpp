@@ -56,10 +56,9 @@ namespace engine::render {
 		uint64_t signature = scene::SignatureOf(view.Instances);
 		signature = FoldPresentationObject(signature, view.CameraFrame);
 		signature = FoldPresentationObject(signature, view.Camera);
-		// Only state consumed by the current render passes belongs in a pixel
-		// signature. Atmosphere and clouds are authored now but have no render node
-		// yet, so signing them would redraw an identical scene forever when their
-		// animation clocks advance.
+		// Only the selected environment enters the pixel signature. Lower siblings
+		// and providers outside Lighting cannot reach the sky node, so changing one
+		// of them must not redraw an identical scene.
 		signature = FoldPresentationObject(signature, state.Lighting.Direction);
 		signature = FoldPresentationObject(signature, state.Lighting.Ambient);
 		signature = FoldPresentationObject(signature, state.Lighting.OutdoorAmbient);
@@ -67,6 +66,30 @@ namespace engine::render {
 		signature = FoldPresentationObject(signature, state.Lighting.FogColor);
 		signature = FoldPresentationObject(signature, state.Lighting.FogStart);
 		signature = FoldPresentationObject(signature, state.Lighting.FogEnd);
+		const scene::Environment &environment = state.Lighting.EnvironmentState;
+		signature = FoldPresentation(signature, static_cast<uint8_t>(environment.Skybox));
+		if (environment.Skybox == scene::SkyboxSource::Textures) {
+			for (const core::Name face :
+				 {environment.Textures.Front,
+				  environment.Textures.Back,
+				  environment.Textures.Left,
+				  environment.Textures.Right,
+				  environment.Textures.Up,
+				  environment.Textures.Down}) {
+				signature = FoldPresentation(signature, face.Id());
+			}
+			signature = FoldPresentation(signature, environment.Textures.Enabled ? 1u : 0u);
+		} else if (environment.Skybox == scene::SkyboxSource::Compute) {
+			signature = FoldPresentationObject(signature, environment.SkyCompute);
+		}
+		if (environment.HasAtmosphere) {
+			signature = FoldPresentationObject(signature, environment.Air);
+			signature = FoldPresentationObject(signature, environment.AirCompute);
+		}
+		if (environment.HasClouds) {
+			signature = FoldPresentationObject(signature, environment.CloudLayer);
+			signature = FoldPresentationObject(signature, environment.CloudVolume);
+		}
 		signature = FoldPresentation(signature, state.SurfaceBounces);
 		signature = FoldPresentation(signature, state.SurfaceLimit);
 		signature = FoldPresentation(signature, state.PostProcess.Id());

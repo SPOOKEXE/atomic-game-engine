@@ -73,6 +73,7 @@ namespace engine::render {
 			BackendNode{
 				core::Name("deferred-lighting"), graph::NodeScope::View, graph::ExecutionQueue::Graphics
 			},
+			BackendNode{core::Name("sky"), graph::NodeScope::View, graph::ExecutionQueue::Graphics},
 			BackendNode{core::Name("tonemap"), graph::NodeScope::View, graph::ExecutionQueue::Graphics},
 			BackendNode{
 				core::Name("portal-overlay"), graph::NodeScope::View, graph::ExecutionQueue::Graphics

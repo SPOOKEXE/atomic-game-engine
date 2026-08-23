@@ -448,10 +448,12 @@ declare namespace Enum {
 	interface AnimationPriority extends EnumItem { readonly __enum: "AnimationPriority"; }
 	interface ApplyStrokeMode extends EnumItem { readonly __enum: "ApplyStrokeMode"; }
 	interface AspectType extends EnumItem { readonly __enum: "AspectType"; }
+	interface AtmosphereProceduralShader extends EnumItem { readonly __enum: "AtmosphereProceduralShader"; }
 	interface AutomaticSize extends EnumItem { readonly __enum: "AutomaticSize"; }
 	interface Axis extends EnumItem { readonly __enum: "Axis"; }
 	interface BorderMode extends EnumItem { readonly __enum: "BorderMode"; }
 	interface CameraType extends EnumItem { readonly __enum: "CameraType"; }
+	interface CloudComputeShader extends EnumItem { readonly __enum: "CloudComputeShader"; }
 	interface ConstraintMotion extends EnumItem { readonly __enum: "ConstraintMotion"; }
 	interface ContextActionResult extends EnumItem { readonly __enum: "ContextActionResult"; }
 	interface DominantAxis extends EnumItem { readonly __enum: "DominantAxis"; }
@@ -481,6 +483,7 @@ declare namespace Enum {
 	interface ServiceScope extends EnumItem { readonly __enum: "ServiceScope"; }
 	interface ShapeKind extends EnumItem { readonly __enum: "ShapeKind"; }
 	interface SizeConstraint extends EnumItem { readonly __enum: "SizeConstraint"; }
+	interface SkyboxComputeShader extends EnumItem { readonly __enum: "SkyboxComputeShader"; }
 	interface SortOrder extends EnumItem { readonly __enum: "SortOrder"; }
 	interface StartCorner extends EnumItem { readonly __enum: "StartCorner"; }
 	interface StrokeSizingMode extends EnumItem { readonly __enum: "StrokeSizingMode"; }
@@ -520,6 +523,12 @@ declare namespace Enum {
 		readonly FitWithinMaxSize: AspectType;
 		readonly ScaleWithParentSize: AspectType;
 	};
+	const AtmosphereProceduralShader: {
+		readonly Earth: AtmosphereProceduralShader;
+		readonly Thin: AtmosphereProceduralShader;
+		readonly Mars: AtmosphereProceduralShader;
+		readonly Alien: AtmosphereProceduralShader;
+	};
 	const AutomaticSize: {
 		readonly None: AutomaticSize;
 		readonly X: AutomaticSize;
@@ -541,6 +550,12 @@ declare namespace Enum {
 		readonly LockFirstPerson: CameraType;
 		readonly ShiftLock: CameraType;
 		readonly Scriptable: CameraType;
+	};
+	const CloudComputeShader: {
+		readonly Cumulus: CloudComputeShader;
+		readonly Stratus: CloudComputeShader;
+		readonly Storm: CloudComputeShader;
+		readonly Voxel: CloudComputeShader;
 	};
 	const ConstraintMotion: {
 		readonly Locked: ConstraintMotion;
@@ -762,6 +777,13 @@ declare namespace Enum {
 		readonly RelativeXY: SizeConstraint;
 		readonly RelativeXX: SizeConstraint;
 		readonly RelativeYY: SizeConstraint;
+	};
+	const SkyboxComputeShader: {
+		readonly Gradient: SkyboxComputeShader;
+		readonly Sunset: SkyboxComputeShader;
+		readonly Night: SkyboxComputeShader;
+		readonly Nebula: SkyboxComputeShader;
+		readonly Voxel: SkyboxComputeShader;
 	};
 	const SortOrder: {
 		readonly Name: SortOrder;
@@ -1317,6 +1339,19 @@ declare interface Atmosphere extends Instance {
 	Offset: number;
 }
 
+declare interface AtmosphereComponent extends Atmosphere {
+}
+
+declare interface AtmosphereProcedural extends AtmosphereComponent {
+	AtmosphereHeight: number;
+	Mie: number;
+	PlanetRadius: number;
+	ProceduralEnabled: boolean;
+	Rayleigh: number;
+	Samples: number;
+	Shader: Enum.AtmosphereProceduralShader;
+}
+
 declare interface Clouds extends Instance {
 	Color: Color3;
 	Cover: number;
@@ -1324,6 +1359,41 @@ declare interface Clouds extends Instance {
 	Enabled: boolean;
 	WindDirection: number;
 	WindSpeed: number;
+}
+
+declare interface CloudProcedural extends Clouds {
+}
+
+declare interface CloudCompute extends CloudProcedural {
+	CellSize: number;
+	ComputeEnabled: boolean;
+	Detail: number;
+	Height: number;
+	Seed: number;
+	Shader: Enum.CloudComputeShader;
+	Steps: number;
+	Thickness: number;
+}
+
+declare interface SkyboxTextures extends Instance {
+	Back: string;
+	Down: string;
+	Enabled: boolean;
+	Front: string;
+	Left: string;
+	Right: string;
+	Up: string;
+}
+
+declare interface SkyboxCompute extends Instance {
+	Enabled: boolean;
+	GroundColor: Color3;
+	HorizonColor: Color3;
+	Seed: number;
+	Shader: Enum.SkyboxComputeShader;
+	StarDensity: number;
+	SunSize: number;
+	ZenithColor: Color3;
 }
 
 declare interface Constraint extends Instance {
@@ -2363,7 +2433,13 @@ declare const Instance: {
 		(className: "Animator", parent?: Instance): Animator;
 		(className: "AnimationTrack", parent?: Instance): AnimationTrack;
 		(className: "Atmosphere", parent?: Instance): Atmosphere;
+		(className: "AtmosphereComponent", parent?: Instance): AtmosphereComponent;
+		(className: "AtmosphereProcedural", parent?: Instance): AtmosphereProcedural;
 		(className: "Clouds", parent?: Instance): Clouds;
+		(className: "CloudProcedural", parent?: Instance): CloudProcedural;
+		(className: "CloudCompute", parent?: Instance): CloudCompute;
+		(className: "SkyboxTextures", parent?: Instance): SkyboxTextures;
+		(className: "SkyboxCompute", parent?: Instance): SkyboxCompute;
 		(className: "Constraint", parent?: Instance): Constraint;
 		(className: "WeldConstraint", parent?: Instance): WeldConstraint;
 		(className: "BallSocketConstraint", parent?: Instance): BallSocketConstraint;

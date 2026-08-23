@@ -744,6 +744,14 @@ namespace engine::render {
 				SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT,
 			};
 		}
+		if (role == Impl::ResourceRole::SkyLit) {
+			return Impl::NamedTexture{
+				slotPbr.SkyLit,
+				slotPbr.Dimensions.LitWidth,
+				slotPbr.Dimensions.LitHeight,
+				SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT,
+			};
+		}
 		return texture;
 	}
 

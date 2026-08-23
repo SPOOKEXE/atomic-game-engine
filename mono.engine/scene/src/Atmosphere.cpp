@@ -17,32 +17,6 @@ namespace engine::scene {
 			return ServiceOf(store, ecs::Classes::Find(core::Name("Lighting")));
 		}
 
-		// The first descendant of `Lighting` carrying `T`, or a null entity.
-		//
-		// **A descendant walk rather than a child lookup**, so that a `Clouds`
-		// under an `Atmosphere` and a `Clouds` directly under `Lighting` both
-		// resolve. Roblox hangs its cloud layer off `Terrain` for reasons that are
-		// an accident of where its volumetric renderer read the data from, and an
-		// author following either arrangement should get a sky.
-		//
-		// **The first in tree order and never an arbitrary one**, which is
-		// `FindSpawn`'s rule: a world with two atmospheres has to pick the same
-		// one on every host, and archetype order is not the same on two machines.
-		template <class T> ecs::Entity FirstUnderLighting(const ecs::Store &store) {
-			const ecs::Entity lighting = LightingService(store);
-			if (lighting == ecs::NULL_ENTITY) {
-				return ecs::NULL_ENTITY;
-			}
-
-			ecs::Entity found = ecs::NULL_ENTITY;
-			store.EachDescendant(lighting, [&](ecs::Entity descendant) {
-				if (found == ecs::NULL_ENTITY && store.Get<T>(descendant) != nullptr) {
-					found = descendant;
-				}
-			});
-			return found;
-		}
-
 		// Brings authored values into the range the header states.
 		//
 		// **Clamped on read rather than refused on write**, which is `LightingOf`'s
@@ -64,29 +38,155 @@ namespace engine::scene {
 			sky.WindSpeed = std::max(sky.WindSpeed, 0.0f);
 			return sky;
 		}
+
+		CloudCompute Clamped(CloudCompute cloud) {
+			cloud.CellSize = std::max(cloud.CellSize, 0.001f);
+			cloud.Detail = std::clamp(cloud.Detail, 0.0f, 1.0f);
+			cloud.Height = std::clamp(cloud.Height, 0.0f, 1.0f);
+			cloud.Thickness = std::clamp(cloud.Thickness, 0.001f, 1.0f);
+			cloud.Steps = std::clamp(cloud.Steps, 1u, 64u);
+			return cloud;
+		}
+
+		AtmosphereProcedural Clamped(AtmosphereProcedural air) {
+			air.PlanetRadius = std::max(air.PlanetRadius, 1.0f);
+			air.Height = std::max(air.Height, 1.0f);
+			air.Rayleigh = std::max(air.Rayleigh, 0.0f);
+			air.Mie = std::max(air.Mie, 0.0f);
+			air.Samples = std::clamp(air.Samples, 1u, 64u);
+			return air;
+		}
+	}
+
+	const char *Describe(SkyboxComputeShader shader) {
+		switch (shader) {
+		case SkyboxComputeShader::Gradient:
+			return "Gradient";
+		case SkyboxComputeShader::Sunset:
+			return "Sunset";
+		case SkyboxComputeShader::Night:
+			return "Night";
+		case SkyboxComputeShader::Nebula:
+			return "Nebula";
+		case SkyboxComputeShader::Voxel:
+			return "Voxel";
+		}
+		return "Gradient";
+	}
+
+	const char *Describe(CloudComputeShader shader) {
+		switch (shader) {
+		case CloudComputeShader::Cumulus:
+			return "Cumulus";
+		case CloudComputeShader::Stratus:
+			return "Stratus";
+		case CloudComputeShader::Storm:
+			return "Storm";
+		case CloudComputeShader::Voxel:
+			return "Voxel";
+		}
+		return "Cumulus";
+	}
+
+	const char *Describe(AtmosphereProceduralShader shader) {
+		switch (shader) {
+		case AtmosphereProceduralShader::Earth:
+			return "Earth";
+		case AtmosphereProceduralShader::Thin:
+			return "Thin";
+		case AtmosphereProceduralShader::Mars:
+			return "Mars";
+		case AtmosphereProceduralShader::Alien:
+			return "Alien";
+		}
+		return "Earth";
+	}
+
+	SkyboxComputeShader SkyboxComputeShaderFromName(const core::Name &name) {
+		for (size_t index = 0; index < SKYBOX_COMPUTE_SHADER_COUNT; index++) {
+			const auto shader = static_cast<SkyboxComputeShader>(index);
+			if (name == core::Name(Describe(shader))) {
+				return shader;
+			}
+		}
+		return SkyboxComputeShader::Gradient;
+	}
+
+	CloudComputeShader CloudComputeShaderFromName(const core::Name &name) {
+		for (size_t index = 0; index < CLOUD_COMPUTE_SHADER_COUNT; index++) {
+			const auto shader = static_cast<CloudComputeShader>(index);
+			if (name == core::Name(Describe(shader))) {
+				return shader;
+			}
+		}
+		return CloudComputeShader::Cumulus;
+	}
+
+	AtmosphereProceduralShader AtmosphereProceduralShaderFromName(const core::Name &name) {
+		for (size_t index = 0; index < ATMOSPHERE_PROCEDURAL_SHADER_COUNT; index++) {
+			const auto shader = static_cast<AtmosphereProceduralShader>(index);
+			if (name == core::Name(Describe(shader))) {
+				return shader;
+			}
+		}
+		return AtmosphereProceduralShader::Earth;
 	}
 
 	Atmosphere AtmosphereOf(const ecs::Store &store) {
-		const ecs::Entity instance = FirstUnderLighting<Atmosphere>(store);
-		if (instance == ecs::NULL_ENTITY) {
-			// Clear air, which is what a world authored before this had. Not the
-			// struct's own defaults: those describe a hazy day, and a place that
-			// never asked for haze must not acquire it on load.
-			Atmosphere clear;
-			clear.Density = 0.0f;
-			return clear;
-		}
-		return Clamped(*store.Get<Atmosphere>(instance));
+		return EnvironmentOf(store).Air;
 	}
 
 	Clouds CloudsOf(const ecs::Store &store) {
-		const ecs::Entity instance = FirstUnderLighting<Clouds>(store);
-		if (instance == ecs::NULL_ENTITY) {
-			Clouds none;
-			none.Enabled = false;
-			return none;
+		return EnvironmentOf(store).CloudLayer;
+	}
+
+	Environment EnvironmentOf(const ecs::Store &store) {
+		Environment environment;
+		environment.Air.Density = 0.0f;
+		environment.CloudLayer.Enabled = false;
+		environment.AirCompute.Enabled = false;
+		environment.CloudVolume.Enabled = false;
+
+		const ecs::Entity lighting = LightingService(store);
+		if (lighting == ecs::NULL_ENTITY) {
+			return environment;
 		}
-		return Clamped(*store.Get<Clouds>(instance));
+
+		// One tree walk resolves all three independent categories. The first row
+		// carrying a category wins even when disabled, so turning a provider off
+		// cannot expose a lower sibling unexpectedly.
+		store.EachDescendant(lighting, [&](ecs::Entity descendant) {
+			if (environment.Skybox == SkyboxSource::None) {
+				if (const SkyboxTextures *textures = store.Get<SkyboxTextures>(descendant)) {
+					environment.Textures = *textures;
+					environment.Skybox = SkyboxSource::Textures;
+				} else if (const SkyboxCompute *compute = store.Get<SkyboxCompute>(descendant)) {
+					environment.SkyCompute = *compute;
+					environment.Skybox = SkyboxSource::Compute;
+				}
+			}
+
+			if (!environment.HasAtmosphere) {
+				if (const Atmosphere *air = store.Get<Atmosphere>(descendant)) {
+					environment.Air = Clamped(*air);
+					environment.HasAtmosphere = true;
+					if (const AtmosphereProcedural *compute = store.Get<AtmosphereProcedural>(descendant)) {
+						environment.AirCompute = Clamped(*compute);
+					}
+				}
+			}
+
+			if (!environment.HasClouds) {
+				if (const Clouds *clouds = store.Get<Clouds>(descendant)) {
+					environment.CloudLayer = Clamped(*clouds);
+					environment.HasClouds = true;
+					if (const CloudCompute *compute = store.Get<CloudCompute>(descendant)) {
+						environment.CloudVolume = Clamped(*compute);
+					}
+				}
+			}
+		});
+		return environment;
 	}
 
 	ecs::ClassId AtmosphereClass() {

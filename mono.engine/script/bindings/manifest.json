@@ -536,6 +536,45 @@
 			]
 		},
 		{
+			"name": "AtmosphereComponent",
+			"parent": "Atmosphere",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Atmosphere"],
+			"properties": [
+				{"name": "Color", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.Atmosphere"], "writes": ["scene.Atmosphere"]},
+				{"name": "Decay", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.Atmosphere"], "writes": ["scene.Atmosphere"]},
+				{"name": "Density", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Atmosphere"], "writes": ["scene.Atmosphere"]},
+				{"name": "Glare", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Atmosphere"], "writes": ["scene.Atmosphere"]},
+				{"name": "Haze", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Atmosphere"], "writes": ["scene.Atmosphere"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Offset", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Atmosphere"], "writes": ["scene.Atmosphere"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]}
+			]
+		},
+		{
+			"name": "AtmosphereProcedural",
+			"parent": "AtmosphereComponent",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Atmosphere", "scene.AtmosphereProcedural"],
+			"properties": [
+				{"name": "AtmosphereHeight", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.AtmosphereProcedural"], "writes": ["scene.AtmosphereProcedural"]},
+				{"name": "Color", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.Atmosphere"], "writes": ["scene.Atmosphere"]},
+				{"name": "Decay", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.Atmosphere"], "writes": ["scene.Atmosphere"]},
+				{"name": "Density", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Atmosphere"], "writes": ["scene.Atmosphere"]},
+				{"name": "Glare", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Atmosphere"], "writes": ["scene.Atmosphere"]},
+				{"name": "Haze", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Atmosphere"], "writes": ["scene.Atmosphere"]},
+				{"name": "Mie", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.AtmosphereProcedural"], "writes": ["scene.AtmosphereProcedural"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Offset", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Atmosphere"], "writes": ["scene.Atmosphere"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "PlanetRadius", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.AtmosphereProcedural"], "writes": ["scene.AtmosphereProcedural"]},
+				{"name": "ProceduralEnabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.AtmosphereProcedural"], "writes": ["scene.AtmosphereProcedural"]},
+				{"name": "Rayleigh", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.AtmosphereProcedural"], "writes": ["scene.AtmosphereProcedural"]},
+				{"name": "Samples", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.AtmosphereProcedural"], "writes": ["scene.AtmosphereProcedural"]},
+				{"name": "Shader", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "AtmosphereProceduralShader", "reads": ["scene.AtmosphereProcedural"], "writes": ["scene.AtmosphereProcedural"]}
+			]
+		},
+		{
 			"name": "Clouds",
 			"parent": "Instance",
 			"constructible": true,
@@ -549,6 +588,81 @@
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
 				{"name": "WindDirection", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
 				{"name": "WindSpeed", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]}
+			]
+		},
+		{
+			"name": "CloudProcedural",
+			"parent": "Clouds",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Clouds"],
+			"properties": [
+				{"name": "Color", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
+				{"name": "Cover", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
+				{"name": "Density", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
+				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "WindDirection", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
+				{"name": "WindSpeed", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]}
+			]
+		},
+		{
+			"name": "CloudCompute",
+			"parent": "CloudProcedural",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.CloudCompute", "scene.Clouds"],
+			"properties": [
+				{"name": "CellSize", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.CloudCompute"], "writes": ["scene.CloudCompute"]},
+				{"name": "Color", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
+				{"name": "ComputeEnabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.CloudCompute"], "writes": ["scene.CloudCompute"]},
+				{"name": "Cover", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
+				{"name": "Density", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
+				{"name": "Detail", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.CloudCompute"], "writes": ["scene.CloudCompute"]},
+				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
+				{"name": "Height", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.CloudCompute"], "writes": ["scene.CloudCompute"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Seed", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.CloudCompute"], "writes": ["scene.CloudCompute"]},
+				{"name": "Shader", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "CloudComputeShader", "reads": ["scene.CloudCompute"], "writes": ["scene.CloudCompute"]},
+				{"name": "Steps", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.CloudCompute"], "writes": ["scene.CloudCompute"]},
+				{"name": "Thickness", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.CloudCompute"], "writes": ["scene.CloudCompute"]},
+				{"name": "WindDirection", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
+				{"name": "WindSpeed", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]}
+			]
+		},
+		{
+			"name": "SkyboxTextures",
+			"parent": "Instance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.SkyboxTextures"],
+			"properties": [
+				{"name": "Back", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.SkyboxTextures"], "writes": ["scene.SkyboxTextures"]},
+				{"name": "Down", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.SkyboxTextures"], "writes": ["scene.SkyboxTextures"]},
+				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.SkyboxTextures"], "writes": ["scene.SkyboxTextures"]},
+				{"name": "Front", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.SkyboxTextures"], "writes": ["scene.SkyboxTextures"]},
+				{"name": "Left", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.SkyboxTextures"], "writes": ["scene.SkyboxTextures"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Right", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.SkyboxTextures"], "writes": ["scene.SkyboxTextures"]},
+				{"name": "Up", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.SkyboxTextures"], "writes": ["scene.SkyboxTextures"]}
+			]
+		},
+		{
+			"name": "SkyboxCompute",
+			"parent": "Instance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.SkyboxCompute"],
+			"properties": [
+				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.SkyboxCompute"], "writes": ["scene.SkyboxCompute"]},
+				{"name": "GroundColor", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.SkyboxCompute"], "writes": ["scene.SkyboxCompute"]},
+				{"name": "HorizonColor", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.SkyboxCompute"], "writes": ["scene.SkyboxCompute"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Seed", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.SkyboxCompute"], "writes": ["scene.SkyboxCompute"]},
+				{"name": "Shader", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "SkyboxComputeShader", "reads": ["scene.SkyboxCompute"], "writes": ["scene.SkyboxCompute"]},
+				{"name": "StarDensity", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.SkyboxCompute"], "writes": ["scene.SkyboxCompute"]},
+				{"name": "SunSize", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.SkyboxCompute"], "writes": ["scene.SkyboxCompute"]},
+				{"name": "ZenithColor", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "reads": ["scene.SkyboxCompute"], "writes": ["scene.SkyboxCompute"]}
 			]
 		},
 		{
@@ -2306,10 +2420,12 @@
 		{"name": "AnimationPriority", "members": ["Core", "Idle", "Movement", "Action", "Override"]},
 		{"name": "ApplyStrokeMode", "members": ["Contextual", "Border"]},
 		{"name": "AspectType", "members": ["FitWithinMaxSize", "ScaleWithParentSize"]},
+		{"name": "AtmosphereProceduralShader", "members": ["Earth", "Thin", "Mars", "Alien"]},
 		{"name": "AutomaticSize", "members": ["None", "X", "Y", "XY"]},
 		{"name": "Axis", "members": ["X", "Y", "Z"]},
 		{"name": "BorderMode", "members": ["Outline", "Middle", "Inset"]},
 		{"name": "CameraType", "members": ["Classic", "LockFirstPerson", "ShiftLock", "Scriptable"]},
+		{"name": "CloudComputeShader", "members": ["Cumulus", "Stratus", "Storm", "Voxel"]},
 		{"name": "ConstraintMotion", "members": ["Locked", "Limited", "Free"]},
 		{"name": "ContextActionResult", "members": ["Sink", "Pass"]},
 		{"name": "DominantAxis", "members": ["Width", "Height"]},
@@ -2339,6 +2455,7 @@
 		{"name": "ServiceScope", "members": ["Shared", "Server", "Client"]},
 		{"name": "ShapeKind", "members": ["Box", "Sphere", "Cylinder", "Hull", "Mesh"]},
 		{"name": "SizeConstraint", "members": ["RelativeXY", "RelativeXX", "RelativeYY"]},
+		{"name": "SkyboxComputeShader", "members": ["Gradient", "Sunset", "Night", "Nebula", "Voxel"]},
 		{"name": "SortOrder", "members": ["Name", "Custom", "LayoutOrder"]},
 		{"name": "StartCorner", "members": ["TopLeft", "TopRight", "BottomLeft", "BottomRight"]},
 		{"name": "StrokeSizingMode", "members": ["FixedSize", "ScaledSize"]},

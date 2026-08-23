@@ -21,9 +21,11 @@
 #include <engine/effects/Ribbon.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Registration.hpp>
+#include <engine/scene/Atmosphere.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Materials.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -187,4 +189,32 @@ TEST_CASE("a material's texture is collected once it has resolved", "[client][co
 	std::vector<Name> after;
 	client::CollectWantedContent(store, after);
 	CHECK(Holds(after, "oak_Color.atex"));
+}
+
+TEST_CASE("a selected skybox asks only for faces it names", "[client][contentdemand][skybox]") {
+	Store store = Fresh("contentdemand.skybox");
+	engine::scene::RegisterSceneClasses();
+	engine::scene::InstallServices(store);
+	const Entity lighting = store.FindFirstRoot("Lighting");
+	REQUIRE(lighting != engine::ecs::NULL_ENTITY);
+
+	const Entity selected =
+		store.CreateInstance(engine::ecs::Classes::Find(Name("SkyboxTextures")), "Selected");
+	REQUIRE(store.SetParent(selected, lighting));
+	auto *faces = store.GetMutable<engine::scene::SkyboxTextures>(selected);
+	REQUIRE(faces != nullptr);
+	faces->Front = Name("sky/front.atex");
+	faces->Up = Name("sky/up.atex");
+
+	const Entity ignored =
+		store.CreateInstance(engine::ecs::Classes::Find(Name("SkyboxTextures")), "Ignored");
+	REQUIRE(store.SetParent(ignored, lighting));
+	store.GetMutable<engine::scene::SkyboxTextures>(ignored)->Front = Name("sky/ignored.atex");
+
+	std::vector<Name> wanted;
+	client::CollectWantedContent(store, wanted);
+	CHECK(wanted.size() == 2);
+	CHECK(Holds(wanted, "sky/front.atex"));
+	CHECK(Holds(wanted, "sky/up.atex"));
+	CHECK_FALSE(Holds(wanted, "sky/ignored.atex"));
 }

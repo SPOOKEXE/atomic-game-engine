@@ -596,6 +596,7 @@ namespace engine::render {
 		State->ReleaseAllGraphState();
 		State->ReleaseOcclusion();
 		State->ReleaseParticlePool();
+		State->ReleaseEnvironments();
 
 		if (State->OpaquePipeline) {
 			SDL_ReleaseGPUGraphicsPipeline(device, State->OpaquePipeline);
@@ -611,6 +612,7 @@ namespace engine::render {
 			  State->DepthLinearPipeline,
 			  State->SsaoPipeline,
 			  State->DeferredLightingPipeline,
+			  State->SkyPipeline,
 			  State->TonemapPipeline,
 			  State->PostProcessPipeline}) {
 			if (pipeline != nullptr) {
@@ -621,6 +623,10 @@ namespace engine::render {
 		State->PostProcessShaderName = core::Name{};
 		if (State->TransparentPipeline) {
 			SDL_ReleaseGPUGraphicsPipeline(device, State->TransparentPipeline);
+		}
+		if (State->EnvironmentCompute != nullptr) {
+			SDL_ReleaseGPUComputePipeline(device, State->EnvironmentCompute);
+			State->EnvironmentCompute = nullptr;
 		}
 		if (State->ShadowPipeline) {
 			SDL_ReleaseGPUGraphicsPipeline(device, State->ShadowPipeline);
@@ -944,6 +950,7 @@ namespace engine::render {
 		State->FogColour = glm::vec4{lighting.FogColor.R, lighting.FogColor.G, lighting.FogColor.B, 1.0f};
 		State->FogStart = std::max(lighting.FogStart, 0.0f);
 		State->FogEnd = std::max(lighting.FogEnd, State->FogStart);
+		State->EnvironmentState = lighting.EnvironmentState;
 	}
 
 	scene::WorldLighting Renderer::CurrentLighting() const {
@@ -963,6 +970,7 @@ namespace engine::render {
 		lighting.FogColor = core::Color3{State->FogColour.x, State->FogColour.y, State->FogColour.z};
 		lighting.FogStart = State->FogStart;
 		lighting.FogEnd = State->FogEnd;
+		lighting.EnvironmentState = State->EnvironmentState;
 		return lighting;
 	}
 
@@ -1332,6 +1340,9 @@ namespace engine::render {
 		}
 		if (role == Impl::ResourceRole::Lit) {
 			return pbr.Lit;
+		}
+		if (role == Impl::ResourceRole::SkyLit) {
+			return pbr.SkyLit;
 		}
 		return nullptr;
 	}

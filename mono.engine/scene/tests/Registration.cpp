@@ -8,6 +8,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/ecs/TypeDescriptor.hpp>
 #include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Atmosphere.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/SurfaceTable.hpp>
@@ -91,6 +92,10 @@ namespace registration_test {
 		"scene.Atmosphere",
 		"scene.Clouds",
 		"scene.Terrain",
+		"scene.SkyboxTextures",
+		"scene.SkyboxCompute",
+		"scene.CloudCompute",
+		"scene.AtmosphereProcedural",
 	};
 }
 
@@ -193,6 +198,53 @@ TEST_CASE("a name-carrying component crosses as text, not as an id", "[scene][re
 	REQUIRE(back != nullptr);
 	CHECK(back->Mesh.Text() == "registration_test.Column");
 	CHECK_FALSE(back->Visible);
+}
+
+TEST_CASE("environment shader names and texture faces survive a snapshot", "[scene][registration]") {
+	RegisterSceneComponents();
+
+	Store source("registration_test.environment.source");
+	const Entity entity = source.Create();
+	engine::scene::SkyboxTextures textures;
+	textures.Front = Name("sky/front.atex");
+	textures.Up = Name("sky/up.atex");
+	source.Set(entity, textures);
+
+	engine::scene::SkyboxCompute sky;
+	sky.Shader = engine::scene::SkyboxComputeShader::Nebula;
+	source.Set(entity, sky);
+	engine::scene::CloudCompute clouds;
+	clouds.Shader = engine::scene::CloudComputeShader::Voxel;
+	source.Set(entity, clouds);
+	engine::scene::AtmosphereProcedural atmosphere;
+	atmosphere.Shader = engine::scene::AtmosphereProceduralShader::Mars;
+	source.Set(entity, atmosphere);
+
+	ByteWriter writer;
+	REQUIRE(source.Save(writer));
+	const Name shifter("registration_test.EnvironmentShiftsTheIdSpace");
+	CHECK(shifter.IsValid());
+
+	Store restored("registration_test.environment.restored");
+	ByteReader reader(writer.Bytes());
+	REQUIRE(restored.Load(reader));
+	REQUIRE(restored.Get<engine::scene::SkyboxTextures>(entity) != nullptr);
+	REQUIRE(restored.Get<engine::scene::SkyboxCompute>(entity) != nullptr);
+	REQUIRE(restored.Get<engine::scene::CloudCompute>(entity) != nullptr);
+	REQUIRE(restored.Get<engine::scene::AtmosphereProcedural>(entity) != nullptr);
+	CHECK(restored.Get<engine::scene::SkyboxTextures>(entity)->Front == Name("sky/front.atex"));
+	CHECK(restored.Get<engine::scene::SkyboxTextures>(entity)->Up == Name("sky/up.atex"));
+	CHECK(
+		restored.Get<engine::scene::SkyboxCompute>(entity)->Shader ==
+		engine::scene::SkyboxComputeShader::Nebula
+	);
+	CHECK(
+		restored.Get<engine::scene::CloudCompute>(entity)->Shader == engine::scene::CloudComputeShader::Voxel
+	);
+	CHECK(
+		restored.Get<engine::scene::AtmosphereProcedural>(entity)->Shader ==
+		engine::scene::AtmosphereProceduralShader::Mars
+	);
 }
 
 TEST_CASE("the surface table crosses a snapshot in order", "[scene][registration]") {

@@ -1394,7 +1394,7 @@ namespace engine::render {
 			},
 		};
 
-		tonemapBindings = {SDL_GPUTextureSamplerBinding{pbr.Lit, sampler}};
+		tonemapBindings = {SDL_GPUTextureSamplerBinding{pbr.SkyLit, sampler}};
 
 		return ViewStart::Recording;
 	}

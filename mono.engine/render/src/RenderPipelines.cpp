@@ -278,11 +278,12 @@ namespace engine::render {
 		// light-field captures - `MAX_SEAM_LIGHTS`, bound last.
 		SDL_GPUShader *deferredLightingFragment =
 			LoadShader("deferred-lighting.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 9, 2);
+		SDL_GPUShader *skyFragment = LoadShader("sky.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 3, 1);
 		SDL_GPUShader *tonemapFragment = LoadShader("tonemap.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
 
 		if (!opaqueVertex || !opaqueFragment || !shadowVertex || !shadowFragment || !overlayVertex ||
 			!imageFragment || !overlayFragment || !gbufferFragment || !depthLinearFragment || !ssaoFragment ||
-			!deferredLightingFragment || !tonemapFragment) {
+			!deferredLightingFragment || !skyFragment || !tonemapFragment) {
 			return false;
 		}
 
@@ -424,9 +425,10 @@ namespace engine::render {
 		SsaoPipeline = fullscreen(ssaoFragment, SDL_GPU_TEXTUREFORMAT_R8_UNORM);
 		DeferredLightingPipeline =
 			fullscreen(deferredLightingFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
+		SkyPipeline = fullscreen(skyFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
 		TonemapPipeline = fullscreen(tonemapFragment, swapchainFormat);
 		if (DepthLinearPipeline == nullptr || SsaoPipeline == nullptr ||
-			DeferredLightingPipeline == nullptr || TonemapPipeline == nullptr) {
+			DeferredLightingPipeline == nullptr || SkyPipeline == nullptr || TonemapPipeline == nullptr) {
 			ENGINE_ERROR("default PBR fullscreen pipeline: {}", SDL_GetError());
 		}
 
@@ -779,6 +781,7 @@ namespace engine::render {
 		SDL_ReleaseGPUShader(Device, depthLinearFragment);
 		SDL_ReleaseGPUShader(Device, ssaoFragment);
 		SDL_ReleaseGPUShader(Device, deferredLightingFragment);
+		SDL_ReleaseGPUShader(Device, skyFragment);
 		SDL_ReleaseGPUShader(Device, tonemapFragment);
 		SDL_ReleaseGPUShader(Device, overlayVertex);
 		SDL_ReleaseGPUShader(Device, imageFragment);
@@ -803,6 +806,7 @@ namespace engine::render {
 		ParticleStep = LoadComputePipeline("particle-step.comp", 0, 4, 0, 2, 64, 1);
 		ParticleEmit = LoadComputePipeline("particle-emission.comp", 0, 2, 0, 2, 64, 1);
 		ParticleScatter = LoadComputePipeline("particle-scatter.comp", 0, 1, 0, 1, 64, 1);
+		EnvironmentCompute = LoadComputePipeline("environment.comp", 6, 0, 1, 0, 8, 8);
 
 		// **The particle pipelines are deliberately not in this conjunction.** A
 		// build whose particle shaders failed to compile still draws a world, and
@@ -812,7 +816,8 @@ namespace engine::render {
 		return OpaquePipeline != nullptr && TransparentPipeline != nullptr && ShadowPipeline != nullptr &&
 			   ImagePipeline != nullptr && OverlayPipeline != nullptr && GBufferPipeline != nullptr &&
 			   DepthLinearPipeline != nullptr && SsaoPipeline != nullptr &&
-			   DeferredLightingPipeline != nullptr && TonemapPipeline != nullptr;
+			   DeferredLightingPipeline != nullptr && SkyPipeline != nullptr && TonemapPipeline != nullptr &&
+			   EnvironmentCompute != nullptr;
 	}
 
 	void Renderer::Impl::BindPipeline(

@@ -558,8 +558,8 @@ namespace engine::render {
 		// `gbuffer` and `transparent`: the material head and the ordered tail.
 		void RegisterGeometryNodes(NodeTable &nodes);
 
-		// `last-frame`, `depth-linearise`, `hzb`, `ssao`, `deferred-lighting`
-		// and `tonemap`: the screen-space chain over the material head.
+		// `last-frame`, `depth-linearise`, `hzb`, `ssao`, `deferred-lighting`,
+		// `sky` and `tonemap`: the screen-space chain over the material head.
 		void RegisterShadingNodes(NodeTable &nodes);
 
 		// `raster` and `dispatch`: the two nodes a pipeline document can author

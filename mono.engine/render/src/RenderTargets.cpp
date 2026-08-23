@@ -395,7 +395,8 @@ namespace engine::render {
 			  slot.Emissive,
 			  slot.LinearDepth,
 			  slot.Occlusion,
-			  slot.Lit}) {
+			  slot.Lit,
+			  slot.SkyLit}) {
 			if (texture != nullptr) {
 				gpu::ReleaseTexture(Device, texture);
 			}
@@ -446,10 +447,12 @@ namespace engine::render {
 			texture(SDL_GPU_TEXTUREFORMAT_R8_UNORM, dimensions.OcclusionWidth, dimensions.OcclusionHeight);
 		made.Lit =
 			texture(SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT, dimensions.LitWidth, dimensions.LitHeight);
+		made.SkyLit =
+			texture(SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT, dimensions.LitWidth, dimensions.LitHeight);
 
 		if (made.Albedo == nullptr || made.Normal == nullptr || made.Material == nullptr ||
 			made.Emissive == nullptr || made.LinearDepth == nullptr || made.Occlusion == nullptr ||
-			made.Lit == nullptr) {
+			made.Lit == nullptr || made.SkyLit == nullptr) {
 			ENGINE_ERROR(
 				"render graph targets for {}x{} view: {}",
 				dimensions.ViewWidth,

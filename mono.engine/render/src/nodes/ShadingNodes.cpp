@@ -256,6 +256,39 @@ namespace engine::render {
 			return true;
 		});
 
+		frameNodes.Set(core::Name("sky"), [this](const graph::RunContext &context) {
+			ViewRecording &recording = *this;
+			Impl *const State = recording.State;
+			Impl::PbrSlot &pbr = *recording.Pbr;
+			PbrUniforms &uniforms = recording.Uniforms;
+			SDL_GPUTexture *environment = State->EnsureEnvironment(
+				recording.Request.World,
+				recording.CurrentLighting.EnvironmentState,
+				recording.Command,
+				recording.Result.ComputeDispatches
+			);
+			uniforms.Fog.w = environment != nullptr ? 1.0f : 0.0f;
+			const std::array bindings{
+				SDL_GPUTextureSamplerBinding{pbr.Lit, recording.Sampler},
+				SDL_GPUTextureSamplerBinding{recording.DepthTarget.texture, recording.Sampler},
+				SDL_GPUTextureSamplerBinding{
+					environment != nullptr ? environment : State->FallbackTexture, recording.Sampler
+				},
+			};
+			recording.Fullscreen(
+				context.Name,
+				State->SkyPipeline,
+				pbr.SkyLit,
+				recording.PbrDimensions.LitWidth,
+				recording.PbrDimensions.LitHeight,
+				bindings,
+				&uniforms,
+				nullptr,
+				SDL_FColor{}
+			);
+			return true;
+		});
+
 		frameNodes.Set(core::Name("tonemap"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
 			Impl *const State = recording.State;
