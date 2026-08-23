@@ -49,6 +49,9 @@ namespace studio {
 		float InterfaceIdle = 0.0f;
 		float RendererFocused = 0.0f;
 		float RendererUnfocused = 0.0f;
+
+		// Whether all four ceilings are bypassed.
+		bool Uncapped = false;
 	};
 
 	// Resolves the one ceiling applied to the joined simulation and rendering

@@ -6,6 +6,10 @@
 namespace studio {
 	float
 	PresentationCeiling(const PresentationRates &rates, bool focused, bool worldRunning, bool inputIdle) {
+		if (rates.Uncapped) {
+			return 0.0f;
+		}
+
 		const float interface_ = inputIdle && !worldRunning ? rates.InterfaceIdle : rates.InterfaceActive;
 		const float renderer = focused ? rates.RendererFocused : rates.RendererUnfocused;
 

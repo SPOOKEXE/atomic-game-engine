@@ -499,15 +499,8 @@ namespace studio {
 		// **Every run rather than only under a flag.** The editor's default is
 		// unpaced-and-capped rather than paced by the display, so this is the
 		// call that puts the swapchain in the state `Editor::VerticalSync`
-		// already claims it is in. The flag only clears the ceiling, and is not
-		// read again - the Preferences page is what moves either of them after
-		// this point.
-		if (Settings.Uncapped) {
-			InterfaceActiveHz = 0.0f;
-			InterfaceIdleHz = 0.0f;
-			RendererFocusedHz = 0.0f;
-			RendererUnfocusedHz = 0.0f;
-		}
+		// already claims it is in. The flag bypasses the saved ceiling for this
+		// run without erasing the rates that should return on the next one.
 
 		if (!Settings.Headless && !Renderer.SetVerticalSync(false)) {
 			// **The preference follows the device rather than the other way
@@ -1706,7 +1699,13 @@ namespace studio {
 		const bool focused = Window == nullptr || (SDL_GetWindowFlags(Window) & SDL_WINDOW_INPUT_FOCUS) != 0;
 		const bool inputIdle = engine::core::Clock::Seconds() - LastInputSeconds > IDLE_AFTER_SECONDS;
 		return PresentationCeiling(
-			PresentationRates{InterfaceActiveHz, InterfaceIdleHz, RendererFocusedHz, RendererUnfocusedHz},
+			PresentationRates{
+				InterfaceActiveHz,
+				InterfaceIdleHz,
+				RendererFocusedHz,
+				RendererUnfocusedHz,
+				Settings.Uncapped || Uncapped,
+			},
 			focused,
 			AnyRunning(),
 			inputIdle

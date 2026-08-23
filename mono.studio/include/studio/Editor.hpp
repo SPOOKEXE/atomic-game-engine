@@ -4401,7 +4401,8 @@ namespace studio {
 		// **Live rather than start-up-only, unlike `Options::Uncapped`.** The
 		// flag is what a launcher passes; these are what somebody changes while
 		// looking at the frame graph, which is the only time the question comes
-		// up. `Options::Uncapped` clears the four rates and is not read again.
+		// up. `Options::Uncapped` bypasses the persisted choice for one run and is
+		// never written back.
 		//
 		// **Off by default, and the pair is one decision.** An editor is a
 		// program with hands on it, and vertical sync puts the display's refresh
@@ -4411,6 +4412,10 @@ namespace studio {
 		// answer; the two ship together because either one alone is a worse
 		// default than what they are now.
 		bool VerticalSync = false;
+
+		// Whether the adaptive presentation ceilings are bypassed. The rates stay
+		// intact so turning this off restores the previous pacing policy.
+		bool Uncapped = false;
 
 		// The image deadline, independent of the update loop. A busy swapchain
 		// does not consume its opportunity, and a late image does not cause a

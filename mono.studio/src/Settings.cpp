@@ -183,6 +183,10 @@ namespace studio {
 		// image; setting the mode here used to rebuild the swapchain underneath
 		// it and the frame then presented a freed texture. See
 		// `render::Renderer::SetVerticalSync`.
+		const bool forcedUncapped = Settings.Uncapped;
+		bool effectivelyUncapped = forcedUncapped || Uncapped;
+
+		ImGui::BeginDisabled(effectivelyUncapped);
 		if (ImGui::Checkbox("Vertical sync", &VerticalSync)) {
 			if (Renderer.SetVerticalSync(VerticalSync)) {
 				Say(VerticalSync ? "frames are paced by the display" : "vertical sync off");
@@ -195,8 +199,25 @@ namespace studio {
 				Say("this device will not change vertical sync", engine::core::LogLevel::Warning);
 			}
 		}
+		ImGui::EndDisabled();
 
-		ImGui::BeginDisabled(VerticalSync);
+		// **A mode rather than four destructive writes.** Setting every rate to
+		// zero did run uncapped, but turning the mode back off had no values to
+		// restore. The scheduler already treats a zero ceiling as due every cycle,
+		// so this switch bypasses the rates while retaining them as preferences.
+		bool requestedUncapped = effectivelyUncapped;
+		ImGui::BeginDisabled(VerticalSync || forcedUncapped);
+		if (ImGui::Checkbox("Uncapped frame rate", &requestedUncapped)) {
+			Uncapped = requestedUncapped;
+			effectivelyUncapped = forcedUncapped || Uncapped;
+			Say(Uncapped ? "frame rate uncapped" : "adaptive frame-rate ceilings restored");
+		}
+		ImGui::EndDisabled();
+		if (forcedUncapped && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+			ImGui::SetTooltip("Forced by --uncapped for this run.");
+		}
+
+		ImGui::BeginDisabled(VerticalSync || effectivelyUncapped);
 
 		// **Four rates, because a still editor and a busy one are not the same
 		// question.** These are what it settles to when nobody is asking it for

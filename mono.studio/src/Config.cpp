@@ -301,6 +301,7 @@ namespace studio {
 		ControlPort = Integer(document, "controlPort", ControlPort);
 
 		if (const auto rates = document.find("frameRates"); rates != document.end() && rates->is_object()) {
+			Uncapped = Flag(*rates, "uncapped", Uncapped);
 			InterfaceActiveHz = JsonNumber(*rates, "interfaceActive", InterfaceActiveHz);
 			InterfaceIdleHz = JsonNumber(*rates, "interfaceIdle", InterfaceIdleHz);
 			RendererFocusedHz = JsonNumber(*rates, "rendererFocused", RendererFocusedHz);
@@ -544,6 +545,7 @@ namespace studio {
 			 }},
 			{"frameRates",
 			 json{
+				 {"uncapped", Uncapped},
 				 {"interfaceActive", InterfaceActiveHz},
 				 {"interfaceIdle", InterfaceIdleHz},
 				 {"rendererFocused", RendererFocusedHz},
@@ -659,6 +661,7 @@ namespace studio {
 		InterfaceIdleHz = Prefs.InterfaceIdleHz;
 		RendererFocusedHz = Prefs.RendererFocusedHz;
 		RendererUnfocusedHz = Prefs.RendererUnfocusedHz;
+		Uncapped = Prefs.Uncapped;
 
 		// **The panel flags are ORed rather than assigned**, because `Options`
 		// has already reconciled a command-line flag against this same file -
@@ -717,6 +720,7 @@ namespace studio {
 		Prefs.InterfaceIdleHz = InterfaceIdleHz;
 		Prefs.RendererFocusedHz = RendererFocusedHz;
 		Prefs.RendererUnfocusedHz = RendererUnfocusedHz;
+		Prefs.Uncapped = Uncapped;
 
 		Prefs.Save();
 		Recent.Save();
