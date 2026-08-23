@@ -34,6 +34,79 @@
 #include <vector>
 
 namespace studio {
+	std::string_view
+	DescribeDiagnosticSpan(std::string_view name, engine::core::ProfileCategory category, bool reported) {
+		if (name == "unaccounted") {
+			return "Measured parent time not covered by a direct child scope.";
+		}
+		if (name == "content.demand") {
+			return "Checks asset-reference revisions and scans only worlds whose references changed.";
+		}
+		if (name == "content.demand.catalogue") {
+			return "Offers the published mesh-name catalogue to worlds that do not hold its current list.";
+		}
+		if (name == "content.demand.references" || name == "content.demand.scan") {
+			return "Checks content-bearing component revisions and scans only changed worlds.";
+		}
+		if (name == "content.demand.issue") {
+			return "Issues the bounded set of unique asset names not already requested.";
+		}
+		if (name == "sync rendered") {
+			return "Keeps the Rendered tag aligned with visible descendants of Workspace.";
+		}
+		if (name == "sync rendered.revision") {
+			return "Checks Hierarchy and Visual revisions before deciding whether a visibility walk is "
+				   "needed.";
+		}
+		if (name == "sync rendered.walk") {
+			return "Walks the Workspace hierarchy and marks visible drawable descendants.";
+		}
+		if (name == "sync rendered.count") {
+			return "Reads the retained visible-row count after the revision gate hits.";
+		}
+		if (name == "sync rendered.sweep") {
+			return "Removes stale Rendered tags and clears surviving marks.";
+		}
+		if (name == "frame graph.average") {
+			return "Accumulates this frame into the panel's retained interval average.";
+		}
+		if (name == "frame graph.publish") {
+			return "Publishes the retained interval into the stable snapshot shown by the panel.";
+		}
+		if (name == "frame graph layout") {
+			return "Builds display rows and synthetic unaccounted gaps after a snapshot changes.";
+		}
+		if (reported) {
+			return "Work measured on another worker or device and projected into its parent's timeline.";
+		}
+
+		switch (category) {
+		case engine::core::ProfileCategory::Render:
+			return "CPU work that prepares, records, or composes rendering commands.";
+		case engine::core::ProfileCategory::Gpu:
+			return "GPU execution time reported from device timestamps.";
+		case engine::core::ProfileCategory::ECS:
+			return "Entity-component query or scheduler work on world storage.";
+		case engine::core::ProfileCategory::Physics:
+			return "Collision, broadphase, solver, or rigid-body work.";
+		case engine::core::ProfileCategory::Simulation:
+			return "Fixed-step, world-driver, barrier, or lifecycle work.";
+		case engine::core::ProfileCategory::Script:
+			return "Script scheduling, VM execution, or binding work.";
+		case engine::core::ProfileCategory::Network:
+			return "Replication, transport, or network protocol work.";
+		case engine::core::ProfileCategory::Assets:
+			return "Asset demand, delivery, verification, decoding, or registration work.";
+		case engine::core::ProfileCategory::Idle:
+			return "Time deliberately waiting for a deadline, display, worker, or external event.";
+		case engine::core::ProfileCategory::Engine:
+			return "General application or engine orchestration work.";
+		case engine::core::ProfileCategory::Count:
+			break;
+		}
+		return "Recorded work with no more specific category description.";
+	}
+
 	void AccumulateDiagnosticSpans(
 		std::span<const engine::core::FrameSpan> frame, std::vector<DiagnosticSpan> &totals
 	) {
@@ -686,9 +759,12 @@ namespace studio {
 					ImGui::TextUnformatted(layer.Name.data(), layer.Name.data() + layer.Name.size());
 					ImGui::Unindent(engine::ui::Scaled(16.0f) * static_cast<float>(layer.Depth));
 					ImGui::TableSetColumnIndex(1);
-					if (decisions == 0) {
+					if (activity.Last == engine::render::PresentationCacheActivity::Decision::NotApplicable) {
+						ImGui::TextDisabled("n/a");
+					} else if (activity.Last ==
+							   engine::render::PresentationCacheActivity::Decision::NotObserved) {
 						ImGui::TextDisabled("not seen");
-					} else if (activity.Wrote) {
+					} else if (activity.Wrote()) {
 						ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
 						ImGui::TextUnformatted("write");
 						ImGui::PopStyleColor();
@@ -700,7 +776,11 @@ namespace studio {
 					ImGui::TableSetColumnIndex(3);
 					ImGui::Text("%" PRIu64, activity.Writes);
 					ImGui::TableSetColumnIndex(4);
-					ImGui::Text("%.1f%%", hitRate);
+					if (decisions == 0) {
+						ImGui::TextDisabled("-");
+					} else {
+						ImGui::Text("%.1f%%", hitRate);
+					}
 				}
 				ImGui::EndTable();
 			}
@@ -790,6 +870,7 @@ namespace studio {
 				forget();
 			} else {
 				if (view.Average) {
+					ENGINE_PROFILE_CAT("frame graph.average", engine::core::ProfileCategory::Engine);
 					// Structural matching keeps repeated world and phase trees
 					// separate. Matching only name and depth collapses all of their
 					// bars onto one time range.
@@ -806,6 +887,7 @@ namespace studio {
 				// interval says. Waiting five seconds to draw anything at all
 				// reads as a panel that does not work.
 				if (now >= view.NextPublish || view.Spans.empty()) {
+					ENGINE_PROFILE_CAT("frame graph.publish", engine::core::ProfileCategory::Engine);
 					if (view.Average && view.Frames > 0) {
 						const float frames = static_cast<float>(view.Frames);
 						view.Spans = view.Summed;
@@ -1261,6 +1343,10 @@ namespace studio {
 				static_cast<double>(hovered->SelfMilliseconds),
 				static_cast<double>(hovered->IdleMilliseconds)
 			);
+			ImGui::Spacing();
+			const std::string_view description =
+				DescribeDiagnosticSpan(hovered->Name, hovered->Category, hovered->Reported);
+			ImGui::TextWrapped("%.*s", static_cast<int>(description.size()), description.data());
 			ImGui::Text(
 				"%s%s",
 				GetCategoryName(hovered->Category).data(),

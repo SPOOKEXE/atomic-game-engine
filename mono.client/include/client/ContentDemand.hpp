@@ -39,15 +39,16 @@
 // keep in step.
 //
 // **Idempotent is not free, and the caller decides when to spend it.** This is
-// eight walks of a store, so a client that ran it on every world on every frame
-// spent all eight to learn nothing on every frame but the ones where a scene
-// changed - `docs/ARCH_REVIEW.md` F1. `Client::ScanWantedContent` is the gate
-// and states why it is `ecs::WorldTime::Tick` and not the ECS change channel.
+// several walks of a store, so a client that ran it on every world on every
+// frame spent all of them to learn nothing on every frame but the ones where an asset
+// reference changed - `docs/ARCH_REVIEW.md` F1. `WantedContentRevision` is the
+// component-specific gate shared by the client and Studio.
 //
 // @tier L13 · client
 
 #include <engine/core/Name.hpp>
 
+#include <cstdint>
 #include <vector>
 
 namespace engine::ecs {
@@ -55,6 +56,13 @@ namespace engine::ecs {
 }
 
 namespace client {
+	// A cheap fingerprint of every ECS column that can name content.
+	//
+	// The first call starts the ECS's component-specific change channels. Later
+	// calls are constant in entity count: a version and row count per component.
+	// This is what lets a host avoid rediscovering identical texture names just
+	// because particles advanced or another viewport asked to draw the world.
+	uint64_t WantedContentRevision(engine::ecs::Store &store);
 
 	// Appends every content name the world currently mentions.
 	//
@@ -92,8 +100,7 @@ namespace client {
 	// anybody who has to trust it.
 	//
 	// @param store The world to read.
-	// @param out   Appended to. Duplicates are left in - the caller is diffing
-	//              against what it has already asked for, and de-duplicating
-	//              twice is one place too many.
+	// @param out   Appended to. A name already present is not appended again, so
+	//              every emitter and every viewport reuses one asset request.
 	void CollectWantedContent(engine::ecs::Store &store, std::vector<engine::core::Name> &out);
 }

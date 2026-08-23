@@ -401,6 +401,18 @@ view reports how long actual work took. Portal-history writes come from
 have produced a visible pass. GPU heap statistics and transfer counters remain
 the other half of the check.
 
+An inactive source is reported as `n/a`, never as a hit. A hidden panel may
+continue collecting CPU diagnostics, but it must not alter ImGui draw geometry
+or the host-interface signature. Always-visible diagnostic text such as FPS and
+draw counts is retained between display deadlines; feeding raw per-frame
+counters into it turns an unchanged Studio window into an interface write every
+uncapped frame.
+
+Studio content demand follows the same component-revision gate and name
+deduplication as the shipped client. Do not replace it with a walk over every
+open world on each presentation. The unissued tail stays queued across bounded
+pumps so that the gate can remain closed while delivery catches up.
+
 When every layer hits, `PresentWorld` returns before `Renderer::Render`; no
 command buffer or swapchain image is owed. Headless, frame-budget and capture
 runs force diagnostic writes so their requested output and termination cannot

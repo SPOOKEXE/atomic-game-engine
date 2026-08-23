@@ -12,6 +12,7 @@
 // `physics::SyncBroadphase` and `gui::Compiled` both open with.
 
 #include <engine/core/Bytes.hpp>
+#include <engine/core/FrameGraph.hpp>
 #include <engine/core/types/CFrame.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Components.hpp>
@@ -129,6 +130,38 @@ TEST_CASE("a steady tree takes the early-out", "[scene][visibility]") {
 	CHECK(store.Has<Rendered>(part));
 	CHECK(store.Has<Rendered>(second));
 	CHECK(store.Resource<RenderedSignature>()->Stamp != settled);
+}
+
+TEST_CASE("a steady visibility sync does no entity-sized walk", "[scene][visibility][profile]") {
+	visibility_test::Ready();
+	Store store("visibility_test.profile.steady");
+	const Entity workspace = InstallServices(store);
+	for (size_t index = 0; index < 4096; index++) {
+		visibility_test::PartIn(store, workspace);
+	}
+	REQUIRE(SyncRendered(store) == 4096);
+
+	engine::core::FrameGraph::SetEnabled(true);
+	engine::core::FrameGraph::BeginFrame();
+	REQUIRE(SyncRendered(store) == 4096);
+	engine::core::FrameGraph::EndFrame();
+
+	bool revision = false;
+	bool count = false;
+	bool walk = false;
+	bool sweep = false;
+	for (const engine::core::FrameSpan &span : engine::core::FrameGraph::Spans()) {
+		revision |= span.Name == "sync rendered.revision";
+		count |= span.Name == "sync rendered.count";
+		walk |= span.Name == "sync rendered.walk";
+		sweep |= span.Name == "sync rendered.sweep";
+	}
+	engine::core::FrameGraph::SetEnabled(false);
+
+	CHECK(revision);
+	CHECK(count);
+	CHECK_FALSE(walk);
+	CHECK_FALSE(sweep);
 }
 
 TEST_CASE("hiding a part re-syncs, with no tree change at all", "[scene][visibility]") {

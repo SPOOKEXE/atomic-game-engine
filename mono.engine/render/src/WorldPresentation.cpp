@@ -52,118 +52,154 @@ namespace engine::render {
 		}
 	}
 
+	bool EnvironmentLayerPresent(const scene::WorldLighting &lighting) {
+		const scene::Environment &environment = lighting.EnvironmentState;
+		const bool texturedSky =
+			environment.Skybox == scene::SkyboxSource::Textures && environment.Textures.Enabled &&
+			(environment.Textures.Front.IsValid() || environment.Textures.Back.IsValid() ||
+			 environment.Textures.Left.IsValid() || environment.Textures.Right.IsValid() ||
+			 environment.Textures.Up.IsValid() || environment.Textures.Down.IsValid());
+		const bool computedSky =
+			environment.Skybox == scene::SkyboxSource::Compute && environment.SkyCompute.Enabled;
+		const bool clouds = environment.HasClouds && environment.CloudLayer.Enabled;
+		return texturedSky || computedSky || environment.HasAtmosphere || clouds;
+	}
+
 	ScenePresentationSignatures
 	ScenePresentationSignaturesOf(const View &view, const ScenePresentationState &state) {
 		ScenePresentationSignatures signatures;
 		uint64_t &objects = signatures.Objects;
-		objects = scene::SignatureOf(view.Instances);
-		objects = FoldPresentationObject(objects, view.CameraFrame);
-		objects = FoldPresentationObject(objects, view.Camera);
-		objects = FoldPresentation(objects, view.World);
-		objects = FoldPresentation(objects, view.WorldName.Id());
-		objects = FoldPresentation(objects, view.Pipeline.Id());
-		objects = FoldPresentationObject(objects, view.Grid);
-		objects = FoldPresentation(objects, state.Animation);
-		objects = FoldPresentation(objects, state.Resources);
-		objects = FoldPresentation(objects, state.PostProcess.Id());
-		objects = FoldPresentation(objects, state.Untextured ? 1u : 0u);
-		objects = FoldPresentationSpan(objects, view.Lights);
+		const bool objectLayer = !view.Instances.empty() || view.Grid.Enabled || state.PostProcess.IsValid();
+		if (objectLayer) {
+			objects = scene::SignatureOf(view.Instances);
+			objects = FoldPresentationObject(objects, view.CameraFrame);
+			objects = FoldPresentationObject(objects, view.Camera);
+			objects = FoldPresentation(objects, view.World);
+			objects = FoldPresentation(objects, view.WorldName.Id());
+			objects = FoldPresentation(objects, view.Pipeline.Id());
+			objects = FoldPresentationObject(objects, view.Grid);
+			objects = FoldPresentation(objects, state.Animation);
+			objects = FoldPresentation(objects, state.Resources);
+			objects = FoldPresentation(objects, state.PostProcess.Id());
+			objects = FoldPresentation(objects, state.Untextured ? 1u : 0u);
+			objects = FoldPresentationSpan(objects, view.Lights);
+			objects = FoldPresentationObject(objects, state.Lighting.Direction);
+			objects = FoldPresentationObject(objects, state.Lighting.Ambient);
+			objects = FoldPresentationObject(objects, state.Lighting.OutdoorAmbient);
+			objects = FoldPresentationObject(objects, state.Lighting.Direct);
+			objects = FoldPresentationObject(objects, state.Lighting.FogColor);
+			objects = FoldPresentationObject(objects, state.Lighting.FogStart);
+			objects = FoldPresentationObject(objects, state.Lighting.FogEnd);
+			objects = FoldPresentation(objects, view.OverrideLighting ? 1u : 0u);
+			if (view.OverrideLighting) {
+				objects = FoldPresentationObject(objects, view.Lighting);
+			}
+		}
 
 		uint64_t &environmentSignature = signatures.Environment;
 		// Only the selected environment enters the pixel signature. Lower siblings
 		// and providers outside Lighting cannot reach the sky node, so changing one
 		// of them must not redraw an identical scene.
-		environmentSignature = FoldPresentationObject(environmentSignature, state.Lighting.Direction);
-		environmentSignature = FoldPresentationObject(environmentSignature, state.Lighting.Ambient);
-		environmentSignature = FoldPresentationObject(environmentSignature, state.Lighting.OutdoorAmbient);
-		environmentSignature = FoldPresentationObject(environmentSignature, state.Lighting.Direct);
-		environmentSignature = FoldPresentationObject(environmentSignature, state.Lighting.FogColor);
-		environmentSignature = FoldPresentationObject(environmentSignature, state.Lighting.FogStart);
-		environmentSignature = FoldPresentationObject(environmentSignature, state.Lighting.FogEnd);
 		const scene::Environment &environment = state.Lighting.EnvironmentState;
-		environmentSignature =
-			FoldPresentation(environmentSignature, static_cast<uint8_t>(environment.Skybox));
-		if (environment.Skybox == scene::SkyboxSource::Textures) {
+		if (!EnvironmentLayerPresent(state.Lighting)) {
+			environmentSignature = 0;
+		} else {
+			environmentSignature = FoldPresentationObject(environmentSignature, state.Lighting.Direction);
+			environmentSignature = FoldPresentationObject(environmentSignature, state.Lighting.Ambient);
 			environmentSignature =
-				FoldPresentation(environmentSignature, environment.Textures.Enabled ? 1u : 0u);
-			if (environment.Textures.Enabled) {
-				for (const core::Name face :
-					 {environment.Textures.Front,
-					  environment.Textures.Back,
-					  environment.Textures.Left,
-					  environment.Textures.Right,
-					  environment.Textures.Up,
-					  environment.Textures.Down}) {
-					environmentSignature = FoldPresentation(environmentSignature, face.Id());
+				FoldPresentationObject(environmentSignature, state.Lighting.OutdoorAmbient);
+			environmentSignature = FoldPresentationObject(environmentSignature, state.Lighting.Direct);
+			environmentSignature =
+				FoldPresentation(environmentSignature, static_cast<uint8_t>(environment.Skybox));
+			if (environment.Skybox == scene::SkyboxSource::Textures) {
+				environmentSignature =
+					FoldPresentation(environmentSignature, environment.Textures.Enabled ? 1u : 0u);
+				if (environment.Textures.Enabled) {
+					for (const core::Name face :
+						 {environment.Textures.Front,
+						  environment.Textures.Back,
+						  environment.Textures.Left,
+						  environment.Textures.Right,
+						  environment.Textures.Up,
+						  environment.Textures.Down}) {
+						environmentSignature = FoldPresentation(environmentSignature, face.Id());
+					}
+				}
+			} else if (environment.Skybox == scene::SkyboxSource::Compute) {
+				environmentSignature =
+					FoldPresentation(environmentSignature, environment.SkyCompute.Enabled ? 1u : 0u);
+				if (environment.SkyCompute.Enabled) {
+					environmentSignature =
+						FoldPresentationObject(environmentSignature, environment.SkyCompute);
 				}
 			}
-		} else if (environment.Skybox == scene::SkyboxSource::Compute) {
-			environmentSignature =
-				FoldPresentation(environmentSignature, environment.SkyCompute.Enabled ? 1u : 0u);
-			if (environment.SkyCompute.Enabled) {
-				environmentSignature = FoldPresentationObject(environmentSignature, environment.SkyCompute);
+			if (environment.HasAtmosphere) {
+				environmentSignature = FoldPresentationObject(environmentSignature, environment.Air);
+				environmentSignature = FoldPresentationObject(environmentSignature, environment.AirCompute);
 			}
-		}
-		if (environment.HasAtmosphere) {
-			environmentSignature = FoldPresentationObject(environmentSignature, environment.Air);
-			environmentSignature = FoldPresentationObject(environmentSignature, environment.AirCompute);
-		}
-		if (environment.HasClouds) {
-			environmentSignature = FoldPresentationObject(environmentSignature, environment.CloudLayer);
-			environmentSignature = FoldPresentationObject(environmentSignature, environment.CloudVolume);
-		}
-		environmentSignature = FoldPresentation(environmentSignature, view.OverrideLighting ? 1u : 0u);
-		if (view.OverrideLighting) {
-			environmentSignature = FoldPresentationObject(environmentSignature, view.Lighting);
+			if (environment.HasClouds) {
+				environmentSignature = FoldPresentationObject(environmentSignature, environment.CloudLayer);
+				environmentSignature = FoldPresentationObject(environmentSignature, environment.CloudVolume);
+			}
+			environmentSignature = FoldPresentation(environmentSignature, view.OverrideLighting ? 1u : 0u);
+			if (view.OverrideLighting) {
+				environmentSignature = FoldPresentationObject(environmentSignature, view.Lighting);
+			}
 		}
 
 		uint64_t &particles = signatures.Particles;
-		particles = FoldPresentation(particles, view.ParticleRevision);
-		particles = FoldPresentation(particles, view.ParticleLayoutRevision);
-		particles = FoldPresentation(particles, view.ParticleResidentRevision);
-		particles = FoldPresentationSpan(particles, view.RibbonRuns);
-		particles = FoldPresentationSpan(particles, view.RibbonVertices);
-
-		uint64_t &portals = signatures.Portals;
-		portals = FoldPresentation(portals, state.SurfaceBounces);
-		portals = FoldPresentation(portals, state.SurfaceLimit);
-		portals = FoldPresentation(portals, scene::SignatureOf(view.Foreign));
-
-		portals = FoldPresentation(portals, view.Portals.size());
-		for (const PortalView &portal : view.Portals) {
-			portals = FoldPresentationObject(portals, portal.Index);
-			portals = FoldPresentationObject(portals, portal.Partner);
-			portals = FoldPresentationObject(portals, portal.Centre);
-			portals = FoldPresentationObject(portals, portal.Normal);
-			portals = FoldPresentationObject(portals, portal.First);
-			portals = FoldPresentationObject(portals, portal.Second);
-			portals = FoldPresentationObject(portals, portal.Warp);
-			portals = FoldPresentationObject(portals, portal.TagFilter);
+		const bool particleLayer = !view.Particles.empty() || !view.RibbonRuns.empty();
+		if (particleLayer) {
+			particles = FoldPresentation(particles, view.ParticleRevision);
+			particles = FoldPresentation(particles, view.ParticleLayoutRevision);
+			particles = FoldPresentation(particles, view.ParticleResidentRevision);
+			particles = FoldPresentationSpan(particles, view.RibbonRuns);
+			particles = FoldPresentationSpan(particles, view.RibbonVertices);
 		}
 
-		portals = FoldPresentation(portals, view.Surfaces.size());
-		for (const SurfaceView &surface : view.Surfaces) {
-			portals = FoldPresentationObject(portals, surface.Index);
-			portals = FoldPresentationObject(portals, surface.Frame);
-			portals = FoldPresentationObject(portals, surface.PaneCentre);
-			portals = FoldPresentationObject(portals, surface.PaneNormal);
-			portals = FoldPresentationObject(portals, surface.PaneFirst);
-			portals = FoldPresentationObject(portals, surface.PaneSecond);
-			portals = FoldPresentationObject(portals, surface.PaneNear);
-			portals = FoldPresentationObject(portals, surface.PaneFar);
-			portals = FoldPresentationObject(portals, surface.Projection);
-			portals = FoldPresentationObject(portals, surface.Mapping);
-			portals = FoldPresentationObject(portals, surface.Width);
-			portals = FoldPresentationObject(portals, surface.Height);
-			portals = FoldPresentationObject(portals, surface.ImageOpacity);
-			portals = FoldPresentationObject(portals, surface.Effect);
-			portals = FoldPresentationObject(portals, surface.TagFilter);
-			portals = FoldPresentationObject(portals, surface.FPS);
-			portals = FoldPresentationObject(portals, surface.InstanceFirst);
-			portals = FoldPresentationObject(portals, surface.InstanceCount);
-			portals = FoldPresentationObject(portals, surface.Lighting);
-			portals = FoldPresentationSpan(portals, std::span<const SceneLight>(surface.Lights));
-			portals = FoldPresentation(portals, surface.OverrideLighting ? 1u : 0u);
+		uint64_t &portals = signatures.Portals;
+		const bool portalLayer = !view.Portals.empty() || !view.Surfaces.empty() || !view.Foreign.empty();
+		if (portalLayer) {
+			portals = FoldPresentation(portals, state.SurfaceBounces);
+			portals = FoldPresentation(portals, state.SurfaceLimit);
+			portals = FoldPresentation(portals, scene::SignatureOf(view.Foreign));
+
+			portals = FoldPresentation(portals, view.Portals.size());
+			for (const PortalView &portal : view.Portals) {
+				portals = FoldPresentationObject(portals, portal.Index);
+				portals = FoldPresentationObject(portals, portal.Partner);
+				portals = FoldPresentationObject(portals, portal.Centre);
+				portals = FoldPresentationObject(portals, portal.Normal);
+				portals = FoldPresentationObject(portals, portal.First);
+				portals = FoldPresentationObject(portals, portal.Second);
+				portals = FoldPresentationObject(portals, portal.Warp);
+				portals = FoldPresentationObject(portals, portal.TagFilter);
+			}
+
+			portals = FoldPresentation(portals, view.Surfaces.size());
+			for (const SurfaceView &surface : view.Surfaces) {
+				portals = FoldPresentationObject(portals, surface.Index);
+				portals = FoldPresentationObject(portals, surface.Frame);
+				portals = FoldPresentationObject(portals, surface.PaneCentre);
+				portals = FoldPresentationObject(portals, surface.PaneNormal);
+				portals = FoldPresentationObject(portals, surface.PaneFirst);
+				portals = FoldPresentationObject(portals, surface.PaneSecond);
+				portals = FoldPresentationObject(portals, surface.PaneNear);
+				portals = FoldPresentationObject(portals, surface.PaneFar);
+				portals = FoldPresentationObject(portals, surface.Projection);
+				portals = FoldPresentationObject(portals, surface.Mapping);
+				portals = FoldPresentationObject(portals, surface.Width);
+				portals = FoldPresentationObject(portals, surface.Height);
+				portals = FoldPresentationObject(portals, surface.ImageOpacity);
+				portals = FoldPresentationObject(portals, surface.Effect);
+				portals = FoldPresentationObject(portals, surface.TagFilter);
+				portals = FoldPresentationObject(portals, surface.FPS);
+				portals = FoldPresentationObject(portals, surface.InstanceFirst);
+				portals = FoldPresentationObject(portals, surface.InstanceCount);
+				portals = FoldPresentationObject(portals, surface.Lighting);
+				portals = FoldPresentationSpan(portals, std::span<const SceneLight>(surface.Lights));
+				portals = FoldPresentation(portals, surface.OverrideLighting ? 1u : 0u);
+			}
 		}
 		return signatures;
 	}

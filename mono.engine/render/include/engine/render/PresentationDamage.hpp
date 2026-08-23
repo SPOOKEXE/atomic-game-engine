@@ -114,7 +114,30 @@ namespace engine::render {
 	struct PresentationCacheActivity {
 		uint64_t Hits = 0;
 		uint64_t Writes = 0;
-		bool Wrote = false;
+		enum class Decision : uint8_t {
+			NotObserved,
+			NotApplicable,
+			Hit,
+			Write,
+		};
+		Decision Last = Decision::NotObserved;
+
+		bool Wrote() const {
+			return Last == Decision::Write;
+		}
+	};
+
+	// Whether a retained source exists for this presentation opportunity.
+	// A missing source is not a cache hit: there was no resource to reuse.
+	struct PresentationCacheApplicability {
+		bool Objects = true;
+		bool Particles = true;
+		bool Environment = true;
+		bool Portals = true;
+		bool GameInterface = true;
+		bool HostInterface = true;
+		bool ViewportGeometry = true;
+		bool ViewportOverlay = true;
 	};
 
 	// Cheap per-viewport cache accounting for the diagnostics panel.
@@ -123,7 +146,12 @@ namespace engine::render {
 	// tree rather than a fake-duration span in the timing flame graph.
 	class PresentationCacheProfile {
 	  public:
-		void Record(const PresentationDamage &damage, bool studio, bool portalHistoryWrite = false) {
+		void Record(
+			const PresentationDamage &damage,
+			bool studio,
+			bool portalHistoryWrite = false,
+			const PresentationCacheApplicability &applicable = {}
+		) {
 			const bool sceneImage = damage.Scene || damage.Objects || damage.Particles ||
 									damage.Environment || damage.Portals || portalHistoryWrite;
 			const bool gameComposition =
@@ -145,13 +173,33 @@ namespace engine::render {
 				studioComposition,
 				finalImage,
 			};
+			const std::array applies{
+				applicable.Objects,
+				applicable.Particles,
+				applicable.Environment,
+				applicable.Portals,
+				applicable.Portals,
+				true,
+				applicable.GameInterface,
+				studio && applicable.HostInterface,
+				applicable.ViewportGeometry,
+				applicable.ViewportOverlay,
+				true,
+				studio,
+				true,
+			};
 
 			for (size_t index = 0; index < Rows.size(); index++) {
 				PresentationCacheActivity &row = Rows[index];
-				row.Wrote = writes[index];
-				if (row.Wrote) {
+				if (!applies[index]) {
+					row.Last = PresentationCacheActivity::Decision::NotApplicable;
+					continue;
+				}
+				if (writes[index]) {
+					row.Last = PresentationCacheActivity::Decision::Write;
 					row.Writes++;
 				} else {
+					row.Last = PresentationCacheActivity::Decision::Hit;
 					row.Hits++;
 				}
 			}

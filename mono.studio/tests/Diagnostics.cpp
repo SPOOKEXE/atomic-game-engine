@@ -15,10 +15,27 @@ using engine::core::FrameGraph;
 using engine::core::FrameSpan;
 using studio::AccumulateDiagnosticSpans;
 using studio::AppendUnaccountedDiagnosticSpans;
+using studio::DescribeDiagnosticSpan;
 using studio::DiagnosticSpan;
 using studio::FinishDiagnosticAverage;
 using studio::FitReportedDiagnosticTimeline;
 using studio::LayoutDiagnosticRows;
+
+TEST_CASE("every diagnostic span has an explanatory tooltip", "[studio][diagnostics]") {
+	CHECK(
+		DescribeDiagnosticSpan("content.demand", engine::core::ProfileCategory::Assets, false)
+			.find("references changed") != std::string_view::npos
+	);
+	CHECK_FALSE(DescribeDiagnosticSpan("runtime.system", engine::core::ProfileCategory::ECS, false).empty());
+	CHECK(
+		DescribeDiagnosticSpan("worker", engine::core::ProfileCategory::ECS, true).find("another worker") !=
+		std::string_view::npos
+	);
+	CHECK(
+		DescribeDiagnosticSpan("unaccounted", engine::core::ProfileCategory::Engine, false)
+			.find("not covered") != std::string_view::npos
+	);
+}
 
 TEST_CASE("averaging retains repeated scheduler trees", "[studio][diagnostics]") {
 	const std::array frame{

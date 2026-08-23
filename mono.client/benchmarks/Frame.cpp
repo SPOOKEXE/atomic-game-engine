@@ -50,6 +50,7 @@
 #include <engine/scene/Registration.hpp>
 #include <engine/testing/Bench.hpp>
 
+#include <client/ContentDemand.hpp>
 #include <client/Scene.hpp>
 #include <cstddef>
 #include <cstdint>
@@ -232,6 +233,24 @@ BENCH("CollectParticleBatches · a world with no emitters", 10'000) {
 		batches += engine::render::CollectParticleBatches(*scene.World, frame);
 	}
 	Consume(batches);
+}
+
+BENCH("ContentDemand revision · unchanged world with 10,000 emitters", 10'000) {
+	Store &store = Emitting(10'000);
+	const uint64_t settled = client::WantedContentRevision(store);
+	for (size_t call = 0; call < 10'000; call++) {
+		Consume(client::WantedContentRevision(store) == settled);
+	}
+}
+
+BENCH("ContentDemand scan · 10,000 emitters sharing one texture", 100) {
+	Store &store = Emitting(10'000);
+	std::vector<engine::core::Name> wanted;
+	for (size_t call = 0; call < 100; call++) {
+		wanted.clear();
+		client::CollectWantedContent(store, wanted);
+		Consume(wanted.size());
+	}
 }
 
 BENCH("CollectParticleBatches · reuse 1,000 live emitters", 1000) {

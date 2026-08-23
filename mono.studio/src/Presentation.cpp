@@ -4,6 +4,28 @@
 #include <studio/Presentation.hpp>
 
 namespace studio {
+	bool StatusBarSnapshot::Refresh(
+		double now,
+		size_t viewport,
+		uint32_t framesPerSecond,
+		uint32_t drawCalls,
+		uint64_t triangles,
+		uint32_t culled
+	) {
+		if (Valid && viewport == Viewport && now < NextSample) {
+			return false;
+		}
+
+		NextSample = now + 0.25;
+		Viewport = viewport;
+		FramesPerSecond = framesPerSecond;
+		DrawCalls = drawCalls;
+		Triangles = triangles;
+		Culled = culled;
+		Valid = true;
+		return true;
+	}
+
 	float
 	PresentationCeiling(const PresentationRates &rates, bool focused, bool worldRunning, bool inputIdle) {
 		if (rates.Uncapped) {

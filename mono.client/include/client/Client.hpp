@@ -691,7 +691,7 @@ namespace client {
 		// failed request rather than one per pump forever.
 		std::unordered_set<uint32_t> ContentAsked;
 
-		// The world tick each world's content demand was last collected at, by
+		// The content-reference revision each world was last collected at, by
 		// `world::WorldId::Index`. Absent means never.
 		//
 		// **A watermark rather than a copy**, which is the distinction root
@@ -699,9 +699,9 @@ namespace client {
 		// something a world holds, it is a record of how far *this* reader has
 		// got. `ContentAsked` above is the same kind of memo.
 		//
-		// The number it is compared against is `ecs::WorldTime::Tick`, and that
-		// is the whole of the gate - see `RequestWantedContent`.
-		std::unordered_map<uint32_t, uint64_t> ContentScannedAtTick;
+		// The number is derived from component-specific ECS versions, so particle
+		// simulation and unrelated property writes do not falsify it.
+		std::unordered_map<uint32_t, uint64_t> ContentScannedAtRevision;
 
 		// Scratch for the demand scan, reused so a pump allocates nothing.
 		std::vector<engine::core::Name> ContentWanted;

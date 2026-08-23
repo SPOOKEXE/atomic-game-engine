@@ -162,6 +162,13 @@ cmake --preset ci && cmake --build .cache/build/ci -j
       the Frame Graph's `Cascaded Cache Hits` view. Use the timing graph for work
       that actually ran, and `FrameResult` plus GPU heap statistics for traffic
       and residency.
+- [ ] **Are absent optional layers excluded?** No selected environment, visible
+      portals, particles or interface means `n/a`, not a free cache hit. A
+      stable hidden diagnostics panel must not dirty host-interface geometry or
+      the final image.
+- [ ] **Do content references gate their own discovery?** A transform or world
+      tick must not rescan content-bearing components. Repeated references to
+      one texture must become one delivery request and one resident GPU texture.
 - [ ] **Was the steady state measured in `release`?** Record the source and
       composition hit rates, uploaded bytes, command-buffer counts and GPU
       logical bytes before and after the change. Exercise a still scene, moving

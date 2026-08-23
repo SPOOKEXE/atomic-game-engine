@@ -88,7 +88,10 @@ TEST_CASE("scene presentation signature excludes viewport geometry", "[render][p
 }
 
 TEST_CASE("camera and renderer state invalidate scene pixels", "[render][presentation][damage]") {
+	engine::scene::DrawInstance instance;
+	const std::array instances{instance};
 	engine::render::View view;
+	view.Instances = instances;
 	engine::render::ScenePresentationState state;
 	const uint64_t original = engine::render::ScenePresentationSignature(view, state);
 
@@ -98,6 +101,20 @@ TEST_CASE("camera and renderer state invalidate scene pixels", "[render][present
 	view.CameraFrame.Position.X = 0.0f;
 	state.Untextured = true;
 	CHECK(engine::render::ScenePresentationSignature(view, state) != original);
+}
+
+TEST_CASE("absent object layer cannot invalidate scene pixels", "[render][presentation][damage]") {
+	engine::render::View view;
+	engine::render::ScenePresentationState state;
+	CHECK(engine::render::ScenePresentationSignaturesOf(view, state).Objects == 0);
+
+	view.CameraFrame.Position.X = 42.0f;
+	view.World = 91;
+	state.Animation = 12;
+	state.Resources = 34;
+	state.Untextured = true;
+	state.Lighting.Ambient = {0.2f, 0.4f, 0.6f};
+	CHECK(engine::render::ScenePresentationSignaturesOf(view, state).Objects == 0);
 }
 
 TEST_CASE("only selected environment state invalidates scene pixels", "[render][presentation][damage]") {
@@ -124,12 +141,51 @@ TEST_CASE("only selected environment state invalidates scene pixels", "[render][
 	CHECK(engine::render::ScenePresentationSignature(view, state) == disabled);
 }
 
+TEST_CASE("empty Lighting has no retained environment layer", "[render][presentation][cache]") {
+	engine::scene::DrawInstance instance;
+	const std::array instances{instance};
+	engine::render::View view;
+	view.Instances = instances;
+	engine::render::ScenePresentationState state;
+	CHECK_FALSE(engine::render::EnvironmentLayerPresent(state.Lighting));
+	CHECK(engine::render::ScenePresentationSignaturesOf(view, state).Environment == 0);
+
+	state.Lighting.Ambient.R = 0.75f;
+	const engine::render::ScenePresentationSignatures changed =
+		engine::render::ScenePresentationSignaturesOf(view, state);
+	CHECK(changed.Environment == 0);
+	CHECK(changed.Objects != engine::render::ScenePresentationSignaturesOf(view, {}).Objects);
+}
+
+TEST_CASE("only enabled selected providers create an environment layer", "[render][presentation][cache]") {
+	engine::scene::WorldLighting lighting;
+	lighting.EnvironmentState.Skybox = engine::scene::SkyboxSource::Textures;
+	CHECK_FALSE(engine::render::EnvironmentLayerPresent(lighting));
+
+	lighting.EnvironmentState.Textures.Front = Name("front.atex");
+	CHECK(engine::render::EnvironmentLayerPresent(lighting));
+
+	lighting = {};
+	lighting.EnvironmentState.HasAtmosphere = true;
+	CHECK(engine::render::EnvironmentLayerPresent(lighting));
+
+	lighting = {};
+	lighting.EnvironmentState.HasClouds = true;
+	lighting.EnvironmentState.CloudLayer.Enabled = false;
+	CHECK_FALSE(engine::render::EnvironmentLayerPresent(lighting));
+}
+
 TEST_CASE("scene cache causes are signed independently", "[render][presentation][cache]") {
 	engine::render::View view;
+	engine::effects::EmitterBlock block;
+	engine::render::ParticleBatch batch;
+	batch.Block = &block;
+	const std::array particlesInView{batch};
 	engine::render::ScenePresentationState state;
 	const engine::render::ScenePresentationSignatures original =
 		engine::render::ScenePresentationSignaturesOf(view, state);
 
+	view.Particles = particlesInView;
 	view.ParticleRevision++;
 	const engine::render::ScenePresentationSignatures particles =
 		engine::render::ScenePresentationSignaturesOf(view, state);
@@ -138,6 +194,7 @@ TEST_CASE("scene cache causes are signed independently", "[render][presentation]
 	CHECK(particles.Environment == original.Environment);
 	CHECK(particles.Portals == original.Portals);
 
+	view.Particles = {};
 	view.ParticleRevision--;
 	state.Lighting.EnvironmentState.HasAtmosphere = true;
 	const engine::render::ScenePresentationSignatures environment =

@@ -57,6 +57,11 @@ namespace engine::render {
 	ScenePresentationSignatures
 	ScenePresentationSignaturesOf(const View &view, const ScenePresentationState &state);
 
+	// Whether the selected Lighting children produce an environment layer.
+	// Base lighting still affects objects, but an empty Lighting service has no
+	// sky, atmosphere or clouds to retain and is therefore not a cache source.
+	bool EnvironmentLayerPresent(const scene::WorldLighting &lighting);
+
 	// Signs the target geometry independently from its contents.
 	uint64_t ViewportPresentationSignature(uint32_t width, uint32_t height);
 

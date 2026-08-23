@@ -2510,16 +2510,24 @@ namespace studio {
 								  : live == 1 ? std::string(Describe(Runs.front().Mode)) + " (1 scene)"
 											  : std::to_string(live) + " scenes running";
 
-		const engine::render::FrameResult frame = FocusedViewport < ViewportResults.size()
-													  ? ViewportResults[FocusedViewport]
-													  : engine::render::FrameResult{};
+		const engine::render::FrameResult current = FocusedViewport < ViewportResults.size()
+														? ViewportResults[FocusedViewport]
+														: engine::render::FrameResult{};
+		StatusBar.Refresh(
+			ImGui::GetTime(),
+			FocusedViewport,
+			static_cast<uint32_t>(std::max(std::lround(ImGui::GetIO().Framerate), 0l)),
+			current.DrawCalls,
+			current.Triangles,
+			current.Culled
+		);
 		ImGui::Text(
-			"%s  |  %.0f fps  |  %u draw calls, %llu triangles, %u culled",
+			"%s  |  %u fps  |  %u draw calls, %llu triangles, %u culled",
 			state.c_str(),
-			ImGui::GetIO().Framerate,
-			frame.DrawCalls,
-			static_cast<unsigned long long>(frame.Triangles),
-			frame.Culled
+			StatusBar.FramesPerSecond,
+			StatusBar.DrawCalls,
+			static_cast<unsigned long long>(StatusBar.Triangles),
+			StatusBar.Culled
 		);
 
 		// **What is selected, which the explorer cannot say while you are

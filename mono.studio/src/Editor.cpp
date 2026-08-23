@@ -2075,13 +2075,17 @@ namespace studio {
 		RibbonRuns.clear();
 		Lights.clear();
 
+		engine::scene::WorldLighting visualLighting;
+		uint32_t visualSurfaceBounces = Renderer.SurfaceBounces();
+		uint32_t visualSurfaceLimit = Renderer.SurfaceLimit();
 		if (visual.IsValid()) {
 			const Name selectedProfile = Universe->SettingsOf(visual).RenderingProfile;
 			Universe->Enter(visual, [&, selectedProfile](Store &store) {
 				// Lighting is authored per world and Studio presents worlds without
 				// going through client::Client. Resolve it here so editing the
 				// service changes this viewport on the same frame.
-				Renderer.SetLighting(engine::scene::LightingOf(store));
+				visualLighting = engine::scene::LightingOf(store);
+				Renderer.SetLighting(visualLighting);
 
 				if (const auto *list = store.Resource<engine::render::DrawList>()) {
 					// Copied out rather than borrowed. The renderer's call
@@ -2170,7 +2174,8 @@ namespace studio {
 				const int32_t bounces = Settings.SurfaceBounces > 0
 											? static_cast<int32_t>(Settings.SurfaceBounces)
 											: engine::scene::SurfaceBouncesOf(store);
-				Renderer.SetSurfaceBounces(static_cast<uint32_t>(std::max(bounces, 0)));
+				visualSurfaceBounces = static_cast<uint32_t>(std::max(bounces, 0));
+				Renderer.SetSurfaceBounces(visualSurfaceBounces);
 
 				// **And how many panes it draws at once**, which is the other half of
 				// what a hall of mirrors costs: the depth above says how deep a chain
@@ -2183,9 +2188,8 @@ namespace studio {
 				// exists because somebody comparing two depths needs the world to stop
 				// arguing; there is no equivalent measurement for the count, and a
 				// flag with no use is a flag that goes stale.
-				Renderer.SetSurfaceLimit(
-					static_cast<uint32_t>(std::max(engine::scene::SurfaceLimitOf(store), 0))
-				);
+				visualSurfaceLimit = static_cast<uint32_t>(std::max(engine::scene::SurfaceLimitOf(store), 0));
+				Renderer.SetSurfaceLimit(visualSurfaceLimit);
 
 				// **The shaders this world's materials name, resolved before
 				// the frame that draws with them.** The same block
@@ -2433,21 +2437,23 @@ namespace studio {
 		}
 
 		const uint64_t animationSignature = Renderer.TextureAnimationSignature(AnimationSeconds);
+		const bool gameInterfacePresent =
+			DrawingViewport < GuiLists.size() && !GuiLists[DrawingViewport].Commands().Commands.empty();
 		const uint64_t gameInterfaceSignature =
-			DrawingViewport < GuiLists.size()
+			gameInterfacePresent
 				? engine::scene::MixSignature(GuiLists[DrawingViewport].Signature(), animationSignature)
-				: animationSignature;
+				: 0;
 		engine::render::ScenePresentationSignatures scenePresentationSignatures;
 		{
 			ENGINE_PROFILE_CAT("presentation signature", engine::core::ProfileCategory::Render);
 			scenePresentationSignatures = engine::render::ScenePresentationSignaturesOf(
 				view,
 				engine::render::ScenePresentationState{
-					.Lighting = Renderer.CurrentLighting(),
+					.Lighting = visualLighting,
 					.Animation = animationSignature,
 					.Resources = VisualResourceRevision,
-					.SurfaceBounces = Renderer.SurfaceBounces(),
-					.SurfaceLimit = Renderer.SurfaceLimit(),
+					.SurfaceBounces = visualSurfaceBounces,
+					.SurfaceLimit = visualSurfaceLimit,
 					.PostProcess = {},
 					.Untextured = ShowColliders && ColliderHideTextures,
 				}
@@ -2464,6 +2470,16 @@ namespace studio {
 		damage.Particles = damage.Particles || !view.Particles.empty() || !view.RibbonRuns.empty();
 		damage.Scene = damage.Scene || damage.Particles;
 		damage.Overlay = Overlay.IsDirty();
+		const engine::render::PresentationCacheApplicability cacheApplicability{
+			.Objects = !view.Instances.empty() || view.Grid.Enabled,
+			.Particles = !view.Particles.empty() || !view.RibbonRuns.empty(),
+			.Environment = engine::render::EnvironmentLayerPresent(visualLighting),
+			.Portals = !view.Portals.empty() || !view.Surfaces.empty(),
+			.GameInterface = gameInterfacePresent,
+			.HostInterface = true,
+			.ViewportGeometry = drawingWorld && target.IsValid(),
+			.ViewportOverlay = drawingWorld && target.IsValid(),
+		};
 		const bool diagnosticFrame =
 			Settings.Headless || Settings.MaximumFrames >= 0 || !Settings.Capture.empty();
 		if (diagnosticFrame) {
@@ -2473,7 +2489,9 @@ namespace studio {
 		}
 		view.Damage = damage;
 		if (!damage.Any()) {
-			ViewportPresentations[DrawingViewport].CacheProfile().Record(damage, true);
+			ViewportPresentations[DrawingViewport].CacheProfile().Record(
+				damage, true, false, cacheApplicability
+			);
 			return;
 		}
 		{
@@ -2484,7 +2502,7 @@ namespace studio {
 		}
 		if (LastFrame.Presented || Settings.Headless) {
 			ViewportPresentations[DrawingViewport].CacheProfile().Record(
-				damage, true, LastFrame.PortalPasses > 0
+				damage, true, LastFrame.PortalPasses > 0, cacheApplicability
 			);
 			ViewportPresentations[DrawingViewport].Commit(presentationSignatures);
 		}

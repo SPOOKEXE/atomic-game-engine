@@ -42,6 +42,7 @@ using studio::AppendReplicaVisualInstances;
 using studio::PresentationAlpha;
 using studio::PresentationCeiling;
 using studio::PresentationRates;
+using studio::StatusBarSnapshot;
 using studio::WorldSelectorLabel;
 
 namespace {
@@ -143,6 +144,29 @@ TEST_CASE("renderer focus and the active subsystem rates limit presentation", "[
 
 	const PresentationRates uncapped{120.0f, 20.0f, 100.0f, 10.0f, true};
 	CHECK(PresentationCeiling(uncapped, false, false, true) == 0.0f);
+}
+
+TEST_CASE("status counters stay retained between their display deadlines", "[studio][presentation][cache]") {
+	StatusBarSnapshot snapshot;
+	REQUIRE(snapshot.Refresh(10.0, 0, 300, 12, 400, 0));
+
+	CHECK_FALSE(snapshot.Refresh(10.1, 0, 297, 99, 9000, 0));
+	CHECK(snapshot.FramesPerSecond == 300);
+	CHECK(snapshot.DrawCalls == 12);
+	CHECK(snapshot.Triangles == 400);
+
+	CHECK(snapshot.Refresh(10.25, 0, 297, 99, 9000, 0));
+	CHECK(snapshot.FramesPerSecond == 297);
+	CHECK(snapshot.DrawCalls == 99);
+}
+
+TEST_CASE("changing the focused viewport refreshes status immediately", "[studio][presentation][cache]") {
+	StatusBarSnapshot snapshot;
+	REQUIRE(snapshot.Refresh(10.0, 0, 300, 12, 0, 0));
+
+	CHECK(snapshot.Refresh(10.01, 1, 300, 4, 0, 0));
+	CHECK(snapshot.Viewport == 1);
+	CHECK(snapshot.DrawCalls == 4);
 }
 
 // --- the hosted client visual scene -----------------------------------------

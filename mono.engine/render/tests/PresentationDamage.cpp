@@ -7,6 +7,7 @@
 
 TEST_SUITE_ID("engine.render.presentation-damage")
 
+using engine::render::PresentationCacheApplicability;
 using engine::render::PresentationCacheLayer;
 using engine::render::PresentationDamage;
 using engine::render::PresentationDamageTracker;
@@ -173,10 +174,10 @@ TEST_CASE("viewport causes stay visible in cache accounting", "[render][presenta
 	tracker.CacheProfile().Record(damage, true);
 
 	const auto activities = tracker.CacheProfile().Activities();
-	CHECK(activities[static_cast<size_t>(PresentationCacheLayer::ViewportGeometry)].Wrote);
-	CHECK(activities[static_cast<size_t>(PresentationCacheLayer::ViewportOverlay)].Wrote);
-	CHECK(activities[static_cast<size_t>(PresentationCacheLayer::GameComposition)].Wrote);
-	CHECK(activities[static_cast<size_t>(PresentationCacheLayer::FinalImage)].Wrote);
+	CHECK(activities[static_cast<size_t>(PresentationCacheLayer::ViewportGeometry)].Wrote());
+	CHECK(activities[static_cast<size_t>(PresentationCacheLayer::ViewportOverlay)].Wrote());
+	CHECK(activities[static_cast<size_t>(PresentationCacheLayer::GameComposition)].Wrote());
+	CHECK(activities[static_cast<size_t>(PresentationCacheLayer::FinalImage)].Wrote());
 }
 
 TEST_CASE("client cache accounting omits the Studio composition", "[render][presentation][cache]") {
@@ -187,8 +188,8 @@ TEST_CASE("client cache accounting omits the Studio composition", "[render][pres
 	tracker.CacheProfile().Record(damage, false);
 
 	const auto activities = tracker.CacheProfile().Activities();
-	CHECK_FALSE(activities[static_cast<size_t>(PresentationCacheLayer::FinalImage)].Wrote);
-	CHECK_FALSE(activities[static_cast<size_t>(PresentationCacheLayer::StudioComposition)].Wrote);
+	CHECK_FALSE(activities[static_cast<size_t>(PresentationCacheLayer::FinalImage)].Wrote());
+	CHECK_FALSE(activities[static_cast<size_t>(PresentationCacheLayer::StudioComposition)].Wrote());
 }
 
 TEST_CASE(
@@ -203,15 +204,91 @@ TEST_CASE(
 	tracker.CacheProfile().Record(damage, true, false);
 
 	auto activities = tracker.CacheProfile().Activities();
-	CHECK(activities[static_cast<size_t>(PresentationCacheLayer::PortalInputs)].Wrote);
-	CHECK_FALSE(activities[static_cast<size_t>(PresentationCacheLayer::PortalHistory)].Wrote);
+	CHECK(activities[static_cast<size_t>(PresentationCacheLayer::PortalInputs)].Wrote());
+	CHECK_FALSE(activities[static_cast<size_t>(PresentationCacheLayer::PortalHistory)].Wrote());
 
 	tracker.CacheProfile().Record(PresentationDamage{}, true, true);
 	activities = tracker.CacheProfile().Activities();
-	CHECK_FALSE(activities[static_cast<size_t>(PresentationCacheLayer::PortalInputs)].Wrote);
-	CHECK(activities[static_cast<size_t>(PresentationCacheLayer::PortalHistory)].Wrote);
-	CHECK(activities[static_cast<size_t>(PresentationCacheLayer::SceneImage)].Wrote);
-	CHECK(activities[static_cast<size_t>(PresentationCacheLayer::FinalImage)].Wrote);
+	CHECK_FALSE(activities[static_cast<size_t>(PresentationCacheLayer::PortalInputs)].Wrote());
+	CHECK(activities[static_cast<size_t>(PresentationCacheLayer::PortalHistory)].Wrote());
+	CHECK(activities[static_cast<size_t>(PresentationCacheLayer::SceneImage)].Wrote());
+	CHECK(activities[static_cast<size_t>(PresentationCacheLayer::FinalImage)].Wrote());
+}
+
+TEST_CASE("absent portal layers are not reported as cache hits", "[render][presentation][cache]") {
+	PresentationDamageTracker tracker;
+	PresentationCacheApplicability applicable;
+	applicable.Portals = false;
+
+	tracker.CacheProfile().Record(PresentationDamage{}, true, false, applicable);
+
+	const auto activities = tracker.CacheProfile().Activities();
+	for (const PresentationCacheLayer layer :
+		 {PresentationCacheLayer::PortalInputs, PresentationCacheLayer::PortalHistory}) {
+		const auto &activity = activities[static_cast<size_t>(layer)];
+		CHECK(activity.Hits == 0);
+		CHECK(activity.Writes == 0);
+		CHECK(activity.Last == engine::render::PresentationCacheActivity::Decision::NotApplicable);
+	}
+	CHECK(activities[static_cast<size_t>(PresentationCacheLayer::SceneImage)].Hits == 1);
+}
+
+TEST_CASE("absent source layers never inflate hit rates", "[render][presentation][cache]") {
+	PresentationDamageTracker tracker;
+	PresentationCacheApplicability applicable;
+	applicable.Objects = false;
+	applicable.Particles = false;
+	applicable.Environment = false;
+	applicable.Portals = false;
+	applicable.GameInterface = false;
+	applicable.HostInterface = false;
+
+	for (size_t frame = 0; frame < 128; frame++) {
+		tracker.CacheProfile().Record(PresentationDamage{}, true, false, applicable);
+	}
+
+	const auto activities = tracker.CacheProfile().Activities();
+	for (const PresentationCacheLayer layer : {
+			 PresentationCacheLayer::Objects,
+			 PresentationCacheLayer::Particles,
+			 PresentationCacheLayer::Environment,
+			 PresentationCacheLayer::PortalInputs,
+			 PresentationCacheLayer::PortalHistory,
+			 PresentationCacheLayer::GameInterface,
+			 PresentationCacheLayer::HostInterface,
+		 }) {
+		const auto &activity = activities[static_cast<size_t>(layer)];
+		CHECK(activity.Hits == 0);
+		CHECK(activity.Writes == 0);
+		CHECK(activity.Last == engine::render::PresentationCacheActivity::Decision::NotApplicable);
+	}
+	CHECK(activities[static_cast<size_t>(PresentationCacheLayer::FinalImage)].Hits == 128);
+}
+
+TEST_CASE("steady Studio presentation writes no retained layer", "[render][presentation][cache]") {
+	PresentationDamageTracker tracker;
+	tracker.Commit(Settled());
+
+	for (size_t opportunity = 0; opportunity < 41'247; opportunity++) {
+		tracker.CacheProfile().Record(tracker.Inspect(Settled()), true);
+	}
+
+	auto activities = tracker.CacheProfile().Activities();
+	for (const engine::render::PresentationCacheActivity &activity : activities) {
+		CHECK(activity.Writes == 0);
+		CHECK(activity.Hits == 41'247);
+	}
+
+	PresentationSignatures statusChanged = Settled();
+	statusChanged.HostInterface++;
+	tracker.CacheProfile().Record(tracker.Inspect(statusChanged), true);
+	tracker.Commit(statusChanged);
+
+	activities = tracker.CacheProfile().Activities();
+	CHECK(activities[static_cast<size_t>(PresentationCacheLayer::HostInterface)].Writes == 1);
+	CHECK(activities[static_cast<size_t>(PresentationCacheLayer::StudioComposition)].Writes == 1);
+	CHECK(activities[static_cast<size_t>(PresentationCacheLayer::FinalImage)].Writes == 1);
+	CHECK(activities[static_cast<size_t>(PresentationCacheLayer::SceneImage)].Writes == 0);
 }
 
 TEST_CASE(
@@ -226,6 +303,7 @@ TEST_CASE(
 	for (const engine::render::PresentationCacheActivity &activity : tracker.CacheProfile().Activities()) {
 		CHECK(activity.Hits == 0);
 		CHECK(activity.Writes == 0);
-		CHECK_FALSE(activity.Wrote);
+		CHECK_FALSE(activity.Wrote());
+		CHECK(activity.Last == engine::render::PresentationCacheActivity::Decision::NotObserved);
 	}
 }

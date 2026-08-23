@@ -12,6 +12,7 @@
 
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace studio {
@@ -83,4 +84,10 @@ namespace studio {
 	//
 	// @return How many rows the graph needs.
 	uint32_t LayoutDiagnosticRows(std::span<const DiagnosticSpan> spans, std::vector<uint32_t> &rows);
+
+	// Human explanation shown for every flame-graph bar. Known hot paths get a
+	// specific contract; dynamic names fall back to their category, so no bar
+	// has a tooltip that merely repeats its label.
+	std::string_view
+	DescribeDiagnosticSpan(std::string_view name, engine::core::ProfileCategory category, bool reported);
 }

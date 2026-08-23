@@ -156,6 +156,74 @@ TEST_CASE("a world naming nothing asks for nothing", "[client][contentdemand]") 
 	CHECK(wanted.empty());
 }
 
+TEST_CASE("unchanged demand revisions ignore simulation and unrelated writes", "[client][contentdemand]") {
+	Store store = Fresh("contentdemand.revision.steady");
+	const Entity emitter = store.Create();
+	engine::effects::ParticleEmitter particles;
+	particles.Texture = Name("shared.atex");
+	store.Set(emitter, particles);
+
+	const uint64_t before = client::WantedContentRevision(store);
+	store.AdvanceTick(1.0 / 60.0);
+	const Entity unrelated = store.Create();
+	store.Set(unrelated, engine::scene::Transform{});
+
+	CHECK(client::WantedContentRevision(store) == before);
+}
+
+TEST_CASE("content property changes advance the precise demand revision", "[client][contentdemand]") {
+	Store store = Fresh("contentdemand.revision.changed");
+	const Entity emitter = store.Create();
+	store.Set(emitter, engine::effects::ParticleEmitter{});
+	const uint64_t before = client::WantedContentRevision(store);
+
+	store.GetMutable<engine::effects::ParticleEmitter>(emitter)->Texture = Name("changed.atex");
+
+	CHECK(client::WantedContentRevision(store) != before);
+}
+
+TEST_CASE("collecting demand does not dirty the references it reads", "[client][contentdemand]") {
+	Store store = Fresh("contentdemand.revision.readonly");
+	const Entity part = store.Create();
+	engine::scene::Visual visual;
+	visual.Mesh = Name("readonly.amesh");
+	store.Set(part, visual);
+	const uint64_t before = client::WantedContentRevision(store);
+
+	std::vector<Name> wanted;
+	client::CollectWantedContent(store, wanted);
+
+	CHECK(client::WantedContentRevision(store) == before);
+	REQUIRE(wanted.size() == 1);
+}
+
+TEST_CASE("removing a content-bearing row advances demand revision", "[client][contentdemand]") {
+	Store store = Fresh("contentdemand.revision.removed");
+	const Entity emitter = store.Create();
+	store.Set(emitter, engine::effects::ParticleEmitter{});
+	const uint64_t before = client::WantedContentRevision(store);
+
+	store.Remove<engine::effects::ParticleEmitter>(emitter);
+
+	CHECK(client::WantedContentRevision(store) != before);
+}
+
+TEST_CASE("many emitters share one demanded texture name", "[client][contentdemand]") {
+	Store store = Fresh("contentdemand.shared.texture");
+	for (size_t index = 0; index < 4096; index++) {
+		const Entity emitter = store.Create();
+		engine::effects::ParticleEmitter particles;
+		particles.Texture = Name("shared.atex");
+		store.Set(emitter, particles);
+	}
+
+	std::vector<Name> wanted;
+	client::CollectWantedContent(store, wanted);
+
+	REQUIRE(wanted.size() == 1);
+	CHECK(wanted.front() == Name("shared.atex"));
+}
+
 TEST_CASE("a material's texture is collected once it has resolved", "[client][contentdemand]") {
 	// **The indirection that let materials stay out of the demand path.** A
 	// material reaches a part through `ResolveMaterials`, which writes its

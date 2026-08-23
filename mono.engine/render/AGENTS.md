@@ -671,6 +671,9 @@ Cache profiling uses hit and write counters in
 as a fabricated timing span. The Frame Graph panel's `Cascaded Cache Hits` view
 shows the dependency depth, last decision and cumulative hit rate per viewport.
 Any new retained layer must add one row there and tests for its upward cascade.
+An absent source is `n/a`, not a hit: no environment provider, portal, particle
+list or interface exists to reuse. Counting absence as reuse inflates the rate
+and makes an idle scene look healthier as more optional systems are disabled.
 
 On a hit, that layer owes no upload, no command buffer and no transient
 allocation. Validate this in a steady scene with the release preset, the cache

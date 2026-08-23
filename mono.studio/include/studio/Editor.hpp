@@ -96,6 +96,7 @@
 #include <studio/Operators.hpp>
 #include <studio/PlayLink.hpp>
 #include <studio/Plugins.hpp>
+#include <studio/Presentation.hpp>
 #include <studio/Preview.hpp>
 #include <studio/Projection.hpp>
 #include <studio/TeamCreate.hpp>
@@ -2675,13 +2676,16 @@ namespace studio {
 		// Which texture names have been asked for, by `core::Name::Id`.
 		std::unordered_set<uint32_t> ContentAsked;
 
-		// The names the open worlds carry, refilled once per content pump.
+		// Last content-reference revision scanned per open world. This is a
+		// reader watermark, not a second copy of the world's asset references.
+		std::unordered_map<uint32_t, uint64_t> ContentScannedAtRevision;
+
+		// Newly changed names carried by the open worlds, refilled on demand.
 		//
 		// A member rather than a local in `RequestShownContent` so the buffer's
-		// capacity survives the frame. The answer is recomputed from scratch
-		// every pump - there is nothing cheap to observe that would say when a
-		// world's content names changed - so the allocation was the one part of
-		// that which did not have to be paid again.
+		// capacity survives the frame. Component-specific revisions decide which
+		// worlds need a scan, so an unchanged or merely simulating world is O(1)
+		// in its entity count here.
 		std::vector<engine::core::Name> WantedContent;
 
 		// Queues every file in the local store's `raw/` for every write source.
@@ -5569,6 +5573,8 @@ namespace studio {
 		// Frame times, sampled every frame so the panel has history the moment
 		// it is opened rather than starting empty.
 		engine::render::FrameStatistics Statistics;
+
+		StatusBarSnapshot StatusBar;
 
 		// What the frame-graph panel is showing, and when it changes.
 		//

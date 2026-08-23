@@ -43,6 +43,33 @@
 #include <vector>
 
 namespace studio {
+	// The slowly sampled values printed in Studio's always-visible status bar.
+	//
+	// The source counters change every frame even when the visible scene and
+	// editor state do not. Keeping the displayed snapshot stable between sample
+	// deadlines prevents diagnostic text from invalidating the retained Studio
+	// interface and every composition above it at an uncapped render rate.
+	struct StatusBarSnapshot {
+		double NextSample = 0.0;
+		size_t Viewport = 0;
+		uint32_t FramesPerSecond = 0;
+		uint32_t DrawCalls = 0;
+		uint64_t Triangles = 0;
+		uint32_t Culled = 0;
+		bool Valid = false;
+
+		// Refreshes the visible values when their deadline expires or the
+		// focused viewport changes. Returns whether the snapshot was sampled.
+		bool Refresh(
+			double now,
+			size_t viewport,
+			uint32_t framesPerSecond,
+			uint32_t drawCalls,
+			uint64_t triangles,
+			uint32_t culled
+		);
+	};
+
 	// The presentation ceilings configured by Studio.
 	struct PresentationRates {
 		float InterfaceActive = 0.0f;

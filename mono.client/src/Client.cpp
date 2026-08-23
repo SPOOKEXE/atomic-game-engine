@@ -601,7 +601,10 @@ namespace client {
 		// frame was eight store walks per world to produce an empty list.
 		if (ContentRequested) {
 			ENGINE_PROFILE_CAT("content.demand", engine::core::ProfileCategory::Assets);
-			RequestWantedContent();
+			{
+				ENGINE_PROFILE_CAT("content.demand.references", engine::core::ProfileCategory::Assets);
+				RequestWantedContent();
+			}
 		}
 
 		{
@@ -938,47 +941,22 @@ namespace client {
 		}
 
 		Universe_->Enter(world, [this, world](engine::ecs::Store &store) {
-			// **The gate, and it is one integer compare.** `CollectWantedContent`
-			// is eight walks of the store, and this used to run all eight on
+			// **The gate, and it is a small fixed set of integer compares.**
+			// `CollectWantedContent`
+			// is several walks of the store, and this used to run all of them on
 			// every world on every frame - `docs/ARCH_REVIEW.md` F1, which is
 			// explicit that this is work that should not happen rather than
-			// work to parallelise. Nothing can put a new content name into a
-			// world without a tick advancing, so a world whose tick has not
-			// moved since the last scan cannot have a different answer.
-			//
-			// **Why not the change channel, which is what rule 2 points at.**
-			// Three things were checked and each rules it out on its own:
-			//
-			//  * `Store::ClearChanges` runs at the *start* of a tick, so a
-			//    reader that runs once per frame sees only the last tick of a
-			//    frame that owed several. At 30 fps against a 60 Hz tick that
-			//    is every other tick's new content, silently.
-			//  * A write made outside a tick - which is how a snapshot and a
-			//    world build reach a store - has its bits cleared by the next
-			//    tick before `FlushSignals` ever runs, so `Store::OnChanged`
-			//    does not see it either.
-			//  * `Store::ChangeVersion` moves for *any* write in an archetype
-			//    that carries `DirtyBits`, and `physics` observes
-			//    `scene::Transform`, which sits in the same archetype as every
-			//    `Visual` in the world. One moving part falsifies it for the
-			//    whole scene, so it is never false when it matters.
-			//
-			// The tick counter has none of those properties: it is the world's
-			// own, it is in the store, it advances exactly when the world may
-			// have advanced, and no consumer can clear it.
-			//
-			// **A missed frame costs latency and never a request.** A row that
-			// arrives between two ticks is picked up on the next one, which is
-			// at most one tick late against a fetch that takes hundreds of
-			// milliseconds. A request that never fires would be a texture that
-			// never loads, and that is the failure this gate is written to
-			// avoid rather than to trade against.
-			const uint64_t tick = store.Time().Tick;
-			const auto scanned = ContentScannedAtTick.find(world.Index);
-			if (scanned != ContentScannedAtTick.end() && scanned->second == tick) {
+			// work to parallelise. `WantedContentRevision` watches only columns
+			// that can carry an asset name. Its monotonic component versions survive
+			// `ClearChanges`, and live row counts cover removals, so the reader
+			// cannot miss a write between pumps. Particle simulation, transforms,
+			// ticks, and additional cameras leave it unchanged.
+			const uint64_t revision = WantedContentRevision(store);
+			const auto scanned = ContentScannedAtRevision.find(world.Index);
+			if (scanned != ContentScannedAtRevision.end() && scanned->second == revision) {
 				return;
 			}
-			ContentScannedAtTick[world.Index] = tick;
+			ContentScannedAtRevision[world.Index] = revision;
 
 			CollectWantedContent(store, ContentWanted);
 		});
@@ -3288,9 +3266,10 @@ namespace client {
 				}
 			);
 		}
+		const bool gameInterfacePresent = hook != nullptr && !InterfaceList.Commands().Commands.empty();
 		const engine::render::PresentationSignatures presentationSignatures{
 			.Scene = scenePresentationSignatures,
-			.GameInterface = hook == nullptr ? 0 : InterfaceList.Signature(),
+			.GameInterface = gameInterfacePresent ? InterfaceList.Signature() : 0,
 			.HostInterface = 0,
 			.Viewport = viewportSignature,
 		};
@@ -3305,10 +3284,20 @@ namespace client {
 		damage.GameInterface =
 			damage.GameInterface || diagnosticFrame || interfaceContinuous || PresentedImages < 2;
 		damage.Overlay = Overlay.IsDirty();
+		const engine::render::PresentationCacheApplicability cacheApplicability{
+			.Objects = !view.Instances.empty() || view.Grid.Enabled,
+			.Particles = !view.Particles.empty() || !view.RibbonRuns.empty(),
+			.Environment = engine::render::EnvironmentLayerPresent(visualLighting),
+			.Portals = !view.Portals.empty() || !view.Surfaces.empty(),
+			.GameInterface = gameInterfacePresent,
+			.HostInterface = false,
+			.ViewportGeometry = true,
+			.ViewportOverlay = true,
+		};
 		view.Damage = damage;
 		const bool visualChanged = damage.Any() || PresentationInvalidated;
 		if (!visualChanged) {
-			PresentationDamage.CacheProfile().Record(damage, false);
+			PresentationDamage.CacheProfile().Record(damage, false, false, cacheApplicability);
 			UnchangedPresentationsSkipped++;
 			Presentations.Consume(engine::render::PresentationSchedule::Clock::now());
 			ParticleDeltaSeconds = 0.0f;
@@ -3339,7 +3328,9 @@ namespace client {
 		}
 		Presentations.Consume(engine::render::PresentationSchedule::Clock::now());
 		if (LastFrame.Presented || Settings.Headless) {
-			PresentationDamage.CacheProfile().Record(damage, false, LastFrame.PortalPasses > 0);
+			PresentationDamage.CacheProfile().Record(
+				damage, false, LastFrame.PortalPasses > 0, cacheApplicability
+			);
 			PresentationDamage.Commit(presentationSignatures);
 			PresentedImages++;
 			VisualResourcesChanged = false;

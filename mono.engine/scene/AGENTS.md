@@ -1157,3 +1157,12 @@ written down: it is what turns `ResolveBones` into a forward pass over a sorted
 palette instead of a recursive walk, and an importer that cannot produce that
 ordering has produced a cycle. The pass degrades to the rig's own frame rather
 than looping, and `engine.scene.skinning` holds both halves.
+
+## Visibility synchronization keys the walk, it does not hash the world
+
+`SyncRendered` uses the `Hierarchy` and `Visual` component revisions plus their
+matching counts to decide whether its membership walk is owed. It must not hash
+every row on a steady presentation: that makes a resident scene cost linear CPU
+time merely to prove that nothing changed. Revisions catch additions and
+writes; counts catch removals. The slower walk and stale-row sweep have their own
+profiling spans and should be absent from a steady-world trace.

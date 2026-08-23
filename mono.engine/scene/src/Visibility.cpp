@@ -101,44 +101,17 @@ namespace engine::scene {
 		uint64_t Signature(Store &store, Entity workspace) {
 			uint64_t stamp = Fold(uint64_t{0}, workspace);
 
-			// The tree the walk descends. `Parent` is not read by `EachChild`
-			// and is folded anyway: it is the field a reparent writes on the
-			// row that moved, and one term costs less than reasoning about
-			// which end of a relink is guaranteed to be visible here.
-			//
-			// **Destruction needs nothing of its own.** A destroyed instance's
-			// row leaves this pass, so the count moves whether or not the
-			// links around it were tidied - and `DestroyInstance` does unparent
-			// on the way out, so both halves move.
-			size_t nodes = 0;
-			store.Each<const Hierarchy>([&stamp, &nodes](Entity entity, const Hierarchy &node) {
-				nodes++;
-				stamp = Fold(stamp, entity);
-				stamp = Fold(stamp, node.Parent);
-				stamp = Fold(stamp, node.FirstChild);
-				stamp = Fold(stamp, node.NextSibling);
-			});
-			stamp = Fold(stamp, static_cast<uint64_t>(nodes));
-
-			// **The second half, and a `Hierarchy`-only signature is wrong
-			// without it.** `Visible` is read by the walk and a script or a
-			// wire delta can toggle it without touching a single link, which
-			// would leave a part somebody hid still drawing. The entity id
-			// covers the other direction: `Instance.new("Part")` parented and
-			// then given its `Visual` changes the answer with no tree change
-			// at all, and the id appearing in this pass is what says so.
-			size_t visuals = 0;
-			store.Each<const Visual>([&stamp, &visuals](Entity entity, const Visual &visual) {
-				visuals++;
-				stamp = Fold(stamp, entity);
-
-				// **1 and 2, not 1 and 0.** A zero term folds to a value that
-				// depends only on the running total, so a `false` beside a
-				// missing row would be indistinguishable - and telling those
-				// apart is the whole job here.
-				stamp = Fold(stamp, static_cast<uint64_t>(visual.Visible ? 1 : 2));
-			});
-			stamp = Fold(stamp, static_cast<uint64_t>(visuals));
+			// Component epochs are monotonic and are not cleared with per-tick
+			// dirty bits. Counts cover removals, which have no surviving row on
+			// which to leave a write bit. This turns the steady path from two full
+			// column scans into four integer reads without maintaining a second
+			// copy of the tree.
+			store.Observe<Hierarchy>();
+			store.Observe<Visual>();
+			stamp = Fold(stamp, store.ComponentChangeVersion<Hierarchy>());
+			stamp = Fold(stamp, store.CountMatching<Hierarchy>());
+			stamp = Fold(stamp, store.ComponentChangeVersion<Visual>());
+			stamp = Fold(stamp, store.CountMatching<Visual>());
 
 			return stamp;
 		}
@@ -147,7 +120,13 @@ namespace engine::scene {
 	size_t SyncRendered(Store &store) {
 		ENGINE_PROFILE_CAT("sync rendered", engine::core::ProfileCategory::ECS);
 
-		const Entity workspace = WorkspaceOf(store);
+		Entity workspace = NULL_ENTITY;
+		uint64_t stamp = 0;
+		{
+			ENGINE_PROFILE_CAT("sync rendered.revision", engine::core::ProfileCategory::ECS);
+			workspace = WorkspaceOf(store);
+			stamp = Signature(store, workspace);
+		}
 
 		// --- the early-out: has anything the answer depends on moved? --------
 		//
@@ -173,7 +152,6 @@ namespace engine::scene {
 			store.SetResource(RenderedSignature{});
 		}
 
-		const uint64_t stamp = Signature(store, workspace);
 		RenderedSignature &memo = *store.ResourceMutable<RenderedSignature>();
 
 		if (memo.Fresh != 0 && memo.Stamp == stamp) {
@@ -184,6 +162,7 @@ namespace engine::scene {
 			// one per call. Caching the count in the resource instead would be
 			// a second copy of a derived fact, which is the thing `ecs`'s own
 			// invariants open by refusing.
+			ENGINE_PROFILE_CAT("sync rendered.count", engine::core::ProfileCategory::ECS);
 			return store.CountMatching<Rendered>();
 		}
 
@@ -201,6 +180,7 @@ namespace engine::scene {
 		// clears everything, which is the empty screen `Visibility.hpp` argues
 		// for rather than a scene that draws its own storage.
 		if (workspace != NULL_ENTITY) {
+			ENGINE_PROFILE_CAT("sync rendered.walk", engine::core::ProfileCategory::ECS);
 			std::vector<Entity> &pending = Stack();
 			pending.clear();
 			pending.push_back(workspace);
@@ -316,17 +296,20 @@ namespace engine::scene {
 		// `Remove` inside `Each` is deferred by the store until the loop ends,
 		// so the rows are not moved underneath the iteration that asked for it.
 		size_t rendered = 0;
-		store.Each<Rendered>([&store, &rendered](Entity entity, Rendered &tag) {
-			if (tag.Mark == 0) {
-				store.Remove<Rendered>(entity);
-				return;
-			}
+		{
+			ENGINE_PROFILE_CAT("sync rendered.sweep", engine::core::ProfileCategory::ECS);
+			store.Each<Rendered>([&store, &rendered](Entity entity, Rendered &tag) {
+				if (tag.Mark == 0) {
+					store.Remove<Rendered>(entity);
+					return;
+				}
 
-			// Cleared for the next pass, which is what keeps the field zero
-			// everywhere a snapshot or a comparison can see it.
-			tag.Mark = 0;
-			rendered++;
-		});
+				// Cleared for the next pass, which is what keeps the field zero
+				// everywhere a snapshot or a comparison can see it.
+				tag.Mark = 0;
+				rendered++;
+			});
+		}
 
 		// **A gauge and not a counter**: this is a level, and how many entities
 		// a world is drawing is the first number to ask for when the answer to

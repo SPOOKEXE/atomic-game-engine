@@ -349,11 +349,13 @@ Four steps, in this order and for reasons that are each a failure somebody had:
   has already been asked for. Names and never content: asking by kind fetched
   6.9 GB through one synchronous function on the frame the editor opened, which
   is the failure `client/ContentDemand.hpp` carries in full.
-- **Collect demand, for a world that has moved.** `CollectWantedContent` is
-  eight walks of a store and it ran on every world on every frame to produce, in
-  the steady state, an empty list. `Client::ScanWantedContent` gates it on
-  `ecs::WorldTime::Tick` and states there why the ECS change channel cannot
-  serve a once-per-frame reader. `docs/ARCH_REVIEW.md` F1.
+- **Collect demand only when a content-bearing component changed.**
+  `CollectWantedContent` is several walks of a store and used to run on every
+  world on every frame to produce, in the steady state, an empty list. The gate
+  folds the component revisions and matching counts for the types that can name
+  content. A simulation tick or a transform write is not content demand. Counts
+  are part of the key because removing the last reference must be observable
+  even though no surviving row carries the removal.
 - **Pump delivery.** `AssetClient::Pump` resolves, verifies and decompresses
   **synchronously**, because the fetch path may not have a thread: a completion
   that landed at a moment scheduling chose would be a desync. That is why the
@@ -368,6 +370,13 @@ the walk**, and both would otherwise never be fetched at all: a mesh's own
 sheets, whose names live inside the mesh file and are read on arrival, and a
 material's colour map, which `scene::ResolveMaterials` writes into a
 `SurfaceAppearance` field the next scan already reads.
+
+Demand is deduplicated by interned content name before delivery. Ten thousand
+emitters naming one particle sheet issue one request and `render::TextureTable`
+owns one GPU texture for that name; per-emitter texture copies are a residency
+bug. Rebuilding the delivery client clears both the request memo and the world
+revision baselines, so a newly published catalogue can resolve the same name to
+new content without reviving per-frame scans.
 
 **Where it runs is load-bearing.** Before the simulation and outside every pass:
 content becoming visible mid-tick is rule 5's desync, and content registering

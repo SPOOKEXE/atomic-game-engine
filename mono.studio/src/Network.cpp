@@ -168,6 +168,7 @@ namespace studio {
 		// dead client and would be asked about a live one. `mono.client` clears
 		// its own set for this reason when it rebuilds; the editor did not.
 		ContentAsked.clear();
+		ContentScannedAtRevision.clear();
 		ContentPending.clear();
 		ContentIssued.clear();
 		ContentRequested = false;
@@ -322,8 +323,14 @@ namespace studio {
 			// which is exactly the reading that sends somebody looking in the
 			// delivery client and finding nothing.
 			ENGINE_PROFILE_CAT("content.demand", engine::core::ProfileCategory::Assets);
-			OfferPublishedNames();
-			RequestShownContent();
+			{
+				ENGINE_PROFILE_CAT("content.demand.catalogue", engine::core::ProfileCategory::Assets);
+				OfferPublishedNames();
+			}
+			{
+				ENGINE_PROFILE_CAT("content.demand.references", engine::core::ProfileCategory::Assets);
+				RequestShownContent();
+			}
 		}
 
 		// **How much decoding and uploading one frame will do**, and the same
@@ -728,25 +735,40 @@ namespace studio {
 		//
 		// Issuing a few per pump turns the same load into content appearing over
 		// a second or two, which is what an editor opening a large place should
-		// look like. The collection is idempotent, so what is not issued this
-		// pump is simply issued on the next - there is no queue to keep in step.
-		// **A member cleared rather than a local rebuilt.** This runs every pump
-		// and the list is discarded every pump, so a local was one allocation
-		// and a geometric regrowth per frame for an answer that is almost always
-		// the same one.
+		// look like. Unissued names stay in the member queue; rescanning an
+		// unchanged world to reconstruct that queue was the idle cost this gate
+		// removes.
 		std::vector<engine::core::Name> &wanted = WantedContent;
-		wanted.clear();
-		EachOpenWorld([&wanted](engine::ecs::Store &store) { client::CollectWantedContent(store, wanted); });
+		{
+			ENGINE_PROFILE_CAT("content.demand.scan", engine::core::ProfileCategory::Assets);
+			Universe->EachWorld([this, &wanted](engine::world::WorldId world) {
+				Universe->Enter(world, [this, world, &wanted](engine::ecs::Store &store) {
+					const uint64_t revision = client::WantedContentRevision(store);
+					const auto scanned = ContentScannedAtRevision.find(world.Index);
+					if (scanned != ContentScannedAtRevision.end() && scanned->second == revision) {
+						return;
+					}
+					ContentScannedAtRevision[world.Index] = revision;
+					client::CollectWantedContent(store, wanted);
+				});
+			});
+		}
 
 		size_t issued = 0;
-		for (const engine::core::Name &name : wanted) {
-			if (issued >= REQUESTS_PER_PUMP) {
-				break;
-			}
-			if (RequestContentAsset(name)) {
-				issued++;
+		size_t kept = 0;
+		{
+			ENGINE_PROFILE_CAT("content.demand.issue", engine::core::ProfileCategory::Assets);
+			for (const engine::core::Name &name : wanted) {
+				if (issued >= REQUESTS_PER_PUMP) {
+					wanted[kept++] = name;
+					continue;
+				}
+				if (RequestContentAsset(name)) {
+					issued++;
+				}
 			}
 		}
+		wanted.resize(kept);
 	}
 
 	bool Editor::RequestContentAsset(const engine::core::Name &asset) {
