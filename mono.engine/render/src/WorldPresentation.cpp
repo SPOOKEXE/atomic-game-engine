@@ -56,7 +56,17 @@ namespace engine::render {
 		uint64_t signature = scene::SignatureOf(view.Instances);
 		signature = FoldPresentationObject(signature, view.CameraFrame);
 		signature = FoldPresentationObject(signature, view.Camera);
-		signature = FoldPresentationObject(signature, state.Lighting);
+		// Only state consumed by the current render passes belongs in a pixel
+		// signature. Atmosphere and clouds are authored now but have no render node
+		// yet, so signing them would redraw an identical scene forever when their
+		// animation clocks advance.
+		signature = FoldPresentationObject(signature, state.Lighting.Direction);
+		signature = FoldPresentationObject(signature, state.Lighting.Ambient);
+		signature = FoldPresentationObject(signature, state.Lighting.OutdoorAmbient);
+		signature = FoldPresentationObject(signature, state.Lighting.Direct);
+		signature = FoldPresentationObject(signature, state.Lighting.FogColor);
+		signature = FoldPresentationObject(signature, state.Lighting.FogStart);
+		signature = FoldPresentationObject(signature, state.Lighting.FogEnd);
 		signature = FoldPresentation(signature, state.SurfaceBounces);
 		signature = FoldPresentation(signature, state.SurfaceLimit);
 		signature = FoldPresentation(signature, state.PostProcess.Id());

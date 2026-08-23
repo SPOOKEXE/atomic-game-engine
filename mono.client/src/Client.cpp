@@ -3265,8 +3265,10 @@ namespace client {
 		const uint32_t targetHeight = static_cast<uint32_t>(std::max(pixelHeight, 0));
 		const uint64_t viewportSignature =
 			engine::render::ViewportPresentationSignature(targetWidth, targetHeight);
-		const engine::render::PresentationSignatures presentationSignatures{
-			.Scene = engine::render::ScenePresentationSignature(
+		uint64_t scenePresentationSignature = 0;
+		{
+			ENGINE_PROFILE_CAT("presentation signature", engine::core::ProfileCategory::Render);
+			scenePresentationSignature = engine::render::ScenePresentationSignature(
 				view,
 				engine::render::ScenePresentationState{
 					.Lighting = visualLighting,
@@ -3277,14 +3279,16 @@ namespace client {
 					.PostProcess = LastPostProcessShader,
 					.Untextured = false,
 				}
-			),
+			);
+		}
+		const engine::render::PresentationSignatures presentationSignatures{
+			.Scene = scenePresentationSignature,
 			.GameInterface = hook == nullptr ? 0 : InterfaceList.Signature(),
 			.HostInterface = 0,
 			.Viewport = viewportSignature,
 		};
 		engine::render::PresentationDamage damage = PresentationDamage.Inspect(presentationSignatures);
-		const bool continuousScene =
-			!view.Particles.empty() || !view.RibbonRuns.empty() || visualLighting.Sky.Enabled;
+		const bool continuousScene = !view.Particles.empty() || !view.RibbonRuns.empty();
 		const bool diagnosticFrame =
 			Settings.Headless || Settings.MaximumFrames >= 0 || !Settings.Capture.empty();
 		damage.Scene = damage.Scene || diagnosticFrame || continuousScene || VisualResourcesChanged ||

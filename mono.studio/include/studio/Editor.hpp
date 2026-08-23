@@ -5607,6 +5607,8 @@ namespace studio {
 			// an open profiler does not allocate a second tree every repaint.
 			std::vector<DiagnosticSpan> DisplaySpans;
 			std::vector<uint32_t> Rows;
+			uint32_t DisplayRows = 0;
+			bool DisplayDirty = true;
 			float FrameMilliseconds = 0.0f;
 			float IdleMilliseconds = 0.0f;
 			float UnmarkedMilliseconds = 0.0f;

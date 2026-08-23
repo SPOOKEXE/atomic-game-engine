@@ -671,6 +671,7 @@ namespace studio {
 		if (!view.Paused) {
 			if (const engine::core::FrameTriggerHit *hit = FrameGraph::Triggered(); hit != nullptr) {
 				snapshot(view.Spans);
+				view.DisplayDirty = true;
 				readScalars();
 				view.PublishedFrames = 1;
 				forget();
@@ -684,6 +685,7 @@ namespace studio {
 			if (interval <= 0.0f) {
 				// Every frame, which is what this panel always did.
 				snapshot(view.Spans);
+				view.DisplayDirty = true;
 				readScalars();
 				view.PublishedFrames = 1;
 				forget();
@@ -720,6 +722,7 @@ namespace studio {
 						view.PublishedFrames = 1;
 					}
 
+					view.DisplayDirty = true;
 					view.NextPublish = now + static_cast<double>(interval);
 					forget();
 				}
@@ -732,9 +735,14 @@ namespace studio {
 		const float busyMs = std::max(frameMs - idleMs, 0.0f);
 
 		std::vector<DiagnosticSpan> &graphSpans = view.DisplaySpans;
-		graphSpans = spans;
-		FitReportedDiagnosticTimeline(graphSpans, frameMs);
-		AppendUnaccountedDiagnosticSpans(graphSpans);
+		if (view.DisplayDirty) {
+			ENGINE_PROFILE_CAT("frame graph layout", engine::core::ProfileCategory::Engine);
+			graphSpans = spans;
+			FitReportedDiagnosticTimeline(graphSpans, frameMs);
+			AppendUnaccountedDiagnosticSpans(graphSpans);
+			view.DisplayRows = LayoutDiagnosticRows(graphSpans, view.Rows);
+			view.DisplayDirty = false;
+		}
 
 		const char *millisecondsFormat = frameMs < 1.0f ? "%.3f" : "%.2f";
 		ImGui::Text(frameMs < 1.0f ? "%.3f ms" : "%.2f ms", static_cast<double>(frameMs));
@@ -1086,8 +1094,7 @@ namespace studio {
 		const ImVec2 origin = ImGui::GetCursorScreenPos();
 		const float graphWidth = std::max(ImGui::GetContentRegionAvail().x, 1.0f);
 		const float scale = frameMs > 0.0001f ? graphWidth / frameMs : 0.0f;
-		const uint32_t graphRows = LayoutDiagnosticRows(graphSpans, view.Rows);
-		const float graphHeight = rowHeight * static_cast<float>(graphRows);
+		const float graphHeight = rowHeight * static_cast<float>(view.DisplayRows);
 
 		ImDrawList *draw = ImGui::GetWindowDrawList();
 		const DiagnosticSpan *hovered = nullptr;

@@ -19,9 +19,23 @@
 namespace engine::ui {
 	namespace {
 		uint64_t FoldBytes(uint64_t hash, const void *data, size_t size) {
+			constexpr uint64_t PRIME = 1099511628211ull;
 			const auto *bytes = static_cast<const std::byte *>(data);
-			for (size_t index = 0; index < size; index++) {
-				hash = (hash ^ std::to_integer<uint8_t>(bytes[index])) * 1099511628211ull;
+			hash = (hash ^ size) * PRIME;
+
+			// One dependent multiply per machine word rather than per byte. The
+			// signature is process-local, and folding the byte count first keeps a
+			// short buffer distinct from a longer one with a zero tail.
+			size_t index = 0;
+			for (; index + sizeof(uint64_t) <= size; index += sizeof(uint64_t)) {
+				uint64_t word = 0;
+				std::memcpy(&word, bytes + index, sizeof(word));
+				hash = (hash ^ word) * PRIME;
+			}
+			if (index < size) {
+				uint64_t word = 0;
+				std::memcpy(&word, bytes + index, size - index);
+				hash = (hash ^ word) * PRIME;
 			}
 			return hash;
 		}
@@ -40,6 +54,10 @@ namespace engine::ui {
 				hash = FoldBytes(hash, list->IdxBuffer.Data, list->IdxBuffer.Size * sizeof(ImDrawIdx));
 				for (const ImDrawCmd &command : list->CmdBuffer) {
 					hash = FoldBytes(hash, &command.ClipRect, sizeof(command.ClipRect));
+					// The unresolved atlas pointer is the texture's identity in a
+					// headless frame. GetTexID asserts until a graphics backend uploads
+					// it, while this pair is valid in both headed and headless hosts.
+					hash = FoldBytes(hash, &command.TexRef, sizeof(command.TexRef));
 					hash = FoldBytes(hash, &command.ElemCount, sizeof(command.ElemCount));
 					hash = FoldBytes(hash, &command.IdxOffset, sizeof(command.IdxOffset));
 					hash = FoldBytes(hash, &command.VtxOffset, sizeof(command.VtxOffset));
@@ -312,7 +330,10 @@ namespace engine::ui {
 
 		ImGui::Render();
 		State->Draw = ImGui::GetDrawData();
-		State->DrawSignature = DrawGeometrySignature(State->Draw);
+		{
+			ENGINE_PROFILE_CAT("ui.signature", core::ProfileCategory::Render);
+			State->DrawSignature = DrawGeometrySignature(State->Draw);
+		}
 	}
 
 	uint64_t Interface::Signature() const {

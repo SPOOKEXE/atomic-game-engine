@@ -2437,8 +2437,10 @@ namespace studio {
 			DrawingViewport < GuiLists.size()
 				? engine::scene::MixSignature(GuiLists[DrawingViewport].Signature(), animationSignature)
 				: animationSignature;
-		const engine::render::PresentationSignatures presentationSignatures{
-			.Scene = engine::render::ScenePresentationSignature(
+		uint64_t scenePresentationSignature = 0;
+		{
+			ENGINE_PROFILE_CAT("presentation signature", engine::core::ProfileCategory::Render);
+			scenePresentationSignature = engine::render::ScenePresentationSignature(
 				view,
 				engine::render::ScenePresentationState{
 					.Lighting = Renderer.CurrentLighting(),
@@ -2449,15 +2451,17 @@ namespace studio {
 					.PostProcess = {},
 					.Untextured = ShowColliders && ColliderHideTextures,
 				}
-			),
+			);
+		}
+		const engine::render::PresentationSignatures presentationSignatures{
+			.Scene = scenePresentationSignature,
 			.GameInterface = gameInterfaceSignature,
 			.HostInterface = Interface.Signature(),
 			.Viewport = engine::render::ViewportPresentationSignature(target.Width, target.Height),
 		};
 		engine::render::PresentationDamage damage =
 			ViewportPresentations[DrawingViewport].Inspect(presentationSignatures);
-		damage.Scene = damage.Scene || !view.Particles.empty() || !view.RibbonRuns.empty() ||
-					   Renderer.CurrentLighting().Sky.Enabled;
+		damage.Scene = damage.Scene || !view.Particles.empty() || !view.RibbonRuns.empty();
 		damage.Overlay = Overlay.IsDirty();
 		view.Damage = damage;
 		{

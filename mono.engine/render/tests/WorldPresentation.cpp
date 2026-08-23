@@ -99,3 +99,19 @@ TEST_CASE("camera and renderer state invalidate scene pixels", "[render][present
 	state.Untextured = true;
 	CHECK(engine::render::ScenePresentationSignature(view, state) != original);
 }
+
+TEST_CASE(
+	"only lighting consumed by render passes invalidates scene pixels", "[render][presentation][damage]"
+) {
+	engine::render::View view;
+	engine::render::ScenePresentationState state;
+	const uint64_t original = engine::render::ScenePresentationSignature(view, state);
+
+	state.Lighting.Sky.Enabled = !state.Lighting.Sky.Enabled;
+	state.Lighting.Sky.Cover = 0.9f;
+	state.Lighting.Air.Density = 0.8f;
+	CHECK(engine::render::ScenePresentationSignature(view, state) == original);
+
+	state.Lighting.Ambient.R = 0.25f;
+	CHECK(engine::render::ScenePresentationSignature(view, state) != original);
+}
