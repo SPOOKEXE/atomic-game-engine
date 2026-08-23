@@ -272,6 +272,12 @@ namespace server {
 	}
 
 	void RegisterPlaceholderComponents() {
+		// The placeholder's first system opens a Postbox. Register its resources
+		// here with the rest of the program's stable component names so a test or
+		// tool that prepares the scheduler before constructing a Universe cannot
+		// mint them under compiler spellings.
+		engine::world::RegisterMailboxTypes();
+
 		// The shared set first, and under `scene`'s names rather than this
 		// program's. A client registers the same strings, which is what makes a
 		// snapshot resolve on the far side without a translation layer - there
