@@ -740,6 +740,10 @@ namespace engine::render {
 			}
 		}
 		State->ResourcePreviews.clear();
+		if (State->WindowCaptureTexture != nullptr) {
+			gpu::ReleaseTexture(device, State->WindowCaptureTexture);
+			State->WindowCaptureTexture = nullptr;
+		}
 
 		// Anything a resize retired and no frame came along to free. Shutting
 		// down is the one path where the next frame never arrives, so leaving
@@ -1216,6 +1220,14 @@ namespace engine::render {
 	void Renderer::RequestSceneCapture(std::filesystem::path path, size_t slot) {
 		State->CapturePath = std::move(path);
 		State->CaptureSlot = slot;
+	}
+
+	void Renderer::RequestWindowCapture(std::filesystem::path path) {
+		State->WindowCapturePath = std::move(path);
+	}
+
+	bool Renderer::CapturePending() const {
+		return State != nullptr && (!State->CapturePath.empty() || !State->WindowCapturePath.empty());
 	}
 
 	bool Renderer::IsHeadless() const {

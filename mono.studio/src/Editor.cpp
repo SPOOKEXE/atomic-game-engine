@@ -1015,6 +1015,13 @@ namespace studio {
 				// received the letter W because the camera was listening for it.
 				Interface.ProcessEvent(event);
 
+				if (PendingControlClick.has_value() && event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
+					event.button.windowID == SDL_GetWindowID(Window) &&
+					event.button.button == PendingControlClick->Button &&
+					event.button.x == PendingControlClick->X && event.button.y == PendingControlClick->Y) {
+					PendingControlClick->DownProcessed = true;
+				}
+
 				if (event.type == SDL_EVENT_QUIT) {
 					Running = false;
 				}
@@ -1270,6 +1277,8 @@ namespace studio {
 			ENGINE_PROFILE_CAT("present world", engine::core::ProfileCategory::Render);
 			PresentWorld(frameSeconds);
 		}
+
+		FinishControlAutomationFrame();
 	}
 
 	void Editor::InstallExampleScript(Store &store, std::string_view file, std::string_view instanceName) {
@@ -1795,6 +1804,8 @@ namespace studio {
 			RoundRobin = (RoundRobin + 1) % Candidates.size();
 			DrawingViewport = Candidates[RoundRobin];
 		}
+
+		PrepareControlScreenshot();
 
 		// **This frame belongs to the preview**, and it is spent the same way a
 		// viewport spends one: `Render` owns the swapchain, so whichever slot the

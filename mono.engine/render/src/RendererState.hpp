@@ -1523,6 +1523,9 @@ namespace engine::render {
 		// `Renderer::RequestSceneCapture`.
 		std::filesystem::path CapturePath;
 
+		// Where the next complete host overlay goes, or empty for none.
+		std::filesystem::path WindowCapturePath;
+
 		// Which viewport's scene the pending capture wants, or `ANY_VIEWPORT`.
 		//
 		// **A panel per scene means the next `Render` is usually the wrong
@@ -1530,6 +1533,12 @@ namespace engine::render {
 		// call that made it, and honouring it in whichever call comes next
 		// photographs whatever that panel happens to be showing.
 		size_t CaptureSlot = Renderer::ANY_VIEWPORT;
+
+		// A readable stand-in for the write-only swapchain on a requested Studio
+		// screenshot frame. Released after its download fence signals.
+		SDL_GPUTexture *WindowCaptureTexture = nullptr;
+		uint32_t WindowCaptureWidth = 0;
+		uint32_t WindowCaptureHeight = 0;
 
 		bool WriteCapture(
 			SDL_GPUTransferBuffer *from,
@@ -2042,6 +2051,7 @@ namespace engine::render {
 			uint32_t height
 		);
 		bool EnsureScene(uint32_t width, uint32_t height);
+		bool EnsureWindowCapture(uint32_t width, uint32_t height);
 		bool RetainSceneFrame(SDL_GPUCommandBuffer *command, size_t slot, const FrameResult &result);
 		bool SubmitSceneCommand(SDL_GPUCommandBuffer *command);
 		void DropStagedSceneFrames();

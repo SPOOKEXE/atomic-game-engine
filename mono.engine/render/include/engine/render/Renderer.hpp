@@ -1975,6 +1975,23 @@ namespace engine::render {
 		//             is right for a host with one panel.
 		void RequestSceneCapture(std::filesystem::path path, size_t slot = ANY_VIEWPORT);
 
+		// Writes the next complete host overlay to a file, once.
+		//
+		// The swapchain is write-only, so a requested frame records the host
+		// overlay into a readable target and blits that target to the window. The
+		// extra image and blit exist only on a requested frame.
+		//
+		// This is asynchronous with respect to the caller: `Render` consumes the
+		// request and performs the GPU wait needed to write the BMP.
+		//
+		// @param path Where to write a BMP. Empty cancels a pending request.
+		void RequestWindowCapture(std::filesystem::path path);
+
+		// Whether either kind of file capture is waiting for a frame.
+		//
+		// @return `true` until the renderer has completed the requested readback.
+		bool CapturePending() const;
+
 		// Any viewport will do. See `RequestSceneCapture`.
 		//
 		// @since v0.15

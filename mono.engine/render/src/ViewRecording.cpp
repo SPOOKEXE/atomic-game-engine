@@ -1846,6 +1846,8 @@ namespace engine::render {
 		const bool present = Request.Present;
 		const uint64_t world = Request.World;
 		const bool offscreen = Offscreen;
+		const uint32_t width = Width;
+		const uint32_t height = Height;
 		const uint32_t sceneWidth = SceneWidth;
 		const uint32_t sceneHeight = SceneHeight;
 		const bool drawHostOverlay = DrawHostOverlay;
@@ -1929,6 +1931,18 @@ namespace engine::render {
 			}
 		}
 
+		// A swapchain image is write-only. On a requested Studio screenshot
+		// frame the host overlay is therefore recorded into a readable image of
+		// the same size, then blitted to the swapchain below. Ordinary frames keep
+		// the direct path and pay no extra image or blit.
+		const bool windowCaptureRequested =
+			present && swapchain != nullptr && drawHostOverlay && !State->WindowCapturePath.empty();
+		const bool windowCaptureReady = windowCaptureRequested && State->EnsureWindowCapture(width, height);
+		if (windowCaptureReady) {
+			windowTarget.texture = State->WindowCaptureTexture;
+			windowTarget.load_op = SDL_GPU_LOADOP_CLEAR;
+		}
+
 		// --- the capture ----------------------------------------------------
 		//
 		// After the world's passes and before the window's, because what is
@@ -1942,14 +1956,24 @@ namespace engine::render {
 		// frames as there are panels.
 		const bool captureWantsThis =
 			State->CaptureSlot == Renderer::ANY_VIEWPORT || State->CaptureSlot == targetSlot;
-		const bool explicitCapture = present && offscreen && !State->CapturePath.empty() && captureWantsThis;
+		const bool explicitSceneCapture =
+			present && offscreen && !State->CapturePath.empty() && captureWantsThis;
 		const bool capturingAuthored = authoredCapture.IsValid();
+		const bool explicitWindowCapture = !capturingAuthored && !explicitSceneCapture && windowCaptureReady;
 		Impl::NamedTexture captureSource = authoredCapture;
 		std::filesystem::path capturePath = authoredCapturePath;
-		if (!captureSource.IsValid() && explicitCapture) {
+		if (!captureSource.IsValid() && explicitSceneCapture) {
 			const Impl::SceneSlot &scene = State->SlotAt(targetSlot);
 			captureSource = {scene.Texture, sceneWidth, sceneHeight, State->ColourFormat()};
 			capturePath = State->CapturePath;
+		} else if (!captureSource.IsValid() && explicitWindowCapture) {
+			captureSource = {
+				State->WindowCaptureTexture,
+				State->WindowCaptureWidth,
+				State->WindowCaptureHeight,
+				State->ColourFormat(),
+			};
+			capturePath = State->WindowCapturePath;
 		}
 
 		if (captureSource.IsValid() && !capturePath.empty()) {
@@ -2012,6 +2036,19 @@ namespace engine::render {
 			SDL_EndGPURenderPass(pass);
 			windowTarget.load_op = SDL_GPU_LOADOP_LOAD;
 			result.DrawCalls++;
+		}
+
+		if (windowCaptureReady) {
+			SDL_GPUBlitInfo blit{};
+			blit.source.texture = State->WindowCaptureTexture;
+			blit.source.w = State->WindowCaptureWidth;
+			blit.source.h = State->WindowCaptureHeight;
+			blit.destination.texture = swapchain;
+			blit.destination.w = width;
+			blit.destination.h = height;
+			blit.load_op = SDL_GPU_LOADOP_DONT_CARE;
+			blit.filter = SDL_GPU_FILTER_NEAREST;
+			SDL_BlitGPUTexture(command, &blit);
 		}
 
 		// **The window, when nothing else touched it.** With the world drawn
@@ -2108,9 +2145,16 @@ namespace engine::render {
 
 						// Once. A request that repeated would write a file
 						// every frame and stall every one of them.
-						if (explicitCapture && !capturingAuthored) {
+						if (explicitSceneCapture && !capturingAuthored) {
 							State->CapturePath.clear();
 							State->CaptureSlot = Renderer::ANY_VIEWPORT;
+						}
+						if (explicitWindowCapture) {
+							State->WindowCapturePath.clear();
+							gpu::ReleaseTexture(State->Device, State->WindowCaptureTexture);
+							State->WindowCaptureTexture = nullptr;
+							State->WindowCaptureWidth = 0;
+							State->WindowCaptureHeight = 0;
 						}
 					}
 				} else if (State->PreviewSubmitted) {

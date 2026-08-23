@@ -126,6 +126,41 @@ namespace engine::render {
 		return true;
 	}
 
+	bool Renderer::Impl::EnsureWindowCapture(uint32_t width, uint32_t height) {
+		if (width == 0 || height == 0) {
+			return false;
+		}
+		if (WindowCaptureTexture != nullptr && WindowCaptureWidth == width && WindowCaptureHeight == height) {
+			return true;
+		}
+
+		if (WindowCaptureTexture != nullptr) {
+			RetiredScenes.push_back(WindowCaptureTexture);
+			WindowCaptureTexture = nullptr;
+		}
+
+		SDL_GPUTextureCreateInfo info{};
+		info.type = SDL_GPU_TEXTURETYPE_2D;
+		info.format = ColourFormat();
+		info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+		info.width = width;
+		info.height = height;
+		info.layer_count_or_depth = 1;
+		info.num_levels = 1;
+
+		WindowCaptureTexture = gpu::CreateTexture(Device, &info);
+		if (WindowCaptureTexture == nullptr) {
+			ENGINE_ERROR("SDL_CreateGPUTexture (window capture): {}", SDL_GetError());
+			WindowCaptureWidth = 0;
+			WindowCaptureHeight = 0;
+			return false;
+		}
+
+		WindowCaptureWidth = width;
+		WindowCaptureHeight = height;
+		return true;
+	}
+
 	bool
 	Renderer::Impl::RetainSceneFrame(SDL_GPUCommandBuffer *command, size_t slot, const FrameResult &result) {
 		if (command == nullptr || slot >= SceneSlots.size()) {

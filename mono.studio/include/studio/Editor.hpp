@@ -3087,6 +3087,13 @@ namespace studio {
 		// The `world` argument, defaulting to the active scene.
 		WorldId ControlWorld(const nlohmann::json &arguments, std::string &failure);
 
+		// Issues the front MCP screenshot request to the renderer once.
+		void PrepareControlScreenshot();
+
+		// Retires completed screenshots and releases a synthetic mouse press after
+		// ImGui has drawn one frame with it held.
+		void FinishControlAutomationFrame();
+
 		// Whether a control client has asked for the frame graph.
 		//
 		// Mirrored from `ControlSurface.WantsProfiling()` rather than reusing
@@ -3094,6 +3101,26 @@ namespace studio {
 		// a window in an editor somebody is using, to answer a question asked
 		// over a socket.
 		bool ControlWantsProfile = false;
+
+		// One file in a screenshot batch. Scene requests name a renderer slot;
+		// Studio requests capture the complete host overlay.
+		struct ControlScreenshot {
+			std::filesystem::path Path;
+			size_t Slot = 0;
+			bool Studio = false;
+		};
+		std::deque<ControlScreenshot> ControlScreenshots;
+		bool ControlScreenshotIssued = false;
+
+		// A click injected through SDL. The release waits until a presented ImGui
+		// frame has observed the press, matching a physical button lifecycle.
+		struct ControlClick {
+			float X = 0.0f;
+			float Y = 0.0f;
+			uint8_t Button = 0;
+			bool DownProcessed = false;
+		};
+		std::optional<ControlClick> PendingControlClick;
 
 		// What this editor was started with.
 		Options Settings;

@@ -52,3 +52,18 @@ TEST_CASE("a capture from a slot that was never drawn into is refused", "[render
 	// a blank texture, which would cache an empty picture for ever.
 	CHECK_FALSE(renderer.CaptureSceneTexture(64, engine::core::Name("studio.thumbnail/late.amesh")));
 }
+
+TEST_CASE("file capture requests expose and clear their pending state without a device", "[render]") {
+	engine::render::Renderer renderer;
+	CHECK_FALSE(renderer.CapturePending());
+
+	renderer.RequestSceneCapture("scene.bmp", 3);
+	CHECK(renderer.CapturePending());
+	renderer.RequestSceneCapture({});
+	CHECK_FALSE(renderer.CapturePending());
+
+	renderer.RequestWindowCapture("studio.bmp");
+	CHECK(renderer.CapturePending());
+	renderer.RequestWindowCapture({});
+	CHECK_FALSE(renderer.CapturePending());
+}
