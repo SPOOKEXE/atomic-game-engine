@@ -57,7 +57,9 @@ namespace studio {
 		// **v9 because Render Pipeline is a panel the saved layout has never
 		// heard of**, and a panel a layout does not know about opens floating in
 		// a corner - which is exactly the failure it exists to fix.
-		constexpr const char *DOCKSPACE = "StudioDockSpace.v10";
+		// **v12 because v11 was briefly built with the old side-by-side split.**
+		// Reusing that id leaves half the scene empty for anybody who launched it.
+		constexpr const char *DOCKSPACE = "StudioDockSpace.v12";
 
 		constexpr const char *VIEWPORT = "Viewport";
 		constexpr const char *VIEWPORT2 = "Viewport 2";
@@ -117,12 +119,14 @@ namespace studio {
 		// **Only when imgui has no layout of its own.** Rebuilding every run
 		// would throw away wherever somebody dragged a panel to, which is the
 		// single most annoying thing an editor can do.
-		// @param dockspace   The dockspace node to fill.
-		// @param extraTitles The extra viewport panels, in index order. Passed in
-		//                    rather than spelled here because the editor owns
-		//                    both how many there are and what they are called -
-		//                    see `Editor::ResizeViewports`.
-		void BuildDefaultLayout(ImGuiID dockspace, std::span<const char *const> extraTitles) {
+		// @param dockspace     The dockspace node to fill.
+		// @param extraTitles   The extra viewport panels, in index order. Passed in
+		//                      rather than spelled here because the editor owns
+		//                      both how many there are and what they are called -
+		//                      see `Editor::ResizeViewports`.
+		// @param splitViewports Whether an extra viewport is open in this layout.
+		void
+		BuildDefaultLayout(ImGuiID dockspace, std::span<const char *const> extraTitles, bool splitViewports) {
 			ImGui::DockBuilderRemoveNode(dockspace);
 			ImGui::DockBuilderAddNode(dockspace, ImGuiDockNodeFlags_DockSpace);
 			ImGui::DockBuilderSetNodeSize(dockspace, ImGui::GetMainViewport()->Size);
@@ -142,28 +146,31 @@ namespace studio {
 			const ImGuiID rightUpper =
 				ImGui::DockBuilderSplitNode(rightLower, ImGuiDir_Up, 0.45f, nullptr, &rightLower);
 
-			// **A split, not the same node.** Docking both viewports into
-			// `centre` makes them *tabs*, so the second is a background window
-			// - `ImGui::Begin` returns false for it, the panel drops its target
-			// and the renderer never draws it. That is not a subtle failure
-			// either: the second view is simply never there, and the first
-			// looks exactly as it always did.
-			//
-			// Two views stacked as tabs would also be one view you have to
-			// click between, which is the thing having two of them is for.
-			ImGuiID rightHalf = centre;
-			const ImGuiID leftHalf =
-				ImGui::DockBuilderSplitNode(rightHalf, ImGuiDir_Left, 0.5f, nullptr, &rightHalf);
+			if (splitViewports) {
+				// **A split, not the same node, when another viewport is open.**
+				// Docking both into `centre` makes them tabs, which is one picture
+				// somebody has to click between rather than two views at once.
+				ImGuiID rightHalf = centre;
+				const ImGuiID leftHalf =
+					ImGui::DockBuilderSplitNode(rightHalf, ImGuiDir_Left, 0.5f, nullptr, &rightHalf);
 
-			ImGui::DockBuilderDockWindow(VIEWPORT, leftHalf);
+				ImGui::DockBuilderDockWindow(VIEWPORT, leftHalf);
 
-			// Everything past the second shares the two halves rather than
-			// splitting further: four quarters of a centre pane are four
-			// pictures too small to judge anything by, and a panel can be
-			// dragged wherever somebody actually wants it. They alternate so an
-			// author who opens two more gets one on each side.
-			for (size_t index = 0; index < extraTitles.size(); index++) {
-				ImGui::DockBuilderDockWindow(extraTitles[index], index % 2 == 0 ? rightHalf : leftHalf);
+				// Everything past the second shares the two halves rather than
+				// splitting further: four quarters of a centre pane are four
+				// pictures too small to judge anything by. Closed reusable panels
+				// are included so reopening one inherits a dock instead of floating.
+				for (size_t index = 0; index < extraTitles.size(); index++) {
+					ImGui::DockBuilderDockWindow(extraTitles[index], index % 2 == 0 ? rightHalf : leftHalf);
+				}
+			} else {
+				// One open viewport owns the whole centre. Closed reusable panels
+				// wait in the same node, so they cost no space and still have a dock
+				// when somebody opens one from the View menu.
+				ImGui::DockBuilderDockWindow(VIEWPORT, centre);
+				for (const char *title : extraTitles) {
+					ImGui::DockBuilderDockWindow(title, centre);
+				}
 			}
 			ImGui::DockBuilderDockWindow(EXPLORER, rightUpper);
 			ImGui::DockBuilderDockWindow(WORLDS, rightUpper);
@@ -261,10 +268,12 @@ namespace studio {
 		for (const ViewportState &view : Extras) {
 			extraTitles.push_back(view.Title.c_str());
 		}
+		const bool splitViewports =
+			std::any_of(Extras.begin(), Extras.end(), [](const ViewportState &view) { return view.Open; });
 
 		if (ResetLayout) {
 			ResetLayout = false;
-			BuildDefaultLayout(dockspace, extraTitles);
+			BuildDefaultLayout(dockspace, extraTitles, splitViewports);
 		}
 
 		static bool built = false;
@@ -272,7 +281,7 @@ namespace studio {
 			built = true;
 			if (ImGui::DockBuilderGetNode(dockspace) == nullptr ||
 				ImGui::DockBuilderGetNode(dockspace)->IsLeafNode()) {
-				BuildDefaultLayout(dockspace, extraTitles);
+				BuildDefaultLayout(dockspace, extraTitles, splitViewports);
 			}
 		}
 

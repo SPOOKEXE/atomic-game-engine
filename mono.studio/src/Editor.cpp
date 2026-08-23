@@ -2785,19 +2785,9 @@ namespace studio {
 		// running together. See `world::ExecutionMode`.
 		Universe->SetMode(engine::world::ExecutionMode::WorldParallel);
 
-		// **A viewport each for the first two, pinned rather than left following
-		// the active world.** An extra viewport with no world of its own draws
-		// whatever is being edited, so two panels would show one scene twice and
-		// the template would demonstrate nothing. With one world open there is
-		// no second scene to show, so the panel stays shut.
-		if (ViewportState *second = ExtraAt(1); second != nullptr) {
-			if (opened.size() > 1) {
-				second->World = opened[1];
-				second->Open = true;
-			} else {
-				second->Open = false;
-			}
-		}
+		// Viewports are an editor layout choice, not a property of the new-place
+		// template. `--viewports N` and New Viewport are the two explicit ways to
+		// open more; the number of default worlds must not silently open panels.
 		ShowViewport = true;
 
 		// Enough frames to outlast a first-run layout rebuild. See
