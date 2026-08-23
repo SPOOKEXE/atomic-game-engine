@@ -297,41 +297,53 @@ namespace studio {
 				continue;
 			}
 
+			// `SelfMilliseconds` is computed from the original frame tree before
+			// Studio averages anything. The geometric gaps below are exact for one
+			// frame, but sparse children have conditional start positions and
+			// per-frame averaged widths. Their apparent gaps can therefore be much
+			// wider than the work the parent actually did. Scale the display gaps to
+			// the measured self total so "unaccounted" never invents time.
+			float geometricGaps = 0.0f;
 			float coveredUntil = parentStart;
 			for (size_t childIndex = firstChild;
 				 childIndex < children.size() && children[childIndex].Parent == parentIndex;
 				 childIndex++) {
 				const float childStart = children[childIndex].Start;
 				const float childEnd = children[childIndex].End;
-				if (childStart > coveredUntil) {
-					spans.push_back(
-						DiagnosticSpan{
-							.Name = "unaccounted",
-							.Depth = parent.Depth + 1,
-							.Parent = static_cast<uint32_t>(parentIndex),
-							.StartMilliseconds = coveredUntil,
-							.Milliseconds = childStart - coveredUntil,
-							.SelfMilliseconds = childStart - coveredUntil,
-							.Category = engine::core::ProfileCategory::Engine,
-						}
-					);
-				}
+				geometricGaps += std::max(childStart - coveredUntil, 0.0f);
 				coveredUntil = std::max(coveredUntil, childEnd);
 			}
+			geometricGaps += std::max(parentEnd - coveredUntil, 0.0f);
+			const float self = std::clamp(parent.SelfMilliseconds, 0.0f, parent.Milliseconds);
+			const float gapScale = geometricGaps > 0.0f ? std::min(self / geometricGaps, 1.0f) : 0.0f;
 
-			if (coveredUntil < parentEnd) {
+			const auto appendGap = [&](float start, float available) {
+				const float measured = available * gapScale;
+				if (measured <= 0.0f) {
+					return;
+				}
 				spans.push_back(
 					DiagnosticSpan{
 						.Name = "unaccounted",
 						.Depth = parent.Depth + 1,
 						.Parent = static_cast<uint32_t>(parentIndex),
-						.StartMilliseconds = coveredUntil,
-						.Milliseconds = parentEnd - coveredUntil,
-						.SelfMilliseconds = parentEnd - coveredUntil,
+						.StartMilliseconds = start,
+						.Milliseconds = measured,
+						.SelfMilliseconds = measured,
 						.Category = engine::core::ProfileCategory::Engine,
 					}
 				);
+			};
+
+			coveredUntil = parentStart;
+			for (size_t childIndex = firstChild;
+				 childIndex < children.size() && children[childIndex].Parent == parentIndex;
+				 childIndex++) {
+				const float childStart = children[childIndex].Start;
+				appendGap(coveredUntil, std::max(childStart - coveredUntil, 0.0f));
+				coveredUntil = std::max(coveredUntil, children[childIndex].End);
 			}
+			appendGap(coveredUntil, std::max(parentEnd - coveredUntil, 0.0f));
 		}
 	}
 
@@ -747,15 +759,25 @@ namespace studio {
 		FitReportedDiagnosticTimeline(graphSpans, frameMs);
 		AppendUnaccountedDiagnosticSpans(graphSpans);
 
-		ImGui::Text("%.2f ms", static_cast<double>(frameMs));
+		const char *millisecondsFormat = frameMs < 1.0f ? "%.3f" : "%.2f";
+		ImGui::Text(frameMs < 1.0f ? "%.3f ms" : "%.2f ms", static_cast<double>(frameMs));
 		ImGui::SameLine();
 		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
-		ImGui::Text(
-			"  busy %.2f   idle %.2f   unmarked %.2f",
-			static_cast<double>(busyMs),
-			static_cast<double>(idleMs),
-			static_cast<double>(view.UnmarkedMilliseconds)
-		);
+		if (frameMs < 1.0f) {
+			ImGui::Text(
+				"  busy %.3f   idle %.3f   unmarked %.3f",
+				static_cast<double>(busyMs),
+				static_cast<double>(idleMs),
+				static_cast<double>(view.UnmarkedMilliseconds)
+			);
+		} else {
+			ImGui::Text(
+				"  busy %.2f   idle %.2f   unmarked %.2f",
+				static_cast<double>(busyMs),
+				static_cast<double>(idleMs),
+				static_cast<double>(view.UnmarkedMilliseconds)
+			);
+		}
 		ImGui::PopStyleColor();
 
 		// --- the controls ----------------------------------------------------
@@ -1183,12 +1205,12 @@ namespace studio {
 				const float share = busyMs > 0.0001f ? (spanBusy / busyMs) * 100.0f : 0.0f;
 
 				ImGui::TableSetColumnIndex(1);
-				ImGui::Text("%.2f", static_cast<double>(spanBusy));
+				ImGui::Text(millisecondsFormat, static_cast<double>(spanBusy));
 
 				ImGui::TableSetColumnIndex(2);
 				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
 				if (span.IdleMilliseconds > 0.0001f) {
-					ImGui::Text("%.2f", static_cast<double>(span.IdleMilliseconds));
+					ImGui::Text(millisecondsFormat, static_cast<double>(span.IdleMilliseconds));
 				} else {
 					ImGui::TextUnformatted("-");
 				}

@@ -155,7 +155,13 @@ TEST_CASE("overlapping spans in different parent branches reuse a row", "[studio
 
 TEST_CASE("unaccounted spans fill gaps between direct children", "[studio][diagnostics]") {
 	std::vector spans{
-		DiagnosticSpan{.Name = "Application", .Depth = 0, .StartMilliseconds = 0.0f, .Milliseconds = 10.0f},
+		DiagnosticSpan{
+			.Name = "Application",
+			.Depth = 0,
+			.StartMilliseconds = 0.0f,
+			.Milliseconds = 10.0f,
+			.SelfMilliseconds = 6.0f,
+		},
 		DiagnosticSpan{
 			.Name = "first",
 			.Depth = 1,
@@ -227,6 +233,7 @@ TEST_CASE("reported worker time does not conceal measured parent gaps", "[studio
 			.Reported = true,
 		},
 	};
+	spans[0].SelfMilliseconds = 1.5f;
 
 	AppendUnaccountedDiagnosticSpans(spans);
 
@@ -235,6 +242,41 @@ TEST_CASE("reported worker time does not conceal measured parent gaps", "[studio
 	CHECK(spans[3].Parent == 0);
 	CHECK(spans[3].StartMilliseconds == 0.5f);
 	CHECK(spans[3].Milliseconds == 1.5f);
+}
+
+TEST_CASE("averaged sparse gaps are capped by measured self time", "[studio][diagnostics]") {
+	std::vector spans{
+		DiagnosticSpan{
+			.Name = "ecs.systems",
+			.Depth = 0,
+			.Milliseconds = 0.30f,
+			.SelfMilliseconds = 0.012f,
+		},
+		DiagnosticSpan{
+			.Name = "pre-simulation",
+			.Depth = 1,
+			.Parent = 0,
+			.StartMilliseconds = 0.01f,
+			.Milliseconds = 0.04f,
+		},
+		DiagnosticSpan{
+			.Name = "simulation",
+			.Depth = 1,
+			.Parent = 0,
+			.StartMilliseconds = 0.20f,
+			.Milliseconds = 0.08f,
+		},
+	};
+
+	AppendUnaccountedDiagnosticSpans(spans);
+
+	float unaccounted = 0.0f;
+	for (const DiagnosticSpan &span : spans) {
+		if (span.Name == "unaccounted" && span.Parent == 0) {
+			unaccounted += span.Milliseconds;
+		}
+	}
+	CHECK(unaccounted == Catch::Approx(0.012f));
 }
 
 TEST_CASE("reported summaries do not invent unaccounted worker time", "[studio][diagnostics]") {

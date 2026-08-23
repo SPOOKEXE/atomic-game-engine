@@ -865,6 +865,7 @@ TEST_CASE("a destroyed emitter gives its block row back", "[effects]") {
 	// emitters ever made rather than on emitters emitting at once.
 	CHECK(system->Blocks.size() == 2);
 	CHECK(system->FrameParents.size() == system->Blocks.size());
+	CHECK(system->SpawnStates.size() == system->Blocks.size());
 
 	// And the surviving emitter still has its own row and is still emitting.
 	CHECK(system->Statistics.Blocks == 1);

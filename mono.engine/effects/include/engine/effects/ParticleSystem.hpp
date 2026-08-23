@@ -268,6 +268,12 @@ namespace engine::effects {
 		// Wrapping is harmless: it repeats a sequence, it does not corrupt one.
 		uint32_t Spawned = 0;
 
+		// One-shot births waiting for this resident block. Requests made before a
+		// block exists remain on `EmitterSlot` and move here when it is claimed.
+		// Keeping an assigned request here lets the step walk the compact resident
+		// arrays without reopening the ECS emitter column.
+		uint32_t Requested = 0;
+
 		// How fast speed is shed, as a fraction per second.
 		float Drag = 0.0f;
 
@@ -374,18 +380,47 @@ namespace engine::effects {
 		// Whether particles are recomputed from the parent's frame each step.
 		bool Locked = false;
 
-		// Whether an emitter claimed this block on the current refresh.
+		// Which refresh last saw the emitter that owns this block.
 		//
-		// **Named `Reserved` and it is not padding**, which is worth saying
-		// because every other `Reserved` in the engine is. `RefreshEmitters`
-		// clears this over every block, lets the emitter walk set it, and frees
-		// whatever is still clear - which is how a block belonging to a destroyed
-		// emitter is reclaimed without keeping a second list of live owners.
-		uint8_t Reserved = 0;
+		// A generation stamp avoids a separate strided write over all blocks just
+		// to clear one byte before the claim walk sets it again. A block whose stamp
+		// differs from `ParticleSystem::ClaimGeneration` was not claimed and is
+		// reclaimed, which preserves the destroyed-emitter check without the pass.
+		uint32_t ClaimedAt = 0;
 
 		// How fast a flipbook runs, in cells per second, under a mode that pays
 		// attention to it.
 		float FlipbookRate = 12.0f;
+	};
+
+	// The compact authored state needed only when a particle is born.
+	//
+	// Kept beside `EmitterBlock`, indexed identically, because adding these fields
+	// to the block slowed the ageing and refresh passes that stream blocks but do
+	// not spawn. Refreshing this row only when the emitter or its parent changes
+	// removes the steady 1.5 KiB `ParticleEmitter` walk from `StepParticles` while
+	// preserving the small hot block used by both host and device stepping.
+	struct EmitterSpawnState {
+		core::Vector3 Half;
+		core::Vector3 Emission;
+		core::Vector3 Inherited;
+
+		core::NumberRange Speed;
+		core::NumberRange Lifetime;
+		core::NumberRange RotationSpeed;
+		core::NumberRange Rotation;
+
+		float Rate = 0.0f;
+		float TimeScale = 1.0f;
+		float SpreadX = 0.0f;
+		float SpreadY = 0.0f;
+		float ShapePartial = 0.0f;
+		float VelocityInheritance = 0.0f;
+
+		ParticleShape Shape = ParticleShape::Box;
+		ParticleShapeStyle ShapeStyle = ParticleShapeStyle::Volume;
+		ParticleShapeDirection ShapeDirection = ParticleShapeDirection::Outward;
+		bool Enabled = true;
 	};
 
 	// One particle's simulation half.
@@ -541,6 +576,9 @@ namespace engine::effects {
 		// One per live emitter.
 		std::vector<EmitterBlock> Blocks;
 
+		// Spawn-only rows, indexed exactly as `Blocks`.
+		std::vector<EmitterSpawnState> SpawnStates;
+
 		// The immediate parent used to resolve each block's cached frame.
 		//
 		// Kept beside rather than inside `EmitterBlock`: the device and particle
@@ -574,6 +612,9 @@ namespace engine::effects {
 		// therefore advance for any number of ticks without making presentation
 		// scan every block to rediscover that all per-block revisions still match.
 		uint64_t ResidentRevision = 1;
+
+		// The current block-claim generation. Zero remains the unclaimed marker.
+		uint32_t ClaimGeneration = 0;
 
 		// Rows of `Blocks` whose emitter has gone, waiting to be handed to the
 		// next one that arrives.

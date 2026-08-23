@@ -54,25 +54,20 @@ namespace engine::world {
 
 		ENGINE_PROFILE_CAT("World::Tick", engine::core::ProfileCategory::Simulation);
 
-		// Whichever worker claimed this world runs it, so the handoff is the
-		// ordinary case rather than a setup step.
-		Store_.BindToCallingThread();
-
 		const uint64_t started = core::Clock::Nanoseconds();
 
-		// **Once per batch, and nothing was doing it.** `Scheduler::Tick` clears
-		// the per-system timings for you; this path calls `RunPhases` directly
-		// instead, and `Scheduler::ClearTimings`' own header says a caller that
-		// splits the frame that way has to do it itself "or timings from earlier
-		// frames remain in the overlay totals". Nothing did, so `Timings()` had
-		// been accumulating since the process started - the studio's systems
-		// tab was showing a lifetime total and calling it a frame, and it grew
-		// forever.
-		//
-		// Before the loop rather than inside it, so a world owing three ticks
-		// reports what the whole batch cost. That is the number the frame graph
-		// wants: the bar is one frame's worth of this world.
-		Scheduler_.ClearTimings();
+		{
+			ENGINE_PROFILE_CAT("tick setup", engine::core::ProfileCategory::Simulation);
+
+			// Whichever worker claimed this world runs it, so the handoff is the
+			// ordinary case rather than a setup step.
+			Store_.BindToCallingThread();
+
+			// Once per batch. Before the loop so a catch-up batch reports its whole
+			// system cost while clearing no timing that belongs to an earlier owed
+			// tick in this same frame.
+			Scheduler_.ClearTimings();
+		}
 
 		try {
 			for (int tick = 0; tick < ticks; tick++) {
@@ -90,49 +85,53 @@ namespace engine::world {
 				// of the other two would have written it into a bitmap nobody
 				// ever read. A world with no replication rate never holds, so
 				// this costs it one branch and nothing else.
-				if (!HoldingChanges) {
-					Store_.ClearChanges();
-				}
-
-				// **Catch-up ticks after the first see an empty inbox, and that
-				// is exactly-once delivery.** A barrier fills this world's inbox
-				// at most once per host frame and this loop may run several
-				// ticks in that frame - so without this, a world owing three
-				// ticks handed the same message to its systems three times. It
-				// was found as a teleport that admitted the same player three
-				// times into the destination world.
-				//
-				// **The first tick of the batch keeps it**, because that one is
-				// the delivery: the barrier ran immediately before this call and
-				// `Universe::Tick` is what orders the two. The mail also
-				// survives this whole call, so a caller reading `Postbox::
-				// Deliveries` after a tick still sees what arrived - which is
-				// what every bus suite does and what the router's own
-				// replace-on-next-mail rule was already promising.
-				if (tick > 0) {
-					if (Inbox *inbox = Store_.ResourceMutable<Inbox>(); inbox != nullptr) {
-						inbox->Arrived.clear();
+				{
+					ENGINE_PROFILE_CAT("tick prepare", engine::core::ProfileCategory::Simulation);
+					if (!HoldingChanges) {
+						Store_.ClearChanges();
 					}
+
+					// **Catch-up ticks after the first see an empty inbox, and that
+					// is exactly-once delivery.** A barrier fills this world's inbox
+					// at most once per host frame and this loop may run several
+					// ticks in that frame - so without this, a world owing three
+					// ticks handed the same message to its systems three times. It
+					// was found as a teleport that admitted the same player three
+					// times into the destination world.
+					//
+					// **The first tick of the batch keeps it**, because that one is
+					// the delivery: the barrier ran immediately before this call and
+					// `Universe::Tick` is what orders the two. The mail also
+					// survives this whole call, so a caller reading `Postbox::
+					// Deliveries` after a tick still sees what arrived - which is
+					// what every bus suite does and what the router's own
+					// replace-on-next-mail rule was already promising.
+					if (tick > 0) {
+						if (Inbox *inbox = Store_.ResourceMutable<Inbox>(); inbox != nullptr) {
+							inbox->Arrived.clear();
+						}
+					}
+
+					Store_.AdvanceTick(Timestep.Delta());
 				}
 
-				Store_.AdvanceTick(Timestep.Delta());
 				Scheduler_.RunPhases(Store_, ecs::Phase::PreSimulation, ecs::Phase::PostSimulation);
 
-				// The phase boundary the change signals are named for. After
-				// the simulation phases, so a property written three times in
-				// one tick signals once with the value it ended up at - and
-				// never inside a batch, where a listener could mutate the world
-				// in the middle of a loop over it.
-				Store_.FlushSignals();
+				{
+					ENGINE_PROFILE_CAT("tick commit", engine::core::ProfileCategory::Simulation);
 
-				// Charged after the tick rather than before it, so the tick a
-				// publish covers is one that has actually run.
-				if (AdvanceReplication()) {
-					ReplicationPending = true;
-					HoldingChanges = false;
-					Stats.ReplicationTicks++;
-				} else {
-					HoldingChanges = true;
+					// After the simulation phases, so a property written three times
+					// signals once and never mutates a world inside a system iteration.
+					Store_.FlushSignals();
+
+					// Charged after the tick, so a publication covers a tick that ran.
+					if (AdvanceReplication()) {
+						ReplicationPending = true;
+						HoldingChanges = false;
+						Stats.ReplicationTicks++;
+					} else {
+						HoldingChanges = true;
+					}
 				}
 			}
 			ConsecutiveFaults = 0;

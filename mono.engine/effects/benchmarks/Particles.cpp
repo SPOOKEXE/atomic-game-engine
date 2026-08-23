@@ -11,15 +11,14 @@
 // The measurement is split three ways because "why is the particle system slow"
 // has three different answers and one number cannot tell them apart:
 //
-// - **Refresh** walks the `ParticleEmitter` column, which is about 1.5 KB a row.
-//   This is the pass whose cost is proportional to emitter *count* and to nothing
-//   else, and it is the one that would go wrong first if a hot loop ever started
-//   reading the authored component.
+// - **Refresh** walks the twelve-byte runtime slot column and only opens the
+//   roughly 1.5 KB `ParticleEmitter` row when authored or parent state changed.
+//   This is the pass whose steady cost is proportional to emitter *count*.
 // - **Step** walks the blocks in parallel and is proportional to particles
 //   *alive*. This is the loop the module exists for.
 // - **Spawn** is inside the step and is proportional to particles *born*, which
-//   in a steady scene is alive-over-lifetime and therefore much smaller. It is
-//   the serial half, and this is where that decision is checked.
+//   in a steady scene is alive-over-lifetime and therefore much smaller. Rate
+//   planning walks compact resident rows and births dispatch over plans.
 //
 // What it measured, in the `bench` preset, on a 24-thread machine. Figures are
 // the minimum sample per iteration:
@@ -50,10 +49,8 @@
 //   steady claim row at twelve bytes reduced it again to 112 us.
 // - **The spawn half really is free.** "Step at zero delta" ages nothing and
 //   spawns nothing and costs 307 us, which is within noise of the full step's
-//   304 us. So the entire cost of the step is the walk and the per-particle
-//   arithmetic, and the serial spawn loop - the one deliberate serialisation in
-//   the module - does not appear in the measurement at all. That is the
-//   justification `StepParticles` claims for it, confirmed rather than asserted.
+//   304 us. So the entire cost of the host step is the walk and per-particle
+//   arithmetic rather than births.
 //
 // **A harness bug is recorded here rather than quietly fixed**, because it is the
 // kind that produces a confident wrong number: the first version of `Frame` did
@@ -110,12 +107,17 @@ namespace particle_bench {
 	// an emitter draws its spawn volume from its parent's `Bounds`, so a hundred
 	// thousand emitters sharing one part would be measuring a case nobody builds
 	// and would also make every spawn read one cache line.
-	Store &WorldOf(size_t count) {
-		static std::vector<std::pair<size_t, std::unique_ptr<Store>>> built;
+	Store &WorldOf(size_t count, bool deviceStepped = false) {
+		struct BuiltWorld {
+			size_t Count = 0;
+			bool DeviceStepped = false;
+			std::unique_ptr<Store> World;
+		};
+		static std::vector<BuiltWorld> built;
 
-		for (auto &[key, store] : built) {
-			if (key == count) {
-				return *store;
+		for (BuiltWorld &candidate : built) {
+			if (candidate.Count == count && candidate.DeviceStepped == deviceStepped) {
+				return *candidate.World;
 			}
 		}
 
@@ -124,6 +126,7 @@ namespace particle_bench {
 
 		// One spare slot an emitter, for the frame the accumulator rounds up on.
 		engine::effects::InstallParticles(*store, static_cast<uint32_t>(count) * 6);
+		store->ResourceMutable<ParticleSystem>()->DeviceStepped = deviceStepped;
 
 		const engine::ecs::ClassId emitterClass = engine::ecs::Classes::Find(Name("ParticleEmitter"));
 
@@ -158,8 +161,8 @@ namespace particle_bench {
 			engine::effects::StepParticles(*store, 1.0f / 60.0f);
 		}
 
-		built.emplace_back(count, std::move(store));
-		return *built.back().second;
+		built.push_back(BuiltWorld{count, deviceStepped, std::move(store)});
+		return *built.back().World;
 	}
 
 	// Both passes, which is what a frame actually costs.
@@ -228,5 +231,19 @@ BENCH("Step only · 100,000 emitters · 500,000 particles", 20) {
 // the difference between it and the row above is the work rather than the walk.
 BENCH("Step at zero delta · 100,000 emitters", 20) {
 	Store &store = WorldOf(100000);
+	Consume(engine::effects::StepParticles(store, 0.0f).Live);
+}
+
+// The ordinary rendered path. The device owns ageing, so this row isolates the
+// compact rate walk and CPU birth preparation that remain on a simulation tick.
+// StressParticles has 5,120 emitters, making this the regression row for the
+// scene used by Studio's frame graph rather than an extrapolation from 100,000.
+BENCH("Device step · 5,120 emitters", 100) {
+	Store &store = WorldOf(5120, true);
+	Consume(engine::effects::StepParticles(store, 1.0f / 60.0f).Live);
+}
+
+BENCH("Device step at zero delta · 5,120 emitters", 100) {
+	Store &store = WorldOf(5120, true);
 	Consume(engine::effects::StepParticles(store, 0.0f).Live);
 }

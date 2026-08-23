@@ -996,65 +996,69 @@ namespace studio {
 		// question.
 		bool sawInput = false;
 
-		SDL_Event event;
-		while (SDL_PollEvent(&event)) {
-			// **A span per event kind**, because a pump that is slow says
-			// nothing about why: a window resize is a synchronous round trip to
-			// the window system and a keystroke is not, and one bar covering
-			// both cannot tell them apart.
-			ENGINE_PROFILE_DYNAMIC_STABLE(
-				"event", EventName(event.type), engine::core::ProfileCategory::Engine
-			);
+		{
+			ENGINE_PROFILE("poll events");
 
-			// **Every event, before anything else looks at it.** imgui decides
-			// whether it wanted an event after being told about it, so a
-			// program that filtered first would have a script editor that never
-			// received the letter W because the camera was listening for it.
-			Interface.ProcessEvent(event);
+			SDL_Event event;
+			while (SDL_PollEvent(&event)) {
+				// **A span per event kind**, because a pump that is slow says
+				// nothing about why: a window resize is a synchronous round trip to
+				// the window system and a keystroke is not, and one bar covering
+				// both cannot tell them apart.
+				ENGINE_PROFILE_DYNAMIC_STABLE(
+					"event", EventName(event.type), engine::core::ProfileCategory::Engine
+				);
 
-			if (event.type == SDL_EVENT_QUIT) {
-				Running = false;
-			}
+				// **Every event, before anything else looks at it.** imgui decides
+				// whether it wanted an event after being told about it, so a
+				// program that filtered first would have a script editor that never
+				// received the letter W because the camera was listening for it.
+				Interface.ProcessEvent(event);
 
-			// **What "idle" means, decided here rather than asked of imgui.**
-			// `ImGuiIO::WantCaptureMouse` answers whether the *interface* wanted
-			// an event, which is false for every frame somebody spends flying
-			// the viewport - and a camera being flown is the last moment to drop
-			// to the idle frame rate. Any input at all resets the clock.
-			switch (event.type) {
-			case SDL_EVENT_MOUSE_MOTION:
-			case SDL_EVENT_MOUSE_BUTTON_DOWN:
-			case SDL_EVENT_MOUSE_BUTTON_UP:
-			case SDL_EVENT_MOUSE_WHEEL:
-			case SDL_EVENT_KEY_DOWN:
-			case SDL_EVENT_KEY_UP:
-			case SDL_EVENT_TEXT_INPUT:
-			case SDL_EVENT_DROP_FILE:
-			case SDL_EVENT_WINDOW_RESIZED:
-			case SDL_EVENT_WINDOW_FOCUS_GAINED:
-				sawInput = true;
-				break;
-			default:
-				break;
-			}
+				if (event.type == SDL_EVENT_QUIT) {
+					Running = false;
+				}
 
-			// **One event per dropped path, which is what makes multi-select
-			// drag and drop free.** SDL brackets a multi-file drop with
-			// `DROP_BEGIN` and `DROP_COMPLETE` and sends a `DROP_FILE` for each
-			// path between them, so importing each as it arrives handles one
-			// file, forty files and a folder without a special case for any of
-			// them.
-			//
-			// **Not filtered by whether imgui wanted the event.** A drop has no
-			// keyboard or mouse capture to respect - imgui does not consume
-			// them - and a drop that only worked when the pointer was over the
-			// right panel would be a rule nobody could guess.
-			if (event.type == SDL_EVENT_DROP_FILE && event.drop.data != nullptr) {
-				DropAssetPath(event.drop.data);
-			}
-			if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED &&
-				event.window.windowID == SDL_GetWindowID(Window)) {
-				Running = false;
+				// **What "idle" means, decided here rather than asked of imgui.**
+				// `ImGuiIO::WantCaptureMouse` answers whether the *interface* wanted
+				// an event, which is false for every frame somebody spends flying
+				// the viewport - and a camera being flown is the last moment to drop
+				// to the idle frame rate. Any input at all resets the clock.
+				switch (event.type) {
+				case SDL_EVENT_MOUSE_MOTION:
+				case SDL_EVENT_MOUSE_BUTTON_DOWN:
+				case SDL_EVENT_MOUSE_BUTTON_UP:
+				case SDL_EVENT_MOUSE_WHEEL:
+				case SDL_EVENT_KEY_DOWN:
+				case SDL_EVENT_KEY_UP:
+				case SDL_EVENT_TEXT_INPUT:
+				case SDL_EVENT_DROP_FILE:
+				case SDL_EVENT_WINDOW_RESIZED:
+				case SDL_EVENT_WINDOW_FOCUS_GAINED:
+					sawInput = true;
+					break;
+				default:
+					break;
+				}
+
+				// **One event per dropped path, which is what makes multi-select
+				// drag and drop free.** SDL brackets a multi-file drop with
+				// `DROP_BEGIN` and `DROP_COMPLETE` and sends a `DROP_FILE` for each
+				// path between them, so importing each as it arrives handles one
+				// file, forty files and a folder without a special case for any of
+				// them.
+				//
+				// **Not filtered by whether imgui wanted the event.** A drop has no
+				// keyboard or mouse capture to respect - imgui does not consume
+				// them - and a drop that only worked when the pointer was over the
+				// right panel would be a rule nobody could guess.
+				if (event.type == SDL_EVENT_DROP_FILE && event.drop.data != nullptr) {
+					DropAssetPath(event.drop.data);
+				}
+				if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED &&
+					event.window.windowID == SDL_GetWindowID(Window)) {
+					Running = false;
+				}
 			}
 		}
 
