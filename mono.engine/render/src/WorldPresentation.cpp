@@ -69,18 +69,23 @@ namespace engine::render {
 		const scene::Environment &environment = state.Lighting.EnvironmentState;
 		signature = FoldPresentation(signature, static_cast<uint8_t>(environment.Skybox));
 		if (environment.Skybox == scene::SkyboxSource::Textures) {
-			for (const core::Name face :
-				 {environment.Textures.Front,
-				  environment.Textures.Back,
-				  environment.Textures.Left,
-				  environment.Textures.Right,
-				  environment.Textures.Up,
-				  environment.Textures.Down}) {
-				signature = FoldPresentation(signature, face.Id());
-			}
 			signature = FoldPresentation(signature, environment.Textures.Enabled ? 1u : 0u);
+			if (environment.Textures.Enabled) {
+				for (const core::Name face :
+					 {environment.Textures.Front,
+					  environment.Textures.Back,
+					  environment.Textures.Left,
+					  environment.Textures.Right,
+					  environment.Textures.Up,
+					  environment.Textures.Down}) {
+					signature = FoldPresentation(signature, face.Id());
+				}
+			}
 		} else if (environment.Skybox == scene::SkyboxSource::Compute) {
-			signature = FoldPresentationObject(signature, environment.SkyCompute);
+			signature = FoldPresentation(signature, environment.SkyCompute.Enabled ? 1u : 0u);
+			if (environment.SkyCompute.Enabled) {
+				signature = FoldPresentationObject(signature, environment.SkyCompute);
+			}
 		}
 		if (environment.HasAtmosphere) {
 			signature = FoldPresentationObject(signature, environment.Air);

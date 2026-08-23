@@ -177,6 +177,26 @@ TEST_CASE("compute variants carry the common authored component", "[scene][atmos
 	CHECK(environment.CloudVolume.Steps == 23);
 }
 
+TEST_CASE("enabled properties preserve authored provider switches", "[scene][atmosphere][enabled]") {
+	RegisterSceneClasses();
+	Store store("atmosphere_test.enabled");
+	const Entity lighting = Lighting(store);
+	const Entity sky = store.CreateInstance(Classes::Find(Name("SkyboxTextures")), "Sky");
+	const Entity clouds = store.CreateInstance(Classes::Find(Name("CloudCompute")), "Clouds");
+	REQUIRE(store.SetParent(sky, lighting));
+	REQUIRE(store.SetParent(clouds, lighting));
+
+	const bool disabled = false;
+	REQUIRE(store.SetProperty(sky, Name("Enabled"), &disabled, sizeof(disabled)));
+	REQUIRE(store.SetProperty(clouds, Name("Enabled"), &disabled, sizeof(disabled)));
+	CHECK_FALSE(store.Get<engine::scene::SkyboxTextures>(sky)->Enabled);
+	CHECK_FALSE(store.Get<Clouds>(clouds)->Enabled);
+
+	const Environment environment = EnvironmentOf(store);
+	CHECK_FALSE(environment.Textures.Enabled);
+	CHECK_FALSE(environment.CloudLayer.Enabled);
+}
+
 TEST_CASE("compute shader choices are closed dropdowns", "[scene][atmosphere][compute][enum]") {
 	RegisterSceneClasses();
 	Store store("atmosphere_test.shaders");

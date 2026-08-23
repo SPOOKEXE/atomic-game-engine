@@ -117,4 +117,9 @@ TEST_CASE("only selected environment state invalidates scene pixels", "[render][
 	CHECK(engine::render::ScenePresentationSignature(view, state) == original);
 	state.Lighting.EnvironmentState.Skybox = engine::scene::SkyboxSource::Textures;
 	CHECK(engine::render::ScenePresentationSignature(view, state) != original);
+
+	state.Lighting.EnvironmentState.Textures.Enabled = false;
+	const uint64_t disabled = engine::render::ScenePresentationSignature(view, state);
+	state.Lighting.EnvironmentState.Textures.Front = Name("still-unused.atex");
+	CHECK(engine::render::ScenePresentationSignature(view, state) == disabled);
 }

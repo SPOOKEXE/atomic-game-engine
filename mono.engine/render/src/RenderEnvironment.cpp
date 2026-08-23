@@ -1,3 +1,4 @@
+#include "EnvironmentModes.hpp"
 #include "GpuHeap.hpp"
 #include "RendererState.hpp"
 
@@ -19,19 +20,17 @@ namespace engine::render {
 		constexpr uint64_t ENVIRONMENT_KEEP_FRAMES = 240;
 
 		bool Active(const scene::Environment &environment) {
+			const EnvironmentUniformModes modes = EnvironmentModesOf(environment);
 			const bool textureSky =
 				environment.Textures.Front.IsValid() || environment.Textures.Back.IsValid() ||
 				environment.Textures.Left.IsValid() || environment.Textures.Right.IsValid() ||
 				environment.Textures.Up.IsValid() || environment.Textures.Down.IsValid();
-			const bool skybox =
-				(environment.Skybox == scene::SkyboxSource::Textures && environment.Textures.Enabled &&
-				 textureSky) ||
-				(environment.Skybox == scene::SkyboxSource::Compute && environment.SkyCompute.Enabled);
+			const bool skybox = (modes.Skybox == 1 && textureSky) || modes.Skybox == 2;
 			const bool atmosphere =
-				environment.HasAtmosphere && (environment.Air.Density > 0.0f || environment.Air.Haze > 0.0f ||
-											  environment.Air.Glare > 0.0f);
-			const bool clouds = environment.HasClouds && environment.CloudLayer.Enabled &&
-								environment.CloudLayer.Cover > 0.0f && environment.CloudLayer.Density > 0.0f;
+				modes.Atmosphere != 0 && (environment.Air.Density > 0.0f || environment.Air.Haze > 0.0f ||
+										  environment.Air.Glare > 0.0f);
+			const bool clouds = modes.Clouds != 0 && environment.CloudLayer.Cover > 0.0f &&
+								environment.CloudLayer.Density > 0.0f;
 			return skybox || atmosphere || clouds;
 		}
 
@@ -172,6 +171,7 @@ namespace engine::render {
 		const scene::AtmosphereProcedural &airCompute = environment.AirCompute;
 		const scene::Clouds &clouds = environment.CloudLayer;
 		const scene::CloudCompute &cloudCompute = environment.CloudVolume;
+		const EnvironmentUniformModes modes = EnvironmentModesOf(environment);
 		const EnvironmentUniforms uniforms{
 			.Zenith = Colour(sky.Zenith, sky.StarDensity),
 			.Horizon = Colour(sky.Horizon, sky.SunSize),
@@ -190,9 +190,9 @@ namespace engine::render {
 				},
 			.Modes =
 				glm::uvec4{
-					static_cast<uint32_t>(environment.Skybox),
-					environment.HasAtmosphere ? (airCompute.Enabled ? 2u : 1u) : 0u,
-					environment.HasClouds && clouds.Enabled ? (cloudCompute.Enabled ? 2u : 1u) : 0u,
+					modes.Skybox,
+					modes.Atmosphere,
+					modes.Clouds,
 					faceMask,
 				},
 			.Counts =

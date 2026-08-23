@@ -4,6 +4,8 @@
 // accepted only when every enabled node has a backend implementation. The
 // default output path belongs to the engine's default graph, not this boundary.
 
+#include "EnvironmentModes.hpp"
+
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/graph/RenderGraph.hpp>
 #include <engine/render/Renderer.hpp>
@@ -177,6 +179,24 @@ TEST_CASE("authored compute can be scoped once per world", "[render][graph]") {
 
 	Renderer renderer;
 	CHECK(renderer.SetPipeline(Name("world-compute#1"), graph));
+}
+
+TEST_CASE("disabled environment providers map to no GPU work", "[render][environment]") {
+	engine::scene::Environment environment;
+	environment.Skybox = engine::scene::SkyboxSource::Textures;
+	CHECK(engine::render::EnvironmentModesOf(environment).Skybox == 1);
+	environment.Textures.Enabled = false;
+	CHECK(engine::render::EnvironmentModesOf(environment).Skybox == 0);
+
+	environment.Skybox = engine::scene::SkyboxSource::Compute;
+	CHECK(engine::render::EnvironmentModesOf(environment).Skybox == 2);
+	environment.SkyCompute.Enabled = false;
+	CHECK(engine::render::EnvironmentModesOf(environment).Skybox == 0);
+
+	environment.HasClouds = true;
+	CHECK(engine::render::EnvironmentModesOf(environment).Clouds == 2);
+	environment.CloudLayer.Enabled = false;
+	CHECK(engine::render::EnvironmentModesOf(environment).Clouds == 0);
 }
 
 TEST_CASE("optional default nodes can be disabled at the backend boundary", "[render][graph]") {
