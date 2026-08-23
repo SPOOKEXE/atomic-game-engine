@@ -120,3 +120,5 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] smart platform backend where only "admitted keys" can connect to a given server - i.e. whitelist-based servers (press play on website => generate play key => platform tells server user is connecting with key => send key + server to user => user connects to server using key and info => join)
 - [_] rpg maker port tool
 - [_] docs/MOBILE.md implementation
+- [_] add a components view (inspector in unity) where you can see components.
+- [_] add a way to "expose" component values as configs for "components view" - this way you can tweak values without opening it.
