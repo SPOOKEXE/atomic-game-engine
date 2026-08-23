@@ -2336,6 +2336,7 @@ namespace studio {
 		view.ParticleSeams = Particles.Seams;
 		view.ParticleRevision = Particles.Revision;
 		view.ParticleLayoutRevision = Particles.LayoutRevision;
+		view.ParticleResidentRevision = Particles.ResidentRevision;
 		view.ParticlePool = Particles.Pool;
 		view.ParticleBlocks = Particles.BlockCount;
 		// Every surface and nested camera in this render reads the same prepared

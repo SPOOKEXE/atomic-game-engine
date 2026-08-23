@@ -13,9 +13,9 @@
 // - **`CollectInstances`** walks every visible part, interpolates it between the
 //   last two ticks and writes a `scene::DrawInstance`. This is the triangle
 //   count's proxy and the one that scales with the scene.
-// - **`CollectParticleBatches`** turns changed emitter blocks into batches once
-//   per simulation revision. Render-rate calls between ticks compare one key;
-//   both paths are measured below.
+// - **`CollectParticleBatches`** refreshes births once per simulation revision,
+//   block data only when its resident revision changes, and authored batches
+//   only when emitter layout changes. All three paths are measured below.
 // - **`CollectLights`** resolves each light to where it shines from, which is a
 //   walk to a parent, and then sorts to a cap.
 // - **`CollectSurfaceViews`** finds every mirror, which is a scan that usually
@@ -247,7 +247,7 @@ BENCH("CollectParticleBatches · reuse 1,000 live emitters", 1000) {
 	Consume(batches);
 }
 
-BENCH("CollectParticleBatches · rebuild 1,000 live emitters", 100) {
+BENCH("CollectParticleBatches · refresh 1,000 resident emitters", 100) {
 	Store &store = Emitting(1000);
 	auto *system = store.ResourceMutable<engine::effects::ParticleSystem>();
 	engine::render::ParticleFrame frame;
@@ -259,9 +259,9 @@ BENCH("CollectParticleBatches · rebuild 1,000 live emitters", 100) {
 	Consume(batches);
 }
 
-BENCH("CollectParticleBatches · rebuild 10,000 live emitters", 100) {
-	// Ten times the emitters. Ten times the rebuild cost is a collector that
-	// scales with the emitter column; anything steeper reaches into the pool.
+BENCH("CollectParticleBatches · refresh 10,000 resident emitters", 100) {
+	// A simulation revision refreshes births and resident block pointers without
+	// walking the authored emitter column or rebuilding material order.
 	Store &store = Emitting(10'000);
 	auto *system = store.ResourceMutable<engine::effects::ParticleSystem>();
 	engine::render::ParticleFrame frame;
@@ -273,14 +273,27 @@ BENCH("CollectParticleBatches · rebuild 10,000 live emitters", 100) {
 	Consume(batches);
 }
 
+BENCH("CollectParticleBatches · rebuild 10,000 emitter layout", 100) {
+	// This is the deliberately rare path: membership or material state changed,
+	// so every emitter has to publish new batch metadata.
+	Store &store = Emitting(10'000);
+	auto *system = store.ResourceMutable<engine::effects::ParticleSystem>();
+	engine::render::ParticleFrame frame;
+	size_t batches = 0;
+	for (size_t call = 0; call < 100; call++) {
+		system->PresentationRevision++;
+		system->LayoutRevision++;
+		batches += engine::render::CollectParticleBatches(store, frame);
+	}
+	Consume(batches);
+}
+
 BENCH("ParticleFrame::Detach · 10,000 live emitters", 100) {
 	// What the studio pays and the client does not. `Renderer::Render` happens
 	// after `Universe::Enter` has returned there, so the batches have to stop
-	// pointing into a world that may be stepping again - which copies the blocks
-	// they point at. As measured it is a few times what collecting them cost, so
-	// the studio pays a real multiple of the client's particle path and the
-	// client's decision to render inside the tick is worth what it looks like it
-	// is worth.
+	// pointing into a world that may be stepping again. The first call copies the
+	// blocks; later simulation-only revisions retain that detached storage because
+	// no device table input changed.
 	Store &store = Emitting(10'000);
 	auto *system = store.ResourceMutable<engine::effects::ParticleSystem>();
 	engine::render::ParticleFrame frame;

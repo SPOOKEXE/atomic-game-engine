@@ -71,11 +71,11 @@ namespace engine::render {
 		constexpr uint32_t PARTICLE_CURVE_OF_SQUASH = 32;
 		constexpr uint32_t PARTICLE_CURVE_OF_COLOUR = 48;
 
-		// One entry of the per-frame draw list: which block, and where its run of
+		// One entry of the resident draw list: which block, and where its run of
 		// the instance stream starts.
 		//
-		// **The only thing that crosses per emitter per frame, and getting it down
-		// to two words is what makes the device-resident pool a win at the scale
+		// **The only thing that crosses per emitter when layout changes, and getting
+		// it down to two words is what makes the device-resident pool a win at the scale
 		// it exists for.** The first version staged the whole three-hundred-and-
 		// eighty-four-byte record for every emitter every frame: at the roadmap's
 		// hundred thousand emitters that is thirty-nine megabytes of writes into a
@@ -86,8 +86,8 @@ namespace engine::render {
 		// Almost none of a record changes between frames. `EmitterBlock::Revision`
 		// says when it has, `ParticlePool::ParamRevision` is what the device was
 		// last told, and `particle-scatter.comp` sends the difference - nothing at
-		// all for a static scene. What is left is this, because the sort that
-		// decides where a block draws is genuinely per frame.
+		// all for a static scene. The draw table and its sort are retained until
+		// ParticleLayoutRevision says membership or material state changed.
 		constexpr uint32_t PARTICLE_DRAW_WORDS = 2;
 
 		// How many block tables may be brought up to date in one frame.
@@ -112,6 +112,11 @@ namespace engine::render {
 		static_assert(
 			sizeof(effects::ParticleState) == PARTICLE_STATE_WORDS * sizeof(uint32_t),
 			"the state's width is the shader's stride"
+		);
+		static_assert(
+			sizeof(effects::ParticleBirth) == PARTICLE_BIRTH_WORDS * sizeof(uint32_t) &&
+				offsetof(effects::ParticleBirth, State) == sizeof(uint32_t),
+			"a birth must be one directly uploadable shader record"
 		);
 		static_assert(effects::CURVE_SAMPLES == 16, "the curve table reserves sixteen words a curve");
 		static_assert(
@@ -816,16 +821,20 @@ namespace engine::render {
 			Particles.CurveUpdates = 0;
 			ActiveParticleWorld->PreparedFrame = FrameCounter;
 			ActiveParticleWorld->PreparedRevision = view.ParticleRevision;
+			ActiveParticleWorld->PreparedLayoutRevision = view.ParticleLayoutRevision;
+			ActiveParticleWorld->PreparedResidentRevision = view.ParticleResidentRevision;
 			ActiveParticleWorld->PreparedRevisionValid = true;
+			ActiveParticleWorld->ResidentRefreshPending = false;
 			ActiveParticleWorld->PreparedCount = 0;
 			ActiveParticleWorld->PreparedBatches.clear();
 			ActiveParticleWorld->PreparedGroups.clear();
 			return {};
 		}
 
-		const bool rebuild = !ActiveParticleWorld->PreparedRevisionValid ||
+		const bool refresh = !ActiveParticleWorld->PreparedRevisionValid ||
+							 ActiveParticleWorld->ResidentRefreshPending ||
 							 ActiveParticleWorld->PreparedRevision != view.ParticleRevision;
-		if (!rebuild) {
+		if (!refresh) {
 			ParticleGroups = ActiveParticleWorld->PreparedGroups;
 			Particles.DrawUpdates = 0;
 			Particles.BirthCount = 0;
@@ -849,9 +858,16 @@ namespace engine::render {
 			ActiveParticleWorld->PreparedFrame = FrameCounter;
 			return {ActiveParticleWorld->PreparedCount, dispatched.Count};
 		}
+		const bool rebuildLayout = !ActiveParticleWorld->PreparedRevisionValid ||
+								   ActiveParticleWorld->PreparedLayoutRevision != view.ParticleLayoutRevision;
+		const bool refreshResident =
+			rebuildLayout || ActiveParticleWorld->ResidentRefreshPending ||
+			ActiveParticleWorld->PreparedResidentRevision != view.ParticleResidentRevision;
 
-		ParticleGroups.clear();
-		Particles.Records = 0;
+		if (rebuildLayout) {
+			ParticleGroups.clear();
+			Particles.Records = 0;
+		}
 		Particles.DrawUpdates = 0;
 		Particles.BirthCount = 0;
 		Particles.SeamCount = 0;
@@ -869,47 +885,49 @@ namespace engine::render {
 		// **A stable sort into an index list rather than sorting the batches**,
 		// because the caller owns them - the same reason `scene::OrderForDrawing`
 		// produces an order instead of reordering a draw list.
-		ParticleOrder.resize(batches.size());
-		for (size_t index = 0; index < batches.size(); index++) {
-			ParticleOrder[index] = static_cast<uint32_t>(index);
-		}
+		if (rebuildLayout) {
+			ParticleOrder.resize(batches.size());
+			for (size_t index = 0; index < batches.size(); index++) {
+				ParticleOrder[index] = static_cast<uint32_t>(index);
+			}
 
-		// Blended before additive, so the pipeline is bound twice rather than
-		// alternating. Within each half the key is arbitrary but must be *total*,
-		// or equal states would not end up adjacent.
-		//
-		// **Timed apart from the copy below**, because the two scale with
-		// different things and one bar could not say which had grown: this is
-		// proportional to the number of *emitters* and the copy is proportional
-		// to the number of *particles*, and a scene can move a long way in one
-		// without moving in the other.
-		{
-			ENGINE_PROFILE_CAT("particles.sort", core::ProfileCategory::Render);
-			std::stable_sort(
-				ParticleOrder.begin(), ParticleOrder.end(), [batches](uint32_t left, uint32_t right) {
-					const render::ParticleBatch &a = batches[left];
-					const render::ParticleBatch &b = batches[right];
-					if (a.Additive != b.Additive) {
-						return !a.Additive;
+			// Blended before additive, so the pipeline is bound twice rather than
+			// alternating. Within each half the key is arbitrary but must be *total*,
+			// or equal states would not end up adjacent.
+			//
+			// **Timed apart from the copy below**, because the two scale with
+			// different things and one bar could not say which had grown: this is
+			// proportional to the number of *emitters* and the copy is proportional
+			// to the number of *particles*, and a scene can move a long way in one
+			// without moving in the other.
+			{
+				ENGINE_PROFILE_CAT("particles.sort", core::ProfileCategory::Render);
+				std::stable_sort(
+					ParticleOrder.begin(), ParticleOrder.end(), [batches](uint32_t left, uint32_t right) {
+						const render::ParticleBatch &a = batches[left];
+						const render::ParticleBatch &b = batches[right];
+						if (a.Additive != b.Additive) {
+							return !a.Additive;
+						}
+						if (a.Texture.Id() != b.Texture.Id()) {
+							return a.Texture.Id() < b.Texture.Id();
+						}
+						if (a.FlipbookSide != b.FlipbookSide) {
+							return a.FlipbookSide < b.FlipbookSide;
+						}
+						if (a.ZOffset != b.ZOffset) {
+							return a.ZOffset < b.ZOffset;
+						}
+						if (a.LightEmission != b.LightEmission) {
+							return a.LightEmission < b.LightEmission;
+						}
+						if (a.LightInfluence != b.LightInfluence) {
+							return a.LightInfluence < b.LightInfluence;
+						}
+						return static_cast<int>(a.WorldUp) < static_cast<int>(b.WorldUp);
 					}
-					if (a.Texture.Id() != b.Texture.Id()) {
-						return a.Texture.Id() < b.Texture.Id();
-					}
-					if (a.FlipbookSide != b.FlipbookSide) {
-						return a.FlipbookSide < b.FlipbookSide;
-					}
-					if (a.ZOffset != b.ZOffset) {
-						return a.ZOffset < b.ZOffset;
-					}
-					if (a.LightEmission != b.LightEmission) {
-						return a.LightEmission < b.LightEmission;
-					}
-					if (a.LightInfluence != b.LightInfluence) {
-						return a.LightInfluence < b.LightInfluence;
-					}
-					return static_cast<int>(a.WorldUp) < static_cast<int>(b.WorldUp);
-				}
-			);
+				);
+			}
 		}
 
 		// **The whole capacity of every block, not the live count.** The device
@@ -918,10 +936,13 @@ namespace engine::render {
 		// `Rate * maxLifetime + 1`, so a steady block is full but for a slot.
 		// A dead slot's instance is written with a zero `Size`, which
 		// `particle.vert` expands into a quad with no extent.
-		uint32_t total = 0;
-		for (const render::ParticleBatch &batch : batches) {
-			if (batch.Block != nullptr) {
-				total += batch.Block->Capacity;
+		uint32_t total = ActiveParticleWorld->PreparedCount;
+		if (rebuildLayout) {
+			total = 0;
+			for (const render::ParticleBatch &batch : batches) {
+				if (batch.Block != nullptr) {
+					total += batch.Block->Capacity;
+				}
 			}
 		}
 		if (total == 0 || !ReserveParticles(total)) {
@@ -938,12 +959,20 @@ namespace engine::render {
 			return {};
 		}
 
-		auto *draws = static_cast<uint32_t *>(SDL_MapGPUTransferBuffer(Device, Particles.DrawStaging, true));
+		auto *draws =
+			rebuildLayout
+				? static_cast<uint32_t *>(SDL_MapGPUTransferBuffer(Device, Particles.DrawStaging, true))
+				: nullptr;
 		auto *changedParams =
-			static_cast<uint32_t *>(SDL_MapGPUTransferBuffer(Device, Particles.ParamStaging, true));
+			refreshResident
+				? static_cast<uint32_t *>(SDL_MapGPUTransferBuffer(Device, Particles.ParamStaging, true))
+				: nullptr;
 		auto *changedCurves =
-			static_cast<uint32_t *>(SDL_MapGPUTransferBuffer(Device, Particles.CurveStaging, true));
-		if (draws == nullptr || changedParams == nullptr || changedCurves == nullptr) {
+			refreshResident
+				? static_cast<uint32_t *>(SDL_MapGPUTransferBuffer(Device, Particles.CurveStaging, true))
+				: nullptr;
+		if ((rebuildLayout && draws == nullptr) ||
+			(refreshResident && (changedParams == nullptr || changedCurves == nullptr))) {
 			for (auto [mapped, buffer] : {
 					 std::pair{draws, Particles.DrawStaging},
 					 std::pair{changedParams, Particles.ParamStaging},
@@ -969,68 +998,84 @@ namespace engine::render {
 		// The parameter and curve updates share one staging buffer, filled from
 		// the front for parameters and from the back for curves, so a frame that
 		// changed neither writes nothing at all.
-		ParticleGroups.clear();
-
-		uint32_t written = 0;
-		uint32_t staged = 0;
-		uint32_t params = 0;
-		uint32_t curves = 0;
-		for (const uint32_t index : ParticleOrder) {
-			const render::ParticleBatch &batch = batches[index];
-			if (batch.Block == nullptr || batch.Block->Capacity == 0 || batch.Index >= Particles.TableRows) {
-				continue;
-			}
-			const effects::EmitterBlock &block = *batch.Block;
-
-			// **Brought up to date first, and left out of the frame if it cannot
-			// be.** The step reads a block's capacity out of the parameter table,
-			// so a block the device has not been told about yet would return from
-			// its workgroup without writing anything - while this walk had
-			// already reserved its run of the instance stream. That run would
-			// then draw whatever was in it, which is the previous frame's
-			// particles at this frame's positions. Skipping it instead costs the
-			// block a frame and leaves the stream exact.
-			const bool needParams = Particles.ParamRevision[batch.Index] != block.Revision;
-			const bool needCurves = Particles.CurveRevision[batch.Index] != block.CurveRevision;
-			if (needParams || needCurves) {
-				if ((needParams && params >= PARTICLE_UPDATE_BUDGET) ||
-					(needCurves && curves >= PARTICLE_UPDATE_BUDGET)) {
-					continue;
-				}
-				if (needParams) {
-					uint32_t *const row = changedParams + params * (PARTICLE_PARAM_WORDS + 1);
-					row[0] = batch.Index;
-					WriteParticleParams(row + 1, block);
-					Particles.ParamRevision[batch.Index] = block.Revision;
-					params++;
-				}
-				if (needCurves) {
-					uint32_t *const row = changedCurves + curves * (PARTICLE_CURVE_WORDS + 1);
-					row[0] = batch.Index;
-					WriteParticleCurves(row + 1, block.Curves);
-					Particles.CurveRevision[batch.Index] = block.CurveRevision;
-					curves++;
-				}
-			}
-
-			if (ParticleGroups.empty() || !SameParticleState(batches[ParticleGroups.back().Batch], batch)) {
-				ParticleGroups.push_back(ParticleGroup{index, written, 0});
-			}
-
-			uint32_t *const entry = draws + staged * PARTICLE_DRAW_WORDS;
-			entry[0] = batch.Index;
-			entry[1] = written;
-			staged++;
-
-			written += block.Capacity;
-			ParticleGroups.back().Count += block.Capacity;
+		if (rebuildLayout) {
+			ParticleGroups.clear();
+		} else {
+			ParticleGroups = ActiveParticleWorld->PreparedGroups;
 		}
 
-		SDL_UnmapGPUTransferBuffer(Device, Particles.DrawStaging);
-		SDL_UnmapGPUTransferBuffer(Device, Particles.ParamStaging);
-		SDL_UnmapGPUTransferBuffer(Device, Particles.CurveStaging);
+		uint32_t written = rebuildLayout ? 0 : ActiveParticleWorld->PreparedCount;
+		uint32_t staged = rebuildLayout ? 0 : Particles.Records;
+		uint32_t params = 0;
+		uint32_t curves = 0;
+		bool residentIncomplete = false;
+		if (refreshResident) {
+			for (const uint32_t index : ParticleOrder) {
+				const render::ParticleBatch &batch = batches[index];
+				if (batch.Block == nullptr || batch.Block->Capacity == 0 ||
+					batch.Index >= Particles.TableRows) {
+					continue;
+				}
+				const effects::EmitterBlock &block = *batch.Block;
+
+				// **Brought up to date first, and left out of the frame if it cannot
+				// be.** The step reads a block's capacity out of the parameter table,
+				// so a block the device has not been told about yet would return from
+				// its workgroup without writing anything - while this walk had
+				// already reserved its run of the instance stream. That run would
+				// then draw whatever was in it, which is the previous frame's
+				// particles at this frame's positions. Skipping it instead costs the
+				// block a frame and leaves the stream exact.
+				const bool needParams = Particles.ParamRevision[batch.Index] != block.Revision;
+				const bool needCurves = Particles.CurveRevision[batch.Index] != block.CurveRevision;
+				if (needParams || needCurves) {
+					if ((needParams && params >= PARTICLE_UPDATE_BUDGET) ||
+						(needCurves && curves >= PARTICLE_UPDATE_BUDGET)) {
+						residentIncomplete = true;
+						continue;
+					}
+					if (needParams) {
+						uint32_t *const row = changedParams + params * (PARTICLE_PARAM_WORDS + 1);
+						row[0] = batch.Index;
+						WriteParticleParams(row + 1, block);
+						Particles.ParamRevision[batch.Index] = block.Revision;
+						params++;
+					}
+					if (needCurves) {
+						uint32_t *const row = changedCurves + curves * (PARTICLE_CURVE_WORDS + 1);
+						row[0] = batch.Index;
+						WriteParticleCurves(row + 1, block.Curves);
+						Particles.CurveRevision[batch.Index] = block.CurveRevision;
+						curves++;
+					}
+				}
+
+				if (rebuildLayout) {
+					if (ParticleGroups.empty() ||
+						!SameParticleState(batches[ParticleGroups.back().Batch], batch)) {
+						ParticleGroups.push_back(ParticleGroup{index, written, 0});
+					}
+
+					uint32_t *const entry = draws + staged * PARTICLE_DRAW_WORDS;
+					entry[0] = batch.Index;
+					entry[1] = written;
+					staged++;
+
+					written += block.Capacity;
+					ParticleGroups.back().Count += block.Capacity;
+				}
+			}
+		}
+
+		if (rebuildLayout) {
+			SDL_UnmapGPUTransferBuffer(Device, Particles.DrawStaging);
+		}
+		if (refreshResident) {
+			SDL_UnmapGPUTransferBuffer(Device, Particles.ParamStaging);
+			SDL_UnmapGPUTransferBuffer(Device, Particles.CurveStaging);
+		}
 		Particles.Records = staged;
-		Particles.DrawUpdates = staged;
+		Particles.DrawUpdates = rebuildLayout ? staged : 0;
 		Particles.ParamUpdates = params;
 		Particles.CurveUpdates = curves;
 		Particles.Delta = view.ParticleDelta + ActiveParticleWorld->CarriedDelta;
@@ -1043,12 +1088,9 @@ namespace engine::render {
 			auto *births =
 				static_cast<uint32_t *>(SDL_MapGPUTransferBuffer(Device, Particles.BirthStaging, true));
 			if (births != nullptr) {
-				for (size_t at = 0; at < view.ParticleBirths.size(); at++) {
-					const effects::ParticleBirth &birth = view.ParticleBirths[at];
-					uint32_t *const row = births + at * PARTICLE_BIRTH_WORDS;
-					row[0] = birth.Row;
-					std::memcpy(row + 1, &birth.State, sizeof(effects::ParticleState));
-				}
+				// ParticleBirth is pinned to the shader record above, so every newborn
+				// crosses in one contiguous copy rather than a scalar row loop.
+				std::memcpy(births, view.ParticleBirths.data(), view.ParticleBirths.size_bytes());
 				SDL_UnmapGPUTransferBuffer(Device, Particles.BirthStaging);
 				Particles.BirthCount = static_cast<uint32_t>(view.ParticleBirths.size());
 			}
@@ -1080,9 +1122,16 @@ namespace engine::render {
 
 		ActiveParticleWorld->PreparedFrame = FrameCounter;
 		ActiveParticleWorld->PreparedRevision = view.ParticleRevision;
-		ActiveParticleWorld->PreparedRevisionValid = true;
+		ActiveParticleWorld->PreparedLayoutRevision = view.ParticleLayoutRevision;
+		if (!residentIncomplete) {
+			ActiveParticleWorld->PreparedResidentRevision = view.ParticleResidentRevision;
+		}
+		ActiveParticleWorld->ResidentRefreshPending = residentIncomplete && !rebuildLayout;
+		ActiveParticleWorld->PreparedRevisionValid = !(residentIncomplete && rebuildLayout);
 		ActiveParticleWorld->PreparedCount = written;
-		ActiveParticleWorld->PreparedBatches.assign(batches.begin(), batches.end());
+		if (rebuildLayout) {
+			ActiveParticleWorld->PreparedBatches.assign(batches.begin(), batches.end());
+		}
 		ActiveParticleWorld->PreparedGroups = ParticleGroups;
 
 		return {written, dispatched.Count};

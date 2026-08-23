@@ -637,15 +637,18 @@ namespace engine::render {
 		// `ParticleSeam`.
 		std::span<const ParticleSeam> ParticleSeams;
 
-		// Which simulation revision produced the particle batches, births and
-		// seams. An unchanged value keeps the resident draw layout and tables;
-		// only the device step is recorded for the new visual delta.
+		// Which simulation revision produced the particle blocks, births and
+		// seams. An unchanged value needs only another device step for the new
+		// visual delta; ParticleLayoutRevision separately owns ordering.
 		uint64_t ParticleRevision = 0;
 
 		// Which emitter membership and material ordering `Particles` describes.
 		// Unlike ParticleRevision, this stays constant while only simulation and
 		// resident block values advance.
 		uint64_t ParticleLayoutRevision = 0;
+
+		// Which resident parameter and curve-table content `Particles` names.
+		uint64_t ParticleResidentRevision = 0;
 
 		// How far to advance the particle simulation, in seconds.
 		//

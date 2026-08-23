@@ -720,6 +720,7 @@ namespace engine::effects {
 		// searched for.
 		system->Statistics.EmittersRefused = 0;
 		bool layoutChanged = false;
+		bool residentChanged = false;
 
 		// Mark every block unclaimed, then let the walk claim them back. A block
 		// still unclaimed at the end belonged to an emitter that has died.
@@ -738,6 +739,7 @@ namespace engine::effects {
 			if (block.Capacity > 0) {
 				system->Free.emplace_back(block.First, block.Capacity);
 				layoutChanged = true;
+				residentChanged = true;
 			}
 			block.Capacity = 0;
 			block.Live = 0;
@@ -775,6 +777,7 @@ namespace engine::effects {
 			SampleCurves(emitter, block.Curves);
 			block.Longest = std::max(emitter.Lifetime.Maximum, 0.0f);
 			block.CurveRevision++;
+			residentChanged = true;
 			if (ApplyPlayback(store, emitter, block, true, catalogueChanged)) {
 				block.Revision++;
 			}
@@ -791,6 +794,7 @@ namespace engine::effects {
 					EmitterBlock &block = system->Blocks[slot.Index];
 					if (ApplyPlayback(store, emitter, block, false, true)) {
 						block.Revision++;
+						residentChanged = true;
 					}
 				}
 			);
@@ -832,6 +836,7 @@ namespace engine::effects {
 					if (slot.ClearRequested) {
 						block.Generation++;
 						block.Revision++;
+						residentChanged = true;
 						block.Live = 0;
 						block.Spawned = 0;
 						block.Pending = 0.0f;
@@ -861,6 +866,7 @@ namespace engine::effects {
 							}
 							block.Frame = frame;
 							block.Revision++;
+							residentChanged = true;
 						}
 						system->FrameParents[slot.Index] = parent;
 					}
@@ -957,6 +963,7 @@ namespace engine::effects {
 					system->FrameParents.push_back(parent);
 				}
 				layoutChanged = true;
+				residentChanged = true;
 			});
 		}
 
@@ -980,6 +987,7 @@ namespace engine::effects {
 				// with every effect the game had ever played.
 				system->FreeSlots.push_back(static_cast<uint32_t>(index));
 				layoutChanged = true;
+				residentChanged = true;
 			}
 			if (block.Capacity > 0) {
 				live++;
@@ -989,6 +997,9 @@ namespace engine::effects {
 		system->Statistics.Blocks = static_cast<uint32_t>(live);
 		if (layoutChanged) {
 			system->LayoutRevision++;
+		}
+		if (residentChanged) {
+			system->ResidentRevision++;
 		}
 		return live;
 	}

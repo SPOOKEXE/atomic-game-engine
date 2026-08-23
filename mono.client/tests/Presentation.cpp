@@ -219,6 +219,7 @@ TEST_CASE("a detached particle frame stops pointing into the world", "[client][p
 
 		frame.Detach();
 		const uint64_t collectedRevision = frame.Revision;
+		const uint64_t collectedResident = frame.ResidentRevision;
 		const engine::effects::EmitterBlock *const detachedPool = frame.Blocks.data();
 
 		// A render-rate collection of the same simulation revision is constant
@@ -240,16 +241,31 @@ TEST_CASE("a detached particle frame stops pointing into the world", "[client][p
 			CHECK(frame.Batches[at].Block->Generation == system->Blocks[at].Generation);
 		}
 
-		// Simulation advances the source revision. The next collection rebuilds
-		// the batch pointers from the world and can be detached afresh.
+		// Simulation advances the source revision without changing layout or any
+		// device-table input. The detached storage and its safe pointers stay put.
 		(void)engine::effects::StepParticles(store, 1.0f / 30.0f);
 		REQUIRE(engine::render::CollectParticleBatches(store, frame) == 3);
 		CHECK(frame.Revision == collectedRevision + 1);
-		CHECK_FALSE(frame.Detached);
-		for (const engine::render::ParticleBatch &batch : frame.Batches) {
-			CHECK(batch.Block >= pool);
-			CHECK(batch.Block < pool + system->Blocks.size());
+		CHECK(frame.ResidentRevision == collectedResident);
+		CHECK(frame.Detached);
+		CHECK(frame.Blocks.data() == detachedPool);
+		for (size_t at = 0; at < frame.Batches.size(); at++) {
+			CHECK(frame.Batches[at].Block == frame.Blocks.data() + at);
 		}
+
+		// Draw-state changes are layout changes even without another simulation
+		// step. They rebuild the borrowed batch metadata once, then can be detached
+		// again for the renderer outside the world boundary.
+		const uint64_t collectedLayout = frame.LayoutRevision;
+		auto *changedEmitter = store.GetMutable<engine::effects::ParticleEmitter>(system->Blocks[0].Owner);
+		REQUIRE(changedEmitter != nullptr);
+		changedEmitter->Additive = !changedEmitter->Additive;
+		REQUIRE(engine::effects::RefreshEmitters(store) == 3);
+		REQUIRE(engine::render::CollectParticleBatches(store, frame) == 3);
+		CHECK(frame.LayoutRevision == collectedLayout + 1);
+		CHECK(frame.ResidentRevision == collectedResident + 1);
+		CHECK_FALSE(frame.Detached);
+		CHECK(frame.Batches[0].Additive == changedEmitter->Additive);
 	});
 }
 

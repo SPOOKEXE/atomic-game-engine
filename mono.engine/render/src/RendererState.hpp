@@ -1058,7 +1058,9 @@ namespace engine::render {
 			uint64_t PreparedFrame = 0;
 			uint64_t PreparedRevision = 0;
 			uint64_t PreparedLayoutRevision = 0;
+			uint64_t PreparedResidentRevision = 0;
 			bool PreparedRevisionValid = false;
+			bool ResidentRefreshPending = false;
 			uint32_t PreparedCount = 0;
 			std::vector<ParticleBatch> PreparedBatches;
 			std::vector<ParticleGroup> PreparedGroups;

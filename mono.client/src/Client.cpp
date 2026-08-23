@@ -3303,6 +3303,7 @@ namespace client {
 		view.ParticleSeams = Particles.Seams;
 		view.ParticleRevision = Particles.Revision;
 		view.ParticleLayoutRevision = Particles.LayoutRevision;
+		view.ParticleResidentRevision = Particles.ResidentRevision;
 		view.ParticlePool = Particles.Pool;
 		view.ParticleBlocks = Particles.BlockCount;
 

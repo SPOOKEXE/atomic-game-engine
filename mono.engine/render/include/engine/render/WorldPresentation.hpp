@@ -61,11 +61,15 @@ namespace engine::render {
 		// Monotonically identifies emitter membership and draw-state ordering.
 		uint64_t LayoutRevision = 0;
 
-		// Source identity and simulation revision represented by this snapshot.
+		// Monotonically identifies resident block parameter and curve content.
+		uint64_t ResidentRevision = 0;
+
+		// Source identity and source revisions represented by this snapshot.
 		//@{
 		core::Name SourceWorld;
 		uint64_t SourceRevision = 0;
 		uint64_t SourceLayoutRevision = 0;
+		uint64_t SourceResidentRevision = 0;
 		//@}
 
 		// Copies of blocks used when the frame outlives the store boundary.

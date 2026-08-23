@@ -399,6 +399,8 @@ namespace engine::render {
 		BlockCount = 0;
 		SourceWorld = {};
 		SourceRevision = 0;
+		SourceLayoutRevision = 0;
+		SourceResidentRevision = 0;
 		Detached = false;
 	}
 
@@ -406,14 +408,39 @@ namespace engine::render {
 		auto *system = store.ResourceMutable<effects::ParticleSystem>();
 		const core::Name sourceWorld(store.Name());
 		const uint64_t sourceRevision = system == nullptr ? 0 : system->PresentationRevision;
-		if (frame.SourceWorld == sourceWorld && frame.SourceRevision == sourceRevision) {
+		const uint64_t sourceLayoutRevision = system == nullptr ? 0 : system->LayoutRevision;
+		const uint64_t sourceResidentRevision = system == nullptr ? 0 : system->ResidentRevision;
+		if (frame.SourceWorld == sourceWorld && frame.SourceRevision == sourceRevision &&
+			frame.SourceLayoutRevision == sourceLayoutRevision &&
+			frame.SourceResidentRevision == sourceResidentRevision) {
 			return frame.Batches.size();
 		}
 
-		frame.Clear();
+		bool rebuildLayout =
+			frame.SourceWorld != sourceWorld || frame.SourceLayoutRevision != sourceLayoutRevision;
+		if (!rebuildLayout && frame.Detached && frame.Blocks.size() != frame.Batches.size()) {
+			// A malformed detached frame cannot safely be refreshed in place. Treat
+			// it as a cold snapshot rather than leaving one batch pointing outside
+			// the copied block array.
+			rebuildLayout = true;
+		}
+
+		if (rebuildLayout) {
+			frame.Clear();
+			frame.LayoutRevision++;
+		} else {
+			frame.Births.clear();
+			frame.Seams.clear();
+		}
 		frame.SourceWorld = sourceWorld;
 		frame.SourceRevision = sourceRevision;
+		frame.SourceLayoutRevision = sourceLayoutRevision;
+		const bool refreshResident = rebuildLayout || frame.SourceResidentRevision != sourceResidentRevision;
+		frame.SourceResidentRevision = sourceResidentRevision;
 		frame.Revision++;
+		if (refreshResident) {
+			frame.ResidentRevision++;
+		}
 
 		if (system == nullptr || system->Blocks.empty()) {
 			return 0;
@@ -445,8 +472,26 @@ namespace engine::render {
 		frame.Births.assign(system->Births.begin(), system->Births.end());
 		system->BirthsPresentedRevision = system->PresentationRevision;
 
+		if (!rebuildLayout && refreshResident) {
+			for (size_t at = 0; at < frame.Batches.size(); at++) {
+				ParticleBatch &batch = frame.Batches[at];
+				assert(batch.Index < system->Blocks.size());
+				if (frame.Detached) {
+					frame.Blocks[at] = system->Blocks[batch.Index];
+					batch.Block = frame.Blocks.data() + at;
+				} else {
+					batch.Block = system->Blocks.data() + batch.Index;
+				}
+			}
+		}
+		if (!rebuildLayout) {
+			return frame.Batches.size();
+		}
+
 		// Walk the emitter column because it owns presentation properties. The
-		// block only owns resident simulation state.
+		// block only owns resident simulation state. This walk is a layout rebuild,
+		// not a simulation-revision cost: unchanged emitters retain this ordered
+		// metadata while births and changed block values refresh around it.
 		store.Each<const effects::ParticleEmitter, const effects::EmitterSlot>(
 			[&](ecs::Entity, const effects::ParticleEmitter &emitter, const effects::EmitterSlot &slot) {
 				if (slot.Index == effects::NO_SLOT || slot.Index >= system->Blocks.size()) {
@@ -454,7 +499,7 @@ namespace engine::render {
 				}
 
 				const effects::EmitterBlock &block = system->Blocks[slot.Index];
-				if (block.Capacity == 0 || block.Live == 0) {
+				if (block.Capacity == 0) {
 					return;
 				}
 

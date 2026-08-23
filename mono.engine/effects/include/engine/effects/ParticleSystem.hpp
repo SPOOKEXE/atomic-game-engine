@@ -568,6 +568,13 @@ namespace engine::effects {
 		// sorting and rewriting the complete emitter draw table.
 		uint64_t LayoutRevision = 1;
 
+		// Which device parameter or curve-table content Blocks describes.
+		//
+		// Particle ages and births do not change these tables. A static emitter can
+		// therefore advance for any number of ticks without making presentation
+		// scan every block to rediscover that all per-block revisions still match.
+		uint64_t ResidentRevision = 1;
+
 		// Rows of `Blocks` whose emitter has gone, waiting to be handed to the
 		// next one that arrives.
 		//
