@@ -48,7 +48,7 @@ int main(int argc, char **argv) {
 
 	// The client's names for the same two panels. See `Options::ShowStatistics`.
 	arguments.Flag("stats", "Open the statistics panel (F7)");
-	arguments.Flag("graph", "Open the frame graph (F8)");
+	arguments.Flag("graph", "Open and select the frame graph (F8)");
 	arguments.Flag("assets", "Open the assets manager");
 	arguments.Flag("viewport2", "Open the second viewport (same as --viewports 2)");
 
@@ -183,6 +183,7 @@ int main(int argc, char **argv) {
 	// booleans that both mean "show it".
 	options.ShowStatistics = arguments.Has("stats") || preferences.ShowStatistics;
 	options.ShowFrameGraph = arguments.Has("graph") || preferences.ShowFrameGraph;
+	options.FocusFrameGraph = arguments.Has("graph");
 	options.ShowAssetsPanel = arguments.Has("assets") || preferences.ShowAssets;
 	// **`--viewport2` is the old spelling of `--viewports 2` and still works.**
 	// Whichever asks for more wins, because both mean "open at least this many"

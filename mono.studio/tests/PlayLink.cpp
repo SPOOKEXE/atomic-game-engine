@@ -35,6 +35,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <algorithm>
+#include <array>
 #include <client/Replicated.hpp>
 #include <client/Scene.hpp>
 #include <imgui.h>
@@ -473,10 +474,10 @@ TEST_CASE("what the server holds arrives on every client", "[studio][playlink]")
 
 	fixture.Spawn(2.0f);
 
+	const std::array<PlayLink *, 2> links{&first, &second};
 	for (int beat = 0; beat < 8; beat++) {
 		fixture.Worlds.Tick(1.0f / static_cast<float>(TICK_RATE));
-		first.Step(fixture.Worlds);
-		second.Step(fixture.Worlds);
+		PlayLink::StepMany(fixture.Worlds, links);
 	}
 
 	CHECK(first.Report().ClientEntities == first.Report().ServerEntities);

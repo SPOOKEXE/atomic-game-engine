@@ -20,6 +20,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <map>
 #include <span>
@@ -177,6 +178,33 @@ TEST_CASE("a client joins by full snapshot and sees the world", "[replication]")
 		REQUIRE(pair.Client.Get<Spot>(entity) != nullptr);
 		REQUIRE(pair.Client.Get<Spot>(entity)->X == static_cast<float>(index));
 	}
+}
+
+TEST_CASE("independent worlds publish through one signing batch", "[replication]") {
+	Pair first;
+	Pair second;
+	const Entity firstEntity = first.Server.Create();
+	const Entity secondEntity = second.Server.Create();
+	first.Server.Set<Spot>(firstEntity, Spot{1.0f, 2.0f});
+	second.Server.Set<Spot>(secondEntity, Spot{3.0f, 4.0f});
+
+	std::array<Authority::PublishRequest, 2> requests{
+		Authority::PublishRequest{first.Authority_, first.Server, ++first.Now},
+		Authority::PublishRequest{second.Authority_, second.Server, ++second.Now},
+	};
+	CHECK(Authority::PublishMany(requests) == 2);
+
+	for (const std::vector<std::byte> &message : first.Authority_.Outgoing(first.Handle)) {
+		first.Replica_.Receive(first.Client, message);
+	}
+	for (const std::vector<std::byte> &message : second.Authority_.Outgoing(second.Handle)) {
+		second.Replica_.Receive(second.Client, message);
+	}
+
+	REQUIRE(first.Client.Get<Spot>(firstEntity) != nullptr);
+	REQUIRE(second.Client.Get<Spot>(secondEntity) != nullptr);
+	CHECK(first.Client.Get<Spot>(firstEntity)->X == 1.0f);
+	CHECK(second.Client.Get<Spot>(secondEntity)->X == 3.0f);
 }
 
 TEST_CASE("a big world joins over several ticks rather than one", "[replication]") {

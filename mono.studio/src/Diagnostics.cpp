@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <array>
 #include <cinttypes>
+#include <cmath>
 #include <cstdio>
 #include <imgui.h>
 #include <iterator>
@@ -227,6 +228,28 @@ namespace studio {
 				cursor += child.Milliseconds;
 			}
 		}
+
+		// Averaging and reported summaries use different clocks: measured spans
+		// retain their frame position while a reported parent is projected into a
+		// measured gap. Keep the final display tree geometrically honest by
+		// clipping every descendant to the interval its parent occupies. Without
+		// this, a child of `simulation` can appear inside the following
+		// `presentation` sibling even though those scopes never overlapped.
+		for (size_t index = 0; index < spans.size(); index++) {
+			DiagnosticSpan &span = spans[index];
+			if (span.Parent >= index) {
+				continue;
+			}
+
+			const DiagnosticSpan &parent = spans[span.Parent];
+			const float parentStart = std::clamp(parent.StartMilliseconds, 0.0f, frameEnd);
+			const float parentEnd =
+				std::clamp(parent.StartMilliseconds + parent.Milliseconds, parentStart, frameEnd);
+			const float childEnd = span.StartMilliseconds + std::max(span.Milliseconds, 0.0f);
+			span.StartMilliseconds = std::clamp(span.StartMilliseconds, parentStart, parentEnd);
+			span.Milliseconds =
+				std::clamp(childEnd, span.StartMilliseconds, parentEnd) - span.StartMilliseconds;
+		}
 	}
 
 	void AppendUnaccountedDiagnosticSpans(std::vector<DiagnosticSpan> &spans) {
@@ -347,69 +370,19 @@ namespace studio {
 		}
 	}
 
-	uint32_t LayoutDiagnosticRows(
-		std::span<const DiagnosticSpan> spans,
-		float frameMilliseconds,
-		float minimumMilliseconds,
-		std::vector<uint32_t> &rows
-	) {
+	uint32_t LayoutDiagnosticRows(std::span<const DiagnosticSpan> spans, std::vector<uint32_t> &rows) {
 		rows.assign(spans.size(), 0);
 		if (spans.empty()) {
 			return 0;
 		}
 
-		uint32_t deepest = 0;
-		for (const DiagnosticSpan &span : spans) {
-			deepest = std::max(deepest, span.Depth);
-		}
-
-		struct ParentLanes {
-			uint32_t Parent = engine::core::FrameGraph::NO_PARENT;
-			std::vector<float> Ends;
-		};
-		std::vector<std::vector<ParentLanes>> parentLanes(static_cast<size_t>(deepest) + 1);
-		std::vector<uint32_t> depthLaneCounts(static_cast<size_t>(deepest) + 1, 1);
-		std::vector<uint32_t> lanes(spans.size(), 0);
-		const float frameEnd = std::max(frameMilliseconds, 0.0f);
-		const float minimum = std::max(minimumMilliseconds, 0.0f);
-
+		uint32_t rowCount = 1;
 		for (size_t index = 0; index < spans.size(); index++) {
 			const DiagnosticSpan &span = spans[index];
-			const float latestStart = std::max(frameEnd - minimum, 0.0f);
-			const float left = std::clamp(span.StartMilliseconds, 0.0f, latestStart);
-			const float right = std::min(frameEnd, left + std::max(span.Milliseconds, minimum));
-
-			auto &groups = parentLanes[span.Depth];
-			auto found = std::find_if(groups.begin(), groups.end(), [&](const ParentLanes &candidate) {
-				return candidate.Parent == span.Parent;
-			});
-			if (found == groups.end()) {
-				groups.push_back(ParentLanes{.Parent = span.Parent, .Ends = {}});
-				found = std::prev(groups.end());
+			if (span.Parent < index) {
+				rows[index] = rows[span.Parent] + 1;
 			}
-			auto &ends = found->Ends;
-			uint32_t lane = 0;
-			while (lane < ends.size() && left < ends[lane]) {
-				lane++;
-			}
-			if (lane == ends.size()) {
-				ends.push_back(right);
-			} else {
-				ends[lane] = right;
-			}
-			lanes[index] = lane;
-			depthLaneCounts[span.Depth] = std::max(depthLaneCounts[span.Depth], lane + 1);
-		}
-
-		std::vector<uint32_t> offsets(parentLanes.size(), 0);
-		uint32_t rowCount = 0;
-		for (size_t depth = 0; depth < parentLanes.size(); depth++) {
-			offsets[depth] = rowCount;
-			rowCount += depthLaneCounts[depth];
-		}
-
-		for (size_t index = 0; index < spans.size(); index++) {
-			rows[index] = offsets[spans[index].Depth] + lanes[index];
+			rowCount = std::max(rowCount, rows[index] + 1);
 		}
 		return rowCount;
 	}
@@ -627,6 +600,10 @@ namespace studio {
 			return;
 		}
 
+		if (FocusFrameGraphFrames > 0) {
+			FocusFrameGraphFrames--;
+			ImGui::SetNextWindowFocus();
+		}
 		if (!ImGui::Begin("Frame Graph", &ShowFrameGraph)) {
 			ImGui::End();
 			return;
@@ -1105,18 +1082,17 @@ namespace studio {
 		// reason nobody wrote down. `StartMilliseconds` and `Depth` are exactly
 		// the two axes.
 
-		const float rowHeight = engine::ui::Scaled(engine::ui::Size::Row) * 0.72f;
+		const float rowHeight = std::max(std::floor(engine::ui::Scaled(engine::ui::Size::Row) * 0.72f), 1.0f);
 		const ImVec2 origin = ImGui::GetCursorScreenPos();
 		const float graphWidth = std::max(ImGui::GetContentRegionAvail().x, 1.0f);
 		const float scale = frameMs > 0.0001f ? graphWidth / frameMs : 0.0f;
-		const float onePixelMilliseconds = scale > 0.0f ? 1.0f / scale : 0.0f;
-		const uint32_t graphRows = LayoutDiagnosticRows(graphSpans, frameMs, onePixelMilliseconds, view.Rows);
+		const uint32_t graphRows = LayoutDiagnosticRows(graphSpans, view.Rows);
 		const float graphHeight = rowHeight * static_cast<float>(graphRows);
 
 		ImDrawList *draw = ImGui::GetWindowDrawList();
 		const DiagnosticSpan *hovered = nullptr;
 
-		for (size_t index = 0; index < graphSpans.size(); index++) {
+		const auto drawSpan = [&](size_t index) {
 			const DiagnosticSpan &span = graphSpans[index];
 			// **Clamped to the graph, whatever the arithmetic above produced.**
 			// An averaged span can still exceed the averaged frame - a span that
@@ -1132,15 +1108,15 @@ namespace studio {
 			const float top = origin.y + static_cast<float>(view.Rows[index]) * rowHeight;
 
 			const ImVec2 upper(left, top);
-			const ImVec2 lower(left + width, top + rowHeight - 1.0f);
+			const ImVec2 lower(left + width, top + rowHeight);
 
 			const ImU32 colour =
 				span.Name == "unaccounted" ? IM_COL32(94, 99, 112, 210) : ColourOf(span.Category);
-			draw->AddRectFilled(upper, lower, colour, 2.0f);
+			draw->AddRectFilled(upper, lower, colour);
 
 			if (ImGui::IsMouseHoveringRect(upper, lower)) {
 				hovered = index < spans.size() ? &spans[index] : &span;
-				draw->AddRect(upper, lower, engine::ui::BrightColour(), 2.0f);
+				draw->AddRect(upper, lower, engine::ui::BrightColour());
 			}
 
 			// Only where the label fits. Text clipped mid-word is noise, and a
@@ -1155,6 +1131,16 @@ namespace studio {
 				);
 				draw->PopClipRect();
 			}
+		};
+
+		// Accounting is the background of the timeline. Reported worker work is
+		// deliberately fitted into the measured wall-time gap that waited for it,
+		// so drawing synthetic gaps last would cover the useful worker bars.
+		for (size_t index = spans.size(); index < graphSpans.size(); index++) {
+			drawSpan(index);
+		}
+		for (size_t index = 0; index < spans.size(); index++) {
+			drawSpan(index);
 		}
 
 		ImGui::Dummy(ImVec2(graphWidth, graphHeight));

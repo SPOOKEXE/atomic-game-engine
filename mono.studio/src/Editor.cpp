@@ -433,6 +433,7 @@ namespace studio {
 		// is a flag that gets stuck.
 		ShowStatistics = Settings.ShowStatistics;
 		ShowFrameGraph = Settings.ShowFrameGraph;
+		FocusFrameGraphFrames = Settings.FocusFrameGraph ? 4 : 0;
 		ShowAssets = Settings.ShowAssetsPanel;
 		IdleCloseSeconds = Settings.IdleCloseSeconds;
 
@@ -1159,16 +1160,18 @@ namespace studio {
 		// below then clears exactly what was just sent.
 		{
 			ENGINE_PROFILE_CAT("replication links", engine::core::ProfileCategory::Network);
+			ActivePlayLinks.clear();
 			for (WorldRun &run : Runs) {
 				if (run.Paused) {
 					continue;
 				}
 				for (const std::unique_ptr<PlayLink> &link : run.Links) {
 					if (link != nullptr) {
-						link->Step(*Universe);
+						ActivePlayLinks.push_back(link.get());
 					}
 				}
 			}
+			PlayLink::StepMany(*Universe, ActivePlayLinks);
 		}
 
 		Advancing = true;

@@ -3,8 +3,8 @@
 // Data shaping for Studio's frame-graph panel.
 //
 // The panel itself needs imgui, but averaging a recorded tree and assigning
-// non-overlapping display rows do not. Keeping those operations here makes the
-// silent failures testable without a window or a graphics device.
+// stable hierarchy rows do not. Keeping those operations here makes the silent
+// failures testable without a window or a graphics device.
 //
 // @tier L13 · client
 
@@ -60,8 +60,10 @@ namespace studio {
 	// Reported durations are CPU work totals and may exceed wall time when
 	// workers overlap. Direct reported children are scaled into their measured
 	// parent's largest uncovered interval, then their descendants are fitted
-	// proportionally inside that logical bar. Call this on a display copy: the
-	// table and tooltip must retain the producer's actual milliseconds.
+	// proportionally inside that logical bar. Descendants are finally clipped to
+	// their parent, so a projected subtree cannot overlap the next measured
+	// sibling. Call this on a display copy: the table and tooltip must retain the
+	// producer's actual milliseconds.
 	void FitReportedDiagnosticTimeline(std::vector<DiagnosticSpan> &spans, float frameMilliseconds);
 
 	// Adds display-only children for time inside a span that none of its direct
@@ -71,18 +73,14 @@ namespace studio {
 	// indices remain valid.
 	void AppendUnaccountedDiagnosticSpans(std::vector<DiagnosticSpan> &spans);
 
-	// Assigns a non-overlapping display row to every span.
+	// Assigns one stable display row to each hierarchy level.
 	//
-	// Rows remain grouped by tree depth. Overlapping siblings take separate
-	// lanes; spans under different parents reuse the same lanes because their
-	// parent branches already explain the overlap.
-	// `minimumMilliseconds` is the graph's one-pixel minimum expressed in time.
+	// A valid child is always exactly one row below its parent. Timing overlap
+	// does not create another row: reported worker summaries intentionally share
+	// wall time with the measured wait that contains them, and pixel-sized bars
+	// may overlap after scaling. Turning either into a lane makes every deeper
+	// span jump vertically when the frame timing changes.
 	//
 	// @return How many rows the graph needs.
-	uint32_t LayoutDiagnosticRows(
-		std::span<const DiagnosticSpan> spans,
-		float frameMilliseconds,
-		float minimumMilliseconds,
-		std::vector<uint32_t> &rows
-	);
+	uint32_t LayoutDiagnosticRows(std::span<const DiagnosticSpan> spans, std::vector<uint32_t> &rows);
 }

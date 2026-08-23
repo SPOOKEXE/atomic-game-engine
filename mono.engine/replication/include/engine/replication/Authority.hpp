@@ -222,6 +222,14 @@ namespace engine::replication {
 	// @since v0.3
 	class Authority {
 	  public:
+		// One authoritative world participating in a shared publish dispatch.
+		// References are borrowed only for the duration of `PublishMany`.
+		struct PublishRequest {
+			Authority &Source;
+			ecs::Store &World;
+			uint64_t Tick = 0;
+		};
+
 		// Creates a server-side replicator.
 		//
 		// @param settings How to stream.
@@ -537,6 +545,14 @@ namespace engine::replication {
 		// @param store The authoritative world.
 		// @param tick  The tick just completed.
 		void Publish(ecs::Store &store, uint64_t tick);
+
+		// Publishes independent worlds with one signing dispatch across all of
+		// their component slots. The store-owning preparation and completion
+		// passes remain ordered on the caller; only the gathered, read-only hash
+		// work is combined.
+		//
+		// @return How many requests had an admitted client and were published.
+		static size_t PublishMany(std::span<const PublishRequest> requests);
 
 		// What to send one client, each entry a whole message.
 		//
@@ -1332,7 +1348,13 @@ namespace engine::replication {
 		Client *Reach(ClientId client);
 		const Client *Reach(ClientId client) const;
 		void Survey(ecs::Store &store);
-		void Resign(ecs::Store &store);
+		void PrepareSurvey(ecs::Store &store);
+		void FinishSurvey(ecs::Store &store);
+		void GatherSignatures(ecs::Store &store);
+		void SignSignatures();
+		void ReportSignatures();
+		void ResetPublishStatistics();
+		void PublishAfterSurvey(ecs::Store &store, uint64_t tick);
 
 		// Signs one slot from the runs `Resign` gathered for it.
 		//

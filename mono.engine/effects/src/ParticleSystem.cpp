@@ -766,8 +766,12 @@ namespace engine::effects {
 		// is the same reason `ActiveCamera` names an entity rather than being
 		// searched for.
 		system->Statistics.EmittersRefused = 0;
+		system->Statistics.EmitterClaimAttempts = 0;
 		bool layoutChanged = false;
 		bool residentChanged = false;
+		uint32_t newSlotRefusals = 0;
+		uint32_t newPoolRefusals = 0;
+		const bool retryRefused = std::exchange(system->RetryRefused, false);
 
 		// A generation stamp makes the claim walk itself mark survivors. Only the
 		// once-per-four-billion wrap needs to clear the retained stamps.
@@ -791,6 +795,7 @@ namespace engine::effects {
 			slot.Requested = block.Requested;
 			if (block.Capacity > 0) {
 				system->Free.emplace_back(block.First, block.Capacity);
+				system->RetryRefused = true;
 				layoutChanged = true;
 				residentChanged = true;
 			}
@@ -802,6 +807,7 @@ namespace engine::effects {
 			system->FreeSlots.push_back(index);
 			slot.Index = NO_SLOT;
 			slot.ClearRequested = false;
+			slot.Refused = false;
 		};
 
 		// Pull authored data only for rows that changed. The steady claim pass
@@ -815,6 +821,7 @@ namespace engine::effects {
 
 			slot->Enabled = emitter.Enabled;
 			slot->Configured = true;
+			slot->Refused = false;
 			layoutChanged = true;
 
 			if (slot->Index == NO_SLOT || slot->Index >= system->Blocks.size()) {
@@ -932,6 +939,11 @@ namespace engine::effects {
 				if (!slot.Enabled && slot.Requested == 0) {
 					return;
 				}
+				if (slot.Refused && !retryRefused) {
+					system->Statistics.EmittersRefused++;
+					return;
+				}
+				slot.Refused = false;
 
 				const ParticleEmitter *emitter = store.Get<ParticleEmitter>(entity);
 				if (emitter == nullptr) {
@@ -946,22 +958,20 @@ namespace engine::effects {
 				// to fit under the cap.
 				const bool recycling = !system->FreeSlots.empty();
 				const bool noSlot = !recycling && system->Blocks.size() >= MAX_EMITTER_SLOTS;
+				system->Statistics.EmitterClaimAttempts++;
 				if (noSlot || !Take(*system, wanted, first)) {
 					// **Two causes on one counter, and they need different
 					// fixes.** Out of emitter rows is a scene with too many
 					// effects; out of pool is a scene whose effects each want
 					// too many particles. Either way the effect never
 					// appears and nothing else says so.
-					ENGINE_WARN_EVERY(
-						5.0,
-						"emitter refused: {} ({} of {} slots, {} of {} particle rows used)",
-						noSlot ? "no emitter slot" : "no room in the particle pool",
-						system->Blocks.size(),
-						MAX_EMITTER_SLOTS,
-						system->Used,
-						system->Capacity
-					);
+					if (noSlot) {
+						newSlotRefusals++;
+					} else {
+						newPoolRefusals++;
+					}
 					system->Statistics.EmittersRefused++;
+					slot.Refused = true;
 					return;
 				}
 
@@ -1023,9 +1033,28 @@ namespace engine::effects {
 					system->SpawnStates.push_back(spawnState);
 					system->FrameParents.push_back(parent);
 				}
+				slot.Refused = false;
 				layoutChanged = true;
 				residentChanged = true;
 			});
+		}
+		if (newSlotRefusals + newPoolRefusals > 0) {
+			// One diagnostic per refresh, not one formatting and rate-limit lookup
+			// per refused row. A pathological scene can encounter the cap hundreds
+			// of thousands of times in one tick, while the useful fact is the two
+			// causes and the pool state after that claim pass.
+			ENGINE_WARN_EVERY(
+				5.0,
+				"{} emitter(s) refused: {} without an emitter slot, {} without pool room "
+				"({} of {} slots, {} of {} particle rows used)",
+				newSlotRefusals + newPoolRefusals,
+				newSlotRefusals,
+				newPoolRefusals,
+				system->Blocks.size(),
+				MAX_EMITTER_SLOTS,
+				system->Used,
+				system->Capacity
+			);
 		}
 
 		// Reclaim the blocks nobody claimed. Their particles go with them: an
@@ -1038,6 +1067,7 @@ namespace engine::effects {
 			EmitterBlock &block = system->Blocks[index];
 			if (block.ClaimedAt != claimGeneration && block.Capacity > 0) {
 				system->Free.emplace_back(block.First, block.Capacity);
+				system->RetryRefused = true;
 				block.Capacity = 0;
 				block.Live = 0;
 				block.Owner = ecs::NULL_ENTITY;
@@ -1360,6 +1390,7 @@ namespace engine::effects {
 		ParticleStatistics counted;
 		counted.Blocks = system->Statistics.Blocks;
 		counted.EmittersRefused = system->Statistics.EmittersRefused;
+		counted.EmitterClaimAttempts = system->Statistics.EmitterClaimAttempts;
 
 		// Two phases: the first walks compact resident spawn rows and the second
 		// dispatches births over disjoint block slices. Authored emitter data is

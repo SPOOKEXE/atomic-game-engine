@@ -115,42 +115,86 @@ TEST_CASE("reported parallel work fits inside measured wall time", "[studio][dia
 	CHECK(spans[4].Milliseconds == Catch::Approx(4.8f));
 
 	std::vector<uint32_t> rows;
-	CHECK(LayoutDiagnosticRows(spans, 10.0f, 0.01f, rows) == 3);
+	CHECK(LayoutDiagnosticRows(spans, rows) == 3);
 }
 
-TEST_CASE("overlapping bars at one depth receive separate rows", "[studio][diagnostics]") {
+TEST_CASE("reported trees cannot overlap the next measured sibling", "[studio][diagnostics]") {
+	std::vector spans{
+		DiagnosticSpan{.Name = "Application", .Depth = 0, .Milliseconds = 10.0f},
+		DiagnosticSpan{.Name = "simulation", .Depth = 1, .Parent = 0, .Milliseconds = 6.0f},
+		DiagnosticSpan{
+			.Name = "workers",
+			.Depth = 2,
+			.Parent = 1,
+			.StartMilliseconds = 5.0f,
+			.Milliseconds = 12.0f,
+			.Reported = true,
+		},
+		DiagnosticSpan{
+			.Name = "late measured child",
+			.Depth = 3,
+			.Parent = 2,
+			.StartMilliseconds = 7.0f,
+			.Milliseconds = 2.0f,
+		},
+		DiagnosticSpan{
+			.Name = "presentation",
+			.Depth = 1,
+			.Parent = 0,
+			.StartMilliseconds = 6.0f,
+			.Milliseconds = 4.0f,
+		},
+	};
+
+	FitReportedDiagnosticTimeline(spans, 10.0f);
+
+	const float simulationEnd = spans[1].StartMilliseconds + spans[1].Milliseconds;
+	CHECK(spans[2].StartMilliseconds + spans[2].Milliseconds <= simulationEnd);
+	CHECK(spans[3].StartMilliseconds + spans[3].Milliseconds <= simulationEnd);
+	CHECK(spans[4].StartMilliseconds >= simulationEnd);
+}
+
+TEST_CASE("timing overlap never changes hierarchy rows", "[studio][diagnostics]") {
 	const std::array spans{
 		DiagnosticSpan{.Name = "first", .Depth = 0, .StartMilliseconds = 0.0f, .Milliseconds = 5.0f},
 		DiagnosticSpan{.Name = "overlap", .Depth = 0, .StartMilliseconds = 2.0f, .Milliseconds = 2.0f},
-		DiagnosticSpan{.Name = "after", .Depth = 0, .StartMilliseconds = 5.0f, .Milliseconds = 2.0f},
-		DiagnosticSpan{.Name = "child", .Depth = 1, .StartMilliseconds = 1.0f, .Milliseconds = 1.0f},
+		DiagnosticSpan{
+			.Name = "child", .Depth = 1, .Parent = 0, .StartMilliseconds = 1.0f, .Milliseconds = 1.0f
+		},
+		DiagnosticSpan{.Name = "grandchild", .Depth = 2, .Parent = 2, .Milliseconds = 1.0f},
 	};
 
 	std::vector<uint32_t> rows;
-	const uint32_t count = LayoutDiagnosticRows(spans, 10.0f, 0.01f, rows);
+	const uint32_t count = LayoutDiagnosticRows(spans, rows);
 
 	REQUIRE(rows.size() == spans.size());
-	CHECK(rows[0] != rows[1]);
-	CHECK(rows[0] == rows[2]);
-	CHECK(rows[3] > rows[1]);
+	CHECK(rows[0] == rows[1]);
+	CHECK(rows[2] == rows[0] + 1);
+	CHECK(rows[3] == rows[2] + 1);
 	CHECK(count == 3);
 }
 
-TEST_CASE("overlapping spans in different parent branches reuse a row", "[studio][diagnostics]") {
+TEST_CASE("parallel summaries keep every branch on the same depth grid", "[studio][diagnostics]") {
 	const std::array spans{
-		DiagnosticSpan{.Name = "left", .Depth = 0, .Parent = FrameGraph::NO_PARENT, .Milliseconds = 5.0f},
-		DiagnosticSpan{.Name = "left child", .Depth = 1, .Parent = 0, .Milliseconds = 5.0f},
-		DiagnosticSpan{.Name = "right", .Depth = 0, .Parent = FrameGraph::NO_PARENT, .Milliseconds = 5.0f},
-		DiagnosticSpan{.Name = "right child", .Depth = 1, .Parent = 2, .Milliseconds = 5.0f},
+		DiagnosticSpan{
+			.Name = "application", .Depth = 0, .Parent = FrameGraph::NO_PARENT, .Milliseconds = 5.0f
+		},
+		DiagnosticSpan{.Name = "simulation", .Depth = 1, .Parent = 0, .Milliseconds = 5.0f},
+		DiagnosticSpan{.Name = "workers", .Depth = 2, .Parent = 1, .Milliseconds = 8.0f, .Reported = true},
+		DiagnosticSpan{.Name = "measured wait", .Depth = 2, .Parent = 1, .Milliseconds = 5.0f},
+		DiagnosticSpan{.Name = "left world", .Depth = 3, .Parent = 2, .Milliseconds = 4.0f, .Reported = true},
+		DiagnosticSpan{
+			.Name = "right world", .Depth = 3, .Parent = 2, .Milliseconds = 4.0f, .Reported = true
+		},
+		DiagnosticSpan{.Name = "system", .Depth = 4, .Parent = 4, .Milliseconds = 1.0f, .Reported = true},
 	};
 
 	std::vector<uint32_t> rows;
-	const uint32_t count = LayoutDiagnosticRows(spans, 10.0f, 0.01f, rows);
+	const uint32_t count = LayoutDiagnosticRows(spans, rows);
 
 	REQUIRE(rows.size() == spans.size());
-	CHECK(rows[0] != rows[2]);
-	CHECK(rows[1] == rows[3]);
-	CHECK(count == 3);
+	CHECK(rows == std::vector<uint32_t>{0, 1, 2, 2, 3, 3, 4});
+	CHECK(count == 5);
 }
 
 TEST_CASE("unaccounted spans fill gaps between direct children", "[studio][diagnostics]") {

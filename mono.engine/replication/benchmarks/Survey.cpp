@@ -42,6 +42,7 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/parallel/Jobs.hpp>
 #include <engine/replication/Authority.hpp>
 #include <engine/testing/Bench.hpp>
 
@@ -229,6 +230,47 @@ namespace survey_bench {
 		Fixture &fixture = FixtureOf(shape);
 		fixture.Server.Publish(fixture.World, fixture.Tick++);
 	}
+
+	const std::array<Shape, 3> &BatchShapes() {
+		// This row measures the host shape, where signing dispatches into an
+		// existing pool. Without workers `Jobs::For` takes its direct fallback and
+		// the benchmark would erase the dispatch cost batching is meant to remove.
+		static const bool workers = [] {
+			engine::parallel::Jobs::Start(4);
+			return true;
+		}();
+		(void)workers;
+		static const std::array shapes{
+			Shape{498, 4, 4, ChangeDetection::Signature, true},
+			Shape{499, 4, 4, ChangeDetection::Signature, true},
+			Shape{500, 4, 4, ChangeDetection::Signature, true},
+		};
+		return shapes;
+	}
+
+	void PublishScenesSequentially() {
+		for (const Shape &shape : BatchShapes()) {
+			Publish(shape);
+		}
+	}
+
+	void PublishScenesTogether() {
+		std::array<Authority::PublishRequest, 3> requests{
+			[&] {
+				Fixture &fixture = FixtureOf(BatchShapes()[0]);
+				return Authority::PublishRequest{fixture.Server, fixture.World, fixture.Tick++};
+			}(),
+			[&] {
+				Fixture &fixture = FixtureOf(BatchShapes()[1]);
+				return Authority::PublishRequest{fixture.Server, fixture.World, fixture.Tick++};
+			}(),
+			[&] {
+				Fixture &fixture = FixtureOf(BatchShapes()[2]);
+				return Authority::PublishRequest{fixture.Server, fixture.World, fixture.Tick++};
+			}(),
+		};
+		Authority::PublishMany(requests);
+	}
 }
 
 using namespace survey_bench;
@@ -294,4 +336,14 @@ BENCH_PER_ITEM("Publish · 10k entities · 4 signed slots · 64-byte value", 100
 // entity at all.
 BENCH_PER_ITEM("Publish · 10k entities · 4 signed slots, 0 carried", 10000) {
 	Publish(Shape{10000, 4, 0, ChangeDetection::Signature, false});
+}
+
+// --- the Studio shape: several independent scenes in one host -----------------
+
+BENCH_PER_ITEM("Publish · 3 scenes, 1.5k entities · sequential signing dispatches", 1497) {
+	PublishScenesSequentially();
+}
+
+BENCH_PER_ITEM("Publish · 3 scenes, 1.5k entities · one signing dispatch", 1497) {
+	PublishScenesTogether();
 }

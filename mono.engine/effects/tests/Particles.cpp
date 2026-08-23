@@ -209,9 +209,11 @@ TEST_CASE("a pool that is full refuses blocks rather than overlapping them", "[e
 	const Entity part = engine::scene::MakePart(store, desc);
 
 	// Each wants 21 slots against a pool of 64, so the fourth cannot fit.
+	std::vector<Entity> emitters;
 	for (int index = 0; index < 4; index++) {
 		const Entity emitter =
 			store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("ParticleEmitter")));
+		emitters.push_back(emitter);
 		store.SetParent(emitter, part);
 		store.GetMutable<ParticleEmitter>(emitter)->Rate = 10.0f;
 		store.GetMutable<ParticleEmitter>(emitter)->Lifetime = NumberRange{2.0f, 2.0f};
@@ -221,6 +223,27 @@ TEST_CASE("a pool that is full refuses blocks rather than overlapping them", "[e
 
 	const auto *system = store.Resource<ParticleSystem>();
 	REQUIRE(system->Statistics.EmittersRefused == 1);
+	REQUIRE(system->Statistics.EmitterClaimAttempts == 4);
+
+	// A full pool is a state, not a reason to run the same failed allocation
+	// and warning path on every tick. The refusal remains visible in statistics.
+	store.ClearChanges();
+	Frame(store, 0.0f);
+	system = store.Resource<ParticleSystem>();
+	CHECK(system->Statistics.EmittersRefused == 1);
+	CHECK(system->Statistics.EmitterClaimAttempts == 0);
+
+	// Returning capacity wakes refused rows once. Reclaim follows claim within a
+	// refresh, so the newly free range is deliberately consumed next frame.
+	store.Destroy(emitters.front());
+	store.ClearChanges();
+	Frame(store, 0.0f);
+	store.ClearChanges();
+	Frame(store, 0.0f);
+	system = store.Resource<ParticleSystem>();
+	CHECK(system->Statistics.EmittersRefused == 0);
+	CHECK(system->Statistics.EmitterClaimAttempts == 1);
+	CHECK(store.Get<EmitterSlot>(emitters.back())->Index != NO_SLOT);
 
 	// **The blocks that did fit must not overlap**, which is the failure a
 	// refusal exists to prevent: two emitters sharing a range write each other's

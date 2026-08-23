@@ -379,6 +379,12 @@ namespace engine::replication {
 
 	void Authority::Survey(ecs::Store &store) {
 		ENGINE_PROFILE_CAT("Authority::Survey", core::ProfileCategory::Network);
+		PrepareSurvey(store);
+		SignSignatures();
+		FinishSurvey(store);
+	}
+
+	void Authority::PrepareSurvey(ecs::Store &store) {
 
 		{
 			ENGINE_PROFILE_CAT("Authority::ResolveComponents", core::ProfileCategory::Network);
@@ -527,10 +533,12 @@ namespace engine::replication {
 		}
 
 		{
-			ENGINE_PROFILE_CAT("Authority::Resign", core::ProfileCategory::Network);
-			Resign(store);
+			ENGINE_PROFILE_CAT("Authority::Resign::gather", core::ProfileCategory::Network);
+			GatherSignatures(store);
 		}
+	}
 
+	void Authority::FinishSurvey(ecs::Store &store) {
 		{
 			ENGINE_PROFILE_CAT("Authority::GatherChanged", core::ProfileCategory::Network);
 
@@ -634,7 +642,7 @@ namespace engine::replication {
 		);
 	}
 
-	void Authority::Resign(ecs::Store &store) {
+	void Authority::GatherSignatures(ecs::Store &store) {
 		// --- what to sign, on the thread that owns the store -----------------
 		//
 		// `Store::EachRuns` walks the archetype tables and may only be called by
@@ -695,7 +703,9 @@ namespace engine::replication {
 
 			ResignWork.push_back(slot);
 		}
+	}
 
+	void Authority::SignSignatures() {
 		// --- the signing, spread across whatever workers there are -----------
 		//
 		// A grain of one because a slot is the unit: they are within a factor of
@@ -712,6 +722,10 @@ namespace engine::replication {
 			});
 		}
 
+		ReportSignatures();
+	}
+
+	void Authority::ReportSignatures() {
 		// --- the per-component rows, put back on the graph -------------------
 		//
 		// A span opened by a worker is dropped, so the breakdown is reported
@@ -2009,6 +2023,16 @@ namespace engine::replication {
 		return std::min(clients, available);
 	}
 
+	void Authority::ResetPublishStatistics() {
+		Stats_.Messages = 0;
+		Stats_.Bytes = 0;
+		Stats_.Visible = 0;
+		Stats_.Resnapshots = 0;
+		Stats_.Deferred = 0;
+		Stats_.Stalest = 0;
+		Stats_.Audits = 0;
+	}
+
 	void Authority::Publish(ecs::Store &store, uint64_t tick) {
 		// **Instrumented per phase and not per client**, which is the shape a
 		// two-hundred-client host forces: `FrameGraph::MAXIMUM_SPANS` is 4096 and
@@ -2026,21 +2050,79 @@ namespace engine::replication {
 		// names the spans used, and into `core::Metrics` as histograms because
 		// that is the sink a headless server can drain.
 		ENGINE_PROFILE_CAT("Authority::Publish", core::ProfileCategory::Network);
-
-		Stats_.Messages = 0;
-		Stats_.Bytes = 0;
-		Stats_.Visible = 0;
-		Stats_.Resnapshots = 0;
-		Stats_.Deferred = 0;
-		Stats_.Stalest = 0;
-		Stats_.Audits = 0;
-
+		ResetPublishStatistics();
 		if (Count() == 0) {
 			return;
 		}
 
 		Survey(store);
+		PublishAfterSurvey(store, tick);
+	}
 
+	size_t Authority::PublishMany(std::span<const PublishRequest> requests) {
+		if (requests.empty()) {
+			return 0;
+		}
+		if (requests.size() == 1) {
+			PublishRequest request = requests.front();
+			const bool active = request.Source.Count() > 0;
+			request.Source.Publish(request.World, request.Tick);
+			return active ? 1 : 0;
+		}
+
+		ENGINE_PROFILE_CAT("Authority::PublishMany", core::ProfileCategory::Network);
+
+		struct SignWork {
+			Authority *Source = nullptr;
+			size_t Slot = 0;
+		};
+		static thread_local std::vector<size_t> active;
+		static thread_local std::vector<SignWork> signing;
+		active.clear();
+		signing.clear();
+
+		{
+			ENGINE_PROFILE_CAT("Authority::PrepareMany", core::ProfileCategory::Network);
+			for (size_t index = 0; index < requests.size(); index++) {
+				Authority &source = requests[index].Source;
+				source.ResetPublishStatistics();
+				if (source.Count() == 0) {
+					continue;
+				}
+
+				source.PrepareSurvey(requests[index].World);
+				active.push_back(index);
+				for (const size_t slot : source.ResignWork) {
+					signing.push_back(SignWork{&source, slot});
+				}
+			}
+		}
+
+		{
+			ENGINE_PROFILE_CAT("Authority::Resign::sign many", core::ProfileCategory::Network);
+			std::vector<SignWork> *workList = &signing;
+			parallel::Jobs::For(signing.size(), 1, [workList](size_t begin, size_t end) {
+				for (size_t index = begin; index < end; index++) {
+					const SignWork &work = (*workList)[index];
+					SignSlot(work.Source->Signatures[work.Slot]);
+				}
+			});
+		}
+
+		{
+			ENGINE_PROFILE_CAT("Authority::FinishMany", core::ProfileCategory::Network);
+			for (const size_t index : active) {
+				const PublishRequest &request = requests[index];
+				request.Source.ReportSignatures();
+				request.Source.FinishSurvey(request.World);
+				request.Source.PublishAfterSurvey(request.World, request.Tick);
+			}
+		}
+
+		return active.size();
+	}
+
+	void Authority::PublishAfterSurvey(ecs::Store &store, uint64_t tick) {
 		// --- what has to happen on the thread that owns the store ------------
 		//
 		// **A join is the one part of a publish that builds a world**, and

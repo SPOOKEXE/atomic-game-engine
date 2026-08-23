@@ -191,8 +191,12 @@ namespace engine::effects {
 		// Whether the next refresh invalidates every particle in the block.
 		bool ClearRequested = false;
 
-		// Explicit padding, for the reason every other `Reserved` gives.
-		uint8_t Reserved[1] = {};
+		// The last block claim failed and should not be retried until some block
+		// returns capacity or the authored emitter changes.
+		//
+		// This occupies the byte that was explicit padding, so remembering a
+		// refusal does not widen the row walked for every emitter every tick.
+		bool Refused = false;
 	};
 	static_assert(sizeof(EmitterSlot) == 12);
 
@@ -548,6 +552,13 @@ namespace engine::effects {
 		// read, and a count that is not zero is the whole diagnosis.
 		uint32_t EmittersRefused = 0;
 
+		// How many block allocations were actually attempted this refresh.
+		//
+		// A full pool keeps refused emitters visible in `EmittersRefused`, but it
+		// must not retry every one every frame. This counter distinguishes those
+		// two states in tests and diagnostics.
+		uint32_t EmitterClaimAttempts = 0;
+
 		// How many particles a block wanted to emit and had no room for.
 		//
 		// Distinct from `EmittersRefused`: this is an emitter that *has* a block
@@ -635,6 +646,10 @@ namespace engine::effects {
 		// in that order in one `RefreshEmitters` - so a row freed this tick is
 		// reused on the next one rather than under the walk that freed it.
 		std::vector<uint32_t> FreeSlots;
+
+		// A returned particle range or block row makes refused emitters eligible
+		// for one new claim pass. It is consumed at the start of that pass.
+		bool RetryRefused = false;
 
 		// Whether the device owns the pool and this module only spawns into it.
 		//

@@ -233,6 +233,7 @@ namespace engine::effects {
 				systems[index].TextureRevision = 0;
 				systems[index].Free.clear();
 				systems[index].Used = 0;
+				systems[index].RetryRefused = false;
 				systems[index].Statistics = {};
 			}
 		}
@@ -250,7 +251,7 @@ namespace engine::effects {
 				slots[index].Enabled = true;
 				slots[index].Configured = false;
 				slots[index].ClearRequested = false;
-				slots[index].Reserved[0] = 0;
+				slots[index].Refused = false;
 			}
 		}
 	}

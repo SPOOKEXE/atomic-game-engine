@@ -434,6 +434,13 @@ namespace studio {
 		// The frame graph, which is the second of the two panels above.
 		bool ShowFrameGraph = false;
 
+		// Select the frame graph's docked tab on its first submitted frame.
+		//
+		// Kept separate from `ShowFrameGraph`: a panel restored as open from
+		// preferences must not steal focus on every launch, while an explicit
+		// `--graph` request should put the requested panel in front.
+		bool FocusFrameGraph = false;
+
 		// The assets manager, open at startup.
 		//
 		// **The same reason the two above take flags**, said in their own
@@ -3508,6 +3515,10 @@ namespace studio {
 		// Every world currently running. Worlds absent from this are in edit.
 		std::vector<WorldRun> Runs;
 
+		// Reused by `Simulate` when every live play link is submitted as one
+		// cross-scene replication batch.
+		std::vector<PlayLink *> ActivePlayLinks;
+
 		// The run a world belongs to, whether it is the authority or a replica.
 		//
 		// **`RunOf` answers for the authority alone**, because a run is recorded
@@ -5526,6 +5537,9 @@ namespace studio {
 		//@{
 		bool ShowStatistics = false;
 		bool ShowFrameGraph = false;
+		// How many more frames an explicit `--graph` should select the dock tab.
+		// A few frames outlast the first-run dock rebuild, as `FocusWorlds` does.
+		int FocusFrameGraphFrames = 0;
 
 		// Where the live bytes are, and whether they are climbing.
 		//
