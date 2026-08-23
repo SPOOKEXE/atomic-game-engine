@@ -256,28 +256,6 @@ namespace engine::effects {
 		// How many slots it owns.
 		uint32_t Capacity = 0;
 
-		// How many of them are alive, contiguous from `First`.
-		uint32_t Live = 0;
-
-		// How many this emitter has ever spawned.
-		//
-		// **The seed's index, and it must not be the slot number.** A slot is
-		// reused the instant a particle dies, so seeding from it makes every
-		// replacement identical to what it replaced - a steady emitter settles
-		// into a loop of the same handful of particles within one lifetime, which
-		// reads as a stuttering effect rather than as a seeding mistake. A
-		// monotonic counter gives every particle its own draw.
-		//
-		// Wraps at four billion, which at a thousand a second is seven weeks.
-		// Wrapping is harmless: it repeats a sequence, it does not corrupt one.
-		uint32_t Spawned = 0;
-
-		// One-shot births waiting for this resident block. Requests made before a
-		// block exists remain on `EmitterSlot` and move here when it is claimed.
-		// Keeping an assigned request here lets the step walk the compact resident
-		// arrays without reopening the ECS emitter column.
-		uint32_t Requested = 0;
-
 		// How fast speed is shed, as a fraction per second.
 		float Drag = 0.0f;
 
@@ -317,20 +295,9 @@ namespace engine::effects {
 		// claimed, which at scene load is the whole pool.
 		uint32_t Generation = 1;
 
-		// Seconds since this block last spawned anything.
-		//
-		// **What lets `Live` reach zero when the device owns the pool.** The
-		// host cannot see a particle die, so `Live` is what it has ever put in
-		// the block - which never falls, so a disabled emitter would hold its
-		// rows for as long as it existed and go on costing its capacity in
-		// quads with no extent. Past `Longest` nothing born before can still be
-		// alive, whatever the device is doing, and the block is empty by
-		// arithmetic rather than by observation.
-		float Idle = 0.0f;
-
 		// How many times the device-visible half of this block has changed.
 		//
-		// **Because a block record is three hundred and eighty-four bytes and a
+		// **Because a block record is hundreds of bytes and a
 		// scene may have a hundred thousand of them.** Staging every block every
 		// frame is thirty-nine megabytes of writes into a mapped transfer buffer -
 		// more than the sixteen the whole particle pool used to cost, which would
@@ -350,18 +317,6 @@ namespace engine::effects {
 		uint32_t Revision = 1;
 		uint32_t CurveRevision = 1;
 		//@}
-
-		// The longest a particle of this emitter can live, in seconds. Read with
-		// `Idle` and set from `ParticleEmitter::Lifetime`.
-		float Longest = 0.0f;
-
-		// What is left over from the last frame's emission, in particles.
-		//
-		// **A fractional accumulator, and it is what makes a low rate work at
-		// all.** An emitter at three particles a second over a sixtieth of a
-		// second owes 0.05 of a particle; truncating that emits nothing, forever.
-		// Roblox's emitters have the same accumulator for the same reason.
-		float Pending = 0.0f;
 
 		// The entity this block belongs to, so a dead emitter's block is freed.
 		ecs::Entity Owner;
@@ -397,6 +352,42 @@ namespace engine::effects {
 		float FlipbookRate = 12.0f;
 	};
 
+	// The compact mutable row streamed by rate planning and host-side spawning.
+	//
+	// Kept beside `EmitterBlock`, indexed identically. The block is hundreds of
+	// bytes of curves, transforms and device parameters, while a simulation tick
+	// needs only this row until an emitter actually owes a birth. Splitting the
+	// mutable counters keeps the hundred-thousand-emitter steady walk contiguous.
+	struct EmitterRuntime {
+		// How many particles are alive. The host keeps a prefix; a device-owned
+		// block keeps the number ever placed in its ring, capped to capacity.
+		uint32_t Live = 0;
+
+		// The monotonic per-emitter seed index. A slot is reused, so using it would
+		// make replacement particles repeat the ones they replace.
+		uint32_t Spawned = 0;
+
+		// One-shot births waiting for an already resident block.
+		uint32_t Requested = 0;
+
+		// Fractional continuous-emission debt.
+		float Pending = 0.0f;
+
+		// Time since the last birth and the maximum time one can remain alive.
+		//@{
+		float Idle = 0.0f;
+		float Longest = 0.0f;
+		//@}
+
+		// Zero while disabled, otherwise authored rate times time scale.
+		float ContinuousRate = 0.0f;
+
+		// The guaranteed first birth chooses a deterministic recurring phase after
+		// it is planned, preserving immediate start without synchronising a crowd.
+		bool RatePhasePending = true;
+		bool Enabled = true;
+	};
+
 	// The compact authored state needed only when a particle is born.
 	//
 	// Kept beside `EmitterBlock`, indexed identically, because adding these fields
@@ -414,8 +405,6 @@ namespace engine::effects {
 		core::NumberRange RotationSpeed;
 		core::NumberRange Rotation;
 
-		float Rate = 0.0f;
-		float TimeScale = 1.0f;
 		float SpreadX = 0.0f;
 		float SpreadY = 0.0f;
 		float ShapePartial = 0.0f;
@@ -424,7 +413,6 @@ namespace engine::effects {
 		ParticleShape Shape = ParticleShape::Box;
 		ParticleShapeStyle ShapeStyle = ParticleShapeStyle::Volume;
 		ParticleShapeDirection ShapeDirection = ParticleShapeDirection::Outward;
-		bool Enabled = true;
 	};
 
 	// One particle's simulation half.
@@ -589,6 +577,9 @@ namespace engine::effects {
 
 		// Spawn-only rows, indexed exactly as `Blocks`.
 		std::vector<EmitterSpawnState> SpawnStates;
+
+		// Mutable rate and ring counters, indexed exactly as `Blocks`.
+		std::vector<EmitterRuntime> RuntimeStates;
 
 		// The immediate parent used to resolve each block's cached frame.
 		//

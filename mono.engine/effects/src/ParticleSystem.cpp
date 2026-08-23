@@ -609,17 +609,21 @@ namespace engine::effects {
 			state.Lifetime = emitter.Lifetime;
 			state.RotationSpeed = emitter.RotationSpeed;
 			state.Rotation = emitter.Rotation;
-			state.Rate = emitter.Rate;
-			state.TimeScale = std::max(emitter.TimeScale, 0.0f);
 			state.SpreadX = emitter.SpreadAngle.X * RADIANS_PER_DEGREE;
 			state.SpreadY = emitter.SpreadAngle.Y * RADIANS_PER_DEGREE;
 			state.ShapePartial = emitter.ShapePartial;
 			state.Shape = emitter.Shape;
 			state.ShapeStyle = emitter.ShapeStyle;
 			state.ShapeDirection = emitter.ShapeDirection;
-			state.Enabled = emitter.Enabled;
 			state.VelocityInheritance = emitter.VelocityInheritance;
 			RefreshSpawnParentState(store, entity, state);
+		}
+
+		void RefreshRuntimeState(const ParticleEmitter &emitter, EmitterRuntime &runtime) {
+			runtime.Longest = std::max(emitter.Lifetime.Maximum, 0.0f);
+			runtime.Enabled = emitter.Enabled;
+			runtime.ContinuousRate =
+				emitter.Enabled ? std::max(emitter.Rate, 0.0f) * std::max(emitter.TimeScale, 0.0f) : 0.0f;
 		}
 	}
 
@@ -738,8 +742,8 @@ namespace engine::effects {
 		ParticleSystem *system = store.ResourceMutable<ParticleSystem>();
 		const uint32_t ceiling = system == nullptr ? 4096u : system->BlockCeiling;
 		uint32_t *pending = &slot->Requested;
-		if (system != nullptr && slot->Index < system->Blocks.size()) {
-			pending = &system->Blocks[slot->Index].Requested;
+		if (system != nullptr && slot->Index < system->RuntimeStates.size()) {
+			pending = &system->RuntimeStates[slot->Index].Requested;
 		}
 		const uint64_t requested = static_cast<uint64_t>(*pending) + count;
 		*pending = static_cast<uint32_t>(std::min<uint64_t>(requested, ceiling));
@@ -760,8 +764,8 @@ namespace engine::effects {
 		slot->Requested = 0;
 		if (ParticleSystem *system = store.ResourceMutable<ParticleSystem>(); system != nullptr) {
 			system->RefreshRequested = true;
-			if (slot->Index < system->Blocks.size()) {
-				system->Blocks[slot->Index].Requested = 0;
+			if (slot->Index < system->RuntimeStates.size()) {
+				system->RuntimeStates[slot->Index].Requested = 0;
 			}
 		}
 		slot->ClearRequested = true;
@@ -837,7 +841,8 @@ namespace engine::effects {
 
 			const uint32_t index = slot.Index;
 			EmitterBlock &block = system->Blocks[index];
-			slot.Requested = block.Requested;
+			EmitterRuntime &runtime = system->RuntimeStates[index];
+			slot.Requested = runtime.Requested;
 			if (block.Capacity > 0) {
 				system->Free.emplace_back(block.First, block.Capacity);
 				system->RetryRefused = true;
@@ -845,8 +850,8 @@ namespace engine::effects {
 				residentChanged = true;
 			}
 			block.Capacity = 0;
-			block.Live = 0;
-			block.Requested = 0;
+			runtime.Live = 0;
+			runtime.Requested = 0;
 			block.Owner = ecs::NULL_ENTITY;
 			block.ClaimedAt = 0;
 			system->FreeSlots.push_back(index);
@@ -876,7 +881,9 @@ namespace engine::effects {
 			}
 
 			EmitterBlock &block = system->Blocks[slot->Index];
+			EmitterRuntime &runtime = system->RuntimeStates[slot->Index];
 			RefreshSpawnState(store, entity, emitter, system->SpawnStates[slot->Index]);
+			RefreshRuntimeState(emitter, runtime);
 			block.RateOverDistance = emitter.RateOverDistance;
 			if (block.ParticleLimit != emitter.MaxParticles) {
 				releaseBlock(*slot);
@@ -884,7 +891,6 @@ namespace engine::effects {
 			}
 
 			SampleCurves(emitter, block.Curves);
-			block.Longest = std::max(emitter.Lifetime.Maximum, 0.0f);
 			block.CurveRevision++;
 			residentChanged = true;
 			if (ApplyPlayback(store, emitter, block, true, catalogueChanged)) {
@@ -949,19 +955,21 @@ namespace engine::effects {
 				}
 				if (holds) {
 					EmitterBlock &block = system->Blocks[slot.Index];
+					EmitterRuntime &runtime = system->RuntimeStates[slot.Index];
 
 					if (slot.ClearRequested) {
 						block.Generation++;
 						block.Revision++;
 						residentChanged = true;
-						block.Live = 0;
-						block.Spawned = 0;
-						block.Pending = 0.0f;
-						block.Idle = 0.0f;
+						runtime.Live = 0;
+						runtime.Spawned = 0;
+						runtime.Pending = 0.0f;
+						runtime.Idle = 0.0f;
+						runtime.RatePhasePending = true;
 						slot.ClearRequested = false;
 					}
 
-					if (!slot.Enabled && block.Requested == 0 && block.Live == 0) {
+					if (!slot.Enabled && runtime.Requested == 0 && runtime.Live == 0) {
 						releaseBlock(slot);
 						return;
 					}
@@ -978,8 +986,8 @@ namespace engine::effects {
 						const core::CFrame frame = FrameOfParent(store, parent);
 						if (!SameFrame(frame, block.Frame)) {
 							if (slot.Enabled && block.RateOverDistance > 0.0f) {
-								block.Pending += (frame.Position - block.Frame.Position).Magnitude() *
-												 block.RateOverDistance;
+								runtime.Pending += (frame.Position - block.Frame.Position).Magnitude() *
+												   block.RateOverDistance;
 							}
 							block.Frame = frame;
 							block.Revision++;
@@ -1035,10 +1043,12 @@ namespace engine::effects {
 				block.Capacity = wanted;
 				block.Owner = entity;
 				block.ClaimedAt = claimGeneration;
-				block.Longest = std::max(emitter->Lifetime.Maximum, 0.0f);
 				block.ParticleLimit = emitter->MaxParticles;
 				block.RateOverDistance = emitter->RateOverDistance;
-				block.Requested = std::exchange(slot.Requested, 0u);
+
+				EmitterRuntime runtime;
+				runtime.Requested = std::exchange(slot.Requested, 0u);
+				RefreshRuntimeState(*emitter, runtime);
 
 				// **A fresh block owes one particle immediately.**
 				//
@@ -1053,7 +1063,7 @@ namespace engine::effects {
 				// starts" true at every rate. It is not free particles: the debt
 				// is subtracted like any other, so the *steady* rate is unchanged
 				// and only the first particle moves.
-				block.Pending = emitter->Enabled && emitter->Rate > 0.0f ? 1.0f : 0.0f;
+				runtime.Pending = emitter->Enabled && emitter->Rate > 0.0f ? 1.0f : 0.0f;
 				SampleCurves(*emitter, block.Curves);
 				ApplyPlayback(store, *emitter, block);
 				const ecs::Entity parent = store.ParentOf(entity);
@@ -1081,11 +1091,13 @@ namespace engine::effects {
 					slot.Index = reused;
 					system->Blocks[reused] = block;
 					system->SpawnStates[reused] = spawnState;
+					system->RuntimeStates[reused] = runtime;
 					system->FrameParents[reused] = parent;
 				} else {
 					slot.Index = static_cast<uint32_t>(system->Blocks.size());
 					system->Blocks.push_back(block);
 					system->SpawnStates.push_back(spawnState);
+					system->RuntimeStates.push_back(runtime);
 					system->FrameParents.push_back(parent);
 				}
 				slot.Refused = false;
@@ -1120,11 +1132,12 @@ namespace engine::effects {
 		size_t live = 0;
 		for (size_t index = 0; index < system->Blocks.size(); index++) {
 			EmitterBlock &block = system->Blocks[index];
+			EmitterRuntime &runtime = system->RuntimeStates[index];
 			if (block.ClaimedAt != claimGeneration && block.Capacity > 0) {
 				system->Free.emplace_back(block.First, block.Capacity);
 				system->RetryRefused = true;
 				block.Capacity = 0;
-				block.Live = 0;
+				runtime.Live = 0;
 				block.Owner = ecs::NULL_ENTITY;
 
 				// **And the row itself, which used to be abandoned.** See
@@ -1297,6 +1310,7 @@ namespace engine::effects {
 		// incremented half a million times a frame is a cache line every worker
 		// fights over, and the sum is the same number either way.
 		std::vector<EmitterBlock> &blocks = system->Blocks;
+		std::vector<EmitterRuntime> &runtimes = system->RuntimeStates;
 		const size_t carriedBirths = system->DeviceStepped ? system->Births.size() : 0;
 
 		// **Two spans, because the two halves answer to different things.**
@@ -1314,9 +1328,10 @@ namespace engine::effects {
 			parallel::Jobs::For(
 				blocks.size(),
 				BLOCK_GRAIN,
-				[&blocks, instances, states, capacity, delta](size_t begin, size_t end) {
+				[&blocks, &runtimes, instances, states, capacity, delta](size_t begin, size_t end) {
 					for (size_t index = begin; index < end; index++) {
 						EmitterBlock &block = blocks[index];
+						EmitterRuntime &runtime = runtimes[index];
 						if (block.Capacity == 0 || block.First + block.Capacity > capacity) {
 							continue;
 						}
@@ -1349,7 +1364,7 @@ namespace engine::effects {
 						// has yet to visit. Forwards with a swap is the classic way to
 						// skip a particle: the one swapped in takes the index the loop
 						// has already passed.
-						uint32_t live = block.Live;
+						uint32_t live = runtime.Live;
 						for (uint32_t at = live; at-- > 0;) {
 							const uint32_t row = block.First + at;
 							ParticleState &state = states[row];
@@ -1429,7 +1444,7 @@ namespace engine::effects {
 							instance.Slot = slot;
 						}
 
-						block.Live = live;
+						runtime.Live = live;
 					}
 				},
 				BLOCK_MINIMUM
@@ -1459,13 +1474,13 @@ namespace engine::effects {
 			ENGINE_PROFILE_CAT("particles.plan", core::ProfileCategory::Simulation);
 
 			uint32_t births = 0;
-			const size_t spawnRows = std::min(blocks.size(), system->SpawnStates.size());
+			const size_t spawnRows = std::min({blocks.size(), runtimes.size(), system->SpawnStates.size()});
 			for (size_t index = 0; index < spawnRows; index++) {
 				EmitterBlock &block = blocks[index];
+				EmitterRuntime &runtime = runtimes[index];
 				if (block.Capacity == 0) {
 					continue;
 				}
-				const EmitterSpawnState &emitter = system->SpawnStates[index];
 
 				// **Advanced before the enabled test, and that is the point of
 				// it.** A disabled emitter is exactly the one whose block has
@@ -1474,12 +1489,12 @@ namespace engine::effects {
 				// alive. Without this a block the device owns would hold its
 				// rows and go on drawing its capacity in quads with no extent
 				// for as long as the emitter existed.
-				block.Idle += delta;
-				if (system->DeviceStepped && block.Idle > block.Longest) {
-					block.Live = 0;
-					block.Spawned = 0;
+				runtime.Idle += delta;
+				if (system->DeviceStepped && runtime.Idle > runtime.Longest) {
+					runtime.Live = 0;
+					runtime.Spawned = 0;
 				}
-				if (!emitter.Enabled && block.Live == 0) {
+				if (!runtime.Enabled && runtime.Live == 0) {
 					system->RefreshRequested = true;
 				}
 
@@ -1487,16 +1502,20 @@ namespace engine::effects {
 				// world. It is the emitter's own debt and it has to advance
 				// on every tick whether or not it comes due, so it is not
 				// part of what dispatches.
-				if (emitter.Enabled) {
-					block.Pending += emitter.Rate * delta * emitter.TimeScale;
-				}
-				const auto accumulated = static_cast<uint32_t>(block.Pending);
-				const uint32_t owed = accumulated + block.Requested;
+				runtime.Pending += runtime.ContinuousRate * delta;
+				const auto accumulated = static_cast<uint32_t>(runtime.Pending);
+				const uint32_t owed = accumulated + runtime.Requested;
 				if (owed == 0) {
 					continue;
 				}
-				block.Pending -= static_cast<float>(accumulated);
-				block.Requested = 0;
+				runtime.Pending -= static_cast<float>(accumulated);
+				if (runtime.RatePhasePending && accumulated > 0) {
+					runtime.Pending = Unit(SeedOf(static_cast<uint32_t>(block.Owner.Id), 0, 14));
+					runtime.RatePhasePending = false;
+				}
+				runtime.Requested = 0;
+
+				const EmitterSpawnState &emitter = system->SpawnStates[index];
 
 				SpawnPlan plan;
 				plan.Block = static_cast<uint32_t>(index);
@@ -1520,7 +1539,7 @@ namespace engine::effects {
 
 				plan.Inherited = emitter.Inherited;
 
-				block.Idle = 0.0f;
+				runtime.Idle = 0.0f;
 				plan.BirthAt = static_cast<uint32_t>(carriedBirths + births);
 				births += owed;
 
@@ -1555,10 +1574,11 @@ namespace engine::effects {
 			parallel::Jobs::For(
 				plans.size(),
 				SPAWN_GRAIN,
-				[instances, states, &blocks, planned, ring, births](size_t begin, size_t end) {
+				[instances, states, &blocks, &runtimes, planned, ring, births](size_t begin, size_t end) {
 					for (size_t at = begin; at < end; at++) {
 						SpawnPlan &plan = planned[at];
 						EmitterBlock &block = blocks[plan.Block];
+						EmitterRuntime &runtime = runtimes[plan.Block];
 
 						const uint32_t id = plan.Id;
 						const Vector3 &half = plan.Half;
@@ -1592,13 +1612,13 @@ namespace engine::effects {
 							// refused. That is the better of the two: an emitter
 							// that outgrows its block thins out instead of
 							// stopping.
-							if (!ring && block.Live >= block.Capacity) {
+							if (!ring && runtime.Live >= block.Capacity) {
 								plan.Dropped = plan.Owed - spawn;
 								break;
 							}
 
-							const uint32_t row = ring ? block.First + block.Spawned % block.Capacity
-													  : block.First + block.Live;
+							const uint32_t row = ring ? block.First + runtime.Spawned % block.Capacity
+													  : block.First + runtime.Live;
 
 							// **Written into whichever of the two the pool lives
 							// in.** The host-side pass ages an array, so a birth
@@ -1615,7 +1635,7 @@ namespace engine::effects {
 							// the one it replaced, and a steady emitter would
 							// settle into a repeating loop of the same few
 							// particles.
-							const uint32_t index = block.Spawned++;
+							const uint32_t index = runtime.Spawned++;
 
 							const Vector3 local = SpawnPoint(plan, half, id, index);
 							const Vector3 direction = SpawnDirection(plan, local, id, index);
@@ -1663,7 +1683,8 @@ namespace engine::effects {
 							// a count of what has ever been born: the device
 							// draws the whole capacity and works out for itself
 							// which slots hold anything.
-							block.Live = ring ? std::min(block.Spawned, block.Capacity) : block.Live + 1;
+							runtime.Live =
+								ring ? std::min(runtime.Spawned, block.Capacity) : runtime.Live + 1;
 						}
 					}
 				},
@@ -1683,8 +1704,8 @@ namespace engine::effects {
 			counted.SpawnsDropped += plan.Dropped;
 		}
 
-		for (const EmitterBlock &block : blocks) {
-			counted.Live += block.Live;
+		for (const EmitterRuntime &runtime : runtimes) {
+			counted.Live += runtime.Live;
 		}
 
 		system->Statistics = counted;

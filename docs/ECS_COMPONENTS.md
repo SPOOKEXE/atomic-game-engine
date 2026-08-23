@@ -44,7 +44,7 @@ state until v0.19.
 | `effects.Beam` | 712 | 8 | yes | . | yes | . | An authored beam drawn between two attachments: colour and transparency along its length, the texture and its scroll, end widths and curve control. |
 | `effects.EmitterSlot` | 12 | 4 | yes | . | . | . | Which row of the particle pool's block table an emitter owns, kept on the emitter's own row so the per-frame passes read a column instead of a hash map. |
 | `effects.ParticleEmitter` | 1296 | 4 | yes | . | . | . | The authored settings of one particle emitter: size, colour, transparency and squash over a particle's life, the spawn shape and rate, and the material and flipbook facts. |
-| `effects.ParticleSystem` | 312 | 8 | yes | . | . | . | Per-world singleton particle pool: the particle slots a step writes, the per-emitter blocks, the free lists that hand slots and blocks out, and last step's statistics. |
+| `effects.ParticleSystem` | 336 | 8 | yes | . | . | . | Per-world singleton particle pool: the particle slots a step writes, the per-emitter blocks, the free lists that hand slots and blocks out, and last step's statistics. |
 | `effects.RibbonBuffer` | 48 | 8 | yes | . | . | . | Per-world singleton holding the vertices and per-ribbon runs that this frame's beams and trails were built into, ready for the renderer. |
 | `effects.Trail` | 1152 | 8 | yes | . | yes | . | A trail following two attachments: its authored colour, transparency, lifetime and texture, plus the ring of recorded edge points it is drawn from. |
 

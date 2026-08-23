@@ -835,22 +835,10 @@ namespace engine::render {
 			Particles.SeamCount = 0;
 			Particles.ParamUpdates = 0;
 			Particles.CurveUpdates = 0;
-			Particles.Delta = view.ParticleDelta + ActiveParticleWorld->CarriedDelta;
-
-			ParticleDispatch dispatched{true, 0};
-			if (view.ParticleDelta > 0.0f) {
-				dispatched = DispatchParticles(command, timingSlot);
-			}
-			if (!dispatched.Succeeded) {
-				ActiveParticleWorld->PreparedRevisionValid = false;
-				ActiveParticleWorld->CarriedDelta = Particles.Delta;
-				std::fill(Particles.ParamRevision.begin(), Particles.ParamRevision.end(), 0);
-				std::fill(Particles.CurveRevision.begin(), Particles.CurveRevision.end(), 0);
-				return {};
-			}
+			Particles.Delta = 0.0f;
 
 			ActiveParticleWorld->PreparedFrame = FrameCounter;
-			return {ActiveParticleWorld->PreparedCount, dispatched.Count};
+			return {ActiveParticleWorld->PreparedCount, 0};
 		}
 		const bool rebuildLayout = !ActiveParticleWorld->PreparedRevisionValid ||
 								   ActiveParticleWorld->PreparedLayoutRevision != view.ParticleLayoutRevision;
@@ -1071,7 +1059,12 @@ namespace engine::render {
 		Particles.WorkUpdates = rebuildLayout ? written : 0;
 		Particles.ParamUpdates = params;
 		Particles.CurveUpdates = curves;
-		Particles.Delta = view.ParticleDelta + ActiveParticleWorld->CarriedDelta;
+		Particles.Delta = ParticleStepDelta(
+			ActiveParticleWorld->PreparedRevision,
+			view.ParticleRevision,
+			view.ParticleDelta,
+			ActiveParticleWorld->CarriedDelta
+		);
 
 		// The births and the panes, both small and both straight copies - a birth
 		// is sixty bytes and a scene has thousands of them against half a million
@@ -1108,6 +1101,7 @@ namespace engine::render {
 		if (!dispatched.Succeeded) {
 			ActiveParticleWorld->PreparedRevisionValid = false;
 			ActiveParticleWorld->CarriedDelta = Particles.Delta;
+			ActiveParticleWorld->PreparedRevision = view.ParticleRevision;
 			std::fill(Particles.ParamRevision.begin(), Particles.ParamRevision.end(), 0);
 			std::fill(Particles.CurveRevision.begin(), Particles.CurveRevision.end(), 0);
 			return {};

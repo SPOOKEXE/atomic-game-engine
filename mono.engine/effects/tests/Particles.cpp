@@ -368,6 +368,42 @@ TEST_CASE("a fractional rate still emits", "[effects]") {
 	REQUIRE(emitted == 3);
 }
 
+TEST_CASE("equal-rate device emitters do not pulse every birth on one tick", "[effects][device]") {
+	Store store("effects_test");
+	engine::effects::RegisterEffectClasses();
+	constexpr uint32_t emitters = 600;
+	engine::effects::InstallParticles(store, emitters * 6);
+	store.ResourceMutable<ParticleSystem>()->DeviceStepped = true;
+
+	engine::scene::PartDesc desc;
+	desc.Simulated = false;
+	const Entity part = engine::scene::MakePart(store, desc);
+	const auto emitterClass = engine::ecs::Classes::Find(engine::core::Name("ParticleEmitter"));
+	for (uint32_t index = 0; index < emitters; index++) {
+		const Entity emitter = store.CreateInstance(emitterClass);
+		store.SetParent(emitter, part);
+		Settings(store, emitter).Rate = 5.0f;
+		Settings(store, emitter).Lifetime = NumberRange{1.0f, 1.0f};
+	}
+
+	// Every emitter still starts immediately. Only the recurring rate is phased,
+	// which is the distinction an author sees between a responsive effect and a
+	// hundred-thousand-emitter simulation hitch.
+	CHECK(Frame(store, 1.0f / 60.0f).Emitted == emitters);
+
+	uint32_t recurring = 0;
+	uint32_t largestTick = 0;
+	for (uint32_t tick = 0; tick < 12; tick++) {
+		const uint32_t born = Frame(store, 1.0f / 60.0f).Emitted;
+		recurring += born;
+		largestTick = std::max(largestTick, born);
+	}
+
+	CHECK(recurring >= emitters - 1);
+	CHECK(recurring <= emitters);
+	CHECK(largestTick < emitters / 6);
+}
+
 TEST_CASE("a flipbook plays only the cells that hold a frame", "[effects]") {
 	Store store("effects_test");
 	const Entity emitter = MakeEmitter(store);
@@ -711,8 +747,9 @@ TEST_CASE("the pool holds the scale the roadmap asks for", "[effects]") {
 	// capacity would be writing another emitter's particles, and the symptom is
 	// an effect that flickers between two shapes rather than a crash.
 	const auto *system = store.Resource<ParticleSystem>();
-	for (const auto &block : system->Blocks) {
-		REQUIRE(block.Live <= block.Capacity);
+	for (size_t index = 0; index < system->Blocks.size(); index++) {
+		const auto &block = system->Blocks[index];
+		REQUIRE(system->RuntimeStates[index].Live <= block.Capacity);
 		REQUIRE(block.First + block.Capacity <= system->Capacity);
 	}
 
@@ -922,6 +959,7 @@ TEST_CASE("a destroyed emitter gives its block row back", "[effects]") {
 	CHECK(system->Blocks.size() == 2);
 	CHECK(system->FrameParents.size() == system->Blocks.size());
 	CHECK(system->SpawnStates.size() == system->Blocks.size());
+	CHECK(system->RuntimeStates.size() == system->Blocks.size());
 
 	// And the surviving emitter still has its own row and is still emitting.
 	CHECK(system->Statistics.Blocks == 1);
@@ -997,6 +1035,7 @@ TEST_CASE("a device-stepped block spawns round its ring rather than refusing", "
 
 	const auto *system = store.Resource<engine::effects::ParticleSystem>();
 	const engine::effects::EmitterBlock &block = system->Blocks[0];
+	const engine::effects::EmitterRuntime &runtime = system->RuntimeStates[0];
 
 	CHECK(dropped == 0);
 	CHECK(emitted > block.Capacity);
@@ -1004,9 +1043,9 @@ TEST_CASE("a device-stepped block spawns round its ring rather than refusing", "
 	// **Round, not off the end.** Every row the ring ever named is inside the
 	// block, which is the property the whole design rests on: the shader is
 	// handed `First` and `Capacity` and trusts them.
-	CHECK(block.Spawned == emitted);
-	CHECK(block.First + block.Spawned % block.Capacity < block.First + block.Capacity);
-	CHECK(block.Live == std::min(block.Spawned, block.Capacity));
+	CHECK(runtime.Spawned == emitted);
+	CHECK(block.First + runtime.Spawned % block.Capacity < block.First + block.Capacity);
+	CHECK(runtime.Live == std::min(runtime.Spawned, block.Capacity));
 	CHECK(system->Births.size() <= block.Capacity * 2);
 }
 
@@ -1068,7 +1107,7 @@ TEST_CASE("a device block empties once nothing has been born for a lifetime", "[
 	for (int frame = 0; frame < 30; frame++) {
 		Frame(store, 1.0f / 60.0f);
 	}
-	REQUIRE(store.Resource<engine::effects::ParticleSystem>()->Blocks[0].Live > 0);
+	REQUIRE(store.Resource<engine::effects::ParticleSystem>()->RuntimeStates[0].Live > 0);
 
 	// Turned off. The host cannot see a particle die, so this is the only thing
 	// that ever brings `Live` back down - and without it a disabled emitter
@@ -1078,5 +1117,5 @@ TEST_CASE("a device block empties once nothing has been born for a lifetime", "[
 		Frame(store, 1.0f / 60.0f);
 	}
 
-	CHECK(store.Resource<engine::effects::ParticleSystem>()->Blocks[0].Live == 0);
+	CHECK(store.Resource<engine::effects::ParticleSystem>()->RuntimeStates[0].Live == 0);
 }

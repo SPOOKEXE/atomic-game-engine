@@ -6,6 +6,7 @@
 
 TEST_SUITE_ID("engine.render.particlework")
 
+using engine::render::ParticleStepDelta;
 using engine::render::ParticleWorkgroups;
 using engine::render::ParticleWorkItem;
 
@@ -27,4 +28,11 @@ TEST_CASE("small emitters share full compute groups instead of padding per emitt
 	CHECK(ParticleWorkgroups(workItems) < emitters / 10);
 	CHECK(ParticleWorkgroups(0) == 0);
 	CHECK(ParticleWorkgroups(65) == 2);
+}
+
+TEST_CASE("an uncapped redraw does not advance a resident particle revision twice", "[render][particles]") {
+	CHECK(ParticleStepDelta(40, 40, 1.0f / 60.0f, 0.0f) == 0.0f);
+	CHECK(ParticleStepDelta(40, 41, 1.0f / 60.0f, 0.0f) == 1.0f / 60.0f);
+	CHECK(ParticleStepDelta(41, 41, 1.0f / 60.0f, 0.025f) == 0.025f);
+	CHECK(ParticleStepDelta(40, 41, 1.0f / 60.0f, 0.025f) == 0.025f + 1.0f / 60.0f);
 }

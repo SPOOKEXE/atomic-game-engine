@@ -18,4 +18,13 @@ namespace engine::render {
 	constexpr uint32_t ParticleWorkgroups(uint32_t workItems) {
 		return (workItems + 63u) / 64u;
 	}
+
+	// A presented revision advances the resident pool once. Rendering the same
+	// revision again only reuses its output, while a failed submission carries
+	// the unsubmitted time without charging the same revision twice.
+	constexpr float ParticleStepDelta(
+		uint64_t preparedRevision, uint64_t presentedRevision, float presentedDelta, float carriedDelta
+	) {
+		return carriedDelta + (preparedRevision == presentedRevision ? 0.0f : presentedDelta);
+	}
 }
