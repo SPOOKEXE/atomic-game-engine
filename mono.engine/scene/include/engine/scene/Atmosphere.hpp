@@ -258,7 +258,11 @@ namespace engine::scene {
 		SkyboxSource Skybox = SkyboxSource::None;
 		bool HasAtmosphere = false;
 		bool HasClouds = false;
-		uint8_t Reserved = 0;
+		// The selected atmosphere provider owns procedural controls.
+		bool HasAtmosphereCompute = false;
+		// The selected cloud provider owns compute controls.
+		bool HasCloudCompute = false;
+		uint8_t Reserved[3] = {};
 	};
 
 	// The world's atmosphere, or the defaults when it has none.

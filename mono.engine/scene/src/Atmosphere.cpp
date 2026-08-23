@@ -171,6 +171,7 @@ namespace engine::scene {
 					environment.Air = Clamped(*air);
 					environment.HasAtmosphere = true;
 					if (const AtmosphereProcedural *compute = store.Get<AtmosphereProcedural>(descendant)) {
+						environment.HasAtmosphereCompute = true;
 						environment.AirCompute = Clamped(*compute);
 					}
 				}
@@ -181,6 +182,7 @@ namespace engine::scene {
 					environment.CloudLayer = Clamped(*clouds);
 					environment.HasClouds = true;
 					if (const CloudCompute *compute = store.Get<CloudCompute>(descendant)) {
+						environment.HasCloudCompute = true;
 						environment.CloudVolume = Clamped(*compute);
 					}
 				}

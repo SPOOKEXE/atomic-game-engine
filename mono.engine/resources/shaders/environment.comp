@@ -155,12 +155,12 @@ vec3 ApplyAtmosphere(vec3 colour, vec3 direction) {
 	float rayleigh = source.Modes.y == 2u ? source.AtmosphereCompute.z : 1.0;
 	float mie = source.Modes.y == 2u ? source.AtmosphereCompute.w : 1.0;
 	vec3 scattered = source.AtmosphereColour.rgb * (0.35 + horizon * source.Atmosphere.w * 0.12) * rayleigh;
-	if (source.Shaders.y == 1u) {
+	if (source.Modes.y == 2u && source.Shaders.y == 1u) {
 		thickness *= 0.35;
-	} else if (source.Shaders.y == 2u) {
+	} else if (source.Modes.y == 2u && source.Shaders.y == 2u) {
 		scattered *= vec3(1.6, 0.48, 0.22);
 		thickness = min(thickness * 1.35, 1.0);
-	} else if (source.Shaders.y == 3u) {
+	} else if (source.Modes.y == 2u && source.Shaders.y == 3u) {
 		scattered *= vec3(0.34, 1.2, 0.72);
 	}
 	colour = mix(colour * exp(-source.AtmosphereDecay.rgb * thickness * mie), scattered, thickness);
@@ -207,7 +207,7 @@ vec3 ApplyClouds(vec3 colour, vec3 direction) {
 	float alpha = smoothstep(coverage, min(coverage + 0.24, 1.0), density) * source.Clouds.y;
 	alpha *= smoothstep(-0.03, 0.12, direction.y);
 	vec3 cloudColour = source.CloudColour.rgb;
-	if (source.Shaders.z == 2u) {
+	if (source.Modes.z == 2u && source.Shaders.z == 2u) {
 		cloudColour *= vec3(0.32, 0.36, 0.45);
 		alpha = min(alpha * 1.45, 1.0);
 	}

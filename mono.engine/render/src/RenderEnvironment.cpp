@@ -107,28 +107,39 @@ namespace engine::render {
 		};
 		std::array<SDL_GPUTexture *, 6> faces{};
 		uint32_t faceMask = 0;
-		uint64_t signature = scene::MixSignature(1, static_cast<uint8_t>(environment.Skybox));
+		const EnvironmentUniformModes modes = EnvironmentModesOf(environment);
+		uint64_t signature = scene::MixSignature(1, modes.Skybox);
+		signature = scene::MixSignature(signature, modes.Atmosphere);
+		signature = scene::MixSignature(signature, modes.Clouds);
 		for (size_t index = 0; index < faces.size(); index++) {
-			faces[index] = Textures.Find(names[index]);
-			if (names[index].IsValid() && faces[index] != nullptr) {
-				faceMask |= 1u << index;
+			if (modes.Skybox == 1) {
+				faces[index] = Textures.Find(names[index]);
+				if (names[index].IsValid() && faces[index] != nullptr) {
+					faceMask |= 1u << index;
+				}
+				signature = scene::MixSignature(signature, names[index].Id());
+				signature = scene::MixSignature(
+					signature, static_cast<uint64_t>(reinterpret_cast<uintptr_t>(faces[index]))
+				);
 			}
-			if (faces[index] == nullptr) {
-				faces[index] = Textures.Missing();
-			}
-			signature = scene::MixSignature(signature, names[index].Id());
-			signature = scene::MixSignature(
-				signature, static_cast<uint64_t>(reinterpret_cast<uintptr_t>(faces[index]))
-			);
+			faces[index] = faces[index] == nullptr ? Textures.Missing() : faces[index];
 		}
-		signature = Fold(signature, environment.SkyCompute);
-		signature = Fold(signature, environment.Air);
-		signature = Fold(signature, environment.AirCompute);
-		signature = Fold(signature, environment.CloudLayer);
-		signature = Fold(signature, environment.CloudVolume);
+		if (modes.Skybox == 2) {
+			signature = Fold(signature, environment.SkyCompute);
+		}
+		if (modes.Atmosphere != 0) {
+			signature = Fold(signature, environment.Air);
+		}
+		if (modes.Atmosphere == 2) {
+			signature = Fold(signature, environment.AirCompute);
+		}
+		if (modes.Clouds != 0) {
+			signature = Fold(signature, environment.CloudLayer);
+		}
+		if (modes.Clouds == 2) {
+			signature = Fold(signature, environment.CloudVolume);
+		}
 		signature = Fold(signature, Sun);
-		signature = scene::MixSignature(signature, environment.HasAtmosphere ? 1u : 0u);
-		signature = scene::MixSignature(signature, environment.HasClouds ? 1u : 0u);
 		if (target->Texture != nullptr && target->Signature == signature) {
 			return target->Texture;
 		}
@@ -168,10 +179,10 @@ namespace engine::render {
 
 		const scene::SkyboxCompute &sky = environment.SkyCompute;
 		const scene::Atmosphere &air = environment.Air;
-		const scene::AtmosphereProcedural &airCompute = environment.AirCompute;
+		const scene::AtmosphereProcedural airCompute = EnvironmentAtmosphereComputeOf(environment);
 		const scene::Clouds &clouds = environment.CloudLayer;
-		const scene::CloudCompute &cloudCompute = environment.CloudVolume;
-		const EnvironmentUniformModes modes = EnvironmentModesOf(environment);
+		const scene::CloudCompute cloudCompute = EnvironmentCloudComputeOf(environment);
+		const EnvironmentUniformShaders shaders = EnvironmentShadersOf(environment);
 		const EnvironmentUniforms uniforms{
 			.Zenith = Colour(sky.Zenith, sky.StarDensity),
 			.Horizon = Colour(sky.Horizon, sky.SunSize),
@@ -203,9 +214,9 @@ namespace engine::render {
 					std::clamp(cloudCompute.Steps, 1u, 64u),
 				},
 			.Shaders = glm::uvec4{
-				static_cast<uint32_t>(sky.Shader),
-				static_cast<uint32_t>(airCompute.Shader),
-				static_cast<uint32_t>(cloudCompute.Shader),
+				shaders.Skybox,
+				shaders.Atmosphere,
+				shaders.Clouds,
 				0u,
 			},
 		};

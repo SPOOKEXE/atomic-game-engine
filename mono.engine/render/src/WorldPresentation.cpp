@@ -1,3 +1,5 @@
+#include "EnvironmentModes.hpp"
+
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
@@ -54,15 +56,13 @@ namespace engine::render {
 
 	bool EnvironmentLayerPresent(const scene::WorldLighting &lighting) {
 		const scene::Environment &environment = lighting.EnvironmentState;
+		const EnvironmentUniformModes modes = EnvironmentModesOf(environment);
 		const bool texturedSky =
-			environment.Skybox == scene::SkyboxSource::Textures && environment.Textures.Enabled &&
+			modes.Skybox == 1 &&
 			(environment.Textures.Front.IsValid() || environment.Textures.Back.IsValid() ||
 			 environment.Textures.Left.IsValid() || environment.Textures.Right.IsValid() ||
 			 environment.Textures.Up.IsValid() || environment.Textures.Down.IsValid());
-		const bool computedSky =
-			environment.Skybox == scene::SkyboxSource::Compute && environment.SkyCompute.Enabled;
-		const bool clouds = environment.HasClouds && environment.CloudLayer.Enabled;
-		return texturedSky || computedSky || environment.HasAtmosphere || clouds;
+		return texturedSky || modes.Skybox == 2 || modes.Atmosphere != 0 || modes.Clouds != 0;
 	}
 
 	ScenePresentationSignatures
@@ -101,6 +101,7 @@ namespace engine::render {
 		// and providers outside Lighting cannot reach the sky node, so changing one
 		// of them must not redraw an identical scene.
 		const scene::Environment &environment = state.Lighting.EnvironmentState;
+		const EnvironmentUniformModes environmentModes = EnvironmentModesOf(environment);
 		if (!EnvironmentLayerPresent(state.Lighting)) {
 			environmentSignature = 0;
 		} else {
@@ -133,13 +134,19 @@ namespace engine::render {
 						FoldPresentationObject(environmentSignature, environment.SkyCompute);
 				}
 			}
-			if (environment.HasAtmosphere) {
+			if (environmentModes.Atmosphere != 0) {
 				environmentSignature = FoldPresentationObject(environmentSignature, environment.Air);
-				environmentSignature = FoldPresentationObject(environmentSignature, environment.AirCompute);
+				if (environmentModes.Atmosphere == 2) {
+					environmentSignature =
+						FoldPresentationObject(environmentSignature, environment.AirCompute);
+				}
 			}
-			if (environment.HasClouds) {
+			if (environmentModes.Clouds != 0) {
 				environmentSignature = FoldPresentationObject(environmentSignature, environment.CloudLayer);
-				environmentSignature = FoldPresentationObject(environmentSignature, environment.CloudVolume);
+				if (environmentModes.Clouds == 2) {
+					environmentSignature =
+						FoldPresentationObject(environmentSignature, environment.CloudVolume);
+				}
 			}
 			environmentSignature = FoldPresentation(environmentSignature, view.OverrideLighting ? 1u : 0u);
 			if (view.OverrideLighting) {

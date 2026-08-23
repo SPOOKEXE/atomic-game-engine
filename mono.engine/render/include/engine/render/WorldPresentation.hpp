@@ -147,6 +147,7 @@ namespace engine::render {
 	//
 	// @param store The world being presented.
 	// @param frame Cleared and filled with the complete particle input.
+	// @param selection Optional emitter membership rule and its revision.
 	// @return The number of live emitter batches.
 	size_t CollectParticleBatches(
 		ecs::Store &store, ParticleFrame &frame, const ParticleBatchSelection &selection = {}

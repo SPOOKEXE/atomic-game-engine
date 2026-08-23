@@ -139,6 +139,26 @@ TEST_CASE("only selected environment state invalidates scene pixels", "[render][
 	const uint64_t disabled = engine::render::ScenePresentationSignature(view, state);
 	state.Lighting.EnvironmentState.Textures.Front = Name("still-unused.atex");
 	CHECK(engine::render::ScenePresentationSignature(view, state) == disabled);
+
+	state = {};
+	state.Lighting.EnvironmentState.HasAtmosphere = true;
+	state.Lighting.EnvironmentState.HasAtmosphereCompute = true;
+	state.Lighting.EnvironmentState.AirCompute.Enabled = false;
+	const uint64_t authoredAtmosphere = engine::render::ScenePresentationSignature(view, state);
+	state.Lighting.EnvironmentState.AirCompute.Shader = engine::scene::AtmosphereProceduralShader::Alien;
+	CHECK(engine::render::ScenePresentationSignature(view, state) == authoredAtmosphere);
+	state.Lighting.EnvironmentState.AirCompute.Enabled = true;
+	CHECK(engine::render::ScenePresentationSignature(view, state) != authoredAtmosphere);
+
+	state = {};
+	state.Lighting.EnvironmentState.HasClouds = true;
+	state.Lighting.EnvironmentState.HasCloudCompute = true;
+	state.Lighting.EnvironmentState.CloudVolume.Enabled = false;
+	const uint64_t authoredClouds = engine::render::ScenePresentationSignature(view, state);
+	state.Lighting.EnvironmentState.CloudVolume.Shader = engine::scene::CloudComputeShader::Voxel;
+	CHECK(engine::render::ScenePresentationSignature(view, state) == authoredClouds);
+	state.Lighting.EnvironmentState.CloudVolume.Enabled = true;
+	CHECK(engine::render::ScenePresentationSignature(view, state) != authoredClouds);
 }
 
 TEST_CASE("empty Lighting has no retained environment layer", "[render][presentation][cache]") {
@@ -168,10 +188,17 @@ TEST_CASE("only enabled selected providers create an environment layer", "[rende
 	lighting = {};
 	lighting.EnvironmentState.HasAtmosphere = true;
 	CHECK(engine::render::EnvironmentLayerPresent(lighting));
+	lighting.EnvironmentState.HasAtmosphereCompute = true;
+	lighting.EnvironmentState.AirCompute.Enabled = false;
+	CHECK_FALSE(engine::render::EnvironmentLayerPresent(lighting));
 
 	lighting = {};
 	lighting.EnvironmentState.HasClouds = true;
 	lighting.EnvironmentState.CloudLayer.Enabled = false;
+	CHECK_FALSE(engine::render::EnvironmentLayerPresent(lighting));
+	lighting.EnvironmentState.CloudLayer.Enabled = true;
+	lighting.EnvironmentState.HasCloudCompute = true;
+	lighting.EnvironmentState.CloudVolume.Enabled = false;
 	CHECK_FALSE(engine::render::EnvironmentLayerPresent(lighting));
 }
 

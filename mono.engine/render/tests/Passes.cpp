@@ -181,7 +181,7 @@ TEST_CASE("authored compute can be scoped once per world", "[render][graph]") {
 	CHECK(renderer.SetPipeline(Name("world-compute#1"), graph));
 }
 
-TEST_CASE("disabled environment providers map to no GPU work", "[render][environment]") {
+TEST_CASE("environment enabled switches select only their authored GPU mode", "[render][environment]") {
 	engine::scene::Environment environment;
 	environment.Skybox = engine::scene::SkyboxSource::Textures;
 	CHECK(engine::render::EnvironmentModesOf(environment).Skybox == 1);
@@ -194,9 +194,40 @@ TEST_CASE("disabled environment providers map to no GPU work", "[render][environ
 	CHECK(engine::render::EnvironmentModesOf(environment).Skybox == 0);
 
 	environment.HasClouds = true;
+	CHECK(engine::render::EnvironmentModesOf(environment).Clouds == 1);
+	environment.HasCloudCompute = true;
 	CHECK(engine::render::EnvironmentModesOf(environment).Clouds == 2);
+	environment.CloudVolume.Shader = engine::scene::CloudComputeShader::Voxel;
+	CHECK(
+		engine::render::EnvironmentShadersOf(environment).Clouds ==
+		static_cast<uint32_t>(engine::scene::CloudComputeShader::Voxel)
+	);
+	environment.CloudVolume.Enabled = false;
+	CHECK(engine::render::EnvironmentModesOf(environment).Clouds == 0);
+	CHECK(engine::render::EnvironmentShadersOf(environment).Clouds == 0);
+	CHECK(
+		engine::render::EnvironmentCloudComputeOf(environment).Shader ==
+		engine::scene::CloudComputeShader::Cumulus
+	);
 	environment.CloudLayer.Enabled = false;
 	CHECK(engine::render::EnvironmentModesOf(environment).Clouds == 0);
+
+	environment.HasAtmosphere = true;
+	CHECK(engine::render::EnvironmentModesOf(environment).Atmosphere == 1);
+	environment.HasAtmosphereCompute = true;
+	environment.AirCompute.Shader = engine::scene::AtmosphereProceduralShader::Alien;
+	CHECK(engine::render::EnvironmentModesOf(environment).Atmosphere == 2);
+	CHECK(
+		engine::render::EnvironmentShadersOf(environment).Atmosphere ==
+		static_cast<uint32_t>(engine::scene::AtmosphereProceduralShader::Alien)
+	);
+	environment.AirCompute.Enabled = false;
+	CHECK(engine::render::EnvironmentModesOf(environment).Atmosphere == 0);
+	CHECK(engine::render::EnvironmentShadersOf(environment).Atmosphere == 0);
+	CHECK(
+		engine::render::EnvironmentAtmosphereComputeOf(environment).Shader ==
+		engine::scene::AtmosphereProceduralShader::Earth
+	);
 }
 
 TEST_CASE("optional default nodes can be disabled at the backend boundary", "[render][graph]") {

@@ -117,6 +117,8 @@ TEST_CASE("the resolved lighting carries the sky", "[scene][atmosphere]") {
 	CHECK(resolved.EnvironmentState.CloudLayer.Enabled);
 	CHECK(resolved.EnvironmentState.CloudLayer.Cover == Approx(0.3f));
 	CHECK(resolved.EnvironmentState.CloudLayer.WindSpeed == Approx(12.0f));
+	CHECK_FALSE(resolved.EnvironmentState.HasAtmosphereCompute);
+	CHECK_FALSE(resolved.EnvironmentState.HasCloudCompute);
 }
 
 TEST_CASE("only the first provider of each kind below Lighting resolves", "[scene][atmosphere][skybox]") {
@@ -148,6 +150,7 @@ TEST_CASE("only the first provider of each kind below Lighting resolves", "[scen
 	CHECK(environment.Textures.Front == Name("sky/front.atex"));
 	CHECK(environment.CloudLayer.Cover == Approx(0.2f));
 	CHECK_FALSE(environment.CloudVolume.Enabled);
+	CHECK_FALSE(environment.HasCloudCompute);
 }
 
 TEST_CASE("compute variants carry the common authored component", "[scene][atmosphere][compute]") {
@@ -168,10 +171,12 @@ TEST_CASE("compute variants carry the common authored component", "[scene][atmos
 
 	const Environment environment = EnvironmentOf(store);
 	CHECK(environment.HasAtmosphere);
+	CHECK(environment.HasAtmosphereCompute);
 	CHECK(environment.Air.Density == Approx(0.7f));
 	CHECK(environment.AirCompute.Enabled);
 	CHECK(environment.AirCompute.Samples == 31);
 	CHECK(environment.HasClouds);
+	CHECK(environment.HasCloudCompute);
 	CHECK(environment.CloudLayer.Cover == Approx(0.4f));
 	CHECK(environment.CloudVolume.Enabled);
 	CHECK(environment.CloudVolume.Steps == 23);
@@ -183,18 +188,28 @@ TEST_CASE("enabled properties preserve authored provider switches", "[scene][atm
 	const Entity lighting = Lighting(store);
 	const Entity sky = store.CreateInstance(Classes::Find(Name("SkyboxTextures")), "Sky");
 	const Entity clouds = store.CreateInstance(Classes::Find(Name("CloudCompute")), "Clouds");
+	const Entity atmosphere = store.CreateInstance(Classes::Find(Name("AtmosphereProcedural")), "Atmosphere");
 	REQUIRE(store.SetParent(sky, lighting));
 	REQUIRE(store.SetParent(clouds, lighting));
+	REQUIRE(store.SetParent(atmosphere, lighting));
 
 	const bool disabled = false;
 	REQUIRE(store.SetProperty(sky, Name("Enabled"), &disabled, sizeof(disabled)));
 	REQUIRE(store.SetProperty(clouds, Name("Enabled"), &disabled, sizeof(disabled)));
+	REQUIRE(store.SetProperty(clouds, Name("ComputeEnabled"), &disabled, sizeof(disabled)));
+	REQUIRE(store.SetProperty(atmosphere, Name("ProceduralEnabled"), &disabled, sizeof(disabled)));
 	CHECK_FALSE(store.Get<engine::scene::SkyboxTextures>(sky)->Enabled);
 	CHECK_FALSE(store.Get<Clouds>(clouds)->Enabled);
+	CHECK_FALSE(store.Get<engine::scene::CloudCompute>(clouds)->Enabled);
+	CHECK_FALSE(store.Get<engine::scene::AtmosphereProcedural>(atmosphere)->Enabled);
 
 	const Environment environment = EnvironmentOf(store);
 	CHECK_FALSE(environment.Textures.Enabled);
 	CHECK_FALSE(environment.CloudLayer.Enabled);
+	CHECK_FALSE(environment.CloudVolume.Enabled);
+	CHECK_FALSE(environment.AirCompute.Enabled);
+	CHECK(environment.HasCloudCompute);
+	CHECK(environment.HasAtmosphereCompute);
 }
 
 TEST_CASE("compute shader choices are closed dropdowns", "[scene][atmosphere][compute][enum]") {
