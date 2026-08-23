@@ -11,6 +11,7 @@
 // public header is what confines it to `src/`.
 
 #include "GpuHeap.hpp"
+#include "IndexResidency.hpp"
 #include "InstanceResidency.hpp"
 #include "RenderTypes.hpp"
 #include "ResourcePreview.hpp"
@@ -949,12 +950,11 @@ namespace engine::render {
 		// particle frame did - larger than the simulation and two orders of
 		// magnitude larger than recording the draw.
 		//
-		// What crosses now is `Blocks` - one 384-byte record per emitter, which
-		// is a five-thousand-emitter scene's two megabytes - and `Births`, which
-		// is whatever the tick spawned. `particle-step.comp` does the rest and
-		// writes its output straight into its world's buffer at the offsets
-		// `PrepareParticles` worked out, so the draw grouping is exactly what it
-		// was and there is no gather pass.
+		// Steady frames cross births and only the parameter or curve records that
+		// changed. The flat work list crosses when emitter layout changes.
+		// `particle-step.comp` does the rest and writes its output straight into
+		// its world's buffer at the offsets `PrepareParticles` worked out, so the
+		// draw grouping is exactly what it was and there is no gather pass.
 		struct ParticlePool {
 			// One state per slot, `STATE_WORDS` wide, read and written by the
 			// step and written by the spawn. Never read by the host.
@@ -962,20 +962,20 @@ namespace engine::render {
 			SDL_GPUTransferBuffer *StateStaging = nullptr;
 			uint32_t Slots = 0;
 
-			// The resident draw list: two words an emitter, in sorted batch order,
-			// so a workgroup index is an entry index and no live list is needed. It
-			// crosses only when the simulation revision changes.
+			// The resident work list: one block and state-row pair per particle slot,
+			// in sorted draw order. It crosses only when the layout changes, then lets
+			// the device run full 64-wide groups across emitter boundaries.
 			//@{
-			SDL_GPUBuffer *Draws = nullptr;
-			SDL_GPUTransferBuffer *DrawStaging = nullptr;
-			uint32_t DrawCapacity = 0;
+			SDL_GPUBuffer *Work = nullptr;
+			SDL_GPUTransferBuffer *WorkStaging = nullptr;
+			uint32_t WorkCapacity = 0;
 			//@}
 
 			// The two tables the step reads by block index, and the one staging
 			// pair that feeds both.
 			//
 			// **Persistent, and written only where they disagree with the host.**
-			// See `PARTICLE_DRAW_WORDS` for why: staging every block every frame
+			// See `PARTICLE_WORK_WORDS` for why: staging every block every frame
 			// is more traffic than the pool itself used to cost.
 			//@{
 			SDL_GPUBuffer *Params = nullptr;
@@ -1033,8 +1033,8 @@ namespace engine::render {
 
 			// What changed for the dispatch being recorded.
 			//@{
-			uint32_t Records = 0;
-			uint32_t DrawUpdates = 0;
+			uint32_t WorkItems = 0;
+			uint32_t WorkUpdates = 0;
 			uint32_t BirthCount = 0;
 			uint32_t SeamCount = 0;
 			uint32_t ParamUpdates = 0;
@@ -1106,7 +1106,7 @@ namespace engine::render {
 		//@{
 		bool ReserveParticlePool(uint32_t slots, SDL_GPUCommandBuffer *command);
 		bool ReserveParticleTables(uint32_t blocks);
-		bool ReserveParticleStaging(uint32_t draws, uint32_t births, uint32_t seams);
+		bool ReserveParticleStaging(uint32_t workItems, uint32_t births, uint32_t seams);
 		//@}
 
 		// Runs changed-state uploads, the spawn scatter and the step in the
@@ -1215,9 +1215,16 @@ namespace engine::render {
 			// are shared by every camera carrying the same world key.
 			std::vector<uint32_t> InstanceIndices;
 
-			SDL_GPUBuffer *InstanceIndexBuffer = nullptr;
-			SDL_GPUTransferBuffer *InstanceIndexTransfer = nullptr;
-			uint32_t InstanceIndexCapacity = 0;
+			// One acknowledged stream per possible in-flight frame. Partial copies
+			// preserve unchanged device bytes, so a buffer cannot be reused until the
+			// frame that last read it has retired.
+			struct InstanceIndexVersion {
+				SDL_GPUBuffer *Buffer = nullptr;
+				SDL_GPUTransferBuffer *Transfer = nullptr;
+				uint32_t Capacity = 0;
+			};
+			std::array<InstanceIndexVersion, IndexResidency::VERSIONS> InstanceIndexVersions;
+			IndexResidency ResidentIndices;
 
 			// Completed output images are separate from the target being written.
 			// The CPU publishes one only after its submission fence signals, so an
@@ -2038,7 +2045,9 @@ namespace engine::render {
 		void BindInstanceBuffers(SDL_GPURenderPass *pass, SDL_GPUBuffer *indices = nullptr);
 
 		bool CreateGeometry();
-		bool EnsureInstanceCapacity(uint32_t rows, uint32_t indices, bool &rowsReallocated);
+		bool EnsureInstanceCapacity(
+			uint32_t rows, uint32_t indices, bool &rowsReallocated, bool &indicesReallocated
+		);
 		bool EnsureDepth(uint32_t width, uint32_t height);
 
 		// The same, into whichever depth texture the caller owns. See

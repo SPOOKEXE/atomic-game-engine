@@ -463,13 +463,16 @@ namespace engine::render {
 		return true;
 	}
 
-	bool Renderer::Impl::EnsureInstanceCapacity(uint32_t rows, uint32_t indices, bool &rowsReallocated) {
+	bool Renderer::Impl::EnsureInstanceCapacity(
+		uint32_t rows, uint32_t indices, bool &rowsReallocated, bool &indicesReallocated
+	) {
 		SceneSlot &slot = SlotAt(ActiveSlot);
 		if (ActiveInstanceWorld == nullptr) {
 			return false;
 		}
 		InstanceWorld &world = *ActiveInstanceWorld;
 		rowsReallocated = false;
+		indicesReallocated = false;
 
 		const auto grown = [](uint32_t have, uint32_t need) {
 			uint32_t capacity = have == 0 ? 256 : have;
@@ -506,39 +509,42 @@ namespace engine::render {
 			rowsReallocated = true;
 		}
 
-		if (indices > slot.InstanceIndexCapacity || slot.InstanceIndexBuffer == nullptr ||
-			slot.InstanceIndexTransfer == nullptr) {
-			const uint32_t capacity = grown(slot.InstanceIndexCapacity, indices);
-			if (slot.InstanceIndexBuffer != nullptr) {
-				gpu::ReleaseBuffer(Device, slot.InstanceIndexBuffer);
+		const uint32_t indexVersion = static_cast<uint32_t>(FrameCounter % IndexResidency::VERSIONS);
+		SceneSlot::InstanceIndexVersion &residentIndices = slot.InstanceIndexVersions[indexVersion];
+		if (indices > residentIndices.Capacity || residentIndices.Buffer == nullptr ||
+			residentIndices.Transfer == nullptr) {
+			const uint32_t capacity = grown(residentIndices.Capacity, indices);
+			if (residentIndices.Buffer != nullptr) {
+				gpu::ReleaseBuffer(Device, residentIndices.Buffer);
 			}
-			if (slot.InstanceIndexTransfer != nullptr) {
-				gpu::ReleaseTransferBuffer(Device, slot.InstanceIndexTransfer);
+			if (residentIndices.Transfer != nullptr) {
+				gpu::ReleaseTransferBuffer(Device, residentIndices.Transfer);
 			}
 
 			const uint32_t bytes = capacity * static_cast<uint32_t>(sizeof(uint32_t));
 			SDL_GPUBufferCreateInfo bufferInfo{};
 			bufferInfo.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
 			bufferInfo.size = bytes;
-			slot.InstanceIndexBuffer = gpu::CreateBuffer(Device, &bufferInfo);
+			residentIndices.Buffer = gpu::CreateBuffer(Device, &bufferInfo);
 			SDL_GPUTransferBufferCreateInfo transferInfo{};
 			transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
 			transferInfo.size = bytes;
-			slot.InstanceIndexTransfer = gpu::CreateTransferBuffer(Device, &transferInfo);
-			if (slot.InstanceIndexBuffer == nullptr || slot.InstanceIndexTransfer == nullptr) {
+			residentIndices.Transfer = gpu::CreateTransferBuffer(Device, &transferInfo);
+			if (residentIndices.Buffer == nullptr || residentIndices.Transfer == nullptr) {
 				ENGINE_ERROR("instance index buffer of {} entries: {}", capacity, SDL_GetError());
-				slot.InstanceIndexCapacity = 0;
+				residentIndices.Capacity = 0;
 				return false;
 			}
-			slot.InstanceIndexCapacity = capacity;
+			residentIndices.Capacity = capacity;
+			indicesReallocated = true;
 		}
 
 		InstanceBuffer = world.Buffer;
 		InstanceTransfer = world.Transfer;
 		InstanceCapacity = world.Capacity;
-		InstanceIndexBuffer = slot.InstanceIndexBuffer;
-		InstanceIndexTransfer = slot.InstanceIndexTransfer;
-		InstanceIndexCapacity = slot.InstanceIndexCapacity;
+		InstanceIndexBuffer = residentIndices.Buffer;
+		InstanceIndexTransfer = residentIndices.Transfer;
+		InstanceIndexCapacity = residentIndices.Capacity;
 		return true;
 	}
 }

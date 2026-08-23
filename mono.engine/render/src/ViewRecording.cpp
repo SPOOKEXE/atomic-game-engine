@@ -1535,25 +1535,32 @@ namespace engine::render {
 			}
 			{
 				ENGINE_PROFILE_CAT("resident.camera", core::ProfileCategory::Render);
-				for (uint32_t index = 0; index < State->DrawOrder.size(); index++) {
-					const uint32_t source = State->DrawOrder[index];
-					const uint32_t drawSlot = cameraBase + index;
-					const uint32_t sceneSlot = State->SceneSlotOfSource[source];
-					target.InstanceIndices[drawSlot] = target.InstanceIndices[sceneSlot];
-					State->SlotMesh[drawSlot] = State->SlotMesh[sceneSlot];
-					State->SlotTexture[drawSlot] = State->SlotTexture[sceneSlot];
-					State->SlotNormalMap[drawSlot] = State->SlotNormalMap[sceneSlot];
-					State->SlotRoughnessMap[drawSlot] = State->SlotRoughnessMap[sceneSlot];
-					State->SlotOcclusionMap[drawSlot] = State->SlotOcclusionMap[sceneSlot];
-					State->SlotHeightMap[drawSlot] = State->SlotHeightMap[sceneSlot];
-					State->SlotMetalnessMap[drawSlot] = State->SlotMetalnessMap[sceneSlot];
-					State->SlotEmissiveMap[drawSlot] = State->SlotEmissiveMap[sceneSlot];
-					State->SlotResample[drawSlot] = State->SlotResample[sceneSlot];
-					State->SlotShader[drawSlot] = State->SlotShader[sceneSlot];
-					State->SlotTags[drawSlot] = State->SlotTags[sceneSlot];
-					State->SlotSeam[drawSlot] = State->SlotSeam[sceneSlot];
-					State->SlotSeamLight[drawSlot] = State->SlotSeamLight[sceneSlot];
-				}
+				const auto mapCameraRows = [&](size_t begin, size_t end) {
+					for (size_t index = begin; index < end; index++) {
+						const uint32_t source = State->DrawOrder[index];
+						const uint32_t drawSlot = cameraBase + static_cast<uint32_t>(index);
+						const uint32_t sceneSlot = State->SceneSlotOfSource[source];
+						target.InstanceIndices[drawSlot] = target.InstanceIndices[sceneSlot];
+						State->SlotMesh[drawSlot] = State->SlotMesh[sceneSlot];
+						State->SlotTexture[drawSlot] = State->SlotTexture[sceneSlot];
+						State->SlotNormalMap[drawSlot] = State->SlotNormalMap[sceneSlot];
+						State->SlotRoughnessMap[drawSlot] = State->SlotRoughnessMap[sceneSlot];
+						State->SlotOcclusionMap[drawSlot] = State->SlotOcclusionMap[sceneSlot];
+						State->SlotHeightMap[drawSlot] = State->SlotHeightMap[sceneSlot];
+						State->SlotMetalnessMap[drawSlot] = State->SlotMetalnessMap[sceneSlot];
+						State->SlotEmissiveMap[drawSlot] = State->SlotEmissiveMap[sceneSlot];
+						State->SlotResample[drawSlot] = State->SlotResample[sceneSlot];
+						State->SlotShader[drawSlot] = State->SlotShader[sceneSlot];
+						State->SlotTags[drawSlot] = State->SlotTags[sceneSlot];
+						State->SlotSeam[drawSlot] = State->SlotSeam[sceneSlot];
+						State->SlotSeamLight[drawSlot] = State->SlotSeamLight[sceneSlot];
+					}
+				};
+				constexpr size_t CAMERA_ROWS_GRAIN = 4096;
+				constexpr size_t CAMERA_ROWS_PARALLEL_MINIMUM = 16'384;
+				parallel::Jobs::For(
+					State->DrawOrder.size(), CAMERA_ROWS_GRAIN, mapCameraRows, CAMERA_ROWS_PARALLEL_MINIMUM
+				);
 			}
 		}
 
@@ -1665,6 +1672,10 @@ namespace engine::render {
 		residency.EndFrame();
 
 		if (uploadCount == 0) {
+			target.ResidentIndices.Plan(
+				static_cast<uint32_t>(State->FrameCounter % IndexResidency::VERSIONS), {}, false
+			);
+			target.ResidentIndices.Acknowledge();
 			Result.InstanceChunks = 0;
 			Result.InstanceChunksDirty = 0;
 			Result.InstanceRows = 0;
@@ -1673,9 +1684,12 @@ namespace engine::render {
 		}
 
 		bool rowsReallocated = false;
+		bool indicesReallocated = false;
 		{
 			ENGINE_PROFILE_CAT("ensure instance capacity", core::ProfileCategory::Render);
-			if (!State->EnsureInstanceCapacity(residency.SlotCount(), uploadCount, rowsReallocated)) {
+			if (!State->EnsureInstanceCapacity(
+					residency.SlotCount(), uploadCount, rowsReallocated, indicesReallocated
+				)) {
 				return;
 			}
 			if (rowsReallocated) {
@@ -1701,16 +1715,30 @@ namespace engine::render {
 			Result.InstanceChunksDirty =
 				static_cast<uint32_t>(std::count(dirtyChunks.begin(), dirtyChunks.end(), true));
 			Result.InstanceRowsDirty = residency.DirtyCount();
+			target.ResidentIndices.Plan(
+				static_cast<uint32_t>(State->FrameCounter % IndexResidency::VERSIONS),
+				target.InstanceIndices,
+				indicesReallocated
+			);
 
-			{
+			if (target.ResidentIndices.DirtyCount() > 0) {
 				ENGINE_PROFILE_CAT("stage instance indices", core::ProfileCategory::Render);
 				void *mapped = SDL_MapGPUTransferBuffer(State->Device, State->InstanceIndexTransfer, true);
 				if (mapped == nullptr) {
 					ENGINE_ERROR("instance indices: SDL_MapGPUTransferBuffer: {}", SDL_GetError());
 					return;
 				}
-				std::memcpy(mapped, target.InstanceIndices.data(), uploadCount * sizeof(uint32_t));
+				auto *staged = static_cast<uint32_t *>(mapped);
+				for (const InstanceUploadRange &range : target.ResidentIndices.DirtyRanges()) {
+					std::memcpy(
+						staged + range.First,
+						target.InstanceIndices.data() + range.First,
+						static_cast<size_t>(range.Count) * sizeof(uint32_t)
+					);
+				}
 				SDL_UnmapGPUTransferBuffer(State->Device, State->InstanceIndexTransfer);
+			} else {
+				target.ResidentIndices.Acknowledge();
 			}
 
 			if (residency.DirtyCount() > 0) {

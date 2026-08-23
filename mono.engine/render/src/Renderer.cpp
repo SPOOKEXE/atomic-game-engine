@@ -713,11 +713,13 @@ namespace engine::render {
 				gpu::ReleaseTexture(device, slot.History);
 				slot.History = nullptr;
 			}
-			if (slot.InstanceIndexBuffer != nullptr) {
-				gpu::ReleaseBuffer(device, slot.InstanceIndexBuffer);
-			}
-			if (slot.InstanceIndexTransfer != nullptr) {
-				gpu::ReleaseTransferBuffer(device, slot.InstanceIndexTransfer);
+			for (Impl::SceneSlot::InstanceIndexVersion &indices : slot.InstanceIndexVersions) {
+				if (indices.Buffer != nullptr) {
+					gpu::ReleaseBuffer(device, indices.Buffer);
+				}
+				if (indices.Transfer != nullptr) {
+					gpu::ReleaseTransferBuffer(device, indices.Transfer);
+				}
 			}
 		}
 		for (Impl::InstanceWorld &world : State->InstanceWorlds) {

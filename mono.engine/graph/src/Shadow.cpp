@@ -1,3 +1,5 @@
+#include "StableFilter.hpp"
+
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/graph/Cull.hpp>
@@ -62,37 +64,74 @@ namespace engine::graph {
 		// turns away: culling decides what is *drawn*, not what is *looked at*.
 		ENGINE_PROFILE_CAT("graph.cull-bound", core::ProfileCategory::Render);
 
-		// Sized to the worst case once rather than grown as it fills, for the
-		// reason `Cull` gives: the worst case is "everything is visible", which
-		// is also the common case for a camera framing its own scene.
-		visible.clear();
-		visible.reserve(instances.size());
-
 		if (instances.empty()) {
+			visible.clear();
 			bounds = BoundsOfNothing();
 			return 0;
 		}
 
-		// **The first instance is unrolled out of the loop rather than seeded
-		// from an empty box**, which is the same shape `BoundsOfAll` has and for
-		// the same reason: there is no empty `AABB` to accumulate from, and
-		// inventing one here would be the inverted sentinel `AABB.hpp` refuses.
-		core::AABB total = BoundsOf(instances[0]);
-		if (frustum.Intersects(total)) {
-			visible.push_back(0);
+		if (instances.size() < detail::FILTER_PARALLEL_MINIMUM) {
+			visible.clear();
+			visible.reserve(instances.size());
+			core::AABB total = BoundsOf(instances[0]);
+			if (frustum.Intersects(total)) {
+				visible.push_back(0);
+			}
+			for (size_t index = 1; index < instances.size(); index++) {
+				const core::AABB box = BoundsOf(instances[index]);
+				total = total.Union(box);
+				if (frustum.Intersects(box)) {
+					visible.push_back(static_cast<uint32_t>(index));
+				}
+			}
+			bounds = total;
+			return visible.size();
 		}
 
-		for (size_t index = 1; index < instances.size(); index++) {
-			// Derived once and used twice, which is the whole point of this
-			// function. The union is unconditional and the test is not: the
-			// light is fitted to everything that casts, and the frustum only
-			// decides what the eye draws.
-			const core::AABB box = BoundsOf(instances[index]);
-			total = total.Union(box);
+		struct Chunk {
+			std::vector<uint32_t> Visible;
+			core::AABB Bounds;
+		};
+		static thread_local std::vector<Chunk> chunks;
+		std::vector<Chunk> &scratch = chunks;
+		const size_t chunkCount = (instances.size() + detail::FILTER_GRAIN - 1) / detail::FILTER_GRAIN;
+		scratch.resize(chunkCount);
 
-			if (frustum.Intersects(box)) {
-				visible.push_back(static_cast<uint32_t>(index));
+		parallel::Jobs::For(
+			chunkCount,
+			1,
+			[&](size_t firstChunk, size_t lastChunk) {
+				for (size_t chunkIndex = firstChunk; chunkIndex < lastChunk; chunkIndex++) {
+					const size_t begin = chunkIndex * detail::FILTER_GRAIN;
+					const size_t end = std::min(begin + detail::FILTER_GRAIN, instances.size());
+					Chunk &chunk = scratch[chunkIndex];
+					chunk.Visible.clear();
+					chunk.Visible.reserve(end - begin);
+					chunk.Bounds = BoundsOf(instances[begin]);
+					if (frustum.Intersects(chunk.Bounds)) {
+						chunk.Visible.push_back(static_cast<uint32_t>(begin));
+					}
+					for (size_t index = begin + 1; index < end; index++) {
+						const core::AABB box = BoundsOf(instances[index]);
+						chunk.Bounds = chunk.Bounds.Union(box);
+						if (frustum.Intersects(box)) {
+							chunk.Visible.push_back(static_cast<uint32_t>(index));
+						}
+					}
+				}
+			},
+			2
+		);
+
+		visible.clear();
+		visible.reserve(instances.size());
+		core::AABB total = scratch[0].Bounds;
+		for (size_t chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++) {
+			const Chunk &chunk = scratch[chunkIndex];
+			if (chunkIndex > 0) {
+				total = total.Union(chunk.Bounds);
 			}
+			visible.insert(visible.end(), chunk.Visible.begin(), chunk.Visible.end());
 		}
 
 		bounds = total;

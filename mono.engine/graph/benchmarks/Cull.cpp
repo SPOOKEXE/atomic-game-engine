@@ -18,7 +18,14 @@
 // | Cull 1000, all visible | 17.2 us ± 1.3 | 17 ns |
 // | Cull 1000, all behind | 13.3 us ± 0.3 | 13 ns |
 // | Cull 10000, mixed | 172 us ± 8 | 17 ns |
+// | Cull 20000, mixed, pooled | 247 us ± 96 | 12 ns |
+// | Cull 100000, mixed, pooled | 451 us ± 604 | 4.5 ns |
 // | Bound a rotated instance | 9 ns ± 1 | |
+//
+// The same 20,000 and 100,000 rows ran inline at 344 us and 1.76 ms before the
+// benchmark started the worker pool. The 16,384-row handover keeps the small
+// cases unchanged and cuts the large case by about four times. The wide spread
+// is scheduler noise across twenty-three workers, not a stable per-row cost.
 //
 // **Bounding costs more than testing, which was not the expected shape.** Nine
 // of the seventeen nanoseconds an instance is `core::OrientedBoxBounds` - three
@@ -43,6 +50,7 @@
 
 #include <engine/graph/Cull.hpp>
 #include <engine/graph/Frustum.hpp>
+#include <engine/parallel/Jobs.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/testing/Bench.hpp>
 
@@ -61,6 +69,19 @@ using engine::scene::DrawInstance;
 using engine::testing::Consume;
 
 namespace cull_bench {
+	struct Pool {
+		Pool() {
+			engine::parallel::Jobs::Start(0);
+		}
+		~Pool() {
+			engine::parallel::Jobs::Stop();
+		}
+	};
+	void StartWorkers() {
+		static const Pool workers;
+		(void)workers;
+	}
+
 	Frustum ViewFrom(const Vector3 &position) {
 		Camera camera;
 		return Frustum::FromViewProjection(
@@ -136,6 +157,28 @@ BENCH("Cull 10000, mixed", 500) {
 
 	std::vector<uint32_t> visible;
 	for (int pass = 0; pass < 500; pass++) {
+		Consume(Cull(instances, frustum, visible));
+	}
+}
+
+BENCH("Cull 20000, mixed", 300) {
+	StartWorkers();
+	const auto &instances = SceneOf(20000, -0.01f);
+	const Frustum frustum = ViewFrom(Vector3{0.0f, 0.0f, 40.0f});
+
+	std::vector<uint32_t> visible;
+	for (int pass = 0; pass < 300; pass++) {
+		Consume(Cull(instances, frustum, visible));
+	}
+}
+
+BENCH("Cull 100000, mixed", 100) {
+	StartWorkers();
+	const auto &instances = SceneOf(100000, -0.002f);
+	const Frustum frustum = ViewFrom(Vector3{0.0f, 0.0f, 40.0f});
+
+	std::vector<uint32_t> visible;
+	for (int pass = 0; pass < 100; pass++) {
 		Consume(Cull(instances, frustum, visible));
 	}
 }

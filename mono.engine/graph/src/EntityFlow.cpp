@@ -1,3 +1,5 @@
+#include "StableFilter.hpp"
+
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/graph/Cull.hpp>
@@ -140,18 +142,14 @@ namespace engine::graph {
 		const Frustum &frustum,
 		std::vector<uint32_t> &into
 	) {
-		into.clear();
-		into.reserve(from.size());
-
-		for (const uint32_t index : from) {
-			if (index >= instances.size()) {
-				continue;
-			}
-			if (frustum.Intersects(BoundsOf(instances[index]))) {
-				into.push_back(index);
-			}
-		}
-		return into.size();
+		return detail::StableFilter(
+			from.size(),
+			[&](size_t at) { return from[at]; },
+			[&](uint32_t index) {
+				return index < instances.size() && frustum.Intersects(BoundsOf(instances[index]));
+			},
+			into
+		);
 	}
 
 	size_t FilterByTag(
@@ -171,16 +169,14 @@ namespace engine::graph {
 			return into.size();
 		}
 
-		into.reserve(from.size());
-		for (const uint32_t index : from) {
-			if (index >= instances.size()) {
-				continue;
-			}
-			if ((instances[index].TagMask & mask) != 0) {
-				into.push_back(index);
-			}
-		}
-		return into.size();
+		return detail::StableFilter(
+			from.size(),
+			[&](size_t at) { return from[at]; },
+			[&](uint32_t index) {
+				return index < instances.size() && (instances[index].TagMask & mask) != 0;
+			},
+			into
+		);
 	}
 
 	size_t FilterByDistance(
@@ -203,16 +199,15 @@ namespace engine::graph {
 		// instance every frame per view.
 		const float limit = radius * radius;
 
-		into.reserve(from.size());
-		for (const uint32_t index : from) {
-			if (index >= instances.size()) {
-				continue;
-			}
-			if ((instances[index].Frame.Position - eye).MagnitudeSquared() <= limit) {
-				into.push_back(index);
-			}
-		}
-		return into.size();
+		return detail::StableFilter(
+			from.size(),
+			[&](size_t at) { return from[at]; },
+			[&](uint32_t index) {
+				return index < instances.size() &&
+					   (instances[index].Frame.Position - eye).MagnitudeSquared() <= limit;
+			},
+			into
+		);
 	}
 
 	size_t OrderEntities(

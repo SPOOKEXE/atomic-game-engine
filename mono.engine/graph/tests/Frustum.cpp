@@ -1,5 +1,6 @@
 #include <engine/graph/Cull.hpp>
 #include <engine/graph/Frustum.hpp>
+#include <engine/parallel/Jobs.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -49,6 +50,15 @@ namespace {
 		instance.HalfExtent = Vector3{halfExtent, halfExtent, halfExtent};
 		return instance;
 	}
+
+	struct RunningJobs {
+		RunningJobs() {
+			engine::parallel::Jobs::Start(4);
+		}
+		~RunningJobs() {
+			engine::parallel::Jobs::Stop();
+		}
+	};
 }
 
 TEST_CASE("a point in front is inside and one behind is not", "[graph][frustum]") {
@@ -175,6 +185,24 @@ TEST_CASE("culling preserves the order it was given", "[graph][frustum]") {
 
 	for (uint32_t index = 0; index < visible.size(); index++) {
 		CHECK(visible[index] == index);
+	}
+}
+
+TEST_CASE("a parallel camera whitelist preserves entity order across chunks", "[graph][frustum]") {
+	const RunningJobs jobs;
+	const Frustum frustum = Looking();
+	std::vector<DrawInstance> instances;
+	instances.reserve(20'000);
+	for (uint32_t index = 0; index < 20'000; index++) {
+		const float x = (index % 3) == 0 ? 0.0f : 500.0f;
+		instances.push_back(At(Vector3{x, 0.0f, -10.0f}));
+	}
+
+	std::vector<uint32_t> visible;
+	CHECK(Cull(instances, frustum, visible) == 6'667);
+	REQUIRE(visible.size() == 6'667);
+	for (uint32_t kept = 0; kept < visible.size(); kept++) {
+		CHECK(visible[kept] == kept * 3);
 	}
 }
 

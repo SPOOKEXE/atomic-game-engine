@@ -157,7 +157,6 @@ namespace engine::render {
 		OverlayImage &overlay = *Request.Overlay;
 		const bool haveInstances = HaveInstances;
 		const bool uploadOverlay = UploadOverlay;
-		const uint32_t uploadCount = UploadCount;
 		const uint32_t particleCount = ParticleCount;
 		const uint32_t ribbonCount = RibbonCount;
 		bool &uploadsRecorded = UploadsRecorded;
@@ -166,7 +165,11 @@ namespace engine::render {
 			return true;
 		}
 
-		const bool uploadInstances = haveInstances;
+		Impl::SceneSlot &target = State->SlotAt(State->ActiveSlot);
+		const bool uploadInstances =
+			haveInstances && (State->ActiveInstanceWorld == nullptr ||
+							  State->ActiveInstanceWorld->Instances.DirtyCount() > 0 ||
+							  target.ResidentIndices.DirtyCount() > 0 || State->OcclusionFrame.Active);
 		if (!uploadInstances && !uploadOverlay && particleCount == 0 && ribbonCount == 0) {
 			uploadsRecorded = true;
 			return true;
@@ -230,14 +233,17 @@ namespace engine::render {
 				uploadedBytes += destination.size;
 			}
 
-			const SDL_GPUTransferBufferLocation source{State->InstanceIndexTransfer, 0};
-			const SDL_GPUBufferRegion destination{
-				State->InstanceIndexBuffer,
-				0,
-				uploadCount * static_cast<uint32_t>(sizeof(uint32_t)),
-			};
-			SDL_UploadToGPUBuffer(copy, &source, &destination, true);
-			uploadedBytes += destination.size;
+			for (const InstanceUploadRange &range : target.ResidentIndices.DirtyRanges()) {
+				const uint32_t offset = range.First * static_cast<uint32_t>(sizeof(uint32_t));
+				const SDL_GPUTransferBufferLocation source{State->InstanceIndexTransfer, offset};
+				const SDL_GPUBufferRegion destination{
+					State->InstanceIndexBuffer,
+					offset,
+					range.Count * static_cast<uint32_t>(sizeof(uint32_t)),
+				};
+				SDL_UploadToGPUBuffer(copy, &source, &destination, false);
+				uploadedBytes += destination.size;
+			}
 		}
 
 		// The occlusion plan's five buffers, in the order its staging wrote
@@ -311,6 +317,9 @@ namespace engine::render {
 			State->ActiveInstanceWorld->Instances.DirtyCount() > 0) {
 			State->TrackInstanceUpload(*State->ActiveInstanceWorld);
 			State->ActiveInstanceWorld->Instances.AcknowledgeDirty();
+		}
+		if (uploadInstances && target.ResidentIndices.DirtyCount() > 0) {
+			target.ResidentIndices.Acknowledge();
 		}
 
 		// The copy is in the frame's main command buffer, before every draw that

@@ -1,3 +1,5 @@
+#include "StableFilter.hpp"
+
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
@@ -21,14 +23,12 @@ namespace engine::graph {
 		// case is "everything is visible", which is also the common case for a
 		// camera framing its own scene - so a reserve that assumed otherwise
 		// would reallocate on exactly the frames that matter.
-		visible.clear();
-		visible.reserve(instances.size());
-
-		for (size_t index = 0; index < instances.size(); index++) {
-			if (frustum.Intersects(BoundsOf(instances[index]))) {
-				visible.push_back(static_cast<uint32_t>(index));
-			}
-		}
+		detail::StableFilter(
+			instances.size(),
+			[](size_t index) { return static_cast<uint32_t>(index); },
+			[&](uint32_t index) { return frustum.Intersects(BoundsOf(instances[index])); },
+			visible
+		);
 
 		// Outside the loop, once per view per frame. What the frustum kept
 		// against what it was offered is the number that answers "is the cull

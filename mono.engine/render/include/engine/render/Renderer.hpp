@@ -500,7 +500,7 @@ namespace engine::render {
 		//
 		// **The index and not only the pointer**, because the renderer keeps two
 		// device tables indexed by block and a note of what it last told each
-		// row - see `PARTICLE_DRAW_WORDS` in `Renderer.cpp`. A pointer says where
+		// row. A pointer says where
 		// the block is in this frame's list; the index says which block it *is*,
 		// which is what survives a frame.
 		uint32_t Index = 0;
