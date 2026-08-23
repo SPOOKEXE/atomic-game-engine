@@ -750,10 +750,10 @@ namespace client {
 		// it. This deadline is observed after the update and never sleeps it.
 		engine::render::PresentationSchedule Presentations;
 
-		// The complete visual input last submitted. A matching state can leave the
-		// already-presented swapchain image alone without acquiring another one.
-		uint64_t PresentedVisualSignature = 0;
-		bool PresentedVisualSignatureValid = false;
+		// Scene, game UI, and viewport geometry are retained independently. A
+		// scene-only update does not rebuild the interface image, and a restored
+		// window can present the retained composition without rebuilding either.
+		engine::render::PresentationDamageTracker PresentationDamage;
 		uint32_t PresentedImages = 0;
 
 		// Content and shader uploads can change pixels without changing a draw row.

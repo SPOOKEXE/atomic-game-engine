@@ -72,6 +72,7 @@ namespace engine::render {
 		bool Present = false;
 		core::Name Pipeline;
 		uint64_t World = 0;
+		PresentationDamage Damage;
 	};
 
 	// A surface camera this frame accepted, with what it resolved to.

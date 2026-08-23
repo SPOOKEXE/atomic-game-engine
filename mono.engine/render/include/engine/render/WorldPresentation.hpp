@@ -38,6 +38,24 @@ namespace engine::render {
 		std::vector<scene::DrawInstance> Instances;
 	};
 
+	// Renderer settings that affect scene pixels without changing a draw row.
+	struct ScenePresentationState {
+		scene::WorldLighting Lighting;
+		uint64_t Animation = 0;
+		uint64_t Resources = 0;
+		uint32_t SurfaceBounces = 0;
+		uint32_t SurfaceLimit = 0;
+		core::Name PostProcess;
+		bool Untextured = false;
+	};
+
+	// Signs all inputs that can change the scene layer. Game and host interface
+	// signatures deliberately do not enter this value.
+	uint64_t ScenePresentationSignature(const View &view, const ScenePresentationState &state);
+
+	// Signs the target geometry independently from its contents.
+	uint64_t ViewportPresentationSignature(uint32_t width, uint32_t height);
+
 	// Everything one frame of a world's particles needs.
 	struct ParticleFrame {
 		// One batch per emitter with a live resident block.

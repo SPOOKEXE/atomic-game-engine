@@ -1170,8 +1170,8 @@ namespace engine::render {
 		// once a mirror, surface or portal render pass is open. Headless frames
 		// still draw into capture targets; a hook that has no backend declines in
 		// `Prepare` itself.
-		drawInterface = graphEnabled(core::Name("interface")) && gameInterfaceHook != nullptr &&
-						gameInterfaceHook->Prepare(command);
+		drawInterface = Request.Damage.GameInterface && graphEnabled(core::Name("interface")) &&
+						gameInterfaceHook != nullptr && gameInterfaceHook->Prepare(command);
 		drawHostOverlay =
 			swapchain != nullptr && hostOverlayHook != nullptr && hostOverlayHook->Prepare(command);
 

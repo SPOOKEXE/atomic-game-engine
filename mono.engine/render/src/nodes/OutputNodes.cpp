@@ -22,6 +22,9 @@ namespace engine::render {
 	void ViewRecording::RegisterOutputNodes(NodeTable &frameNodes) {
 		frameNodes.Set(core::Name("interface"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
+			if (!recording.Request.Damage.GameInterface) {
+				return true;
+			}
 			FrameResult &result = recording.Result;
 			SDL_GPUCommandBuffer *const command = recording.Command;
 			FrameOverlayHook *const gameInterfaceHook = recording.Request.GameInterfaceHook;
@@ -67,6 +70,9 @@ namespace engine::render {
 
 		frameNodes.Set(core::Name("overlay"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
+			if (!recording.Request.Damage.SceneImage() && !recording.UploadOverlay) {
+				return true;
+			}
 			Impl *const State = recording.State;
 			const bool haveOverlay = recording.HaveOverlay;
 			const auto graphEnabled = [&recording](core::Name kind) { return recording.GraphEnabled(kind); };
@@ -125,6 +131,9 @@ namespace engine::render {
 
 		frameNodes.Set(core::Name("present"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
+			if (!recording.Request.Damage.SceneImage() && !recording.UploadOverlay) {
+				return true;
+			}
 			const auto enterNamedPass = [&recording](
 											core::Name name, SDL_GPUCommandBuffer *recordedCommand = nullptr
 										) { recording.EnterNamedPass(name, recordedCommand); };

@@ -521,7 +521,9 @@ namespace studio {
 		if (engine::assets::KindOfName(name) == engine::assets::AssetKind::Texture) {
 			engine::assets::TextureData image;
 			if (engine::assets::Texture::Read(reader, image)) {
-				Renderer.AddTexture(interned, image);
+				if (Renderer.AddTexture(interned, image)) {
+					VisualResourceRevision++;
+				}
 			}
 			return;
 		}
@@ -529,7 +531,9 @@ namespace studio {
 		if (engine::assets::KindOfName(name) == engine::assets::AssetKind::Mesh) {
 			engine::assets::MeshData mesh;
 			if (engine::assets::Mesh::Read(reader, mesh)) {
-				Renderer.AddMesh(interned, mesh);
+				if (Renderer.AddMesh(interned, mesh)) {
+					VisualResourceRevision++;
+				}
 			}
 		}
 	}

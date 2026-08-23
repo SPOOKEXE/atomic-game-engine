@@ -8,6 +8,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <vector>
 
 TEST_SUITE_ID("engine.render.worldpresentation")
@@ -64,4 +65,37 @@ TEST_CASE("world pipeline selection is qualified and replaced in one engine cach
 		Name("cinematic#17")
 	);
 	CHECK(renderer.Pipelines() == std::vector<Name>{Name("cinematic#17")});
+}
+
+TEST_CASE("scene presentation signature excludes viewport geometry", "[render][presentation][damage]") {
+	engine::scene::DrawInstance instance;
+	instance.Source = 7;
+	const std::array instances{instance};
+
+	engine::render::View view;
+	view.Instances = instances;
+	view.World = 9;
+	view.WorldName = Name("signature-world");
+	const engine::render::ScenePresentationState state;
+	const uint64_t scene = engine::render::ScenePresentationSignature(view, state);
+
+	CHECK(scene == engine::render::ScenePresentationSignature(view, state));
+	CHECK(
+		engine::render::ViewportPresentationSignature(800, 600) !=
+		engine::render::ViewportPresentationSignature(801, 600)
+	);
+	CHECK(scene == engine::render::ScenePresentationSignature(view, state));
+}
+
+TEST_CASE("camera and renderer state invalidate scene pixels", "[render][presentation][damage]") {
+	engine::render::View view;
+	engine::render::ScenePresentationState state;
+	const uint64_t original = engine::render::ScenePresentationSignature(view, state);
+
+	view.CameraFrame.Position.X = 1.0f;
+	CHECK(engine::render::ScenePresentationSignature(view, state) != original);
+
+	view.CameraFrame.Position.X = 0.0f;
+	state.Untextured = true;
+	CHECK(engine::render::ScenePresentationSignature(view, state) != original);
 }

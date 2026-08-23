@@ -14,6 +14,7 @@
 #include <engine/graph/RenderGraph.hpp>
 #include <engine/render/Flipbook.hpp>
 #include <engine/render/Overlay.hpp>
+#include <engine/render/PresentationDamage.hpp>
 #include <engine/render/Readback.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/DrawInstance.hpp>
@@ -595,6 +596,11 @@ namespace engine::render {
 	//
 	// @since v0.17
 	struct View {
+		// Which retained parts of this view differ from the last completed
+		// presentation. The conservative default preserves callers that do not
+		// yet provide independent signatures.
+		PresentationDamage Damage{true, true, true, true};
+
 		// The eye transform and lens for this invocation.
 		//@{
 		core::CFrame CameraFrame;
@@ -858,6 +864,12 @@ namespace engine::render {
 			bool
 		) {
 			return 0;
+		}
+
+		// Whether a game-interface change also changes world-space pixels. Screen
+		// UI returns false; SurfaceGui and BillboardGui implementations return true.
+		virtual bool AffectsScene() const {
+			return false;
 		}
 
 		// Records draw commands into the supplied image target.

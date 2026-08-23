@@ -4045,6 +4045,16 @@ namespace studio {
 		// signature, find nothing to compare it against and rebuild every time.
 		std::vector<engine::gui::Compiled> GuiLists;
 
+		// The retained scene, game UI, host UI, and geometry signatures for each
+		// viewport. A turn in the round robin can update one image without
+		// invalidating the other layers or the other panels.
+		std::vector<engine::render::PresentationDamageTracker> ViewportPresentations;
+
+		// Renderer-owned mesh, texture, shader, and editable content revision.
+		// Included in every viewport's scene signature so an arrival refreshes
+		// each panel on its own next round-robin turn.
+		uint64_t VisualResourceRevision = 0;
+
 		// The hover and press state behind those lists, per panel for the same
 		// reason. Editor state, not world state: nobody replicates where a
 		// mouse is.

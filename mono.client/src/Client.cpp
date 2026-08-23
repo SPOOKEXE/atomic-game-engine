@@ -129,99 +129,6 @@ namespace client {
 			}
 		}
 
-		uint64_t FoldVisual(uint64_t signature, uint64_t word) {
-			return engine::scene::MixSignature(signature, word);
-		}
-
-		template <typename Value> uint64_t FoldVisualObject(uint64_t signature, const Value &value) {
-			static_assert(std::is_trivially_copyable_v<Value>);
-			const auto bytes = std::as_bytes(std::span<const Value>(&value, 1));
-			uint64_t word = 1469598103934665603ull;
-			for (const std::byte byte : bytes) {
-				word = (word ^ std::to_integer<uint8_t>(byte)) * 1099511628211ull;
-			}
-			return FoldVisual(signature, word);
-		}
-
-		template <typename Value> uint64_t FoldVisualSpan(uint64_t signature, std::span<const Value> values) {
-			signature = FoldVisual(signature, values.size());
-			for (const Value &value : values) {
-				signature = FoldVisualObject(signature, value);
-			}
-			return signature;
-		}
-
-		uint64_t SignatureOfVisual(
-			const engine::render::View &view,
-			const engine::render::OverlayImage &overlay,
-			uint64_t interfaceSignature,
-			uint64_t animationSignature,
-			uint32_t pixelWidth,
-			uint32_t pixelHeight,
-			const engine::scene::WorldLighting &lighting,
-			uint32_t surfaceBounces,
-			uint32_t surfaceLimit,
-			engine::core::Name postProcess
-		) {
-			uint64_t signature = engine::scene::SignatureOf(view.Instances);
-			signature = FoldVisualObject(signature, view.CameraFrame);
-			signature = FoldVisualObject(signature, view.Camera);
-			signature = FoldVisual(signature, pixelWidth);
-			signature = FoldVisual(signature, pixelHeight);
-			signature = FoldVisualObject(signature, lighting);
-			signature = FoldVisual(signature, surfaceBounces);
-			signature = FoldVisual(signature, surfaceLimit);
-			signature = FoldVisual(signature, postProcess.Id());
-			signature = FoldVisual(signature, view.World);
-			signature = FoldVisual(signature, view.WorldName.Id());
-			signature = FoldVisual(signature, view.Pipeline.Id());
-			signature = FoldVisual(signature, interfaceSignature);
-			signature = FoldVisual(signature, animationSignature);
-			signature = FoldVisual(signature, overlay.HasContent() ? 1u : 0u);
-			signature = FoldVisualSpan(signature, view.Lights);
-			signature = FoldVisual(signature, engine::scene::SignatureOf(view.Foreign));
-			signature = FoldVisual(signature, view.Portals.size());
-			for (const engine::render::PortalView &portal : view.Portals) {
-				signature = FoldVisualObject(signature, portal.Index);
-				signature = FoldVisualObject(signature, portal.Partner);
-				signature = FoldVisualObject(signature, portal.Centre);
-				signature = FoldVisualObject(signature, portal.Normal);
-				signature = FoldVisualObject(signature, portal.First);
-				signature = FoldVisualObject(signature, portal.Second);
-				signature = FoldVisualObject(signature, portal.Warp);
-				signature = FoldVisualObject(signature, portal.TagFilter);
-			}
-
-			// SurfaceView owns a vector, so hash its value fields and the vector's
-			// contents separately. Hashing the vector object would observe an
-			// allocator address and miss a light changing in place.
-			signature = FoldVisual(signature, view.Surfaces.size());
-			for (const engine::render::SurfaceView &surface : view.Surfaces) {
-				signature = FoldVisualObject(signature, surface.Index);
-				signature = FoldVisualObject(signature, surface.Frame);
-				signature = FoldVisualObject(signature, surface.PaneCentre);
-				signature = FoldVisualObject(signature, surface.PaneNormal);
-				signature = FoldVisualObject(signature, surface.PaneFirst);
-				signature = FoldVisualObject(signature, surface.PaneSecond);
-				signature = FoldVisualObject(signature, surface.PaneNear);
-				signature = FoldVisualObject(signature, surface.PaneFar);
-				signature = FoldVisualObject(signature, surface.Projection);
-				signature = FoldVisualObject(signature, surface.Mapping);
-				signature = FoldVisualObject(signature, surface.Width);
-				signature = FoldVisualObject(signature, surface.Height);
-				signature = FoldVisualObject(signature, surface.ImageOpacity);
-				signature = FoldVisualObject(signature, surface.Effect);
-				signature = FoldVisualObject(signature, surface.TagFilter);
-				signature = FoldVisualObject(signature, surface.FPS);
-				signature = FoldVisualObject(signature, surface.InstanceFirst);
-				signature = FoldVisualObject(signature, surface.InstanceCount);
-				signature = FoldVisualObject(signature, surface.Lighting);
-				signature =
-					FoldVisualSpan(signature, std::span<const engine::render::SceneLight>(surface.Lights));
-				signature = FoldVisual(signature, surface.OverrideLighting ? 1u : 0u);
-			}
-			return signature;
-		}
 	}
 
 	Client::~Client() {
@@ -3354,26 +3261,39 @@ namespace client {
 		view.World = Rendered.IsValid() ? Rendered.Index : 0;
 		view.WorldName = Rendered.IsValid() ? Universe_->NameOf(Rendered) : engine::core::Name{};
 
-		const uint64_t visualSignature = SignatureOfVisual(
-			view,
-			Overlay,
-			hook == nullptr ? 0 : InterfaceList.Signature(),
-			Renderer.TextureAnimationSignature(AnimationSeconds),
-			static_cast<uint32_t>(std::max(pixelWidth, 0)),
-			static_cast<uint32_t>(std::max(pixelHeight, 0)),
-			visualLighting,
-			visualSurfaceBounces,
-			visualSurfaceLimit,
-			LastPostProcessShader
-		);
-		const bool continuousVisual = !view.Particles.empty() || !view.RibbonRuns.empty() ||
-									  interfaceContinuous || visualLighting.Sky.Enabled;
+		const uint32_t targetWidth = static_cast<uint32_t>(std::max(pixelWidth, 0));
+		const uint32_t targetHeight = static_cast<uint32_t>(std::max(pixelHeight, 0));
+		const uint64_t viewportSignature =
+			engine::render::ViewportPresentationSignature(targetWidth, targetHeight);
+		const engine::render::PresentationSignatures presentationSignatures{
+			.Scene = engine::render::ScenePresentationSignature(
+				view,
+				engine::render::ScenePresentationState{
+					.Lighting = visualLighting,
+					.Animation = Renderer.TextureAnimationSignature(AnimationSeconds),
+					.Resources = 0,
+					.SurfaceBounces = visualSurfaceBounces,
+					.SurfaceLimit = visualSurfaceLimit,
+					.PostProcess = LastPostProcessShader,
+					.Untextured = false,
+				}
+			),
+			.GameInterface = hook == nullptr ? 0 : InterfaceList.Signature(),
+			.HostInterface = 0,
+			.Viewport = viewportSignature,
+		};
+		engine::render::PresentationDamage damage = PresentationDamage.Inspect(presentationSignatures);
+		const bool continuousScene =
+			!view.Particles.empty() || !view.RibbonRuns.empty() || visualLighting.Sky.Enabled;
 		const bool diagnosticFrame =
 			Settings.Headless || Settings.MaximumFrames >= 0 || !Settings.Capture.empty();
-		const bool visualChanged = diagnosticFrame || continuousVisual || VisualResourcesChanged ||
-								   PresentationInvalidated || PresentedImages < 2 ||
-								   !PresentedVisualSignatureValid ||
-								   visualSignature != PresentedVisualSignature || Overlay.IsDirty();
+		damage.Scene = damage.Scene || diagnosticFrame || continuousScene || VisualResourcesChanged ||
+					   PresentedImages < 2;
+		damage.GameInterface =
+			damage.GameInterface || diagnosticFrame || interfaceContinuous || PresentedImages < 2;
+		damage.Overlay = Overlay.IsDirty();
+		view.Damage = damage;
+		const bool visualChanged = damage.Any() || PresentationInvalidated;
 
 		if (!visualChanged) {
 			UnchangedPresentationsSkipped++;
@@ -3405,8 +3325,7 @@ namespace client {
 			Statistics.Record(Clock.Now(), ParticleDeltaSeconds);
 		}
 		Presentations.Consume(engine::render::PresentationSchedule::Clock::now());
-		PresentedVisualSignature = visualSignature;
-		PresentedVisualSignatureValid = true;
+		PresentationDamage.Commit(presentationSignatures);
 		PresentedImages++;
 		VisualResourcesChanged = false;
 		PresentationInvalidated = false;

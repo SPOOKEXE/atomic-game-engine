@@ -1807,6 +1807,9 @@ namespace engine::render {
 		// is nineteen chances to hand `foreign` to the parameter that wanted
 		// `instances` - two spans of the same type, and the compiler would have
 		// nothing to say about it.
+		PresentationDamage damage = source.Damage;
+		damage.Scene = damage.Scene || (damage.GameInterface && gameInterfaceHook != nullptr &&
+										gameInterfaceHook->AffectsScene());
 		const ViewRequest request{
 			.CameraFrame = cameraFrame,
 			.Camera = camera,
@@ -1827,6 +1830,7 @@ namespace engine::render {
 			.Present = present,
 			.Pipeline = pipeline,
 			.World = world,
+			.Damage = damage,
 		};
 		if (recording.Begin(request) != ViewStart::Recording) {
 			return result;
@@ -1838,13 +1842,15 @@ namespace engine::render {
 		// through it, and a kind with a runner registered below replaces the
 		// default.
 		NodeTable frameNodes = BackendTable([](const graph::RunContext &) { return true; });
-		recording.RegisterUploadNodes(frameNodes);
-		recording.RegisterShadowNodes(frameNodes);
-		recording.RegisterMirrorNodes(frameNodes);
-		recording.RegisterPortalNodes(frameNodes);
-		recording.RegisterGeometryNodes(frameNodes);
-		recording.RegisterShadingNodes(frameNodes);
-		recording.RegisterAuthoredNodes(frameNodes);
+		if (request.Damage.Scene) {
+			recording.RegisterUploadNodes(frameNodes);
+			recording.RegisterShadowNodes(frameNodes);
+			recording.RegisterMirrorNodes(frameNodes);
+			recording.RegisterPortalNodes(frameNodes);
+			recording.RegisterGeometryNodes(frameNodes);
+			recording.RegisterShadingNodes(frameNodes);
+			recording.RegisterAuthoredNodes(frameNodes);
+		}
 		recording.RegisterOutputNodes(frameNodes);
 
 		recording.Finish(frameNodes);

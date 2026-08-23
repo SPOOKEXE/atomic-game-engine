@@ -342,6 +342,7 @@ namespace studio {
 		Viewers.resize(1 + extras);
 		Overlays.resize(1 + extras);
 		GuiLists.resize(1 + extras);
+		ViewportPresentations.resize(1 + extras);
 		GuiRouters.resize(1 + extras);
 
 		// **"Viewport 2" upwards, and the main panel is plain "Viewport".** The
@@ -2198,6 +2199,7 @@ namespace studio {
 				{
 					ENGINE_PROFILE_CAT("shaders", engine::core::ProfileCategory::Render);
 					if (Shaders.Refresh(store) > 0) {
+						VisualResourceRevision++;
 						for (const engine::core::Name &shader : Shaders.Changed()) {
 							const engine::render::ShaderModule *module = Shaders.Find(shader);
 							if (module == nullptr) {
@@ -2240,11 +2242,11 @@ namespace studio {
 					ENGINE_PROFILE_CAT("editable upload", engine::core::ProfileCategory::Assets);
 					{
 						ENGINE_PROFILE_CAT("editable meshes", engine::core::ProfileCategory::Assets);
-						(void)EditableMeshes.Refresh(store, Renderer);
+						VisualResourceRevision += EditableMeshes.Refresh(store, Renderer) > 0 ? 1u : 0u;
 					}
 					{
 						ENGINE_PROFILE_CAT("editable images", engine::core::ProfileCategory::Assets);
-						(void)EditableImages.Refresh(store, Renderer);
+						VisualResourceRevision += EditableImages.Refresh(store, Renderer) > 0 ? 1u : 0u;
 					}
 
 					// **And the collision shapes, which the editor needs on a
@@ -2265,6 +2267,7 @@ namespace studio {
 					PipelineSelected[visual.Index] = engine::render::InstallWorldPipeline(
 						RenderingProfiles, Renderer, visual.Index, selectedProfile
 					);
+					VisualResourceRevision++;
 				}
 			});
 		}
@@ -2428,11 +2431,43 @@ namespace studio {
 			// another panel would otherwise inherit whatever the last click left.
 			Renderer.SetUntextured(ShowColliders && ColliderHideTextures);
 		}
+
+		const uint64_t animationSignature = Renderer.TextureAnimationSignature(AnimationSeconds);
+		const uint64_t gameInterfaceSignature =
+			DrawingViewport < GuiLists.size()
+				? engine::scene::MixSignature(GuiLists[DrawingViewport].Signature(), animationSignature)
+				: animationSignature;
+		const engine::render::PresentationSignatures presentationSignatures{
+			.Scene = engine::render::ScenePresentationSignature(
+				view,
+				engine::render::ScenePresentationState{
+					.Lighting = Renderer.CurrentLighting(),
+					.Animation = animationSignature,
+					.Resources = VisualResourceRevision,
+					.SurfaceBounces = Renderer.SurfaceBounces(),
+					.SurfaceLimit = Renderer.SurfaceLimit(),
+					.PostProcess = {},
+					.Untextured = ShowColliders && ColliderHideTextures,
+				}
+			),
+			.GameInterface = gameInterfaceSignature,
+			.HostInterface = Interface.Signature(),
+			.Viewport = engine::render::ViewportPresentationSignature(target.Width, target.Height),
+		};
+		engine::render::PresentationDamage damage =
+			ViewportPresentations[DrawingViewport].Inspect(presentationSignatures);
+		damage.Scene = damage.Scene || !view.Particles.empty() || !view.RibbonRuns.empty() ||
+					   Renderer.CurrentLighting().Sky.Enabled;
+		damage.Overlay = Overlay.IsDirty();
+		view.Damage = damage;
 		{
 			ENGINE_PROFILE_CAT("render frame", engine::core::ProfileCategory::Render);
 			LastFrame = Renderer.Render(
 				std::span<const engine::render::View>(&view, 1), Overlay, &GameInterface, true, &Interface
 			);
+		}
+		if (LastFrame.Presented || Settings.Headless) {
+			ViewportPresentations[DrawingViewport].Commit(presentationSignatures);
 		}
 		{
 			ENGINE_PROFILE_CAT("frame result", engine::core::ProfileCategory::Render);

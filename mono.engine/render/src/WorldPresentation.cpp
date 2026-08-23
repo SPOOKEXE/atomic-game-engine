@@ -19,11 +19,108 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <cstddef>
+#include <cstring>
 #include <format>
 #include <numbers>
 #include <string>
+#include <type_traits>
 
 namespace engine::render {
+	namespace {
+		uint64_t FoldPresentation(uint64_t signature, uint64_t word) {
+			return scene::MixSignature(signature, word);
+		}
+
+		template <typename Value> uint64_t FoldPresentationObject(uint64_t signature, const Value &value) {
+			static_assert(std::is_trivially_copyable_v<Value>);
+			const auto bytes = std::as_bytes(std::span<const Value>(&value, 1));
+			uint64_t word = 1469598103934665603ull;
+			for (const std::byte byte : bytes) {
+				word = (word ^ std::to_integer<uint8_t>(byte)) * 1099511628211ull;
+			}
+			return FoldPresentation(signature, word);
+		}
+
+		template <typename Value>
+		uint64_t FoldPresentationSpan(uint64_t signature, std::span<const Value> values) {
+			signature = FoldPresentation(signature, values.size());
+			for (const Value &value : values) {
+				signature = FoldPresentationObject(signature, value);
+			}
+			return signature;
+		}
+	}
+
+	uint64_t ScenePresentationSignature(const View &view, const ScenePresentationState &state) {
+		uint64_t signature = scene::SignatureOf(view.Instances);
+		signature = FoldPresentationObject(signature, view.CameraFrame);
+		signature = FoldPresentationObject(signature, view.Camera);
+		signature = FoldPresentationObject(signature, state.Lighting);
+		signature = FoldPresentation(signature, state.SurfaceBounces);
+		signature = FoldPresentation(signature, state.SurfaceLimit);
+		signature = FoldPresentation(signature, state.PostProcess.Id());
+		signature = FoldPresentation(signature, state.Untextured ? 1u : 0u);
+		signature = FoldPresentation(signature, view.World);
+		signature = FoldPresentation(signature, view.WorldName.Id());
+		signature = FoldPresentation(signature, view.Pipeline.Id());
+		signature = FoldPresentationObject(signature, view.Grid);
+		signature = FoldPresentation(signature, view.OverrideLighting ? 1u : 0u);
+		if (view.OverrideLighting) {
+			signature = FoldPresentationObject(signature, view.Lighting);
+		}
+		signature = FoldPresentation(signature, state.Animation);
+		signature = FoldPresentation(signature, state.Resources);
+		signature = FoldPresentationSpan(signature, view.Lights);
+		signature = FoldPresentation(signature, scene::SignatureOf(view.Foreign));
+		signature = FoldPresentation(signature, view.ParticleRevision);
+		signature = FoldPresentation(signature, view.ParticleLayoutRevision);
+		signature = FoldPresentation(signature, view.ParticleResidentRevision);
+		signature = FoldPresentationSpan(signature, view.RibbonRuns);
+		signature = FoldPresentationSpan(signature, view.RibbonVertices);
+
+		signature = FoldPresentation(signature, view.Portals.size());
+		for (const PortalView &portal : view.Portals) {
+			signature = FoldPresentationObject(signature, portal.Index);
+			signature = FoldPresentationObject(signature, portal.Partner);
+			signature = FoldPresentationObject(signature, portal.Centre);
+			signature = FoldPresentationObject(signature, portal.Normal);
+			signature = FoldPresentationObject(signature, portal.First);
+			signature = FoldPresentationObject(signature, portal.Second);
+			signature = FoldPresentationObject(signature, portal.Warp);
+			signature = FoldPresentationObject(signature, portal.TagFilter);
+		}
+
+		signature = FoldPresentation(signature, view.Surfaces.size());
+		for (const SurfaceView &surface : view.Surfaces) {
+			signature = FoldPresentationObject(signature, surface.Index);
+			signature = FoldPresentationObject(signature, surface.Frame);
+			signature = FoldPresentationObject(signature, surface.PaneCentre);
+			signature = FoldPresentationObject(signature, surface.PaneNormal);
+			signature = FoldPresentationObject(signature, surface.PaneFirst);
+			signature = FoldPresentationObject(signature, surface.PaneSecond);
+			signature = FoldPresentationObject(signature, surface.PaneNear);
+			signature = FoldPresentationObject(signature, surface.PaneFar);
+			signature = FoldPresentationObject(signature, surface.Projection);
+			signature = FoldPresentationObject(signature, surface.Mapping);
+			signature = FoldPresentationObject(signature, surface.Width);
+			signature = FoldPresentationObject(signature, surface.Height);
+			signature = FoldPresentationObject(signature, surface.ImageOpacity);
+			signature = FoldPresentationObject(signature, surface.Effect);
+			signature = FoldPresentationObject(signature, surface.TagFilter);
+			signature = FoldPresentationObject(signature, surface.FPS);
+			signature = FoldPresentationObject(signature, surface.InstanceFirst);
+			signature = FoldPresentationObject(signature, surface.InstanceCount);
+			signature = FoldPresentationObject(signature, surface.Lighting);
+			signature = FoldPresentationSpan(signature, std::span<const SceneLight>(surface.Lights));
+			signature = FoldPresentation(signature, surface.OverrideLighting ? 1u : 0u);
+		}
+		return signature;
+	}
+
+	uint64_t ViewportPresentationSignature(uint32_t width, uint32_t height) {
+		return FoldPresentation(FoldPresentation(0, width), height);
+	}
 	using engine::ecs::Entity;
 	using engine::ecs::Store;
 	using engine::scene::Bounds;

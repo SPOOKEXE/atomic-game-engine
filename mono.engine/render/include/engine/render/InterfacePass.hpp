@@ -198,6 +198,10 @@ namespace engine::render {
 			bool alwaysOnTop
 		) override;
 
+		bool AffectsScene() const override {
+			return !SpatialCollectors.empty();
+		}
+
 		// How to resolve a content name to a texture.
 		//
 		// **The hook `ui::ImageSource` is on this side of the seam**, and it is

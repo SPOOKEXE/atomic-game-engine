@@ -403,6 +403,7 @@ namespace studio {
 				}
 
 				if (Renderer.AddMesh(name, mesh)) {
+					VisualResourceRevision++;
 					ContentMeshes++;
 
 					// **Every part naming it, now that its shape is known.** A
@@ -457,6 +458,7 @@ namespace studio {
 			} else if (asset->Kind == engine::assets::AssetKind::Texture) {
 				engine::assets::TextureData image;
 				if (engine::assets::Texture::Read(reader, image) && Renderer.AddTexture(name, image)) {
+					VisualResourceRevision++;
 					ContentTextures++;
 				}
 			} else if (asset->Kind == engine::assets::AssetKind::Shader) {
