@@ -320,6 +320,14 @@ with either.
   a current level. Counters are drained rates; gauges are not. Read metrics to
   report them, never to steer engine behaviour.
 
+### Cascaded and Individual Caching
+
+- Use caching to prevent numerous computations when the scenario does not require it.
+  For example, the studio UI only needs to be recomputed when any state changes, not
+  every frame. This would warrant a "individual cache".
+- Cascaded caching is more for layered images, where if one image changes in a chain,
+  you need to update the layered image again.
+
 ---
 
 ## Honesty in reporting
