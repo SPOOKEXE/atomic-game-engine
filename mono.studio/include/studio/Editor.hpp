@@ -5559,6 +5559,9 @@ namespace studio {
 			// The published snapshot - what is drawn.
 			//@{
 			std::vector<DiagnosticSpan> Spans;
+			// Display-only copy with synthetic `unaccounted` children. Retained so
+			// an open profiler does not allocate a second tree every repaint.
+			std::vector<DiagnosticSpan> DisplaySpans;
 			std::vector<uint32_t> Rows;
 			float FrameMilliseconds = 0.0f;
 			float IdleMilliseconds = 0.0f;

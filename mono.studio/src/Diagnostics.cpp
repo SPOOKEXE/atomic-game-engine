@@ -105,6 +105,106 @@ namespace studio {
 		}
 	}
 
+	void AppendUnaccountedDiagnosticSpans(std::vector<DiagnosticSpan> &spans) {
+		const size_t recorded = spans.size();
+		struct ChildInterval {
+			uint32_t Parent = engine::core::FrameGraph::NO_PARENT;
+			float Start = 0.0f;
+			float End = 0.0f;
+		};
+
+		// Retained because this runs every repaint while the profiler is open.
+		// A diagnostic that allocates a second span tree each frame would show up
+		// in the heap panel as the problem it was opened to investigate.
+		static thread_local std::vector<ChildInterval> children;
+		children.clear();
+		children.reserve(recorded);
+		for (const DiagnosticSpan &child : spans) {
+			if (child.Parent >= recorded || child.Milliseconds <= 0.0f) {
+				continue;
+			}
+
+			const DiagnosticSpan &parent = spans[child.Parent];
+			const float parentStart = parent.StartMilliseconds;
+			const float parentEnd = parentStart + std::max(parent.Milliseconds, 0.0f);
+			const float childStart = std::clamp(child.StartMilliseconds, parentStart, parentEnd);
+			const float childEnd =
+				std::clamp(child.StartMilliseconds + child.Milliseconds, parentStart, parentEnd);
+			if (childEnd > childStart) {
+				children.push_back({child.Parent, childStart, childEnd});
+			}
+		}
+
+		std::sort(
+			children.begin(), children.end(), [](const ChildInterval &left, const ChildInterval &right) {
+				if (left.Parent != right.Parent) {
+					return left.Parent < right.Parent;
+				}
+				if (left.Start != right.Start) {
+					return left.Start < right.Start;
+				}
+				return left.End < right.End;
+			}
+		);
+		spans.reserve(recorded + children.size() * 2);
+
+		size_t firstChild = 0;
+		for (size_t parentIndex = 0; parentIndex < recorded; parentIndex++) {
+			const DiagnosticSpan parent = spans[parentIndex];
+			const float parentStart = parent.StartMilliseconds;
+			const float parentEnd = parentStart + std::max(parent.Milliseconds, 0.0f);
+			if (parentEnd <= parentStart) {
+				continue;
+			}
+
+			while (firstChild < children.size() && children[firstChild].Parent < parentIndex) {
+				firstChild++;
+			}
+
+			// A leaf's own work is already named by the leaf. Gaps only add
+			// information when a parent has measured children to compare against.
+			if (firstChild == children.size() || children[firstChild].Parent != parentIndex) {
+				continue;
+			}
+
+			float coveredUntil = parentStart;
+			for (size_t childIndex = firstChild;
+				 childIndex < children.size() && children[childIndex].Parent == parentIndex;
+				 childIndex++) {
+				const float childStart = children[childIndex].Start;
+				const float childEnd = children[childIndex].End;
+				if (childStart > coveredUntil) {
+					spans.push_back(
+						DiagnosticSpan{
+							.Name = "unaccounted",
+							.Depth = parent.Depth + 1,
+							.Parent = static_cast<uint32_t>(parentIndex),
+							.StartMilliseconds = coveredUntil,
+							.Milliseconds = childStart - coveredUntil,
+							.SelfMilliseconds = childStart - coveredUntil,
+							.Category = engine::core::ProfileCategory::Engine,
+						}
+					);
+				}
+				coveredUntil = std::max(coveredUntil, childEnd);
+			}
+
+			if (coveredUntil < parentEnd) {
+				spans.push_back(
+					DiagnosticSpan{
+						.Name = "unaccounted",
+						.Depth = parent.Depth + 1,
+						.Parent = static_cast<uint32_t>(parentIndex),
+						.StartMilliseconds = coveredUntil,
+						.Milliseconds = parentEnd - coveredUntil,
+						.SelfMilliseconds = parentEnd - coveredUntil,
+						.Category = engine::core::ProfileCategory::Engine,
+					}
+				);
+			}
+		}
+	}
+
 	uint32_t LayoutDiagnosticRows(
 		std::span<const DiagnosticSpan> spans,
 		float frameMilliseconds,
@@ -490,6 +590,9 @@ namespace studio {
 		}
 
 		const std::vector<DiagnosticSpan> &spans = view.Spans;
+		std::vector<DiagnosticSpan> &graphSpans = view.DisplaySpans;
+		graphSpans = spans;
+		AppendUnaccountedDiagnosticSpans(graphSpans);
 
 		const float frameMs = view.FrameMilliseconds;
 		const float idleMs = view.IdleMilliseconds;
@@ -836,14 +939,14 @@ namespace studio {
 		const float graphWidth = std::max(ImGui::GetContentRegionAvail().x, 1.0f);
 		const float scale = frameMs > 0.0001f ? graphWidth / frameMs : 0.0f;
 		const float onePixelMilliseconds = scale > 0.0f ? 1.0f / scale : 0.0f;
-		const uint32_t graphRows = LayoutDiagnosticRows(spans, frameMs, onePixelMilliseconds, view.Rows);
+		const uint32_t graphRows = LayoutDiagnosticRows(graphSpans, frameMs, onePixelMilliseconds, view.Rows);
 		const float graphHeight = rowHeight * static_cast<float>(graphRows);
 
 		ImDrawList *draw = ImGui::GetWindowDrawList();
 		const DiagnosticSpan *hovered = nullptr;
 
-		for (size_t index = 0; index < spans.size(); index++) {
-			const DiagnosticSpan &span = spans[index];
+		for (size_t index = 0; index < graphSpans.size(); index++) {
+			const DiagnosticSpan &span = graphSpans[index];
 			// **Clamped to the graph, whatever the arithmetic above produced.**
 			// An averaged span can still exceed the averaged frame - a span that
 			// ran in only some of the frames divides by all of them for its
@@ -860,7 +963,9 @@ namespace studio {
 			const ImVec2 upper(left, top);
 			const ImVec2 lower(left + width, top + rowHeight - 1.0f);
 
-			draw->AddRectFilled(upper, lower, ColourOf(span.Category), 2.0f);
+			const ImU32 colour =
+				span.Name == "unaccounted" ? IM_COL32(94, 99, 112, 210) : ColourOf(span.Category);
+			draw->AddRectFilled(upper, lower, colour, 2.0f);
 
 			if (ImGui::IsMouseHoveringRect(upper, lower)) {
 				hovered = &span;

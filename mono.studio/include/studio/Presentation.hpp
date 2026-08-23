@@ -55,9 +55,8 @@ namespace studio {
 	// Resolves the one ceiling applied to the joined simulation and rendering
 	// loop. A running world is visually active even when nobody is touching the
 	// editor, so input-idle pacing applies only while editing a stopped scene.
-	float PresentationCeiling(
-		const PresentationRates &rates, bool focused, bool worldRunning, bool inputIdle
-	);
+	float
+	PresentationCeiling(const PresentationRates &rates, bool focused, bool worldRunning, bool inputIdle);
 
 	// Which alpha to present a world at.
 	//

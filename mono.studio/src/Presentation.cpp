@@ -1,13 +1,11 @@
 #include <engine/ecs/Store.hpp>
 
+#include <algorithm>
 #include <studio/Presentation.hpp>
 
-#include <algorithm>
-
 namespace studio {
-	float PresentationCeiling(
-		const PresentationRates &rates, bool focused, bool worldRunning, bool inputIdle
-	) {
+	float
+	PresentationCeiling(const PresentationRates &rates, bool focused, bool worldRunning, bool inputIdle) {
 		if (rates.Frame <= 0.0f) {
 			return 0.0f;
 		}

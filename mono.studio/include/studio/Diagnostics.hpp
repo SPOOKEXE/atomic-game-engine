@@ -55,6 +55,11 @@ namespace studio {
 	// meaningful start position.
 	void FinishDiagnosticAverage(std::vector<DiagnosticSpan> &spans, uint32_t frames);
 
+	// Adds display-only children for time inside a span that none of its direct
+	// children covers. The input tree stays intact and new spans are appended, so
+	// recorded parent indices remain valid.
+	void AppendUnaccountedDiagnosticSpans(std::vector<DiagnosticSpan> &spans);
+
 	// Assigns a non-overlapping display row to every span.
 	//
 	// Rows remain grouped by tree depth. Within one depth, overlapping time

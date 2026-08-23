@@ -838,61 +838,64 @@ namespace studio {
 			// honest category for it, which is what lets the panel keep leading
 			// with busy time while the graph still accounts for the whole frame.
 			engine::core::FrameGraph::BeginFrame();
+			{
+				ENGINE_PROFILE_CAT("Application", engine::core::ProfileCategory::Engine);
 
-			bool renderingActive = false;
-			if (presentationDue) {
-				ENGINE_PROFILE_CAT("wait for frame", engine::core::ProfileCategory::Idle);
+				bool renderingActive = false;
+				if (presentationDue) {
+					ENGINE_PROFILE_CAT("wait for frame", engine::core::ProfileCategory::Idle);
 
-				// A frame that could not be acquired is minimised, mid-resize, or
-				// still owned by the GPU in immediate mode.
-				// The result gates presentation below, after simulation,
-				// control, collaboration, and plugins have continued, so an
-				// invisible editor allocates and submits no rendering work.
+					// A frame that could not be acquired is minimised, mid-resize, or
+					// still owned by the GPU in immediate mode.
+					// The result gates presentation below, after simulation,
+					// control, collaboration, and plugins have continued, so an
+					// invisible editor allocates and submits no rendering work.
+					//
+					// Vsync deliberately waits before input for the latency argument
+					// above. Immediate mode never waits: the update loop keeps advancing
+					// and submits the next changed image when a swapchain slot is ready.
+					renderingActive = VerticalSync ? Renderer.WaitForFrame() : Renderer.TryFrame();
+				}
+
+				const float delta = Clock.Tick();
+				PresentationDeltaSeconds += delta;
+
+				PumpEvents();
+
+				// **Between input and simulation**, which is where a person's click
+				// would have landed. A tool that starts a world or writes a property
+				// is doing what a hand on the mouse does, so it happens at the same
+				// point in the frame and needs no separate ordering story.
+				PumpControl();
+				ControlWantsProfile = ControlSurface.WantsProfiling();
+
+				// Beside the control surface, and idle unless somebody has opened
+				// the panel: `TeamCreate` holds no socket until it is asked to look.
+				if (Team != nullptr) {
+					// **Named, because a pump that is not on the graph is
+					// indistinguishable from a stall.** It holds no socket until
+					// somebody opens the panel, so on most frames this span is the
+					// null check and nothing else - which is a useful thing for the
+					// graph to say out loud.
+					ENGINE_PROFILE_CAT("team create", engine::core::ProfileCategory::Network);
+					Team->Pump(engine::core::Clock::Seconds());
+				}
+
+				// **Beside the control surface and for its reason**, which the
+				// comment above already gives: a plugin writing a property is doing
+				// what a hand on the mouse does, so it happens where a click would
+				// have landed rather than needing an ordering story of its own.
 				//
-				// Vsync deliberately waits before input for the latency argument
-				// above. Immediate mode never waits: the update loop keeps advancing
-				// and submits the next changed image when a swapchain slot is ready.
-				renderingActive = VerticalSync ? Renderer.WaitForFrame() : Renderer.TryFrame();
-			}
+				// Before `Simulate`, so a plugin that moved something sees the
+				// physics of the frame it moved it in.
+				PumpPlugins(delta);
 
-			const float delta = Clock.Tick();
-			PresentationDeltaSeconds += delta;
-
-			PumpEvents();
-
-			// **Between input and simulation**, which is where a person's click
-			// would have landed. A tool that starts a world or writes a property
-			// is doing what a hand on the mouse does, so it happens at the same
-			// point in the frame and needs no separate ordering story.
-			PumpControl();
-			ControlWantsProfile = ControlSurface.WantsProfiling();
-
-			// Beside the control surface, and idle unless somebody has opened
-			// the panel: `TeamCreate` holds no socket until it is asked to look.
-			if (Team != nullptr) {
-				// **Named, because a pump that is not on the graph is
-				// indistinguishable from a stall.** It holds no socket until
-				// somebody opens the panel, so on most frames this span is the
-				// null check and nothing else - which is a useful thing for the
-				// graph to say out loud.
-				ENGINE_PROFILE_CAT("team create", engine::core::ProfileCategory::Network);
-				Team->Pump(engine::core::Clock::Seconds());
-			}
-
-			// **Beside the control surface and for its reason**, which the
-			// comment above already gives: a plugin writing a property is doing
-			// what a hand on the mouse does, so it happens where a click would
-			// have landed rather than needing an ordering story of its own.
-			//
-			// Before `Simulate`, so a plugin that moved something sees the
-			// physics of the frame it moved it in.
-			PumpPlugins(delta);
-
-			Simulate(delta);
-			if (renderingActive) {
-				Present(PresentationDeltaSeconds);
-				PresentationDeltaSeconds = 0.0f;
-				Presentations.Consume(engine::render::PresentationSchedule::Clock::now());
+				Simulate(delta);
+				if (renderingActive) {
+					Present(PresentationDeltaSeconds);
+					PresentationDeltaSeconds = 0.0f;
+					Presentations.Consume(engine::render::PresentationSchedule::Clock::now());
+				}
 			}
 
 			engine::core::FrameGraph::EndFrame();
@@ -1671,7 +1674,9 @@ namespace studio {
 		const bool focused = Window == nullptr || (SDL_GetWindowFlags(Window) & SDL_WINDOW_INPUT_FOCUS) != 0;
 		const bool inputIdle = engine::core::Clock::Seconds() - LastInputSeconds > IDLE_AFTER_SECONDS;
 		return PresentationCeiling(
-			PresentationRates{FrameCap, InterfaceActiveHz, InterfaceIdleHz, RendererFocusedHz, RendererUnfocusedHz},
+			PresentationRates{
+				FrameCap, InterfaceActiveHz, InterfaceIdleHz, RendererFocusedHz, RendererUnfocusedHz
+			},
 			focused,
 			AnyRunning(),
 			inputIdle

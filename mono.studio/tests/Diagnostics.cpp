@@ -13,6 +13,7 @@ TEST_DEPENDS("engine.core.framegraph")
 using engine::core::FrameGraph;
 using engine::core::FrameSpan;
 using studio::AccumulateDiagnosticSpans;
+using studio::AppendUnaccountedDiagnosticSpans;
 using studio::DiagnosticSpan;
 using studio::FinishDiagnosticAverage;
 using studio::LayoutDiagnosticRows;
@@ -77,4 +78,61 @@ TEST_CASE("overlapping bars at one depth receive separate rows", "[studio][diagn
 	CHECK(rows[0] == rows[2]);
 	CHECK(rows[3] > rows[1]);
 	CHECK(count == 3);
+}
+
+TEST_CASE("unaccounted spans fill gaps between direct children", "[studio][diagnostics]") {
+	std::vector spans{
+		DiagnosticSpan{.Name = "Application", .Depth = 0, .StartMilliseconds = 0.0f, .Milliseconds = 10.0f},
+		DiagnosticSpan{
+			.Name = "first",
+			.Depth = 1,
+			.Parent = 0,
+			.StartMilliseconds = 1.0f,
+			.Milliseconds = 2.0f,
+		},
+		DiagnosticSpan{
+			.Name = "second",
+			.Depth = 1,
+			.Parent = 0,
+			.StartMilliseconds = 5.0f,
+			.Milliseconds = 2.0f,
+		},
+	};
+
+	AppendUnaccountedDiagnosticSpans(spans);
+
+	REQUIRE(spans.size() == 6);
+	CHECK(spans[3].Name == "unaccounted");
+	CHECK(spans[3].StartMilliseconds == 0.0f);
+	CHECK(spans[3].Milliseconds == 1.0f);
+	CHECK(spans[4].StartMilliseconds == 3.0f);
+	CHECK(spans[4].Milliseconds == 2.0f);
+	CHECK(spans[5].StartMilliseconds == 7.0f);
+	CHECK(spans[5].Milliseconds == 3.0f);
+	CHECK(spans[3].Parent == 0);
+	CHECK(spans[3].Depth == 1);
+}
+
+TEST_CASE("unaccounted spans merge overlapping child coverage", "[studio][diagnostics]") {
+	std::vector spans{
+		DiagnosticSpan{.Name = "Application", .Depth = 0, .StartMilliseconds = 2.0f, .Milliseconds = 8.0f},
+		DiagnosticSpan{
+			.Name = "first",
+			.Depth = 1,
+			.Parent = 0,
+			.StartMilliseconds = 1.0f,
+			.Milliseconds = 6.0f,
+		},
+		DiagnosticSpan{
+			.Name = "overlap",
+			.Depth = 1,
+			.Parent = 0,
+			.StartMilliseconds = 5.0f,
+			.Milliseconds = 7.0f,
+		},
+	};
+
+	AppendUnaccountedDiagnosticSpans(spans);
+
+	CHECK(spans.size() == 3);
 }
