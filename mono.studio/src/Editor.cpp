@@ -2437,10 +2437,10 @@ namespace studio {
 			DrawingViewport < GuiLists.size()
 				? engine::scene::MixSignature(GuiLists[DrawingViewport].Signature(), animationSignature)
 				: animationSignature;
-		uint64_t scenePresentationSignature = 0;
+		engine::render::ScenePresentationSignatures scenePresentationSignatures;
 		{
 			ENGINE_PROFILE_CAT("presentation signature", engine::core::ProfileCategory::Render);
-			scenePresentationSignature = engine::render::ScenePresentationSignature(
+			scenePresentationSignatures = engine::render::ScenePresentationSignaturesOf(
 				view,
 				engine::render::ScenePresentationState{
 					.Lighting = Renderer.CurrentLighting(),
@@ -2454,16 +2454,28 @@ namespace studio {
 			);
 		}
 		const engine::render::PresentationSignatures presentationSignatures{
-			.Scene = scenePresentationSignature,
+			.Scene = scenePresentationSignatures,
 			.GameInterface = gameInterfaceSignature,
 			.HostInterface = Interface.Signature(),
 			.Viewport = engine::render::ViewportPresentationSignature(target.Width, target.Height),
 		};
 		engine::render::PresentationDamage damage =
 			ViewportPresentations[DrawingViewport].Inspect(presentationSignatures);
-		damage.Scene = damage.Scene || !view.Particles.empty() || !view.RibbonRuns.empty();
+		damage.Particles = damage.Particles || !view.Particles.empty() || !view.RibbonRuns.empty();
+		damage.Scene = damage.Scene || damage.Particles;
 		damage.Overlay = Overlay.IsDirty();
+		const bool diagnosticFrame =
+			Settings.Headless || Settings.MaximumFrames >= 0 || !Settings.Capture.empty();
+		if (diagnosticFrame) {
+			damage.Scene = true;
+			damage.GameInterface = true;
+			damage.HostInterface = true;
+		}
 		view.Damage = damage;
+		if (!damage.Any()) {
+			ViewportPresentations[DrawingViewport].CacheProfile().Record(damage, true);
+			return;
+		}
 		{
 			ENGINE_PROFILE_CAT("render frame", engine::core::ProfileCategory::Render);
 			LastFrame = Renderer.Render(
@@ -2471,6 +2483,9 @@ namespace studio {
 			);
 		}
 		if (LastFrame.Presented || Settings.Headless) {
+			ViewportPresentations[DrawingViewport].CacheProfile().Record(
+				damage, true, LastFrame.PortalPasses > 0
+			);
 			ViewportPresentations[DrawingViewport].Commit(presentationSignatures);
 		}
 		{

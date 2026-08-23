@@ -378,6 +378,34 @@ the step budget already maintains; History reads `CommandLog`'s two stacks.
 bites hardest on the Bus panel, because `Inbox` is replaced wholesale every
 barrier.
 
+## Presentation caches are per viewport and visible in diagnostics
+
+Every viewport owns a `PresentationDamageTracker`. Sharing one across panels
+would let a camera, extent or game interface compiled for one panel become the
+baseline of another. The round robin changes which tracker is observed; it
+must not reset any tracker or copy retained images between slots.
+
+An edit-mode viewport compiles `StarterGui`, which is the template an author is
+editing. A running viewport, including a client replica, compiles `PlayerGui`,
+which is the live per-player copy. It also supplies `LocalPlayer` as the viewer,
+so another player's private `PlayerGui` cannot enter the same list; a running
+world with no local viewer draws no screen interface. The source selection is
+signed, so entering or leaving Run forces the correct interface to replace the
+old one even when their contents happen to match.
+
+The Frame Graph window has a `Cascaded Cache Hits` view for this state. Keep it
+as counters rather than timing bars: it reports whether resident sources,
+retained images and their compositions were reused or written, while the normal
+view reports how long actual work took. Portal-history writes come from
+`FrameResult::PortalPasses`, not from guessing that a changed descriptor must
+have produced a visible pass. GPU heap statistics and transfer counters remain
+the other half of the check.
+
+When every layer hits, `PresentWorld` returns before `Renderer::Render`; no
+command buffer or swapchain image is owed. Headless, frame-budget and capture
+runs force diagnostic writes so their requested output and termination cannot
+be starved by a valid cache hit.
+
 ## The testable half of a panel goes in a free function
 
 `MatchesQuery`, `DiffText` and `ParseRojoProject` are not methods, and that is
@@ -534,4 +562,3 @@ There is deliberately **no toolbar or editor-command API**, and the absence is
 stated in `studio/Plugins.hpp` rather than left to be discovered. `D00105`
 carries what adding one would take, and the obstacle is `script/AGENTS.md`'s
 first rule rather than an opinion.
-

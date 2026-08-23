@@ -286,6 +286,20 @@ namespace client {
 		std::shared_ptr<engine::script::Runtime> *runtime = nullptr
 	);
 
+	// Establishes the player a single-player client looks through.
+	//
+	// This happens before scripts start, so `Players.LocalPlayer` is already a
+	// real instance at a top-level script statement. The `StarterGui` template
+	// is reset separately after startup, because the script may be what authors
+	// that template.
+	//
+	// Idempotent. A world that already names a live local player keeps it.
+	//
+	// @param store The client-owned world.
+	// @return The local player, or a null entity if the world refuses one.
+	// @since v0.19
+	engine::ecs::Entity EnsureLocalPlayer(engine::ecs::Store &store);
+
 	// The client's half of a world, installed onto one somebody else built.
 	//
 	// **`BuildScriptedWorld` is the demo's entry point and this is the general

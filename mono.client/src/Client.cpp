@@ -298,10 +298,16 @@ namespace client {
 
 			Universe_->Enter(id, [&](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
 				InstallPresentation(store, systems, Settings.Entities);
+				const engine::ecs::Entity localPlayer = EnsureLocalPlayer(store);
+				if (localPlayer == engine::ecs::NULL_ENTITY) {
+					failure = "could not establish the single-player client";
+					return;
+				}
 
 				// The scripts before the camera, so a scene that aimed one of
 				// its own keeps it - see `InstallDefaultCamera`.
 				Runtimes.emplace_back(id, engine::game::StartWorldScripts(store, systems, limits, failure));
+				(void)engine::gui::ResetPlayerGui(store, localPlayer);
 				InstallDefaultCamera(store, systems);
 			});
 
@@ -2778,6 +2784,7 @@ namespace client {
 
 			request.Display.Width = static_cast<float>(windowWidth);
 			request.Display.Height = static_cast<float>(windowHeight);
+			request.ScreenGuis = engine::gui::ScreenGuiSource::PlayerGui;
 
 			// Fed back from the previous frame's routing, deliberately: the
 			// hover comes from the list a compile produced, so a compile
@@ -3265,10 +3272,10 @@ namespace client {
 		const uint32_t targetHeight = static_cast<uint32_t>(std::max(pixelHeight, 0));
 		const uint64_t viewportSignature =
 			engine::render::ViewportPresentationSignature(targetWidth, targetHeight);
-		uint64_t scenePresentationSignature = 0;
+		engine::render::ScenePresentationSignatures scenePresentationSignatures;
 		{
 			ENGINE_PROFILE_CAT("presentation signature", engine::core::ProfileCategory::Render);
-			scenePresentationSignature = engine::render::ScenePresentationSignature(
+			scenePresentationSignatures = engine::render::ScenePresentationSignaturesOf(
 				view,
 				engine::render::ScenePresentationState{
 					.Lighting = visualLighting,
@@ -3282,7 +3289,7 @@ namespace client {
 			);
 		}
 		const engine::render::PresentationSignatures presentationSignatures{
-			.Scene = scenePresentationSignature,
+			.Scene = scenePresentationSignatures,
 			.GameInterface = hook == nullptr ? 0 : InterfaceList.Signature(),
 			.HostInterface = 0,
 			.Viewport = viewportSignature,
@@ -3291,15 +3298,17 @@ namespace client {
 		const bool continuousScene = !view.Particles.empty() || !view.RibbonRuns.empty();
 		const bool diagnosticFrame =
 			Settings.Headless || Settings.MaximumFrames >= 0 || !Settings.Capture.empty();
-		damage.Scene = damage.Scene || diagnosticFrame || continuousScene || VisualResourcesChanged ||
-					   PresentedImages < 2;
+		damage.Particles = damage.Particles || continuousScene;
+		damage.Objects = damage.Objects || VisualResourcesChanged;
+		damage.Scene =
+			damage.Scene || diagnosticFrame || damage.Particles || damage.Objects || PresentedImages < 2;
 		damage.GameInterface =
 			damage.GameInterface || diagnosticFrame || interfaceContinuous || PresentedImages < 2;
 		damage.Overlay = Overlay.IsDirty();
 		view.Damage = damage;
 		const bool visualChanged = damage.Any() || PresentationInvalidated;
-
 		if (!visualChanged) {
+			PresentationDamage.CacheProfile().Record(damage, false);
 			UnchangedPresentationsSkipped++;
 			Presentations.Consume(engine::render::PresentationSchedule::Clock::now());
 			ParticleDeltaSeconds = 0.0f;
@@ -3329,10 +3338,13 @@ namespace client {
 			Statistics.Record(Clock.Now(), ParticleDeltaSeconds);
 		}
 		Presentations.Consume(engine::render::PresentationSchedule::Clock::now());
-		PresentationDamage.Commit(presentationSignatures);
-		PresentedImages++;
-		VisualResourcesChanged = false;
-		PresentationInvalidated = false;
+		if (LastFrame.Presented || Settings.Headless) {
+			PresentationDamage.CacheProfile().Record(damage, false, LastFrame.PortalPasses > 0);
+			PresentationDamage.Commit(presentationSignatures);
+			PresentedImages++;
+			VisualResourcesChanged = false;
+			PresentationInvalidated = false;
+		}
 		ParticleDeltaSeconds = 0.0f;
 
 		// **After the frame rather than before it**, so the capture is of a

@@ -139,6 +139,34 @@ cmake --preset ci && cmake --build .cache/build/ci -j
 - [ ] **Was the grain chosen or inherited?** `DEFAULT_GRAIN` suits a body that
       does almost nothing. Real work per row wants a much smaller one.
 
+### Cascaded presentation caches
+
+- [ ] **Does each visible fact invalidate only its source layer?** Object,
+      particle, environment, portal, game-interface and host-interface
+      signatures must remain separate until their documented composition.
+- [ ] **Does a write cascade upward and never sideways?** A scene write reaches
+      game composition, Studio composition and final image. It does not rebuild
+      game or Studio interface geometry. A UI write does not touch resident
+      scene rows.
+- [ ] **Does a hit perform no work for that layer?** Check uploads, command
+      buffers, transfer bytes and transient allocations. A counter labelled
+      `hit` beside non-zero traffic is evidence of a broken cache boundary.
+- [ ] **Is the cache bounded and owned by the output it represents?** One
+      tracker and retained target per viewport or surface, with portal history
+      bounded by visible portal capacity. Never retain one full-size image per
+      frame.
+- [ ] **Is the baseline committed only after a successful write?** A failed
+      acquire, submit or render must retry the same damage rather than turn it
+      into a false hit.
+- [ ] **Are hits and writes profiled as counters rather than durations?** Use
+      the Frame Graph's `Cascaded Cache Hits` view. Use the timing graph for work
+      that actually ran, and `FrameResult` plus GPU heap statistics for traffic
+      and residency.
+- [ ] **Was the steady state measured in `release`?** Record the source and
+      composition hit rates, uploaded bytes, command-buffer counts and GPU
+      logical bytes before and after the change. Exercise a still scene, moving
+      particles, a UI-only edit, a resize and a visible portal.
+
 ## 6 · Tests
 
 - [ ] **Does the test fail if the code is wrong?** Write it, break the code

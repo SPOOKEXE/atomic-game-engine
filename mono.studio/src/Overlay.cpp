@@ -14,6 +14,7 @@
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/spatial/HashGrid.hpp>
 #include <engine/spatial/Query.hpp>
 #include <engine/ui/Theme.hpp>
@@ -1757,6 +1758,8 @@ namespace studio {
 		engine::gui::CompileRequest request;
 		request.Display.Width = canvas.Width;
 		request.Display.Height = canvas.Height;
+		request.ScreenGuis = IsRunning(shown) ? engine::gui::ScreenGuiSource::PlayerGui
+											  : engine::gui::ScreenGuiSource::StarterGui;
 
 		// The clock a page slide and a rubber band are measured against. See
 		// `CompileRequest::Seconds` for why it is handed in.
@@ -1814,6 +1817,10 @@ namespace studio {
 
 		std::vector<engine::gui::GuiEvent> events;
 		Universe->Enter(shown, [&](Store &store) {
+			if (const auto *local = store.Resource<engine::scene::LocalPlayer>(); local != nullptr) {
+				request.Viewer = local->Instance;
+			}
+
 			// **Per panel, because a panel is a canvas with its own camera.**
 			// A billboard is as many pixels across as the viewport it is
 			// projected into makes it, so two panels looking at one world from

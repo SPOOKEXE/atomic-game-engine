@@ -9,6 +9,8 @@
 #include <engine/effects/Ribbon.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/game/CollisionContent.hpp>
+#include <engine/gui/Registration.hpp>
+#include <engine/gui/Services.hpp>
 #include <engine/physics/Characters.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/physics/Query.hpp>
@@ -23,6 +25,7 @@
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Visibility.hpp>
 #include <engine/script/Runtime.hpp>
@@ -1094,6 +1097,18 @@ namespace client {
 		// Register built-in metadata before the script can query it.
 		RecordBuiltinMeshes(store);
 
+		// **The viewer exists before the script and receives the completed template
+		// after it.** A client compiles only `PlayerGui`; drawing `StarterGui`
+		// directly would expose an editing template in a shipped game and would
+		// render every player's interface together. The example loader installs
+		// these same registries and services idempotently, but it also starts the
+		// script, which is too late for a top-level `Players.LocalPlayer` read.
+		const Entity localPlayer = EnsureLocalPlayer(store);
+		if (localPlayer == engine::ecs::NULL_ENTITY) {
+			ENGINE_ERROR("could not establish the single-player client");
+			return false;
+		}
+
 		// **Before the script runs, for `RegisterEffectClasses`' reason with a
 		// quieter failure.** A top-level `UserInputService.MouseBehavior` is a
 		// write onto `scene::InputState`, and a write onto a world that has none
@@ -1108,6 +1123,20 @@ namespace client {
 		if (!engine::examples::LoadScene(store, scheduler, path, error, runtime)) {
 			ENGINE_ERROR("script '{}' failed:\n{}", path, error);
 			return false;
+		}
+
+		// The script has now finished authoring `StarterGui`. Clone that completed
+		// template rather than the empty service that existed before it ran. An
+		// interactive local script may instead author directly into `PlayerGui`;
+		// resetting an empty template would delete that live interface and replace
+		// it with nothing.
+		bool hasTemplate = false;
+		const Entity starterGui = store.FindFirstRoot(engine::gui::STARTER_GUI);
+		if (starterGui != engine::ecs::NULL_ENTITY) {
+			store.EachChild(starterGui, [&hasTemplate](Entity) { hasTemplate = true; });
+		}
+		if (hasTemplate) {
+			(void)engine::gui::ResetPlayerGui(store, localPlayer);
 		}
 
 		const float extent = store.Resource<WorldBounds>()->HalfExtent;
@@ -1161,6 +1190,20 @@ namespace client {
 
 		scheduler.Add("collect-instances", Phase::PreRender, engine::render::CollectInstances);
 		return true;
+	}
+
+	Entity EnsureLocalPlayer(Store &store) {
+		engine::scene::RegisterSceneClasses();
+		engine::gui::RegisterGuiClasses();
+		(void)engine::scene::InstallServices(store);
+		(void)engine::gui::InstallGuiServices(store);
+
+		if (const auto *local = store.Resource<engine::scene::LocalPlayer>();
+			local != nullptr && local->Instance != engine::ecs::NULL_ENTITY && store.Alive(local->Instance)) {
+			return local->Instance;
+		}
+
+		return engine::scene::AddPlayer(store, "Player", true, 1);
 	}
 
 	bool InstallDefaultCamera(Store &store, Scheduler &scheduler) {

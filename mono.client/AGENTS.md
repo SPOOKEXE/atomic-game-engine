@@ -242,6 +242,15 @@ build:
 drawn world otherwise, and everything in `Client::Draw`'s interface block -
 layout, compile, the router, `gui::Type`, `DeliverGuiEvents` - uses it.
 
+A single-player client is its own host. `EnsureLocalPlayer` establishes its
+local player before world scripts start, so a top-level
+`Players.LocalPlayer` read is valid. A scripted scene that authors a
+`StarterGui` template has it copied after startup; one that authors its live
+interactive interface directly under `PlayerGui` keeps those exact instances
+and their runtime signal connections. Never reset an empty `StarterGui` over a
+live `PlayerGui`, because that deletes the interface and replaces it with
+nothing.
+
 A connected client draws its local scene *and* the server's, and a person's
 `PlayerGui` is a subtree of their own `Player`, which is a row in the replica.
 Compiling the drawn world and delivering the press there is what made every
@@ -304,6 +313,26 @@ which is the previous one - this frame has not finished being measured. That is
 correct and intended. Do not "fix" it by calling `EndFrame` before the panels
 are drawn; the render pass would then be missing from every graph, which is the
 part you most want to see.
+
+## An unchanged final image never reaches the swapchain
+
+The client owns one `PresentationDamageTracker` because it owns one final
+presentation. Object, particle, environment and portal signatures invalidate
+the scene source independently; the game interface is signed separately and is
+compiled only from `PlayerGui`. They meet at the game composition. There is no
+Studio composition in this program.
+
+When every layer hits, `Client::Draw` returns before `WaitForFrame`, command
+buffer acquisition and swapchain acquisition. A swapchain image is not durable
+cache storage, so the final-image hit means no presentation at all, not copying
+the previous image into a new swapchain image. If a frame could not be acquired,
+do not commit the candidate signatures and do not count a successful write.
+
+Record cache decisions alongside `FrameResult` upload, command-buffer and GPU
+heap statistics. A supposedly unchanged frame that still submits is a
+presentation regression. A high source hit rate that still uploads resident
+rows is a residency regression. They are separate failures and the diagnostics
+must keep them distinguishable.
 
 ## The content pump is the largest thing here that nothing described
 

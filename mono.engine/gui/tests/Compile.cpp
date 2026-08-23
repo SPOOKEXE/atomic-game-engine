@@ -197,6 +197,38 @@ TEST_CASE("a still world compiles once and is then kept", "[gui][compile]") {
 	CHECK(world.List.Requests() == 11);
 }
 
+TEST_CASE("screen interfaces are compiled from the selected viewer root", "[gui][compile][cache]") {
+	World world("gui_compile.viewer-root");
+	const Entity starterScreen = world.Make("ScreenGui");
+	world.Make("Frame", starterScreen);
+
+	const engine::ecs::ClassId instance = engine::ecs::Classes::Find(engine::core::Name("Instance"));
+	const Entity player = world.Data.CreateInstance(instance, "Player");
+	const Entity playerGui = world.Data.CreateInstance(instance, "PlayerGui");
+	REQUIRE(world.Data.SetParent(playerGui, player));
+	const Entity playerScreen = world.Make("ScreenGui", playerGui);
+	world.Make("Frame", playerScreen);
+	world.Make("Frame", playerScreen);
+	const Entity otherPlayer = world.Data.CreateInstance(instance, "OtherPlayer");
+	const Entity otherPlayerGui = world.Data.CreateInstance(instance, "PlayerGui");
+	REQUIRE(world.Data.SetParent(otherPlayerGui, otherPlayer));
+	const Entity otherScreen = world.Make("ScreenGui", otherPlayerGui);
+	world.Make("Frame", otherScreen);
+
+	world.Request.ScreenGuis = ScreenGuiSource::StarterGui;
+	REQUIRE(world.Rebuild());
+	CHECK(world.List.Commands().Elements == 1);
+
+	world.Request.ScreenGuis = ScreenGuiSource::PlayerGui;
+	world.Request.Viewer = player;
+	REQUIRE(world.Rebuild());
+	CHECK(world.List.Commands().Elements == 2);
+
+	world.Request.Viewer = engine::ecs::NULL_ENTITY;
+	REQUIRE(world.Rebuild());
+	CHECK(world.List.Commands().Elements == 0);
+}
+
 TEST_CASE("every declared property moves the signature", "[gui][compile]") {
 	// **This is the check that makes `Compile.hpp`'s table a contract.** A
 	// field added to a component and not to the fold is a UI one edit stale,

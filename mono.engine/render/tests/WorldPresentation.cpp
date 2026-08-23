@@ -123,3 +123,27 @@ TEST_CASE("only selected environment state invalidates scene pixels", "[render][
 	state.Lighting.EnvironmentState.Textures.Front = Name("still-unused.atex");
 	CHECK(engine::render::ScenePresentationSignature(view, state) == disabled);
 }
+
+TEST_CASE("scene cache causes are signed independently", "[render][presentation][cache]") {
+	engine::render::View view;
+	engine::render::ScenePresentationState state;
+	const engine::render::ScenePresentationSignatures original =
+		engine::render::ScenePresentationSignaturesOf(view, state);
+
+	view.ParticleRevision++;
+	const engine::render::ScenePresentationSignatures particles =
+		engine::render::ScenePresentationSignaturesOf(view, state);
+	CHECK(particles.Objects == original.Objects);
+	CHECK(particles.Particles != original.Particles);
+	CHECK(particles.Environment == original.Environment);
+	CHECK(particles.Portals == original.Portals);
+
+	view.ParticleRevision--;
+	state.Lighting.EnvironmentState.HasAtmosphere = true;
+	const engine::render::ScenePresentationSignatures environment =
+		engine::render::ScenePresentationSignaturesOf(view, state);
+	CHECK(environment.Objects == original.Objects);
+	CHECK(environment.Particles == original.Particles);
+	CHECK(environment.Environment != original.Environment);
+	CHECK(environment.Portals == original.Portals);
+}

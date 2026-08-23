@@ -609,6 +609,106 @@ namespace studio {
 			return;
 		}
 
+		FrameGraphView &view = FrameGraphState;
+		if (ImGui::RadioButton("Frame timings", !view.ShowCascadedCaches)) {
+			view.ShowCascadedCaches = false;
+		}
+		ImGui::SameLine();
+		if (ImGui::RadioButton("Cascaded Cache Hits", view.ShowCascadedCaches)) {
+			view.ShowCascadedCaches = true;
+		}
+
+		if (view.ShowCascadedCaches) {
+			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+			ImGui::TextWrapped(
+				"One decision per viewport render opportunity. A hit means the retained GPU layer was "
+				"reused; "
+				"a write means that layer or one of its inputs invalidated it. These are counters, not "
+				"timing spans."
+			);
+			ImGui::PopStyleColor();
+
+			if (ViewportPresentations.empty()) {
+				ImGui::TextDisabled("no viewport cache has been observed yet");
+				ImGui::End();
+				return;
+			}
+			view.CacheViewport = std::min(view.CacheViewport, ViewportPresentations.size() - 1);
+			ImGui::SetNextItemWidth(engine::ui::Scaled(160.0f));
+			if (ImGui::BeginCombo("viewport", ViewportTitle(view.CacheViewport))) {
+				for (size_t index = 0; index < ViewportPresentations.size(); index++) {
+					const bool selected = view.CacheViewport == index;
+					if (ImGui::Selectable(ViewportTitle(index), selected)) {
+						view.CacheViewport = index;
+					}
+					if (selected) {
+						ImGui::SetItemDefaultFocus();
+					}
+				}
+				ImGui::EndCombo();
+			}
+
+			engine::render::PresentationCacheProfile &profile =
+				ViewportPresentations[view.CacheViewport].CacheProfile();
+			const std::span<const engine::render::PresentationCacheActivity> activities =
+				profile.Activities();
+			ImGui::SameLine();
+			if (ImGui::Button("Reset counters")) {
+				profile.Reset();
+			}
+
+			constexpr ImGuiTableFlags flags = ImGuiTableFlags_BordersV | ImGuiTableFlags_RowBg |
+											  ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp;
+			if (ImGui::BeginTable("cascaded cache activity", 5, flags)) {
+				ImGui::TableSetupColumn("layer", ImGuiTableColumnFlags_WidthStretch, 2.0f);
+				ImGui::TableSetupColumn("last", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(64.0f));
+				ImGui::TableSetupColumn("hits", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(80.0f));
+				ImGui::TableSetupColumn(
+					"writes", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(80.0f)
+				);
+				ImGui::TableSetupColumn(
+					"hit rate", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(80.0f)
+				);
+				ImGui::TableHeadersRow();
+
+				for (size_t index = 0; index < activities.size(); index++) {
+					const engine::render::PresentationCacheLayerInfo &layer =
+						engine::render::PRESENTATION_CACHE_LAYERS[index];
+					const engine::render::PresentationCacheActivity &activity = activities[index];
+					const uint64_t decisions = activity.Hits + activity.Writes;
+					const double hitRate = decisions == 0 ? 0.0
+														  : static_cast<double>(activity.Hits) * 100.0 /
+																static_cast<double>(decisions);
+
+					ImGui::TableNextRow();
+					ImGui::TableSetColumnIndex(0);
+					ImGui::Indent(engine::ui::Scaled(16.0f) * static_cast<float>(layer.Depth));
+					ImGui::TextUnformatted(layer.Name.data(), layer.Name.data() + layer.Name.size());
+					ImGui::Unindent(engine::ui::Scaled(16.0f) * static_cast<float>(layer.Depth));
+					ImGui::TableSetColumnIndex(1);
+					if (decisions == 0) {
+						ImGui::TextDisabled("not seen");
+					} else if (activity.Wrote) {
+						ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
+						ImGui::TextUnformatted("write");
+						ImGui::PopStyleColor();
+					} else {
+						ImGui::TextUnformatted("hit");
+					}
+					ImGui::TableSetColumnIndex(2);
+					ImGui::Text("%" PRIu64, activity.Hits);
+					ImGui::TableSetColumnIndex(3);
+					ImGui::Text("%" PRIu64, activity.Writes);
+					ImGui::TableSetColumnIndex(4);
+					ImGui::Text("%.1f%%", hitRate);
+				}
+				ImGui::EndTable();
+			}
+
+			ImGui::End();
+			return;
+		}
+
 		// --- what is shown, and when it changes -----------------------------
 		//
 		// **Collected only while this panel is open.** Recording every span of
@@ -620,7 +720,6 @@ namespace studio {
 		// happens. Drawing the live buffer directly is what made the panel
 		// hard to use for its one job: at sixty frames a second a bar is gone
 		// before the pointer reaches it.
-		FrameGraphView &view = FrameGraphState;
 		const std::vector<FrameSpan> &live = FrameGraph::Spans();
 		const double now = ImGui::GetTime();
 

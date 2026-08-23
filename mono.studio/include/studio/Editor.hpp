@@ -5653,6 +5653,16 @@ namespace studio {
 			// Whether the rule list is open. Folded away by default, because
 			// most sessions never write one.
 			bool ShowTriggers = false;
+
+			// Show cache decisions instead of elapsed spans. Hits have no useful
+			// duration, so placing them in the timing flame graph would invent a
+			// cost and obscure the question this view answers.
+			bool ShowCascadedCaches = false;
+
+			// The viewport whose cache tree is selected. Independent of the
+			// renderer's round-robin cursor so the table does not switch subjects
+			// every frame when several panels are open.
+			size_t CacheViewport = 0;
 		};
 
 		// What the frame-graph panel is showing. Held across frames, which is

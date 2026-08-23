@@ -632,3 +632,48 @@ a misspelled sheet expected for ever and the marker would never appear for the
 one case it exists for. A failure carries no name - `Take` answers nothing - so
 `delivery::AssetClient::NameOf` exists for it, and both hosts read the name
 *before* taking because a take is what destroys the record.
+
+## Cascaded presentation caches describe dependencies, not extra copies
+
+`PresentationDamageTracker` is the common invalidation boundary used by the
+client and by every Studio viewport. Its graph has three kinds of node:
+
+- resident sources: object rows, particle rows, environment inputs and portal
+  inputs;
+- retained images: portal history, the scene image, the game interface and the
+  Studio interface;
+- compositions: game, Studio, then the final presented image.
+
+This is a dependency graph, not an instruction to allocate one full-size
+texture for every named node. A node may be a resident buffer, a retained draw
+list, an existing renderer target or the decision to avoid acquiring a
+swapchain image. Adding a duplicate image merely to make the diagram literal is
+wrong unless a measured consumer needs it.
+
+`ScenePresentationSignaturesOf` signs the four source groups independently.
+Those signatures are causes, not another scene registry and not dirty flags.
+The ECS remains the storage, renderer residency remains keyed by its stable
+slots, and a signature only answers whether the retained result may be reused.
+A source change invalidates the scene image and every composition above it; it
+does not invalidate either interface sideways. A game-interface change starts
+at the game composition. A Studio-interface change starts at the Studio
+composition.
+
+The baseline advances only after pixels were successfully rendered or a
+headless render completed. A failed swapchain acquisition must leave the old
+baseline intact so the same damage is retried. Portals are the special retained
+input: their history is the last image actually rendered for that portal, and
+`FrameResult::PortalPasses` is the evidence that history was written. Do not
+infer a portal-history write from a changed portal descriptor alone.
+
+Cache profiling uses hit and write counters in
+`PresentationCacheProfile`. A hit has no duration, so it must not be represented
+as a fabricated timing span. The Frame Graph panel's `Cascaded Cache Hits` view
+shows the dependency depth, last decision and cumulative hit rate per viewport.
+Any new retained layer must add one row there and tests for its upward cascade.
+
+On a hit, that layer owes no upload, no command buffer and no transient
+allocation. Validate this in a steady scene with the release preset, the cache
+counters, `FrameResult` traffic counters and GPU heap statistics together. A
+high hit rate with upload bytes or logical GPU memory still growing is a bug,
+not a successful cache.

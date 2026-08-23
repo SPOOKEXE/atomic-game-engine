@@ -509,17 +509,40 @@ namespace engine::gui {
 		struct Ids {
 			ClassId Object;
 			ClassId Collector;
+			ClassId Screen;
 
 			Ids() {
 				RegisterGuiClasses();
 				Object = GuiClass("GuiObject");
 				Collector = GuiClass("LayerCollector");
+				Screen = GuiClass("ScreenGui");
 			}
 		};
 
 		const Ids &Classes() {
 			static const Ids ids;
 			return ids;
+		}
+
+		bool ScreenGuiAllowed(const Store &store, Entity collector, ScreenGuiSource source, Entity viewer) {
+			if (source == ScreenGuiSource::All) {
+				return true;
+			}
+
+			static const core::Name starter("StarterGui");
+			static const core::Name player("PlayerGui");
+			for (Entity above = store.ParentOf(collector); above != ecs::NULL_ENTITY;
+				 above = store.ParentOf(above)) {
+				const core::Name name = store.InstanceNameOf(above);
+				if (name == starter) {
+					return source == ScreenGuiSource::StarterGui;
+				}
+				if (name == player) {
+					return source == ScreenGuiSource::PlayerGui && viewer != ecs::NULL_ENTITY &&
+						   store.ParentOf(above) == viewer;
+				}
+			}
+			return false;
 		}
 
 		// How far a hovered or pressed button's fill shifts.
@@ -1166,6 +1189,7 @@ namespace engine::gui {
 		stamp = Fold(stamp, request.Hovered);
 		stamp = Fold(stamp, request.Pressed);
 		stamp = Fold(stamp, request.Viewer);
+		stamp = Fold(stamp, request.ScreenGuis);
 
 		// Names, for `SortOrder::Name`. Restricted to rows that have an
 		// `Element`, so renaming a part does not rebuild the UI.
@@ -1277,6 +1301,10 @@ namespace engine::gui {
 		for (const Entity collector : collectors) {
 			const Resolved *resolved = store.Get<Resolved>(collector);
 			if (resolved == nullptr || !resolved->Rendered) {
+				continue;
+			}
+			if (store.IsA(collector, ids.Screen) &&
+				!ScreenGuiAllowed(store, collector, request.ScreenGuis, request.Viewer)) {
 				continue;
 			}
 

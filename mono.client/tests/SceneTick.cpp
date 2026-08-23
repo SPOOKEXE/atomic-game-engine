@@ -16,11 +16,13 @@
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/examples/Scene.hpp>
+#include <engine/gui/Services.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/render/DebugPanels.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Input.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -40,6 +42,7 @@ TEST_DEPENDS("engine.core.framegraph")
 TEST_DEPENDS("engine.scene.components")
 TEST_DEPENDS("engine.scene.drawinstance")
 TEST_DEPENDS("engine.scene.input")
+TEST_DEPENDS("engine.gui.services")
 
 using Catch::Approx;
 using engine::core::FrameGraph;
@@ -554,6 +557,36 @@ TEST_CASE("a top-level pointer-mode write survives the install", "[demo]") {
 	REQUIRE(input != nullptr);
 	CHECK(input->Behaviour == engine::scene::MouseBehavior::LockCenter);
 	CHECK_FALSE(input->MouseIconEnabled);
+
+	std::filesystem::remove(scene);
+	engine::parallel::Jobs::Stop();
+}
+
+TEST_CASE("a scripted client sees a local player and draws its completed PlayerGui", "[demo][gui]") {
+	engine::parallel::Jobs::Start(2);
+	engine::core::Paths::SetAssetsOverride(engine::core::Paths::Base().parent_path() / "assets");
+
+	const std::filesystem::path scene =
+		std::filesystem::temp_directory_path() / "client_scene_tick_player_gui.luau";
+	{
+		std::ofstream out(scene);
+		out << "local Players = game:GetService('Players')\n";
+		out << "assert(Players.LocalPlayer ~= nil, 'LocalPlayer was absent during startup')\n";
+		out << "local screen = Instance.new('ScreenGui')\n";
+		out << "screen.Name = 'ClientScreen'\n";
+		out << "screen.Parent = game:GetService('StarterGui')\n";
+	}
+
+	Store world("player_gui");
+	Scheduler systems;
+	REQUIRE(client::BuildScriptedWorld(world, systems, scene.string(), 1));
+
+	const auto *local = world.Resource<engine::scene::LocalPlayer>();
+	REQUIRE(local != nullptr);
+	REQUIRE(local->Instance != engine::ecs::NULL_ENTITY);
+	const engine::ecs::Entity playerGui = world.FindFirstChild(local->Instance, engine::gui::PLAYER_GUI);
+	REQUIRE(playerGui != engine::ecs::NULL_ENTITY);
+	CHECK(world.FindFirstChild(playerGui, "ClientScreen") != engine::ecs::NULL_ENTITY);
 
 	std::filesystem::remove(scene);
 	engine::parallel::Jobs::Stop();

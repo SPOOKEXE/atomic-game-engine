@@ -96,6 +96,29 @@ The direction matters and only one way round is safe. A collision keeps a list
 the world has moved on from; a spurious change costs one rebuild nobody sees.
 Lean the second way, always.
 
+## The game interface is its own retained cache layer
+
+`Compiled` is the resident game-interface source for the presentation cache. It
+keeps its draw list when its signature matches, and a caller must use the
+`false` return from `Rebuild` to avoid uploading identical vertices. Scene
+motion does not enter this signature and a game-interface edit does not dirty
+the scene source. They meet only in the renderer's game composition.
+
+`CompileRequest::ScreenGuis` is part of the signature and is a viewing policy,
+not authored state. A shipped client selects `PlayerGui`. Studio selects
+`StarterGui` while editing and `PlayerGui` while a world is running. The
+`PlayerGui` choice also requires `CompileRequest::Viewer` and admits only that
+player's subtree; a null viewer admits none. The generic default admits both for
+tests and tools that deliberately inspect a whole store. Never make a
+production caller rely on that default: rendering a template and live copies
+together duplicates or leaks another player's interface and makes their cache
+signatures move for unrelated edits.
+
+The cache profiler belongs above this shared module. This module already
+reports `Requests` and `Rebuilds`, while render records whether the retained
+interface and its compositions were hits or writes. Do not add timing spans for
+hits; a skipped compile has no useful elapsed region.
+
 ## Enums are stored as ordinals, so their order is the save format
 
 Every enum in `Enums.hpp` sits in a trivially-copied component as its ordinal.

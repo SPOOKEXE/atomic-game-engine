@@ -27,6 +27,7 @@
 // | `InstanceName` | `SortOrder::Name` reads it |
 // | Every field of every component this module declares | All of it reaches a rectangle or a command |
 // | The hovered and pressed instances | `AutoButtonColor` shifts a fill |
+// | The selected `ScreenGui` source | Edit templates and live player copies must not share a list |
 //
 // A field added to a component has to be added to the fold in `Compile.cpp`,
 // and the failure if it is not is a UI one edit stale. `gui/tests/Compile.cpp`
@@ -53,6 +54,12 @@ namespace engine::ecs {
 }
 
 namespace engine::gui {
+
+	enum class ScreenGuiSource : uint8_t {
+		All,
+		StarterGui,
+		PlayerGui,
+	};
 
 	// What the compile needs to know that is not in the store.
 	//
@@ -87,6 +94,12 @@ namespace engine::gui {
 		//
 		// @since v0.18
 		ecs::Entity Viewer;
+
+		// Which screen-interface root this viewer is allowed to see. `PlayerGui`
+		// also requires `Viewer` and admits only that player's subtree. Generic
+		// tools default to both; shipped clients select `PlayerGui`, and Studio
+		// selects the template only while editing.
+		ScreenGuiSource ScreenGuis = ScreenGuiSource::All;
 
 		// The caller's monotonic clock, in seconds.
 		//

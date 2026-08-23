@@ -53,6 +53,10 @@ namespace engine::render {
 	// signatures deliberately do not enter this value.
 	uint64_t ScenePresentationSignature(const View &view, const ScenePresentationState &state);
 
+	// The same scene inputs split by resident source for cache diagnostics.
+	ScenePresentationSignatures
+	ScenePresentationSignaturesOf(const View &view, const ScenePresentationState &state);
+
 	// Signs the target geometry independently from its contents.
 	uint64_t ViewportPresentationSignature(uint32_t width, uint32_t height);
 
