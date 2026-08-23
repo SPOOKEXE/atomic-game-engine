@@ -186,6 +186,25 @@ TEST_CASE("writing the same component three times signals once", "[ecs]") {
 	REQUIRE(store.Get<Spot>(entity)->X == 3.0f);
 }
 
+TEST_CASE("row-wise changes are journalled once per entity", "[ecs]") {
+	Store store("test");
+	store.Observe<Spot>();
+
+	const Entity first = store.Create();
+	const Entity second = store.Create();
+	store.Set<Spot>(first, Spot{1.0f});
+	store.Set<Spot>(second, Spot{2.0f});
+	store.ClearChanges();
+
+	store.Set<Spot>(second, Spot{3.0f});
+	store.Set<Spot>(second, Spot{4.0f});
+	store.Set<Spot>(second, Spot{5.0f});
+
+	std::vector<Entity> changed;
+	store.EachChanged<Spot>([&](Entity entity, Spot &) { changed.push_back(entity); });
+	REQUIRE(changed == std::vector<Entity>{second});
+}
+
 TEST_CASE("EachChanged hands out the live value", "[ecs]") {
 	Store store("test");
 	store.Observe<Spot>();
@@ -333,6 +352,32 @@ TEST_CASE("the coarse counter moves on every recorded write", "[ecs]") {
 	const uint64_t held = store.ChangeVersion();
 	store.ClearChanges();
 	REQUIRE(store.ChangeVersion() == held);
+}
+
+TEST_CASE("component change epochs ignore unrelated writes", "[ecs]") {
+	Store store("test");
+	store.Observe<Spot>();
+	store.Observe<Drift>();
+
+	const uint64_t spotBefore = store.ComponentChangeVersion<Spot>();
+	const uint64_t driftBefore = store.ComponentChangeVersion<Drift>();
+	REQUIRE(spotBefore != 0);
+	REQUIRE(driftBefore != 0);
+	REQUIRE(store.ComponentChangeVersion<Quiet>() == 0);
+
+	const Entity entity = store.Create();
+	store.Set<Spot>(entity, Spot{1.0f});
+	REQUIRE(store.ComponentChangeVersion<Spot>() > spotBefore);
+	REQUIRE(store.ComponentChangeVersion<Drift>() == driftBefore);
+
+	const uint64_t spotAfter = store.ComponentChangeVersion<Spot>();
+	store.Set<Drift>(entity, Drift{2.0f});
+	REQUIRE(store.ComponentChangeVersion<Spot>() == spotAfter);
+	REQUIRE(store.ComponentChangeVersion<Drift>() > driftBefore);
+
+	const uint64_t held = store.ComponentChangeVersion<Drift>();
+	store.ClearChanges();
+	REQUIRE(store.ComponentChangeVersion<Drift>() == held);
 }
 
 TEST_CASE("a batch write moves the counter but sets no bit", "[ecs]") {

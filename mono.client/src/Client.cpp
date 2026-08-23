@@ -3334,7 +3334,6 @@ namespace client {
 		view.Surfaces = Surfaces;
 		view.Target = sceneTarget;
 		view.Particles = Particles.Batches;
-		view.ParticleBirths = Particles.Births;
 		view.ParticleSeams = Particles.Seams;
 		view.ParticleRevision = Particles.Revision;
 		view.ParticleLayoutRevision = Particles.LayoutRevision;

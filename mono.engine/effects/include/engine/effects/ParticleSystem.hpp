@@ -352,7 +352,7 @@ namespace engine::effects {
 		float FlipbookRate = 12.0f;
 	};
 
-	// The compact mutable row streamed by rate planning and host-side spawning.
+	// The compact mutable row consumed by host fallback or copied to device state.
 	//
 	// Kept beside `EmitterBlock`, indexed identically. The block is hundreds of
 	// bytes of curves, transforms and device parameters, while a simulation tick
@@ -386,6 +386,11 @@ namespace engine::effects {
 		// it is planned, preserving immediate start without synchronising a crowd.
 		bool RatePhasePending = true;
 		bool Enabled = true;
+
+		// A disabled device emitter remains resident until its longest possible
+		// particle has expired. Only those rare blocks are revisited by the host;
+		// steady active emitters are advanced entirely by the GPU.
+		bool DeviceRetiring = false;
 	};
 
 	// The compact authored state needed only when a particle is born.
@@ -498,24 +503,6 @@ namespace engine::effects {
 		uint32_t Rotation = 0;
 	};
 
-	// One particle that was born this tick, and the pool row it belongs in.
-	//
-	// **The unit that crosses to a device-resident pool.** The host decides every
-	// birth - where a particle starts reads the emitter's shape, its half-extent,
-	// its parent's motion and a draw seeded from the emitter's entity, none of
-	// which is going to the device - and this is what comes back: about seventeen
-	// hundred of these a tick in a scene of five thousand emitters, against the
-	// half million particles the device ages without being told anything.
-	//
-	// @since v0.17
-	struct ParticleBirth {
-		// Which slot of the pool this particle occupies.
-		uint32_t Row = 0;
-
-		// Its whole simulation half, as the host worked it out at spawn.
-		ParticleState State;
-	};
-
 	// What one step did, for the panel and for a test.
 	//
 	// @since v0.10
@@ -581,6 +568,11 @@ namespace engine::effects {
 		// Mutable rate and ring counters, indexed exactly as `Blocks`.
 		std::vector<EmitterRuntime> RuntimeStates;
 
+		// Indices of disabled device blocks waiting for their last possible
+		// particle to expire. This keeps retirement proportional to emitters that
+		// are actually stopping instead of restoring an all-emitter CPU step.
+		std::vector<uint32_t> RetiringBlocks;
+
 		// The immediate parent used to resolve each block's cached frame.
 		//
 		// Kept beside rather than inside `EmitterBlock`: the device and particle
@@ -590,6 +582,16 @@ namespace engine::effects {
 
 		// The texture catalogue revision already reflected in `Blocks`.
 		uint64_t TextureRevision = 0;
+
+		// Observed ECS epochs already folded into the resident emitter rows.
+		// Keeping the six exact component epochs makes the steady refresh path
+		// independent of the number of quiet entities carrying those components.
+		uint64_t EmitterChangeVersion = 0;
+		uint64_t TransformChangeVersion = 0;
+		uint64_t AttachmentChangeVersion = 0;
+		uint64_t BoundsChangeVersion = 0;
+		uint64_t MotionChangeVersion = 0;
+		uint64_t HierarchyChangeVersion = 0;
 
 		// Which completed simulation revision the presentation data describes.
 		//
@@ -604,13 +606,13 @@ namespace engine::effects {
 		//
 		// Simulation advances every tick, while this advances only when a batch is
 		// added, removed, or changes draw state. Keeping the two separate lets a
-		// resident renderer upload births and changed block parameters without
+		// resident renderer upload changed block parameters without
 		// sorting and rewriting the complete emitter draw table.
 		uint64_t LayoutRevision = 1;
 
 		// Which device parameter or curve-table content Blocks describes.
 		//
-		// Particle ages and births do not change these tables. A static emitter can
+		// Particle ages and emission do not change these tables. A static emitter can
 		// therefore advance for any number of ticks without making presentation
 		// scan every block to rediscover that all per-block revisions still match.
 		uint64_t ResidentRevision = 1;
@@ -656,12 +658,12 @@ namespace engine::effects {
 		// case remains independent of emitter count.
 		size_t EmitterRows = 0;
 
-		// Whether the device owns the pool and this module only spawns into it.
+		// Whether the device owns the pool and its complete lifecycle.
 		//
 		// **Set by whoever has a renderer, and the client always does.** When it
 		// is on, `StepParticles` skips its ageing pass entirely: the device
-		// integrates, shades and draws from `particle-step.comp` and nothing has
-		// to cross the bus but the block parameters and the frame's births. That
+		// emits, integrates, shades and draws from the resident particle buffers.
+		// Nothing crosses the bus unless an emitter parameter changes. That
 		// is worth about two milliseconds a frame at half a million particles,
 		// which is most of what a particle frame used to cost.
 		//
@@ -672,27 +674,6 @@ namespace engine::effects {
 		// the same integration written twice, so a change to one is a change to
 		// both; `particle-step.comp` says so at each point where it matters.
 		bool DeviceStepped = false;
-
-		// What was spawned since presentation last consumed a revision, and which
-		// pool row each one belongs in.
-		//
-		// **The whole state and not a row into `States`, which is what lets both
-		// host arrays go.** When the device owns the pool nothing on this side
-		// ever reads a particle again: `Instances` is written by the step, and
-		// `States` is read and written by it. Carrying the newborn state here
-		// rather than pointing at an array is the difference between allocating
-		// fifty-four megabytes the host never looks at and allocating none - at
-		// the pool's default capacity, on every client.
-		//
-		// Empty unless `DeviceStepped`. The host-side pass has no need of it: it
-		// spawns into the arrays it also ages.
-		std::vector<ParticleBirth> Births;
-
-		// The revision whose births presentation has copied. The next simulation
-		// step may then discard those records before appending new ones. Keeping
-		// them until that step lets several cameras or a rebuilt snapshot read the
-		// same revision without one consumer stealing it from the others.
-		uint64_t BirthsPresentedRevision = 0;
 
 		// How many slots the pool holds in total.
 		//

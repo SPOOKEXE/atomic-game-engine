@@ -301,6 +301,9 @@ namespace engine::script {
 		if (input == nullptr) {
 			return {};
 		}
+		if (!input->HasFrameEvents()) {
+			return {};
+		}
 
 		std::string firstError;
 

@@ -138,18 +138,21 @@ namespace engine::physics {
 		// decision the solver makes about `scene::SurfaceTable`.
 		const scene::CollisionShapes *baked = scene::CollisionShapesOf(store);
 
-		store.Each<const scene::Transform, const scene::Collider, const scene::Motion>(
-			[&dynamicProxies, &dynamicRecords, &dynamicShapes, baked](
-				ecs::Entity entity,
-				const scene::Transform &transform,
-				const scene::Collider &collider,
-				const scene::Motion &
-			) {
-				AppendEntry(
-					dynamicProxies, dynamicRecords, dynamicShapes, baked, entity, transform, collider
-				);
-			}
-		);
+		{
+			ENGINE_PROFILE_CAT("physics.gather-dynamic", core::ProfileCategory::Physics);
+			store.Each<const scene::Transform, const scene::Collider, const scene::Motion>(
+				[&dynamicProxies, &dynamicRecords, &dynamicShapes, baked](
+					ecs::Entity entity,
+					const scene::Transform &transform,
+					const scene::Collider &collider,
+					const scene::Motion &
+				) {
+					AppendEntry(
+						dynamicProxies, dynamicRecords, dynamicShapes, baked, entity, transform, collider
+					);
+				}
+			);
+		}
 
 		{
 			// The rebuild on its own, separate from gathering the proxies that
@@ -188,7 +191,11 @@ namespace engine::physics {
 		// `ecs::Store` has no "without this component" query term, so the count
 		// is a subtraction and the pass below asks per row - which is affordable
 		// exactly because it is not a per-tick pass.
-		const size_t colliders = store.CountMatching<scene::Transform, scene::Collider>();
+		size_t colliders = 0;
+		{
+			ENGINE_PROFILE_CAT("physics.count-colliders", core::ProfileCategory::Physics);
+			colliders = store.CountMatching<scene::Transform, scene::Collider>();
+		}
 		const size_t staticCount = colliders - dynamicRecords.size();
 
 		if (!StaticSetChanged(store, *world, staticCount)) {

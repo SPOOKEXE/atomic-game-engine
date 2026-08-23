@@ -147,32 +147,34 @@ TEST_CASE("particle light properties reach the render batch", "[client][presenta
 
 		engine::scene::ResolveAttachments(store);
 		REQUIRE(engine::effects::RefreshEmitters(store) == 1);
+		store.ResourceMutable<engine::effects::ParticleSystem>()->DeviceStepped = true;
 		const engine::effects::ParticleStatistics first = engine::effects::StepParticles(store, 1.0f / 30.0f);
 		const engine::effects::ParticleStatistics second =
 			engine::effects::StepParticles(store, 1.0f / 30.0f);
-		REQUIRE(first.Live > 0);
-		REQUIRE(second.Live > 0);
+		CHECK(first.Live == 0);
+		CHECK(second.Live == 0);
 
 		engine::render::ParticleFrame frame;
 		REQUIRE(engine::render::CollectParticleBatches(store, frame) == 1);
 		REQUIRE(frame.Batches.size() == 1);
-		CHECK(frame.Births.size() == first.Emitted + second.Emitted);
 		const auto *system = store.Resource<engine::effects::ParticleSystem>();
-		CHECK(system->Births.size() == frame.Births.size());
-		CHECK(system->BirthsPresentedRevision == system->PresentationRevision);
+		CHECK(first.Emitted == 0);
+		CHECK(second.Emitted == 0);
+		CHECK(frame.SourceRevision == system->PresentationRevision);
 
-		const engine::effects::ParticleStatistics third = engine::effects::StepParticles(store, 1.0f / 30.0f);
+		(void)engine::effects::StepParticles(store, 1.0f / 30.0f);
 		system = store.Resource<engine::effects::ParticleSystem>();
-		CHECK(system->Births.size() == third.Emitted);
 		REQUIRE(engine::render::CollectParticleBatches(store, frame) == 1);
-		CHECK(frame.Births.size() == third.Emitted);
 		CHECK(frame.Batches[0].LightEmission == Catch::Approx(0.35f));
 		CHECK(frame.Batches[0].LightInfluence == Catch::Approx(0.8f));
 
 		// The block is what the batch carries now, and the renderer steps and
 		// draws from it - see `render::ParticleBatch`.
 		REQUIRE(frame.Batches[0].Block != nullptr);
+		REQUIRE(frame.Batches[0].Spawn != nullptr);
+		REQUIRE(frame.Batches[0].Runtime != nullptr);
 		CHECK(frame.Batches[0].Block->Capacity > 0);
+		CHECK(frame.Batches[0].Runtime->ContinuousRate == 60.0f);
 		CHECK(frame.Pool > 0);
 	});
 }
@@ -205,7 +207,8 @@ TEST_CASE("a detached particle frame stops pointing into the world", "[client][p
 
 		engine::scene::ResolveAttachments(store);
 		REQUIRE(engine::effects::RefreshEmitters(store) == 3);
-		REQUIRE(engine::effects::StepParticles(store, 1.0f / 30.0f).Emitted > 0);
+		store.ResourceMutable<engine::effects::ParticleSystem>()->DeviceStepped = true;
+		CHECK(engine::effects::StepParticles(store, 1.0f / 30.0f).Emitted == 0);
 
 		engine::render::ParticleFrame frame;
 		REQUIRE(engine::render::CollectParticleBatches(store, frame) == 3);

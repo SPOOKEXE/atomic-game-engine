@@ -867,6 +867,7 @@ namespace engine::render {
 		// Shared programs for every world's particle pool. The state and output
 		// buffers are world-owned below; the shaders carry no world state.
 		SDL_GPUComputePipeline *ParticleStep = nullptr;
+		SDL_GPUComputePipeline *ParticleEmit = nullptr;
 		SDL_GPUComputePipeline *ParticleScatter = nullptr;
 
 		// One run of particles that share every uniform and every binding.
@@ -950,14 +951,14 @@ namespace engine::render {
 		// particle frame did - larger than the simulation and two orders of
 		// magnitude larger than recording the draw.
 		//
-		// Steady frames cross births and only the parameter or curve records that
-		// changed. The flat work list crosses when emitter layout changes.
+		// Steady frames cross only parameter or curve records that changed. The
+		// flat work list crosses when emitter layout changes.
 		// `particle-step.comp` does the rest and writes its output straight into
 		// its world's buffer at the offsets `PrepareParticles` worked out, so the
 		// draw grouping is exactly what it was and there is no gather pass.
 		struct ParticlePool {
 			// One state per slot, `STATE_WORDS` wide, read and written by the
-			// step and written by the spawn. Never read by the host.
+			// integration pass and written by emission. Never read by the host.
 			SDL_GPUBuffer *States = nullptr;
 			SDL_GPUTransferBuffer *StateStaging = nullptr;
 			uint32_t Slots = 0;
@@ -972,7 +973,7 @@ namespace engine::render {
 			//@}
 
 			// The two tables the step reads by block index, and the one staging
-			// pair that feeds both.
+			// staging records that feed them.
 			//
 			// **Persistent, and written only where they disagree with the host.**
 			// See `PARTICLE_WORK_WORDS` for why: staging every block every frame
@@ -980,13 +981,15 @@ namespace engine::render {
 			//@{
 			SDL_GPUBuffer *Params = nullptr;
 			SDL_GPUBuffer *Curves = nullptr;
+			SDL_GPUBuffer *EmitterRuntime = nullptr;
+			SDL_GPUTransferBuffer *EmitterRuntimeStaging = nullptr;
 			uint32_t TableRows = 0;
 
 			// The records that update them, staged and scattered.
 			//
 			// **One pair each, and they cannot share.** A scatter record is its
 			// destination row followed by the payload, so its stride *is* the
-			// payload width - twenty-five words for a parameter record and
+			// payload width - fifty-one words for a parameter record and
 			// sixty-five for a curve one. The first version put both in one
 			// buffer from its two ends and told the shader one width, so every
 			// parameter update but the first landed at the wrong offset and the
@@ -1016,14 +1019,6 @@ namespace engine::render {
 			std::vector<uint32_t> CurveRevision;
 			//@}
 
-			// Pending births since the last presented revision, each a slot and the
-			// state to put in it.
-			//@{
-			SDL_GPUBuffer *Births = nullptr;
-			SDL_GPUTransferBuffer *BirthStaging = nullptr;
-			uint32_t BirthCapacity = 0;
-			//@}
-
 			// The portal panes, if the scene has any.
 			//@{
 			SDL_GPUBuffer *Seams = nullptr;
@@ -1035,7 +1030,6 @@ namespace engine::render {
 			//@{
 			uint32_t WorkItems = 0;
 			uint32_t WorkUpdates = 0;
-			uint32_t BirthCount = 0;
 			uint32_t SeamCount = 0;
 			uint32_t ParamUpdates = 0;
 			uint32_t CurveUpdates = 0;
@@ -1096,8 +1090,8 @@ namespace engine::render {
 			return ParticleWorlds.back();
 		}
 
-		// Grows the pool's state buffer to `slots`, and the three staging pairs
-		// to what this frame needs.
+		// Grows the pool's state buffer and the staging buffers to what this frame
+		// needs.
 		//
 		// **The state buffer is never re-created once it is big enough**, and it
 		// must not be: it is the simulation. Re-creating it would empty every
@@ -1105,12 +1099,12 @@ namespace engine::render {
 		// frame.
 		//@{
 		bool ReserveParticlePool(uint32_t slots, SDL_GPUCommandBuffer *command);
-		bool ReserveParticleTables(uint32_t blocks);
-		bool ReserveParticleStaging(uint32_t workItems, uint32_t births, uint32_t seams);
+		bool ReserveParticleTables(uint32_t blocks, SDL_GPUCommandBuffer *command);
+		bool ReserveParticleStaging(uint32_t workItems, uint32_t seams);
 		//@}
 
-		// Runs changed-state uploads, the spawn scatter and the step in the
-		// frame's command buffer.
+		// Runs changed-state uploads, emission and integration in the frame's
+		// command buffer.
 		//
 		// **Once per world rather than once per view.** The pool is a world's and
 		// not a camera's; `PrepareParticles` records it for the first view and
@@ -1132,7 +1126,7 @@ namespace engine::render {
 		bool ReserveParticles(uint32_t count);
 
 		// Groups the batches, decides where each block's run lands in the draw
-		// stream, and stages the records, births and seams the step will read.
+		// stream, and stages the changed records and seams the device will read.
 		//
 		// **Outside every render pass**, because the copy that follows it is a
 		// copy pass and a copy pass cannot be started while a render pass is

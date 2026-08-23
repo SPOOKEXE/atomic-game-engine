@@ -496,6 +496,12 @@ namespace engine::render {
 		// curves out of it, and reads nothing else.
 		const effects::EmitterBlock *Block = nullptr;
 
+		// Spawn configuration and device-owned rate counters for this block.
+		// These are separate from EmitterBlock so the host fallback can stream its
+		// compact runtime row without pulling curves and transforms into cache.
+		const effects::EmitterSpawnState *Spawn = nullptr;
+		const effects::EmitterRuntime *Runtime = nullptr;
+
 		// Which block this is, from `effects::EmitterSlot::Index`.
 		//
 		// **The index and not only the pointer**, because the renderer keeps two
@@ -622,23 +628,14 @@ namespace engine::render {
 		//@{
 		std::span<const ParticleBatch> Particles;
 
-		// What was born this tick, and where it goes in the device pool.
-		//
-		// **The host still spawns**, because a birth reads `ParticleEmitter`, the
-		// entity tree and the parent's motion, and none of those is going to the
-		// device. So the one thing that crosses per frame besides the blocks is
-		// this: a few thousand rows of sixty bytes, scattered into the device's
-		// state pool by a compute pass before the step runs.
-		std::span<const effects::ParticleBirth> ParticleBirths;
-
 		// The panes a particle can be drawn through, already flattened.
 		//
 		// Empty in a scene with no portals, which is nearly all of them. See
 		// `ParticleSeam`.
 		std::span<const ParticleSeam> ParticleSeams;
 
-		// Which simulation revision produced the particle blocks, births and
-		// seams. An unchanged value needs only another device step for the new
+		// Which simulation revision produced the particle blocks and seams. An
+		// unchanged value needs only another device step for the new
 		// visual delta; ParticleLayoutRevision separately owns ordering.
 		uint64_t ParticleRevision = 0;
 

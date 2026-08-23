@@ -1641,6 +1641,18 @@ namespace engine::ecs {
 			return ObservedRaw(Components::Of<T>());
 		}
 
+		// The monotonic write epoch for one observed component.
+		//
+		// Unlike the store-wide `ChangeVersion`, this stays still when an
+		// unrelated component changes. Compare it with a retained value before
+		// walking `EachChanged<T>` when a large observed column is usually quiet.
+		// Zero means the component is not observed.
+		//
+		// @return A counter that increases on every recorded write to `T`.
+		template <class T> uint64_t ComponentChangeVersion() const {
+			return ComponentChangeVersionRaw(Components::Of<T>());
+		}
+
 		// Reports whether one entity's `T` was written since the last
 		// ClearChanges.
 		//
@@ -1776,12 +1788,9 @@ namespace engine::ecs {
 			RequireOwningThread("EachChanged");
 
 			const ComponentId id = Components::Of<T>();
-			const ComponentId terms[] = {id, Components::Of<DirtyBits>()};
 			const DeferScope defer(*this);
 
-			VisitChanged(terms, id, [&](Entity entity, void *value) {
-				body(entity, *static_cast<T *>(value));
-			});
+			VisitChanged(id, [&](Entity entity, void *value) { body(entity, *static_cast<T *>(value)); });
 		}
 
 		// Visits every *run* of adjacent changed rows, as arrays.
@@ -2335,13 +2344,10 @@ namespace engine::ecs {
 
 		void ObserveRaw(ComponentId id);
 		bool ObservedRaw(ComponentId id) const;
+		uint64_t ComponentChangeVersionRaw(ComponentId id) const;
 		Connection Listen(ComponentId id, std::function<void(Store &, Entity, const void *)> body);
 		bool ChangedRaw(Entity entity, ComponentId id) const;
-		void VisitChanged(
-			std::span<const ComponentId> terms,
-			ComponentId subject,
-			const std::function<void(Entity, void *)> &body
-		);
+		void VisitChanged(ComponentId subject, const std::function<void(Entity, void *)> &body);
 
 		void VisitChangedRuns(
 			std::span<const ComponentId> terms,

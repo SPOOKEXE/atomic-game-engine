@@ -905,9 +905,9 @@ namespace client {
 			// **Every world a client installs is stepped on the device**, which
 			// is what turns the ageing half of `StepParticles` off. A client has
 			// a renderer by definition, and `render::Renderer` owns the pool: it
-			// integrates and shades in `particle-step.comp` and writes the
-			// instances straight into the draw stream, so nothing crosses the bus
-			// but the block records and the tick's births.
+			// emits, integrates and shades on the device, then writes instances
+			// straight into the draw stream. Nothing crosses the bus unless an
+			// emitter's resident parameters change.
 			//
 			// The host-side pass is what a test asserts against and what a build
 			// with no compute device would fall back on; it is not what a client

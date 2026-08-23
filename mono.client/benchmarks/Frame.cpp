@@ -13,9 +13,9 @@
 // - **`CollectInstances`** walks every visible part, interpolates it between the
 //   last two ticks and writes a `scene::DrawInstance`. This is the triangle
 //   count's proxy and the one that scales with the scene.
-// - **`CollectParticleBatches`** refreshes births once per simulation revision,
-//   block data only when its resident revision changes, and authored batches
-//   only when emitter layout changes. All three paths are measured below.
+// - **`CollectParticleBatches`** refreshes block data only when its resident
+//   revision changes and authored batches only when emitter layout changes.
+//   Both paths are measured below.
 // - **`CollectLights`** resolves each light to where it shines from, which is a
 //   walk to a parent, and then sorts to a cap.
 // - **`CollectSurfaceViews`** finds every mirror, which is a scan that usually
@@ -260,7 +260,7 @@ BENCH("CollectParticleBatches · refresh 1,000 resident emitters", 100) {
 }
 
 BENCH("CollectParticleBatches · refresh 10,000 resident emitters", 100) {
-	// A simulation revision refreshes births and resident block pointers without
+	// A simulation revision refreshes resident block pointers without
 	// walking the authored emitter column or rebuilding material order.
 	Store &store = Emitting(10'000);
 	auto *system = store.ResourceMutable<engine::effects::ParticleSystem>();

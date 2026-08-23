@@ -2389,7 +2389,6 @@ namespace studio {
 												  : std::span<const engine::scene::DrawInstance>{};
 			view.Surfaces = Surfaces;
 			view.Particles = Particles.Batches;
-			view.ParticleBirths = Particles.Births;
 			view.ParticleSeams = Particles.Seams;
 			view.ParticleRevision = Particles.Revision;
 			view.ParticleLayoutRevision = Particles.LayoutRevision;

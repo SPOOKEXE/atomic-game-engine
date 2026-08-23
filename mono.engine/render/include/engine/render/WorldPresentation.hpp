@@ -43,9 +43,6 @@ namespace engine::render {
 		// One batch per emitter with a live resident block.
 		std::vector<ParticleBatch> Batches;
 
-		// Births accumulated since this world was last collected.
-		std::vector<effects::ParticleBirth> Births;
-
 		// Same-world portal seams applied by the device particle step.
 		std::vector<ParticleSeam> Seams;
 
@@ -74,6 +71,8 @@ namespace engine::render {
 
 		// Copies of blocks used when the frame outlives the store boundary.
 		std::vector<effects::EmitterBlock> Blocks;
+		std::vector<effects::EmitterSpawnState> SpawnStates;
+		std::vector<effects::EmitterRuntime> RuntimeStates;
 
 		// Whether batch pointers already name Blocks.
 		bool Detached = false;

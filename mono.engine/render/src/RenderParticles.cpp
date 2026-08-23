@@ -39,12 +39,12 @@ namespace engine::render {
 		// `static_assert`s below are what makes a change to the C++ side fail to
 		// build instead of failing to look right.
 		constexpr uint32_t PARTICLE_STATE_WORDS = 15;
-		constexpr uint32_t PARTICLE_BIRTH_WORDS = PARTICLE_STATE_WORDS + 1;
+		constexpr uint32_t PARTICLE_EMITTER_WORDS = 5;
 		constexpr uint32_t PARTICLE_SEAM_WORDS = 20;
 
-		// The block's parameters, in a table indexed by block. The six tail words
-		// carry the optional force modules without widening a particle row.
-		constexpr uint32_t PARTICLE_PARAM_WORDS = 24;
+		// The block's parameters, in a table indexed by block. Forces and spawn
+		// configuration live here without widening a particle row.
+		constexpr uint32_t PARTICLE_PARAM_WORDS = 50;
 		constexpr uint32_t PARTICLE_PARAM_ROTATION = 0;
 		constexpr uint32_t PARTICLE_PARAM_POSITION = 4;
 		constexpr uint32_t PARTICLE_PARAM_ACCELERATION = 7;
@@ -62,6 +62,21 @@ namespace engine::render {
 		constexpr uint32_t PARTICLE_PARAM_NOISE_SCROLL = 21;
 		constexpr uint32_t PARTICLE_PARAM_RADIAL = 22;
 		constexpr uint32_t PARTICLE_PARAM_TANGENTIAL = 23;
+		constexpr uint32_t PARTICLE_PARAM_OWNER = 24;
+		constexpr uint32_t PARTICLE_PARAM_CONTINUOUS_RATE = 25;
+		constexpr uint32_t PARTICLE_PARAM_REQUESTED = 26;
+		constexpr uint32_t PARTICLE_PARAM_HALF = 27;
+		constexpr uint32_t PARTICLE_PARAM_EMISSION = 30;
+		constexpr uint32_t PARTICLE_PARAM_INHERITED = 33;
+		constexpr uint32_t PARTICLE_PARAM_SPEED = 36;
+		constexpr uint32_t PARTICLE_PARAM_LIFETIME = 38;
+		constexpr uint32_t PARTICLE_PARAM_ROTATION_SPEED = 40;
+		constexpr uint32_t PARTICLE_PARAM_ROTATION_RANGE = 42;
+		constexpr uint32_t PARTICLE_PARAM_SPREAD = 44;
+		constexpr uint32_t PARTICLE_PARAM_SHAPE_PARTIAL = 46;
+		constexpr uint32_t PARTICLE_PARAM_SHAPE = 47;
+		constexpr uint32_t PARTICLE_PARAM_SHAPE_STYLE = 48;
+		constexpr uint32_t PARTICLE_PARAM_SHAPE_DIRECTION = 49;
 
 		// The four curves, in a second table indexed by block. Words rather than
 		// floats because the colour curve is packed RGB and the other three are
@@ -110,18 +125,13 @@ namespace engine::render {
 			sizeof(effects::ParticleState) == PARTICLE_STATE_WORDS * sizeof(uint32_t),
 			"the state's width is the shader's stride"
 		);
-		static_assert(
-			sizeof(effects::ParticleBirth) == PARTICLE_BIRTH_WORDS * sizeof(uint32_t) &&
-				offsetof(effects::ParticleBirth, State) == sizeof(uint32_t),
-			"a birth must be one directly uploadable shader record"
-		);
 		static_assert(effects::CURVE_SAMPLES == 16, "the curve table reserves sixteen words a curve");
 		static_assert(
 			PARTICLE_CURVE_OF_COLOUR + effects::CURVE_SAMPLES <= PARTICLE_CURVE_WORDS,
 			"the four curves must fit inside one row of the table"
 		);
 		static_assert(
-			PARTICLE_PARAM_TANGENTIAL < PARTICLE_PARAM_WORDS,
+			PARTICLE_PARAM_SHAPE_DIRECTION < PARTICLE_PARAM_WORDS,
 			"the parameters must fit inside one row of the table"
 		);
 
@@ -136,8 +146,18 @@ namespace engine::render {
 			PutFloat(words, at + 2, value.Z);
 		}
 
+		void PutRange(uint32_t *words, uint32_t at, const core::NumberRange &value) {
+			PutFloat(words, at, value.Minimum);
+			PutFloat(words, at + 1, value.Maximum);
+		}
+
 		// Fills one row of the parameter table.
-		void WriteParticleParams(uint32_t *words, const effects::EmitterBlock &block) {
+		void WriteParticleParams(
+			uint32_t *words,
+			const effects::EmitterBlock &block,
+			const effects::EmitterSpawnState &spawn,
+			const effects::EmitterRuntime &runtime
+		) {
 			const glm::quat turn = block.Frame.Rotation();
 			PutFloat(words, PARTICLE_PARAM_ROTATION, turn.x);
 			PutFloat(words, PARTICLE_PARAM_ROTATION + 1, turn.y);
@@ -169,6 +189,23 @@ namespace engine::render {
 			PutFloat(words, PARTICLE_PARAM_NOISE_SCROLL, block.NoiseScrollSpeed);
 			PutFloat(words, PARTICLE_PARAM_RADIAL, block.RadialAcceleration);
 			PutFloat(words, PARTICLE_PARAM_TANGENTIAL, block.TangentialAcceleration);
+
+			words[PARTICLE_PARAM_OWNER] = static_cast<uint32_t>(block.Owner.Id);
+			PutFloat(words, PARTICLE_PARAM_CONTINUOUS_RATE, runtime.ContinuousRate);
+			words[PARTICLE_PARAM_REQUESTED] = runtime.Requested;
+			PutVector(words, PARTICLE_PARAM_HALF, spawn.Half);
+			PutVector(words, PARTICLE_PARAM_EMISSION, spawn.Emission);
+			PutVector(words, PARTICLE_PARAM_INHERITED, spawn.Inherited);
+			PutRange(words, PARTICLE_PARAM_SPEED, spawn.Speed);
+			PutRange(words, PARTICLE_PARAM_LIFETIME, spawn.Lifetime);
+			PutRange(words, PARTICLE_PARAM_ROTATION_SPEED, spawn.RotationSpeed);
+			PutRange(words, PARTICLE_PARAM_ROTATION_RANGE, spawn.Rotation);
+			PutFloat(words, PARTICLE_PARAM_SPREAD, spawn.SpreadX);
+			PutFloat(words, PARTICLE_PARAM_SPREAD + 1, spawn.SpreadY);
+			PutFloat(words, PARTICLE_PARAM_SHAPE_PARTIAL, spawn.ShapePartial);
+			words[PARTICLE_PARAM_SHAPE] = static_cast<uint32_t>(spawn.Shape);
+			words[PARTICLE_PARAM_SHAPE_STYLE] = static_cast<uint32_t>(spawn.ShapeStyle);
+			words[PARTICLE_PARAM_SHAPE_DIRECTION] = static_cast<uint32_t>(spawn.ShapeDirection);
 		}
 
 		// Fills one row of the curve table.
@@ -344,10 +381,13 @@ namespace engine::render {
 		return true;
 	}
 
-	bool Renderer::Impl::ReserveParticleTables(uint32_t blocks) {
+	bool Renderer::Impl::ReserveParticleTables(uint32_t blocks, SDL_GPUCommandBuffer *command) {
 		ParticlePool &Particles = ActiveParticleWorld->Pool;
 		if (blocks <= Particles.TableRows) {
 			return true;
+		}
+		if (command == nullptr) {
+			return false;
 		}
 
 		// **Grown and never shrunk, and what is in them is kept.** These are what
@@ -360,38 +400,98 @@ namespace engine::render {
 		while (rows < blocks) {
 			rows *= 2;
 		}
-
-		for (SDL_GPUBuffer **buffer : {&Particles.Params, &Particles.Curves}) {
-			if (*buffer != nullptr) {
-				gpu::ReleaseBuffer(Device, *buffer);
-				*buffer = nullptr;
+		const auto releaseBuffer = [this](SDL_GPUBuffer *buffer) {
+			if (buffer != nullptr) {
+				gpu::ReleaseBuffer(Device, buffer);
 			}
-		}
+		};
 
 		SDL_GPUBufferCreateInfo info{};
 		info.usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
 
 		info.size = rows * PARTICLE_PARAM_WORDS * static_cast<uint32_t>(sizeof(uint32_t));
-		Particles.Params = gpu::CreateBuffer(Device, &info);
+		SDL_GPUBuffer *params = gpu::CreateBuffer(Device, &info);
 
 		info.size = rows * PARTICLE_CURVE_WORDS * static_cast<uint32_t>(sizeof(uint32_t));
-		Particles.Curves = gpu::CreateBuffer(Device, &info);
+		SDL_GPUBuffer *curves = gpu::CreateBuffer(Device, &info);
 
-		if (Particles.Params == nullptr || Particles.Curves == nullptr) {
+		info.size = rows * PARTICLE_EMITTER_WORDS * static_cast<uint32_t>(sizeof(uint32_t));
+		SDL_GPUBuffer *emitterRuntime = gpu::CreateBuffer(Device, &info);
+
+		if (params == nullptr || curves == nullptr || emitterRuntime == nullptr) {
 			ENGINE_ERROR("particle tables of {} blocks: {}", rows, SDL_GetError());
-			Particles.TableRows = 0;
+			releaseBuffer(params);
+			releaseBuffer(curves);
+			releaseBuffer(emitterRuntime);
 			return false;
 		}
 
+		SDL_GPUTransferBufferCreateInfo blank{};
+		blank.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+		blank.size = info.size;
+		SDL_GPUTransferBuffer *runtimeStaging = gpu::CreateTransferBuffer(Device, &blank);
+		if (runtimeStaging == nullptr) {
+			ENGINE_ERROR("particle emitter runtime of {} blocks: {}", rows, SDL_GetError());
+			releaseBuffer(params);
+			releaseBuffer(curves);
+			releaseBuffer(emitterRuntime);
+			return false;
+		}
+		void *mapped = SDL_MapGPUTransferBuffer(Device, runtimeStaging, true);
+		if (mapped == nullptr) {
+			ENGINE_ERROR("particle emitter runtime: could not map clear buffer: {}", SDL_GetError());
+			gpu::ReleaseTransferBuffer(Device, runtimeStaging);
+			releaseBuffer(params);
+			releaseBuffer(curves);
+			releaseBuffer(emitterRuntime);
+			return false;
+		}
+		std::memset(mapped, 0, info.size);
+		SDL_UnmapGPUTransferBuffer(Device, runtimeStaging);
+		SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(command);
+		if (copy == nullptr) {
+			ENGINE_ERROR("particle emitter runtime: could not begin clear pass: {}", SDL_GetError());
+			gpu::ReleaseTransferBuffer(Device, runtimeStaging);
+			releaseBuffer(params);
+			releaseBuffer(curves);
+			releaseBuffer(emitterRuntime);
+			return false;
+		}
+		const SDL_GPUTransferBufferLocation source{runtimeStaging, 0};
+		const SDL_GPUBufferRegion destination{emitterRuntime, 0, info.size};
+		SDL_UploadToGPUBuffer(copy, &source, &destination, false);
+
+		// Runtime counters are authored by the device. Re-uploading the parameter
+		// tables after growth is safe because the host owns them, but clearing these
+		// counters would restart every existing emitter's phase and ring index.
+		if (Particles.EmitterRuntime != nullptr && Particles.TableRows > 0) {
+			const SDL_GPUBufferLocation oldRuntime{Particles.EmitterRuntime, 0};
+			const SDL_GPUBufferLocation newRuntime{emitterRuntime, 0};
+			const uint32_t bytes =
+				Particles.TableRows * PARTICLE_EMITTER_WORDS * static_cast<uint32_t>(sizeof(uint32_t));
+			SDL_CopyGPUBufferToBuffer(copy, &oldRuntime, &newRuntime, bytes, false);
+		}
+		SDL_EndGPUCopyPass(copy);
+
+		releaseBuffer(Particles.Params);
+		releaseBuffer(Particles.Curves);
+		releaseBuffer(Particles.EmitterRuntime);
+		if (Particles.EmitterRuntimeStaging != nullptr) {
+			gpu::ReleaseTransferBuffer(Device, Particles.EmitterRuntimeStaging);
+		}
+		Particles.Params = params;
+		Particles.Curves = curves;
+		Particles.EmitterRuntime = emitterRuntime;
+		Particles.EmitterRuntimeStaging = runtimeStaging;
 		Particles.TableRows = rows;
 		Particles.ParamRevision.assign(rows, 0);
 		Particles.CurveRevision.assign(rows, 0);
 		return true;
 	}
 
-	bool Renderer::Impl::ReserveParticleStaging(uint32_t workItems, uint32_t births, uint32_t seams) {
+	bool Renderer::Impl::ReserveParticleStaging(uint32_t workItems, uint32_t seams) {
 		ParticlePool &Particles = ActiveParticleWorld->Pool;
-		// One shape three times over: a read-only storage buffer and the upload
+		// One shape for each transient upload: a read-only storage buffer and the
 		// transfer beside it, grown in powers of two and never shrunk.
 		const auto grow = [this](
 							  SDL_GPUBuffer *&buffer,
@@ -453,14 +553,6 @@ namespace engine::render {
 				"work list"
 			) ||
 			!grow(
-				Particles.Births,
-				Particles.BirthStaging,
-				Particles.BirthCapacity,
-				std::max(births, 1u),
-				PARTICLE_BIRTH_WORDS * word,
-				"births"
-			) ||
-			!grow(
 				Particles.Seams,
 				Particles.SeamStaging,
 				Particles.SeamCapacity,
@@ -503,9 +595,9 @@ namespace engine::render {
 				  &Particles.Work,
 				  &Particles.Params,
 				  &Particles.Curves,
+				  &Particles.EmitterRuntime,
 				  &Particles.ParamUpdateBuffer,
 				  &Particles.CurveUpdateBuffer,
-				  &Particles.Births,
 				  &Particles.Seams}) {
 				if (*buffer != nullptr) {
 					gpu::ReleaseBuffer(Device, *buffer);
@@ -517,15 +609,15 @@ namespace engine::render {
 				  &Particles.WorkStaging,
 				  &Particles.ParamStaging,
 				  &Particles.CurveStaging,
-				  &Particles.BirthStaging,
-				  &Particles.SeamStaging}) {
+				  &Particles.SeamStaging,
+				  &Particles.EmitterRuntimeStaging}) {
 				if (*staging != nullptr) {
 					gpu::ReleaseTransferBuffer(Device, *staging);
 					*staging = nullptr;
 				}
 			}
 		}
-		for (SDL_GPUComputePipeline **pipeline : {&ParticleStep, &ParticleScatter}) {
+		for (SDL_GPUComputePipeline **pipeline : {&ParticleStep, &ParticleEmit, &ParticleScatter}) {
 			if (*pipeline != nullptr) {
 				SDL_ReleaseGPUComputePipeline(Device, *pipeline);
 				*pipeline = nullptr;
@@ -538,7 +630,8 @@ namespace engine::render {
 	Renderer::Impl::ParticleDispatch
 	Renderer::Impl::DispatchParticles(SDL_GPUCommandBuffer *command, uint32_t timingSlot) {
 		ParticlePool &Particles = ActiveParticleWorld->Pool;
-		if (ParticleStep == nullptr || Particles.WorkItems == 0 || command == nullptr) {
+		if (ParticleStep == nullptr || ParticleEmit == nullptr || Particles.WorkItems == 0 ||
+			command == nullptr) {
 			return {true, 0};
 		}
 
@@ -549,9 +642,8 @@ namespace engine::render {
 		uint32_t dispatches = 0;
 
 		const uint32_t word = static_cast<uint32_t>(sizeof(uint32_t));
-		const bool upload = Particles.WorkUpdates > 0 || Particles.BirthCount > 0 ||
-							Particles.SeamCount > 0 || Particles.ParamUpdates > 0 ||
-							Particles.CurveUpdates > 0;
+		const bool upload = Particles.WorkUpdates > 0 || Particles.SeamCount > 0 ||
+							Particles.ParamUpdates > 0 || Particles.CurveUpdates > 0;
 
 		// Changed uploads share one copy pass. All are cycled: this is each
 		// buffer's first touch of the command, so the previous frame's dispatch
@@ -588,13 +680,6 @@ namespace engine::render {
 				Particles.Work,
 				0,
 				Particles.WorkUpdates * PARTICLE_WORK_WORDS * word,
-				true
-			);
-			send(
-				Particles.BirthStaging,
-				Particles.Births,
-				0,
-				Particles.BirthCount * PARTICLE_BIRTH_WORDS * word,
 				true
 			);
 			send(
@@ -662,11 +747,9 @@ namespace engine::render {
 			return true;
 		};
 
-		// **The block tables first, then the births, then the step**, which is
-		// the order the step reads them in: a block whose curves changed this
-		// frame has to have them before anything is shaded with them, and a
-		// newborn has to be in the pool before the pass that shades it runs or its
-		// slot draws whatever the ring last left there.
+		// **Block tables, emission, then integration**, which is the dependency
+		// order: emission needs current spawn parameters, and integration must see
+		// newborn state before it writes the instance stream.
 		//
 		// Ageing a newborn by one step on the tick it is born is the one place
 		// this differs from the host-side pass, which spawns after ageing. It is
@@ -686,17 +769,28 @@ namespace engine::render {
 								PARTICLE_CURVE_WORDS,
 								Particles.TableRows,
 								"curve update"
-							) &&
-							scatter(
-								Particles.States,
-								Particles.Births,
-								Particles.BirthCount,
-								PARTICLE_STATE_WORDS,
-								Particles.Slots,
-								"spawn"
 							);
 		if (!staged) {
 			return {false, dispatches};
+		}
+
+		{
+			SDL_GPUStorageBufferReadWriteBinding outputs[2]{};
+			outputs[0].buffer = Particles.States;
+			outputs[1].buffer = Particles.EmitterRuntime;
+			SDL_GPUComputePass *pass = SDL_BeginGPUComputePass(command, nullptr, 0, outputs, 2);
+			if (pass == nullptr) {
+				ENGINE_ERROR("particle emission: SDL_BeginGPUComputePass: {}", SDL_GetError());
+				return {false, dispatches};
+			}
+			SDL_BindGPUComputePipeline(pass, ParticleEmit);
+			SDL_GPUBuffer *const reads[2] = {Particles.Work, Particles.Params};
+			SDL_BindGPUComputeStorageBuffers(pass, 0, reads, 2);
+			const float emission[4] = {Particles.Delta, static_cast<float>(Particles.WorkItems), 0.0f, 0.0f};
+			SDL_PushGPUComputeUniformData(command, 0, emission, sizeof(emission));
+			SDL_DispatchGPUCompute(pass, ParticleWorkgroups(Particles.WorkItems), 1, 1);
+			SDL_EndGPUComputePass(pass);
+			dispatches++;
 		}
 
 		{
@@ -809,7 +903,6 @@ namespace engine::render {
 			ParticleGroups.clear();
 			Particles.WorkItems = 0;
 			Particles.WorkUpdates = 0;
-			Particles.BirthCount = 0;
 			Particles.SeamCount = 0;
 			Particles.ParamUpdates = 0;
 			Particles.CurveUpdates = 0;
@@ -831,7 +924,6 @@ namespace engine::render {
 		if (!refresh) {
 			ParticleGroups = ActiveParticleWorld->PreparedGroups;
 			Particles.WorkUpdates = 0;
-			Particles.BirthCount = 0;
 			Particles.SeamCount = 0;
 			Particles.ParamUpdates = 0;
 			Particles.CurveUpdates = 0;
@@ -851,7 +943,6 @@ namespace engine::render {
 			Particles.WorkItems = 0;
 		}
 		Particles.WorkUpdates = 0;
-		Particles.BirthCount = 0;
 		Particles.SeamCount = 0;
 		Particles.ParamUpdates = 0;
 		Particles.CurveUpdates = 0;
@@ -930,14 +1021,11 @@ namespace engine::render {
 		if (total == 0 || !ReserveParticles(total)) {
 			return {};
 		}
-		if (!ReserveParticlePool(view.ParticlePool, command) || !ReserveParticleTables(view.ParticleBlocks)) {
+		if (!ReserveParticlePool(view.ParticlePool, command) ||
+			!ReserveParticleTables(view.ParticleBlocks, command)) {
 			return {};
 		}
-		if (!ReserveParticleStaging(
-				total,
-				static_cast<uint32_t>(view.ParticleBirths.size()),
-				static_cast<uint32_t>(view.ParticleSeams.size())
-			)) {
+		if (!ReserveParticleStaging(total, static_cast<uint32_t>(view.ParticleSeams.size()))) {
 			return {};
 		}
 
@@ -993,8 +1081,8 @@ namespace engine::render {
 		if (refreshResident) {
 			for (const uint32_t index : ParticleOrder) {
 				const render::ParticleBatch &batch = batches[index];
-				if (batch.Block == nullptr || batch.Block->Capacity == 0 ||
-					batch.Index >= Particles.TableRows) {
+				if (batch.Block == nullptr || batch.Spawn == nullptr || batch.Runtime == nullptr ||
+					batch.Block->Capacity == 0 || batch.Index >= Particles.TableRows) {
 					continue;
 				}
 				const effects::EmitterBlock &block = *batch.Block;
@@ -1018,7 +1106,7 @@ namespace engine::render {
 					if (needParams) {
 						uint32_t *const row = changedParams + params * (PARTICLE_PARAM_WORDS + 1);
 						row[0] = batch.Index;
-						WriteParticleParams(row + 1, block);
+						WriteParticleParams(row + 1, block, *batch.Spawn, *batch.Runtime);
 						Particles.ParamRevision[batch.Index] = block.Revision;
 						params++;
 					}
@@ -1065,22 +1153,6 @@ namespace engine::render {
 			view.ParticleDelta,
 			ActiveParticleWorld->CarriedDelta
 		);
-
-		// The births and the panes, both small and both straight copies - a birth
-		// is sixty bytes and a scene has thousands of them against half a million
-		// particles, and a pane is eighty and a scene has none.
-		Particles.BirthCount = 0;
-		if (!view.ParticleBirths.empty()) {
-			auto *births =
-				static_cast<uint32_t *>(SDL_MapGPUTransferBuffer(Device, Particles.BirthStaging, true));
-			if (births != nullptr) {
-				// ParticleBirth is pinned to the shader record above, so every newborn
-				// crosses in one contiguous copy rather than a scalar row loop.
-				std::memcpy(births, view.ParticleBirths.data(), view.ParticleBirths.size_bytes());
-				SDL_UnmapGPUTransferBuffer(Device, Particles.BirthStaging);
-				Particles.BirthCount = static_cast<uint32_t>(view.ParticleBirths.size());
-			}
-		}
 
 		Particles.SeamCount = 0;
 		if (!view.ParticleSeams.empty()) {

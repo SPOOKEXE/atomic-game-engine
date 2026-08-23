@@ -796,17 +796,12 @@ namespace engine::render {
 		Occlusion.Cull = LoadComputePipeline("occlusion-cull.comp", PYRAMID_LEVEL_LIMIT, 2, 0, 2, 64, 1);
 		Occlusion.Args = LoadComputePipeline("occlusion-args.comp", 0, 2, 0, 1, 64, 1);
 
-		// The particle simulation. Two read-only buffers (the block records and
-		// the panes) and two read-write ones (the state pool and the instance
-		// stream it writes the frame into); the spawn scatter reads one and
-		// writes one. Sixty-four threads a group, which for the step is the
-		// stride it walks a block's capacity in.
-		// The particle simulation. The step reads four buffers - the frame's draw
-		// list, the two block tables and the panes - and writes two, the state
-		// pool and the instance stream it fills. The scatter reads one and writes
-		// one, and is dispatched three times a frame at most: births, changed
-		// parameters, changed curves.
+		// The particle simulation. Emission reads the resident work and parameter
+		// tables, then writes newborn state and per-emitter counters. Integration
+		// reads those plus curves and portal panes, then writes the state pool and
+		// instance stream. The scatter updates changed parameter or curve rows.
 		ParticleStep = LoadComputePipeline("particle-step.comp", 0, 4, 0, 2, 64, 1);
+		ParticleEmit = LoadComputePipeline("particle-emission.comp", 0, 2, 0, 2, 64, 1);
 		ParticleScatter = LoadComputePipeline("particle-scatter.comp", 0, 1, 0, 1, 64, 1);
 
 		// **The particle pipelines are deliberately not in this conjunction.** A
