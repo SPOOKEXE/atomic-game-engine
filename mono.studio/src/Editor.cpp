@@ -1668,30 +1668,14 @@ namespace studio {
 	}
 
 	float Editor::PacingCeiling() const {
-		// `FrameCap` is still the master switch: zero is `--uncapped` and the
-		// Preferences checkbox, and neither should be overridden by a per-state
-		// rate somebody set months ago.
-		if (FrameCap <= 0.0f) {
-			return 0.0f;
-		}
-
 		const bool focused = Window == nullptr || (SDL_GetWindowFlags(Window) & SDL_WINDOW_INPUT_FOCUS) != 0;
-		const bool idle = engine::core::Clock::Seconds() - LastInputSeconds > IDLE_AFTER_SECONDS;
-
-		const float interface_ = idle ? InterfaceIdleHz : InterfaceActiveHz;
-		const float renderer = focused ? RendererFocusedHz : RendererUnfocusedHz;
-
-		// **The lowest ceiling that applies**, and zero on either means that one
-		// imposes none - see the fields' own comment for why they combine rather
-		// than run independently.
-		float ceiling = FrameCap;
-		if (interface_ > 0.0f) {
-			ceiling = std::min(ceiling, interface_);
-		}
-		if (renderer > 0.0f) {
-			ceiling = std::min(ceiling, renderer);
-		}
-		return ceiling;
+		const bool inputIdle = engine::core::Clock::Seconds() - LastInputSeconds > IDLE_AFTER_SECONDS;
+		return PresentationCeiling(
+			PresentationRates{FrameCap, InterfaceActiveHz, InterfaceIdleHz, RendererFocusedHz, RendererUnfocusedHz},
+			focused,
+			AnyRunning(),
+			inputIdle
+		);
 	}
 
 	void Editor::PresentWorld(float frameSeconds) {

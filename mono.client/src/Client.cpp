@@ -2704,6 +2704,11 @@ namespace client {
 				panels.HeapHistorySeconds = HeapProfile::HistorySeconds();
 				panels.GpuHeapLiveBytes = GpuHeapTotals.LiveBytes;
 				panels.GpuHeapPeakBytes = GpuHeapTotals.PeakBytes;
+				panels.GpuAllocatedBytes = GpuHeapTotals.AllocatedBytes;
+				panels.GpuReleasedBytes = GpuHeapTotals.ReleasedBytes;
+				panels.GpuBufferAllocations = GpuHeapTotals.BufferAllocations;
+				panels.GpuTransferBufferAllocations = GpuHeapTotals.TransferBufferAllocations;
+				panels.GpuTextureAllocations = GpuHeapTotals.TextureAllocations;
 				panels.GpuBufferBytes = GpuHeapTotals.BufferBytes;
 				panels.GpuTransferBufferBytes = GpuHeapTotals.TransferBufferBytes;
 				panels.GpuTextureBytes = GpuHeapTotals.TextureBytes;

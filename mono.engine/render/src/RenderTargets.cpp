@@ -237,6 +237,19 @@ namespace engine::render {
 				continue;
 			}
 
+			// Querying only reports the Vulkan fence. SDL retires the submitted
+			// command buffer, its descriptor cache, and its uniform buffers from
+			// WaitForGPUFences. Releasing the queried fence first lets SDL recycle
+			// and reset it while the old command buffer still names it, so that
+			// command buffer can never become clean and device memory grows every
+			// frame. The query above makes this wait nonblocking.
+			SDL_GPUFence *completed = submission.Fence;
+			if (!SDL_WaitForGPUFences(Device, true, &completed, 1)) {
+				ENGINE_ERROR("SDL_WaitForGPUFences (completed scene frame): {}", SDL_GetError());
+				index++;
+				continue;
+			}
+
 			for (const StagedSceneFrame &staged : submission.Frames) {
 				if (staged.Slot >= SceneSlots.size() || staged.Frame >= SceneSlot::RETAINED_FRAMES) {
 					continue;

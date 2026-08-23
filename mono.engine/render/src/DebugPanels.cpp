@@ -1043,6 +1043,25 @@ namespace engine::render {
 			);
 			cursor += rowHeight;
 
+			DebugText::Draw(
+				image,
+				x,
+				cursor,
+				Format(
+					"GPU CHURN %s ALLOCATED   %s RELEASED   CREATES %s / %s / %s",
+					FormatBytes(static_cast<double>(data.GpuAllocatedBytes)).c_str(),
+					FormatBytes(static_cast<double>(data.GpuReleasedBytes)).c_str(),
+					Grouped(static_cast<double>(data.GpuBufferAllocations)).c_str(),
+					Grouped(static_cast<double>(data.GpuTransferBufferAllocations)).c_str(),
+					Grouped(static_cast<double>(data.GpuTextureAllocations)).c_str()
+				),
+				TEXT_DIM.R,
+				TEXT_DIM.G,
+				TEXT_DIM.B,
+				scale
+			);
+			cursor += rowHeight;
+
 			// What the run is doing *now*, which is the whole question this tab
 			// exists for. The process slope is the first history entry's own,
 			// fitted by the caller over the same window as every other row.

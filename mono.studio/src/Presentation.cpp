@@ -2,7 +2,28 @@
 
 #include <studio/Presentation.hpp>
 
+#include <algorithm>
+
 namespace studio {
+	float PresentationCeiling(
+		const PresentationRates &rates, bool focused, bool worldRunning, bool inputIdle
+	) {
+		if (rates.Frame <= 0.0f) {
+			return 0.0f;
+		}
+
+		const float interface_ = inputIdle && !worldRunning ? rates.InterfaceIdle : rates.InterfaceActive;
+		const float renderer = focused ? rates.RendererFocused : rates.RendererUnfocused;
+
+		float ceiling = rates.Frame;
+		if (interface_ > 0.0f) {
+			ceiling = std::min(ceiling, interface_);
+		}
+		if (renderer > 0.0f) {
+			ceiling = std::min(ceiling, renderer);
+		}
+		return ceiling;
+	}
 
 	float PresentationAlpha(bool advancing, engine::world::WorldState state, float accumulator) {
 		return advancing && engine::world::Ticks(state) ? accumulator : 1.0f;

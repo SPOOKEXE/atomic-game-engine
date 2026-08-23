@@ -40,6 +40,8 @@ using engine::world::WorldSettings;
 using engine::world::WorldState;
 using studio::AppendReplicaVisualInstances;
 using studio::PresentationAlpha;
+using studio::PresentationCeiling;
+using studio::PresentationRates;
 using studio::WorldSelectorLabel;
 
 namespace {
@@ -120,6 +122,21 @@ TEST_CASE("the world selector marks runtime activity, not selection", "[studio][
 	CHECK(WorldSelectorLabel("MeshGrid", false) == "MeshGrid");
 	CHECK(WorldSelectorLabel("MeshGrid", true) == "MeshGrid (ACTIVE)");
 	CHECK(WorldSelectorLabel({}, true) == "? (ACTIVE)");
+}
+
+TEST_CASE("a running world is not reduced to the input-idle rate", "[studio][presentation]") {
+	const PresentationRates rates{120.0f, 120.0f, 20.0f, 120.0f, 10.0f};
+
+	CHECK(PresentationCeiling(rates, true, true, true) == 120.0f);
+	CHECK(PresentationCeiling(rates, true, false, true) == 20.0f);
+}
+
+TEST_CASE("renderer focus and the master cap still limit presentation", "[studio][presentation]") {
+	const PresentationRates rates{90.0f, 120.0f, 20.0f, 100.0f, 10.0f};
+
+	CHECK(PresentationCeiling(rates, true, true, false) == 90.0f);
+	CHECK(PresentationCeiling(rates, false, true, false) == 10.0f);
+	CHECK(PresentationCeiling(PresentationRates{}, true, true, true) == 0.0f);
 }
 
 // --- the hosted client visual scene -----------------------------------------

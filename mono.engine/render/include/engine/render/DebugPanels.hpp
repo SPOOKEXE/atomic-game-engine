@@ -320,6 +320,11 @@ namespace engine::render {
 		//@{
 		uint64_t GpuHeapLiveBytes = 0;
 		uint64_t GpuHeapPeakBytes = 0;
+		uint64_t GpuAllocatedBytes = 0;
+		uint64_t GpuReleasedBytes = 0;
+		uint64_t GpuBufferAllocations = 0;
+		uint64_t GpuTransferBufferAllocations = 0;
+		uint64_t GpuTextureAllocations = 0;
 		uint64_t GpuBufferBytes = 0;
 		uint64_t GpuTransferBufferBytes = 0;
 		uint64_t GpuTextureBytes = 0;

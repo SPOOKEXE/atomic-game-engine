@@ -87,18 +87,22 @@ namespace engine::render::gpu {
 				return;
 			}
 			GpuMemoryStatistics &totals = resources.Devices[device];
+			totals.AllocatedBytes += bytes;
 			switch (kind) {
 			case ResourceKind::Buffer:
 				totals.BufferBytes += bytes;
 				totals.Buffers++;
+				totals.BufferAllocations++;
 				break;
 			case ResourceKind::TransferBuffer:
 				totals.TransferBufferBytes += bytes;
 				totals.TransferBuffers++;
+				totals.TransferBufferAllocations++;
 				break;
 			case ResourceKind::Texture:
 				totals.TextureBytes += bytes;
 				totals.Textures++;
+				totals.TextureAllocations++;
 				break;
 			}
 			totals.LiveBytes += bytes;
@@ -122,6 +126,7 @@ namespace engine::render::gpu {
 			if (foundDevice != resources.Devices.end()) {
 				GpuMemoryStatistics &totals = foundDevice->second;
 				totals.LiveBytes -= std::min(totals.LiveBytes, bytes);
+				totals.ReleasedBytes += bytes;
 				switch (kind) {
 				case ResourceKind::Buffer:
 					totals.BufferBytes -= std::min(totals.BufferBytes, bytes);

@@ -1038,6 +1038,17 @@ namespace studio {
 			FormatBytes(static_cast<double>(view.Gpu.TransferBufferBytes)).c_str(),
 			FormatBytes(static_cast<double>(view.Gpu.TextureBytes)).c_str()
 		);
+		ImGui::Text(
+			"GPU churn %s allocated   %s released",
+			FormatBytes(static_cast<double>(view.Gpu.AllocatedBytes)).c_str(),
+			FormatBytes(static_cast<double>(view.Gpu.ReleasedBytes)).c_str()
+		);
+		ImGui::Text(
+			"GPU creates %" PRIu64 " buffers   %" PRIu64 " transfers   %" PRIu64 " textures",
+			view.Gpu.BufferAllocations,
+			view.Gpu.TransferBufferAllocations,
+			view.Gpu.TextureAllocations
+		);
 
 		if (totals.DroppedScopes > 0 || totals.ForeignFrees > 0) {
 			// A partial tree must not look complete, which is the same position

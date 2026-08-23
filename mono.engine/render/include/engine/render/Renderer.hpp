@@ -1050,17 +1050,26 @@ namespace engine::render {
 	// levels, and samples. Driver alignment, pipelines, samplers, shaders, and
 	// swapchain images are deliberately outside the total.
 	//
+	// `AllocatedBytes`, `ReleasedBytes`, and the allocation counts are cumulative
+	// for the device lifetime. Live bytes can stay flat while a target is rebuilt
+	// every frame, so these figures distinguish residency from allocation churn.
+	//
 	// @since v0.19
 	// @client
 	struct GpuMemoryStatistics {
 		uint64_t LiveBytes = 0;
 		uint64_t PeakBytes = 0;
+		uint64_t AllocatedBytes = 0;
+		uint64_t ReleasedBytes = 0;
 		uint64_t BufferBytes = 0;
 		uint64_t TransferBufferBytes = 0;
 		uint64_t TextureBytes = 0;
 		uint64_t Buffers = 0;
 		uint64_t TransferBuffers = 0;
 		uint64_t Textures = 0;
+		uint64_t BufferAllocations = 0;
+		uint64_t TransferBufferAllocations = 0;
+		uint64_t TextureAllocations = 0;
 	};
 
 	// Owns the client GPU device, window claim, pipelines, and per-frame upload resources.

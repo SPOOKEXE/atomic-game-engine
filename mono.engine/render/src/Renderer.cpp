@@ -348,10 +348,14 @@ namespace engine::render {
 		file << "\ngpu logical heap\n";
 		file << "  live      " << memory.LiveBytes << " bytes\n";
 		file << "  peak      " << memory.PeakBytes << " bytes\n";
-		file << "  buffers   " << memory.BufferBytes << " bytes in " << memory.Buffers << " resources\n";
+		file << "  allocated " << memory.AllocatedBytes << " bytes\n";
+		file << "  released  " << memory.ReleasedBytes << " bytes\n";
+		file << "  buffers   " << memory.BufferBytes << " bytes in " << memory.Buffers << " resources, "
+			 << memory.BufferAllocations << " created\n";
 		file << "  transfers " << memory.TransferBufferBytes << " bytes in " << memory.TransferBuffers
-			 << " resources\n";
-		file << "  textures  " << memory.TextureBytes << " bytes in " << memory.Textures << " resources\n";
+			 << " resources, " << memory.TransferBufferAllocations << " created\n";
+		file << "  textures  " << memory.TextureBytes << " bytes in " << memory.Textures << " resources, "
+			 << memory.TextureAllocations << " created\n";
 		file
 			<< "  coverage  requested payload; driver alignment, pipelines, samplers, shaders, and swapchain "
 			   "images excluded\n";
