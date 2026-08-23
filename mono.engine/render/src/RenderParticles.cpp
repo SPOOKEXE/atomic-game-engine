@@ -265,11 +265,10 @@ namespace engine::render {
 			return true;
 		}
 
-		// **Not grown in powers of two, and not grown by much.** The pool is
-		// `InstallParticles`' declared capacity and it does not move: the host
-		// allocates blocks inside it and their `First` indices are absolute, so a
-		// pool sized to anything but the declared number would put a block's run
-		// off the end. It is asked for once and answered once.
+		// **Exactly the logical capacity, not another growth policy.** The host
+		// allocator grows geometrically under its own hard ceiling and publishes the
+		// resulting row count. Mirroring that count here keeps absolute block ranges
+		// valid and makes one host growth exactly one resident device growth.
 		if (Particles.States != nullptr) {
 			// A changed declared capacity is exceptional, but the old pool can still
 			// be referenced by queued frames. Drain it before replacing either half.

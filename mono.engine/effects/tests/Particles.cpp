@@ -260,6 +260,39 @@ TEST_CASE("a pool that is full refuses blocks rather than overlapping them", "[e
 	}
 }
 
+TEST_CASE("a growable pool expands once before refusing emitter blocks", "[effects]") {
+	Store store("effects_test");
+	engine::effects::RegisterEffectClasses();
+	engine::effects::InstallParticles(store, 64, 128);
+
+	engine::scene::PartDesc desc;
+	desc.Simulated = false;
+	const Entity part = engine::scene::MakePart(store, desc);
+
+	for (int index = 0; index < 7; index++) {
+		const Entity emitter =
+			store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("ParticleEmitter")));
+		store.SetParent(emitter, part);
+		store.GetMutable<ParticleEmitter>(emitter)->Rate = 10.0f;
+		store.GetMutable<ParticleEmitter>(emitter)->Lifetime = NumberRange{2.0f, 2.0f};
+	}
+
+	Frame(store, 0.0f);
+
+	const auto *system = store.Resource<ParticleSystem>();
+	REQUIRE(system->Capacity == 128);
+	REQUIRE(system->MaximumCapacity == 128);
+	CHECK(system->Used == 126);
+	CHECK(system->Instances.size() == 128);
+	CHECK(system->States.size() == 128);
+	CHECK(system->Statistics.EmittersRefused == 1);
+	CHECK(system->Statistics.EmitterClaimAttempts == 7);
+
+	store.ClearChanges();
+	Frame(store, 0.0f);
+	CHECK(store.Resource<ParticleSystem>()->Statistics.EmitterClaimAttempts == 0);
+}
+
 // --- the step ----------------------------------------------------------------
 
 TEST_CASE("particles are born, age and are retired", "[effects]") {

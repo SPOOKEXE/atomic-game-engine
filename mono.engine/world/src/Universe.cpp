@@ -661,17 +661,9 @@ namespace engine::world {
 					continue;
 				}
 
-				int owed = world->Owed(frameSeconds);
+				const int owed = world->Owed(frameSeconds, Settings_.MaximumCatchUpTicks);
 				if (owed <= 0) {
 					continue;
-				}
-
-				if (owed > Settings_.MaximumCatchUpTicks) {
-					// A world far enough behind will not recover by running a
-					// hundred ticks in one frame; it will only fall further behind
-					// while holding a worker. Dropping the excess and counting it
-					// makes that visible instead of terminal.
-					owed = Settings_.MaximumCatchUpTicks;
 				}
 
 				ActiveList.push_back(world.get());

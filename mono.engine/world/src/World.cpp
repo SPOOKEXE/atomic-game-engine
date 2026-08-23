@@ -28,7 +28,7 @@ namespace engine::world {
 		RootEntity = Store_.Create("workspace");
 	}
 
-	int World::Owed(float frameSeconds) {
+	int World::Owed(float frameSeconds, int maximumTicks) {
 		if (State_ == WorldState::Suspended || State_ == WorldState::Faulted ||
 			State_ == WorldState::Remote) {
 			// Not merely skipped: the accumulator is not advanced either, so a
@@ -38,7 +38,7 @@ namespace engine::world {
 
 		Timestep.SetRate(State_ == WorldState::Idle ? Settings_.IdleTickRate : Settings_.TickRate);
 
-		const int owed = Timestep.Advance(frameSeconds);
+		const int owed = Timestep.Advance(frameSeconds, maximumTicks);
 
 		// The timestep gives up on a stall rather than trying to catch it, and
 		// the count it dropped is worth surfacing: a figure that climbs is a

@@ -15,7 +15,7 @@ namespace engine::core {
 		TicksPerSecond = ticksPerSecond > 0.0 ? ticksPerSecond : 1.0;
 	}
 
-	int FixedTimestep::Advance(float frameSeconds) {
+	int FixedTimestep::Advance(float frameSeconds, int maximumTicks) {
 		if (frameSeconds > 0.0f) {
 			Accumulator += static_cast<double>(frameSeconds);
 		}
@@ -26,7 +26,8 @@ namespace engine::core {
 			return 0;
 		}
 
-		if (ticks > MAXIMUM_TICKS_PER_FRAME) {
+		const int ceiling = std::clamp(maximumTicks, 1, MAXIMUM_TICKS_PER_FRAME);
+		if (ticks > ceiling) {
 			// Drop the excess rather than carrying it. Carrying it is the
 			// death spiral: the frame after a stall runs the maximum, takes
 			// longer than a frame to do it, and arrives at the next one with
@@ -35,8 +36,8 @@ namespace engine::core {
 			//
 			// Giving up means the world skipped forward. That is visible and
 			// recoverable; the spiral is neither.
-			DroppedTicks += static_cast<uint64_t>(ticks - MAXIMUM_TICKS_PER_FRAME);
-			ticks = MAXIMUM_TICKS_PER_FRAME;
+			DroppedTicks += static_cast<uint64_t>(ticks - ceiling);
+			ticks = ceiling;
 			Accumulator = 0.0;
 		} else {
 			Accumulator -= ticks * delta;

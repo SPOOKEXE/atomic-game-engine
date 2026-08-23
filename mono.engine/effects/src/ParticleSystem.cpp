@@ -625,9 +625,10 @@ namespace engine::effects {
 
 	// --- installation and block management -----------------------------------
 
-	void InstallParticles(ecs::Store &store, uint32_t capacity) {
+	void InstallParticles(ecs::Store &store, uint32_t capacity, uint32_t maximumCapacity) {
 		ParticleSystem system;
 		system.Capacity = capacity;
+		system.MaximumCapacity = std::max(capacity, maximumCapacity);
 		system.Instances.resize(capacity);
 		system.States.resize(capacity);
 		store.SetResource(std::move(system));
@@ -646,9 +647,44 @@ namespace engine::effects {
 		store.Observe<scene::Attachment>();
 		store.Observe<scene::Bounds>();
 		store.Observe<scene::Motion>();
+		store.Observe<ecs::Hierarchy>();
 	}
 
 	namespace {
+		// Grows a pool at most logarithmically and never beyond its stated ceiling.
+		//
+		// Blocks retain numeric row ranges, not pointers into either host vector, so
+		// resizing preserves every existing allocation. Device-stepped worlds leave
+		// both vectors empty and publish the new capacity to the renderer instead.
+		bool GrowFor(ParticleSystem &system, uint32_t wanted) {
+			const uint64_t required = static_cast<uint64_t>(system.Used) + wanted;
+			if (required <= system.Capacity) {
+				return true;
+			}
+			if (required > system.MaximumCapacity) {
+				return false;
+			}
+
+			uint64_t grown = std::max<uint64_t>(system.Capacity, 1);
+			while (grown < required) {
+				grown = std::min<uint64_t>(grown * 2, system.MaximumCapacity);
+			}
+
+			const uint32_t previous = system.Capacity;
+			system.Capacity = static_cast<uint32_t>(grown);
+			if (!system.DeviceStepped) {
+				system.Instances.resize(system.Capacity);
+				system.States.resize(system.Capacity);
+			}
+			ENGINE_INFO(
+				"particle pool grew from {} to {} rows ({} maximum)",
+				previous,
+				system.Capacity,
+				system.MaximumCapacity
+			);
+			return true;
+		}
+
 		// Takes a range out of the pool, exact-fit from the free list or bumped.
 		//
 		// **Exact fit and not best fit, because a block is never resized.** A
@@ -666,7 +702,7 @@ namespace engine::effects {
 				}
 			}
 
-			if (system.Used + wanted > system.Capacity) {
+			if (!GrowFor(system, wanted)) {
 				return false;
 			}
 			first = system.Used;
@@ -707,6 +743,9 @@ namespace engine::effects {
 		}
 		const uint64_t requested = static_cast<uint64_t>(*pending) + count;
 		*pending = static_cast<uint32_t>(std::min<uint64_t>(requested, ceiling));
+		if (system != nullptr) {
+			system->RefreshRequested = true;
+		}
 		return true;
 	}
 
@@ -719,9 +758,11 @@ namespace engine::effects {
 			return false;
 		}
 		slot->Requested = 0;
-		if (ParticleSystem *system = store.ResourceMutable<ParticleSystem>();
-			system != nullptr && slot->Index < system->Blocks.size()) {
-			system->Blocks[slot->Index].Requested = 0;
+		if (ParticleSystem *system = store.ResourceMutable<ParticleSystem>(); system != nullptr) {
+			system->RefreshRequested = true;
+			if (slot->Index < system->Blocks.size()) {
+				system->Blocks[slot->Index].Requested = 0;
+			}
 		}
 		slot->ClearRequested = true;
 		return true;
@@ -761,11 +802,15 @@ namespace engine::effects {
 		std::sort(movedParents.begin(), movedParents.end());
 		movedParents.erase(std::unique(movedParents.begin(), movedParents.end()), movedParents.end());
 
+		bool emitterHierarchyChanged = false;
+		store.EachChanged<ecs::Hierarchy>([&](ecs::Entity entity, ecs::Hierarchy &) {
+			emitterHierarchyChanged = emitterHierarchyChanged || store.Get<EmitterSlot>(entity) != nullptr;
+		});
+
 		// **The block index lives on the emitter's own row**, as a component, so
 		// finding an emitter's block is a column read rather than a search. That
 		// is the same reason `ActiveCamera` names an entity rather than being
 		// searched for.
-		system->Statistics.EmittersRefused = 0;
 		system->Statistics.EmitterClaimAttempts = 0;
 		bool layoutChanged = false;
 		bool residentChanged = false;
@@ -813,7 +858,9 @@ namespace engine::effects {
 		// Pull authored data only for rows that changed. The steady claim pass
 		// below walks `EmitterSlot`, which is a small runtime row instead of the
 		// roughly 1.5 KiB authored component.
+		size_t changedEmitters = 0;
 		store.EachChanged<ParticleEmitter>([&](ecs::Entity entity, ParticleEmitter &emitter) {
+			changedEmitters++;
 			EmitterSlot *slot = store.GetMutable<EmitterSlot>(entity);
 			if (slot == nullptr) {
 				return;
@@ -844,6 +891,14 @@ namespace engine::effects {
 				block.Revision++;
 			}
 		});
+
+		const size_t emitterRows = store.CountMatching<EmitterSlot>();
+		const bool explicitlyRequested = std::exchange(system->RefreshRequested, false);
+		if (changedEmitters == 0 && !emitterHierarchyChanged && movedParents.empty() && !catalogueChanged &&
+			!retryRefused && !explicitlyRequested && emitterRows == system->EmitterRows) {
+			return system->Statistics.Blocks;
+		}
+		system->Statistics.EmittersRefused = 0;
 
 		// A catalogue revision is rare and is the one steady-state event that
 		// needs the emitter's texture sequence without an authored row changing.
@@ -1086,6 +1141,7 @@ namespace engine::effects {
 		}
 
 		system->Statistics.Blocks = static_cast<uint32_t>(live);
+		system->EmitterRows = emitterRows;
 		if (layoutChanged) {
 			system->LayoutRevision++;
 		}
@@ -1422,6 +1478,9 @@ namespace engine::effects {
 				if (system->DeviceStepped && block.Idle > block.Longest) {
 					block.Live = 0;
 					block.Spawned = 0;
+				}
+				if (!emitter.Enabled && block.Live == 0) {
+					system->RefreshRequested = true;
 				}
 
 				// **The accumulator stays here**, on the thread that owns the

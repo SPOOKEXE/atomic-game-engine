@@ -651,6 +651,20 @@ namespace engine::effects {
 		// for one new claim pass. It is consumed at the start of that pass.
 		bool RetryRefused = false;
 
+		// Whether an explicit emitter operation needs the claim pass.
+		//
+		// Authored and hierarchy changes have ECS dirty channels of their own.
+		// `Emit` and `Clear` write this resource so a steady scene can skip the
+		// emitter column without losing operations queued on a row with no block.
+		bool RefreshRequested = true;
+
+		// The emitter-row count observed by the last full claim pass.
+		//
+		// `CountMatching` is an archetype count rather than a row walk. A changed
+		// count wakes reclamation for destroyed emitters while the common unchanged
+		// case remains independent of emitter count.
+		size_t EmitterRows = 0;
+
 		// Whether the device owns the pool and this module only spawns into it.
 		//
 		// **Set by whoever has a renderer, and the client always does.** When it
@@ -691,12 +705,18 @@ namespace engine::effects {
 
 		// How many slots the pool holds in total.
 		//
-		// **Fixed at install time rather than grown on demand**, and the reason is
-		// the same one that made blocks contiguous: growing the pool reallocates
-		// under every block's indices, so it would have to happen between frames
-		// with nothing running - which is exactly when nobody knows how much is
-		// needed. A pool that is full drops spawns and says so.
+		// May grow as far as `MaximumCapacity`. Blocks carry indices rather than
+		// pointers, so reallocating the host fallback arrays does not invalidate
+		// them. A device-owned pool observes the new capacity through presentation
+		// and replaces its resident buffers once.
 		uint32_t Capacity = 0;
+
+		// The hard ceiling for capacity growth.
+		//
+		// Equal to `Capacity` for a fixed pool. A rendered client may leave room to
+		// grow so a scene pays for the rows it actually claims instead of either
+		// reserving the worst case in every loaded world or silently losing effects.
+		uint32_t MaximumCapacity = 0;
 
 		// How many particles one emitter may ever hold.
 		//
@@ -719,11 +739,17 @@ namespace engine::effects {
 		std::vector<std::pair<uint32_t, uint32_t>> Free;
 	};
 
-	// Gives a world a pool of a stated size.
+	// Gives a world a pool with an initial size and an optional growth ceiling.
 	//
-	// @param store    The world.
-	// @param capacity How many particles it may hold at once.
-	void InstallParticles(ecs::Store &store, uint32_t capacity);
+	// Omitting `maximumCapacity` makes a fixed pool, which keeps headless worlds
+	// and tests from acquiring an implicit memory policy. A larger ceiling lets
+	// the allocator grow geometrically when a block claim first crosses the
+	// current capacity.
+	//
+	// @param store           The world.
+	// @param capacity        How many particle rows to allocate initially.
+	// @param maximumCapacity The hard row ceiling, or zero to remain fixed.
+	void InstallParticles(ecs::Store &store, uint32_t capacity, uint32_t maximumCapacity = 0);
 
 	// Queues a one-shot emission on an emitter, including one that is disabled.
 	//

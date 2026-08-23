@@ -294,6 +294,7 @@ TEST_CASE("catch-up is capped rather than unbounded", "[world]") {
 	universe.Tick(10.0f);
 
 	REQUIRE(universe.StatisticsOf(id).Ticks == 4);
+	CHECK(universe.StatisticsOf(id).DroppedTicks > 500);
 }
 
 TEST_CASE("universe tuning can change between driver ticks", "[world]") {

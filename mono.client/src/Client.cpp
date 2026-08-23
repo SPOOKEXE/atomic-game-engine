@@ -315,7 +315,9 @@ namespace client {
 
 		ENGINE_INFO("simulation at {:.0f} Hz, rendering unlocked from it", Settings.TickRate);
 
-		Universe_ = std::make_unique<engine::world::Universe>();
+		engine::world::UniverseSettings interactiveWorlds;
+		interactiveWorlds.MaximumCatchUpTicks = engine::world::INTERACTIVE_CATCH_UP_TICKS;
+		Universe_ = std::make_unique<engine::world::Universe>(interactiveWorlds);
 
 		if (!Settings.GameFile.empty()) {
 			if (!LoadGameFile()) {

@@ -618,7 +618,9 @@ namespace studio {
 			engine::ecs::EnumTable::Register("FinishRecordingOperation", OPERATIONS);
 		}
 
-		Universe = std::make_unique<engine::world::Universe>();
+		engine::world::UniverseSettings interactiveWorlds;
+		interactiveWorlds.MaximumCatchUpTicks = engine::world::INTERACTIVE_CATCH_UP_TICKS;
+		Universe = std::make_unique<engine::world::Universe>(interactiveWorlds);
 		Commands = std::make_unique<CommandLog>(*Universe);
 		Team = std::make_unique<TeamCreate>(*Commands, *Universe);
 		InstallHistoryWatcher();
@@ -2763,7 +2765,7 @@ namespace studio {
 
 		const engine::world::UniverseSettings defaults;
 		Universe->SetMode(defaults.Mode);
-		Universe->SetMaximumCatchUpTicks(defaults.MaximumCatchUpTicks);
+		Universe->SetMaximumCatchUpTicks(engine::world::INTERACTIVE_CATCH_UP_TICKS);
 		Universe->SetBusBudgetPerTick(defaults.BusBudgetPerTick);
 		Universe->SetChannelQueueLimit(defaults.ChannelQueueLimit);
 		Universe->SetChannelsPerWorld(defaults.ChannelsPerWorld);

@@ -281,6 +281,16 @@ local SEED = 20260820
 -- they call the same function with the same coordinate.
 local CHUNK = 64
 
+-- How many heightfield rows the streaming producer samples per tick.
+--
+-- **Fixed work rather than a wall-clock budget**, so a recorded run resumes at
+-- the same points on every machine. Terrain graph evaluation will eventually
+-- move this work into the native node system planned in `docs/TERRAIN.md`; this
+-- example must still remain responsive until that system exists. Sixteen rows
+-- bounds the expensive noise work without yielding a coroutine more than once:
+-- `EditableMesh:SetGeometry` is the one yield used to commit the finished mesh.
+local SAMPLE_ROWS_PER_TICK = 16
+
 -- How far the built world reaches, in chunks each way from the one the subject
 -- stands in. Three gives a 7 x 7 block of chunks - 448 studs across - and a
 -- chunk is dropped once it is further than `KEEP`.
@@ -365,15 +375,19 @@ end
 local SKIRT = 1
 local SPAN = CHUNK + 1 + SKIRT * 2
 
-local function SampleBlock(baseX: number, baseZ: number): { number }
-	local block = table.create(SPAN * SPAN, 0)
-	for row = 0, SPAN - 1 do
+local function SampleRows(block: { number }, baseX: number, baseZ: number, first: number, past: number)
+	for row = first, past - 1 do
 		local z = baseZ + row - SKIRT
 		local offset = row * SPAN
 		for column = 0, SPAN - 1 do
 			block[offset + column + 1] = HeightAt(baseX + column - SKIRT, z)
 		end
 	end
+end
+
+local function SampleBlock(baseX: number, baseZ: number): { number }
+	local block = table.create(SPAN * SPAN, 0)
+	SampleRows(block, baseX, baseZ, 0, SPAN)
 	return block
 end
 
@@ -495,10 +509,9 @@ end
 -- `Position`. `render::Renderer`'s `ToGpu` scales a mesh so its box fills the
 -- part's, so a part sized to the box it holds is a scale of exactly one - which
 -- is the only arrangement where a heightfield is not quietly stretched.
-local function BuildChunk(cx: number, cz: number)
+local function BuildSampledChunk(cx: number, cz: number, block: { number })
 	local baseX = cx * CHUNK
 	local baseZ = cz * CHUNK
-	local block = SampleBlock(baseX, baseZ)
 	local span = CHUNK + 1
 
 	-- **The range first, because the vertices are written around the centre.**
@@ -612,6 +625,10 @@ local function BuildChunk(cx: number, cz: number)
 
 	chunks[KeyOf(cx, cz)] = { Part = part, Mesh = mesh }
 	built += 1
+end
+
+local function BuildChunk(cx: number, cz: number)
+	BuildSampledChunk(cx, cz, SampleBlock(cx * CHUNK, cz * CHUNK))
 end
 
 -- --- the water -------------------------------------------------------------
@@ -819,7 +836,49 @@ local function ChunkOf(value: number): number
 	return math.floor(value / CHUNK)
 end
 
+-- One chunk whose expensive height samples are being filled across ticks.
+-- The finished mesh transaction is still one atomic `SetGeometry` commit.
+type SamplingChunk = {
+	Cx: number,
+	Cz: number,
+	BaseX: number,
+	BaseZ: number,
+	Block: { number },
+	NextRow: number,
+	Committing: boolean,
+}
+
+local sampling: SamplingChunk? = nil
+
+local function AdvanceSampling(): boolean
+	local job = sampling
+	if job == nil then
+		return false
+	end
+	if job.Committing then
+		return true
+	end
+
+	local past = math.min(job.NextRow + SAMPLE_ROWS_PER_TICK, SPAN)
+	SampleRows(job.Block, job.BaseX, job.BaseZ, job.NextRow, past)
+	job.NextRow = past
+	if past < SPAN then
+		return true
+	end
+
+	-- Keep the job visible while `SetGeometry` yields. A later Heartbeat callback
+	-- then observes `Committing` and cannot start the same tile a second time.
+	job.Committing = true
+	BuildSampledChunk(job.Cx, job.Cz, job.Block)
+	sampling = nil
+	return true
+end
+
 local function Stream()
+	if AdvanceSampling() then
+		return
+	end
+
 	local at = SubjectPosition()
 	local cx = ChunkOf(at.X)
 	local cz = ChunkOf(at.Z)
@@ -845,9 +904,18 @@ local function Stream()
 	end
 
 	if wantX ~= nil and wantZ ~= nil then
-		BuildChunk(wantX, wantZ)
-		-- One a frame, so the eviction below waits for the next one. A frame
-		-- that both builds and destroys is the worst of both.
+		sampling = {
+			Cx = wantX,
+			Cz = wantZ,
+			BaseX = wantX * CHUNK,
+			BaseZ = wantZ * CHUNK,
+			Block = table.create(SPAN * SPAN, 0),
+			NextRow = 0,
+			Committing = false,
+		}
+		AdvanceSampling()
+		-- Sampling and eviction stay on separate ticks. A tick that both builds
+		-- and destroys is the worst of both.
 		return
 	end
 
@@ -867,15 +935,10 @@ local function Stream()
 	water.Position = Vector3.new(cx * CHUNK + CHUNK / 2, SEA_LEVEL, cz * CHUNK + CHUNK / 2)
 end
 
--- The first ring is built before the first frame is drawn, so a character does
--- not spawn into an empty world and fall through where the ground has not been
--- made yet. Only the chunk under the spawn and its immediate neighbours - the
--- rest arrives at one a frame like everything else.
-for dz = -1, 1 do
-	for dx = -1, 1 do
-		BuildChunk(dx, dz)
-	end
-end
+-- Build only the ground under the spawn before streaming starts, so a character
+-- cannot fall through an empty world. Its neighbours use the sliced producer
+-- above instead of delaying the Heartbeat connection for nine complete chunks.
+BuildChunk(0, 0)
 
 local announced = false
 local beat = 0

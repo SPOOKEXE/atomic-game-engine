@@ -54,10 +54,10 @@ namespace engine::core {
 		// How many ticks to run for this frame. Zero is normal and correct:
 		// a 300 fps frame usually advances no tick at all.
 		//
-		// Positive frame time is accumulated. If more than
-		// MAXIMUM_TICKS_PER_FRAME are owed, the excess is dropped and no remainder
-		// is carried into the next frame.
-		int Advance(float frameSeconds);
+		// Positive frame time is accumulated. If more than `maximumTicks` are owed,
+		// the excess is dropped and no remainder is carried into the next frame.
+		// The argument is clamped to one through `MAXIMUM_TICKS_PER_FRAME`.
+		int Advance(float frameSeconds, int maximumTicks = MAXIMUM_TICKS_PER_FRAME);
 
 		// Where the render sits between the last tick and the next, 0..1.
 		float Alpha() const;

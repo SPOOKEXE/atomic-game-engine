@@ -44,7 +44,7 @@ state until v0.19.
 | `effects.Beam` | 712 | 8 | yes | . | yes | . | An authored beam drawn between two attachments: colour and transparency along its length, the texture and its scroll, end widths and curve control. |
 | `effects.EmitterSlot` | 12 | 4 | yes | . | . | . | Which row of the particle pool's block table an emitter owns, kept on the emitter's own row so the per-frame passes read a column instead of a hash map. |
 | `effects.ParticleEmitter` | 1296 | 4 | yes | . | . | . | The authored settings of one particle emitter: size, colour, transparency and squash over a particle's life, the spawn shape and rate, and the material and flipbook facts. |
-| `effects.ParticleSystem` | 256 | 8 | yes | . | . | . | Per-world singleton particle pool: the particle slots a step writes, the per-emitter blocks, the free lists that hand slots and blocks out, and last step's statistics. |
+| `effects.ParticleSystem` | 312 | 8 | yes | . | . | . | Per-world singleton particle pool: the particle slots a step writes, the per-emitter blocks, the free lists that hand slots and blocks out, and last step's statistics. |
 | `effects.RibbonBuffer` | 48 | 8 | yes | . | . | . | Per-world singleton holding the vertices and per-ribbon runs that this frame's beams and trails were built into, ready for the renderer. |
 | `effects.Trail` | 1152 | 8 | yes | . | yes | . | A trail following two attachments: its authored colour, transparency, lifetime and texture, plus the ring of recorded edge points it is drawn from. |
 
@@ -141,7 +141,7 @@ state until v0.19.
 | `scene.CollisionShapes` | 48 | 8 | yes | . | . | . | Resource: the world's table of baked convex hulls and triangle meshes, looked up by the name a `Collider::Geometry` field carries. |
 | `scene.Constraint` | 120 | 8 | yes | yes | . | . | A generic six-degree-of-freedom joint between two attachments: a motion mode and a limit per axis, plus the drive target, stiffness, damping and force caps. Each Roblox constraint class is a prototype of this one row. |
 | `scene.EditableImage` | 40 | 8 | yes | . | . | . | Script-drawable RGBA8 pixels with their width and height, plus a revision the client watches to know when to re-upload the texture. |
-| `scene.EditableMesh` | 152 | 8 | yes | . | . | . | Script-built geometry: positions, normals, UVs, colours, alphas and indices, plus a revision the client watches to know when to re-upload the mesh. |
+| `scene.EditableMesh` | 160 | 8 | yes | . | . | . | Script-built geometry: positions, normals, UVs, colours, alphas and indices, plus a revision the client watches to know when to re-upload the mesh. |
 | `scene.EditableMeshCollision` | 24 | 8 | yes | . | . | . | Resource: which revision of each `EditableMesh` already has a collision shape baked for it, so a mesh a script is still editing is baked once per change and not once per tick. |
 | `scene.Humanoid` | 48 | 8 | yes | yes | . | . | The character controller's state: move direction, walk and jump speed, capsule size, health, and the grounded, jump-requested and enabled latches the movement pass reads every tick. |
 | `scene.InputState` | 56 | 8 | yes | yes | . | . | Resource: this host's keyboard, mouse and focus state for the current frame, with last-frame copies and sticky press edges. It is a machine's own input, never another's. |

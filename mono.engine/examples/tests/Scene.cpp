@@ -1263,8 +1263,8 @@ TEST_CASE("the terrain scene builds a coloured heightfield mesh", "[examples][sc
 
 	// **The scene is endless, so this is the ring it holds rather than the map
 	// it has.** `VIEW` is three chunks each way from whoever is walking, which
-	// is a seven-by-seven block; the nine around the spawn are built before the
-	// first frame and the rest arrive one a tick.
+	// is a seven-by-seven block; the chunk under the spawn is built first and the
+	// rest arrive through the sliced streaming producer.
 	constexpr size_t CHUNKS = 49;
 	BuildTerrain(store, systems, CHUNKS);
 	CHECK(TerrainChunks(store) >= CHUNKS);

@@ -893,11 +893,13 @@ namespace client {
 		// does not follow the pattern: a trail is a record of where something has
 		// been, so sampling it at frame rate would make its length depend on the
 		// machine drawing it. `Ribbon.hpp` carries the argument.
-		void InstallEffects(Store &store, Scheduler &scheduler, uint32_t poolCapacity) {
+		void InstallEffects(
+			Store &store, Scheduler &scheduler, uint32_t poolCapacity, uint32_t maximumPoolCapacity
+		) {
 			engine::effects::RegisterEffectClasses();
 
 			if (!store.HasResource<engine::effects::ParticleSystem>()) {
-				engine::effects::InstallParticles(store, poolCapacity);
+				engine::effects::InstallParticles(store, poolCapacity, maximumPoolCapacity);
 			}
 
 			// **Every world a client installs is stepped on the device**, which
@@ -1046,19 +1048,16 @@ namespace client {
 			engine::physics::RegisterCharacterSystems(scheduler);
 		}
 
-		// How many particles a world's pool holds when nobody has said.
+		// How many particle rows a world starts with and may grow to.
 		//
 		// **Half a million, because that is the number `ROADMAP.md` v0.10 asks
 		// for by name** - a hundred thousand emitters at five particles each - and
 		// a default below it makes the engine's stated target something every
 		// scene has to opt into.
 		//
-		// **The cost is paid whether or not a world has an effect in it**, which
-		// is what makes this a real decision rather than a generous one: the pool
-		// is allocated up front and never grows (`ParticleSystem::Capacity` gives
-		// the reason), so this is 524,288 slots times 68 bytes across the instance
-		// and state arrays - **about 36 MB a world**, resident from the moment
-		// presentation is installed.
+		// The logical pool starts at the roadmap target. A rendered world may double
+		// once when it proves that it needs more, which keeps the common case bounded
+		// while allowing the 102,400-emitter particle example's 614,400 rows.
 		//
 		// That is affordable for one world and is not for twenty. A host that
 		// opens several at once - the studio with more than one place loaded -
@@ -1070,6 +1069,7 @@ namespace client {
 		// an effect that simply was not there rather than an error -
 		// `ParticleStatistics::EmittersRefused` is the number that says so.
 		constexpr uint32_t DEFAULT_PARTICLE_POOL = 524288;
+		constexpr uint32_t MAXIMUM_PARTICLE_POOL = 1048576;
 	}
 
 	bool BuildScriptedWorld(
@@ -1156,7 +1156,7 @@ namespace client {
 		// phase", `physics::RegisterCharacterSystems` says the pose runs before
 		// the draw list is built, and `camera-control` says `PlaceCamera` sees
 		// this frame's distance.
-		InstallEffects(store, scheduler, DEFAULT_PARTICLE_POOL);
+		InstallEffects(store, scheduler, DEFAULT_PARTICLE_POOL, MAXIMUM_PARTICLE_POOL);
 		InstallControls(store, scheduler);
 
 		scheduler.Add("collect-instances", Phase::PreRender, engine::render::CollectInstances);
@@ -1326,7 +1326,7 @@ namespace client {
 		// gives at length**: what these install in `PreRender` is what the draw
 		// list is built from, and a phase runs its systems in the order they
 		// were added.
-		InstallEffects(store, scheduler, DEFAULT_PARTICLE_POOL);
+		InstallEffects(store, scheduler, DEFAULT_PARTICLE_POOL, MAXIMUM_PARTICLE_POOL);
 		InstallControls(store, scheduler);
 
 		scheduler.Add("collect-instances", Phase::PreRender, engine::render::CollectInstances);
