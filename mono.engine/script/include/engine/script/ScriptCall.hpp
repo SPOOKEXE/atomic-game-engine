@@ -102,6 +102,7 @@
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/scene/EditableMesh.hpp>
 #include <engine/script/Actions.hpp>
 #include <engine/script/Bus.hpp>
 #include <engine/script/Changes.hpp>
@@ -417,6 +418,17 @@ namespace engine::script {
 			size_t index, std::vector<ecs::Entity> &instances, std::vector<core::CFrame> &frames
 		) = 0;
 
+		// Two array arguments, read as complete editable-mesh geometry.
+		//
+		// The first array holds vertex records with `Position` and optional
+		// `Normal`, `UV`, `Color` and `Alpha` fields. The second holds triangle
+		// indices. Defaults are filled here so the shared transaction always has
+		// parallel semantic arrays and never has to inspect a VM value.
+		//
+		// @param index    Zero-based index of the vertex array. Indices follow it.
+		// @param geometry Cleared and filled.
+		virtual void ReadEditableMeshGeometry(size_t index, scene::EditableMeshGeometry &geometry) = 0;
+
 		// Keeps an argument that is a function, and hands back the VM's name for
 		// it. Raises when it is not one.
 		//
@@ -695,6 +707,12 @@ namespace engine::script {
 		//               full queue is refused where it is asked for, because the
 		//               message names the method.
 		virtual void AwaitChild(uint64_t waiter) = 0;
+
+		// Queues a complete editable-mesh transaction and suspends this call until
+		// the next script barrier has prepared and owner-thread committed it. This
+		// is the third deterministic resume source, separate from bus and tree ids
+		// because all three counters have independent meanings.
+		virtual void AwaitEditableMesh(scene::EditableMeshGeometry geometry) = 0;
 
 		// Refuses the call, in the language's own idiom. Never returns.
 		//

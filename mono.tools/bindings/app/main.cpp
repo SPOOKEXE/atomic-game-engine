@@ -2155,6 +2155,8 @@ declare task: {
 				out << "\tfunction SetVertexUV(self, vertex: number, uv: Vector2): boolean\n";
 				out << "\tfunction SetVertexColor(self, vertex: number, colour: Color3, alpha: number?): "
 					   "boolean\n";
+				out << "\tfunction SetGeometry(self, vertices: { { Position: Vector3, Normal: Vector3?, "
+					   "UV: Vector2?, Color: Color3?, Alpha: number? } }, indices: { number }): boolean\n";
 				out << "\tfunction Clear(self): boolean\n";
 
 				// The `EditableImage` core, declared the same way.
@@ -3623,6 +3625,8 @@ declare const task: {
 				out << "\tSetVertexNormal(vertex: number, normal: Vector3): boolean;\n";
 				out << "\tSetVertexUV(vertex: number, uv: Vector2): boolean;\n";
 				out << "\tSetVertexColor(vertex: number, colour: Color3, alpha?: number): boolean;\n";
+				out << "\tSetGeometry(vertices: { Position: Vector3; Normal?: Vector3; UV?: Vector2; "
+					   "Color?: Color3; Alpha?: number }[], indices: number[]): Promise<boolean>;\n";
 				out << "\tClear(): boolean;\n";
 
 				// The `EditableImage` core, matching the Luau half.

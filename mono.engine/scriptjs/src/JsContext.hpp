@@ -22,6 +22,7 @@
 #include <engine/script/Changes.hpp>
 #include <engine/script/ChildWaiters.hpp>
 #include <engine/script/Debris.hpp>
+#include <engine/script/EditableMeshJobs.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/ScriptCall.hpp>
 #include <engine/script/Signals.hpp>
@@ -210,6 +211,9 @@ namespace engine::script {
 		// id come from two counters that know nothing about each other, and what
 		// each resolves *with* is different.
 		std::unordered_map<uint64_t, CallbackRef> AwaitedChildren;
+
+		EditableMeshJobs EditableMeshes;
+		std::unordered_map<uint64_t, CallbackRef> AwaitedEditableMeshes;
 
 		// How many ticks a `task.wait` asked for, so its resolution can report
 		// how long it actually waited. Keyed by the resolver's ref.

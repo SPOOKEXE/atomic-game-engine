@@ -403,13 +403,14 @@ namespace engine::script {
 		// every save.
 		MirrorSourcePrograms(Store, Mirrored);
 
-		Error = PumpJsDeliveries(Context, Store);
+		Error = PumpJsEditableMeshJobs(Context);
 
 		const auto note = [&](std::string message) {
 			if (Error.empty()) {
 				Error = std::move(message);
 			}
 		};
+		note(PumpJsDeliveries(Context, Store));
 
 		// **The world's own timed work first, exactly where the Luau side puts
 		// it** - see `LuauRuntime::Heartbeat`, which carries the whole argument:

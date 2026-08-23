@@ -1026,6 +1026,123 @@ TEST_CASE("AddVertex refuses an instance that is not an EditableMesh", "[scripti
 	)");
 }
 
+TEST_CASE("SetGeometry resumes after one bulk owner-thread commit", "[scripting][editablemesh]") {
+	RegisterClasses();
+	engine::scene::EditableMeshClass();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local mesh = Instance.new("EditableMesh")
+		mesh.Name = "BulkPending"
+		local accepted = mesh:SetGeometry({
+			{ Position = Vector3.new(0, 0, 0), Color = Color3.new(1, 0, 0) },
+			{ Position = Vector3.new(1, 0, 0) },
+			{ Position = Vector3.new(0, 0, 1), Normal = Vector3.new(0, 1, 0), UV = Vector2.new(0, 1) },
+		}, { 0, 2, 1 })
+		assert(accepted, "bulk geometry was refused")
+		mesh.Name = "BulkCommitted"
+	)");
+
+	CHECK(InScene(store, "BulkCommitted") == engine::ecs::NULL_ENTITY);
+	Beat(store, *runtime);
+	const Entity mesh = InScene(store, "BulkCommitted");
+	REQUIRE(mesh != engine::ecs::NULL_ENTITY);
+	const auto *geometry = store.Get<engine::scene::EditableMesh>(mesh);
+	REQUIRE(geometry != nullptr);
+	CHECK(geometry->Positions.size() == 3);
+	CHECK(geometry->Indices == std::vector<uint32_t>{0, 2, 1});
+	CHECK(geometry->Revision == 1);
+	CHECK(geometry->Signature != 0);
+}
+
+TEST_CASE("a Heartbeat handler may await its editable mesh commit", "[scripting][editablemesh]") {
+	RegisterClasses();
+	engine::scene::EditableMeshClass();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local mesh = Instance.new("EditableMesh")
+		mesh.Name = "HeartbeatPending"
+		mesh.Parent = workspace
+		local submitted = false
+		RunService.Heartbeat:Connect(function()
+			if submitted then return end
+			submitted = true
+			local accepted = mesh:SetGeometry({
+				{ Position = Vector3.new(0, 0, 0) },
+				{ Position = Vector3.new(1, 0, 0) },
+				{ Position = Vector3.new(0, 0, 1) },
+			}, { 0, 2, 1 })
+			mesh.Name = if accepted then "HeartbeatCommitted" else "HeartbeatCancelled"
+		end)
+	)");
+
+	Beat(store, *runtime);
+	CHECK(InScene(store, "HeartbeatPending") != engine::ecs::NULL_ENTITY);
+	CHECK(InScene(store, "HeartbeatCommitted") == engine::ecs::NULL_ENTITY);
+
+	Beat(store, *runtime);
+	const Entity committed = InScene(store, "HeartbeatCommitted");
+	REQUIRE(committed != engine::ecs::NULL_ENTITY);
+	CHECK(store.Get<engine::scene::EditableMesh>(committed)->Revision == 1);
+}
+
+TEST_CASE("SetGeometry has the same promise barrier in JavaScript", "[scripting][editablemesh][js]") {
+	RegisterClasses();
+	engine::scene::EditableMeshClass();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::JavaScript);
+
+	MustRun(*runtime, R"(
+		const mesh = Instance.new('EditableMesh');
+		mesh.Name = 'JsBulkPending';
+		(async () => {
+			const accepted = await mesh.SetGeometry([
+				{ Position: Vector3.new(0, 0, 0), Color: Color3.new(1, 0, 0) },
+				{ Position: Vector3.new(1, 0, 0) },
+				{ Position: Vector3.new(0, 0, 1), UV: Vector2.new(0, 1) },
+			], [0, 2, 1]);
+			if (!accepted) throw new Error('bulk geometry was refused');
+			mesh.Name = 'JsBulkCommitted';
+		})();
+	)");
+
+	CHECK(InScene(store, "JsBulkCommitted") == engine::ecs::NULL_ENTITY);
+	Beat(store, *runtime);
+	const Entity mesh = InScene(store, "JsBulkCommitted");
+	REQUIRE(mesh != engine::ecs::NULL_ENTITY);
+	REQUIRE(store.Get<engine::scene::EditableMesh>(mesh) != nullptr);
+	CHECK(store.Get<engine::scene::EditableMesh>(mesh)->Indices.size() == 3);
+}
+
+TEST_CASE("a later edit cancels a stale SetGeometry result", "[scripting][editablemesh]") {
+	RegisterClasses();
+	engine::scene::EditableMeshClass();
+	Store store("script_test");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local mesh = Instance.new("EditableMesh")
+		mesh.Name = "StalePending"
+		local accepted = mesh:SetGeometry({
+			{ Position = Vector3.new(0, 0, 0) },
+			{ Position = Vector3.new(1, 0, 0) },
+			{ Position = Vector3.new(0, 0, 1) },
+		}, { 0, 2, 1 })
+		mesh.Name = if accepted then "StaleOverwrote" else "StaleCancelled"
+	)");
+
+	const Entity pending = InScene(store, "StalePending");
+	REQUIRE(pending != engine::ecs::NULL_ENTITY);
+	REQUIRE(engine::scene::AddVertex(store, pending, engine::core::Vector3{}).has_value());
+	Beat(store, *runtime);
+	CHECK(InScene(store, "StaleOverwrote") == engine::ecs::NULL_ENTITY);
+	CHECK(InScene(store, "StaleCancelled") == pending);
+	CHECK(store.Get<engine::scene::EditableMesh>(pending)->Positions.size() == 1);
+}
+
 // --- EditableImage ------------------------------------------------------------
 
 TEST_CASE("a script paints an image and reads its size back", "[scripting]") {

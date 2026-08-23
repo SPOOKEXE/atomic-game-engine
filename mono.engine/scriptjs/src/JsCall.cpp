@@ -27,7 +27,9 @@
 #include <engine/script/ScriptCall.hpp>
 #include <engine/script/Subtree.hpp>
 
+#include <cmath>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <string>
 #include <string_view>
@@ -338,6 +340,112 @@ namespace engine::script {
 				}
 
 				return count == placed;
+			}
+
+			void ReadEditableMeshGeometry(size_t index, scene::EditableMeshGeometry &geometry) override {
+				geometry = {};
+				if (index + 1 >= Argc || !JS_IsArray(Argv[index]) || !JS_IsArray(Argv[index + 1])) {
+					Raise("EditableMesh:SetGeometry expects vertex and index arrays");
+				}
+
+				const auto lengthOf = [&](JSValueConst array) {
+					JSValue held = JS_GetPropertyStr(Context, array, "length");
+					uint32_t length = 0;
+					JS_ToUint32(Context, &length, held);
+					JS_FreeValue(Context, held);
+					return length;
+				};
+				const auto absent = [](JSValueConst value) {
+					return JS_IsUndefined(value) || JS_IsNull(value);
+				};
+
+				const uint32_t vertexCount = lengthOf(Argv[index]);
+				geometry.Positions.reserve(vertexCount);
+				geometry.Normals.reserve(vertexCount);
+				geometry.UVs.reserve(vertexCount);
+				geometry.Colours.reserve(vertexCount);
+				geometry.Alphas.reserve(vertexCount);
+
+				for (uint32_t at = 0; at < vertexCount; at++) {
+					JSValue vertex = JS_GetPropertyUint32(Context, Argv[index], at);
+					if (!JS_IsObject(vertex)) {
+						JS_FreeValue(Context, vertex);
+						Raise("EditableMesh vertices must be records");
+					}
+
+					JSValue value = JS_GetPropertyStr(Context, vertex, "Position");
+					const core::Vector3 *position = AsVector3(Context, value);
+					if (position == nullptr) {
+						JS_FreeValue(Context, value);
+						JS_FreeValue(Context, vertex);
+						Raise("EditableMesh vertex Position must be a Vector3");
+					}
+					geometry.Positions.push_back(*position);
+					JS_FreeValue(Context, value);
+
+					value = JS_GetPropertyStr(Context, vertex, "Normal");
+					if (absent(value)) {
+						geometry.Normals.push_back(core::Vector3{0.0f, 1.0f, 0.0f});
+					} else if (const core::Vector3 *normal = AsVector3(Context, value); normal != nullptr) {
+						geometry.Normals.push_back(*normal);
+					} else {
+						JS_FreeValue(Context, value);
+						JS_FreeValue(Context, vertex);
+						Raise("EditableMesh vertex Normal must be a Vector3");
+					}
+					JS_FreeValue(Context, value);
+
+					value = JS_GetPropertyStr(Context, vertex, "UV");
+					if (absent(value)) {
+						geometry.UVs.push_back(core::Vector2{});
+					} else if (const core::Vector2 *uv = AsVector2(Context, value); uv != nullptr) {
+						geometry.UVs.push_back(*uv);
+					} else {
+						JS_FreeValue(Context, value);
+						JS_FreeValue(Context, vertex);
+						Raise("EditableMesh vertex UV must be a Vector2");
+					}
+					JS_FreeValue(Context, value);
+
+					value = JS_GetPropertyStr(Context, vertex, "Color");
+					if (absent(value)) {
+						geometry.Colours.push_back(core::Color3{1.0f, 1.0f, 1.0f});
+					} else if (const core::Color3 *colour = AsColor3(Context, value); colour != nullptr) {
+						geometry.Colours.push_back(*colour);
+					} else {
+						JS_FreeValue(Context, value);
+						JS_FreeValue(Context, vertex);
+						Raise("EditableMesh vertex Color must be a Color3");
+					}
+					JS_FreeValue(Context, value);
+
+					value = JS_GetPropertyStr(Context, vertex, "Alpha");
+					double alpha = 0.0;
+					if (!absent(value) &&
+						(!JS_IsNumber(value) || JS_ToFloat64(Context, &alpha, value) != 0)) {
+						JS_FreeValue(Context, value);
+						JS_FreeValue(Context, vertex);
+						Raise("EditableMesh vertex Alpha must be a number");
+					}
+					geometry.Alphas.push_back(static_cast<float>(alpha));
+					JS_FreeValue(Context, value);
+					JS_FreeValue(Context, vertex);
+				}
+
+				const uint32_t indexCount = lengthOf(Argv[index + 1]);
+				geometry.Indices.reserve(indexCount);
+				for (uint32_t at = 0; at < indexCount; at++) {
+					JSValue held = JS_GetPropertyUint32(Context, Argv[index + 1], at);
+					double value = 0.0;
+					const bool valid = JS_IsNumber(held) && JS_ToFloat64(Context, &value, held) == 0 &&
+									   std::isfinite(value) && value >= 0.0 && std::floor(value) == value &&
+									   value <= static_cast<double>(std::numeric_limits<uint32_t>::max());
+					JS_FreeValue(Context, held);
+					if (!valid) {
+						Raise("EditableMesh indices must be non-negative uint32 values");
+					}
+					geometry.Indices.push_back(static_cast<uint32_t>(value));
+				}
 			}
 
 			void ReadAttribute(size_t index, AttributeValue &out) override {
@@ -657,6 +765,12 @@ namespace engine::script {
 				Suspend(JsOf(Context).AwaitedChildren, waiter);
 			}
 
+			void AwaitEditableMesh(scene::EditableMeshGeometry geometry) override {
+				JsContext &bound = JsOf(Context);
+				const uint64_t ticket = bound.EditableMeshes.Submit(*bound.World, Self, std::move(geometry));
+				Suspend(bound.AwaitedEditableMeshes, ticket);
+			}
+
 			[[noreturn]] void Raise(const char *message) override {
 				// The value is discarded because the exception is on the context
 				// now; the trampoline turns the throw below back into
@@ -909,5 +1023,39 @@ namespace engine::script {
 			JS_DefinePropertyGetSet(context, service, atom, getter, setter, JS_PROP_C_W_E);
 			JS_FreeAtom(context, atom);
 		}
+	}
+
+	std::string PumpJsEditableMeshJobs(JSContext *context) {
+		JsContext &bound = JsOf(context);
+		bound.EditableMeshes.Run(*bound.World);
+
+		std::string firstError;
+		for (const EditableMeshJobs::Completion &completion : bound.EditableMeshes.Completions()) {
+			const auto waiting = bound.AwaitedEditableMeshes.find(completion.Ticket);
+			if (waiting == bound.AwaitedEditableMeshes.end()) {
+				continue;
+			}
+
+			const CallbackRef resolver = waiting->second;
+			bound.AwaitedEditableMeshes.erase(waiting);
+			const bool accepted = completion.Result == scene::EditableMeshCommit::Applied ||
+								  completion.Result == scene::EditableMeshCommit::Unchanged;
+			JSValue argument = JS_NewBool(context, accepted);
+			JSValue result = JS_Call(context, Held(context, resolver), JS_UNDEFINED, 1, &argument);
+			JS_FreeValue(context, argument);
+			if (JS_IsException(result) && firstError.empty()) {
+				firstError = "a resumed EditableMesh.SetGeometry failed";
+				JSValue thrown = JS_GetException(context);
+				if (const char *message = JS_ToCString(context, thrown); message != nullptr) {
+					firstError = message;
+					JS_FreeCString(context, message);
+				}
+				JS_FreeValue(context, thrown);
+			}
+			JS_FreeValue(context, result);
+			Release(context, resolver);
+		}
+		bound.EditableMeshes.ClearCompletions();
+		return firstError;
 	}
 }

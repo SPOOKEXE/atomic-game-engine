@@ -525,6 +525,9 @@ namespace engine::scene {
 				}
 
 				mesh.Revision = reader.ReadUInt32();
+				// Derived and deliberately absent from the snapshot. The first bulk
+				// comparison recomputes it from the exact geometry just read.
+				mesh.Signature = 0;
 			}
 		}
 

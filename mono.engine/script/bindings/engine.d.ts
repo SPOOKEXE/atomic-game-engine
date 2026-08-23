@@ -1095,6 +1095,7 @@ declare interface Instance {
 	SetVertexNormal(vertex: number, normal: Vector3): boolean;
 	SetVertexUV(vertex: number, uv: Vector2): boolean;
 	SetVertexColor(vertex: number, colour: Color3, alpha?: number): boolean;
+	SetGeometry(vertices: { Position: Vector3; Normal?: Vector3; UV?: Vector2; Color?: Color3; Alpha?: number }[], indices: number[]): Promise<boolean>;
 	Clear(): boolean;
 	Resize(width: number, height: number): boolean;
 	DrawRectangle(position: Vector2, size: Vector2, colour: Color3, transparency?: number): boolean;

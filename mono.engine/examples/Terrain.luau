@@ -526,15 +526,23 @@ local function BuildChunk(cx: number, cz: number)
 
 	local mesh = Instance.new("EditableMesh")
 
-	-- `AddVertex` returns ids in the order it is called, starting at zero, so
-	-- the id of `(gx, gz)` is `gz * span + gx` and no lookup table is needed.
+	-- One transaction rather than three method calls per vertex and two more per
+	-- cell. `SetGeometry` yields until the next deterministic script barrier,
+	-- where this scene's pending chunks are prepared as one batch and committed
+	-- on its world thread. Universe runs the same batch for other scenes in its
+	-- outer world dispatch. The id of `(gx, gz)` remains `gz * span + gx`.
+	local vertices = {}
 	for gz = 0, CHUNK do
 		for gx = 0, CHUNK do
-			local id = mesh:AddVertex(
-				Vector3.new(baseX + gx - centreX, At(block, gx, gz) - centreY, baseZ + gz - centreZ)
-			)
-			mesh:SetVertexNormal(id, NormalAt(block, gx, gz))
-			mesh:SetVertexColor(id, ColourAt(block, gx, gz))
+			table.insert(vertices, {
+				Position = Vector3.new(
+					baseX + gx - centreX,
+					At(block, gx, gz) - centreY,
+					baseZ + gz - centreZ
+				),
+				Normal = NormalAt(block, gx, gz),
+				Color = ColourAt(block, gx, gz),
+			})
 		end
 	end
 
@@ -542,6 +550,7 @@ local function BuildChunk(cx: number, cz: number)
 	-- surface faces the sky. `render/AGENTS.md`'s winding rule shows up as an
 	-- invisible landscape when it is got wrong, which is a hard thing to debug
 	-- backwards from.
+	local indices = {}
 	for gz = 0, CHUNK - 1 do
 		for gx = 0, CHUNK - 1 do
 			local a = gz * span + gx
@@ -549,11 +558,17 @@ local function BuildChunk(cx: number, cz: number)
 			local c = a + span
 			local d = c + 1
 
-			mesh:AddTriangle(a, c, b)
-			mesh:AddTriangle(b, c, d)
+			table.insert(indices, a)
+			table.insert(indices, c)
+			table.insert(indices, b)
+			table.insert(indices, b)
+			table.insert(indices, c)
+			table.insert(indices, d)
 			triangles += 2
 		end
 	end
+
+	assert(mesh:SetGeometry(vertices, indices), "terrain mesh transaction was cancelled")
 
 	-- **A floor under the vertical size.** A chunk that happens to be flat has
 	-- a box with no height at all, and a `Size` of zero on an axis is the one
@@ -864,6 +879,7 @@ end
 
 local announced = false
 local beat = 0
+local streaming = false
 
 local function CountChunks(): number
 	local resident = 0
@@ -879,7 +895,14 @@ RunService.Heartbeat:Connect(function()
 	end
 
 	Settle()
-	Stream()
+	if not streaming then
+		-- Signal callbacks are independent coroutines. `BuildChunk` waits for its
+		-- mesh commit, so another Heartbeat may arrive before this one returns.
+		-- One producer keeps two callbacks from generating the same missing tile.
+		streaming = true
+		Stream()
+		streaming = false
+	end
 
 	if not announced and built >= (VIEW * 2 + 1) * (VIEW * 2 + 1) then
 		announced = true

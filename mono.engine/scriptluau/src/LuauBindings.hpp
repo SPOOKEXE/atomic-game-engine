@@ -30,6 +30,7 @@
 #include <engine/script/Codec.hpp>
 #include <engine/script/Debris.hpp>
 #include <engine/script/Debugger.hpp>
+#include <engine/script/EditableMeshJobs.hpp>
 #include <engine/script/Host.hpp>
 #include <engine/script/LuauTags.hpp>
 #include <engine/script/Runtime.hpp>
@@ -201,6 +202,12 @@ namespace engine::script {
 		// different too: `PumpDeliveries` pushes `(value, status, version)` and
 		// `PumpChildWaiters` pushes one instance or nil.
 		std::unordered_map<uint64_t, lua_State *> AwaitedChildren;
+
+		// Complete geometry transactions and the threads waiting on their ordered
+		// owner-thread commits. This is a distinct key space from tickets and child
+		// waiters, so it has a distinct table.
+		EditableMeshJobs EditableMeshes;
+		std::unordered_map<uint64_t, lua_State *> AwaitedEditableMeshes;
 
 		// How many GUIDs `HttpService:GenerateGUID` has handed out.
 		//
@@ -788,6 +795,10 @@ namespace engine::script {
 	// @return The first error a resumed script raised, or empty.
 	// @since v0.15
 	std::string PumpChildWaiters(lua_State *state);
+
+	// Prepares every queued editable-mesh transaction as one batch, commits in
+	// ticket order on this world thread, and resumes its callers.
+	std::string PumpEditableMeshJobs(lua_State *state);
 
 	// Fires `Player.CharacterAdded` and `CharacterRemoving` for everything
 	// `scene` recorded since the last barrier.

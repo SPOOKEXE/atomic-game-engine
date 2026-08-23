@@ -369,23 +369,41 @@ namespace engine::script {
 				return;
 			}
 
+			// A callback is the root function of its own coroutine. Calling it with
+			// `lua_pcall` makes every engine method below it a C-call boundary that
+			// Luau refuses to yield across. Heartbeat terrain generation exposed the
+			// difference: `SetGeometry` may wait for its deterministic owner-thread
+			// commit, and a signal handler must be able to wait for the same legal
+			// resume sources as a top-level script or `task.spawn`.
+			lua_State *thread = lua_newthread(state);
+			luaL_sandboxthread(thread);
 			lua_getref(state, connection.Callback);
 			for (int index = 1; index <= arguments; index++) {
 				lua_pushvalue(state, base + index);
 			}
+			lua_xmove(state, thread, arguments + 1);
 
 			// **Every connection runs even when one raises**, and the first
 			// error is what the host hears about. A handler that threw once
 			// would otherwise silently stop everything registered after it, and
 			// the symptom - half a scene animating - points nowhere near the
 			// cause.
-			if (lua_pcall(state, arguments, 0, 0) != LUA_OK) {
+			const int status = lua_resume(thread, state, arguments);
+			if (status == LUA_YIELD && !ThreadIsScheduled(context, thread)) {
 				if (firstError.empty()) {
-					const char *message = lua_tostring(state, -1);
-					firstError = message != nullptr ? message : "a connection failed";
+					firstError = "a connection yielded without a deterministic resume source";
 				}
-				lua_pop(state, 1);
+			} else if (status != LUA_OK && status != LUA_YIELD) {
+				if (firstError.empty()) {
+					const char *message = lua_tostring(thread, -1);
+					firstError = message != nullptr ? message : "a connection failed";
+					if (const char *trace = lua_debugtrace(thread); trace != nullptr) {
+						firstError += "\n";
+						firstError += trace;
+					}
+				}
 			}
+			lua_pop(state, 1);
 
 			if (connection.Once) {
 				spent.push_back(connection.Id);

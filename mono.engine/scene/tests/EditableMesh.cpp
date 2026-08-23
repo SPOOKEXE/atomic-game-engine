@@ -19,6 +19,8 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
+
 TEST_SUITE_ID("engine.scene.editablemesh")
 
 using Catch::Approx;
@@ -34,8 +36,12 @@ using engine::scene::AddVertex;
 using engine::scene::ClearEditableMesh;
 using engine::scene::EditableMesh;
 using engine::scene::EditableMeshClass;
+using engine::scene::EditableMeshCommit;
 using engine::scene::EditableMeshContentName;
+using engine::scene::EditableMeshGeometry;
+using engine::scene::PrepareEditableMesh;
 using engine::scene::RemoveTriangle;
+using engine::scene::ReplaceEditableMesh;
 using engine::scene::SetVertexColor;
 using engine::scene::SetVertexNormal;
 using engine::scene::SetVertexPosition;
@@ -173,6 +179,79 @@ TEST_CASE("Clear empties every array and bumps the revision once", "[scene][edit
 	CHECK(held->Positions.empty());
 	CHECK(held->Indices.empty());
 	CHECK(held->Revision == before + 1);
+}
+
+TEST_CASE("bulk geometry is validated and committed as one revision", "[scene][editablemesh]") {
+	Store store("editablemesh.bulk");
+	const Entity mesh = MakeEditableMesh(store);
+
+	EditableMeshGeometry geometry;
+	geometry.Positions = {Vector3{}, Vector3{1.0f, 0.0f, 0.0f}, Vector3{0.0f, 0.0f, 1.0f}};
+	geometry.Normals.assign(3, Vector3{0.0f, 1.0f, 0.0f});
+	geometry.UVs.assign(3, Vector2{});
+	geometry.Colours.assign(3, Color3{0.2f, 0.4f, 0.6f});
+	geometry.Alphas.assign(3, 0.25f);
+	geometry.Indices = {0, 2, 1};
+
+	CHECK(ReplaceEditableMesh(store, mesh, geometry) == EditableMeshCommit::Applied);
+	const EditableMesh *held = store.Get<EditableMesh>(mesh);
+	REQUIRE(held != nullptr);
+	CHECK(held->Revision == 1);
+	CHECK(held->Signature != 0);
+	CHECK(held->Positions == geometry.Positions);
+	CHECK(held->Indices == geometry.Indices);
+
+	// Exact content is not a change. This is what prevents a repeated graph
+	// result from invalidating resident GPU and collision data.
+	CHECK(ReplaceEditableMesh(store, mesh, geometry) == EditableMeshCommit::Unchanged);
+	CHECK(store.Get<EditableMesh>(mesh)->Revision == 1);
+
+	geometry.Positions[0].Y = 3.0f;
+	CHECK(ReplaceEditableMesh(store, mesh, geometry) == EditableMeshCommit::Applied);
+	CHECK(store.Get<EditableMesh>(mesh)->Revision == 2);
+}
+
+TEST_CASE("bulk geometry refuses malformed and stale transactions", "[scene][editablemesh]") {
+	Store store("editablemesh.bulk.refuse");
+	const Entity mesh = MakeEditableMesh(store);
+
+	EditableMeshGeometry malformed;
+	malformed.Positions.assign(3, Vector3{});
+	malformed.Normals.assign(2, Vector3{});
+	malformed.UVs.assign(3, Vector2{});
+	malformed.Colours.assign(3, Color3{});
+	malformed.Alphas.assign(3, 0.0f);
+	malformed.Indices = {0, 1, 9};
+	CHECK_FALSE(PrepareEditableMesh(std::move(malformed)).Valid);
+
+	EditableMeshGeometry geometry;
+	geometry.Positions.assign(3, Vector3{});
+	geometry.Normals.assign(3, Vector3{0.0f, 1.0f, 0.0f});
+	geometry.UVs.assign(3, Vector2{});
+	geometry.Colours.assign(3, Color3{1.0f, 1.0f, 1.0f});
+	geometry.Alphas.assign(3, 0.0f);
+	geometry.Indices = {0, 1, 2};
+	auto prepared = PrepareEditableMesh(std::move(geometry));
+	REQUIRE(prepared.Valid);
+
+	REQUIRE(AddVertex(store, mesh, Vector3{}).has_value());
+	CHECK(
+		engine::scene::CommitEditableMesh(store, mesh, std::move(prepared), 0) == EditableMeshCommit::Stale
+	);
+	CHECK(store.Get<EditableMesh>(mesh)->Positions.size() == 1);
+}
+
+TEST_CASE("writing the same vertex attributes does not invalidate geometry", "[scene][editablemesh]") {
+	Store store("editablemesh.noop");
+	const Entity mesh = MakeEditableMesh(store);
+	REQUIRE(AddVertex(store, mesh, Vector3{1.0f, 2.0f, 3.0f}).has_value());
+	const uint32_t revision = store.Get<EditableMesh>(mesh)->Revision;
+
+	CHECK(SetVertexPosition(store, mesh, 0, Vector3{1.0f, 2.0f, 3.0f}));
+	CHECK(SetVertexNormal(store, mesh, 0, Vector3{0.0f, 1.0f, 0.0f}));
+	CHECK(SetVertexUV(store, mesh, 0, Vector2{}));
+	CHECK(SetVertexColor(store, mesh, 0, Color3{1.0f, 1.0f, 1.0f}, 0.0f));
+	CHECK(store.Get<EditableMesh>(mesh)->Revision == revision);
 }
 
 TEST_CASE("every door refuses an instance that is not an EditableMesh", "[scene][editablemesh]") {
@@ -317,6 +396,26 @@ TEST_CASE("a mesh whose revision has not moved is not rebaked", "[scene][editabl
 	// An edit moves the revision, so the shape is built again.
 	CHECK(SetVertexPosition(store, mesh, 0, Vector3{-2.0f, 0.0f, -2.0f}));
 	CHECK(engine::scene::RefreshEditableMeshCollision(store) == 1);
+}
+
+TEST_CASE("changed mesh collision is baked as one deterministic batch", "[scene][editablemesh]") {
+	engine::scene::RegisterSceneComponents();
+
+	Store store("editablemesh.collision.batch");
+	const std::array meshes{MakeQuad(store), MakeQuad(store), MakeQuad(store)};
+
+	CHECK(engine::scene::RefreshEditableMeshCollision(store) == meshes.size());
+	const engine::scene::CollisionShapes *shapes = engine::scene::CollisionShapesOf(store);
+	REQUIRE(shapes != nullptr);
+	for (const Entity mesh : meshes) {
+		const auto *shape = shapes->FindMesh(EditableMeshContentName(store, mesh));
+		REQUIRE(shape != nullptr);
+		CHECK(shape->TriangleCount() == 2);
+	}
+
+	// Worker results are published on the owner thread and the revision ledger
+	// advances with them, so the next refresh has no work to repeat.
+	CHECK(engine::scene::RefreshEditableMeshCollision(store) == 0);
 }
 
 TEST_CASE("a mesh that is gone takes its shapes with it", "[scene][editablemesh]") {

@@ -1295,6 +1295,7 @@ declare extern type Instance with
 	function SetVertexNormal(self, vertex: number, normal: Vector3): boolean
 	function SetVertexUV(self, vertex: number, uv: Vector2): boolean
 	function SetVertexColor(self, vertex: number, colour: Color3, alpha: number?): boolean
+	function SetGeometry(self, vertices: { { Position: Vector3, Normal: Vector3?, UV: Vector2?, Color: Color3?, Alpha: number? } }, indices: { number }): boolean
 	function Clear(self): boolean
 	function Resize(self, width: number, height: number): boolean
 	function DrawRectangle(self, position: Vector2, size: Vector2, colour: Color3, transparency: number?): boolean

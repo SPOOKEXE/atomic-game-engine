@@ -12,12 +12,11 @@
 namespace engine::render {
 
 	engine::assets::MeshData BuildMeshData(const engine::scene::EditableMesh &mesh) {
-		// **Built fresh from the raw arrays rather than kept incrementally**,
-		// because `AddVertex`/`AddTriangle` are script-rate calls - a
-		// handful a frame at most, on a mesh a player is actively editing -
-		// and `render::MeshTable::Add` already re-uploads its whole shared
-		// buffer on any change. Converting incrementally would be machinery
-		// built for a cost this path does not have.
+		// **Built once per semantic revision rather than maintained beside the
+		// scene arrays.** `EditableMeshUploader` records both drawable and
+		// incomplete revisions, and bulk transactions advance one revision for a
+		// complete terrain-sized result. A second packed copy here would be shared
+		// storage for data the ECS already owns.
 		engine::assets::MeshData built;
 		built.Vertices.reserve(mesh.Positions.size());
 		for (size_t index = 0; index < mesh.Positions.size(); index++) {
@@ -171,7 +170,10 @@ namespace engine::render {
 				// An author mid-edit - vertices added, no triangle yet -
 				// is the ordinary state right after `Instance.
 				// new("EditableMesh")` and must not be reported as a
-				// failure.
+				// failure. Remembering the revision is important: otherwise an
+				// unchanged half-built mesh pays the full conversion every presented
+				// frame. The next edit advances the revision and retries it.
+				Uploaded[entity.Id] = mesh.Revision;
 				return;
 			}
 

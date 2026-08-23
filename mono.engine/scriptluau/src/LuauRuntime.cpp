@@ -820,8 +820,18 @@ namespace engine::script {
 
 		std::string firstError;
 		{
+			// The third deterministic resume source. Work submitted by the previous
+			// barrier is prepared together, committed in ticket order on this world
+			// thread, and only then handed back to scripts.
+			ENGINE_PROFILE_CAT("script editable meshes", core::ProfileCategory::Script);
+			firstError = PumpEditableMeshJobs(State);
+		}
+		{
 			ENGINE_PROFILE_CAT("script deliveries", core::ProfileCategory::Script);
-			firstError = PumpDeliveries(State, Store);
+			const std::string deliveryError = PumpDeliveries(State, Store);
+			if (firstError.empty()) {
+				firstError = deliveryError;
+			}
 		}
 
 		const auto note = [&](std::string message) {

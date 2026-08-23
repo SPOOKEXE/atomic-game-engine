@@ -890,6 +890,21 @@ namespace engine::script {
 			call.ReturnBoolean(scene::SetVertexColor(call.World(), call.Subject(), id, colour, alpha));
 		}
 
+		// `editableMesh:SetGeometry(vertices, indices)`
+		//
+		// One VM crossing for a complete mesh. Preparation happens in the runtime's
+		// deterministic mesh batch and the world row is changed once, on its owner
+		// thread, after the target revision is checked.
+		void EditableMeshSetGeometry(ScriptCall &call) {
+			if (call.World().Get<scene::EditableMesh>(call.Subject()) == nullptr) {
+				call.Raise("SetGeometry needs an EditableMesh");
+			}
+
+			scene::EditableMeshGeometry geometry;
+			call.ReadEditableMeshGeometry(0, geometry);
+			call.AwaitEditableMesh(std::move(geometry));
+		}
+
 		// `editableMesh:Clear()` or `particleEmitter:Clear()`
 		void EditableMeshClear(ScriptCall &call) {
 			if (call.World().Get<effects::ParticleEmitter>(call.Subject()) != nullptr) {
@@ -994,7 +1009,7 @@ namespace engine::script {
 		// catalogue: a method table is a map from a name to a callable and no
 		// entry can be reached before another. Grouped by what they do, so a
 		// reader can see that the four attribute calls arrived together.
-		constexpr std::array<InstanceMethod, 53> SCRIPT_METHODS{{
+		constexpr std::array<InstanceMethod, 54> SCRIPT_METHODS{{
 			{"GetPivot", GetPivot},
 			{"PivotTo", PivotTo},
 			{"BulkMoveTo", BulkMoveTo},
@@ -1008,6 +1023,7 @@ namespace engine::script {
 			{"SetVertexNormal", EditableMeshSetVertexNormal},
 			{"SetVertexUV", EditableMeshSetVertexUV},
 			{"SetVertexColor", EditableMeshSetVertexColor},
+			{"SetGeometry", EditableMeshSetGeometry},
 			{"Clear", EditableMeshClear},
 			{"Emit", ParticleEmitterEmit},
 

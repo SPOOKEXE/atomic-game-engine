@@ -67,22 +67,21 @@ local HALF = 3.0
 local APEX = 6.0
 
 local mesh = Instance.new("EditableMesh")
-local v0 = mesh:AddVertex(Vector3.new(-HALF, 0, -HALF))
-local v1 = mesh:AddVertex(Vector3.new(HALF, 0, -HALF))
-local v2 = mesh:AddVertex(Vector3.new(HALF, 0, HALF))
-local v3 = mesh:AddVertex(Vector3.new(-HALF, 0, HALF))
-local apex = mesh:AddVertex(Vector3.new(0, APEX, 0))
-
-mesh:AddTriangle(v0, v1, v2)
-mesh:AddTriangle(v0, v2, v3)
-mesh:AddTriangle(v1, v0, apex)
-mesh:AddTriangle(v2, v1, apex)
-mesh:AddTriangle(v3, v2, apex)
-mesh:AddTriangle(v0, v3, apex)
-
-for _, id in { v0, v1, v2, v3, apex } do
-	mesh:SetVertexColor(id, Color3.fromRGB(255, 40, 40))
-end
+local red = Color3.fromRGB(255, 40, 40)
+assert(mesh:SetGeometry({
+	{ Position = Vector3.new(-HALF, 0, -HALF), Color = red },
+	{ Position = Vector3.new(HALF, 0, -HALF), Color = red },
+	{ Position = Vector3.new(HALF, 0, HALF), Color = red },
+	{ Position = Vector3.new(-HALF, 0, HALF), Color = red },
+	{ Position = Vector3.new(0, APEX, 0), Color = red },
+}, {
+	0, 1, 2,
+	0, 2, 3,
+	1, 0, 4,
+	2, 1, 4,
+	3, 2, 4,
+	0, 3, 4,
+}), "bulk editable mesh transaction failed")
 
 local built = Instance.new("MeshPart")
 built.Name = "ProbePyramid"

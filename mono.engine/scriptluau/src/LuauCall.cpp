@@ -33,8 +33,10 @@
 #include <engine/script/ScriptCall.hpp>
 #include <engine/script/Subtree.hpp>
 
+#include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <lualib.h>
 #include <span>
 #include <string>
@@ -387,6 +389,73 @@ namespace engine::script {
 				return count == placed;
 			}
 
+			void ReadEditableMeshGeometry(size_t index, scene::EditableMeshGeometry &geometry) override {
+				geometry = {};
+				const int vertices = Slot(index);
+				const int indices = Slot(index + 1);
+				luaL_checktype(State, vertices, LUA_TTABLE);
+				luaL_checktype(State, indices, LUA_TTABLE);
+
+				const size_t vertexCount = lua_objlen(State, vertices);
+				geometry.Positions.reserve(vertexCount);
+				geometry.Normals.reserve(vertexCount);
+				geometry.UVs.reserve(vertexCount);
+				geometry.Colours.reserve(vertexCount);
+				geometry.Alphas.reserve(vertexCount);
+
+				for (size_t at = 1; at <= vertexCount; at++) {
+					lua_rawgeti(State, vertices, static_cast<int>(at));
+					luaL_checktype(State, -1, LUA_TTABLE);
+
+					lua_getfield(State, -1, "Position");
+					geometry.Positions.push_back(CheckVector3(State, -1));
+					lua_pop(State, 1);
+
+					lua_getfield(State, -1, "Normal");
+					geometry.Normals.push_back(
+						lua_isnoneornil(State, -1) ? core::Vector3{0.0f, 1.0f, 0.0f} : CheckVector3(State, -1)
+					);
+					lua_pop(State, 1);
+
+					lua_getfield(State, -1, "UV");
+					geometry.UVs.push_back(
+						lua_isnoneornil(State, -1) ? core::Vector2{} : CheckVector2Value(State, -1)
+					);
+					lua_pop(State, 1);
+
+					lua_getfield(State, -1, "Color");
+					geometry.Colours.push_back(
+						lua_isnoneornil(State, -1) ? core::Color3{1.0f, 1.0f, 1.0f} : CheckColor3(State, -1)
+					);
+					lua_pop(State, 1);
+
+					lua_getfield(State, -1, "Alpha");
+					if (!lua_isnoneornil(State, -1) && lua_type(State, -1) != LUA_TNUMBER) {
+						Raise("EditableMesh vertex Alpha must be a number");
+					}
+					geometry.Alphas.push_back(
+						lua_isnoneornil(State, -1) ? 0.0f : static_cast<float>(lua_tonumber(State, -1))
+					);
+					lua_pop(State, 2);
+				}
+
+				const size_t indexCount = lua_objlen(State, indices);
+				geometry.Indices.reserve(indexCount);
+				for (size_t at = 1; at <= indexCount; at++) {
+					lua_rawgeti(State, indices, static_cast<int>(at));
+					if (lua_type(State, -1) != LUA_TNUMBER) {
+						Raise("EditableMesh indices must be numbers");
+					}
+					const double value = lua_tonumber(State, -1);
+					if (!std::isfinite(value) || value < 0.0 || std::floor(value) != value ||
+						value > static_cast<double>(std::numeric_limits<uint32_t>::max())) {
+						Raise("EditableMesh indices must be non-negative uint32 values");
+					}
+					geometry.Indices.push_back(static_cast<uint32_t>(value));
+					lua_pop(State, 1);
+				}
+			}
+
 			void ReadAttribute(size_t index, AttributeValue &out) override {
 				out = ReadLuauAttribute(State, Slot(index));
 			}
@@ -639,6 +708,12 @@ namespace engine::script {
 				Suspend(Context.AwaitedChildren, waiter);
 			}
 
+			void AwaitEditableMesh(scene::EditableMeshGeometry geometry) override {
+				const uint64_t ticket =
+					Context.EditableMeshes.Submit(*Context.World, Self, std::move(geometry));
+				Suspend(Context.AwaitedEditableMeshes, ticket);
+			}
+
 			[[noreturn]] void Raise(const char *message) override {
 				// `"%s"` rather than the message as the format, because a message
 				// this file did not write may contain a percent and `luaL_errorL`
@@ -882,5 +957,43 @@ namespace engine::script {
 		}
 
 		lua_pop(state, 1);
+	}
+
+	std::string PumpEditableMeshJobs(lua_State *state) {
+		LuauContext &context = ContextOf(state);
+		context.EditableMeshes.Run(*context.World);
+
+		std::string firstError;
+		for (const EditableMeshJobs::Completion &completion : context.EditableMeshes.Completions()) {
+			const auto waiting = context.AwaitedEditableMeshes.find(completion.Ticket);
+			if (waiting == context.AwaitedEditableMeshes.end()) {
+				continue;
+			}
+
+			lua_State *thread = waiting->second;
+			context.AwaitedEditableMeshes.erase(waiting);
+			const auto held = context.Threads.find(thread);
+			if (held == context.Threads.end()) {
+				continue;
+			}
+			const CallbackRef reference = held->second;
+			context.Threads.erase(held);
+
+			const bool accepted = completion.Result == scene::EditableMeshCommit::Applied ||
+								  completion.Result == scene::EditableMeshCommit::Unchanged;
+			lua_pushboolean(thread, accepted ? 1 : 0);
+			const int status = lua_resume(thread, nullptr, 1);
+			if (status != LUA_OK && status != LUA_YIELD && firstError.empty()) {
+				const char *message = lua_tostring(thread, -1);
+				firstError = message != nullptr ? message : "a resumed EditableMesh:SetGeometry failed";
+				if (const char *trace = lua_debugtrace(thread); trace != nullptr) {
+					firstError += "\n";
+					firstError += trace;
+				}
+			}
+			lua_unref(state, reference);
+		}
+		context.EditableMeshes.ClearCompletions();
+		return firstError;
 	}
 }
