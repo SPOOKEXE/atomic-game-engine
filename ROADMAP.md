@@ -43,8 +43,8 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] add SkyboxCompute and SkyboxTextures
 - [_] add CloudCompute and CloudProcedural
 - [_] build out proper caching and cascaded caching implementations across every pipeline - some are done incorrectly and need to be corrected.
-- [_] make particles emit in studio when property is enabled and they are within a PVInstance (BasePart/Attachment) - this will cause cache invalidation on scene
-- [_] button to disable all particle emitter rendering in studio
+- [x] make particles emit in studio when property is enabled and they are within a PVInstance (BasePart/Attachment) - this will cause cache invalidation on scene
+- [x] button to disable all particle emitter rendering in studio
 
 ### v0.20
 

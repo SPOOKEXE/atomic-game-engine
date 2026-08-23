@@ -94,7 +94,14 @@ namespace engine::render {
 		uint64_t SourceRevision = 0;
 		uint64_t SourceLayoutRevision = 0;
 		uint64_t SourceResidentRevision = 0;
+		uint64_t SourceSelectionRevision = 0;
 		//@}
+
+		// The optional emitter selection represented by this snapshot. Stored so
+		// switching between a complete client frame and a filtered editor frame
+		// cannot reuse the other one's batch membership. The predicate itself is
+		// call-local and never crosses the world boundary.
+		core::Name SourceSelection;
 
 		// Copies of blocks used when the frame outlives the store boundary.
 		std::vector<effects::EmitterBlock> Blocks;
@@ -109,6 +116,19 @@ namespace engine::render {
 
 		// Clears frame-local arrays while preserving their capacity.
 		void Clear();
+	};
+
+	// Optional membership rule for a particle presentation snapshot.
+	//
+	// The predicate is a plain function pointer because collection is a hot
+	// boundary and owns no callable allocation. Revision must change whenever
+	// state read only by the predicate changes.
+	struct ParticleBatchSelection {
+		using Predicate = bool (*)(const ecs::Store &, ecs::Entity, const effects::ParticleEmitter &);
+
+		core::Name Name;
+		Predicate Includes = nullptr;
+		uint64_t Revision = 0;
 	};
 
 	// Rebuilds the world-owned draw list from visible scene rows.
@@ -128,7 +148,9 @@ namespace engine::render {
 	// @param store The world being presented.
 	// @param frame Cleared and filled with the complete particle input.
 	// @return The number of live emitter batches.
-	size_t CollectParticleBatches(ecs::Store &store, ParticleFrame &frame);
+	size_t CollectParticleBatches(
+		ecs::Store &store, ParticleFrame &frame, const ParticleBatchSelection &selection = {}
+	);
 
 	// Collects and orders the lights relevant to one camera.
 	//

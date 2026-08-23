@@ -593,6 +593,11 @@ namespace engine::effects {
 		uint64_t MotionChangeVersion = 0;
 		uint64_t HierarchyChangeVersion = 0;
 
+		// Caller-owned activation policy revision already applied to resident
+		// blocks. The predicate itself lives only for one refresh call and never
+		// crosses the world boundary.
+		uint64_t ActivationPolicyRevision = 0;
+
 		// Which completed simulation revision the presentation data describes.
 		//
 		// **One counter for the whole pool, because rendering needs one answer to
@@ -738,6 +743,8 @@ namespace engine::effects {
 	// @return False when the entity is not a ParticleEmitter.
 	bool ClearParticles(ecs::Store &store, ecs::Entity emitter);
 
+	using EmitterActivationPredicate = bool (*)(const ecs::Store &, ecs::Entity);
+
 	// Hands out and reclaims blocks, and refreshes each one from its emitter.
 	//
 	// **The pass that touches `ParticleEmitter`**, and the only one. It walks the
@@ -748,9 +755,13 @@ namespace engine::effects {
 	// Registered in `PreSimulation`, before `StepParticles`, because a block
 	// handed out after the step is a block that emits nothing for one frame.
 	//
-	// @param store The world.
+	// @param store              The world.
+	// @param activation         Optional caller policy for whether an emitter may own a block.
+	// @param activationRevision Revision of that caller policy; changing it forces reevaluation.
 	// @return How many blocks are live.
-	size_t RefreshEmitters(ecs::Store &store);
+	size_t RefreshEmitters(
+		ecs::Store &store, EmitterActivationPredicate activation = nullptr, uint64_t activationRevision = 0
+	);
 
 	// Ages every particle, spawns new ones, and writes the instance stream.
 	//

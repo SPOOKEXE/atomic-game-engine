@@ -1,9 +1,83 @@
+#include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Components.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/effects/ParticleSystem.hpp>
+#include <engine/scene/Attachments.hpp>
 
 #include <algorithm>
 #include <studio/Presentation.hpp>
 
 namespace studio {
+	namespace {
+		constexpr uint64_t STUDIO_PARTICLE_ACTIVATION_REVISION = 1;
+
+		uint64_t FoldParticleSelection(uint64_t hash, uint64_t value) {
+			hash ^= value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2);
+			return hash;
+		}
+
+		bool ParticleEmitterHasStudioParent(const engine::ecs::Store &store, engine::ecs::Entity emitter) {
+			const engine::ecs::Entity parent = store.ParentOf(emitter);
+			if (parent == engine::ecs::NULL_ENTITY) {
+				return false;
+			}
+
+			static const engine::ecs::ClassId pvInstance =
+				engine::ecs::Classes::Find(engine::core::Name("PVInstance"));
+			if (pvInstance.IsValid() && store.IsA(parent, pvInstance)) {
+				return true;
+			}
+
+			static const engine::ecs::ClassId attachment = engine::scene::AttachmentClass();
+			return attachment.IsValid() && store.IsA(parent, attachment) && pvInstance.IsValid() &&
+				   store.FindFirstAncestorWhichIsA(parent, pvInstance) != engine::ecs::NULL_ENTITY;
+		}
+	}
+
+	bool ParticleEmitterVisibleInStudio(
+		const engine::ecs::Store &store,
+		engine::ecs::Entity emitter,
+		const engine::effects::ParticleEmitter &settings
+	) {
+		if (!settings.Enabled) {
+			return false;
+		}
+
+		return ParticleEmitterHasStudioParent(store, emitter);
+	}
+
+	engine::render::ParticleBatchSelection StudioParticleSelection(engine::ecs::Store &store) {
+		store.Observe<engine::ecs::Hierarchy>();
+		static const engine::core::Name selectionName("studio.preview-particles");
+		uint64_t revision = 0xcbf29ce484222325ull;
+		revision = FoldParticleSelection(revision, store.ComponentChangeVersion<engine::ecs::Hierarchy>());
+		revision = FoldParticleSelection(revision, store.CountMatching<engine::ecs::Hierarchy>());
+		return {selectionName, ParticleEmitterVisibleInStudio, revision};
+	}
+
+	size_t CollectStudioParticleBatches(
+		engine::ecs::Store &store, engine::render::ParticleFrame &frame, bool renderingEnabled
+	) {
+		if (!renderingEnabled) {
+			frame.Clear();
+			return 0;
+		}
+		return engine::render::CollectParticleBatches(store, frame, StudioParticleSelection(store));
+	}
+
+	bool AdvanceStudioParticlePreview(
+		engine::ecs::Store &store, float delta, bool worldRunning, bool renderingEnabled
+	) {
+		if (worldRunning || !renderingEnabled) {
+			return false;
+		}
+		(void)engine::effects::RefreshEmitters(
+			store, ParticleEmitterHasStudioParent, STUDIO_PARTICLE_ACTIVATION_REVISION
+		);
+		(void)engine::effects::StepParticles(store, std::max(delta, 0.0f));
+		return true;
+	}
+
 	bool StatusBarSnapshot::Refresh(
 		double now,
 		size_t viewport,

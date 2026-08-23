@@ -34,6 +34,7 @@
 // @tier L13 · client
 
 #include <engine/core/Name.hpp>
+#include <engine/render/WorldPresentation.hpp>
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/world/Enums.hpp>
 
@@ -43,6 +44,33 @@
 #include <vector>
 
 namespace studio {
+	// Whether one authored emitter belongs in an editor viewport.
+	//
+	// Studio previews only enabled emitters placed on a PVInstance, either
+	// directly or through an Attachment below one. This is presentation policy:
+	// runtime worlds retain the engine's normal emitter semantics.
+	bool ParticleEmitterVisibleInStudio(
+		const engine::ecs::Store &store,
+		engine::ecs::Entity emitter,
+		const engine::effects::ParticleEmitter &settings
+	);
+
+	// Builds the filtered particle selection and its ECS-backed revision key.
+	engine::render::ParticleBatchSelection StudioParticleSelection(engine::ecs::Store &store);
+
+	// Collects the particle snapshot shown by Studio, or clears the retained
+	// snapshot when the global particle view is hidden.
+	size_t CollectStudioParticleBatches(
+		engine::ecs::Store &store, engine::render::ParticleFrame &frame, bool renderingEnabled
+	);
+
+	// Advances the existing resident particle system for an authored Edit-mode
+	// world. Running worlds already advance through their scheduler, and a global
+	// visibility disable owes neither simulation nor renderer submission.
+	bool AdvanceStudioParticlePreview(
+		engine::ecs::Store &store, float delta, bool worldRunning, bool renderingEnabled
+	);
+
 	// The slowly sampled values printed in Studio's always-visible status bar.
 	//
 	// The source counters change every frame even when the visible scene and

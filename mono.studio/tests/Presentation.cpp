@@ -14,6 +14,8 @@
 // `client::InstallPresentation` the editor installs.
 
 #include <engine/ecs/Scheduler.hpp>
+#include <engine/effects/ParticleSystem.hpp>
+#include <engine/scene/Attachments.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
@@ -38,11 +40,15 @@ using engine::world::Universe;
 using engine::world::WorldId;
 using engine::world::WorldSettings;
 using engine::world::WorldState;
+using studio::AdvanceStudioParticlePreview;
 using studio::AppendReplicaVisualInstances;
+using studio::CollectStudioParticleBatches;
+using studio::ParticleEmitterVisibleInStudio;
 using studio::PresentationAlpha;
 using studio::PresentationCeiling;
 using studio::PresentationRates;
 using studio::StatusBarSnapshot;
+using studio::StudioParticleSelection;
 using studio::WorldSelectorLabel;
 
 namespace {
@@ -123,6 +129,69 @@ TEST_CASE("the world selector marks runtime activity, not selection", "[studio][
 	CHECK(WorldSelectorLabel("MeshGrid", false) == "MeshGrid");
 	CHECK(WorldSelectorLabel("MeshGrid", true) == "MeshGrid (ACTIVE)");
 	CHECK(WorldSelectorLabel({}, true) == "? (ACTIVE)");
+}
+
+TEST_CASE(
+	"Studio previews only enabled particle emitters placed in the world", "[studio][presentation][particles]"
+) {
+	Store store("studio-particle-preview");
+	Scheduler systems;
+	client::InstallPresentation(store, systems, 64);
+
+	const Entity part = store.CreateInstance(engine::scene::PartClass(), "EmitterPart");
+	const engine::ecs::ClassId emitterClass = engine::ecs::Classes::Find(Name("ParticleEmitter"));
+	REQUIRE(emitterClass.IsValid());
+	const Entity emitter = store.CreateInstance(emitterClass, "PreviewEmitter");
+	auto *settings = store.GetMutable<engine::effects::ParticleEmitter>(emitter);
+	REQUIRE(settings != nullptr);
+	settings->Rate = 10.0f;
+	settings->Lifetime = {1.0f, 1.0f};
+
+	REQUIRE(AdvanceStudioParticlePreview(store, 1.0f / 60.0f, false, true));
+	engine::render::ParticleFrame frame;
+	CHECK(engine::render::CollectParticleBatches(store, frame, StudioParticleSelection(store)) == 0);
+	CHECK_FALSE(ParticleEmitterVisibleInStudio(store, emitter, *settings));
+	CHECK(store.Resource<engine::effects::ParticleSystem>()->Blocks.empty());
+
+	REQUIRE(store.SetParent(emitter, part));
+	REQUIRE(AdvanceStudioParticlePreview(store, 1.0f / 60.0f, false, true));
+	CHECK(CollectStudioParticleBatches(store, frame, true) == 1);
+	CHECK(ParticleEmitterVisibleInStudio(store, emitter, *settings));
+	CHECK(CollectStudioParticleBatches(store, frame, false) == 0);
+	CHECK(frame.Batches.empty());
+
+	const Entity attachment = store.CreateInstance(engine::scene::AttachmentClass(), "EmitterAttachment");
+	REQUIRE(store.SetParent(attachment, part));
+	REQUIRE(store.SetParent(emitter, attachment));
+	REQUIRE(AdvanceStudioParticlePreview(store, 1.0f / 60.0f, false, true));
+	CHECK(engine::render::CollectParticleBatches(store, frame, StudioParticleSelection(store)) == 1);
+	CHECK(ParticleEmitterVisibleInStudio(store, emitter, *settings));
+
+	settings = store.GetMutable<engine::effects::ParticleEmitter>(emitter);
+	REQUIRE(settings != nullptr);
+	settings->Enabled = false;
+	REQUIRE(AdvanceStudioParticlePreview(store, 1.0f / 60.0f, false, true));
+	CHECK(engine::render::CollectParticleBatches(store, frame, StudioParticleSelection(store)) == 0);
+	CHECK_FALSE(ParticleEmitterVisibleInStudio(store, emitter, *settings));
+}
+
+TEST_CASE(
+	"hidden or running Studio particles are not advanced by the preview", "[studio][presentation][particles]"
+) {
+	Store store("studio-particle-preview-gate");
+	Scheduler systems;
+	client::InstallPresentation(store, systems, 64);
+
+	const auto *before = store.Resource<engine::effects::ParticleSystem>();
+	REQUIRE(before != nullptr);
+	const uint64_t baseline = before->PresentationRevision;
+
+	CHECK_FALSE(AdvanceStudioParticlePreview(store, 1.0f / 60.0f, false, false));
+	CHECK_FALSE(AdvanceStudioParticlePreview(store, 1.0f / 60.0f, true, true));
+	const auto *after = store.Resource<engine::effects::ParticleSystem>();
+	REQUIRE(after != nullptr);
+	CHECK(after->PresentationRevision == baseline);
+	CHECK(after->Blocks.empty());
 }
 
 TEST_CASE("a running world is not reduced to the input-idle rate", "[studio][presentation]") {

@@ -278,6 +278,7 @@ namespace studio {
 		// clearing whatever it did not mention.
 		Scale = JsonNumber(document, "scale", Scale);
 		ShowGrid = Flag(document, "showGrid", ShowGrid);
+		ShowParticleEmitters = Flag(document, "showParticleEmitters", ShowParticleEmitters);
 		SnapEnabled = Flag(document, "snap", SnapEnabled);
 		SnapDistance = JsonNumber(document, "gridStep", SnapDistance);
 		SnapDegrees = JsonNumber(document, "rotationStep", SnapDegrees);
@@ -511,6 +512,7 @@ namespace studio {
 		json document{
 			{"scale", Scale},
 			{"showGrid", ShowGrid},
+			{"showParticleEmitters", ShowParticleEmitters},
 			{"snap", SnapEnabled},
 			{"gridStep", SnapDistance},
 			{"rotationStep", SnapDegrees},
@@ -632,6 +634,7 @@ namespace studio {
 		Recent.Load();
 
 		ShowGrid = Prefs.ShowGrid;
+		ShowParticleEmitters = Prefs.ShowParticleEmitters;
 		ShowControl = Prefs.ShowControl;
 
 		// Armed here rather than when the panel first draws, because the panel
@@ -701,6 +704,7 @@ namespace studio {
 		// reading them back here is what makes "it remembered what I left open"
 		// true without every toggle having to write a file.
 		Prefs.ShowGrid = ShowGrid;
+		Prefs.ShowParticleEmitters = ShowParticleEmitters;
 		Prefs.ShowControl = ShowControl;
 		Prefs.FrameGraphRules = FrameGraphState.Triggers;
 		Prefs.ShowStatistics = ShowStatistics;

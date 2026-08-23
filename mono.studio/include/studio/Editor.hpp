@@ -4561,6 +4561,11 @@ namespace studio {
 		// where the origin is or which way is up.
 		bool ShowGrid = true;
 
+		// Whether particle emitters are drawn in Studio viewports. Kept separate
+		// from each emitter's Enabled property so hiding effects is an editor view
+		// decision and cannot modify the game being authored.
+		bool ShowParticleEmitters = true;
+
 		// Whether every nearby part's collider is outlined.
 		//
 		// **Off by default, which the grid is not**, and the difference is what

@@ -601,10 +601,13 @@ namespace engine::render {
 		SourceRevision = 0;
 		SourceLayoutRevision = 0;
 		SourceResidentRevision = 0;
+		SourceSelectionRevision = 0;
+		SourceSelection = {};
 		Detached = false;
 	}
 
-	size_t CollectParticleBatches(ecs::Store &store, ParticleFrame &frame) {
+	size_t
+	CollectParticleBatches(ecs::Store &store, ParticleFrame &frame, const ParticleBatchSelection &selection) {
 		auto *system = store.ResourceMutable<effects::ParticleSystem>();
 		const core::Name sourceWorld(store.Name());
 		const uint64_t sourceRevision = system == nullptr ? 0 : system->PresentationRevision;
@@ -612,12 +615,14 @@ namespace engine::render {
 		const uint64_t sourceResidentRevision = system == nullptr ? 0 : system->ResidentRevision;
 		if (frame.SourceWorld == sourceWorld && frame.SourceRevision == sourceRevision &&
 			frame.SourceLayoutRevision == sourceLayoutRevision &&
-			frame.SourceResidentRevision == sourceResidentRevision) {
+			frame.SourceResidentRevision == sourceResidentRevision &&
+			frame.SourceSelection == selection.Name && frame.SourceSelectionRevision == selection.Revision) {
 			return frame.Batches.size();
 		}
 
 		bool rebuildLayout =
-			frame.SourceWorld != sourceWorld || frame.SourceLayoutRevision != sourceLayoutRevision;
+			frame.SourceWorld != sourceWorld || frame.SourceLayoutRevision != sourceLayoutRevision ||
+			frame.SourceSelection != selection.Name || frame.SourceSelectionRevision != selection.Revision;
 		if (!rebuildLayout && frame.Detached &&
 			(frame.Blocks.size() != frame.Batches.size() ||
 			 frame.SpawnStates.size() != frame.Batches.size() ||
@@ -637,6 +642,8 @@ namespace engine::render {
 		frame.SourceWorld = sourceWorld;
 		frame.SourceRevision = sourceRevision;
 		frame.SourceLayoutRevision = sourceLayoutRevision;
+		frame.SourceSelection = selection.Name;
+		frame.SourceSelectionRevision = selection.Revision;
 		const bool refreshResident = rebuildLayout || frame.SourceResidentRevision != sourceResidentRevision;
 		frame.SourceResidentRevision = sourceResidentRevision;
 		frame.Revision++;
@@ -698,7 +705,12 @@ namespace engine::render {
 		// not a simulation-revision cost: unchanged emitters retain this ordered
 		// metadata while changed block values refresh around it.
 		store.Each<const effects::ParticleEmitter, const effects::EmitterSlot>(
-			[&](ecs::Entity, const effects::ParticleEmitter &emitter, const effects::EmitterSlot &slot) {
+			[&](ecs::Entity entity,
+				const effects::ParticleEmitter &emitter,
+				const effects::EmitterSlot &slot) {
+				if (selection.Includes != nullptr && !selection.Includes(store, entity, emitter)) {
+					return;
+				}
 				if (slot.Index == effects::NO_SLOT || slot.Index >= system->Blocks.size()) {
 					return;
 				}

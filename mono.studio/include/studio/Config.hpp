@@ -223,6 +223,11 @@ namespace studio {
 		// Whether the ground grid is drawn.
 		bool ShowGrid = true;
 
+		// Whether authored and running particle emitters are submitted to Studio
+		// viewports. This changes only the editor's view, never the saved Enabled
+		// property or a running world's simulation state.
+		bool ShowParticleEmitters = true;
+
 		// Whether a dragged handle snaps at all.
 		//
 		// **These three are `Editor::SnapEnabled`, `SnapDistance` and

@@ -413,6 +413,13 @@ deduplication as the shipped client. Do not replace it with a walk over every
 open world on each presentation. The unissued tail stays queued across bounded
 pumps so that the gate can remain closed while delivery catches up.
 
+Edit-mode particle preview advances the engine's resident particle system after
+PreRender resolves attachments. It admits only enabled emitters parented to a
+PVInstance, directly or through an Attachment, so invalid authored emitters do
+not consume pool rows. The global Particle Emitters view toggle suppresses both
+that edit-mode step and particle submission without changing any emitter's
+Enabled property. Running worlds keep their own simulation clock.
+
 When every layer hits, `PresentWorld` returns before `Renderer::Render`; no
 command buffer or swapchain image is owed. Headless, frame-budget and capture
 runs force diagnostic writes so their requested output and termination cannot

@@ -87,6 +87,10 @@ namespace {
 		engine::effects::RefreshEmitters(store);
 		return engine::effects::StepParticles(store, delta);
 	}
+
+	bool HasParent(const Store &store, Entity emitter) {
+		return store.ParentOf(emitter) != engine::ecs::NULL_ENTITY;
+	}
 }
 
 // --- the packing -------------------------------------------------------------
@@ -170,6 +174,41 @@ TEST_CASE("an emitter gets a block sized by its own rate and lifetime", "[effect
 	// stops an emitter at exactly one particle a second with a one-second life
 	// oscillating between zero slots and one.
 	REQUIRE(system->Blocks[slot].Capacity == 21);
+}
+
+TEST_CASE("an activation policy gates blocks and restores resident emission", "[effects][activation]") {
+	Store store("effects_test");
+	const Entity emitter = MakeEmitter(store);
+	const Entity part = store.ParentOf(emitter);
+	auto *system = store.ResourceMutable<ParticleSystem>();
+	system->DeviceStepped = true;
+
+	Settings(store, emitter).Rate = 20.0f;
+	Settings(store, emitter).Lifetime = NumberRange{2.0f, 2.0f};
+	store.SetParent(emitter, engine::ecs::NULL_ENTITY);
+	engine::effects::RefreshEmitters(store, HasParent, 1);
+	CHECK(store.Get<EmitterSlot>(emitter)->Index == NO_SLOT);
+	CHECK(system->Blocks.empty());
+
+	store.SetParent(emitter, part);
+	engine::effects::RefreshEmitters(store, HasParent, 1);
+	const uint32_t slot = store.Get<EmitterSlot>(emitter)->Index;
+	REQUIRE(slot != NO_SLOT);
+	CHECK(system->RuntimeStates[slot].Enabled);
+	CHECK(system->RuntimeStates[slot].ContinuousRate == Catch::Approx(20.0f));
+
+	store.SetParent(emitter, engine::ecs::NULL_ENTITY);
+	engine::effects::RefreshEmitters(store, HasParent, 1);
+	CHECK_FALSE(system->RuntimeStates[slot].Enabled);
+	CHECK(system->RuntimeStates[slot].ContinuousRate == 0.0f);
+	CHECK(system->RuntimeStates[slot].DeviceRetiring);
+
+	store.SetParent(emitter, part);
+	engine::effects::RefreshEmitters(store, HasParent, 1);
+	CHECK(system->RuntimeStates[slot].Enabled);
+	CHECK(system->RuntimeStates[slot].ContinuousRate == Catch::Approx(20.0f));
+	CHECK_FALSE(system->RuntimeStates[slot].DeviceRetiring);
+	CHECK(system->RetiringBlocks.empty());
 }
 
 TEST_CASE("a disabled emitter keeps its block until its particles are gone", "[effects]") {

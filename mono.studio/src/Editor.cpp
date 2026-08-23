@@ -2078,6 +2078,7 @@ namespace studio {
 		engine::scene::WorldLighting visualLighting;
 		uint32_t visualSurfaceBounces = Renderer.SurfaceBounces();
 		uint32_t visualSurfaceLimit = Renderer.SurfaceLimit();
+		const bool particleWorldRunning = visual.IsValid() && IsRunning(visual);
 		if (visual.IsValid()) {
 			const Name selectedProfile = Universe->SettingsOf(visual).RenderingProfile;
 			Universe->Enter(visual, [&, selectedProfile](Store &store) {
@@ -2130,16 +2131,29 @@ namespace studio {
 				{
 					ENGINE_PROFILE_CAT("collect effects", engine::core::ProfileCategory::Render);
 
+					if (ShowParticleEmitters) {
+						// Edit worlds run PreRender but no simulation phases. Advance
+						// the same resident system the client uses after attachments
+						// have resolved, then select only enabled emitters placed on a
+						// PVInstance or an Attachment beneath one. A running or paused
+						// world already owns its particle clock and is never stepped
+						// here.
+						{
+							ENGINE_PROFILE_CAT(
+								"preview particles", engine::core::ProfileCategory::Simulation
+							);
+							(void)AdvanceStudioParticlePreview(
+								store, frameSeconds, particleWorldRunning, ShowParticleEmitters
+							);
+						}
+					}
+
 					// **Detached from the pool, for the reason `drawn` gives one
-					// screen up:** `Renderer::Render` happens outside this
-					// `Enter`, and a `ParticleBatch` points at a block the world
-					// may reclaim the moment the tick resumes. Copying the
-					// batches alone would copy the pointers.
-					//
-					// A block is a few hundred bytes against the twenty-eight a
-					// particle was, so this copies a couple of megabytes where it
-					// used to copy sixteen.
-					(void)engine::render::CollectParticleBatches(store, Particles);
+					// screen up:** `Renderer::Render` happens outside this `Enter`,
+					// and a `ParticleBatch` points at a block the world may reclaim
+					// the moment the tick resumes. Copying the batches alone would
+					// copy the pointers.
+					(void)CollectStudioParticleBatches(store, Particles, ShowParticleEmitters);
 					particleFrameCollected = true;
 					Particles.Detach();
 

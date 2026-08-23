@@ -1260,6 +1260,7 @@ namespace studio {
 		// them - but it is a thing somebody turns off and has to be able to
 		// turn back on, which is the rule this menu exists for.
 		ImGui::MenuItem("Ground Grid", nullptr, &ShowGrid);
+		ImGui::MenuItem("Particle Emitters", nullptr, &ShowParticleEmitters);
 
 		// **Beside the grid, because it is the same kind of thing**: furniture
 		// that says something about the world rather than part of it. Off by

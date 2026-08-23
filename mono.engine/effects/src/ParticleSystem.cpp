@@ -773,7 +773,8 @@ namespace engine::effects {
 		return true;
 	}
 
-	size_t RefreshEmitters(ecs::Store &store) {
+	size_t
+	RefreshEmitters(ecs::Store &store, EmitterActivationPredicate activation, uint64_t activationRevision) {
 		ENGINE_PROFILE_CAT("refresh emitters", core::ProfileCategory::Simulation);
 
 		auto *system = store.ResourceMutable<ParticleSystem>();
@@ -785,6 +786,8 @@ namespace engine::effects {
 		const uint64_t textureRevision = catalogue == nullptr ? 0 : catalogue->Revision;
 		const bool catalogueChanged = system->TextureRevision != textureRevision;
 		system->TextureRevision = textureRevision;
+		const bool activationChanged = system->ActivationPolicyRevision != activationRevision;
+		system->ActivationPolicyRevision = activationRevision;
 
 		// Parent frames are stable far more often than emitters spawn. Gather the
 		// moved rows once, then leave every unchanged block's cached frame alone.
@@ -962,7 +965,8 @@ namespace engine::effects {
 		}
 		const bool explicitlyRequested = std::exchange(system->RefreshRequested, false);
 		if (changedEmitters == 0 && !emitterHierarchyChanged && movedParents.empty() && !catalogueChanged &&
-			!retryRefused && !explicitlyRequested && emitterRows == system->EmitterRows) {
+			!activationChanged && !retryRefused && !explicitlyRequested &&
+			emitterRows == system->EmitterRows) {
 			return system->Statistics.Blocks;
 		}
 		system->Statistics.EmittersRefused = 0;
@@ -1003,6 +1007,9 @@ namespace engine::effects {
 					slot.Configured = true;
 				}
 
+				const bool eligible = activation == nullptr || activation(store, entity);
+				const bool continuouslyEnabled = slot.Enabled && eligible;
+
 				// An emitter that is off and has nothing left alive gives its
 				// block back. One that is off and still has particles keeps it,
 				// because disabling must not kill what is already in the air -
@@ -1017,6 +1024,28 @@ namespace engine::effects {
 				if (holds) {
 					EmitterBlock &block = system->Blocks[slot.Index];
 					EmitterRuntime &runtime = system->RuntimeStates[slot.Index];
+					if (runtime.Enabled != continuouslyEnabled) {
+						if (continuouslyEnabled) {
+							const ParticleEmitter *emitter = store.Get<ParticleEmitter>(entity);
+							if (emitter != nullptr) {
+								RefreshRuntimeState(*emitter, runtime);
+							}
+						} else {
+							runtime.Enabled = false;
+							runtime.ContinuousRate = 0.0f;
+						}
+						block.Revision++;
+						residentChanged = true;
+						if (system->DeviceStepped && !continuouslyEnabled && !runtime.DeviceRetiring) {
+							runtime.DeviceRetiring = true;
+							runtime.Idle = 0.0f;
+							runtime.Live = std::max(runtime.Live, 1u);
+							system->RetiringBlocks.push_back(slot.Index);
+						} else if (continuouslyEnabled) {
+							runtime.DeviceRetiring = false;
+							std::erase(system->RetiringBlocks, slot.Index);
+						}
+					}
 
 					if (slot.ClearRequested) {
 						block.Generation++;
@@ -1030,7 +1059,7 @@ namespace engine::effects {
 						slot.ClearRequested = false;
 					}
 
-					if (!slot.Enabled && (system->DeviceStepped || runtime.Requested == 0) &&
+					if (!continuouslyEnabled && (system->DeviceStepped || runtime.Requested == 0) &&
 						runtime.Live == 0) {
 						releaseBlock(slot);
 						return;
@@ -1047,7 +1076,7 @@ namespace engine::effects {
 					if (parentChanged || parentMoved) {
 						const core::CFrame frame = FrameOfParent(store, parent);
 						if (!SameFrame(frame, block.Frame)) {
-							if (slot.Enabled && block.RateOverDistance > 0.0f) {
+							if (continuouslyEnabled && block.RateOverDistance > 0.0f) {
 								const float distanceDebt =
 									(frame.Position - block.Frame.Position).Magnitude() *
 									block.RateOverDistance;
@@ -1070,7 +1099,7 @@ namespace engine::effects {
 					return;
 				}
 
-				if (!slot.Enabled && slot.Requested == 0) {
+				if (!eligible || (!slot.Enabled && slot.Requested == 0)) {
 					return;
 				}
 				if (slot.Refused && !retryRefused) {
@@ -1120,6 +1149,10 @@ namespace engine::effects {
 				EmitterRuntime runtime;
 				runtime.Requested = std::exchange(slot.Requested, 0u);
 				RefreshRuntimeState(*emitter, runtime);
+				runtime.Enabled = emitter->Enabled && eligible;
+				if (!runtime.Enabled) {
+					runtime.ContinuousRate = 0.0f;
+				}
 				if (system->DeviceStepped) {
 					runtime.Live = 1;
 				}
@@ -1137,7 +1170,7 @@ namespace engine::effects {
 				// starts" true at every rate. It is not free particles: the debt
 				// is subtracted like any other, so the *steady* rate is unchanged
 				// and only the first particle moves.
-				runtime.Pending = emitter->Enabled && emitter->Rate > 0.0f ? 1.0f : 0.0f;
+				runtime.Pending = runtime.Enabled && emitter->Rate > 0.0f ? 1.0f : 0.0f;
 				SampleCurves(*emitter, block.Curves);
 				ApplyPlayback(store, *emitter, block);
 				const ecs::Entity parent = store.ParentOf(entity);

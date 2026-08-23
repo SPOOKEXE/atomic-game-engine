@@ -131,6 +131,7 @@ TEST_CASE("preferences round trip and are read forward", "[studio][config]") {
 	Preferences written;
 	written.Scale = 1.25f;
 	written.ShowGrid = false;
+	written.ShowParticleEmitters = false;
 	written.SnapEnabled = true;
 	written.SnapDistance = 0.25f;
 	written.SnapDegrees = 45.0f;
@@ -145,6 +146,7 @@ TEST_CASE("preferences round trip and are read forward", "[studio][config]") {
 	REQUIRE(read.Load());
 	CHECK(read.Scale == 1.25f);
 	CHECK_FALSE(read.ShowGrid);
+	CHECK_FALSE(read.ShowParticleEmitters);
 	CHECK(read.SnapEnabled);
 	CHECK(read.SnapDistance == 0.25f);
 	CHECK(read.SnapDegrees == 45.0f);
