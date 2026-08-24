@@ -13,6 +13,7 @@
 #include "GpuHeap.hpp"
 #include "IndexResidency.hpp"
 #include "InstanceResidency.hpp"
+#include "ParticleWork.hpp"
 #include "RenderTypes.hpp"
 #include "ResourcePreview.hpp"
 #include "ShaderBinary.hpp"
@@ -920,6 +921,7 @@ namespace engine::render {
 			core::AABB Bounds;
 			bool HasBounds = false;
 			bool Cullable = false;
+			double CullableAfter = 0.0;
 
 			// The emitter-sized spans folded into this material run. They let a
 			// camera reject particles behind it even when the aggregate box surrounds
@@ -934,6 +936,7 @@ namespace engine::render {
 			uint32_t Count = 0;
 			core::AABB Bounds;
 			bool Cullable = false;
+			double CullableAfter = 0.0;
 		};
 
 		struct ParticleDrawRun {
@@ -1012,15 +1015,6 @@ namespace engine::render {
 		// its world's buffer at the offsets `PrepareParticles` worked out, so the
 		// draw grouping is exactly what it was and there is no gather pass.
 		struct ParticlePool {
-			struct CullRecord {
-				core::AABB Bounds;
-				uint32_t Generation = 0;
-				uint32_t Revision = 0;
-				uint32_t CurveRevision = 0;
-				bool Stable = false;
-				bool Cullable = false;
-			};
-
 			// One state per slot, `STATE_WORDS` wide, read and written by the
 			// integration pass and written by emission. Never read by the host.
 			SDL_GPUBuffer *States = nullptr;
@@ -1098,7 +1092,8 @@ namespace engine::render {
 			uint32_t ParamUpdates = 0;
 			uint32_t CurveUpdates = 0;
 			float Delta = 0.0f;
-			std::vector<CullRecord> CullRecords;
+			double SimulatedSeconds = 0.0;
+			std::vector<ParticleCullRecord> CullRecords;
 			//@}
 		};
 

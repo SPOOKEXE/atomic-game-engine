@@ -27,6 +27,32 @@ namespace engine::render {
 		bool Cullable = false;
 	};
 
+	// The conservative host-side culling state for one resident emitter block.
+	// Parameter changes cannot immediately discard the old bound because particles
+	// already alive keep their old spawn motion. Once their maximum lifetime has
+	// elapsed, only particles described by the new bound can remain.
+	struct ParticleCullRecord {
+		core::AABB Bounds;
+		uint32_t Generation = 0;
+		uint32_t Revision = 0;
+		uint32_t CurveRevision = 0;
+		double CullableAfter = 0.0;
+		bool Cullable = false;
+
+		void Observe(
+			const ParticleDrawBounds &candidate,
+			uint32_t generation,
+			uint32_t revision,
+			uint32_t curveRevision,
+			float maximumLifetime,
+			double simulatedSeconds
+		);
+
+		bool Ready(double simulatedSeconds) const {
+			return Cullable && simulatedSeconds >= CullableAfter;
+		}
+	};
+
 	ParticleDrawBounds BoundsForParticleDraw(
 		const effects::EmitterBlock &block, const effects::EmitterSpawnState &spawn, float zOffset = 0.0f
 	);

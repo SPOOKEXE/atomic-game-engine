@@ -14,6 +14,7 @@ TEST_DEPENDS("engine.graph.frustum")
 using Catch::Approx;
 using engine::core::Vector3;
 using engine::render::BoundsForParticleDraw;
+using engine::render::ParticleCullRecord;
 using engine::render::ParticleDrawVisible;
 using engine::render::ParticleStepDelta;
 using engine::render::ParticleWorkgroups;
@@ -102,6 +103,31 @@ TEST_CASE("particle group culling rejects only safe off-camera bounds", "[render
 	CHECK(ParticleDrawVisible(ahead, true, true, frustum));
 	CHECK(ParticleDrawVisible(behind, false, true, frustum));
 	CHECK(ParticleDrawVisible(behind, true, false, frustum));
+}
+
+TEST_CASE(
+	"changed emitter bounds become cullable after old particles expire", "[render][particles][culling]"
+) {
+	ParticleCullRecord record;
+	const engine::render::ParticleDrawBounds first{
+		engine::core::AABB::FromCentre(Vector3{0.0f, 0.0f, 0.0f}, Vector3{1.0f, 1.0f, 1.0f}),
+		true,
+	};
+	const engine::render::ParticleDrawBounds moved{
+		engine::core::AABB::FromCentre(Vector3{100.0f, 0.0f, 0.0f}, Vector3{1.0f, 1.0f, 1.0f}),
+		true,
+	};
+
+	record.Observe(first, 1, 1, 1, 1.0f, 0.0);
+	CHECK(record.Ready(0.0));
+	record.Observe(moved, 1, 2, 1, 1.0f, 4.0);
+	CHECK_FALSE(record.Ready(4.999));
+	CHECK(record.Ready(5.0));
+
+	// Recycling changes the generation consumed by every particle row, so no
+	// old tenancy survives and the replacement bound is safe immediately.
+	record.Observe(first, 2, 3, 2, 10.0f, 5.0);
+	CHECK(record.Ready(5.0));
 }
 
 TEST_CASE(

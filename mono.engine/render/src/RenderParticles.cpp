@@ -92,6 +92,32 @@ namespace engine::render {
 		};
 	}
 
+	void ParticleCullRecord::Observe(
+		const ParticleDrawBounds &candidate,
+		uint32_t generation,
+		uint32_t revision,
+		uint32_t curveRevision,
+		float maximumLifetime,
+		double simulatedSeconds
+	) {
+		const bool recycled = Generation != generation;
+		const bool changed = Revision != revision || CurveRevision != curveRevision;
+		Bounds = candidate.Bounds;
+		Cullable = candidate.Cullable;
+		Generation = generation;
+		Revision = revision;
+		CurveRevision = curveRevision;
+
+		if (recycled) {
+			CullableAfter = simulatedSeconds;
+			return;
+		}
+		if (changed) {
+			const double retirement = std::max(static_cast<double>(maximumLifetime), 0.0);
+			CullableAfter = std::max(CullableAfter, simulatedSeconds + retirement);
+		}
+	}
+
 	bool ParticleDrawVisible(
 		const core::AABB &bounds, bool cullable, bool cullingSafe, const graph::Frustum &frustum
 	) {
@@ -1204,18 +1230,14 @@ namespace engine::render {
 
 				auto &record = Particles.CullRecords[batch.Index];
 				const ParticleDrawBounds bounds = BoundsForParticleDraw(block, *batch.Spawn, batch.ZOffset);
-				if (record.Generation != block.Generation) {
-					record.Generation = block.Generation;
-					record.Revision = block.Revision;
-					record.CurveRevision = block.CurveRevision;
-					record.Stable = bounds.Cullable;
-				} else if (record.Revision != block.Revision || record.CurveRevision != block.CurveRevision) {
-					record.Revision = block.Revision;
-					record.CurveRevision = block.CurveRevision;
-					record.Stable = false;
-				}
-				record.Bounds = bounds.Bounds;
-				record.Cullable = record.Stable && bounds.Cullable;
+				record.Observe(
+					bounds,
+					block.Generation,
+					block.Revision,
+					block.CurveRevision,
+					batch.Spawn->Lifetime.Maximum,
+					Particles.SimulatedSeconds
+				);
 
 				if (rebuildLayout) {
 					if (ParticleGroups.empty() ||
@@ -1252,12 +1274,14 @@ namespace engine::render {
 			for (ParticleGroup &group : ParticleGroups) {
 				group.HasBounds = false;
 				group.Cullable = true;
+				group.CullableAfter = 0.0;
 			}
 			for (ParticleCullSpan &span : ParticleSpans) {
 				const render::ParticleBatch &batch = batches[span.Batch];
-				const ParticlePool::CullRecord &record = Particles.CullRecords[batch.Index];
+				const ParticleCullRecord &record = Particles.CullRecords[batch.Index];
 				span.Bounds = record.Bounds;
 				span.Cullable = record.Cullable && record.Generation == batch.Block->Generation;
+				span.CullableAfter = record.CullableAfter;
 			}
 			for (ParticleGroup &group : ParticleGroups) {
 				for (uint32_t offset = 0; offset < group.SpanCount; offset++) {
@@ -1266,6 +1290,7 @@ namespace engine::render {
 						group.Cullable = false;
 						continue;
 					}
+					group.CullableAfter = std::max(group.CullableAfter, span.CullableAfter);
 					if (!group.HasBounds) {
 						group.Bounds = span.Bounds;
 						group.HasBounds = true;
@@ -1319,6 +1344,7 @@ namespace engine::render {
 			std::fill(Particles.CurveRevision.begin(), Particles.CurveRevision.end(), 0);
 			return {};
 		}
+		Particles.SimulatedSeconds += std::max(static_cast<double>(Particles.Delta), 0.0);
 
 		ActiveParticleWorld->PreparedFrame = FrameCounter;
 		ActiveParticleWorld->PreparedRevision = view.ParticleRevision;
@@ -1386,7 +1412,10 @@ namespace engine::render {
 		for (const ParticleGroup &group : ParticleGroups) {
 			if (group.HasBounds &&
 				!ParticleDrawVisible(
-					group.Bounds, group.Cullable, ActiveParticleWorld->PreparedCullingSafe, frustum
+					group.Bounds,
+					group.Cullable && ActiveParticleWorld->Pool.SimulatedSeconds >= group.CullableAfter,
+					ActiveParticleWorld->PreparedCullingSafe,
+					frustum
 				)) {
 				culled += group.Count;
 				continue;
@@ -1408,7 +1437,10 @@ namespace engine::render {
 			for (uint32_t offset = 0; offset < group.SpanCount; offset++) {
 				const ParticleCullSpan &span = ParticleSpans[group.FirstSpan + offset];
 				if (!ParticleDrawVisible(
-						span.Bounds, span.Cullable, ActiveParticleWorld->PreparedCullingSafe, frustum
+						span.Bounds,
+						span.Cullable && ActiveParticleWorld->Pool.SimulatedSeconds >= span.CullableAfter,
+						ActiveParticleWorld->PreparedCullingSafe,
+						frustum
 					)) {
 					flushRun();
 					culled += span.Count;
