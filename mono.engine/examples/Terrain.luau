@@ -824,7 +824,7 @@ local function SubjectPosition(): Vector3
 	-- view being drawn current. Resolving it here keeps chunks around what is
 	-- actually visible instead of around `eye` after Studio has replaced it.
 	local current = workspace.CurrentCamera
-	return if current ~= nil then current.CFrame.Position else eye.CFrame.Position
+	return if current ~= nil then (current :: Camera).CFrame.Position else eye.CFrame.Position
 end
 
 -- --- streaming --------------------------------------------------------------
