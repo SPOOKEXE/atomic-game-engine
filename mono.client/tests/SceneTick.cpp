@@ -23,6 +23,7 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/SurfaceCameras.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -74,7 +75,7 @@ namespace {
 		Store World{"integration"};
 		Scheduler Systems;
 
-		Session() {
+		explicit Session(std::string_view scene = "Rings.luau") {
 			engine::parallel::Jobs::Start(2);
 
 			// **The staged assets root, not the test binary's own directory.**
@@ -85,7 +86,7 @@ namespace {
 			engine::core::Paths::SetAssetsOverride(engine::core::Paths::Base().parent_path() / "assets");
 
 			const bool built = client::BuildScriptedWorld(
-				World, Systems, engine::examples::ExamplePath("Rings.luau"), ENTITIES
+				World, Systems, engine::examples::ExamplePath(std::string(scene)), ENTITIES
 			);
 			REQUIRE(built);
 		}
@@ -104,6 +105,12 @@ namespace {
 			return World.Resource<engine::render::DrawList>()->Instances;
 		}
 	};
+
+	engine::ecs::Entity InWorkspace(Store &store, std::string_view name) {
+		const engine::ecs::Entity workspace = engine::scene::WorkspaceOf(store);
+		return workspace == engine::ecs::NULL_ENTITY ? engine::ecs::NULL_ENTITY
+													 : store.FindFirstChild(workspace, name);
+	}
 }
 
 TEST_CASE("a built scene produces one instance per entity", "[demo]") {
@@ -171,6 +178,43 @@ TEST_CASE("entities actually move", "[demo]") {
 
 	const bool moved = before.X != after.X || before.Z != after.Z;
 	REQUIRE(moved);
+}
+
+TEST_CASE("a scripted NPC is integrated and crosses a portal in a standalone client", "[demo][portal]") {
+	// `MoveDirection` alone is not movement. The `--script` path used to install
+	// character control without the physics pipeline, so the tunnel walker held
+	// the right intent while its root stayed at the same position forever.
+	Session session("Tunnels.luau");
+	const engine::ecs::Entity character = InWorkspace(session.World, "TunnelWalker");
+	REQUIRE(character != engine::ecs::NULL_ENTITY);
+	const engine::ecs::Entity root = session.World.FindFirstChild(character, "HumanoidRootPart");
+	REQUIRE(root != engine::ecs::NULL_ENTITY);
+
+	const float before = session.World.Get<Transform>(root)->Frame.Position.Z;
+	session.Tick(240);
+	const float after = session.World.Get<Transform>(root)->Frame.Position.Z;
+	CHECK(after != Approx(before));
+
+	const auto *transit = session.World.Get<engine::scene::PortalTransit>(root);
+	REQUIRE(transit != nullptr);
+	CHECK(transit->Serial >= 1u);
+}
+
+TEST_CASE("the hallway camera and NPC cross portals in a standalone client", "[demo][portal]") {
+	Session session("Hallway.luau");
+	const engine::ecs::Entity character = InWorkspace(session.World, "HallwayWalker");
+	REQUIRE(character != engine::ecs::NULL_ENTITY);
+	const engine::ecs::Entity root = session.World.FindFirstChild(character, "HumanoidRootPart");
+	REQUIRE(root != engine::ecs::NULL_ENTITY);
+
+	const engine::ecs::Entity camera = session.World.Resource<ActiveCamera>()->Entity;
+	session.Tick(100);
+	CHECK(session.World.Get<Transform>(camera)->Frame.Position.X == Approx(20.0f).margin(0.1f));
+
+	session.Tick(140);
+	const auto *characterTransit = session.World.Get<engine::scene::PortalTransit>(root);
+	REQUIRE(characterTransit != nullptr);
+	CHECK(characterTransit->Serial >= 1u);
 }
 
 TEST_CASE("the camera is a row the systems move, not a resource holding a value", "[demo]") {
@@ -504,7 +548,12 @@ TEST_CASE("the panels render a real tick's data", "[demo]") {
 	// previous frame the authority computes - the body is drawn once or twice
 	// somewhere in between. `PreRender`, because the serial it reads arrives
 	// with a replication delta and a delta lands after `PreSimulation` has run.
-	REQUIRE(timings.size() == 22);
+	//
+	// **And twenty-seven for a standalone client's authority pipeline.** The
+	// script path now installs editable collision refresh, integration, contacts,
+	// gravity and abandoned-owner reclamation. Without those five a scripted
+	// Humanoid produced velocity that no system ever integrated.
+	REQUIRE(timings.size() == 27);
 
 	engine::render::OverlayImage image;
 	image.Resize(1280, 720);

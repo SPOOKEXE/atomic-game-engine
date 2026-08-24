@@ -19,10 +19,12 @@
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
+#include <engine/scene/Gravity.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/Interpolation.hpp>
 #include <engine/scene/Materials.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
+#include <engine/scene/Ownership.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
@@ -1124,6 +1126,18 @@ namespace client {
 			ENGINE_ERROR("script '{}' failed:\n{}", path, error);
 			return false;
 		}
+
+		// A standalone scripted client is an authority, not a passive replica.
+		// The studio and game-file paths already furnish their worlds with these
+		// systems, but `--script` stopped at presentation. A Humanoid could hold a
+		// non-zero MoveDirection for ever while no integrator consumed the Motion
+		// it produced. Anchored examples still cost no body work because they have
+		// no Simulated rows.
+		engine::physics::PreparePhysicsWorld(store);
+		engine::physics::RegisterPhysicsSystems(scheduler);
+		engine::scene::PrepareGravity(store);
+		engine::scene::RegisterGravitySystem(scheduler);
+		engine::scene::RegisterOwnershipSystem(scheduler);
 
 		// The script has now finished authoring `StarterGui`. Clone that completed
 		// template rather than the empty service that existed before it ran. An

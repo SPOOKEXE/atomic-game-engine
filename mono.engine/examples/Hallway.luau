@@ -112,7 +112,16 @@ block("Ground", Vector3.new(200, 1, 200), Vector3.new(0, -0.5 + GROUND_LIFT, 0),
 local function corridor(name: string, x: number, half: number)
 	local span = half * 2
 
-	block(name .. "Floor", Vector3.new(WIDTH + WALL * 2, WALL, span), Vector3.new(x, -WALL / 2 + INSIDE, 0), FLOOR)
+	local floor = block(
+		name .. "Floor",
+		Vector3.new(WIDTH + WALL * 2, WALL, span),
+		Vector3.new(x, -WALL / 2 + INSIDE, 0),
+		FLOOR
+	)
+	-- The plain already supports this whole corridor. The visible floor sits a
+	-- hundredth above it to avoid a depth tie, and a box collider on that thin
+	-- lift presents its full side as a wall to a character entering the mouth.
+	floor.CanCollide = false
 	block(
 		name .. "Ceiling",
 		Vector3.new(WIDTH + WALL * 2, WALL, span),
@@ -199,12 +208,24 @@ link(shortSouth, longSouth, "ShortSouthToLong")
 -- they go past is how you feel the length rather than infer it.
 for index = 0, 7 do
 	local z = -LONG / 2 + 2 + index * ((LONG - 4) / 7)
-	block("LongStripe" .. index, Vector3.new(WIDTH, 0.3, 0.6), Vector3.new(LONG_X, 0.2, z), LONG_MARK)
+	local stripe = block(
+		"LongStripe" .. index,
+		Vector3.new(WIDTH, 0.3, 0.6),
+		Vector3.new(LONG_X, 0.2, z),
+		LONG_MARK
+	)
+	stripe.CanCollide = false
 end
 
 for index = 0, 1 do
 	local z = -SHORT / 2 + 1 + index * (SHORT - 2)
-	block("ShortStripe" .. index, Vector3.new(WIDTH, 0.3, 0.6), Vector3.new(SHORT_X, 0.2, z), SHORT_MARK)
+	local stripe = block(
+		"ShortStripe" .. index,
+		Vector3.new(WIDTH, 0.3, 0.6),
+		Vector3.new(SHORT_X, 0.2, z),
+		SHORT_MARK
+	)
+	stripe.CanCollide = false
 end
 
 -- Posts outside each mouth, so the two buildings can be told apart from the

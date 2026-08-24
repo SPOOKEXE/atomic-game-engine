@@ -138,10 +138,20 @@ block("Ground", Vector3.new(200, 1, 200), Vector3.new(0, -0.5 + GROUND_LIFT, 0),
 -- open - both tunnels are walked *into*, not through a hole in a wall - but the
 -- shell is still the right build, because the panes inside have to fill the
 -- cross-section exactly and a lipped section would leave a crack round each.
-local function tunnel(name: string, x: number, half: number)
+local function tunnel(name: string, x: number, half: number, supportedByPlain: boolean)
 	local span = half * 2
 
-	block(name .. "Floor", Vector3.new(WIDTH + WALL * 2, WALL, span), Vector3.new(x, -WALL / 2 + INSIDE, 0), FLOOR)
+	local floor = block(
+		name .. "Floor",
+		Vector3.new(WIDTH + WALL * 2, WALL, span),
+		Vector3.new(x, -WALL / 2 + INSIDE, 0),
+		FLOOR
+	)
+	-- The visible tunnels already have the plain under them. Their floor is a
+	-- colour layer lifted by 0.01 to avoid a depth tie, and colliding with that
+	-- layer turns the box's front face into a wall at each mouth. The isolated
+	-- interior has no plain beneath it and remains the real supporting floor.
+	floor.CanCollide = not supportedByPlain
 	block(
 		name .. "Ceiling",
 		Vector3.new(WIDTH + WALL * 2, WALL, span),
@@ -162,9 +172,9 @@ local function tunnel(name: string, x: number, half: number)
 	)
 end
 
-tunnel("Long", LONG_X, LONG / 2)
-tunnel("Short", SHORT_X, SHORT / 2)
-tunnel("ShortInterior", SUBSPACE_X, SPLICE)
+tunnel("Long", LONG_X, LONG / 2, true)
+tunnel("Short", SHORT_X, SHORT / 2, true)
+tunnel("ShortInterior", SUBSPACE_X, SPLICE, false)
 
 -- --- the panes ------------------------------------------------------------
 
@@ -241,7 +251,8 @@ link(interiorSouth, entrySouth, "InteriorToShortSouth")
 -- who steps into a four-stud box and finds twenty-six studs of blue floor sees
 -- one continuous tunnel even though the physical room is elsewhere.
 local function stripe(name: string, x: number, z: number, colour: Color3)
-	block(name, Vector3.new(WIDTH, 0.3, 0.6), Vector3.new(x, 0.2, z), colour)
+	local marking = block(name, Vector3.new(WIDTH, 0.3, 0.6), Vector3.new(x, 0.2, z), colour)
+	marking.CanCollide = false
 end
 
 -- The west tunnel's two stubs, which are all of it anybody walks.
