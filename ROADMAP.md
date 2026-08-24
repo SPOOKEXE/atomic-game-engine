@@ -54,28 +54,37 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] `~/Documents/GitHub/BLADEBORNE_UNIFIED/game` port and also studio place `~/Documents/Bladeborne Floor 0.rbxl`. Turn this into a demo file.
 - [_] roblox porting tools (rbxl) - in the widget that pops up, show all asset ids and make a assets selector so you can click which asset id points to which file asset (same for animations and whatnot where possible).
 - [_] porting roblox games (DEFER THIS UNTIL LATER ONCE TYPES ARE BUILT UP) - untouched, and the trigger is unchanged: there are four instance classes in this engine and a Roblox place names hundreds. Will show a widget that tells you conflicts and missing classes.
-
-### v0.21
-
+- [_] read the documents folder on what else we need to add and ask user for each one.
+- [_] add better memory packing for components by adding a DataQuantization component or something similar. Add quantization support for storing and packing values within components, like (u)float16, (u)float8, (u)int16, (u)int8, (u)int4 and bool. Need a way to decide who packs with what, maybe a `Component Data Packing` dock widget that shows you what values a component stores?
+- [_] ensure we build out and test UserInputService and ContextActionService.
 - [_] plan out base plugin system + default plugins + move default tools into plugins instead.
 - [_] setup a toolbar editor system where you can create new tabs, select which tools are visible on the toolbar, and plugins can modify their buttons and whatnot (with size constraints and such)
 - [_] setup and plan out dock widgets
+- [_] plugin manager widget
+- [_] build a plugin layer that calls the functions needed for engine behaviors, hook to plugin luau and js, and hook other side to engine
+- [_] build out default plugins (move all topbar tools and stuff to plugins as a "Default Studio" plugin)
+- [_] build out plugin function suite (create dropdown, edit toolbar, edit viewport, edit script editors, etc)
+- [_] viewport indictator direction gizmo (select and lock to certain directions)
+- [_] 3d cursor and camera orbit options under gizmo
+- [_] expand ShaderCapabilities out
+- [_] expand compilation steps with: constant folding, common-subexpression elimination, node fusion and resource aliasing. When we select a shader asset, we should be able to see its ShaderCapabilities and resources it'd take (estimate compute, memory, etc).
+- [_] add tests to validate each step of the rendering pipeline graph
+- [_] build a RENDER_PIPELINE.md that lists current pipeline and what we need to do to make it more modular (like Unity/Unreal) and with shader compilation.
+
+### v0.21
+
 - [_] add custom backgrounds and customization to the script editor too
 - [_] add external editor connections like vscode, notepad, etc.
 - [_] add settings for selected external editors
 - [_] plugin modify the viewport grid colors, sizes/scales, offsets, etc
 - [_] plugin enable/disable visible particles
-- [_] plugin manager dock widget
 - [_] ask about the other view widgets and which you actually would change to dockwidgets.
-- [_] build a plugin layer that calls the functions needed for engine behaviors, hook to plugin luau and js, and hook other side to engine
+- [_] build out more plugins layer that calls the functions needed for engine behaviors, hook to plugin luau and js, and hook other side to engine
 - [_] move a bunch of View > ... widgets into plugins instead. List: explorer, properties, component inspector, script editor
-- [_] build out default plugins (move all topbar tools and stuff to plugins as a "Default Studio" plugin)
-- [_] build out plugin function suite (create dropdown, edit toolbar, edit viewport, edit script editors, etc)
+- [_] build out more plugin functions (create dropdown, edit toolbar, edit viewport, edit script editors, etc)
 - [_] universe shared assets folder and setup easy cdn with it (when you load the universe file, it sets up a cdn with it).
 - [_] add a universe loading widget - shows cdns the universe has and asks to allow permission, also http enabled property if changed
 - [_] add tabs to the universe importer: general, assets, permissions, cdn, misc with all or per-world breakdown
-- [_] viewport indictator direction gizmo (select and lock to certain directions)
-- [_] 3d cursor and camera orbit options under gizmo
 - [_] create a universe/world export menu with options to include assets in the export (only processed, also raw), as a folder of a assets/ with name.aworld (or we can do a name.auniverse that loads a bunch of name.aworld and warns on missing ones listed in auniverse)?
 - [_] more cleanly separate the luau/js and roblox-style system from ECS. We want a clean shim where: luau/js => roblox instance => shim => ECS-driven underlying. Find areas where we're not doing this and improve it.
 - [_] setup datastores and memorystores (sqlite, mongo, supabase, etc - make a selection with local and remote setups, server settings and studio settings). add mock options that separate into a mock/ folder vs live/ folder. make a dataset editor plugin too.
@@ -106,7 +115,8 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] simplify and strip old rendering code that is not part of the node system. Everything should be in the node system. - the residency and delta upload are a node too, so the sweep and the GPU-resident work are the same refactor rather than two passes over the same files
 - [_] port semi-real raytrace and path-trace as part of nodes
 - [_] make demo render pipelines with semi-real raytrace and path-trace
-- [_] (dynamic) ambient occulusion, screen-space, global illumination, displacement maps (make it rendering only but not physical) - "rendering only but not physical" is exactly the transform/visual split the GPU-resident set draws, so all of this is GPU-side state with no CPU mirror to keep in step
+- [_] add compute shaders / postprocessing shaders to all visual items as a additional node to attach (render pipeline pulls and residents shaders on gpu when active)
+- [_] (dynamic) ambient occulusion, mipmapping, occulusion culling (bbox first, extra after), sRGB handle, proper PBR with tests, tesselation, add Fog/Clouds/Skybox compute shader support, screen-space, global illumination, displacement maps (make it rendering only but not physical) - "rendering only but not physical" is exactly the transform/visual split the GPU-resident set draws, so all of this is GPU-side state with no CPU mirror to keep in step
 - [_] render pipeline nodes for above
 - [_] plan the entire rendering system to a visual compositor system like Unity. https://docs.unity3d.com/Manual/scriptable-render-pipeline-introduction.html https://docs.unity3d.com/Packages/com.unity.visual-compositor@0.27/manual/nodes.html
 - [_] ensure full parallel/vectorised (i.e. get all active scenes => build entity list => update gpu resident => batch render all cameras in every scene) - stable entity slots, per-world particle pools and batched camera submission are built. The remaining work is the product-side active-scene collector and parallel presentation walk; every camera can already read its world's buffers without re-uploading them.
@@ -114,7 +124,7 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### FUTURE
 
-- [_] (procedural, node-based) terrain generator (refer to discord references) - editablemesh, greedymesh, noise layers, node graph with previews, chunk-based, etc. Add voxel mode (which separates cardinal direction Fnt/Bk/Lft/Rgt/Top/Bott)
+- [_] (procedural, node-based) terrain generator (refer to discord references) - editablemesh, greedymesh, noise layers, node graph with previews, chunk-based, etc. Add voxel mode (which separates cardinal facing direction Fnt/Bk/Lft/Rgt/Top/Bott faces into groups - only renders the two groups it can see). Expand with surfacecameras, portals, etc, so it culls, occulusion culls, etc.
 - [_] unity porting tools / unity shop
 - [_] consider adding C# as another scripting langauge?
 - [_] constraints system
