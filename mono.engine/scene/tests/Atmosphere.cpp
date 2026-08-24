@@ -24,6 +24,7 @@ TEST_SUITE_ID("engine.scene.atmosphere")
 using Catch::Approx;
 using engine::core::Color3;
 using engine::core::Name;
+using engine::core::Vector2;
 using engine::ecs::Classes;
 using engine::ecs::Entity;
 using engine::ecs::Store;
@@ -109,6 +110,7 @@ TEST_CASE("the resolved lighting carries the sky", "[scene][atmosphere]") {
 	Clouds layer;
 	layer.Cover = 0.3f;
 	layer.WindSpeed = 12.0f;
+	layer.WindDirection = Vector2{-2.0f, 3.0f};
 	store.Set(clouds, layer);
 
 	const WorldLighting resolved = LightingOf(store);
@@ -117,8 +119,23 @@ TEST_CASE("the resolved lighting carries the sky", "[scene][atmosphere]") {
 	CHECK(resolved.EnvironmentState.CloudLayer.Enabled);
 	CHECK(resolved.EnvironmentState.CloudLayer.Cover == Approx(0.3f));
 	CHECK(resolved.EnvironmentState.CloudLayer.WindSpeed == Approx(12.0f));
+	CHECK(resolved.EnvironmentState.CloudLayer.WindDirection == Vector2{-2.0f, 3.0f});
 	CHECK_FALSE(resolved.EnvironmentState.HasAtmosphereCompute);
 	CHECK_FALSE(resolved.EnvironmentState.HasCloudCompute);
+}
+
+TEST_CASE("computed clouds advance from deterministic world time", "[scene][atmosphere][compute]") {
+	RegisterSceneClasses();
+	Store store("atmosphere_test.time");
+	const Entity clouds = store.CreateInstance(Classes::Find(Name("CloudCompute")), "Clouds");
+	REQUIRE(store.SetParent(clouds, Lighting(store)));
+
+	CHECK(EnvironmentOf(store).CloudTime == Approx(0.0));
+	store.AdvanceTick(0.25f);
+	CHECK(EnvironmentOf(store).CloudTime == Approx(0.25));
+
+	store.GetMutable<Clouds>(clouds)->WindDirection = Vector2{};
+	CHECK(EnvironmentOf(store).CloudLayer.WindDirection == Vector2::XAxis);
 }
 
 TEST_CASE("only the first provider of each kind below Lighting resolves", "[scene][atmosphere][skybox]") {

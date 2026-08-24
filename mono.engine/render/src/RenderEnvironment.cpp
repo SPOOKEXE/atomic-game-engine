@@ -58,6 +58,7 @@ namespace engine::render {
 			glm::vec4 CloudColour;
 			glm::vec4 Clouds;
 			glm::vec4 CloudCompute;
+			glm::vec4 CloudMotion;
 			glm::uvec4 Modes;
 			glm::uvec4 Counts;
 			glm::uvec4 Shaders;
@@ -135,6 +136,9 @@ namespace engine::render {
 		}
 		if (modes.Clouds != 0) {
 			signature = Fold(signature, environment.CloudLayer);
+			if (environment.CloudLayer.WindSpeed > 0.0f) {
+				signature = Fold(signature, environment.CloudTime);
+			}
 		}
 		if (modes.Clouds == 2) {
 			signature = Fold(signature, environment.CloudVolume);
@@ -194,11 +198,18 @@ namespace engine::render {
 			.AtmosphereCompute =
 				glm::vec4{airCompute.PlanetRadius, airCompute.Height, airCompute.Rayleigh, airCompute.Mie},
 			.CloudColour = Colour(clouds.Colour),
-			.Clouds = glm::vec4{clouds.Cover, clouds.Density, clouds.WindSpeed, clouds.WindDirection},
+			.Clouds =
+				glm::vec4{
+					clouds.Cover,
+					clouds.Density,
+					clouds.WindDirection.X,
+					clouds.WindDirection.Y,
+				},
 			.CloudCompute =
 				glm::vec4{
 					cloudCompute.CellSize, cloudCompute.Detail, cloudCompute.Height, cloudCompute.Thickness
 				},
+			.CloudMotion = glm::vec4{clouds.WindSpeed, static_cast<float>(environment.CloudTime), 0.0f, 0.0f},
 			.Modes =
 				glm::uvec4{
 					modes.Skybox,

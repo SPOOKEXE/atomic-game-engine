@@ -1563,7 +1563,7 @@ declare extern type Clouds extends Instance with
 	Cover: number
 	Density: number
 	Enabled: boolean
-	WindDirection: number
+	WindDirection: Vector2
 	WindSpeed: number
 end
 

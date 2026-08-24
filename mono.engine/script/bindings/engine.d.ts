@@ -1357,7 +1357,7 @@ declare interface Clouds extends Instance {
 	Cover: number;
 	Density: number;
 	Enabled: boolean;
-	WindDirection: number;
+	WindDirection: Vector2;
 	WindSpeed: number;
 }
 

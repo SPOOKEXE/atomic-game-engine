@@ -820,7 +820,11 @@ local function SubjectPosition(): Vector3
 		end
 	end
 
-	return eye.CFrame.Position
+	-- Studio owns one transient camera per viewport and makes the camera for the
+	-- view being drawn current. Resolving it here keeps chunks around what is
+	-- actually visible instead of around `eye` after Studio has replaced it.
+	local current = workspace.CurrentCamera
+	return if current ~= nil then current.CFrame.Position else eye.CFrame.Position
 end
 
 -- --- streaming --------------------------------------------------------------

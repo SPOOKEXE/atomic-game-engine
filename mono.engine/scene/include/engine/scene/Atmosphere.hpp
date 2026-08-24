@@ -35,6 +35,7 @@
 
 #include <engine/core/Name.hpp>
 #include <engine/core/types/Color3.hpp>
+#include <engine/core/types/Vector2.hpp>
 #include <engine/ecs/Classes.hpp>
 
 #include <cstddef>
@@ -116,12 +117,11 @@ namespace engine::scene {
 		// How fast the layer drifts, in metres per second.
 		float WindSpeed = 6.0f;
 
-		// Which way it drifts, in degrees clockwise from world north.
+		// Which way it drifts across the horizontal X/Z plane.
 		//
-		// **Degrees, matching `Lighting.GeographicLatitude` beside it**, which is
-		// the one place in this module a human types an angle without a property
-		// converting it.
-		float WindDirection = 0.0f;
+		// X addresses world X and Y addresses world Z. The renderer normalises the
+		// pair, so this remains a direction and `WindSpeed` remains the magnitude.
+		core::Vector2 WindDirection{1.0f, 0.0f};
 
 		// Whether the layer is drawn at all.
 		bool Enabled = true;
@@ -255,6 +255,11 @@ namespace engine::scene {
 		AtmosphereProcedural AirCompute;
 		Clouds CloudLayer;
 		CloudCompute CloudVolume;
+
+		// Deterministic animation time supplied by the world's simulation clock.
+		// It is resolved render state rather than authored component storage, so
+		// moving clouds do not dirty or replicate their recipe sixty times a second.
+		double CloudTime = 0.0;
 		SkyboxSource Skybox = SkyboxSource::None;
 		bool HasAtmosphere = false;
 		bool HasClouds = false;

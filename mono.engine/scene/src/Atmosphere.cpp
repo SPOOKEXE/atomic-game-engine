@@ -36,6 +36,9 @@ namespace engine::scene {
 			sky.Cover = std::clamp(sky.Cover, 0.0f, 1.0f);
 			sky.Density = std::clamp(sky.Density, 0.0f, 1.0f);
 			sky.WindSpeed = std::max(sky.WindSpeed, 0.0f);
+			if (sky.WindDirection.MagnitudeSquared() <= 0.0f) {
+				sky.WindDirection = core::Vector2::XAxis;
+			}
 			return sky;
 		}
 
@@ -142,6 +145,7 @@ namespace engine::scene {
 
 	Environment EnvironmentOf(const ecs::Store &store) {
 		Environment environment;
+		environment.CloudTime = store.Time().Elapsed;
 		environment.Air.Density = 0.0f;
 		environment.CloudLayer.Enabled = false;
 		environment.AirCompute.Enabled = false;

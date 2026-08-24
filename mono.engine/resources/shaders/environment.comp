@@ -27,6 +27,7 @@ layout(set = 2, binding = 0) uniform Environment {
 	vec4 CloudColour;
 	vec4 Clouds;
 	vec4 CloudCompute;
+	vec4 CloudMotion;
 	uvec4 Modes;
 	uvec4 Counts;
 	uvec4 Shaders;
@@ -173,8 +174,11 @@ vec3 ApplyClouds(vec3 colour, vec3 direction) {
 	if (source.Modes.z == 0u || direction.y <= -0.03) {
 		return colour;
 	}
-	float angle = radians(source.Clouds.w);
-	vec2 wind = vec2(cos(angle), sin(angle)) * source.Clouds.z * 0.001;
+	vec2 windDirection = source.Clouds.zw;
+	windDirection = dot(windDirection, windDirection) > 0.0
+		? normalize(windDirection)
+		: vec2(1.0, 0.0);
+	vec2 wind = windDirection * source.CloudMotion.x * source.CloudMotion.y * 0.001;
 	float cellSize = max(source.CloudCompute.x, 0.001);
 	float density = 0.0;
 	if (source.Modes.z == 1u) {

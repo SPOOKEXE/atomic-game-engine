@@ -216,6 +216,9 @@ TEST_CASE("environment shader names and texture faces survive a snapshot", "[sce
 	engine::scene::CloudCompute clouds;
 	clouds.Shader = engine::scene::CloudComputeShader::Voxel;
 	source.Set(entity, clouds);
+	engine::scene::Clouds cloudLayer;
+	cloudLayer.WindDirection = {0.25f, -0.75f};
+	source.Set(entity, cloudLayer);
 	engine::scene::AtmosphereProcedural atmosphere;
 	atmosphere.Shader = engine::scene::AtmosphereProceduralShader::Mars;
 	source.Set(entity, atmosphere);
@@ -231,6 +234,7 @@ TEST_CASE("environment shader names and texture faces survive a snapshot", "[sce
 	REQUIRE(restored.Get<engine::scene::SkyboxTextures>(entity) != nullptr);
 	REQUIRE(restored.Get<engine::scene::SkyboxCompute>(entity) != nullptr);
 	REQUIRE(restored.Get<engine::scene::CloudCompute>(entity) != nullptr);
+	REQUIRE(restored.Get<engine::scene::Clouds>(entity) != nullptr);
 	REQUIRE(restored.Get<engine::scene::AtmosphereProcedural>(entity) != nullptr);
 	CHECK(restored.Get<engine::scene::SkyboxTextures>(entity)->Front == Name("sky/front.atex"));
 	CHECK(restored.Get<engine::scene::SkyboxTextures>(entity)->Up == Name("sky/up.atex"));
@@ -241,6 +245,7 @@ TEST_CASE("environment shader names and texture faces survive a snapshot", "[sce
 	CHECK(
 		restored.Get<engine::scene::CloudCompute>(entity)->Shader == engine::scene::CloudComputeShader::Voxel
 	);
+	CHECK(restored.Get<engine::scene::Clouds>(entity)->WindDirection == engine::core::Vector2{0.25f, -0.75f});
 	CHECK(
 		restored.Get<engine::scene::AtmosphereProcedural>(entity)->Shader ==
 		engine::scene::AtmosphereProceduralShader::Mars

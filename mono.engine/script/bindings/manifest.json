@@ -586,7 +586,7 @@
 				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
-				{"name": "WindDirection", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
+				{"name": "WindDirection", "type": "Vector2", "kind": "field", "bytes": 8, "writable": true, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
 				{"name": "WindSpeed", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]}
 			]
 		},
@@ -602,7 +602,7 @@
 				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
-				{"name": "WindDirection", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
+				{"name": "WindDirection", "type": "Vector2", "kind": "field", "bytes": 8, "writable": true, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
 				{"name": "WindSpeed", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]}
 			]
 		},
@@ -626,7 +626,7 @@
 				{"name": "Shader", "type": "enum", "kind": "field", "bytes": 4, "writable": true, "enum": "CloudComputeShader", "reads": ["scene.CloudCompute"], "writes": ["scene.CloudCompute"]},
 				{"name": "Steps", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.CloudCompute"], "writes": ["scene.CloudCompute"]},
 				{"name": "Thickness", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.CloudCompute"], "writes": ["scene.CloudCompute"]},
-				{"name": "WindDirection", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
+				{"name": "WindDirection", "type": "Vector2", "kind": "field", "bytes": 8, "writable": true, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]},
 				{"name": "WindSpeed", "type": "float", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.Clouds"], "writes": ["scene.Clouds"]}
 			]
 		},

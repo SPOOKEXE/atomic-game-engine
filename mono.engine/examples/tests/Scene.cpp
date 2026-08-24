@@ -990,6 +990,39 @@ TEST_CASE("the tunnels scene leaves its walk paths clear", "[examples][scene]") 
 	CHECK(CountNamed(store, "ShortDrifter") == 1);
 }
 
+TEST_CASE("the slide gives the ramp and riders their intended friction", "[examples][scene][physics]") {
+	const StagedAssets assets;
+	Store store("slide.friction");
+	Scheduler systems;
+
+	std::string error;
+	REQUIRE(LoadScene(store, systems, ExamplePath("Slide.luau"), error));
+	systems.Tick(store, 0.5f);
+
+	const auto propertiesOf = [&store](const char *name) {
+		const Entity part = InScene(store, name);
+		REQUIRE(part != engine::ecs::NULL_ENTITY);
+		const auto *properties = store.Get<engine::scene::PhysicsProperties>(part);
+		REQUIRE(properties != nullptr);
+		return *properties;
+	};
+
+	const engine::scene::PhysicsProperties floor = propertiesOf("Baseplate");
+	CHECK_FALSE(floor.Custom);
+
+	const engine::scene::PhysicsProperties segment = propertiesOf("Segment_1");
+	CHECK(segment.Custom);
+	CHECK(segment.Friction == Approx(0.05f));
+
+	const engine::scene::PhysicsProperties rail = propertiesOf("Rail_L_1");
+	CHECK(rail.Custom);
+	CHECK(rail.Friction == Approx(0.05f));
+
+	const engine::scene::PhysicsProperties rider = propertiesOf("Block_1");
+	CHECK(rider.Custom);
+	CHECK(rider.Friction == Approx(0.2f));
+}
+
 TEST_CASE("the interface scene builds and connects its buttons", "[examples][scene][gui]") {
 	const StagedAssets assets;
 
@@ -1357,6 +1390,31 @@ TEST_CASE("the terrain scene builds a coloured heightfield mesh", "[examples][sc
 	// whatever the relief adds.
 	REQUIRE(store.Resource<WorldBounds>() != nullptr);
 	CHECK(store.Resource<WorldBounds>()->HalfExtent > 200.0f);
+}
+
+TEST_CASE("the terrain stream follows the camera that is actually active", "[examples][scene]") {
+	const StagedAssets assets;
+	Store store("terrain.active_camera");
+	Scheduler systems;
+
+	std::string error;
+	REQUIRE(LoadScene(store, systems, ExamplePath("Terrain.luau"), error));
+
+	const Entity camera = store.CreateInstance(engine::scene::CameraClass(), "ViewportCamera");
+	REQUIRE(camera != engine::ecs::NULL_ENTITY);
+	store.Set<engine::scene::Transform>(
+		camera, engine::scene::Transform{engine::core::CFrame(engine::core::Vector3{672.0f, 80.0f, -608.0f})}
+	);
+	store.SetResource(ActiveCamera{camera});
+
+	// Five sliced sampling ticks plus the yielding geometry commit. The old demo
+	// kept building around its private Flyer here, which is invisible once Studio
+	// replaces CurrentCamera with a viewport camera.
+	for (int tick = 0; tick < 20; tick++) {
+		systems.Tick(store, 1.0f / 60.0f);
+	}
+
+	CHECK(InScene(store, "Terrain_10_-10") != engine::ecs::NULL_ENTITY);
 }
 
 TEST_CASE("the terrain generator is a pure function of its seed", "[examples][scene]") {
@@ -1770,6 +1828,30 @@ TEST_CASE("the portal lighting scenes author lamps a seam can carry", "[examples
 		);
 		CHECK(dark);
 	}
+}
+
+TEST_CASE("the recursive mirror demo moves through a bounded history corridor", "[examples][scene]") {
+	const StagedAssets assets;
+	Store store("recursive_mirrors");
+	Scheduler systems;
+
+	std::string error;
+	REQUIRE(LoadScene(store, systems, ExamplePath("RecursiveMirrors.luau"), error));
+
+	const Entity cube = InScene(store, "RecursiveCube");
+	REQUIRE(cube != engine::ecs::NULL_ENTITY);
+	const engine::core::CFrame before = store.Get<engine::scene::Transform>(cube)->Frame;
+	systems.Tick(store, 0.25f);
+	const engine::core::CFrame after = store.Get<engine::scene::Transform>(cube)->Frame;
+	CHECK(after != before);
+
+	static thread_local std::vector<engine::scene::SurfacePane> panes;
+	REQUIRE(engine::scene::GatherSurfacePanes(store, panes) == 2);
+	for (const engine::scene::SurfacePane &pane : panes) {
+		CHECK(pane.FPS == Approx(60.0f));
+	}
+	CHECK(engine::scene::SurfaceBouncesOf(store) == 3);
+	CHECK(engine::scene::SurfaceLimitOf(store) == 2);
 }
 
 // The mirror ball, and the two things about it that are arithmetic rather than
