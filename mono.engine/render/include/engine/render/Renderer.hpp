@@ -949,6 +949,11 @@ namespace engine::render {
 		// @since v0.10
 		uint32_t Particles = 0;
 
+		// How many particle quads reached a draw in any camera pass. This may exceed
+		// Particles when portals draw the pool again. Zero means resident simulation
+		// changed no scene pixel and the particle image can remain cached.
+		uint32_t ParticlesDrawn = 0;
+
 		// How many mesh instances or particle quads the frustum rejected.
 		//
 		// **Reported rather than inferred**, because the interesting number is

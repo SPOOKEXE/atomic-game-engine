@@ -439,6 +439,7 @@ namespace engine::render {
 						frameUniforms.ViewProjection,
 						cameraFrame,
 						result.Triangles,
+						result.ParticlesDrawn,
 						result.Culled
 					);
 				}

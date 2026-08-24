@@ -68,6 +68,39 @@ namespace engine::render {
 		}
 	};
 
+	// Remembers whether the last completed scene render found any particle pixels.
+	// An invisible resident pool still advances on the device, but it does not
+	// invalidate the retained scene image until a camera or emitter input changes.
+	struct ParticleLayerVisibility {
+		uint64_t Signature = 0;
+		bool Visible = true;
+		bool Valid = false;
+
+		bool RequiresImage(bool particlesPresent, bool ribbonsPresent, uint64_t candidate) const {
+			return ribbonsPresent || (particlesPresent && (Visible || !Valid || Signature != candidate));
+		}
+
+		void Refine(
+			PresentationDamage &damage, bool particlesPresent, bool ribbonsPresent, uint64_t candidate
+		) const {
+			if (particlesPresent || ribbonsPresent) {
+				damage.Particles = RequiresImage(particlesPresent, ribbonsPresent, candidate);
+			}
+			damage.Scene =
+				damage.Viewport || damage.Objects || damage.Particles || damage.Environment || damage.Portals;
+		}
+
+		void Commit(uint64_t signature, bool visible) {
+			Signature = signature;
+			Visible = visible;
+			Valid = true;
+		}
+
+		void Reset() {
+			*this = {};
+		}
+	};
+
 	// The retained layers in dependency order. Depth is a display property only;
 	// the write cascade is defined by `PresentationCacheProfile::Record`.
 	enum class PresentationCacheLayer : uint8_t {

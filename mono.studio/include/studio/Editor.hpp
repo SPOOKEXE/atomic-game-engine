@@ -4053,6 +4053,7 @@ namespace studio {
 		// viewport. A turn in the round robin can update one image without
 		// invalidating the other layers or the other panels.
 		std::vector<engine::render::PresentationDamageTracker> ViewportPresentations;
+		std::vector<engine::render::ParticleLayerVisibility> ViewportParticleVisibility;
 
 		// Renderer-owned mesh, texture, shader, and editable content revision.
 		// Included in every viewport's scene signature so an arrival refreshes

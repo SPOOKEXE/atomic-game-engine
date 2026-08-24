@@ -3274,13 +3274,16 @@ namespace client {
 			.Viewport = viewportSignature,
 		};
 		engine::render::PresentationDamage damage = PresentationDamage.Inspect(presentationSignatures);
-		const bool continuousScene = !view.Particles.empty() || !view.RibbonRuns.empty();
+		const bool particleLayerPresent = !view.Particles.empty();
+		const bool ribbonLayerPresent = !view.RibbonRuns.empty();
+		const uint64_t particleVisibilitySignature = engine::render::ParticleVisibilitySignature(view);
 		const bool diagnosticFrame =
 			Settings.Headless || Settings.MaximumFrames >= 0 || !Settings.Capture.empty();
-		damage.Particles = damage.Particles || continuousScene;
+		ParticleVisibility.Refine(
+			damage, particleLayerPresent, ribbonLayerPresent, particleVisibilitySignature
+		);
 		damage.Objects = damage.Objects || VisualResourcesChanged;
-		damage.Scene =
-			damage.Scene || diagnosticFrame || damage.Particles || damage.Objects || PresentedImages < 2;
+		damage.Scene = damage.Scene || damage.Objects || diagnosticFrame || PresentedImages < 2;
 		damage.GameInterface =
 			damage.GameInterface || diagnosticFrame || interfaceContinuous || PresentedImages < 2;
 		damage.Overlay = Overlay.IsDirty();
@@ -3296,9 +3299,12 @@ namespace client {
 		};
 		view.Damage = damage;
 		const bool visualChanged = damage.Any() || PresentationInvalidated;
+		const bool particleDeviceStep = particleLayerPresent && ParticleDeltaSeconds > 0.0f;
 		if (!visualChanged) {
 			PresentationDamage.CacheProfile().Record(damage, false, false, cacheApplicability);
 			UnchangedPresentationsSkipped++;
+		}
+		if (!visualChanged && !particleDeviceStep) {
 			Presentations.Consume(engine::render::PresentationSchedule::Clock::now());
 			ParticleDeltaSeconds = 0.0f;
 			FrameGraph::EndFrame();
@@ -3327,11 +3333,16 @@ namespace client {
 			Statistics.Record(Clock.Now(), ParticleDeltaSeconds);
 		}
 		Presentations.Consume(engine::render::PresentationSchedule::Clock::now());
-		if (LastFrame.Presented || Settings.Headless) {
+		if ((LastFrame.Presented || Settings.Headless) && visualChanged) {
 			PresentationDamage.CacheProfile().Record(
 				damage, false, LastFrame.PortalPasses > 0, cacheApplicability
 			);
 			PresentationDamage.Commit(presentationSignatures);
+			if (damage.Scene) {
+				ParticleVisibility.Commit(
+					particleVisibilitySignature, LastFrame.ParticlesDrawn > 0 || ribbonLayerPresent
+				);
+			}
 			PresentedImages++;
 			VisualResourcesChanged = false;
 			PresentationInvalidated = false;

@@ -343,6 +343,7 @@ namespace studio {
 		Overlays.resize(1 + extras);
 		GuiLists.resize(1 + extras);
 		ViewportPresentations.resize(1 + extras);
+		ViewportParticleVisibility.resize(1 + extras);
 		GuiRouters.resize(1 + extras);
 
 		// **"Viewport 2" upwards, and the main panel is plain "Viewport".** The
@@ -2481,8 +2482,13 @@ namespace studio {
 		};
 		engine::render::PresentationDamage damage =
 			ViewportPresentations[DrawingViewport].Inspect(presentationSignatures);
-		damage.Particles = damage.Particles || !view.Particles.empty() || !view.RibbonRuns.empty();
-		damage.Scene = damage.Scene || damage.Particles;
+		const bool particleLayerPresent = !view.Particles.empty();
+		const bool ribbonLayerPresent = !view.RibbonRuns.empty();
+		const uint64_t particleVisibilitySignature = engine::render::ParticleVisibilitySignature(view);
+		auto &particleVisibility = ViewportParticleVisibility[DrawingViewport];
+		particleVisibility.Refine(
+			damage, particleLayerPresent, ribbonLayerPresent, particleVisibilitySignature
+		);
 		damage.Overlay = Overlay.IsDirty();
 		const engine::render::PresentationCacheApplicability cacheApplicability{
 			.Objects = !view.Instances.empty() || view.Grid.Enabled,
@@ -2502,10 +2508,14 @@ namespace studio {
 			damage.HostInterface = true;
 		}
 		view.Damage = damage;
-		if (!damage.Any()) {
+		const bool visualChanged = damage.Any();
+		const bool particleDeviceStep = particleLayerPresent && frameSeconds > 0.0f;
+		if (!visualChanged) {
 			ViewportPresentations[DrawingViewport].CacheProfile().Record(
 				damage, true, false, cacheApplicability
 			);
+		}
+		if (!visualChanged && !particleDeviceStep) {
 			return;
 		}
 		{
@@ -2514,11 +2524,16 @@ namespace studio {
 				std::span<const engine::render::View>(&view, 1), Overlay, &GameInterface, true, &Interface
 			);
 		}
-		if (LastFrame.Presented || Settings.Headless) {
+		if ((LastFrame.Presented || Settings.Headless) && visualChanged) {
 			ViewportPresentations[DrawingViewport].CacheProfile().Record(
 				damage, true, LastFrame.PortalPasses > 0, cacheApplicability
 			);
 			ViewportPresentations[DrawingViewport].Commit(presentationSignatures);
+			if (damage.Scene) {
+				particleVisibility.Commit(
+					particleVisibilitySignature, LastFrame.ParticlesDrawn > 0 || ribbonLayerPresent
+				);
+			}
 		}
 		{
 			ENGINE_PROFILE_CAT("frame result", engine::core::ProfileCategory::Render);

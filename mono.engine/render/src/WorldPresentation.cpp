@@ -66,6 +66,22 @@ namespace engine::render {
 		return texturedSky || modes.Skybox == 2 || modes.Atmosphere != 0 || modes.Clouds != 0;
 	}
 
+	uint64_t ParticleVisibilitySignature(const View &view) {
+		if (view.Particles.empty() && view.RibbonRuns.empty()) {
+			return 0;
+		}
+
+		uint64_t signature = FoldPresentationObject(0, view.CameraFrame);
+		signature = FoldPresentationObject(signature, view.Camera);
+		signature = FoldPresentation(signature, view.World);
+		signature = FoldPresentation(signature, view.WorldName.Id());
+		signature = FoldPresentation(signature, view.ParticleLayoutRevision);
+		signature = FoldPresentation(signature, view.ParticleResidentRevision);
+		signature = FoldPresentation(signature, view.Particles.size());
+		signature = FoldPresentation(signature, view.ParticleSeams.empty() ? 0u : 1u);
+		return signature;
+	}
+
 	ScenePresentationSignatures
 	ScenePresentationSignaturesOf(const View &view, const ScenePresentationState &state) {
 		ScenePresentationSignatures signatures;

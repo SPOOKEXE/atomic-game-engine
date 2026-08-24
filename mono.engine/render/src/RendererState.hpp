@@ -1223,6 +1223,7 @@ namespace engine::render {
 			const glm::mat4 &viewProjection,
 			const core::CFrame &eye,
 			uint64_t &triangles,
+			uint32_t &particlesDrawn,
 			uint32_t &culled
 		);
 

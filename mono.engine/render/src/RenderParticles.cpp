@@ -1346,6 +1346,7 @@ namespace engine::render {
 		const glm::mat4 &viewProjection,
 		const core::CFrame &eye,
 		uint64_t &triangles,
+		uint32_t &particlesDrawn,
 		uint32_t &culled
 	) {
 		if (ParticlePipeline == nullptr || ActiveParticleWorld == nullptr || ParticleGroups.empty()) {
@@ -1486,6 +1487,7 @@ namespace engine::render {
 				SDL_DrawGPUPrimitives(pass, 4, run.Count, 0, run.First);
 				draws++;
 				triangles += static_cast<uint64_t>(run.Count) * 2;
+				particlesDrawn += run.Count;
 			}
 
 			// **Two triangles a particle, counted above.** A four-vertex strip is

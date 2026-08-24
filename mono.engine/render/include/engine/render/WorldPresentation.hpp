@@ -57,6 +57,11 @@ namespace engine::render {
 	ScenePresentationSignatures
 	ScenePresentationSignaturesOf(const View &view, const ScenePresentationState &state);
 
+	// Signs inputs that can move an invisible particle layer back into a camera.
+	// Simulation time is deliberately absent, so an off-camera resident pool can
+	// advance without invalidating pixels that remain unchanged.
+	uint64_t ParticleVisibilitySignature(const View &view);
+
 	// Whether the selected Lighting children produce an environment layer.
 	// Base lighting still affects objects, but an empty Lighting service has no
 	// sky, atmosphere or clouds to retain and is therefore not a cache source.

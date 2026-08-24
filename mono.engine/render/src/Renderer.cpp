@@ -275,6 +275,7 @@ namespace engine::render {
 		InstanceRows += view.InstanceRows;
 		InstanceRowsDirty += view.InstanceRowsDirty;
 		Particles += view.Particles;
+		ParticlesDrawn += view.ParticlesDrawn;
 		Culled += view.Culled;
 		ScheduledReadBytes += view.ScheduledReadBytes;
 		ScheduledWriteBytes += view.ScheduledWriteBytes;

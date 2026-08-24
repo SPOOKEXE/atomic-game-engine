@@ -7,6 +7,7 @@
 
 TEST_SUITE_ID("engine.render.presentation-damage")
 
+using engine::render::ParticleLayerVisibility;
 using engine::render::PresentationCacheApplicability;
 using engine::render::PresentationCacheLayer;
 using engine::render::PresentationDamage;
@@ -306,4 +307,25 @@ TEST_CASE(
 		CHECK_FALSE(activity.Wrote());
 		CHECK(activity.Last == engine::render::PresentationCacheActivity::Decision::NotObserved);
 	}
+}
+
+TEST_CASE("an invisible resident particle layer keeps its retained image", "[render][presentation][cache]") {
+	ParticleLayerVisibility visibility;
+	CHECK(visibility.RequiresImage(true, false, 41));
+
+	visibility.Commit(41, false);
+	CHECK_FALSE(visibility.RequiresImage(true, false, 41));
+	PresentationDamage simulationOnly;
+	simulationOnly.Scene = true;
+	simulationOnly.Particles = true;
+	visibility.Refine(simulationOnly, true, false, 41);
+	CHECK_FALSE(simulationOnly.Particles);
+	CHECK_FALSE(simulationOnly.Scene);
+	CHECK(visibility.RequiresImage(true, false, 42));
+	CHECK(visibility.RequiresImage(true, true, 41));
+
+	visibility.Commit(42, true);
+	CHECK(visibility.RequiresImage(true, false, 42));
+	visibility.Reset();
+	CHECK(visibility.RequiresImage(true, false, 42));
 }

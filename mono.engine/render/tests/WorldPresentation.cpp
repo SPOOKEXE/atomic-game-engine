@@ -273,3 +273,25 @@ TEST_CASE("scene cache causes are signed independently", "[render][presentation]
 	CHECK(environment.Environment != original.Environment);
 	CHECK(environment.Portals == original.Portals);
 }
+
+TEST_CASE(
+	"particle visibility ignores simulation time but notices camera and resident changes",
+	"[render][presentation][cache]"
+) {
+	engine::render::View view;
+	engine::effects::EmitterBlock block;
+	engine::render::ParticleBatch batch;
+	batch.Block = &block;
+	const std::array particles{batch};
+	view.Particles = particles;
+
+	const uint64_t original = engine::render::ParticleVisibilitySignature(view);
+	view.ParticleRevision++;
+	CHECK(engine::render::ParticleVisibilitySignature(view) == original);
+
+	view.CameraFrame.Position.X = 1.0f;
+	CHECK(engine::render::ParticleVisibilitySignature(view) != original);
+	view.CameraFrame.Position.X = 0.0f;
+	view.ParticleResidentRevision++;
+	CHECK(engine::render::ParticleVisibilitySignature(view) != original);
+}

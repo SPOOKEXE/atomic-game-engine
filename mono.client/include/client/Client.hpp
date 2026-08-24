@@ -754,6 +754,7 @@ namespace client {
 		// scene-only update does not rebuild the interface image, and a restored
 		// window can present the retained composition without rebuilding either.
 		engine::render::PresentationDamageTracker PresentationDamage;
+		engine::render::ParticleLayerVisibility ParticleVisibility;
 		uint32_t PresentedImages = 0;
 
 		// Content and shader uploads can change pixels without changing a draw row.
