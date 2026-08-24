@@ -570,7 +570,7 @@ namespace engine::scene {
 	// **A bound on an allocation, not a statement about how many mirrors a world
 	// should have.** That second question is the world's, through
 	// `workspace.MaxSurfaces` and `scene::SurfaceLimitOf` - which defaults to
-	// fifty and is what an author actually turns. This number only says how far
+	// thirty-two and is what an author actually turns. This number only says how far
 	// the arrays sized by it reach, and it exists for the reason
 	// `spatial::HashGrid::MAXIMUM_CELLS_PER_PROXY` does: a save file is hostile
 	// input, and a world asking for a million mirrors must reach a bound rather

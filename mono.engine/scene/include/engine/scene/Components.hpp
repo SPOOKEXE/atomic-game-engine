@@ -1144,10 +1144,10 @@ namespace engine::scene {
 		// full scene passes at 165 hertz, and nothing a viewer can see in a
 		// pane at arm's length needs them: a reflection is already a frame
 		// behind by construction, and the eye cannot tell a reflection updated
-		// at 120 from one updated at 165 while it can very much tell the
+		// at 60 from one updated at 165 while it can very much tell the
 		// difference in frame time.
 		//
-		// **120 by default rather than uncapped**, because that is the rate
+		// **60 by default rather than uncapped**, because that is the rate
 		// above which nobody has reported seeing the difference and below which
 		// several people have reported the cost. A display slower than this
 		// never reaches the cap and pays nothing for it; a fast one draws the
@@ -1165,7 +1165,7 @@ namespace engine::scene {
 		// stated bound.
 		//
 		// @since v0.15
-		float FPS = 120.0f;
+		float FPS = 60.0f;
 
 		// Which surface index this camera writes.
 		//

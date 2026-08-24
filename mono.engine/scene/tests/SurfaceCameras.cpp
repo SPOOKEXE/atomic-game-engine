@@ -4035,10 +4035,10 @@ TEST_CASE("a world states how many surface panes it draws", "[surfacecameras]") 
 	REQUIRE(workspace != engine::ecs::NULL_ENTITY);
 
 	// A world that has never said anything gets the default, which is what makes
-	// every scene authored before this go on drawing - and it is fifty rather
+	// every scene authored before this go on drawing - and it is thirty-two rather
 	// than the sixteen that used to be compiled in.
 	CHECK(engine::scene::SurfaceLimitOf(store) == engine::scene::DEFAULT_SURFACE_LIMIT);
-	CHECK(engine::scene::DEFAULT_SURFACE_LIMIT == 50);
+	CHECK(engine::scene::DEFAULT_SURFACE_LIMIT == 32);
 
 	// The declared type is checked and not only the round-trip, for
 	// `SurfaceBounces`' reason: raw bytes through `SetProperty` succeed whatever

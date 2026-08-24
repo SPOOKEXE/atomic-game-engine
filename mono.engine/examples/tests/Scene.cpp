@@ -1843,12 +1843,13 @@ TEST_CASE("the recursive mirror demo moves through a bounded history corridor", 
 	const engine::core::CFrame before = store.Get<engine::scene::Transform>(cube)->Frame;
 	systems.Tick(store, 0.25f);
 	const engine::core::CFrame after = store.Get<engine::scene::Transform>(cube)->Frame;
-	CHECK(after != before);
+	CHECK((after.Position - before.Position).Magnitude() > 0.1f);
 
 	static thread_local std::vector<engine::scene::SurfacePane> panes;
 	REQUIRE(engine::scene::GatherSurfacePanes(store, panes) == 2);
 	for (const engine::scene::SurfacePane &pane : panes) {
-		CHECK(pane.FPS == Approx(60.0f));
+		REQUIRE(store.Has<engine::scene::SurfaceCamera>(pane.Camera));
+		CHECK(store.Get<engine::scene::SurfaceCamera>(pane.Camera)->FPS == Approx(60.0f));
 	}
 	CHECK(engine::scene::SurfaceBouncesOf(store) == 3);
 	CHECK(engine::scene::SurfaceLimitOf(store) == 2);

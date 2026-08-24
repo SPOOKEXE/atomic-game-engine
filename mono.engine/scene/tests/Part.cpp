@@ -472,6 +472,7 @@ TEST_CASE("a surface camera has its own opacity, clamped the same way", "[scene]
 	// fading a mirror faded its reflection with it and there was no way to
 	// author a transparent pane that still reflects.
 	CHECK(Read<float>(store, camera, "ImageTransparency") == 0.0f);
+	CHECK(Read<float>(store, camera, "FPS") == 60.0f);
 
 	REQUIRE(Write(store, camera, "ImageTransparency", 0.5f));
 	CHECK(Read<float>(store, camera, "ImageTransparency") == 0.5f);

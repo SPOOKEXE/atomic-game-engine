@@ -530,12 +530,12 @@ namespace engine::scene {
 
 	// How many surface panes a world draws at once when it says nothing.
 	//
-	// **Fifty, and it is a budget rather than a ceiling.** A hall of mirrors is
+	// **Thirty-two, and it is a budget rather than a ceiling.** A hall of mirrors is
 	// the scene this number exists for and it does not have a natural size; what
 	// it has is a frame time, and a pane costs a whole render of the world into
-	// a texture. Fifty is what a modern device draws without the frame falling
-	// over, at the sizes `render::SurfaceScale` picks for panes that are not
-	// filling the screen.
+	// a texture. Thirty-two bounds the close-up case where retained panes grow
+	// toward the viewport size while still covering the visible face of the
+	// stress mirror ball.
 	//
 	// **It was sixteen and it was not a setting**, which is the thing that
 	// changed at v0.17: `MAX_SURFACES` was a compile-time constant and a world
@@ -544,7 +544,7 @@ namespace engine::scene {
 	// allocation.
 	//
 	// @since v0.17
-	inline constexpr int32_t DEFAULT_SURFACE_LIMIT = 50;
+	inline constexpr int32_t DEFAULT_SURFACE_LIMIT = 32;
 
 	// How many surface panes this world draws at once.
 	//
