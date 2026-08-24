@@ -1643,6 +1643,10 @@ namespace studio {
 		// @param panel    That panel's mapping for this frame.
 		void PickInViewport(size_t viewport, float x, float y, bool add, const PanelProjection &panel);
 
+		// Starts, draws, and commits a rectangle selection begun on empty space.
+		// Returns true while the rectangle owns the left mouse gesture.
+		bool DragSelectionBox(size_t viewport, const PanelProjection &panel);
+
 		// Fills `Operators` in. Called once, from `Start`, after the universe
 		// exists - several polls read it.
 		//
@@ -4097,6 +4101,18 @@ namespace studio {
 		// The click waiting to become a selection, if any.
 		PendingPickAction PendingPick;
 
+		// A selection rectangle begun on empty viewport space. Starting on a
+		// part remains Select's direct surface move.
+		struct BoxSelectionAction {
+			bool Active = false;
+			size_t Viewport = 0;
+			glm::vec2 Start{0.0f};
+			glm::vec2 Current{0.0f};
+			bool Add = false;
+		};
+
+		BoxSelectionAction BoxSelection;
+
 		// Which manipulator the viewport is offering.
 		//
 		// **A mode rather than three gizmos drawn at once.** Studio and every
@@ -5219,6 +5235,11 @@ namespace studio {
 		// the class table is rebuilt by registration - rule 3, and the reason
 		// every handle in this editor is a value.
 		engine::core::Name PickerProperty;
+
+		// The class that declared the chosen row. Two unrelated classes may use
+		// the same property spelling, and confirming one picker must not write the
+		// other meaning onto a mixed selection.
+		engine::ecs::ClassId PickerOwner;
 
 		// What that property's type is, carried across the frames the modal is
 		// open.

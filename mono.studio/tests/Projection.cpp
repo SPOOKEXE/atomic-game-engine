@@ -472,3 +472,45 @@ TEST_CASE("aligning to a surface keeps the facing it can", "[studio][projection]
 	CHECK_THAT(onFloor.UpVector().Y, WithinAbs(1.0f, 0.0005f));
 	CHECK_THAT(onFloor.LookVector().Magnitude(), WithinAbs(1.0f, 0.0005f));
 }
+
+TEST_CASE("an oriented box projects to the rectangle drag selection tests", "[studio][projection]") {
+	const PanelProjection panel = Panel();
+	glm::vec2 minimum;
+	glm::vec2 maximum;
+	REQUIRE(
+		studio::ProjectBoxBounds(
+			panel,
+			CFrame(Vector3{0.0f, 0.0f, -10.0f}, glm::angleAxis(0.5f, glm::vec3(0.0f, 1.0f, 0.0f))),
+			Vector3{1.0f, 2.0f, 1.0f},
+			minimum,
+			maximum
+		)
+	);
+
+	CHECK(minimum.x < 400.0f);
+	CHECK(maximum.x > 400.0f);
+	CHECK(minimum.y < 200.0f);
+	CHECK(maximum.y > 200.0f);
+	CHECK(
+		studio::PanelRectanglesOverlap(minimum, maximum, glm::vec2(390.0f, 190.0f), glm::vec2(410.0f, 210.0f))
+	);
+	CHECK_FALSE(
+		studio::PanelRectanglesOverlap(minimum, maximum, glm::vec2(0.0f, 0.0f), glm::vec2(10.0f, 10.0f))
+	);
+}
+
+TEST_CASE("a selection box crossing the eye plane is clipped instead of lost", "[studio][projection]") {
+	const PanelProjection panel = Panel();
+	glm::vec2 minimum;
+	glm::vec2 maximum;
+	CHECK(
+		studio::ProjectBoxBounds(
+			panel, CFrame(Vector3{0.0f, 0.0f, -0.15f}), Vector3{0.1f, 0.1f, 0.1f}, minimum, maximum
+		)
+	);
+	CHECK_FALSE(
+		studio::ProjectBoxBounds(
+			panel, CFrame(Vector3{0.0f, 0.0f, 2.0f}), Vector3{0.5f, 0.5f, 0.5f}, minimum, maximum
+		)
+	);
+}

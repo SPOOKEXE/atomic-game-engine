@@ -361,7 +361,10 @@ namespace studio {
 			// **After the gizmo, and it declines while a handle is held.** Both
 			// write placements, and two of them running against one selection
 			// is two answers to where it is.
-			DragOnSurface(index, panel);
+			const bool movingSelection = DragOnSurface(index, panel);
+			if (!movingSelection) {
+				DragSelectionBox(index, panel);
+			}
 
 			// **After both, because it is the only one that draws nothing
 			// interactive.** The gizmo has to adjudicate the pending pick and
@@ -1698,6 +1701,95 @@ namespace studio {
 		});
 
 		return true;
+	}
+
+	bool Editor::DragSelectionBox(size_t viewport, const PanelProjection &panel) {
+		const WorldId world = ViewportWorld(viewport);
+		if (CurrentTool != ToolMode::Select || !world.IsValid() || Universe == nullptr) {
+			return false;
+		}
+
+		const bool holding = BoxSelection.Active && BoxSelection.Viewport == viewport;
+		const ImVec2 mouse = ImGui::GetIO().MousePos;
+		const glm::vec2 cursor(mouse.x, mouse.y);
+
+		if (!holding) {
+			if (!ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
+				return false;
+			}
+			const ImVec2 delta = ImGui::GetMouseDragDelta(ImGuiMouseButton_Left);
+			const glm::vec2 start(mouse.x - delta.x, mouse.y - delta.y);
+			if (!panel.ContainsPanel(start)) {
+				return false;
+			}
+
+			// A part at the gesture origin belongs to Select's direct move. Only
+			// empty space starts a rectangle, so the two interactions never race.
+			if (RaycastWorld(world, panel.PanelToRay(start), {}).has_value()) {
+				return false;
+			}
+
+			BoxSelection.Active = true;
+			BoxSelection.Viewport = viewport;
+			BoxSelection.Start = start;
+			BoxSelection.Current = cursor;
+			BoxSelection.Add = ImGui::GetIO().KeyCtrl;
+		}
+
+		const glm::vec2 panelMinimum = panel.ImageMin;
+		const glm::vec2 panelMaximum = panel.ImageMin + panel.ImageSize;
+		BoxSelection.Current = glm::clamp(cursor, panelMinimum, panelMaximum);
+
+		if (viewport < Overlays.size() && Overlays[viewport].List != nullptr) {
+			const glm::vec2 minimum = glm::min(BoxSelection.Start, BoxSelection.Current);
+			const glm::vec2 maximum = glm::max(BoxSelection.Start, BoxSelection.Current);
+			Overlays[viewport].List->AddRectFilled(
+				ImVec2(minimum.x, minimum.y), ImVec2(maximum.x, maximum.y), IM_COL32(45, 125, 230, 38)
+			);
+			Overlays[viewport].List->AddRect(
+				ImVec2(minimum.x, minimum.y), ImVec2(maximum.x, maximum.y), IM_COL32(80, 160, 255, 230)
+			);
+		}
+
+		if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+			return true;
+		}
+
+		std::vector<Entity> enclosed;
+		Universe->Enter(world, [&](Store &store) {
+			store.Each<engine::scene::Transform, engine::scene::Bounds>(
+				[&](Entity entity,
+					const engine::scene::Transform &transform,
+					const engine::scene::Bounds &bounds) {
+					if (const auto *visual = store.Get<engine::scene::Visual>(entity);
+						visual != nullptr && visual->Locked) {
+						return;
+					}
+
+					glm::vec2 minimum;
+					glm::vec2 maximum;
+					if (ProjectBoxBounds(panel, transform.Frame, bounds.HalfExtent, minimum, maximum) &&
+						PanelRectanglesOverlap(BoxSelection.Start, BoxSelection.Current, minimum, maximum)) {
+						enclosed.push_back(entity);
+					}
+				}
+			);
+		});
+
+		if (!BoxSelection.Add || SelectionWorld != world) {
+			ClearSelection();
+		}
+		for (const Entity entity : enclosed) {
+			if (!IsSelected(entity)) {
+				Select(world, entity, true);
+			}
+		}
+		if (!enclosed.empty()) {
+			SelectionAnchor = enclosed.back();
+			OpenPathTo(world, enclosed.back());
+		}
+		BoxSelection = BoxSelectionAction{};
+		return false;
 	}
 
 	void Editor::PickInViewport(size_t viewport, float x, float y, bool add, const PanelProjection &panel) {
