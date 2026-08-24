@@ -100,6 +100,7 @@
 #include <studio/Preview.hpp>
 #include <studio/Projection.hpp>
 #include <studio/TeamCreate.hpp>
+#include <studio/Viewports.hpp>
 #include <studio/Widgets.hpp>
 #include <unordered_map>
 #include <unordered_set>
@@ -3826,6 +3827,7 @@ namespace studio {
 		float CameraYaw = 0.0f;
 		float CameraPitch = 0.0f;
 		float CameraSpeed = 24.0f;
+		ViewportCameraMemory CameraMemory;
 		//@}
 
 		// How big a texture the world is drawn into, from the main viewport
@@ -3856,6 +3858,7 @@ namespace studio {
 			float Yaw = 0.0f;
 			float Pitch = 0.0f;
 			float Speed = 24.0f;
+			ViewportCameraMemory CameraMemory;
 			//@}
 
 			// What the pointer is doing to this panel.

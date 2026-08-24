@@ -842,6 +842,22 @@ namespace studio {
 	void Editor::DrawViewport(size_t index) {
 		ViewportState *extra = ExtraAt(index);
 		const bool second = extra != nullptr;
+		ViewportCameraPose cameraPose{
+			second ? extra->Frame : CameraFrame,
+			second ? extra->Yaw : CameraYaw,
+			second ? extra->Pitch : CameraPitch,
+		};
+		ViewportCameraMemory &cameraMemory = second ? extra->CameraMemory : CameraMemory;
+		cameraMemory.Use(ViewportWorld(index), cameraPose);
+		if (second) {
+			extra->Frame = cameraPose.Frame;
+			extra->Yaw = cameraPose.Yaw;
+			extra->Pitch = cameraPose.Pitch;
+		} else {
+			CameraFrame = cameraPose.Frame;
+			CameraYaw = cameraPose.Yaw;
+			CameraPitch = cameraPose.Pitch;
+		}
 
 		// imgui remembers a window by its title, so a panel's title is minted
 		// once when the panel is and then never changes - a name that moved
@@ -1893,9 +1909,11 @@ namespace studio {
 		const bool running = mode != RunMode::Edit;
 		const bool paused = IsPaused(scope);
 
-		if (RunButton("Play", mode == RunMode::Play, engine::ui::AccentColour())) {
-			SetRunMode(scope, mode == RunMode::Play ? RunMode::Edit : RunMode::Play);
+		ImGui::BeginDisabled(running);
+		if (RunButton("Play", false, engine::ui::AccentColour())) {
+			SetRunMode(scope, RunMode::Play);
 		}
+		ImGui::EndDisabled();
 		ImGui::SameLine();
 
 		// **Play, starting where you are looking rather than where the pad is.**

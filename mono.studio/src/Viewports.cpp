@@ -2,7 +2,50 @@
 
 namespace studio {
 
+	using engine::core::CFrame;
+	using engine::core::Vector3;
 	using engine::world::WorldId;
+
+	ViewportCameraPose DefaultViewportCamera() {
+		ViewportCameraPose pose;
+		pose.Frame = CFrame::LookAt(Vector3{0.0f, 30.0f, 30.0f}, Vector3::Zero);
+		const Vector3 angles = pose.Frame.ToAngles();
+		pose.Pitch = angles.X;
+		pose.Yaw = angles.Y;
+		return pose;
+	}
+
+	void ViewportCameraMemory::Use(WorldId world, ViewportCameraPose &pose) {
+		if (world == Current) {
+			return;
+		}
+
+		if (Current.IsValid()) {
+			Remembered[Current.Index] = pose;
+		}
+		if (!world.IsValid()) {
+			Current = {};
+			return;
+		}
+
+		if (!Current.IsValid() && Remembered.empty()) {
+			Current = world;
+			Remembered[world.Index] = pose;
+			return;
+		}
+
+		Current = world;
+		const auto found = Remembered.find(world.Index);
+		pose = found == Remembered.end() ? DefaultViewportCamera() : found->second;
+		Remembered[world.Index] = pose;
+	}
+
+	void ViewportCameraMemory::Place(WorldId world, const ViewportCameraPose &pose) {
+		Current = world;
+		if (world.IsValid()) {
+			Remembered[world.Index] = pose;
+		}
+	}
 
 	ViewportCanvas CanvasForViewport(
 		float panelX, float panelY, float panelWidth, float panelHeight, float pointerX, float pointerY

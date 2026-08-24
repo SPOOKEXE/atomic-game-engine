@@ -82,9 +82,10 @@ namespace studio {
 			return NO_VIEWPORT;
 		}
 
-		// Already showing it: bring it forward and leave its camera exactly
-		// where somebody put it.
-		if (view->Open && view->World == world) {
+		// Already assigned to it, including a closed panel: bring it forward and
+		// leave its remembered camera exactly where somebody put it.
+		if (view->World == world) {
+			view->Open = true;
 			ImGui::SetWindowFocus(ViewportIdentity(panel));
 			return panel;
 		}
@@ -92,12 +93,6 @@ namespace studio {
 		view->World = world;
 		view->Open = true;
 
-		// Where the main camera is, so a view that has not received anything yet
-		// opens looking at the same thing rather than at the origin -
-		// `Editor::Initialise` gives the argument at length.
-		view->Frame = CameraFrame;
-		view->Yaw = CameraYaw;
-		view->Pitch = CameraPitch;
 		view->Follow = engine::ecs::NULL_ENTITY;
 
 		ImGui::SetWindowFocus(ViewportIdentity(panel));

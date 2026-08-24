@@ -24,8 +24,11 @@ TEST_SUITE_ID("studio.viewports")
 using engine::world::WorldId;
 using studio::CanvasForViewport;
 using studio::ChooseViewportFor;
+using studio::DefaultViewportCamera;
 using studio::NO_VIEWPORT;
 using studio::PanelView;
+using studio::ViewportCameraMemory;
+using studio::ViewportCameraPose;
 
 namespace {
 	// Three scenes and a client view, as an editor mid-play holds them.
@@ -97,4 +100,35 @@ TEST_CASE("a panel somebody pinned is never taken", "[studio][viewports]") {
 	// Including when there are no extras at all, which is what a fresh editor
 	// with one panel open looks like.
 	CHECK(ChooseViewportFor(CLIENT, SCENE, true, std::span<const PanelView>{}) == NO_VIEWPORT);
+}
+
+TEST_CASE("new worlds start above the scene looking at the origin", "[studio][viewports][camera]") {
+	const ViewportCameraPose pose = DefaultViewportCamera();
+	CHECK(pose.Frame.Position == engine::core::Vector3{0.0f, 30.0f, 30.0f});
+	CHECK(pose.Frame.LookVector().Dot((engine::core::Vector3::Zero - pose.Frame.Position).Unit()) > 0.9999f);
+	const engine::core::CFrame rebuilt = engine::core::CFrame::Angles(pose.Pitch, pose.Yaw, 0.0f);
+	CHECK(rebuilt.LookVector().Dot(pose.Frame.LookVector()) > 0.9999f);
+}
+
+TEST_CASE("each viewport remembers an independent camera per world", "[studio][viewports][camera]") {
+	ViewportCameraMemory left;
+	ViewportCameraMemory right;
+	ViewportCameraPose leftPose = DefaultViewportCamera();
+	ViewportCameraPose rightPose = DefaultViewportCamera();
+	left.Use(SCENE, leftPose);
+	right.Use(SCENE, rightPose);
+
+	leftPose.Frame.Position = {1.0f, 2.0f, 3.0f};
+	leftPose.Yaw = 0.25f;
+	left.Use(OTHER, leftPose);
+	CHECK(leftPose.Frame.Position == engine::core::Vector3{0.0f, 30.0f, 30.0f});
+
+	rightPose.Frame.Position = {40.0f, 50.0f, 60.0f};
+	right.Use(OTHER, rightPose);
+	left.Use(SCENE, leftPose);
+	right.Use(SCENE, rightPose);
+
+	CHECK(leftPose.Frame.Position == engine::core::Vector3{1.0f, 2.0f, 3.0f});
+	CHECK(leftPose.Yaw == 0.25f);
+	CHECK(rightPose.Frame.Position == engine::core::Vector3{40.0f, 50.0f, 60.0f});
 }

@@ -421,6 +421,7 @@ namespace studio {
 				view->Yaw = CameraYaw;
 				view->Pitch = CameraPitch;
 			}
+			view->CameraMemory.Place(showing, ViewportCameraPose{view->Frame, view->Yaw, view->Pitch});
 		}
 
 		return made;
@@ -679,9 +680,10 @@ namespace studio {
 		// Back and up, looking at the origin - where a new scene's first part
 		// is. A camera at the origin looking down the axis starts inside
 		// whatever gets made first, which reads as a black viewport.
-		CameraYaw = -0.6f;
-		CameraPitch = -0.45f;
-		CameraFrame = CFrame(Vector3{18.0f, 14.0f, 18.0f});
+		const ViewportCameraPose initialCamera = DefaultViewportCamera();
+		CameraYaw = initialCamera.Yaw;
+		CameraPitch = initialCamera.Pitch;
+		CameraFrame = initialCamera.Frame;
 
 		// **Every extra viewport starts where the main one does.** Left at the
 		// identity it sits at the origin looking down an axis, which is inside

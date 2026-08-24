@@ -1649,10 +1649,9 @@ TEST_CASE("the player list names everybody in the world", "[examples][scene][pla
 	INFO(error);
 	REQUIRE(loaded);
 
-	// A few ticks, because the panel is finished on the `Heartbeat` that
-	// notices a player with no panel - see the scene's last paragraph for why
-	// the signal alone is not enough.
-	for (int tick = 0; tick < 4; tick++) {
+	// Past the one-second repair clock. A stale table entry used to make that
+	// path build another ScreenGui every time it ran.
+	for (int tick = 0; tick < 70; tick++) {
 		systems.Tick(store, 1.0f / 60.0f);
 	}
 
@@ -1663,6 +1662,14 @@ TEST_CASE("the player list names everybody in the world", "[examples][scene][pla
 
 		const Entity container = store.FindFirstChild(player, "PlayerGui");
 		REQUIRE(container != engine::ecs::NULL_ENTITY);
+
+		size_t screens = 0;
+		store.EachChild(container, [&](Entity child) {
+			if (store.InstanceNameOf(child) == Name("PlayerList")) {
+				screens++;
+			}
+		});
+		CHECK(screens == 1);
 
 		const Entity screen = store.FindFirstChild(container, "PlayerList");
 		REQUIRE(screen != engine::ecs::NULL_ENTITY);
