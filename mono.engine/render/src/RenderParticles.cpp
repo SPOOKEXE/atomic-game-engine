@@ -14,6 +14,7 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/effects/Particles.hpp>
+#include <engine/graph/Frustum.hpp>
 
 #include <SDL3/SDL_gpu.h>
 #include <glm/mat4x4.hpp>
@@ -26,6 +27,76 @@
 #include <vector>
 
 namespace engine::render {
+	namespace {
+		bool Finite(const core::Vector3 &value) {
+			return std::isfinite(value.X) && std::isfinite(value.Y) && std::isfinite(value.Z);
+		}
+	}
+
+	ParticleDrawBounds BoundsForParticleDraw(
+		const effects::EmitterBlock &block, const effects::EmitterSpawnState &spawn, float zOffset
+	) {
+		const float lifetime = std::max({0.0001f, spawn.Lifetime.Minimum, spawn.Lifetime.Maximum});
+		const float initialSpeed = std::max(std::abs(spawn.Speed.Minimum), std::abs(spawn.Speed.Maximum)) +
+								   spawn.Inherited.Magnitude();
+		const float proceduralForce = std::abs(block.RadialAcceleration) +
+									  std::abs(block.TangentialAcceleration) + std::abs(block.NoiseStrength);
+
+		float billboard = 0.0f;
+		for (uint32_t sample = 0; sample < effects::CURVE_SAMPLES; sample++) {
+			const float width = block.Curves.Size[sample];
+			const float squash = block.Curves.Squash[sample];
+			if (!std::isfinite(width) || !std::isfinite(squash)) {
+				return {};
+			}
+			const float x = std::clamp(
+				width * (squash < 0.0f ? 1.0f - squash : 1.0f / (1.0f + squash)),
+				0.0f,
+				effects::MAX_PARTICLE_SIZE
+			);
+			const float y = std::clamp(
+				width * (squash > 0.0f ? 1.0f + squash : 1.0f / (1.0f - squash)),
+				0.0f,
+				effects::MAX_PARTICLE_SIZE
+			);
+			billboard = std::max(billboard, std::hypot(x, y) * 0.5f);
+		}
+
+		if (!Finite(block.Frame.Position) || !Finite(block.Acceleration) || !Finite(spawn.Half) ||
+			!Finite(spawn.Inherited) || !std::isfinite(lifetime) || !std::isfinite(initialSpeed) ||
+			!std::isfinite(proceduralForce) || !std::isfinite(block.Drag) || block.Drag < 0.0f ||
+			!std::isfinite(block.MaxSpeed) || !std::isfinite(zOffset)) {
+			return {};
+		}
+
+		const float lifetimeSquared = lifetime * lifetime;
+		const float symmetricTravel = block.MaxSpeed > 0.0f
+										  ? block.MaxSpeed * lifetime
+										  : initialSpeed * lifetime + proceduralForce * lifetimeSquared;
+		const float symmetric = spawn.Half.Magnitude() + symmetricTravel + billboard + std::abs(zOffset);
+		const core::Vector3 acceleration =
+			block.Locked ? block.Frame.VectorToWorldSpace(block.Acceleration) : block.Acceleration;
+		if (!std::isfinite(symmetric) || !Finite(acceleration)) {
+			return {};
+		}
+
+		const core::Vector3 base{symmetric, symmetric, symmetric};
+		const core::Vector3 accelerationReach =
+			block.MaxSpeed > 0.0f ? core::Vector3::Zero : acceleration * lifetimeSquared;
+		return {
+			core::AABB{
+				block.Frame.Position - base + accelerationReach.Min(core::Vector3::Zero),
+				block.Frame.Position + base + accelerationReach.Max(core::Vector3::Zero),
+			},
+			true,
+		};
+	}
+
+	bool ParticleDrawVisible(
+		const core::AABB &bounds, bool cullable, bool cullingSafe, const graph::Frustum &frustum
+	) {
+		return !cullingSafe || !cullable || frustum.Intersects(bounds);
+	}
 
 	namespace {
 		// --- the device layouts -----------------------------------------------
@@ -486,6 +557,7 @@ namespace engine::render {
 		Particles.TableRows = rows;
 		Particles.ParamRevision.assign(rows, 0);
 		Particles.CurveRevision.assign(rows, 0);
+		Particles.CullRecords.resize(rows);
 		return true;
 	}
 
@@ -894,6 +966,7 @@ namespace engine::render {
 		ActiveParticleWorld = &ParticleWorldFor(view.World, view.WorldName);
 		if (ActiveParticleWorld->PreparedFrame == FrameCounter) {
 			ParticleGroups = ActiveParticleWorld->PreparedGroups;
+			ParticleSpans = ActiveParticleWorld->PreparedSpans;
 			return {ActiveParticleWorld->PreparedCount, 0};
 		}
 
@@ -915,6 +988,9 @@ namespace engine::render {
 			ActiveParticleWorld->PreparedCount = 0;
 			ActiveParticleWorld->PreparedBatches.clear();
 			ActiveParticleWorld->PreparedGroups.clear();
+			ActiveParticleWorld->PreparedSpans.clear();
+			ActiveParticleWorld->PreparedOrder.clear();
+			ActiveParticleWorld->PreparedCullingSafe = true;
 			return {};
 		}
 
@@ -923,6 +999,7 @@ namespace engine::render {
 							 ActiveParticleWorld->PreparedRevision != view.ParticleRevision;
 		if (!refresh) {
 			ParticleGroups = ActiveParticleWorld->PreparedGroups;
+			ParticleSpans = ActiveParticleWorld->PreparedSpans;
 			Particles.WorkUpdates = 0;
 			Particles.SeamCount = 0;
 			Particles.ParamUpdates = 0;
@@ -937,9 +1014,13 @@ namespace engine::render {
 		const bool refreshResident =
 			rebuildLayout || ActiveParticleWorld->ResidentRefreshPending ||
 			ActiveParticleWorld->PreparedResidentRevision != view.ParticleResidentRevision;
+		if (!rebuildLayout) {
+			ParticleOrder = ActiveParticleWorld->PreparedOrder;
+		}
 
 		if (rebuildLayout) {
 			ParticleGroups.clear();
+			ParticleSpans.clear();
 			Particles.WorkItems = 0;
 		}
 		Particles.WorkUpdates = 0;
@@ -1070,8 +1151,10 @@ namespace engine::render {
 		// changed neither writes nothing at all.
 		if (rebuildLayout) {
 			ParticleGroups.clear();
+			ParticleSpans.clear();
 		} else {
 			ParticleGroups = ActiveParticleWorld->PreparedGroups;
+			ParticleSpans = ActiveParticleWorld->PreparedSpans;
 		}
 
 		uint32_t written = rebuildLayout ? 0 : ActiveParticleWorld->PreparedCount;
@@ -1119,11 +1202,39 @@ namespace engine::render {
 					}
 				}
 
+				auto &record = Particles.CullRecords[batch.Index];
+				const ParticleDrawBounds bounds = BoundsForParticleDraw(block, *batch.Spawn, batch.ZOffset);
+				if (record.Generation != block.Generation) {
+					record.Generation = block.Generation;
+					record.Revision = block.Revision;
+					record.CurveRevision = block.CurveRevision;
+					record.Stable = bounds.Cullable;
+				} else if (record.Revision != block.Revision || record.CurveRevision != block.CurveRevision) {
+					record.Revision = block.Revision;
+					record.CurveRevision = block.CurveRevision;
+					record.Stable = false;
+				}
+				record.Bounds = bounds.Bounds;
+				record.Cullable = record.Stable && bounds.Cullable;
+
 				if (rebuildLayout) {
 					if (ParticleGroups.empty() ||
 						!SameParticleState(batches[ParticleGroups.back().Batch], batch)) {
-						ParticleGroups.push_back(ParticleGroup{index, written, 0});
+						ParticleGroup group;
+						group.Batch = index;
+						group.First = written;
+						group.FirstSpan = static_cast<uint32_t>(ParticleSpans.size());
+						ParticleGroups.push_back(group);
 					}
+					ParticleSpans.push_back(
+						ParticleCullSpan{
+							index,
+							written,
+							block.Capacity,
+							{},
+							false,
+						}
+					);
 
 					auto *const items = reinterpret_cast<ParticleWorkItem *>(work);
 					for (uint32_t local = 0; local < block.Capacity; local++) {
@@ -1132,6 +1243,36 @@ namespace engine::render {
 
 					written += block.Capacity;
 					ParticleGroups.back().Count += block.Capacity;
+					ParticleGroups.back().SpanCount++;
+				}
+			}
+		}
+
+		if (refreshResident) {
+			for (ParticleGroup &group : ParticleGroups) {
+				group.HasBounds = false;
+				group.Cullable = true;
+			}
+			for (ParticleCullSpan &span : ParticleSpans) {
+				const render::ParticleBatch &batch = batches[span.Batch];
+				const ParticlePool::CullRecord &record = Particles.CullRecords[batch.Index];
+				span.Bounds = record.Bounds;
+				span.Cullable = record.Cullable && record.Generation == batch.Block->Generation;
+			}
+			for (ParticleGroup &group : ParticleGroups) {
+				for (uint32_t offset = 0; offset < group.SpanCount; offset++) {
+					const ParticleCullSpan &span = ParticleSpans[group.FirstSpan + offset];
+					if (!span.Cullable) {
+						group.Cullable = false;
+						continue;
+					}
+					if (!group.HasBounds) {
+						group.Bounds = span.Bounds;
+						group.HasBounds = true;
+					} else {
+						group.Bounds.Minimum = group.Bounds.Minimum.Min(span.Bounds.Minimum);
+						group.Bounds.Maximum = group.Bounds.Maximum.Max(span.Bounds.Maximum);
+					}
 				}
 			}
 		}
@@ -1190,8 +1331,11 @@ namespace engine::render {
 		ActiveParticleWorld->PreparedCount = written;
 		if (rebuildLayout) {
 			ActiveParticleWorld->PreparedBatches.assign(batches.begin(), batches.end());
+			ActiveParticleWorld->PreparedOrder = ParticleOrder;
 		}
 		ActiveParticleWorld->PreparedGroups = ParticleGroups;
+		ActiveParticleWorld->PreparedSpans = ParticleSpans;
+		ActiveParticleWorld->PreparedCullingSafe = view.ParticleSeams.empty();
 
 		return {written, dispatched.Count};
 	}
@@ -1201,7 +1345,8 @@ namespace engine::render {
 		SDL_GPURenderPass *pass,
 		const glm::mat4 &viewProjection,
 		const core::CFrame &eye,
-		uint64_t &triangles
+		uint64_t &triangles,
+		uint32_t &culled
 	) {
 		if (ParticlePipeline == nullptr || ActiveParticleWorld == nullptr || ParticleGroups.empty()) {
 			return 0;
@@ -1235,8 +1380,54 @@ namespace engine::render {
 		uint32_t draws = 0;
 		bool additiveBound = false;
 		bool blendedBound = false;
+		const graph::Frustum frustum = graph::Frustum::FromViewProjection(viewProjection);
 
 		for (const ParticleGroup &group : ParticleGroups) {
+			if (group.HasBounds &&
+				!ParticleDrawVisible(
+					group.Bounds, group.Cullable, ActiveParticleWorld->PreparedCullingSafe, frustum
+				)) {
+				culled += group.Count;
+				continue;
+			}
+
+			// The material-wide box is a cheap reject, but it can surround the eye in
+			// a large field while every emitter is behind the camera. Refine that case
+			// at emitter granularity and fold adjacent survivors back into draw runs.
+			// This is host work over emitter bounds, never over resident particles.
+			ParticleDrawRuns.clear();
+			uint32_t runFirst = 0;
+			uint32_t runCount = 0;
+			const auto flushRun = [&]() {
+				if (runCount != 0) {
+					ParticleDrawRuns.push_back({runFirst, runCount});
+					runCount = 0;
+				}
+			};
+			for (uint32_t offset = 0; offset < group.SpanCount; offset++) {
+				const ParticleCullSpan &span = ParticleSpans[group.FirstSpan + offset];
+				if (!ParticleDrawVisible(
+						span.Bounds, span.Cullable, ActiveParticleWorld->PreparedCullingSafe, frustum
+					)) {
+					flushRun();
+					culled += span.Count;
+					continue;
+				}
+				if (runCount == 0) {
+					runFirst = span.First;
+				} else if (runFirst + runCount != span.First) {
+					flushRun();
+					runFirst = span.First;
+				}
+				runCount += span.Count;
+			}
+			flushRun();
+			if (group.SpanCount == 0) {
+				ParticleDrawRuns.push_back({group.First, group.Count});
+			}
+			if (ParticleDrawRuns.empty()) {
+				continue;
+			}
 			const render::ParticleBatch &state = batches[group.Batch];
 
 			// **Bound once per pipeline rather than once per group**, which the
@@ -1289,19 +1480,21 @@ namespace engine::render {
 			binding.sampler = Textures.Sampler();
 			SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
 
-			// Four vertices a particle, as a strip. `first_instance` selects this
-			// group's slice of the shared buffer.
-			SDL_DrawGPUPrimitives(pass, 4, group.Count, 0, group.First);
-			draws++;
+			// Four vertices a particle, as a strip. `first_instance` selects each
+			// surviving contiguous slice of the shared buffer.
+			for (const ParticleDrawRun &run : ParticleDrawRuns) {
+				SDL_DrawGPUPrimitives(pass, 4, run.Count, 0, run.First);
+				draws++;
+				triangles += static_cast<uint64_t>(run.Count) * 2;
+			}
 
-			// **Two triangles a particle, counted here.** A four-vertex strip is
-			// two triangles and `group.Count` of them are drawn, so this is the
-			// whole arithmetic - but it was not being done at all, and the
+			// **Two triangles a particle, counted above.** A four-vertex strip is
+			// two triangles and `run.Count` of them are drawn, so this is the
+			// whole arithmetic. Before it was added, the
 			// omission read as a broken renderer rather than as a missing sum. A
 			// frame drawing half a million particle quads reported "108
 			// triangle(s)", which is a number small enough to look like nothing
 			// had been submitted; the particles were on screen the whole time.
-			triangles += static_cast<uint64_t>(group.Count) * 2;
 		}
 
 		return draws;

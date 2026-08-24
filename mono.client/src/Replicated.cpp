@@ -209,26 +209,26 @@ namespace client {
 					const LocalTransparency *local = store.Get<LocalTransparency>(entity);
 
 					// Every replicated visual field, through the builder both
-					// collectors share - see `scene::MakeDrawInstance`. The
-					// optional components stay optional here: a replicated row
-					// may arrive without an appearance, which is the difference
-					// from the local collector that made these two drift.
-					drawList->Instances.push_back(
-						engine::scene::MakeDrawInstance(
-							interpolated.value_or(transform.Frame),
-							bounds,
-							visual,
-							appearance,
-							tags,
-							entity.Id,
-							local,
-							// Which rig this row belongs to, so a portal cuts a
-							// replicated character in one piece. Optional like
-							// the two above it, and for the same reason: most
-							// rows are not a limb of anything.
-							store.Get<engine::scene::CharacterLimb>(entity)
-						)
+					// collectors share. Fully transparent rows stop here, before
+					// residency, sorting, shadows or portal cloning can charge for
+					// geometry that contributes no pixel.
+					const engine::scene::DrawInstance instance = engine::scene::MakeDrawInstance(
+						interpolated.value_or(transform.Frame),
+						bounds,
+						visual,
+						appearance,
+						tags,
+						entity.Id,
+						local,
+						// Which rig this row belongs to, so a portal cuts a
+						// replicated character in one piece. Optional like
+						// the two above it, and for the same reason: most
+						// rows are not a limb of anything.
+						store.Get<engine::scene::CharacterLimb>(entity)
 					);
+					if (!(instance.Transparency >= 1.0f)) {
+						drawList->Instances.push_back(instance);
+					}
 				}
 			);
 

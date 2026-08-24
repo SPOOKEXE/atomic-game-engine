@@ -20,6 +20,7 @@
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/core/types/AABB.hpp>
 #include <engine/graph/EntityFlow.hpp>
 #include <engine/graph/ExecutionPlan.hpp>
 #include <engine/graph/RenderGraph.hpp>
@@ -913,6 +914,31 @@ namespace engine::render {
 
 			// How many there are.
 			uint32_t Count = 0;
+
+			// A coarse conservative bound shared by every emitter in this material
+			// run. Invalid authored motion leaves `Cullable` false and draws it.
+			core::AABB Bounds;
+			bool HasBounds = false;
+			bool Cullable = false;
+
+			// The emitter-sized spans folded into this material run. They let a
+			// camera reject particles behind it even when the aggregate box surrounds
+			// the eye, while adjacent visible spans still collapse into one draw.
+			uint32_t FirstSpan = 0;
+			uint32_t SpanCount = 0;
+		};
+
+		struct ParticleCullSpan {
+			uint32_t Batch = 0;
+			uint32_t First = 0;
+			uint32_t Count = 0;
+			core::AABB Bounds;
+			bool Cullable = false;
+		};
+
+		struct ParticleDrawRun {
+			uint32_t First = 0;
+			uint32_t Count = 0;
 		};
 
 		// --- ribbons ----------------------------------------------------------
@@ -967,6 +993,8 @@ namespace engine::render {
 		// Members rather than locals, so the capacity survives the frame - the
 		// same argument `DrawOrder` makes one screen up.
 		std::vector<ParticleGroup> ParticleGroups;
+		std::vector<ParticleCullSpan> ParticleSpans;
+		std::vector<ParticleDrawRun> ParticleDrawRuns;
 		std::vector<uint32_t> ParticleOrder;
 
 		// --- the device-resident pool -----------------------------------------
@@ -984,6 +1012,15 @@ namespace engine::render {
 		// its world's buffer at the offsets `PrepareParticles` worked out, so the
 		// draw grouping is exactly what it was and there is no gather pass.
 		struct ParticlePool {
+			struct CullRecord {
+				core::AABB Bounds;
+				uint32_t Generation = 0;
+				uint32_t Revision = 0;
+				uint32_t CurveRevision = 0;
+				bool Stable = false;
+				bool Cullable = false;
+			};
+
 			// One state per slot, `STATE_WORDS` wide, read and written by the
 			// integration pass and written by emission. Never read by the host.
 			SDL_GPUBuffer *States = nullptr;
@@ -1061,6 +1098,7 @@ namespace engine::render {
 			uint32_t ParamUpdates = 0;
 			uint32_t CurveUpdates = 0;
 			float Delta = 0.0f;
+			std::vector<CullRecord> CullRecords;
 			//@}
 		};
 
@@ -1085,6 +1123,9 @@ namespace engine::render {
 			uint32_t PreparedCount = 0;
 			std::vector<ParticleBatch> PreparedBatches;
 			std::vector<ParticleGroup> PreparedGroups;
+			std::vector<ParticleCullSpan> PreparedSpans;
+			std::vector<uint32_t> PreparedOrder;
+			bool PreparedCullingSafe = true;
 
 			// Time recorded into the command currently owned by the host. A submit
 			// failure carries it into the next device step instead of losing time.
@@ -1181,7 +1222,8 @@ namespace engine::render {
 			SDL_GPURenderPass *pass,
 			const glm::mat4 &viewProjection,
 			const core::CFrame &eye,
-			uint64_t &triangles
+			uint64_t &triangles,
+			uint32_t &culled
 		);
 
 		// Chosen once so pipelines and depth textures use one supported format.

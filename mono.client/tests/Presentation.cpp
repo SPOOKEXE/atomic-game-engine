@@ -1582,10 +1582,12 @@ TEST_CASE("a cross-world pane in a client's view leads to that client's rooms", 
 		CHECK(instance.Transparency < 1.0f);
 	}
 
-	// The far room, less its pane and its stand-in, and no more: a resolution
+	// The far room, less its pane, and no more. The transparency-one stand-in
+	// never enters the world's draw list, so this portal-specific filter only
+	// removes the surface-bearing pane. A resolution
 	// that found the authority instead would also pass every line above, so the
 	// count is checked against the world the occupant proves it read.
-	CHECK(foreign.size() + 2 == Drawn(universe, thereSeen));
+	CHECK(foreign.size() + 1 == Drawn(universe, thereSeen));
 }
 
 TEST_CASE("a hole's picture leaves out the far pane and the stand-in", "[client][presentation]") {
@@ -1707,9 +1709,9 @@ TEST_CASE("a hole's picture leaves out the far pane and the stand-in", "[client]
 		CHECK(instance.Transparency < 1.0f);
 	}
 
-	// And the room is still there - a filter that dropped the far world rather
-	// than its pane and its stand-in would pass both lines above and show
-	// nothing at all. Two rows fewer, and exactly two.
-	CHECK(foreign.size() + 2 == Drawn(universe, there));
+	// And the room is still there. The transparency-one stand-in never entered
+	// the world's draw list, and this filter removes exactly the remaining pane.
+	// Dropping the far world instead would pass both lines above and show nothing.
+	CHECK(foreign.size() + 1 == Drawn(universe, there));
 	CHECK(views[0].InstanceCount == static_cast<uint32_t>(foreign.size()));
 }

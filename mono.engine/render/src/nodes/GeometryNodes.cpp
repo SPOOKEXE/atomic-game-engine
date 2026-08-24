@@ -434,7 +434,12 @@ namespace engine::render {
 				// backend operation, not another fixed pass label in this body.
 				if (particleCount > 0) {
 					result.DrawCalls += State->DrawParticles(
-						command, pass, frameUniforms.ViewProjection, cameraFrame, result.Triangles
+						command,
+						pass,
+						frameUniforms.ViewProjection,
+						cameraFrame,
+						result.Triangles,
+						result.Culled
 					);
 				}
 

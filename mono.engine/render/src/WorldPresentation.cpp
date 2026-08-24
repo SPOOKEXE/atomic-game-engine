@@ -19,6 +19,7 @@
 #include <engine/scene/Visibility.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <cmath>
 #include <cstddef>
@@ -319,6 +320,7 @@ namespace engine::render {
 		}
 
 		size_t written = 0;
+		std::atomic_bool hasFullyTransparent = false;
 		{
 			// Parallel, and this is the loop that earns it. The arithmetic
 			// stopped being the cost once the interpolation lost its
@@ -365,7 +367,7 @@ namespace engine::render {
 			// split on the component instead
 			// and each half is a walk with a required column list. Every
 			// other field is written by the same function in both.
-			const auto write = [out, capacity, alpha](
+			const auto write = [out, capacity, alpha, &hasFullyTransparent](
 								   size_t base,
 								   size_t first,
 								   size_t rows,
@@ -389,6 +391,7 @@ namespace engine::render {
 					return;
 				}
 				rows = std::min(rows, capacity - at);
+				bool foundFullyTransparent = false;
 
 				for (size_t row = 0; row < rows; row++) {
 					// Interpolated, not the tick position. At 300 fps
@@ -422,6 +425,10 @@ namespace engine::render {
 						&locals[row],
 						limbs == nullptr ? nullptr : &limbs[row]
 					);
+					foundFullyTransparent |= out[at + row].Transparency >= 1.0f;
+				}
+				if (foundFullyTransparent) {
+					hasFullyTransparent.store(true, std::memory_order_relaxed);
 				}
 			};
 
@@ -525,6 +532,11 @@ namespace engine::render {
 			// a vector writes nothing and keeps the capacity, so the frame
 			// after an entity is destroyed still does not allocate.
 			drawList->Instances.resize(std::min(written, drawList->Instances.size()));
+			if (hasFullyTransparent.load(std::memory_order_relaxed)) {
+				std::erase_if(drawList->Instances, [](const scene::DrawInstance &instance) {
+					return instance.Transparency >= 1.0f;
+				});
+			}
 
 			engine::core::Metrics::Count("render.instances", static_cast<double>(drawList->Instances.size()));
 		}

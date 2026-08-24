@@ -4,6 +4,10 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/render/WorldPresentation.hpp>
+#include <engine/scene/Part.hpp>
+#include <engine/scene/Registration.hpp>
+#include <engine/scene/Services.hpp>
+#include <engine/scene/Visibility.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -14,6 +18,7 @@
 TEST_SUITE_ID("engine.render.worldpresentation")
 TEST_DEPENDS("engine.graph.pipelinedocument")
 TEST_DEPENDS("engine.render.passes")
+TEST_DEPENDS("engine.scene.services")
 
 using engine::core::Name;
 
@@ -45,6 +50,43 @@ TEST_CASE("an empty world publishes an empty reusable particle snapshot", "[rend
 	CHECK_FALSE(frame.SourceWorld.IsValid());
 	CHECK(engine::render::CollectParticleBatches(store, frame) == 0);
 	CHECK(frame.Revision == 2);
+}
+
+TEST_CASE("fully transparent parts never enter the resident draw list", "[render][presentation]") {
+	engine::scene::RegisterSceneClasses();
+	engine::render::RegisterPresentationComponents();
+	engine::ecs::Store store("transparent-presentation");
+	store.SetResource(engine::render::DrawList{});
+	const engine::ecs::Entity workspace = engine::scene::InstallServices(store);
+
+	const auto part = [&](float authored, float local) {
+		const engine::ecs::Entity entity = engine::scene::MakePart(store, engine::scene::PartDesc{});
+		REQUIRE(entity != engine::ecs::NULL_ENTITY);
+		REQUIRE(store.SetParent(entity, workspace));
+		auto visual = *store.Get<engine::scene::Visual>(entity);
+		visual.Transparency = authored;
+		store.Set(entity, visual);
+		store.Set(entity, engine::scene::LocalTransparency{local});
+		return entity;
+	};
+
+	const engine::ecs::Entity opaque = part(0.0f, 0.0f);
+	const engine::ecs::Entity blended = part(0.999f, 0.0f);
+	part(1.0f, 0.0f);
+	part(2.0f, 0.0f);
+	part(0.0f, 1.0f);
+
+	REQUIRE(engine::scene::SyncRendered(store) == 5);
+	engine::render::CollectInstances(store);
+	const auto *drawList = store.Resource<engine::render::DrawList>();
+	REQUIRE(drawList != nullptr);
+	REQUIRE(drawList->Instances.size() == 2);
+	CHECK(std::count_if(drawList->Instances.begin(), drawList->Instances.end(), [opaque](const auto &row) {
+			  return row.Source == opaque.Id;
+		  }) == 1);
+	CHECK(std::count_if(drawList->Instances.begin(), drawList->Instances.end(), [blended](const auto &row) {
+			  return row.Source == blended.Id;
+		  }) == 1);
 }
 
 TEST_CASE("world pipeline selection is qualified and replaced in one engine cache", "[render][pipeline]") {

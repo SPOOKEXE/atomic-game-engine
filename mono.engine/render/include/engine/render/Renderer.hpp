@@ -949,7 +949,7 @@ namespace engine::render {
 		// @since v0.10
 		uint32_t Particles = 0;
 
-		// How many instances the frustum rejected.
+		// How many mesh instances or particle quads the frustum rejected.
 		//
 		// **Reported rather than inferred**, because the interesting number is
 		// the ratio and the denominator is the caller's draw list - which the

@@ -360,6 +360,21 @@ TEST_CASE("a replica does not draw a part it was told is invisible", "[client][r
 	CHECK(replica.Instances().size() == 1);
 }
 
+TEST_CASE("a replica does not publish fully transparent parts", "[client][replication]") {
+	Replica replica;
+	replica.Spawn();
+
+	Visual authored;
+	authored.Transparency = 1.0f;
+	replica.SpawnLooking(authored);
+
+	const Entity locallyHidden = replica.Spawn();
+	replica.World.Set(locallyHidden, engine::scene::LocalTransparency{1.0f});
+
+	replica.Draw();
+	CHECK(replica.Instances().size() == 1);
+}
+
 // **The registration this world used to skip**, and the failure it caused was a
 // long way from the cause.
 //
