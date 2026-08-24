@@ -70,9 +70,20 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] expand compilation steps with: constant folding, common-subexpression elimination, node fusion and resource aliasing. When we select a shader asset, we should be able to see its ShaderCapabilities and resources it'd take (estimate compute, memory, etc).
 - [_] add tests to validate each step of the rendering pipeline graph
 - [_] build a RENDER_PIPELINE.md that lists current pipeline and what we need to do to make it more modular (like Unity/Unreal) and with shader compilation.
+- [_] add beams/trails/decals/textures, etc if they aren't added
+- [_] build out different types of physics colliders components (capsule, square, use-mesh, hull, etc). add properties to meshpart.
+- [_] add websocket support
+- [_] benchmark job system, add different types of jobs (Serial, Threaded, Processed) contexts.
+- [_] can we do something to help async-compute more complex computations like noise terrain generation? it freezes main thread.
+- [_] Access levels/Script securities/Script capabilities/proper sandboxing (plugin, game script, server script, client script, etc).
+- [_] StackGuard to prevent stack errors, infinite recursion, etc.
+- [_] Random.new(seed) with functions
 
 ### v0.21
 
+- [_] build out file format even more, save all shader scripts, universe/world settings, etc. Also support separating worlds into separate files and universe finds them in same folder / subfolders (enable a recursive flag, DO NOT walk links)
+- [_] in world export, add a option to ground ALL assets into a assets/ folder that saves with the world. copies from cdn and all, only processed saved.
+- [_] in cdn, add optinos for compression saving, compressed network traffic, etc.
 - [_] add custom backgrounds and customization to the script editor too
 - [_] add external editor connections like vscode, notepad, etc.
 - [_] add settings for selected external editors
@@ -116,11 +127,13 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] port semi-real raytrace and path-trace as part of nodes
 - [_] make demo render pipelines with semi-real raytrace and path-trace
 - [_] add compute shaders / postprocessing shaders to all visual items as a additional node to attach (render pipeline pulls and residents shaders on gpu when active)
-- [_] (dynamic) ambient occulusion, mipmapping, occulusion culling (bbox first, extra after), sRGB handle, proper PBR with tests, tesselation, add Fog/Clouds/Skybox compute shader support, screen-space, global illumination, displacement maps (make it rendering only but not physical) - "rendering only but not physical" is exactly the transform/visual split the GPU-resident set draws, so all of this is GPU-side state with no CPU mirror to keep in step
+- [_] (dynamic) ambient occulusion, emissivity, mipmapping, occulusion culling (bbox first, extra after), sRGB handle, proper PBR with tests, tesselation, add Fog/Clouds/Skybox compute shader support, screen-space, global illumination, displacement maps (make it rendering only but not physical) - "rendering only but not physical" is exactly the transform/visual split the GPU-resident set draws, so all of this is GPU-side state with no CPU mirror to keep in step
+- [_] more blender-like render pipeline ideas and build-out
 - [_] render pipeline nodes for above
 - [_] plan the entire rendering system to a visual compositor system like Unity. https://docs.unity3d.com/Manual/scriptable-render-pipeline-introduction.html https://docs.unity3d.com/Packages/com.unity.visual-compositor@0.27/manual/nodes.html
 - [_] ensure full parallel/vectorised (i.e. get all active scenes => build entity list => update gpu resident => batch render all cameras in every scene) - stable entity slots, per-world particle pools and batched camera submission are built. The remaining work is the product-side active-scene collector and parallel presentation walk; every camera can already read its world's buffers without re-uploading them.
 - [_] better memory packing for editablemeshes and editabletextures. also add quantization support for editablemesh and editabletexture as a component that rounds values and such (e.g. (u)float16, (u)float8, (u)int16, (u)int8, (u)int4, bool) test many 4k textures on gpu and packing. test an atlas system on gpu too.
+- [_] different antialiasing choices as render nodes
 
 ### FUTURE
 
@@ -140,3 +153,5 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] rpg maker port tool
 - [_] docs/MOBILE.md implementation
 - [_] concept idea: setup a public mcp repository in python, add .mcp.json in project folder that loads it, it watches forums channels in the discord server for new/existing bugs. agent writes a message in the channel stating you're fixing it, other agents work on other bugs. agents can write that "this bug is a big rewrite" in the channel too which could be helpful. as a custom plugin? maybe just consider as a separate project.
+- [_] localization support
+- [_] could we try some minecraft shaders / pbr texture packs as test items? maybe upload to my cdn and then load it and ill check if it works
