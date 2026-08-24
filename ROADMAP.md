@@ -40,9 +40,53 @@ The milestone headings below are development labels. Not in line with project ve
 ### v0.19
 
 - [_] final tests and bug fixes for v0.19.0 release
+- [_] remove uncapped framerate button. make "no limit" on the rates sliders to the right, not 0. clamp between 0 and 360, with 361 being unlimited.
+- [_] vsync does not match monitor refresh rate (mine is 165 but locks to 60) - check if bug.
+- [_] auto complete doesn't position absoluteposition properly.
+- [_] add script coloring for keywords and whatnot based on theme. add theme configs for script editor highlighting.
+- [_] isolate each dock widget with their own update signature. maybe its worth just to have each dock widget have its data be sent to the gpu when it updates, and we can add batched updates to reduce synchronisations?
+- [_] ensure dock widgets DO NOT update studio ui signature unless its open
+- [_] separate statistics in bottom left and viewport statistics labels into separate signatures so they dont cause image rewrites and ui rewrites (we write on top of those)
+- [_] when you have different dock widgets open below and on the side of a game scene viewport, it stretches the game viewport image. resizing x/y causes it to stretch in that direction by squash/stretch. it should be centered with the camera AND use the viewport size as the camera's render size. also add camera options to set max image size (default is 1920x1080). also add a way to force overwrite the image size so scripts can edit it as well.
+- [_] remove "lighting service properties" button in "World Lighting" widget.
+- [_] split "acquire swapchain" into deadline waiting, display waiting, worker waiting and event waiting, if possible. or split what you can.
+- [_] have one viewport by default, i see in cascaded cache hits it says in dropdown "Viewport, Viewport 2, Viewport 3, Viewport 4". also make "Viewport 1" the default, not "Viewport".
+- [_] ensure cached locations do BULK transfers to resident gpu for updates so we minimize calls and maximize throughput.
+- [_] prevent renaming world services
+- [_] when you are setting a keybind in the keybinds preference config, make ESC set as "unbound".
+- [_] add a small label above the table of keybinds put "Use ESC to set as unbound".
+- [_] properly implement the Pipeline Profile. Most things are 0ms because they are not recorded/bound properly. Only output-image says something.
+- [_] properly build out team create menu
+- [_] team create build out options properly
+- [_] demo nodes freezes entire studio for like 4 seconds on first open
+- [_] add a CTRL+SHIFT+F keybind for Search-All-Replace-All
+- [_] when i double click a script or right-click edit script, open the script editor if its not open (does not currently)
+- [_] merge the "Find Instances" into the Explorer's search instead. Also add a per-world selector.
+- [_] when i click on something within a world, do not highlight the world, same with when you click in the scene
+- [_] the "Bus" dock widget shows nothing, its useless.
+- [_] build out the "Changes" widget properly, add a record of changes where the file saves as xml or such (timestamp-changes.xml) and you look for them and parse them.
+- [_] breakpoints do NOT function. i set one in the script editor in Rings example ```local function layout(names: { string })
+	for index, mesh in ipairs(names) do``` on the for loop, and it does not trigger. the Debugger widget shows the breakpoint exists, but 0 hits.
+- [_] make the "Particles" demo only spawn a 32x32 grid of particles.
+- [_] selection box and collider outlines visualisations are not cropped out in viewport images, they render on top of the studio ui. All scene-related items should be rendered on the scene image where they exist.
+- [_] move selection box / collider outlines visualisations under the scene cache
+- [_] add Heap dock widget under View dropdown
+- [_] Move Sync Rojo Project/Universe to a Sync dropdown after the Run dropdown.
+- [_] convert Sync Rojo Project/Universe to a dock widget instead of a popup with white background
+- [_] "collect effects" is 55.44MB but no scenes are currently running. post-particles.
+- [_] ensure we cleanup all allocated objects when a scene ends (e.g. particles, meshes, images, etc that are resident on gpu)
+- [_] convert Assets dock widget into a paginated dock widget. Do 100 items per page by default. add filters for file/asset types too.
+- [_] The Script/LocalScript/ModuleScript buttons in Script tab is really wide for some reason
+- [_] in the explorer, add a + button when you hover on a explorer item that is the insert object menu (add a search bar where you typre and it searches) to insert something into the object
+- [_] ensure replication is WHITELIST/INCLUSION only. Workspace, Lighting, ReplicatedFirst, ReplicatedStorage, StarterGui (clones to PlayerGui via separate player system), StarterPack (clones to Backpack via separate player system), Players (see other players, does NOT replicate their UI/PlayerScripts), Teams, StarterPlayerScripts (copies to each client, clients do NOT see each other's), StarterCharacterScripts (copies to each character, clients CAN see each others).
+- [_] ensure replication only replicates items WITHIN services and their properties. Exceptions are ServerScriptService/ServerStorage which are server only, and 
+- [_] heap shows "build interface" is always growing overtime
+- [_] add tests that show Heap values growing overtime for different demos. ensure we don't memory leak.
 
 ### v0.20
 
+- [_] consolidate render pipeline to a easy-to-find location for future work.
+- [_] ensure when you read the render pipeline, its obvious what it does and in what order
 - [_] thoroughly implement every user-interface element, including `SurfaceGui` and `BillboardGui` - `SurfaceGui` gains `ZOffset`, `MaxDistance`, `ClipsDescendants` and `Active`, and `BillboardGui` gains `Active`, `Brightness`, `ClipsDescendants`, `CurrentDistance`, `DistanceStep`, `ExtentsOffsetWorldSpace`, `SizeOffset` and `PlayerToHideFrom`; new classes `UIGradient`, `UITableLayout`, `UIPageLayout` and `UIDragDetector`; `ScrollingFrame` completed with `ScrollingEnabled`, `AutomaticCanvasSize`, the two `ScrollBarInset`s, `VerticalScrollBarPosition`, `ElasticBehavior`, the three bar images and `AbsoluteCanvasSize`/`AbsoluteWindowSize`, plus wheel and thumb-drag input; `RichText`, `MaxVisibleGraphemes`, `ContentText`, `TextBounds` and `TextFits` on every text class; `Interactable`, the four `NextSelection*`, `SelectionOrder` and `SelectionImageObject` on `GuiObject`; `HoverImage`, `PressedImage` and `ResampleMode` on the image classes; `Enabled` and `ApplyStrokeMode` on `UIStroke`. Laid out, drawn by both backends, saved, replicated, bound and in the Properties panel. `D00129` carries the members that need a subsystem this engine has not got (filed as `D00120`, renumbered at v0.17 - that number was already a retired entry)
 - [_] build out all remaining roblox surfaces with available underlying surface - all seven texture channels now resolve, stream, preview and render; metalness reaches forward and deferred PBR, alpha follows Overlay, Transparency, TintMask and Opaque semantics including masked shadows, and surface colour, emission and resampling are saved, replicated, bound and packed into the 48-byte GPU-resident instance row. Content-object aliases remain outside this item because the engine has no `Content` object type beneath them
 - [_] port many particle features from unity to here (https://docs.unity3d.com/6000.5/Documentation/ScriptReference/ParticleSystem.html) - the existing lifetime curves, shape emission, drag, velocity inheritance, texture sheets and orientation modes are joined by distance emission, a live `MaxParticles` capacity, one-shot `Emit` from disabled emitters and `Clear`, a speed ceiling, scrolling procedural noise, and radial and tangential acceleration. Shared emitter values occupy the six reserved words in the GPU parameter row, while the 28-byte quantised `ParticleInstance` remains unchanged. The host fallback and `particle-step.comp` implement the same forces, the authored controls save and bind in both languages, and limit edits reclaim the resident block at its new size. Collision, sub-emitters and external force fields are not inert properties here: each needs an underlying collision/event/field subsystem before it can honestly be exposed
@@ -121,8 +165,20 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] skinning and animation - `bake` skips joints and weights and keeps the rest pose, because there are no skeletons in the engine yet - joint palettes are visual transform state and go GPU-resident beside the instance rows; the animation *controller* that produces them stays on the CPU, per the split above
 - [_] add accessories support
 - [_] add future addition spots like animation trees, blueprints, state blueprints, etc. blueprints = node graph.
+- [_] animation + animation track + animator => binds to character controller
+- [_] build out ArcHandles, BoxHandleAdornments (and similar), etc
+- [_] make virtualised Gui2D and such where they are just a set of components instead of an actual class that is accessible (since you normally cannot create them in studio). Ask user which to keep and which to convert to virtual instances. Needs hierarchy too.
+- [_] ensure :IsA() handles virtual instances and does hierarchy.
+- [_] ensure valueobjects work
+- [_] ensure you built out all the UI items and they work (e.g. drag selector)
+- [_] ensure weld / weld constraints work
+- [_] ensure ViewportFrame and WorldRoot are implemented and work
 
 ### v0.23
+
+- [_] security audit, fuzzy tests, bound tests, etc.
+
+### v0.24
 
 - [_] find a way to (easily) and thoroughly test rendering steps and ensure they produce the right image with right projections
 - [_] finish portals so lighting, physics, projection, clipping and geometry crossing the seam are seamless, build an actual demo that agent can see that properly visualises this
@@ -159,3 +215,5 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] concept idea: setup a public mcp repository in python, add .mcp.json in project folder that loads it, it watches forums channels in the discord server for new/existing bugs. agent writes a message in the channel stating you're fixing it, other agents work on other bugs. agents can write that "this bug is a big rewrite" in the channel too which could be helpful. as a custom plugin? maybe just consider as a separate project.
 - [_] localization support
 - [_] could we try some minecraft shaders / pbr texture packs as test items? maybe upload to my cdn and then load it and ill check if it works
+- [_] atomic engine icons
+- [_] studio icons
