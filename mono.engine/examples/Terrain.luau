@@ -854,9 +854,17 @@ type SamplingChunk = {
 
 local sampling: SamplingChunk? = nil
 
-local function AdvanceSampling(): boolean
+local function AdvanceSampling(cx: number, cz: number): boolean
 	local job = sampling
 	if job == nil then
+		return false
+	end
+
+	-- A viewport can replace CurrentCamera while a sliced sample is in flight.
+	-- Drop an uncommitted tile that no longer belongs to the visible ring rather
+	-- than finishing it around the old camera and deleting it a few frames later.
+	if not job.Committing and (math.abs(job.Cx - cx) > VIEW or math.abs(job.Cz - cz) > VIEW) then
+		sampling = nil
 		return false
 	end
 	if job.Committing then
@@ -879,13 +887,12 @@ local function AdvanceSampling(): boolean
 end
 
 local function Stream()
-	if AdvanceSampling() then
-		return
-	end
-
 	local at = SubjectPosition()
 	local cx = ChunkOf(at.X)
 	local cz = ChunkOf(at.Z)
+	if AdvanceSampling(cx, cz) then
+		return
+	end
 
 	-- The nearest chunk that is wanted and not built. Squared distance in chunk
 	-- units, so the ring fills roughly outward rather than row by row.
@@ -917,7 +924,7 @@ local function Stream()
 			NextRow = 0,
 			Committing = false,
 		}
-		AdvanceSampling()
+		AdvanceSampling(cx, cz)
 		-- Sampling and eviction stay on separate ticks. A tick that both builds
 		-- and destroys is the worst of both.
 		return

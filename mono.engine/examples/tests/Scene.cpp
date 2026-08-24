@@ -1415,6 +1415,11 @@ TEST_CASE("the terrain stream follows the camera that is actually active", "[exa
 	}
 
 	CHECK(InScene(store, "Terrain_10_-10") != engine::ecs::NULL_ENTITY);
+	// The one origin tile supports the spawn before streaming starts. Its old
+	// surrounding ring must not continue after Studio replaces CurrentCamera,
+	// otherwise the world visibly builds far away and then deletes that work.
+	CHECK(InScene(store, "Terrain_1_0") == engine::ecs::NULL_ENTITY);
+	CHECK(InScene(store, "Terrain_0_1") == engine::ecs::NULL_ENTITY);
 }
 
 TEST_CASE("the terrain generator is a pure function of its seed", "[examples][scene]") {
@@ -1731,6 +1736,9 @@ TEST_CASE("the player list names everybody in the world", "[examples][scene][pla
 
 		const Entity screen = store.FindFirstChild(container, "PlayerList");
 		REQUIRE(screen != engine::ecs::NULL_ENTITY);
+		const auto *layer = store.Get<engine::gui::Layer>(screen);
+		REQUIRE(layer != nullptr);
+		CHECK(layer->Enabled);
 
 		const Entity card = store.FindFirstChild(screen, "Card");
 		REQUIRE(card != engine::ecs::NULL_ENTITY);
@@ -1924,6 +1932,11 @@ TEST_CASE("the mirror ball mirrors every facet, faces them out and has no holes"
 	// hiding the finding.
 	static thread_local std::vector<engine::scene::SurfacePane> panes;
 	REQUIRE(engine::scene::GatherSurfacePanes(store, panes) == facets);
+	CHECK(engine::scene::SurfaceLimitOf(store) == 32);
+	for (const engine::scene::SurfacePane &pane : panes) {
+		REQUIRE(store.Get<engine::scene::SurfaceCamera>(pane.Camera) != nullptr);
+		CHECK(store.Get<engine::scene::SurfaceCamera>(pane.Camera)->FPS == Approx(60.0f));
+	}
 
 	// **And the tiles more than cover the ball, which is what closes the holes.**
 	// A rectangle circumscribing a triangle is twice the triangle's area, so a

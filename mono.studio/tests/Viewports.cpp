@@ -131,4 +131,13 @@ TEST_CASE("each viewport remembers an independent camera per world", "[studio][v
 	CHECK(leftPose.Frame.Position == engine::core::Vector3{1.0f, 2.0f, 3.0f});
 	CHECK(leftPose.Yaw == 0.25f);
 	CHECK(rightPose.Frame.Position == engine::core::Vector3{40.0f, 50.0f, 60.0f});
+
+	// Closing a panel has no world to use, but it must retain the pose of the
+	// world that was visible. Reopening the same world restores that pose from
+	// session memory rather than starting a new camera.
+	leftPose.Frame.Position = {7.0f, 8.0f, 9.0f};
+	left.Use(WorldId{}, leftPose);
+	leftPose = DefaultViewportCamera();
+	left.Use(SCENE, leftPose);
+	CHECK(leftPose.Frame.Position == engine::core::Vector3{7.0f, 8.0f, 9.0f});
 }

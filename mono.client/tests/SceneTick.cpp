@@ -21,6 +21,7 @@
 #include <engine/render/DebugPanels.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Controls.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
@@ -205,7 +206,9 @@ TEST_CASE("the hallway camera and NPC cross portals in a standalone client", "[d
 	const engine::ecs::Entity character = InWorkspace(session.World, "HallwayWalker");
 	REQUIRE(character != engine::ecs::NULL_ENTITY);
 	const engine::ecs::Entity root = session.World.FindFirstChild(character, "HumanoidRootPart");
+	const engine::ecs::Entity humanoid = session.World.FindFirstChild(character, "Humanoid");
 	REQUIRE(root != engine::ecs::NULL_ENTITY);
+	REQUIRE(humanoid != engine::ecs::NULL_ENTITY);
 
 	const engine::ecs::Entity camera = session.World.Resource<ActiveCamera>()->Entity;
 	session.Tick(100);
@@ -215,6 +218,20 @@ TEST_CASE("the hallway camera and NPC cross portals in a standalone client", "[d
 	const auto *characterTransit = session.World.Get<engine::scene::PortalTransit>(root);
 	REQUIRE(characterTransit != nullptr);
 	CHECK(characterTransit->Serial >= 1u);
+
+	// The demonstration is a shuttle rather than a one-way walk. Wait for the
+	// authored controller to reverse at the south end, then prove the same body
+	// is walking north and has crossed another mouth on its return leg.
+	bool returning = false;
+	for (int tick = 0; tick < 240 && !returning; tick++) {
+		session.Tick(1);
+		const auto *intent = session.World.Get<engine::scene::Humanoid>(humanoid);
+		returning = intent != nullptr && intent->MoveDirection.Z > 0.5f;
+	}
+	CHECK(returning);
+	const auto *returnTransit = session.World.Get<engine::scene::PortalTransit>(root);
+	REQUIRE(returnTransit != nullptr);
+	CHECK(returnTransit->Serial >= 2u);
 }
 
 TEST_CASE("the camera is a row the systems move, not a resource holding a value", "[demo]") {
