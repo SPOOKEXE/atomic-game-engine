@@ -302,9 +302,15 @@ if viewpoint ~= nil then
 
 	if WHICH == "fly" then
 		local CAMERA_SPEED = 9
+		local cameraHeading = -1
 		RunService.Heartbeat:Connect(function(deltaTime: number)
 			local frame = view.CFrame
-			local forward = frame.LookVector
+			if frame.Position.Z <= -(LONG / 2 + 8) then
+				cameraHeading = 1
+			elseif frame.Position.Z >= LONG / 2 + 8 then
+				cameraHeading = -1
+			end
+			local forward = Vector3.new(0, 0, cameraHeading)
 			local eye = frame.Position + forward * CAMERA_SPEED * deltaTime
 			view.CFrame = CFrame.lookAt(eye, eye + forward)
 		end)
@@ -323,12 +329,23 @@ if character ~= nil then
 	local root = character:FindFirstChild("HumanoidRootPart") :: BasePart?
 	local humanoid = character:FindFirstChild("Humanoid") :: Humanoid?
 	if root ~= nil and humanoid ~= nil then
-		root.CFrame = CFrame.lookAt(
+		local movingRoot: BasePart = root
+		local movingHumanoid: Humanoid = humanoid
+		movingRoot.CFrame = CFrame.lookAt(
 			Vector3.new(LONG_X, 3, LONG / 2 + 8),
 			Vector3.new(LONG_X, 3, LONG / 2)
 		)
-		humanoid.WalkSpeed = 9
-		humanoid.MoveDirection = Vector3.new(0, 0, -1)
+		movingHumanoid.WalkSpeed = 9
+		local heading = -1
+		movingHumanoid.MoveDirection = Vector3.new(0, 0, heading)
+		RunService.Heartbeat:Connect(function(_deltaTime: number)
+			if movingRoot.Position.Z <= -(LONG / 2 + 8) then
+				heading = 1
+			elseif movingRoot.Position.Z >= LONG / 2 + 8 then
+				heading = -1
+			end
+			movingHumanoid.MoveDirection = Vector3.new(0, 0, heading)
+		end)
 	end
 end
 

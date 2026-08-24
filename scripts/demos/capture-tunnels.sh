@@ -78,7 +78,7 @@ capture() {
 if [ $# -ge 1 ]; then
 	capture "$1"
 else
-	for view in long short plain; do
+	for view in long-north long-south short-north short-south plain; do
 		capture "$view"
 	done
 fi

@@ -51,6 +51,7 @@
 -- six, so a pane's rotation is the whole of its aim.
 
 local WORLD = workspace
+local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
 -- --- the shape ------------------------------------------------------------
@@ -510,6 +511,37 @@ drifter("ShortLantern", SHORT_MARK, {
 -- mouth.
 block("SpawnLocation", Vector3.new(8, 1, 8), Vector3.new(0, 0.5, 30), FLOOR)
 
+-- A controller-driven character repeatedly crosses the west tunnel's skip.
+-- Its root and every limb are ordinary portal crossers, so watching it enter,
+-- straddle and leave exercises the path an interactive player uses.
+local walker = Instance.new("Player")
+walker.Name = "TunnelWalker"
+walker.Parent = Players
+
+local character = walker:LoadCharacter()
+if character ~= nil then
+	local root = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	local humanoid = character:FindFirstChild("Humanoid") :: Humanoid?
+	if root ~= nil and humanoid ~= nil then
+		local movingRoot: BasePart = root
+		local movingHumanoid: Humanoid = humanoid
+		movingRoot.CFrame = CFrame.lookAt(
+			Vector3.new(LONG_X, 3, LONG / 2 + 6),
+			Vector3.new(LONG_X, 3, LONG / 2)
+		)
+		movingHumanoid.WalkSpeed = DRIFT_SPEED
+		local heading = -1
+		RunService.Heartbeat:Connect(function(_deltaTime: number)
+			if movingRoot.Position.Z <= -(LONG / 2 + 6) then
+				heading = 1
+			elseif movingRoot.Position.Z >= LONG / 2 + 6 then
+				heading = -1
+			end
+			movingHumanoid.MoveDirection = Vector3.new(0, 0, heading)
+		end)
+	end
+end
+
 -- --- a still, for when nobody is walking ----------------------------------
 --
 -- **Off by default, because this scene is meant to be walked.** A
@@ -530,25 +562,59 @@ local viewpoint: CFrame? = nil
 local VIEW = ""
 local WHICH = if VIEW == "" then nil else VIEW
 
+local cameraFrames = {
+	["long-north"] = CFrame.lookAt(
+		Vector3.new(LONG_X, 4, LONG / 2 + 12),
+		Vector3.new(LONG_X, 4, LONG / 2)
+	),
+	["long-south"] = CFrame.lookAt(
+		Vector3.new(LONG_X, 4, -(LONG / 2 + 12)),
+		Vector3.new(LONG_X, 4, -(LONG / 2))
+	),
+	["short-north"] = CFrame.lookAt(
+		Vector3.new(SHORT_X, 4, SHORT / 2 + 12),
+		Vector3.new(SHORT_X, 4, SHORT / 2)
+	),
+	["short-south"] = CFrame.lookAt(
+		Vector3.new(SHORT_X, 4, -(SHORT / 2 + 12)),
+		Vector3.new(SHORT_X, 4, -(SHORT / 2))
+	),
+}
+
+-- Named cameras remain available to separate Studio viewports without making
+-- any one of them the player's camera. The capture mode selects one explicitly.
+local cameras: { [string]: Camera } = {}
+for name, frame in cameraFrames do
+	local camera = Instance.new("Camera")
+	camera.Name = name
+	camera.FieldOfView = 70
+	camera.CFrame = frame
+	camera.Parent = WORLD
+	cameras[name] = camera
+end
+
 if WHICH == "long" then
-	-- Outside the west tunnel's north mouth, looking down it. The far end is
-	-- four studs away through a building thirty-two studs long.
-	viewpoint = CFrame.new(Vector3.new(LONG_X, 4, LONG / 2 + 12))
+	WHICH = "long-north"
 elseif WHICH == "short" then
-	-- Outside the east tunnel's north mouth. Twenty-six studs of corridor
-	-- stretch away out of a four-stud box.
-	viewpoint = CFrame.new(Vector3.new(SHORT_X, 4, SHORT / 2 + 12))
+	WHICH = "short-north"
+end
+
+if WHICH ~= nil and cameraFrames[WHICH] ~= nil then
+	viewpoint = cameraFrames[WHICH]
 elseif WHICH == "plain" then
 	-- Both buildings at once, which is the comparison the walks turn on.
 	viewpoint = CFrame.new(Vector3.new(0, 12, 62)) * CFrame.Angles(-0.14, 0, 0)
 end
 
 if viewpoint ~= nil then
-	local view = Instance.new("Camera")
-	view.Name = "Viewer"
-	view.FieldOfView = 70
-	view.CFrame = viewpoint
-	view.Parent = WORLD
+	local view = cameras[WHICH :: string]
+	if view == nil then
+		view = Instance.new("Camera")
+		view.Name = "Viewer"
+		view.FieldOfView = 70
+		view.CFrame = viewpoint
+		view.Parent = WORLD
+	end
 	WORLD.CurrentCamera = view
 end
 

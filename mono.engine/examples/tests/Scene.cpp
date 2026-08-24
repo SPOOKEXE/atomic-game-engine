@@ -846,9 +846,19 @@ TEST_CASE("the tunnels scene is shorter and longer inside than out", "[examples]
 	REQUIRE(plainBounds != nullptr);
 	CHECK(floorTop > plainPlacement->Frame.Position.Y + plainBounds->HalfExtent.Y);
 
-	// **Nothing is set as the world's camera**, which is what makes this one
-	// walkable where `Hallway.luau` is a capture: a `CurrentCamera` standing in
-	// a world somebody presses Play in overrides the character's own.
+	const Entity demoCharacter = InScene(store, "TunnelWalker");
+	REQUIRE(demoCharacter != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(demoCharacter, "HumanoidRootPart") != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(demoCharacter, "Humanoid") != engine::ecs::NULL_ENTITY);
+
+	// Named views exist on both sides of both tunnels for independent Studio
+	// viewports and deterministic captures. None is selected by default, so a
+	// player still gets its character camera when Play starts.
+	for (const char *name : {"long-north", "long-south", "short-north", "short-south"}) {
+		const Entity camera = InScene(store, name);
+		REQUIRE(camera != engine::ecs::NULL_ENTITY);
+		CHECK(store.Get<engine::scene::Camera>(camera) != nullptr);
+	}
 	CHECK(InScene(store, "Viewer") == engine::ecs::NULL_ENTITY);
 }
 
@@ -928,7 +938,13 @@ TEST_CASE("the tunnels scene leaves its walk paths clear", "[examples][scene]") 
 	size_t measured = 0;
 	store.Each<const engine::scene::Transform, const engine::scene::Bounds>(
 		[&](Entity part, const engine::scene::Transform &placement, const engine::scene::Bounds &bounds) {
-			if (isPane(part)) {
+			// The demo character is the thing the channel exists to carry, not
+			// authored scenery blocking it. Every rendered body row carries its rig
+			// identity, including the root that starts on the approach.
+			const Entity parent = store.ParentOf(part);
+			const bool characterBody = store.Get<engine::scene::CharacterLimb>(part) != nullptr ||
+									   store.Get<engine::scene::Character>(parent) != nullptr;
+			if (isPane(part) || characterBody) {
 				return;
 			}
 

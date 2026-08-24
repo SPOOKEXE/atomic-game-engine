@@ -2945,9 +2945,11 @@ namespace engine::scene {
 		// used only to aim portal and mirror cameras.
 		const ActiveCamera *active = store.Resource<ActiveCamera>();
 		const CameraController *controller = store.Resource<CameraController>();
-		if (active != nullptr && controller != nullptr && controller->Subject == NULL_ENTITY &&
-			active->Entity != NULL_ENTITY && store.Alive(active->Entity) &&
-			!store.Has<Motion>(active->Entity)) {
+		const bool independentlyPlaced =
+			controller != nullptr &&
+			(controller->Subject == NULL_ENTITY || controller->Mode == CameraMode::Scriptable);
+		if (active != nullptr && independentlyPlaced && active->Entity != NULL_ENTITY &&
+			store.Alive(active->Entity) && !store.Has<Motion>(active->Entity)) {
 			Transform *placement = store.GetMutable<Transform>(active->Entity);
 			PreviousTransform *before = store.GetMutable<PreviousTransform>(active->Entity);
 			if (placement != nullptr && before != nullptr) {
