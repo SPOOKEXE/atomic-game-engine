@@ -39,16 +39,16 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### v0.19
 
-- [_] remove "lighting service properties" button in "World Lighting" widget.
-- [_] remove uncapped framerate button. make "no limit" on the rates sliders to the right, not 0. clamp between 0 and 360, with 361 being unlimited.
-- [_] prevent renaming world services
-- [_] add a small label above the table of keybinds put "Use ESC to set as unbound".
-- [_] make the "Particles" demo only spawn a 32x32 grid of particles.
-- [_] add Heap dock widget under View dropdown
-- [_] selection box and collider outlines visualisations are not cropped out in viewport images, they render on top of the studio ui. All scene-related items should be rendered on the scene image where they exist.
-- [_] move selection box / collider outlines visualisations under the scene cache
-- [_] when i double click a script or right-click edit script, open the script editor if its not open (does not currently)
-- [_] merge the "Find Instances" into the Explorer's search instead. Also add a per-world selector.
+- [x] remove "lighting service properties" button in "World Lighting" widget.
+- [x] remove uncapped framerate button. make "no limit" on the rates sliders to the right, not 0. clamp between 0 and 360, with 361 being unlimited.
+- [x] prevent renaming world services
+- [x] add a small label above the table of keybinds put "Use ESC to set as unbound".
+- [x] make the "Particles" demo only spawn a 32x32 grid of particles.
+- [x] add Heap dock widget under View dropdown
+- [x] selection box and collider outlines visualisations are not cropped out in viewport images, they render on top of the studio ui. All scene-related items should be rendered on the scene image where they exist.
+- [x] move selection box / collider outlines visualisations under the scene cache
+- [x] when i double click a script or right-click edit script, open the script editor if its not open (does not currently)
+- [x] merge the "Find Instances" into the Explorer's search instead. Also add a per-world selector.
 
 - [_] the "Bus" dock widget shows nothing, its useless.
 - [_] vsync does not match monitor refresh rate (mine is 165 but locks to 60) - check if bug.
