@@ -39,38 +39,38 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### v0.19
 
-- [_] final tests and bug fixes for v0.19.0 release
+- [_] remove "lighting service properties" button in "World Lighting" widget.
 - [_] remove uncapped framerate button. make "no limit" on the rates sliders to the right, not 0. clamp between 0 and 360, with 361 being unlimited.
+- [_] prevent renaming world services
+- [_] add a small label above the table of keybinds put "Use ESC to set as unbound".
+- [_] make the "Particles" demo only spawn a 32x32 grid of particles.
+- [_] add Heap dock widget under View dropdown
+- [_] selection box and collider outlines visualisations are not cropped out in viewport images, they render on top of the studio ui. All scene-related items should be rendered on the scene image where they exist.
+- [_] move selection box / collider outlines visualisations under the scene cache
+- [_] when i double click a script or right-click edit script, open the script editor if its not open (does not currently)
+- [_] merge the "Find Instances" into the Explorer's search instead. Also add a per-world selector.
+
 - [_] vsync does not match monitor refresh rate (mine is 165 but locks to 60) - check if bug.
-- [_] auto complete doesn't position absoluteposition properly.
+- [_] auto complete popup doesn't position properly above/below text we're editing.
 - [_] add script coloring for keywords and whatnot based on theme. add theme configs for script editor highlighting.
 - [_] isolate each dock widget with their own update signature. maybe its worth just to have each dock widget have its data be sent to the gpu when it updates, and we can add batched updates to reduce synchronisations?
 - [_] ensure dock widgets DO NOT update studio ui signature unless its open
 - [_] separate statistics in bottom left and viewport statistics labels into separate signatures so they dont cause image rewrites and ui rewrites (we write on top of those)
 - [_] when you have different dock widgets open below and on the side of a game scene viewport, it stretches the game viewport image. resizing x/y causes it to stretch in that direction by squash/stretch. it should be centered with the camera AND use the viewport size as the camera's render size. also add camera options to set max image size (default is 1920x1080). also add a way to force overwrite the image size so scripts can edit it as well.
-- [_] remove "lighting service properties" button in "World Lighting" widget.
 - [_] split "acquire swapchain" into deadline waiting, display waiting, worker waiting and event waiting, if possible. or split what you can.
 - [_] have one viewport by default, i see in cascaded cache hits it says in dropdown "Viewport, Viewport 2, Viewport 3, Viewport 4". also make "Viewport 1" the default, not "Viewport".
 - [_] ensure cached locations do BULK transfers to resident gpu for updates so we minimize calls and maximize throughput.
-- [_] prevent renaming world services
 - [_] when you are setting a keybind in the keybinds preference config, make ESC set as "unbound".
-- [_] add a small label above the table of keybinds put "Use ESC to set as unbound".
 - [_] properly implement the Pipeline Profile. Most things are 0ms because they are not recorded/bound properly. Only output-image says something.
 - [_] properly build out team create menu
 - [_] team create build out options properly
 - [_] demo nodes freezes entire studio for like 4 seconds on first open
 - [_] add a CTRL+SHIFT+F keybind for Search-All-Replace-All
-- [_] when i double click a script or right-click edit script, open the script editor if its not open (does not currently)
-- [_] merge the "Find Instances" into the Explorer's search instead. Also add a per-world selector.
 - [_] when i click on something within a world, do not highlight the world, same with when you click in the scene
 - [_] the "Bus" dock widget shows nothing, its useless.
 - [_] build out the "Changes" widget properly, add a record of changes where the file saves as xml or such (timestamp-changes.xml) and you look for them and parse them.
 - [_] breakpoints do NOT function. i set one in the script editor in Rings example ```local function layout(names: { string })
 	for index, mesh in ipairs(names) do``` on the for loop, and it does not trigger. the Debugger widget shows the breakpoint exists, but 0 hits.
-- [_] make the "Particles" demo only spawn a 32x32 grid of particles.
-- [_] selection box and collider outlines visualisations are not cropped out in viewport images, they render on top of the studio ui. All scene-related items should be rendered on the scene image where they exist.
-- [_] move selection box / collider outlines visualisations under the scene cache
-- [_] add Heap dock widget under View dropdown
 - [_] Move Sync Rojo Project/Universe to a Sync dropdown after the Run dropdown.
 - [_] convert Sync Rojo Project/Universe to a dock widget instead of a popup with white background
 - [_] "collect effects" is 55.44MB but no scenes are currently running. post-particles.
