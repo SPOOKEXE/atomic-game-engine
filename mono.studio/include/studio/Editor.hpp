@@ -1693,6 +1693,7 @@ namespace studio {
 		void DrawRenderPipelineInspector();
 		void DrawRenderPipelineSchedule();
 		void DrawPipelineProfile();
+		void DrawRojoSync();
 		void DrawWorldLighting();
 		void DrawProfileWatch();
 		void
@@ -4902,11 +4903,15 @@ namespace studio {
 		bool AskingOpen = false;
 		//@}
 
-		// Whether the Rojo project picker is up. See `SyncRojo`.
-		bool AskingRojo = false;
+		// Whether the Rojo sync dock is open. See `DrawRojoSync`.
+		bool ShowRojoSync = false;
 
-		// Whether the Rojo universe picker is up. See `SyncRojoWorlds`.
-		bool AskingRojoUniverse = false;
+		// The two sync documents are independent inputs, so changing one does not
+		// replace the path somebody is preparing for the other.
+		//@{
+		char RojoProjectPath[4096] = {};
+		char RojoUniversePath[4096] = {};
+		//@}
 		// Which of the file modals is up. At most one at a time.
 		//@{
 		bool AskingExport = false;

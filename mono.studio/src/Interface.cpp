@@ -59,7 +59,7 @@ namespace studio {
 		// a corner - which is exactly the failure it exists to fix.
 		// **v12 because v11 was briefly built with the old side-by-side split.**
 		// Reusing that id leaves half the scene empty for anybody who launched it.
-		constexpr const char *DOCKSPACE = "StudioDockSpace.v13";
+		constexpr const char *DOCKSPACE = "StudioDockSpace.v14";
 
 		constexpr const char *VIEWPORT = "Viewport 1";
 		constexpr const char *VIEWPORT2 = "Viewport 2";
@@ -80,6 +80,7 @@ namespace studio {
 		constexpr const char *STATISTICS = "Statistics";
 		constexpr const char *FRAMEGRAPH = "Frame Graph";
 		constexpr const char *HEAP = "Heap";
+		constexpr const char *ROJO_SYNC = "Sync Rojo";
 
 		// The rest, which have no constant of their own because only this list
 		// and their own `Begin` ever name them. Spelled here rather than
@@ -99,6 +100,7 @@ namespace studio {
 			STATISTICS,
 			FRAMEGRAPH,
 			HEAP,
+			ROJO_SYNC,
 			"History",
 			"Assets",
 			"Render Pipeline",
@@ -189,6 +191,7 @@ namespace studio {
 			ImGui::DockBuilderDockWindow(STATISTICS, rightLower);
 			ImGui::DockBuilderDockWindow(FRAMEGRAPH, bottom);
 			ImGui::DockBuilderDockWindow(HEAP, bottom);
+			ImGui::DockBuilderDockWindow(ROJO_SYNC, rightLower);
 			ImGui::DockBuilderDockWindow("Render Pipeline", bottom);
 
 			ImGui::DockBuilderFinish(dockspace);
@@ -396,6 +399,7 @@ namespace studio {
 			ENGINE_PROFILE_CAT("tools", engine::core::ProfileCategory::Render);
 			Skinned("History", [&] { DrawHistory(); });
 			Skinned("Assets", [&] { DrawAssets(); });
+			Skinned(ROJO_SYNC, [&] { DrawRojoSync(); });
 			Skinned("Render Pipeline", [&] { DrawRenderPipeline(); });
 			Skinned("World Lighting", [&] { DrawWorldLighting(); });
 			Skinned("Pipeline Profile", [&] { DrawPipelineProfile(); });
@@ -1262,6 +1266,7 @@ namespace studio {
 		// question and closed again.
 		ImGui::MenuItem("History", nullptr, &ShowHistory);
 		ImGui::MenuItem("Assets", nullptr, &ShowAssets);
+		ImGui::MenuItem(ROJO_SYNC, nullptr, &ShowRojoSync);
 		ImGui::MenuItem("Render Pipeline", nullptr, &ShowRenderPipeline);
 		ImGui::MenuItem("World Lighting", nullptr, &ShowWorldLighting);
 		ImGui::MenuItem("Pipeline Profile", nullptr, &ShowPipelineProfile);
@@ -1410,30 +1415,6 @@ namespace studio {
 				if (!chosen.empty()) {
 					OpenGame(chosen);
 				}
-			}
-
-			// **Rojo's layout, because it is the one the ecosystem already
-			// writes.** A game laid out for Rojo has its scripts in folders that
-			// mean something, its tooling assumes it, and every author who has
-			// used Roblox knows it - asking them to convert a working project in
-			// order to try this engine is the wrong side of the trade for a
-			// format that costs a parser to read.
-			if (ImGui::MenuItem("Sync Rojo Project...")) {
-				AskingRojo = true;
-				PathBuffer = GamePath.empty() ? std::string("default.project.json")
-											  : (GamePath.parent_path() / "default.project.json").string();
-			}
-
-			// **A second command rather than a mode of the first.** One project
-			// file is one world, which is what an author editing a scene wants;
-			// a universe file is a whole game laid out as a folder of them,
-			// which is what an author opening a checkout wants. Deciding which
-			// they meant by looking inside the file would be a guess, and the
-			// wrong guess builds a game into one world.
-			if (ImGui::MenuItem("Sync Rojo Universe...")) {
-				AskingRojoUniverse = true;
-				PathBuffer = GamePath.empty() ? std::string("main.universe.json")
-											  : (GamePath.parent_path() / "main.universe.json").string();
 			}
 
 			ImGui::Separator();
@@ -1654,6 +1635,32 @@ namespace studio {
 			if (ImGui::MenuItem("Stop All", nullptr, false, AnyRunning())) {
 				EndAllRuns();
 				Say("stopped every scene");
+			}
+			ImGui::EndMenu();
+		}
+
+		if (ImGui::BeginMenu("Sync")) {
+			if (ImGui::MenuItem("Sync Rojo Project...")) {
+				ShowRojoSync = true;
+				std::snprintf(
+					RojoProjectPath,
+					sizeof(RojoProjectPath),
+					"%s",
+					GamePath.empty()
+						? "default.project.json"
+						: (GamePath.parent_path() / "default.project.json").string().c_str()
+				);
+			}
+			if (ImGui::MenuItem("Sync Rojo Universe...")) {
+				ShowRojoSync = true;
+				std::snprintf(
+					RojoUniversePath,
+					sizeof(RojoUniversePath),
+					"%s",
+					GamePath.empty()
+						? "main.universe.json"
+						: (GamePath.parent_path() / "main.universe.json").string().c_str()
+				);
 			}
 			ImGui::EndMenu();
 		}
@@ -2603,10 +2610,49 @@ namespace studio {
 		const std::vector<std::string> GAME_FILES{std::string(engine::game::GAME_EXTENSION)};
 		const std::vector<std::string> WORLD_FILES{std::string(engine::game::WORLD_EXTENSION)};
 
-		// Rojo's own name for its project file, and the only one this opens.
-		// A picker that offered every `.json` would invite somebody to point it
-		// at a `package.json` and get an error rather than a filter.
-		const std::vector<std::string> ROJO_FILES{".json"};
+	}
+
+	void Editor::DrawRojoSync() {
+		if (!ShowRojoSync) {
+			return;
+		}
+		if (!ImGui::Begin(ROJO_SYNC, &ShowRojoSync)) {
+			ImGui::End();
+			return;
+		}
+
+		ImGui::TextWrapped(
+			"Sync a Rojo project into the active world, or sync a universe containing multiple worlds."
+		);
+		ImGui::SeparatorText("Project");
+		ImGui::InputTextWithHint(
+			"##rojo-project", "path to default.project.json", RojoProjectPath, sizeof(RojoProjectPath)
+		);
+		if (ImGui::Button("Sync Project")) {
+			const std::filesystem::path path(RojoProjectPath);
+			std::error_code error;
+			if (!std::filesystem::is_regular_file(path, error)) {
+				Say("Rojo project does not exist: " + path.string(), LogLevel::Warning);
+			} else {
+				SyncRojo(path);
+			}
+		}
+
+		ImGui::SeparatorText("Universe");
+		ImGui::InputTextWithHint(
+			"##rojo-universe", "path to main.universe.json", RojoUniversePath, sizeof(RojoUniversePath)
+		);
+		if (ImGui::Button("Sync Universe")) {
+			const std::filesystem::path path(RojoUniversePath);
+			std::error_code error;
+			if (!std::filesystem::is_regular_file(path, error)) {
+				Say("Rojo universe does not exist: " + path.string(), LogLevel::Warning);
+			} else {
+				SyncRojoWorlds(path);
+			}
+		}
+
+		ImGui::End();
 	}
 
 	void Editor::DrawDialogs() {
@@ -2619,12 +2665,6 @@ namespace studio {
 		}
 		if (AskingOpen) {
 			ImGui::OpenPopup("Open Game");
-		}
-		if (AskingRojoUniverse) {
-			ImGui::OpenPopup("Sync Rojo Universe");
-		}
-		if (AskingRojo) {
-			ImGui::OpenPopup("Sync Rojo Project");
 		}
 		if (AskingExport) {
 			ImGui::OpenPopup("Export World");
@@ -2657,20 +2697,6 @@ namespace studio {
 			AskingOpen = false;
 		} else if (!ImGui::IsPopupOpen("Open Game")) {
 			AskingOpen = false;
-		}
-
-		if (engine::ui::FilePrompt("Sync Rojo Project", PathBuffer, "Sync", ROJO_FILES, true)) {
-			SyncRojo(std::filesystem::path(PathBuffer));
-			AskingRojo = false;
-		} else if (!ImGui::IsPopupOpen("Sync Rojo Project")) {
-			AskingRojo = false;
-		}
-
-		if (engine::ui::FilePrompt("Sync Rojo Universe", PathBuffer, "Sync", ROJO_FILES, true)) {
-			SyncRojoWorlds(std::filesystem::path(PathBuffer));
-			AskingRojoUniverse = false;
-		} else if (!ImGui::IsPopupOpen("Sync Rojo Universe")) {
-			AskingRojoUniverse = false;
 		}
 
 		if (engine::ui::FilePrompt("Export World", PathBuffer, "Export", WORLD_FILES, false)) {

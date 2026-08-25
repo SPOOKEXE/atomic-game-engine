@@ -68,17 +68,16 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] in the explorer, add a + button when you hover on a explorer item that is the insert object menu (add a search bar where you typre and it searches) to insert something into the object
 - [x] convert Assets dock widget into a paginated dock widget. Do 100 items per page by default. add filters for file/asset types too.
 - [x] heap shows "build interface" is always growing overtime with allocated
-
-- [_] add tests that show Heap values growing overtime for different demos. ensure we don't memory leak.
-
-- [_] breakpoints do NOT function. i set one in the script editor in Rings example ```local function layout(names: { string })
-	for index, mesh in ipairs(names) do``` on the for loop, and it does not trigger. the Debugger widget shows the breakpoint exists, but 0 hits.
-- [_] Move Sync Rojo Project/Universe to a Sync dropdown after the Run dropdown.
-- [_] convert Sync Rojo Project/Universe to a dock widget instead of a popup with white background
-- [_] properly implement the Pipeline Profile. Most things are 0ms because they are not recorded/bound properly. Only output-image says something.
+- [x] add tests that show Heap values growing overtime for different demos. ensure we don't memory leak.
+- [x] Move Sync Rojo Project/Universe to a Sync dropdown after the Run dropdown.
+- [x] convert Sync Rojo Project/Universe to a dock widget instead of a popup with white background
+- [x] properly implement the Pipeline Profile. Most things are 0ms because they are not recorded/bound properly. Only output-image says something.
 
 ### v0.20
 
+- [_] breakpoints do NOT function. i set one in the script editor in Rings example ```local function layout(names: { string })
+	for index, mesh in ipairs(names) do``` on the for loop, and it does not trigger. the Debugger widget shows the breakpoint exists, but 0 hits.
+- [_] add stack watch and breakpoint watch dock widgets
 - [_] auto complete popup doesn't position properly above/below text we're editing.
 - [_] add script coloring for keywords and whatnot based on theme. add theme configs for script editor highlighting.
 - [_] properly build out team create menu

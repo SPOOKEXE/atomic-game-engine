@@ -1,3 +1,4 @@
+#include <engine/core/FrameGraph.hpp>
 #include <engine/graph/ExecutionPlan.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/PipelineProfile.hpp>
@@ -11,6 +12,7 @@
 #include <imgui.h>
 #include <studio/Editor.hpp>
 #include <studio/RenderPipelineGraph.hpp>
+#include <string_view>
 
 namespace studio {
 
@@ -39,6 +41,30 @@ namespace studio {
 				}
 			}
 			return nullptr;
+		}
+
+		template <typename Timings>
+		double PassTiming(const Timings &timings, const engine::graph::ProfilePass &pass) {
+			if (const auto named = timings.find(pass.Name.Id()); named != timings.end()) {
+				return named->second;
+			}
+			// The renderer records the display name, but the node kind is the
+			// stable fallback for an older installed pipeline whose names differ.
+			if (const auto kind = timings.find(pass.Kind.Id()); kind != timings.end()) {
+				return kind->second;
+			}
+			return 0.0;
+		}
+
+		double FrameGraphWallTime(const engine::graph::ProfilePass &pass) {
+			const std::string_view name = pass.Name.Text();
+			double microseconds = 0.0;
+			for (const engine::core::FrameSpan &span : engine::core::FrameGraph::Spans()) {
+				if (span.Name == name || span.Name == pass.Kind.Text()) {
+					microseconds += static_cast<double>(span.Milliseconds) * 1000.0;
+				}
+			}
+			return microseconds;
 		}
 
 		template <typename Draw>
@@ -434,19 +460,27 @@ namespace studio {
 			if (renderNode != nullptr) {
 				const auto &gpuTimings = Renderer.PassTimings();
 				const auto &wallTimings = Renderer.PassWallTimes();
-				const auto gpu = gpuTimings.find(renderNode->Name.Id());
-				const auto wall = wallTimings.find(renderNode->Name.Id());
 				ImGui::SeparatorText("Profile");
-				if (gpu != gpuTimings.end() && gpu->second > 0.0) {
+				const engine::graph::ProfilePass pass{
+					engine::graph::NodeId{offset + 1},
+					renderNode->Name,
+					renderNode->Kind,
+				};
+				const double gpu = PassTiming(gpuTimings, pass);
+				double wall = PassTiming(wallTimings, pass);
+				if (wall <= 0.0) {
+					wall = FrameGraphWallTime(pass);
+				}
+				if (gpu > 0.0) {
 					ImGui::Text(
 						"GPU %.3f ms, wall %.3f ms",
-						gpu->second / 1000.0,
-						wall == wallTimings.end() ? 0.0 : wall->second / 1000.0
+						gpu / 1000.0,
+						wall / 1000.0
 					);
 				} else {
 					ImGui::TextDisabled(
 						Renderer.Timed() ? "GPU pending, wall %.3f ms" : "GPU unavailable, wall %.3f ms",
-						wall == wallTimings.end() ? 0.0 : wall->second / 1000.0
+						wall / 1000.0
 					);
 				}
 
@@ -646,11 +680,10 @@ namespace studio {
 		const auto &gpuTimings = Renderer.PassTimings();
 		const auto &wallTimings = Renderer.PassWallTimes();
 		for (engine::graph::ProfilePass &pass : profile.Passes) {
-			if (const auto found = gpuTimings.find(pass.Name.Id()); found != gpuTimings.end()) {
-				pass.Elapsed = found->second;
-			}
-			if (const auto found = wallTimings.find(pass.Name.Id()); found != wallTimings.end()) {
-				pass.Wall = found->second;
+			pass.Elapsed = PassTiming(gpuTimings, pass);
+			pass.Wall = PassTiming(wallTimings, pass);
+			if (pass.Wall <= 0.0) {
+				pass.Wall = FrameGraphWallTime(pass);
 			}
 		}
 		const auto mib = [](uint64_t bytes) { return static_cast<double>(bytes) / (1024.0 * 1024.0); };
@@ -669,8 +702,14 @@ namespace studio {
 			const std::string name(pass.Name.Text());
 			const bool open = ImGui::TreeNodeEx(name.c_str(), ImGuiTreeNodeFlags_SpanAvailWidth);
 			ImGui::SameLine();
-			if (pass.Elapsed > 0.0) {
-				ImGui::TextDisabled("GPU %.3f ms  wall %.3f ms", pass.Elapsed / 1000.0, pass.Wall / 1000.0);
+			if (pass.Elapsed > 0.0 || pass.Wall > 0.0) {
+				if (pass.Elapsed > 0.0) {
+					ImGui::TextDisabled(
+						"GPU %.3f ms  wall %.3f ms", pass.Elapsed / 1000.0, pass.Wall / 1000.0
+					);
+				} else {
+					ImGui::TextDisabled("GPU pending  wall %.3f ms", pass.Wall / 1000.0);
+				}
 			} else {
 				ImGui::TextDisabled(
 					Renderer.Timed() ? "GPU pending  wall %.3f ms" : "GPU unavailable  wall %.3f ms",
