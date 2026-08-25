@@ -22,9 +22,25 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <optional>
 #include <vector>
 
 namespace engine::render {
+
+	namespace {
+		std::optional<InstanceUploadRange> BulkRange(std::span<const InstanceUploadRange> ranges) {
+			if (ranges.empty()) {
+				return std::nullopt;
+			}
+			uint32_t first = ranges.front().First;
+			uint32_t last = first + ranges.front().Count;
+			for (const InstanceUploadRange &range : ranges) {
+				first = std::min(first, range.First);
+				last = std::max(last, range.First + range.Count);
+			}
+			return InstanceUploadRange{first, last - first};
+		}
+	}
 
 	const graph::Node *ViewRecording::GraphNode(core::Name kind) const {
 		const Impl::NamedPipeline *const selectedPipeline = Pipeline;
@@ -219,13 +235,13 @@ namespace engine::render {
 				SDL_EndGPUCopyPass(copy);
 				return false;
 			}
-			for (const InstanceUploadRange &range : world->Instances.DirtyRanges()) {
-				const uint32_t offset = range.First * static_cast<uint32_t>(sizeof(GpuInstance));
+			if (const auto range = BulkRange(world->Instances.DirtyRanges())) {
+				const uint32_t offset = range->First * static_cast<uint32_t>(sizeof(GpuInstance));
 				const SDL_GPUTransferBufferLocation source{State->InstanceTransfer, offset};
 				const SDL_GPUBufferRegion destination{
 					State->InstanceBuffer,
 					offset,
-					range.Count * static_cast<uint32_t>(sizeof(GpuInstance)),
+					range->Count * static_cast<uint32_t>(sizeof(GpuInstance)),
 				};
 				// Queue order protects unchanged resident rows. Cycling here would
 				// select fresh storage and discard every row this partial copy omits.
@@ -233,13 +249,13 @@ namespace engine::render {
 				uploadedBytes += destination.size;
 			}
 
-			for (const InstanceUploadRange &range : target.ResidentIndices.DirtyRanges()) {
-				const uint32_t offset = range.First * static_cast<uint32_t>(sizeof(uint32_t));
+			if (const auto range = BulkRange(target.ResidentIndices.DirtyRanges())) {
+				const uint32_t offset = range->First * static_cast<uint32_t>(sizeof(uint32_t));
 				const SDL_GPUTransferBufferLocation source{State->InstanceIndexTransfer, offset};
 				const SDL_GPUBufferRegion destination{
 					State->InstanceIndexBuffer,
 					offset,
-					range.Count * static_cast<uint32_t>(sizeof(uint32_t)),
+					range->Count * static_cast<uint32_t>(sizeof(uint32_t)),
 				};
 				SDL_UploadToGPUBuffer(copy, &source, &destination, false);
 				uploadedBytes += destination.size;

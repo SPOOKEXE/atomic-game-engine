@@ -57,23 +57,24 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] when i click on something within a world, do not highlight the world, same with when you click in the scene
 - [x] ensure replication is WHITELIST/INCLUSION only. Workspace, Lighting, ReplicatedFirst, ReplicatedStorage, StarterGui (clones to PlayerGui via separate player system), StarterPack (clones to Backpack via separate player system), Players (see other players, does NOT replicate their UI/PlayerScripts), Teams, StarterPlayerScripts (copies to each client, clients do NOT see each other's), StarterCharacterScripts (copies to each character, clients CAN see each others).
 - [x] ensure replication only replicates items WITHIN services and their properties. Exceptions are ServerScriptService/ServerStorage which are server only, etc
+- [x] isolate each dock widget with their own update signature. maybe its worth just to have each dock widget have its data be sent to the gpu when it updates, and we can add batched updates to reduce synchronisations?
+- [x] when you have different dock widgets open below and on the side of a game scene viewport, it stretches the game viewport image. resizing x/y causes it to stretch in that direction by squash/stretch. it should be centered with the camera AND use the viewport size as the camera's render size. also add camera options to set max image size (default is 1920x1080). also add a way to force overwrite the image size so scripts can edit it as well.
+- [x] have one viewport by default, i see in cascaded cache hits it says in dropdown "Viewport, Viewport 2, Viewport 3, Viewport 4". also make "Viewport 1" the default, not "Viewport".
+- [x] ensure cached locations do BULK transfers to resident gpu for updates so we minimize calls and maximize throughput.
+- [x] when you are setting a keybind in the keybinds preference config, make ESC set as "unbound".
 
-- [_] isolate each dock widget with their own update signature. maybe its worth just to have each dock widget have its data be sent to the gpu when it updates, and we can add batched updates to reduce synchronisations?
-- [_] when you have different dock widgets open below and on the side of a game scene viewport, it stretches the game viewport image. resizing x/y causes it to stretch in that direction by squash/stretch. it should be centered with the camera AND use the viewport size as the camera's render size. also add camera options to set max image size (default is 1920x1080). also add a way to force overwrite the image size so scripts can edit it as well.
-- [_] have one viewport by default, i see in cascaded cache hits it says in dropdown "Viewport, Viewport 2, Viewport 3, Viewport 4". also make "Viewport 1" the default, not "Viewport".
-- [_] ensure cached locations do BULK transfers to resident gpu for updates so we minimize calls and maximize throughput.
-- [_] when you are setting a keybind in the keybinds preference config, make ESC set as "unbound".
+- [_] demo nodes freezes entire studio for like 4 seconds on first open
+- [_] "collect effects" is 55.44MB but no scenes are currently running. post-particles.
+- [_] ensure we cleanup all allocated objects when a scene ends (e.g. particles, meshes, images, etc that are resident on gpu)
+- [_] in the explorer, add a + button when you hover on a explorer item that is the insert object menu (add a search bar where you typre and it searches) to insert something into the object
+- [_] convert Assets dock widget into a paginated dock widget. Do 100 items per page by default. add filters for file/asset types too.
+- [_] heap shows "build interface" is always growing overtime with allocated
+
+- [_] add tests that show Heap values growing overtime for different demos. ensure we don't memory leak.
 - [_] breakpoints do NOT function. i set one in the script editor in Rings example ```local function layout(names: { string })
 	for index, mesh in ipairs(names) do``` on the for loop, and it does not trigger. the Debugger widget shows the breakpoint exists, but 0 hits.
 - [_] Move Sync Rojo Project/Universe to a Sync dropdown after the Run dropdown.
 - [_] convert Sync Rojo Project/Universe to a dock widget instead of a popup with white background
-- [_] in the explorer, add a + button when you hover on a explorer item that is the insert object menu (add a search bar where you typre and it searches) to insert something into the object
-- [_] heap shows "build interface" is always growing overtime
-- [_] add tests that show Heap values growing overtime for different demos. ensure we don't memory leak.
-- [_] demo nodes freezes entire studio for like 4 seconds on first open
-- [_] "collect effects" is 55.44MB but no scenes are currently running. post-particles.
-- [_] ensure we cleanup all allocated objects when a scene ends (e.g. particles, meshes, images, etc that are resident on gpu)
-- [_] convert Assets dock widget into a paginated dock widget. Do 100 items per page by default. add filters for file/asset types too.
 - [_] properly implement the Pipeline Profile. Most things are 0ms because they are not recorded/bound properly. Only output-image says something.
 
 ### v0.20

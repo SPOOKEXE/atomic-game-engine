@@ -1066,7 +1066,9 @@ TEST_CASE("one client viewport walks and the others let go", "[studio][playlink]
 	}
 
 	// Two panels, one per client, laid out the way `Editor::SpawnPlayer` lays
-	// them out.
+	// them out. A fresh editor deliberately starts with one panel, so this
+	// fixture creates the two additional panel records it needs.
+	editor.Extras.resize(2);
 	REQUIRE(editor.Extras.size() >= 2);
 	editor.Extras[0].Open = true;
 	editor.Extras[0].World = first;

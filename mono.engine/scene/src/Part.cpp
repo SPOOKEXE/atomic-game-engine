@@ -2683,6 +2683,10 @@ namespace engine::scene {
 			ecs::Classes::Computed(cameraClass, FieldOfViewProperty());
 			ecs::Classes::Property<&Camera::NearPlane>(cameraClass, "NearPlaneZ");
 			ecs::Classes::Property<&Camera::FarPlane>(cameraClass, "FarPlaneZ");
+			ecs::Classes::Property<&Camera::MaxImageWidth>(cameraClass, "MaxImageWidth");
+			ecs::Classes::Property<&Camera::MaxImageHeight>(cameraClass, "MaxImageHeight");
+			ecs::Classes::Property<&Camera::ImageWidth>(cameraClass, "ImageWidth");
+			ecs::Classes::Property<&Camera::ImageHeight>(cameraClass, "ImageHeight");
 			ecs::Classes::Computed(cameraClass, SurfaceSizeProperty());
 
 			// The surface camera's four. `SurfaceSize` above is inherited, so a

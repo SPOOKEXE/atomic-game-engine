@@ -1009,6 +1009,16 @@ namespace engine::scene {
 
 		// Far clipping distance, in metres.
 		float FarPlane = 500.0f;
+
+		// The largest image a renderer may allocate for this camera. The default
+		// keeps an editor viewport from allocating beyond a full HD frame.
+		uint32_t MaxImageWidth = 1920;
+		uint32_t MaxImageHeight = 1080;
+
+		// A non-zero pair replaces the target size. This is useful for scripts
+		// that need a stable capture size independent of the host window.
+		uint32_t ImageWidth = 0;
+		uint32_t ImageHeight = 0;
 	};
 
 	// Something that makes a noise.

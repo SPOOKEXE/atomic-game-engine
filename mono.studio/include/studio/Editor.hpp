@@ -3975,7 +3975,7 @@ namespace studio {
 		// - a closed panel drops its `SceneTarget` - so having a few ready is
 		// what makes the View menu's first three entries work with no wait.
 		// `AddViewport` makes more.
-		static constexpr size_t DEFAULT_EXTRA_VIEWPORTS = 3;
+		static constexpr size_t DEFAULT_EXTRA_VIEWPORTS = 0;
 
 		// **The slot the asset preview owns, past every viewport panel.**
 		// Sharing one with a viewport would make the preview and that panel
@@ -4674,16 +4674,16 @@ namespace studio {
 		// The imgui title of a panel index. See `ViewportState::Title`.
 		//
 		// @param index 0 is the main viewport, 1..`Extras.size()` the others.
-		// @return A string valid until the panels are resized, or "Viewport" for
+		// @return A string valid until the panels are resized, or "Viewport 1" for
 		//         an index that is not a panel.
 		const char *ViewportTitle(size_t index) const {
-			return index == 0 || index > Extras.size() ? "Viewport" : Extras[index - 1].Title.c_str();
+			return index == 0 || index > Extras.size() ? "Viewport 1" : Extras[index - 1].Title.c_str();
 		}
 
 		// What a panel's tab reads, which is not its identity.
 		//
 		// **The scene it is showing.** With four
-		// viewports open the tabs said "Viewport", "Viewport 2", "Viewport 3",
+		// viewports open the tabs said "Viewport 1", "Viewport 2", "Viewport 3",
 		// "Viewport 4" and nothing said which scene any of them held - so the
 		// only way to find the one you wanted was to click each in turn.
 		//

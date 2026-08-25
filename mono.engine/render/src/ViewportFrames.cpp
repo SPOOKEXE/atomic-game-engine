@@ -86,11 +86,19 @@ namespace engine::render {
 				1u,
 				MAX_VIEWPORT_EDGE
 			);
+			const uint32_t imageWidth = lens->ImageWidth > 0 && lens->ImageHeight > 0
+				? lens->ImageWidth
+				: width;
+			const uint32_t imageHeight = lens->ImageWidth > 0 && lens->ImageHeight > 0
+				? lens->ImageHeight
+				: height;
+			const uint32_t maxWidth = lens->MaxImageWidth == 0 ? MAX_VIEWPORT_EDGE : lens->MaxImageWidth;
+			const uint32_t maxHeight = lens->MaxImageHeight == 0 ? MAX_VIEWPORT_EDGE : lens->MaxImageHeight;
 
 			const size_t slot = firstSlot + Entries.size();
 			instances.emplace_back();
 			CollectViewportInstances(store, command.Source, 0, instances.back());
-			targets.push_back({width, height});
+			targets.push_back({std::clamp(imageWidth, 1u, maxWidth), std::clamp(imageHeight, 1u, maxHeight)});
 
 			View view;
 			view.CameraFrame = placement->Frame;

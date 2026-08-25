@@ -61,7 +61,7 @@ namespace studio {
 		// Reusing that id leaves half the scene empty for anybody who launched it.
 		constexpr const char *DOCKSPACE = "StudioDockSpace.v13";
 
-		constexpr const char *VIEWPORT = "Viewport";
+		constexpr const char *VIEWPORT = "Viewport 1";
 		constexpr const char *VIEWPORT2 = "Viewport 2";
 		constexpr const char *EXPLORER = "Explorer";
 		constexpr const char *PROPERTIES = "Properties";

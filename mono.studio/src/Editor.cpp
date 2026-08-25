@@ -346,7 +346,7 @@ namespace studio {
 		ViewportParticleVisibility.resize(1 + extras);
 		GuiRouters.resize(1 + extras);
 
-		// **"Viewport 2" upwards, and the main panel is plain "Viewport".** The
+		// **"Viewport 2" upwards, and the main panel is "Viewport 1".** The
 		// numbering is what a person reads in the View menu and what the saved
 		// layout keys its dock node on, so it is derived from the index and
 		// never from creation order - panel 5 is "Viewport 6" in every session
@@ -1910,6 +1910,18 @@ namespace studio {
 					}
 				}
 			});
+		}
+
+		const auto clampImageSize = [](uint32_t requested, uint32_t maximum, uint32_t fallback) {
+			const uint32_t limit = maximum == 0 ? fallback : maximum;
+			return std::clamp(requested, 1u, std::max(limit, 1u));
+		};
+		if (lens.ImageWidth > 0 && lens.ImageHeight > 0) {
+			target.Width = clampImageSize(lens.ImageWidth, lens.MaxImageWidth, lens.ImageWidth);
+			target.Height = clampImageSize(lens.ImageHeight, lens.MaxImageHeight, lens.ImageHeight);
+		} else {
+			target.Width = clampImageSize(target.Width, lens.MaxImageWidth, 1920u);
+			target.Height = clampImageSize(target.Height, lens.MaxImageHeight, 1080u);
 		}
 
 		// **Remembered for the overlay, which is drawn on this texture every

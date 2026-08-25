@@ -77,7 +77,7 @@ TEST_CASE("no component carries unnamed padding", "[scene][components]") {
 	CHECK(sizeof(Bounds) == sizeof(Vector3));
 	CHECK(sizeof(Motion) == 2 * sizeof(Vector3));
 	CHECK(sizeof(Surface) == sizeof(Name));
-	CHECK(sizeof(Camera) == 3 * sizeof(float));
+	CHECK(sizeof(Camera) == 7 * sizeof(float));
 	// **`ImageTransparency` widened this one and the two bytes it needed came
 	// out of the named padding**, which is the same trade `Visual` records
 	// above: a float needs four-byte alignment, so it could not sit in the three

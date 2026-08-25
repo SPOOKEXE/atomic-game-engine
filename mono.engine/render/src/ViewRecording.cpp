@@ -37,6 +37,30 @@
 
 namespace engine::render {
 
+	namespace {
+		template <typename Value>
+		void StageBulk(
+			Value *destination,
+			std::span<const InstanceUploadRange> ranges,
+			std::span<const Value> source
+		) {
+			if (ranges.empty()) {
+				return;
+			}
+			uint32_t first = ranges.front().First;
+			uint32_t last = first + ranges.front().Count;
+			for (const InstanceUploadRange &range : ranges) {
+				first = std::min(first, range.First);
+				last = std::max(last, range.First + range.Count);
+			}
+			std::memcpy(
+				destination + first,
+				source.data() + first,
+				static_cast<size_t>(last - first) * sizeof(Value)
+			);
+		}
+	}
+
 	ViewStart ViewRecording::Begin(const ViewRequest &request) {
 		ENGINE_PROFILE_CAT("ViewRecording::Begin", core::ProfileCategory::Render);
 
@@ -1729,13 +1753,7 @@ namespace engine::render {
 					return;
 				}
 				auto *staged = static_cast<uint32_t *>(mapped);
-				for (const InstanceUploadRange &range : target.ResidentIndices.DirtyRanges()) {
-					std::memcpy(
-						staged + range.First,
-						target.InstanceIndices.data() + range.First,
-						static_cast<size_t>(range.Count) * sizeof(uint32_t)
-					);
-				}
+				StageBulk<uint32_t>(staged, target.ResidentIndices.DirtyRanges(), target.InstanceIndices);
 				SDL_UnmapGPUTransferBuffer(State->Device, State->InstanceIndexTransfer);
 			} else {
 				target.ResidentIndices.Acknowledge();
@@ -1750,13 +1768,7 @@ namespace engine::render {
 				}
 				auto *rows = static_cast<GpuInstance *>(mapped);
 				const std::span<const GpuInstance> packed = residency.PackedRows();
-				for (const InstanceUploadRange &range : residency.DirtyRanges()) {
-					std::memcpy(
-						rows + range.First,
-						packed.data() + range.First,
-						static_cast<size_t>(range.Count) * sizeof(GpuInstance)
-					);
-				}
+				StageBulk<GpuInstance>(rows, residency.DirtyRanges(), packed);
 				SDL_UnmapGPUTransferBuffer(State->Device, State->InstanceTransfer);
 			}
 			haveInstances = true;
