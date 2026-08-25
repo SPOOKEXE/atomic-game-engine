@@ -1514,7 +1514,7 @@ namespace engine::render {
 				// is asleep until the display is ready for another image, and
 				// counting that as rendering work makes the renderer look like
 				// the most expensive thing in a frame it spent waiting.
-				ENGINE_PROFILE_CAT("acquire swapchain", core::ProfileCategory::Idle);
+				ENGINE_PROFILE_CAT("display waiting", core::ProfileCategory::Idle);
 				acquired =
 					SDL_WaitAndAcquireGPUSwapchainTexture(command, Window, &swapchain, &width, &height);
 			}

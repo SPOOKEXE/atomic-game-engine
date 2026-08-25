@@ -50,14 +50,14 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] when i double click a script or right-click edit script, open the script editor if its not open (does not currently)
 - [x] merge the "Find Instances" into the Explorer's search instead. Also add a per-world selector.
 
-- [_] the "Bus" dock widget shows nothing, its useless.
-- [_] vsync does not match monitor refresh rate (mine is 165 but locks to 60) - check if bug.
-- [_] separate statistics in bottom left and viewport statistics labels into separate signatures so they dont cause image rewrites and ui rewrites (we write on top of those)
-- [_] split "acquire swapchain" into deadline waiting, display waiting, worker waiting and event waiting, if possible. or split what you can.
-- [_] ensure dock widgets DO NOT update studio ui signature unless its open
-- [_] when i click on something within a world, do not highlight the world, same with when you click in the scene
-- [_] ensure replication is WHITELIST/INCLUSION only. Workspace, Lighting, ReplicatedFirst, ReplicatedStorage, StarterGui (clones to PlayerGui via separate player system), StarterPack (clones to Backpack via separate player system), Players (see other players, does NOT replicate their UI/PlayerScripts), Teams, StarterPlayerScripts (copies to each client, clients do NOT see each other's), StarterCharacterScripts (copies to each character, clients CAN see each others).
-- [_] ensure replication only replicates items WITHIN services and their properties. Exceptions are ServerScriptService/ServerStorage which are server only, etc
+- [x] the "Bus" dock widget shows nothing, its useless.
+- [x] vsync does not match monitor refresh rate (mine is 165 but locks to 60) - check if bug.
+- [x] separate statistics in bottom left and viewport statistics labels into separate signatures so they dont cause image rewrites and ui rewrites (we write on top of those)
+- [x] split "acquire swapchain" into deadline waiting, display waiting, worker waiting and event waiting, if possible. or split what you can.
+- [x] ensure dock widgets DO NOT update studio ui signature unless its open
+- [x] when i click on something within a world, do not highlight the world, same with when you click in the scene
+- [x] ensure replication is WHITELIST/INCLUSION only. Workspace, Lighting, ReplicatedFirst, ReplicatedStorage, StarterGui (clones to PlayerGui via separate player system), StarterPack (clones to Backpack via separate player system), Players (see other players, does NOT replicate their UI/PlayerScripts), Teams, StarterPlayerScripts (copies to each client, clients do NOT see each other's), StarterCharacterScripts (copies to each character, clients CAN see each others).
+- [x] ensure replication only replicates items WITHIN services and their properties. Exceptions are ServerScriptService/ServerStorage which are server only, etc
 
 - [_] auto complete popup doesn't position properly above/below text we're editing.
 - [_] add script coloring for keywords and whatnot based on theme. add theme configs for script editor highlighting.

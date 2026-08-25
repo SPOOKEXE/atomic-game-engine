@@ -850,7 +850,7 @@ namespace studio {
 
 				bool renderingActive = false;
 				if (presentationDue) {
-					ENGINE_PROFILE_CAT("wait for frame", engine::core::ProfileCategory::Idle);
+					ENGINE_PROFILE_CAT("frame deadline", engine::core::ProfileCategory::Idle);
 
 					// A frame that could not be acquired is minimised, mid-resize, or
 					// still owned by the GPU in immediate mode.

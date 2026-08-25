@@ -541,4 +541,7 @@ namespace engine::scene {
 	//         that is not under one - which is almost everything.
 	// @since v0.15
 	ecs::Entity PlayerOwning(const ecs::Store &store, ecs::Entity instance);
+
+	// Which player's private container owns this instance, or a null entity.
+	ecs::Entity PrivatePlayerOwning(const ecs::Store &store, ecs::Entity instance);
 }

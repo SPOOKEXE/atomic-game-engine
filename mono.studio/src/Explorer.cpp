@@ -885,7 +885,8 @@ namespace studio {
 				const Name worldName = Universe->NameOf(world);
 
 				ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnArrow;
-				if (world == editingWorld && !UniverseSelected) {
+				if (world == SelectedWorldRow || (world == editingWorld && !UniverseSelected &&
+					Selection.empty() && !SelectedWorldRow.IsValid())) {
 					flags |= ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_Selected;
 				}
 

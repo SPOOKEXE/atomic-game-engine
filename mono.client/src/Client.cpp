@@ -210,8 +210,11 @@ namespace client {
 
 		// **Only with a window**, because a present mode belongs to a swapchain
 		// and a headless run has none.
-		if (Settings.Uncapped && Window != nullptr && !Renderer.SetVerticalSync(false)) {
-			ENGINE_WARN("--uncapped had no effect; frames stay paced by the display");
+		if (Window != nullptr && !Renderer.SetVerticalSync(!Settings.Uncapped)) {
+			ENGINE_WARN(
+				"client could not select {} present mode",
+				Settings.Uncapped ? "immediate" : "vsync"
+			);
 		}
 
 		// **The configured count wins, and zero means work it out.** A machine
@@ -2160,7 +2163,7 @@ namespace client {
 		// below after simulation and external services have continued.
 		bool renderingActive = true;
 		if (!Settings.Uncapped) {
-			ENGINE_PROFILE_CAT("wait for frame", engine::core::ProfileCategory::Idle);
+			ENGINE_PROFILE_CAT("frame deadline", engine::core::ProfileCategory::Idle);
 			renderingActive = Renderer.WaitForFrame();
 		}
 

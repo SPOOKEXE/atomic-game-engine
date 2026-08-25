@@ -245,7 +245,7 @@ TEST_CASE("a server-scoped service and everything under it is hidden from client
 	CHECK(engine::scene::VisibleToClients(store, secret));
 }
 
-TEST_CASE("an orphan is shared rather than secret", "[scene][services]") {
+TEST_CASE("an orphan is not replicated outside a service", "[scene][services]") {
 	// **The safe answer is the permissive one here, which is worth stating
 	// because it reads backwards.** An instance a script has created and not yet
 	// parented is under no service, so it has no scope to read. Calling that
@@ -262,7 +262,7 @@ TEST_CASE("an orphan is shared rather than secret", "[scene][services]") {
 	const Entity loose = store.CreateInstance(Classes::Find(Name("Part")), "Loose");
 	REQUIRE(loose != NULL_ENTITY);
 	CHECK(engine::scene::ScopeOfInstance(store, loose) == ServiceScope::Shared);
-	CHECK(engine::scene::VisibleToClients(store, loose));
+	CHECK_FALSE(engine::scene::VisibleToClients(store, loose));
 }
 
 TEST_CASE("what is under a player belongs to that player", "[scene][services]") {

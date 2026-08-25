@@ -1040,7 +1040,37 @@ namespace engine::scene {
 	}
 
 	bool VisibleToClients(const Store &store, Entity instance) {
-		return ScopeOfInstance(store, instance) != ServiceScope::Server;
+		const ClassId service = Classes::Find(core::Name("Service"));
+		if (!service.IsValid()) {
+			return true;
+		}
+
+		Entity at = instance;
+		while (at != NULL_ENTITY && !store.IsA(at, service)) {
+			at = store.ParentOf(at);
+		}
+		if (at == NULL_ENTITY) {
+			return false;
+		}
+
+		const ClassId allowed[] = {
+			Classes::Find(core::Name("Workspace")),
+			Classes::Find(core::Name("Lighting")),
+			Classes::Find(core::Name("ReplicatedFirst")),
+			Classes::Find(core::Name("ReplicatedStorage")),
+			Classes::Find(core::Name("StarterGui")),
+			Classes::Find(core::Name("StarterPack")),
+			Classes::Find(core::Name("Players")),
+			Classes::Find(core::Name("Teams")),
+			Classes::Find(core::Name("StarterPlayerScripts")),
+			Classes::Find(core::Name("StarterCharacterScripts")),
+		};
+		if (std::find(std::begin(allowed), std::end(allowed), store.ClassOf(at)) == std::end(allowed)) {
+			return false;
+		}
+
+		const ServiceComponent *component = store.Get<ServiceComponent>(at);
+		return component != nullptr && component->Scope != ServiceScope::Server;
 	}
 
 	Entity PlayerOwning(const Store &store, Entity instance) {
@@ -1060,6 +1090,27 @@ namespace engine::scene {
 				return at;
 			}
 			at = store.ParentOf(at);
+		}
+		return NULL_ENTITY;
+	}
+
+	Entity PrivatePlayerOwning(const Store &store, Entity instance) {
+		const ClassId player = Classes::Find(core::Name("Player"));
+		if (!player.IsValid()) {
+			return NULL_ENTITY;
+		}
+
+		Entity at = instance;
+		while (at != NULL_ENTITY) {
+			const Entity parent = store.ParentOf(at);
+			if (parent != NULL_ENTITY && store.IsA(parent, player)) {
+				const core::Name name = store.InstanceNameOf(at);
+				if (name == core::Name(PLAYER_GUI_NAME) || name == core::Name(PLAYER_SCRIPTS_NAME) ||
+					name == core::Name(BACKPACK_NAME) || name == core::Name(STARTER_GEAR_NAME)) {
+					return parent;
+				}
+			}
+			at = parent;
 		}
 		return NULL_ENTITY;
 	}

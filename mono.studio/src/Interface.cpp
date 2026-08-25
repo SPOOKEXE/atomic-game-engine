@@ -1167,6 +1167,13 @@ namespace studio {
 			const engine::ui::ScopedFont small(engine::ui::Typeface::Interface, engine::ui::TextSize::Small);
 			const engine::render::FrameResult frame =
 				index < ViewportResults.size() ? ViewportResults[index] : engine::render::FrameResult{};
+			if (ViewportStatistics.size() <= index) {
+				ViewportStatistics.resize(index + 1);
+			}
+			StatusBarSnapshot &statistics = ViewportStatistics[index];
+			statistics.Refresh(
+				ImGui::GetTime(), index, 0, frame.DrawCalls, frame.Triangles, frame.Culled
+			);
 
 			const engine::core::Name scene =
 				Universe->NameOf(second ? (extra->World.IsValid() ? extra->World : Active) : Active);
@@ -1176,9 +1183,9 @@ namespace studio {
 				scene.IsValid() ? Label(scene) : "(no scene)",
 				target.Width,
 				target.Height,
-				frame.DrawCalls,
-				static_cast<unsigned long long>(frame.Triangles),
-				frame.Culled
+				statistics.DrawCalls,
+				static_cast<unsigned long long>(statistics.Triangles),
+				statistics.Culled
 			);
 			ImGui::PopStyleColor();
 

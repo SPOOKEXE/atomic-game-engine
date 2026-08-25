@@ -1354,7 +1354,7 @@ namespace server {
 		// move components and it has no business knowing what a service is.
 		Replication->Authority().SetInterest(
 			[this](
-				engine::replication::ClientId client, engine::ecs::Entity entity, const engine::ecs::Store &
+				engine::replication::ClientId client, engine::ecs::Entity entity, const engine::ecs::Store &store
 			) {
 				// **Two lookups into what `SurveyVisibility` worked out this tick,
 				// rather than two walks up the tree.** Both of those questions are
@@ -1401,7 +1401,8 @@ namespace server {
 				if (occupant == Players.end() || occupant->second.Generation != client.Generation) {
 					return false;
 				}
-				return owner == occupant->second.Instance;
+				const engine::ecs::Entity privateOwner = engine::scene::PrivatePlayerOwning(store, entity);
+				return privateOwner == engine::ecs::NULL_ENTITY || owner == occupant->second.Instance;
 			}
 		);
 
@@ -1452,6 +1453,16 @@ namespace server {
 
 		HiddenFromClients.clear();
 		OwnedByPlayer.clear();
+		if (Settings.GamePath.empty()) {
+			return;
+		}
+		bool hasServices = false;
+		store.Each<const engine::scene::ServiceComponent>(
+			[&hasServices](engine::ecs::Entity, const engine::scene::ServiceComponent &) { hasServices = true; }
+		);
+		if (!hasServices) {
+			return;
+		}
 
 		// **One walk for the world, where the predicate it feeds is one walk per
 		// entity per client.** `EachEntity` visits in archetype order, so both

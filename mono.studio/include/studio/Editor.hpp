@@ -5603,6 +5603,7 @@ namespace studio {
 		engine::render::FrameStatistics Statistics;
 
 		StatusBarSnapshot StatusBar;
+		std::vector<StatusBarSnapshot> ViewportStatistics;
 
 		// What the frame-graph panel is showing, and when it changes.
 		//
