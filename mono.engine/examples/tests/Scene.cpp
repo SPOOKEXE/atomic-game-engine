@@ -7,6 +7,7 @@
 // is what can be: that each scene builds the *inputs* those passes need, in the
 // world, through the same bindings a game would use.
 
+#include <engine/core/HeapProfile.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Scheduler.hpp>
@@ -36,6 +37,7 @@
 #include <numbers>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 TEST_SUITE_ID("engine.examples.scene")
@@ -43,6 +45,8 @@ TEST_DEPENDS("engine.scripthost.scripting")
 
 using Catch::Approx;
 using engine::core::Name;
+using engine::core::HeapProfile;
+using engine::core::HeapSample;
 using engine::ecs::Entity;
 using engine::ecs::Scheduler;
 using engine::ecs::Store;
@@ -151,6 +155,94 @@ namespace {
 			}
 		});
 		return found;
+	}
+
+	struct HeapDemo {
+		const char *Scene;
+		const char *Tag;
+	};
+
+	bool RunHeapDemo(const HeapDemo &demo) {
+		ENGINE_HEAP_SCOPE(demo.Tag);
+
+		Store store("examples.heap.demo");
+		Scheduler systems;
+		std::string error;
+		if (!LoadScene(store, systems, ExamplePath(demo.Scene), error)) {
+			return false;
+		}
+
+		// Loading is only half a demo lifecycle. A few deterministic ticks let
+		// scripts create their first scheduled work and exercise the same cleanup
+		// path that a scene ending after a short run uses.
+		for (int tick = 0; tick < 8; tick++) {
+			systems.Tick(store, 1.0f / 60.0f);
+		}
+		return true;
+	}
+}
+
+TEST_CASE("demo scene heaps settle after repeated lifecycles", "[examples][scene][heap]") {
+	if (!HeapProfile::IsCompiledIn()) {
+		SUCCEED("allocator hooks are not compiled in");
+		return;
+	}
+
+	const StagedAssets assets;
+	const std::array<HeapDemo, 3> demos = {{
+		{"Rings.luau", "examples.heap.rings"},
+		{"Interface.luau", "examples.heap.interface"},
+		{"Magic.luau", "examples.heap.magic"},
+	}};
+
+	// The first load pays for process-wide script and class caches. Warm each
+	// demo before sampling so those one-time costs cannot look like a leak.
+	for (const HeapDemo &demo : demos) {
+		CHECK(RunHeapDemo(demo));
+	}
+
+	for (const HeapDemo &demo : demos) {
+		HeapProfile::SetSamplingEnabled(true);
+		bool loaded = true;
+		std::vector<HeapSample> samples;
+		samples.reserve(5);
+		for (int round = 0; round < 5; round++) {
+			loaded = RunHeapDemo(demo) && loaded;
+			std::this_thread::sleep_for(std::chrono::milliseconds(2));
+			HeapProfile::Sample();
+			const std::vector<HeapSample> history = HeapProfile::History();
+			if (history.empty()) {
+				loaded = false;
+			} else {
+				samples.push_back(history.back());
+			}
+		}
+		HeapProfile::SetSamplingEnabled(false);
+
+		INFO(demo.Scene);
+		REQUIRE(loaded);
+		REQUIRE(samples.size() == 5);
+		const auto [lowest, highest] = std::minmax_element(
+			samples.begin(), samples.end(), [](const HeapSample &left, const HeapSample &right) {
+				return left.LiveBytes < right.LiveBytes;
+			}
+		);
+		INFO("first live bytes: " << samples.front().LiveBytes);
+		INFO("last live bytes: " << samples.back().LiveBytes);
+		INFO("lowest live bytes: " << lowest->LiveBytes);
+		INFO("highest live bytes: " << highest->LiveBytes);
+		const double seconds = samples.back().Seconds - samples.front().Seconds;
+		REQUIRE(seconds > 0.0);
+
+		// A scene may retain a small allocator cache, but a steadily growing
+		// live set is a leak. Keep the allowance below the runaway threshold and
+		// require the sampled endpoint and total window to remain bounded.
+		CHECK(samples.back().LiveBytes <= samples.front().LiveBytes + 256 * 1024);
+		CHECK(highest->LiveBytes - lowest->LiveBytes <= 512 * 1024);
+		CHECK(
+			static_cast<double>(samples.back().LiveBytes - samples.front().LiveBytes) / seconds <=
+				256 * 1024.0
+		);
 	}
 }
 
