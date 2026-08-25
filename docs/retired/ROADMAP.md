@@ -2418,3 +2418,36 @@ examples/Magic.luau:44```. Same with TerrainCore. - **the libraries were staged 
 - [x] build out proper caching and cascaded caching implementations across every pipeline - some are done incorrectly and need to be corrected.
 - [x] make particles emit in studio when property is enabled and they are within a PVInstance (BasePart/Attachment) - this will cause cache invalidation on scene
 - [x] button to disable all particle emitter rendering in studio
+- [x] remove "lighting service properties" button in "World Lighting" widget.
+- [x] remove uncapped framerate button. make "no limit" on the rates sliders to the right, not 0. clamp between 0 and 360, with 361 being unlimited.
+- [x] prevent renaming world services
+- [x] add a small label above the table of keybinds put "Use ESC to set as unbound".
+- [x] make the "Particles" demo only spawn a 32x32 grid of particles.
+- [x] add Heap dock widget under View dropdown
+- [x] selection box and collider outlines visualisations are not cropped out in viewport images, they render on top of the studio ui. All scene-related items should be rendered on the scene image where they exist.
+- [x] move selection box / collider outlines visualisations under the scene cache
+- [x] when i double click a script or right-click edit script, open the script editor if its not open (does not currently)
+- [x] merge the "Find Instances" into the Explorer's search instead. Also add a per-world selector.
+- [x] the "Bus" dock widget shows nothing, its useless.
+- [x] vsync does not match monitor refresh rate (mine is 165 but locks to 60) - check if bug.
+- [x] separate statistics in bottom left and viewport statistics labels into separate signatures so they dont cause image rewrites and ui rewrites (we write on top of those)
+- [x] split "acquire swapchain" into deadline waiting, display waiting, worker waiting and event waiting, if possible. or split what you can.
+- [x] ensure dock widgets DO NOT update studio ui signature unless its open
+- [x] when i click on something within a world, do not highlight the world, same with when you click in the scene
+- [x] ensure replication is WHITELIST/INCLUSION only. Workspace, Lighting, ReplicatedFirst, ReplicatedStorage, StarterGui (clones to PlayerGui via separate player system), StarterPack (clones to Backpack via separate player system), Players (see other players, does NOT replicate their UI/PlayerScripts), Teams, StarterPlayerScripts (copies to each client, clients do NOT see each other's), StarterCharacterScripts (copies to each character, clients CAN see each others).
+- [x] ensure replication only replicates items WITHIN services and their properties. Exceptions are ServerScriptService/ServerStorage which are server only, etc
+- [x] isolate each dock widget with their own update signature. maybe its worth just to have each dock widget have its data be sent to the gpu when it updates, and we can add batched updates to reduce synchronisations?
+- [x] when you have different dock widgets open below and on the side of a game scene viewport, it stretches the game viewport image. resizing x/y causes it to stretch in that direction by squash/stretch. it should be centered with the camera AND use the viewport size as the camera's render size. also add camera options to set max image size (default is 1920x1080). also add a way to force overwrite the image size so scripts can edit it as well.
+- [x] have one viewport by default, i see in cascaded cache hits it says in dropdown "Viewport, Viewport 2, Viewport 3, Viewport 4". also make "Viewport 1" the default, not "Viewport".
+- [x] ensure cached locations do BULK transfers to resident gpu for updates so we minimize calls and maximize throughput.
+- [x] when you are setting a keybind in the keybinds preference config, make ESC set as "unbound".
+- [x] demo nodes freezes entire studio for like 4 seconds on first open
+- [x] "collect effects" is 55.44MB but no scenes are currently running. post-particles.
+- [x] ensure we cleanup all allocated objects when a scene ends (e.g. particles, meshes, images, etc that are resident on gpu)
+- [x] in the explorer, add a + button when you hover on a explorer item that is the insert object menu (add a search bar where you typre and it searches) to insert something into the object
+- [x] convert Assets dock widget into a paginated dock widget. Do 100 items per page by default. add filters for file/asset types too.
+- [x] heap shows "build interface" is always growing overtime with allocated
+- [x] add tests that show Heap values growing overtime for different demos. ensure we don't memory leak.
+- [x] Move Sync Rojo Project/Universe to a Sync dropdown after the Run dropdown.
+- [x] convert Sync Rojo Project/Universe to a dock widget instead of a popup with white background
+- [x] properly implement the Pipeline Profile. Most things are 0ms because they are not recorded/bound properly. Only output-image says something.
