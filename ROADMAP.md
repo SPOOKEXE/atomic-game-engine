@@ -49,7 +49,6 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] move selection box / collider outlines visualisations under the scene cache
 - [x] when i double click a script or right-click edit script, open the script editor if its not open (does not currently)
 - [x] merge the "Find Instances" into the Explorer's search instead. Also add a per-world selector.
-
 - [x] the "Bus" dock widget shows nothing, its useless.
 - [x] vsync does not match monitor refresh rate (mine is 165 but locks to 60) - check if bug.
 - [x] separate statistics in bottom left and viewport statistics labels into separate signatures so they dont cause image rewrites and ui rewrites (we write on top of those)
@@ -59,33 +58,33 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] ensure replication is WHITELIST/INCLUSION only. Workspace, Lighting, ReplicatedFirst, ReplicatedStorage, StarterGui (clones to PlayerGui via separate player system), StarterPack (clones to Backpack via separate player system), Players (see other players, does NOT replicate their UI/PlayerScripts), Teams, StarterPlayerScripts (copies to each client, clients do NOT see each other's), StarterCharacterScripts (copies to each character, clients CAN see each others).
 - [x] ensure replication only replicates items WITHIN services and their properties. Exceptions are ServerScriptService/ServerStorage which are server only, etc
 
-- [_] auto complete popup doesn't position properly above/below text we're editing.
-- [_] add script coloring for keywords and whatnot based on theme. add theme configs for script editor highlighting.
 - [_] isolate each dock widget with their own update signature. maybe its worth just to have each dock widget have its data be sent to the gpu when it updates, and we can add batched updates to reduce synchronisations?
 - [_] when you have different dock widgets open below and on the side of a game scene viewport, it stretches the game viewport image. resizing x/y causes it to stretch in that direction by squash/stretch. it should be centered with the camera AND use the viewport size as the camera's render size. also add camera options to set max image size (default is 1920x1080). also add a way to force overwrite the image size so scripts can edit it as well.
 - [_] have one viewport by default, i see in cascaded cache hits it says in dropdown "Viewport, Viewport 2, Viewport 3, Viewport 4". also make "Viewport 1" the default, not "Viewport".
 - [_] ensure cached locations do BULK transfers to resident gpu for updates so we minimize calls and maximize throughput.
 - [_] when you are setting a keybind in the keybinds preference config, make ESC set as "unbound".
-- [_] properly implement the Pipeline Profile. Most things are 0ms because they are not recorded/bound properly. Only output-image says something.
-- [_] properly build out team create menu
-- [_] team create build out options properly
-- [_] demo nodes freezes entire studio for like 4 seconds on first open
-- [_] add a CTRL+SHIFT+F keybind for Search-All-Replace-All
-- [_] build out the "Changes" widget properly, add a record of changes where the file saves as xml or such (timestamp-changes.xml) and you look for them and parse them.
 - [_] breakpoints do NOT function. i set one in the script editor in Rings example ```local function layout(names: { string })
 	for index, mesh in ipairs(names) do``` on the for loop, and it does not trigger. the Debugger widget shows the breakpoint exists, but 0 hits.
 - [_] Move Sync Rojo Project/Universe to a Sync dropdown after the Run dropdown.
 - [_] convert Sync Rojo Project/Universe to a dock widget instead of a popup with white background
-- [_] "collect effects" is 55.44MB but no scenes are currently running. post-particles.
-- [_] ensure we cleanup all allocated objects when a scene ends (e.g. particles, meshes, images, etc that are resident on gpu)
-- [_] convert Assets dock widget into a paginated dock widget. Do 100 items per page by default. add filters for file/asset types too.
-- [_] The Script/LocalScript/ModuleScript buttons in Script tab is really wide for some reason
 - [_] in the explorer, add a + button when you hover on a explorer item that is the insert object menu (add a search bar where you typre and it searches) to insert something into the object
 - [_] heap shows "build interface" is always growing overtime
 - [_] add tests that show Heap values growing overtime for different demos. ensure we don't memory leak.
+- [_] demo nodes freezes entire studio for like 4 seconds on first open
+- [_] "collect effects" is 55.44MB but no scenes are currently running. post-particles.
+- [_] ensure we cleanup all allocated objects when a scene ends (e.g. particles, meshes, images, etc that are resident on gpu)
+- [_] convert Assets dock widget into a paginated dock widget. Do 100 items per page by default. add filters for file/asset types too.
+- [_] properly implement the Pipeline Profile. Most things are 0ms because they are not recorded/bound properly. Only output-image says something.
 
 ### v0.20
 
+- [_] auto complete popup doesn't position properly above/below text we're editing.
+- [_] add script coloring for keywords and whatnot based on theme. add theme configs for script editor highlighting.
+- [_] properly build out team create menu
+- [_] team create build out options properly
+- [_] add a CTRL+SHIFT+F keybind for Search-All-Replace-All
+- [_] build out the "Changes" widget properly, add a record of changes where the file saves as xml or such (timestamp-changes.xml) and you look for them and parse them.
+- [_] The Script/LocalScript/ModuleScript buttons in Script tab is really wide for some reason
 - [_] consolidate render pipeline to a easy-to-find location for future work.
 - [_] ensure when you read the render pipeline, its obvious what it does and in what order
 - [_] thoroughly implement every user-interface element, including `SurfaceGui` and `BillboardGui` - `SurfaceGui` gains `ZOffset`, `MaxDistance`, `ClipsDescendants` and `Active`, and `BillboardGui` gains `Active`, `Brightness`, `ClipsDescendants`, `CurrentDistance`, `DistanceStep`, `ExtentsOffsetWorldSpace`, `SizeOffset` and `PlayerToHideFrom`; new classes `UIGradient`, `UITableLayout`, `UIPageLayout` and `UIDragDetector`; `ScrollingFrame` completed with `ScrollingEnabled`, `AutomaticCanvasSize`, the two `ScrollBarInset`s, `VerticalScrollBarPosition`, `ElasticBehavior`, the three bar images and `AbsoluteCanvasSize`/`AbsoluteWindowSize`, plus wheel and thumb-drag input; `RichText`, `MaxVisibleGraphemes`, `ContentText`, `TextBounds` and `TextFits` on every text class; `Interactable`, the four `NextSelection*`, `SelectionOrder` and `SelectionImageObject` on `GuiObject`; `HoverImage`, `PressedImage` and `ResampleMode` on the image classes; `Enabled` and `ApplyStrokeMode` on `UIStroke`. Laid out, drawn by both backends, saved, replicated, bound and in the Properties panel. `D00129` carries the members that need a subsystem this engine has not got (filed as `D00120`, renumbered at v0.17 - that number was already a retired entry)
