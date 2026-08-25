@@ -591,6 +591,25 @@ namespace studio {
 
 		ImGui::SetNextItemWidth(-1.0f);
 		TextField("##catalogue-filter", AssetFilter, "filter");
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(engine::ui::Scaled(120.0f));
+		const char *kindLabel = AssetKindFilter < 0
+			? "All types"
+			: KindName(static_cast<engine::assets::AssetKind>(AssetKindFilter));
+		if (ImGui::BeginCombo("##catalogue-kind", kindLabel)) {
+			if (ImGui::Selectable("All types", AssetKindFilter < 0)) {
+				AssetKindFilter = -1;
+				AssetPage = 0;
+			}
+			for (int kind = 0; kind <= static_cast<int>(engine::assets::AssetKind::Shader); kind++) {
+				const bool selected = AssetKindFilter == kind;
+				if (ImGui::Selectable(KindName(static_cast<engine::assets::AssetKind>(kind)), selected)) {
+					AssetKindFilter = kind;
+					AssetPage = 0;
+				}
+			}
+			ImGui::EndCombo();
+		}
 
 		if (!ImGui::BeginTable(
 				"catalogue",
@@ -629,12 +648,16 @@ namespace studio {
 		// signal this needs. It is read before the early-outs so a click is
 		// never swallowed by a cache hit.
 		bool stale = AssetRowsTab != static_cast<const void *>(&tab) ||
-					 AssetRowsRevision != AssetTabsRevision || AssetRowsFilter != AssetFilter;
+					 AssetRowsRevision != AssetTabsRevision || AssetRowsFilter != AssetFilter ||
+					 AssetRowsKind != AssetKindFilter;
 
 		ImGuiTableSortSpecs *specs = ImGui::TableGetSortSpecs();
 		if (specs != nullptr && specs->SpecsDirty) {
 			specs->SpecsDirty = false;
 			stale = true;
+		}
+		if (stale && (AssetRowsFilter != AssetFilter || AssetRowsKind != AssetKindFilter)) {
+			AssetPage = 0;
 		}
 
 		if (stale) {
@@ -643,7 +666,8 @@ namespace studio {
 			AssetRows.reserve(tab.Entries.size());
 			for (const CatalogueEntry &entry : tab.Entries) {
 				int score = 0;
-				if (FuzzyMatch(AssetFilter, entry.Name, score)) {
+				if (FuzzyMatch(AssetFilter, entry.Name, score) &&
+					(AssetKindFilter < 0 || static_cast<int>(entry.Kind) == AssetKindFilter)) {
 					AssetRows.push_back(&entry);
 				}
 			}
@@ -659,16 +683,37 @@ namespace studio {
 			AssetRowsTab = &tab;
 			AssetRowsRevision = AssetTabsRevision;
 			AssetRowsFilter = AssetFilter;
+			AssetRowsKind = AssetKindFilter;
 		}
 
 		const std::vector<const CatalogueEntry *> &shown = AssetRows;
+		const int pageCount = std::max(1, static_cast<int>((shown.size() + AssetPageSize - 1) /
+																		 static_cast<size_t>(AssetPageSize)));
+		AssetPage = std::clamp(AssetPage, 0, pageCount - 1);
+		ImGui::Text("page %d of %d", AssetPage + 1, pageCount);
+		ImGui::SameLine();
+		ImGui::BeginDisabled(AssetPage == 0);
+		if (ImGui::SmallButton("<##asset-page")) {
+			AssetPage--;
+		}
+		ImGui::EndDisabled();
+		ImGui::SameLine();
+		ImGui::BeginDisabled(AssetPage + 1 >= pageCount);
+		if (ImGui::SmallButton(">##asset-page")) {
+			AssetPage++;
+		}
+		ImGui::EndDisabled();
+
+		const size_t pageFirst = static_cast<size_t>(AssetPage) * static_cast<size_t>(AssetPageSize);
+		const size_t pageLast = std::min(pageFirst + static_cast<size_t>(AssetPageSize), shown.size());
 
 		ImGuiListClipper clipper;
-		clipper.Begin(static_cast<int>(shown.size()));
+		clipper.Begin(static_cast<int>(pageLast - pageFirst));
 
 		while (clipper.Step()) {
 			for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; row++) {
-				const CatalogueEntry &entry = *shown[static_cast<size_t>(row)];
+				const int absoluteRow = row + static_cast<int>(pageFirst);
+				const CatalogueEntry &entry = *shown[static_cast<size_t>(absoluteRow)];
 
 				ImGui::TableNextRow();
 

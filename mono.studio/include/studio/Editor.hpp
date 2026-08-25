@@ -5192,11 +5192,15 @@ namespace studio {
 		// Rebuilt when the tab, the filter, the sort order or the catalogue
 		// changes - which is exactly when the answer can differ.
 		//@{
-		std::vector<const CatalogueEntry *> AssetRows;
-		const void *AssetRowsTab = nullptr;
-		std::string AssetRowsFilter;
-		uint64_t AssetRowsRevision = 0;
-		//@}
+			std::vector<const CatalogueEntry *> AssetRows;
+			const void *AssetRowsTab = nullptr;
+			std::string AssetRowsFilter;
+			int AssetRowsKind = -1;
+			int AssetKindFilter = -1;
+			uint64_t AssetRowsRevision = 0;
+			int AssetPage = 0;
+			int AssetPageSize = 100;
+			//@}
 
 		// The tab bar's imgui ids, one per entry in `AssetTabs`.
 		//

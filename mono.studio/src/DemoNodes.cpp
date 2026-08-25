@@ -420,7 +420,7 @@ namespace studio {
 		perlin.Inputs = {Port("Frequency", "data.NUMBER")};
 		perlin.Outputs = {Port("Out", "data.FIELD")};
 		perlin.Widgets = {
-			Select("resolution", "Resolution", {"64", "128", "256", "512"}, 1),
+			Select("resolution", "Resolution", {"64", "128", "256", "512"}, 0),
 			Slider("frequency", "Frequency", 1.0, 16.0, 4.0),
 			Slider("octaves", "Octaves", 1.0, 8.0, 5.0),
 			Slider("gain", "Gain", 0.2, 0.8, 0.5),

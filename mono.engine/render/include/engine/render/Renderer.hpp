@@ -1148,6 +1148,13 @@ namespace engine::render {
 		// Calling this on an uninitialised renderer has no effect.
 		void Shutdown();
 
+		// Releases GPU residency owned by one world while keeping shared content
+		// such as meshes and images available to the remaining worlds.
+		//
+		// @param world The process-local world identity.
+		// @param name The stable world name used by the presentation cache.
+		void ForgetWorld(uint64_t world, core::Name name);
+
 		// Registers a mesh under the name a `DrawInstance` will ask for.
 		//
 		// **The one door content comes in through**, and it is on the renderer

@@ -62,15 +62,15 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] have one viewport by default, i see in cascaded cache hits it says in dropdown "Viewport, Viewport 2, Viewport 3, Viewport 4". also make "Viewport 1" the default, not "Viewport".
 - [x] ensure cached locations do BULK transfers to resident gpu for updates so we minimize calls and maximize throughput.
 - [x] when you are setting a keybind in the keybinds preference config, make ESC set as "unbound".
-
-- [_] demo nodes freezes entire studio for like 4 seconds on first open
-- [_] "collect effects" is 55.44MB but no scenes are currently running. post-particles.
-- [_] ensure we cleanup all allocated objects when a scene ends (e.g. particles, meshes, images, etc that are resident on gpu)
-- [_] in the explorer, add a + button when you hover on a explorer item that is the insert object menu (add a search bar where you typre and it searches) to insert something into the object
-- [_] convert Assets dock widget into a paginated dock widget. Do 100 items per page by default. add filters for file/asset types too.
-- [_] heap shows "build interface" is always growing overtime with allocated
+- [x] demo nodes freezes entire studio for like 4 seconds on first open
+- [x] "collect effects" is 55.44MB but no scenes are currently running. post-particles.
+- [x] ensure we cleanup all allocated objects when a scene ends (e.g. particles, meshes, images, etc that are resident on gpu)
+- [x] in the explorer, add a + button when you hover on a explorer item that is the insert object menu (add a search bar where you typre and it searches) to insert something into the object
+- [x] convert Assets dock widget into a paginated dock widget. Do 100 items per page by default. add filters for file/asset types too.
+- [x] heap shows "build interface" is always growing overtime with allocated
 
 - [_] add tests that show Heap values growing overtime for different demos. ensure we don't memory leak.
+
 - [_] breakpoints do NOT function. i set one in the script editor in Rings example ```local function layout(names: { string })
 	for index, mesh in ipairs(names) do``` on the for loop, and it does not trigger. the Debugger widget shows the breakpoint exists, but 0 hits.
 - [_] Move Sync Rojo Project/Universe to a Sync dropdown after the Run dropdown.

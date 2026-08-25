@@ -2867,6 +2867,7 @@ namespace studio {
 		Trees.clear();
 
 		for (const WorldId existing : Universe->Worlds()) {
+			Renderer.ForgetWorld(existing.Index, Universe->NameOf(existing));
 			Universe->Destroy(existing);
 		}
 
@@ -3452,6 +3453,7 @@ namespace studio {
 		}
 
 		const std::string name(Label(Universe->NameOf(world)));
+		Renderer.ForgetWorld(world.Index, Universe->NameOf(world));
 		Universe->Destroy(world);
 
 		if (Active == world) {
@@ -4110,6 +4112,11 @@ namespace studio {
 
 		const Name name = Universe->NameOf(world);
 		const bool wasActive = world == Active;
+
+		// Stop destroys the world below, so drop its renderer-owned residency
+		// before the handle disappears. Shared content tables stay alive for
+		// other worlds; only instance and particle buffers are world-local.
+		Renderer.ForgetWorld(world.Index, name);
 
 		// **Destroyed and rebuilt, because `ReadWorldDocument` creates a scene
 		// rather than restoring into one.** `Universe::Adopt` reuses the hole a

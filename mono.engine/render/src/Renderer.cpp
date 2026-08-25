@@ -787,6 +787,66 @@ namespace engine::render {
 		State = std::make_unique<Impl>();
 	}
 
+	void Renderer::ForgetWorld(uint64_t world, core::Name name) {
+		if (State == nullptr || State->Device == nullptr) {
+			return;
+		}
+		RequireOwningThread("ForgetWorld");
+		SDL_WaitForGPUIdle(State->Device);
+
+		const auto sameWorld = [world, name](const auto &resident) {
+			return resident.Id == world && resident.Name == name;
+		};
+		for (Impl::InstanceWorld &resident : State->InstanceWorlds) {
+			if (!sameWorld(resident)) {
+				continue;
+			}
+			if (resident.Buffer != nullptr) {
+				gpu::ReleaseBuffer(State->Device, resident.Buffer);
+				resident.Buffer = nullptr;
+			}
+			if (resident.Transfer != nullptr) {
+				gpu::ReleaseTransferBuffer(State->Device, resident.Transfer);
+				resident.Transfer = nullptr;
+			}
+		}
+		for (Impl::ParticleWorld &resident : State->ParticleWorlds) {
+			if (!sameWorld(resident)) {
+				continue;
+			}
+			Impl::ParticlePool &pool = resident.Pool;
+			for (SDL_GPUBuffer **buffer : {&resident.Buffer, &pool.States, &pool.Work, &pool.Params,
+												&pool.Curves, &pool.EmitterRuntime, &pool.ParamUpdateBuffer,
+												&pool.CurveUpdateBuffer, &pool.Seams}) {
+				if (*buffer != nullptr) {
+					gpu::ReleaseBuffer(State->Device, *buffer);
+					*buffer = nullptr;
+				}
+			}
+			for (SDL_GPUTransferBuffer **staging : {&pool.StateStaging, &pool.WorkStaging, &pool.ParamStaging,
+												&pool.CurveStaging, &pool.SeamStaging, &pool.EmitterRuntimeStaging}) {
+				if (*staging != nullptr) {
+					gpu::ReleaseTransferBuffer(State->Device, *staging);
+					*staging = nullptr;
+				}
+			}
+		}
+		State->PendingInstanceUploads.erase(
+			std::remove_if(State->PendingInstanceUploads.begin(), State->PendingInstanceUploads.end(), sameWorld),
+			State->PendingInstanceUploads.end()
+		);
+		State->InstanceWorlds.erase(
+			std::remove_if(State->InstanceWorlds.begin(), State->InstanceWorlds.end(), sameWorld),
+			State->InstanceWorlds.end()
+		);
+		State->ParticleWorlds.erase(
+			std::remove_if(State->ParticleWorlds.begin(), State->ParticleWorlds.end(), sameWorld),
+			State->ParticleWorlds.end()
+		);
+		State->ActiveInstanceWorld = nullptr;
+		State->ActiveParticleWorld = nullptr;
+	}
+
 	bool Renderer::MeshExtentOf(const core::Name &name, core::Vector3 &out) const {
 		if (State == nullptr || !State->Meshes.Has(name)) {
 			return false;
