@@ -75,7 +75,7 @@
 -- the roadmap's target; 100 is 10,000 and is what a machine without a discrete
 -- GPU should start from.
 
-local GRID = 320
+local GRID = 32
 
 -- **Two metres and not four.** At four the grid is 1,280 metres across and its
 -- particles are sub-pixel from any camera that can see the whole of it - a
@@ -105,6 +105,8 @@ plate.Parent = workspace
 -- One emitter per feature, on its own pedestal, far enough apart to tell apart.
 -- Every one of these is an assertion made visually: a reader who knows what the
 -- property does can see whether it does it.
+
+if false then
 
 local function pedestal(x: number, z: number, colour: Color3): Part
 	local part = Instance.new("Part")
@@ -375,6 +377,8 @@ do
 	trail.Color = ColorSequence.new(Color3.new(1, 0.6, 0.1))
 	trail.Transparency = NumberSequence.new(0, 1)
 	trail.Parent = swinger
+end
+
 end
 
 -- --- the grid ----------------------------------------------------------------

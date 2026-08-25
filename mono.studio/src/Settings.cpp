@@ -184,9 +184,8 @@ namespace studio {
 		// it and the frame then presented a freed texture. See
 		// `render::Renderer::SetVerticalSync`.
 		const bool forcedUncapped = Settings.Uncapped;
-		bool effectivelyUncapped = forcedUncapped || Uncapped;
 
-		ImGui::BeginDisabled(effectivelyUncapped);
+		ImGui::BeginDisabled(forcedUncapped);
 		if (ImGui::Checkbox("Vertical sync", &VerticalSync)) {
 			if (Renderer.SetVerticalSync(VerticalSync)) {
 				Say(VerticalSync ? "frames are paced by the display" : "vertical sync off");
@@ -201,23 +200,7 @@ namespace studio {
 		}
 		ImGui::EndDisabled();
 
-		// **A mode rather than four destructive writes.** Setting every rate to
-		// zero did run uncapped, but turning the mode back off had no values to
-		// restore. The scheduler already treats a zero ceiling as due every cycle,
-		// so this switch bypasses the rates while retaining them as preferences.
-		bool requestedUncapped = effectivelyUncapped;
 		ImGui::BeginDisabled(VerticalSync || forcedUncapped);
-		if (ImGui::Checkbox("Uncapped frame rate", &requestedUncapped)) {
-			Uncapped = requestedUncapped;
-			effectivelyUncapped = forcedUncapped || Uncapped;
-			Say(Uncapped ? "frame rate uncapped" : "adaptive frame-rate ceilings restored");
-		}
-		ImGui::EndDisabled();
-		if (forcedUncapped && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-			ImGui::SetTooltip("Forced by --uncapped for this run.");
-		}
-
-		ImGui::BeginDisabled(VerticalSync || effectivelyUncapped);
 
 		// **Four rates, because a still editor and a busy one are not the same
 		// question.** These are what it settles to when nobody is asking it for
@@ -231,7 +214,7 @@ namespace studio {
 
 		const auto rate = [](const char *label, float &value, const char *tip) {
 			ImGui::SetNextItemWidth(engine::ui::Scaled(160.0f));
-			ImGui::SliderFloat(label, &value, 0.0f, 360.0f, value <= 0.0f ? "no limit" : "%.0f Hz");
+			ImGui::SliderFloat(label, &value, 0.0f, 361.0f, value >= 361.0f ? "no limit" : "%.0f Hz");
 			if (ImGui::IsItemHovered()) {
 				ImGui::SetTooltip("%s", tip);
 			}
@@ -479,6 +462,7 @@ namespace studio {
 		// edits one of them.
 		ImGui::SetNextItemWidth(-1.0f);
 		TextField("##keybind-filter", KeybindFilter, "Search Actions");
+		ImGui::TextDisabled("Use ESC to set as unbound");
 
 		ImGui::Spacing();
 

@@ -361,23 +361,6 @@ namespace studio {
 			// **After the gizmo, and it declines while a handle is held.** Both
 			// write placements, and two of them running against one selection
 			// is two answers to where it is.
-			const bool movingSelection = DragOnSurface(index, panel);
-			if (!movingSelection) {
-				DragSelectionBox(index, panel);
-			}
-
-			// **After both, because it is the only one that draws nothing
-			// interactive.** The gizmo has to adjudicate the pending pick and
-			// the surface drag has to see the gizmo's answer; an outline reads
-			// the world and writes lines, so it goes last and cannot be in
-			// either one's way.
-			DrawColliderOutlines(index, panel);
-
-			// Last of all, and for the same reason the outlines are late: an
-			// adornment reads the world and writes lines, so it can be in
-			// nothing's way. It is drawn *after* the collider outlines because
-			// a selection somebody made is the thing they are looking at.
-			DrawAdornments(index, panel);
 		}
 
 		if (PendingPick.Wanted) {
@@ -424,6 +407,15 @@ namespace studio {
 			list->PushClipRect(
 				ImVec2(slot.X, slot.Y), ImVec2(slot.X + slot.Width, slot.Y + slot.Height), true
 			);
+
+			// Scene annotations belong to the viewport image. Drawing them before
+			// this clip lets projected lines escape into docked Studio panels.
+			const bool movingSelection = DragOnSurface(index, panel);
+			if (!movingSelection) {
+				DragSelectionBox(index, panel);
+			}
+			DrawColliderOutlines(index, panel);
+			DrawAdornments(index, panel);
 
 			// **`PushClipRect` is a scissor, not a reject.** It stops the pixels
 			// reaching the explorer and does nothing about the vertices: an

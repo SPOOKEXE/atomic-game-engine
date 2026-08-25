@@ -106,8 +106,10 @@ namespace studio {
 			return 0.0f;
 		}
 
-		const float interface_ = inputIdle && !worldRunning ? rates.InterfaceIdle : rates.InterfaceActive;
-		const float renderer = focused ? rates.RendererFocused : rates.RendererUnfocused;
+		const auto ceiling = [](float rate) { return rate >= 361.0f ? 0.0f : std::max(rate, 0.0f); };
+		const float interface_ =
+			ceiling(inputIdle && !worldRunning ? rates.InterfaceIdle : rates.InterfaceActive);
+		const float renderer = ceiling(focused ? rates.RendererFocused : rates.RendererUnfocused);
 
 		if (interface_ <= 0.0f) {
 			return std::max(renderer, 0.0f);

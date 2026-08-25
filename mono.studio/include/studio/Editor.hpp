@@ -2717,8 +2717,6 @@ namespace studio {
 		// **Generic over properties for the same reason the properties panel
 		// is**: `PropertyDescriptor` is data, so this names no property and
 		// gains one the day any module declares it.
-		void DrawFindInstances();
-
 		// Rebuilds `FindResults` from `Find` across every world.
 		void RunFind();
 
@@ -4517,7 +4515,7 @@ namespace studio {
 		// for real means `Render` taking the world and the chrome separately,
 		// which is a change to the shared renderer.
 		//
-		// Zero on any of them means "no ceiling from this one".
+		// 361 on any of them means "no ceiling from this one".
 		//@{
 		float InterfaceActiveHz = 120.0f;
 		float InterfaceIdleHz = 20.0f;
@@ -4541,7 +4539,7 @@ namespace studio {
 		static constexpr double IDLE_AFTER_SECONDS = 3.0;
 
 		// The ceiling that applies right now, from the four above and the
-		// window's focus. Zero for no ceiling.
+		// window's focus. Zero means no scheduled presentation.
 		float PacingCeiling() const;
 
 		// The script editor's find bar: whether it is up, and what is in it.
@@ -5489,8 +5487,8 @@ namespace studio {
 		// What crosses between worlds. See `DrawBus`.
 		bool ShowBus = false;
 
-		// Find instances by class and property. See `DrawFindInstances`.
-		bool ShowFindInstances = false;
+		// The world shown by Explorer, or every world when invalid.
+		WorldId ExplorerWorld;
 
 		// What the Find panel was asked for. Every field is optional and an
 		// empty one is "do not filter on this" rather than "match nothing".

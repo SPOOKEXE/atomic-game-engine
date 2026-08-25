@@ -459,14 +459,13 @@ namespace studio {
 		SnapDegrees = std::max(0.001f, SnapDegrees);
 		ControlPort = std::clamp(ControlPort, 0, 65535);
 
-		// **Clamped rather than refused, and zero survives.** Zero means "this
-		// one imposes no ceiling", which is a real answer for every one of them
-		// - a negative is not, and a file with one in it is a typo rather than a
-		// document to reject.
-		InterfaceActiveHz = std::clamp(InterfaceActiveHz, 0.0f, 1000.0f);
-		InterfaceIdleHz = std::clamp(InterfaceIdleHz, 0.0f, 1000.0f);
-		RendererFocusedHz = std::clamp(RendererFocusedHz, 0.0f, 1000.0f);
-		RendererUnfocusedHz = std::clamp(RendererUnfocusedHz, 0.0f, 1000.0f);
+		// **Clamped rather than refused.** 361 means "this one imposes no
+		// ceiling"; a negative is not, and a file with one in it is a typo rather
+		// than a document to reject.
+		InterfaceActiveHz = std::clamp(InterfaceActiveHz, 0.0f, 361.0f);
+		InterfaceIdleHz = std::clamp(InterfaceIdleHz, 0.0f, 361.0f);
+		RendererFocusedHz = std::clamp(RendererFocusedHz, 0.0f, 361.0f);
+		RendererUnfocusedHz = std::clamp(RendererUnfocusedHz, 0.0f, 361.0f);
 		return true;
 	}
 

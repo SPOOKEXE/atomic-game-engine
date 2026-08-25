@@ -606,21 +606,6 @@ namespace studio {
 			ShowRenderPipeline = true;
 			LoadRenderPipeline(Active, settings.RenderingProfile);
 		}
-		ImGui::SameLine();
-		if (ImGui::Button("Lighting Service Properties")) {
-			engine::ecs::Entity lighting = engine::ecs::NULL_ENTITY;
-			Universe->Enter(Active, [&](engine::ecs::Store &store) {
-				lighting = store.FindFirstRoot("Lighting");
-			});
-			if (lighting != engine::ecs::NULL_ENTITY) {
-				Selection = {lighting};
-				SelectionWorld = Active;
-				ClearRootSelection();
-				ShowProperties = true;
-				RevealSelection = true;
-			}
-		}
-
 		ImGui::TextDisabled("Lighting values remain properties of this world's Lighting service.");
 		ImGui::End();
 	}

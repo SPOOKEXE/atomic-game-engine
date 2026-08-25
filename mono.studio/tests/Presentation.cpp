@@ -210,6 +210,8 @@ TEST_CASE("renderer focus and the active subsystem rates limit presentation", "[
 
 	const PresentationRates interfaceUnlimited{0.0f, 0.0f, 165.0f, 60.0f};
 	CHECK(PresentationCeiling(interfaceUnlimited, true, true, false) == 165.0f);
+	const PresentationRates sliderUnlimited{361.0f, 361.0f, 165.0f, 60.0f};
+	CHECK(PresentationCeiling(sliderUnlimited, true, true, false) == 165.0f);
 
 	const PresentationRates uncapped{120.0f, 20.0f, 100.0f, 10.0f, true};
 	CHECK(PresentationCeiling(uncapped, false, false, true) == 0.0f);

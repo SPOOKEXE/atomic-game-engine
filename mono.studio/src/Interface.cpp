@@ -59,7 +59,7 @@ namespace studio {
 		// a corner - which is exactly the failure it exists to fix.
 		// **v12 because v11 was briefly built with the old side-by-side split.**
 		// Reusing that id leaves half the scene empty for anybody who launched it.
-		constexpr const char *DOCKSPACE = "StudioDockSpace.v12";
+		constexpr const char *DOCKSPACE = "StudioDockSpace.v13";
 
 		constexpr const char *VIEWPORT = "Viewport";
 		constexpr const char *VIEWPORT2 = "Viewport 2";
@@ -108,7 +108,6 @@ namespace studio {
 			"Control (MCP)",
 			"Plugins",
 			"Bus",
-			"Find Instances",
 			"Script Profile",
 			"Changes",
 			"Debugger",
@@ -415,7 +414,6 @@ namespace studio {
 			DrawPluginWidgets();
 
 			Skinned("Bus", [&] { DrawBus(); });
-			Skinned("Find Instances", [&] { DrawFindInstances(); });
 			Skinned("Script Profile", [&] { DrawScriptProfile(); });
 			Skinned("Changes", [&] { DrawDiff(); });
 			Skinned("Debugger", [&] { DrawDebugger(); });
@@ -1247,6 +1245,7 @@ namespace studio {
 		// now, and two places to bind a key is one too many.
 		ImGui::MenuItem("Statistics", nullptr, &ShowStatistics);
 		ImGui::MenuItem("Frame Graph", nullptr, &ShowFrameGraph);
+		ImGui::MenuItem("Heap", nullptr, &ShowHeap);
 		ImGui::MenuItem("Script Profile", nullptr, &ShowScriptProfile);
 
 		ImGui::Separator();
@@ -1265,7 +1264,6 @@ namespace studio {
 		ImGui::MenuItem("Control (MCP)", nullptr, &ShowControl);
 		ImGui::MenuItem("Plugins", nullptr, &ShowPlugins);
 		ImGui::MenuItem("Demo Nodes", nullptr, &ShowNodeDemo);
-		ImGui::MenuItem("Find Instances", nullptr, &ShowFindInstances);
 		ImGui::MenuItem("Bus", nullptr, &ShowBus);
 		ImGui::MenuItem("Changes", nullptr, &ShowDiff);
 		ImGui::MenuItem("Debugger", nullptr, &ShowDebugger);
