@@ -353,3 +353,16 @@ the one that gets believed.
 - Are you doing any 'negative' C++ code practices?
 - Are you doing any 'negative' general code practices?
 
+---
+
+## Taste
+
+- Complexity belongs at the adapter boundary. Orchestration stays pure, UI stays dumb.
+- If a rule here fights the task in front of you, say so loudly and get a human sign-off or response before breaking it.
+
+## Additional Tips
+
+- Do not verify with browsers or compute unless user explicitly agrees or requests it.
+- Use headless tests where possible, save live studio tests until the end when the user allows it.
+- Security is important, but not should be over-indexed on. If you think something should be audited, especially new items, add to ROADMAP.md under current work version.
+
