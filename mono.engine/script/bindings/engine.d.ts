@@ -1217,6 +1217,10 @@ declare interface MeshPart extends BasePart {
 declare interface Camera extends PVInstance {
 	FarPlaneZ: number;
 	FieldOfView: number;
+	ImageHeight: number;
+	ImageWidth: number;
+	MaxImageHeight: number;
+	MaxImageWidth: number;
 	NearPlaneZ: number;
 	SurfaceSize: Vector3;
 }

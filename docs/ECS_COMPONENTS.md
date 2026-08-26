@@ -132,7 +132,7 @@ state until v0.19.
 | `scene.AwakeWorld` | 4 | 4 | yes | yes | . | . | Held by an entity that wants the world to keep ticking, with a required `Reason` naming why. `world::DecideLifecycle` walks these rows. |
 | `scene.Bone` | 116 | 4 | yes | yes | . | . | One joint of a rig on a `Bone` instance: its rest frame, the animated offset on top of it, its inverse bind frame, its resolved world frame, and its palette slot and parent slot. |
 | `scene.Bounds` | 12 | 4 | yes | yes | . | . | Half the extent of a part on each local axis. Render culling reads it every frame, the broad phase every tick, and the `Size` property writes it. |
-| `scene.Camera` | 12 | 4 | yes | yes | . | . | The lens: vertical field of view, near plane and far plane. It deliberately holds no aspect ratio, because that is a fact about a window and not about the world. |
+| `scene.Camera` | 28 | 4 | yes | yes | . | . | The lens: vertical field of view, near plane and far plane. It deliberately holds no aspect ratio, because that is a fact about a window and not about the world. |
 | `scene.CameraController` | 64 | 8 | yes | yes | . | . | Resource: how this viewer's own eye is driven - subject, orbit angles and distance, zoom and sensitivity limits, camera mode, and the poppercam distance override. |
 | `scene.Character` | 24 | 8 | yes | yes | . | . | On a character `Model`: handles to its root part, its `Humanoid` and the owning `Player`, null for an NPC. Controls, tools and camera code all start here. |
 | `scene.CharacterChanges` | 24 | 8 | yes | . | . | . | Resource: the ordered queue of character arrivals and departures since the last drain, emptied into the `CharacterAdded` and `CharacterRemoving` script signals. |

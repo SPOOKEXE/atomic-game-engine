@@ -815,16 +815,28 @@ namespace engine::render {
 				continue;
 			}
 			Impl::ParticlePool &pool = resident.Pool;
-			for (SDL_GPUBuffer **buffer : {&resident.Buffer, &pool.States, &pool.Work, &pool.Params,
-												&pool.Curves, &pool.EmitterRuntime, &pool.ParamUpdateBuffer,
-												&pool.CurveUpdateBuffer, &pool.Seams}) {
+			for (SDL_GPUBuffer **buffer :
+				 {&resident.Buffer,
+				  &pool.States,
+				  &pool.Work,
+				  &pool.Params,
+				  &pool.Curves,
+				  &pool.EmitterRuntime,
+				  &pool.ParamUpdateBuffer,
+				  &pool.CurveUpdateBuffer,
+				  &pool.Seams}) {
 				if (*buffer != nullptr) {
 					gpu::ReleaseBuffer(State->Device, *buffer);
 					*buffer = nullptr;
 				}
 			}
-			for (SDL_GPUTransferBuffer **staging : {&pool.StateStaging, &pool.WorkStaging, &pool.ParamStaging,
-												&pool.CurveStaging, &pool.SeamStaging, &pool.EmitterRuntimeStaging}) {
+			for (SDL_GPUTransferBuffer **staging :
+				 {&pool.StateStaging,
+				  &pool.WorkStaging,
+				  &pool.ParamStaging,
+				  &pool.CurveStaging,
+				  &pool.SeamStaging,
+				  &pool.EmitterRuntimeStaging}) {
 				if (*staging != nullptr) {
 					gpu::ReleaseTransferBuffer(State->Device, *staging);
 					*staging = nullptr;
@@ -832,7 +844,9 @@ namespace engine::render {
 			}
 		}
 		State->PendingInstanceUploads.erase(
-			std::remove_if(State->PendingInstanceUploads.begin(), State->PendingInstanceUploads.end(), sameWorld),
+			std::remove_if(
+				State->PendingInstanceUploads.begin(), State->PendingInstanceUploads.end(), sameWorld
+			),
 			State->PendingInstanceUploads.end()
 		);
 		State->InstanceWorlds.erase(

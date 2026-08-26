@@ -1175,9 +1175,7 @@ namespace studio {
 				ViewportStatistics.resize(index + 1);
 			}
 			StatusBarSnapshot &statistics = ViewportStatistics[index];
-			statistics.Refresh(
-				ImGui::GetTime(), index, 0, frame.DrawCalls, frame.Triangles, frame.Culled
-			);
+			statistics.Refresh(ImGui::GetTime(), index, 0, frame.DrawCalls, frame.Triangles, frame.Culled);
 
 			const engine::core::Name scene =
 				Universe->NameOf(second ? (extra->World.IsValid() ? extra->World : Active) : Active);
@@ -1646,9 +1644,8 @@ namespace studio {
 					RojoProjectPath,
 					sizeof(RojoProjectPath),
 					"%s",
-					GamePath.empty()
-						? "default.project.json"
-						: (GamePath.parent_path() / "default.project.json").string().c_str()
+					GamePath.empty() ? "default.project.json"
+									 : (GamePath.parent_path() / "default.project.json").string().c_str()
 				);
 			}
 			if (ImGui::MenuItem("Sync Rojo Universe...")) {
@@ -1657,9 +1654,8 @@ namespace studio {
 					RojoUniversePath,
 					sizeof(RojoUniversePath),
 					"%s",
-					GamePath.empty()
-						? "main.universe.json"
-						: (GamePath.parent_path() / "main.universe.json").string().c_str()
+					GamePath.empty() ? "main.universe.json"
+									 : (GamePath.parent_path() / "main.universe.json").string().c_str()
 				);
 			}
 			ImGui::EndMenu();

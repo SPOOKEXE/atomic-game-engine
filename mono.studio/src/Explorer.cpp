@@ -905,7 +905,7 @@ namespace studio {
 
 				ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnArrow;
 				if (world == SelectedWorldRow || (world == editingWorld && !UniverseSelected &&
-					Selection.empty() && !SelectedWorldRow.IsValid())) {
+												  Selection.empty() && !SelectedWorldRow.IsValid())) {
 					flags |= ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_Selected;
 				}
 

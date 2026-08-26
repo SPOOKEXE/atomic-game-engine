@@ -1352,59 +1352,59 @@ namespace server {
 		// same split `SetOwnership` makes one block up: `mono.engine/replication`
 		// does not depend on `scene` and must not, because the wire's job is to
 		// move components and it has no business knowing what a service is.
-		Replication->Authority().SetInterest(
-			[this](
-				engine::replication::ClientId client, engine::ecs::Entity entity, const engine::ecs::Store &store
-			) {
-				// **Two lookups into what `SurveyVisibility` worked out this tick,
-				// rather than two walks up the tree.** Both of those questions are
-				// about the world rather than about who is asking, and this runs once
-				// per entity per client - see `HiddenFromClients`.
-				if (std::binary_search(HiddenFromClients.begin(), HiddenFromClients.end(), entity.Id)) {
-					return false;
-				}
-
-				// **Almost everything is nobody's**, so this answers first and the
-				// player lookup below is paid only by the few rows under a player.
-				const auto owned = std::lower_bound(
-					OwnedByPlayer.begin(),
-					OwnedByPlayer.end(),
-					entity.Id,
-					[](const std::pair<uint64_t, engine::ecs::Entity> &row, uint64_t id) {
-						return row.first < id;
-					}
-				);
-				if (owned == OwnedByPlayer.end() || owned->first != entity.Id) {
-					return true;
-				}
-
-				const engine::ecs::Entity owner = owned->second;
-
-				// **The `Player` row itself goes to everybody; what is *under* it
-				// does not.** Roblox draws the line in the same place and for the
-				// same reason: `Players:GetPlayers()` is how a game knows who is in
-				// it, and a client shown only its own row would think it was alone.
-				// `server.replication`'s "a client is told which player is theirs"
-				// case is what caught this - the first version of this predicate hid
-				// every player from every other client, which reads as a lobby that
-				// never fills.
-				if (entity == owner) {
-					return true;
-				}
-
-				// **A client this server has forgotten sees nothing under any
-				// player**, rather than everything: the map is the only statement of
-				// who a connection is, and a handle it does not answer for is a
-				// connection that has gone. Failing open here would show a departing
-				// client every player's interface on its way out.
-				const auto occupant = Players.find(client.Index);
-				if (occupant == Players.end() || occupant->second.Generation != client.Generation) {
-					return false;
-				}
-				const engine::ecs::Entity privateOwner = engine::scene::PrivatePlayerOwning(store, entity);
-				return privateOwner == engine::ecs::NULL_ENTITY || owner == occupant->second.Instance;
+		Replication->Authority().SetInterest([this](
+												 engine::replication::ClientId client,
+												 engine::ecs::Entity entity,
+												 const engine::ecs::Store &store
+											 ) {
+			// **Two lookups into what `SurveyVisibility` worked out this tick,
+			// rather than two walks up the tree.** Both of those questions are
+			// about the world rather than about who is asking, and this runs once
+			// per entity per client - see `HiddenFromClients`.
+			if (std::binary_search(HiddenFromClients.begin(), HiddenFromClients.end(), entity.Id)) {
+				return false;
 			}
-		);
+
+			// **Almost everything is nobody's**, so this answers first and the
+			// player lookup below is paid only by the few rows under a player.
+			const auto owned = std::lower_bound(
+				OwnedByPlayer.begin(),
+				OwnedByPlayer.end(),
+				entity.Id,
+				[](const std::pair<uint64_t, engine::ecs::Entity> &row, uint64_t id) {
+					return row.first < id;
+				}
+			);
+			if (owned == OwnedByPlayer.end() || owned->first != entity.Id) {
+				return true;
+			}
+
+			const engine::ecs::Entity owner = owned->second;
+
+			// **The `Player` row itself goes to everybody; what is *under* it
+			// does not.** Roblox draws the line in the same place and for the
+			// same reason: `Players:GetPlayers()` is how a game knows who is in
+			// it, and a client shown only its own row would think it was alone.
+			// `server.replication`'s "a client is told which player is theirs"
+			// case is what caught this - the first version of this predicate hid
+			// every player from every other client, which reads as a lobby that
+			// never fills.
+			if (entity == owner) {
+				return true;
+			}
+
+			// **A client this server has forgotten sees nothing under any
+			// player**, rather than everything: the map is the only statement of
+			// who a connection is, and a handle it does not answer for is a
+			// connection that has gone. Failing open here would show a departing
+			// client every player's interface on its way out.
+			const auto occupant = Players.find(client.Index);
+			if (occupant == Players.end() || occupant->second.Generation != client.Generation) {
+				return false;
+			}
+			const engine::ecs::Entity privateOwner = engine::scene::PrivatePlayerOwning(store, entity);
+			return privateOwner == engine::ecs::NULL_ENTITY || owner == occupant->second.Instance;
+		});
 
 		// A delta is the third reader of the dirty bits, so the components that
 		// travel *and change every tick* have to be observed or nothing ever
@@ -1458,7 +1458,9 @@ namespace server {
 		}
 		bool hasServices = false;
 		store.Each<const engine::scene::ServiceComponent>(
-			[&hasServices](engine::ecs::Entity, const engine::scene::ServiceComponent &) { hasServices = true; }
+			[&hasServices](engine::ecs::Entity, const engine::scene::ServiceComponent &) {
+				hasServices = true;
+			}
 		);
 		if (!hasServices) {
 			return;

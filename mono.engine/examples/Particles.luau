@@ -106,8 +106,6 @@ plate.Parent = workspace
 -- Every one of these is an assertion made visually: a reader who knows what the
 -- property does can see whether it does it.
 
-if false then
-
 local function pedestal(x: number, z: number, colour: Color3): Part
 	local part = Instance.new("Part")
 	part.Anchored = true
@@ -377,8 +375,6 @@ do
 	trail.Color = ColorSequence.new(Color3.new(1, 0.6, 0.1))
 	trail.Transparency = NumberSequence.new(0, 1)
 	trail.Parent = swinger
-end
-
 end
 
 -- --- the grid ----------------------------------------------------------------

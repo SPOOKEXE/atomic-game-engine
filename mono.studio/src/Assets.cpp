@@ -594,8 +594,8 @@ namespace studio {
 		ImGui::SameLine();
 		ImGui::SetNextItemWidth(engine::ui::Scaled(120.0f));
 		const char *kindLabel = AssetKindFilter < 0
-			? "All types"
-			: KindName(static_cast<engine::assets::AssetKind>(AssetKindFilter));
+									? "All types"
+									: KindName(static_cast<engine::assets::AssetKind>(AssetKindFilter));
 		if (ImGui::BeginCombo("##catalogue-kind", kindLabel)) {
 			if (ImGui::Selectable("All types", AssetKindFilter < 0)) {
 				AssetKindFilter = -1;
@@ -687,8 +687,9 @@ namespace studio {
 		}
 
 		const std::vector<const CatalogueEntry *> &shown = AssetRows;
-		const int pageCount = std::max(1, static_cast<int>((shown.size() + AssetPageSize - 1) /
-																		 static_cast<size_t>(AssetPageSize)));
+		const int pageCount = std::max(
+			1, static_cast<int>((shown.size() + AssetPageSize - 1) / static_cast<size_t>(AssetPageSize))
+		);
 		AssetPage = std::clamp(AssetPage, 0, pageCount - 1);
 		ImGui::Text("page %d of %d", AssetPage + 1, pageCount);
 		ImGui::SameLine();

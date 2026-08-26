@@ -10,9 +10,9 @@
 #include <array>
 #include <cctype>
 #include <imgui.h>
+#include <string_view>
 #include <studio/Editor.hpp>
 #include <studio/RenderPipelineGraph.hpp>
-#include <string_view>
 
 namespace studio {
 
@@ -472,11 +472,7 @@ namespace studio {
 					wall = FrameGraphWallTime(pass);
 				}
 				if (gpu > 0.0) {
-					ImGui::Text(
-						"GPU %.3f ms, wall %.3f ms",
-						gpu / 1000.0,
-						wall / 1000.0
-					);
+					ImGui::Text("GPU %.3f ms, wall %.3f ms", gpu / 1000.0, wall / 1000.0);
 				} else {
 					ImGui::TextDisabled(
 						Renderer.Timed() ? "GPU pending, wall %.3f ms" : "GPU unavailable, wall %.3f ms",
